@@ -1,9 +1,11 @@
 use std::collections::HashSet;
 
-use super::types::{SimState, Team};
+use crate::ai::effects::StatusKind;
+
+use super::types::SimState;
 
 /// A specific invariant violation detected during a simulation tick.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Violation {
     /// Unit HP exceeds its max_hp.
     HpExceedsMax { unit_id: u32, hp: i32, max_hp: i32 },
@@ -31,6 +33,31 @@ pub enum Violation {
     CooldownExceedsBase { unit_id: u32, field: &'static str, remaining: u32, base: u32 },
     /// Negative resource value.
     NegativeResource { unit_id: u32, resource: i32 },
+
+    // --- New runtime verification checks ---
+
+    /// Unit is simultaneously casting and channeling.
+    CastingAndChanneling { unit_id: u32 },
+    /// Dead unit still has active crowd-control timer.
+    DeadUnitControlled { unit_id: u32, control_remaining_ms: u32 },
+    /// Ability slot charges exceed max_charges.
+    AbilityChargesExceedMax { unit_id: u32, ability_index: usize, charges: u32, max_charges: u32 },
+    /// Ability has an active morph timer but no saved base definition.
+    MorphWithoutBaseDef { unit_id: u32, ability_index: usize },
+    /// Recast window is active but no recasts remain.
+    RecastWindowWithoutRecasts { unit_id: u32, ability_index: usize },
+    /// Directed summon without an owner.
+    DirectedWithoutOwner { unit_id: u32 },
+    /// Status effect references a unit that doesn't exist.
+    StatusEffectOrphanedRef { unit_id: u32, kind: &'static str, referenced_id: u32 },
+    /// Status effect references a dead unit (partner/protector/host is dead).
+    StatusEffectDeadRef { unit_id: u32, kind: &'static str, referenced_id: u32 },
+    /// Cover bonus is outside the valid range [0.0, 1.0].
+    CoverBonusOutOfRange { unit_id: u32, cover_bonus: i32 },
+    /// Zone remaining duration is zero but zone still exists.
+    ZoneExpired { zone_id: u32 },
+    /// Tether remaining duration is zero but tether still exists.
+    TetherExpired { source_id: u32, target_id: u32 },
 }
 
 /// Result of running verification checks on a simulation state.
@@ -55,6 +82,12 @@ impl VerificationReport {
 pub fn verify_tick(state: &SimState) -> VerificationReport {
     let mut violations = Vec::new();
     let unit_ids: HashSet<u32> = state.units.iter().map(|u| u.id).collect();
+
+    // Build alive-unit set for status-effect reference checks
+    let alive_ids: HashSet<u32> = state.units.iter()
+        .filter(|u| u.hp > 0)
+        .map(|u| u.id)
+        .collect();
 
     // Check for duplicate unit IDs
     if unit_ids.len() != state.units.len() {
@@ -86,6 +119,19 @@ pub fn verify_tick(state: &SimState) -> VerificationReport {
         // Dead unit still channeling
         if !alive && unit.channeling.is_some() {
             violations.push(Violation::DeadUnitChanneling { unit_id: unit.id });
+        }
+
+        // Dead unit still under crowd control
+        if !alive && unit.control_remaining_ms > 0 {
+            violations.push(Violation::DeadUnitControlled {
+                unit_id: unit.id,
+                control_remaining_ms: unit.control_remaining_ms,
+            });
+        }
+
+        // Casting and channeling at the same time
+        if unit.casting.is_some() && unit.channeling.is_some() {
+            violations.push(Violation::CastingAndChanneling { unit_id: unit.id });
         }
 
         // Negative shield
@@ -126,6 +172,19 @@ pub fn verify_tick(state: &SimState) -> VerificationReport {
                 unit_id: unit.id,
                 speed: unit.move_speed_per_sec,
             });
+        }
+
+        // Cover bonus bounds
+        if unit.cover_bonus < 0.0 || unit.cover_bonus > 1.0 {
+            violations.push(Violation::CoverBonusOutOfRange {
+                unit_id: unit.id,
+                cover_bonus: (unit.cover_bonus * 1000.0) as i32,
+            });
+        }
+
+        // Directed summon must have an owner
+        if unit.directed && unit.owner_id.is_none() {
+            violations.push(Violation::DirectedWithoutOwner { unit_id: unit.id });
         }
 
         // Cooldown sanity: remaining should not exceed base
@@ -169,6 +228,120 @@ pub fn verify_tick(state: &SimState) -> VerificationReport {
                 base: unit.control_cooldown_ms,
             });
         }
+
+        // --- Hero ability slot invariants ---
+        for (i, slot) in unit.abilities.iter().enumerate() {
+            // Charges cannot exceed max_charges
+            if slot.def.max_charges > 0 && slot.charges > slot.def.max_charges {
+                violations.push(Violation::AbilityChargesExceedMax {
+                    unit_id: unit.id,
+                    ability_index: i,
+                    charges: slot.charges,
+                    max_charges: slot.def.max_charges,
+                });
+            }
+
+            // Active morph must have a saved base definition
+            if slot.morph_remaining_ms > 0 && slot.base_def.is_none() {
+                violations.push(Violation::MorphWithoutBaseDef {
+                    unit_id: unit.id,
+                    ability_index: i,
+                });
+            }
+
+            // Recast window active implies recasts remaining
+            if slot.recast_window_remaining_ms > 0 && slot.recasts_remaining == 0 {
+                violations.push(Violation::RecastWindowWithoutRecasts {
+                    unit_id: unit.id,
+                    ability_index: i,
+                });
+            }
+        }
+
+        // --- Status effect reference validation ---
+        for effect in &unit.status_effects {
+            match &effect.kind {
+                StatusKind::Duel { partner_id } => {
+                    if !unit_ids.contains(partner_id) {
+                        violations.push(Violation::StatusEffectOrphanedRef {
+                            unit_id: unit.id,
+                            kind: "Duel",
+                            referenced_id: *partner_id,
+                        });
+                    }
+                }
+                StatusKind::Taunt { taunter_id } => {
+                    if !unit_ids.contains(taunter_id) {
+                        violations.push(Violation::StatusEffectOrphanedRef {
+                            unit_id: unit.id,
+                            kind: "Taunt",
+                            referenced_id: *taunter_id,
+                        });
+                    } else if !alive_ids.contains(taunter_id) {
+                        violations.push(Violation::StatusEffectDeadRef {
+                            unit_id: unit.id,
+                            kind: "Taunt",
+                            referenced_id: *taunter_id,
+                        });
+                    }
+                }
+                StatusKind::Link { partner_id, .. } => {
+                    if !unit_ids.contains(partner_id) {
+                        violations.push(Violation::StatusEffectOrphanedRef {
+                            unit_id: unit.id,
+                            kind: "Link",
+                            referenced_id: *partner_id,
+                        });
+                    } else if !alive_ids.contains(partner_id) {
+                        violations.push(Violation::StatusEffectDeadRef {
+                            unit_id: unit.id,
+                            kind: "Link",
+                            referenced_id: *partner_id,
+                        });
+                    }
+                }
+                StatusKind::Redirect { protector_id, .. } => {
+                    if !unit_ids.contains(protector_id) {
+                        violations.push(Violation::StatusEffectOrphanedRef {
+                            unit_id: unit.id,
+                            kind: "Redirect",
+                            referenced_id: *protector_id,
+                        });
+                    } else if !alive_ids.contains(protector_id) {
+                        violations.push(Violation::StatusEffectDeadRef {
+                            unit_id: unit.id,
+                            kind: "Redirect",
+                            referenced_id: *protector_id,
+                        });
+                    }
+                }
+                StatusKind::Attached { host_id } => {
+                    if !unit_ids.contains(host_id) {
+                        violations.push(Violation::StatusEffectOrphanedRef {
+                            unit_id: unit.id,
+                            kind: "Attached",
+                            referenced_id: *host_id,
+                        });
+                    } else if !alive_ids.contains(host_id) {
+                        violations.push(Violation::StatusEffectDeadRef {
+                            unit_id: unit.id,
+                            kind: "Attached",
+                            referenced_id: *host_id,
+                        });
+                    }
+                }
+                StatusKind::Charm { .. } => {
+                    if !unit_ids.contains(&effect.source_id) {
+                        violations.push(Violation::StatusEffectOrphanedRef {
+                            unit_id: unit.id,
+                            kind: "Charm",
+                            referenced_id: effect.source_id,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     // Zone source validation
@@ -179,12 +352,23 @@ pub fn verify_tick(state: &SimState) -> VerificationReport {
                 source_id: zone.source_id,
             });
         }
+        // Expired zones should have been removed
+        if zone.remaining_ms == 0 && !zone.trigger_on_enter {
+            violations.push(Violation::ZoneExpired { zone_id: zone.id });
+        }
     }
 
     // Tether endpoint validation
     for tether in &state.tethers {
         if !unit_ids.contains(&tether.source_id) || !unit_ids.contains(&tether.target_id) {
             violations.push(Violation::TetherOrphanedUnit {
+                source_id: tether.source_id,
+                target_id: tether.target_id,
+            });
+        }
+        // Expired tethers should have been removed
+        if tether.remaining_ms == 0 {
+            violations.push(Violation::TetherExpired {
                 source_id: tether.source_id,
                 target_id: tether.target_id,
             });
@@ -202,6 +386,11 @@ mod tests {
     use super::*;
     use crate::ai::core::simulation::sample_duel_state;
     use crate::ai::core::types::*;
+    use crate::ai::effects::{AbilitySlot, AbilityDef, ActiveStatusEffect, Stacking};
+
+    fn make_ability_def() -> AbilityDef {
+        AbilityDef::default()
+    }
 
     #[test]
     fn clean_state_passes_verification() {
@@ -315,5 +504,149 @@ mod tests {
         assert!(report.violations.iter().any(|v| matches!(v,
             Violation::CooldownExceedsBase { unit_id: 1, field: "attack", .. }
         )));
+    }
+
+    // --- New runtime verification tests ---
+
+    #[test]
+    fn detects_casting_and_channeling() {
+        let mut state = sample_duel_state(42);
+        state.units[0].casting = Some(CastState {
+            target_id: 2,
+            target_pos: None,
+            remaining_ms: 100,
+            kind: CastKind::Attack,
+        });
+        state.units[0].channeling = Some(ChannelState {
+            ability_index: 0,
+            target_id: 2,
+            target_pos: None,
+            remaining_ms: 500,
+            tick_interval_ms: 100,
+            tick_elapsed_ms: 0,
+        });
+        let report = verify_tick(&state);
+        assert!(report.violations.iter().any(|v| matches!(v,
+            Violation::CastingAndChanneling { unit_id: 1 }
+        )));
+    }
+
+    #[test]
+    fn detects_dead_unit_controlled() {
+        let mut state = sample_duel_state(42);
+        state.units[0].hp = 0;
+        state.units[0].control_remaining_ms = 500;
+        let report = verify_tick(&state);
+        assert!(report.violations.iter().any(|v| matches!(v,
+            Violation::DeadUnitControlled { unit_id: 1, control_remaining_ms: 500 }
+        )));
+    }
+
+    #[test]
+    fn detects_ability_charges_exceed_max() {
+        let mut state = sample_duel_state(42);
+        let mut def = make_ability_def();
+        def.max_charges = 3;
+        let mut slot = AbilitySlot::new(def);
+        slot.charges = 5;
+        state.units[0].abilities.push(slot);
+        let report = verify_tick(&state);
+        assert!(report.violations.iter().any(|v| matches!(v,
+            Violation::AbilityChargesExceedMax { unit_id: 1, ability_index: 0, charges: 5, max_charges: 3 }
+        )));
+    }
+
+    #[test]
+    fn detects_morph_without_base_def() {
+        let mut state = sample_duel_state(42);
+        let def = make_ability_def();
+        let mut slot = AbilitySlot::new(def);
+        slot.morph_remaining_ms = 1000;
+        // base_def is None by default
+        state.units[0].abilities.push(slot);
+        let report = verify_tick(&state);
+        assert!(report.violations.iter().any(|v| matches!(v,
+            Violation::MorphWithoutBaseDef { unit_id: 1, ability_index: 0 }
+        )));
+    }
+
+    #[test]
+    fn detects_recast_window_without_recasts() {
+        let mut state = sample_duel_state(42);
+        let def = make_ability_def();
+        let mut slot = AbilitySlot::new(def);
+        slot.recast_window_remaining_ms = 500;
+        slot.recasts_remaining = 0;
+        state.units[0].abilities.push(slot);
+        let report = verify_tick(&state);
+        assert!(report.violations.iter().any(|v| matches!(v,
+            Violation::RecastWindowWithoutRecasts { unit_id: 1, ability_index: 0 }
+        )));
+    }
+
+    #[test]
+    fn detects_directed_without_owner() {
+        let mut state = sample_duel_state(42);
+        state.units[0].directed = true;
+        state.units[0].owner_id = None;
+        let report = verify_tick(&state);
+        assert!(report.violations.iter().any(|v| matches!(v,
+            Violation::DirectedWithoutOwner { unit_id: 1 }
+        )));
+    }
+
+    #[test]
+    fn detects_status_effect_orphaned_link() {
+        let mut state = sample_duel_state(42);
+        state.units[0].status_effects.push(ActiveStatusEffect {
+            kind: StatusKind::Link { partner_id: 999, share_percent: 0.5 },
+            source_id: 2,
+            remaining_ms: 1000,
+            tags: Default::default(),
+            stacking: Stacking::default(),
+        });
+        let report = verify_tick(&state);
+        assert!(report.violations.iter().any(|v| matches!(v,
+            Violation::StatusEffectOrphanedRef { unit_id: 1, kind: "Link", referenced_id: 999 }
+        )));
+    }
+
+    #[test]
+    fn detects_status_effect_dead_redirect_protector() {
+        let mut state = sample_duel_state(42);
+        state.units[1].hp = 0; // kill protector
+        state.units[0].status_effects.push(ActiveStatusEffect {
+            kind: StatusKind::Redirect { protector_id: 2, charges: 3 },
+            source_id: 2,
+            remaining_ms: 1000,
+            tags: Default::default(),
+            stacking: Stacking::default(),
+        });
+        let report = verify_tick(&state);
+        assert!(report.violations.iter().any(|v| matches!(v,
+            Violation::StatusEffectDeadRef { unit_id: 1, kind: "Redirect", referenced_id: 2 }
+        )));
+    }
+
+    #[test]
+    fn detects_cover_bonus_out_of_range() {
+        let mut state = sample_duel_state(42);
+        state.units[0].cover_bonus = 1.5;
+        let report = verify_tick(&state);
+        assert!(report.violations.iter().any(|v| matches!(v,
+            Violation::CoverBonusOutOfRange { unit_id: 1, .. }
+        )));
+    }
+
+    #[test]
+    fn valid_ability_slots_pass() {
+        let mut state = sample_duel_state(42);
+        let mut def = make_ability_def();
+        def.max_charges = 3;
+        let mut slot = AbilitySlot::new(def);
+        slot.charges = 2;
+        state.units[0].abilities.push(slot);
+        let report = verify_tick(&state);
+        assert!(report.is_ok(), "Expected no violations, got: {:?}", report.violations);
     }
 }
