@@ -1,239 +1,212 @@
 # Deterministic Tactical Orchestration Game
 
-This project is a deterministic tactical orchestration game where the player manages parallel crises.
+A tactical crisis-management RPG built with **Rust** and the **Bevy 0.13** ECS engine. Players manage a hero roster across a contested overworld, resolve flashpoint crises through multi-room missions, and command squads in deterministic real-time combat.
 
-## Project Status
+> **Status:** Active development -- Rust-native architecture using Bevy ECS.
 
-The project is currently undergoing a migration to a Rust-Native architecture using the Bevy engine.
+---
 
-## Documentation
+## Highlights
 
-*   **Roadmap:** [docs/ROADMAP.md](docs/ROADMAP.md) - Current execution plan and priorities.
-*   **Campaign Flow Plan:** [docs/CAMPAIGN_FLOW_PLAN.md](docs/CAMPAIGN_FLOW_PLAN.md) - Target player journey, gaps, and phased implementation plan.
-*   **Changelog:** [CHANGELOG.md](CHANGELOG.md) - Chronological change history.
+- **Three-layer simulation** -- Turn-based campaign overworld, multi-room mission runs, and 100ms fixed-tick deterministic combat
+- **27 hero archetypes** (Alchemist, Assassin, Berserker, Paladin, Witch, ...) defined in TOML with 8-9 abilities each
+- **Data-driven ability system** -- 32+ effects, 7 area shapes, 7 delivery methods, 20+ conditions, passive triggers
+- **Autonomous AI factions** that pursue territory, diplomacy, and military operations
+- **Flashpoint crisis chains** (Recon -> Sabotage -> Decisive) with player-chosen risk/reward intents
+- **Companion story arcs** woven into campaign consequences
+- **Deterministic seeding** throughout for reproducible simulations and testing
+- **Optional Gemini AI integration** for procedural map art and backstory cinematics
 
-## Project Management
+## Quick Start
 
-*   Use issues and milestones for active planning.
+### Prerequisites
 
-## Building and Running
+- [Rust toolchain](https://rustup.rs/) (edition 2021)
+- Optional: `GEMINI_API_KEY` environment variable for AI art generation features
 
-Run the game:
+### Run the Game
 
 ```bash
 cargo run
 ```
 
-Run tests:
+### Run Tests
 
 ```bash
 cargo test
 ```
 
-Campaign save/load controls:
-- `F5` / `F9`: save/load slot 1 (`generated/saves/campaign_save.json`)
-- `Shift+F5` / `Shift+F9`: save/load slot 2 (`generated/saves/campaign_slot_2.json`)
-- `Ctrl+F5` / `Ctrl+F9`: save/load slot 3 (`generated/saves/campaign_slot_3.json`)
-- Autosave: every 10 turns to `generated/saves/campaign_autosave.json`
-- Save panel: `F6` to open, `Up/Down` select, `S` save selected slot, `G` preview load, `Enter` confirm load.
-- Save writes are atomic and keep a backup (`.bak`) when overwriting existing slot files.
-- Save files are versioned and migrated on load when supported.
-- Slot metadata is tracked in `generated/saves/campaign_index.json` (version, turn, seed, timestamp, compatibility).
-- Vertical-slice overworld crisis loop: high border pressure can open a 3-stage `Flashpoint` mission chain (`Recon -> Sabotage -> Decisive`) that can shift region ownership and alter recruit access.
-- Flashpoint stage intents: press `1` (`Stealth Push`), `2` (`Direct Assault`), or `3` (`Civilian First`) to retune active flashpoint mission risk/reward.
-- Flashpoints now surface companion hook objectives and projected consequences (`win=>border+recruit`, `lose=>hold-line`) directly in mission queue entries.
-
-Startup load:
+### Load a Saved Campaign
 
 ```bash
 cargo run -- --load-campaign generated/saves/campaign_save.json
 ```
 
-UI screenshot capture:
+## Architecture
 
-- Single snapshot directory (captures one frame then exits):
-
-```bash
-cargo run -- --screenshot generated/screenshots/ui_baseline
+```
+Campaign (turn-based overworld)
+  -> Mission (multi-room dungeon runs)
+    -> Combat (100ms fixed-tick, deterministic)
 ```
 
-- Snapshot sequence (good for regression tests over multiple ticks):
+| Layer | Description |
+|-------|-------------|
+| **Campaign** | Overworld map with faction ownership, unrest, diplomacy, border pressure, and flashpoint triggers |
+| **Mission** | Multi-room sequences (Entry -> Pressure -> Pivot -> Setpiece -> Recovery -> Climax) with procedural encounters |
+| **Combat** | Squad-based real-time simulation with personality-driven AI, role assignment, and phase-based tactics |
+
+### Key Modules
+
+| Directory | Purpose |
+|-----------|---------|
+| `src/game_core/` | Campaign state, mission types, roster management |
+| `src/ai/` | Combat simulation engine, ability system, squad AI, pathing |
+| `src/mission/` | Mission execution, objectives, room generation, enemy templates |
+| `src/hub_ui_draw/` | Egui-based hub UI rendering |
+| `src/campaign_ops/` | Save/load, campaign initialization, entity snapshots |
+| `src/runtime_assets/` | Async Gemini-powered environment art generation |
+| `src/bin/xtask/` | Task runner for map generation, screenshot capture, simulation phases |
+| `assets/hero_templates/` | 27 hero definitions in TOML |
+
+## Controls
+
+### Campaign Save/Load
+
+| Action | Keys |
+|--------|------|
+| Save/Load slot 1 | `F5` / `F9` |
+| Save/Load slot 2 | `Shift+F5` / `Shift+F9` |
+| Save/Load slot 3 | `Ctrl+F5` / `Ctrl+F9` |
+| Save panel | `F6` (open), `Up/Down` (select), `S` (save), `G` (preview), `Enter` (confirm load) |
+
+Autosave triggers every 10 turns. Save writes are atomic with `.bak` backups. Save files are versioned and auto-migrated on load. Slot metadata lives in `generated/saves/campaign_index.json`.
+
+### Flashpoint Intents
+
+During active flashpoint missions, press `1` (Stealth Push), `2` (Direct Assault), or `3` (Civilian First) to adjust risk/reward.
+
+## Screenshot Capture
+
+Capture UI frames for visual regression testing. Each capture produces a `.png` and a `.json` sidecar with simulation state.
 
 ```bash
+# Single snapshot
+cargo run -- --screenshot generated/screenshots/ui_baseline
+
+# Multi-frame sequence
 cargo run -- --steps 30 --screenshot-sequence generated/screenshots/run_a
 ```
 
-Optional capture tuning:
-- `--screenshot-every N`: write one image every `N` rendered frames in sequence mode.
-- `--screenshot-warmup-frames N`: number of rendered frames to wait before first capture.
-- Each capture writes both `frame_000NN.png` and `frame_000NN.json`.
-- JSON sidecars include global turn plus mission-level state so visual output can be validated against internal simulation state.
+Optional flags: `--screenshot-every N`, `--screenshot-warmup-frames N`.
 
-Windows-native Rust-only capture (outside WSL):
+### Windows Native Capture
 
-- If WSL graphics backend support is limited, run screenshot captures from a native Windows shell using Cargo directly.
-- Preferred entrypoint: `cargo run --bin xtask -- capture ...`
-- Underlying wrappers remain available:
-  - PowerShell: `scripts/capture_windows.ps1`
-  - CMD: `scripts/capture_windows.cmd`
-- Capture is ephemeral by default (auto-cleans screenshot artifacts after run).
-- Add `--persist` to keep screenshots in `--out-dir`.
-
-Single capture (hub scene):
+For environments where WSL graphics support is limited, run captures from a native Windows shell:
 
 ```powershell
+# Single capture (hub scene)
 cargo run --bin xtask -- capture windows --mode single --hub --out-dir generated/screenshots/windows_hub
-```
 
-Sequence capture (regression run):
-
-```powershell
+# Sequence capture
 cargo run --bin xtask -- capture windows --mode sequence --steps 40 --every 1 --out-dir generated/screenshots/windows_seq
-```
 
-Note: `--hub` with `--mode sequence` is intentionally blocked because hub start-menu gating currently bypasses step-based auto-exit.
+# Hub stage walkthrough (Start Menu -> Character Creation -> Overworld -> Region View -> Local Intro)
+cargo run --bin xtask -- capture windows --mode hub-stages --out-dir generated/screenshots/windows_hub_stages
 
-Safe sequence fallback (one process per frame; slower but avoids swapchain instability on some systems):
-
-```powershell
+# Safe sequence (one process per frame, avoids swapchain issues)
 cargo run --bin xtask -- capture windows --mode safe-sequence --steps 20 --out-dir generated/screenshots/windows_safe_seq
 ```
 
-Deterministic hub stage capture (Start Menu -> Character Creation -> Overworld -> Region View -> Local Intro, one frame each, auto-exit):
+Captures are ephemeral by default. Add `--persist` to keep artifacts. Run `cargo run --bin xtask -- capture dedupe --out-dir <dir>` to remove exact visual duplicates.
 
-```powershell
-cargo run --bin xtask -- capture windows --mode hub-stages --out-dir generated/screenshots/windows_hub_stages
-```
+## AI-Assisted Content Generation
 
-Keep artifacts for inspection:
+Requires the `gemini` feature flag and a `GEMINI_API_KEY`.
 
-```powershell
-cargo run --bin xtask -- capture windows --mode hub-stages --out-dir generated/screenshots/windows_hub_stages --persist
-```
-
-Post-process dedupe (exact visual duplicates + orphan JSON cleanup):
-
-```powershell
-cargo run --bin xtask -- capture dedupe --out-dir generated/screenshots/windows_seq
-```
-
-CMD equivalent:
-
-```cmd
-scripts\capture_windows.cmd -Mode sequence -Steps 40 -Every 1 -OutDir generated\screenshots\windows_seq
-```
-
-## Gemini Map Image Generation
-
-You can generate map concept images with Gemini (including Pro image model support).
-
-Prerequisites:
-- Export an API key: `export GEMINI_API_KEY=...`
-
-Generate from inline prompt:
+### Map Concept Art
 
 ```bash
+# From inline prompt
 cargo run --bin xtask -- map gemini \
   --prompt "Top-down fantasy dungeon map, guild branch mission, 3 lanes, ritual boss chamber" \
-  --out generated/maps/guild_mission_map.png \
-  --save-text
-```
+  --out generated/maps/guild_mission_map.png --save-text
 
-Generate from the included prompt template:
-
-```bash
+# From prompt template
 cargo run --bin xtask -- map gemini \
   --prompt-file scripts/map_prompt_template.txt \
   --out generated/maps/template_map.png
 ```
 
-Model selection:
-- Default model: `gemini-3-pro-image-preview`
-- Alternate: `--model gemini-2.5-flash-image`
+Model selection: default `gemini-3-pro-image-preview`, alternate `--model gemini-2.5-flash-image`.
 
-## Procedural Overworld Voronoi -> Gemini
+### Procedural Overworld (Voronoi -> Gemini)
 
-Build a weighted Voronoi campaign-map prompt/spec from the current overworld save (territory size scaling by faction strength, plus organic edge metadata):
+Build a weighted Voronoi map prompt from a campaign save, then generate art:
 
 ```bash
+# Generate prompt + spec
 cargo run --bin xtask -- map voronoi \
   --save generated/saves/campaign_autosave.json \
   --out-prompt generated/maps/overworld_voronoi_prompt.txt \
   --out-spec generated/maps/overworld_voronoi_spec.json
-```
 
-Then run Gemini directly from that generated prompt:
-
-```bash
+# Generate image directly
 cargo run --bin xtask -- map voronoi \
   --save generated/saves/campaign_autosave.json \
-  --run-gemini \
-  --gemini-out generated/maps/overworld_voronoi_map.png
+  --run-gemini --gemini-out generated/maps/overworld_voronoi_map.png
 ```
 
-## Gemini + hnsw_rs Environment Art Pipeline
+### Environment Art Pipeline (Gemini + HNSW)
 
-Use Gemini embeddings with Rust `hnsw_rs` ANN search for semantic term queries, then generate
-detailed fantasy environment background art (including concept-art style outputs).
-
-Prerequisites:
-- `GEMINI_API_KEY` in environment or `.env`
-
-Query the environment prompt corpus with semantic search:
+Semantic search over an environment prompt corpus, then generate fantasy environment art:
 
 ```bash
+# Build index
 cargo run --bin xtask -- map env-art build-index \
   --corpus scripts/ai/fantasy_env_prompt_corpus.json \
   --index generated/hnsw/env_art_index.json
-```
 
-Then query the persisted index:
-
-```bash
+# Query
 cargo run --bin xtask -- map env-art query \
   --corpus scripts/ai/fantasy_env_prompt_corpus.json \
   --index generated/hnsw/env_art_index.json \
-  --query "stormy mountain fortress with vertical traversal lanes" \
-  --top-k 8
-```
+  --query "stormy mountain fortress with vertical traversal lanes" --top-k 8
 
-Generate environment-only batch art from top semantic matches:
-
-```bash
+# Generate batch art
 cargo run --bin xtask -- map env-art generate \
   --corpus scripts/ai/fantasy_env_prompt_corpus.json \
   --index generated/hnsw/env_art_index.json \
-  --query "misty flooded ruins with lantern lighting and broken bridges" \
-  --top-k 12 \
-  --count 8 \
-  --style concept \
+  --query "misty flooded ruins with lantern lighting" \
+  --top-k 12 --count 8 --style concept \
   --out-dir generated/maps/fantasy_env
 ```
 
-Notes:
-- Style options: `concept`, `matte`, `illustration`.
-- Outputs include `.png`, prompt text files, Gemini response text, and `manifest.json`.
-- The generator enforces environment-only constraints (no characters).
-- Use `--refresh-index` on `query`/`generate` to force index rebuild.
+Style options: `concept`, `matte`, `illustration`. Use `--refresh-index` to force index rebuild.
 
-## Runtime Asset Generation (In-Game)
+### Runtime Asset Generation
 
-When running hub mode (`cargo run` default), the game now includes a runtime asset generation
-service:
+During gameplay the runtime asset service queues environment concept-art jobs asynchronously. Live status appears in the `Runtime Asset Gen` overlay. Outputs go to `generated/maps/runtime_env`.
 
-- Queues environment concept-art jobs while the game is running.
-- Executes generation asynchronously (non-blocking game loop).
-- Shows live status + recent outputs in the `Runtime Asset Gen` overlay window.
-- Writes outputs to `generated/maps/runtime_env`.
+### Backstory Cinematic
 
-Current provider is Gemini; the service is intentionally provider-abstracted in code so a local
-1-2B model backend can be swapped in later.
+After backstory confirmation, a cinematic plays 4 AI-generated beats (Origin, Crisis, Decision, Vow) as a Ken Burns-style slideshow before transitioning to the overworld.
 
-### Backstory Cinematic Flow
+## Documentation
 
-After confirming backstory, the hub now transitions to a `BackstoryCinematic` screen:
+| Document | Description |
+|----------|-------------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System layers, module layout, design decisions |
+| [docs/SYSTEMS.md](docs/SYSTEMS.md) | Complete reference for campaign, mission, AI, and UI systems |
+| [docs/ABILITY_SYSTEM.md](docs/ABILITY_SYSTEM.md) | Ability engine reference (effects, shapes, delivery, conditions) |
+| [docs/ABILITY_PRIORITY_SYSTEM.md](docs/ABILITY_PRIORITY_SYSTEM.md) | Squad ability rotation and prioritization |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Execution plan and priorities |
+| [docs/CAMPAIGN_FLOW_PLAN.md](docs/CAMPAIGN_FLOW_PLAN.md) | Target player journey and phased implementation |
 
-- Queues 4 beat images (`Origin`, `Crisis`, `Decision`, `Vow`) with high priority.
-- Shows a loading screen until the first beat image is ready.
-- Plays a Ken Burns-style slideshow (pan/zoom over stills) while remaining beats continue generating.
-- Automatically enters `OverworldMap` when the cinematic finishes.
+## Project Management
+
+Use GitHub issues and milestones for active planning.
+
+## License
+
+See repository for license details.
