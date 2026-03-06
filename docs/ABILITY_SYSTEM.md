@@ -8,11 +8,11 @@ Complete reference for the data-driven ability engine, the LoL champion dataset,
 
 1. [System Architecture](#system-architecture)
 2. [Hero TOML Format](#hero-toml-format)
-3. [Effect Types (45)](#effect-types)
+3. [Effect Types (52)](#effect-types)
 4. [Area Shapes (7)](#area-shapes)
 5. [Delivery Methods (7)](#delivery-methods)
 6. [Conditions (24)](#conditions)
-7. [Passive Triggers (19)](#passive-triggers)
+7. [Passive Triggers (20)](#passive-triggers)
 8. [Targeting Modes (8)](#targeting-modes)
 9. [Damage Types](#damage-types)
 10. [Status Effects](#status-effects)
@@ -235,7 +235,7 @@ Triggered by the `EvolveAbility` effect.
 
 ## Effect Types
 
-45 effect types defined in `src/ai/effects/effect_enum.rs`. Each is a variant of the `Effect` enum.
+52 effect types defined in `src/ai/effects/effect_enum.rs`. Each is a variant of the `Effect` enum.
 
 ### Core Combat
 
@@ -398,7 +398,7 @@ Triggered by the `EvolveAbility` effect.
 
 ## Passive Triggers
 
-19 triggers defined in `src/ai/effects/types.rs`. Drive passive ability activation.
+20 triggers defined in `src/ai/effects/types.rs`. Drive passive ability activation.
 
 | Trigger | Fields | Usage |
 |---------|--------|-------|

@@ -609,7 +609,7 @@ AbilityDef {
 }
 ```
 
-### Effect Types (45)
+### Effect Types (52)
 
 **Core Combat:** `Damage` (with `DamageType`: physical/magic/true), `Heal`, `Shield`, `SelfDamage`, `Execute`, `Lifesteal`, `Reflect`, `DamageModify`
 

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::types::{ConditionalEffect, DamageType};
 
 // ---------------------------------------------------------------------------
-// WHAT — Effect types (40 total)
+// WHAT — Effect types (52 total)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

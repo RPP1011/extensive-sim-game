@@ -216,9 +216,9 @@ Pure-Rust deterministic fixed-tick (100ms) combat simulation. `SimState` holds u
 - **`tests_stress.rs`** — Stress tests
 
 ### `effects/` — Data-Driven Ability Engine
-Defines 45 effect types and ability definitions loaded from TOML. Supports 7 delivery methods (Instant, Projectile, Channel, Zone, Tether, Trap, Chain), 8 targeting modes, and 3 damage types (Physical, Magic, True).
+Defines 52 effect types and ability definitions loaded from TOML. Supports 7 delivery methods (Instant, Projectile, Channel, Zone, Tether, Trap, Chain), 8 targeting modes, and 3 damage types (Physical, Magic, True).
 
-- **`effect_enum.rs`** — `Effect` enum with all 45 variants and serde defaults
+- **`effect_enum.rs`** — `Effect` enum with all 52 variants and serde defaults
 - **`types.rs`** — `Area` (7 shapes), `Delivery` (7 methods), `Condition` (24), `Trigger` (19), `ConditionalEffect`, `DamageType`, `Stacking`, `Tags`
 - **`defs.rs`** — `AbilityDef` (with recast, charges, toggle, unstoppable, form swap, evolve), `PassiveDef`, `AbilitySlot`, `PassiveSlot`, `AbilityTargeting` (8 modes), `HeroToml`, `HeroStats` (with armor/magic_resist), `ActiveStatusEffect`, `StatusKind`, `Projectile`, `AbilityTarget`
 - **`tests.rs`** / **`tests_extended.rs`** — Effect parsing and behavior tests
