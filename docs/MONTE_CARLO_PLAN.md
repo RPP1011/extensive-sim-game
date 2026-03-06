@@ -77,7 +77,9 @@ Not needed for this scale. CPU handles 100K episodes in minutes. GPU sim (Isaac 
 
 After the current ability evaluator pipeline is validated end-to-end:
 - Terrain-aware features trained and tested
-- Evaluators integrated into runtime squad AI
+- Evaluators integrated into runtime squad AI (see [docs/ABILITY_PRIORITY_SYSTEM.md](ABILITY_PRIORITY_SYSTEM.md))
 - Win rate improvement measured on attrition scenarios
+
+The ability evaluator pipeline is now implemented (`src/ai/core/ability_eval/`) with 9 category-specific micro-models, terrain-aware features, and post-prediction modifiers (heal saturation, cleanup boost/suppress). Integration with the squad AI is done via the interrupt-driven evaluation in `src/ai/squad/intents.rs`.
 
 If we hit a ceiling where the 10-tick oracle can't capture important ability interactions, that's the signal to add MC scoring.

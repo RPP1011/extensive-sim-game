@@ -6,23 +6,29 @@ pipeline with manual review for complex cases.
 
 **Champion tiers**: 28 simple, 107 medium, 37 complex
 
-## Phase 0: Last Two Mechanic Gaps (1 session)
+## Phase 0: Mechanic Gaps — COMPLETED
 
-### 0a. Directed Summons (Azir, Zyra, Yorick, Heimerdinger)
-Files: `effects/types.rs`, `effects/defs.rs`, `core/types.rs`, `core/apply_effect.rs`, `core/simulation.rs`
+All previously identified mechanic gaps have been implemented:
 
-- `Effect::Summon` — add `directed: bool` (unit doesn't generate its own intents)
-- `UnitState` — add `owner_id: Option<u32>` (links summon to caster)
-- `simulation.rs` step() — skip intent for units with `owner_id` where directed;
-  instead when owner attacks, each directed summon in attack range also attacks from
-  its position
-- New `Effect::CommandSummons` — move all owned directed summons toward target pos
-  (for Azir Q). Fields: `{ speed: f32 }` — summons dash to location
+- **Directed Summons**: `Effect::Summon { directed: true }` — summon doesn't generate its own intents, attacks when owner attacks. `Effect::CommandSummons { speed }` moves directed summons to a target position (Azir Q).
+- **Global Targeting**: `AbilityTargeting::Global` — hits all enemies regardless of position (Karthus R, Soraka R).
+- **Recast System**: `recast_count`, `recast_window_ms`, `recast_effects` on `AbilityDef`.
+- **Charge/Ammo System**: `max_charges`, `charge_recharge_ms` on `AbilityDef`.
+- **Damage Types**: `DamageType` enum (Physical/Magic/True) with `armor`/`magic_resist` on `HeroStats`.
+- **Toggle Abilities**: `is_toggle`, `toggle_cost_per_sec` on `AbilityDef`.
+- **Suppress CC**: `Effect::Suppress` — hard CC that can't be cleansed normally.
+- **Teleport/Blink**: `is_blink` on `Effect::Dash` — instant repositioning ignoring terrain/grounded.
+- **Unstoppable**: `unstoppable` on `AbilityDef` — CC immunity during cast.
+- **Form Swap**: `swap_form` + `form` on `AbilityDef` — swap entire ability kits (Jayce, Nidalee, Elise).
+- **Clone**: `clone`, `clone_damage_percent` on `Effect::Summon`.
+- **Evolution**: `evolve_into` on `AbilityDef` + `Effect::EvolveAbility`.
+- **Vector Targeting**: `AbilityTargeting::Vector` — click-drag (Rumble R, Viktor E).
+- **Attach**: `Effect::Attach` — become untargetable, move with host (Yuumi W).
+- **Grounded**: `Effect::Grounded` — prevents dashes/blinks.
+- **Projectile Block**: `Effect::ProjectileBlock` — blocks enemy projectiles in area (Yasuo W, Braum E).
+- **%HP Damage**: `scaling_stat: "target_max_hp"` / `"target_missing_hp"` on `Damage` effect.
 
-### 0b. Global Targeting
-- Add `AbilityTargeting::Global` — targets all enemies on the map
-- In `oracle.rs` + `combat.rs` match arms, treat like SelfAoe but hits all enemies
-- In `resolve_targets`, return all enemies regardless of position
+See [docs/ABILITY_SYSTEM.md](ABILITY_SYSTEM.md) for the full reference.
 
 ## Phase 1: Converter Script (`scripts/lol_to_toml.py`)
 
@@ -47,17 +53,19 @@ LoL stats -> our scale:
 The converter maps LoL abilities using keyword detection + wiki targeting data:
 
 ```
-DAMAGE TYPE:
+DAMAGE TYPE (first-class DamageType enum):
   wiki_detail.damagetype == "Physical" -> damage_type = "physical"
   wiki_detail.damagetype == "Magic"    -> damage_type = "magic"
   wiki_detail.damagetype == "True"     -> damage_type = "true"
 
-TARGETING:
+TARGETING (8 modes):
   wiki "Location"         -> targeting = "ground_target"
   wiki "Direction"        -> targeting = "direction"
+  wiki "Vector"           -> targeting = "vector"     (Rumble R, Viktor E)
   wiki "Unit" + enemy     -> targeting = "target_enemy"
   wiki "Unit" + ally      -> targeting = "target_ally"
   wiki "Auto"/"Passive"   -> targeting = "self_cast"
+  global ult (Karthus R)  -> targeting = "global"
 
 DELIVERY (from description keywords):
   "fires a projectile/skillshot/bolt" -> Projectile
@@ -69,14 +77,14 @@ DELIVERY (from description keywords):
   default                            -> Instant
 
 EFFECTS (from description keywords):
-  "deals X damage"        -> Damage { amount: X_normalized }
+  "deals X damage"        -> Damage { amount: X_normalized, damage_type }
   "heals for X"           -> Heal { amount: X_normalized }
   "shields for X"         -> Shield { amount: X_normalized }
   "stuns for X seconds"   -> Stun { duration_ms: X*1000 }
   "slows by X%"           -> Slow { factor: X/100 }
   "roots/snares"          -> Root
   "knocks back/up"        -> Knockback
-  "dashes/leaps/lunges"   -> Dash
+  "dashes/leaps/lunges"   -> Dash  (or Dash { is_blink: true } for blinks)
   "silences"              -> Silence
   "fears/terrifies"       -> Fear
   "taunts"                -> Taunt
@@ -86,13 +94,25 @@ EFFECTS (from description keywords):
   "stealths/invisible"    -> Stealth
   "% max health"          -> scaling_stat: "target_max_hp"
   "% missing health"      -> scaling_stat: "target_missing_hp"
+  "blocks projectiles"    -> ProjectileBlock
+  "attaches to"           -> Attach
+
+SPECIAL MECHANICS (now supported):
+  "can be recast"         -> recast_count + recast_window_ms + recast_effects
+  "stores charges/ammo"   -> max_charges + charge_recharge_ms
+  "toggle on/off"         -> is_toggle + toggle_cost_per_sec
+  "unstoppable"           -> unstoppable = true
+  "transforms/changes stance" -> swap_form + form
+  "evolves"               -> evolve_into
+  "creates a clone"       -> Summon { clone: true }
+  "commands soldiers"     -> Summon { directed: true } + CommandSummons
 
 AI_HINT:
   Primary damage ability      -> "damage"
   CC ability                  -> "crowd_control"
   Heal/shield ability         -> "heal" / "defense"
   Mobility ability            -> "utility"
-  Buff/steroid ability        -> "buff"
+  Buff/steroid ability        -> "utility"
 ```
 
 ### Converter Architecture

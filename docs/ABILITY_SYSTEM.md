@@ -8,14 +8,16 @@ Complete reference for the data-driven ability engine, the LoL champion dataset,
 
 1. [System Architecture](#system-architecture)
 2. [Hero TOML Format](#hero-toml-format)
-3. [Effect Types (32)](#effect-types)
+3. [Effect Types (45)](#effect-types)
 4. [Area Shapes (7)](#area-shapes)
 5. [Delivery Methods (7)](#delivery-methods)
-6. [Conditions (20)](#conditions)
-7. [Passive Triggers (17)](#passive-triggers)
-8. [Targeting Modes (6)](#targeting-modes)
-9. [LoL Champion Dataset](#lol-champion-dataset)
-10. [Gap Analysis](#gap-analysis)
+6. [Conditions (24)](#conditions)
+7. [Passive Triggers (19)](#passive-triggers)
+8. [Targeting Modes (8)](#targeting-modes)
+9. [Damage Types](#damage-types)
+10. [Status Effects](#status-effects)
+11. [LoL Champion Dataset](#lol-champion-dataset)
+12. [Gap Analysis](#gap-analysis)
 
 ---
 
@@ -31,14 +33,16 @@ WHAT (Effect) x WHERE (Area) x HOW (Delivery) x WHEN (Condition/Trigger) + Tags
 
 | File | Purpose |
 |------|---------|
-| `src/ai/effects/types.rs` | Effect, Area, Delivery, Condition, Trigger enums |
-| `src/ai/effects/defs.rs` | AbilityDef, PassiveDef, HeroToml, AbilitySlot, runtime types |
-| `src/ai/core/apply_effect.rs` | Main effect dispatcher (handles all 32 effect types) |
+| `src/ai/effects/effect_enum.rs` | `Effect` enum with all 45 variants and serde defaults |
+| `src/ai/effects/types.rs` | Area, Delivery, Condition, Trigger enums; `ConditionalEffect` wrapper; `DamageType`; `Stacking` |
+| `src/ai/effects/defs.rs` | `AbilityDef`, `PassiveDef`, `AbilitySlot`, `PassiveSlot`, `HeroToml`, `AbilityTargeting`, `StatusKind`, `ActiveStatusEffect`, `Projectile`, `AbilityTarget` |
+| `src/ai/core/apply_effect.rs` | Main effect dispatcher (handles all effect types) |
 | `src/ai/core/apply_effect_ext.rs` | Extended effect application (phases 4-7) |
 | `src/ai/core/damage.rs` | Damage/heal application, chain delivery, stat scaling |
 | `src/ai/core/triggers.rs` | Passive trigger system (check + fire) |
 | `src/ai/core/targeting.rs` | Target resolution, area queries |
-| `src/ai/core/hero.rs` | Ability resolution, morph system |
+| `src/ai/core/hero/resolution.rs` | Ability resolution, cooldown/charge mechanics |
+| `src/ai/core/hero/reactions.rs` | Morph, form swap, zone reactions |
 | `src/ai/core/tick_systems.rs` | Cooldown ticks, status effects, projectile advancement |
 | `src/ai/core/tick_world.rs` | Zone, channel, tether tick updates |
 | `src/mission/hero_templates.rs` | TOML loading, `parse_hero_toml`, `hero_toml_to_unit` |
@@ -48,7 +52,7 @@ WHAT (Effect) x WHERE (Area) x HOW (Delivery) x WHEN (Condition/Trigger) + Tags
 
 ## Hero TOML Format
 
-Every hero is a TOML file in `assets/hero_templates/`. The struct is `HeroToml` in `src/ai/effects/defs.rs:236`.
+Every hero is a TOML file in `assets/hero_templates/`. The struct is `HeroToml` in `src/ai/effects/defs.rs`.
 
 ```toml
 [hero]
@@ -60,6 +64,8 @@ move_speed = 2.4
 resource = 100         # optional mana/energy pool
 max_resource = 100
 resource_regen_per_sec = 5.0
+armor = 30.0           # physical damage reduction
+magic_resist = 25.0    # magic damage reduction
 
 [stats.tags]           # resistance tags (higher = more resistant)
 CROWD_CONTROL = 50.0
@@ -84,6 +90,7 @@ resource_cost = 20            # optional
 [[abilities.effects]]         # instant effects
 type = "damage"
 amount = 30
+damage_type = "magic"         # physical (default) | magic | true
 
 [abilities.effects.tags]      # effect power tags
 HOLY = 50.0
@@ -106,6 +113,66 @@ width = 0.5
 [[abilities.delivery.on_hit]] # effects applied on projectile hit
 type = "damage"
 amount = 75
+
+# --- Charge/Ammo abilities ---
+[[abilities]]
+name = "ShieldBash"
+targeting = "target_enemy"
+range = 1.5
+cooldown_ms = 0              # charges handle availability
+max_charges = 2              # starts with 2 charges
+charge_recharge_ms = 8000    # one charge every 8s
+ai_hint = "damage"
+
+# --- Toggle abilities ---
+[[abilities]]
+name = "AuraOfFaith"
+targeting = "self_cast"
+is_toggle = true
+toggle_cost_per_sec = 8.0    # drains resource while active
+ai_hint = "utility"
+
+# --- Recast abilities ---
+[[abilities]]
+name = "TripleSlash"
+targeting = "target_enemy"
+range = 1.8
+cooldown_ms = 10000
+cast_time_ms = 200
+ai_hint = "damage"
+recast_count = 3             # 3 casts total
+recast_window_ms = 4000      # must recast within 4s
+
+[[abilities.effects]]
+type = "damage"
+amount = 20
+
+# recast_effects[0] = 2nd cast effects, recast_effects[1] = 3rd cast effects
+# (defined as arrays of ConditionalEffect)
+
+# --- Unstoppable abilities ---
+[[abilities]]
+name = "UnstoppableCharge"
+targeting = "target_enemy"
+range = 6.0
+cooldown_ms = 20000
+cast_time_ms = 1000
+ai_hint = "crowd_control"
+unstoppable = true           # immune to CC during cast
+
+# --- Form swap abilities ---
+[[abilities]]
+name = "StanceSwitch"
+targeting = "self_cast"
+cooldown_ms = 3000
+swap_form = "cougar"         # swaps all abilities tagged with this form
+
+[[abilities]]
+name = "Pounce"
+targeting = "target_enemy"
+range = 2.0
+form = "cougar"              # belongs to the "cougar" form group
+ai_hint = "damage"
 
 # --- Passive abilities (typically 2 per hero) ---
 [[passives]]
@@ -138,19 +205,43 @@ morph_into = { name = "StanceB", targeting = "self_cast", ... }
 morph_duration_ms = 5000
 ```
 
-Defined in `AbilityDef` at `src/ai/effects/defs.rs:48-50`. Applied in `src/ai/core/hero.rs`.
+Defined in `AbilityDef` at `src/ai/effects/defs.rs`. Applied in `src/ai/core/hero/reactions.rs`.
+
+### Zone Reactions
+
+Abilities with a `zone_tag` can trigger combo reactions when zones overlap:
+
+```toml
+[[abilities]]
+name = "FireWall"
+zone_tag = "fire"            # fire + frost, fire + lightning, frost + lightning
+```
+
+Combo logic in `src/ai/core/hero/reactions.rs:check_zone_reactions`.
+
+### Evolution System
+
+Abilities can permanently upgrade via `evolve_into`:
+
+```toml
+[[abilities]]
+name = "BasicSlash"
+evolve_into = { name = "EmpoweredSlash", ... }
+```
+
+Triggered by the `EvolveAbility` effect.
 
 ---
 
 ## Effect Types
 
-32 effect types defined in `src/ai/effects/types.rs:47-273`. Each is a variant of the `Effect` enum.
+45 effect types defined in `src/ai/effects/effect_enum.rs`. Each is a variant of the `Effect` enum.
 
 ### Core Combat
 
-| Effect | Fields | Example |
-|--------|--------|---------|
-| `damage` | `amount`, `amount_per_tick`, `duration_ms`, `tick_interval_ms`, `scaling_stat`, `scaling_percent` | Direct damage or DoT |
+| Effect | Fields | Description |
+|--------|--------|-------------|
+| `damage` | `amount`, `amount_per_tick`, `duration_ms`, `tick_interval_ms`, `scaling_stat`, `scaling_percent`, `damage_type` | Direct damage or DoT. Supports physical/magic/true via `DamageType`. |
 | `heal` | `amount`, `amount_per_tick`, `duration_ms`, `tick_interval_ms`, `scaling_stat`, `scaling_percent` | Direct heal or HoT |
 | `shield` | `amount`, `duration_ms` | Temporary HP |
 | `self_damage` | `amount` | HP cost abilities |
@@ -161,8 +252,8 @@ Defined in `AbilityDef` at `src/ai/effects/defs.rs:48-50`. Applied in `src/ai/co
 
 ### Crowd Control
 
-| Effect | Fields | Example |
-|--------|--------|---------|
+| Effect | Fields | Description |
+|--------|--------|-------------|
 | `stun` | `duration_ms` | Cannot act |
 | `root` | `duration_ms` | Cannot move |
 | `silence` | `duration_ms` | Cannot cast abilities |
@@ -174,54 +265,75 @@ Defined in `AbilityDef` at `src/ai/effects/defs.rs:48-50`. Applied in `src/ai/co
 | `banish` | `duration_ms` | Untargetable + cannot act |
 | `confuse` | `duration_ms` | Random targeting |
 | `charm` | `duration_ms` | Walk toward source |
+| `suppress` | `duration_ms` | Hard CC, cannot be cleansed by normal means |
+| `grounded` | `duration_ms` | Prevents dashes, blinks, and movement abilities |
 
 ### Positioning
 
-| Effect | Fields | Example |
-|--------|--------|---------|
-| `dash` | `to_target`, `distance`, `to_position` | Self-movement |
+| Effect | Fields | Description |
+|--------|--------|-------------|
+| `dash` | `to_target`, `distance`, `to_position`, `is_blink` | Self-movement. `is_blink = true` for instant teleport (ignores terrain/grounded). Default distance: 2.0. |
 | `knockback` | `distance` | Push enemy away |
 | `pull` | `distance` | Pull enemy closer |
 | `swap` | (none) | Swap positions with target |
 
 ### Buffs & Debuffs
 
-| Effect | Fields | Example |
-|--------|--------|---------|
+| Effect | Fields | Description |
+|--------|--------|-------------|
 | `buff` | `stat`, `factor`, `duration_ms` | Stat increase (stats: `damage_output`, `move_speed`) |
 | `debuff` | `stat`, `factor`, `duration_ms` | Stat decrease |
 | `on_hit_buff` | `duration_ms`, `on_hit_effects[]` | Add effects to auto-attacks |
 
-### Advanced
+### Summoning
 
-| Effect | Fields | Example |
-|--------|--------|---------|
-| `summon` | `template`, `count`, `hp_percent` | Spawn ally units |
-| `dispel` | `target_tags[]` | Remove status effects |
+| Effect | Fields | Description |
+|--------|--------|-------------|
+| `summon` | `template`, `count`, `hp_percent`, `clone`, `clone_damage_percent`, `directed` | Spawn ally units. `clone = true` copies caster stats/abilities. `directed = true` means summon attacks when owner attacks (doesn't act independently). Defaults: count=1, hp_percent=100, clone_damage_percent=75. |
+| `command_summons` | `speed` | Move all owned directed summons toward a target position. Default speed: 8.0. |
+
+### Healing & Shield
+
+| Effect | Fields | Description |
+|--------|--------|-------------|
+| `resurrect` | `hp_percent` | Revive dead ally |
+| `overheal_shield` | `duration_ms`, `conversion_percent` | Excess heal to shield. Default conversion: 100%. |
+| `absorb_to_heal` | `shield_amount`, `duration_ms`, `heal_percent` | Absorb shield heals when it expires. Default heal: 50%. |
+| `shield_steal` | `amount` | Take enemy shield |
+| `status_clone` | `max_count` | Copy statuses. Default max: 3. |
+
+### Status Interaction
+
+| Effect | Fields | Description |
+|--------|--------|-------------|
+| `immunity` | `immune_to[]`, `duration_ms` | Status immunity |
+| `death_mark` | `duration_ms`, `damage_percent` | Deferred damage. Default damage: 50%. |
+| `detonate` | `damage_multiplier` | Pop accumulated status. Default multiplier: 1.0. |
+| `status_transfer` | `steal_buffs` | Move statuses between units |
+| `dispel` | `target_tags[]` | Remove status effects matching tags |
+
+### Complex Mechanics
+
+| Effect | Fields | Description |
+|--------|--------|-------------|
 | `duel` | `duration_ms` | Force 1v1 |
 | `stealth` | `duration_ms`, `break_on_damage`, `break_on_ability` | Invisibility |
 | `leash` | `max_range`, `duration_ms` | Tether to position |
-| `link` | `duration_ms`, `share_percent` | Damage sharing |
-| `redirect` | `duration_ms`, `charges` | Redirect damage to protector |
-| `rewind` | `lookback_ms` | Restore previous state |
+| `link` | `duration_ms`, `share_percent` | Damage sharing. Default share: 50%. |
+| `redirect` | `duration_ms`, `charges` | Redirect damage to protector. Default charges: 3. |
+| `rewind` | `lookback_ms` | Restore previous state. Default lookback: 3000ms. |
 | `cooldown_modify` | `amount_ms`, `ability_name` | Change ability cooldowns |
-| `apply_stacks` | `name`, `count`, `max_stacks`, `duration_ms` | Stack system |
-| `immunity` | `immune_to[]`, `duration_ms` | Status immunity |
-| `death_mark` | `duration_ms`, `damage_percent` | Deferred damage |
-| `detonate` | `damage_multiplier` | Pop accumulated status |
-| `status_transfer` | `steal_buffs` | Move statuses between units |
-| `resurrect` | `hp_percent` | Revive dead ally |
-| `overheal_shield` | `duration_ms`, `conversion_percent` | Excess heal to shield |
-| `absorb_to_heal` | `shield_amount`, `duration_ms`, `heal_percent` | Absorb shield heals |
-| `shield_steal` | `amount` | Take enemy shield |
-| `status_clone` | `max_count` | Copy statuses |
+| `apply_stacks` | `name`, `count`, `max_stacks`, `duration_ms` | Stack system. Default count: 1, max: 4. |
 | `obstacle` | `width`, `height` | Terrain creation |
+| `projectile_block` | `duration_ms` | Blocks enemy projectiles in an area |
+| `attach` | `duration_ms` | Attach to an ally — become untargetable and move with them. 0 = until recast. |
+| `evolve_ability` | `ability_index` | Permanently replace an ability with its `evolve_into` variant |
 
 ---
 
 ## Area Shapes
 
-7 shapes defined in `src/ai/effects/types.rs:319-345`.
+7 shapes defined in `src/ai/effects/types.rs`.
 
 | Shape | Fields | Usage |
 |-------|--------|-------|
@@ -237,12 +349,12 @@ Defined in `AbilityDef` at `src/ai/effects/defs.rs:48-50`. Applied in `src/ai/co
 
 ## Delivery Methods
 
-7 delivery methods defined in `src/ai/effects/types.rs:357-401`.
+7 delivery methods defined in `src/ai/effects/types.rs`.
 
 | Method | Fields | Usage |
 |--------|--------|-------|
 | `instant` | (none) | Default, immediate application |
-| `projectile` | `speed`, `pierce`, `width`, `on_hit[]`, `on_arrival[]` | Traveling missile |
+| `projectile` | `speed`, `pierce`, `width`, `on_hit[]`, `on_arrival[]` | Traveling missile. Supports skillshots via `max_travel_distance` on the runtime `Projectile` struct. |
 | `channel` | `duration_ms`, `tick_interval_ms` | Sustained cast, interruptible |
 | `zone` | `duration_ms`, `tick_interval_ms` | Persistent ground area |
 | `tether` | `max_range`, `tick_interval_ms`, `on_complete[]` | Unit-to-unit link |
@@ -253,7 +365,7 @@ Defined in `AbilityDef` at `src/ai/effects/defs.rs:48-50`. Applied in `src/ai/co
 
 ## Conditions
 
-20 conditions defined in `src/ai/effects/types.rs:413-441`. Evaluated per-effect to conditionally apply.
+24 conditions defined in `src/ai/effects/types.rs`. Evaluated per-effect to conditionally apply.
 
 | Condition | Fields | Usage |
 |-----------|--------|-------|
@@ -286,14 +398,14 @@ Defined in `AbilityDef` at `src/ai/effects/defs.rs:48-50`. Applied in `src/ai/co
 
 ## Passive Triggers
 
-17 triggers defined in `src/ai/effects/types.rs:449-482`. Drive passive ability activation.
+19 triggers defined in `src/ai/effects/types.rs`. Drive passive ability activation.
 
 | Trigger | Fields | Usage |
 |---------|--------|-------|
 | `on_damage_dealt` | (none) | After dealing damage |
 | `on_damage_taken` | (none) | After taking damage |
 | `on_kill` | (none) | After killing a unit |
-| `on_ally_damaged` | `range` | Nearby ally takes damage |
+| `on_ally_damaged` | `range` | Nearby ally takes damage. Default range: 5.0. |
 | `on_death` | (none) | On unit death |
 | `on_ability_used` | (none) | After casting any ability |
 | `on_hp_below` | `percent` | HP drops below threshold |
@@ -307,7 +419,7 @@ Defined in `AbilityDef` at `src/ai/effects/defs.rs:48-50`. Applied in `src/ai/co
 | `on_resurrect` | (none) | After being revived |
 | `on_dodge` | (none) | After dodging an attack |
 | `on_reflect` | (none) | After reflecting damage |
-| `on_ally_killed` | `range` | Nearby ally dies |
+| `on_ally_killed` | `range` | Nearby ally dies. Default range: 5.0. |
 | `on_auto_attack` | (none) | On each auto-attack |
 | `on_stack_reached` | `name`, `count` | Stack count threshold |
 
@@ -315,16 +427,63 @@ Defined in `AbilityDef` at `src/ai/effects/defs.rs:48-50`. Applied in `src/ai/co
 
 ## Targeting Modes
 
-6 modes defined in `src/ai/effects/defs.rs:13-20`.
+8 modes defined in `src/ai/effects/defs.rs`.
 
 | Mode | TOML value | Behavior |
 |------|------------|----------|
-| Target Enemy | `target_enemy` | Click enemy unit |
+| Target Enemy | `target_enemy` | Click enemy unit (default) |
 | Target Ally | `target_ally` | Click ally unit |
 | Self Cast | `self_cast` | No target needed |
 | Self AoE | `self_aoe` | AoE centered on caster |
 | Ground Target | `ground_target` | Click position on ground |
 | Direction | `direction` | Fire in a direction (skillshot) |
+| Vector | `vector` | Click-drag vector targeting (start point + direction). Used by Rumble R, Viktor E. |
+| Global | `global` | Hits all enemies on the map regardless of range. Used by Karthus R, Soraka R. |
+
+---
+
+## Damage Types
+
+3 damage types defined in `src/ai/effects/types.rs` as the `DamageType` enum. Applied on the `Damage` effect variant.
+
+| Type | Interaction |
+|------|-------------|
+| `physical` | Reduced by `armor` stat (default) |
+| `magic` | Reduced by `magic_resist` stat |
+| `true` | Ignores all damage reduction |
+
+`HeroStats` includes `armor: f32` and `magic_resist: f32` fields for damage type resolution.
+
+---
+
+## Status Effects
+
+Live status tracking via `ActiveStatusEffect` in `src/ai/effects/defs.rs`. Each status has a `StatusKind`, source unit, remaining duration, tags, and stacking mode.
+
+### Stacking Modes
+
+| Mode | Behavior |
+|------|----------|
+| `refresh` | Reset duration (default) |
+| `extend` | Add duration to existing |
+| `strongest` | Keep only the highest-value instance |
+| `stack` | Allow multiple independent instances |
+
+### StatusKind Variants
+
+Core: `Stun`, `Slow { factor }`, `Dot { amount_per_tick, tick_interval_ms }`, `Hot { amount_per_tick, tick_interval_ms }`, `Shield { amount }`, `Buff { stat, factor }`, `Debuff { stat, factor }`, `Duel { partner_id }`
+
+CC: `Root`, `Silence`, `Fear { source_pos }`, `Taunt { taunter_id }`, `Polymorph`, `Banish`, `Confuse`, `Charm { original_team }`, `Suppress`, `Grounded`
+
+Damage Modifiers: `Reflect { percent }`, `Lifesteal { percent }`, `DamageModify { factor }`, `Blind { miss_chance }`, `OnHitBuff { effects }`
+
+Healing/Shield: `OverhealShield { conversion_percent }`, `AbsorbShield { amount, heal_percent }`
+
+Status Interaction: `Immunity { immune_to }`, `DeathMark { accumulated_damage, damage_percent }`
+
+Complex: `Stealth { break_on_damage, break_on_ability }`, `Leash { anchor_pos, max_range }`, `Link { partner_id, share_percent }`, `Redirect { protector_id, charges }`, `Attached { host_id }`
+
+Stacks: `Stacks { name, count, max_stacks }`
 
 ---
 
@@ -417,276 +576,78 @@ scripts/fetch_lol_champions.py  # fetch script (resumable, parallel)
 
 ### LoL Mechanic Frequency (across all 860 abilities)
 
-| Mechanic | Count | Current System Support |
-|----------|-------|----------------------|
+| Mechanic | Count | System Support |
+|----------|-------|----------------|
 | Heal | 151 | `effect.heal` |
 | Slow | 144 | `effect.slow` |
 | Knockback/up | 65 | `effect.knockback` |
 | Shield | 64 | `effect.shield` |
 | Stun | 59 | `effect.stun` |
-| Dash/leap | 82 | `effect.dash` |
-| Recast | 114 | **GAP** — `morph_into` is partial |
-| Charge/ammo | 112 | **GAP** — no charge system |
-| Stack-based | 40 | `effect.apply_stacks` (partial) |
-| %HP damage | 76 | **GAP** — no %HP scaling |
+| Dash/leap | 82 | `effect.dash` (includes `is_blink` for teleports) |
+| Recast | 114 | `recast_count` + `recast_window_ms` + `recast_effects` on `AbilityDef` |
+| Charge/ammo | 112 | `max_charges` + `charge_recharge_ms` on `AbilityDef` |
+| Stack-based | 40 | `effect.apply_stacks` |
+| %HP damage | 76 | `scaling_stat: "target_max_hp"` / `"target_missing_hp"` on `Damage` |
 | On-hit effects | 33 | `effect.on_hit_buff` |
-| Summon/pet | 27 | `effect.summon` (no pet AI) |
+| Summon/pet | 27 | `effect.summon` with `directed` flag + `effect.command_summons` |
 | Root/snare | 25 | `effect.root` |
-| Wall/terrain | 19 | `effect.obstacle` (basic) |
-| True damage | 17 | **GAP** — no damage type system |
+| Wall/terrain | 19 | `effect.obstacle` |
+| True damage | 17 | `damage_type = "true"` on `Damage` effect |
 | Channel | 16 | `delivery.channel` |
-| Toggle | 15 | **GAP** — no toggle abilities |
-| Terrain creation | 15 | `effect.obstacle` (partial) |
-| Suppress | 17 | **GAP** — no suppress CC |
-| Untargetable | 12 | `effect.banish` (partial) |
-| Transform/stance | 13 | `morph_into` (partial) |
-| Teleport | 12 | **GAP** — no teleport effect |
-| Unstoppable | 12 | **GAP** — no CC immunity during cast |
-| Execute (%HP) | 11 | `effect.execute` (threshold only, no scaling) |
+| Toggle | 15 | `is_toggle` + `toggle_cost_per_sec` on `AbilityDef` |
+| Terrain creation | 15 | `effect.obstacle` |
+| Suppress | 17 | `effect.suppress` |
+| Untargetable | 12 | `effect.banish` |
+| Transform/stance | 13 | `swap_form` + `form` on `AbilityDef` |
+| Teleport | 12 | `effect.dash { is_blink = true }` |
+| Unstoppable | 12 | `unstoppable = true` on `AbilityDef` |
+| Execute (%HP) | 11 | `effect.execute` |
 | Invisible | 9 | `effect.stealth` |
 | Bounce | 9 | `delivery.chain` |
 | Trap | 9 | `delivery.trap` |
-| Clone | 8 | **GAP** — no clone mechanic |
-| Evolve | 8 | **GAP** — no ability evolution |
-| Global range | 42 | Works (just set large range) |
-| Attach | 7 | **GAP** — no attach mechanic |
+| Clone | 8 | `effect.summon { clone = true }` |
+| Evolve | 8 | `evolve_into` on `AbilityDef` + `effect.evolve_ability` |
+| Global range | 42 | `targeting = "global"` |
+| Attach | 7 | `effect.attach` |
 | Fear | 7 | `effect.fear` |
-| Vector targeting | 4 | **GAP** — no vector targeting mode |
+| Vector targeting | 4 | `targeting = "vector"` |
+| Grounded | 31 | `effect.grounded` |
+| Projectile blocking | ~5 | `effect.projectile_block` |
 
 ---
 
 ## Gap Analysis
 
-Mechanics needed to fully express all 172 LoL champions. Ordered by impact (how many champions use the mechanic).
-
-### GAP 1: Recast System (114 abilities)
-
-**Problem:** Many LoL abilities can be recast 1-3 times with different effects per cast (Aatrox Q, Ahri R, Riven Q). Current `morph_into` only supports one transformation with a timer.
-
-**Examples:** Aatrox Q (3 casts, different hitboxes), Ahri R (3 dashes), Lee Sin Q (dash to marked target), Akali R (2 casts with different effects).
-
-**Proposal:** Add a `recast` field to `AbilityDef`:
-```toml
-[[abilities]]
-name = "TheDarkinBlade"
-recast_count = 3
-recast_window_ms = 4000
-recast_effects = [...]   # different effects per cast
-```
-
-**Files to modify:** `src/ai/effects/defs.rs` (AbilityDef), `src/ai/core/hero.rs` (resolve_hero_ability)
-
-### GAP 2: Charge/Ammo System (112 abilities)
-
-**Problem:** Many abilities have multiple charges that regenerate independently (Ammu Q has 2 charges, Akali R has 2 charges, Teemo R stores mushrooms). No charge system exists.
-
-**Examples:** Teemo R (stores up to 3 mushrooms), Corki R (stores up to 7 missiles), Riven E (1 charge with independent CD).
-
-**Proposal:** Add `max_charges` and `charge_recharge_ms` to `AbilityDef`:
-```toml
-[[abilities]]
-name = "NoxianFervor"
-max_charges = 3
-charge_recharge_ms = 12000
-```
-
-**Files to modify:** `src/ai/effects/defs.rs` (AbilityDef), `src/ai/effects/defs.rs` (AbilitySlot — add `charges: u32`), `src/ai/core/tick_systems.rs` (charge regeneration)
-
-### GAP 3: %HP Damage Scaling (76 abilities)
-
-**Problem:** Many abilities deal damage based on target's max/current/missing HP. Current `damage` only supports flat amounts and stat-based scaling.
-
-**Examples:** Aatrox passive (% max HP), Vayne W (% max HP true damage), Lee Sin Q recast (% missing HP), Elise Q (% current HP).
-
-**Proposal:** Add `hp_scaling` fields to the `Damage` effect:
-```toml
-[[abilities.effects]]
-type = "damage"
-target_max_hp_percent = 8.0     # deals 8% of target's max HP
-target_current_hp_percent = 0.0
-target_missing_hp_percent = 0.0
-```
-
-**Files to modify:** `src/ai/effects/types.rs` (Effect::Damage), `src/ai/core/damage.rs` (apply_damage_to_unit)
-
-### GAP 4: Damage Types (Physical/Magic/True) (all abilities)
-
-**Problem:** LoL has three distinct damage types (physical, magic, true) that interact with armor/MR. Current system uses flat tags but no damage type resolution — there's no armor/MR stat or damage type reduction.
-
-**Note:** The tag system (`FIRE = 50.0`, `HOLY = 40.0`) already provides a resistance framework. Damage types could be implemented as special tags or as a first-class field.
-
-**Proposal:** Add optional `damage_type` field to `Damage` effect:
-```toml
-[[abilities.effects]]
-type = "damage"
-amount = 30
-damage_type = "magic"   # physical | magic | true
-```
-
-**Files to modify:** `src/ai/effects/types.rs` (Effect::Damage), `src/ai/core/damage.rs`, `src/ai/effects/defs.rs` (HeroStats — add `armor`, `magic_resist`)
-
-### GAP 5: Toggle Abilities (15 abilities)
-
-**Problem:** Some abilities toggle on/off with per-second costs (Amumu W, Anivia R, Singed Q). No toggle state exists.
-
-**Examples:** Amumu W (persistent AoE drain), Anivia R (channeled blizzard), Karthus E (AoE damage aura).
-
-**Proposal:** Add `is_toggle` flag to `AbilityDef`:
-```toml
-[[abilities]]
-name = "Despair"
-is_toggle = true
-resource_cost_per_sec = 8
-```
-
-**Files to modify:** `src/ai/effects/defs.rs` (AbilityDef), `src/ai/effects/defs.rs` (AbilitySlot — add `toggled_on: bool`), `src/ai/core/tick_systems.rs` (per-tick drain)
-
-### GAP 6: Suppress CC (17 abilities)
-
-**Problem:** Suppress is a hard CC that also prevents summoner spells and cannot be cleansed by normal means. Currently no suppress effect.
-
-**Examples:** Malzahar R, Warwick R, Skarner R, Urgot R.
-
-**Proposal:** Add `Suppress` variant to `Effect`:
-```toml
-[[abilities.effects]]
-type = "suppress"
-duration_ms = 2500
-```
-
-**Files to modify:** `src/ai/effects/types.rs` (Effect, StatusKind), `src/ai/core/apply_effect.rs`
-
-### GAP 7: Teleport/Blink Effect (12 abilities)
-
-**Problem:** `Dash` moves along a path (interruptible, can be blocked). Blink/teleport is instant repositioning. Several champions need this (Ezreal E, Kassadin R, Flash).
-
-**Proposal:** Add `blink` field to `Dash` or new `Teleport` effect:
-```toml
-[[abilities.effects]]
-type = "dash"
-distance = 4.0
-is_blink = true    # instant, ignores terrain/units
-```
-
-**Files to modify:** `src/ai/effects/types.rs` (Effect::Dash), `src/ai/core/apply_effect.rs`
-
-### GAP 8: Unstoppable / CC Immunity During Cast (12 abilities)
-
-**Problem:** Some abilities grant CC immunity during their cast (Malphite R, Sion R, Vi R). No way to express this.
-
-**Proposal:** Add `unstoppable` flag to `AbilityDef`:
-```toml
-[[abilities]]
-name = "UnstoppableForce"
-unstoppable = true   # immune to CC during cast
-```
-
-**Files to modify:** `src/ai/effects/defs.rs` (AbilityDef), `src/ai/core/resolve.rs` (skip CC checks during unstoppable casts)
-
-### GAP 9: Transform/Stance Swap (13 abilities)
-
-**Problem:** Champions like Jayce, Nidalee, and Elise swap their entire ability kit. Current `morph_into` only transforms one ability at a time.
-
-**Examples:** Jayce R (swap all 3 basic abilities), Nidalee R (human/cougar), Elise R (human/spider).
-
-**Proposal:** Add `form` system — ability sets that swap as a group:
-```toml
-[[abilities]]
-name = "Transform"
-targeting = "self_cast"
-swap_form = "cougar"   # swaps all abilities tagged with this form
-```
-
-**Files to modify:** `src/ai/effects/defs.rs` (AbilityDef — add `form` tag), `src/ai/core/hero.rs` (form swap logic)
-
-### GAP 10: Clone Mechanic (8 abilities)
-
-**Problem:** Shaco R, LeBlanc passive, Wukong W create controllable/uncontrollable clones. `Summon` exists but clones are supposed to copy the caster's appearance/stats.
-
-**Proposal:** Extend `Summon` with a `clone` flag:
-```toml
-[[abilities.effects]]
-type = "summon"
-template = "self_clone"
-clone = true           # copies caster stats/appearance
-clone_damage_percent = 75
-clone_damage_taken_percent = 150
-```
-
-**Files to modify:** `src/ai/effects/types.rs` (Effect::Summon), `src/ai/core/apply_effect.rs`
-
-### GAP 11: Ability Evolution (8 abilities)
-
-**Problem:** Kha'Zix and Kai'Sa can evolve abilities mid-game, permanently changing their effects. No upgrade/evolution system exists.
-
-**Proposal:** Add `evolve_into` to `AbilityDef`:
-```toml
-[[abilities]]
-name = "TasteTheirFear"
-evolve_into = { name = "EvolvedTasteTheirFear", ... }
-evolve_condition = { type = "target_stack_count", name = "evolution_points", min_count = 1 }
-```
-
-**Files to modify:** `src/ai/effects/defs.rs` (AbilityDef), `src/ai/core/hero.rs`
-
-### GAP 12: Vector Targeting (4 abilities)
-
-**Problem:** Rumble R, Viktor E, Taliyah W use click-drag vector targeting (start point + direction). Only 4 abilities use this.
-
-**Proposal:** Add `vector` targeting mode:
-```toml
-[[abilities]]
-name = "TheEqualizer"
-targeting = "vector"
-range = 5.0
-vector_length = 6.0
-```
-
-**Files to modify:** `src/ai/effects/defs.rs` (AbilityTargeting), `src/ai/core/targeting.rs`
-
-### GAP 13: Attach Mechanic (7 abilities)
-
-**Problem:** Yuumi W attaches to an ally, becoming untargetable and moving with them. No attach system.
-
-**Proposal:** Add `Attach` effect:
-```toml
-[[abilities.effects]]
-type = "attach"
-duration_ms = 0    # 0 = until recast
-```
-
-**Files to modify:** `src/ai/effects/types.rs` (Effect), `src/ai/core/apply_effect.rs`, `src/ai/core/tick_systems.rs` (position sync)
-
-### GAP 14: Projectile Blocking (Yasuo Wind Wall)
-
-**Problem:** Yasuo W and Braum E block/destroy enemy projectiles in an area. No projectile interaction system.
-
-**Proposal:** Add `ProjectileBlock` effect that creates a zone destroying incoming projectiles:
-```toml
-[[abilities.effects]]
-type = "projectile_block"
-duration_ms = 4000
-
-[abilities.effects.area]
-shape = "line"
-length = 4.0
-width = 0.5
-```
-
-**Files to modify:** `src/ai/effects/types.rs` (Effect), `src/ai/core/tick_systems.rs` (projectile advancement — check for blocking zones)
-
-### GAP 15: Grounded Effect (31 abilities mention it)
-
-**Problem:** LoL's "Grounded" status prevents dashes, blinks, and movement abilities. Several champions apply it (Cassiopeia W, Singed W, Poppy W zone).
-
-**Proposal:** Add `Grounded` effect/status:
-```toml
-[[abilities.effects]]
-type = "grounded"
-duration_ms = 3000
-```
-
-**Files to modify:** `src/ai/effects/types.rs` (Effect, StatusKind), `src/ai/core/apply_effect.rs` (block dashes when grounded)
+Most previously identified gaps have been implemented. Remaining gaps are limited to advanced AI behaviors that require specialized handling beyond the data-driven ability system.
+
+### Implemented (formerly gaps)
+
+| Mechanic | Implementation |
+|----------|---------------|
+| Recast system | `recast_count`, `recast_window_ms`, `recast_effects` on `AbilityDef`; `recasts_remaining`, `recast_window_remaining_ms` on `AbilitySlot` |
+| Charge/ammo system | `max_charges`, `charge_recharge_ms` on `AbilityDef`; `charges`, `charge_recharge_remaining_ms` on `AbilitySlot` |
+| Damage types (Phys/Magic/True) | `DamageType` enum on `Damage` effect; `armor`, `magic_resist` on `HeroStats` |
+| Toggle abilities | `is_toggle`, `toggle_cost_per_sec` on `AbilityDef`; `toggled_on` on `AbilitySlot` |
+| Suppress CC | `Effect::Suppress`, `StatusKind::Suppress` |
+| Teleport/Blink | `is_blink` field on `Effect::Dash` |
+| Unstoppable / CC immunity during cast | `unstoppable` flag on `AbilityDef` |
+| Transform/stance swap | `swap_form` + `form` fields on `AbilityDef` |
+| Clone mechanic | `clone`, `clone_damage_percent` fields on `Effect::Summon` |
+| Ability evolution | `evolve_into` on `AbilityDef` + `Effect::EvolveAbility` |
+| Vector targeting | `AbilityTargeting::Vector` |
+| Global targeting | `AbilityTargeting::Global` |
+| Attach mechanic | `Effect::Attach`, `StatusKind::Attached` |
+| Projectile blocking | `Effect::ProjectileBlock` |
+| Grounded effect | `Effect::Grounded`, `StatusKind::Grounded` |
+| Directed summons | `directed` flag on `Effect::Summon` + `Effect::CommandSummons` |
+| %HP damage | `scaling_stat` supports `"target_max_hp"` and `"target_missing_hp"` |
+
+### Remaining Gaps
+
+| Mechanic | Impact | Notes |
+|----------|--------|-------|
+| Pet AI | Low | Directed summons cover most cases; fully autonomous pet AI (Tibbers, Daisy) would need separate intent generation |
+| Ability combos / Marks | Low | Some champions (Akali, Zed) apply marks then detonate. Partially expressible via `apply_stacks` + `detonate` but exact mark-target tracking is limited. |
 
 ---
 
@@ -717,7 +678,8 @@ LoL has 5 (P/Q/W/E/R), game expects ~8 active + 2 passive.
 
 - LoL Passive -> game passive
 - LoL Q/W/E/R -> 4 active abilities
-- Multi-part abilities (Aatrox Q 3 casts) -> split into separate slots OR use recast system
+- Multi-part abilities (Aatrox Q 3 casts) -> use `recast_count` + `recast_effects`
+- Transform champions (Jayce, Nidalee) -> use `swap_form` + `form` tags
 - Remaining slots: derive from passive interactions or leave empty
 
 ### AI Hints
