@@ -456,7 +456,7 @@ Personality-driven decision-making with force-based steering.
 **Dominant Forces (9 tactical impulses):**
 Attack, Heal, Retreat, Control, Focus, Protect, Pursue, Regroup, Position
 
-**Formation Modes:** Spread, Loose, Tight
+**Formation Modes:** Hold (maintain, defensive), Advance (push forward, offensive), Retreat (fall back)
 
 **Key Functions:**
 - `infer_personality(unit) -> Personality` -- auto-infer from stat block
@@ -562,6 +562,19 @@ The 80-dim input extracts targeting mode, delivery method, damage/heal/CC values
 
 See `docs/STUDENT_MODEL_APPROACH.md` § "Ability Embedding Autoencoder" for full details.
 
+### Ability Evaluation System
+
+**Files:** `src/ai/core/ability_eval/`
+
+Interrupt-driven ability priority using per-category neural network evaluators. 9 categories (DamageUnit, DamageAoe, CcUnit, HealUnit, HealAoe, Defense, Utility, Summon, Obstacle) each with a tiny MLP (~300-1.2K params). Urgency threshold = 0.4.
+
+See [docs/ABILITY_PRIORITY_SYSTEM.md](ABILITY_PRIORITY_SYSTEM.md) for full details.
+
+**Key Functions:**
+- `evaluate_abilities(state, squad_ai, unit_id, weights) -> Option<(IntentAction, f32)>`
+- `evaluate_abilities_with_encoder()` — enhanced version with ability embeddings
+- Post-prediction modifiers: heal saturation, cleanup boost (tick > 2000), cleanup suppress (tick > 5000)
+
 ### AI Tooling
 
 **File:** `src/ai/tooling.rs`
@@ -572,68 +585,70 @@ Utility functions for AI development and debugging.
 
 ## Effects Engine
 
-**File:** `src/ai/effects.rs`
+**Files:** `src/ai/effects/effect_enum.rs`, `src/ai/effects/types.rs`, `src/ai/effects/defs.rs`
 
 Data-driven ability system. Abilities are defined in TOML and resolved at runtime.
+
+See [docs/ABILITY_SYSTEM.md](ABILITY_SYSTEM.md) for the complete reference with all fields and defaults.
 
 ### Ability Definition
 
 ```rust
 AbilityDef {
-    name, cooldown, range, cast_time,
-    effects: Vec<Effect>,
-    delivery: DeliveryMethod,
-    targeting: TargetingRule,
-    tags: Vec<String>,
+    name, targeting, range, cooldown_ms, cast_time_ms, ai_hint,
+    effects: Vec<ConditionalEffect>,
+    delivery: Option<Delivery>,
+    resource_cost, morph_into, morph_duration_ms, zone_tag,
+    // LoL Coverage:
+    max_charges, charge_recharge_ms,        // ammo system
+    is_toggle, toggle_cost_per_sec,         // toggle abilities
+    recast_count, recast_window_ms, recast_effects,  // multi-cast
+    unstoppable,                            // CC immunity during cast
+    swap_form, form,                        // stance/form swap
+    evolve_into,                            // permanent ability upgrade
 }
 ```
 
-### Effect Types (32)
+### Effect Types (52)
 
-| Effect | Description |
-|--------|-------------|
-| `Damage` | Deal damage |
-| `Heal` | Restore HP |
-| `Shield` | Add temporary HP |
-| `Stun` / `Root` / `Silence` / `Fear` | Hard CC |
-| `Slow` | Movement reduction |
-| `Knockback` / `Pull` / `Swap` | Forced movement |
-| `Dash` | Self-movement |
-| `Buff` / `Debuff` | Stat modification |
-| `Duel` | Force 1v1 |
-| `Summon` | Spawn ally |
-| `Dispel` | Remove effects |
-| `Taunt` | Force targeting |
-| `Reflect` | Damage reflection |
-| `Lifesteal` | Damage-to-heal conversion |
-| `Vulnerability` / `Resistance` | Damage taken modifiers |
-| `Zone` | Persistent ground area |
-| `Tether` | Unit-to-unit link |
-| `Projectile` | Traveling missile |
-| `Rewind` | State restoration |
-| `Invisibility` / `Reveal` | Stealth mechanics |
-| `Channel` | Sustained cast |
-| `Transform` | Unit transformation |
-| `Trigger` / `Conditional` | Reactive/conditional effects |
+**Core Combat:** `Damage` (with `DamageType`: physical/magic/true), `Heal`, `Shield`, `SelfDamage`, `Execute`, `Lifesteal`, `Reflect`, `DamageModify`
 
-### Delivery Methods
+**Crowd Control (13):** `Stun`, `Root`, `Silence`, `Slow`, `Fear`, `Taunt`, `Blind`, `Polymorph`, `Banish`, `Confuse`, `Charm`, `Suppress`, `Grounded`
 
-`Instant`, `Projectile`, `Area`, `Cone`, `Line`, `Beam`
+**Positioning:** `Dash` (with `is_blink`), `Knockback`, `Pull`, `Swap`
 
-### Targeting Rules
+**Buffs/Debuffs:** `Buff`, `Debuff`, `OnHitBuff`
 
-`UnitId`, `Position`, `Nearest`, `Farthest`, `MostHp`, `LeastHp`
+**Summoning:** `Summon` (with `clone`, `directed` flags), `CommandSummons`
 
-### Status Effects
+**Healing/Shield:** `Resurrect`, `OverhealShield`, `AbsorbToHeal`, `ShieldSteal`, `StatusClone`
 
-Active tracking with duration, stacking rules, and per-tag resistance/power levels.
+**Status Interaction:** `Immunity`, `DeathMark`, `Detonate`, `StatusTransfer`, `Dispel`
+
+**Complex:** `Duel`, `Stealth`, `Leash`, `Link`, `Redirect`, `Rewind`, `CooldownModify`, `ApplyStacks`, `Obstacle`, `ProjectileBlock`, `Attach`, `EvolveAbility`
+
+### Delivery Methods (7)
+
+`Instant`, `Projectile`, `Channel`, `Zone`, `Tether`, `Trap`, `Chain`
+
+### Targeting Modes (8)
+
+`TargetEnemy`, `TargetAlly`, `SelfCast`, `SelfAoe`, `GroundTarget`, `Direction`, `Vector`, `Global`
+
+### Damage Types (3)
+
+`Physical` (reduced by armor, default), `Magic` (reduced by magic_resist), `True` (ignores all reduction)
+
+### Stacking Modes
+
+`Refresh` (reset duration, default), `Extend` (add duration), `Strongest` (keep highest), `Stack` (allow multiple)
 
 ### TOML Format
 
 Hero templates in `assets/hero_templates/*.toml` define:
-- Base stats (HP, move speed, armor, etc.)
-- Abilities with full effect definitions
-- Passive abilities
+- Base stats (HP, move speed, armor, magic_resist, resource)
+- Active abilities with full effect/delivery/targeting definitions
+- Passive abilities with triggers
 - Tags for damage/resistance interactions
 
 ---

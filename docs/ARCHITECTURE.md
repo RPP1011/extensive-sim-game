@@ -205,7 +205,7 @@ Pure-Rust deterministic fixed-tick (100ms) combat simulation. `SimState` holds u
 - **`apply_effect.rs`** / **`apply_effect_ext.rs`** — Main effect dispatcher handling all 32 effect types
 - **`damage.rs`** — `apply_damage_to_unit`, `apply_heal_to_unit`, `resolve_chain_delivery`, `scale_effect`
 - **`triggers.rs`** — Passive trigger system (`check_passive_triggers`, `fire_damage_triggers`)
-- **`hero/`** — Hero ability resolution, split into `resolution.rs` (resolve_hero_ability, cooldown/charge mechanics) and `reactions.rs` (apply_morph, apply_form_swap, check_zone_reactions)
+- **`hero/`** — Hero ability resolution, split into `resolution.rs` (resolve_hero_ability, cooldown/charge/recast/toggle mechanics) and `reactions.rs` (apply_morph, apply_form_swap, check_zone_reactions, evolve_ability)
 - **`intent.rs`** — Converts `IntentAction` into cast attempts (attack, ability, heal, control)
 - **`resolve.rs`** — `try_start_cast`, `resolve_cast` for cast execution
 - **`tick_systems.rs`** — Per-tick updates: cooldowns, status effects, projectile advancement, periodic passives
@@ -216,11 +216,11 @@ Pure-Rust deterministic fixed-tick (100ms) combat simulation. `SimState` holds u
 - **`tests_stress.rs`** — Stress tests
 
 ### `effects/` — Data-Driven Ability Engine
-Defines 32 effect types (Damage, Heal, Shield, Stun, Root, Knockback, Zone, Tether, etc.) and ability definitions loaded from TOML. Supports delivery methods (Instant, Projectile, Area, Cone, Line) and targeting rules.
+Defines 52 effect types and ability definitions loaded from TOML. Supports 7 delivery methods (Instant, Projectile, Channel, Zone, Tether, Trap, Chain), 8 targeting modes, and 3 damage types (Physical, Magic, True).
 
-- **`types.rs`** — `AbilityDef`, `DeliveryMethod`, `TargetingRule`, `StatusEffect`, structural types (Tags, Area, Delivery, Condition, Trigger)
-- **`effect_enum.rs`** — `Effect` enum with all 40+ variants and serde defaults
-- **`defs.rs`** — Effect resolution helpers and default definitions
+- **`effect_enum.rs`** — `Effect` enum with all 52 variants and serde defaults
+- **`types.rs`** — `Area` (7 shapes), `Delivery` (7 methods), `Condition` (24), `Trigger` (19), `ConditionalEffect`, `DamageType`, `Stacking`, `Tags`
+- **`defs.rs`** — `AbilityDef` (with recast, charges, toggle, unstoppable, form swap, evolve), `PassiveDef`, `AbilitySlot`, `PassiveSlot`, `AbilityTargeting` (8 modes), `HeroToml`, `HeroStats` (with armor/magic_resist), `ActiveStatusEffect`, `StatusKind`, `Projectile`, `AbilityTarget`
 - **`tests.rs`** / **`tests_extended.rs`** — Effect parsing and behavior tests
 
 ### `squad/` — Phase 3 Squad AI
