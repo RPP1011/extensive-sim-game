@@ -1,0 +1,4818 @@
+{
+  "Aatrox": {
+    "abilities": {
+      "The Darkin Blade": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Infernal Chains": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Umbral Dash": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "World Ender": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Deathbringer Stance",
+      "anim": "idle1"
+    }
+  },
+  "Ahri": {
+    "abilities": {
+      "Orb of Deception": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Fox-Fire": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Charm": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Spirit Rush": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Essence Theft",
+      "anim": "idle1"
+    }
+  },
+  "Akali": {
+    "abilities": {
+      "Five Point Strike": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Twilight Shroud": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Shuriken Flip": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Perfect Execution": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Assassin's Mark",
+      "anim": "idle1"
+    }
+  },
+  "Akshan": {
+    "abilities": {
+      "Avengerang": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Going Rogue": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Heroic Swing": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Comeuppance": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Dirty Fighting",
+      "anim": "idle1"
+    }
+  },
+  "Alistar": {
+    "abilities": {
+      "Pulverize": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Headbutt": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Trample": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Unbreakable Will": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Triumphant Roar",
+      "anim": "idle1"
+    }
+  },
+  "Ambessa": {
+    "abilities": {
+      "Cunning Sweep / Sundering Slam": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Repudiation": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Lacerate": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Public Execution": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Drakehound's Step",
+      "anim": "idle1"
+    }
+  },
+  "Amumu": {
+    "abilities": {
+      "Bandage Toss": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Despair": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Tantrum": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Curse of the Sad Mummy": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Cursed Touch",
+      "anim": "idle1"
+    }
+  },
+  "Anivia": {
+    "abilities": {
+      "Flash Frost": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Crystallize": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Frostbite": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Glacial Storm": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Rebirth",
+      "anim": "idle1"
+    }
+  },
+  "Annie": {
+    "abilities": {
+      "Disintegrate": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Incinerate": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Molten Shield": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Summon: Tibbers": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Pyromania",
+      "anim": "idle1"
+    }
+  },
+  "Aphelios": {
+    "abilities": {
+      "Weapon Abilites": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Phase": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Weapon Queue System": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Moonlight Vigil": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "The Hitman and the Seer",
+      "anim": "idle1"
+    }
+  },
+  "Ashe": {
+    "abilities": {
+      "Ranger's Focus": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Volley": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Hawkshot": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Enchanted Crystal Arrow": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Frost Shot",
+      "anim": "idle1"
+    }
+  },
+  "AurelionSol": {
+    "abilities": {
+      "Breath of Light": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Astral Flight": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Singularity": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Falling Star / The Skies Descend": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Cosmic Creator",
+      "anim": "idle1"
+    }
+  },
+  "Aurora": {
+    "abilities": {
+      "Twofold Hex": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Across the Veil": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "The Weirding": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Between Worlds": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Spirit Abjuration",
+      "anim": "idle1"
+    }
+  },
+  "Azir": {
+    "abilities": {
+      "Conquering Sands": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Arise!": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Shifting Sands": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Emperor's Divide": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Shurima's Legacy",
+      "anim": "idle1"
+    }
+  },
+  "Bard": {
+    "abilities": {
+      "Cosmic Binding": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Caretaker's Shrine": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Magical Journey": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Tempered Fate": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Traveler's Call",
+      "anim": "idle1"
+    }
+  },
+  "Belveth": {
+    "abilities": {
+      "Void Surge": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Above and Below": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Royal Maelstrom": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Endless Banquet": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Death in Lavender ",
+      "anim": "idle1"
+    }
+  },
+  "Blitzcrank": {
+    "abilities": {
+      "Rocket Grab": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Overdrive": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Power Fist": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Static Field": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Mana Barrier",
+      "anim": "idle1"
+    }
+  },
+  "Brand": {
+    "abilities": {
+      "Sear": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Pillar of Flame": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Conflagration": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Pyroclasm": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Blaze",
+      "anim": "idle1"
+    }
+  },
+  "Braum": {
+    "abilities": {
+      "Winter's Bite": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Stand Behind Me": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Unbreakable": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Glacial Fissure": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Concussive Blows",
+      "anim": "idle1"
+    }
+  },
+  "Briar": {
+    "abilities": {
+      "Head Rush": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Blood Frenzy / Snack Attack": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Chilling Scream": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Certain Death": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Crimson Curse",
+      "anim": "idle1"
+    }
+  },
+  "Caitlyn": {
+    "abilities": {
+      "Piltover Peacemaker": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Yordle Snap Trap": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "90 Caliber Net": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Ace in the Hole": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Headshot",
+      "anim": "idle1"
+    }
+  },
+  "Camille": {
+    "abilities": {
+      "Precision Protocol": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Tactical Sweep": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Hookshot": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "The Hextech Ultimatum": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Adaptive Defenses",
+      "anim": "idle1"
+    }
+  },
+  "Cassiopeia": {
+    "abilities": {
+      "Noxious Blast": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Miasma": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Twin Fang": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Petrifying Gaze": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Serpentine Grace",
+      "anim": "idle1"
+    }
+  },
+  "Chogath": {
+    "abilities": {
+      "Rupture": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Feral Scream": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Vorpal Spikes": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Feast": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Carnivore",
+      "anim": "idle1"
+    }
+  },
+  "Corki": {
+    "abilities": {
+      "Phosphorus Bomb": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Valkyrie": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Gatling Gun": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Missile Barrage": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Hextech Munitions",
+      "anim": "idle1"
+    }
+  },
+  "Darius": {
+    "abilities": {
+      "Decimate": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Crippling Strike": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Apprehend": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Noxian Guillotine": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Hemorrhage",
+      "anim": "idle1"
+    }
+  },
+  "Diana": {
+    "abilities": {
+      "Crescent Strike": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Pale Cascade": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Lunar Rush": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Moonfall": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Moonsilver Blade",
+      "anim": "idle1"
+    }
+  },
+  "DrMundo": {
+    "abilities": {
+      "Infected Bonesaw": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Heart Zapper": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Blunt Force Trauma": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Maximum Dosage": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Goes Where He Pleases",
+      "anim": "idle1"
+    }
+  },
+  "Draven": {
+    "abilities": {
+      "Spinning Axe": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Blood Rush": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Stand Aside": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Whirling Death": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "League of Draven",
+      "anim": "idle1"
+    }
+  },
+  "Ekko": {
+    "abilities": {
+      "Timewinder": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Parallel Convergence": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Phase Dive": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Chronobreak": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Z-Drive Resonance",
+      "anim": "idle1"
+    }
+  },
+  "Elise": {
+    "abilities": {
+      "Neurotoxin / Venomous Bite": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Volatile Spiderling / Skittering Frenzy": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Cocoon / Rappel": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Spider Form": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Spider Queen",
+      "anim": "idle1"
+    }
+  },
+  "Evelynn": {
+    "abilities": {
+      "Hate Spike": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Allure": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Whiplash": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Last Caress": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Demon Shade",
+      "anim": "idle1"
+    }
+  },
+  "Ezreal": {
+    "abilities": {
+      "Mystic Shot": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Essence Flux": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Arcane Shift": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Trueshot Barrage": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Rising Spell Force",
+      "anim": "idle1"
+    }
+  },
+  "Fiddlesticks": {
+    "abilities": {
+      "Terrify": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Bountiful Harvest": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Reap": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Crowstorm": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "A Harmless Scarecrow",
+      "anim": "idle1"
+    }
+  },
+  "Fiora": {
+    "abilities": {
+      "Lunge": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Riposte": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Bladework": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Grand Challenge": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Duelist's Dance",
+      "anim": "idle1"
+    }
+  },
+  "Fizz": {
+    "abilities": {
+      "Urchin Strike": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Seastone Trident": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Playful / Trickster": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Chum the Waters": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Nimble Fighter",
+      "anim": "idle1"
+    }
+  },
+  "Galio": {
+    "abilities": {
+      "Winds of War": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Shield of Durand": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Justice Punch": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Hero's Entrance": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Colossal Smash",
+      "anim": "idle1"
+    }
+  },
+  "Gangplank": {
+    "abilities": {
+      "Parrrley": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Remove Scurvy": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Powder Keg": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Cannon Barrage": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Trial by Fire",
+      "anim": "idle1"
+    }
+  },
+  "Garen": {
+    "abilities": {
+      "Decisive Strike": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Courage": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Judgment": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Demacian Justice": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Perseverance",
+      "anim": "idle1"
+    }
+  },
+  "Gnar": {
+    "abilities": {
+      "Boomerang Throw / Boulder Toss": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Hyper / Wallop": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Hop / Crunch": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "GNAR!": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Rage Gene",
+      "anim": "idle1"
+    }
+  },
+  "Gragas": {
+    "abilities": {
+      "Barrel Roll": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Drunken Rage": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Body Slam": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Explosive Cask": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Happy Hour",
+      "anim": "idle1"
+    }
+  },
+  "Graves": {
+    "abilities": {
+      "End of the Line": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Smoke Screen": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Quickdraw": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Collateral Damage": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "New Destiny",
+      "anim": "idle1"
+    }
+  },
+  "Gwen": {
+    "abilities": {
+      "Snip Snip!": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Hallowed Mist": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Skip 'n Slash": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Needlework": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "A Thousand Cuts",
+      "anim": "idle1"
+    }
+  },
+  "Hecarim": {
+    "abilities": {
+      "Rampage": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Spirit of Dread": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Devastating Charge": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Onslaught of Shadows": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Warpath",
+      "anim": "idle1"
+    }
+  },
+  "Heimerdinger": {
+    "abilities": {
+      "H-28 G Evolution Turret": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Hextech Micro-Rockets": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "CH-2 Electron Storm Grenade": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "UPGRADE!!!": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Hextech Affinity",
+      "anim": "idle1"
+    }
+  },
+  "Hwei": {
+    "abilities": {
+      "Subject: Disaster": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Subject: Serenity": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Subject: Torment": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Spiraling Despair": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Signature of the Visionary",
+      "anim": "idle1"
+    }
+  },
+  "Illaoi": {
+    "abilities": {
+      "Tentacle Smash": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Harsh Lesson": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Test of Spirit": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Leap of Faith": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Prophet of an Elder God",
+      "anim": "idle1"
+    }
+  },
+  "Irelia": {
+    "abilities": {
+      "Bladesurge": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Defiant Dance": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Flawless Duet": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Vanguard's Edge": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Ionian Fervor",
+      "anim": "idle1"
+    }
+  },
+  "Ivern": {
+    "abilities": {
+      "Rootcaller": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Brushmaker": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Triggerseed": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Daisy!": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Friend of the Forest",
+      "anim": "idle1"
+    }
+  },
+  "Janna": {
+    "abilities": {
+      "Howling Gale": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Zephyr": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Eye Of The Storm": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Monsoon": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Tailwind",
+      "anim": "idle1"
+    }
+  },
+  "JarvanIV": {
+    "abilities": {
+      "Dragon Strike": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Golden Aegis": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Demacian Standard": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Cataclysm": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Martial Cadence",
+      "anim": "idle1"
+    }
+  },
+  "Jax": {
+    "abilities": {
+      "Leap Strike": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Empower": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Counter Strike": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Grandmaster-at-Arms": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Relentless Assault",
+      "anim": "idle1"
+    }
+  },
+  "Jayce": {
+    "abilities": {
+      "To the Skies! / Shock Blast": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Lightning Field / Hyper Charge": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Thundering Blow / Acceleration Gate": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Mercury Cannon / Mercury Hammer": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Hextech Capacitor",
+      "anim": "idle1"
+    }
+  },
+  "Jhin": {
+    "abilities": {
+      "Dancing Grenade": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Deadly Flourish": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Captive Audience": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Curtain Call": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Whisper",
+      "anim": "idle1"
+    }
+  },
+  "Jinx": {
+    "abilities": {
+      "Switcheroo!": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Zap!": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Flame Chompers!": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Super Mega Death Rocket!": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Get Excited!",
+      "anim": "idle1"
+    }
+  },
+  "KSante": {
+    "abilities": {
+      "Ntofo Strikes": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Path Maker": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Footwork": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "All Out": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Dauntless Instinct",
+      "anim": "idle1"
+    }
+  },
+  "Kaisa": {
+    "abilities": {
+      "Icathian Rain": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Void Seeker": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Supercharge": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Killer Instinct": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Second Skin",
+      "anim": "idle1"
+    }
+  },
+  "Kalista": {
+    "abilities": {
+      "Pierce": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Sentinel": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Rend": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Fate's Call": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Martial Poise",
+      "anim": "idle1"
+    }
+  },
+  "Karma": {
+    "abilities": {
+      "Inner Flame": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Focused Resolve": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Inspire": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Mantra": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Gathering Fire",
+      "anim": "idle1"
+    }
+  },
+  "Karthus": {
+    "abilities": {
+      "Lay Waste": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Wall of Pain": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Defile": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Requiem": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Death Defied",
+      "anim": "idle1"
+    }
+  },
+  "Kassadin": {
+    "abilities": {
+      "Null Sphere": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Nether Blade": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Force Pulse": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Riftwalk": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Void Stone",
+      "anim": "idle1"
+    }
+  },
+  "Katarina": {
+    "abilities": {
+      "Bouncing Blade": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Preparation": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Shunpo": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Death Lotus": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Voracity",
+      "anim": "idle1"
+    }
+  },
+  "Kayle": {
+    "abilities": {
+      "Radiant Blast": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Celestial Blessing": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Starfire Spellblade": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Divine Judgment": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Divine Ascent",
+      "anim": "idle1"
+    }
+  },
+  "Kayn": {
+    "abilities": {
+      "Reaping Slash": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Blade's Reach": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Shadow Step": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Umbral Trespass": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "The Darkin Scythe",
+      "anim": "idle1"
+    }
+  },
+  "Kennen": {
+    "abilities": {
+      "Thundering Shuriken": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Electrical Surge": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Lightning Rush": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Slicing Maelstrom": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Mark of the Storm",
+      "anim": "idle1"
+    }
+  },
+  "Khazix": {
+    "abilities": {
+      "Taste Their Fear": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Void Spike": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Leap": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Void Assault": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Unseen Threat",
+      "anim": "idle1"
+    }
+  },
+  "Kindred": {
+    "abilities": {
+      "Dance of Arrows": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Wolf's Frenzy": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Mounting Dread": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Lamb's Respite": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Mark of the Kindred",
+      "anim": "idle1"
+    }
+  },
+  "Kled": {
+    "abilities": {
+      "Bear Trap on a Rope": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Violent Tendencies": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Jousting": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Chaaaaaaaarge!!!": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Skaarl, the Cowardly Lizard",
+      "anim": "idle1"
+    }
+  },
+  "KogMaw": {
+    "abilities": {
+      "Caustic Spittle": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Bio-Arcane Barrage": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Void Ooze": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Living Artillery": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Icathian Surprise",
+      "anim": "idle1"
+    }
+  },
+  "Leblanc": {
+    "abilities": {
+      "Sigil of Malice": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Distortion": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Ethereal Chains": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Mimic": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Mirror Image",
+      "anim": "idle1"
+    }
+  },
+  "LeeSin": {
+    "abilities": {
+      "Sonic Wave / Resonating Strike": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Safeguard / Iron Will": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Tempest / Cripple": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Dragon's Rage": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Flurry",
+      "anim": "idle1"
+    }
+  },
+  "Leona": {
+    "abilities": {
+      "Shield of Daybreak": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Eclipse": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Zenith Blade": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Solar Flare": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Sunlight",
+      "anim": "idle1"
+    }
+  },
+  "Lillia": {
+    "abilities": {
+      "Blooming Blows": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Watch Out! Eep!": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Swirlseed": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Lilting Lullaby": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Dream-Laden Bough",
+      "anim": "idle1"
+    }
+  },
+  "Lissandra": {
+    "abilities": {
+      "Ice Shard": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Ring of Frost": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Glacial Path": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Frozen Tomb": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Iceborn Subjugation",
+      "anim": "idle1"
+    }
+  },
+  "Lucian": {
+    "abilities": {
+      "Piercing Light": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Ardent Blaze": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Relentless Pursuit": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "The Culling": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Lightslinger",
+      "anim": "idle1"
+    }
+  },
+  "Lulu": {
+    "abilities": {
+      "Glitterlance": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Whimsy": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Help, Pix!": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Wild Growth": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Pix, Faerie Companion",
+      "anim": "idle1"
+    }
+  },
+  "Lux": {
+    "abilities": {
+      "Light Binding": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Prismatic Barrier": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Lucent Singularity": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Final Spark": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Illumination",
+      "anim": "idle1"
+    }
+  },
+  "Malphite": {
+    "abilities": {
+      "Seismic Shard": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Thunderclap": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Ground Slam": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Unstoppable Force": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Granite Shield",
+      "anim": "idle1"
+    }
+  },
+  "Malzahar": {
+    "abilities": {
+      "Call of the Void": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Void Swarm": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Malefic Visions": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Nether Grasp": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Void Shift",
+      "anim": "idle1"
+    }
+  },
+  "Maokai": {
+    "abilities": {
+      "Bramble Smash": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Twisted Advance": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Sapling Toss": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Nature's Grasp": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Sap Magic",
+      "anim": "idle1"
+    }
+  },
+  "MasterYi": {
+    "abilities": {
+      "Alpha Strike": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Meditate": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Wuju Style": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Highlander": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Double Strike",
+      "anim": "idle1"
+    }
+  },
+  "Mel": {
+    "abilities": {
+      "Radiant Volley": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Rebuttal": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Solar Snare": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Golden Eclipse": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Searing Brilliance",
+      "anim": "idle1"
+    }
+  },
+  "Milio": {
+    "abilities": {
+      "Ultra Mega Fire Kick": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Cozy Campfire": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Warm Hugs": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Breath of Life": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Fired Up!",
+      "anim": "idle1"
+    }
+  },
+  "MissFortune": {
+    "abilities": {
+      "Double Up": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Strut": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Make It Rain": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Bullet Time": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Love Tap",
+      "anim": "idle1"
+    }
+  },
+  "MonkeyKing": {
+    "abilities": {
+      "Crushing Blow": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Warrior Trickster": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Nimbus Strike": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Cyclone": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Stone Skin",
+      "anim": "idle1"
+    }
+  },
+  "Mordekaiser": {
+    "abilities": {
+      "Obliterate": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Indestructible": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Death's Grasp": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Realm of Death": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Darkness Rise",
+      "anim": "idle1"
+    }
+  },
+  "Morgana": {
+    "abilities": {
+      "Dark Binding": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Tormented Shadow": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Black Shield": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Soul Shackles": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Soul Siphon",
+      "anim": "idle1"
+    }
+  },
+  "Naafiri": {
+    "abilities": {
+      "Darkin Daggers": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "The Call of the Pack": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Eviscerate": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Hounds' Pursuit": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "We Are More",
+      "anim": "idle1"
+    }
+  },
+  "Nami": {
+    "abilities": {
+      "Aqua Prison": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Ebb and Flow": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Tidecaller's Blessing": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Tidal Wave": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Surging Tides",
+      "anim": "idle1"
+    }
+  },
+  "Nasus": {
+    "abilities": {
+      "Siphoning Strike": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Wither": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Spirit Fire": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Fury of the Sands": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Soul Eater",
+      "anim": "idle1"
+    }
+  },
+  "Nautilus": {
+    "abilities": {
+      "Dredge Line": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Titan's Wrath": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Riptide": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Depth Charge": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Staggering Blow",
+      "anim": "idle1"
+    }
+  },
+  "Neeko": {
+    "abilities": {
+      "Blooming Burst": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Shapesplitter": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Tangle-Barbs": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Pop Blossom": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Inherent Glamour",
+      "anim": "idle1"
+    }
+  },
+  "Nidalee": {
+    "abilities": {
+      "Javelin Toss / Takedown": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Bushwhack / Pounce": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Primal Surge / Swipe": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Aspect Of The Cougar": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Prowl",
+      "anim": "idle1"
+    }
+  },
+  "Nilah": {
+    "abilities": {
+      "Formless Blade": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Jubilant Veil": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Slipstream": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Apotheosis": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Joy Unending",
+      "anim": "idle1"
+    }
+  },
+  "Nocturne": {
+    "abilities": {
+      "Duskbringer": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Shroud of Darkness": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Unspeakable Horror": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Paranoia": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Umbra Blades",
+      "anim": "idle1"
+    }
+  },
+  "Nunu": {
+    "abilities": {
+      "Consume": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Biggest Snowball Ever!": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Snowball Barrage": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Absolute Zero": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Call of the Freljord",
+      "anim": "idle1"
+    }
+  },
+  "Olaf": {
+    "abilities": {
+      "Undertow": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Tough It Out": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Reckless Swing": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Ragnarok": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Berserker Rage",
+      "anim": "idle1"
+    }
+  },
+  "Orianna": {
+    "abilities": {
+      "Command: Attack": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Command: Dissonance": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Command: Protect": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Command: Shockwave": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Clockwork Windup",
+      "anim": "idle1"
+    }
+  },
+  "Ornn": {
+    "abilities": {
+      "Volcanic Rupture": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Bellows Breath": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Searing Charge": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Call of the Forge God": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Living Forge",
+      "anim": "idle1"
+    }
+  },
+  "Pantheon": {
+    "abilities": {
+      "Comet Spear": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Shield Vault": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Aegis Assault": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Grand Starfall": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Mortal Will",
+      "anim": "idle1"
+    }
+  },
+  "Poppy": {
+    "abilities": {
+      "Hammer Shock": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Steadfast Presence": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Heroic Charge": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Keeper's Verdict": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Iron Ambassador",
+      "anim": "idle1"
+    }
+  },
+  "Pyke": {
+    "abilities": {
+      "Bone Skewer": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Ghostwater Dive": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Phantom Undertow": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Death From Below": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Gift of the Drowned Ones",
+      "anim": "idle1"
+    }
+  },
+  "Qiyana": {
+    "abilities": {
+      "Elemental Wrath / Edge of Ixtal": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Terrashape": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Audacity": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Supreme Display of Talent": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Royal Privilege",
+      "anim": "idle1"
+    }
+  },
+  "Quinn": {
+    "abilities": {
+      "Blinding Assault": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Heightened Senses": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Vault": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Behind Enemy Lines": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Harrier",
+      "anim": "idle1"
+    }
+  },
+  "Rakan": {
+    "abilities": {
+      "Gleaming Quill": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Grand Entrance": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Battle Dance": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "The Quickness": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Fey Feathers",
+      "anim": "idle1"
+    }
+  },
+  "Rammus": {
+    "abilities": {
+      "Powerball": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Defensive Ball Curl": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Frenzying Taunt": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Soaring Slam": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Spiked Shell",
+      "anim": "idle1"
+    }
+  },
+  "RekSai": {
+    "abilities": {
+      "Queen's Wrath / Prey Seeker": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Burrow / Un-burrow": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Furious Bite / Tunnel": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Void Rush": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Fury of the Xer'Sai",
+      "anim": "idle1"
+    }
+  },
+  "Rell": {
+    "abilities": {
+      "Shattering Strike": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Ferromancy: Crash Down": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Full Tilt": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Magnet Storm": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Break the Mold",
+      "anim": "idle1"
+    }
+  },
+  "Renata": {
+    "abilities": {
+      "Handshake": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Bailout": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Loyalty Program": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Hostile Takeover": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Leverage",
+      "anim": "idle1"
+    }
+  },
+  "Renekton": {
+    "abilities": {
+      "Cull the Meek": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Ruthless Predator": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Slice and Dice": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Dominus": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Reign of Anger",
+      "anim": "idle1"
+    }
+  },
+  "Rengar": {
+    "abilities": {
+      "Savagery": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Battle Roar": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Bola Strike": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Thrill of the Hunt": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Unseen Predator",
+      "anim": "idle1"
+    }
+  },
+  "Riven": {
+    "abilities": {
+      "Broken Wings": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Ki Burst": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Valor": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Blade of the Exile": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Runic Blade",
+      "anim": "idle1"
+    }
+  },
+  "Rumble": {
+    "abilities": {
+      "Flamespitter": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Scrap Shield": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Electro Harpoon": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "The Equalizer": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Junkyard Titan",
+      "anim": "idle1"
+    }
+  },
+  "Ryze": {
+    "abilities": {
+      "Overload": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Rune Prison": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Spell Flux": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Realm Warp": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Arcane Mastery",
+      "anim": "idle1"
+    }
+  },
+  "Samira": {
+    "abilities": {
+      "Flair": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Blade Whirl": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Wild Rush": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Inferno Trigger": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Daredevil Impulse",
+      "anim": "idle1"
+    }
+  },
+  "Sejuani": {
+    "abilities": {
+      "Arctic Assault": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Winter's Wrath": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Permafrost": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Glacial Prison": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Fury of the North",
+      "anim": "idle1"
+    }
+  },
+  "Senna": {
+    "abilities": {
+      "Piercing Darkness": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Last Embrace": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Curse of the Black Mist": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Dawning Shadow": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Absolution",
+      "anim": "idle1"
+    }
+  },
+  "Seraphine": {
+    "abilities": {
+      "High Note": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Surround Sound": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Beat Drop": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Encore": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Stage Presence",
+      "anim": "idle1"
+    }
+  },
+  "Sett": {
+    "abilities": {
+      "Knuckle Down": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Haymaker": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Facebreaker": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "The Show Stopper": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Pit Grit",
+      "anim": "idle1"
+    }
+  },
+  "Shaco": {
+    "abilities": {
+      "Deceive": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Jack In The Box": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Two-Shiv Poison": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Hallucinate": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Backstab",
+      "anim": "idle1"
+    }
+  },
+  "Shen": {
+    "abilities": {
+      "Twilight Assault": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Spirit's Refuge": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Shadow Dash": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Stand United": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Ki Barrier",
+      "anim": "idle1"
+    }
+  },
+  "Shyvana": {
+    "abilities": {
+      "Twin Bite": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Burnout": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Flame Breath": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Dragon's Descent": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Fury of the Dragonborn",
+      "anim": "idle1"
+    }
+  },
+  "Singed": {
+    "abilities": {
+      "Poison Trail": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Mega Adhesive": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Fling": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Insanity Potion": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Noxious Slipstream",
+      "anim": "idle1"
+    }
+  },
+  "Sion": {
+    "abilities": {
+      "Decimating Smash": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Soul Furnace": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Roar of the Slayer": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Unstoppable Onslaught": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Glory in Death",
+      "anim": "idle1"
+    }
+  },
+  "Sivir": {
+    "abilities": {
+      "Boomerang Blade": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Ricochet": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Spell Shield": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "On The Hunt": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Fleet of Foot",
+      "anim": "idle1"
+    }
+  },
+  "Skarner": {
+    "abilities": {
+      "Shattered Earth / Upheaval": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Seismic Bastion": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Ixtal's Impact": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Impale": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Threads of Vibration",
+      "anim": "idle1"
+    }
+  },
+  "Smolder": {
+    "abilities": {
+      "Super Scorcher Breath": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Achooo!": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Flap, Flap, Flap": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "MMOOOMMMM!": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Dragon Practice",
+      "anim": "idle1"
+    }
+  },
+  "Sona": {
+    "abilities": {
+      "Hymn of Valor": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Aria of Perseverance": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Song of Celerity": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Crescendo": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Power Chord",
+      "anim": "idle1"
+    }
+  },
+  "Soraka": {
+    "abilities": {
+      "Starcall": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Astral Infusion": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Equinox": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Wish": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Salvation",
+      "anim": "idle1"
+    }
+  },
+  "Swain": {
+    "abilities": {
+      "Death's Hand": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Vision of Empire": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Nevermove": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Demonic Ascension": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Ravenous Flock",
+      "anim": "idle1"
+    }
+  },
+  "Sylas": {
+    "abilities": {
+      "Chain Lash": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Kingslayer": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Abscond / Abduct": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Hijack": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Petricite Burst",
+      "anim": "idle1"
+    }
+  },
+  "Syndra": {
+    "abilities": {
+      "Dark Sphere": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Force of Will": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Scatter the Weak": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Unleashed Power": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Transcendent",
+      "anim": "idle1"
+    }
+  },
+  "TahmKench": {
+    "abilities": {
+      "Tongue Lash": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Abyssal Dive": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Thick Skin": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Devour": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "An Acquired Taste",
+      "anim": "idle1"
+    }
+  },
+  "Taliyah": {
+    "abilities": {
+      "Threaded Volley": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Seismic Shove": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Unraveled Earth": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Weaver's Wall": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Rock Surfing",
+      "anim": "idle1"
+    }
+  },
+  "Talon": {
+    "abilities": {
+      "Noxian Diplomacy": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Rake": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Assassin's Path": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Shadow Assault": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Blade's End",
+      "anim": "idle1"
+    }
+  },
+  "Taric": {
+    "abilities": {
+      "Starlight's Touch": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Bastion": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Dazzle": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Cosmic Radiance": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Bravado",
+      "anim": "idle1"
+    }
+  },
+  "Teemo": {
+    "abilities": {
+      "Blinding Dart": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Move Quick": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Toxic Shot": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Noxious Trap": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Guerrilla Warfare",
+      "anim": "idle1"
+    }
+  },
+  "Thresh": {
+    "abilities": {
+      "Death Sentence": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Dark Passage": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Flay": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "The Box": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Damnation",
+      "anim": "idle1"
+    }
+  },
+  "Tristana": {
+    "abilities": {
+      "Rapid Fire": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Rocket Jump": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Explosive Charge": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Buster Shot": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Draw a Bead",
+      "anim": "idle1"
+    }
+  },
+  "Trundle": {
+    "abilities": {
+      "Chomp": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Frozen Domain": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Pillar of Ice": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Subjugate": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "King's Tribute",
+      "anim": "idle1"
+    }
+  },
+  "Tryndamere": {
+    "abilities": {
+      "Bloodlust": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Mocking Shout": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Spinning Slash": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Undying Rage": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Battle Fury",
+      "anim": "idle1"
+    }
+  },
+  "TwistedFate": {
+    "abilities": {
+      "Wild Cards": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Pick a Card": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Stacked Deck": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Destiny": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Loaded Dice",
+      "anim": "idle1"
+    }
+  },
+  "Twitch": {
+    "abilities": {
+      "Ambush": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Venom Cask": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Contaminate": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Spray and Pray": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Deadly Venom",
+      "anim": "idle1"
+    }
+  },
+  "Udyr": {
+    "abilities": {
+      "Wilding Claw": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Iron Mantle": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Blazing Stampede": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Wingborne Storm": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Bridge Between",
+      "anim": "idle1"
+    }
+  },
+  "Urgot": {
+    "abilities": {
+      "Corrosive Charge": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Purge": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Disdain": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Fear Beyond Death": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Echoing Flames",
+      "anim": "idle1"
+    }
+  },
+  "Varus": {
+    "abilities": {
+      "Piercing Arrow": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Blighted Quiver": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Hail of Arrows": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Chain of Corruption": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Living Vengeance",
+      "anim": "idle1"
+    }
+  },
+  "Vayne": {
+    "abilities": {
+      "Tumble": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Silver Bolts": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Condemn": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Final Hour": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Night Hunter",
+      "anim": "idle1"
+    }
+  },
+  "Veigar": {
+    "abilities": {
+      "Baleful Strike": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Dark Matter": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Event Horizon": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Primordial Burst": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Phenomenal Evil Power",
+      "anim": "idle1"
+    }
+  },
+  "Velkoz": {
+    "abilities": {
+      "Plasma Fission": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Void Rift": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Tectonic Disruption": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Life Form Disintegration Ray": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Organic Deconstruction",
+      "anim": "idle1"
+    }
+  },
+  "Vex": {
+    "abilities": {
+      "Mistral Bolt": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Personal Space": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Looming Darkness": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Shadow Surge": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Doom 'n Gloom",
+      "anim": "idle1"
+    }
+  },
+  "Vi": {
+    "abilities": {
+      "Vault Breaker": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Denting Blows": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Relentless Force": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Cease and Desist": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Blast Shield",
+      "anim": "idle1"
+    }
+  },
+  "Viego": {
+    "abilities": {
+      "Blade of the Ruined King": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Spectral Maw": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Harrowed Path": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Heartbreaker": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Sovereign's Domination",
+      "anim": "idle1"
+    }
+  },
+  "Viktor": {
+    "abilities": {
+      "Siphon Power": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Gravity Field": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Hextech Ray": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Arcane Storm": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Glorious Evolution",
+      "anim": "idle1"
+    }
+  },
+  "Vladimir": {
+    "abilities": {
+      "Transfusion": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Sanguine Pool": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Tides of Blood": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Hemoplague": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Crimson Pact",
+      "anim": "idle1"
+    }
+  },
+  "Volibear": {
+    "abilities": {
+      "Thundering Smash": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Frenzied Maul": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Sky Splitter": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Stormbringer": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "The Relentless Storm",
+      "anim": "idle1"
+    }
+  },
+  "Warwick": {
+    "abilities": {
+      "Jaws of the Beast": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Blood Hunt": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Primal Howl": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Infinite Duress": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Eternal Hunger",
+      "anim": "idle1"
+    }
+  },
+  "Xayah": {
+    "abilities": {
+      "Double Daggers": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Deadly Plumage": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Bladecaller": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Featherstorm": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Clean Cuts",
+      "anim": "idle1"
+    }
+  },
+  "Xerath": {
+    "abilities": {
+      "Arcanopulse": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Eye of Destruction": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Shocking Orb": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Rite of the Arcane": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Mana Surge",
+      "anim": "idle1"
+    }
+  },
+  "XinZhao": {
+    "abilities": {
+      "Three Talon Strike": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Wind Becomes Lightning": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Audacious Charge": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Crescent Guard": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Determination",
+      "anim": "idle1"
+    }
+  },
+  "Yasuo": {
+    "abilities": {
+      "Steel Tempest": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Wind Wall": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Sweeping Blade": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Last Breath": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Way of the Wanderer",
+      "anim": "idle1"
+    }
+  },
+  "Yone": {
+    "abilities": {
+      "Mortal Steel": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Spirit Cleave": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Soul Unbound": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Fate Sealed": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Way of the Hunter",
+      "anim": "idle1"
+    }
+  },
+  "Yorick": {
+    "abilities": {
+      "Last Rites": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Dark Procession": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Mourning Mist": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Eulogy of the Isles": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Shepherd of Souls",
+      "anim": "idle1"
+    }
+  },
+  "Yunara": {
+    "abilities": {
+      "Cultivation of Spirit": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Arc of Judgment | Arc of Ruin": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Kanmei's Steps | Untouchable Shadow": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Transcend One's Self": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Vow of the First Lands",
+      "anim": "idle1"
+    }
+  },
+  "Yuumi": {
+    "abilities": {
+      "Prowling Projectile": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "You and Me!": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Zoomies": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Final Chapter": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Feline Friendship",
+      "anim": "idle1"
+    }
+  },
+  "Zaahen": {
+    "abilities": {
+      "The Darkin Glaive": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Dreaded Return": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Aureate Rush": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Grim Deliverance": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Cultivation of War",
+      "anim": "idle1"
+    }
+  },
+  "Zac": {
+    "abilities": {
+      "Stretching Strikes": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Unstable Matter": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Elastic Slingshot": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Let's Bounce!": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Cell Division",
+      "anim": "idle1"
+    }
+  },
+  "Zed": {
+    "abilities": {
+      "Razor Shuriken": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Living Shadow": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Shadow Slash": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Death Mark": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Contempt for the Weak",
+      "anim": "idle1"
+    }
+  },
+  "Zeri": {
+    "abilities": {
+      "Burst Fire": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Ultrashock Laser": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Spark Surge": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Lightning Crash": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Living Battery",
+      "anim": "idle1"
+    }
+  },
+  "Ziggs": {
+    "abilities": {
+      "Bouncing Bomb": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Satchel Charge": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Hexplosive Minefield": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Mega Inferno Bomb": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Short Fuse",
+      "anim": "idle1"
+    }
+  },
+  "Zilean": {
+    "abilities": {
+      "Time Bomb": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Rewind": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Time Warp": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Chronoshift": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Time In A Bottle",
+      "anim": "idle1"
+    }
+  },
+  "Zoe": {
+    "abilities": {
+      "Paddle Star!": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Spell Thief": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Sleepy Trouble Bubble": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Portal Jump": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "More Sparkles!",
+      "anim": "idle1"
+    }
+  },
+  "Zyra": {
+    "abilities": {
+      "Deadly Spines": {
+        "slot": "Q",
+        "anim": "spell1"
+      },
+      "Rampant Growth": {
+        "slot": "W",
+        "anim": "spell2"
+      },
+      "Grasping Roots": {
+        "slot": "E",
+        "anim": "spell3"
+      },
+      "Stranglethorns": {
+        "slot": "R",
+        "anim": "spell4"
+      }
+    },
+    "basic_attack": "attack1",
+    "move": "run",
+    "death": "death1",
+    "idle": "idle1",
+    "passive": {
+      "name": "Garden of Thorns",
+      "anim": "idle1"
+    }
+  }
+}

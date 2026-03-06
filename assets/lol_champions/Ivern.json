@@ -1,0 +1,301 @@
+{
+  "id": "Ivern",
+  "name": "Ivern",
+  "title": "the Green Father",
+  "resource_type": "Mana",
+  "tags": [
+    "Support",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Friend of the Forest",
+      "description": "Ivern cannot attack or be attacked by non-epic monsters. Ivern can create magical groves on jungle camps which grow over time. When the grove is fully grown, Ivern may free the monsters to receive gold and experience.",
+      "wiki_detail": {
+        "champion": "Ivern",
+        "skill": "I",
+        "icon": "Friend of the Forest.png",
+        "blurbicon": "Friend of the Forest.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Ivern}} cannot attack nor damage non-epic {{tip|monsters}}. When he targets a jungle camp, he {{tip|channel|plants}} a magical {{as|grove|buzzword2}} under it at the cost of {{as|health}} and {{as|mana}}.",
+        "blurb2": "The {{as|grove|buzzword2}} charges up over time to fully mature, upon which '''Ivern''' can then target the monsters to instantly clear the camp. Using {{si|Smite}} on a monster in the {{as|grove|buzzword2}} will clear the camp regardless of maturity.",
+        "description": "{{sbc|Innate:}} '''Ivern''' cannot attack nor damage non-epic {{tip|monster|monsters}}. Instead, targeting a jungle camp initiates a {{fd|2.5}} second {{tip|channel}} that will plant a {{as|grove|buzzword2}} upon the camp. Placing a {{as|grove|buzzword2}} costs {{sti|health|{{as|{{pp|(15-(x-1)*0.882)/100*({{ccd|Ivern|hp_base}}+{{ccd|Ivern|hp_lvl}}*(x-1)*(0.7025+0.0175*(x-1)))|formula = (15% - 0.882% per level after 1) of base health}} health}}}} and {{sti|mana|{{as|{{pp|(20-(x-1)*1.175)/100*({{ccd|Ivern|mp_base}}+{{ccd|Ivern|mp_lvl}}*(x-1)*(0.7025+0.0175*(x-1)))|formula = (20% - 1.175% per level after 1) of base mana}} mana}}}}. The channel cannot be cancelled in the first {{fd|0.15}} seconds and in the last {{fd|0.5}} seconds.",
+        "description2": "'''Ivern''' cannot place a grove while he is unable to cast abilities.",
+        "description3": "The {{as|grove|buzzword2}} matures over {{pp|40;38;36;34;32;30;27;24;21;18;15;11;7;3;1|formula = 42 - 2 per level until level 6, then 3 until level 11, then 4 until level 15. ''This is capped at 1 second at level 15.''}} seconds. When fully matured, '''Ivern''' can target the camp again to ''free'' it after a {{fd|0.5}}-second [[Channel#Casting Times|cast time]], clearing the camp and receiving the {{tt|{{g|full gold}} and {{sti|experience|{{as|full experience}}}}|Not full when freeing Krug camp, see notes}} [[bounty|bounties]]. Using {{si|Smite}} on a monster within the {{as|grove|buzzword2}} will instantly ''free'' the camp regardless of maturity.",
+        "description4": "If the camp's large monster has already been slain prior to planting a {{as|grove|buzzword2}}, '''Ivern''' will ''free'' the camp upon completing the channel at no cost. Similarly, the {{as|grove|buzzword2}} will instantly mature if the large monster is slain.",
+        "targeting": "Unit",
+        "affects": "Monsters",
+        "silence": "true",
+        "notes": "* Freeing a {{tip|Krugs}} camp will only give the {{g|gold}} and {{as|experience}} of 1 {{ui|Ancient Krug}}, 2 {{ui|Krug|Krugs}}, and 3 {{ui|Krug|Mini Krugs}}, for a total of {{pp|95;95*1.025;95*1.075;95*1.15;95*1.25;95*1.35|1;3;4;5;7;9|type=monster's level|formula=''This is capped at monster's level 9.''|color=experience}} {{as|experience}} and {{g|85}}.\n** The entire {{tip|Krugs}} camp is usually a total of 1 {{ui|Ancient Krug}}, 3 {{ui|Krug|Krugs}}, and 6 {{ui|Krug|Mini Krugs}}, for a total of {{pp|153;153*1.025;153*1.075;153*1.15;153*1.25;153*1.35|1;3;4;5;7;9|type=monster's level|formula=''This is capped at monster's level 9.''|color=experience}} and {{g|131}}.\n* '''Ivern''' must be within {{tip|er|icononly = true}} 275 units of the {{tt|large monster|if still alive}} of the targeted camp to start channeling or collect a {{as|grove|buzzword2}}. The large monsters also must be {{tip|sight|visible}}.\n* If '''Ivern''' cannot afford the cost to place a grove, ''Friend of the Forest'' is placed on a cooldown equal to the number of seconds it takes for his {{stil|health regeneration}} and/or {{stil|mana regeneration}} to restore him to the amount of health and/or mana needed to afford the cost.\n** The cooldown will update based on '''Ivern's''' '''current''' health and mana regeneration, as well as his '''current''' health and mana.\n* ''Friend of the Forest'' can be used while '''Ivern''' or the camp is in combat and, once the {{as|grove|buzzword2}} is placed, {{si|Smite}} can be used to instantly claim the camp. {{tip|Interrupt|Interrupting}} '''Ivern's''' channel is the only way to contest jungle camps, short of killing the camp during the channel time.\n* ''Saplings'' cannot be gathered by allied champions in a {{tip|zombie state}} nor allied {{tip|clone|clones}}.\n* ''Saplings'' can be gathered while {{tip|untargetable}}.\n* Allied {{tip|clone|clones}} killing buff monsters will also cause a ''sapling'' to be spawned.\n* Freeing a {{as|grove|buzzword2}} causes the monsters within the camp to be dealt {{as|5000 true damage}} in the {{tip|raw damage|internalraw damage}} source type by '''Ivern''', despite his inability to damage them.\n* ''Friend of the Forest'' will leave '''Ivern''' at {{as|1 health}} if cast with exactly the required amount. ''Friend of the Forest'' cannot be cast with less, unlike other abilities with health costs.\n* The following table refers for interactions while '''Ivern''' is {{tip|channel|channeling}}:\n** '''Ivern''' is unable to act during the first {{fd|0.15}} and last {{fd|0.5}} seconds of the channel.\n{{ct|channel|cast=interrupts|items=interrupts,true,,false|spells=true,interrupts,interrupts,interrupts,interrupts|interrupts=death, silence|damage=true}}",
+        "differences": "|video = Ivern - Passive"
+      }
+    },
+    "Q": {
+      "id": "IvernQ",
+      "name": "Rootcaller",
+      "description": "Ivern conjures a vine, dealing damage and rooting enemy targets hit. Ivern's allies can dash to the rooted target.",
+      "tooltip": "Ivern conjures a vine dealing {{ totaldamage }} magic damage and Rooting the first enemy hit for {{ rootduration }} seconds. Allies that Attack a Rooted enemy dash into Attack Range. \n\nRecast: Ivern dashes directly onto the Rooted enemy.\n\nHitting non-epic monsters reduces Rootcaller's cooldown by 50%.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1125",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Root Duration",
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ rootduration }} -> {{ rootdurationNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ivern",
+        "skill": "Q",
+        "icon": "Rootcaller.png",
+        "blurbicon": "Rootcaller.png",
+        "blurb": "{{sbc|Active:}} {{ci|Ivern}} throws a vine in the target direction that deals {{as|magic damage}} and {{tip|root|roots}} the first enemy hit.",
+        "blurb2": "While the target is rooted, '''Ivern''' can recast ''Rootcaller''. He and his allies can select the target to {{tip|dash}} closer to the location.",
+        "blurb3": "{{sbc|Recast:}} '''Ivern''' {{tip|dash|dashes}} to the target.",
+        "description": "{{sbc|Active:}} '''Ivern''' throws a vine in the target direction, dealing {{as|magic damage}} to the first enemy hit and {{tip|root|rooting}} them for a duration, during which they are also {{tip|standard sight|revealed}}. ''Rootcaller'' can be recast while the target is {{tip|root|rooted}}.",
+        "leveling": "{{st|Magic Damage|{{ap|80 to 260}} {{as|(+ 70% AP)}}}}\n{{st|Root Duration|{{ap|1.2 to 2}} seconds}}",
+        "description2": "'''Ivern''' and allied champions can select the target {{tip|root|rooted}} by ''Rootcaller'' to {{tip|dash}} to their location, stopping at {{sti|their attack range}}.",
+        "description3": "{{sbc|Recast:}} '''Ivern''' {{tip|dash|dashes}} to the rooted target.",
+        "description4": "Hitting a non-epic monster reduces ''Rootcaller's'' {{sti|cooldown}} by 50%.",
+        "target range": "{{tip|cr|icononly = true}} 1150 / {{tip|er|icononly=true}} {{tt|0|Ivern recast dash location relative to target}} / {{tip|er|icononly=true}} {{tt|{{ccd|Ivern|range}}|Ivern selecting dash location relative to target}} / {{tip|er|icononly=true}} {{tt|Attack range|Ally dash location relative to target}}",
+        "speed": "1300",
+        "cost": "60",
+        "costtype": "Mana",
+        "cooldown": "{{ap|14 to 10}}",
+        "cdstart": "on-cast",
+        "cast time": "{{fd|0.25}}",
+        "width": "{{tip|er|icononly = true}} 160",
+        "targeting": "[[Direction-targeted|Direction]] / [[Auto-targeted|Auto]]",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Single target",
+        "projectile": "True",
+        "grounded": "special",
+        "knockdown": "true",
+        "notes": "{{Effect at cast time start}}\n* {{ai|Daisy!|Ivern|Daisy}} dashes to rooted minions.\n* ''Rootcaller'' will hit {{tip|monster|monsters}} but does not deal damage to them unless they were an epic monster.\n* '''Ivern's''' pull/attack range is determined when he dashes to the target - not from when he initially casts ''Rootcaller'' and throws the vine.\n* '''Ivern''' is not able to dash to the target unless they are within approximately 1200 range.\n** {{Pending for test}}: This also counts for allies.\n* ''Rootcaller'' {{tt|cannot be used|By either clicking on the target or Ivern recasts}} to {{tip|dash}} while {{tip|ground|grounded}} or {{tip|root|rooted}}. This applies to '''Ivern''' and his allies.\n* ''Rootcaller's'' dash does not follow targets, their position at the time of starting the dash is the location '''Ivern''' and his allies will stop from.\n* '''Ivern''' and his teammates cannot dash to a target if the root was not applied to them.",
+        "video": "Ivern - Q"
+      }
+    },
+    "W": {
+      "id": "IvernW",
+      "name": "Brushmaker",
+      "description": "In brush, Ivern and his nearby allies attacks deal bonus magic damage. Ivern can activate this ability to create a patch of brush.",
+      "tooltip": "Passive: While in brush and for {{ buffduration }} seconds after leaving, Ivern's Attacks deal an additional {{ totaldamage }} magic damage. Nearby allies will gain this effect for {{ allybuffduration }} seconds and deal {{ totalallydamage }} magic damage.\n\nActive: Ivern grows a patch of Brush, revealing the area for {{ revealduration }} seconds. The Brush persists until Ivern's team loses vision within it, or up to {{ maxbrushduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0.5",
+      "cost": "30",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1150",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Magic Damage",
+          "Ally Magic Damage"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ allybasedamage }} -> {{ allybasedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ivern",
+        "skill": "W",
+        "icon": "false",
+        "blurbicon": "Brushmaker.png",
+        "blurb": "{{sbc|Passive:}} While {{ci|Ivern}} is in {{tip|brush}}, his basic attacks deal {{as|'''bonus''' magic damage}}.",
+        "blurb2": "{{sbc|Active:}} '''Ivern''' grows a patch of {{tip|brush}} at the target location. More brush will be created if grown near [[terrain]] or other brush.",
+        "description": "{{sbc|Passive:}} While '''Ivern''' is in {{tip|brush}}, his basic attacks are empowered to deal {{as|'''bonus''' magic damage}} {{tip|on-hit}}. This bonus persists for 3 seconds after leaving brush.",
+        "leveling": "{{st|Bonus Magic Damage|{{ap|20 to 50}} {{as|(+ 20% AP)}}}}",
+        "icon2": "Brushmaker.png",
+        "description2": "{{sbc|Active:}} '''Ivern''' grows a patch of {{tip|brush}} at the target location for 45 seconds, granting {{tip|sight}} of the area within and around it for 8 seconds. Brushes despawn instantly after allied {{tip|sight|vision}} of them is lost. Spawning brush near [[terrain]] or other brush increases its radius.",
+        "description3": "While allied champions are in any {{tip|brush}} when '''Ivern''' is in range, their basic attacks are empowered to deal {{as|'''bonus''' magic damage}} {{tip|on-hit}}. This bonus persists for {{fd|1.5}} seconds after leaving brush.",
+        "leveling3": "{{st|Ally Bonus Magic Damage|{{ap|10 to 30}} {{as|(+ 10% of '''Ivern's''' AP)}}}}",
+        "description4": "'''Ivern''' periodically [[stocks]] a ''Brushmaker'' charge, up to a maximum of 3.",
+        "target range": "1000",
+        "cost": "30",
+        "costtype": "Mana",
+        "static": "{{fd|0.5}}",
+        "recharge": "20",
+        "cast time": "{{fd|0.25}}",
+        "targeting": "Location",
+        "affects": "Self, Allies",
+        "damagetype": "Magic",
+        "spellshield": "False",
+        "spelleffects": "spell",
+        "parry": "special",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* A {{tip|brush}} will be immediately {{tip|expose|exposed}} if grown within the {{tip|sight}} of an enemy {{tip|turret}}.\n* The bonus damage does not apply to structures.\n* The bonus damage can be {{tip|block|blocked}} or {{tip|dodge|dodged}}.\n** {{Pending for test}}: Passive's interactions with {{tip|blind|blinding}} effects.\n* The empowerment given to allies respects {{tip|enchantment redirection}}.",
+        "tips": "* Since enemy {{tip|Control ward|control wards}} require line of sight to disable your wards, placing a {{tip|Brush}} on the disabled ward can re-enable them for the lifetime of the brush.",
+        "video": "Ivern - W"
+      }
+    },
+    "E": {
+      "id": "IvernE",
+      "name": "Triggerseed",
+      "description": "Ivern places a shield on an ally which explodes after a short duration slowing and damaging enemies. The shield refreshes if it hits no enemies.",
+      "tooltip": "Ivern grants {{ totalshield }} Shield to an ally champion or Daisy. After {{ shieldduration }} seconds, it bursts, dealing {{ totaldamage }} magic damage and Slowing enemies by {{ slowamount*100 }}% for {{ slowduration }} seconds.\n\nIf Triggerseed detonates and no enemy champions are hit while the shield still persists, the ally will be shielded for {{ totalshield }} for {{ shieldduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11/10/9/8/7",
+      "cost": "70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "750",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Shield Amount",
+          "Damage",
+          "Slow",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ baseshield }} -> {{ baseshieldNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ slowamount*100.000000 }}% -> {{ slowamountnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ivern",
+        "skill": "E",
+        "icon": "Triggerseed.png",
+        "blurbicon": "Triggerseed.png",
+        "blurb": "{{sbc|Active:}} {{ci|Ivern}} can target an ally champion, {{ui|Daisy}}, or himself to {{tip|shield}} them for a short time.",
+        "blurb2": "The target then explodes to deal {{as|magic damage}} and {{tip|slow}} nearby enemies.",
+        "description": "{{sbc|Active:}} '''Ivern''' places a seed on the target allied champion, {{ui|Daisy}}, or himself, granting the target a {{tip|shield}} for 2 seconds.",
+        "leveling": "{{st|Shield Strength|{{ap|75 to 235}} {{as|(+ 50% AP)}}}}",
+        "description2": "After 2 seconds, the seed explodes to deal {{as|magic damage}} to nearby enemies and {{tip|slow}} them for 2 seconds.",
+        "leveling2": "{{st|Magic Damage|{{ap|70 to 150}} {{as|(+ 80% AP)}}}}\n{{st|Slow|{{ap|40 to 60}}%}}",
+        "description3": "If the seed does not damage an enemy champion and the shield persists by the end of the duration, the shield is reapplied for the same strength and duration without the explosion effect.",
+        "target range": "750",
+        "effect radius": "{{tip|cr|icononly = true}} 500",
+        "cost": "70",
+        "costtype": "Mana",
+        "cooldown": "{{ap|11 to 7}}",
+        "cast time": "none",
+        "targeting": "Unit",
+        "affects": "Allies, Self, Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        =\n* The explosion occurs regardless of whether the shield is maintained.\n* The damage of ''Triggerseed'' is attributed to the champion the shield was cast on.\n** If cast on {{ui|Daisy}}, the damage is attributed to '''Ivern'''.\n** The {{tip|slow}} debuff is always attributed to '''Ivern'''.\n** Therefore, placing ''Triggerseed'' on allied champions:\n*** grants them credit for all [[kill]]s on enemy units that it causes.\n*** triggers turret aggro on them if it deals damage to an enemy champion.\n*** triggers their spell effects instead of '''Ivern's'''.\n*** benefits from their {{sti|{{as|magic penetration}}}} stat.\n** '''Ivern's''' player can appreciate the damage ''Triggerseed'' from an ally deals via a yellow damage number intended to reflect the damage dealt.\n*** This yellow damage number wrongfully uses '''Ivern's''' {{sti|{{as|magic penetration}}}} stat to calculate the expected damage dealt, instead of reflecting the actual damage dealt.",
+        "video": "Ivern - E"
+      }
+    },
+    "R": {
+      "id": "IvernR",
+      "name": "Daisy!",
+      "description": "Ivern summons his Sentinel friend Daisy to fight with him. Re-cast command Daisy to attack or move.",
+      "tooltip": "Ivern summons his sentinel friend Daisy to leap into the fray for {{ daisyduration }} seconds.\n\nDaisy, Slam!: Daisy's 3rd consecutive Attack on the same champion or epic monster will launch a shockwave, dealing {{ totalshockwavedamage }} magic damage to all enemies hit as well as Knocking Up for {{ shockwaveccduration }} second. This effect can only occur once every {{ shockwavecd }} seconds.\n\nRecast: Instruct Daisy to Attack or move.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "140/130/120",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Attack Damage",
+          "Shockwave Damage",
+          "Daisy Bonus Attack Speed",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ daisyad }} -> {{ daisyadNL }}",
+          "{{ shockwavebasedamage }} -> {{ shockwavebasedamageNL }}",
+          "{{ daisyas }}% -> {{ daisyasNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ivern",
+        "skill": "R",
+        "icon": "Daisy!.png",
+        "icon3": "Daisy, wait!.png",
+        "blurbicon": "Daisy!.png",
+        "blurb": "{{sbc|Active:}} {{ci|Ivern}} summons his Sentinel friend {{ui|Daisy}} to fight with him.",
+        "blurb2": "''Daisy!'' can be recast any number of times while {{ui|Daisy}} is alive. The recast cannot be {{tip|interrupt|interrupted}}.",
+        "blurb3": "{{sbc|Recast:}} {{ui|Daisy}} is commanded to move to the target location. If recast on '''Ivern''', she will follow him.",
+        "blurb4": "{{sbc|Daisy Smash!:}} Whenever {{ui|Daisy}} attacks the same champion three times in a row, she will send a shockwave that {{tip|airborne|knocks up}} enemies hit within a line.",
+        "description": "{{sbc|Active:}} '''Ivern''' summons his sentinel friend {{ui|Daisy}} to his side, who lands 350 units away from him in the target direction and remains on the field for up to 45 seconds as a controllable {{tip|pet}}.",
+        "description2": "''Daisy!'' can be recast at any time while {{ui|Daisy}} is alive.",
+        "description3": "{{sbc|Recast:}} '''Ivern''' commands {{ui|Daisy}} to move to the target location. If cast on '''Ivern''', {{ui|Daisy}} will follow him.",
+        "description4": "''The recast of Daisy! can be used while affected by {{tip|cast-inhibiting crowd control}}. See [[Ivern/LoL#Pets|Pets]] for more details about {{ui|Daisy}}.''",
+        "cost": "100",
+        "costtype": "Mana",
+        "cooldown": "{{ap|140 to 120}}",
+        "cdstart": "on-cast",
+        "targeting": "Direction",
+        "affects": "None",
+        "damagetype": "physical",
+        "cast time": "{{fd|0.5}}",
+        "spellshield": "|spelleffects = spellaoe",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        =\n* ''Daisy'', when the ability is initially cast, is {{tip|untargetable}} until she lands.",
+        "flavorsound": "{{sm2|Ivern_Original_R_6.ogg}} ''Daisy!''",
+        "video": "Ivern - R"
+      }
+    }
+  }
+}

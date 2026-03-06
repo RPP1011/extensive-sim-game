@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0007_3v3"
+seed = 1930
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["Kalista", "Hecarim", "Tryndamere"]
+enemy_hero_templates = ["Alistar", "Senna", "Gwen"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

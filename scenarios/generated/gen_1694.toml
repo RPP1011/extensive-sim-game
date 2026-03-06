@@ -1,0 +1,13 @@
+[scenario]
+name = "pair_shadow_dancer_necromancer_s2"
+seed = 21565
+hero_count = 2
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["shadow_dancer", "necromancer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

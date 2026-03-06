@@ -1,0 +1,332 @@
+{
+  "id": "KSante",
+  "name": "K'Sante",
+  "title": "the Pride of Nazumah",
+  "resource_type": "Mana",
+  "tags": [
+    "Tank",
+    "Fighter"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Dauntless Instinct",
+      "description": "K'Sante's Abilities mark targets to take more damage on his next Attack.\n\nWhen All Out, K'Sante deals more damage with all Attacks and Abilities.",
+      "wiki_detail": {
+        "champion": "K'Sante",
+        "skill": "I",
+        "icon": "Dauntless Instinct.png",
+        "description": "{{sbc|Innate:}} '''K'Sante's''' [[champion ability|abilities]] mark enemies hit for 4 seconds. His {{tip|basic attack|basic attacks}} against marked enemies are empowered to consume the mark [[on-hit]], dealing {{as|20|physical damage}} {{as|(+ {{pp|1 to 2|key=%}} of target's '''maximum''' health)}} {{as|'''bonus''' physical damage}}. The health-based portion deals a minimum of {{pp|10 + x * 5}} damage against {{tip|minion|minions}} and {{pp|15 + x * 5}} against {{tip|monster|monsters}}.",
+        "description3": "{{sbc|{{ai|All Out|K'Sante|All Out}} Bonus:}} '''K'Sante's''' basic attacks and [[ability damage]], as well as ''Dauntless Instinct's'' mark consumption, are empowered to deal {{as|'''bonus''' physical damage}} equal to {{as|1% {{as|(+ 1% per 100 '''bonus''' armor)}} {{as|(+ 1% per 100 '''bonus''' magic resistance)}} of the target's '''maximum''' health}}.",
+        "effect radius": "|width        =",
+        "speed": "|angle        =",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "physical",
+        "spellshield": "special",
+        "spelleffects": "proc",
+        "projectile": "|parry        = special",
+        "grounded": "|knockdown    =",
+        "notes": "* {{tip|Spell shield}} will block the mark's application, but not the mark's consumption from an attack.\n* The empowered attack can be {{tip|dodge|dodged}}, {{tip|block|blocked}}, and missed while {{tip|blind|blinded}} but the mark will not be consumed.\n* Starting the empowered attack while the mark is about to time out will not extend the mark duration, but still complete the attack and apply the bonus damage.\n*All Out's bonus damage on abilities only applies to one enemy hit when damaging multiple enemies.{{bug}}",
+        "flavorsound": "|yvideo       = \n<!-- Blurb -->",
+        "blurbicon": "Dauntless Instinct.png",
+        "blurb": "{{sbc|Innate:}} {{cis|K'Sante}} abilities mark enemies hit for a short time. His basic attacks consume the mark to deal {{as|'''bonus''' physical damage}} based on the {{as|target's '''maximum''' health}}.",
+        "blurb4": "{{sbc|{{ai|All Out|K'Sante|All Out}} Bonus:}} The damage dealt upon consuming a mark is increased based on '''K'Sante's''' '''bonus''' {{as|armor}} and {{as|magic resist}}. The mark damage is converted to {{as|true damage}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "KSanteQ",
+      "name": "Ntofo Strikes",
+      "description": "K'Sante strikes, damaging and slowing enemies in a short line.\n\nOn hit, grants a stack of Ntofo Strikes. At 2 stacks, K'Sante fires a shockwave that pulls enemies in.\n\nWhen All Out, cooldown is reduced.",
+      "tooltip": "K'Sante slams his weapon, dealing {{ basedamage }} physical damage and Slowing enemies by {{ slowpercent*100 }}% for {{ slowduration }}s. If he hits, he gains a stack of Ntofo Strikes for {{ recastwindow }} seconds. At 2 stacks, he instead fires a shockwave that Stuns and Pulls enemies for {{ stunduration }} second.\n\nAll Out: Cooldown is reduced by {{ rcooldownreduction.0*100 }}%.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "3.5",
+      "cost": "20",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "450",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage"
+        ],
+        "effect": [
+          "{{ flatdamage }} -> {{ flatdamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "K'Sante",
+        "skill": "Q",
+        "icon": "K'Sante Ntofo Strikes.png",
+        "icon2": "K'Sante Ntofo Strikes 2.png",
+        "icon3": "K'Sante Ntofo Strikes 3.png",
+        "description": "{{sbc|Active:}} '''K'Sante''' slams his ntofo down in the target direction that deals {{as|physical damage}} to enemies hit and {{tip|slow|slows}} them by 80% for {{fd|0.5}} seconds.",
+        "leveling": "{{st|Physical Damage|{{ap|80 to 200}} {{as|(+ 40% '''bonus''' armor)}} {{as|(+ 40% '''bonus''' magic resistance)}}}}",
+        "description2": "If this hits at least one enemy, '''K'Sante''' generates a [[stack]] for 6 seconds, stacking up to 2 times and refreshing on subsequent hits. At 2 stacks, the next ''Ntofo Strikes'' consumes them all to become empowered with a new effect.",
+        "description3": "{{sbc|Empowered Active:}} '''K'Sante''' fires a shockwave in the target direction that applies the same effects to enemies hit, but also {{tip|airborne|pulls}} them towards him over {{fd|0.65}} seconds and {{tip|stun|stuns}} them for {{fd|0.8}} seconds.",
+        "description4": "{{sbc|{{ai|All Out|K'Sante|All Out}} Bonus:}} ''Ntofo Strikes' '' {{sti|cooldown}} is reduced by 33%, with a minimum total cooldown of {{fd|1.33}} seconds.",
+        "description5": "''Ntofo Strikes {{tip|basic attack reset|resets}} '''K'Sante's''' basic attack timer.''",
+        "range": "{{tip|er|icononly = true}} {{tt|465|Q1 rectangle length, starts at K'Sante's center. Backwards also edge range from 0.}} /  {{tt|930|Q3 missile maximum range}}",
+        "width": "{{tip|er|icononly = true}} {{tt|100|Q1 rectangle width}} / {{tt|100|Q3 missile width}}",
+        "angle": "|cost             = 20",
+        "costtype": "Mana",
+        "cast time": "{{pp|0.45 to 0.35|0 to 120 for 11|type='''bonus''' resistances|label=cast time|label1=bonus resistances|formula= 0.45 - 0.00083̅ × bonus resistances, capped at 120 bonus resistances.}}",
+        "effect radius": "|static           = {{pp|3.5 to 2 by 0.1|0 to 120|type='''bonus''' resistances|label=cooldown|label1=bonus resistances|formula= 3.5 - 0.0125 × bonus resistances, capped at 120 bonus resistances.}}",
+        "targeting": "Direction",
+        "affects": "Enemies, Self",
+        "damagetype": "Physical",
+        "spelleffects": "spellaoe",
+        "spellshield": "true",
+        "projectile": "special",
+        "notes": "{{Effect at cast time end}}\n* If ''Ntofo Strikes'' hits no more than one enemy champion, '''K'Sante''' will be ordered an attack command against them.\n* The basic attack reset is not considered one for {{ri|Hail of Blades}}.\n* Temporary increases/decreases in bonus resistances will count for reducing/increasing ''Ntofo Strikes''' cooldown.\n* Only the empowered active is a {{tip|projectile}}.\n* The following table refers for interactions while '''K'Sante''' is in the cast time of the third cast:\n{{ct|cast|spells=true,false,false,false,false}}",
+        "flavorsound": "|yvideo       = \n<!-- Blurb -->",
+        "blurbicon": "K'Sante Ntofo Strikes.png",
+        "blurb": "{{sbc|Active:}} {{ci|K'Sante}} slams his ntofo down in the target direction that deals {{as|physical damage}} and briefly {{tip|slow|slows}} enemies hit.",
+        "blurb2": "If this hits at least one enemy, he generates a [[stack]] for a few seconds. At 2 stacks, the next ''Ntofo Strikes'' consumes them all to become empowered with a new effect.",
+        "blurb3": "{{sbc|Empowered Active:}} '''K'Sante''' fires a shockwave that deals {{as|physical damage}} and {{tip|airborne|pulls}} enemies hit toward him.",
+        "blurb4": "{{sbc|{{ai|All Out|K'Sante|All Out}} Bonus:}} ''Ntofo Strikes's'' {{sti|cooldown}} is reduced, but it no longer slows enemies hit.",
+        "tips": "* Using {{ai|Footwork|K'Sante}} on top of an enemy immediately followed by an empowered ''Ntofo Strikes'' allows '''K'Sante''' to fling enemies behind him, including through walls.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "W": {
+      "id": "KSanteW",
+      "name": "Path Maker",
+      "description": "K'Sante charges up, taking reduced damage, then dashes, knocking back and stunning enemies.\n\nWhen All Out, deals increased damage and no longer knocks back or stuns.",
+      "tooltip": "K'Sante raises his weapons defensively for {{ mindurationtooltip }}-{{ maxduration.1 }}s, becoming Unstoppable and reducing incoming damage by {{ damagereduction*100 }}%. Then, he rams forward, dealing {{ basedamage }} + {{ totalmaxhealthdamage }} max Health physical damage. Enemies hit are Knocked Back and Stunned for {{ minknockbackduration }}-{{ maxknockbackduration }}s (based on charge time).\n\nAll Out: Cooldown is refreshed. Deals an additional {{ rdamageincreasemin*100 }}-{{ rdamageincreasemax*100 }}% damage as true damage (based on charge time), damage reduction is increased to {{ rdamagereduction*100 }}% and dash speed is increased, but no longer Knocks Back or Stuns.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "40/45/50/55/60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "K'Sante",
+        "skill": "W",
+        "icon": "Path Maker.png",
+        "description": "{{sbc|Active:}} '''K'Sante''' prepares to {{tip|dash}} in the target direction, {{tip|channel|charging}} for a minimum of {{fd|0.4}} seconds and up to 1 second. During this time, he gains {{tip|displacement immunity}} and 30% damage reduction; additionally, ''Path Maker's'' range, {{tip|stun}} duration, and ''{{ai|All Out|K'Sante}}'' {{as|'''bonus''' true damage}} modifier increase over the first {{fd|0.9}} seconds of the channel.",
+        "description2": "''Path Maker'' can be recast within the duration, and does so automatically afterwards. ''Path Maker's'' charge cannot be {{tip|interrupt|interrupted}} by {{tip|crowd control}}.",
+        "description3": "{{sbc|Recast:}} '''K'Sante''' {{tip|dash|dashes}} in the direction he targeted at the time of cast, though not through terrain, dealing {{as|physical damage}} to enemies he passes through, {{tip|airborne|carrying}} them alongside him, and {{tip|stun|stunning}} them for {{pp|type=channel time|label1=Channel duration|0.5 to 1.75 for 11|0.4 to 0.9|formula=0.5 + 0.1 for every 0.05 seconds channeling, capped at 0.9 seconds.}} seconds. This damage is capped against {{tip|monsters}}.",
+        "leveling3": "{{st|Physical Damage|{{ap|40 to 120}} {{as|(+ 8%|hp}} {{as|(+ 2% per 100 '''bonus''' armor)}} {{as|(+ 2% per 100 '''bonus''' magic resistance)}} {{as|of target's '''maximum''' health)}}}}\n{{st|Monster Damage Cap|{{ap|180 to 500}}}}",
+        "description4": "{{sbc|{{ai|All Out|K'Sante|All Out}} Bonus:}} ''Path Maker'' no longer applies its {{tip|airborne|knock back}} and {{tip|stun}}, but its damage reduction is increased to 75%, the dash deals {{sti|true damage|{{as|{{pp|key=%|type=channel time|label1=Channel duration|10 to 100|0.4 to 0.9 by 0.05|formula=10% + 9% for every 0.05 seconds channeling, capped at 0.9 seconds.}} '''bonus''' true damage}}}}, and the dash speed is increased by 20%. Upon entering ''All Out'', ''Path Maker's'' {{sti|cooldown}} is refreshed.",
+        "leveling4": "{{st|Minimum Bonus True Damage|{{ap|40*0.1 to 120*0.1}} {{as|(+ {{ap|8*0.1}}%|hp}} {{as|(+ {{ap|2*0.1}}% per 100 '''bonus''' armor)}} {{as|(+ {{ap|2*0.1}}% per 100 '''bonus''' magic resistance)}} {{as|of target's '''maximum''' health)}}|Maximum Bonus True Damage|{{ap|40 to 120}} {{as|(+ 8%|hp}} {{as|(+ 2% per 100 '''bonus''' armor)}} {{as|(+ 2% per 100 '''bonus''' magic resistance)}} {{as|of target's '''maximum''' health)}}|Total Maximum Mixed Damage|{{ap|40*2 to 120*2}} {{as|(+ {{ap|8*2}}%|hp}} {{as|(+ {{ap|2*2}}% per 100 '''bonus''' armor)}} {{as|(+ {{ap|2*2}}% per 100 '''bonus''' magic resistance)}} {{as|of target's '''maximum''' health)}}}}",
+        "description5": "''{{ai|Ntofo Strikes|K'Sante}} and {{ai|All Out|K'Sante}} can be cast during the dash. Path Maker's recast can be used while affected by {{tip|cast-inhibiting crowd control}}.''",
+        "range": "{{tt|450|Maximum dash range, pending for test}}",
+        "width": "|angle            =",
+        "speed": "{{tt|1300|Knock back speed}} / {{tt|1500|Dash speed}} / {{tt|1800|Dash speed during All Out}} <!--Needs to be confirmed-->",
+        "cost": "{{ap|40 to 60}}",
+        "costtype": "Mana",
+        "cast time": "none",
+        "effect radius": "|cooldown         = {{ap|24 to 16}}",
+        "cdstart": "post-effect",
+        "targeting": "Direction",
+        "affects": "Self, Enemies",
+        "damagetype": "Physical",
+        "spelleffects": "spellaoe",
+        "spellshield": "true",
+        "grounded": "special",
+        "knockdown": "true",
+        "silence": "false",
+        "notes": "* {{ais|All Out|K'Sante}} duration is increased by 2 seconds if it were to expire during ''Path Maker's'' charge.\n* ''Path Maker'' cancels any existing movement or attack commands. However, new inputs given during the charge will be retained once the dash ends, except when the dash hits only one enemy champion. If ''Path Maker'' hits only one enemy champion '''K'Sante''' will be ordered to basic attack them afterwards.\n* '''K'Sante''' cannot use {{si|Flash}} during ''Path Maker's'' dash.\n* ''Path Maker's'' damage is not capped against monsters while empowered by ''All Out''.{{bug}}\n* ''Path Maker's'' recast can be used even while {{tip|ground|grounded}} or {{tip|root|rooted}}, but the initial cast cannot.\n* ''Path Maker'' can be recast by issuing an attack move command (or {{sbc|LMB}}) but not a targeted attack command.\n* The following table refers for interactions while '''K'Sante''' is {{tip|channel|channeling}}:\n** If the charge is cancelled, he will not automatically use the recast.\n{{ct|charge|attack=false|cast=false|move=false|items=false|consume=Disabled, but allows trinkets|spells=true,false,false,false,recasts|interrupts=death}}",
+        "flavorsound": "|yvideo           = \n<!-- Blurb -->",
+        "blurb": "{{ci|K'Sante}} begins to {{tip|channel|charge}}, during which he gains damage reduction. After a brief delay, ''Path Maker'' can be recast within the remaining charge duration, and does so automatically afterwards. The charge cannot be {{tip|interrupt|interrupted}}.",
+        "blurb2": "{{sbc|Recast:}} '''K'Sante''' {{tip|dash|dashes}} in the target direction, dealing {{as|physical damage}} to enemies hit, {{tip|airborne|knocking them back}} and {{tip|stun|stunning}} all targets.",
+        "blurb4": "{{sbc|{{ai|All Out|K'Sante|All Out}} Bonus:}} Upon entering ''All Out'', ''Path Maker's'' {{sti|cooldown}} is refreshed. ''Path Maker's'' damage, dash speed, and damage reduction are increased, but it will no longer stun or knock back targets.",
+        "_comments": [
+          "Needs to be confirmed",
+          "Blurb"
+        ]
+      }
+    },
+    "E": {
+      "id": "KSanteE",
+      "name": "Footwork",
+      "description": "K'Sante dashes and gains a shield. If targeting an ally, K'Sante dashes to the ally with increased range and both gain a shield.\n\nWhen All Out, cooldown is reduced and speed is increased.",
+      "tooltip": "K'Sante dashes, gaining {{ totalshield }} Shield for {{ shieldduration }} seconds. If dashing to an ally, the distance of the dash is significantly increased and the ally is also Shielded.\n\nAll Out: Cooldown is decreased by {{ cooldownmodao*100 }}% and dash speed is increased.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9.5/9/8.5/8",
+      "cost": "45/50/55/60/65",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "525",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Shield",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ shieldbaseamountfast }} -> {{ shieldbaseamountfastNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "K'Sante",
+        "skill": "E",
+        "icon": "Footwork.png",
+        "description": "{{sbc|Active:}} '''K'Sante''' {{tip|dash|dashes}} to the target location, though not through terrain, and grants himself a {{tip|shield}} for 2 seconds.",
+        "leveling": "{{st|Shield Strength|{{ap|80 to 240}} {{as|(+ 15% '''bonus''' health)}}}}",
+        "description2": "''Footwork'' can also be cast on allies with increased range and speed, and the ability to {{tip|dash}} through terrain. If the target ally is a {{tip|champion}}, they receive the {{tip|shield}} as well.",
+        "description3": "{{sbc|{{ai|All Out|K'Sante|All Out}} Bonus:}} ''Footwork's'' dash speed is increased, and its cooldown is reduced by 50%.",
+        "description4": "''Footwork's dash speed scales with '''K'Sante's''' {{as|'''total''' movement speed}}. '''K'Sante''' can cast any of his abilities during the dash. Footwork will cast at max range if cast beyond that.''",
+        "range": "{{tt|250|Location-targeted dash range}} / {{tt|550|Ally-targeted dash range}} <!--Needs to be confirmed-->",
+        "speed": "{{tt|500|Dash speed to location}} / {{tt|950|Dash speed to location during All Out}} / {{tt|1100|Dash speed to allies}} / {{tt|1400|Dash speed to allies during All Out}}",
+        "width": "|angle            =",
+        "cost": "{{ap|45 to 65}}",
+        "costtype": "Mana",
+        "cast time": "none",
+        "effect radius": "|cooldown         = {{ap|10 to 8}}",
+        "targeting": "[[Location-targeted|Location]] / [[Unit-targeted|Unit]]",
+        "affects": "Self, Allies",
+        "damagetype": "|callforhelp      =",
+        "spelleffects": "|spellshield      =",
+        "grounded": "True",
+        "knockdown": "True",
+        "parry": "|projectile       =",
+        "notes": "* Dashing to the side or behind will cancel current move or attack orders. Exception when attack order was given at melee range from target.\n* The shield is granted instantly on cast for both '''K'Sante''' and the potential allied champion.",
+        "flavorsound": "|yvideo           = \n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|K'Sante}} {{tip|dash|dashes}}, granting himself a {{tip|shield}}.",
+        "blurb2": "If cast toward an ally, ''Footwork'' has increased range and can dash through terrain. If the ally is a {{tip|champion}}, they also receive the shield.",
+        "blurb4": "{{sbc|{{ai|All Out|K'Sante|All Out}} Bonus:}} ''Footwork's'' dash speed and location range are increased, and it can dash through terrain.",
+        "_comments": [
+          "Needs to be confirmed",
+          "Blurb"
+        ]
+      }
+    },
+    "R": {
+      "id": "KSanteR",
+      "name": "All Out",
+      "description": "K'Sante knocks an enemy back, launching them through any wall in their path. Then, K'Sante goes All Out and dashes after them, gaining increased damage, healing, and transformed abilities at the cost of reduced defenses.",
+      "tooltip": "K'Sante shatters his ntofos to Knock Back an enemy champion, dealing {{ basedamage }} physical damage, then dashes behind them and goes All Out for {{ alloutduration }}s. If the enemy would hit a wall, they are Knocked Back through the wall and K'Sante strikes them again for {{ totaldamageslamdown }} physical damage.\n\nWhile All Out, K'Sante's Abilities are upgraded and he gains {{ attackspeed*100 }}% Attack Speed, {{ armorpenpercent*100 }}% Bonus Armor Penetration, and {{ omnivamp*100 }}% Omnivamp, but loses {{ healthlost*100 }}% max Health, {{ defenseslost*100 }}% Bonus Armor, and {{ defenseslost*100 }}% Bonus Magic Resistance.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "250",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Follow-Up Damage",
+          "Cooldown",
+          "Attack Speed"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ slamdownstrikedamage }} -> {{ slamdownstrikedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ attackspeed*100.000000 }}% -> {{ attackspeednl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "K'Sante",
+        "skill": "R",
+        "icon": "All Out.png",
+        "description": "{{sbc|Active:}} '''K'Sante''' {{tip|root|roots}} the target enemy {{tip|champion}} for {{tt|{{fd|0.5}} seconds|Duration unaffected by tenacity}} and gains {{tip|displacement immunity}} over the cast time. He then shatters his ntofos, {{tip|airborne|pulling}} the target to a location that is 300 units in the cast direction from their location at the time of cast, during which they are {{tip|standard sight|revealed}}, and {{tip|blink|blinking}} {{tt|175 units|See notes}} behind that location. The target is dealt {{as|physical damage}} near the end of the displacement and is {{tip|stun|stunned}} for {{fd|0.3}} seconds once it ends.",
+        "leveling": "{{st|Physical Damage|{{ap|80 to 150}}}}",
+        "description2": "If there is {{tt|valid terrain|Terrain with an opposite side}} 350 units in the cast direction from the target's location at the time of cast, the target is instead {{tip|airborne|pulled}} to a location that is directly 450 units away from the edge of the other side of the terrain and '''K'Sante''' {{tip|blink|blinks}} 100 units behind that location, dealing them the {{as|physical damage}} near their emergence from the terrain. At the end of the displacement, they remain {{tip|airborne}} for {{rutngt|0.25}}, after which they are {{tip|stun|stunned}} for {{fd|0.5}} seconds. '''K'Sante''' strikes them after {{rutngt|0.125}} into the airborne duration to deal {{as|physical damage}}.",
+        "leveling2": "{{st|Strike Physical Damage|{{ap|80 to 150}} {{as|(+ 5% of his '''bonus''' health)}}}}\n{{st|Total Physical Damage|{{ap|80*2 to 150*2}} {{as|(+ 5% of his '''bonus''' health)}}}}",
+        "description3": "After '''K'Sante''' {{tip|blink|blinks}}, he enters ''All Out'' for 15 seconds.",
+        "description4": "{{sbc|All Out:}} '''K'Sante''' gains a [[Health#Health_threshold|health threshold]] equal to {{sti|{{as|65% '''maximum''' health}}}} which cannot be {{tt|modified|By increases or decreases to maximum health}} nor {{tt|exceeded|By healing and health regeneration}} by any means. Upon entering ''All Out'', his {{as|'''current''' health}} is reduced to this threshold if it is above it. Additionally, his {{sti|armor|{{as|'''base''' armor}}}} and {{sti|mr|{{as|'''base''' magic resistance}}}} are reduced by {{as|85% '''bonus''' armor}} and {{as|85% '''bonus''' magic resistance}}, respectively. In return, he gains {{sti|{{as|'''bonus''' attack speed}}}}, {{sti|lethality|{{as|50% {{tt|'''bonus'''-armor penetration|Modifies bonus armor only}}}}}}, and {{sti|{{as|20% omnivamp}}}}, and modifies his basic abilities which can be cast at no cost.<br><br>Upon entering ''All Out'', '''K'Sante''' is restored to {{as|100% '''maximum''' mana}}. His {{as|mana}} then decays to {{as|0|mana}} over the duration of the buff, after which the {{tt|amount of {{as|mana}}|Preserves the exact amount of mana, not his mana percentage at the time}} he had {{tt|prior to entering ''All Out''|After paying All Out's mana cost}} is restored.",
+        "leveling4": "{{st|Bonus Attack Speed|{{ap|40 to 80}}%}}",
+        "description5": "'''''K'Sante''' retains his {{as|'''maximum''' health}} and '''bonus''' resistances during All Out. Health lost from gaining the health threshold is '''not''' restored after the effect ends. If the target is pulled over terrain that is longer than {{tt|2000|Estimated}} units, '''K'Sante''' will {{tip|vanish}} during their displacement and reappear near the end of it.''",
+        "target range": "{{tip|cr|icononly = true}} 300",
+        "effect radius": "{{tt|350|Range check for pull being eligible for displacing through terrain}} / {{tt|5000|Maximum pull radius over terrain on Summoner's Rift}} / {{tt|Global|Pull radius over terrain on non-Summoner's Rift maps}}",
+        "speed": "{{tt|2000|Pull speed}}<!--Needs to be confirmed-->",
+        "width": "|angle            =",
+        "cost": "100",
+        "costtype": "Mana",
+        "cast time": "{{fd|0.4}}",
+        "cooldown": "{{ap|120 to 80}}",
+        "cdstart": "post-effect",
+        "targeting": "[[Unit-targeted|Unit]] / [[Vector-targeted|Vector]]",
+        "affects": "Self, Enemies",
+        "damagetype": "Physical",
+        "callforhelp": "|spelleffects     = spell",
+        "spellshield": "true",
+        "grounded": "True",
+        "parry": "|projectile       =",
+        "notes": "* If the terrain behind the target is invalid by not having an opposite side, ''All Out'' will not trigger its additional effects from pulling the target over terrain.\n** The pull destination in this case would be inside terrain and thus the displacement would stop at the boundary.\n* '''K'Sante''' will restore the exact amount of {{as|mana}} he had before going ''All Out'' after the buff expires.\n** The amount does not change even if his {{as|'''maximum''' mana}} changes during the effect.\n* While the target is being {{tip|airborne|pulled}} over terrain, they are additionally {{tip|attach|attached}} to a missile that travels in the same trajectory as the displacement, becoming detached afterwards.\n** Removing the {{tip|airborne}} debuff will not cause the target to detach from the missile.\n* '''K'Sante''' will blink 175 units beyond the target's hitbox's edge at the end location.\n* If the target resists the {{tip|airborne|pull}} by having a {{tip|spell shield}} or being {{tip|cc-immune|immune to crowd control}} or {{tip|displacement immune}}, '''K'Sante''' will still blink beyond the pull's end location as if the target were displaced.\n* ''All Out's'' remaining duration is tracked in his secondary resource bar.\n* ''All Out'' does not interact with [[Terrain#Player-Generated|player-generated terrain]].\n* '''K'Sante's''' strike at the end of the displacement when the target is pulled over terrain does not apply {{ais|Dauntless Instinct|K'Sante}} mark.\n* Going ''All Out'' does not override '''K'Sante's''' attack or movement commands if the target does not collide with terrain.\n** If the target is however pulled through terrain then '''K'Sante''' will be ordered to basic attack the target afterwards.\n* The percentage bonus armor penetration stacks additively with other sources of percentage armor penetration.{{bug|2}}\n* Since '''K'Sante''' retains the stats he \"lost\", any effects that scale based on those stats will calculate based on the value prior to him going ''All Out''.\n** His '''base''' resistances can be reduced below 0 by his '''bonus''' resistances.\n* ''All Out'' will not take into account resistances gained through % bonuses (eg. {{ri|Conditioning}}, {{bi|Mountainous Vigor}}, etc) when reducing '''K'Sante's base''' resistances.{{bug|1}}\n* Gaining '''bonus''' health during ''All Out'' causes the health threshold to be briefly increased then reset back to its original value.\n** The '''bonus''' health is still applied to his '''current''' health.\n* ''All Out's'' granted {{tip|untargetability}} from the {{tip|vanish}} during the target's pull of over 2000 units does not {{tip|homing projectile destruction|destroy}} in-flight {{tip|projectiles}}.{{Unit-targeted cancel conditions}}\n* The following table refers for interactions while '''K'Sante''' is in cast time:\n{{ct|attack=false|cast=false|move=false|items=false,true|consume=true|spells=true,false,false,false,false|interrupts=revival-false}}\n* The following table refers for interactions while '''K'Sante''' is performing ''All Out's'' cast:\n{{ct|attack=false|cast=false|move=false|items=false|consume=false|spells=true,false,false,false,false|interrupts=death}}",
+        "flavorsound": "{{sm2|K'Sante_Original_R_5.ogg}} ''\"I will not yield!\"''",
+        "yvideo": "<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|K'Sante}} {{tip|root|roots}} an enemy and then shatters his tonfas, {{tip|airborne|knocking them back}}, {{tip|blink|blinking}} behind them, and dealing {{as|physical damage}}. If the enemy is pushed into terrain, they will be knocked over it and take additional {{as|physical damage}}.",
+        "blurb2": "The target is {{tip|stun|stunned}} at the end of the push, and also {{tip|airborne|knocked up}} again if they were pushed through terrain. At the end, '''K'Sante''' goes ''All Out'' for some time.",
+        "blurb3": "{{sbc|All Out:}} '''K'Sante''' loses a large portion of his {{as|{{sti|health}}}}, '''base''' {{as|{{sti|armor}}}} and {{as|{{sti|magic resist}}}}, but gains {{as|{{sti|'''bonus''' AD}}}} and {{as|{{sti|omnivamp}}}}. His basic abilities are empowered and they have no {{as|{{sti|mana}}}} cost. '''K'Sante''' can recast this ability to end ''All Out'' early.",
+        "blurb4": "After ''All Out'' ends, '''K'Sante'''  restores his mana, but his health is <u>not restored</u>.",
+        "_comments": [
+          "Needs to be confirmed",
+          "Blurb"
+        ]
+      }
+    }
+  }
+}

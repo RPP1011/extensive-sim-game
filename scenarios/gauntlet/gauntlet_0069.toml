@@ -1,0 +1,12 @@
+[scenario]
+name        = "3x Samurai + Warrior"
+seed        = 546453
+hero_count  = 4
+enemy_count = 16
+difficulty  = 3
+max_ticks   = 5000
+room_type   = "Climax"
+hero_templates = ["Samurai", "Samurai", "Samurai", "Warrior"]
+
+[assert]
+outcome = "Either"

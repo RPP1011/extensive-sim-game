@@ -1,0 +1,124 @@
+[hero]
+name = "Viktor"
+
+[stats]
+hp = 90
+move_speed = 3.3
+armor = 20.0
+magic_resist = 30.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 12
+range = 5.5
+cooldown = 1000
+
+# --- Q: Siphon Power ---
+[[abilities]]
+name = "Siphon Power"
+targeting = "target_enemy"
+range = 6.0
+cooldown_ms = 9000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 9
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+[[abilities.effects]]
+type = "shield"
+amount = 15
+duration_ms = 3000
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 3000
+
+# --- W: Gravity Field ---
+[[abilities]]
+name = "Gravity Field"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 17000
+cast_time_ms = 250
+ai_hint = "crowd_control"
+resource_cost = 13
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- E: Hextech Ray ---
+[[abilities]]
+name = "Hextech Ray"
+targeting = "target_enemy"
+range = 5.5
+cooldown_ms = 12000
+ai_hint = "damage"
+resource_cost = 12
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.5
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 17
+damage_type = "magic"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 5.0
+
+# --- R: Arcane Storm ---
+[[abilities]]
+name = "Arcane Storm"
+targeting = "ground_target"
+range = 7.0
+cooldown_ms = 23900
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 20
+
+[[abilities.effects]]
+type = "damage"
+amount = 25
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.5
+
+# --- Passive: Glorious Evolution ---
+[[passives]]
+name = "Glorious Evolution"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_kill"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+

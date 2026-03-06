@@ -1,0 +1,303 @@
+{
+  "id": "Viktor",
+  "name": "Viktor",
+  "title": "the Herald of the Arcane",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Glorious Evolution",
+      "description": "Viktor gains Hex Fragments whenever he kills an enemy. With every 100 Hex Fragments he obtains, Viktor permanently augments an active ability. After upgrading all of his basic abilities, he can gather 100 Hex Fragments to augment his ultimate ability.",
+      "wiki_detail": {
+        "champion": "Viktor",
+        "skill": "I",
+        "icon": "Glorious Evolution.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Viktor}} collects ''Hex Fragments'' from enemies he kills and enemy champion {{tip|takedown|takedowns}}, he can augment each of his basic abilities at the cost of max ''Hex Fragments''.",
+        "blurb2": "''{{ai|Arcane Storm|Viktor}}'' can be augmented once all augments have been acquired.",
+        "description": "{{sbc|Innate:}} '''Viktor''' can augment each of his basic [[champion ability|abilities]] at the cost of 100 ''Hex Fragments'', which he gains from killing enemies:\n* {{tip|Minions}} and {{tip|monsters}} generate 1 ''Hex Fragment''.\n* Siege minions, super minions, and epic monsters generate 10 ''Hex Fragments''.\n* Enemy {{tip|champion}} {{tip|takedown|takedowns}} generate 20 ''Hex Fragments''.",
+        "description2": "''{{ai|Arcane Storm|Viktor}}'' can be augmented once all augments have been acquired.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "notes": "* '''Viktor''' can only have up to 100 ''Hex Fragments'', and must upgrade an ability before obtaining any more."
+      }
+    },
+    "Q": {
+      "id": "ViktorQ",
+      "name": "Siphon Power",
+      "description": "Viktor blasts an enemy unit with magic damage, which grants him a shield and empowers his next basic attack.\n\nAugment: Siphon Power's shield is increased by 60% and Viktor gains bonus move speed after casting the Ability.",
+      "tooltip": "Viktor blasts an enemy, dealing {{ totalmissiledamage }} magic damage and granting Viktor {{ shieldlevelscaling }} Shield for {{ buffduration }} seconds.\n\nViktor's next Attack within 4 seconds deals {{ attacktotaldmg }} magic damage.\n\nUpgraded: Grants {{ totalaugmentedshieldvalue }} Shield and Viktor additionally gains {{ augmentmovespeedbonus }}% Move Speed for {{ buffduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9/8/7/6/5",
+      "cost": "45/50/55/60/65",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "2.5",
+        "30",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "@AbilityResourceName@ Cost",
+          "Damage (Missile)",
+          "Damage (Attack)"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ missiledamage }} -> {{ missiledamageNL }}",
+          "{{ aabonusdamage }} -> {{ aabonusdamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Viktor",
+        "skill": "Q",
+        "icon": "Siphon Power.png",
+        "icon2": "Discharge.png",
+        "icon3": "Augment- Turbocharge.png",
+        "blurb": "{{sbc|Active:}} {{ci|Viktor}} throws a device at the target enemy that deals {{as|magic damage}}. He also gains ''Discharge'' and {{tip|shield|shields}} himself for a short time.",
+        "blurb2": "{{sbc|{{ai|Discharge|Viktor}}:}} '''Viktor's''' next basic attack with a short time will be modified to deal {{as|magic damage}}.",
+        "blurb4": "{{sbc|{{ai|Augment: Turbocharge|Viktor}}:}} After the device hits, '''Viktor''' gains {{sti|ms|{{as|'''bonus''' movement speed}}}} for a short time, and the {{sti|shield}} is increased.",
+        "description": "{{sbc|Active:}} '''Viktor''' throws a device at the target enemy that deals {{as|magic damage}}. He also grants himself a {{tip|shield}} for {{pp|40 to 115}} {{as|(+ 18% AP)}} for {{fd|2.5}} seconds and gains ''Discharge'' for {{fd|3.5}} seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|60 to 120}} {{as|(+ 40% AP)}}}}",
+        "description2": "{{sbc|Discharge:}} '''Viktor's''' next [[basic attack]] is empowered to become {{tip|projectile|non-projectile}} and deal {{as|'''modified''' magic damage}}.",
+        "leveling2": "{{st|Modified Magic Damage|{{ap|20 to 120}} {{as|(+ 100% AD)}} {{as|(+ 60% AP)}}}}\n{{st|Total Magic Damage|{{ap|60+20 to 120+120}} {{as|(+ 100% AD)}} {{as|(+ 100% AP)}}}}",
+        "description3": "{{sbc|{{ai|Glorious Evolution|Viktor|Augment: Turbocharge}}:}} After the device hits, '''Viktor''' gains {{sti|ms|{{as|30% '''bonus''' movement speed}}}} for {{fd|2.5}} seconds and the shield's strength is increased{{ft|by 60%.|to {{pp|30*1.6 to 115*1.6}} {{as|(+ 32% AP)}}.}}",
+        "target range": "{{tip|er|icononly = true}} 600",
+        "cooldown": "{{ap|9 to 5}}",
+        "cdstart": "on-cast",
+        "cost": "{{ap|45 to 65}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "mana",
+        "speed": "2000",
+        "targeting": "Unit",
+        "affects": "Enemies / Self",
+        "damagetype": "Magic",
+        "spelleffects": "spell",
+        "spellshield": "True",
+        "projectile": "special",
+        "callforhelp": "True",
+        "parry": "unknown",
+        "knockdown": "|grounded     =",
+        "notes": "* All damage dealt by {{tip|Spellblade}} on the enhanced attack is converted into {{as|magic damage}}. <!--does not work as of patch 12.11-->\n* {{tip|Spell shield}} does not prevent '''Viktor''' from gaining ''Discharge''.\n* {{tip|Critical strike}} and {{sti|life steal|link=true}} only interact with the basic attack damage component.\n* Only the initial projectile can be {{tip|projectile|intercepted}}.\n* ''Discharge's'' empowered attack can be {{tip|blocked}} (damage is negated and the empowered attack will still be consumed).\n* The empowered attack will trigger against turrets but not be consumed nor apply its effects against [[ward]]s.\n* {{Pending for test}}: ''Discharge's'' interaction with ''parrying'' effects ({{tip|dodge}} and {{tip|blind}}).\n{{Unit-targeted cancel conditions}}",
+        "_comments": [
+          "does not work as of patch 12.11"
+        ]
+      }
+    },
+    "W": {
+      "id": "ViktorW",
+      "name": "Gravity Field",
+      "description": "Viktor conjures a heavy gravitational field that slows enemies caught within its radius. Enemies who stay in the field for too long become stunned.\n\nAugment: Viktor's spells apply a slow to enemies.",
+      "tooltip": "Viktor deploys a gravitational imprisonment device for {{ fieldduration }} seconds, Slowing enemies inside it by {{ slowpotency*-1 }}%. Enemies who remain within its radius for 1.25 seconds are Stunned for {{ stunduration }} seconds.\n\nUpgraded Passive: Viktor's Abilities Slow by {{ augmentslow }}% for 1 second.\n\n\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "17/16/15/14/13",
+      "cost": "65",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Movement Slow"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ slowpotency*-1.000000 }}% -> {{ slowpotencynl*-1.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Viktor",
+        "skill": "W",
+        "icon": "Gravity Field.png",
+        "blurb": "{{sbc|Active:}} {{ci|Viktor}} deploys a gravity field that remains at the target location for a few seconds. After a brief delay, it activates to continually {{tip|slow}} enemies within and inflict stacks of ''Gravity Field''.",
+        "blurb2": "The third stack consumes them all to briefly {{tip|knockdown|knock down}} and {{tip|stun}} the target.",
+        "blurb4": "{{sbc|{{ai|Augment: Magnetize|Viktor}}:}} '''Viktor's''' other basic abilities will also briefly {{tip|slow}} enemies hit.",
+        "description": "{{sbc|Active:}} '''Viktor''' deploys a gravity field at the target location for 4 seconds. After a {{fd|0.75}}-second delay, it activates to {{tip|slow}} enemies within, persisting for {{fd|0.25}} seconds after leaving the area or generating 3 stacks.",
+        "leveling": "{{st|Slow|{{ap|30 to 42 4|45}}%}}",
+        "description2": "The field applies a [[stack]] to enemies within every {{fd|0.5}} seconds, stacking up to 3 times. The third stack consumes them all to {{tip|knockdown|knock down}} and {{tip|stun}} the target for {{fd|1.5}} seconds. The target then becomes immune to ''Gravity Field's'' effects, occurring once per cast.",
+        "icon3": "Augment- Magnetize.png",
+        "description3": "{{sbc|{{ai|Glorious Evolution|Viktor|Augment: Magnetize}}:}} '''Viktor's''' other abilities, excluding ''{{ais|Chaos Storm|Viktor}}'' persistent damage, {{tip|slow}} enemies hit by 20% for 1 second.",
+        "target range": "800",
+        "cooldown": "{{ap|17 to 13}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "65",
+        "costtype": "mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "|spelleffects =",
+        "spellshield": "True",
+        "projectile": "|knockdown    =",
+        "grounded": "|notes        = \n* ''Gravity Field'' will remain active if '''Viktor''' dies.\n* ''Gravity Field's'' animation can be seen by both teams through [[Sight|fog of war]].\n* If an enemy enters the area of effect while {{tip|untargetable}}, they may generate stacks even after becoming stunned once, causing them to get stunned up-to 3 times by a single ''Gravity Field''.{{bug}} <!-- Bugged since precisely 11.1-->",
+        "_comments": [
+          "Bugged since precisely 11.1"
+        ]
+      }
+    },
+    "E": {
+      "id": "ViktorE",
+      "name": "Hextech Ray",
+      "description": "Viktor uses his biomechanical arm to fire a Hextech Ray that cuts across the field in a line, dealing damage to all enemies in its path.\n\nAugment: An explosion follows in the Hextech Ray's wake, dealing magic damage.",
+      "tooltip": "Viktor fires a hextech ray in a chosen direction, dealing {{ laserdamage }} magic damage to any enemies it hits.\n\nUpgraded: An aftershock follows Hextech Ray, dealing {{ aftershockdamage }} magic damage.\n\n\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/11/10/9/8",
+      "cost": "60/70/80/90/100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "525",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "70/110/150/190/230",
+        "20/60/100/140/180",
+        "1",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage (Hextech Ray)",
+          "Damage (Aftershock)",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamagelaser }} -> {{ basedamagelaserNL }}",
+          "{{ basedamageaftershock }} -> {{ basedamageaftershockNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Viktor",
+        "skill": "E",
+        "icon": "Viktor Hextech Ray.png",
+        "icon2": "Augment- Aftershock.png",
+        "blurb": "{{sbc|Active:}} {{ci|Viktor}} fires an energy beam along the target path that deals {{as|magic damage}} to enemies hit.",
+        "blurb4": "{{sbc|{{ai|Augment: Aftershock|Viktor}}:}} The path explodes along the beam's wake, dealing {{as|magic damage}} to enemies hit.",
+        "description": "{{sbc|Active:}} '''Viktor''' fires an energy beam along the target path that deals {{as|magic damage}} to enemies hit and briefly grants {{tip|sight}} of the area.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 230}} {{as|(+ 50% AP)}}}}",
+        "description2": "{{sbc|{{ai|Glorious Evolution|Viktor|Augment: Aftershock}}:}} The path explodes along the beam's wake after 1 second, dealing {{as|magic damage}} to enemies hit.",
+        "leveling2": "{{st|Magic Damage|{{ap|20 to 140}} {{as|(+ 80% AP)}}|Total Magic Damage|{{ap|70+20 to 230+140}} {{as|(+ 130% AP)}}}}",
+        "effect radius": "500",
+        "width": "{{tip|er|icononly = true}} {{tt|90|Missile width (both)}}",
+        "target range": "550",
+        "range": "{{tip|cr|icononly = true}} {{tt|500|Missile range (both)}}",
+        "speed": "{{tt|1050|Laser missile speed}} / {{tt|1500|Aftershock missile speed}}",
+        "cooldown": "{{ap|12 to 8}}",
+        "cost": "{{ap|60 to 100}}",
+        "costtype": "mana",
+        "targeting": "Vector",
+        "affects": "Enemies",
+        "cast time": "none",
+        "damagetype": "Magic",
+        "spelleffects": "spellaoe",
+        "spellshield": "True",
+        "projectile": "True",
+        "knockdown": "|grounded     =",
+        "notes": "* '''Viktor''' may freely act while the ray is traveling.\n** The effected area is set upon casting, no matter how far away '''Viktor''' moves. Unlike a leash, ''Death Ray'' will not break off its own effect.\n* The laser grants a moderate area of {{tip|sight}} around where the beam strikes the ground.\n* If ''Death Ray'' is {{tip|projectile|intercepted}}, the initial ray is not destroyed.\n** However, the capability to be blocked only applies to the laser as it hits the ground. '''Viktor''' can cast the ability ''over'' the wall and it will not be destroyed or intercepted. \n** ''Augmented Death Ray'' will still cause the entire target area to explode even if the laser is blocked.\n* If '''Viktor''' dies while he is firing the beam it only deals damage up to the location at the time of his death."
+      }
+    },
+    "R": {
+      "id": "ViktorR",
+      "name": "Arcane Storm",
+      "description": "Viktor conjures an Arcane Storm on the field, dealing magic damage and interrupting enemy channels. The storm periodically does magic damage to all nearby enemies and can be redirected by Viktor.\n\nAugment: The Arcane Storm moves 25% faster, and whenever champions die after taking damage from it, the storm grows and increases in its duration.",
+      "tooltip": "Viktor conjures an Arcane Storm in an area for {{ stormduration }} seconds, which instantly deals {{ initialburstdamage }} magic damage followed by {{ subsequentburstdamage }} magic damage per second to surrounding enemies. The storm automatically follows champions it has recently damaged.\n\nRecast: Viktor can manually move the storm.\n\nUpgraded: The storm moves {{ augmentboost*100 }}% faster. If a champion that the storm has damaged dies, the storm increases its size and its duration by {{ tooltip_durationextension }} seconds (up to {{ maxgrowths }} times).\n\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "700",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage (Initial Burst)",
+          "Damage (Periodic Ticks)"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ initialburstbasedamage }} -> {{ initialburstbasedamageNL }}",
+          "{{ subsequentburstbasedamage }} -> {{ subsequentburstbasedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Viktor",
+        "skill": "R",
+        "icon": "Arcane Storm.png",
+        "blurb": "{{sbc|Active:}} {{ci|Viktor}} conjures an arcane storm at the target location that deals {{as|magic damage}} to enemies within and {{tip|disrupt|disrupts}} their channeled abilities. The storm remains for a few seconds to continually deal {{as|magic damage}}, and automatically follows the nearest enemy {{tip|champion}} hit upon cast. ==",
+        "blurb2": "''Arcane Storm'' can be recast any time while the storm is active.",
+        "blurb3": "{{sbc|Recast:}} '''Viktor''' directs the storm to the target location or enemy champion.",
+        "blurb4": "{{sbc|{{ai|Augment: Perfect Storm|Viktor}}:}} The storm moves faster.",
+        "description": "{{sbc|Active:}} '''Viktor''' conjures an arcane storm at the target location, dealing {{as|magic damage}} to enemies within the area and {{tip|disrupt|disrupting}} their {{tip|channel|channeled abilities}}.",
+        "leveling": "{{st|Magic Damage|{{ap|100 to 250}} {{as|(+ 50% AP)}}}}",
+        "description2": "The storm then remains active for {{fd|6.5}} seconds, dealing {{as|magic damage}} to enemies within it every second and granting {{tip|sight}} of the area. The storm targets the nearest champion hit by its initial damage and will follow them, moving faster based on its proximity to '''Viktor'''.",
+        "leveling2": "{{st|Magic Damage Per Tick|{{ap|65 to 145}} {{as|(+ 45% AP)}}|Total Magic Damage|{{ap|100+65*6 to 250+145*6}} {{as|(+ {{ap|50+45*6}}% AP)}}}}",
+        "description3": "''Arcane Storm'' can be recast at any time while the storm is active.",
+        "icon4": "Arcane Storm 2.png",
+        "description4": "{{sbc|Recast:}} '''Viktor''' directs the storm to the target location or enemy champion.",
+        "icon5": "Augment- Perfect Storm.png",
+        "description5": "{{sbc|{{ai|Glorious Evolution|Viktor|Augment: Perfect Storm}}:}} Upon takedown, the storm grows 40% in size, moves 25% faster and its duration increased by 3 seconds.",
+        "icon6": "Viktor Arcane Storm 3.png",
+        "description6": "''Maximum of 6 size increases and 6 second overall duration increase. Arcane Storm's recast can be used while affected by {{tip|cast-inhibiting crowd control}}.''",
+        "target range": "700",
+        "effect radius": "350 / {{tt|700|Sight radius}}",
+        "speed": "{{tt|200|Minimum speed}} / {{tt|300|Maximum speed}} / {{tt|250|Perfect Storm minimum speed}} / {{tt|375|Perfect Storm maximum speed}}",
+        "cooldown": "{{ap|120 to 80}}",
+        "cdstart": "post-effect",
+        "cast time": "{{fd|0.25}}",
+        "cost": "100",
+        "costtype": "mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "spellaoe",
+        "spellshield": "True",
+        "projectile": "|knockdown    =",
+        "grounded": "|notes        = \n* The {{tip|disrupt}} is 'wrapped' into a status effect that says the target is {{tip|Silence|Silenced}} for {{fd|0.25}} seconds, but it does not actually ''silence''. It however makes sure that the ''disrupt'' is prevented by {{tip|Cc-immune|immunity to silences}}.\n* '''Viktor''' can command the storm regardless of how far away he is from it. \n* The storm will remain active even if '''Viktor''' dies. Any commands it was issued prior to his death will not be interrupted.\n* ''Arcane Storm'' reaches its maximum speed at 300 units and minimum speed at 900 units away from '''Viktor'''.\n* Including the initial damage, ''Arcane Storm'' deals 7 instances of damage.\n* The storm will follow its target even if they are not {{tip|sight|visible}}, effectively giving away their position.\n* ''Arcane Storm'' can be recast to follow '''Viktor'''. However, upon reaching him, the storm will stop following '''Viktor'''.\n* ''Arcane Storm'' is not obstructed by terrain."
+      }
+    }
+  }
+}

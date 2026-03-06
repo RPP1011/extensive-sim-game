@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0111_4v4"
+seed = 2034
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["templar", "cleric", "paladin", "warlock"]
+enemy_hero_templates = ["Teemo", "Kassadin", "Vi", "Swain"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

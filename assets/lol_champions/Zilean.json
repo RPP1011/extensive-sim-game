@@ -1,0 +1,241 @@
+{
+  "id": "Zilean",
+  "name": "Zilean",
+  "title": "the Chronokeeper",
+  "resource_type": "Mana",
+  "tags": [
+    "Support",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Time In A Bottle",
+      "description": "Zilean stores time as Experience and can grant it to his allies. When he has enough Experience to finish an ally's level up, he can right-click them to impart it. Zilean receives as much Experience as he gives."
+    },
+    "Q": {
+      "id": "ZileanQ",
+      "name": "Time Bomb",
+      "description": "Tosses a bomb to target area that sticks to units that come near it (prioritizes Champions). It detonates after 3 seconds, dealing area of effect damage. If a Time Bomb is detonated early by another Time Bomb, it also stuns enemies.",
+      "tooltip": "Zilean tosses a time-delayed bomb that sticks to the first unit which comes within a small area around it. After {{ e2 }} seconds it detonates, dealing {{ totaldamage }} magic damage.\n\nPlacing a second bomb on a unit that already has one detonates the first bomb immediately and Stuns enemies in the blast for {{ e4 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9.5/9/8.5/8",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "75/115/165/230/300",
+        "3",
+        "7",
+        "1.1/1.2/1.3/1.4/1.5",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "@AbilityResourceName@ Cost",
+          "Damage",
+          "Stun Duration:"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ bombbasedamage }} -> {{ bombbasedamageNL }}",
+          "{{ stunduration }} -> {{ stundurationNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Zilean",
+        "skill": "Q",
+        "icon": "Time Bomb.png",
+        "blurb": "{{sbc|Active:}} {{ci|Zilean}} throws a ticking time bomb to the target location that will attach upon enemy contact, {{tip|standard sight|revealing}} them. It will detonate after a short time or when the attached unit dies, dealing {{as|magic damage}} to nearby enemies hit.",
+        "blurb2": "The bomb will detonate immediately if another bomb attaches to the same target, briefly {{tip|stun|stunning}} enemies hit.",
+        "description": "{{sbc|Active:}} '''Zilean''' throws a ticking time bomb to the target location that grants {{tip|sight}} of its surroundings. The bomb will attach itself to units that move within the epicenter, or those hit directly, {{tip|standard sight|revealing}} them.",
+        "leveling2": "{{st|Magic Damage|{{ap|75|115|165|230|300}} {{as|(+ 90% AP)}}}}",
+        "description2": "After 3 seconds, or when the attached unit dies, the bomb explodes to deal {{as|magic damage}} to nearby enemies.",
+        "description3": "The bomb detonates immediately if another bomb attaches itself to the same unit, {{tip|stun|stunning}} nearby enemies for a duration.",
+        "leveling3": "{{st|Stun Duration|{{ap|1.1 to 1.5}} seconds}}",
+        "target range": "900",
+        "effect radius": "{{tip|cr|icononly = true}} 350",
+        "collision radius": "{{tip|er|icononly = true}} 140",
+        "cooldown": "{{ap|10 to 8}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "{{ap|60 to 80}}",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "True",
+        "notes": "* ''Time Bombs'' landing directly on top of multiple units follow a priority order for whom to attach themselves to.\n*# Units already carrying a bomb\n*# Enemy champions\n*# Allied champions\n*# Enemy minions\n*# Allied minions\n* ''Time Bombs'' are not visible to enemies if they attach to an ally that is {{tip|stealth|stealthed}} and vice versa.\n* When ''Time Bomb'' snaps onto an enemy, it  deals 0 {{tip|proc damage}}.\n** This triggers [[combat status|in-combat]] effects such as drawing turret aggro and drawing [[Monster#Monster_Behavior|monster aggression]].\n** It also triggers {{ri|Sudden Impact}} and applies {{ii|Elixir of Sorcery}}.\n** It does not trigger {{ri|Cheap Shot}}, however, as {{tip|proc damage}} doesn't trigger {{ri|Cheap Shot}}.\n* '''Zilean''' can detonate an enemy counterpart's ''Time Bomb'' by placing his own on the same unit (the first bomb still deals damage).\n* ''Time Bomb'' will be dispelled if the holder takes fatal damage and is saved by {{tip|resurrection}} before it explodes.\n* ''Time Bomb'' can deal damage to the enemy holder through {{tip|untargetable|untargetablility}}.\n* {{tip|Spell shield}} will prevent the application of ''Time Bomb'' and it's detonation damage as well as block the {{tip|stun}}, but not it's immediate detonation if the target already has a ''Time Bomb'' on them."
+      }
+    },
+    "W": {
+      "id": "ZileanW",
+      "name": "Rewind",
+      "description": "Zilean can prepare himself for future confrontations, reducing the cooldowns of his other basic abilities.",
+      "tooltip": "Zilean turns time, reducing his other basic Ability Cooldowns by {{ e2 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/12/10/8/6",
+      "cost": "35",
+      "cost_type": " Mana",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "20/30/40/50/60",
+        "10",
+        "35",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ e3 }} Mana",
+      "wiki_detail": {
+        "champion": "Zilean",
+        "skill": "W",
+        "icon": "Rewind.png",
+        "blurb": "{{sbc|Active:}} {{ci|Zilean}} {{sti|cdr|reduces}} the {{sti|cd|'''remaining'''}} cooldowns of his other basic abilities.",
+        "description": "{{sbc|Active:}} '''Zilean''' reduces the {{sti|cd|'''remaining'''}} cooldowns of ''{{ai|Time Bomb|Zilean}}'' and ''{{ai|Time Warp|Zilean}}'' by 10 seconds each.",
+        "description2": "''Either {{ai|Time Bomb|Zilean}} or {{ai|Time Warp|Zilean}} must be on cooldown to cast this ability''.",
+        "cooldown": "{{ap|14|12|10|8|6}}",
+        "cost": "35",
+        "cast time": "none",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Self",
+        "notes": "* No additional details."
+      }
+    },
+    "E": {
+      "id": "TimeWarp",
+      "name": "Time Warp",
+      "description": "Zilean bends time around any unit, decreasing an enemy's Move Speed or increasing an ally's Move Speed for a short time.",
+      "tooltip": "Zilean Slows an enemy champion by {{ e2 }}% or grants an allied champion {{ e2 }}% Move Speed for {{ e1 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "15",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "550",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "2.5",
+        "40/55/70/85/99",
+        "1.5",
+        "8",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Slow",
+          "Move Speed"
+        ],
+        "effect": [
+          "{{ e2 }}% -> {{ e2NL }}%",
+          "{{ e2 }}% -> {{ e2NL }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Zilean",
+        "skill": "E",
+        "icon": "Time Warp.png",
+        "blurb": "{{sbc|Active:}} {{ci|Zilean}} applies ''Time Warp'' to the target champion that lasts for a short time.",
+        "blurb4": "{{sbc|Time Warp:}} If the target is an ally, they gain {{as|{{sti|'''bonus''' movement speed}}}}. If the target is an enemy, they are {{tip|slow|slowed}}.",
+        "description": "{{sbc|Active:}} '''Zilean''' applies ''Time Warp'' to the target champion which lasts for {{fd|2.5}} seconds.",
+        "leveling2": "{{st|Movement Speed Modifier|{{ap|40 to 85 4|99}}%}}",
+        "description2": "{{sbc|Time Warp:}} If the target is an ally, they gain {{as|{{sti|'''bonus''' movement speed}}}}. If the target is an enemy, they are {{tip|slow|slowed}}.",
+        "target range": "{{tip|er|icononly = true}} 550",
+        "cooldown": "15",
+        "cost": "50",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "cast time": "none",
+        "affects": "Enemies, Allies",
+        "spellshield": "True",
+        "spelleffects": "|projectile = False",
+        "notes": "* No additional notes."
+      }
+    },
+    "R": {
+      "id": "ChronoShift",
+      "name": "Chronoshift",
+      "description": "Zilean places a protective time rune on an allied champion, teleporting the champion back in time if they take lethal damage.",
+      "tooltip": "Zilean grants a protective time rune to an allied champion for {{ rduration }} seconds. If the target would die, the rune rewinds their timeline, putting them into Stasis for {{ revivestateduration }} seconds, then reviving them and restoring {{ rtotalheal }} Health.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/90/60",
+      "cost": "125/150/175",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "@AbilityResourceName@ Cost",
+          "Healing"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ rbaseheal }} -> {{ rbasehealNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Zilean",
+        "skill": "R",
+        "icon": "Chronoshift.png",
+        "blurb": "{{sbc|Active:}} {{ci|Zilean}} places a protective time rune on himself or the target allied champion for a few seconds.",
+        "blurb2": "If the target would die, they enter {{tip|resurrection}} for a short time, becoming {{tip|invulnerable}}, {{tip|untargetable}}, and {{tip|lockout|unable to act}}. They are {{tip|heal|healed}} afterwards.",
+        "description": "{{sbc|Active:}} '''Zilean''' places a protective time rune on the target allied {{tip|champion}} or himself for 5 seconds.",
+        "description2": "If the target takes {{tip|death|fatal damage}} within the duration, they enter {{tip|resurrection}} for 3 seconds, becoming {{tip|invulnerable}}, {{tip|untargetable}}, and {{tip|lockout|unable to act}}. Afterwards, they revive while being {{tip|heal|healed}}.",
+        "leveling2": "{{st|Heal|{{ap|600 to 1100}} {{as|(+ 200% AP)}}}}",
+        "target range": "{{tip|cr|icononly = true}} 900",
+        "cooldown": "{{ap|120 to 60}}",
+        "cost": "{{ap|125 to 175}}",
+        "costtype": "Mana",
+        "cast time": "none",
+        "targeting": "Unit",
+        "affects": "Self, Allies",
+        "spelleffects": "Heal",
+        "flavorsound": "{{sm2|Zilean_Original_R_SFX.ogg}} ''Buff SFX''<br>{{sm2|Zilean_Original_R_Revive_SFX.ogg}} ''Revive SFX''",
+        "notes": "* Upon trigger, ''Chronoshift'' places all [[summoner spell]]s that are not already on cooldown on a 3-second {{sti|cooldown}}.\n* ''Chronoshift's'' {{tip|untargetability}} does not {{tip|homing projectile destruction|destroy}} in-flight {{tip|projectiles}}.\n* ''Chronoshift'' cannot target {{tip|clone|clones}}.\n* ''Chronoshift'' takes priority over all other {{tip|resurrection}} effects as well as all {{tip|zombie state}} effects.\n* ''Chronoshift'' does not activate if the target is killed by the {{tip|Nexus Obelisk}}.\n* While in resurrection, the target's [[health regeneration]] is set to 0.\n* The target's screen will have a white tint.\n* The following table refers for interactions while the target is unable to act:\n{{ct|attack=false|move=false|cast=false|items=false|consume=false|spells=true,false,false,false,false,false,false|interrupts=death}}"
+      }
+    }
+  }
+}

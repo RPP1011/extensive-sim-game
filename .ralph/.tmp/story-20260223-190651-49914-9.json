@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "total": 12,
+  "remaining": 3,
+  "quality_gates": [
+    "cargo test"
+  ],
+  "id": "US-010",
+  "title": "Bootstrap region-to-local eagle-eye intro sequence"
+}

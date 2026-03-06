@@ -1,0 +1,13 @@
+[scenario]
+name = "size_2v4_2673"
+seed = 1894
+hero_count = 2
+enemy_count = 4
+difficulty = 1
+max_ticks = 10000
+room_type = "Pivot"
+hero_templates = ["rogue", "warden"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

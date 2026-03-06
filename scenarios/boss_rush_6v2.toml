@@ -1,0 +1,13 @@
+[scenario]
+name        = "Boss Rush 6v2 — Big Team vs Bosses"
+seed        = 55
+hero_count  = 6
+enemy_count = 2
+difficulty  = 5
+max_ticks   = 5000
+room_type   = "Climax"
+
+[assert]
+outcome          = "Victory"
+max_ticks_to_win = 4500
+min_heroes_alive = 2

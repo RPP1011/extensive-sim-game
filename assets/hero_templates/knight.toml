@@ -1,0 +1,201 @@
+[hero]
+name = "Knight"
+
+[stats]
+hp = 200
+move_speed = 2.0
+
+[stats.tags]
+CROWD_CONTROL = 65.0
+PHYSICAL = 40.0
+
+[attack]
+damage = 15
+range = 1.5
+cooldown = 1000
+cast_time = 300
+
+# --- Ability 1: Shield Bash ---
+[[abilities]]
+name = "ShieldBash"
+targeting = "target_enemy"
+range = 1.5
+cooldown_ms = 6000
+cast_time_ms = 200
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "damage"
+amount = 25
+
+[abilities.effects.tags]
+PHYSICAL = 45.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 2000
+
+[abilities.effects.tags]
+CROWD_CONTROL = 70.0
+
+# --- Ability 2: Bulwark ---
+[[abilities]]
+name = "Bulwark"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 14000
+cast_time_ms = 300
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 80
+duration_ms = 6000
+
+# --- Ability 3: Challenging Shout ---
+[[abilities]]
+name = "ChallengingShout"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 10000
+cast_time_ms = 300
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "debuff"
+stat = "damage_output"
+factor = 0.8
+duration_ms = 4000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+# --- Ability 4: Heroic Charge ---
+[[abilities]]
+name = "HeroicCharge"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 8000
+cast_time_ms = 0
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+[[abilities.effects]]
+type = "damage"
+amount = 30
+
+[abilities.effects.tags]
+PHYSICAL = 45.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+[abilities.effects.tags]
+CROWD_CONTROL = 55.0
+
+# --- Ability 5: Fortify ---
+[[abilities]]
+name = "Fortify"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 10000
+cast_time_ms = 300
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 50
+duration_ms = 4000
+
+[[abilities.effects]]
+type = "buff"
+stat = "damage_output"
+factor = 0.1
+duration_ms = 4000
+
+# --- Ability 6: Sweeping Strike ---
+[[abilities]]
+name = "SweepingStrike"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 5000
+cast_time_ms = 200
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 35
+
+[abilities.effects.area]
+shape = "cone"
+radius = 2.5
+angle_deg = 120.0
+
+[abilities.effects.tags]
+PHYSICAL = 50.0
+
+# --- Ability 7: Rallying Cry ---
+[[abilities]]
+name = "RallyingCry"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 15000
+cast_time_ms = 300
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "buff"
+stat = "damage_output"
+factor = 0.15
+duration_ms = 5000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 4.0
+
+# --- Ability 8: Duel Challenge ---
+[[abilities]]
+name = "DuelChallenge"
+targeting = "target_enemy"
+range = 3.0
+cooldown_ms = 20000
+cast_time_ms = 300
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "duel"
+duration_ms = 5000
+
+# --- Passive 1: Stalwart ---
+[[passives]]
+name = "Stalwart"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_taken"
+
+[[passives.effects]]
+type = "shield"
+amount = 25
+duration_ms = 3000
+
+# --- Passive 2: Guardian's Resolve ---
+[[passives]]
+name = "GuardiansResolve"
+cooldown_ms = 4000
+range = 3.0
+
+[passives.trigger]
+type = "on_ally_damaged"
+range = 3.0
+
+[[passives.effects]]
+type = "shield"
+amount = 20
+duration_ms = 3000

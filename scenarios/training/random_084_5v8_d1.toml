@@ -1,0 +1,13 @@
+[scenario]
+name = "random_084_5v8_d1"
+seed = 8084
+hero_count = 5
+enemy_count = 8
+difficulty = 1
+max_ticks = 10000
+room_type = "Climax"
+hero_templates = ["warrior", "berserker", "assassin", "necromancer", "cryomancer"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Either"

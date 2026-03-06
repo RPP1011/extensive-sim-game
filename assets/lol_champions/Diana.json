@@ -1,0 +1,284 @@
+{
+  "id": "Diana",
+  "name": "Diana",
+  "title": "Scorn of the Moon",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Moonsilver Blade",
+      "description": "Every third strike cleaves nearby enemies for an additional magic damage. After casting a spell, Diana gains Attack Speed for 5 seconds.",
+      "wiki_detail": {
+        "champion": "Diana",
+        "skill": "I",
+        "icon": "false",
+        "icon2": "Moonsilver Blade.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Diana}} gains {{as|{{sti|attack speed}}}}, increased shortly after casting an ability.",
+        "blurb2": "Every third basic attack in quick succession will cleave nearby enemies, dealing {{as|magic damage}}.",
+        "description": "{{sbc|Innate:}} '''Diana''' gains {{as|{{sti|attack speed|{{pp|15 to 35|key=%}} '''bonus''' attack speed}}}}. After casting an [[champion ability|ability]], this bonus is tripled to {{pp|15*3 to 35*3|key=%|color=as}} for 5 seconds.",
+        "description2": "{{sbc|Innate - Moonsilver Blade:}} '''Diana's''' [[basic attacks]] generate a [[stack]] of ''Moonsilver Blade'' for 5 seconds, refreshing on subsequent attacks and stacking up to 2 times. At 2 stacks, '''Diana''' empowers her next basic attack to consume the stacks {{tip|on-hit}} to additionally cleave nearby enemies, dealing them {{pp|20+5*(x-1) for 6; then + 10*x for 5; then + 15*x for 5; then + 25*x|formula=20 + 5 per level until level 6, then + 10 per level until level 11, then + 15 per level until level 16, then + 25 per level|color=magic damage}} {{as|(+ 50% AP)}} {{as|magic damage}}. ''Moonsilver Blade'' deals 225% damage against {{tip|monsters}}.",
+        "targeting": "Passive",
+        "effect radius": "175",
+        "affects": "Self / Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "spellaoe",
+        "spellshield": "true",
+        "parry": "true",
+        "video": "Diana IVideo.ogv",
+        "notes": "* ''Moonsilver Blade'' will affect [[structures]].\n* Each attack has a distinct animation and she will glow when the empowered attack is ready.\n* Sometimes, the empowered basic attack will not consume the stacks.{{bug|1}}\n** In this case, the attack will also not deal its damage."
+      }
+    },
+    "Q": {
+      "id": "DianaQ",
+      "name": "Crescent Strike",
+      "description": "Unleashes a bolt of lunar energy in an arc dealing magic damage.\n\nAfflicts enemies struck with Moonlight, revealing them if they are not stealthed for 3 seconds.",
+      "tooltip": "Diana unleashes an arc of lunar energy, dealing {{ totaldamage }} magic damage and marking with Moonlight for {{ moonlightduration }} seconds. \n\nMoonlight reveals enemies that are not stealthed.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8/7.5/7/6.5/6",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "1",
+        "1.5",
+        "3",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Diana",
+        "skill": "Q",
+        "icon": "Crescent Strike.png",
+        "blurb": "{{sbc|Active:}} {{ci|Diana}} unleashes a bolt of lunar energy that deals {{as|magic damage}} to enemies hit in an arc before exploding at the target location.",
+        "blurb2": "Enemies hit are marked with ''Moonlight'', {{tip|sight|revealing}} them.",
+        "description": "{{sbc|Active:}} '''Diana''' unleashes a bolt of lunar energy that travels in a counter-clockwise arc before exploding at the target location, granting {{tip|sight}} of the area for {{fd|0.5}} seconds and dealing {{as|magic damage}} to enemies hit and afflicting them with ''Moonlight'' for 3 seconds, during which they are {{tip|standard sight|revealed}}.",
+        "description2": "''{{ai|Lunar Rush|Diana}}'' interacts with ''Moonlight''.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 210}} {{as|(+ 70% AP)}}}}",
+        "description3": "''Crescent Strike will cast at max range if cast beyond that.''",
+        "target range": "900",
+        "speed": "{{tt|1900|Inner arc speed}} / {{tt|2100|Outer arc speed}}",
+        "cooldown": "{{ap|8 to 6}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "50",
+        "costtype": "mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "projectile": "True",
+        "spelleffects": "aoe",
+        "spellshield": "special",
+        "video": "Diana QVideo.ogv",
+        "notes": "* Even if the target {{tip|spell shield|spell shields}} the bolt, they may still be damaged by the explosion. ''Moonlight'' is not applied to the protected target if blocked.\n{{Effect at cast time end}}\n** If the ability is cast at max range and she is moved backwards while casting, the bolt will travel to the target location with increased distance.{{bug}}"
+      }
+    },
+    "W": {
+      "id": "DianaOrbs",
+      "name": "Pale Cascade",
+      "description": "Diana creates three orbiting spheres that detonate on contact with enemies to deal damage in an area. She also gains a temporary shield that absorbs damage. If her third sphere detonates, the shield gains additional strength.",
+      "tooltip": "Diana creates three orbiting spheres for {{ shieldduration }} seconds that explode on contact, each dealing {{ totaldamage }} magic damage, up to a max of {{ totalmaxdamage }} damage.\n\nDiana also gains {{ shieldvalue }} Shield for the same duration. When the last sphere detonates, she gains an additional {{ shieldvalue }} Shield and refreshes the duration.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "15/13.5/12/10.5/9",
+      "cost": "40/45/50/55/60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "5",
+        "0",
+        "0",
+        "1",
+        "4",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Shield Amount",
+          "@AbilityResourceName@ Cost",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ orbdamage }} -> {{ orbdamageNL }}",
+          "{{ shieldbase }} -> {{ shieldbaseNL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Diana",
+        "skill": "W",
+        "icon": "Pale Cascade.png",
+        "blurb": "{{sbc|Active:}} {{ci|Diana}} {{tip|shield|shields}} herself, creating three orbiting spheres that detonate on contact with enemies to deal {{as|magic damage}} in an area.",
+        "blurb2": "If all the spheres detonate, she gains more {{tip|shield}}.",
+        "description": "{{sbc|Active:}} '''Diana''' grants herself a {{tip|shield}} for up to 5 seconds and creates three spheres that orbit her counterclockwise for the same duration, detonating upon contact with an enemy to deal {{as|magic damage}} to nearby enemies.",
+        "leveling": "{{st|Shield Strength|{{ap|45 to 105}} {{as|(+ 30% AP)}} {{as|(+ 9% '''bonus''' health)}}}}\n{{st|Magic Damage per Orb|{{ap|20 to 68}} {{as|(+ 18% AP)}}|Total Magic Damage|{{ap|20*3 to 68*3}} {{as|(+ 54% AP)}}}}",
+        "description2": "If all three spheres detonate, ''Pale Cascade's'' shield is reapplied, stacking with its original shield and refreshing the duration.",
+        "leveling2": "{{st|Maximum Shield Strength|{{ap|45*2 to 105*2}} {{as|(+ 60% AP)}} {{as|(+ 18% '''bonus''' health)}}}}",
+        "effect radius": "{{tt|200|Orbit and explosion}}",
+        "cast time": "none",
+        "cooldown": "{{ap|15 to 9}}",
+        "cdstart": "After sphere detonation",
+        "cost": "{{ap|40 to 60}}",
+        "costtype": "mana",
+        "targeting": "Auto",
+        "damagetype": "Magic",
+        "projectile": "True",
+        "spelleffects": "spellaoe",
+        "spellshield": "True",
+        "affects": "Self, Enemies",
+        "video": "Diana WVideo.ogv",
+        "notes": "* On the second application of ''Pale Cascade's'' shield, {{sti|Shield Power|link = Heal and shield power}} will apply to both the new shield amount and the shield amount remaining from the first shield, which has already benefited from ''shield power''.\n** Because of this, ''shield power'' effectively applies to the second shield twice, but with reduced efficiency, for up to an increase of 50% of ''shield power'' (maximum benefit if no damage was mitigated by the first shield). With 10% ''shield power'', the second shield's total amount will be increased by up to an additional 5%, for a total of {{tt|{{fd|15.5%}}|1.1*1.05}} '''bonus''' shield.\n** The formula for the total amount of shield '''Diana''' will receive from both shield applications is:\n*** ''Total Shield = (((Shield Amount × (1 + Shield Power)) - Damage Blocked by Shield) + Shield Amount) × (1 + Shield Power)''"
+      }
+    },
+    "E": {
+      "id": "DianaTeleport",
+      "name": "Lunar Rush",
+      "description": "Becomes the living embodiment of the vengeful moon, dashing to an enemy and dealing magic damage.\n\nLunar Rush has no cooldown when used to dash to an enemy afflicted with Moonlight. All other enemies will have the Moonlight debuff removed regardless of whether they were the target of Lunar Rush.",
+      "tooltip": "Diana becomes as the vengeful moon, dashing to an enemy and dealing {{ totaldamage }} magic damage. If the target is afflicted with Moonlight, this Ability's Cooldown is refreshed.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "22/20/18/16/14",
+      "cost": "40/45/50/55/60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "825",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "4/4/4/0/0",
+        "40/60/80/100/120",
+        "50/75/100/0/0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "@AbilityResourceName@ Cost",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Diana",
+        "skill": "E",
+        "icon": "Lunar Rush.png",
+        "blurb": "{{sbc|Active:}} {{ci|Diana}} {{tip|dash|dashes}} to an enemy and deals {{as|magic damage}}.",
+        "blurb2": "If used on a target afflicted with {{ai|Crescent Strike|Diana|''Moonlight''}}, the cooldown is massively {{sti|ah|reduced}}.",
+        "description": "{{sbc|Active:}} '''Diana''' {{tip|dashes}} to the target enemy's location, and upon completion, she deals them {{as|magic damage}} and consumes ''{{ai|Crescent Strike|Diana|Moonlight}}'' from all enemies. If the target is within 400 range, '''Diana''' will dash through their location.",
+        "leveling": "{{st|Magic Damage|{{ap|50 to 130}} {{as|(+ 60% AP)}}}}",
+        "description2": "If ''Moonlight'' is consumed from the target, ''Lunar Rush's'' {{sti|'''current''' cooldown}} is reduced to {{fd|0.25}} seconds.",
+        "description3": "'''''Diana''' can cast any of her abilities during the dash.''",
+        "target range": "825",
+        "cast time": "none",
+        "cooldown": "{{ap|22 to 14}}",
+        "cost": "{{ap|40 to 60}}",
+        "costtype": "mana",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "Single target",
+        "callforhelp": "True",
+        "spellshield": "True",
+        "grounded": "True",
+        "knockdown": "True",
+        "video": "Diana RVideo.ogv",
+        "notes": "* '''Diana''' will attempt to basic attack the target. This will not grant a stack of {{ri|Conqueror}}, {{ri|Electrocute}}, or {{ri|Phase Rush}}.\n* ''Lunar Rush's'' cooldown will also be reset if the target dies during the dash while being affected by ''Moonlight''.\n* ''Lunar Rush'' consumes ''Moonlight'' upon ending the dash (even if {{tip|interrupt|interrupted}}).\n* ''Lunar Rush'' will still deal damage even if the target is {{tip|untargetable}} by the end of the dash.\n* If ''Lunar Rush'' is blocked by {{tip|spell shield}} the ''Moonlight'' debuff is still consumed but ''Lunar Rush's'' cooldown is not reset.",
+        "tips": "* Since ''Moonlight'' is consumed upon ending the dash, a {{ai|Crescent Strike|Diana}} cast mid-dash can still cause a reset.\n* ''Lunar Rush'' only consumes present ''Moonlight'' from the enemies. Because of this, it is possible for ''Lunar Rush'' to be reset multiple times during the same ''Crescent Strike'' cast, until it finishes its trajectory."
+      }
+    },
+    "R": {
+      "id": "DianaR",
+      "name": "Moonfall",
+      "description": "Diana reveals and draws in all nearby enemies and slows them.\n\nIf Diana pulls in one or more enemy champions, the moonlight crashes down onto her after a short delay, dealing magic damage in an area around her, increased for each target beyond the first pulled.",
+      "tooltip": "Diana Pulls In, Slows by {{ slowtooltip }}%, and reveals nearby enemies for {{ slowduration }} seconds.\n\nIf Diana hits at least one enemy champion, she calls to the moon, dealing {{ rexplosiondamage }} magic damage plus {{ rmultihitamplification }} for each champion pulled beyond the first, up to a max of an additional {{ maxdamage }} damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "100/90/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "475",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "-0.35/-0.4/-0.45",
+        "2",
+        "0.5",
+        "3",
+        "4",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage",
+          "Slow"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ slowtooltip }}% -> {{ slowtooltipNL }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Diana",
+        "skill": "R",
+        "icon": "Moonfall.png",
+        "blurb": "{{sbc|Active:}} {{ci|Diana}} {{tip|airborne|draws}} in and {{tip|slow|slows}} nearby enemies.",
+        "blurb2": "If she pulls an enemy {{tip|champion}}, she calls down a beam of moonlight to strike upon the area after a delay, dealing {{as|magic damage}}, increased if she pulled more champions.",
+        "description": "{{sbc|Active:}} '''Diana''' {{tip|airborne|pulls}} in all nearby enemies, during which they are {{tip|standard sight|revealed}}, then {{tip|slow|slows}} them for 2 seconds.",
+        "leveling": "{{st|Slow|{{ap|40 to 60}}%}}",
+        "description2": "If an enemy {{tip|champion}} is pulled in, she calls down a beam of moonlight to strike upon the area around her after 1 second, dealing {{as|magic damage}} to all nearby enemies, increased for each champion pulled beyond the first.",
+        "leveling2": "{{st|Magic Damage|{{ap|200 to 400}} {{as|(+ 60% AP)}}}}\n{{st|Bonus Damage Per Champion|{{ap|35 to 85}} {{as|(+ 15% AP)}}|Total Damage Vs. 5 Champions|{{ap|200+35*5 to 400+85*5}} {{as|(+ 135% AP)}}}}",
+        "effect radius": "{{tt|475|Effect radius}} / {{tt|225|Maximum Pull distance}}",
+        "cooldown": "{{ap|100 to 80}}",
+        "cost": "100",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "mana",
+        "damagetype": "Magic",
+        "targeting": "Auto",
+        "targetwarning": "Auto warning",
+        "affects": "Self, Enemies",
+        "spelleffects": "spellaoe",
+        "spellshield": "special",
+        "flavorsound": "{{sm2|Diana_Original_R_0.ogg}} ''\"Night approaches!\"''",
+        "notes": "* Enemies stay in the area for a maximum of approximately {{fd|0.5}} seconds while being pulled.\n* {{tip|cc-immune|Crowd control immunity}} and {{tip|displacement immunity}} still count as being \"pulled in\" by the ability.\n* {{tip|clone|Clones}} count as champions for increasing this ability's damage.\n* ''Moonfall's'' additional damage is capped at 5 champions.\n* The beam of moonlight does not crash down if champions hit blocked the initial effect with {{tip|spell shield}}.\n** Enemy champions protected by ''spell shield'' do not count towards the damage increase.\n{{Effect at cast time end}}\n* A lunar phase of the moon will appear above '''Diana''' while she is casting ''Moonfall'', each phase is based on the number of enemy {{tip|champion|champions}} pulled:\n<gallery navigation=true widths=\"80px\">\nNew_Moon_Moonfall_(1_Enemy_Champion).png|{{sbc|New Moon:}} '''1''' Enemy Champion Pulled\nWaning_Crescent_Moonfall_(2_Enemy_Champions).png|{{sbc|Waning Crescent:}} '''2''' Enemy Champions Pulled\nThird_Quarter_Moonfall_(3_Enemy_Champions).png|{{sbc|Third Quarter:}} '''3''' Enemy Champions Pulled\nWaning_Gibbous_Moonfall_(4_Enemy_Champions).png|{{sbc|Waning Gibbous:}} '''4''' Enemy Champions Pulled\nFull_Moon_Moonfall_(5_Enemy_Champions).png|{{sbc|Full Moon:}} '''5''' Enemy Champions Pulled\n</gallery>"
+      }
+    }
+  }
+}

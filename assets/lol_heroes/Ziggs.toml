@@ -1,0 +1,134 @@
+[hero]
+name = "Ziggs"
+
+[stats]
+hp = 90
+move_speed = 3.3
+armor = 20.0
+magic_resist = 30.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 12
+range = 5.5
+cooldown = 1000
+
+# --- Q: Bouncing Bomb ---
+[[abilities]]
+name = "Bouncing Bomb"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 6000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 10
+
+[abilities.delivery]
+method = "projectile"
+speed = 17.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 20
+damage_type = "magic"
+
+# --- W: Satchel Charge ---
+[[abilities]]
+name = "Satchel Charge"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 20000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 16
+recast_count = 1
+recast_window_ms = 10000
+
+[abilities.delivery]
+method = "projectile"
+speed = 17.5
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 17
+damage_type = "magic"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 3.25
+
+[[abilities.delivery.on_hit]]
+type = "knockback"
+distance = 2.0
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- E: Hexplosive Minefield ---
+[[abilities]]
+name = "Hexplosive Minefield"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 16000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 14
+
+[abilities.delivery]
+method = "projectile"
+speed = 15.5
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 0
+damage_type = "magic"
+duration_ms = 2000
+tick_interval_ms = 1000
+amount_per_tick = 3
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 3.25
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- R: Mega Inferno Bomb ---
+[[abilities]]
+name = "Mega Inferno Bomb"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 23900
+cast_time_ms = 375
+ai_hint = "damage"
+resource_cost = 20
+
+[[abilities.effects]]
+type = "damage"
+amount = 50
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 5.25
+
+# --- Passive: Short Fuse ---
+[[passives]]
+name = "Short Fuse"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 5000
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

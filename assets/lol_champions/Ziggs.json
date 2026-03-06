@@ -1,0 +1,294 @@
+{
+  "id": "Ziggs",
+  "name": "Ziggs",
+  "title": "the Hexplosives Expert",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Short Fuse",
+      "description": "Periodically, Ziggs' next basic attack deals bonus magic damage. This cooldown is reduced whenever Ziggs uses an ability.",
+      "wiki_detail": {
+        "champion": "Ziggs",
+        "skill": "I",
+        "icon": "Short Fuse.png",
+        "blurb": "{{sbc|Innate:}} Periodically, {{cis|Ziggs}} next basic attack will deal {{as|'''bonus''' magic damage}}, increased against [[structures]].",
+        "blurb2": "''Short Fuse's'' cooldown is {{sti|cdr|reduced}} whenever '''Ziggs''' casts an ability.",
+        "description": "{{sbc|Innate:}} Periodically, '''Ziggs''' empowers his next [[basic attack]] to deal {{as|{{pp|20;24;28;32;36;40;48;56;64;72;80;88;100;112;124;136;148;160|formula = 20 + 4 per level up to 6, then + 8 per level up to 12, then + 12 per level up to 18}}|magic damage}} {{as|(+ 50% AP)}} {{as|'''bonus''' magic damage}},{{ft|increased by 75% against [[structures]].|increased to {{as|{{pp|1.75*(20+4*(x-1)) for 6;then +1.75*8*x for 6;then +1.75*12*x|formula={{ap|20*1.75}} + {{ap|4*1.75}} per level up to 6, then + {{ap|8*1.75}} per level up to level 12, then + {{ap|12*1.75}} per level}}|magic damage}} {{as|(+ {{ap|50*1.75}}% AP)}} against [[structures]].}}",
+        "description2": "''Short Fuse's'' {{sti|cooldown}} is reduced by {{pp|4 to 6 for 3|1 to 13}} seconds whenever '''Ziggs''' casts an [[Champion ability|ability]].",
+        "static": "12",
+        "speed": "{{tt|1500|Attack missile speed, same as basic attacks}}",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spelleffects": "Proc",
+        "spellshield": "False",
+        "parry": "unknown",
+        "notes": "* The empowered attack will not trigger against [[ward]]s.\n* {{Pending for test}}: ''Short Fuse's'' interactions with {{tip|dodge|dodging}}, {{tip|block|blocking}}, and {{tip|blind|blinding}} effects."
+      }
+    },
+    "Q": {
+      "id": "ZiggsQ",
+      "name": "Bouncing Bomb",
+      "description": "Ziggs throws a bouncing bomb that deals magic damage.",
+      "tooltip": "Ziggs throws a bouncing bomb that deals {{ totaldamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "6/5.5/5/4.5/4",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "850",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "850",
+        "325",
+        "225",
+        "180",
+        "240",
+        "70",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Total AP Ratio",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ apratio*100.000000 }}% -> {{ aprationl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ziggs",
+        "skill": "Q",
+        "icon": "Bouncing Bomb.png",
+        "blurb": "{{sbc|Active:}} {{ci|Ziggs}} throws a bomb to the target location that bounces twice forward. It will explode upon hitting an enemy, terrain, or the final bounce, dealing {{as|magic damage}} to nearby enemies.",
+        "description": "{{sbc|Active:}} '''Ziggs''' throws a bomb to the target location that bounces forward up to two times, with the distance traveled each time being based on how far it was originally thrown.",
+        "description2": "The bomb explodes upon landing near an enemy, within terrain, or the final bounce, dealing {{as|magic damage}} to nearby enemies.",
+        "leveling2": "{{st|Magic Damage|{{ap|80 to 280}} {{as|(+ 60 / 65 / 70 / 75 / 80% AP)}}}}",
+        "description3": "''Bouncing Bomb will cast at max range if cast beyond that.''",
+        "target range": "{{tt|850|Cast range}}",
+        "range": "{{tt|1400|Maximum range with bounces, excluding explosion radius}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|240|Explosion radius}}",
+        "collision radius": "{{tip|cr|icononly = true}} {{tt|180|Hit detection on bounces}}",
+        "speed": "{{tt|1700|Initial missile}} / {{tt|Fixed time|Bounces travel over 0.495 seconds each, regardless of distance}}",
+        "cooldown": "{{ap|6 to 4}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "{{ap|50 to 70}}",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "projectile": "true",
+        "spelleffects": "spellaoe",
+        "onhiteffects": "|spellshield  = true",
+        "notes": "* ''Bouncing Bomb'' can be thrown or bounce over units/terrain.\n* {{tip|Spell shield}} will block the damage of the explosion, but the explosion can still damage other targets in the radius.\n* '''Ziggs''' will throw the bomb from his location at the end of the cast time, towards the {{tt|pre-clamped|Relevant only if cast beyond maximum range}} cast location, causing the bounces to adjust their angle accordingly."
+      }
+    },
+    "W": {
+      "id": "ZiggsW",
+      "name": "Satchel Charge",
+      "description": "Ziggs flings an explosive charge that detonates after a delay, or when this ability is activated again. The explosion deals magic damage to enemies, knocking them away. Ziggs is also knocked away, but takes no damage. \n\nZiggs can use the Satchel to hexplode vulnerable enemy turrets.",
+      "tooltip": "Ziggs flings an explosive charge that detonates after {{ bombduration }} seconds, or when this ability is Recast. It deals {{ totaldamage }} magic damage to enemies and Knocks them Back. Ziggs is also knocked away, but takes no damage.\n\nSatchel Charge will automatically destroy towers below {{ turretdestroypercent*100 }}% of their Health.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "20/18/16/14/12",
+      "cost": "80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "70/105/140/175/210",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "Tower Destruction Threshold"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ turretdestroypercent*100.000000 }}% -> {{ turretdestroypercentnl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ziggs",
+        "skill": "W",
+        "icon": "Satchel Charge.png",
+        "blurb": "{{sbc|Active:}} {{ci|Ziggs}} hurls a charge to the target location that remains for a few seconds. ''Satchel Charge'' can be recast within the duration, and does so automatically afterwards.",
+        "blurb2": "{{sbc|Recast:}} The charge explodes to deal {{as|magic damage}} and {{tip|airborne|knock back}} nearby enemies hit. If this hits '''Ziggs''', he will {{tip|dash}} farther away.",
+        "blurb3": "The explosion will {{tip|execute}} {{tip|turrets}} hit {{as|below a certain health}}.",
+        "description": "{{sbc|Active:}} '''Ziggs''' hurls a charge to the target location, remaining there for 4 seconds and granting {{tip|sight}} of the area. ''Satchel Charge'' can be recast within the duration, and does so automatically afterwards. If recast while in flight, the charge will explode immediately upon landing.",
+        "description2": "{{sbc|Recast:}} '''Ziggs''' detonates the charge, causing it to explode to deal {{as|magic damage}} to nearby enemies and {{tip|airborne|knock them back}} up to 500 units away from the center of the explosion, though not through terrain. If this hits '''Ziggs''', he will {{tip|dash}} up to 825 units away from the center.",
+        "leveling2": "{{st|Magic Damage|{{ap|70 to 210}} {{as|(+ 50% AP)}}}}",
+        "description3": "{{cci|Satchel Charge Turret Explosion Indicator.png|border=false||{{sbc|Turret Explosion:}}}} The explosion also {{ccs|{{tip|execute|executes}}|magic}} enemy {{tip|turrets}} within that are below a {{as|'''maximum''' health}} threshold.",
+        "leveling3": "{{st|Demolition Threshold|{{as|{{ap|25 to 35}}% of turret's '''maximum''' health}}}}",
+        "description4": "'''''Ziggs''' does not {{tip|dash}} if he is {{tip|immobilize|immobilized}} or {{tip|ground|grounded}}. He can cast any of his abilities during the dash.''",
+        "target range": "1000",
+        "speed": "{{tt|1750|Missile speed}} <!--/ {{tt|X|Knockback speed}} / {{tt|Y|Dash speed}}-->",
+        "effect radius": "{{tip|cr|icononly = true}} 325 / {{tip|sight|icononly = true}} 400",
+        "cooldown": "{{ap|20 to 12}}",
+        "cdstart": "on-cast",
+        "cost": "80",
+        "costtype": "Mana",
+        "targeting": "[[Location-targeted|Location]] / [[Auto-targeted|Auto]]",
+        "affects": "Enemies / Self",
+        "cast time": "{{fd|0.25}}",
+        "damagetype": "magic",
+        "projectile": "true",
+        "spelleffects": "special",
+        "onhiteffects": "|grounded = special",
+        "knockdown": "true",
+        "spellshield": "True",
+        "notes": "*The initial cast counts as an ability activation for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n**Detonating the ability manually does not.\n* Deals {{tip|area damage}} to non-turrets and {{tip|raw damage}} to turrets.\n* ''Satchel Charge's'' distance increases with proximity to the charge, resulting in being knocked straight up when aligned directly on top of it.\n* '''Ziggs''' will not ''dash'' from ''Satchel Charge's'' detonation while {{si|Teleport|Teleporting}} but he will while {{si|Recall|Recalling}}.",
+        "_comments": [
+          "/ {{tt|X|Knockback speed}} / {{tt|Y|Dash speed}}"
+        ]
+      }
+    },
+    "E": {
+      "id": "ZiggsE",
+      "name": "Hexplosive Minefield",
+      "description": "Ziggs scatters proximity mines that detonate on enemy contact, dealing magic damage and slowing. Successive mine detonations on the same target deal reduced damage.",
+      "tooltip": "Ziggs scatters proximity mines that detonate on enemy contact, dealing {{ totaldamage }} magic damage and Slows by {{ slow*-100 }}% for {{ e4 }} seconds. Mines last {{ mineduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16",
+      "cost": "70/80/90/100/110",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "10",
+        "1.5",
+        "0.4",
+        "0",
+        "135",
+        "150",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Mine Damage",
+          "Total AP Ratio",
+          "Slow",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ damagepermine }} -> {{ damagepermineNL }}",
+          "{{ apratiopermine*100.000000 }}% -> {{ apratioperminenl*100.000000 }}%",
+          "{{ slow*-100.000000 }}% -> {{ slownl*-100.000000 }}%",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ziggs",
+        "skill": "E",
+        "icon": "Hexplosive Minefield.png",
+        "blurb": "{{sbc|Active:}} {{ci|Ziggs}} scatters proximity mines over the target location that remain a period. Each mine will explode upon contact with an enemy or terrain, dealing {{as|magic damage}} and briefly {{tip|slow|slowing}} them.",
+        "description": "{{sbc|Active:}} '''Ziggs''' scatters a cluster of 11 proximity mines over the target location that grant {{tip|sight}} of the area for 2 seconds, {{tt|arming after {{fd|0.5}} seconds|travel time of the mines spreading out plus a brief delay}} and lasting for up to 10 seconds.",
+        "description2": "Each mine within the area explodes upon contact with terrain or an enemy, dealing {{as|magic damage}} and {{tip|slow|slowing}} them for {{fd|1.5}} seconds, as well as granting {{tip|sight}} of the area around the explosion for 2 seconds. An enemy takes 40% damage from subsequent mines.",
+        "leveling2": "{{st|Magic Damage per Mine|{{ap|30 to 190}} {{as|(+ 25 / 30 / 35 / 40 / 45% AP)}}|Reduced Damage per Mine|{{ap|30*0.4 to 190*0.4}} {{as|(+ {{ap|25*0.4 to 45*0.4}}% AP)}}|Maximum Total Magic Damage|{{ap|30*(1+0.4*10) to 190*(1+0.4*10)}} {{as|(+ {{ap|125 to 225}}% AP)}}\n{{st|Slow|{{ap|10 to 50}}%}}",
+        "target range": "900",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|325|Effective minefield radius}} / {{tip|cr|icononly = true}} {{tt|135|Detection and explosion radius of each individual mine}}",
+        "speed": "{{tt|1550|Travel speed to cast location}}",
+        "cooldown": "16",
+        "cost": "{{ap|70 to 110}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "projectile": "true",
+        "spelleffects": "spellaoe",
+        "onhiteffects": "|spellshield  = Special",
+        "notes": "* The mine cluster is built of 2 rings, with 3 mines in the inner ring (radius pending for test) and 8 mines on the other ring (200 radius), all equally spaced.\n** The angular offset is randomized on each cast.\n** Because of the {{tip|cr|icononly = true}} 135 detonation radius of each mine, the total possible range of a mine from the minefield hitting an enemy from the cast location is {{tip|cr|icononly = true}} 335 units. It will often be slightly less as the minefield is not guaranteed to be angled the right way for this.\n* Mines will not explode upon contact with [[Terrain#Player-Generated|player-generated terrain]].\n* {{tip|Spell shield}} will block the effects of a single detonation."
+      }
+    },
+    "R": {
+      "id": "ZiggsR",
+      "name": "Mega Inferno Bomb",
+      "description": "Ziggs deploys his ultimate creation, the Mega Inferno Bomb, hurling it an enormous distance. Enemies in the primary blast zone take more damage than those farther away.",
+      "tooltip": "Ziggs hurls his ultimate creation, dealing {{ empowereddamage }} magic damage in the center of the blast radius, or {{ blastdamage }} magic damage at the edge.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/95/70",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "5000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Blast Zone Damage",
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ basedamage*0.650000 }} -> {{ basedamagenl*0.650000 }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ziggs",
+        "skill": "R",
+        "icon": "Mega Inferno Bomb.png",
+        "blurb": "{{sbc|Active:}} {{ci|Ziggs}} catapults the ''Mega Inferno Bomb'' to the target location that deals {{as|magic damage}} to enemies hit, increased at the epicenter.",
+        "description": "{{sbc|Active:}} '''Ziggs''' catapults the ''Mega Inferno Bomb'' to the target location, granting {{tip|sight}} within a 600 radius around its destination for 4 seconds.",
+        "icon2": "Mega Inferno Bomb Minimap.png",
+        "description2": "The bomb explodes upon arrival to deal {{as|magic damage}} to enemies hit, increased by 50% against those in the epicenter.",
+        "leveling2": "{{st|Magic Damage|{{ap|200 to 400}} {{as|(+ {{fd|73.3{{Recurring|3}}}}% AP)}}|Increased Damage|{{ap|200*1.5 to 400*1.5}} {{as|(+ 110% AP)}}}}",
+        "speed": "2250",
+        "target range": "5000",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|525|Estimated}}",
+        "inner radius": "{{tip|cr|icononly = true}} {{tt|230|Estimated}}",
+        "cooldown": "{{ap|120 to 70}}",
+        "cast time": "{{fd|0.375}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "projectile": "false",
+        "damagetype": "magic",
+        "spelleffects": "aoe",
+        "onhiteffects": "|spellshield  = True",
+        "notes": "* Allies cannot see ''Mega Inferno Bomb's'' area indicator until shortly before the blast.\n* ''Mega Inferno Bomb'' takes {{fd|2.64}} seconds from the start of the cast time to land when ''Ziggs'' casts at maximum range (reduced to {{fd|1.617}} seconds from the start of the cast time when casting within {{tt|2700|Estimated}} units).\n** When cast within 2700 units, ''Mega Inferno Bomb'' has a fixed travel time. Beyond that, the travel time is equal to the cast distance divided by the now-fixed missile speed.\n* The area reveal on the target location begins as soon as the cast time is completed and can see into {{tip|brush}} and across terrain.",
+        "flavorsound": "{{sm2|Ziggs_Original_R_2.ogg}} ''\"I bring the Big One!\"''"
+      }
+    }
+  }
+}

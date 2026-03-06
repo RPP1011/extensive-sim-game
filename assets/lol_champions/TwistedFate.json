@@ -1,0 +1,285 @@
+{
+  "id": "TwistedFate",
+  "name": "Twisted Fate",
+  "title": "the Card Master",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage",
+    "Marksman"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Loaded Dice",
+      "description": "Upon killing a unit, Twisted Fate rolls his 'lucky' dice receiving 1 to 6 bonus gold.",
+      "wiki_detail": {
+        "champion": "Twisted Fate",
+        "skill": "I",
+        "icon": "Loaded Dice.png",
+        "blurb": "{{sbc|Innate:}} Whenever {{ci|Twisted Fate}} kills an enemy, he generates a small amount of {{g|'''bonus''' gold}} based on chance.",
+        "blurb4": "<small>''Since his dice are loaded, '''Twisted Fate''' has an increased chance of gaining {{g|'''maximum''' gold}}.''</small>",
+        "description": "{{sbc|Innate:}} Whenever '''Twisted Fate''' kills an enemy, he generates {{g|icononly=true}}{{pp|type=probability|1 to 6 for 6|key1=%|100*2/3/5 to 100*2/3/5;100/3|color=gold}}. He also has a chance equal to his {{as|critical strike chance}} to generate an additional {{g|{{pp|type=probability|1 to 6 for 6|key1=%|100/3;100*2/3/5 to 100*2/3/5|color=gold}}}}.",
+        "description2": "''As you'd expect, '''Twisted Fate''' plays with loaded dice. His initial dice roll is weighted to have an increased chance of granting {{g|6}}, while his critical dice roll is weighted against him and has an increased chance of granting {{g|1}}.''",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|projectile   =",
+        "grounded": "|knockdown    =",
+        "notes": "* The expected bonus gold gained per unit killed is {{g|4}}.\n** The expected additional gold due to critical strike chance is {{g|3}}."
+      }
+    },
+    "Q": {
+      "id": "WildCards",
+      "name": "Wild Cards",
+      "description": "Twisted Fate throws three cards, dealing damage to each enemy unit they pass through.",
+      "tooltip": "Twisted Fate throws three cards that deal {{ totaldamage }} magic damage each.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "6/5.75/5.5/5.25/5",
+      "cost": "60/70/80/90/100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "10000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Twisted Fate",
+        "skill": "Q",
+        "icon": "Wild Cards.png",
+        "blurb": "{{sbc|Active:}} {{ci|Twisted Fate}} throws a fan of three cards in the target direction that each deal {{as|magic damage}} to enemies hit.",
+        "description": "{{sbc|Active:}} '''Twisted Fate''' throws a fan of three cards in a cone in the target direction that each deal {{as|magic damage}} to enemies hit.",
+        "description2": "''Enemies can be damaged only once per pass.''",
+        "leveling": "{{st|Magic Damage|{{ap|60 to 240}} {{as|(+ 50% '''bonus''' AD)}} {{as|(+ 85% AP)}}}}",
+        "target range": "1450",
+        "speed": "1000",
+        "angle": "45{{degree}}",
+        "cast time": "{{fd|0.25}}",
+        "cooldown": "{{ap|6 to 5}}",
+        "cost": "{{ap|60|70|80|90|100}}",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "{{Effect at cast time end}}"
+      }
+    },
+    "W": {
+      "id": "PickACard",
+      "name": "Pick a Card",
+      "description": "Twisted Fate chooses a magic card from his deck, and uses that for his next attack, causing bonus effects.",
+      "tooltip": "Twisted Fate begins shuffling his deck, allowing him to Recast to lock in one of three cards and enhance his next Attack.\nThe Blue Card deals {{ bluedamage }} magic damage and restores {{ e6 }} Mana.The Red Card deals {{ reddamage }} to nearby enemies and Slows by {{ e2 }}% for 2.5 seconds.The Gold Card deals {{ golddamage }} and Stuns for {{ e3 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "6",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "200",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "40/60/80/100/120",
+        "30/35/40/45/50",
+        "1/1.25/1.5/1.75/2",
+        "30/45/60/75/90",
+        "15/22.5/30/37.5/45",
+        "70/90/110/130/150",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Blue Card Damage",
+          "Blue Card Mana Restore",
+          "Red Card Damage",
+          "Red Card Slow %",
+          "Gold Card Damage",
+          "Gold Card Stun Duration",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ e6 }} -> {{ e6NL }}",
+          "{{ e4 }} -> {{ e4NL }}",
+          "{{ e2 }}% -> {{ e2NL }}%",
+          "{{ e5 }} -> {{ e5NL }}",
+          "{{ e3 }} -> {{ e3NL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Twisted Fate",
+        "skill": "W",
+        "icon": "Pick a Card.png",
+        "blurb": "{{sbc|Active:}} {{ci|Twisted Fate}} cycles through three cards over the next few seconds. ''Pick a Card'' can be recast within the duration, which selects the current card hovered.",
+        "blurb2": "{{sbc|Recast:}} '''Twisted Fate's''' next basic attack becomes empowered to deal {{as|magic damage}} and apply an additional effect based on the card selected.\n* [[File: Blue Card.png|20px|link=]] {{sbc|Blue Card Bonus:}} Deals significantly increased {{as|magic damage}} and restores {{sti|{{as|mana}}}}.\n* [[File: Red Card.png|20px|link=]] {{sbc|Red Card Bonus:}} Deals increased {{as|magic damage}} to the target and surrounding enemies, {{tip|slow|slowing}} them for a short time.\n* [[File: Gold Card.png|20px|link=]] {{sbc|Gold Card Bonus:}} Deals {{as|magic damage}} and briefly {{tip|stun|stuns}} the target.",
+        "description": "{{sbc|Active:}} '''Twisted Fate''' cycles through three cards for 6 seconds, hovering each for {{fd|0.5}} seconds at a time. ''Pick a Card'' can be recast within the duration, which selects the current card hovered.",
+        "icon2": "Twisted Fate Pick a Card.gif",
+        "description2": "{{sbc|Recast:}} '''Twisted Fate''' empowers his next [[basic attack]] within 6 seconds to have a {{fd|0.25}}-second cast time, deal {{as|'''modified''' magic damage}}, and apply an additional effect based on the card selected. This damage cannot {{tip|critically strike}} but is increased based on {{as|critical strike chance}}.",
+        "icon3": "Blue Card.png",
+        "description3": "{{sbc|Blue Card Bonus:}} Deals {{as|magic damage}}, increased by {{as|{{pp|key=%|key1=%|type=critical strike chance|0 to 57.5 for 11|0 to 100|formula=0.575% x critical strike chance, capped at 57.5% increase}}|critical chance}}, and restores {{as|{{sti|mana}}|mana}}.",
+        "leveling3": "{{st|Magic Damage|{{ap|40 to 120}} {{as|(+ 100% AD)}} {{as|(+ 100% AP)}}}}\n{{st|Mana Restored|{{as|{{ap|70 to 150}}|mana}}}}",
+        "icon4": "Red Card.png",
+        "description4": "{{sbc|Red Card Bonus:}} Deals {{as|magic damage}} to the target and surrounding enemies, increased by {{as|{{pp|key=%|key1=%|type=critical strike chance|0 to 35 for 11|0 to 100|formula=0.35% x critical strike chance, capped at 35% increase}}|critical chance}}. All targets hit are {{tip|slow|slowed}} for {{fd|2.5}} seconds.",
+        "leveling4": "{{st|Magic Damage|{{ap|30 to 90}} {{as|(+ 100% AD)}} {{as|(+ 70% AP)}}}}\n{{st|Slow|{{ap|30 to 50}}%}}",
+        "icon5": "Gold Card.png",
+        "description5": "{{sbc|Gold Card Bonus:}} Deals {{as|magic damage}}, increased by {{as|{{pp|key=%|key1=%|type=critical strike chance|0 to 25 for 11|0 to 100|formula=0.25% x critical strike chance, capped at 25% increase}}|critical chance}}, and {{tip|stun|stuns}} the target for a duration.",
+        "leveling5": "{{st|Magic Damage|{{ap|15 to 45}} {{as|(+ 100% AD)}} {{as|(+ 50% AP)}}}}\n{{st|Stun Duration|{{ap|1 to 2}} seconds}}",
+        "description6": "''Pick a Card's recast {{tip|basic attack reset|resets}} '''Twisted Fate's''' basic attack timer. The recast can be used while affected by {{tip|cast-inhibiting crowd control}}.''",
+        "cooldown": "6",
+        "cdstart": "post-effect",
+        "cost": "{{ap|50 to 70}}",
+        "costtype": "Mana",
+        "effect radius": "100",
+        "speed": "{{tt|1500|Attack missile speed, same as basic attacks}}",
+        "targeting": "Auto",
+        "affects": "Enemies, Self",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "cast time": "none",
+        "spelleffects": "spell",
+        "projectile": "True",
+        "parry": "True",
+        "notes": "*The initial cast counts as an ability activation for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n**Recasting the ability does not.\n* The first card shown is random but the order always remains the same ({{ai|Blue Card|Twisted Fate}}, {{ai|Red Card|Twisted Fate}}, {{ai|Gold Card|Twisted Fate}}, repeat).\n** Upon activation, an indicator visible to allies and enemies appears above '''Twisted Fate''' to show him shuffling his deck of cards while remaining in the same order, the card he can choose at every moment glows over the others. The selected card is specified for the duration of the enhanced attack.\n* {{pending for test}} The interval until the next card is hovered is {{rutngt|0.5}} every time, instead of some times {{fd|0.528}} and other times {{fd|0.495}}.\n* If the target becomes {{tip|untargetable}}, {{tip|death|dies}}, or is too far away during the empowered attack's cast time, it is cancelled but not consumed.\n* The empowered attack will trigger against [[structures]] and [[buildings]] but not [[ward]]s."
+      }
+    },
+    "E": {
+      "id": "CardmasterStack",
+      "name": "Stacked Deck",
+      "description": "Every 4 attacks, Twisted Fate deals bonus damage. In addition, his Attack Speed is increased.",
+      "tooltip": "Passive: Twisted Fate gains {{ attackspeedbonus }}% Attack Speed and every 4th Attack deals an additional {{ bonusdamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0",
+      "cost": "0",
+      "cost_type": "Passive",
+      "range": "0",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "4",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Bonus Damage:",
+          "Attack Speed"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ attackspeedbonus }}% -> {{ attackspeedbonusNL }}%"
+        ]
+      },
+      "resource": "Passive",
+      "wiki_detail": {
+        "champion": "Twisted Fate",
+        "skill": "E",
+        "icon": "Stacked Deck.png",
+        "blurb": "{{sbc|Passive:}} {{ci|Twisted Fate}} gains {{sti|as|{{as|'''bonus''' attack speed}}}}. His basic attacks {{tip|on-hit}} generate [[stack]]s of ''Stacked Deck'', which stacks up to a cap.",
+        "blurb2": "At max stacks, his next basic attack consumes them all to deal {{as|'''bonus''' magic damage}}.",
+        "description": "{{sbc|Passive:}} '''Twisted Fate''' gains {{sti|as|{{as|'''bonus''' attack speed}}}}. His basic attacks {{tip|on-hit}} generate a [[stack]] of ''Stacked Deck'', stacking up to 3 times.<br/><br/> At 3 stacks, his next basic attack is empowered to consume them all to deal {{as|'''bonus''' magic damage}}, reduced to 50% against structures.<br><br>'''Twisted Fate''' gains maximum stacks of ''Stacked Deck'' upon learning the ability and on [[death|respawn]].",
+        "leveling": "{{st|Bonus Attack Speed|{{ap|10 to 50}}%}}\n{{st|Bonus Magic Damage|{{ap|65 to 165}} {{as|(+ 25% '''bonus''' AD)}} {{as|(+ 40% AP)}}}}",
+        "targeting": "Passive",
+        "affects": "Enemies, Self",
+        "damagetype": "Magic",
+        "spellshield": "false",
+        "spelleffects": "proc",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "parry": "special",
+        "notes": "* ''Stacked Deck'' can be {{tip|dodged}} and/or missed if '''Twisted Fate''' is {{tip|blind|blinded}} (the on-hit effect is not consumed in either case) but cannot be {{tip|blocked}} (the enhanced attack is consumed and the bonus damage is still applied).\n* The empowered attack will trigger against [[structures]] but not [[ward]]s."
+      }
+    },
+    "R": {
+      "id": "Destiny",
+      "name": "Destiny",
+      "description": "Twisted Fate predicts the fortunes of his foes, revealing all enemy champions and enabling the use of Gate, which teleports Twisted Fate to any target location in 1.5 seconds.",
+      "tooltip": "Twisted Fate focuses on his cards, granting True Sight of all enemy champions on the map for {{ e1 }} seconds and allowing him to Recast.\n\nRecast: Twisted Fate teleports up to {{ e4 }} units away.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "170/140/110",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "5500",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "6/8/10",
+        "0",
+        "0",
+        "5500",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Duration",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ recastduration }} -> {{ recastdurationNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Twisted Fate",
+        "skill": "R",
+        "icon": "Destiny.png",
+        "blurb": "{{sbc|Active:}} {{ci|Twisted Fate}} marks all enemy champions, {{tip|true sight|revealing}} them for a few seconds. ''Destiny'' can be recast within the duration.",
+        "blurb2": "{{sbc|Recast - Gate:}} '''Twisted Fate''' briefly {{tip|channels}} before {{tip|blink|blinking}} to the target location, {{tip|homing projectile destruction|destroying}} all incoming {{tip|projectiles}}.",
+        "description": "{{sbc|Active:}} '''Twisted Fate''' marks all targetable enemy champions, {{tip|true sight|revealing}} them for a duration. ''Destiny'' can be recast after {{fd|0.5}} seconds within the duration.",
+        "leveling": "{{st|Effect Duration|{{ap|6 to 10}} seconds}}",
+        "icon2": "Gate.png",
+        "description2": "{{sbc|Recast - Gate:}} '''Twisted Fate''' {{tip|channels}} for {{fd|1.5}} seconds before {{tip|blink|blinking}} to the target location, {{tip|homing projectile destruction|destroying}} all {{tip|projectiles}} targeting him in the process.",
+        "flavorsound": "{{sm2|Twisted_Fate_Original_R_1.ogg}} ''\"No fightin' destiny.\"''",
+        "target range": "5500",
+        "effect radius": "Global",
+        "cooldown": "{{tt|{{ap|180 to 120}}|Starts after recast times out or is used}}",
+        "cdstart": "post-effect",
+        "cast time": "none",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "[[Auto-targeted|Auto]] / [[Location-targeted|Location]]",
+        "affects": "Enemies, Allies, Self",
+        "spellshield": "True",
+        "grounded": "special",
+        "silence": "true",
+        "notes": "*Both casts count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n* '''Twisted Fate''' cannot recast ''Destiny'' while {{tip|ground|grounded}} or {{tip|root|rooted}}.\n* The {{tip|nearsight}} from {{ai|Paranoia|Nocturne}} will overpower the {{tip|true sight|reveal}} from ''Destiny'' regardless of which one was cast first (enemy champions can still be revealed by ''Destiny'' after ''Paranoia'' ends if durations permit).\n* Using the recast will inform allies with a [[ping]].\n** Both allies and enemies can see an indicator at the targeted location of where '''Twisted Fate''' will appear.\n* The following table refers for interactions while '''Twisted Fate''' is {{tip|channel|channeling}}:\n** Item actives with cast times as well as {{ii|Titanic Hydra}} are disabled during the channel.\n*** Trying to cast a disabled item active will buffer it to cast at the completion of the channel.\n{{ct|channel|attack=false|move=false|cast={{ai|Pick a Card|Twisted Fate}} is usable. {{ai|Wild Cards|Twisted Fate}} is disabled.|items=true,,interrupts|spells=false|interrupts=death, ground, root, silence}}"
+      }
+    }
+  }
+}

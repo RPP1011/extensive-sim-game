@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0130_3v3_s1"
+seed = 12053
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["arcanist", "cleric", "shaman"]
+enemy_hero_templates = ["Gwen", "Thresh", "Renata"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

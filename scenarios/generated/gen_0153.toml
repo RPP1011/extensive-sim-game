@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_warrior_witch_doctor_warden"
+seed = 1052
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["warrior", "witch_doctor", "warden"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

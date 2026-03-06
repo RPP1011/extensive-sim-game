@@ -1,0 +1,27 @@
+# Error Log
+
+> Failures and repeated issues. Use this to add guardrails.
+
+[2026-02-23 18:13:53] ITERATION 1 left uncommitted changes; review run summary at /mnt/d/Projects/game/.ralph/runs/run-20260223-180726-47424-iter-1.md
+[2026-02-24 03:14:05 UTC] US-002 iteration 1: repeated full-suite failures in cargo test: game_core::tests::focused_mission_outpaces_matching_unfocused_mission, game_core::tests::unfocused_missions_progress_without_focus, tests::non_headless_update_smoke_does_not_panic.
+[2026-02-23 19:16:47] ITERATION 1 left uncommitted changes; review run summary at /mnt/d/Projects/game/.ralph/runs/run-20260223-190651-49914-iter-1.md
+[2026-02-24 03:20:19 UTC] US-003 iteration 2: cargo test unchanged known failures: game_core::tests::focused_mission_outpaces_matching_unfocused_mission, game_core::tests::unfocused_missions_progress_without_focus, tests::non_headless_update_smoke_does_not_panic.
+[2026-02-23 19:24:31] ITERATION 2 left uncommitted changes; review run summary at /mnt/d/Projects/game/.ralph/runs/run-20260223-190651-49914-iter-2.md
+[2026-02-24 03:31:47 UTC] US-004 iteration 3: cargo test unchanged known failures: game_core::tests::focused_mission_outpaces_matching_unfocused_mission, game_core::tests::unfocused_missions_progress_without_focus, tests::non_headless_update_smoke_does_not_panic.
+[2026-02-23 19:35:46] ITERATION 3 left uncommitted changes; review run summary at /mnt/d/Projects/game/.ralph/runs/run-20260223-190651-49914-iter-3.md
+[2026-02-24 03:39:49 UTC] US-005 iteration 4: cargo test unchanged known failures: game_core::tests::focused_mission_outpaces_matching_unfocused_mission, game_core::tests::unfocused_missions_progress_without_focus, tests::non_headless_update_smoke_does_not_panic.
+[2026-02-23 19:44:21] ITERATION 4 left uncommitted changes; review run summary at /mnt/d/Projects/game/.ralph/runs/run-20260223-190651-49914-iter-4.md
+[2026-02-24 03:50:16 UTC] US-006 iteration 5: cargo test unchanged known failures: game_core::tests::focused_mission_outpaces_matching_unfocused_mission, game_core::tests::unfocused_missions_progress_without_focus, tests::non_headless_update_smoke_does_not_panic.
+[2026-02-23 19:53:14] ITERATION 5 left uncommitted changes; review run summary at /mnt/d/Projects/game/.ralph/runs/run-20260223-190651-49914-iter-5.md
+[2026-02-24 03:59:04 UTC] US-007 iteration 6: cargo test unchanged known failures: game_core::tests::focused_mission_outpaces_matching_unfocused_mission, game_core::tests::unfocused_missions_progress_without_focus, tests::non_headless_update_smoke_does_not_panic.
+[2026-02-23 20:03:12] ITERATION 6 left uncommitted changes; review run summary at /mnt/d/Projects/game/.ralph/runs/run-20260223-190651-49914-iter-6.md
+[2026-02-24 04:12:31 UTC] US-008 iteration 7: cargo test unchanged known failures: game_core::tests::focused_mission_outpaces_matching_unfocused_mission, game_core::tests::unfocused_missions_progress_without_focus, tests::non_headless_update_smoke_does_not_panic.
+[2026-02-23 20:14:17] ITERATION 7 left uncommitted changes; review run summary at /mnt/d/Projects/game/.ralph/runs/run-20260223-190651-49914-iter-7.md
+[2026-02-24 04:22:26 UTC] US-009 iteration 8: cargo test unchanged known failures: game_core::tests::focused_mission_outpaces_matching_unfocused_mission, game_core::tests::unfocused_missions_progress_without_focus, tests::non_headless_update_smoke_does_not_panic.
+[2026-02-23 20:25:30] ITERATION 8 left uncommitted changes; review run summary at /mnt/d/Projects/game/.ralph/runs/run-20260223-190651-49914-iter-8.md
+[2026-02-24 04:30:17 UTC] US-010 iteration 9: cargo test unchanged known failures: game_core::tests::focused_mission_outpaces_matching_unfocused_mission, game_core::tests::unfocused_missions_progress_without_focus, tests::non_headless_update_smoke_does_not_panic.
+[2026-02-23 20:32:30] ITERATION 9 left uncommitted changes; review run summary at /mnt/d/Projects/game/.ralph/runs/run-20260223-190651-49914-iter-9.md
+[2026-02-24 04:38:43 UTC] US-011 iteration 10: cargo test unchanged known failures: game_core::tests::focused_mission_outpaces_matching_unfocused_mission, game_core::tests::unfocused_missions_progress_without_focus, tests::non_headless_update_smoke_does_not_panic.
+[2026-02-23 20:40:52] ITERATION 10 left uncommitted changes; review run summary at /mnt/d/Projects/game/.ralph/runs/run-20260223-190651-49914-iter-10.md
+[2026-02-24 04:46:28 UTC] US-012 iteration 11: cargo test unchanged known failures: game_core::tests::focused_mission_outpaces_matching_unfocused_mission, game_core::tests::unfocused_missions_progress_without_focus, tests::non_headless_update_smoke_does_not_panic.
+[2026-02-23 20:48:29] ITERATION 11 left uncommitted changes; review run summary at /mnt/d/Projects/game/.ralph/runs/run-20260223-190651-49914-iter-11.md

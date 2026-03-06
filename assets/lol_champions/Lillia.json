@@ -1,0 +1,285 @@
+{
+  "id": "Lillia",
+  "name": "Lillia",
+  "title": "the Bashful Bloom",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Dream-Laden Bough",
+      "description": "Hitting a champion or monster with a skill will deal additional max Health damage over time.",
+      "wiki_detail": {
+        "champion": "Lillia",
+        "skill": "I",
+        "icon": "Dream-Laden Bough.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Lillia}} abilities apply ''Dream Dust'' to enemies hit, which continually deals {{as|magic damage}} based on the {{as|target's '''maximum''' health}} over a short time, and {{tip|heal|heals}} her for the same duration.",
+        "description": "{{sbc|Innate:}} '''Lillia's''' [[champion ability|abilities]] apply ''Dream Dust'' to enemies hit, which deals{{ft|{{as|5% {{as|(+ {{fd|1.25}}% per 100 AP)}} of the target's '''maximum''' health}} {{as|'''total''' magic damage}} over 3 seconds, capped at 65|{{as|{{fd|0.8{{Recurring|3}}}}% {{as|(+ {{fd|0.208{{Recurring|3}}}}% per 100 AP)}} of the target's '''maximum''' health}} {{as|magic damage}} every {{fd|0.5}} seconds over 3 seconds, capped at {{fd|10.8{{recurring|3}}}} per tick}}against {{tip|monster|monsters}}.",
+        "description2": "'''Lillia''' {{tip|heals}} herself for{{ft|{{pp|39 to 54}} {{as|(+ 15% AP)}} against large {{tip|monsters}} and {{pp|6 to 90}} {{as|(+ 30% AP)}} against {{tip|champions}}|{{pp|39/6 to 54/6}} {{as|(+ {{ap|15/6}}% AP)}} against large {{tip|monsters}} and {{pp|6/6 to 90/6}} {{as|(+ {{ap|30/6}}% AP)}} against {{tip|champions}} every {{fd|0.5}} seconds}}over the duration of ''Dream Dust'', reduced to 15% effectiveness for each target afflicted beyond the first. She may only heal against 1 monster at a time.",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spellshield": "true",
+        "spelleffects": "dot",
+        "occurrence": "|projectile   =",
+        "grounded": "|knockdown    =",
+        "parry": "|video        =",
+        "notes": "* {{ais|Lilting Lullaby|Lillia}} application does not apply ''Dream Dust'', but its triggering damage does.\n* ''Dream Dust'' is applied even if the target takes no damage from an ability, e.g. by being {{tip|shield|shielded}} or {{tip|invulnerability|invulnerable}}, but not when the ability hit is prevented in the first place (e.g. {{tip|spell shield}})."
+      }
+    },
+    "Q": {
+      "id": "LilliaQ",
+      "name": "Blooming Blows",
+      "description": "Passively, Lillia gains stacking Move Speed when hitting enemies with spells. She can activate this to deal magic damage to nearby enemies, dealing extra true damage on the edge.",
+      "tooltip": "Passive: Lillia's Ability hits grant {{ prancespeed }} Move Speed for {{ pranceduration }} seconds, stacking up to {{ prancemaxstacks }} times.\n\nActive: Lillia whirls her censer, dealing {{ totaldamage }} magic damage, plus an additional {{ bonustruedamage }} true damage at the outer edge.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "6/5.5/5/4.5/4",
+      "cost": "65",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "450",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Move Speed",
+          "Magic Damage",
+          "True Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ prancebonusperstack*100.000000 }}% -> {{ prancebonusperstacknl*100.000000 }}%",
+          "{{ flatdamagebase }} -> {{ flatdamagebaseNL }}",
+          "{{ flatdamagetrue }} -> {{ flatdamagetrueNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lillia",
+        "skill": "Q",
+        "icon": "false",
+        "icon2": "Prance.png",
+        "blurbicon": "Blooming Blows.png",
+        "blurb": "{{sbc|Passive:}} Whenever {{cis|Lillia}} abilities hit at least one enemy, she generates a stack of ''Prance'', up to a cap.",
+        "blurb2": "{{sbc|Active:}} '''Lillia''' swings her censer around her, dealing {{as|magic damage}} to nearby enemies. Enemies hit within the outer edge of the area additionally take the same amount as {{as|'''bonus''' true damage}}.",
+        "blurb4": "{{sbc|Prance:}} For each stack, '''Lillia''' gains {{sti|{{as|'''bonus''' movement speed}}}}.",
+        "description": "{{sbc|Passive:}} Whenever '''Lillia's''' abilities hit at least one enemy, she generates a [[stack]] of ''Prance'' for {{fd|6.5}} seconds, refreshing on subsequent hits and stacking up to 4 times. Stacks expire by one every {{fd|1.5}} seconds when the duration ends.",
+        "description2": "{{sbc|Prance:}} For each stack, '''Lillia''' gains {{sti|{{as|'''bonus''' movement speed}}}}.",
+        "leveling2": "{{st|Bonus Movement Speed|{{ap|3 to 7}}% {{as|(+ 3% per 100 AP)}}|Maximum Bonus Movement Speed|{{ap|3*4 to 7*4}}% {{as|(+ 12% per 100 AP)}}}}",
+        "icon3": "Blooming Blows.png",
+        "description3": "{{sbc|Active:}} '''Lillia''' swings her censer around her, dealing {{as|magic damage}} to nearby enemies. Enemies hit within the outer edge of the area additionally take the same amount as {{sti|{{as|'''bonus''' true damage}}}}.",
+        "leveling3": "{{st|Magic Damage|{{ap|35 to 75}} {{as|(+ 35% AP)}}|Total Mixed Damage|{{ap|35*2 to 75*2}} {{as|(+ 70% AP)}}}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|225|Inner Radius}} / {{tt|485|Outer Radius}}",
+        "cast time": "{{fd|0.25}}",
+        "cooldown": "{{ap|6 to 4}}",
+        "cost": "65",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "damagetype": "{{tip|Magic damage|Magic}} / {{tip|True damage|True}}",
+        "spelleffects": "aoe",
+        "affects": "Self, Enemies",
+        "spellshield": "true",
+        "notes": "* '''Lillia''' can move during ''Blooming Blows' ''cast time.\n{{Effect at cast time end}}\n* {{tip|Spell shield}} will not prevent '''Lillia''' from gaining a ''Prance'' stack.\n* For the purpose of aim-assist, '''Lillia's''' {{stil|attack range}} is reduced{{ft|to 275|by 50}}during ''Blooming Blows's'' cast time."
+      }
+    },
+    "W": {
+      "id": "LilliaW",
+      "name": "Watch Out! Eep!",
+      "description": "Lillia deals damage in a nearby area, dealing heavy damage in the center.",
+      "tooltip": "Lillia winds up a huge strike, dealing {{ flatdamage }} magic damage. Enemies in the center take {{ flatdamagesweetspot }} damage instead.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "500",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ flatdamagebase }} -> {{ flatdamagebaseNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lillia",
+        "skill": "W",
+        "icon": "Watch Out! Eep!.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lillia}} {{tip|dash|dashes}} toward the target area and smashes her censer, dealing {{as|magic damage}} to enemies hit. Enemies hit within the epicenter are dealt {{ccs|increased damage|magic}}.",
+        "description": "{{sbc|Active:}} '''Lillia''' {{tip|dash|dashes}} to 150 units in front of the target location over {{rutngt|0.75}}, though not through terrain, and deals {{as|magic damage}} in an area around the target spot. Enemies hit within the epicenter are dealt {{ccs|200% increased damage|magic}}.",
+        "leveling": "{{st|Magic Damage|{{ap|80 to 160}} {{as|(+ 35% AP)}}|Increased Damage|{{ap|80*3 to 160*3}} {{as|(+ 105% AP)}}}}",
+        "description2": "''Watch Out! Eep!'' deals 50% damage to {{tip|minions}}.",
+        "leveling2": "{{st|Minion Damage|{{ap|80*0.5 to 160*0.5}} {{as|(+ {{fd|17.5}}% AP)}}|Increased Minion Damage|{{ap|80*0.5*3 to 160*0.5*3}} {{as|(+ {{fd|52.5}}% AP)}}}}",
+        "description3": "''Watch Out! Eep! will cast at max range if cast beyond that.''",
+        "target range": "{{tt|500|Range for center of AoE}} / {{tt|350|Maximum dash range}}",
+        "effect radius": "{{tip|er|icononly = true}} {{tt|65|Inner Radius}} / {{tip|cr|icononly = true}} {{tt|250|Outer Radius}}",
+        "cooldown": "{{ap|14 to 10}}",
+        "cast time": "{{tt|None|Dash starts immediately before a 0.25 cast time, but actual delay is 0.6 to 0.75 seconds}}",
+        "cost": "50",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "damagetype": "Magic",
+        "affects": "Enemies",
+        "spelleffects": "aoe",
+        "spellshield": "true",
+        "grounded": "true",
+        "knockdown": "true",
+        "notes": "* '''Lillia''' dashes to her target location over {{tt|{{fd|0.627}} to {{fd|0.759}} seconds|0.6 to 0.75 seconds, but rounded to the next game tick}}, but cannot move before the strike goes off at {{fd|0.759}} seconds, regardless.\n* '''Lillia''' can hop over the edges of certain walls despite the ability being unable to traverse terrain."
+      }
+    },
+    "E": {
+      "id": "LilliaE",
+      "name": "Swirlseed",
+      "description": "Lillia hurls a seed that damages and slows those it lands on. If it doesn't hit anything, it will continue rolling until it hits a wall or target.",
+      "tooltip": "Lillia lobs a swirlseed overhead, dealing {{ impactdamagetotal }} magic damage where it lands and revealing and Slowing them by {{ slowamount*100 }}% for {{ slowduration }} seconds. If no enemies are hit, the seed rolls until it hits an enemy or collides with terrain.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "700",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ impactdamage }} -> {{ impactdamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lillia",
+        "skill": "E",
+        "icon": "Swirlseed.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lillia}} lobs a seed at the target area that rolls forward indefinitely. The seed detonates upon hitting an enemy or terrain, dealing {{as|magic damage}} to enemies in a cone, {{tip|slow|slowing}} and {{tip|standard sight|revealing}} them for a short time.",
+        "description": "{{sbc|Active:}} '''Lillia''' lobs a seed at the target location that rolls forward indefinitely. The seed detonates upon hitting an enemy or terrain while on the ground, dealing {{as|magic damage}} to enemies in a cone, {{tip|slow|slowing}} them by 40% for 3 seconds and {{tip|standard sight|revealing}} them for 2 seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|60 to 160}} {{as|(+ 50% AP)}}}}",
+        "description2": "''Swirlseed will cast at max range if cast beyond that.''",
+        "cooldown": "14",
+        "cast time": "{{fd|0.4}}",
+        "cost": "70",
+        "costtype": "Mana",
+        "target range": "{{tt|700|Lob range}} / {{tt|Global|Roll range}}",
+        "width": "{{tip|er|icononly = true}} {{tt|120|Lobbed and rolling seed (Lobbed seed does not collide by itself)}}",
+        "speed": "{{tt|5000|Lobbed seed}} / {{tt|1400|Rolling Seed}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|150|Landing Location Hit Radius, estimated}} <!--/ {{tt|X|Explosion Cone's Radius}}-->",
+        "angle": "<!--X-->",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "projectile": "special",
+        "spelleffects": "aoe",
+        "spellshield": "special",
+        "notes": "* ''Swirlseed's'' origin is determined from '''Lillia's''' position at the start of cast, the rolling direction is determined from '''Lillia's''' position at the end of cast (when the projectile is created, not when the seed starts rolling).\n* {{tip|Spell shield}} does not prevent the seed from detonating thus striking nearby targets.\n* {{tip|Projectile|Projectile destroying effects}} will still make the rolling seed detonate upon colliding with them, but not when the initial arcing missile is destroyed.\n** If {{cai|Unbreakable|Braum}} blocks the initial projectile, it is destroyed and deals 0 damage to him, as well as not triggering the cone-shaped area of effect.\n* The spot at which the seed will collide with terrain is highlighted while it is rolling.\n[[File: Swirlseed collision indicator.png|175px|thumb|left|Collision indicator]]",
+        "_comments": [
+          "/ {{tt|X|Explosion Cone's Radius}}",
+          "X"
+        ]
+      }
+    },
+    "R": {
+      "id": "LilliaR",
+      "name": "Lilting Lullaby",
+      "description": "Lillia causes all enemies with Dream Dust on them to become Drowsy before falling asleep. Those enemies will take extra damage on being forcibly woken up.",
+      "tooltip": "Lillia causes all enemy champions with Dream Dust to become Drowsy for {{ drowsyduration }} seconds. Afterward, they fall Asleep for {{ sleepduration }} seconds.\n\nWhen awakened by damage, they take an additional {{ totaldamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "150/130/110",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1600",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Break Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ breakdamagebase }} -> {{ breakdamagebaseNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lillia",
+        "skill": "R",
+        "icon": "Lilting Lullaby.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lillia}} casts a magical lullaby over all enemy {{tip|champions}} affected by ''{{ai|Dream-Laden Bough|Lillia|Dream Dust}}'', making them {{tip|drowsy}} before falling {{tip|asleep}} for a few seconds.",
+        "blurb2": "Damaging {{tip|sleep|sleeping}} targets consumes the debuff to deal additional {{as|magic damage}}.",
+        "description": "{{sbc|Active:}} '''Lillia''' casts a magical lullaby over all enemy {{tip|champions}} affected by ''{{ai|Dream-Laden Bough|Lillia|Dream Dust}}'', which {{tt|arrives after {{fd|0.3}} seconds|fixed travel time missile}} and renders them {{tip|drowsy}} for {{fd|1.5}} seconds, {{tip|slow|slowing}} them by 10%. After the duration, they fall {{tip|asleep}} for 2 seconds.",
+        "icon2": "Lilting Lullaby 2.png",
+        "description2": "The next instance of non-{{tip|persistent damage|persistent}} damage that a {{tip|sleep|sleeping}} target takes from {{tip|champions}}, large {{tip|monsters}} or {{tip|turrets}} consumes the debuff to deal {{as|'''additional''' magic damage|magic damage}}.",
+        "leveling2": "{{st|Magic Damage|{{ap|100 to 200}} {{as|(+ 40% AP)}}}}",
+        "description3": "''An enemy champion affected by {{ai|Dream-Laden Bough|Lillia|Dream Dust}} is required to cast this ability.''",
+        "cost": "50",
+        "costtype": "Mana",
+        "cooldown": "{{ap|150 to 110}}",
+        "cast time": "{{fd|0.4}}",
+        "effect radius": "{{tt|Global|or 19500}}",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "true",
+        "spelleffects": "spell",
+        "projectile": "true",
+        "callforhelp": "|parry        =",
+        "grounded": "|knockdown    =",
+        "notes": "* The {{tip|sleep}} debuff is named ''Shhh.. They're Asleep''.\n* '''Lillia''' can move during ''Lilting Lullaby's'' cast time.\n* The additional {{as|magic damage}} dealt is accredited to '''Lillia''' and benefits from her {{sti|{{as|magic penetration}}}}.\n* ''Lilting Lullaby's'' missile will still hit even if the target becomes {{tip|untargetable}} during the cast time.{{bug}}\n** If the target becomes so while it is travelling, it will be destroyed.\n* ''Lilting Lullaby's'' application does not trigger aggro from {{tip|turret|turrets}}, only its triggering damage does.\n** {{ai|Dream-Laden Bough|Lillia|Dream Dust's}} persistent damage will still cause '''Lillia''' to trigger turret aggro, unless she casts ''Lilting Lullaby'' right before it runs out.\n* {{ai|Dream-Laden Bough|Lillia|Dream Dust}} will mark targets if ''Lilting Lullaby'' is learned.",
+        "flavorsound": "{{sm2|Lillia_Original_R_0.ogg}} ''\"Sleepy time!\"''"
+      }
+    }
+  }
+}

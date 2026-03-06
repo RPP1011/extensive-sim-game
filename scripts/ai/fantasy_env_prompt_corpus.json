@@ -1,0 +1,146 @@
+[
+  {
+    "id": "env_001",
+    "title": "Stormwall Citadel Overlook",
+    "tags": ["mountain", "fortress", "storm", "dusk", "concept-art"],
+    "prompt": "Epic fantasy environment concept art of a colossal citadel fused into black cliffs above a stormy sea, jagged lightning in distant rain bands, torch-lit battlements, dramatic scale cues with tiny caravans on a switchback road, painterly brushwork, high atmosphere, no characters, no text."
+  },
+  {
+    "id": "env_002",
+    "title": "Sunken Bazaar Canals",
+    "tags": ["city", "canal", "ruins", "humid", "concept-art"],
+    "prompt": "Detailed environment concept art of a flooded fantasy bazaar district with collapsed arches, hanging lanterns reflecting in canal water, improvised rope bridges, moss-covered stone, layered depth and fog, production-ready mood board quality, no characters, no text."
+  },
+  {
+    "id": "env_003",
+    "title": "Ashen Steppe Monolith",
+    "tags": ["wasteland", "monolith", "volcanic", "wide-shot", "concept-art"],
+    "prompt": "Wide cinematic fantasy landscape concept art of an ashen steppe cut by lava scars and dominated by a cracked rune monolith, wind-driven dust plumes, distant obsidian mesas, subtle volcanic glow at horizon, matte painting style, no characters, no text."
+  },
+  {
+    "id": "env_004",
+    "title": "Moonfen Witchlight Marsh",
+    "tags": ["swamp", "night", "mystic", "bioluminescent", "concept-art"],
+    "prompt": "Night-time fantasy marsh environment concept art with bioluminescent reeds, twisted cypress silhouettes, moonlight mist layers, half-submerged standing stones, eerie yet readable composition for level ideation, no characters, no text."
+  },
+  {
+    "id": "env_005",
+    "title": "Skybridge Ruin Expanse",
+    "tags": ["aerial", "ruins", "bridges", "cloudscape", "concept-art"],
+    "prompt": "Environment concept art of monumental broken skybridges linking floating basalt plateaus over a dense cloud ocean, sunrise rim light, weathered masonry and wind-torn banners, high-detail architectural storytelling, no characters, no text."
+  },
+  {
+    "id": "env_006",
+    "title": "Frostspire Pass",
+    "tags": ["snow", "mountains", "fortified-pass", "cold", "concept-art"],
+    "prompt": "Fantasy environment concept painting of a fortified mountain pass under blizzard conditions, carved ice watchtowers, avalanche debris, muted blue-gray palette with warm beacon lights, strategic readability for game worldbuilding, no characters, no text."
+  },
+  {
+    "id": "env_007",
+    "title": "Verdant Titan Skeleton Valley",
+    "tags": ["jungle", "valley", "bones", "ancient", "concept-art"],
+    "prompt": "Lush fantasy jungle valley concept art where colossal fossilized titan ribs arch overhead like natural bridges, layered canopy fog, waterfalls, ancient carved paths, high production concept rendering, no characters, no text."
+  },
+  {
+    "id": "env_008",
+    "title": "Obsidian Gate Caldera",
+    "tags": ["volcanic", "caldera", "gate", "ritual", "concept-art"],
+    "prompt": "Dark fantasy environment concept art of an obsidian gate complex embedded in an active volcanic caldera, magma rivers and basalt buttresses, dramatic top-down and horizon depth cues, no characters, no text."
+  },
+  {
+    "id": "env_009",
+    "title": "Whispering Birch Cathedrals",
+    "tags": ["forest", "sacred", "sunbeams", "tranquil", "concept-art"],
+    "prompt": "Painterly fantasy forest environment concept art of towering white birch groves resembling cathedral columns, god rays through drifting pollen, stone processional road overgrown by roots, serene but mysterious mood, no characters, no text."
+  },
+  {
+    "id": "env_010",
+    "title": "Ironreef Harbor Bastion",
+    "tags": ["coast", "harbor", "industrial-fantasy", "fortress", "concept-art"],
+    "prompt": "Environment concept art of a fortified harbor built into iron-rich cliffs, heavy chain booms, tide-powered cranes, storm-beaten breakwaters, cinematic overcast lighting, detailed materials and silhouette readability, no characters, no text."
+  },
+  {
+    "id": "env_011",
+    "title": "Crystal Salt Flats",
+    "tags": ["desert", "salt", "crystal", "mirage", "concept-art"],
+    "prompt": "High-detail fantasy landscape concept art of endless salt flats punctuated by giant translucent crystal growths, heat haze, mirrored sky reflections, distant caravan routes and ruined waystones, no characters, no text."
+  },
+  {
+    "id": "env_012",
+    "title": "Catacomb Sinkhole City",
+    "tags": ["underground", "sinkhole", "ruins", "verticality", "concept-art"],
+    "prompt": "Environment concept art of a collapsed city descending into a massive sinkhole exposing catacomb layers, suspended bridges and hanging shrines, volumetric dust beams, strong vertical composition, no characters, no text."
+  },
+  {
+    "id": "env_013",
+    "title": "Amber Dune Observatory",
+    "tags": ["desert", "observatory", "astral", "sunset", "concept-art"],
+    "prompt": "Fantasy environment concept painting of an ancient astronomical observatory half-buried in amber dunes, brass instruments and broken orrery rings, warm sunset sky with distant dust storm wall, no characters, no text."
+  },
+  {
+    "id": "env_014",
+    "title": "Shattered Glacier Reliquary",
+    "tags": ["glacier", "ice-cave", "reliquary", "cold", "concept-art"],
+    "prompt": "Environment concept art of a sacred reliquary revealed by a fractured glacier, translucent blue ice caverns, collapsed buttresses, crystalline reflections and freezing fog, high-fidelity matte concept style, no characters, no text."
+  },
+  {
+    "id": "env_015",
+    "title": "Copperwood Foundry Frontier",
+    "tags": ["frontier", "forest", "foundry", "settlement", "concept-art"],
+    "prompt": "Detailed fantasy environment concept art of a frontier foundry settlement carved into redwood trunks, copper pipes and smoke stacks intertwined with nature, muddy roads and rain puddles, no characters, no text."
+  },
+  {
+    "id": "env_016",
+    "title": "Riftlight Canyon Temples",
+    "tags": ["canyon", "temples", "arcane", "night", "concept-art"],
+    "prompt": "Night fantasy environment concept art of cliffside temples lining a deep canyon filled with blue arcane rift light, rope elevators and carved switchback stairs, dramatic contrast and depth layering, no characters, no text."
+  },
+  {
+    "id": "env_017",
+    "title": "Tideglass Library Isles",
+    "tags": ["islands", "library", "coastal", "mist", "concept-art"],
+    "prompt": "Environment concept art of fragmented coastal isles connected by narrow causeways to an ancient library fortress, sea mist rolling through courtyards, weathered statuary and tide pools, no characters, no text."
+  },
+  {
+    "id": "env_018",
+    "title": "Golden Prairie Skyport",
+    "tags": ["plains", "skyport", "wind", "sunlit", "concept-art"],
+    "prompt": "Bright fantasy environment concept art of a wind-powered skyport across endless golden prairie, massive tether towers, canvas canopies and rotating vane machinery, clean readability for gameplay spaces, no characters, no text."
+  },
+  {
+    "id": "env_019",
+    "title": "Brine Cathedral Caves",
+    "tags": ["cave", "cathedral", "saltwater", "subterranean", "concept-art"],
+    "prompt": "Moody fantasy cave environment concept art of flooded cathedral chambers under the coast, stalactite vaults, reflected candlelight in brine pools, collapsed transepts and barnacle textures, no characters, no text."
+  },
+  {
+    "id": "env_020",
+    "title": "Hollow Crown Highlands",
+    "tags": ["highlands", "ruins", "windswept", "dawn", "concept-art"],
+    "prompt": "Epic highland environment concept art of ring-shaped ruins called the Hollow Crown on a windswept plateau, dawn light slicing through fog banks, monumental stone geometry for encounter staging, no characters, no text."
+  },
+  {
+    "id": "env_021",
+    "title": "Gloamriver Deadfall",
+    "tags": ["river", "forest", "dark-fantasy", "rain", "concept-art"],
+    "prompt": "Dark fantasy environment concept art of a rain-heavy river choke point packed with ancient fallen trees, improvised palisades and ruined watch shrines, dynamic water flow and readable traversal lanes, no characters, no text."
+  },
+  {
+    "id": "env_022",
+    "title": "Ivory Plateau Wind Tombs",
+    "tags": ["plateau", "tombs", "wind", "bleached-stone", "concept-art"],
+    "prompt": "Fantasy environment concept art of bleached-stone tomb complexes on an ivory plateau, wind-sculpted arches and dust devils, sparse vegetation and harsh noon contrast, no characters, no text."
+  },
+  {
+    "id": "env_023",
+    "title": "Lantern Reef Terraces",
+    "tags": ["reef", "terraces", "coastal", "twilight", "concept-art"],
+    "prompt": "Twilight fantasy environment concept art of stepped reef terraces with lantern pylons and wave-cut sanctuaries, phosphorescent surf, warm-cool color contrast, cinematic composition, no characters, no text."
+  },
+  {
+    "id": "env_024",
+    "title": "Gravemoss Fen Fortress",
+    "tags": ["fen", "fortress", "ruined", "mist", "concept-art"],
+    "prompt": "Environment concept art of a half-submerged fortress in a misty fen, collapsed towers draped in moss, causeways broken into islands, diffuse overcast lighting and strong mood, no characters, no text."
+  }
+]

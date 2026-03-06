@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0109_2v2_s1"
+seed = 12032
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["warrior", "Leblanc"]
+enemy_hero_templates = ["templar", "Nilah"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0147_5v6_d3_s1"
+seed = 12270
+hero_count = 5
+enemy_count = 6
+difficulty = 3
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["shaman", "engineer", "alchemist", "assassin", "cleric"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

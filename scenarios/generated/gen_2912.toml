@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0050_4v4_s2"
+seed = 21973
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["Aatrox", "Annie", "Heimerdinger", "Illaoi"]
+enemy_hero_templates = ["Qiyana", "Khazix", "Skarner", "Nautilus"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

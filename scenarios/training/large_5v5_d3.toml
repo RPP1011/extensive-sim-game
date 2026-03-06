@@ -1,0 +1,13 @@
+[scenario]
+name = "large_5v5_d3"
+seed = 5175
+hero_count = 5
+enemy_count = 5
+difficulty = 3
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["templar", "berserker", "bard", "pyromancer", "monk"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Either"

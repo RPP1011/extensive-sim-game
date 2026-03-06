@@ -1,0 +1,12 @@
+[scenario]
+name        = "3x Berserker + Cleric"
+seed        = 229693
+hero_count  = 4
+enemy_count = 16
+difficulty  = 3
+max_ticks   = 5000
+room_type   = "Climax"
+hero_templates = ["Berserker", "Berserker", "Berserker", "Cleric"]
+
+[assert]
+outcome = "Either"

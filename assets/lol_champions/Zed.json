@@ -1,0 +1,286 @@
+{
+  "id": "Zed",
+  "name": "Zed",
+  "title": "the Master of Shadows",
+  "resource_type": "Energy",
+  "tags": [
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Contempt for the Weak",
+      "description": "Zed's basic attacks against low health targets deals bonus Magic Damage. This effect can only occur once every few seconds against the same enemy champion.",
+      "wiki_detail": {
+        "champion": "Zed",
+        "skill": "I",
+        "icon": "Contempt for the Weak.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Zed}} basic attacks against targets {{as|below half health}} will deal {{as|'''bonus''' magic damage}} equal to a portion of {{as|their '''maximum''' health}}.",
+        "blurb2": "This effect cannot recur on the same {{tip|champion}} for a period.",
+        "description": "{{sbc|Innate:}} '''Zed's''' [[basic attack]]s against targets {{as|below 50% '''maximum''' health}} are empowered to deal {{as|{{pp|key=%|6 to 10 for 3|1;7;17}} of the target's '''maximum''' health}} as {{as|'''bonus''' magic damage}}.",
+        "description2": "Against {{tip|monsters}}, ''Contempt for the Weak'' deals 200% damage, capped at 300.",
+        "description3": "''Contempt for the Weak'' cannot occur on the same {{tip|champion}} more than once every few seconds.",
+        "ontargetcdstatic": "10",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spelleffects": "proc",
+        "spellshield": "False",
+        "parry": "special",
+        "onhiteffects": "Special",
+        "notes": "* The enhanced attack applies other [[on-hit effect]]s and can {{tip|critical strike|critically strike}} as normal (the bonus damage cannot).\n* ''Contempt for the Weak'' is not consumed when {{tip|dodged}} or {{tip|blind|missed}}, but it is consumed when {{tip|blocked}}.\n* ''Contempt for the Weak'' considers the target's health upon landing the attack, not when it's declared.\n** If the target falls below the threshold while '''Zed''' is winding up the attack, ''Contempt for the Weak'' applies, and vice versa.\n* The empowered attack will not trigger against [[structures]]."
+      }
+    },
+    "Q": {
+      "id": "ZedQ",
+      "name": "Razor Shuriken",
+      "description": "Zed and his shadows throw their shurikens.\n\nEach shuriken deals damage to every enemy hit.",
+      "tooltip": "Zed and his Shadows throw their shurikens, each dealing {{ totaldamage }} physical damage to the first enemy they pass through, and {{ passthroughdamage }} physical damage to each additional enemy.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "6",
+      "cost": "75/70/65/60/55",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Zed",
+        "skill": "Q",
+        "icon": "Razor Shuriken.png",
+        "blurb": "{{sbc|Active:}} {{ci|Zed}} throws a shuriken in the target direction that deals {{as|physical damage}} to enemies hit.",
+        "description": "{{sbc|Active:}} '''Zed''' throws a shuriken in the target direction that deals {{as|physical damage}} to enemies hit, reduced to 60% against targets beyond the first.",
+        "leveling": "{{st|Physical Damage|{{ap|80 to 240}} {{as|(+ 100% '''bonus''' AD)}}|Reduced Damage|{{ap|80*0.6 to 240*0.6}} {{as|(+ {{ap|100*0.6}}% '''bonus''' AD)}}}}",
+        "target range": "{{tip|cr|icononly = true}} 925",
+        "width": "{{tip|er|icononly = true}} 100",
+        "speed": "1700",
+        "cast time": "{{fd|0.25}}",
+        "cooldown": "6",
+        "cost": "{{ap|75 to 55}}",
+        "costtype": "energy",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "true",
+        "spelleffects": "Area of effect",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Shurikens'' blocked by {{tip|spell shield}} still count as being hit for the reduced pass-through damage.\n* If '''Zed''' buffers an attack command during ''Razor Shuriken's'' cast time the attack will perform slower than if '''Zed''' had attacked after the cast time.\n** The same does not happen if '''Zed''' recasts {{ai|Living Shadow 2|Zed|Living Shadow}} during ''Razor Shuriken's'' cast time.\n{{Effect at cast time end}}"
+      }
+    },
+    "W": {
+      "id": "ZedW",
+      "name": "Living Shadow",
+      "description": "Passive: Zed gains energy whenever he and his shadows strike an enemy with the same ability. Energy can only be gained once per cast ability.\n\nActive: Zed's shadow dashes forward, remaining in place for a few seconds. Reactivating Living Shadow will cause Zed to switch positions with this shadow.",
+      "tooltip": "Passive: Zed gains {{ e3 }} Energy whenever he and his Shadows strike an enemy with the same Ability.\n\nActive: Zed's Shadow dashes forward, remaining in place for {{ e5 }} seconds. Recasting this Ability will cause Zed to switch positions with this Shadow.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "20/19/18/17/16",
+      "cost": "40/35/30/25/20",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "5.25",
+        "0.2",
+        "30/35/40/45/50",
+        "5.25",
+        "5",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Energy Return",
+          "@AbilityResourceName@ Cost",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e3 }} -> {{ e3NL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Zed",
+        "skill": "W",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} Whenever {{ci|Zed}} and his [[File:Zed's Shadow.png|20px|border]] ''Shadows'' hit an ability on the same target, he restores {{sti|{{as|energy}}}}.",
+        "blurb2": "{{sbc|Active:}} '''Zed''' sends a [[File:Zed's Shadow.png|20px|border]] ''Shadow'' to the target location that will remain for a few seconds, being able to mimic his ''{{ai|Razor Shuriken|Zed}}'' and ''{{ai|Shadow Slash|Zed}}''. ''Living Shadow'' can be recast while within range of the ''Shadow''.",
+        "blurb3": "{{sbc|Recast:}} '''Zed''' and the [[File:Zed's Shadow.png|20px|border]] ''Shadow'' {{tip|blink}} to swap places.",
+        "description": "{{sbc|Passive:}} '''Zed''' restores {{sti|{{as|energy}}}} whenever he and his [[File:Zed's Shadow.png|20px|border|link=]] ''Shadows'' or multiple ''Shadows'' hit an ability on the same target. This may only occur once per cast ability.",
+        "leveling": "{{st|Energy Restored|{{as|{{ap|30 to 50}}|energy}}}}",
+        "icon2": "Living Shadow.png",
+        "description2": "{{sbc|Active:}} '''Zed''' creates a [[File:Zed's Shadow.png|20px|border|link=]] ''Shadow'' that dashes to the target location and remains there for {{fd|5.25}} seconds, being able to mimic ''{{ai|Razor Shuriken|Zed}}'' and ''{{ai|Shadow Slash|Zed}}'' regardless of range. ''Living Shadow'' can be recast while within range of the ''Shadow''.",
+        "icon3": "Living Shadow 2.png",
+        "description3": "{{sbc|Recast:}} '''Zed''' and the [[File:Zed's Shadow.png|20px|border|link=]] ''Shadow'' {{tip|blink}} to swap places. If ''Living Shadow'' was recast while the ''Shadow'' is dashing, the recast will instead occur once it has been placed.",
+        "description4": "''If an ability is cast while the Shadow is dashing, it will cast that ability once it has been placed. See [[Zed/LoL#Pets|Pets]] for more details about Shadows. Living Shadow will cast at max range if cast beyond that.''",
+        "target range": "650",
+        "effect radius": "{{tt|2000|Recast range}} / {{tt|Global|Ability mimick range}}",
+        "speed": "2500",
+        "cast time": "none",
+        "cooldown": "{{ap|20 to 16}}",
+        "cdstart": "on-cast",
+        "cost": "{{ap|40 to 20}}",
+        "costtype": "energy",
+        "targeting": "[[Location-targeted|Location]] / [[Auto-targeted|Auto]]",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|projectile   =",
+        "grounded": "special",
+        "notes": "* '''Zed''' gains a buff for {{fd|5.25}} seconds that indicates and determines the duration in which he may recast ''Living Shadow''.\n** The buff is granted briefly after ''Living Shadow'' is cast.\n*** If cast at minimum distance, the buff and the ''Shadow's'' individual durations will effectively start at the same time.\n*** If cast at greater than the minimum distance, then the buff's duration will start before the ''Shadow's'' duration.\n* The passive will grant its energy refund at rank 1 even if ''Living Shadow'' hasn't been learned yet.\n* The {{tip|energy}} refund is not granted if the mimicked ability is blocked by a {{tip|spell shield}}.\n* ''Living Shadow'' cannot be recast while {{tip|ground|grounded}} or {{tip|root|rooted}}.\n* If ''Living Shadow'' is recast during {{ai|Q|Zed}}, '''Zed''' will instantly release the shuriken from his original position while still remaining in cast time, and the [[File:Zed's Shadow.png|20px|border|link=]] ''Shadow'' will release the shuriken based on '''Zed's''' remaining cast time.{{bug|1}}\n* The [[File:Zed's Shadow.png|20px|border|link=]] ''Shadow'' will cast {{ai|E|Zed}} independently of being in {{ais|Q|Zed}} cast time or not.{{bug|2}}\n* '''Zed''' will swap places with the [[File:Zed's Shadow.png|20px|border|link=]] ''Shadow'' by all means if he buffers ''Living Shadow's'' recast during its dash.{{bug|2}}\n** ''Living Shadow'' cannot be recast while '''Zed''' is marking his target with {{ai|R|Zed}}, but may still be recast if it was buffered.{{bug|1}}\n* If '''Zed''' casts ''Living Shadow'' while a non-''{{ai|Death Mark 2|Zed|Death Mark}} Shadow'' is already present, the previous ''Shadow'' will instantly disappear.\n* [[File:Zed's Shadow.png|20px|border|link=]] ''Shadows'' will not disappear when '''Zed''' dies.{{bug}}",
+        "flavorsound": "{{sm2|Zed_Original_Move_0.ogg}} ''\"The shadows have enlightened me.\"''"
+      }
+    },
+    "E": {
+      "id": "ZedE",
+      "name": "Shadow Slash",
+      "description": "Zed and his Shadows slash, dealing damage to nearby enemies. Enemies hit by a Shadow's slash are slowed.",
+      "tooltip": "Zed and his Shadows slash, dealing {{ totaldamage }} physical damage to nearby enemies.\n\nEach enemy champion hit by Zed's slash reduces Living Shadow's Cooldown by {{ shadowhitcdr }} seconds.\n\nEnemies hit by a Shadow's slash are Slowed by {{ movespeedmod*-100 }}% for {{ slowduration }} seconds. Enemies hit by multiple slashes take no additional damage but are Slowed by {{ movespeedmodbonus*-100 }}% instead.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "5/4.5/4/3.5/3",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "290",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ movespeedmod*-100.000000 }}% -> {{ movespeedmodnl*-100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Zed",
+        "skill": "E",
+        "icon": "Shadow Slash.png",
+        "blurb": "{{sbc|Active:}} {{ci|Zed}} slashes to deal {{as|physical damage}} to nearby enemies hit. Enemies hit by a [[File:Zed's Shadow.png|20px|border]] ''Shadow's'' slash are also briefly {{tip|slow|slowed}}.",
+        "blurb3": "''{{ai|Living Shadow|Zed|Living Shadow's}}'' cooldown is {{sti|cdr|reduced}} for each enemy {{tip|champion}} hit by '''Zed's''' slash.",
+        "description": "{{sbc|Active:}} '''Zed''' slashes to deal {{as|physical damage}} to nearby enemies.",
+        "leveling": "{{st|Physical Damage|{{ap|65 to 165}} {{as|(+ 65% '''bonus''' AD)}}}}",
+        "description2": "Enemies hit by a [[File:Zed's Shadow.png|20px|border|link=]] ''Shadow's'' slash are {{tip|slow|slowed}} for {{fd|1.5}} seconds, with multiple slashes dealing no additional damage but the slow's effectiveness being increased by 50%.",
+        "leveling2": "{{st|Slow|{{ap|20 to 40}}%|Enhanced Slow|{{ap|20*1.5 to 40*1.5}}%}}",
+        "description3": "''{{ai|Living Shadow|Zed|Living Shadow's}}'' {{sti|'''current''' cooldown}} is reduced by 3 seconds for each enemy {{tip|champion}} hit by '''Zed's''' slash.",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|315|From Zed}} / {{tt|290|From shadow clones}}",
+        "cooldown": "{{ap|5 to 3}}",
+        "cost": "40",
+        "cast time": "none",
+        "costtype": "energy",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "special",
+        "spelleffects": "aoe",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* {{tip|Spell shield|Spell shield}} will only block one ''Shadow Slash'' even if two hit at the same time, the {{tip|slow}} will not apply regardless.\n* ''Shadow Slash'' does not interrupt attack, movement, or cast commands."
+      }
+    },
+    "R": {
+      "id": "ZedR",
+      "name": "Death Mark",
+      "description": "Zed becomes untargetable and dashes to an enemy champion, marking them. After 3 seconds the mark triggers, repeating a portion of all the damage Zed dealt to the target while they were marked.",
+      "tooltip": "Zed becomes Untargetable and dashes to an enemy champion, marking them. After {{ rdeathmarkduration }} seconds, the mark triggers, dealing {{ rcalculateddamage }} physical damage and repeating {{ rdamageamp*100 }}% of all damage dealt to the target by Zed while the mark was active.\n\nThe dash leaves a Shadow behind for {{ rshadowdurationdisplayed }} seconds. Zed can Recast this Ability to switch positions with this Shadow.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/110/100",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "625",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Mark Detonation Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ rdamageamp*100.000000 }}% -> {{ rdamageampnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Zed",
+        "skill": "R",
+        "icon": "Death Mark.png",
+        "blurb": "{{sbc|Active:}} {{ci|Zed}} becomes {{tip|untargetable}} while {{tip|dash|dashing}} to the target enemy champion, then marks them ''Marked for Death'' for a short time. He leaves behind a [[File:Zed's Shadow.png|20px|border]] ''Shadow'' that will remain for a period and mimic ''{{ai|Razor Shuriken|Zed}}'' and ''{{ai|Shadow Slash|Zed}}''.",
+        "blurb2": "''Death Mark'' can be recast while the [[File:Zed's Shadow.png|20px|border]] ''Shadow'' remains.",
+        "blurb3": "{{sbc|Recast:}} '''Zed''' and his [[File:Zed's Shadow.png|20px|border]] ''Shadow'' {{tip|blink}} to swap places.",
+        "blurb4": "{{sbc|Marked for Death:}} After the duration, the mark detonates to deal {{as|physical damage}} based on the total damage dealt by '''Zed''' and his [[File:Zed's Shadow.png|20px|border|link=]] ''Shadows'' beforehand.",
+        "description": "{{sbc|Active:}} '''Zed''' becomes {{tip|untargetable}} and, after {{fd|0.6}} seconds, he {{tip|dashes}} 125 units through the target enemy champion over {{fd|0.35}} seconds. Afterwards, he becomes targetable again, renders the target ''Marked for Death'' for 3 seconds, and gains {{tip|ghost|ghosting}} for the same duration.",
+        "description2": "'''Zed''' also spawns a [[File:Zed's Shadow.png|20px|border|link=]] ''Shadow'' at his casting position for 9 seconds which is able to mimic ''{{ai|Razor Shuriken|Zed}}'' and ''{{ai|Shadow Slash|Zed}}'' regardless of range. ''Death Mark'' can be recast after {{fd|0.5}} seconds of his reappearance while the [[File:Zed's Shadow.png|20px|border|link=]] ''Shadow'' is active, though not in the last {{fd|1.25}} seconds of its duration.",
+        "description3": "{{sbc|Marked for Death:}} '''Zed''' stores a portion of all {{tt|pre-mitigation|Damage calculated before modifiers}} {{as|physical damage}} and {{as|magic damage}} he and his [[File:Zed's Shadow.png|20px|border|link=]] ''Shadows'' deal to the target, detonating at the end of the duration to deal {{as|physical damage}}.",
+        "leveling3": "{{st|Physical Damage|{{as|100% AD}} (+ {{ap|25|40|55}}% of damage stored)}}",
+        "icon4": "Death Mark 2.png",
+        "description4": "{{sbc|Recast:}} '''Zed''' and the [[File:Zed's Shadow.png|20px|border|link=]] ''Shadow'' {{tip|blink}} to swap places.",
+        "description5": "''If the target dies or is 1950 or more units away before the dash begins, Death Mark is cancelled, causing the ability to go on a {{sti|cd|{{fd|0.5}}-second}} cooldown, '''Zed''' to reappear at the cast location, and the [[File:Zed's Shadow.png|20px|border|link=]] Shadow he spawned to disappear.''",
+        "target range": "625",
+        "effect radius": "{{tt|Global|Recast and ability mimick range}}",
+        "cooldown": "{{ap|120 to 100}}",
+        "cdstart": "on-cast",
+        "cost": "|costtype     =",
+        "cast time": "none",
+        "targeting": "[[Unit-targeted|Unit]] / [[Auto-targeted|Auto]]",
+        "affects": "Self, Enemies",
+        "damagetype": "Physical",
+        "spellshield": "Special",
+        "spelleffects": "Single target",
+        "projectile": "|grounded     = True",
+        "knockdown": "special",
+        "flavorsound": "{{sm2|Zed_Original_R_3.ogg}} ''Zed chuckles.''",
+        "notes": "* '''Zed''' gains a buff for {{fd|7.5}} seconds that indicates and determines the duration in which he may recast ''Death Mark''.\n** The buff is granted on-cast and lingers for {{fd|0.25}} seconds after it expires.\n* The [[File:Zed's Shadow.png|20px|border|link=]] ''Shadow'' is spawned the moment ''Death Mark'' is cast.\n* '''Zed''' will track the target if they change locations.\n** He will dash through the target's previous location while still applying the {{as|mark|buzzword}} if they are 2200 or more units away.\n* '''Zed''' will be ordered to basic attack his target after reappearing.\n* ''Death Mark's'' stored damage derives from all [[basic attack]]s, [[Champion ability|abilities]], [[item]]s, [[Runes Reforged|runes]] and [[buff]]s.\n* ''Death Mark's'' [[File:Zed's Shadow.png|20px|border|link=]] ''Shadow'' is functionally the same as a regular one, but it lasts longer and can be swapped to regardless of range.\n** The range at which it mimics '''Zed's''' abilities does not change.\n* The {{as|mark|buzzword}} can be prevented by becoming {{tip|untargetable}} before it is applied (untargetability after application will not prevent the mark's detonation).\n* {{tip|Spell shield|Spell shields}} will only block the {{as|mark's|buzzword}} application. They will not prevent '''Zed''' from initiating the cast nor block the detonation from a {{as|mark|buzzword}} that is already applied.\n* If '''Zed''' dies during ''Death Mark'', the ability will cancel instantly and he will reappear at his current location. The cooldown is not compensated.\n** If he enters {{tip|resurrection}} before the dash, ''Death Mark'' does not cancel. If he enters it while dashing, the dash is interrupted.\n* If the {{tip|dash}} is interrupted, '''Zed''' stops, places himself to the ground (ends all displacements affecting him, but does not remove {{tip|airborne}} effects), and reappears prematurely at his current location. The {{as|mark|buzzword}} will still be applied regardless.\n** '''Zed''' will remove {{tip|airborne}} effects from himself immediately upon starting the dash.\n* Once '''Zed''' begins the {{tip|dash}}, two [[File:Zed's Shadow.png|20px|border|link=]] ''Shadows'' will also appear to be dashing through his target, each one spawning a certain distance behind the target (from the right and left). These ''shadows'' do '''not''' mimic abilities and disappear immediately after they stop dashing but they grant {{tip|sight}} of their surroundings.\n** These ''shadows'' have a tracking distance of 2200 and a dash speed of 1750.\n* ''Death Mark'' does not cancel if the target enters a {{tip|zombie state}} before the dash begins.\n* If the {{as|mark's|buzzword}} {{tt|post-mitigation damage|Damage calculated after modifiers}} is higher than the target's '''current''' health, a ''spinning shuriken'' will appear above the victim. This does not necessarily mean the target will die, as it does not consider {{tip|shield|shields}} or forms of [[damage modifier]]s that are not respected by this predictive calculation.\n{{clr}}\n[[File:Spinning_Shuriken_Indicator.png|thumb|center|225px|The indicator shown in-game ''(base skin)''.]]\n{{clr}}\n* This following table refers for interactions while '''Zed''' is in ''Death Mark'':\n{{ct|attack=false|cast=false|move=false|items=false|consume=false|spells=true, false, false, false, false, false, false|interrupts=revival-false}}"
+      }
+    }
+  }
+}

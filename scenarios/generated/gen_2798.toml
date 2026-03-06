@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0012_4v4_s2"
+seed = 21935
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["Naafiri", "pyromancer", "Irelia", "Rumble"]
+enemy_hero_templates = ["Darius", "Taliyah", "Trundle", "Jax"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

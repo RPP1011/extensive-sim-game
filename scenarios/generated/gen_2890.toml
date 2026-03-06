@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0043_5v5_s1"
+seed = 11966
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["engineer", "witch_doctor", "alchemist", "bard", "templar"]
+enemy_hero_templates = ["arcanist", "necromancer", "witch_doctor", "cleric", "paladin"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

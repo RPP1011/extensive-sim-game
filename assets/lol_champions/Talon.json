@@ -1,0 +1,285 @@
+{
+  "id": "Talon",
+  "name": "Talon",
+  "title": "the Blade's Shadow",
+  "resource_type": "Mana",
+  "tags": [
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Blade's End",
+      "description": "Talon's spells Wound champions and large monsters, stacking up to 3 times. When Talon attacks a champion with 3 stacks of Wound, they bleed for heavy damage over time.",
+      "wiki_detail": {
+        "champion": "Talon",
+        "skill": "I",
+        "icon": "Blade's End.png",
+        "blurb": "{{sbc|Innate:}} Each time {{cis|Talon}} abilities deal {{as|physical damage}} to {{tip|champions}} and large {{tip|monsters}}, they apply a stack of ''Wound'', stacking up to a cap.",
+        "blurb2": "His next basic attack against an enemy with maximum stacks consumes them all to deal {{as|physical damage}} over a short time. The target cannot gain new stacks over this duration.",
+        "description": "{{sbc|Innate:}} '''Talon's''' [[champion ability|abilities]] apply a [[stack]] of ''Wound'' to enemy {{tip|champions}} and large {{tip|monsters}} hit for 6 seconds, refreshing on basic attacks and subsequent applications and stacking up to 3 times.",
+        "description2": "'''Talon's''' next [[basic attack]] against an enemy with 3 ''Wound'' stacks is empowered to consume them all to cause the target to bleed, dealing{{ft|{{as|{{pp|80 to 280}}|physical damage}} {{as|(+ 210% '''bonus''' AD)}} {{as|'''total''' physical damage}} over 2 seconds,|{{as|{{pp|80/16 to 280/16}}|physical damage}} {{as|(+ {{ap|210/16}}% '''bonus''' AD)}} {{as|physical damage}} every {{fd|0.125}} seconds over 2 seconds,}}increased to 120% damage against {{tip|monsters}}. The target cannot gain ''Wound'' stacks during this time.",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "Special",
+        "spelleffects": "default",
+        "parry": "unknown",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        =\n* ''Blade End's'' enhanced attack will still trigger if {{tip|blocked}}.\n* Both passes of {{ai|Rake|Talon}} and {{ai|Shadow Assault|Talon}} apply a stack of ''Wound''.\n* Interaction with ''parrying'' effects ({{tip|dodge}}, {{tip|blind}}). If the attack gets parried, dodged or missed the stacks do not trigger or refresh and their amount remains unchanged.\n* {{tip|Spell shield}} prevents ''Wound'' [[stacks]] from being applied.\n** {{tip|Spell shield}} prevents ''Blade End's'' enhanced attack from triggering though still consuming all ''Wound'' [[stacks]]."
+      }
+    },
+    "Q": {
+      "id": "TalonQ",
+      "name": "Noxian Diplomacy",
+      "description": "Talon stabs the target unit. If they are within melee range, this attack deals critical damage. If they are outside melee range, Talon will leap at his target before stabbing them. Talon refunds some health and cooldown if this ability kills the target.",
+      "tooltip": "Talon leaps to a target and deals {{ leapdamage }} physical damage. If used in melee range, this Ability instead critically strikes for {{ criticaldamage }} physical damage.\n\nIf this Ability kills the target, Talon restores {{ totalhealing }} Health and refunds {{ cooldownrefund*100 }}% of its Cooldown.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8/7.5/7/6.5/6",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "575",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Talon",
+        "skill": "Q",
+        "icon": "Noxian Diplomacy.png",
+        "blurb": "{{sbc|Active:}} {{ci|Talon}} {{tip|dash|leaps}} to the target enemy, dealing {{as|physical damage}}. If the target is within melee range, '''Talon''' instead {{tip|critical strike|critically strikes}} the target, dealing {{as|'''bonus''' physical damage}}.",
+        "blurb2": "If ''Noxian Diplomacy'' kills the target, '''Talon''' {{tip|heals}} and {{sti|cdr|reduces}} its cooldown.",
+        "description": "{{sbc|Active:}} '''Talon''' {{tip|dashes}} toward the target enemy, stabbing the target upon arrival to deal {{as|physical damage}}. If cast within close range, '''Talon''' {{tt|{{tip|dash|dashes}} to the target|to within 150 units, if Talon is not closer already}} over the cast time instead and ''Noxian Diplomacy'' {{tip|critical strike|critically strikes}} for {{critical damage|150|100}} damage, as well as grants him {{sti|75 '''bonus''' attack range}} on his next basic attack within 1 second.",
+        "leveling": "{{st|Physical Damage|{{ap|65 to 145}} {{as|(+ 100% '''bonus''' AD)}}|Critical Physical Damage|{{ap|65*1.5 to 145*1.5}} {{as|(+ {{ap|100*1.5}}% '''bonus''' AD)}}}}",
+        "description2": "If ''Noxian Diplomacy'' kills the target, '''Talon''' {{tip|heals}} for {{pp|9 to 55}} and the ability's {{sti|cooldown}} is reduced by 50%.",
+        "description3": "''Noxian Diplomacy {{tip|basic attack reset|resets}} '''Talon's''' basic attack timer. {{ai|Shadow Assault|Talon}} can be cast during the dash.''",
+        "cooldown": "{{ap|8 to 6}}",
+        "target range": "{{tip|cr|icononly = true}} {{tt|575|Ranged dash attack range}} / {{tip|er|icononly = true}} {{tt|170|Close dash attack range}}",
+        "speed": "{{tt|1400|Dash speed, estimated}}",
+        "cast time": "{{tt|None|Ranged dash attack}} / {{tt|Attack Windup Time|Close dash attack}}",
+        "cost": "40",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "projectile": "|callforhelp  = True",
+        "grounded": "special",
+        "knockdown": "True",
+        "notes": "* '''Talon''' will track the target if they change locations with the ranged version of ''Noxian Diplomacy'', landing at an offset of 100 units before reaching them.\n** He will dash to the target's previous location while still dealing damage if the target is too far away or moves beyond {{tt|800|Estimated}} units.\n* When cast in close range, ''Noxian Diplomacy'' deals its damage at the completion of the cast time, rather than at the dash's completion.\n** The damage will be dealt even if '''Talon's''' dash is interrupted, so long as the cast time is completed.\n* '''Talon''' will be ordered to basic attack the target at the end of the dash.\n* While {{tip|ground|grounded}} or {{tip|root|rooted}}, ''Noxian Diplomacy'' can only be cast within close range.\n** '''Talon''' will still dash to the target in both cases.\n* ''Noxian Diplomacy'' will also grant the heal if the target dies upon '''Talon's''' completion of the dash.{{Unit-targeted cancel conditions}}** This only applies to the close dash attack."
+      }
+    },
+    "W": {
+      "id": "TalonW",
+      "name": "Rake",
+      "description": "Talon sends out a volley of daggers that then return back to him, dealing physical damage every time it passes through an enemy. The returning blades deal bonus damage and slow units hit.",
+      "tooltip": "Talon tosses a volley of blades, dealing {{ totalinitialdamage }} physical damage. The blades then return to him, dealing {{ totalreturndamage }} physical damage and Slowing by {{ movespeedslow*100 }}% for {{ slowduration }} second.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9/8.5/8/7.5/7",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "@AbilityResourceName@ Cost",
+          "Initial Damage",
+          "Return Damage",
+          "Slow",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ cost }} -> {{ costNL }}",
+          "{{ initialbasedamage }} -> {{ initialbasedamageNL }}",
+          "{{ returnbasedamage }} -> {{ returnbasedamageNL }}",
+          "{{ movespeedslow*100.000000 }}% -> {{ movespeedslownl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Talon",
+        "skill": "W",
+        "icon": "Rake.png",
+        "blurb": "{{sbc|Active:}} {{ci|Talon}} throws a fan of daggers in the target direction that deals {{as|physical damage}} to enemies hit.",
+        "blurb2": "After a brief delay, the daggers home back to him, dealing {{as|physical damage}} and briefly {{tip|slow|slowing}} enemies hit.",
+        "description": "{{sbc|Active:}} '''Talon''' throws a fan of daggers in a cone in the target direction that deals {{as|physical damage}} to enemies hit.",
+        "leveling": "{{st|Physical Damage|{{ap|50 to 90}} {{as|(+ 40% '''bonus''' AD)}}}}",
+        "description2": "At maximum range, the daggers linger for {{fd|0.75}} seconds before homing back to '''Talon''', dealing {{as|physical damage}} to enemies hit and {{tip|slow|slowing}} them for 1 second.",
+        "leveling2": "{{st|Physical Damage|{{ap|50 to 170}} {{as|(+ 80% '''bonus''' AD)}}|Total Physical Damage|{{ap|50+50 to 90+170}} {{as|(+ {{ap|40+80}}% '''bonus''' AD)}}}}\n{{st|Slow|{{ap|40 to 60}}%}}",
+        "description3": "''Enemies can be hit only once per pass.''",
+        "range": "{{tip|cr|icononly = true}} {{tt|900|Center missile}} / {{tt|850|Side missiles}}",
+        "width": "{{tip|er|icononly = true}} {{tt|150|Individual missile width}}",
+        "speed": "{{tt|2571|Center missile outward; 0.35 seconds fixed travel time}} / {{tt|2429|Side missiles outward; 0.35 seconds fixed travel time}} / {{tt|3000|Returning missiles}}",
+        "cooldown": "{{ap|9 to 7}}",
+        "cost": "{{ap|50 to 70}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "angle": "22{{Degree}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "{{Effect at cast time end}}\n* Casting ''Rake'' when an enemy is within 650 radius and 26° angle in front of ''Talon'' will reveal him from the fog of war like a targeted cast.{{bug}}\n** This is because of ''Rake's'' internal Cone targeting type, which defaults to \"targeting\" all units in the preset area and thereby trigger revealing the caster if not toggled off for the spell.\n* If '''Talon''' dies while ''Rake'' is mid-air, the projectiles will still complete their travel.\n* The blades each will fail to return to '''Talon''' if he is somehow too far from them after the delay.\n** This maximum distance is 5000 units at ranks 1-4 of ''Rake'', or 20000 units at rank 5 of ''Rake''.{{bug}}\n** The latter distance is barely achievable between fountains on Summoner's Rift."
+      }
+    },
+    "E": {
+      "id": "TalonE",
+      "name": "Assassin's Path",
+      "description": "Talon vaults over any terrain or structure, up to a max distance. This ability has a low cooldown, but puts the used terrain on a long cooldown.",
+      "tooltip": "Talon vaults over the nearest terrain or structure. Talon cannot dash over the same terrain more than once every {{ wallcd }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "725",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "625",
+        "1250",
+        "2",
+        "160/135/110/85/60",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Terrain Cooldown"
+        ],
+        "effect": [
+          "{{ wallcd }} -> {{ wallcdNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Talon",
+        "skill": "E",
+        "icon": "Assassin's Path.png",
+        "blurb": "{{sbc|Active:}} {{ci|Talon}} {{tip|dash|vaults}} over the target [[terrain]].",
+        "blurb2": "'''Talon''' cannot cast ''Assassin's Path'' on the same area for a set duration.",
+        "description": "{{sbc|Active:}} '''Talon''' {{tip|dashes}} up to 800 units over the target area of [[terrain]], during which he gains {{tip|unobstructed vision}}.",
+        "description2": "'''Talon''' cannot cast ''Assassin's Path'' on the same area of terrain for a set duration.",
+        "description3": "''{{ai|Shadow Assault|Talon}} can be cast during the dash.''",
+        "target range": "725",
+        "cooldown": "2",
+        "customlabel": "{{tt|On-Terrain Cooldown|Affected by ability haste}}",
+        "custominfo": "{{ap|160|135|110|85|60}}",
+        "speed": "{{as|100% movement speed}}",
+        "ontargetcdstatic": "|cost         =",
+        "cast time": "none",
+        "targeting": "Direction",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|projectile   =",
+        "grounded": "True",
+        "knockdown": "True",
+        "notes": "* ''Assassin's Path'' can interact with [[Terrain#Player-Generated|player-generated terrain]].\n* '''Talon''' will stop dashing upon entering {{tip|stasis}} but will continue to do so afterwards.\n* '''Talon''' will reveal himself for {{fd|0.6}} seconds upon casting ''Assassin's Path'' if he is visible to an enemy champion or there is a nearby enemy champion or minion within 400 units of the landing position."
+      }
+    },
+    "R": {
+      "id": "TalonR",
+      "name": "Shadow Assault",
+      "description": "Talon disperses a ring of blades and becomes Invisible while gaining additional Move Speed. When Talon emerges from Invisibility, the blades converge on his location. Each time the blades move, Shadow Assault deals physical damage to enemies hit by at least one blade.",
+      "tooltip": "Talon disperses a ring of blades that deal {{ damage }} physical damage, gains {{ movespeed*100 }}% Move Speed, and becomes Invisible for {{ duration }} seconds. When the Invisibility ends, the blades return to Talon, dealing {{ damage }} physical damage again.\n\nIf Talon cancels the Invisibility with an Attack or with Noxian Diplomacy, the blades return to the target instead.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "100/80/60",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "550",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Move Speed",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ movespeed*100.000000 }}% -> {{ movespeednl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Talon",
+        "skill": "R",
+        "icon": "Shadow Assault.png",
+        "blurb": "{{sbc|Active:}} {{ci|Talon}} disperses a ring of blades around him that deals {{as|physical damage}} to enemies it passes through and lingers for a short time, during which he gains {{tip|invisibility}} and {{sti|ms|{{as|'''bonus''' move speed}}}}.",
+        "blurb2": "'''Talon''' can recast while invisible, and automatically does so if he breaks stealth.",
+        "blurb3": "{{sbc|Recast:}} '''Talon''' breaks stealth and converges the blades to him, dealing {{as|physical damage}} to enemies hit. Breaking stealth with a basic attack or ''{{ai|Noxian Diplomacy|Talon}}'' will converge the blades to the target instead.",
+        "description": "{{sbc|Active:}} '''Talon''' disperses a ring of blades around him that deals {{as|physical damage}} to enemies hit and lingers at maximum range for up to {{fd|2.5}} seconds, during which he gains {{tip|invisibility}} and {{sti|ms|{{as|'''bonus''' movement speed}}}}.",
+        "leveling": "{{st|Physical Damage|{{ap|90 to 180}} {{as|(+ 100% '''bonus''' AD)}}}}\n{{st|Bonus Movement Speed|{{ap|40 to 70}}%}}",
+        "description2": "''Shadow Assault'' can be recast after 1 second within the duration, and does so automatically after the duration or if '''Talon''' {{tip|breaks stealth}}.",
+        "description3": "{{sbc|Recast:}} '''Talon''' breaks stealth and converges the blades to him, dealing the same {{as|physical damage}} to enemies hit. Breaking stealth with a basic attack or ''{{ai|Noxian Diplomacy|Talon}}'' will converge the blades to the target instead.",
+        "leveling3": "{{st|Total Physical Damage|{{ap|90*2 to 180*2}} {{as|(+ 200% '''bonus''' AD)}}}}",
+        "cooldown": "{{ap|100 to 60}}",
+        "cdstart": "post-effect",
+        "cost": "100",
+        "costtype": "Mana",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|550|Cast range of outward missiles}}",
+        "width": "{{tip|er|icononly = true}} {{tt|280|Width of the individual missiles, both outward and returning}}",
+        "speed": "{{tt|2400|Outward missiles speed}} / {{tt|4000|Returning missiles speed}}",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Shadow Assault'' casts a total of 12 blades evenly distributed in all directions. 4 of them travel down the cardinal directions (Relative to the map, '''not''' relative to '''Talon'''), while all blades have an angle of 30° to one another.\n* {{tip|Spell shield}} will block a single pass.\n* ''Shadow Assault'' does not cancel '''Talon's''' basic attacks.\n* ''Shadow Assault'' has a minimum lifetime of {{fd|0.8}} seconds before convergence.\n* The blades each will fail to converge on their target ('''Talon''' or the attacked target) if the target is more than 20000 units from them.{{bug}}\n** This distance is barely achievable between fountains on Summoner's Rift.\n* Using a basic attack breaks the stealth at the end of the attack windup."
+      }
+    }
+  }
+}

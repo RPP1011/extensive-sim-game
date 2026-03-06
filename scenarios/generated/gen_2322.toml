@@ -1,0 +1,13 @@
+[scenario]
+name = "stress_full_8_pressure"
+seed = 1776
+hero_count = 8
+enemy_count = 8
+difficulty = 3
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["templar", "warden", "cleric", "bard", "assassin", "rogue", "engineer", "mage"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

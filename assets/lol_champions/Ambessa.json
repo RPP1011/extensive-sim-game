@@ -1,0 +1,166 @@
+{
+  "id": "Ambessa",
+  "name": "Ambessa",
+  "title": "Matriarch of War",
+  "resource_type": "Energy",
+  "tags": [
+    "Fighter",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Drakehound's Step",
+      "description": "Entering an attack or movement command while casting an ability will cause Ambessa to dash a short distance once the ability is cast, granting her next attack bonus range, damage, and attack speed, and refunding energy."
+    },
+    "Q": {
+      "id": "AmbessaQ",
+      "name": "Cunning Sweep / Sundering Slam",
+      "description": "Ambessa sweeps her twin drakehounds in a semicircle in front of her, dealing bonus damage to enemies hit by the blades. Striking an enemy will transform the next cast of this ability for a short period of time, causing her to slam her twin drakehounds down in a line in front of her, dealing bonus damage to the first enemy hit.",
+      "tooltip": "Cunning Sweep: Ambessa sweeps her blades forward, dealing {{ calc_damage_1_max }} + {{ calc_damage_1_percent_max }} max Health physical damage to enemies at the edge of the strike. All other enemies take {{ calc_damage_1_min_ratio }} damage. Striking an enemy readies a Sundering Slam.\n\nSundering Slam: Ambessa slams her blades down, dealing {{ calc_damage_2_max }} + {{ calc_damage_2_percent_max }} max Health physical damage against the first enemy hit. All other enemies take {{ calc_damage_2_min_ratio }} damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cunning Sweep | Damage",
+          "Cunning Sweep | Max Health Damage",
+          "Cooldown",
+          "Sundering Slam | Damage",
+          "Sundering Slam | Max Health Damage"
+        ],
+        "effect": [
+          "{{ damage_1_base }} -> {{ damage_1_baseNL }}",
+          "{{ damage_1_percent*100.000000 }}% -> {{ damage_1_percentnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ damage_2_base }} -> {{ damage_2_baseNL }}",
+          "{{ damage_1_percent*100.000000 }}% -> {{ damage_1_percentnl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "W": {
+      "id": "AmbessaW",
+      "name": "Repudiation",
+      "description": "Ambessa gains a shield, briefly braces herself, and then slams the ground to damage nearby enemies. If she blocked any non-minion damage while bracing herself, this ability will deal increased damage.",
+      "tooltip": "Ambessa gains {{ calc_shield }} Shield for {{ shield_duration }} seconds and braces herself for {{ buff_duration }} seconds. She then slams the ground, dealing {{ calc_damage_low }} physical damage to nearby enemies, which increases to {{ calc_damage_high }} physical damage if she braced herself from damage from an enemy champion, large monster, or structure.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "18/17/16/15/14",
+      "cost": "70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "325",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "E": {
+      "id": "AmbessaE",
+      "name": "Lacerate",
+      "description": "Ambessa whips her twin drakehounds around herself, damaging and slowing nearby enemies. Initiating Drakehound's Step from this ability causes her to strike a second time at the end of its dash.",
+      "tooltip": "Ambessa whips her chains around, dealing {{ calc_damage_flat }} physical damage and Slowing enemies by {{ slow_amount*100 }}%, which decays over {{ slow_duration }} second. Initiating Drakehound's Step from this Ability will trigger an additional strike.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "13/12/11/10/9",
+      "cost": "70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "325",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ damage_flat_base }} -> {{ damage_flat_baseNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "R": {
+      "id": "AmbessaR",
+      "name": "Public Execution",
+      "description": "Ambessa blinks to the farthest enemy champion in a line of her choosing and suppresses them upon her arrival. She then slams the enemy into the ground where they take damage and are stunned.",
+      "tooltip": "Passive: Ambessa gains {{ armor_penetration*100 }}% %i:scaleAPen% Armor Penetration and her Abilities heal her for {{ calc_omnivamp }} of the damage she dealt.\n\nActive: Ambessa becomes Unstoppable and blinks to the farthest enemy champion in a line, Suppressing the target for {{ suppress_duration }} seconds and then slamming them into the ground, dealing {{ calc_damage }} physical damage and Stunning them for {{ stun_duration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "130/115/100",
+      "cost": "0",
+      "cost_type": "No cost",
+      "range": "1250",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Armor Penetration",
+          "Healing",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ armor_penetration*100.000000 }}% -> {{ armor_penetrationnl*100.000000 }}%",
+          "{{ omnivamp*100.000000 }}% -> {{ omnivampnl*100.000000 }}%",
+          "{{ damage }} -> {{ damageNL }}"
+        ]
+      },
+      "resource": "No cost"
+    }
+  }
+}

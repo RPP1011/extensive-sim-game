@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0103_5v5_s2"
+seed = 22026
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["assassin", "alchemist", "cryomancer", "cleric", "knight"]
+enemy_hero_templates = ["Akali", "Nami", "Malzahar", "Vi", "Karma"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

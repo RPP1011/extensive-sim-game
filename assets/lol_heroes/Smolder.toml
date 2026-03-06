@@ -1,0 +1,144 @@
+[hero]
+name = "Smolder"
+
+[stats]
+hp = 80
+move_speed = 3.3
+armor = 22.0
+magic_resist = 31.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 5.5
+cooldown = 700
+
+# --- Q: Super Scorcher Breath ---
+[[abilities]]
+name = "Super Scorcher Breath"
+targeting = "target_enemy"
+range = 5.5
+cooldown_ms = 5000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 5
+
+[abilities.delivery]
+method = "projectile"
+speed = 18.0
+
+[[abilities.effects]]
+type = "lifesteal"
+percent = 1.0
+duration_ms = 5000
+
+# --- W: Achooo! ---
+[[abilities]]
+name = "Achooo!"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 14000
+cast_time_ms = 350
+ai_hint = "damage"
+resource_cost = 12
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 11
+damage_type = "physical"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 3.85
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- E: Flap, Flap, Flap ---
+[[abilities]]
+name = "Flap, Flap, Flap"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 24000
+ai_hint = "damage"
+resource_cost = 13
+
+[abilities.delivery]
+method = "projectile"
+speed = 18.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 3
+damage_type = "physical"
+
+[[abilities.delivery.on_hit]]
+type = "root"
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 3000
+
+# --- R: MMOOOMMMM! ---
+[[abilities]]
+name = "MMOOOMMMM!"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 26100
+cast_time_ms = 750
+ai_hint = "damage"
+resource_cost = 20
+
+[abilities.delivery]
+method = "projectile"
+speed = 17.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 50
+damage_type = "physical"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 8.0
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[[abilities.effects]]
+type = "heal"
+amount = 25
+
+# --- Passive: Dragon Practice ---
+[[passives]]
+name = "Dragon Practice"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_kill"
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+
+[[passives.effects]]
+type = "apply_stacks"
+name = "smolder"
+count = 1
+max_stacks = 4
+

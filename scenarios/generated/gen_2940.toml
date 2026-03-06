@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0060_3v3"
+seed = 1983
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["Sona", "Volibear", "cleric"]
+enemy_hero_templates = ["Quinn", "Seraphine", "Kindred"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

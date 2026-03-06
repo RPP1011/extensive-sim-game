@@ -1,0 +1,13 @@
+[scenario]
+name = "stress_solo_tank_recovery_s2"
+seed = 21761
+hero_count = 1
+enemy_count = 4
+difficulty = 1
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["paladin"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

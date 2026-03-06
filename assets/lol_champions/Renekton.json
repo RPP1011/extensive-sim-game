@@ -1,0 +1,250 @@
+{
+  "id": "Renekton",
+  "name": "Renekton",
+  "title": "the Butcher of the Sands",
+  "resource_type": "Fury",
+  "tags": [
+    "Fighter",
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Reign of Anger",
+      "description": "Renekton's attacks generate Fury, increased when he is low on life. This Fury can empower his abilities with bonus effects.",
+      "wiki_detail": {
+        "champion": "Renekton",
+        "skill": "I",
+        "icon": "Reign of Anger.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Renekton}} basic attacks and ability hits generate {{as|{{tip|Fury}}}}, which continually expires after a period without fighting. He generates {{as|'''bonus''' Fury}} while {{as|'''below''' half health}}.",
+        "blurb2": "While '''Renekton''' has at least {{as|50% Fury}}, his next basic ability consumes {{as|50% Fury}} to become empowered with an additional effect.",
+        "description": "{{sbc|Innate:}} '''Renekton's''' [[basic attack]]s generate {{tip|fury|{{as|5 Fury}}}}. After 12 seconds of being [[out of combat]], he loses {{as|1 Fury}} every {{fd|0.25}} seconds.",
+        "description2": "While '''Renekton''' has at least {{as|50 Fury}}, his next [[Champion ability|basic ability]] consumes {{as|50 Fury}} to become empowered with an additional effect. Empowered abilities do not generate {{as|Fury}}.",
+        "description3": "'''Renekton''' generates {{as|50% '''bonus''' Fury}} from all sources while {{as|below 50% of his '''maximum''' health}}.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|projectile   =",
+        "notes": "* ''Renekton'' can generate Fury by collecting {{ui|Honeyfruit}} and [[Health Relic]]s (interacts with ''Reign of Anger's'' bonus generation)."
+      }
+    },
+    "Q": {
+      "id": "RenektonCleave",
+      "name": "Cull the Meek",
+      "description": "Renekton swings his blade, dealing moderate physical damage to all targets around him, and heals for a small portion of the damage dealt. If he has more than 50 Fury, his damage and heal are increased.",
+      "tooltip": "Renekton swings his blade, dealing {{ basicdamage }} physical damage and restoring {{ nonchamphealing }} Health per non-champion and {{ champhealing }} per champion hit. He also generates {{ minionfurygain }} Fury per non-champion and {{ championfurygain }} Fury per champion.\n\nFury Bonus: Damage is increased to {{ empdamage }} physical damage and healing is increased to {{ empnonchamphealing }} Health against non-champions and {{ empchamphealing }} Health against champions. Does not generate any Fury.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "325",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Healing per Champion",
+          "Healing per non-Champion",
+          "Maximum Heal"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ champheal }} -> {{ champhealNL }}",
+          "{{ baseminionheal }} -> {{ baseminionhealNL }}",
+          "{{ basichealcap }} -> {{ basichealcapNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Renekton",
+        "skill": "Q",
+        "icon": "Cull the Meek.png",
+        "blurb": "{{sbc|Active:}} {{ci|Renekton}} cleaves around himself, dealing {{as|physical damage}} to nearby enemies. He also generates {{as|Fury}} and {{tip|heal|heals}} for each enemy hit, increased against {{tip|champions}}.",
+        "blurb4": "{{sbc|{{ai|Reign of Anger|Renekton}} Bonus:}} ''Cull the Meek'' has increased damage and healing.",
+        "description": "{{sbc|Active:}} '''Renekton''' cleaves around himself, dealing {{as|physical damage}} to nearby enemies and {{tip|heal|healing}} himself for each enemy hit, up to a cap.",
+        "leveling": "{{st|Physical Damage|{{ap|60 to 180}} {{as|(+ 100% '''bonus''' AD)}}|Enhanced Damage|{{ap|90 to 270}} {{as|(+ 140% '''bonus''' AD)}}}}\n{{st|Healing Cap|{{ap|50 to 150}}|Enhanced Healing Cap|{{ap|200 to 600}}}}\n{{st|Non-Champion Healing|{{ap|2 to 6}} {{as|(+ 2% '''bonus''' AD)}}|Enhanced Non-Champion Healing|{{ap|6 to 18}} {{as|(+ 6% '''bonus''' AD)}}}}",
+        "description2": "Against {{tip|champion|champions}}, the healing is increased.",
+        "leveling2": "{{st|Champion Healing|{{ap|12 to 44}} {{as|(+ 17% '''bonus''' AD)}}|Enhanced Champion Healing|{{ap|36 to 132}} {{as|(+ 51% '''bonus''' AD)}}}}",
+        "description3": "'''Renekton''' generates {{tip|fury|{{as|{{fd|2.5}} Fury}}}} for each non-champion hit and {{as|10 Fury}} for each champion hit, with the {{as|Fury}} generated per cast capped at {{as|30|Fury}}.",
+        "description4": "{{sbc|{{ai|Reign of Anger|Renekton}} Bonus:}} ''Cull the Meek'' has increased damage, tripled '''total''' healing, and a quadrupled healing cap.",
+        "description5": "'''''Renekton''' cannot basic attack nor cast {{ai|Slice|Renekton}}, {{ai|Dice|Renekton}}, or {{ai|Dominus|Renekton}} for {{fd|0.25}} seconds after Cull the Meek's activation.''",
+        "effect radius": "{{tip|cr|icononly = true}} 400 / {{tt|480|During Dominus}}",
+        "cooldown": "7",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Enemies / Self",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "|notes        = \n* Healing modifiers such as {{ii|Spirit Visage}} and {{tip|Grievous Wounds}} take effect after ''Cull the Meek's'' healing cap."
+      }
+    },
+    "W": {
+      "id": "RenektonPreExecute",
+      "name": "Ruthless Predator",
+      "description": "Renekton slashes his target twice, dealing moderate physical damage and stuns them for 0.75 seconds. If Renekton has more than 50 Fury, he slashes his target three times, destroying damage shields on the target, dealing high physical damage, and stunning them for 1.5 seconds.",
+      "tooltip": "Renekton's next Attack strikes twice, Stunning for {{ stunduration }} seconds and dealing a total of {{ basictotaldamage }} physical damage. Hitting a champion generates an additional {{ bonusfuryvschamps }} Fury.\n\nFury Bonus: Renekton Attacks 3 times instead, destroying Shields before dealing {{ emptotaldamage }} physical damage and Stunning for {{ enragedstunduration }} seconds. Does not generate any Fury.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16/14/12/10/8",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "300",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Empowered Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamageperhit*2.000000 }} -> {{ basedamageperhitnl*2.000000 }}",
+          "{{ basedamageperhit*3.000000 }} -> {{ basedamageperhitnl*3.000000 }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Renekton",
+        "skill": "W",
+        "icon": "Ruthless Predator.png",
+        "blurb": "{{sbc|Active:}} {{cis|Renekton}} next basic attack within a few seconds will strike twice, dealing {{as|'''modified''' physical damage}} and briefly {{tip|stun|stunning}} the target.",
+        "blurb4": "{{sbc|{{ai|Reign of Anger|Renekton}} Bonus:}} '''Renekton''' instead strikes 3 times with increased stun duration, destroying damage {{tip|shields}} on the target before dealing damage.",
+        "description": "{{sbc|Active:}} '''Renekton''' empowers his next basic attack within 7 seconds to have a {{tt|{{fd|0.2}}-second cast time|(Estimated)}}, gain {{sti|range|50 '''bonus''' range}} and strike the target twice, dealing {{as|'''modified''' physical damage}} and {{tip|stun|stunning}} them for {{fd|0.75}} seconds. Each strike applies {{tip|on-hit}} effects at 100% effectiveness and generates {{tip|fury|{{as|Fury}}}}. Hitting an enemy {{tip|champion}} generates {{as|10 '''bonus''' Fury}}.",
+        "leveling": "{{st|Total Physical Damage|{{ap|5*2 to 65*2}} {{as|(+ 150% AD)}}|Physical Damage Per Hit|{{ap|5 to 65}} {{as|(+ 75% AD)}}}}",
+        "description2": "{{sbc|{{ai|Reign of Anger|Renekton}} Bonus:}} '''Renekton''' instead strikes 3 times, completely destroying damage-mitigating {{tip|shield|shields}} on the target upon the first strike if they are not a {{tip|monster}}, as well as increasing the {{tip|stun}} duration to {{fd|1.5}} seconds.",
+        "leveling2": "{{st|Total Physical Damage|{{ap|5*3 to 65*3}} {{as|(+ 225% AD)}}}}",
+        "description3": "''Ruthless Predator {{tip|basic attack reset|resets}} '''Renekton's''' basic attack timer. After Ruthless Predator's standard and empowered attack cast time, '''Renekton''' cannot move nor cast {{ai|Cull the Meek|Renekton}}, {{ai|Slice|Renekton}}, nor {{ai|Dice|Renekton}} for {{rutngt|0.525}}. Casting {{ai|Dominus|Renekton}} ends this lockout prematurely.''",
+        "cooldown": "{{ap|16 to 8}}",
+        "cdstart": "post-effect",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Enemies / Self",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "Proc",
+        "projectile": "|parry        = True",
+        "notes": "* The base damage of the first strike can {{tip|critical strike|critically strike}} (the modified damage and the second and third strike cannot).\n** If the first strike {{tip|critical strike|critically strikes}}, its modified damage becomes {{ap|5 to 65}} {{as|(+ 150% AD)}} (or {{ap|5 to 65}} {{as|(+ 190% AD)}} with {{ii|Infinity Edge}}) instead of {{ap|5 to 65}} {{as|(+ 75% AD)}}.\n* If the target becomes {{tip|untargetable}} or {{tip|death|dies}} during the empowered attack's cast time, it is cancelled but not consumed.\n* The empowered attack will not trigger against [[structures]]."
+      }
+    },
+    "E": {
+      "id": "RenektonSliceAndDice",
+      "name": "Slice and Dice",
+      "description": "Renekton dashes, dealing damage to units along the way. Empowered, Renekton deals bonus damage and reduces the Armor of units hit.",
+      "tooltip": "Renekton dashes, dealing {{ basicdamage }} physical damage. He generates {{ minionragegeneration }} Fury per non-champion and {{ championragegeneration }} Fury per champion hit. Hitting at least one enemy allows Renekton to Recast this Ability once for {{ dicetimer }} seconds. \n\nFury Bonus: The Recast dash deals {{ empdamage }} physical damage instead and removes {{ enragedarmorshred }}% Armor for {{ shredtimer }} seconds. Does not generate Fury.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16/14.5/13/11.5/10",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "450",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Empowered Damage",
+          "Armor Reduction %",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ enragedbasedamage }} -> {{ enragedbasedamageNL }}",
+          "{{ enragedarmorshred }}% -> {{ enragedarmorshredNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost"
+    },
+    "R": {
+      "id": "RenektonReignOfTheTyrant",
+      "name": "Dominus",
+      "description": "Renekton transforms into the Tyrant form, gaining bonus Health and dealing damage to enemies around him. While in this form, Renekton gains Fury periodically.",
+      "tooltip": "Renekton surrounds himself with dark energies for {{ buffduration }} seconds, gaining {{ healthgain }} max Health and {{ furyoncast }} Fury. While active, he deals {{ totaldamagepersecond }} magic damage and gains {{ furypersecond }} Fury per second.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "20",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Bonus Health",
+          "Damage Per Second",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ healthgain }} -> {{ healthgainNL }}",
+          "{{ auradamagepersecond }} -> {{ auradamagepersecondNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Renekton",
+        "skill": "R",
+        "icon": "Dominus.png",
+        "blurb": "{{sbc|Active:}} {{ci|Renekton}} empowers himself for some time, gaining {{as|Fury}}, {{sti|health|{{as|bonus health}}}}, bonus [[size]], {{sti|range|'''bonus''' attack range}}, and increased area on ''{{ai|Cull the Meek|Renekton}}''.",
+        "blurb2": "During this time, '''Renekton''' creates an aura that continually deals {{as|magic damage}} to nearby enemies. He also continually generates {{as|Fury}}, up to a cap.",
+        "description": "{{sbc|Active:}} '''Renekton''' empowers himself for 15 seconds, gaining {{as|{{sti|health|'''bonus''' health}}}}, 20% increased [[size]], {{sti|range|25 '''bonus''' attack range}}, and {{tip|fury|{{as|20 Fury}}}}, as well as increasing ''{{ais|Cull the Meek|Renekton}}'' effect radius.",
+        "leveling": "{{st|Bonus Health|{{ap|300 to 700}}}}",
+        "description2": "During this time, he deals {{as|magic damage}} every {{fd|0.5}} seconds to nearby enemies and generates {{as|5 Fury}} per second, up to a maximum of {{as|75 Fury}}.",
+        "leveling2": "{{st|Magic Damage Per Tick|{{ap|30 to 90}} {{as|(+ 5% '''bonus''' AD)}} {{as|(+ 5% AP)}}|Total Magic Damage|{{ap|30*30 to 90*30}} {{as|(+ 150% '''bonus''' AD)}} {{as|(+ 150% AP)}}}}",
+        "cooldown": "{{ap|120 to 80}}",
+        "cdstart": "on-cast",
+        "cast time": "{{fd|0.25}}",
+        "effect radius": "{{tip|cr|icononly = true}} 375",
+        "targeting": "Auto",
+        "affects": "Enemies / Self",
+        "damagetype": "Magic",
+        "spellshield": "False",
+        "spelleffects": "aoedot",
+        "projectile": "|notes        = \n* ''Dominus' ''range increase does not stack with {{ai|Ruthless Predator|Renekton}}.\n* ''Dominus' ''{{sti|cooldown}} is not refunded if '''Renekton''' {{tip|death|dies}} during the cast animation.\n* ''Dominus' ''bonus health gain does not interact with {{ii|Spirit Visage}} or {{tip|Grievous Wounds}}.\n** '''Renekton''' retains ''Dominus' ''bonus health (if not over his normal maximum) once the duration ends.",
+        "flavorsound": "{{sm2|Renekton Original R 2.ogg}} ''\"I will tear the world asunder!\"''"
+      }
+    }
+  }
+}

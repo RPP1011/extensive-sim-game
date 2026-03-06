@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_engineer_witch_doctor_samurai_s2"
+seed = 21682
+hero_count = 3
+enemy_count = 4
+difficulty = 2
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["engineer", "witch_doctor", "samurai"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

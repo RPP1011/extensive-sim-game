@@ -1,0 +1,13 @@
+[scenario]
+name = "ladder_knight_d1_hp1x_s2"
+seed = 21801
+hero_count = 4
+enemy_count = 5
+difficulty = 1
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["knight", "bard", "pyromancer", "berserker"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

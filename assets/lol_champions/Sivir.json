@@ -1,0 +1,237 @@
+{
+  "id": "Sivir",
+  "name": "Sivir",
+  "title": "the Battle Mistress",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Fleet of Foot",
+      "description": "Sivir gains a short burst of Move Speed when she attacks an enemy champion.",
+      "wiki_detail": {
+        "champion": "Sivir",
+        "skill": "I",
+        "icon": "Fleet of Foot.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Sivir}} basic attacks and damaging abilities against enemy {{tip|champions}} briefly grant her a burst of {{sti|ms|{{as|move speed}}}}.",
+        "description": "{{sbc|Innate:}} '''Sivir's''' [[basic attack]]s and [[Champion ability|ability]] hits against enemy {{tip|champions}} grant her {{sti|ms|{{as|{{pp|changedisplay=true|55 to 75 for 5|1;6;11;16;18}} '''bonus''' movement speed}}}} decaying over {{fd|1.5}} seconds, refreshing on subsequent hits.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "notes": "* No additional details."
+      }
+    },
+    "Q": {
+      "id": "SivirQ",
+      "name": "Boomerang Blade",
+      "description": "Sivir hurls her crossblade like a boomerang, dealing damage each way.",
+      "tooltip": "Sivir hurls her crossblade like a boomerang, dealing {{ totaldamage }} to all enemies it cuts through. Hitting non-champions reduces the damage to subsequent targets, down to a minimum of {{ falloffminimum*100 }}%.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9.5/9/8.5/8",
+      "cost": "55/60/65/70/75",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1200",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "Mana Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Sivir",
+        "skill": "Q",
+        "icon": "Boomerang Blade.png",
+        "blurb": "{{sbc|Active:}} {{ci|Sivir}} hurls her crossblade in the target direction that deals {{as|physical damage}} to enemies hit.",
+        "blurb2": "At max range, it homes back to '''Sivir''' to deal {{as|physical damage}} to enemies hit.",
+        "description": "{{sbc|Active:}} '''Sivir''' hurls her crossblade in the target direction, dealing {{as|physical damage}} to enemies within its path, increased by {{pp|key=%|key1=%|type=critical strike chance|0 to 50 for 11|0 to 100|formula=0.5% per 1% critical strike chance|color=critical strike chance}}.",
+        "leveling": "{{st|Physical Damage|{{ap|15 to 75}} {{as|(+ {{ap|80 to 100}}% AD)}} {{as|(+ 60% AP)}}}}",
+        "description2": "''Boomerang Blade's'' damage is reduced by {{pp|key=%|changedisplay=true|type=non-champions hit|0 to 60 for 5|0 to 4|formula=100%-(15%*Nº of non-champions hit). ''This is capped at 40% damage at 4 enemies hit.''}}. Upon reaching maximum range, the crossblade returns to her, resetting the damage modifier and dealing the same damage to enemies on its way back.",
+        "leveling2": "{{st|Minimum Damage|{{ap|15*0.4 to 75*0.4}} {{as|(+ {{ap|80*0.4 to 100*0.4}}% AD)}} {{as|(+ 24% AP)}}}}\n{{st|Total Maximum Champion Damage|{{ap|15*2 to 75*2}} {{as|(+ {{ap|80*2 to 100*2}}% AD)}} {{as|(+ 120% AP)}}}}",
+        "description3": "''Enemies can be hit only once per pass.''",
+        "cooldown": "{{ap|10 to 8}}",
+        "cost": "{{ap|55 to 75}}",
+        "costtype": "Mana",
+        "cast time": "{{as|{{pp|type='''bonus''' attack speed|round=3|0.25;0.231;0.198;0.165;0.132;0.1|key1=%|0;15.2;41.6;68;94.4;120|formula=0.25*(1-(0.5 per 100% '''bonus''' attack speed)). ''This is capped at 60% reduction at 120% '''bonus''' attack speed.''}}|attack speed}}",
+        "target range": "{{tip|cr|icononly = true}} 1250",
+        "width": "{{tip|er|icononly = true}} {{tt|180|Outgoing missile}} / {{tt|200|Returning missile}}",
+        "speed": "{{tt|1450|Outgoing missile}} / {{tt|1200|Returning missile}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "projectile": "True",
+        "spelleffects": "AoE",
+        "spellshield": "Special",
+        "notes": "* Due to the cast time effectively rounding up to full game ticks, at undesturbed game tick interval times the technical minimum cast time is {{rutngt|0.1875}} reached at {{as|{{fd|99.8}}% '''bonus''' attack speed}}.\n{{Effect at cast time end}}\n* If '''Sivir''' enters {{ii|Zhonya's Hourglass|stasis}} during ''Boomerang Blade's'' initial flight, it will not return to her.\n** This will also prevent it from dealing damage a second time.\n* The damage reduction per unit hit resets back to full damage upon changing direction.\n* ''Boomerang Blade'' will still return to '''Sivir''' even if she dies before it changes direction.\n* {{tip|Spell shield}} only blocks one instance of damage.",
+        "flavorsound": "{{sm2|Sivir_Original_Q_2.ogg}} ''\"Take this!\"''"
+      }
+    },
+    "W": {
+      "id": "SivirW",
+      "name": "Ricochet",
+      "description": "Sivir's next few basic attacks gain additional attack speed and bounce to nearby targets, dealing reduced damage while bouncing.",
+      "tooltip": "For the next {{ buffduration }} seconds, Sivir gains {{ ricochetattackspeed*100 }}% Attack Speed and her auto attacks are empowered to bounce to additional surrounding enemies dealing {{ bouncedamage }} physical damage each bounce for up to {{ maxbounces }} bounces.\n\nThese bounces critically strike if the attack generating them does.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "20",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Attack Speed",
+          "Total AD Ratio"
+        ],
+        "effect": [
+          "{{ ricochetattackspeed*100.000000 }}% -> {{ ricochetattackspeednl*100.000000 }}%",
+          "{{ bounceadratio*100.000000 }}% -> {{ bounceadrationl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Sivir",
+        "skill": "W",
+        "icon": "Ricochet.png",
+        "blurb": "{{sbc|Active:}} {{cis|Sivir}} gains {{sti|{{as|'''bonus''' attack speed}}}} for a few seconds. During this time, her basic attacks create projectiles that repeatedly bounce to nearby surrounding enemies, dealing {{as|physical damage}}.",
+        "description": "{{sbc|Active:}} '''Sivir''' empowers her crossblade for the next 4 seconds, gaining {{sti|{{as|'''bonus''' attack speed}}}} and causing her basic attacks to bounce to additional surrounding enemies, dealing them {{as|physical damage}}. If the triggering attack {{tip|critical strike|critically strikes}}, the bounces will do so as well. ''Ricochet'' deals 65% damage against {{tip|minions}} and executes them if they would be left below {{sti|{{as|15 health}}}}.",
+        "leveling": "{{st|Bonus Attack Speed|{{ap|20 to 40}}%}}\n{{st|Bounce Damage|{{as|{{ap|30 to 50}}% AD}}}}\n{{st|Minion Bounce Damage|{{as|{{ap|30*0.65 to 50*0.65}}% AD}}}}",
+        "description2": "Bounces occur only up to 8 times and can target each enemy up to one additional time per empowered attack. They prioritize the nearest new target, then the nearest target if no new targets are available.",
+        "description3": "''Ricochet {{tip|basic attack reset|resets}} '''Sivir's''' basic attack timer. The target does not have to be {{tip|sight|visible}} to be bounced to.''",
+        "cooldown": "12",
+        "cdstart": "on-cast",
+        "cost": "60",
+        "costtype": "Mana",
+        "cast time": "none",
+        "effect radius": "{{tt|500|Bounce range}}",
+        "speed": "{{tt|1750|Attack missile speed, same as basic attack}} / {{tt|1000|Bounced missile speed}}",
+        "targeting": "Auto",
+        "affects": "Self",
+        "damagetype": "Physical",
+        "spelleffects": "default",
+        "onhiteffects": "Special",
+        "spellshield": "False",
+        "parry": "unknown",
+        "projectile": "True",
+        "notes": "* ''Ricochet''-enhanced basic attacks can bounce from structures onto secondary targets but not from nearby units onto structures.\n* {{Pending for test}}: ''Ricochet's '' interactions with {{tip|dodge|dodging}}, {{tip|block|blocking}}, and {{tip|blind|blinding}} effects.\n* ''Ricochet'' do not apply to additional targets with {{ii|Runaan's Hurricane}}."
+      }
+    },
+    "E": {
+      "id": "SivirE",
+      "name": "Spell Shield",
+      "description": "Creates a magical barrier that blocks a single enemy ability cast on Sivir. She receives health and a burst of movement speed if a spell is blocked.",
+      "tooltip": "Sivir creates a magical barrier for {{ e1 }} seconds that blocks the next incoming enemy Ability. If an ability is blocked, Sivir restores {{ totalheal }} health and triggers Fleet of Foot.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "24/22.5/21/19.5/18",
+      "cost": "0",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "20",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "1.5",
+        "55",
+        "60",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Total AD Ratio",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ healratio*100.000000 }}% -> {{ healrationl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Sivir",
+        "skill": "E",
+        "icon": "Spell Shield.png",
+        "blurb": "{{sbc|Active:}} {{ci|Sivir}} briefly gains a {{tip|spell shield}}.",
+        "blurb2": "'''Sivir''' {{tip|heals}} herself and activates {{ai|Fleet of Foot|Sivir}} if it blocks an ability.",
+        "description": "{{sbc|Active:}} '''Sivir''' gains a {{tip|spell shield}} for {{fd|1.5}} seconds. Upon successfully blocking a hostile effect, she {{tip|heals}} herself and activates ''{{ai|Fleet of Foot|Sivir}}'' after {{fd|0.25}} seconds.",
+        "leveling": "{{st|Heal|{{as|{{ap|60 to 80}}% AD}} {{as|(+ 50% AP)}}}}",
+        "cooldown": "{{ap|24 to 18}}",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Self",
+        "notes": "* ''Spell Shield'' will heal and activate {{ai|Fleet of Foot|Sivir}} if any effect is blocked. This includes effects such as [[champion ability|champion abilities]], [[Named item effect|item effects]], {{uis|Dragon}} basic attacks, as well as the abilities of {{ui|Baron Nashor}} and {{ui|Rift Herald}}.\n* ''Spell Shield'' will still block abilities that have already been applied to '''Sivir''' if the delayed effects of that ability is [[area of effect]] (e.g. {{ai|Blaze 2|Brand|Blaze's}} explosion, {{ai|Chum the Waters|Fizz}}, and {{ai|Time Bomb|Zilean}}).",
+        "flavorsound": "{{sm2|Sivir_Original_EProc_1.ogg}} ''\"Nice try.\"''"
+      }
+    },
+    "R": {
+      "id": "SivirR",
+      "name": "On The Hunt",
+      "description": "Sivir leads her allies in battle, granting them a surge of Move Speed for a period of time. In addition, Sivir's attacks reduce her spell cooldowns.",
+      "tooltip": "Sivir rallies her nearby allies, granting them {{ maxms*100 }}% Move Speed for {{ ultduration }} seconds.\n\nSivir's attacks against champions while On The Hunt reduce the cooldown of her basic abilities by 0.5 seconds.\n\nTakedowns on recently damaged enemies refreshes the duration of the hunt.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Max Move Speed",
+          "Duration"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ maxms*100.000000 }}% -> {{ maxmsnl*100.000000 }}%",
+          "{{ ultduration }} -> {{ ultdurationNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    }
+  }
+}

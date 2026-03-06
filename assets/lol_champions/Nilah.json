@@ -1,0 +1,286 @@
+{
+  "id": "Nilah",
+  "name": "Nilah",
+  "title": "the Joy Unbound",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Joy Unending",
+      "description": "Nilah gains increased experience from last-hitting minions along with the ability to enhance and share nearby healing and shielding from her allies.",
+      "wiki_detail": {
+        "champion": "Nilah",
+        "skill": "I",
+        "icon": "false",
+        "icon2": "Nilah Joy Unending.png",
+        "blurbicon": "Nilah Joy Unending.png",
+        "blurb": "{{sbc|Innate:}} Whenever {{ci|Nilah}} kills a {{tip|minion}}, she and the nearest allied champion gain an additional portion of the {{as|{{sti|experience}}}} they would have lost from sharing.",
+        "blurb2": "{{sbc|Innate:}} '''Nilah''' shares a bonus portion of {{tip|heal|healing}} or {{tip|shield|shielding}} with nearby allied champions that apply healing or shielding to her or themselves.",
+        "description": "{{sbc|Innate:}} Whenever '''Nilah''' [[kill]]s a {{tip|minion}}, she and the nearest allied {{tip|champion}} gain an additional {{sti|{{as|50% of the experience}}}} they would have lost from sharing.",
+        "description2": "{{sbc|Innate:}} Whenever a nearby allied champion uses an [[champion ability|ability]] to {{tip|heal}} or {{tip|shield}} either '''Nilah''' or themselves, both they and '''Nilah''' receive a '''bonus''' amount equal to {{fd|7.5}}% of the healing or 15% of the shielding after a {{fd|0.5}}-second delay. '''Bonus''' shielding lasts as long as the shield that triggered the effect, up to a maximum duration of 4 seconds.",
+        "effect radius": "{{tip|er|icononly = true}} {{tt|1000|Healing and shielding interaction radius}}",
+        "width": "|speed        =",
+        "angle": "|targeting    = Passive",
+        "affects": "Self, Allies",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|projectile   =",
+        "parry": "|grounded     =",
+        "knockdown": "|notes        = \n* '''Nilah''' will gain a portion of all healing and all shielding from nearby allies that activate either of the effects on themselves while she is within range of them.\n** The same applies to allies that grant '''Nilah''' a heal or shield; they gain a portion of the heal or shield given to her by them, even if the heal or shield affects both units.\n* Heal and shields granted by [[item]]s, [[rune]]s, and [[summoner spell]]s will '''not''' trigger the increased amount.\n* The heal and shield increases do not trigger from their own heal or shield.\n* '''Nilah''' may still gain a shield from her allies' shields even if they are longer than 4 seconds, but the buff of the shield will only last for up to 4 seconds.\n* '''Nilah''' can receive a normal shield from nearby allies that gain [[Shield#Physical shields|physical]] or [[Shield#Magic shields|magic]] shields.",
+        "flavorsound": "|yvideo       ="
+      }
+    },
+    "Q": {
+      "id": "NilahQ",
+      "name": "Formless Blade",
+      "description": "With a snap of her whip-blade, Nilah damages any enemies she hits in a straight line in her chosen direction. This action extends her attack range for a short duration.",
+      "tooltip": "Passive: Nilah gains {{ critarmorpen }} Armor Penetration, and her Attacks against champions restore {{ critlifesteal }} damage dealt as Health. Overhealing from this is converted into a Shield for {{ shieldduration }} seconds.\n\nActive: Nilah cracks her whip-blade, dealing {{ damagecalc }} physical damage. If an enemy unit or structure is hit, Nilah gains 125 Attack Range and {{ bonusattackspeedcalc }}% Attack Speed, and her Attacks hit in a cone for {{ buffduration }} seconds.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "4",
+      "cost": "30",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Nilah",
+        "skill": "Q",
+        "icon": "false",
+        "icon2": "Nilah Formless Blade.png",
+        "blurb": "{{sbc|Passive:}} {{ci|Nilah}} gains {{sti|lethality|{{as|armor penetration}}}} based on her {{as|{{sti|critical strike chance}}}}. Her basic attacks and ''Formless Blade'' {{tip|heal}} her for a portion of the damage dealt to {{tip|champions}} based on her {{as|{{sti|critical strike chance}}}}, converting overhealing into {{tip|shield|shielding}} that lasts a few seconds.",
+        "blurb2": "{{sbc|Active:}} '''Nilah''' cracks her whip-blade in a line in the target direction that deals {{as|physical damage}} to enemies hit, increased based on her {{as|{{sti|critical strike chance}}}}.<br/>\nIf ''Formless Blade'' is cast during ''{{ai|Slipstream|Nilah}}'', '''Nilah''' leaves a wave in her wake that homes back to her, dealing {{as|physical damage}} to enemies hit.",
+        "blurb3": "If ''Formless Blade'' hits an enemy, '''Nilah''' empowers herself for a short time: gaining {{sti|range|attack range}} and {{as|{{sti|attack speed}}}}, and causing her basic attacks to strike in a cone that deals {{as|physical damage}} to enemies hit.",
+        "description": "{{sbc|Passive:}} '''Nilah''' gains {{sti|lethality|{{pp|key=%|key1=%|type=critical strike chance|0 to 33 for 11|0 to 100|formula=0.33% per 1% critical strike chance, capped at 100% critical strike chance|color=critical chance}}}} {{as|armor penetration}}. Her [[basic attack]]s and ''Formless Blade'' {{tip|heal}} her for {{pp|key=%|key1=%|type=critical strike chance|0 to 20 for 11|0 to 100|formula=0.2% per 1% critical strike chance, capped at 100% critical strike chance|color=critical chance}} of the {{tt|post-mitigation damage|Damage calculated after modifiers}} dealt to {{tip|champions}}, converting each heal instance beyond {{as|'''maximum''' health}} into a {{tip|shield}} that last 6 seconds.",
+        "description2": "{{sbc|Active:}} '''Nilah''' cracks her whip-blade in a line in the target direction that deals {{as|physical damage}} to enemies hit, increased by {{pp|key=%|key1=%|type=critical strike chance|0 to 100 for 11|0 to 100|formula=1% per 1% critical strike chance, capped at 100% critical strike chance|color=critical chance}}. ''Formless Blade'' can hit [[structures]] and {{tip|applies lifesteal|applies}} {{stil|life steal}} at 100% effectiveness to one target.",
+        "leveling2": "{{st|Minimum Physical Damage|{{ap|5 to 25}} {{as|(+ {{ap|90 to 110}}% AD)}}|Maximum Physical Damage|{{ap|5*2 to 25*2}} {{as|(+ {{ap|90*2 to 110*2}}% AD)}}}}",
+        "description3": "If ''Formless Blade'' is cast during ''{{ai|Slipstream|Nilah}}'', '''Nilah''' leaves behind a wave that is sent towards her location at the end of the dash, dealing the same damage to enemies hit.",
+        "description4": "If ''Formless Blade'' hits an enemy, '''Nilah''' empowers herself for 4 seconds: gaining {{sti|range|125 '''bonus''' attack range}} and {{sti|attack speed|{{as|{{pp|10 to 60|key=%}} '''bonus''' attack speed}}}}, and causing her basic attacks to strike in a cone that deals {{as|100% AD}} {{as|physical damage}} to enemies hit. Against secondary non-champion targets, this is reduced to {{as|{{ap|100*0.33}}% AD}} for {{tip|minions}} and {{as|{{ap|100*0.1}}% AD}} for {{tip|monsters}}, and additionally executes minions left below {{sti|{{as|20 health}}}}. {{tip|On-hit}} effects are applied only to the primary target.",
+        "range": "{{tip|er|icononly = true}} {{tt|0 - 600|Rectangle length, starts at 0 distance from Nilah}} / {{tip|cr|icononly = true}} {{tt|-150 - 500|Cone attacks hit units between 150 units behind Nilah and 500 before her. Radius center unknown}}",
+        "width": "{{tip|er|icononly = true}} {{tt|150|Rectangle width}}",
+        "angle": "<!--{{tip|cr|icononly = true}} {{tt|X{{Degree}}|Cone attacks area angle}}-->",
+        "cost": "30",
+        "costtype": "Mana",
+        "cast time": "{{tt|{{as|{{pp|type='''bonus''' attack speed|round=3|0.35;0.33;0.297;0.28|key1=%|0;13.72;36.358;48|changedisplay=true|formula=0.35-0.035 per 24% '''bonus''' attack speed)). ''This is capped at 20% reduction at 48% '''bonus''' attack speed.''}}|attack speed}}}}",
+        "effect radius": "|cooldown         = 4",
+        "cdstart": "on-cast",
+        "targeting": "Direction",
+        "affects": "Self, Enemies",
+        "damagetype": "Physical",
+        "callforhelp": "True",
+        "spelleffects": "spellaoe",
+        "spellshield": "special",
+        "parry": "special",
+        "projectile": "false",
+        "notes": "{{Effect at cast time end}}\n* ''Formless Blade's'' active cast triggers call for help for dealing damage despite not being a targeted spell.{{bug}}\n* Applies {{tip|area damage}} on the empowered attacks.\n* {{tip|Spell shield}} will not block ''Formless Blade's'' empowered basic attacks.\n* Parrying effects ({{tip|dodge}}, {{tip|block}}, {{tip|blind}}) will negate ''Formless Blade's'' empowered attacks only as the primary target.\n* ''Formless Blade's'' damage to the primary target of the enhanced attacks is affected by {{ii|Infinity Edge}} and classified as {{tip|basic damage}}.\n* The target to which Nilah applies life steal to is unpredictable.",
+        "flavorsound": "|yvideo       =",
+        "_comments": [
+          "{{tip|cr|icononly = true}} {{tt|X{{Degree}}|Cone attacks area angle}}"
+        ]
+      }
+    },
+    "W": {
+      "id": "NilahW",
+      "name": "Jubilant Veil",
+      "description": "Nilah envelops herself in mist, increasing her movement speed and allowing her to gracefully dodge all incoming attacks. Any allies she touches during the mist's duration will also gain this effect.",
+      "tooltip": "Nilah envelops herself in mist for {{ baseduration }} seconds, becoming Ghosted, gaining {{ movespeedpercent*100 }}% Move Speed, dodging Attacks, and reducing magic damage taken by {{ magicdamagereduction*100 }}%.\n\nWhile active, touching allied champions envelops them in mist, granting the same benefits for {{ sharebaseduration }} seconds.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "26/25/24/23/22",
+      "cost": "60/45/30/15/0",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "150",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Move Speed",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ movespeedpercent*100.000000 }}% -> {{ movespeedpercentnl*100.000000 }}%",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Nilah",
+        "skill": "W",
+        "icon": "Nilah Jubilant Veil.png",
+        "blurb": "{{sbc|Active:}} {{ci|Nilah}} briefly envelops herself in mist, during which she gains {{as|{{sti|ms|move speed}}}} and {{as|magic damage}} reduction, and {{tip|dodge|dodges}} all non-turret basic attacks.",
+        "blurb2": "Allied champions she touches will also be enveloped.",
+        "description": "{{sbc|Active:}} '''Nilah''' envelops herself in mist for {{fd|2.25}} seconds, during which she becomes {{tip|ghosted}}, gains {{sti|{{as|'''bonus''' movement speed}}}}, reduces all incoming {{as|magic damage}} taken by 25%, and {{tip|dodge|dodges}} all non-{{tip|turret}} basic attacks.",
+        "leveling": "{{st|Bonus Movement Speed|{{ap|15 to 25}}%}}",
+        "description2": "Allied champions {{tt|she touches|Being within collision range of them}} will also be enveloped for {{fd|1.5}} seconds, gaining the same effects.",
+        "collision radius": "{{tip|edge range|icononly=true}} {{tt|150|Ally buff collision radius}}",
+        "cost": "{{ap|60 to 0}}",
+        "costtype": "Mana",
+        "cast time": "None",
+        "cooldown": "{{ap|26 to 22}}",
+        "cdstart": "post-effect",
+        "targeting": "Auto",
+        "affects": "Self, Allies",
+        "notes": "* Allies may only be affected by ''Jubilant Veil'' only once every 6 seconds.\n* ''Jubilant Veil's'' cooldown is not affected by {{ii|Spear of Shojin}} {{sbc|Dragonforce}}.{{bug}}",
+        "flavorsound": "|yvideo       ="
+      }
+    },
+    "E": {
+      "id": "NilahE",
+      "name": "Slipstream",
+      "description": "Nilah enthusiastically dashes toward her target, dealing damage to any enemies she passes through on the way.",
+      "tooltip": "Nilah dashes through a unit, dealing {{ dashdamage }} physical damage to any enemies she passes through.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0.5",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "550",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Recharge Time"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ ammorechargetime }} -> {{ ammorechargetimeNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Nilah",
+        "skill": "E",
+        "icon": "Nilah Slipstream.png",
+        "blurb": "{{sbc|Active:}} {{ci|Nilah}} {{tip|dash|dashes}} in the target enemy's direction, dealing {{as|physical damage}} to enemies she passes through.",
+        "blurb2": "'''Nilah''' periodically stocks a ''Slipstream'' charge, up to a maximum of 2.",
+        "description": "{{sbc|Active:}} '''Nilah''' {{tip|dash|dashes}} a fixed distance in the direction of the target unit, dealing {{as|physical damage}} to enemies she passes through.",
+        "leveling": "{{st|Physical Damage|{{ap|60 to 100}} {{as|(+ 20% AD)}}}}",
+        "description2": "'''Nilah''' periodically [[stock]]s a ''Slipstream'' charge, up to a maximum of 2.",
+        "description3": "''Slipstream {{tip|basic attack reset|resets}} '''Nilah's''' basic attack timer. {{ai|Formless Blade|Nilah}} and {{ai|Apotheosis|Nilah}} can be cast during the dash.''",
+        "target range": "{{tip|cr|icononly = true}} 550",
+        "range": "{{tt|450|Dash distance}}",
+        "cost": "30",
+        "costtype": "Mana + 1 Charge",
+        "cast time": "{{fd|None}}",
+        "collision radius": "{{tip|er|icononly = true}} {{tt|150|Radius on dash start location, a width alongside the dash and bugged at the end?}}",
+        "speed": "{{tt|2200|Dash speed does not scale with Nilah's Move Speed stat}}",
+        "static": "{{fd|0.5}}",
+        "recharge": "{{ap|26 to 12}}",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spelleffects": "spellaoe",
+        "spellshield": "True",
+        "grounded": "True",
+        "knockdown": "True",
+        "notes": "* ''Formless Blade'' used during ''Slipstream'' might not register, rendering it on cooldown without being casted.{{bug}}\n* ''Slipstream'' has a chance of visually not using charge, causing it to showing one available charge without possibility of using it.{{bug}}\n* Dashing to target through a wall within casting range will cancel the dash if wall is longer than dash range.{{bug}}",
+        "flavorsound": "|yvideo       ="
+      }
+    },
+    "R": {
+      "id": "NilahR",
+      "name": "Apotheosis",
+      "description": "Twirling her whip-blade in joyful exuberance, Nilah deals damage to enemies around her before pulling them closer with her weapon.",
+      "tooltip": "Nilah whirls her whip-blade, dealing {{ damagepertickcalctooltip }} physical damage over 1 second, then finishes with a burst of {{ damagecalc }} physical damage that also Pulls nearby enemies toward her.\n\nApotheosis heals Nilah and her nearby allies for {{ champhealingpercent }} (+{{ spell.nilahq:critlifesteal }} Formless Blade) of the damage dealt to enemy champions, converting any overhealing into a Shield for {{ duration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "110/95/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage",
+          "Damage Over Time"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ damagebase }} -> {{ damagebaseNL }}",
+          "{{ damagepertick*4.000000 }} -> {{ damageperticknl*4.000000 }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Nilah",
+        "skill": "R",
+        "icon": "Nilah Apotheosis.png",
+        "blurb": "{{sbc|Active:}} {{ci|Nilah}} whirls her whip-blade for a brief moment, continually dealing {{as|physical damage}} to nearby enemies. She then bursts to deal {{as|physical damage}} and {{tip|airborne|pull in}} nearby enemies. Each hit will also {{tip|slow}} enemies for a short time.",
+        "blurb2": "'''Nilah''' {{tip|heals}} herself and nearby allied champions for a portion of the damage dealt to {{tip|champions}}, based on her {{as|{{sti|critical strike chance}}}}, and converting overhealing into {{tip|shield|shielding}} that lasts for a moderate amount of time.",
+        "blurb4": "'''Nilah''' can move during ''Apotheosis''.",
+        "description": "{{sbc|Active:}} '''Nilah''' whirls her whip-blade over 1 second, dealing {{as|physical damage}} to nearby enemies every {{fd|0.25}} seconds. She then unleashes a burst that deals {{as|physical damage}} and {{tip|airborne|pulls}} them 250 units towards her. Each hit also {{tip|slows}} targets by 10% for 3 seconds, refreshing on subsequent hits.",
+        "leveling": "{{st|Physical Damage per Tick|{{ap|15 to 35 3}} {{as|(+ 10% '''bonus''' AD)}}|Total Physical Damage|{{ap|15*4 to 35*4 3}} {{as|(+ {{ap|10*4}}% '''bonus''' AD)}}}}\n{{st|Burst Physical Damage|{{ap|125 to 325 3}} {{as|(+ 100% '''bonus''' AD)}}}}\n{{st|Maximum Total Physical Damage|{{ap|15*4+125 to 35*4+325 3}} {{as|(+ {{ap|10*4+100}}% '''bonus''' AD)}}}}",
+        "description2": "'''Nilah''' {{tip|heals}} herself and nearby allied champions for {{pp|key=%|key1=%|type=critical strike chance|20 to 50 for 11|0 to 100|formula=20% + 0.3% per 1% critical strike chance, capped at 100% critical strike chance|color=critical chance}} of the {{tt|post-mitigation damage|Damage calculated after modifiers}} dealt to {{tip|champions}}, reduced to 10% against non-champions, converting each heal instance beyond {{as|'''maximum''' health}} into a {{tip|shield}} that last 6 seconds.",
+        "description3": "'''''Nilah''' is unable to basic attack and cast her other [[champion ability|abilities]] during Apotheosis, but she is able to move.''",
+        "cost": "80",
+        "costtype": "Mana",
+        "cast time": "None",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|450|Damage radius}} / {{tt|1500|Ally heal/shield radius}}",
+        "cooldown": "{{ap|110 to 80 3}}",
+        "cdstart": "on-cast",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spelleffects": "spellaoe",
+        "spellshield": "special",
+        "notes": "* ''Apotheosis'' can pull enemies through walls and can knock them across '''Nilah's''' location.\n* {{tip|Spell shield}} will only block the burst damage.\n* ''Apotheosis'' shielding reuses indicators from ''{{ai|Joy Unending|Nilah}}''.\n* The following table refers for interactions while '''Nilah''' is performing ''Apotheosis'':\n{{ct|cast=false|move=true|attack=false|items=true,,,,,false,false,false,melee|consume=true|spells=true,true,true,false,true|interrupts=death}}"
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+[scenario]
+name        = "2x Berserker + 2x Ranger"
+seed        = 894889
+hero_count  = 4
+enemy_count = 16
+difficulty  = 3
+max_ticks   = 5000
+room_type   = "Climax"
+hero_templates = ["Berserker", "Berserker", "Ranger", "Ranger"]
+
+[assert]
+outcome = "Either"

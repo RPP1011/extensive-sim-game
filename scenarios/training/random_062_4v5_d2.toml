@@ -1,0 +1,13 @@
+[scenario]
+name = "random_062_4v5_d2"
+seed = 8062
+hero_count = 4
+enemy_count = 5
+difficulty = 2
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["blood_mage", "rogue", "bard", "knight"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Either"

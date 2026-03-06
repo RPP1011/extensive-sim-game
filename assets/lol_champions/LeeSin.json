@@ -1,0 +1,199 @@
+{
+  "id": "LeeSin",
+  "name": "Lee Sin",
+  "title": "the Blind Monk",
+  "resource_type": "Energy",
+  "tags": [
+    "Fighter",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Flurry",
+      "description": "After Lee Sin uses an ability, his next 2 basic attacks gain Attack Speed and return Energy.",
+      "wiki_detail": {
+        "champion": "Lee Sin",
+        "skill": "I",
+        "icon": "Flurry.png",
+        "blurb": "{{sbc|Innate:}} After {{ci|Lee Sin}} casts an ability, his next 2 basic attacks within a short time gain {{sti|attack speed|{{as|'''bonus''' attack speed}}}} and restore {{sti|{{as|energy}}}}.",
+        "description": "{{sbc|Innate:}} After casting an [[champion ability|ability]], '''Lee Sin's''' next 2 [[basic attack]]s within 3 seconds gain {{sti|attack speed|{{as|40% '''bonus''' attack speed}}}} and restore {{sti|{{as|energy}}}}.",
+        "description2": "The first attack restores {{as|{{pp|20 to 40 for 3|1 to 13}} energy}} and the second attack restores{{ft|{{as|{{pp|10 to 20 for 3|1 to 13}} energy}}.|half of the previous amount.}}",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|grounded     =",
+        "knockdown": "|parry        = special",
+        "notes": "* ''Flurry'' will still restore energy even if the attacks are {{tip|block|blocked}} or missed while '''Lee Sin''' is {{tip|blind|blinded}}, but not {{tip|dodge|dodged}}."
+      }
+    },
+    "Q": {
+      "id": "LeeSinQOne",
+      "name": "Sonic Wave / Resonating Strike",
+      "description": "Sonic Wave: Lee Sin projects a discordant wave of sound to locate his enemies, dealing physical damage to the first enemy it encounters. If Sonic Wave hits, Lee Sin can cast Resonating Strike for the next 3 seconds.\nResonating Strike: Lee Sin dashes to the enemy hit by Sonic Wave, dealing physical damage based on the target's missing Health.",
+      "tooltip": "Lee Sin projects a discordant wave of sound, dealing {{ initialdamage }} physical damage to the first enemy hit, granting True Sight of them, and allows Lee Sin to Recast for the next {{ reactivatetime }} seconds.\n\nRecast: Lee Sin dashes to the enemy hit by the sound wave, dealing between {{ recastdamage }} to {{ empowereddamage }} physical damage scaling with the target's missing Health. {{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9/8/7/6",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1100",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Sonic Wave Damage",
+          "Resonating Strike Minimum Base Damage",
+          "Resonating Strike Maximum Base Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ q1basedamage }} -> {{ q1basedamageNL }}",
+          "{{ q2basedamage }} -> {{ q2basedamageNL }}",
+          "{{ q2basedamage*2.000000 }} -> {{ q2basedamagenl*2.000000 }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "W": {
+      "id": "LeeSinWOne",
+      "name": "Safeguard / Iron Will",
+      "description": "Safeguard: Lee Sin rushes to target ally, shielding himself from damage. If the ally is a champion, they are also shielded. After using Safeguard, Lee Sin can cast Iron Will.\nIron Will: Lee Sin's intense training allows him to thrive in battle. Lee Sin gains Omnivamp.",
+      "tooltip": "Lee Sin dashes to an ally or ward. If the target is a champion, Lee Sin grants them and himself {{ shieldamount }} Shield for {{ shieldduration }} seconds and reduces this Ability's Cooldown by {{ w1cooldownrecovered*100 }}%. Lee Sin may Recast for the next {{ w1reactivatetime }} seconds.\n\nRecast: Lee Sin gains {{ lifestealandspellvamp }}% Omnivamp for {{ lifestealandspellvamptime }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "700",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Safeguard Shield Absorption",
+          "Iron Will Omnivamp %"
+        ],
+        "effect": [
+          "{{ shieldvalue }} -> {{ shieldvalueNL }}",
+          "{{ lifestealandspellvamp }}% -> {{ lifestealandspellvampNL }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "E": {
+      "id": "LeeSinEOne",
+      "name": "Tempest / Cripple",
+      "description": "Tempest: Lee Sin smashes the ground, sending out a shockwave that deals magic damage and reveals enemy units hit. If Tempest hits an enemy, Lee Sin can cast cripple.\nCripple: Lee Sin cripples nearby enemies damaged by Tempest, reducing their Move Speed. Move Speed recovers gradually over the duration.",
+      "tooltip": "Lee Sin smashes the ground, sending out a shockwave that deals {{ initialdamage }} magic damage and reveals them for {{ slowduration }} seconds. If this hits an enemy, Lee Sin can Recast for the next {{ reactivatetime }} seconds.\n\nRecast: Lee Sin Slows nearby enemies struck by the shockwave by {{ slowamount }}% decaying over {{ slowduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "450",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Tempest Damage",
+          "Cripple Slow"
+        ],
+        "effect": [
+          "{{ e1damage }} -> {{ e1damageNL }}",
+          "{{ slowamount }}% -> {{ slowamountNL }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "R": {
+      "id": "LeeSinR",
+      "name": "Dragon's Rage",
+      "description": "Lee Sin performs a powerful roundhouse kick launching his target back, dealing physical damage to the target and any enemies they collide with. Enemies the target collides with are knocked into the air for a short duration. This technique was taught to him by Jesse Perring, although Lee Sin does not kick players off the map.",
+      "tooltip": "Lee Sin performs a powerful roundhouse kick Knocking Back an enemy champion and dealing {{ damage }} physical damage.\n\nEnemies the target collides with are briefly Knocked Up and take {{ damage }} plus {{ percenthpcarrythrough }}% of the kicked enemy's bonus Health as physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "110/85/60",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "375",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Bonus Health Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ percenthpcarrythrough }}% -> {{ percenthpcarrythroughNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Lee Sin",
+        "skill": "R",
+        "icon": "Dragon's Rage.png",
+        "blurb": "{{sbc|Active:}} '''Lee Sin''' {{tip|root|roots}} the target enemy champion and roundhouse kicks them, dealing {{as|physical damage}} and {{tip|airborne|knocking them back}}.",
+        "blurb2": "Enemies that collide with the displaced enemy while it is {{tip|airborne}} are briefly {{tip|airborne|knocked up}} and take {{as|'''bonus''' physical damage}} based on the {{as|primary target's '''bonus''' health}}.",
+        "blurb4": "''This technique was taught to him by Jesse Perring, although Lee Sin does not kick players off the map.''",
+        "description": "{{sbc|Active:}} '''Lee Sin''' {{tip|root|roots}} the target enemy champion over the cast time, then roundhouse kicks them to deal {{as|physical damage}} and {{tip|airborne|knock them back}} {{tt|up to 800 units|see notes}} {{tt|over {{fd|0.8}} seconds|Estimated}}, rendering them {{tip|airborne}} for 1 second.",
+        "leveling": "{{st|Physical Damage|{{ap|175 to 625}} {{as|(+ 200% '''bonus''' AD)}}}}",
+        "description2": "Enemies that collide with the displaced enemy while it is {{tip|airborne}} take the same damage plus {{as|'''bonus''' physical damage}} and are {{tip|airborne|knocked up}} for 1 second.",
+        "leveling2": "{{st|Collision Physical Damage|{{ap|175 to 625}} {{as|(+ 200% '''bonus''' AD)}} {{as|(+ {{ap|12 to 18}}% of primary target's '''bonus''' health)}}}}",
+        "cooldown": "{{ap|110 to 60}}",
+        "cast time": "{{fd|0.25}}",
+        "target range": "{{tip|cr|icononly = true}} 375",
+        "collision radius": "{{tip|cr|icononly = true}} {{tt|160|Checks for collision every 0.25 seconds, estimated}}",
+        "speed": "|targeting    = Unit",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "Special",
+        "callforhelp": "True",
+        "notes": "* Applies {{tip|spell damage}} to the primary target and {{tip|area damage}} to secondary targets.\n* The [[spell indicator]] for this ability also displays the direction for the knock back relative to '''Lee Sin's''' position.\n* If the target of ''Dragon Rage'' {{tip|death|dies}} initially on the first hit there will be no displacement of any kind.\n* The {{tip|airborne|displacement's}} direction is decided at the moment of impact and not by '''Lee Sin''' and his target's relative locations at the start of the cast (the only way for '''Lee Sin''' to control where his target is displaced is by using {{si|Flash}} before the cast time of ''Dragon's Rage'' ends).\n* If the {{tip|airborne}} debuff is removed from the target, its ability to collide with enemies is removed aswell, even if the target has not come to a stop yet.{{bug|2}}\n** The airborne debuff and with it collision of the target remains for the normal duration even if its trajectory is {{tip|airborne|displaced}} by another source (i.e - {{ai|Headbutt|Alistar}}).\n** The target may still collide with other enemies for the remaining airborne duration after they reach their destination, as the airborne debuff lasts longer than the displacement.\n* The knockback distance is intended to be 800, but due to a bug, this is reduced by up-to the sum of '''Lee Sin's''' and his target's {{tip|gameplay radius}}, depending on how far they are away from one another at the end of the cast time.\n{{Unit-targeted cancel conditions}}"
+      }
+    }
+  }
+}

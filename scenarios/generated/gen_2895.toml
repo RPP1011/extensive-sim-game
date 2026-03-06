@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0045_5v5"
+seed = 1968
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["samurai", "warlock", "warden", "witch_doctor", "shaman"]
+enemy_hero_templates = ["knight", "ranger", "shaman", "necromancer", "cleric"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

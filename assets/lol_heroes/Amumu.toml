@@ -1,0 +1,118 @@
+[hero]
+name = "Amumu"
+
+[stats]
+hp = 150
+move_speed = 3.3
+armor = 40.0
+magic_resist = 35.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 14
+range = 1.5
+cooldown = 900
+
+# --- Q: Bandage Toss ---
+[[abilities]]
+name = "Bandage Toss"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 3000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 9
+max_charges = 2
+charge_recharge_ms = 16000
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 17
+damage_type = "magic"
+
+[[abilities.delivery.on_hit]]
+type = "stun"
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- W: Despair ---
+[[abilities]]
+name = "Despair"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 1000
+cast_time_ms = 1000
+ai_hint = "damage"
+resource_cost = 1
+is_toggle = true
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+# --- E: Tantrum ---
+[[abilities]]
+name = "Tantrum"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 9000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 7
+
+[[abilities.effects]]
+type = "damage"
+amount = 16
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.5
+
+# --- R: Curse of the Sad Mummy ---
+[[abilities]]
+name = "Curse of the Sad Mummy"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 27200
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 20
+
+[[abilities.effects]]
+type = "damage"
+amount = 50
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 5.5
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+# --- Passive: Cursed Touch ---
+[[passives]]
+name = "Cursed Touch"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_auto_attack"
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

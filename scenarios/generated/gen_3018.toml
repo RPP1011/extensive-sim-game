@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0086_3v3"
+seed = 2009
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["engineer", "Amumu", "Illaoi"]
+enemy_hero_templates = ["alchemist", "Samira", "Trundle"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

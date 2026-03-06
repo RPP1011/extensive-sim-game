@@ -1,0 +1,132 @@
+[hero]
+name = "Galio"
+
+[stats]
+hp = 150
+move_speed = 3.3
+armor = 40.0
+magic_resist = 38.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 14
+range = 1.5
+cooldown = 900
+
+# --- Q: Winds of War ---
+[[abilities]]
+name = "Winds of War"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 11000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 14
+
+[[abilities.effects]]
+type = "damage"
+amount = 0
+damage_type = "magic"
+duration_ms = 2000
+tick_interval_ms = 1000
+amount_per_tick = 8
+
+# --- W: Shield of Durand ---
+[[abilities]]
+name = "Shield of Durand"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 18000
+ai_hint = "defense"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "shield"
+amount = 1
+duration_ms = 3000
+
+# --- E: Justice Punch ---
+[[abilities]]
+name = "Justice Punch"
+targeting = "ground_target"
+range = 2.5
+cooldown_ms = 11000
+cast_time_ms = 400
+ai_hint = "damage"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "damage"
+amount = 22
+damage_type = "magic"
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- R: Hero's Entrance ---
+[[abilities]]
+name = "Hero's Entrance"
+targeting = "target_ally"
+range = 8.0
+cooldown_ms = 30000
+ai_hint = "damage"
+resource_cost = 20
+
+[abilities.delivery]
+method = "channel"
+duration_ms = 2000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "damage"
+amount = 0
+damage_type = "magic"
+duration_ms = 5000
+tick_interval_ms = 1000
+amount_per_tick = 7
+
+[abilities.effects.area]
+shape = "circle"
+radius = 6.5
+
+[[abilities.effects]]
+type = "shield"
+amount = 37
+duration_ms = 5000
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- Passive: Colossal Smash ---
+[[passives]]
+name = "Colossal Smash"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 5000
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+
+[[passives.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.2
+duration_ms = 5000
+

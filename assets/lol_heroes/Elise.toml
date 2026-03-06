@@ -1,0 +1,98 @@
+[hero]
+name = "Elise"
+
+[stats]
+hp = 85
+move_speed = 3.5
+armor = 25.0
+magic_resist = 33.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 20
+range = 1.5
+cooldown = 750
+
+# --- Q: Neurotoxin / Venomous Bite ---
+[[abilities]]
+name = "Neurotoxin / Venomous Bite"
+targeting = "target_enemy"
+range = 6.2
+cooldown_ms = 6000
+ai_hint = "utility"
+resource_cost = 16
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- W: Volatile Spiderling / Skittering Frenzy ---
+[[abilities]]
+name = "Volatile Spiderling / Skittering Frenzy"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 12000
+ai_hint = "damage"
+resource_cost = 12
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- E: Cocoon / Rappel ---
+[[abilities]]
+name = "Cocoon / Rappel"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 12000
+ai_hint = "crowd_control"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "heal"
+amount = 7
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "stealth"
+duration_ms = 3000
+break_on_damage = true
+break_on_ability = true
+
+# --- R: Spider Form ---
+[[abilities]]
+name = "Spider Form"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 3000
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- Passive: Spider Queen ---
+[[passives]]
+name = "Spider Queen"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_auto_attack"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

@@ -1,0 +1,131 @@
+[hero]
+name = "Orianna"
+
+[stats]
+hp = 90
+move_speed = 3.3
+armor = 20.0
+magic_resist = 30.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 12
+range = 5.5
+cooldown = 1000
+
+# --- Q: Command: Attack ---
+[[abilities]]
+name = "Command: Attack"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 6000
+ai_hint = "damage"
+resource_cost = 6
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 1.75
+
+# --- W: Command: Dissonance ---
+[[abilities]]
+name = "Command: Dissonance"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 7000
+ai_hint = "damage"
+resource_cost = 12
+
+[[abilities.effects]]
+type = "damage"
+amount = 0
+damage_type = "magic"
+duration_ms = 2000
+tick_interval_ms = 1000
+amount_per_tick = 8
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.25
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 2000
+
+# --- E: Command: Protect ---
+[[abilities]]
+name = "Command: Protect"
+targeting = "target_ally"
+range = 8.0
+cooldown_ms = 9000
+ai_hint = "damage"
+resource_cost = 12
+
+[abilities.delivery]
+method = "projectile"
+speed = 18.5
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+[[abilities.effects]]
+type = "shield"
+amount = 1
+duration_ms = 3000
+
+# --- R: Command: Shockwave ---
+[[abilities]]
+name = "Command: Shockwave"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 22800
+cast_time_ms = 500
+ai_hint = "damage"
+resource_cost = 20
+
+[[abilities.effects]]
+type = "damage"
+amount = 62
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 4.15
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+# --- Passive: Clockwork Windup ---
+[[passives]]
+name = "Clockwork Windup"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_ability_used"
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

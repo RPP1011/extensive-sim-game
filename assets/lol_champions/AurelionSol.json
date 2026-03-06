@@ -1,0 +1,279 @@
+{
+  "id": "AurelionSol",
+  "name": "Aurelion Sol",
+  "title": "The Star Forger",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Cosmic Creator",
+      "description": "Aurelion Sol's damaging Abilities break down enemies into stacks of Stardust, which permanently improves each of his abilities.",
+      "wiki_detail": {
+        "champion": "Aurelion Sol",
+        "skill": "I",
+        "icon": "Cosmic Creator.png",
+        "description": "{{sbc|Innate:}} '''Aurelion Sol's''' damaging [[champion ability|abilities]] against enemies generate him permanent stacks of {{as|Stardust}}, which gradually augments his abilities.\n* ''{{ai|Breath of Light|Aurelion Sol}}'': Bursts deal {{as|'''bonus''' magic damage}} based on the {{as|target's '''maximum''' health}}.\n* ''{{ai|Astral Flight|Aurelion Sol}}'': Range is increased equal to {{as|{{fd|62.5}}% Stardust}}.\n* ''{{ai|Singularity|Aurelion Sol}}'': Outer and inner radius increased equal to {{as|15% Stardust}}, and the execution threshold is increased.\n* ''{{ai|Falling Star|Aurelion Sol}}/{{ai|The Skies Descend|Aurelion Sol}}'': Impact radius increased equal to {{as|15% Stardust}}.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "notes": "* {{ais|Singularity|Aurelion Sol}} relative size and ratio stays the same when affected by ''Cosmic Creator's'' size modifier.\n<!-- Blurb -->",
+        "blurbicon": "Cosmic Creator.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Aurelion Sol}} damaging abilities against enemies generate him permanent stacks of {{as|Stardust}}, which gradually augments of his abilities.\n* ''{{ais|Breath of Light|Aurelion Sol}}'' bursts deal {{as|'''bonus''' magic damage}} based on the {{as|target's '''maximum''' health}}.\n* ''{{ais|Astral Flight|Aurelion Sol}}'' distance is increased.\n* ''{{ais|Singularity|Aurelion Sol}}'' area and execute threshold are increased.\n* ''{{ai|Falling Star|Aurelion Sol}}''/''{{ai|The Skies Descend|Aurelion Sol}}'' has increased impact area.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "AurelionSolQ",
+      "name": "Breath of Light",
+      "description": "Aurelion Sol channels his dragon breath for a few seconds, damaging the first enemy hit and splashing reduced damage onto nearby enemies. Each second the breath is channeled directly at an enemy will deal bonus damage, which is improved by the amount of Stardust that's been collected. This ability collects Stardust if the target is a champion.",
+      "tooltip": "Aurelion Sol breathes starfire for up to {{ maxchannelduration }} seconds, dealing {{ damagepersecond }} magic damage per second to the first enemy hit and {{ aoemodifier*100 }}% of the damage to surrounding enemies.\n\nEach full second of breath on the same enemy deals a burst of {{ burstdamage }} magic damage plus {{ burstbonustruedamagetochamps }} max Health magic damage and absorbs {{ qmassstolen }} Stardust if they are a champion.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "3",
+      "cost": "35/40/45/50/55",
+      "cost_type": " Mana per second",
+      "range": "750",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "@AbilityResourceName@ Cost",
+          "Damage Per Second",
+          "Burst Damage",
+          "Maximum Channel Duration"
+        ],
+        "effect": [
+          "{{ cost }} -> {{ costNL }}",
+          "{{ rankdamagepersecond }} -> {{ rankdamagepersecondNL }}",
+          "{{ rankburstdamage }} -> {{ rankburstdamageNL }}",
+          "{{ maxchannelduration }} -> {{ maxchanneldurationNL }}"
+        ]
+      },
+      "resource": "{{ manacostpersecond }} Mana per second",
+      "wiki_detail": {
+        "champion": "Aurelion Sol",
+        "skill": "Q",
+        "icon": "Breath of Light.png",
+        "description": "{{sbc|Active:}} '''Aurelion Sol''' {{tip|channel|charges}} for up to {{fd|3.25}} seconds to exhale a beam of starfire, during which he can steer the beam in the target direction. The beam collides with the first enemy hit to {{tip|standard sight|reveal}} them and deal {{as|magic damage}} every {{fd|0.125}} seconds, reduced to 50% for other surrounding enemies hit by the beam.",
+        "leveling": "{{st|Magic Damage per Tick|{{ap|45*0.125 to 105*0.125}} {{as|(+ {{ap|55*0.125}}% AP)}}|Reduced Damage per Tick|{{ap|45*0.0625 to 105*0.0625}} {{as|(+ {{ap|55*0.0625}}% AP)}}}}\n{{st|{{tt|Total Maximum Magic Damage|Ranks 1-4}}|{{ap|45*3.25 to 105*3.25 4}} {{as|(+ {{ap|55*3.25}}% AP)}}}}",
+        "description2": "The beam will deal a burst of {{ccs|{{as|'''bonus''' magic damage}}|magic}} for each full second that it damages the same enemy, and generates {{as|2 Stardust}} if the target is a {{tip|champion}}. The damage based on the target's health ratio is capped at 300 against {{tip|monsters}}.",
+        "leveling2": "{{st|Bonus Magic Damage|{{ap|55 to 95}} {{as|(+ 30% AP)}}<br>{{ai|Cosmic Creator|Aurelion Sol|{{as|(+|hp}} {{as|({{fd|3.1}}% Stardust)}}{{as|%|hp}} {{as|of target's '''maximum''' health}}|hp}}}}",
+        "description3": "''Breath of Light'' can be recast within the duration, and does so automatically afterwards.",
+        "description4": "{{sbc|Recast:}} '''Aurelion Sol''' ends ''Breath of Light'' early.",
+        "description5": "At rank 5, ''Breath of Light's'' channel duration is increased to 160 seconds.",
+        "description6": "''Breath of Light cannot be cast for 1 second if the channel is cancelled within the first {{fd|0.25}} seconds.''",
+        "cooldown": "3",
+        "cdstart": "post-effect",
+        "customlabel": "{{tt|Initial Cost|Mana cost paid upon starting the channel. Cost for mana per 0.25 seconds then starts being paid after 1.25 seconds into the channel.}}",
+        "custominfo": "{{ap|30 to 50}} Mana",
+        "cost": "{{ap|35*0.25 to 55*0.25}}",
+        "costtype": "Mana per {{fd|0.25}} seconds",
+        "range": "{{pp|750 to 920}}",
+        "effect radius": "|width        =",
+        "angle": "|cast time    = none",
+        "targeting": "Direction",
+        "affects": "Self, Enemies",
+        "damagetype": "Magic",
+        "spellshield": "special",
+        "spelleffects": "special",
+        "projectile": "false",
+        "silence": "true",
+        "callforhelp": "special",
+        "video": "|notes        = \n* Applies {{tip|spell damage}} on the burst and {{tip|persistent area damage}} on the beam.\n* ''Breath of Light's'' bursts against an enemy champion will aggro nearby enemy minions.\n* ''Breath of Light'' places a timer on each target, which ticks in {{fd|0.2}} second intervals. Thus, at {{ft|5 completed intervals|1 full second}}, the burst damage is procced.\n** The timer's visuals themselves otherwise serve no other purpose than gameplay clarity.\n** The timer falls off and resets to zero immediately upon no longer damaging affected targets.\n* {{tip|Spell shield}} will only block the burst damage.\n* The following table refers to interactions while '''Aurelion Sol''' is {{tip|channel|charging}}.\n{{ct|channel|attack=interrupts|cast=interrupts|move=interrupts|items=interrupts,true,,false|spells=true,interrupts,false,interrupts,interrupts}}\n<!-- Blurb -->",
+        "blurbicon": "Breath of Light.png",
+        "blurb": "{{sbc|Active:}} {{ci|Aurelion Sol}} {{tip|channel|charges}} up to a short time, exhaling a beam in the target direction that continuously deals {{as|magic damage}} to the first enemy hit and reduced damage to other enemies. {{ci|Aurelion Sol}} can steer the beam in any direction.",
+        "blurb2": "The beam will deal a burst of {{ccs|{{as|'''bonus''' magic damage}}|magic}} for each full second that it damages the same enemy, and generates {{as|Stardust}} if the target is a {{tip|champion}}.",
+        "blurb4": "At max rank, ''Breath of Light's'' channel duration may last indefinitely.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "W": {
+      "id": "AurelionSolW",
+      "name": "Astral Flight",
+      "description": "Aurelion Sol flies over terrain in a targeted direction. While in this state, he can cast other abilities. Breath of Light no longer has a cooldown or maximum channel duration and deals increased damage while flying.\n\nAstral Flight's remaining cooldown is reduced whenever an enemy champion dies after being recently damaged by Aurelion Sol.\n\nStardust increases Astral Flight's maximum range.",
+      "tooltip": "Aurelion Sol flies in a direction. While flying, Breath of Light has no Cooldown, no max channel duration, and its flat damage is increased by {{ truedamagebonus*100 }}%.\n\nTakedowns on champions within {{ resetwindow }} seconds of damaging them refunds {{ tooltiptakedowncooldownmultiplier }}% of this Ability's Cooldown.\n\nRecast: End flight early.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "22/20.5/19/17.5/16",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1500",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Percent Bonus Magic Damage",
+          "@AbilityResourceName@ Cost",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ truedamagebonus*100.000000 }}% -> {{ truedamagebonusnl*100.000000 }}%",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Aurelion Sol",
+        "skill": "W",
+        "icon": "Astral Flight.png",
+        "description": "{{sbc|Active:}} '''Aurelion Sol''' {{tip|dash|dashes}} in the target direction and resets ''{{ais|Breath of Light|Aurelion Sol}}'' {{sti|cooldown}}. During flight, he has {{tip|unobstructed vision}} and ''{{ai|Breath of Light|Aurelion Sol}}'' has no cooldown and maximum channel duration and its flat damage is increased, but ''Astral Flight's'' dash speed is reduced by 50% during its channel.",
+        "leveling": "{{st|{{ai|Breath of Light|Aurelion Sol}} Flat Damage Modifier|{{ap|108 to 112}}%}}",
+        "description2": "'''''Aurelion Sol''' will be {{tip|knockdown|knocked down}} by any {{tip|immobilize|immobilizing}} crowd control during the dash.''",
+        "description3": "''Astral Flight'' can be recast after {{fd|0.5}} seconds during the dash, and does so automatically upon arrival.",
+        "icon4": "Astral Flight 2.png",
+        "description4": "{{sbc|Recast:}} '''Aurelion Sol''' ends ''Astral Flight''.",
+        "description5": "Scoring a champion {{tip|takedown}} within 3 seconds of damaging them reduces ''Astral Flight's'' {{sti|'''current''' cooldown}} by 90% of its '''total''' cooldown.",
+        "description6": "'''''Aurelion Sol''' will not dash if he is {{tip|immobilize|immobilized}} or {{tip|ground|grounded}} during the cast time. He can cast any of his abilities during the dash. {{ais|Breath of Light|Aurelion Sol}} channel will be interrupted if Astral Flight ends or {{ai|Singularity|Aurelion Sol}} is cast during the flight, but the ability will automatically be cast afterwards.''",
+        "cooldown": "{{ap|22 to 16}}",
+        "cdstart": "post-effect",
+        "cost": "{{ap|50 to 70}}",
+        "costtype": "Mana",
+        "target range": "1500 (+ {{fd|7.5}} {{times}} {{as|Stardust}})",
+        "cast time": "{{fd|0.4}}",
+        "speed": "{{tt|335 + {{as|100% movement speed}}|Dash speed}} / {{tt|{{fd|167.5}} + {{as|50% movement speed}}|Dash speed while channeling Breath of Light}}",
+        "targeting": "Direction",
+        "affects": "Self",
+        "grounded": "true",
+        "knockdown": "true",
+        "video": "|notes        = \n* If a {{tip|takedown}} is scored while ''Astral Flight'' is active, the cooldown will be reduced after it ends.\n* ''Astral Flight'' cannot be used in the first 15 seconds of the game.\n* The following table refers for interactions while '''Aurelion Sol''' is {{tip|dash|dashing}}:\n{{ct|attack=interrupts|move=interrupts|cast=true|items=true,,interrupts,interrupts|consume=true|spells=true,interrupts,false,false,true|interrupts=death,root}}\n<!-- Blurb -->",
+        "blurbicon": "Astral Flight.png",
+        "blurb": "{{sbc|Active:}} {{ci|Aurelion Sol}} {{tip|dash|flies}} in the target direction. During flight, he can cast any of his abilities, and ''{{ai|Breath of Light|Aurelion Sol}}'' has no {{sti|cooldown}}, no maximum channel duration, and its flat damage is increased. {{ci|Aurelion Sol}} flies at a reduced speed while channeling ''{{ai|Breath of Light|Aurelion Sol}}''.",
+        "blurb2": "''Astral Flight'' can be recast during flight, and does so automatically upon arrival.",
+        "blurb3": "{{sbc|Recast:}} {{ci|Aurelion Sol}} ends ''Astral Flight''.",
+        "blurb4": "Scoring a champion {{tip|takedown}} within 3 seconds of damaging them refunds a large portion of ''Astral Flight's'' {{sti|cooldown}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "E": {
+      "id": "AurelionSolE",
+      "name": "Singularity",
+      "description": "Aurelion Sol summons a black hole, damaging enemies and slowly pulling them toward its center. This ability grants Stardust each time an enemy dies within the black hole and for each second an enemy champion is caught inside it. The center of the black hole executes enemies who are below a certain percentage of their maximum health. Stardust increases Singularity's area as well as the execution threshold.",
+      "tooltip": "Aurelion Sol summons a black hole, dealing {{ damagepersecond }} magic damage per second and Dragging enemies towards the center for {{ duration }} seconds. Enemies in the center below {{ currentexecutionthreshold }}% max Health die instantly.\n\nThe black hole absorbs Stardust when enemies die within it and each second an enemy champion is inside.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "750",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage Per Second"
+        ],
+        "effect": [
+          "{{ basedamagepersecond }} -> {{ basedamagepersecondNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Aurelion Sol",
+        "skill": "E",
+        "icon": "Singularity.png",
+        "description": "{{sbc|Active:}} '''Aurelion Sol''' conjures a black hole at the target location after a {{tt|{{fd|0.5}}-second delay|From start of cast time}} that lasts for 5 seconds, granting {{tip|sight}} of the area and dealing {{as|magic damage}} every {{fd|0.25}} seconds to enemies within.",
+        "leveling": "{{st|Magic Damage per Tick|{{ap|10/4 to 30/4}} {{as|(+ {{ap|16/4}}% AP)}}|Total Magic Damage|{{ap|10*5 to 30*5}} {{as|(+ {{ap|16*5}}% AP)}}}}",
+        "description2": "Enemies in the black hole are {{tip|kinematics|dragged}} inward until they reach the center, and {{tip|minions}} and {{tip|monsters}} also have their {{as|movement speed}} '''reduced''' to {{as|0|ms}}. Enemies within the center are {{tip|execute|executed}} below {{as|5%|hp}} {{as|(+ {{fd|2.6}}% Stardust)%}} {{as|of their '''maximum''' health}}, excluding epic monsters.",
+        "description3": "After ''Singularity'' ends, it generates {{as|1 Stardust}} for each full second that enemy champions were inside it, as well as varying amounts for enemy units that were killed while being within the area:\n* Champions and epic monsters grant {{as|2 Stardust}}.\n* Large minions and monsters grant {{as|2 Stardust}}.\n* Small minions and monsters grant {{as|1 Stardust}}.",
+        "description4": "''Singularity will cast at max range if cast within 200 units beyond. During {{ai|Astral Flight|Aurelion Sol}}, it will cast at max range if cast at any range beyond.''",
+        "cooldown": "12",
+        "cdstart": "post-effect",
+        "cost": "90",
+        "costtype": "Mana",
+        "target range": "{{pp|750 to 920}}",
+        "effect radius": "{{tip|er|icononly=true}} √({{tt|275|Radius at 0 Stardust}}² + {{fd|16.93}}² {{times}} {{as|Stardust}})",
+        "inner radius": "{{tip|er|icononly=true}} √({{tt|{{fd|137.5}}|Radius at 0 Stardust}}² + {{fd|8.46}}² {{times}} {{as|Stardust}})",
+        "cast time": "{{fd|0.2}}",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "special",
+        "spelleffects": "aoedot",
+        "callforhelp": "special",
+        "video": "|notes        = \n* The damage area hits targets by their {{tip|edge range|edge}}, while the {{tip|kinematics}} area hits targets by their {{tip|centered range|center}}. This makes a slight fringe where targets may be damaged without displacing them.\n* {{tip|Spell shield}} will block a single instance of damage.\n* ''Singularity's'' execute against an enemy champion will aggro nearby enemy minions.\n<!-- Blurb -->",
+        "blurbicon": "Singularity.png",
+        "blurb": "{{sbc|Active:}} {{ci|Aurelion Sol}} conjures a black hole at the target location for a few seconds that continually deals {{as|magic damage}} to enemies within. Enemies in the black hole are {{tip|kinematics|dragged}} toward the center. Enemies within the center are {{tip|execute|executed}} {{as|at low health}}.",
+        "blurb2": "After ''Singularity'' ends, it generates {{as|Stardust}} for each full second that enemy champions were inside, as well as for each enemy {{tip|takedown}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "R": {
+      "id": "AurelionSolR",
+      "name": "Falling Star / The Skies Descend",
+      "description": "Falling Star: Aurelion Sol crashes a star into the earth. This impact deals magic damage and stuns enemies while also granting Stardust for each enemy champion it hits. Gathering enough Stardust transforms Aurelion Sol's next Falling Star into The Skies Descend.\n\nThe Skies Descend: Aurelion Sol drags a giant star down from the heavens with an increased impact zone and increased damage, knocking up enemies rather than stunning them. A shockwave then spreads from the edge of the impact zone, which damages and slows the enemies it hits. Stardust increases the impact area of both Falling Star and The Skies Descend.",
+      "tooltip": "Aurelion Sol plucks a star from the heavens and crashes it into the earth, dealing {{ maxdamagetooltip }} magic damage, Stunning enemies {{ stunduration }} second, and absorbing {{ massstolen }} Stardust for each champion hit.\n\nGathering {{ calamitystacks }} Stardust transforms the next Falling Star into The Skies Descend.\n\nThe Skies Descend: Aurelion Sol drags a constellation's worth of fury down from the cosmos, dealing {{ r2damage }} magic damage in a larger area, Knocking Up enemies hit for {{ stunduration }} second, and unleashing a massive shockwave that deals {{ shockwavedamage }} magic damage to champions and Epic Monsters and Slows all enemies hit by {{ shockwaveslow*100 }}% for 1 second.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/110/100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1250",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage",
+          "Empowered Damage",
+          "Shockwave Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ basedamage*1.250000 }} -> {{ basedamagenl*1.250000 }}",
+          "{{ basedamage*0.900000 }} -> {{ basedamagenl*0.900000 }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    }
+  }
+}

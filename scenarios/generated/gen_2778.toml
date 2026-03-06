@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0006_2v2"
+seed = 1929
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["Yasuo", "templar"]
+enemy_hero_templates = ["Briar", "Yorick"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

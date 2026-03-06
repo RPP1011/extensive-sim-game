@@ -1,0 +1,11 @@
+[scenario]
+name        = "Climax Solo 1v2 — Lone Hero vs Bosses"
+seed        = 13
+hero_count  = 1
+enemy_count = 2
+difficulty  = 2
+max_ticks   = 3000
+room_type   = "Climax"
+
+[assert]
+outcome = "Either"

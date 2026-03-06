@@ -1,0 +1,97 @@
+[hero]
+name = "Rek'Sai"
+
+[stats]
+hp = 138
+move_speed = 3.4
+armor = 40.0
+magic_resist = 32.0
+
+[attack]
+damage = 18
+range = 1.5
+cooldown = 800
+
+# --- Q: Queen's Wrath / Prey Seeker ---
+[[abilities]]
+name = "Queen's Wrath / Prey Seeker"
+targeting = "target_enemy"
+range = 3.2
+cooldown_ms = 4000
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- W: Burrow / Un-burrow ---
+[[abilities]]
+name = "Burrow / Un-burrow"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 4000
+ai_hint = "buff"
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 3000
+
+# --- E: Furious Bite / Tunnel ---
+[[abilities]]
+name = "Furious Bite / Tunnel"
+targeting = "target_enemy"
+range = 2.5
+cooldown_ms = 6000
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- R: Void Rush ---
+[[abilities]]
+name = "Void Rush"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 21700
+cast_time_ms = 250
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 37
+damage_type = "physical"
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+is_blink = true
+
+[[abilities.effects]]
+type = "stealth"
+duration_ms = 3000
+break_on_damage = true
+break_on_ability = true
+
+# --- Passive: Fury of the Xer'Sai ---
+[[passives]]
+name = "Fury of the Xer'Sai"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 5000
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+

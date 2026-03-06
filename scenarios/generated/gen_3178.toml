@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0139_4v4_s1"
+seed = 12062
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["Chogath", "Lux", "Jax", "AurelionSol"]
+enemy_hero_templates = ["Diana", "Caitlyn", "Elise", "Alistar"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_knight_alchemist_cleric"
+seed = 1068
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["knight", "alchemist", "cleric"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

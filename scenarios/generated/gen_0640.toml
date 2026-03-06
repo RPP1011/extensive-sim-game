@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_templar_samurai_warrior_s1"
+seed = 11214
+hero_count = 3
+enemy_count = 4
+difficulty = 2
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["templar", "samurai", "warrior"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

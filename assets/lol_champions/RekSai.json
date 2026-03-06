@@ -1,0 +1,208 @@
+{
+  "id": "RekSai",
+  "name": "Rek'Sai",
+  "title": "the Void Burrower",
+  "resource_type": "Rage",
+  "tags": [
+    "Fighter",
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Fury of the Xer'Sai",
+      "description": "Rek'Sai generates Fury by Attacking and hitting with basic Abilities. She consumes this Fury while Burrowed to restore health.",
+      "wiki_detail": {
+        "champion": "Rek'Sai",
+        "skill": "I",
+        "icon": "Fury of the Xer'Sai.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Rek'Sai}} basic attacks and ability hits generate {{tip|fury|{{as|Fury}}}}, which continually expires after a few seconds [[out of combat]].",
+        "blurb2": "When '''Rek'sai''' becomes {{sbc|{{ai|Burrow|Rek'Sai|Burrowed}}}}, she rapidly consumes {{as|Fury}} to {{tip|heal}} herself while she is wounded.",
+        "description": "{{sbc|Innate:}} '''Rek'Sai''' [[basic attack]]s and [[champion ability|ability]] hits generate {{tip|fury|{{as|25 Fury}}}}. After 8 seconds of being [[out of combat]], she loses {{as|20 Fury}} per second. {{as|Fury}} gain is reduced{{ft|by 80%|to {{as|{{ap|25*0.2}}|Fury}} per hit}}against {{tip|minions}}, {{tip|ward|wards}}, and [[Jungle plants|plants]]. ''{{ai|Prey Seeker|Rek'Sai}}'' will not generate {{as|Fury}} against non-{{tip|champions}}.",
+        "description2": "When '''Rek'Sai''' becomes {{sbc|{{ai|Burrow|Rek'Sai|Burrowed}}}}, she consumes her current {{as|Fury}} over 3 seconds to {{tip|heal}} for up to {{as|{{pp|10 to 20 for 6|1 to 16|key=%}} '''maximum''' health}} at {{as|100 Fury}}, stopping once fully consumed or she reaches {{sti|health|{{as|full health}}}}. If she starts generating {{as|Fury}} while {{sbc|Burrowed}}, the consumption occurs after 5 seconds.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "spelleffects": "Heal",
+        "notes": "* {{tip|Fury}} bar changes from {{color|yellow|'''Yellow'''}} to {{color|red|'''Red'''}} when full.\n* When '''Rek'Sai''' automatically consumes {{as|Fury}} while {{sbc|Burrowed}} (no transformation), the healing buff will refresh every second while she has/maintains over {{as|25 Fury}}.{{bug|2}} This causes the healing to last 6 seconds at {{as|100 Fury}}."
+      }
+    },
+    "Q": {
+      "id": "RekSaiQ",
+      "name": "Queen's Wrath / Prey Seeker",
+      "description": "Rek'Sai's next 3 basic attacks deal bonus Physical Damage to nearby enemies.\n\nWhile Burrowed, Rek'Sai launches a burst of void-charged earth that damages and reveals enemies hit.",
+      "tooltip": "Unburrowed: Rek'Sai's next 3 Attacks within {{ buffduration }} seconds gain {{ attackspeed*100 }}% Attack Speed and deal an additional {{ totaldamagetooltip }} physical damage to nearby enemies. Attacks refresh the duration of this Ability.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "4/3.5/3/2.5/2",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "325",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "12/11/10/9/8",
+        "5",
+        "3",
+        "300",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Queen's Wrath AD Ratio",
+          "Queen's Wrath Cooldown",
+          "Prey Seeker Damage"
+        ],
+        "effect": [
+          "{{ unburrowedadratio*100.000000 }}% -> {{ unburrowedadrationl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ burrowedbasedamage }} -> {{ burrowedbasedamageNL }}"
+        ]
+      },
+      "resource": "No Cost"
+    },
+    "W": {
+      "id": "RekSaiW",
+      "name": "Burrow / Un-burrow",
+      "description": "Rek'Sai burrows into the ground, gaining new abilities and increased Move Speed. Her vision range is reduced and she cannot use basic attacks.\n\nWhile Burrowed, Rek'Sai may cast Unburrow to knock up and damage nearby enemies.",
+      "tooltip": "Unburrowed: Rek'Sai burrows into the ground, gaining access to new Abilities but cannot Attack. She gains {{ burrowedmovespeed }} Move Speed, {{ visionradiusmod*-100 }}% reduced vision range, and nearby enemies that move and are otherwise unseen will have their positions revealed to Rek'sai and her allies.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "4",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "1650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "1500",
+        "0",
+        "0",
+        "0",
+        "1",
+        "10",
+        "250",
+        "175",
+        "3",
+        "0.3"
+      ],
+      "leveltip": {
+        "label": [
+          "Unburrow Damage",
+          "Knock Up Immunity",
+          "Burrowed Move Speed"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ knockupimmunity }} -> {{ knockupimmunityNL }}",
+          "{{ burrowedmovespeed }} -> {{ burrowedmovespeedNL }}"
+        ]
+      },
+      "resource": "No Cost"
+    },
+    "E": {
+      "id": "RekSaiE",
+      "name": "Furious Bite / Tunnel",
+      "description": "Rek'Sai bites her target, dealing physical damage, or bonus true damage if she has max Fury.\n\nWhile Burrowed, Rek'Sai creates a re-usable, long lasting tunnel. Enemies can destroy it by standing on top of either entrance.",
+      "tooltip": "Unburrowed: Rek'Sai bites a target, dealing {{ spell.reksaie:basedamage }} physical damage. At max Fury, the bite deals {{ spell.reksaie:empowereddamage }} true damage instead.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "6",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "250",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Base Damage",
+          "Empowered Damage",
+          "Tunnel Cast Cooldown",
+          "Tunnel Use Cooldown"
+        ],
+        "effect": [
+          "{{ empoweredbasedamage*0.800000 }} -> {{ empoweredbasedamagenl*0.800000 }}",
+          "{{ empoweredbasedamage }} -> {{ empoweredbasedamageNL }}",
+          "{{ dashcooldown }} -> {{ dashcooldownNL }}",
+          "{{ tunnelreusecooldown }} -> {{ tunnelreusecooldownNL }}"
+        ]
+      },
+      "resource": "No Cost"
+    },
+    "R": {
+      "id": "RekSaiR",
+      "name": "Void Rush",
+      "description": "Rek'Sai passively marks targets by damaging them. She can activate this ability to become briefly untargetable and lunge at a marked target for heavy damage based on their maximum health.",
+      "tooltip": "Rek'Sai targets an enemy damaged by her in the last {{ preymarkduration }} seconds and then dives underground, becoming Untargetable. Moments later, she leaps unstoppably at her target, dealing {{ rbasedamagecalc }} plus {{ percenthealthdamage }}% max Health physical damage and resets the cooldown of Burrow / Un-burrow.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "1500",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "% Health damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ rbasedamage }} -> {{ rbasedamageNL }}",
+          "{{ percenthealthdamage }}% -> {{ percenthealthdamageNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Rek'Sai",
+        "skill": "R",
+        "blurbicon": "Void Rush.png",
+        "blurb": "{{sbc|Passive:}} {{ci|Rek'Sai}} marks enemy champions she damages with ''Marked as Prey'', which lasts a few seconds.",
+        "blurb2": "{{sbc|Active:}} '''Rek'Sai''' selects the target ''Marked as Prey'', becoming {{tip|displacement immune}} and {{tip|vanish|vanishing}} into the ground. After a brief delay, she emerges {{sbc|{{ai|Unburrow|Rek'Sai|Un-Burrowed}}}} and {{tip|dash|pounces}} at the target, dealing {{as|physical damage}} based on {{as|their '''missing''' health}}.",
+        "blurb4": "{{sbc|{{tip|displacement immunity|nolink=true}}:}} The dash cannot be deterred by {{tip|crowd control}}.",
+        "icon": "Void Rush Mark.png",
+        "description": "{{sbc|Passive:}} '''Rek'Sai''' applies ''Marked as Prey'' to enemy champions she damages, lasting for 5 seconds.",
+        "icon2": "Void Rush.png",
+        "description2": "{{sbc|Active:}} '''Rek'Sai''' selects the target ''Marked as Prey'', becoming {{tip|displacement immune}} and {{tip|lockout|unable to act}} and {{tip|vanish|vanishing}} into the ground. After {{fd|1.5}} seconds, she {{tip|blink|blinks}} to a location {{tt|near the target|Relative to her casting position}}, becoming targetable again and emerging from the ground in {{sbc|{{ai|Unburrow|Rek'Sai|Un-Burrowed}}}} form to {{tip|dash|pounce}} at them. Upon arrival, she deals them {{as|physical damage}} and {{tip|dash|dashes}} 125 units through them.",
+        "leveling2": "{{st|Physical Damage|{{ap|150 to 450}} {{as|(+ 100% '''bonus''' AD)}} {{as|(+ {{ap|25 to 35}}% of target's '''missing''' health)}}}}",
+        "description3": "''If the target dies or is too far away before '''Rek'Sai''' vanishes, Void Rush is canceled with a {{sti|cd|10-second}} cooldown.''",
+        "target range": "1500",
+        "speed": "{{tt|1400|Dash speed}}",
+        "cooldown": "{{ap|100 to 80}}",
+        "targeting": "Unit",
+        "cast time": "{{fd|0.25}}",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "grounded": "True",
+        "knockdown": "False",
+        "callforhelp": "true",
+        "notes": "* '''Rek'Sai''' will track the target if they change locations.\n** She will dash through the target's previous location without dealing damage if the target is too far away or moves beyond {{tt|1750|Estimated}} units.\n* The damage can be dodged if the target moves {{tt|1000|pending for confirmation}} or more units away.\n* All sources of damage by '''Rek'Sai''' count for applying the mark.\n* ''Void Rush'' has a brief cast time during which '''Rek'Sai''' is still targetable.\n* ''Void Rush's'' {{tip|displacement immunity}} begins from the start of the cast time, and ends when the dash ends.\n* ''Void Rush's'' damage can be dodged by becoming {{tip|untargetable}}.\n* '''Rek'Sai''' can activate ''Void Rush'' while {{ai|Burrow|Rek'Sai|Burrowed}} or {{ai|Unburrow|Rek'Sai|Unburrowed}}.\n** She will always emerge as ''Unburrowed''.\n* If '''Rek'Sai''' enters {{tip|resurrection}} during the cast time, ''Void Rush'' is canceled and goes on a 10 second cooldown.\n** If the ''resurrection'' occurs while {{tip|vanish|vanished}}, she will emerge and pounce the target immediately.\n* A screeching noise made by '''Rek'Sai''' can be heard globally after ''Void Rush'' is cast (''will be heard by enemies even if they don't have {{tip|sight}} of '''Rek'Sai''' and/or her destination'').\n* The following table refers for interactions while '''Rek'Sai''' is performing ''Void Rush'':\n{{ct|attack=false|move=false|cast=false|items=false|consume=false|spells=false|interrupts=death}}\n{{ct|cast|spells=false}}",
+        "flavorsound": "{{sm2|Rek'Sai_Original_R.ogg}} ''Activation alert.''",
+        "video": "Rek'Sai RVideo.ogv"
+      }
+    }
+  }
+}

@@ -1,0 +1,315 @@
+{
+  "id": "Warwick",
+  "name": "Warwick",
+  "title": "the Uncaged Wrath of Zaun",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Eternal Hunger",
+      "description": "Warwick's basic attacks deal bonus magic damage. If Warwick is below 50% health, he heals the same amount. If Warwick is below 25% health, this healing triples.",
+      "wiki_detail": {
+        "champion": "Warwick",
+        "skill": "I",
+        "icon": "Eternal Hunger.png",
+        "description": "{{sbc|Innate:}} '''Warwick''' deals {{as|{{pp|12 to 46}} {{as|(+ 15% '''bonus''' AD)}} {{as|(+ 10% AP)}}|magic damage}} {{as|'''bonus''' magic damage}} {{tip|on-hit}}.<br/><br/>\nWhile {{as|below 50% '''maximum''' health}}, '''Warwick''' also {{tip|heal|heals}} for 100% of the {{tt|post-mitigation damage|Damage calculated after resistances and modifiers.}} dealt by ''Eternal Hunger'', increased to 250% while {{as|below 25% '''maximum''' health}}.",
+        "targeting": "Passive",
+        "damagetype": "Magic",
+        "spelleffects": "Proc",
+        "parry": "true",
+        "affects": "Self",
+        "spellshield": "False",
+        "notes": "* ''Eternal Hunger'' does not affect:\n** [[structures]]\n** [[ward]]s (except {{tip|Effigy|effigies}}),\n** {{cai|Powder Keg|Gangplank|kegs}}\n** {{cai|Prophet of an Elder God|Illaoi|Tentacles}} \n{{Pending for test}} Other units with modified health behaviour.",
+        "yvideo": "Warwick - Passive\n<!-- Blurb -->",
+        "blurbicon": "Eternal Hunger.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Warwick}} deals bonus {{as|magic damage}} on-hit.",
+        "blurb2": "While below {{as|50% '''maximum''' health}}, '''Warwick''' also {{as|{{sti|heals}}}} for 100% of the damage dealt by ''Eternal Hunger'', increased to 250% while below {{as|25% '''maximum''' health}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "WarwickQ",
+      "name": "Jaws of the Beast",
+      "description": "Warwick lunges forward and bites his target, dealing damage based on their maximum health and healing for damage dealt.",
+      "tooltip": "Tap: Warwick lunges forward and bites, dealing {{ basebitedamage }} plus {{ targetpercenthpdamage }}% max Health magic damage and healing for {{ e3 }}% of the damage dealt.\n\nHold: Warwick lunges and clamps his jaws on the target, leaping behind them. While clamped, Warwick follows all movement of the target. After releasing his hold, he does the same damage and healing.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8/7.5/7/6.5/6",
+      "cost": "80/85/90/95/100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "365",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "100/150/200/250/300",
+        "25/37.5/50/62.5/75",
+        "150/165/180/195/210",
+        "450",
+        "200",
+        "300",
+        "425",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Healing",
+          "% Health damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e3 }}% -> {{ e3NL }}%",
+          "{{ targetpercenthpdamage }}% -> {{ targetpercenthpdamageNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Warwick",
+        "skill": "Q",
+        "icon": "Jaws of the Beast.png",
+        "description": "{{sbc|Active:}} '''Warwick''' {{tip|lunge|lunges}} at the target enemy over {{rutngt|0.2475}} and bites them, dealing {{as|magic damage}}, {{tip|heal|healing}} himself for a percentage of the {{tt|post-mitigation damage|Damage calculated after resistances and most modifiers.}} dealt, as well as applying {{tip|on-hit}} and {{tip|on-attack}} effects, and {{stil|life steal}} at 100% effectiveness. The damage based on the target's health ratio is capped against {{tip|monster|monsters}}.",
+        "leveling": "{{st|Magic Damage|{{as|{{ap|6 to 10}}% of target's '''maximum''' health}} {{as|(+ 120% AD)}} {{as|(+ 100% AP)}}|Maximum Monster Damage|{{ap|150 to 210}} {{as|(+ 120% AD)}} {{as|(+ 100% AP)}}}}\n{{st|Healing Percentage|{{ap|25 to 75}}%}}",
+        "description2": "While ''Jaws of the Beast'' is active, '''Warwick''' is {{tip|displacement immune}} and clamps his jaw on the target, following '''all''' of their movement. The ability can be held for additional effects.",
+        "description3": "{{sbc|Hold:}} '''Warwick''' performs the bite, and then begins to {{tip|channel|charge}} for {{fd|0.5 seconds}}, extended if the target is under effects of a {{tip|dash}} or {{tip|airborne|displacement}}. During the charge, he {{tip|dash|leaps}} behind the target.",
+        "cooldown": "6",
+        "cdstart": "post-effect",
+        "cost": "{{ap|50 to 90}}",
+        "cast time": "{{tt|none|See notes}}",
+        "costtype": "Mana",
+        "target range": "{{tip|cr|icononly = true}} 350",
+        "range": "{{tt|Global|Charge tracking/following range}}",
+        "targeting": "Unit",
+        "affects": "Enemies, Self",
+        "damagetype": "Magic",
+        "spelleffects": "basic",
+        "spellshield": "True",
+        "parry": "True",
+        "grounded": "special",
+        "knockdown": "Special",
+        "silence": "true",
+        "callforhelp": "True",
+        "notes": "'''Details'''\n* ''Jaws of the Beast'' deals {{tip|basic damage}}, but also triggers spell effects by dealing an additional 0 {{tip|spell damage}}.\n* ''Jaws of the Beast'' has a {{rutngt|0.2475}} cast ''delay'', which is the amount of time required for the bite to occur from the start of the cast. This should not be confused with [[https://leagueoflegends.fandom.com/wiki/Channel#Casting_Times cast times]].\n** If the cast started beforehand, both the damage and the heal occur even after '''Warwick's''' {{tip|death}}, or during {{tip|resurrection}}.\n* If the target dies prior to '''Warwick''' reaching them, ''Jaws of the Beast'' refunds its cooldown when tapped. The ability can be still held, however, '''Warwick''' is no longer eligible for the refund in this case. <br> {{correction}} The refund can occasionally fail. {{bug}}\n* The healing is calculated only from ''Jaws of the Beast's'' damage, while additional effects, such as on-hits, are not.\n* While the bite always occurs after the same delay, the time spent lunging does not, which depends on the range ''Jaws of the Beast'' was cast away from the target, up to {{fd|0.5}} seconds when cast at maximum range.\n** This does not affect the {{tip|lockout}} timer, which is the same as the bite's delay.\n* The lunge always places ''Warwick'' to his attack range to the center of his target, while the dash will place him up to the edge of his attack range from the target's edge.\n* It has been special cased so '''Warwick''' does not follow an enemy's {{si|Recall}} or a {{ci|Sion}} that revives from {{ai|I|Sion}}.<br>{{correction}} This may occasionally fail. Also note that as of currently, if ''Warwick'' manages to bite the target in those conditions, he will almost always end up following them to their base. {{bug}}\n* ''Jaws of the Beast's'' channel cannot be initiated while {{tip|ground|grounded}} or {{tip|root|rooted}}. '''Warwick''' can only use the normal cast.\n** The channel will '''not''' be interrupted by either of the two effects, despite the lock-on being a [[Channel#Movement Channels|movement channel]].\n'''Interactions & Other'''\n* In order to hit the cap, the target monster needs to have at least {{as|{{ap|(100 to 200)/((6 to 10)/100)|round=ceil}} health}}.\n* ''Jaws of the Beast'' is the only ability in the game that combines {{tip|channel|channeling}} with {{tip|displacement immune|displacement immunity}}. Every {{tip|interrupt|interrupting}} crowd control effect that is not resisted by the displacement immunity will prematurely stop the {{tip|dash}}.\n** The bite can still occur if cast before the crowd control application, but '''Warwick''' cannot start channeling.\n** Abilities that apply both {{tip|stun}} and {{tip|airborne}} at the same time cause '''Warwick''' to ignore the displacement, but prematurely stop the channel and the dash.\n** The only exception to this is {{cai|I|Sion}}.\n* '''Warwick''' will follow enemies that move via {{tip|attach|attachment}} effects but the lock-on will '''not''' be extended.\n* While ''Jaws of the Beast'' does not use Quick Casting by default, click-and-hold is comparable to the input required to use {{ai|Bone Skewer|Pyke}} or {{ai|Comet Spear|Pantheon}}. It does not accept two-click input (e.g. First Cast and Recast) that abilities like {{ai|Piercing Arrow|Varus}} or {{ai|Decimating Smash|Sion}} use in Standard Casting.\n* '''Warwick''' will attempt to basic attack the target after a short delay.\n* The following table refers for interactions while '''Warwick''' is {{tip|channel|channeling}}:\n** {{si|Flash}}, {{si|Teleport}}, {{si|Hexflash}}, and {{si|Recall}} are disabled during the first {{fd|0.4}} seconds of the channel.\n{{ct|charge|attack = false|cast = {{ai|Primal Howl|Warwick}} is usable. {{ai|Blood Hunt|Warwick}} and {{ai|Infinite Duress|Warwick}} are disabled.|move=false|spells=true,interrupts,interrupts,interrupts,interrupts|items=interrupts,true,interrupts,false,interrupts,melee|consume=true}}\n'''Known Issues'''\n* ''Jaws of the Beast'' will also refund its {{sti|cooldown}} if it kills the target after being held for exactly its bite delay. {{bug|1|Started in patch 10.1}}\n* The ability can be shortly cast on a dead target, with the ability going on cooldown.{{bug|1|Started in patch 10.1}}",
+        "yvideo": "Warwick - Q\n<!-- Blurb -->",
+        "blurbicon": "Jaws of the Beast.png",
+        "blurb": "{{sbc|Active:}} {{ci|Warwick}} lunges at his target and bites them, dealing {{as|magic damage}} that is increased based on the {{as|target's '''maximum''' health}} and {{as|{{sti|healing}}}} himself for a portion of the damage dealt. When held, he also {{tip|channel|charges}} briefly, {{tip|dash|leaping}} behind his target.",
+        "blurb2": "While ''Jaws of the Beast'' is in effect, '''Warwick''' gains {{tip|displacement immunity}} and also follows '''all''' of his target's movements.",
+        "blurb4": "''Jaws of the Beast'' applies {{tip|on-hit}} effects and {{as|{{sti|life steal}}}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "W": {
+      "id": "WarwickW",
+      "name": "Blood Hunt",
+      "description": "Warwick senses enemies below 50% health, gaining Move Speed toward and attack speed against them. When they fall below 25% health, he frenzies and these bonuses triple.",
+      "tooltip": "Passive: Warwick can sense champions below 50% Health, gaining {{ passivemsbonus }}% Move Speed towards them. Spells and attacks against enemies below 50% Health grant {{ passiveasbonus }}% Attack Speed. These effects are increased by 200% against enemies below 25% Health. \n\nActive: Warwick can briefly sense all enemies, and gains this Ability's passive effect against the closest champion for 8 seconds, regardless of Health. If no champions are found, this Ability's cooldown is reduced by 30%.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "80/70/60/50/40",
+      "cost": "55",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "4000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "35/42.5/50/57.5/65",
+        "70/80/90/100/110",
+        "10/15/20/25/30",
+        "80/90/100/110/120",
+        "30",
+        "8",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Move Speed",
+          "Attack Speed",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ passivemsbonus }}% -> {{ passivemsbonusNL }}%",
+          "{{ passiveasbonus }}% -> {{ passiveasbonusNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Warwick",
+        "skill": "W",
+        "icon": "false",
+        "icon4": "Blood Hunt.png",
+        "description": "{{sbc|Passive:}} '''Warwick''' gains {{sti|{{as|'''bonus''' attack speed}}}} upon basic attacking an enemy who is below {{as|{{sti|health|50% of their '''maximum''' health}}}}, but loses it when not attacking them or switching to a target above the threshold.",
+        "leveling": "{{st|Bonus Attack Speed|{{ap|70 to 110}}%}}",
+        "description2": "{{sbc|Passive:}} '''Warwick''' senses all enemy {{tip|champion|champions}} on the map who are damaged below {{as|{{sti|health|50% of their '''maximum''' health}}}} by an allied source, marking them with ''Blood Hunt'' until they regenerate or {{tip|heal|heal}} above this threshold again. He sees trails leading toward them and gains {{sti|ms|{{as|'''bonus''' movement speed}}}} while following a trail. This bonus is lost for {{fd|0.5}} seconds upon [[Combat status|entering champion combat]], but will build up again over {{fd|3.5}} seconds.",
+        "leveling2": "{{st|Bonus Movement Speed|{{ap|35 to 65}}%}}",
+        "description3": "The {{as|attack speed|attack speed}} and {{as|movement speed}} bonuses granted by both passives are increased to 200% against enemies who are below {{as|{{sti|health|25% of their '''maximum''' health}}}}.",
+        "leveling3": "{{st|Increased Attack Speed|{{ap|70*2.5 to 110*2.5}}%}}\n{{st|Increased Movement Speed|{{ap|35*2.5 to 65*2.5}}%}}",
+        "description4": "{{sbc|Active:}} '''Warwick''' senses the nearest enemy champion in the area, marking them with ''Blood Hunt'' for 8 seconds, gaining both passive bonuses against them regardless of their {{as|{{sti|health|'''current''' health}}}}.",
+        "description5": "''Blood Hunt'' is placed on a {{sti|cooldown reduction|{{tt|3-second static cooldown|Not reduced by Ability Haste}}}} during champion combat. Additionally, while no enemy champions are marked, the '''current''' cooldown of ''Blood Hunt'' runs out twice as quickly, meaning it is reduced by an additional second for each second passed.",
+        "cooldown": "{{ap|100 to 40}}",
+        "cost": "70",
+        "costtype": "Mana",
+        "range": "{{tt|Global|Passive detection of wounded enemies}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|4000|Search radius for target}}",
+        "cast time": "{{fd|0.5}}",
+        "targeting": "Auto",
+        "outofrange": "False",
+        "targetwarning": "Auto warning",
+        "affects": "Self / Enemies",
+        "damagetype": "|spellshield      = False",
+        "parry": "|projectile       =",
+        "grounded": "|knockdown        =",
+        "flavorsound": "{{sm2|Warwick.spellWHunt04.ogg}} ''Blood Hunted music.''",
+        "notes": "* {{correction}} The in-game description incorrectly states that the bonuses are tripled (300%) against enemies below {{as|{{sti|health|20% of their '''maximum''' health}}}}.\n** {{ai|Eternal Hunger|Warwick}} had a similar issue which was eventually fixed when it was rewritten.\n* If ''Blood Hunt'' was cast with no enemy champions within range, the ability does nothing and goes on cooldown.\n* As mentioned by the description, ''Blood Hunt'' only marks enemy champions if they are damaged below the thresholds by an allied source. This includes '''Warwick''' himself, champions, {{tip|minion|minions}}, and {{tip|turret|turrets}}.\n** The only exception is the allied {{tip|Nexus Obelisk}}, because that deals {{tip|raw damage|internalraw}} damage, which does not trigger damage-related events such as ''Blood Hunt's'' marking.\n* Note that {{tip|monster|monsters}} are neutral units.\n* ''Blood Hunt'' can detect and target [[Champion_summoned_units#decoys|decoys]].\n* ''Blood Hunt'' will occur from wherever '''Warwick''' was at the start of the cast time.\n* ''Blood Hunt'' has an indicator that appears above the target(s) when they are being hunted. Some skins have a unique indicator.\n<gallery navigation=true widths=\"128px\">\nWarwick Blood Hunt Mark.png                |[[File:Warwick OriginalCircle.png|32px]] Classic\nPROJECT Warwick Blood Hunt Mark.png        |[[File:Warwick PROJECTCircle.png|32px]] PROJECT\nLunar Guardian Warwick Blood Hunt Mark.png |[[File:Warwick LunarGuardianCircle.png|32px]] Lunar Guardian\nOld God Warwick Blood Hunt Mark.png        |[[File:Warwick OldGodCircle.png|32px]] Old God\nWinterblessed Warwick Blood Hunt Mark.png  |[[File:Warwick WinterblessedCircle.png|32px]] Winterblessed\nPrestige Winterblessed Warwick Blood Hunt Mark.png  |[[File:Warwick PrestigeWinterblessedCircle.png|32px]] Prestige Winterblessed\n</gallery>\n* Each of [[File:Warwick OldGodCircle.png|32px]] Old God's {{skin tier|'''Chromas'''}} have a unique color variation:\n<gallery navigation=true widths=\"128px\">\nOld God Warwick Ruby Blood Hunt Mark.png        | Ruby\nOld God Warwick Citrine Blood Hunt Mark.png     | Citrine\nOld God Warwick Emerald Blood Hunt Mark.png     | Emerald\nOld God Warwick Sapphire Blood Hunt Mark.png    | Sapphire\nOld God Warwick Rose Quartz Blood Hunt Mark.png | Rose Quartz\nOld God Warwick Obsidian Blood Hunt Mark.png    | Obsidian\nOld God Warwick Aquamarine Blood Hunt Mark.png  | Aquamarine\nOld God Warwick Pearl Blood Hunt Mark.png       | Pearl\nOld God Warwick Dark Ritual Blood Hunt Mark.png | Dark Ritual\n</gallery>\n* {{correction}} It should be noted that as of right now, skins that use the [[File:Warwick OriginalCircle.png|32px]] original's assets are all using a purple-blueish indicator that was undocumentedly introduced. It was possibly meant for color blind mode, based on the color. It is unknown whether the change was intentional or is a wrongly implemented feature.\n<gallery navigation=true widths=\"128px\">\nWarwick Blood Hunt Mark Alternative.png\n</gallery>",
+        "yvideo": "Warwick - W\n<!-- Blurb -->",
+        "blurbicon": "Blood Hunt.png",
+        "blurb": "{{sbc|Passive:}} {{ci|Warwick}} gains {{sti|{{as|attack speed}}}} against targets below {{as|50% of their '''maximum''' health}}. Against champions, he also gains out of combat {{as|{{sti|movement speed|movement speed}}}}.\nThese bonuses are massively increased, if the target is below {{as|20% of their '''maximum''' health}}",
+        "blurb2": "{{sbc|Active:}} '''Warwick''' marks the nearest enemy champion for a few seconds, gaining the passive bonuses against them regardless of {{as|their current health}}. This cannot be activated in combat.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "E": {
+      "id": "WarwickE",
+      "name": "Primal Howl",
+      "description": "Warwick gains damage reduction for 2.5 seconds. At the end, or if re-activated, he howls, causing nearby enemies to flee for 1 second.",
+      "tooltip": "Warwick gains {{ e1 }}% damage reduction for 2.5 seconds. After it ends, Warwick howls, Fearing nearby enemies for {{ e3 }} second. Warwick can Recast to end the Ability early.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "15/14/13/12/11",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "375",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "35/40/45/50/55",
+        "2.75",
+        "1",
+        "1",
+        "800",
+        "400",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage Reduction",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e1 }}% -> {{ e1NL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Warwick",
+        "skill": "E",
+        "icon": "Primal Howl.png",
+        "icon3": "Primal Howl 2.png",
+        "blurb": "{{sbc|Active:}} {{ci|Warwick}} gains damage reduction for a short time. ''Primal Howl'' can be recast within the duration, and does so automatically afterwards.",
+        "blurb2": "{{sbc|Recast:}} '''Warwick''' howls to briefly {{tip|fear}} and {{tip|slow}} nearby enemies.",
+        "description": "{{sbc|Active:}} '''Warwick''' gains damage reduction for up to {{fd|2.5}} seconds. ''Primal Howl'' can be recast after 1 second, and does so automatically after the duration.",
+        "leveling": "{{st|Damage Reduction|{{ap|35 to 55}}%}}",
+        "description3": "{{sbc|Recast:}} '''Warwick''' howls, ending ''Primal Howl's'' effects and {{tip|fear|fearing}} nearby enemies for 1 second, {{tip|slow|slowing}} them by 90%.",
+        "description4": "Starting ''{{ais|Infinite Duress|Warwick}}'' channel while ''Primal Howl'' is active will initiate the recast without ending the damage reduction buff prematurely.",
+        "cooldown": "{{ap|15 to 11}}",
+        "cdstart": "post-effect",
+        "cost": "40",
+        "costtype": "Mana",
+        "cast time": "none",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|375|Recast effect radius}}",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "|spelleffects     =",
+        "spellshield": "True",
+        "parry": "|projectile       =",
+        "grounded": "|knockdown        =",
+        "notes": "*The initial cast and the manual recast count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n**If the ability is not manually recasted, the secondary effect will trigger without being considered as an ability activation.\n* The recast's howling animation has a {{fd|0.5}}-second {{tip|lockout}} time.\n** This will also cancel '''Warwick's''' basic attack.\n** '''Warwick''' cannot attack or cast abilities during the animation, instead the last input will be buffered to play after it ends.\n* '''Warwick''' will automatically recast if he enters {{tip|resurrection}}.",
+        "yvideo": "Warwick - E"
+      }
+    },
+    "R": {
+      "id": "WarwickR",
+      "name": "Infinite Duress",
+      "description": "Warwick leaps in a direction (scaling with his bonus Move Speed), suppressing the first champion he collides with for 1.5 seconds.",
+      "tooltip": "Warwick leaps a huge distance that scales with his Move Speed, Suppressing the first champion he collides with while he channels for {{ rduration }} seconds. He attacks that champion 3 times over the duration, dealing {{ damagecumulative }} magic damage. Warwick heals for 100% of all damage dealt during the channel.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "110/90/70",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "25000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ rbasedamage }} -> {{ rbasedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Warwick",
+        "skill": "R",
+        "icon": "Infinite Duress.png",
+        "description": "{{sbc|Active:}} '''Warwick''' {{tip|dash|leaps}} in the target direction with {{tip|cc-immune|crowd control immunity}}, stopping upon hitting an enemy champion. He then {{tip|knockdown|knocks them down}} and {{tip|channel|channels}} for up to {{fd|1.5}} seconds to {{tip|suppression|suppress}}, {{tip|true sight|reveal}}, and deal {{as|magic damage}} every {{fd|0.25}} seconds, {{tip|sight|revealing}} himself in the process.",
+        "leveling": "{{st|Total Magic Damage|{{ap|175 to 525}} {{as|(+ 167% '''bonus''' AD)}}}}",
+        "description3": "'''Warwick''' {{tip|heals}} for 100% of all {{tt|post-mitigation damage|Damage calculated after resistances and modifiers.}} he deals to the target during ''Infinite Duress''.",
+        "description4": "''Infinite Duress'' applies {{tip|on-hit}} and {{tip|on-attack}} effects 3 times, and {{stil|life steal}} at 100% effectiveness.",
+        "description5": "''{{ai|Primal Howl|Warwick}} can be cast during the dash.''",
+        "cooldown": "{{ap|110 to 70}}",
+        "cdstart": "on-cast",
+        "cost": "100",
+        "costtype": "Mana",
+        "range": "{{tt|{{as|250% movement speed}}|Measures the average of this percentage of movement speed in the last 2.5 seconds. Updates every 0.25 seconds.}}",
+        "collision radius": "{{tip|cr|icononly = true}} 150",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "cast time": "{{fd|0.1}}",
+        "spelleffects": "basic",
+        "spellshield": "True",
+        "onhiteffects": "True",
+        "parry": "true",
+        "grounded": "True",
+        "knockdown": "False",
+        "silence": "true",
+        "notes": "* ''Infinite Duress'' deals {{tip|basic damage}}, but also triggers spell effects by dealing an additional 0 {{tip|spell damage}}.\n* The minimum range of the ability is 275 units, based on the minimum movement speed that a champion can have (110) while still being able to move. The \"base\" range of this ability is {{fd|837.5}} because of his 335 base movement speed.\n** Considering movement speed soft caps, with {{ai|Blood Hunt|Warwick}}, this range increases to {{ap|(335*1.35*0.8+83)*2.5|(335*1.4*0.8+83)*2.5|(335*1.45*0.8+83)*2.5|(335*1.5*0.5+230)*2.5|(335*1.55*0.5+230)*2.5}}, further increased to {{ap|(335*(1+0.35*2.5)*0.5+230)*2.5|(335*(1+0.4*2.5)*0.5+230)*2.5|(335*(1+0.45*2.5)*0.5+230)*2.5|(335*(1+0.5*2.5)*0.5+230)*2.5|(335*(1+0.55*2.5)*0.5+230)*2.5}} against enemy champions {{as|below 20% health}}.\n* ''Infinite Duress'' deals a total of 6 damage instances:\n** The 1st, 3rd, and 5th ticks deals 2/9ths of the total damage as a single instance while applying both spell and on-hit effects.\n** The 2nd, 4th, and 6th ticks deal 1/9ths of the total damage as a single instance while applying spell effects but not on-hit effects.\n* If '''Warwick''' does not collide with a champion, he will slide a {{tt|fixed distance|estimated 150 units}} past the maximum range during which he is no longer crowd control immune and unable to declare basic attacks or cast movement abilities, including {{si|Flash}}, but being able to cast {{ai|Jaws of the Beast|Warwick}} and {{ai|Blood Hunt|Warwick}}, with the former also interrupting the slide.\n** '''Warwick''' is able to cast {{ai|Primal Howl|Warwick}} at any time during the dash.\n* Activating {{ii|Zhonya's Hourglass}} during the dash interrupts it.\n* Each hit counts as a separate hit for effects such as {{ri|Electrocute}} and {{iis|Eclipse}} {{nie|Ever Rising Moon}}.\n* '''Warwick''' gains the {{tip|cc-immune|cc-immunity}} at the start of the cast time.\n* {{tip|Cleanse|Cleansing}} the {{tip|suppression}} does not interrupt the {{tip|channel}} and '''Warwick''' will continue to strike but not deal any damage.\n** ''Infinite Duress'' is special cased to have its channel interrupted by {{ai|Fate's Call|Kalista}}.\n* If the target is {{tip|cc-immune|crowd control immune}} or protected by {{tip|spell shield}} upon collision, '''Warwick''' will not start the {{tip|channel}}.\n* If the target is in a {{tip|zombie state}}, '''Warwick''' will stop the channel after ~{{fd|0.5}} seconds of hitting them.{{bug}}\n* ''Infinite Duress'' covers '''Warwick's''' hitbox, meaning he will collide with enemy champions that are particularly close to him.\n* The following table refers for interactions while '''Warwick''' is in cast time:\n{{ct|cast|spells=true,false,false,false,false}}\n* The following table refers for interactions while '''Warwick''' is {{tip|channel|channeling}}:\n{{ct|channel|move=false|cast=false|attack=false|items=false, true|spells=true, false, false, false, false}}",
+        "yvideo": "Warwick - R\n<!-- Blurb -->",
+        "blurbicon": "Infinite Duress.png",
+        "blurb": "{{sbc|Active:}} {{ci|Warwick}} {{tip|dash|leaps}} a huge distance and stops on the first champion he collides with, {{tip|suppression|suppressing}} them while {{tip|channel|channeling}} for a brief time. He mauls them over the duration, dealing {{as|magic damage}} and {{as|{{sti|healing}}}} for 100% of the damage dealt.",
+        "blurb2": "The leap's distance scales with '''Warwick's''' {{sti|{{as|movement speed}}}} and he gains {{tip|cc-immune|crowd control immunity}} during.",
+        "blurb4": "''Infinite Duress'' applies {{tip|on-hit}} effects 3 times and {{sti|{{as|life steal}}}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    }
+  }
+}

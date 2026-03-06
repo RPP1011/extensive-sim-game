@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0008_4v7_d2_s2"
+seed = 22131
+hero_count = 4
+enemy_count = 7
+difficulty = 2
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["warlock", "samurai", "knight", "alchemist"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

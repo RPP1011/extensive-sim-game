@@ -1,0 +1,121 @@
+[hero]
+name = "Udyr"
+
+[stats]
+hp = 138
+move_speed = 3.4
+armor = 40.0
+magic_resist = 32.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 1.5
+cooldown = 800
+
+# --- Q: Wilding Claw ---
+[[abilities]]
+name = "Wilding Claw"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 6000
+ai_hint = "buff"
+resource_cost = 4
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.3
+duration_ms = 5000
+
+# --- W: Iron Mantle ---
+[[abilities]]
+name = "Iron Mantle"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 6000
+ai_hint = "defense"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "shield"
+amount = 3
+duration_ms = 4000
+
+[[abilities.effects]]
+type = "lifesteal"
+percent = 0.08
+duration_ms = 5000
+
+# --- E: Blazing Stampede ---
+[[abilities]]
+name = "Blazing Stampede"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 6000
+ai_hint = "crowd_control"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "root"
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 4000
+
+# --- R: Wingborne Storm ---
+[[abilities]]
+name = "Wingborne Storm"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 6000
+ai_hint = "damage"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "damage"
+amount = 2
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.7
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[[abilities.effects]]
+type = "summon"
+template = "minion"
+count = 1
+
+# --- Passive: Bridge Between ---
+[[passives]]
+name = "Bridge Between"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_auto_attack"
+
+[[passives.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.2
+duration_ms = 5000
+

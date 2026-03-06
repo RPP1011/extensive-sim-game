@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0013_2v2"
+seed = 1936
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["Tristana", "Jhin"]
+enemy_hero_templates = ["Zed", "Samira"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

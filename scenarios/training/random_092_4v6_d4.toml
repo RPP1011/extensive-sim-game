@@ -1,0 +1,13 @@
+[scenario]
+name = "random_092_4v6_d4"
+seed = 8092
+hero_count = 4
+enemy_count = 6
+difficulty = 4
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["warlock", "cryomancer", "elementalist", "warrior"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Either"

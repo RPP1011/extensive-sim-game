@@ -1,0 +1,258 @@
+{
+  "id": "Taric",
+  "name": "Taric",
+  "title": "the Shield of Valoran",
+  "resource_type": "Mana",
+  "tags": [
+    "Support",
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Bravado",
+      "description": "Spellcasts empower Taric's next 2 basic attacks to deal bonus magic damage, reduce his spell cooldowns, and attack in quick succession.",
+      "wiki_detail": {
+        "champion": "Taric",
+        "skill": "I",
+        "icon": "Bravado.png",
+        "blurb": "{{sbc|Innate:}} After casting an ability, {{ci|Taric}} empowers his next two basic attacks to gain tremendous {{sti|as|{{as|'''total''' attack speed}}}}, deal {{as|'''bonus''' magic damage}} based on {{as|his '''bonus''' armor}}, and {{sti|cdr|reduce}} the cooldowns of his basic abilities.",
+        "description": "{{sbc|Innate:}} After casting an [[champion ability|ability]], '''Taric''' empowers his next two [[basic attack]]s within 5 seconds to each gain {{sti|as|{{as|100% '''total''' attack speed}}}}, deal {{as|{{pp|25 to 93}}|magic damage}} {{as|(+ 15% '''bonus''' armor)}} {{as|'''bonus''' magic damage}}, and reduce the {{sti|'''remaining''' cooldowns}} of his basic abilities by {{pp|1;( 1 + ( ( x * 10 ) / ( ( x * 10 ) + 100 ) ) );2|0;10 to 100 for 10;∞|label1= AH|type=ability haste|formula= 1 + ( Haste / ( Haste + 100 ) )}}\n seconds.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "Magic",
+        "spellshield": "|spelleffects = proc",
+        "projectile": "|grounded     =",
+        "knockdown": "|parry        = Special",
+        "yvideo": "Taric - Passive",
+        "notes": "* The first attack refreshes ''Bravado's'' duration.\n* The bonus damage will not apply against {{tip|structures}}.\n* ''Bravado'' can be {{tip|dodged}} and {{tip|blocked}} but it cannot miss if '''Taric''' is {{tip|blind|blinded}}. The cooldown reduction cannot be negated in any cases."
+      }
+    },
+    "Q": {
+      "id": "TaricQ",
+      "name": "Starlight's Touch",
+      "description": "Heals nearby allied champions based on charges stored. Bravado-empowered attacks grant a charge of Starlight's Touch.",
+      "tooltip": "Passive: Gain a stack (max {{ e6 }}) every {{ stackcooldown }} seconds and when hitting a Bravado Attack.\n\nActive: Consume all stacks to restore {{ healingperstack }} Health per stack to nearby ally champions ({{ maxstackhealing }} at {{ e6 }} stacks).{{ spellmodifierdescriptionappend }}",
+      "cooldown": "3",
+      "cost": "60",
+      "cost_type": " Mana, all Charges",
+      "range": "325",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "25",
+        "1",
+        "0.15/0.3/0.45/0.6/0.75",
+        "0.75/1.5/2.25/3/3.75",
+        "25/50/75/100/125",
+        "1/2/3/4/5",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Max Charges",
+          "Max Healing"
+        ],
+        "effect": [
+          "{{ e6 }} -> {{ e6NL }}",
+          "{{ e5 }} -> {{ e5NL }}"
+        ]
+      },
+      "resource": "{{ cost }} Mana, all Charges",
+      "wiki_detail": {
+        "champion": "Taric",
+        "skill": "Q",
+        "icon": "Starlight's Touch.png",
+        "blurb": "{{sbc|Active:}} {{ci|Taric}} {{tip|heal|heals}} himself and nearby allied champions based on {{as|his '''maximum''' health}} per charge of ''Starlight's Touch'' that he periodically [[ammunition|stocks]], up to a cap. ''{{ai|Bravado|Taric}}''-empowered attacks each grant one charge.",
+        "description": "{{sbc|Active:}} '''Taric''' {{tip|heals}} himself and nearby allied champions for 25 {{as|(+ 15% AP)}} {{as|(+ 1% of his '''maximum''' health)}} per charge of ''Starlight's Touch'' that he periodically [[ammunition|stocks]], up to a maximum amount. ''{{ais|Bravado|Taric}}'' empowered attacks each grant one charge.",
+        "description2": "''Starlight's Touch'' can heal up to a maximum of 125 {{as|(+ 75% AP)}} {{as|(+ 5% of '''Taric's''' '''maximum''' health)}} at 5 charges.",
+        "leveling": "{{st|Maximum Charges|{{ap|1 to 5}}}}",
+        "effect radius": "{{tip|cr|icononly = true}} 325",
+        "cost": "60",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana + all charges",
+        "cooldown": "3",
+        "recharge": "15",
+        "targeting": "Auto",
+        "affects": "Allies",
+        "spelleffects": "Heal",
+        "projectile": "|grounded     =",
+        "knockdown": "|yvideo       = Taric - Q",
+        "notes": "* The healing will apply heal effects (such as {{ri|Summon Aery}}) prioritizing targets in '''Taric's''' circle, based on proximity to him, then in the {{ai|Bastion|Taric|Bastioned}} ally's circle, based on proximity to that ally (including it)."
+      }
+    },
+    "W": {
+      "id": "TaricW",
+      "name": "Bastion",
+      "description": "Passively increase the Armor of Taric and any allied champion with Bastion.\n\nActively shields an ally and grants them Bastion for as long as they remain near Taric. Taric's spells also cast off the ally with Bastion.",
+      "tooltip": "Passive: Taric gains {{ bonusarmor }} Armor and forms a tether between him and the ally bound by this Ability. As long as they are near each other, the ally gains {{ bonusarmor }} Armor and Taric casts all his Abilities from both himself and his linked ally.\n\nActive: Taric binds to an ally champion, granting a {{ e2 }}% max Health Shield for {{ e3 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "15",
+      "cost": "60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "7/8/9/10/11",
+        "2.5",
+        "1000",
+        "1300",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Passive Armor",
+          "Shield Ratio"
+        ],
+        "effect": [
+          "{{ armorbonuspercentage*100.000000 }}% -> {{ armorbonuspercentagenl*100.000000 }}%",
+          "{{ e2 }}% -> {{ e2NL }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Taric",
+        "skill": "W",
+        "icon": "Bastion.png",
+        "blurb": "{{sbc|Passive:}} {{ci|Taric}} gains {{sti|armor|{{as|'''bonus''' armor}}}} and forms a {{tip|tether}} to the ally bound by ''Bastion''. While the tether persists, the ally gains the {{as|'''bonus''' armor}} and '''Taric's''' abilities are mimicked to them.",
+        "blurb2": "{{sbc|Active:}} '''Taric''' {{tip|shields}} himself and the target allied champion for a short time, with the amount based on each {{as|target's '''maximum''' health}}. He also binds them with ''Bastion''.",
+        "blurb3": "'''Taric''' can also [[self-targeted|self-cast]] to shield himself.",
+        "blurb4": "Only one ally can be bound at a time, and selecting a new ally overrides the previous bind.",
+        "description": "{{sbc|Passive:}} '''Taric''' gains {{sti|armor|{{as|'''bonus''' armor}}}} and forms a {{tip|tether}} between him and the ally bound by ''Bastion''. While the tether persists, the ally also gains the {{as|'''bonus''' armor}} and '''Taric's''' abilities are mimicked to them, though the effects do not stack.",
+        "leveling": "{{st|Bonus Armor|{{as|{{ap|6 to 10}}% of '''Taric's''' armor}}}}",
+        "icon2": "Bastion 2.png",
+        "description2": "{{sbc|Active:}} '''Taric''' grants himself and the target allied champion a {{tip|shield}} for {{fd|2.5}} seconds, binding them with ''Bastion''.",
+        "leveling2": "{{st|Shield Strength|{{as|{{ap|7 to 11}}% of target's '''maximum''' health}}}}",
+        "description3": "'''Taric''' can also [[self-targeted|self-cast]] to shield himself; if he self-casts and is untethered, he will become tethered to the nearest ally. Only one ally can be bound at a time, and selecting a new ally overrides the previous bind.",
+        "cast time": "{{fd|0.25}}",
+        "target range": "{{tip|cr|icononly = true}} 800",
+        "tether radius": "{{tip|cr|icononly = true}} 1300",
+        "cost": "60",
+        "costtype": "Mana",
+        "cooldown": "15",
+        "targeting": "Unit",
+        "affects": "Self, Allies",
+        "spelleffects": "Shield",
+        "yvideo": "Taric - W",
+        "notes": "* The mimicked abilities will still complete even if '''Taric''' dies or leaves range.\n* Abilities are not mimicked to the bound ally if they are {{tip|vanish|vanished}} via {{ai|Alpha Strike|Master Yi}}, {{ai|Hallucinate|Shaco}}, {{ai|Rappel|Elise}}, or {{ai|Void Rush|Rek'Sai}}.\n** Mimicked abilities will also cancel if they vanish as above."
+      }
+    },
+    "E": {
+      "id": "TaricE",
+      "name": "Dazzle",
+      "description": "Taric readies a beam of starlight that, after a brief delay, deals magic damage and stuns enemies.",
+      "tooltip": "Taric projects a beam of starlight, bursting after {{ e3 }} second to deal {{ totaldamage }} magic damage and Stun enemies for {{ e2 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16/15/14/13/12",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "610",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "90/130/170/210/250",
+        "1.5",
+        "1",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Taric",
+        "skill": "E",
+        "icon": "Dazzle.png",
+        "blurb": "{{sbc|Active:}} {{ci|Taric}} winds up over a brief moment, then projects a beam of starlight in the target direction that briefly {{tip|stuns}} enemies hit, dealing {{as|magic damage}} based on his {{as|'''bonus''' armor}}.",
+        "blurb4": "'''Taric''' can move during ''Dazzle''.",
+        "description": "{{sbc|Active:}} '''Taric''' winds up over 1 second, granting {{tip|ghosting}} to nearby units, then projects a beam of starlight in the target direction that deals {{as|magic damage}} to enemies hit and {{tip|stuns}} them for {{fd|1.5}} seconds.",
+        "description2": "'''''Taric''' can move during Dazzle.''",
+        "leveling": "{{st|Magic Damage|{{ap|90 to 250}} {{as|(+ 50% AP)}} {{as|(+ 50% '''bonus''' armor)}}}}",
+        "cast time": "none",
+        "range": "{{tip|er|icononly = true}} 575",
+        "width": "{{tip|er|icononly = true}} 140",
+        "cost": "40",
+        "costtype": "Mana",
+        "cooldown": "{{ap|16 to 12}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "False",
+        "grounded": "|knockdown    =",
+        "yvideo": "Taric - E",
+        "notes": "* ''Dazzle'' will aim towards the target direction on-cast when firing from both his and his {{ai|Bastion 2|Taric|Bastion's}} positions."
+      }
+    },
+    "R": {
+      "id": "TaricR",
+      "name": "Cosmic Radiance",
+      "description": "Pulses cosmic energy onto nearby allied champions after a delay, making them invulnerable for a short duration.",
+      "tooltip": "Taric calls down protection from the heavens. After {{ initialdelay }} seconds, nearby ally champions become invulnerable for {{ invulnduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "180/150/120",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Taric",
+        "skill": "R",
+        "icon": "Cosmic Radiance.png",
+        "blurb": "{{sbc|Active:}} {{ci|Taric}} calls down a star that descends to him over a short time. Afterwards, he and nearby allied champions become {{tip|invulnerable}} for a short time.",
+        "description": "{{sbc|Active:}} '''Taric''' calls down a star from above that descends to him over {{fd|2.5}} seconds. Afterwards, he and nearby allied champions become {{tip|invulnerable}} for {{fd|2.5}} seconds.",
+        "effect radius": "{{tip|cr|icononly = true}} 400",
+        "cost": "100",
+        "costtype": "Mana",
+        "cooldown": "{{ap|180|150|120}}",
+        "cast time": "{{fd|0.25}}",
+        "targeting": "Auto",
+        "affects": "Allies",
+        "yvideo": "Taric - R",
+        "notes": "* ''Cosmic Radiance'' has no effect on {{tip|untargetable}} allies.\n** It will affect the primary unit (the one the star is falling down on) even if they are untargetable.",
+        "flavorsound": "{{sm2|Taric_Original_R_2.ogg}} ''\"Embrace the cosmos.\"''"
+      }
+    }
+  }
+}

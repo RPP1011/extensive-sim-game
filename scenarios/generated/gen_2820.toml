@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0020_3v3"
+seed = 1943
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["Blitzcrank", "Viego", "Yorick"]
+enemy_hero_templates = ["knight", "Vladimir", "bard"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

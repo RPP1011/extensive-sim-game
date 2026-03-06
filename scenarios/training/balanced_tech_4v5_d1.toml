@@ -1,0 +1,13 @@
+[scenario]
+name = "balanced_tech_4v5_d1"
+seed = 1028
+hero_count = 4
+enemy_count = 5
+difficulty = 1
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["templar", "shaman", "engineer", "monk"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Either"

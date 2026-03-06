@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0038_3v3_s1"
+seed = 11961
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["Khazix", "Darius", "Sett"]
+enemy_hero_templates = ["Akali", "Diana", "Sett"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

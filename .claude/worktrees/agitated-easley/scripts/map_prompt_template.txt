@@ -1,0 +1,21 @@
+Top-down fantasy dungeon map for an adventurer guild branch mission.
+
+Theme:
+- Dark-fantasy city district at night.
+- Main objective is to disrupt a summoning ritual in a cathedral plaza.
+
+Layout:
+- 3 clear lanes from guild outpost to ritual plaza:
+  1) Market Street
+  2) Canal Bridge
+  3) Shrine Alley
+- Include choke points and one mini-boss room before final plaza.
+- Mark safe fallback zone near guild outpost.
+
+Readability:
+- Simple silhouettes and readable lane boundaries.
+- Distinct color coding for friendly route, enemy route, and objective route.
+- Keep clutter low for autobattler tactical readability.
+
+Style:
+- Stylized 3D concept art, game map overview, high contrast lighting, no text labels.

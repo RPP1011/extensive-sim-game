@@ -1,0 +1,110 @@
+[hero]
+name = "LeBlanc"
+
+[stats]
+hp = 85
+move_speed = 3.5
+armor = 25.0
+magic_resist = 33.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 20
+range = 1.5
+cooldown = 750
+
+# --- Q: Sigil of Malice ---
+[[abilities]]
+name = "Sigil of Malice"
+targeting = "target_enemy"
+range = 7.0
+cooldown_ms = 6000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 10
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 17
+damage_type = "magic"
+
+# --- W: Distortion ---
+[[abilities]]
+name = "Distortion"
+targeting = "ground_target"
+range = 6.0
+cooldown_ms = 15000
+ai_hint = "damage"
+resource_cost = 12
+recast_count = 1
+recast_window_ms = 10000
+
+[[abilities.effects]]
+type = "damage"
+amount = 18
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.4
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+is_blink = true
+
+# --- E: Ethereal Chains ---
+[[abilities]]
+name = "Ethereal Chains"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 14000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 10
+
+[abilities.delivery]
+method = "tether"
+max_range = 6.0
+
+[[abilities.effects]]
+type = "damage"
+amount = 12
+damage_type = "magic"
+
+[[abilities.effects]]
+type = "root"
+duration_ms = 1000
+
+# --- R: Mimic ---
+[[abilities]]
+name = "Mimic"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 16200
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 17
+damage_type = "magic"
+
+# --- Passive: Mirror Image ---
+[[passives]]
+name = "Mirror Image"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_taken"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+

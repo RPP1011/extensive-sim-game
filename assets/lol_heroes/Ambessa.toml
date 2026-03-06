@@ -1,0 +1,107 @@
+[hero]
+name = "Ambessa"
+
+[stats]
+hp = 120
+move_speed = 3.5
+armor = 35.0
+magic_resist = 32.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 21
+range = 1.5
+cooldown = 800
+
+# --- Q: Cunning Sweep / Sundering Slam ---
+[[abilities]]
+name = "Cunning Sweep / Sundering Slam"
+targeting = "target_enemy"
+range = 6.5
+cooldown_ms = 14000
+ai_hint = "damage"
+resource_cost = 14
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- W: Repudiation ---
+[[abilities]]
+name = "Repudiation"
+targeting = "target_enemy"
+range = 3.2
+cooldown_ms = 18000
+ai_hint = "defense"
+resource_cost = 14
+
+[[abilities.effects]]
+type = "shield"
+amount = 10
+duration_ms = 3000
+
+# --- E: Lacerate ---
+[[abilities]]
+name = "Lacerate"
+targeting = "target_enemy"
+range = 3.2
+cooldown_ms = 13000
+ai_hint = "utility"
+resource_cost = 14
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[[abilities.effects]]
+type = "dash"
+to_target = false
+
+# --- R: Public Execution ---
+[[abilities]]
+name = "Public Execution"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 25000
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+[abilities.effects.area]
+shape = "line"
+length = 6.0
+width = 1.5
+
+[[abilities.effects]]
+type = "suppress"
+duration_ms = 1500
+
+[[abilities.effects]]
+type = "dash"
+is_blink = true
+
+# --- Passive: Drakehound's Step ---
+[[passives]]
+name = "Drakehound's Step"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_ability_used"
+
+[[passives.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.2
+duration_ms = 5000
+

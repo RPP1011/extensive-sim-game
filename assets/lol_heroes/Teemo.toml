@@ -1,0 +1,113 @@
+[hero]
+name = "Teemo"
+
+[stats]
+hp = 80
+move_speed = 3.3
+armor = 22.0
+magic_resist = 31.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 5.5
+cooldown = 700
+
+# --- Q: Blinding Dart ---
+[[abilities]]
+name = "Blinding Dart"
+targeting = "target_enemy"
+range = 6.8
+cooldown_ms = 7000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 14
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 20
+damage_type = "magic"
+
+# --- W: Move Quick ---
+[[abilities]]
+name = "Move Quick"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 14000
+ai_hint = "buff"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 3000
+
+# --- E: Toxic Shot ---
+[[abilities]]
+name = "Toxic Shot"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 8000
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 0
+damage_type = "magic"
+duration_ms = 4000
+tick_interval_ms = 1000
+amount_per_tick = 1
+
+# --- R: Noxious Trap ---
+[[abilities]]
+name = "Noxious Trap"
+targeting = "ground_target"
+range = 6.0
+cooldown_ms = 8000
+cast_time_ms = 250
+ai_hint = "utility"
+resource_cost = 15
+max_charges = 2
+charge_recharge_ms = 35000
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 4.5
+
+[[abilities.effects]]
+type = "stealth"
+duration_ms = 3000
+break_on_damage = true
+break_on_ability = true
+
+# --- Passive: Guerrilla Warfare ---
+[[passives]]
+name = "Guerrilla Warfare"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_dealt"
+
+[[passives.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.2
+duration_ms = 5000
+

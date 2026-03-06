@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0110_2v2_s1"
+seed = 12033
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["Hwei", "templar"]
+enemy_hero_templates = ["Graves", "KSante"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

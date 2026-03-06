@@ -1,0 +1,296 @@
+{
+  "id": "Anivia",
+  "name": "Anivia",
+  "title": "the Cryophoenix",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Rebirth",
+      "description": "Upon taking fatal damage, Anivia reverts to an egg and is reborn with full health.",
+      "wiki_detail": {
+        "champion": "Anivia",
+        "skill": "I",
+        "icon": "Rebirth.png",
+        "description": "{{sbc|Innate:}} Periodically, upon taking {{tip|death|fatal damage}}, '''Anivia''' enters {{tip|resurrection}} for 6 seconds and restores all of her {{sti|{{as|health}}}}.",
+        "description2": "While under resurrection, '''Anivia''' is {{tip|lockout|unable to act}} and gains {{pp|-40 to 20 for 5|1;5;8;12;15|changedisplay=true}} {{sti|armor|{{as|'''bonus''' armor}}}} and {{sti|mr|{{as|'''bonus''' magic resistance}}}}.",
+        "description3": "If '''Anivia''' remains alive by the end of the duration, she is revived with her {{as|'''current''' health}}.",
+        "static": "240",
+        "targeting": "Passive",
+        "affects": "Self",
+        "video": "Anivia_Passive_Video.webm",
+        "notes": "* Triggering ''Rebirth'' will break {{tip|tether|tethers}} on '''Anivia'''.\n* {{ai|Chronoshift|Zilean}} and {{ii|Guardian Angel}} will take priority over ''Rebirth''.\n* If ''Rebirth'' triggers while '''Anivia''' is channeling {{si|Teleport}}, her channel won't be interrupted.\n** All other {{tip|channel|channels}} will be interrupted upon triggering ''Rebirth''.\n* The following refers for interactions while '''Anivia''' is resurrecting:\n{{ct|move=false|cast=false|attack=false|items=false|consume=false|spells=false|interrupts=death}}\n<!-- Blurb -->",
+        "blurb": "{{sbc|Innate:}} Periodically, upon {{tip|death|dying}}, {{ci|Anivia}} will instead revert into an egg. If the egg can survive for a few seconds, she is gloriously {{tip|resurrection|reborn}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "FlashFrost",
+      "name": "Flash Frost",
+      "description": "Anivia brings her wings together and summons a sphere of ice that flies towards her opponents, chilling and damaging anyone in its path. When the sphere explodes it does moderate damage in a radius, stunning anyone in the area.",
+      "tooltip": "Anivia fires a massive chunk of ice, dealing {{ totalpassthroughdamage }} magic damage and Chilling enemies for {{ slowduration }} seconds, Slowing them by {{ spell.glacialstorm:slowamount }}%. At the end of its range, the ice detonates, Stunning enemies for {{ stunduration }} seconds and dealing {{ totalexplosiondamage }} magic damage.\n\nAnivia can Recast this ability while the ice flies to detonate it early.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11/10/9/8/7",
+      "cost": "80/85/90/95/100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1075",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Detonation Damage",
+          "Stun Duration:",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ passthroughbasedamage }} -> {{ passthroughbasedamageNL }}",
+          "{{ explosionbasedamage }} -> {{ explosionbasedamageNL }}",
+          "{{ stunduration }} -> {{ stundurationNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Anivia",
+        "skill": "Q",
+        "icon": "Flash Frost.png",
+        "description": "{{sbc|Active:}} '''Anivia''' launches a chunk of ice in the target direction that deals {{as|magic damage}} to enemies hit and {{tip|slow|slows}} them by {{pp|changedisplay=true|key=%|20;20 to 40 for 3|0 to 3|type = [[File:Glacial Storm.png|20px|border|link=]] ''Glacial Storm's'' Rank|formula = 20%+(10%*(''Glacial Storm'' Rank-1))}} for 3 seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|50 to 130}} {{as|(+ 25% AP)}}}}",
+        "description2": "''Flash Frost'' can be recast while the ice is in flight after its cast time, and does so automatically at maximum range.",
+        "description3": "{{sbc|Recast:}} '''Anivia''' shatters the ice, dealing {{as|magic damage}} to nearby enemies and {{tip|stun|stunning}} them for a duration, as well as refreshing the {{tip|slow}}.",
+        "leveling3": "{{st|Magic Damage|{{ap|60 to 200}} {{as|(+ 45% AP)}}|Total Magic Damage|{{ap|50+60 to 130+200}} {{as|(+ {{ap|45+25}}% AP)}}}}\n{{st|Stun Duration|{{ap|1.1 to 1.5}} seconds}}",
+        "range": "{{tip|cr|icononly = true}} 1100",
+        "effect radius": "{{tip|cr|icononly = true}} 225",
+        "width": "{{tip|er|icononly = true}} 220",
+        "speed": "950",
+        "cooldown": "{{ap|12 to 8}}",
+        "cdstart": "post-effect",
+        "cast time": "{{fd|0.25}}",
+        "cost": "{{ap|80 to 100}}",
+        "costtype": "mana",
+        "targeting": "[[Direction-targeted|Direction]] / [[Auto-targeted|Auto]]",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "Special",
+        "spelleffects": "spellaoe",
+        "projectile": "True",
+        "video": "Anivia_Q_Video.webm",
+        "notes": "*The initial cast and the manual recast count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n** If the ability is not manually recasted, the secondary effect will trigger without being considered as an ability activation.\n* ''Flash Frost'' can only proc {{ri|Conqueror}} once even if it damages the same target twice.\n* ''Flash Frost'' will fire from wherever '''Anivia''' was at the start of the cast time.\n* {{tip|Spell shield}} can only prevent either the collision hit or recast from affecting the target.\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Anivia}} launches a chunk of ice that deals {{as|magic damage}} and {{tip|slows}} enemies hit.",
+        "blurb2": "''Flash Frost'' will recast at max range, or can recast early.",
+        "blurb3": "{{sbc|Recast:}} The ice explodes, dealing {{as|magic damage}} and {{tip|stun|stunning}} nearby enemies.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "W": {
+      "id": "Crystallize",
+      "name": "Crystallize",
+      "description": "Anivia condenses the moisture in the air into an impassable wall of ice to block all movement. The wall only lasts a short duration before it melts.",
+      "tooltip": "Anivia summons a wall of ice {{ e2 }} units wide. The wall lasts for {{ e1 }} seconds before it melts.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "17",
+      "cost": "70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "5",
+        "400/500/600/700/800",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Width"
+        ],
+        "effect": [
+          "{{ e2 }} -> {{ e2NL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Anivia",
+        "skill": "W",
+        "icon": "Crystallize.png",
+        "description": "{{sbc|Active:}} '''Anivia''' summons a wall of ice at the target location perpendicular to her facing, {{tip|airborne|knocking}} all units away from it, though not through terrain. The wall lingers as impassable terrain for 5 seconds.",
+        "leveling": "{{st|{{tt|Width|Pathfinding}}|{{tip|pathing radius|icononly = true}} {{ap|600 to 1000}} units}}\n{{st|Number of ice segments|{{ap|4 to 8}} chunks of ice|Distance between outermost segments|{{ap|400 to 800}} units|Distance between individual segments|{{ap|133.33|125|120|116.67|114.29}} units}}",
+        "target range": "{{tt|1000|Maximum cast range for wall center}} / {{tt|100|Minimum cast range}}",
+        "cooldown": "17",
+        "cost": "70",
+        "costtype": "mana",
+        "cast time": "{{fd|0.25}}",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "spellshield": "false",
+        "spelleffects": "False",
+        "video": "Anivia_W_Video.webm",
+        "notes": "* ''Crystallize's'' displacement triggers in-combat effects by dealing 0 {{tip|proc damage|proc}} {{tip|true damage}}, such as drawing turret aggro, {{ri|Sudden Impact}} and applying {{ii|Elixir of Sorcery}}.\n* Individual ice chunks have both 100 units {{tip|pathing radius}} and {{tip|gameplay radius}}.\n* {{tip|champion|Champions}} are knocked 120 units to either side of a wall segment, non-champions 250 units.\n** {{pending for test}} Knockback speed?\n* Player-generated terrain such as ''Crystallize'' does not block {{tip|sight}}.\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Anivia}} {{tip|airborne|erects}} a wall of ice that lingers for a few seconds, blocking movement.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "E": {
+      "id": "Frostbite",
+      "name": "Frostbite",
+      "description": "With a flap of her wings, Anivia blasts a freezing gust of wind at her target, dealing damage. If the target was recently hit by Flash Frost or damaged by a fully formed Glacial Storm, the damage they take is doubled.",
+      "tooltip": "Anivia blasts an enemy with a freezing wind, dealing {{ totaldamage }} magic damage. Against Chilled enemies, Anivia deals {{ empowereddamage }} magic damage instead.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "4",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Anivia",
+        "skill": "E",
+        "icon": "false",
+        "description": "{{sbc|Passive:}} Enemies hit by ''{{ai|Flash Frost|Anivia}}'' or a fully formed ''{{ai|Glacial Storm|Anivia}}'' become ''Chilled'' for 3 seconds, refreshing on subsequent hits.",
+        "icon2": "Frostbite.png",
+        "description2": "{{sbc|Active:}} '''Anivia''' blasts a freezing wind at the target enemy that deals {{as|magic damage}}, {{ccs|doubled|magic}} if they were ''Chilled''.",
+        "leveling2": "{{st|Magic Damage|{{ap|50 to 150}} {{as|(+ 55% AP)}}|Enhanced Damage|{{ap|50*2 to 150*2}} {{as|(+ {{ap|55*2}}% AP)}}}}",
+        "target range": "{{tip|er|icononly = true}} 600",
+        "cooldown": "4",
+        "cost": "50",
+        "costtype": "mana",
+        "speed": "1600",
+        "targeting": "Unit",
+        "cast time": "{{fd|0.25}}",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "projectile": "True",
+        "callforhelp": "True",
+        "video": "Anivia_E_Video.webm",
+        "notes": "* The damage of ''Frostbite'' is calculated once it hits. If the target's mark from being hit by {{ai|Flash Frost|Anivia}} or a fully formed {{ai|Glacial Storm|Anivia}} wares off while the projectile is traveling, the damage is not doubled.\n* ''Frostbite'' has a different sound effect when it hits a target for double damage.\n{{Unit-targeted cancel conditions}}\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Anivia}} blasts a freezing wind at the target enemy that deals {{as|magic damage}}.",
+        "blurb2": "If the target had been recently hit by ''{{ai|Flash Frost|Anivia}}'' or ''{{ai|Glacial Storm|Anivia}}'', the damage is {{ccs|doubled|magic}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "R": {
+      "id": "GlacialStorm",
+      "name": "Glacial Storm",
+      "description": "Anivia summons a driving rain of ice and hail to damage her enemies and slow their advance.",
+      "tooltip": "Toggle: Anivia calls forth a driving rain of ice and hail that Slows enemies by {{ slowamount }}% and deals {{ totaldamagepersecond }} magic damage per second. The storm increases in size over {{ growthtime }} seconds.\n\nWhen the storm is fully formed, it Chills, Slows by {{ slowpercentempoweredtt }}%, and does {{ empowereddamagepersecondtooltiponly }} magic damage per second instead.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "4/3/2",
+      "cost": "60",
+      "cost_type": " + {{ manacostpersecond }} Mana per second",
+      "range": "750",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage Per Second",
+          "Slow",
+          "Chilled Slow Amount",
+          "Mana Cost Per Second",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ damagepersecond }} -> {{ damagepersecondNL }}",
+          "{{ slowamount }}% -> {{ slowamountNL }}%",
+          "{{ slowpercentempoweredtt }}% -> {{ slowpercentempoweredttNL }}%",
+          "{{ manacostpersecond }} -> {{ manacostpersecondNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} + {{ manacostpersecond }} Mana per second",
+      "wiki_detail": {
+        "champion": "Anivia",
+        "skill": "R",
+        "icon": "Glacial Storm.png",
+        "description": "{{sbc|Active:}} '''Anivia''' calls forth a driving rain of ice and hail at the target location, dealing {{as|magic damage}} every {{fd|0.5}} seconds to enemies within and {{tip|slow|slowing}} them for 1 second, refreshing every {{fd|0.5}} seconds while they remain inside.",
+        "leveling": "{{st|Magic Damage per Tick|{{ap|15 to 30}} {{as|(+ {{fd|6.25}}% AP)}}}}\n{{st|Slow|{{ap|20 to 40}}%}}",
+        "description2": "The blizzard increases in size over {{fd|1.5}} seconds. At maximum size, ''Glacial Storm'' is empowered to deal 300% damage and increase the effectiveness of its slow by 50%, which also instead lasts {{fd|1.5}} seconds and refreshes every {{fd|0.25}} seconds.",
+        "leveling2": "{{st|Empowered Damage per Tick|{{ap|15*3 to 30*3}} {{as|(+ {{ap|6.25*3}}% AP)}}}}\n{{st|Empowered Slow|{{ap|20*1.5 to 40*1.5}}%}}",
+        "description3": "''Glacial Storm'' can be recast after 1 second, and does so automatically if '''Anivia''' is no longer in range or unable to pay the {{sti|{{as|mana}}}} cost, or becomes affected by any form of {{tip|interrupt|interrupting}} {{tip|crowd control}}.",
+        "description4": "{{sbc|Recast:}} '''Anivia''' ends ''Glacial Storm'', dealing one last tick of damage.",
+        "target range": "750",
+        "cast time": "none",
+        "effect radius": "{{tip|cr|icononly = true}} {{pp|type=time active|200 to 400 by 25;400|0 to 1.5;1.5+}}",
+        "tether radius": "1000",
+        "cooldown": "{{tt|{{ap|4 to 2}}|Starts after storm disappears}}",
+        "cdstart": "post-effect",
+        "cost": "60",
+        "costtype": "mana{{plus}}{{ap|35 to 55 3}} per second",
+        "targeting": "[[Location-targeted|Location]] / [[Auto-targeted|Auto]]",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "False",
+        "spelleffects": "aoedot",
+        "silence": "true",
+        "video": "Anivia_R_Video.webm",
+        "notes": "*Toggle abilities do not count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n* ''Glacial Storm's'' slow leaves a trail that is visible even if the target is [[stealth]]ed.\n* ''Glacial Storm'' deals 3 half ticks at {{ap|200|267|333}} radius for a total of {{fd|1.5}} normal damage ticks before it starts dealing empowered damage at 400 radius.\n* {{tip|Stasis (buff)|Stasis}} via {{ii|Zhonya's Hourglass}} doesn't interrupt ''Glacial Storm''.\n** {{cai|Devour|Tahm Kench}} '''does''' interrupt (allied and enemy) ''Glacial Storm''.\n<!-- Blurb -->",
+        "blurb": "{{sbc|Toggle:}} {{ci|Anivia}} summons a driving rain of ice and hail at the target location that continually deals {{tip|magic damage}} and {{tip|slow|slows}} enemies within.",
+        "blurb2": "''Glacial Storm'' is deactivated when '''Anivia''' leaves it or gets hit by {{tip|crowd control|disables}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    }
+  }
+}

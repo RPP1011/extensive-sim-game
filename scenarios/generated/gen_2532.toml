@@ -1,0 +1,13 @@
+[scenario]
+name = "ladder_blood_mage_d4_hp1x"
+seed = 1847
+hero_count = 4
+enemy_count = 5
+difficulty = 4
+max_ticks = 10000
+room_type = "Setpiece"
+hero_templates = ["blood_mage", "necromancer", "warlock", "witch_doctor"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

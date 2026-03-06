@@ -1,0 +1,303 @@
+{
+  "id": "Kaisa",
+  "name": "Kai'Sa",
+  "title": "Daughter of the Void",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Second Skin",
+      "description": "Kai'Sa's basic attacks stack Plasma, dealing increasing bonus magic damage. Allies' immobilizing effects help stack Plasma. Additionally, Kai'Sa's item purchases upgrade her basic spells to have more powerful properties.",
+      "wiki_detail": {
+        "variables": {
+          "dmgfirst": "5",
+          "dmglast": "23",
+          "dmgstackfirst": "1",
+          "dmgstacklast": "12",
+          "baseap": "15",
+          "apscaling": "2.5"
+        },
+        "champion": "Kai'Sa",
+        "skill": "I",
+        "icon": "Second Skin.png",
+        "blurb": "{{sbc|Innate - Living Weapon:}} {{ci|Kai'Sa}} can permanently evolve each of her basic abilities by obtaining {{as|{{sti|attack damage}}}}, {{as|{{sti|ability power}}}}, and {{as|{{sti|attack speed}}}}, respectively.",
+        "blurb2": "{{sbc|Innate - Plasma:}} '''Kai'Sa''' applies stacks of {{as|Plasma|buzzword}} through basic attacks, {{ai|Void Seeker|Kai'Sa}}, and allied {{tip|polymorph|polymorphs}} and {{tip|immobilize|immobilizing}} effects.",
+        "blurb3": "{{sbc|Innate - Caustic Wounds:}} Applying {{as|Plasma|buzzword}} deals an increasing amount of {{as|magic damage}}. Upon applying the final stack, all stacks are consumed to deal {{as|'''additional''' magic damage|magic damage}} based on the {{as|target's '''missing''' health}}.",
+        "description": "{{sbc|Innate - Living Weapon:}} '''Kai'Sa''' can evolve each of her [[champion ability|basic abilities]] by gaining a set amount of permanent [[Champion statistic|stats]] from [[item]]s and {{tt|stat growth|Includes all stats gained when leveling (including base AD gained), but does not include stats at level 1.}}, granting them additional effects. Evolving an ability causes her to enter a 2-second [[Channel#Casting Times|cast time]]. The upgrade is lost if the stat requirement is no longer met.",
+        "icon2": "Kai'Sa Plasma.png",
+        "description2": "{{sbc|Innate - Plasma:}} '''Kai'Sa's''' [[basic attack]]s {{tip|on-hit}} and ''{{ai|Void Seeker|Kai'Sa}}'' apply [[stack]]s of {{as|Plasma|buzzword}} to enemies for 4 seconds, refreshing on subsequent applications and stacking up to 5 times. Basic attacks each apply 1 stack and ''{{ai|Void Seeker|Kai'Sa}}'' applies 2 stacks, increased to 3 if it is {{ai|Void Seeker 2|Kai'Sa|evolved}}. Her and nearby allies' {{tip|immobilize|immobilizing}} effects and {{tip|polymorph|polymorphs}} against enemy {{tip|champions}} will also apply a stack of {{as|Plasma|buzzword}}.",
+        "description3": "{{sbc|Innate - Caustic Wounds:}} {{as|Plasma|buzzword}} stacks applied by '''Kai'Sa's''' basic attacks or ''{{ai|Void Seeker|Kai'Sa}}'' deal {{as|{{pp|5 to 23|1 to 18}}|magic damage}} {{as|(+ {{pp|1 to 12|1 to 18}} per Plasma stack before application)|buzzword}} {{as|(+ {{pp|15 to 25 for 5|0 to 4|key=%|type=Plasma stacks before application|changedisplay=true}} AP)}} {{as|'''bonus''' magic damage}}. The fifth stack against a target consumes them all to deal {{as|'''additional bonus''' magic damage|magic damage}} equal to {{as|15% {{as|(+ 6% per 100 AP)}} of the target's '''missing''' health|health}}, capped at 400 against {{tip|monster|monsters}}.",
+        "effect radius": "{{tt|2750|Radius for allied disables to apply Plasma}}",
+        "targeting": "Passive",
+        "affects": "Self, Enemies",
+        "damagetype": "Magic",
+        "spellshield": "special",
+        "spelleffects": "Proc",
+        "projectile": "|parry        = True",
+        "notes": "* '''Kai'Sa''' receives the evolution even if she dies while in cast time.\n* '''Kai'Sa''' can evolve an ability even if she hasn't learned it yet.\n* The bonus missing health damage is evaluated after the initial damage from ''Caustic Wounds'' is evaluated, and after {{ais|Void Seeker|Kai'Sa}} damage if triggered by it, but before a triggering basic attack's is.\n** This effectively increases the \"flat\" ''Caustic Wounds'' damage preceding the expunge proc and (if applicable) {{ai|Void Seeker|Kai'Sa}} damage and any potential preceding on-hit damage (usually not possible to acquire due to buff slot order) by 15% {{as|(+ 6% per 100 AP)}} divided by (1+{{as|the target's MR post penetration}}/100).\n* {{as|Plasma|buzzword}} stacks that exceed the rupture are reapplied normally.\n* {{tip|Spell shield}} will block the {{as|Plasma|buzzword}} application from {{ai|Void Seeker|Kai'Sa}} only.\n* With {{ai|Void Seeker|Kai'Sa}}, if the stacks detonate {{as|Plasma|buzzword}}, any remaining stacks are reapplied afterwards. {{ai|Void Seeker|Kai'Sa}} also deals ''Caustic Wounds' ''damage based on {{as|Plasma|buzzword}} stacks on the target. This damage is calculated as if each stack was applied successively.<!--\n-->{{#vardefine:dmgfirst|5}}<!--\n-->{{#vardefine:dmglast|23}}<!--\n-->{{#vardefine:dmgstackfirst|1}}<!--\n-->{{#vardefine:dmgstacklast|12}}<!--\n-->{{#vardefine:baseap|15}}<!--\n-->{{#vardefine:apscaling|2.5}}<!--\n-->\n** Hitting a target with 0 stack with normal ''Void Seeker'': {{tt|{{as|{{#expr:{{#var:dmgfirst}}*2}} − {{#expr:{{#var:dmglast}}*2}} (based on level)|magic damage}}|2 stacks, {{#var:dmgfirst}} - {{#var:dmglast}} each}} {{tt|{{as|(+ {{#var:dmgstackfirst}} − {{#var:dmgstacklast}} (based on level)|buzzword}}|0 stack + 1 stack, {{#var:dmgstackfirst}} - {{#var:dmgstacklast}} each}} {{tt|{{as|(+ {{#expr:{{#var:baseap}}*2+{{#var:apscaling}}}}% AP)}}|0 stack AP ratio {{#var:baseap}}% + 1 stack AP ratio {{#expr:{{#var:baseap}}+{{#var:apscaling}}}}%}}\n** Hitting a target with 3 stacks with normal ''Void Seeker'': {{tt|{{as|{{#expr:{{#var:dmgfirst}}*2}} − {{#expr:{{#var:dmglast}}*2}} (based on level)|magic damage}}|2 stacks, {{#var:dmgfirst}} - {{#var:dmglast}} each}} {{tt|{{as|(+ {{#expr:{{#var:dmgstackfirst}}*7}} − {{#expr:{{#var:dmgstacklast}}*7}} (based on level)|buzzword}}|3 stacks + 4 stacks, {{#var:dmgstackfirst}} - {{#var:dmgstacklast}} each}} {{tt|{{as|(+ {{#expr:{{#var:baseap}}*2+{{#var:apscaling}}*7}}% AP)}}|3 stacks AP ratio {{#expr:{{#var:baseap}}+{{#var:apscaling}}*3}}% + 4 stacks AP ratio {{#expr:{{#var:baseap}}+{{#var:apscaling}}*4}}%}}\n** Hitting a target with 0 stack with evolved ''Void Seeker'': {{tt|{{as|{{#expr:{{#var:dmgfirst}}*3}} − {{#expr:{{#var:dmglast}}*3}} (based on level)|magic damage}}|3 stacks, {{#var:dmgfirst}} - {{#var:dmglast}} each}} {{tt|{{as|(+ {{#expr:{{#var:dmgstackfirst}}*3}} − {{#expr:{{#var:dmgstacklast}}*3}} (based on level)|buzzword}}|0 stack + 1 stack + 2 stacks, {{#var:dmgstackfirst}} - {{#var:dmgstacklast}} each}} {{tt|{{as|(+ {{#expr:{{#var:baseap}}*3+{{#var:apscaling}}*3}}% AP)}}|0 stack AP ratio {{#var:baseap}}% + 1 stack AP ratio {{#expr:{{#var:baseap}}+{{#var:apscaling}}}}% + 2 stacks AP ratio {{#expr:{{#var:baseap}}+{{#var:apscaling}}*2}}%}}\n** Hitting a target with 2 stacks with evolved ''Void Seeker'': {{tt|{{as|{{#expr:{{#var:dmgfirst}}*3}} − {{#expr:{{#var:dmglast}}*3}} (based on level)|magic damage}}|3 stacks, {{#var:dmgfirst}} - {{#var:dmglast}} each}} {{tt|{{as|(+ {{#expr:{{#var:dmgstackfirst}}*9}} − {{#expr:{{#var:dmgstacklast}}*9}} (based on level)|buzzword}}|2 stacks + 3 stacks + 4 stacks, {{#var:dmgstackfirst}} - {{#var:dmgstacklast}} each}} {{tt|{{as|(+ {{#expr:{{#var:baseap}}*3+{{#var:apscaling}}*9}}% AP)}}|2 stacks AP ratio {{#expr:{{#var:baseap}}+{{#var:apscaling}}*2}}% + 3 stacks AP ratio {{#expr:{{#var:baseap}}+{{#var:apscaling}}*3}}% + 4 stacks AP ratio {{#expr:{{#var:baseap}}+{{#var:apscaling}}*4}}%}}",
+        "yvideo": "Kai'Sa - Passive"
+      }
+    },
+    "Q": {
+      "id": "KaisaQ",
+      "name": "Icathian Rain",
+      "description": "Kai'Sa shoots a swarm of missiles that seek out nearby targets.\n\nLiving Weapon: Icathian Rain is upgraded to shoot more missiles.",
+      "tooltip": "Kai'Sa launches {{ e2 }} missiles that split among nearby enemies, each dealing {{ totalindividualmissiledamage }} physical damage, up to a maximum of {{ maxdamagedisplay }}. Additional missile hits on champions or monsters deal {{ extrahitreduction*100 }}% damage.\n\nEvolved: Kai'Sa instead fires {{ e7 }} missiles.\nCurrent: {{ f11.1 }}/{{ e6 }} Bonus Attack Damage{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9/8/7/6",
+      "cost": "55",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "40/55/70/85/100",
+        "6",
+        "0.25",
+        "2",
+        "0.35",
+        "100",
+        "12",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage Per Missile"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "variables": {
+          "b1": "40",
+          "b5": "100",
+          "ad": "55",
+          "ap": "20",
+          "mod": "0.25"
+        },
+        "champion": "Kai'Sa",
+        "skill": "Q",
+        "icon": "Icathian Rain.png",
+        "blurb": "{{sbc|Active:}} '''Kai'Sa''' shoots a swarm of missiles that evenly seek out nearby enemies, dealing {{as|physical damage}}.",
+        "blurb4": "{{sbc|{{ai|Second Skin|Kai'Sa|Living Weapon}} Bonus:}} ['''Requires {{sti|{{as|attack damage}}}}''']<br/>''Icathian Rain'' fires more missiles.",
+        "description": "{{sbc|Active:}} '''Kai'Sa''' releases a swarm of 6 missiles that evenly distributes among nearby {{tip|sight|visible}} enemies, each one hitting their target after {{fd|0.4}} seconds to deal {{as|physical damage}}. {{tip|Minions}} below {{sti|health|{{as|35% health}}}} take double damage.",
+        "leveling": "{{st|Physical Damage Per Missile|{{ap|{{#var:b1}} to {{#var:b5}}}} {{as|(+ {{#var:ad}}% '''bonus''' AD)}} {{as|(+ {{#var:ap}}% AP)}}}}",
+        "description2": "Non-minions take {{ap|{{#var:mod}}*100}}% damage from missiles beyond their first.",
+        "leveling2": "{{st|Reduced Damage Per Missile|{{ap|{{#var:b1}}*{{#var:mod}} to {{#var:b5}}*{{#var:mod}}}} {{as|(+ {{ap|{{#var:ad}}*{{#var:mod}}}}% '''bonus''' AD)}} {{as|(+ {{ap|{{#var:ap}}*{{#var:mod}}}}% AP)}}|Total Single-Target Damage|{{ap|{{#var:b1}}*(1+{{#var:mod}}*5) to {{#var:b5}}*(1+{{#var:mod}}*5)}} {{as|(+ {{ap|{{#var:ad}}*(1+{{#var:mod}}*5)}}% '''bonus''' AD)}} {{as|(+ {{ap|{{#var:ap}}*(1+{{#var:mod}}*5)}}% AP)}}}}",
+        "icon3": "Icathian Rain 2.png",
+        "description3": "{{sbc|{{ai|Second Skin|Kai'Sa|Evolution}}:}} Requires{{ft|{{sti|{{as|{{pp|round=ceil|100-{{ccd|Kai'Sa|dam_lvl}}*(x-1)*(0.7025+0.0175*(x-1))}} attack damage}}}} from items|{{sti|{{as|100 attack damage}}}} from items and stat growth}}to upgrade – ''Icathian Rain'' instead fires 12 missiles.",
+        "leveling3": "{{st|Total Evolved Single-Target Damage|{{ap|{{#var:b1}}*(1+{{#var:mod}}*11) to {{#var:b5}}*(1+{{#var:mod}}*11)}} {{as|(+ {{ap|{{#var:ad}}*(1+{{#var:mod}}*11)}}% '''bonus''' AD)}} {{as|(+ {{ap|{{#var:ap}}*(1+{{#var:mod}}*11)}}% AP)}}}}",
+        "description4": "''A nearby enemy is required to cast this ability.''",
+        "target range": "600",
+        "effect radius": "|cost         = 55",
+        "cast time": "none",
+        "costtype": "Mana",
+        "cooldown": "{{ap|10 to 6}}",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "Special",
+        "spelleffects": "special",
+        "projectile": "True",
+        "grounded": "|notes        = \n* The first missile on a target applies {{tip|area damage}}, while the rest on the same target apply {{tip|persistent area damage}}.\n* {{tip|Spell shield|Spell shields}} only block the damage from a single missile.\n* ''Icathian Rain'' acquires its targets upon cast. Moving will not change its targets.\n* Charging {{ai|Supercharge|Kai'Sa}} will not stop the missiles from firing.\n* It takes 1 second for all missiles to fire at a single target.",
+        "yvideo": "Kai'Sa - Q"
+      }
+    },
+    "W": {
+      "id": "KaisaW",
+      "name": "Void Seeker",
+      "description": "Kai'Sa shoots a long range missile, marking enemies with her passive.\n\nLiving Weapon: Void Seeker is upgraded to apply more passive marks and reduce cooldown on champion hit.",
+      "tooltip": "Kai'Sa fires a void blast that deals {{ totaldamage }} magic damage, applies {{ e4 }} stacks of Plasma, and grants True Sight of the first enemy hit for {{ spell.kaisapassive:pduration }} seconds.\n\nEvolved: Kai'Sa instead applies {{ e5 }} stacks of Plasma and hitting a champion reduces the Cooldown by {{ e3 }}%.\nCurrent: {{ f2.1 }}/{{ e2 }} Ability Power{{ spellmodifierdescriptionappend }}",
+      "cooldown": "22/20/18/16/14",
+      "cost": "55/60/65/70/75",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "3000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "30/55/80/105/130",
+        "100",
+        "75",
+        "2",
+        "3",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage",
+          "Mana Cost"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kai'Sa",
+        "skill": "W",
+        "icon": "Void Seeker.png",
+        "blurb": "{{sbc|Active:}} {{ci|Kai'Sa}} fires a void bolt in the target direction that grants {{tip|sight}} around its trajectory as it travels and deals {{as|magic damage}} to the first enemy hit, {{tip|true sight|revealing}} them for a few seconds.",
+        "blurb4": "{{sbc|{{ai|Second Skin|Kai'Sa|Living Weapon}} Bonus:}} ['''Requires {{sti|{{as|ability power}}}}''']<br/>''Void Seeker'' applies more {{as|Plasma|buzzword}} and {{sti|cdr|reduces}} the cooldown if it hits an enemy {{tip|champion}}.",
+        "description": "{{sbc|Active:}} '''Kai'Sa''' fires a void bolt in the target direction that briefly grants {{tip|sight}} around its trajectory as it travels, deals {{as|magic damage}} to the first enemy hit, applies {{as|2 Plasma|buzzword}}, and {{tip|true sight|reveals}} them for 4 seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|30 to 130}} {{as|(+ 130% AD)}} {{as|(+ 45% AP)}}}}",
+        "icon2": "Void Seeker 2.png",
+        "description2": "{{sbc|{{ai|Second Skin|Kai'Sa|Evolution}}:}} Requires {{sti|{{as|100 ability power}}}} from [[items]] to upgrade – ''Void Seeker'' applies {{as|3 Plasma|buzzword}} instead and refunds 75% of its {{sti|cooldown}} if it hits an enemy {{tip|champion}}.",
+        "target range": "3000",
+        "width": "{{tip|er|icononly = true}} 200",
+        "speed": "1750",
+        "cost": "{{ap|55 to 75}}",
+        "cast time": "{{fd|0.4}}",
+        "costtype": "Mana",
+        "cooldown": "{{ap|22 to 14}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Single",
+        "projectile": "True",
+        "parry": "|notes        = \n{{Effect at cast time end}}",
+        "yvideo": "Kai'Sa - W"
+      }
+    },
+    "E": {
+      "id": "KaisaE",
+      "name": "Supercharge",
+      "description": "Kai'Sa briefly increases her Move Speed, then increases her Attack Speed.\n\nLiving Weapon: Supercharge is upgraded to briefly grant Invisibility.",
+      "tooltip": "Kai'Sa supercharges her void energy, gaining {{ totalmovespeed }} Move Speed and becoming Ghosted while charging, then gaining {{ e5 }}% Attack Speed for {{ e2 }} seconds.\n\nAttacks reduce this Ability's Cooldown by {{ e4 }} seconds.\n\nEvolved: Kai'Sa also becomes Invisible for {{ e7 }} seconds.\nCurrent: {{ f10.1 }}%/{{ e6 }}% Bonus Attack Speed{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16/14.5/13/11.5/10",
+      "cost": "30",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0.55/0.6/0.65/0.7/0.75",
+        "4",
+        "1.2",
+        "0.5",
+        "40/50/60/70/80",
+        "100",
+        "0.5",
+        "0.6",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Move Speed",
+          "Attack Speed"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ effect1amount*100.000000 }}% -> {{ effect1amountnl*100.000000 }}%",
+          "{{ effect5amount*100.000000 }}% -> {{ effect5amountnl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kai'Sa",
+        "skill": "E",
+        "icon": "Supercharge.png",
+        "blurb": "{{sbc|Active:}} {{ci|Kai'Sa}} briefly becomes {{tip|ghosted}} and gains {{sti|ms|{{as|'''bonus''' move speed|ms}}}} during the cast time, then gains {{sti|as|{{as|'''bonus''' attack speed}}}} for a few seconds.",
+        "blurb4": "{{sbc|{{ai|Second Skin|Kai'Sa|Living Weapon}} Bonus:}} ['''Requires {{sti|{{as|attack speed}}}}''']<br/>''Supercharge'' briefly grants {{tip|invisibility}}.",
+        "description": "{{sbc|Active:}} '''Kai'Sa''' charges up over the cast time, during which she is still able to move, becoming {{tip|ghosted}} and gaining {{sti|ms|{{As|'''bonus''' movement speed}}}} for the duration, with the effectiveness increased by {{as|{{pp|type='''bonus''' attack speed|key=%|0 to 100 for 11|key1=%|0 to 100|formula=1% per 1% '''bonus''' attack speed.}}|as}}.",
+        "leveling": "{{st|Minimum Movement Speed|{{ap|55 to 75}}%|Maximum Movement Speed|{{ap|55*2 to 75*2}}%}}",
+        "description2": "After completing the charge, she gains {{sti|as|{{as|'''bonus''' attack speed}}}} and reduces her {{tip|attack windup|basic attack windup}} percentage by {{fd|6.44%}} for 4 seconds.",
+        "leveling2": "{{st|Bonus Attack Speed|{{ap|40 to 80}}%}}",
+        "description3": "''Supercharge's'' {{sti|'''current''' cooldown}} is reduced by {{fd|0.5}} seconds {{tip|on-attack}}.",
+        "icon4": "Supercharge 2.png",
+        "description4": "{{sbc|{{ai|Second Skin|Kai'Sa|Evolution}}:}} Requires{{ft|{{sti|as|{{as|{{pp|round=ceil|key=%|100-{{ccd|Kai'Sa|as_lvl}}*(x-1)*(0.7025+0.0175*(x-1))}} attack speed}}}} from items|{{sti|{{as|100% attack speed}}}} from items and stat growth}}to upgrade – ''Supercharge'' grants {{tip|invisibility}} at the start of the cast time for {{fd|0.5}} seconds.",
+        "target range": "|effect radius=",
+        "cost": "30",
+        "costtype": "Mana",
+        "cooldown": "{{ap|16 to 10}}",
+        "cast time": "{{as|{{pp|type='''bonus''' attack speed|1.2;1.155;1.089;0.99;0.924;0.858;0.792;0.726;0.693;0.66;0.627;0.6|key1=%|0;3.90;10.20;21.22;29.88;39.87;51.52;65.29;73.17;81.82;91.39;100|formula= 1.2 /(1 + '''bonus''' attack speed/100) . ''This is capped at 0.6 seconds.''}}|attack speed}}",
+        "targeting": "Auto",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|projectile   =",
+        "parry": "|notes        = \n* Her attack commands during this time are switched to movement commands instead. Upon finishing the charge and if an attack command was issued, '''Kai'Sa''' will continue walking toward her target.\n** '''Kai'Sa''' behaves normally if attack move click was issued not on a target during the cast time, stopping at attack range of the closest target and starts attacking when charged up.",
+        "tips": "* If ''Supercharge's'' cast time finished while its buff is still active, the movement speed buff lingers briefly longer.\n** This is only possible with a significantly high amount of [[ability haste]] and [[attack speed]].",
+        "yvideo": "Kai'Sa - E"
+      }
+    },
+    "R": {
+      "id": "KaisaR",
+      "name": "Killer Instinct",
+      "description": "Kai'Sa dashes near an enemy champion.",
+      "tooltip": "Kai'Sa warps near an enemy champion affected by Plasma and gains {{ rcalculatedshieldvalue }} Shield for {{ rshieldduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "130/100/70",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "2000/2500/3000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Range",
+          "Cooldown",
+          "Shield Amount",
+          "Attack Damage Ratio"
+        ],
+        "effect": [
+          "{{ rrange }} -> {{ rrangeNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ rbasevalue }} -> {{ rbasevalueNL }}",
+          "{{ rtotaladratio*100.000000 }}% -> {{ rtotaladrationl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kai'Sa",
+        "skill": "R",
+        "icon": "Killer Instinct.png",
+        "blurb": "{{sbc|Active:}} {{ci|Kai'Sa}} briefly {{tip|shields}} herself and {{tip|dashes}} near an enemy champion affected by {{as|Plasma|buzzword}}.",
+        "description": "{{sbc|Active:}} '''Kai'Sa''' grants herself a {{tip|shield}} for 2 seconds and {{tip|dash|dashes}} to a target location near a {{tip|sight|visible}} enemy champion that was {{tt|affected|Stack application or consumption}} by {{as|Plasma|buzzword}} within the last 4 seconds. The shield's duration is refreshed when the dash ends.",
+        "leveling": "{{st|Shield Strength|{{ap|70 to 110}} {{as|(+ {{ap|90 to 180}}% AD)}} {{as|(+ 120% AP)}}}}",
+        "description2": "''An enemy champion within range and affected by {{as|Plasma|buzzword}} is required to cast this ability. Killer Instinct {{tip|Basic attack reset|resets}} '''Kai'Sa's''' basic attack timer. '''Kai'Sa''' can cast any of her [[champion ability|abilities]] during the dash.''",
+        "target range": "{{ap|2000 to 3000}}",
+        "effect radius": "{{tt|525|Area around enemy champions}}",
+        "cost": "100",
+        "cast time": "none",
+        "costtype": "Mana",
+        "cooldown": "{{ap|130 to 70}}",
+        "targeting": "Location",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|projectile   =",
+        "parry": "|grounded = true",
+        "knockdown": "true",
+        "notes": "* '''Kai'Sa''' will issue a movement command to the targeted location regardless of whether the target location is valid. The dash is not buffered during this movement command. '''Kai'Sa''' will not dash if the targeted location becomes valid by walking in range or a nearby enemy champion becomes affected by {{as|Plasma|buzzword}}.\n** If the targeted location is not valid, the range indicator will glow.\n* The enemy champion recently affected by {{as|Plasma|buzzword}} must be in range of '''Kai'Sa''' for the targeted location to be valid, and not the targeted location itself.\n* The basic attack reset is not considered one for {{ri|Hail of Blades}}.",
+        "yvideo": "Kai'Sa - R"
+      }
+    }
+  }
+}

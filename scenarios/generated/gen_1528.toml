@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_berserker_engineer_mage_s1"
+seed = 11510
+hero_count = 3
+enemy_count = 4
+difficulty = 2
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["berserker", "engineer", "mage"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

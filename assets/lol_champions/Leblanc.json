@@ -1,0 +1,287 @@
+{
+  "id": "Leblanc",
+  "name": "LeBlanc",
+  "title": "the Deceiver",
+  "resource_type": "Mana",
+  "tags": [
+    "Assassin",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Mirror Image",
+      "description": "When LeBlanc drops below 40% Health, she becomes invisible for 1 second and creates a Mirror Image that deals no damage and lasts for up to 8 seconds.",
+      "wiki_detail": {
+        "champion": "LeBlanc",
+        "skill": "I",
+        "name": "Mirror Image",
+        "icon": "Mirror Image.png",
+        "blurb": "{{sbc|Innate:}} When {{ci|LeBlanc}} reaches low health, she creates a {{tip|clone|clone}} of herself and together they enter brief {{tip|invisibility}}.",
+        "blurb2": "The clone will run forward to a random location, and lasts for a period.",
+        "blurb3": "''Mirror Image'' will go on cooldown upon triggering.",
+        "description": "{{sbc|Innate:}} Periodically, when '''LeBlanc''' is damaged to {{sti|health|{{as|40% '''maximum''' health}}}}, she creates a {{tip|clone}} of herself, after which they both instantly become {{tip|invisibility|invisible}} for 1 second.",
+        "description2": "The clone can basic attack but deals no damage, lasts for 8 seconds, and starts moving 1900 units towards a random place in front of '''LeBlanc''' decided the moment it spawns.",
+        "description3": "''See [[LeBlanc/LoL#Pets|Pets]] for more details about '''LeBlanc's''' clone.''",
+        "static": "60",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|projectile   =",
+        "grounded": "|knockdown    =",
+        "notes": "* The {{tip|clone}} has a [[Pets#Leash ranges|leash range]].\n* Using a basic attack breaks the stealth at the end of the attack windup.",
+        "flavorsound": "{{sm2|LeBlanc_Original_CloneDeath_1.ogg}} ''\"Looks can be deceiving.\"''"
+      }
+    },
+    "Q": {
+      "id": "LeblancQ",
+      "name": "Sigil of Malice",
+      "description": "LeBlanc projects a sigil, dealing damage and marking the target for 3.5 seconds. Damaging the marked target with an ability detonates the sigil, dealing additional damage. If either part kills the target, Leblanc refunds the Mana cost and part of this spell's remaining Cooldown.",
+      "tooltip": "LeBlanc projects a sigil to an enemy, dealing {{ damage }} magic damage and marking them for {{ markduration }} seconds.\n\nDamaging the marked enemy with an Ability detonates the sigil, dealing {{ markdamage }} magic damage.\n\nIf either part kills the target, Leblanc refunds {{ manarefund*100 }}% of the Mana cost and {{ cooldownrefund*100 }}% of this spell's remaining Cooldown.\n\nThe initial sigil deals an additional {{ bonusminiondamage }} damage to minions. {{ spellmodifierdescriptionappend }}",
+      "cooldown": "6",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "700",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Sigil Damage",
+          "Detonation Damage"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ basemarkdamage }} -> {{ basemarkdamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "LeBlanc",
+        "skill": "Q",
+        "name": "Sigil of Malice",
+        "icon": "Sigil of Malice.png",
+        "blurb": "{{sbc|Active:}} {{ci|LeBlanc}} projects an orb at the target enemy that deals {{as|magic damage}} and marks them for a short time.",
+        "blurb2": "Her next damaging ability against the marked target will consume the mark to deal {{as|magic damage}}.",
+        "description": "{{sbc|Active:}} '''LeBlanc''' projects an orb at the target enemy that deals {{as|magic damage}} and marks them for {{fd|3.5}} seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 170}} {{as|(+ 40% AP)}}}}",
+        "description2": "'''LeBlanc's''' next damaging [[champion ability|ability]] against the marked target will consume the mark to deal them the {{ccs|same damage|magic}} again.",
+        "leveling2": "{{st|Total Magic Damage|{{ap|70*2 to 170*2}} {{as|(+ {{ap|40*2}}% AP)}}}}",
+        "description3": "''Sigil of Malice's'' initial mark deals {{as|{{pp|10 to 146}} '''bonus''' magic damage}} against {{tip|minion|minions}} and refunds 100% of its {{sti|{{as|mana cost}}}} and 30% of its remaining {{sti|cooldown}} if either the mark or its consumption kills the target.",
+        "target range": "{{tip|cr|icononly = true}} 700",
+        "speed": "2000",
+        "cooldown": "6",
+        "cost": "50",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Spell",
+        "projectile": "True",
+        "callforhelp": "true",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Sigil of Malice'' and {{ai|Mimic: Sigil of Malice|LeBlanc}} can detonate each other's marks.\n{{Unit-targeted cancel conditions}}"
+      }
+    },
+    "W": {
+      "id": "LeblancW",
+      "name": "Distortion",
+      "description": "LeBlanc dashes to a location, dealing damage to enemies near her destination. For the next 4 seconds, activate Distortion again to return LeBlanc to her starting location.",
+      "tooltip": "LeBlanc dashes then deals {{ totaldamage }} magic damage to nearby enemies. For {{ e3 }} seconds after dashing, LeBlanc can Recast.\n\nRecast: LeBlanc returns to her starting location.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "15/13.75/12.5/11.25/10",
+      "cost": "60/70/80/90/100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "2",
+        "4",
+        "600",
+        "0.2",
+        "0.2",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "LeBlanc",
+        "skill": "W",
+        "name": "Distortion",
+        "icon": "Distortion.png",
+        "blurb": "{{sbc|Active:}} {{ci|LeBlanc}} {{tip|dashes}} to the target location, dealing {{as|magic damage}} to nearby enemies upon arrival. She leaves behind a return pad at her original location that lasts a few seconds, during which she can recast.",
+        "blurb2": "{{sbc|Recast:}} '''LeBlanc''' {{tip|blinks}} to the return pad.",
+        "description": "{{sbc|Active:}} '''LeBlanc''' {{tip|dashes}} to the target location, dealing {{as|magic damage}} to all nearby enemies upon arrival and leaving a return pad at the cast location for 4 seconds. ''Distortion'' can be recast after {{fd|0.2}} seconds of the dash ending for the pad's duration.",
+        "leveling": "{{st|Magic Damage|{{ap|75 to 235}} {{as|(+ 70% AP)}}}}",
+        "icon2": "Distortion 2.png",
+        "description2": "{{sbc|Recast:}} '''LeBlanc''' {{tip|blink|blinks}} to ''Distortion's'' return pad, regardless of range.",
+        "description3": "''Distortion will cast at max range if cast beyond that.''",
+        "target range": "{{tt|600|Dash range}} / {{tt|Global|Recast radius}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|240|Damage radius}}",
+        "speed": "1450",
+        "cast time": "none",
+        "cooldown": "{{ap|15 to 10}}",
+        "cdstart": "on-cast",
+        "cost": "{{ap|60 to 100}}",
+        "costtype": "Mana",
+        "targeting": "[[Location-targeted|Location]] / [[Auto-targeted|Auto]]",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "|grounded     = True",
+        "knockdown": "True",
+        "notes": "* ''Distortion'' will be buffered and cast as soon as the cooldown ends if the player attempts to cast it within {{fd|0.5}} seconds of the cooldown ending.\n** The {{sbc|recast}} will be buffered and cast as soon as it becomes available if the player attempts to cast it within {{fd|0.3}} seconds of it becoming available to cast.\n*The initial cast counts as an ability activation for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n**Recasting the ability does not.\n**{{ai|Mimic: Distortion|LeBlanc}} has the same properties.\n* ''Distortion'' and {{ai|Mimic: Distortion|LeBlanc}} have independent return pads and '''LeBlanc''' can travel to both while they are active.\n* ''Distortion's'' pad duration starts once the dash ends."
+      }
+    },
+    "E": {
+      "id": "LeblancE",
+      "name": "Ethereal Chains",
+      "description": "LeBlanc launches a chain that shackles the first enemy hit. If the target remains shackled for 1.5 seconds, LeBlanc roots them and deals additional damage.",
+      "tooltip": "LeBlanc launches a chain that shackles the first enemy hit, dealing {{ initialdamage }} magic damage and granting True Sight.\n\nIf they remain shackled for {{ e3 }} seconds, LeBlanc Roots them for {{ e4 }} seconds and deals an additional {{ delayeddamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13.25/12.5/11.75/11",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "925",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "1.5",
+        "1.5",
+        "865",
+        "14/13.25/12.5/11.75/11",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Chain Damage",
+          "Root Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ baseinitialdamage }} -> {{ baseinitialdamageNL }}",
+          "{{ basedelayeddamage }} -> {{ basedelayeddamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "LeBlanc",
+        "skill": "E",
+        "name": "Ethereal Chains",
+        "icon": "Ethereal Chains.png",
+        "blurb": "{{sbc|Active:}} {{ci|LeBlanc}} flings an illusory chain in the target direction that deals {{as|magic damage}} and {{tip|tether|tethers}} the first enemy hit, {{tip|true sight|revealing}} them.",
+        "blurb2": "The tether lasts a brief time, after which the target is dealt {{as|magic damage}}, {{tip|true sight|revealed}}, and briefly {{tip|root|rooted}}.",
+        "description": "{{sbc|Active:}} '''LeBlanc''' flings an illusory chain in the target direction that deals {{as|magic damage}} to the first enemy it hits and forms a {{tip|tether}} between '''LeBlanc''' and the target for {{fd|1.5}} seconds, during which they are {{tip|true sight|revealed}}.",
+        "leveling": "{{st|Magic Damage|{{ap|50 to 130}} {{as|(+ 40% AP)}}}}",
+        "description2": "If the tether is not broken by the end of its duration, the target is dealt {{as|magic damage}} and is {{tip|root|rooted}} for {{fd|1.5}} seconds, during which they are {{tip|true sight|revealed}}.",
+        "leveling2": "{{st|Magic Damage|{{ap|80 to 240}} {{as|(+ 80% AP)}}|Total Damage|{{ap|50+80 to 130+240}} {{as|(+ {{ap|40+80}}% AP)}}}}",
+        "target range": "{{tip|cr|icononly = true}} 950",
+        "width": "{{tip|er|icononly = true}} 110",
+        "tether radius": "{{tip|er|icononly = true}} {{tt|865|Equivalent to 995 center-to-center range against the average enemy champion}}",
+        "speed": "1750",
+        "cooldown": "{{ap|14 to 11}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "50",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "Special",
+        "spelleffects": "spell",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "* Both the initial and the delayed damage can detonate {{ai|Sigil of Malice|LeBlanc}}.\n* ''Ethereal Chains'' and {{ai|Mimic: Ethereal Chains|LeBlanc}} are separate debuffs, and can both be tethered to the same target without overriding each other. The {{tip|root}} duration for either one are unchanged.\n* {{tip|Spell shield}} will block the tether's application and initial damage but not the aftereffects of one already applied.\n* The tether remains for a minimum of {{fd|0.25}} seconds regardless of distance. \n{{Effect at cast time end}}"
+      }
+    },
+    "R": {
+      "id": "LeblancR",
+      "name": "Mimic",
+      "description": "LeBlanc casts a mimicked version of one of her basic spells.",
+      "tooltip": "LeBlanc mimics her most recent Ability, using it again. The mimicked Ability deals increased damage.\n\nMimicked Sigil of Malice deals {{ rq1damage }} magic damage when applied, and {{ rq2damage }} magic damage when consumed.\nMimicked Distortion deals {{ rwdamage }} magic damage.\nMimicked Ethereal Chains deals {{ re1damage }} magic damage when shackled and {{ re2damage }} magic damage when Rooting.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "45/35/25",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "25000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Mimicked Sigil of Malice / Ethereal Chains Damage",
+          "Mimicked Mark / Root Damage",
+          "Mimicked Distortion Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ rq1base }} -> {{ rq1baseNL }}",
+          "{{ rq2base }} -> {{ rq2baseNL }}",
+          "{{ rwbase }} -> {{ rwbaseNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "LeBlanc",
+        "skill": "R",
+        "icon": "Mimic.png",
+        "blurb": "{{sbc|Active:}} {{ci|LeBlanc}} casts a mimicked version of her most recent ability, which deals modified damage.",
+        "description": "{{sbc|Active:}} '''LeBlanc''' casts a mimicked version of her most recently used basic ability, applying the same effects and dealing {{as|'''modified''' magic damage}}.",
+        "description2": "{{sbc|{{ai|Mimic: Sigil of Malice|LeBlanc}}:}} Deals modified damage and double damage upon triggering the mark.",
+        "leveling2": "{{st|Magic Damage|{{ap|70 to 210}} {{as|(+ 40% AP)}}|Enhanced Damage|{{ap|70*2 to 210*2}} {{as|(+ 80% AP)}}|Total Magic Damage|{{ap|70*3 to 210*3}} {{as|(+ 120% AP)}}}}",
+        "description3": "{{sbc|{{ai|Mimic: Distortion|LeBlanc}}:}} Deals modified damage.",
+        "leveling3": "{{st|Magic Damage|{{ap|150 to 450}} {{as|(+ 75% AP)}}}}",
+        "description4": "{{sbc|{{ai|Mimic: Ethereal Chains|LeBlanc}}:}} Deals modified damage and double damage after the tether lasts its full duration.",
+        "leveling4": "{{st|Magic Damage|{{ap|70 to 210}} {{as|(+ 40% AP)}}|Enhanced Damage|{{ap|70*2 to 210*2}} {{as|(+ 80% AP)}}|Total Magic Damage|{{ap|70*3 to 210*3}} {{as|(+ 120% AP)}}}}",
+        "cooldown": "{{ap|50 to 30}}",
+        "targeting": "Varied",
+        "affects": "Self",
+        "damagetype": "Magic",
+        "notes": "* ''Mimic'' will default to {{ai|Mimic: Sigil of Malice|LeBlanc}} if ''LeBlanc'' ranks up ''Mimic'' without having used any abilities beforehand (even if she has not yet learned {{ai|Sigil of Malice|LeBlanc}}).\n* Both {{ai|Mimic: Ethereal Chains|LeBlanc}} and {{ai|Mimic: Sigil of Malice|LeBlanc}} will apply damage twice if the original ability's condition to do so is met."
+      }
+    }
+  }
+}

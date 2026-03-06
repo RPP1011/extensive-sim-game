@@ -1,0 +1,11 @@
+[scenario]
+name        = "Elite Squad 6v8 High Difficulty"
+seed        = 2048
+hero_count  = 6
+enemy_count = 8
+difficulty  = 5
+max_ticks   = 5000
+room_type   = "Pressure"
+
+[assert]
+outcome = "Either"

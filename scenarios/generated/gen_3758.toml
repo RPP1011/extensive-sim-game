@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0132_2v5_d2_s2"
+seed = 22255
+hero_count = 2
+enemy_count = 5
+difficulty = 2
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["arcanist", "elementalist"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

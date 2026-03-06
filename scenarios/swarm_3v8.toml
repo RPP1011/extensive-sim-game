@@ -1,0 +1,11 @@
+[scenario]
+name        = "Swarm 3v8 — Surrounded by Grunts"
+seed        = 303
+hero_count  = 3
+enemy_count = 8
+difficulty  = 1
+max_ticks   = 3000
+room_type   = "Entry"
+
+[assert]
+outcome = "Either"

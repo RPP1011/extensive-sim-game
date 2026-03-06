@@ -1,0 +1,96 @@
+[hero]
+name = "Nasus"
+
+[stats]
+hp = 138
+move_speed = 3.4
+armor = 40.0
+magic_resist = 32.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 1.5
+cooldown = 800
+
+# --- Q: Siphoning Strike ---
+[[abilities]]
+name = "Siphoning Strike"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 7000
+ai_hint = "damage"
+resource_cost = 4
+
+[[abilities.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+
+# --- W: Wither ---
+[[abilities]]
+name = "Wither"
+targeting = "target_enemy"
+range = 7.0
+cooldown_ms = 15000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 16
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- E: Spirit Fire ---
+[[abilities]]
+name = "Spirit Fire"
+targeting = "ground_target"
+range = 6.5
+cooldown_ms = 12000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 12
+
+[[abilities.effects]]
+type = "damage"
+amount = 0
+damage_type = "magic"
+duration_ms = 5000
+tick_interval_ms = 1000
+amount_per_tick = 2
+
+[abilities.effects.area]
+shape = "circle"
+radius = 4.0
+
+# --- R: Fury of the Sands ---
+[[abilities]]
+name = "Fury of the Sands"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 23900
+cast_time_ms = 200
+ai_hint = "damage"
+resource_cost = 20
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+# --- Passive: Soul Eater ---
+[[passives]]
+name = "Soul Eater"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_dealt"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+

@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "total": 12,
+  "remaining": 7,
+  "quality_gates": [
+    "cargo test"
+  ],
+  "id": "US-006",
+  "title": "Deliver party list control UX with command handoff"
+}

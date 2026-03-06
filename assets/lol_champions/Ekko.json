@@ -1,0 +1,320 @@
+{
+  "id": "Ekko",
+  "name": "Ekko",
+  "title": "the Boy Who Shattered Time",
+  "resource_type": "Mana",
+  "tags": [
+    "Assassin",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Z-Drive Resonance",
+      "description": "Every third attack or damaging spell on the same target deals bonus magic damage, and grants Ekko a burst of speed if the target is a champion.",
+      "wiki_detail": {
+        "champion": "Ekko",
+        "skill": "I",
+        "icon": "Z-Drive Resonance.png",
+        "description": "{{sbc|Innate - Resonance:}} '''Ekko's''' [[basic attack]]s {{tip|on-hit}} and damaging [[Champion ability|abilities]] apply a [[stack]] of ''Resonance'' to enemies hit for 4 seconds, refreshing on subsequent hits and stacking up to 3 times. The third stack consumes them all to deal {{pp|30 to 80 by 10; 80 to 140|color=magic damage}} {{as|(+ 90% AP)}} {{as|'''bonus''' magic damage}}. ''Z-Drive Resonance'' deals 300% damage against {{tip|monsters}}.",
+        "description2": "''Resonance'' cannot affect the same target more than once every few seconds.",
+        "icon3": "Z-Drive Resonance 2.png",
+        "description3": "{{sbc|Innate - Stolen Time:}} Triggering ''Resonance'' against a {{tip|champion}} grants '''Ekko''' {{pp|key=%|50 to 80 for 4|1 to 16|color=movement speed}} {{sti|ms|{{as|'''bonus''' movement speed}}}} for {{pp|2 to 3 for 3|1 to 11}} seconds.",
+        "ontargetcdstatic": "{{tt|5|Begins after the stacks are consumed}}",
+        "targeting": "Passive",
+        "affects": "Enemies / Self",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Single target",
+        "occurrence": "On-hit",
+        "parry": "unknown",
+        "projectile": "|grounded     =",
+        "knockdown": "|video        = Ekko IVideo.ogv",
+        "notes": "* '''Ekko's''' basic attacks have different animations based on how many stacks his target has. His attack pattern is as follows: \n** {{tt|Downwards|first stack}} → {{tt|Upwards|second stack}} → {{tt|Sideways|third stack to consume all stacks}}\n*** If the target has already been affected by ''Resonance'', '''Ekko's''' basic attack animations will kick or attack the target sideways.\n* ''Resonance'' stacks will not be applied nor consumed if the basic attack is {{tip|dodged}} or {{tip|blocked}} or if the attack {{tip|blind|misses}}.\n<!-- Blurb -->",
+        "blurb": "{{sbc|Innate:}} {{ci|Ekko|Ekko's}} basic attacks and damaging abilities apply stacks, the third stack deals {{as|'''bonus''' magic damage}}. If the target was a {{tip|champion}}, this grants {{sti|ms|{{as|'''bonus''' movement speed}}}} to '''Ekko'''.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "EkkoQ",
+      "name": "Timewinder",
+      "description": "Ekko throws a temporal grenade that expands into a time-distortion field upon hitting an enemy champion, slowing and damaging anyone caught inside. After a delay, the grenade rewinds back to Ekko, dealing damage on its return.",
+      "tooltip": "Ekko throws a device dealing {{ initialdamage }} magic damage. On hitting a champion or reaching the end of its range, it expands into a field that Slows enemies inside by {{ e2 }}%. After it expands, Ekko recalls it, dealing {{ recalldamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9/8.5/8/7.5/7",
+      "cost": "50/60/70/80/90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1075",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "70/85/100/115/130",
+        "40/45/50/55/60",
+        "40/65/90/115/140",
+        "100",
+        "0",
+        "165",
+        "1.75",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "@AbilityResourceName@ Cost",
+          "Outgoing Damage",
+          "Slow",
+          "Return Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ outgoingdamage }} -> {{ outgoingdamageNL }}",
+          "{{ effect2amount*-100.000000 }}% -> {{ effect2amountnl*-100.000000 }}%",
+          "{{ returndamage }} -> {{ returndamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ekko",
+        "skill": "Q",
+        "icon": "Timewinder.png",
+        "description": "{{sbc|Active:}} '''Ekko''' throws a temporal grenade in the target direction that deals {{as|magic damage}} to enemies hit.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 130}} {{as|(+ 30% AP)}}}}",
+        "description2": "At 700 units or upon hitting an enemy {{tip|champion}}, the grenade slows down for {{fd|1.75}} seconds to gradually expand into a ''Temporal Sickness'' field that {{tip|slows}} nearby enemies, travelling for another 190 units.",
+        "leveling2": "{{st|Slow|{{ap|40 to 60}}%}}",
+        "description3": "Afterwards, the grenade contracts and homes back to '''Ekko''' at an increased speed, dealing {{as|magic damage}} to enemies hit.",
+        "leveling3": "{{st|Magic Damage|{{ap|40 to 140}} {{as|(+ 60% AP)}}|Total Magic Damage|{{ap|70+40 to 130+140}} {{as|(+ 90% AP)}}}}",
+        "description4": "''Enemies can be hit only once per pass.''",
+        "target range": "1100",
+        "width": "{{tt|120|Outward}} / {{tt|200|Returning}}",
+        "effect radius": "{{tt|160 – 210|Temporal Sickness expansion}}",
+        "speed": "{{tt|1650|Outward}} / {{tt|200|Temporal Sickness (Estimated)}} / {{tt|2300|Returning}}",
+        "cast time": "{{fd|0.25}}",
+        "cooldown": "{{ap|9 to 7}}",
+        "cost": "{{ap|50 to 90}}",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "Special",
+        "spelleffects": "spellaoe",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "video": "Ekko QVideo.ogv",
+        "notes": "* {{tip|Spell shield}} will block only a single instance of damage.\n{{Effect at cast time end}}\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Ekko}} throws a temporal grenade that deals {{as|magic damage}} to enemies hit. It expands at max range or upon hitting an enemy {{tip|champion}}, {{tip|slow|slowing}} nearby enemies.",
+        "blurb2": "After a delay, the grenade homes back to '''Ekko''', dealing {{as|magic damage}} to enemies hit.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "W": {
+      "id": "EkkoW",
+      "name": "Parallel Convergence",
+      "description": "Ekko's basic attacks deal bonus magic damage to low health enemies. He can cast Parallel Convergence to split the timeline, creating an anomaly after a few seconds that slows enemies caught inside. If Ekko enters the anomaly, he gains shielding and stuns enemies by suspending them in time.",
+      "tooltip": "Passive: Ekko's Attacks against enemies below 30% Health deal {{ missinghealthpercent }} missing Health magic damage.\n\nActive: Ekko launches a chronosphere lasting 1.5 seconds after a delay that Slows enemies inside by {{ e0 }}%. If Ekko enters the sphere, he detonates it, Stunning for {{ e2 }} seconds and gaining {{ totalshield }} Shield.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "22/20/18/16/14",
+      "cost": "30/35/40/45/50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "375",
+        "2.25",
+        "3",
+        "100/120/140/160/180",
+        "150",
+        "15",
+        "1.5",
+        "3",
+        "2",
+        "40"
+      ],
+      "leveltip": {
+        "label": [
+          "Shield Amount",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e4 }} -> {{ e4NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ekko",
+        "skill": "W",
+        "icon": "false",
+        "description": "{{sbc|Passive:}} '''Ekko's''' basic attacks deal {{as|'''bonus''' magic damage}} equal to {{as|3% {{as|(+ 3% per 100 AP)}} of the target's '''missing''' health|health}} against enemies below {{sti|health|{{as|30% of their '''maximum''' health}}}}. The damage has a minimum threshold of 15 and is capped at 150 against {{tip|minions}} and {{tip|monsters}}.",
+        "icon2": "Parallel Convergence.png",
+        "description2": "{{sbc|Active:}} '''Ekko''' creates an afterimage of himself that, after 2 seconds, bats a device to the target location and grants {{tip|sight}} of the area for {{fd|2.5}} seconds. After travelling over {{fd|1.25}} seconds, the device expands into a chronosphere that is visible for {{fd|1.5}} seconds and which {{tip|slows}} enemies within by 40%.",
+        "description3": "If '''Ekko''' enters the sphere within 2 seconds of its creation, it detonates to grant him a {{tip|shield}} for 2 seconds and {{tip|stun}} enemies within for {{fd|2.25}} seconds.",
+        "leveling3": "{{st|Shield Strength|{{ap|100 to 180}} {{as|(+ 150% AP)}}}}",
+        "description4": "''Enemies can see the indicator for Parallel Convergence 2 seconds after casting.''",
+        "target range": "1600",
+        "effect radius": "375",
+        "cooldown": "{{ap|22 to 14}}",
+        "cdstart": "on-cast",
+        "cost": "{{ap|30 to 50}}",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "cast time": "{{fd|0.25}}",
+        "spelleffects": "|spellshield  = True",
+        "occurrence": "On-hit",
+        "projectile": "False",
+        "grounded": "|knockdown    =",
+        "flavorsound": "{{sm2|Ekko_Original_W_1.ogg}} \"Come get me!\"",
+        "video": "Ekko WVideo.ogv",
+        "notes": "* Applies {{tip|proc damage}} for the passive.\n* The passive will proc with the attack that triggers the final stack of {{ai|Z-Drive Resonance|Ekko|Resonance}} if it reduces a target's health below the 30% threshold.\n* '''Ekko''' can detonate the expansion even while {{tip|untargetable}} (i.e. {{ais|Chronobreak|Ekko}} dash), but not if he is {{tip|resurrection|resurrecting}}.\n* ''Parallel Convergence'' will continue to {{tip|slow}} enemies even if its expansion is detonated.\n<!-- Blurb -->",
+        "blurb": "{{sbc|Passive:}} {{cis|Ekko}} basic attacks deal {{as|'''bonus''' magic damage}} against a {{as|low-health}} target, increased based on {{as|their '''missing''' health}}.",
+        "blurb2": "{{sbc|Active:}} '''Ekko''' indicates the target location where a sphere will be created, which {{tip|slow|slows}} enemies within.",
+        "blurb3": "If '''Ekko''' enters the sphere, it detonates, {{tip|stun|stunning}} enemies within and granting '''Ekko''' a {{sti|shield}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "E": {
+      "id": "EkkoE",
+      "name": "Phase Dive",
+      "description": "Ekko rolls evasively while charging up his Z-Drive. His next attack deals bonus damage and warps reality, teleporting him to his target.",
+      "tooltip": "Ekko dashes and empowers his next Attack to have bonus range, teleport him to his target, and deal an additional {{ totaldamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9/8.5/8/7.5/7",
+      "cost": "40/45/50/55/60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "325",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "50/75/100/125/150",
+        "350",
+        "3",
+        "300",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ekko",
+        "skill": "E",
+        "icon": "Phase Dive.png",
+        "description": "{{sbc|Active:}} '''Ekko''' {{tip|dashes}} in the target direction, then empowers his next basic attack within 3 seconds to have a {{fd|0.25}}-second cast time, gain {{sti|range|300 '''bonus''' range}}, cause him to {{tip|blink}} within {{tt|125|Estimated}} range of the target, and deal {{as|'''bonus''' magic damage}}.",
+        "leveling": "{{st|Bonus Magic Damage|{{ap|50 to 150}} {{as|(+ 40% AP)}}}}",
+        "description2": "''Phase Dive {{tip|basic attack reset|resets}} '''Ekko's''' basic attack timer. '''Ekko''' can cast any of his abilities during the dash.''",
+        "target range": "{{tt|325|Dash distance}} / {{tt|550|Maximum increased dash distance across terrain}}",
+        "cast time": "none",
+        "cooldown": "{{ap|9 to 7}}",
+        "cdstart": "post-effect",
+        "cost": "{{ap|40 to 60}}",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Self",
+        "damagetype": "Magic",
+        "spellshield": "true",
+        "spelleffects": "Spell",
+        "occurrence": "On-hit",
+        "parry": "Unknown",
+        "projectile": "|grounded     = True",
+        "knockdown": "True",
+        "terraingrace": "true",
+        "video": "Ekko EVideo.ogv",
+        "notes": "* The {{tip|dash}} distance can be extended to up-to 550 units when targeting across terrain. It will only extend for the distance needed to cross the wall.\n* While {{tip|ground|grounded}} or {{tip|root|rooted}}, '''Ekko''' loses the {{sti|'''bonus''' attack range}} from ''Phase Dive''.\n* ''Phase Drive's'' attack can be {{tip|blocked}} or {{tip|dodged}}, consuming the basic attack without dealing any damage. If the attack {{tip|blind|misses}}, the same will happen.\n* If the target becomes {{tip|untargetable}}, {{tip|death|dies}}, or is too far away during the empowered attack's cast time, it is cancelled but not consumed.\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Ekko}} {{tip|dash|rolls}} in the target direction, gaining {{sti|range|'''bonus''' attack range}}.",
+        "blurb2": "His next {{tip|basic attack}} {{tip|blink|blinks}} him to the target and deals {{as|'''bonus''' magic damage}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "R": {
+      "id": "EkkoR",
+      "name": "Chronobreak",
+      "description": "Ekko shatters his timeline, becoming untargetable and rewinding to a more favorable point in time. He returns to whenever he was a few seconds ago, and heals for a percentage of the damage received in that duration. Enemies near his arrival zone take massive damage.",
+      "tooltip": "Ekko turns back time, entering Stasis while teleporting to where he was 4 seconds ago and dealing {{ totaldamage }} magic damage to nearby enemies. In addition, Ekko restores {{ totalbaseheal }} Health, increased by {{ percenthealampperpercentmissinghealth }}% for each 1% Health he lost in last 4 seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "110/80/50",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "850",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Healing",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ flatheal }} -> {{ flathealNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ekko",
+        "skill": "R",
+        "icon": "false",
+        "description": "{{sbc|Passive:}} Upon learning ''Chronobreak'' or if its '''current''' cooldown is lower than 4 seconds, '''Ekko''' reveals a time-delayed ''afterimage'' of himself that constantly tracks where he was 4 seconds ago.",
+        "icon2": "Chronobreak.png",
+        "description2": "{{sbc|Active:}} '''Ekko''' enters {{tip|stasis (buff)|stasis}} at the start of the cast time, and afterwards {{tip|heals}} himself and {{tip|dash|dashes}} to his ''afterimage's'' current location over {{fd|0.5}} seconds. Upon arrival, the stasis ends and he creates an explosion that deals {{as|magic damage}} to nearby enemies.",
+        "leveling2": "{{st|Magic Damage|{{ap|200 to 500}} {{as|(+ 175% AP)}}}}{{st|Heal|{{ap|100 to 200}} {{as|(+ 60% AP)}} (+ 3% ''per {{as|1% of health}} lost in the past 4 seconds'')}}",
+        "description3": "'''''Ekko''' is immune to all {{tip|airborne|displacements}} during Chronobreak''.",
+        "effect radius": "{{tt|375|Damage radius}} / {{tt|Global|Activation radius}}",
+        "cast time": "{{fd|0.5}}",
+        "cooldown": "{{ap|110 to 50}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Enemies / Self",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "|grounded     = True",
+        "flavorsound": "{{sm2|Ekko_Original_R_0.ogg}} ''\"One more time!\"''",
+        "knockdown": "False",
+        "video": "Ekko RVideo.ogv",
+        "notes": "* '''Ekko''' will attempt to basic attack the closest target after appearing at the cast location, but can do so quicker if he manually attack commands after the dash, except if {{ai|Phase Dive|Ekko}} is primed.\n* The ''afterimage's'' location will explode even if '''Ekko's''' {{tip|dash}} is interrupted.\n* The ''afterimage'' is always visible to '''Ekko''' and his allies. To enemies, the ''afterimage'' can only be seen if they {{tip|sight}} of it.\n* A ''link'' can also be seen between the ''afterimage'' and '''Ekko''' that traces along his path.\n** The ''link'' follows the same visibility rules as the ''afterimage''.\n** Upon activation, '''Ekko''' travels full distance through the ''link'', and thus will detonate {{ai|Parallel Convergence|Ekko}} that the ''link'' passes through.\n* [[File: Quicksilver Sash item.png|20px|link=]] {{nie|Quicksilver}} is placed on a 1-second {{sti|cooldown}} upon casting ''Chronobreak''.",
+        "tips": "* The ''afterimage'' instantly spawns upon learning ''Chronobreak''. This may be used once per match for a ''stealth'' ''Chronobreak'' usage.\n<!-- Blurb -->",
+        "blurb": "{{sbc|Passive:}} {{ci|Ekko}} reveals a time-delayed ''afterimage'' of himself that tracks where he was 4 seconds ago.",
+        "blurb2": "{{sbc|Active:}} '''Ekko''' enters {{tip|stasis}} and {{tip|dash|rewinds}} to the ''afterimage'', {{as|{{sti|healing}}}} based on the damage received in the last 4 seconds. He then explodes, dealing {{as|magic damage}} to nearby enemies.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    }
+  }
+}

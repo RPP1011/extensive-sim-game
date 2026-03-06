@@ -1,0 +1,286 @@
+{
+  "id": "Darius",
+  "name": "Darius",
+  "title": "the Hand of Noxus",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Hemorrhage",
+      "description": "Darius' attacks and damaging abilities cause enemies to bleed for physical damage over 5 seconds, stacking up to 5 times. Darius enrages and gains massive Attack Damage when his target reaches max stacks.",
+      "wiki_detail": {
+        "champion": "Darius",
+        "skill": "I",
+        "icon": "false",
+        "icon2": "Hemorrhage.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Darius}} basic attacks and damaging abilities apply a stack of ''Hemorrhage'', stacking up to a cap.",
+        "blurb2": "'''Darius''' becomes empowered with ''{{ai|Hemorrhage 2|Darius|Noxian Might}}'' for a few seconds whenever he kills an enemy with ''{{ai|Noxian Guillotine|Darius}}'' or applies maximum stacks to an enemy {{tip|champion}}.",
+        "blurb4": "{{sbc|Hemorrhage:}} Deal {{as|physical damage}} to the target over a few seconds. For each stack, this damage is increased.\n<br/><br/>{{sbc|Noxian Might:}} '''Darius''' gains {{as|{{sti|attack damage}}}} and always applies the maximum stacks of ''Hemorrhage''.",
+        "description": "{{sbc|Innate:}} '''Darius' ''' damaging [[basic attack]]s and [[Champion ability|abilities]] apply a [[stack]] of ''Hemorrhage'' to enemies for 5 seconds, refreshing on subsequent applications and stacking up to 5 times.",
+        "description2": "{{sbc|Hemorrhage:}} For each stack, the target is dealt{{ft|{{as|{{pp|13 to 30}}|physical damage}} {{as|(+ 30% '''bonus''' AD)}} {{as|'''total''' physical damage}} over the duration,|{{as|{{pp|3.25 to 7.5}}|physical damage}} {{as|(+ {{fd|7.5}}% '''bonus''' AD)}} {{as|physical damage}} every {{fd|1.25}} seconds over the duration,}}up to a maximum of{{ft|{{as|{{pp|13*5 to 30*5}}|physical damage}} {{as|(+ 150% '''bonus''' AD)}} {{as|'''total''' physical damage}} over the duration.|{{as|{{pp|3.25*5 to 7.5*5}}|physical damage}} {{as|(+ {{fd|37.5}}% '''bonus''' AD)}} {{as|physical damage}} with each tick.}}''Hemorrhage'' deals 300% damage against {{tip|monsters}}.",
+        "icon3": "Hemorrhage 3.png",
+        "description3": "When '''Darius''' kills a champion with ''{{ai|Noxian Guillotine|Darius}}'', or applies 5 stacks on an enemy {{tip|champion}}, he becomes empowered with ''Noxian Might'' for 5 seconds.",
+        "icon4": "Hemorrhage 2.png",
+        "description4": "{{sbc|Noxian Might:}} '''Darius''' gains {{pp|30 to 75 for 10;85 to 105 for 3;130 to 230 for 5|formula=30 + 5 per level until level 10, then + 10 per level until level 13, then + 25 per level|color=AD}} {{sti|{{as|'''bonus''' attack damage}}}} and instantly applies 5 ''Hemorrhage'' stacks through his usual means.",
+        "targeting": "Passive",
+        "damagetype": "Physical",
+        "spelleffects": "default",
+        "spellshield": "special",
+        "affects": "Enemies",
+        "parry": "true",
+        "video": "Darius IVideo.ogv",
+        "notes": "* If Hemorrhage's '''total''' {{tt|post-mitigation|Damage calculated after modifiers}} damage is higher than the {{as|target's '''current''' health}}, a small area of {{tip|sight}} is granted around the target for the duration of Hemorrhage and for another 2 seconds after it ends.\n* ''Hemorrhage'' does not apply to [[structures]] nor {{tip|wards}}.\n* '''Darius'''' attacks and abilities have to deal damage to apply ''Hemorrhage''.\n** ''Hemorrhage'' cannot be applied to/refreshed against {{tip|invulnerable}} targets.\n** ''Hemorrhage'' '''can''' be applied to and refreshed against {{tip|shield|shielded}} targets.\n** ''Hemorrhage'' can also be applied {{tip|on-hit}}, but will specifically not do so if the target is invulnerable.\n* {{tip|Spell shield}} prevents ''Hemorrhage's'' application from abilities only."
+      }
+    },
+    "Q": {
+      "id": "DariusCleave",
+      "name": "Decimate",
+      "description": "Darius winds up and swings his axe in a wide circle. Enemies struck by the blade take more damage than those struck by the handle. Darius heals based on enemy champions and large monsters hit by the blade.",
+      "tooltip": "Darius hefts his axe then swings it around, dealing {{ bladedamage }} physical damage with the edge and {{ handledamage }} damage with the handle. Enemies hit with the handle do not take a Hemorrhage stack.\n\nDarius restores {{ e5 }}% missing Health per enemy champion and large jungle monster hit with the edge, up to a max of {{ e7 }}%.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9/8/7/6/5",
+      "cost": "25/30/35/40/45",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "100/110/120/130/140",
+        "50/80/110/140/170",
+        "99",
+        "0.1",
+        "17",
+        "35",
+        "51",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Total AD Ratio",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e2 }} -> {{ e2NL }}",
+          "{{ e1 }}% -> {{ e1NL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Darius",
+        "skill": "Q",
+        "icon": "Decimate.png",
+        "blurb": "{{sbc|Active:}} {{ci|Darius}} briefly winds up to spin his axe in a circle, dealing {{as|physical damage}} to enemies hit.",
+        "blurb2": "When '''Darius''' hits a {{tip|champion}} with the blade, he applies a {{ai|Hemorrhage|Darius}} stack and {{tip|heals}} based on {{as|his '''missing''' health}}, multiplied by the number of champions hit up to 3.",
+        "blurb3": "Enemies hit by the handle receive reduced damage and do not gain a ''{{ai|Hemorrhage|Darius}}'' stack.",
+        "description": "{{sbc|Active:}} '''Darius''' hefts his axe for {{fd|0.75}} seconds, and then swings it around himself, dealing {{as|physical damage}} to nearby enemies, reduced to 35% against enemies hit by the inner radius.",
+        "leveling": "{{st|Physical Damage|{{ap|50 to 170}} {{as|(+ {{ap|100 to 140}}% AD)}}|Reduced Damage|{{ap|50*0.35 to 170*0.35}} {{as|(+ {{ap|100*0.35 to 140*0.35}}% AD)}}}}",
+        "description2": "Against champions and large monsters hit, '''Darius''' {{tip|heal|heals}} for {{as|{{sti|health|{{pp|changedisplay=true|type=number of targets hit by the outer radius|key=%|17 to 51 for 3|1;2;3+|formula=15% * number of targets hit. ''This is capped at 3 enemies.''}} of his '''missing''' health}}}}. Enemies hit by the inner radius do not refresh the duration of or gain a new stack of {{ai|Hemorrhage|Darius}}.",
+        "description3": "'''''Darius''' is unable to declare basic attacks or cast {{ai|Apprehend|Darius}} or {{ai|Noxian Guillotine|Darius}} during Decimate.''",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|240|Inner Radius}} / {{tt|460|Outer Radius}}",
+        "cooldown": "{{ap|9 to 5}}",
+        "cdstart": "post-effect",
+        "cast time": "none",
+        "cost": "{{ap|25 to 45}}",
+        "costtype": "mana",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "grounded": "|knockdown    =",
+        "video": "Darius QVideo.ogv",
+        "notes": "* ''Decimate'' will cancel if '''Darius''' enters {{tip|stasis (buff)|stasis}} or uses {{si|Dash}} during the delay.\n** After the delay, ''Decimate'' will be placed on a 1-second cooldown."
+      }
+    },
+    "W": {
+      "id": "DariusNoxianTacticsONH",
+      "name": "Crippling Strike",
+      "description": "Darius's next attack strikes an enemy's crucial artery. As they bleed out, their Move Speed is slowed.",
+      "tooltip": "Darius' next Attack deals {{ empoweredattackdamage }} physical damage and Slows by {{ e2 }}% for {{ e5 }} second.\n\nThis Ability refunds its Mana cost and reduces its Cooldown by {{ e3 }}% if it kills the target.\n\nThis Ability triggers spell effects upon dealing damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "5",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "300",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "90",
+        "50",
+        "1.4/1.45/1.5/1.55/1.6",
+        "1",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Total AD Ratio"
+        ],
+        "effect": [
+          "{{ effect4amount*100.000000 }} -> {{ effect4amountnl*100.000000 }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Darius",
+        "skill": "W",
+        "icon": "Crippling Strike.png",
+        "blurb": "{{sbc|Active:}} {{cis|Darius}} next basic attack within a few seconds deals increased {{as|physical damage}} and {{tip|slow|slows}} the target.",
+        "blurb2": "If the empowered attack kills the target, the cooldown is {{sti|ah|reduced}} and the {{as|{{sti|mana cost}}}} is refunded.",
+        "description": "{{sbc|Active:}} '''Darius''' empowers his next basic attack within 4 seconds to have an {{tip|uncancellable windup}}, gain {{sti|range|25 '''bonus''' range}}, deal {{as|'''bonus''' physical damage}} and {{tip|slow}} the target by 90% for 1 second. This damage is affected by {{tip|critical strike}} modifiers.",
+        "leveling": "{{st|Bonus Physical Damage|{{as|{{ap|40 to 60}}% AD}}}}",
+        "description2": "If this attack kills the target, half of ''Crippling Strike's'' {{sti|cooldown}} is reduced and its {{as|{{sti|mana cost}}}} is refunded.",
+        "description3": "''Crippling Strike {{tip|basic attack reset|resets}} '''Darius' ''' basic attack timer.''",
+        "cooldown": "5",
+        "cdstart": "post-effect",
+        "cost": "40",
+        "costtype": "mana",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Enemies, Structures",
+        "damagetype": "Physical",
+        "spellshield": "special",
+        "spelleffects": "spell",
+        "projectile": "|parry        = true",
+        "video": "Darius WVideo.ogv",
+        "notes": "* {{tip|Spell shield}} will not block the damage.\n* The attack's animation can be cancelled by casting {{ai|Decimate|Darius}}, but the attack will still land.\n* ''Crippling Strike'' will trigger {{ri|Manaflow Band}}, {{iis|Tear of the Goddess}} {{nie|Mana Charge}} and [[spell effects]].\n* Despite its name, ''Crippling Strike'' does not {{tip|cripple}} [[V5.16|anymore]]."
+      }
+    },
+    "E": {
+      "id": "DariusAxeGrabCone",
+      "name": "Apprehend",
+      "description": "Darius hones his axe, passively causing his physical damage to ignore a percentage of his target's Armor. When activated, Darius sweeps up his enemies with his axe's hook and pulls them to him.",
+      "tooltip": "Passive: Darius gains {{ e1 }}% Armor Penetration.\n\nActive: Darius hooks with his axe, Pulling, and Knocking Up and Slowing by {{ e2 }}% for {{ e3 }} second.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "26/23.5/21/18.5/16",
+      "cost": "70/60/50/40/30",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "535",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "20/25/30/35/40",
+        "40",
+        "1",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Percent Armor Penetration",
+          "@AbilityResourceName@ Cost",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Darius",
+        "skill": "E",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} {{ci|Darius}} gains {{as|{{sti|armor penetration}}}}.",
+        "blurb2": "{{sbc|Active:}} '''Darius''' sweeps in a cone in the target direction, {{tip|slow|slowing}} and {{tip|airborne|pulling}} enemies hit towards him.",
+        "description": "{{sbc|Passive:}} '''Darius''' gains {{sti|armor penetration|{{as|armor penetration}}}}.",
+        "leveling": "{{st|Armor Penetration|{{ap|20 to 40}}%}}",
+        "icon2": "Apprehend.png",
+        "description2": "{{sbc|Active:}} '''Darius''' sweeps his axe in a cone in the target direction, granting {{tip|sight}} of the area for 1 second while {{tip|airborne|pulling}} enemies hit towards him. Upon arrival, they rebound {{tt|150|Estimated}} units off of him, remaining {{tip|airborne}} and becoming {{tip|slow|slowed}} by 40% for 1 second.",
+        "description3": "'''''Darius''' is unable to move or cast {{ai|Decimate|Darius}} or {{ai|Noxian Guillotine|Darius}} for {{fd|0.4}} seconds after Apprehend's cast time.''",
+        "effect radius": "{{tip|er|icononly = true}} 535",
+        "angle": "{{tip|er|icononly = true}} 50{{degree}}",
+        "cooldown": "{{ap|24 to 14}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "{{ap|70 to 30}}",
+        "costtype": "mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "|spellshield  = True",
+        "spelleffects": "|projectile   = False",
+        "video": "Darius EVideo.ogv",
+        "notes": "* Enemies hit by ''Apprehend'' will quickly be dragged to '''Darius''' before rebounding over a longer period.\n** The {{tip|slow}} duration starts as soon as the target rebounds off of '''Darius'''<!-- , meaning 50% {{tip|Tenacity}} will leave the target not slowed at all after the {{tip|airborne}} ends.\n** This is disregarding stat update timing, which means that the target's movement speed may still be reduced for up-to {{fd|0.25}} seconds after the slow ends-->.\n** {{pending for test}}: The rebound location is determined when the target reaches '''Darius' '''location.\n** The rebound's forced movement's duration is roughly {{fd|0.5}} seconds, finishing before the {{tip|airborne}} duration ends.\n** {{pending for test}}: There is no {{tip|stun}} applied for the same duration of the {{tip|airborne}}, meaning {{tip|brittle}} cannot extend the disable duration. It will not increase the {{tip|slow}} duration in most situations because of the negative tenacity falling off before the slow is applied.\n* After the pull, '''Darius''' will attempt to basic attack the closest pulled target, prioritizing enemy champions.\n* The armor penetration {{tip|stacks multiplicatively}} with other forms of [[Armor_penetration#Percentage_armor_penetration|percentage armor penetration]].\n{{Effect at cast time end}}\n{{ct|cast|spells=true,false,false,false,false}}"
+      }
+    },
+    "R": {
+      "id": "DariusExecute",
+      "name": "Noxian Guillotine",
+      "description": "Darius leaps to an enemy champion and strikes a lethal blow, dealing true damage. This damage is increased for each stack of Hemorrhage on the target. If Noxian Guillotine is a killing blow, its cooldown is refreshed for a brief duration.",
+      "tooltip": "Darius leaps to an enemy and strikes a lethal blow, dealing {{ damage }} true damage. For each Hemorrhage on the target, this Ability deals an additional {{ rdamagepercentperhemostack*100 }}% damage, up to a max of {{ maximumdamage }} damage.\n\nIf this kills the target, Darius may Recast this Ability once within {{ rrecastduration }} seconds. At rank 3, this Ability has no Mana cost and kills refresh the Cooldown completely.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "100/100/0",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "460",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ rbasedamage }} -> {{ rbasedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Darius",
+        "skill": "R",
+        "icon": "Noxian Guillotine.png",
+        "blurb": "{{sbc|Active:}} {{ci|Darius}} {{tip|lunge|leaps}} to an enemy champion and strikes a lethal blow, dealing {{as|true damage}} based on the target's current ''{{ai|Hemorrhage|Darius}}'' stacks.",
+        "blurb2": "If the target dies very briefly afterwards, ''Noxian Guillotine's'' cooldown is temporarily {{sti|ah|reset}}, and nearby {{tip|minions}} and {{tip|monsters}} are {{tip|fear|feared}} and {{tip|slow|slowed}}.",
+        "blurb4": "At max rank, ''Noxian Guillotine'' permanently resets its cooldown if the target dies very briefly afterwards.",
+        "description": "{{sbc|Active:}} '''Darius''' attempts to execute the target enemy {{tip|champion}}, {{tip|lunge|leaping}} towards them to deal {{sti|{{as|true damage}}}}, increased by {{pp|type=target's [[File:Hemorrhage.png|20px]] Hemorrhage stacks|key=%|0 to 100 by 20|0 to 5|formula=20% for every Hemorrhage stack the target has, capped at 100% at 5 stacks}}, and granting {{tip|sight}} of the area around them for {{fd|2.5}} seconds from the start of the cast time.",
+        "leveling": "{{st|True Damage|{{ap|125 to 375}} {{as|(+ 75% '''bonus''' AD)}}|Bonus Damage Per Stack|{{ap|125*0.2 to 375*0.2}} {{as|(+ 15% '''bonus''' AD)}}|Maximum True Damage|{{ap|125*2 to 375*2}} {{as|(+ 150% '''bonus''' AD)}}}}",
+        "description2": "If the target dies within {{fd|0.15}} seconds after being hit by ''Noxian Guillotine'', '''Darius''' {{tip|fear|fears}} nearby {{tip|minions}} and {{tip|monsters}} for 3 seconds, during which they are gradually {{tip|slow|slowed}} by up to 99% over the duration. He can also recast the ability within 20 seconds at no cost, which refreshes on further executions.",
+        "description3": "At rank 3, ''Noxian Guillotine'' has no {{sti|{{as|mana cost}}}} and recast timer.",
+        "description4": "'''''Darius''' is unable to cast {{ai|Decimate|Darius}} or {{ai|Apprehend|Darius}} for {{fd|0.25}} seconds after Noxian Guillotine's cast time.''",
+        "target range": "{{tip|cr|icononly = true}} 475",
+        "cooldown": "{{ap|120 to 80}}",
+        "cdstart": "on-cast",
+        "cost": "{{ap|100|100|0}}",
+        "costtype": "mana",
+        "cast time": "{{fd|0.3667}}",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "True",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "projectile": "|grounded     = True",
+        "knockdown": "False",
+        "callforhelp": "True",
+        "video": "Darius RVideo.ogv",
+        "notes": "* ''Noxian Guillotine's'' cooldown after the recast or recast window is calculated by taking the values at the end, and using this formula: (''Noxian Guillotine's'' Cooldown - time since first cast){{times}}100{{divided by}}(100 + {{sti|AH}}).\n* ''Noxian Guillotine'' applies {{ai|Hemorrhage|Darius}} after the damage.\n* '''Darius''' will only leap towards the target if it is at range, or leap backwards if it is very close.\n** This leap can pass very thin terrain and will otherwise not be able to. In any case, '''Darius''' will still hit the target.\n** The ability is disabled while {{tip|ground|grounded}} or {{tip|root|rooted}} even if '''Darius''' is in the range in which he does not leap.\n* ''Noxian Guillotine'' will not reset nor trigger {{ai|Hemorrhage 2|Darius|Noxian Might}} if used to kill a {{tip|clone}} or a target protected by {{tip|resurrection}}.\n* ''Noxian Guillotine'' will reset but not trigger {{ai|Hemorrhage 2|Darius|Noxian Might}} if it finishes off a target that is in a {{tip|zombie state}}.\n{{Unit-targeted cancel conditions}}"
+      }
+    }
+  }
+}

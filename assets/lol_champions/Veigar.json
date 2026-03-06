@@ -1,0 +1,266 @@
+{
+  "id": "Veigar",
+  "name": "Veigar",
+  "title": "the Tiny Master of Evil",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Phenomenal Evil Power",
+      "description": "Veigar is the greatest Evil to ever strike at the hearts of Runeterra - and he's only getting bigger! Striking an enemy Champion with a spell or scoring a takedown grants Veigar permanently increased Ability Power.",
+      "wiki_detail": {
+        "champion": "Veigar",
+        "skill": "I",
+        "icon": "false",
+        "icon2": "Phenomenal Evil Power.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Veigar}} generates a stack of ''Phenomenal Evil'' for each enemy {{tip|champion}} hit by his abilities, and more stacks when he scores an enemy champion {{tip|takedown}}.",
+        "blurb4": "{{sbc|Phenomenal Evil:}} For each stack, '''Veigar''' gains {{as|{{sti|ability power}}}}.",
+        "description": "{{sbc|Innate:}} '''Veigar''' generates a [[stack]] of ''Phenomenal Evil'' for each enemy {{tip|champion}} hit by his [[champion ability|abilities]], and 5 stacks whenever he scores an enemy champion {{tip|takedown}}.",
+        "description2": "{{sbc|Phenomenal Evil:}} For each stack, '''Veigar''' gains {{sti|AP|{{as|1 ability power}}}}.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "notes": "* The two effects stack, granting 6 stacks for each enemy champion taken down by an ability, 7 with {{ai|Baleful Strike|Veigar}}.\n* '''Veigar's''' abilities do not have to deal damage nor affect their targets to grant a stack."
+      }
+    },
+    "Q": {
+      "id": "VeigarBalefulStrike",
+      "name": "Baleful Strike",
+      "description": "Veigar unleashes a bolt of dark energy that deals magic damage to the first two enemies hit. Units killed by this bolt grant Veigar some ability power permanently.",
+      "tooltip": "Veigar unleashes a bolt of dark energy, dealing {{ totaldamage }} magic damage to the first two enemies hit.\n\nIf Veigar kills an enemy with this Ability, he gains {{ spell.veigarpassive:dqkillstacks }} stack of Phenomenal Evil. Large minions and large monsters grant {{ spell.veigarpassive:dqkillstackslarge }} stacks instead.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "6/5.5/5/4.5/4",
+      "cost": "30/35/40/45/50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "1",
+        "2",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Total AP Ratio",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ apratio*100.000000 }}% -> {{ aprationl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Veigar",
+        "skill": "Q",
+        "icon": "Baleful Strike.png",
+        "blurb": "{{sbc|Active:}} {{ci|Veigar}} blasts a dark bolt in the target direction that deals {{as|magic damage}} to the first two enemies hit.",
+        "blurb2": "If this kills an enemy, it generates a stack of ''{{ai|Phenomenal Evil Power|Veigar|Phenomenal Evil}}''. Large {{tip|minions}} and {{tip|monsters}} generate more stacks.",
+        "description": "{{sbc|Active:}} '''Veigar''' blasts a dark bolt in the target direction that deals {{as|magic damage}} to the first two enemies hit.",
+        "leveling": "{{st|Magic Damage|{{ap|80 to 240}} {{as|(+ {{ap|50 to 70}}% AP)}}}}",
+        "description2": "If this kills an enemy, it generates 1 stack of ''{{ai|Phenomenal Evil Power|Veigar|Phenomenal Evil}}'', tripled against large {{tip|minions}} and {{tip|monsters}}.",
+        "cooldown": "{{ap|6 to 4}}",
+        "cost": "{{ap|30 to 50}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "mana",
+        "target range": "{{tip|cr|icononly = true}} 1050 / {{tip|er|icononly = true}} 990",
+        "width": "{{tip|er|icononly = true}} 140",
+        "speed": "2200",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "* Killing two enemy champions with ''Baleful Strike'' grants {{tt|{{as|+14 AP}}|+12 from Phenomenal Evil Power and +2 from Baleful Strike}}.\n* ''Baleful Strike'' will only grant stacks of {{ai|Phenomenal Evil Power|Veigar|Phenomenal Evil}} from its bolt, and not any additional effect that would kill other units from the same cast.\n* The stacks are added immediately on enemy kill (on next game tick).\n**If the first target was killed, the second hit may deal 1 damage more on enemies further along the missile's flight path.\n{{Effect at cast time end}}"
+      }
+    },
+    "W": {
+      "id": "VeigarDarkMatter",
+      "name": "Dark Matter",
+      "description": "Veigar calls a great mass of dark matter to fall from the sky to the target location, dealing magic damage when it lands. Stacks of Phenomenal Evil reduce Dark Matter's cooldown.",
+      "tooltip": "Veigar summons dark matter from the sky, dealing {{ totaldamage }} magic damage.\n\nEvery {{ spell.veigarpassive:pstacksperdarkmattercdr }} stacks of Phenomenal Evil reduce this Ability's Cooldown by {{ spell.veigarpassive:darkmattercdrincrement*100 }}%.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "950",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "1.2",
+        "8",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Total AP Ratio",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ apratio*100.000000 }}% -> {{ aprationl*100.000000 }}%",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Veigar",
+        "skill": "W",
+        "icon": "Dark Matter.png",
+        "blurb": "{{sbc|Active:}} {{ci|Veigar}} casts down a mass of dark matter that strikes the target location after a brief delay, dealing {{as|magic damage}} to enemies hit.",
+        "blurb2": "The cooldown is {{sti|cdr|reduced}} based on stacks of ''{{ai|Phenomenal Evil Power|Veigar|Phenomenal Evil}}''.",
+        "description": "{{sbc|Active:}} '''Veigar''' casts down a mass of dark matter that strikes the target location after a {{rutngt|1.2}} {{tt|delay|from the start of the cast time}}, dealing {{as|magic damage}} to enemies hit.",
+        "description2": "''Dark Matter's'' {{sti|cooldown}} is reduced based on stacks of ''{{ai|Phenomenal Evil Power|Veigar|Phenomenal Evil}}''.",
+        "leveling": "{{st|Magic Damage|{{ap|85 to 305}} {{as|(+ {{ap|70 to 110}}% AP)}}}}",
+        "cooldown": "{{pp|type=[[File:Phenomenal_Evil_Power.png|20px|link=Veigar#Phenomenal_Evil_Power]] [[Veigar#Phenomenal_Evil_Power|Phenomenal Evil]] stacks|8*0.9^(x-1);...;0|0 to 900 for 19;...;∞|formula=8 * 0.9^N. ''N{{equals}}Number of times that 50 Phenomenal Evil stacks are earned.''}}",
+        "cost": "{{ap|60 to 80}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "mana",
+        "target range": "950",
+        "effect radius": "{{tip|cr|icononly = true}} {{fd|240}}",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "notes": "* The delay starts at the beginning of the cast time.\n** If '''Veigar''' dies during the cast time, ''Dark Matter'' will still successfully fall from the sky.\n* ''Dark Matter'' grants {{tip|sight}} of the area during the delay."
+      }
+    },
+    "E": {
+      "id": "VeigarEventHorizon",
+      "name": "Event Horizon",
+      "description": "Veigar twists the edges of space, creating a cage that Stuns enemies that pass through.",
+      "tooltip": "Veigar twists the edges of space, creating a cage that Stuns enemies that pass through for {{ e1 }} seconds. The cage lasts for 3 seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "20/18.5/17/15.5/14",
+      "cost": "70/75/80/85/90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "725",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "1.5/1.75/2/2.25/2.5",
+        "0.5",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Stun Duration:",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Veigar",
+        "skill": "E",
+        "icon": "Event Horizon.png",
+        "blurb": "{{sbc|Active:}} After a brief delay, {{ci|Veigar}} erects a cage at the target location that lasts for a short time. Enemies that touch the cage edges are briefly {{tip|knockdown|knocked down}} and {{tip|stun|stunned}}.",
+        "description": "{{sbc|Active:}} '''Veigar''' forms a cage at the target location that erects after a {{fd|0.5}} second delay, remaining there for 3 seconds. Enemies that collide with the edges of the cage are {{tip|knockdown|knocked down}} and {{tip|stun|stunned}} for a duration.",
+        "description2": "''Event Horizon'' can affect enemies only once per cast.",
+        "leveling": "{{st|Stun Duration|{{ap|1.5 to 2.5}} seconds}}",
+        "cooldown": "{{ap|20 to 14}}",
+        "cdstart": "on-cast",
+        "cost": "{{ap|70 to 90}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "mana",
+        "target range": "725",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|400|Outer radius}} / {{tt|250|Safe zone radius}} / {{tt|390|Assist marker radius}}",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "|spellshield  = True",
+        "spelleffects": "|notes        = \n* The stun and the knockdown are applied to units that are within a certain distance interval from the center of the area of effect.\n* An enemy can be affected by ''Event Horizon'' only once every {{fd|4.5}} seconds.\n* Units that negate the stun will still count as passing through the edges. They will become immune to the effects of ''Event Horizon'' for the period even after negating them.\n* {{tip|Displacement immune}} enemies will still be {{tip|stun|stunned}}, but not {{tip|knockdown|knocked down}}.\n* At the start of the cast time, all enemy {{tip|champions}} in a 390-radius become marked for '''Veigar''' to gain an {{tip|takedown|assist}} on them should they perish within the standard 10 seconds assist time.\n* ''Event Horizon'' may fail to catch enemies that move very quickly through the boundary distance.\n** More modern area checks such as {{cai|The Box|Thresh}} or {{cai|Yordle Snap Trap|Caitlyn}} do not have this issue."
+      }
+    },
+    "R": {
+      "id": "VeigarR",
+      "name": "Primordial Burst",
+      "description": "Blasts target enemy champion, dealing a large amount of magic damage, increasing based on the target's missing health.",
+      "tooltip": "Veigar blasts an enemy champion with primal magic to deal between {{ mindamage }} and {{ maxdamage }} magic damage, increasing with the target's missing Health. Damage is maximized against enemies below 33% Health.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "100/80/60",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Total AP Ratio",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ apratio*100.000000 }}% -> {{ aprationl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Veigar",
+        "skill": "R",
+        "icon": "Primordial Burst.png",
+        "blurb": "{{sbc|Active:}} {{ci|Veigar}} sends a primordial burst at the target enemy champion that deals {{as|magic damage}} based on {{as|their '''missing''' health}}.",
+        "description": "{{sbc|Active:}} '''Veigar''' sends a primordial burst at the target enemy champion that deals {{as|magic damage}}, increased by {{as|{{pp|type=target's '''missing''' health|key=%|0 to 100 for 11|key1=%|0 to 100*2/3|formula=1.5% per 1% of target's '''missing''' health. ''This is capped at 66.66% '''missing''' health.''}}|health}}.",
+        "leveling": "{{st|Minimum Magic Damage|{{ap|175 to 325}} {{as|(+ {{ap|65 to 75}}% AP)}}|Maximum Magic Damage|{{ap|175*2 to 325*2}} {{as|(+ {{ap|65*2 to 75*2}}% AP)}}}}",
+        "cooldown": "{{ap|100 to 60}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "100",
+        "costtype": "mana",
+        "target range": "{{tip|cr|icononly = true}} 650",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Single target",
+        "projectile": "True",
+        "callforhelp": "True",
+        "notes": "{{Unit-targeted cancel conditions}}"
+      }
+    }
+  }
+}

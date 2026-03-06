@@ -1,0 +1,284 @@
+{
+  "id": "Corki",
+  "name": "Corki",
+  "title": "the Daring Bombardier",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Hextech Munitions",
+      "description": "A percentage of Corki's basic attack damage is dealt as bonus true damage.",
+      "wiki_detail": {
+        "champion": "Corki",
+        "skill": "I",
+        "icon": "Hextech Munitions.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Corki}} basic attacks deal {{as|'''bonus''' true damage}}.",
+        "description": "{{sbc|Innate:}} '''Corki's''' [[basic attack]]s deal {{sti|{{as|'''bonus''' true damage}}}} equal to {{as|20% AD}}. This damage is affected by {{tip|critical strike}} modifiers.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "{{tip|Physical damage|Physical}} / {{tip|True damage|True}}",
+        "spelleffects": "basic",
+        "parry": "true",
+        "notes": "* The mixed damage is dealt in two simultaneous instances of damage, but will pretend to be a single instance for most effects (such as {{ris|Conqueror}} stacks).\n** The {{as|true damage}} is dealt in an instance before the {{as|physical damage}}.\n** Both instances deal {{tip|basic damage}} and thus natively apply {{sti|life steal}}.\n** The attack applies [[on-hit]] effects only once, right at the start.\n** Even if the target dies from the {{as|true damage}}, the {{as|physical damage}} will still be applied to it.\n*** If the target dies from [[on-hit]] damage, the true damage portion will be skipped and only the physical damage applied.{{bug}}\n** {{iis|Runaan's Hurricane}} {{nie|Wind's Fury}} and {{tip|Spellblade}} effects have both been special cased to benefit from ''Hextech Munitions'', causing their damage dealt to deal {{as|'''bonus''' true damage}} equal to 15% of the {{tt|pre-mitigation damage|Damage calculated before modifiers}} dealt."
+      }
+    },
+    "Q": {
+      "id": "PhosphorusBomb",
+      "name": "Phosphorus Bomb",
+      "description": "Corki fires a flash bomb at a target location, dealing magic damage to enemies in the area. This attack additionally reveals units in the area for a duration.",
+      "tooltip": "Corki lobs a bomb, dealing {{ totaldamage }} magic damage. The area and champions hit are revealed for {{ revealduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9/8.5/8/7.5/7",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "825",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Corki",
+        "skill": "Q",
+        "icon": "Phosphorus Bomb.png",
+        "blurb": "{{sbc|Active:}} {{ci|Corki}} fires a flash bomb at the target location, dealing {{as|magic damage}} to enemies hit and {{tip|sight|revealing}} enemy {{tip|champions}} hit.",
+        "description": "{{sbc|Active:}} '''Corki''' launches a bomb at the target location that explodes upon impact, dealing {{as|magic damage}} to enemies hit.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 250}} {{as|(+ 120% '''bonus''' AD)}} {{as|(+ 100% AP)}}}}",
+        "description2": "The bomb also grants {{tip|sight}} of the area for 6 seconds and {{tip|standard sight|reveals}} enemy {{tip|champions}} hit for the same duration.",
+        "target range": "825",
+        "effect radius": "{{tip|cr|icononly = true}} 275",
+        "speed": "1100",
+        "cooldown": "{{ap|9 to 7}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "80",
+        "costtype": "mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "video": "Corki QVideo.ogv",
+        "notes": "* The missile has a minimum travel time of {{fd|0.227}} seconds."
+      }
+    },
+    "W": {
+      "id": "CarpetBomb",
+      "name": "Valkyrie",
+      "description": "Corki flies a short distance, dropping bombs that create a trail of fire that damages opponents who remain in it.",
+      "tooltip": "Corki flies over and scorches a path, burning it for {{ trailduration }} seconds. Enemies in the fire take up to {{ maximumdamage }} magic damage over the duration.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "20/18/16/14/12",
+      "cost": "80/85/90/95/100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage Over Time",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Corki",
+        "skill": "W",
+        "icon": "Valkyrie.png",
+        "blurb": "{{sbc|Active:}} {{ci|Corki}} {{tip|dash|flies}} a short distance to the target location, dropping bombs that create a trail of fire that deals {{as|magic damage}} continually to enemies within.",
+        "description": "{{sbc|Active:}} '''Corki''' {{tip|dashes}} to the target location and drops bombs that leave up to 3 blazing patches along his path, depending on the distance traveled. Each patch lasts {{fd|2.5}} seconds.",
+        "description2": "Enemies within the patches are dealt {{as|magic damage}} every {{fd|0.5}} seconds, lingering for 1 second.",
+        "leveling2": "{{st|Magic Damage Per Tick|{{ap|30 to 90}} {{as|(+ 15% AP)}}|Total Magic Damage|{{ap|30*5 to 90*5}} {{as|(+ {{ap|15*10}}% AP)}}}}",
+        "description3": "''{{ai|Gatling Gun|Corki}} can be cast during the dash. Valkyrie will cast at max range if cast beyond that.''",
+        "target range": "{{tt|300|Minimum dash range}} / {{tt|600|Maximum dash range}}",
+        "collision radius": "100",
+        "effect radius": "200",
+        "speed": "{{tt|650 + {{as|100% movement speed}}|Dash speed}}",
+        "cast time": "none",
+        "cooldown": "{{ap|20 to 12}}",
+        "cost": "{{ap|80 to 100}}",
+        "costtype": "mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "False",
+        "spelleffects": "aoedot",
+        "projectile": "|grounded     = True",
+        "knockdown": "True",
+        "video": "Corki WVideo.ogv",
+        "notes": "* No additional information."
+      }
+    },
+    "E": {
+      "id": "GGun",
+      "name": "Gatling Gun",
+      "description": "Corki's gatling gun rapidly fires in a cone in front of him, dealing damage and reducing enemy Armor and Magic Resist.",
+      "tooltip": "Corki fires a gatling gun in front of him, dealing {{ totaldamage }} physical damage over {{ sprayduration }} seconds and shredding up to {{ shredmax*-1 }} Armor and Magic Resist.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Defense Reduction",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ shredmax*-1.000000 }} -> {{ shredmaxnl*-1.000000 }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Corki",
+        "skill": "E",
+        "icon": "Gatling Gun.png",
+        "blurb": "{{sbc|Active:}} {{cis|Corki}} gatling gun rapidly fires in a cone in front of him, continually dealing {{as|physical|pdamage}} damage to enemies hit and applying stacks of ''Gatling Gun''.",
+        "blurb4": "{{sbc|Gatling Gun:}} For each stack, the target loses {{as|{{sti|lethality|armor}}}} and {{as|{{sti|magic penetration|magic resist}}}}.",
+        "description": "{{sbc|Active:}} '''Corki''' sprays bullets in a cone toward his facing direction for 4 seconds, dealing {{as|physical damage}} every {{fd|0.25}} seconds to all enemies hit and applying a [[stack]] to them at the same tick rate for 2 seconds, refreshing with subsequent hits and stacking up to 4 times. Each stack reduces the target's {{sti|lethality|{{as|armor}}}} and {{sti|magic penetration|{{as|magic resistance}}}}.",
+        "leveling": "{{st|Physical Damage Per Tick|{{ap|100/16 to 280/16}} {{as|(+ {{ap|250/16}}% '''bonus''' AD)}}|Total Physical Damage|{{ap|100 to 280}} {{as|(+ 250% '''bonus''' AD)}}}}\n{{st|Resistances Reduction Per Stack|{{ap|3 to 5}}|Total Resistances Reduction|{{ap|3*4 to 5*4}}}}",
+        "effect radius": "{{tip|er|icononly = true}} {{tt|690|Cone radius}}",
+        "angle": "{{tip|er|icononly = true}} {{tt|35{{degree}}|Pending for test}}",
+        "cast time": "none",
+        "cooldown": "12",
+        "cdstart": "on-cast",
+        "cost": "{{ap|50 to 90}}",
+        "costtype": "mana",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "physical",
+        "spellshield": "False",
+        "spelleffects": "aoedot",
+        "projectile": "False",
+        "grounded": "|knockdown    =",
+        "video": "Corki EVideo.ogv",
+        "notes": "* The maximum resistances reduction is applied after 4 ticks (1 second).\n* The direction of the gun firing changes depending on where '''Corki''' is facing.\n** '''Corki''' will turn to face in the direction of the cursor upon casting ''Gatling Gun''.\n* ''Gatling Gun's'' area of effect can hit close by enemies next to and behind him, due to hitting {{tip|er|enemy boundary edge}}."
+      }
+    },
+    "R": {
+      "id": "MissileBarrage",
+      "name": "Missile Barrage",
+      "description": "Corki fires a missile toward his target location that explodes on impact, dealing damage to enemies in an area. Corki stores missiles over time, up to a maximum. Every 3rd missile fired will be a Big One, dealing extra damage.",
+      "tooltip": "Corki fires a missile that explodes on the first enemy hit, dealing {{ rsmallmissiledamage }} physical damage to surrounding enemies. Every third missile instead deals {{ rbigmissiledamage }} physical damage.\n\nThis Ability has up to {{ maxammotooltip }} charges. Basic attacks against champions reduce the time between charges by {{ attackrefund }} seconds on hit.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "2",
+      "cost": "35",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1225",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Corki",
+        "skill": "R",
+        "icon": "false",
+        "icon2": "Missile Barrage.png",
+        "icon4": "Big One.png",
+        "blurb": "{{sbc|Active:}} {{ci|Corki}} fires a missile in the target direction that explodes upon the first enemy hit, dealing {{as|physical damage}} to enemies in an area.",
+        "blurb2": "'''Corki''' stores missiles over time, and starts with maximum missiles when he respawns.",
+        "blurb3": "Every 3rd missile fired is a ''Big One'': which fires farther and deals increased damage in a bigger explosion.",
+        "description": "{{sbc|Passive:}} Basic attacks [[on-hit]] against champions reduce ''Missile Barrage's'' remaining recharge time by {{pp|2 to 4 for 11|0 to 100|type=critical strike chance|color=critical chance|key1=%}} seconds.",
+        "description2": "{{sbc|Active:}} '''Corki''' fires a missile in the target direction that explodes upon the first enemy hit, dealing {{as|physical damage}} to enemies within the area.",
+        "leveling2": "{{st|Physical Damage|{{ap|80 to 240}} {{as|(+ 70% '''bonus''' AD)}}}}",
+        "description3": "'''Corki''' periodically [[stock]]s a ''Missile Barrage'' charge, up to a maximum of 4. He gains 2 charges upon learning the ability and maximum charges upon [[death|respawning]].",
+        "description4": "Every third missile '''Corki''' fires is a ''{{ai|Big One|Corki}}'', dealing 100% increased damage as well as gaining increased range and explosion radius.",
+        "leveling4": "{{st|Big One Physical Damage|{{ap|80*2 to 240*2}} {{as|(+ {{ap|70*2}}% '''bonus''' AD)}}}}",
+        "target range": "{{tip|cr|icononly = true}}  {{tt|1300|Standard missile range}} / {{tt|1500|Big one range}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|150|Standard explosion}} / {{tt|300|Big one explosion}}",
+        "speed": "{{tt|2000|Both standard and big missile speed}}",
+        "width": "{{tip|er|icononly = true}} {{tt|80|Both standard and big missile width}}",
+        "cooldown": "2",
+        "recharge": "20",
+        "cost": "35",
+        "cast time": "{{fd|0.175}}",
+        "costtype": "mana + 1 Ammo",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "video": "Corki RVideo.ogv",
+        "notes": "* Once '''Corki''' has learned the ability:\n** He receives a [[buff]] that counts a cycle of the number of times ''Missile Barrage'' has been used since the last ''Big One''.\n** An indicator becomes visible below his [[health bar]] that tracks the number of missiles in reserve and whether a ''Big One'' is available. They are spent from {{tt|left to right|default, for left-to-right locales}}.\n* '''Corki''' retains progress towards a ''Big One'' when he [[death|dies]].\n{{Effect at cast time start}}\n* ''Missile Barrage's'' effect radius is centered around the location of the missile as it collides.\n* {{iis|Malignance}} damage from ''Missile Barrage'' does not count toward {{iis|Eclipse}} passive."
+      }
+    }
+  }
+}

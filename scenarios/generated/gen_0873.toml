@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_druid_assassin_arcanist"
+seed = 1292
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["druid", "assassin", "arcanist"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

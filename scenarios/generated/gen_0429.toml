@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_paladin_blood_mage_rogue"
+seed = 1144
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["paladin", "blood_mage", "rogue"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

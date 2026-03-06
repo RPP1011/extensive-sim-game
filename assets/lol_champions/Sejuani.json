@@ -1,0 +1,291 @@
+{
+  "id": "Sejuani",
+  "name": "Sejuani",
+  "title": "Fury of the North",
+  "resource_type": "Mana",
+  "tags": [
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Fury of the North",
+      "description": "After being out of combat, Sejuani gains Frost Armor which grants Armor and Magic Resist and immunity to slows. Frost Armor persists for a short time after Sejuani takes damage.  Sejuani can damage a stunned enemy to shatter it, dealing massive magic damage.",
+      "wiki_detail": {
+        "champion": "Sejuani",
+        "skill": "I",
+        "icon": "Fury of the North.png",
+        "blurb": "{{sbc|Innate - Icebreaker:}} Enemies {{tip|stun|stunned}} by {{ci|Sejuani}} are also marked ''Frozen'' at the same time. Her next basic attack against a ''Frozen'' target will consume the mark to deal {{as|'''bonus''' magic damage}} based on {{as|their '''maximum''' health}}.",
+        "blurb2": "{{sbc|Innate - Frost Armor:}} '''Sejuani''' gains ''Frost Armor'', which lingers shortly after taking damage from enemy {{tip|champions}} or large {{tip|monsters}}. She restores it after a period without taking damage from them.",
+        "blurb4": "[[File:Sejuani Frost Armor.png|20px|link=]]{{sbc|Frost Armor:}} Sejuani gains {{sti|armor|{{as|'''bonus''' armor}}}} and {{sti|mr|{{as|'''bonus''' magic resist}}}}, as well as {{tip|slow-immune|slow immunity}} and {{tip|cripple-immune|cripple immunity}}.",
+        "description": "{{sbc|Innate - Icebreaker:}} Enemies {{tip|stun|stunned}} by '''Sejuani''' are marked ''Frozen'' for the disable's duration. '''Sejuani's''' next [[basic attack]] or [[champion ability|ability]] against a ''Frozen'' enemy will consume the mark to deal {{as|'''bonus''' magic damage}} equal to {{as|10% of their '''maximum''' health}}, capped at 250 against epic monsters.",
+        "description2": "{{sbc|Innate - Frost Armor:}} '''Sejuani''' gains ''Frost Armor'', which lingers for 3 seconds after taking damage from enemy {{tip|champions}}, {{tip|turrets}}, or large {{tip|monsters}}. She restores it after {{pp|12 to 6}} seconds without taking damage from them.",
+        "icon3": "Sejuani Frost Armor.png",
+        "description3": "{{sbc|Frost Armor:}} '''Sejuani''' gains {{tip|slow-immune|slow immunity}}, {{tip|cripple-immune|cripple immunity}}, {{sti|armor|{{as|10 (+ 75% '''bonus''' armor) '''bonus''' armor}}}}, and {{sti|mr|{{as|10 (+ 75% '''bonus''' magic resistance) '''bonus''' magic resistance}}}}.",
+        "targeting": "Passive",
+        "affects": "Self, Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "proc",
+        "projectile": "|grounded     =",
+        "parry": "Unknown",
+        "spellshield": "unknown",
+        "knockdown": "|notes        = \n* Gaining ''Frost Armor'' does not remove any pre-existing {{tip|slow|slows}} or {{tip|cripple|cripples}}.\n* ''Icebreaker'' will not trigger if the basic attack is {{tip|blocked}}.\n* {{Pending for test}}: ''Icebreaker's '' interactions with {{tip|dodge|dodging}} and {{tip|blind|blinding}} effects via basic attack.\n* {{Pending for test}}: {{tip|Spell shield}} interaction with ''Icebreaker''."
+      }
+    },
+    "Q": {
+      "id": "SejuaniQ",
+      "name": "Arctic Assault",
+      "description": "Sejuani charges forward, knocking enemies into the air. The charge stops after hitting an enemy champion.",
+      "tooltip": "Sejuani charges, dealing {{ totaldamagetooltip }} magic damage to enemies and Knocking them Up for {{ e4 }} seconds. The charge ends after hitting an enemy champion.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "18/16.5/15/13.5/12",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "625",
+        "1000",
+        "0.5",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Sejuani",
+        "skill": "Q",
+        "icon": "Arctic Assault.png",
+        "blurb": "{{sbc|Active:}} {{ci|Sejuani}} {{tip|dash|dashes}} to the target location, dealing {{as|magic damage}} and briefly {{tip|airborne|knocking up}} enemies she passes through. She will stop upon hitting an enemy {{tip|champion}}.",
+        "description": "{{sbc|Active:}} '''{{ui|Bristle|nolink=true}}''' {{tip|dash|dashes}} to the target location until he collides with an enemy {{tip|champion}}, dealing {{as|magic damage}} to enemies he passes through and {{tip|airborne|knocking them up}} for {{fd|0.5}} seconds.",
+        "description3": "''Arctic Assault can be cast during her other abilities without cancelling them and vice versa. Arctic Assault will cast at max range if cast beyond that.''",
+        "leveling": "{{st|Magic Damage|{{ap|90 to 290}} {{as|(+ 60% AP)}}}}",
+        "cooldown": "{{ap|19 to 13}}",
+        "cost": "{{ap|70 to 90}}",
+        "costtype": "Mana",
+        "cast time": "none",
+        "target range": "650",
+        "speed": "1000",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "|grounded     = True",
+        "knockdown": "True",
+        "notes": "* Champions will slightly be {{tip|airborne|knocked back}}, while [[minion]]s and [[monster]]s will instead be slightly {{tip|airborne|pulled}} for a fixed distance.\n* ''Arctic Assault'' cannot {{tip|airborne|knock}} enemies over terrain.\n* Casting {{si|Flash}} during ''Arctic Assault'' will end the dash and affect enemies at the new location.\n* Upon colliding with an enemy {{Tip|champion}}, Sejuani will {{Tip|basic attack|attack}} them.",
+        "flavorsound": "{{sm2|Sejuani_Original_Q_0.ogg}} ''\"Stampede!\"''"
+      }
+    },
+    "W": {
+      "id": "SejuaniW",
+      "name": "Winter's Wrath",
+      "description": "Sejuani swings her mace twice, dealing damage, slowing enemies and applying Frost stacks.",
+      "tooltip": "Sejuani swings her flail, dealing {{ firsthitdamagetooltip }} physical damage and Knocking Back minions and jungle monsters. She then lashes out again, dealing {{ secondhitdamagetooltip }} physical damage and briefly Slowing targets.\n\nBoth swings apply stacks of Permafrost.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9/8/7/6/5",
+      "cost": "60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0.75",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "First Hit Damage",
+          "Second Hit Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamageone }} -> {{ basedamageoneNL }}",
+          "{{ basedamagetwo }} -> {{ basedamagetwoNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Sejuani",
+        "skill": "W",
+        "icon": "Winter's Wrath.png",
+        "blurb": "{{sbc|Active:}} {{ci|Sejuani}} swings her flail in a cone in the target direction that deals {{as|physical damage}} to enemies hit, {{tip|airborne|knocking back}} {{tip|minions}} and {{tip|monsters}}.",
+        "blurb2": "She then lashes out the flail in a line in the same direction, dealing {{as|physical damage}} and briefly {{tip|slow|slowing}} enemies hit.",
+        "blurb3": "'''Sejuani''' can move while casting ''Winter’s Wrath''.",
+        "description": "{{sbc|Active:}} After {{fd|0.25}} seconds into the cast time, '''Sejuani''' swings her flail in a cone in the target direction that deals {{as|physical damage}} to enemies hit and {{tip|airborne|knocks back}} {{tip|minions}} and {{tip|monsters}} hit.",
+        "leveling": "{{st|Physical Damage|{{ap|5 to 45}} {{as|(+ 20% AP)}} {{as|(+ 4% of her '''maximum''' health)}}}}",
+        "description2": "After the cast time, '''Sejuani''' lashes out with her flail in a line in the same direction, dealing {{as|physical damage}} to enemies hit and {{tip|slow|slowing}} them by 75% for {{fd|0.25}} seconds.",
+        "leveling2": "{{st|Physical Damage|{{ap|5 to 85}} {{as|(+ 60% AP)}} {{as|(+ 8% of her '''maximum''' health)}}|Total Physical Damage|{{ap|5+5 to 45+85}} {{as|(+ 80% AP)}} {{as|(+ {{ap|8+4}}% of her '''maximum''' health)}}}}",
+        "description3": "'''''Sejuani''' can move during Winter's Wrath's cast time.''",
+        "cost": "65",
+        "costtype": "Mana",
+        "cast time": "1",
+        "cooldown": "{{ap|9 to 5}}",
+        "target range": "600",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "Special",
+        "spelleffects": "spellaoe",
+        "projectile": "False",
+        "grounded": "|knockdown    =",
+        "notes": "* {{tip|Spell shield|Spell shields}} will block only a single instance of damage - either the swing or the lash.\n{{Effect at cast time end}}\n** Both swings will strike in the cast direction, but the second swing will do so from '''Sejuani's''' location at the end of the cast time."
+      }
+    },
+    "E": {
+      "id": "SejuaniE",
+      "name": "Permafrost",
+      "description": "Sejuani freezes and stuns an enemy champion that has maximum Frost stacks.",
+      "tooltip": "Passive: Nearby melee allied champions' Attacks apply a stack to champions and jungle monsters.\n\nActive: Sejuani deals {{ totaldamage }} magic damage to target enemy with 4 stacks and Stuns them for {{ e1 }} second. {{ spellmodifierdescriptionappend }}",
+      "cooldown": "1.5",
+      "cost": "20",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "560",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "1",
+        "0",
+        "0",
+        "4",
+        "5",
+        "1100",
+        "0",
+        "0",
+        "250",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Sejuani",
+        "skill": "E",
+        "icon": "Sejuani Frost Stack.png",
+        "blurbicon": "Sejuani Permafrost.png",
+        "blurb": "{{sbc|Passive:}} {{ai|Winter's Wrath|Sejuani}} and both {{cis|Sejuani}} and nearby allied {{tip|melee}} champions' attacks apply stacks of ''Frost'' against {{tip|champions}}, medium / large {{tip|monsters}} and large {{tip|minions}}, which lasts a few seconds and stacks up to a cap. '''Sejuani''' can cast ''Permafrost'' against an enemy with max stacks.",
+        "blurb2": "{{sbc|Active:}} '''Sejuani''' hurls a trap at the target enemy that consumes their ''Frost'' stacks and {{tip|knockdown|knocks them down}}, dealing {{as|magic damage}} and briefly {{tip|stun|stunning}} them.",
+        "blurb3": "Once an enemy's ''Frost'' stacks are consumed, they cannot gain any more for a period.",
+        "description": "{{sbc|Passive:}} {{ai|Winter's Wrath|Sejuani}} and both '''Sejuani's''' and nearby allied {{tip|melee}} champions' attacks {{tip|on-hit}} apply [[stack]]s of ''Frost'' to enemy {{tip|champions}}, medium or large {{tip|monsters}}, and large {{tip|minions}} for 5 seconds, refreshing on subsequent applications and stacking up to 4 times, though not applying if the target is ''{{ai|Fury of the North|Sejuani|Frozen}}''. Enemies hit by ''Permafrost'' or ''{{ais|Glacial Prison|Sejuani}}'' bola have all of their ''Frost'' stacks consumed. Enemy champions cannot be affected by ''Frost'' for 8 seconds after having it consumed. <br/><br/>'''Sejuani''' can cast ''Permafrost'' against an enemy with 4 stacks.",
+        "icon2": "Permafrost.png",
+        "description2": "{{sbc|Active:}} '''Sejuani''' hurls a trap at the {{tip|sight|visible}} enemy with 4 stacks of ''Frost'' closest to the cursor, which deals {{as|magic damage}}, {{tt|displaces|Only move block, does not stun the target's actions (disables attacking and movement only)}} them slightly, and {{tip|stun|stuns}} them for 1 second.",
+        "leveling2": "{{st|Magic Damage|{{ap|55 to 255}} {{as|(+ 60% AP)}}}}",
+        "description3": "''Permafrost {{tip|basic attack reset|resets}} '''Sejuani's''' basic attack timer.''",
+        "cost": "20",
+        "costtype": "Mana",
+        "cast time": "{{fd|0.25}}",
+        "cooldown": "{{fd|1.5}}",
+        "target range": "600",
+        "effect radius": "{{tt|1100|Frost stack aura}}",
+        "targeting": "Unit",
+        "affects": "Enemies, Allies, Self",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Single target",
+        "projectile": "True",
+        "callforhelp": "True",
+        "parry": "unknown",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Permafrost's'' targeting prioritizes champions within 50 of cursor, then non-champions within 50 of cursor, then champions within 350 of cursor, then closest unit to cursor within 2500 (this only applies if there is no target directly under the cursor).\n* ''Frost'' stacks will not be applied if the basic attack is {{tip|blocked}}.\n* {{Pending for test}}: ''Permafrost's'' stack application interaction with ''parrying'' effects ({{ai|Counter Strike|Jax|dodge}}, {{tip|blind}}).\n* If the target becomes {{tip|untargetable}}, {{tip|death|dies}}, or is too far away or no longer in {{tip|sight}} during the cast time, this ability will cancel but still go on {{sti|cooldown}} and pay its cost.{{bug}}"
+      }
+    },
+    "R": {
+      "id": "SejuaniR",
+      "name": "Glacial Prison",
+      "description": "Sejuani throws her bola that freezes and stuns the first champion hit and creates an ice storm that slows other enemies.",
+      "tooltip": "Sejuani throws her True Ice bola, Stunning and revealing the first enemy champion hit for {{ e2 }} second and dealing {{ minordamagetooltip }} magic damage.\n\nIf the bola travels at least 25% of its range, it Stuns and reveals for {{ e6 }} seconds instead. It then also creates an ice storm that Slows surrounding enemies by {{ e4 }}% for {{ e3 }} seconds. All affected enemies take {{ totaldamagetooltip }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/105/90",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1300",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "125/150/175",
+        "1",
+        "2",
+        "80",
+        "1",
+        "1.5",
+        "200/300/400",
+        "30",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Minimum Damage",
+          "Maximum Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ e7 }} -> {{ e7NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Sejuani",
+        "skill": "R",
+        "icon": "Glacial Prison.png",
+        "blurb": "{{sbc|Active:}} {{ci|Sejuani}} throws an ice bola in the target direction that stops upon hitting an enemy champion, dealing {{as|magic damage}} and briefly {{tip|stun|stunning}} them.",
+        "blurb2": "If the bola travels far enough, it becomes empowered to detonate upon reaching max range or hitting an enemy champion, gaining increased damage and stun duration. It also creates a frost storm that {{tip|slow|slows}} enemies within.",
+        "blurb3": "After a brief moment, the storm shatters to deal {{as|magic damage}} and briefly {{tip|slow}} enemies within.",
+        "description": "{{sbc|Active:}} '''Sejuani''' throws an ice bola in the target direction that stops upon hitting an enemy champion, dealing {{as|magic damage}} and {{tip|stun|stunning}} them for 1 second.",
+        "leveling": "{{st|Magic Damage|{{ap|125 to 175}} {{as|(+ 40% AP)}}}}",
+        "description2": "If the bola travels over 400 units, it becomes empowered to detonate upon reaching maximum range or hitting an enemy champion, dealing increased damage and {{tip|stun|stunning}} for {{fd|1.5}} seconds instead. For the same duration, a frost storm is created around the location of the detonation that {{tip|slow|slows}} enemies within by 30% and grants {{tip|sight}} of the area in a smaller radius.",
+        "leveling2": "{{st|Increased Damage|{{ap|200 to 400}} {{as|(+ 80% AP)}}}}",
+        "description3": "Afterwards, the storm shatters to deal {{as|magic damage}} to enemies hit and {{tip|slow}} them by 80% for 1 second, as well as {{tip|standard sight|revealing}} them and granting {{tip|sight}} of the area for {{fd|0.5}} seconds.",
+        "leveling3": "{{st|Magic Damage|{{ap|200 to 400}} {{as|(+ 80% AP)}}}}",
+        "description4": "The enemy hit by the bola is not affected by the storm's effects.",
+        "cooldown": "{{ap|130 to 90}}",
+        "cast time": "{{fd|0.25}}",
+        "target range": "1300",
+        "width": "{{tip|er|icononly = true}} 240",
+        "cost": "100",
+        "costtype": "Mana",
+        "speed": "1600",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "Special",
+        "spelleffects": "Special",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "* Applies {{tip|spell damage}} to the primary target and {{tip|area damage}} to secondary targets in the ice storm.\n* {{tip|Spell shield|Spell shields}} will block only a single instance of damage.\n{{Effect at cast time end}}\n* Both areas of effect will be centered on the first champion struck, not at the location the missile collided with them.",
+        "tips": "* {{ai|Q|Sejuani}} can be used after casting ''Glacial Prison'' to hide the cast animation.",
+        "flavorsound": "{{sm2|Sejuani_Original_R_0.ogg}} ''\"A gift from the Freljord!\"''"
+      }
+    }
+  }
+}

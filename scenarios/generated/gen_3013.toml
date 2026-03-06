@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0084_4v4_s1"
+seed = 12007
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["MasterYi", "Braum", "warden", "Vi"]
+enemy_hero_templates = ["Leblanc", "Kalista", "warrior", "Kindred"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

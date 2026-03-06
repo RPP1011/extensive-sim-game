@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_cleric_mage_bard_s2"
+seed = 21262
+hero_count = 3
+enemy_count = 4
+difficulty = 2
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["cleric", "mage", "bard"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

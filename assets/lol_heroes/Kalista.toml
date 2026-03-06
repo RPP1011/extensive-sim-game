@@ -1,0 +1,117 @@
+[hero]
+name = "Kalista"
+
+[stats]
+hp = 80
+move_speed = 3.3
+armor = 22.0
+magic_resist = 28.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 5.5
+cooldown = 700
+
+# --- Q: Pierce ---
+[[abilities]]
+name = "Pierce"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 8000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 10
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 5
+damage_type = "physical"
+
+# --- W: Sentinel ---
+[[abilities]]
+name = "Sentinel"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 30000
+cast_time_ms = 500
+ai_hint = "damage"
+max_charges = 2
+charge_recharge_ms = 90000
+
+[abilities.delivery]
+method = "tether"
+max_range = 6.0
+
+[[abilities.effects]]
+type = "damage"
+amount = 25
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+# --- E: Rend ---
+[[abilities]]
+name = "Rend"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 10000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 6
+
+[[abilities.effects]]
+type = "damage"
+amount = 2
+damage_type = "physical"
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- R: Fate's Call ---
+[[abilities]]
+name = "Fate's Call"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 28300
+ai_hint = "utility"
+resource_cost = 20
+
+[abilities.delivery]
+method = "tether"
+max_range = 6.0
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+is_blink = true
+
+[[abilities.effects]]
+type = "stealth"
+duration_ms = 3000
+break_on_damage = true
+break_on_ability = true
+
+# --- Passive: Martial Poise ---
+[[passives]]
+name = "Martial Poise"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_auto_attack"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+

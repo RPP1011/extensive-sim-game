@@ -1,0 +1,13 @@
+[scenario]
+name = "size_3v5_2691_s1"
+seed = 11900
+hero_count = 3
+enemy_count = 5
+difficulty = 3
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["cleric", "engineer", "warden"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

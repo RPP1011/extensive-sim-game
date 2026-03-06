@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_paladin_bard_knight"
+seed = 1112
+hero_count = 3
+enemy_count = 4
+difficulty = 2
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["paladin", "bard", "knight"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

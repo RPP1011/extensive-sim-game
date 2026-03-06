@@ -1,0 +1,12 @@
+[scenario]
+name        = "Monk+Ranger+Mage+Cleric"
+seed        = 1290839
+hero_count  = 4
+enemy_count = 16
+difficulty  = 3
+max_ticks   = 5000
+room_type   = "Climax"
+hero_templates = ["Monk", "Ranger", "Mage", "Cleric"]
+
+[assert]
+outcome = "Either"

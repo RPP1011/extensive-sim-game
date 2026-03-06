@@ -1,0 +1,260 @@
+{
+  "id": "Janna",
+  "name": "Janna",
+  "title": "the Storm's Fury",
+  "resource_type": "Mana",
+  "tags": [
+    "Support",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Tailwind",
+      "description": "Janna's allies gain Move Speed moving towards her.\n\nJanna deals a portion of bonus Move Speed as bonus magic damage on hit and with Zephyr.",
+      "wiki_detail": {
+        "champion": "Janna",
+        "skill": "I",
+        "icon": "Tailwind.png",
+        "blurbicon": "Tailwind.png",
+        "blurb": "{{sbc|Innate:}} Nearby allied champions gain {{sti|{{as|'''bonus''' movement speed}}}} while moving toward {{ci|Janna}}.",
+        "blurb2": "Her basic attacks and ''{{ai|Zephyr|Janna}}'' deal {{as|'''bonus''' magic damage}} equal to a portion of her {{as|'''bonus''' movement speed}}.",
+        "description": "{{sbc|Innate:}} '''Janna''' grants {{sti|ms|{{as|6% '''bonus''' movement speed}}}} to nearby allied {{tip|champions}} that are facing in the direction of her location.",
+        "description2": "'''Janna's''' basic attacks {{tip|on-hit}} and {{ai|Zephyr|Janna}} deal {{as|'''bonus''' magic damage}} equal to {{as|30% of her '''bonus''' movement speed}}.",
+        "effect radius": "{{tip|cr|icononly = true}} 1200",
+        "targeting": "Passive",
+        "affects": "Self",
+        "spelleffects": "proc",
+        "notes": "* No additional notes."
+      }
+    },
+    "Q": {
+      "id": "HowlingGale",
+      "name": "Howling Gale",
+      "description": "By creating a localized change in pressure and temperature, Janna is able to create a small storm that grows in size with time. She can activate the spell again to release the storm. On release this storm will fly towards the direction it was cast in, dealing damage and knocking away any enemies in its path.",
+      "tooltip": "Janna summons a tornado that grows stronger over {{ maxduration }} seconds then blows along its path. It deals {{ minimumdamage }} - {{ maxdamage }} magic damage and Knocks Up for {{ baseknockup }} - {{ maxknockup }} seconds. The distance, damage, and Knock Up duration increase based on how much the tornado grew. Janna can Recast to send the tornado early.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14",
+      "cost": "90/95/100/105/110",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1075",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Damage Per Second Charged",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ mindamage }} -> {{ mindamageNL }}",
+          "{{ bonusdamage }} -> {{ bonusdamageNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Janna",
+        "skill": "Q",
+        "icon": "Howling Gale.png",
+        "blurbicon": "Howling Gale.png",
+        "blurb": "{{sbc|Active:}} {{ci|Janna}} summons a whirlwind at her current location that matures over a short time, increasing its range, speed, damage, and knock up duration.",
+        "blurb2": "''Howling Gale'' can be recast at any time within the duration, and does so automatically after the duration.",
+        "blurb3": "{{sbc|Recast:}} The whirlwind flies in the target direction over a short time, dealing {{as|magic damage}} and {{tip|airborne|knocking up}} enemies hit. The effects are increased based on maturity.",
+        "description": "{{sbc|Active:}} '''Janna''' summons a whirlwind at her current location that charges up over 3 seconds, increasing its range, speed, damage, and {{tip|airborne|knock up}} duration every second over the duration. ''Howling Gale's'' direction is determined by this cast.",
+        "description2": "''Howling Gale'' can be recast at any time within the duration, and does so automatically after the duration.",
+        "leveling": "{{st|Minimum Magic Damage|{{ap|55 to 195}} {{as|(+ 50% AP)}}}}\n{{st|Bonus Damage Per Second|{{ap|10 to 30}} {{as|(+ 10% AP)}}|Maximum Magic Damage|{{ap|55+10*3 to 195+30*3}} {{as|(+ 80% AP)}}}}",
+        "description3": "{{sbc|Recast:}} '''Janna''' launches the whirlwind in the direction she targeted over {{fd|1.25}} seconds, dealing {{as|magic damage}} to enemies hit and {{tip|airborne|knocking them up}} for {{pp|type=seconds charged|0.5 to 1.25|0 to 1.5 by 0.1}} seconds.",
+        "cooldown": "14",
+        "cdstart": "on-cast",
+        "cost": "{{ap|90 to 110}}",
+        "costtype": "mana",
+        "cast time": "none",
+        "range": "{{pp|type=seconds charged|1100 to 1000*1.76|0 to 3 by 1|changedisplay=true|formula=Increases by 22 every 0.1 seconds.}}",
+        "width": "{{tip|er|icononly = true}} 240",
+        "speed": "{{pp|type=seconds charged|(880 to 1408)|0 to 3 by 1|changedisplay=true|formula  = Always travels for 1.25 seconds.}}",
+        "targeting": "[[Direction-targeted|Direction]] / [[Auto-targeted|Auto]]",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "projectile": "true",
+        "spelleffects": "area of effect",
+        "onhiteffects": "|spellshield  = True",
+        "notes": "* The initial cast and the manual recast count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n* The storm does not interact with enemy units that stand on top of it while it is charging."
+      }
+    },
+    "W": {
+      "id": "SowTheWind",
+      "name": "Zephyr",
+      "description": "Janna summons an air elemental that passively increases her Move Speed and enables her to pass through units. She may also activate this ability to deal damage and slow an enemy's Move Speed.",
+      "tooltip": "Passive: Janna gains {{ totalms }} Move Speed and is Ghosted.\n\nActive: Janna's elemental strikes an enemy, Slowing them by {{ totalslow }} for {{ slowduration }} seconds, and dealing {{ totaldamage }} + {{ spell.tailwindself:bonusdamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8/7.5/7/6.5/6",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "4294967295",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow",
+          "Passive Move Speed",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ slowpercent }}% -> {{ slowpercentNL }}%",
+          "{{ mspercent*100.000000 }}% -> {{ mspercentnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Janna",
+        "skill": "W",
+        "icon": "false",
+        "blurbicon": "Zephyr.png",
+        "blurb": "{{sbc|Passive:}} {{ci|Janna}} gains {{sti|{{as|'''bonus''' movement speed.}}}} and ignores unit collision.",
+        "blurb2": "{{sbc|Active:}} '''Janna''' sends an air elemental to the target enemy, dealing {{as|magic damage}} and {{tip|slow|slowing}} them.",
+        "description": "{{sbc|Passive:}} '''Janna''' is {{tip|ghosting|ghosted}} and gains {{sti|ms|{{as|'''bonus''' movement speed}}}}.",
+        "leveling": "{{st|Bonus Movement Speed|{{ap|6 to 10}}% {{as|(+ 2% per 100 AP)}}}}",
+        "icon2": "Zephyr.png",
+        "description2": "{{sbc|Active:}} '''Janna''' sends an air elemental at the target enemy that deals {{as|magic damage}} and {{tip|slow|slows}} them for 2 seconds, capped at 99%.",
+        "leveling2": "{{st|Magic Damage|{{ap|55 to 175}} {{as|(+ 50% AP)}} {{as|(+ 30% '''bonus''' movement speed)}}}}\n{{st|Slow|{{ap|20 to 36}}% {{as|(+ 6% per 100 AP)}}}}",
+        "cooldown": "{{ap|8 to 6}}",
+        "cost": "{{ap|50 to 70}}",
+        "cast time": "{{fd|0.245}}",
+        "costtype": "mana",
+        "speed": "1600",
+        "target range": "{{tip|er|icononly = true}} 550",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "projectile": "true",
+        "spelleffects": "spell",
+        "onhiteffects": "|spellshield  = True",
+        "callforhelp": "True",
+        "notes": "* The maximum slow (99%) is reached with {{ap|(99-20)*100/6 to (99-36)*100/6|round=2}} ability power.\n{{Unit-targeted cancel conditions}}"
+      }
+    },
+    "E": {
+      "id": "EyeOfTheStorm",
+      "name": "Eye Of The Storm",
+      "description": "Janna conjures a defensive gale that shields an ally champion or turret from incoming damage and increases their Attack Damage.",
+      "tooltip": "Janna grants an ally champion or turret {{ totalshield }} Shield for {{ shieldduration }} seconds. While shielded, they gain {{ totalad }} Attack Damage.\n\nJanna refunds {{ ecdrefundforcc*100 }}% of the cooldown whenever she impairs an enemy champion's movement with an Ability.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16/15/14/13/12",
+      "cost": "70/75/80/85/90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Shield Health",
+          "Attack Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ baseshield }} -> {{ baseshieldNL }}",
+          "{{ bonusad }} -> {{ bonusadNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "R": {
+      "id": "ReapTheWhirlwind",
+      "name": "Monsoon",
+      "description": "Janna surrounds herself in a magical storm, throwing enemies back. After the storm has settled, soothing winds heal nearby allies while the ability is active.",
+      "tooltip": "Janna summons a magical monsoon, Knocking Back nearby enemies then healing nearby allies for {{ totalheal }} Health over {{ e3 }} seconds. Moving or using an Ability ends the monsoon early.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "130/115/100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "725",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "300/450/600",
+        "3",
+        "700",
+        "875",
+        "875",
+        "1200",
+        "10",
+        "0.5",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Heal Per Second",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ healbasepersecond }} -> {{ healbasepersecondNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Janna",
+        "skill": "R",
+        "icon": "Monsoon.png",
+        "blurbicon": "Monsoon.png",
+        "blurb": "{{sbc|Active:}} {{ci|Janna}} unleashes a blast that {{tip|airborne|knocks back}} nearby enemies, though not through terrain.",
+        "blurb2": "She also {{tip|channels}} the winds for a short time, continually {{tip|heal|healing}} nearby allies.",
+        "description": "{{sbc|Active:}} '''Janna''' unleashes a blast that {{tip|airborne|knocks back}} all nearby enemies to up to 875 units over {{fd|0.5}} seconds based on their proximity, though not through terrain.",
+        "description2": "'''Janna''' also {{tip|channel|channels}} for up to 3 seconds, {{tip|heal|healing}} herself and nearby allies every {{fd|0.25}} seconds.",
+        "leveling2": "{{st|Heal Per Tick|{{ap|300/12 to 600/12}} {{as|(+ {{ap|150/12}}% AP)}}|Total Heal|{{ap|300 to 600}} {{as|(+ 150% AP)}}}}",
+        "cooldown": "{{ap|130 to 100}}",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "cost": "100",
+        "costtype": "mana",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|700|Both knockback and healing zone radius}}",
+        "targeting": "Auto",
+        "affects": "Enemies, Allies",
+        "spellshield": "true",
+        "silence": "true",
+        "notes": "{{clr}}\n* The following table refers for interactions while '''Janna''' is {{tip|channel|channeling}}:\n{{ct|channel|attack=interrupts|cast=interrupts|move=interrupts|items=interrupts,true,,false|spells=true, interrupts, interrupts, interrupts, interrupts}}"
+      }
+    }
+  }
+}

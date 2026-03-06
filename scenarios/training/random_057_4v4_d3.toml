@@ -1,0 +1,13 @@
+[scenario]
+name = "random_057_4v4_d3"
+seed = 8057
+hero_count = 4
+enemy_count = 4
+difficulty = 3
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["monk", "rogue", "pyromancer", "necromancer"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Either"

@@ -1,0 +1,104 @@
+[hero]
+name = "Renekton"
+
+[stats]
+hp = 138
+move_speed = 3.4
+armor = 40.0
+magic_resist = 32.0
+
+[attack]
+damage = 18
+range = 1.5
+cooldown = 800
+
+# --- Q: Cull the Meek ---
+[[abilities]]
+name = "Cull the Meek"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 7000
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 4.0
+
+[[abilities.effects]]
+type = "heal"
+amount = 15
+
+# --- W: Ruthless Predator ---
+[[abilities]]
+name = "Ruthless Predator"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 16000
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 1
+damage_type = "physical"
+
+[[abilities.effects]]
+type = "shield"
+amount = 1
+duration_ms = 750
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 750
+
+# --- E: Slice and Dice ---
+[[abilities]]
+name = "Slice and Dice"
+targeting = "target_enemy"
+range = 4.5
+cooldown_ms = 16000
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "dash"
+to_target = false
+
+# --- R: Dominus ---
+[[abilities]]
+name = "Dominus"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 23900
+cast_time_ms = 250
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 0
+damage_type = "magic"
+duration_ms = 15000
+tick_interval_ms = 1000
+amount_per_tick = 1
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.75
+
+# --- Passive: Reign of Anger ---
+[[passives]]
+name = "Reign of Anger"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 5000
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+

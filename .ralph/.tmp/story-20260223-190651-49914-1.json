@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "total": 12,
+  "remaining": 11,
+  "quality_gates": [
+    "cargo test"
+  ],
+  "id": "US-002",
+  "title": "Enforce start-menu action hierarchy and continue semantics"
+}

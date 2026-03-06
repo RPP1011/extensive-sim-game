@@ -1,0 +1,293 @@
+{
+  "id": "Illaoi",
+  "name": "Illaoi",
+  "title": "the Kraken Priestess",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Prophet of an Elder God",
+      "description": "Illaoi and the Vessels she creates spawn Tentacles on nearby impassible terrain. Tentacles swing at spirits, Vessels, and victims of Illaoi's Harsh lesson. Tentacles deal physical damage to enemies hit, and will heal Illaoi if they damage a champion.",
+      "wiki_detail": {
+        "champion": "Illaoi",
+        "skill": "I",
+        "icon": "Prophet of an Elder God.png",
+        "blurb": "{{sbc|Innate:}} Periodically, a {{as|Tentacle|buzzword2}} will spawn next to nearby [[terrain]]. It can be killed by enemy basic attacks and will become dormant if {{ci|Illaoi}} leaves it alone.",
+        "blurb2": "A {{as|Tentacle|buzzword2}} only attacks through '''Illaoi's''' abilities and does so by slamming the ground once, dealing {{as|physical damage}} to enemies hit. Whenever it hits at least one enemy {{tip|champion}}, '''Illaoi''' is {{tip|heal|healed}} for a portion of {{as|her '''missing''' health}}.",
+        "description": "{{sbc|Innate:}} Periodically, '''Illaoi''' spawns a {{as|Tentacle|buzzword2}} on the nearest terrain perpendicular to her location, if no other Tentacles are already nearby it. Tentacles fully spawn after a 2 second delay and are {{tip|untargetable}} in the meantime.",
+        "description2": "{{as|Tentacles|buzzword2}} are commanded to attack by '''Illaoi's''' [[champion ability|abilities]], dealing {{as|{{pp|9 to 162}} {{as|(+ 100% AD)}} {{as|(+ 40% AP)}} physical damage|physical damage}} to all enemies struck, increased by {{pp|0;10 to 30|0 to 5 for 6|key=%|formula=100% + 10% at rank 1, then 5% per rank|type = [[File:Tentacle Smash.png|20px|link=]] Tentacle Smash's rank}}.<br>Enemies struck by multiple slams within {{fd|0.5}} seconds of another, take 50% damage for the second and 25% damage for all other additional slams.",
+        "description3": "Each {{as|Tentacle|buzzword2}} also {{tip|heal|heals}} '''Illaoi''' for {{as|5% of her '''missing''' health}} if it hits at least one enemy {{tip|champion}}.",
+        "description4": "''See [[Illaoi/LoL#Pets|Pets]] for more details about {{as|Tentacles|buzzword2}}.''",
+        "static": "{{pp|20 to 7.25}}",
+        "effect radius": "{{tt|1000|Range around a tentacle within which Illaoi cannot spawn a tentacle in.}}",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "False",
+        "grounded": "|knockdown    =",
+        "notes": "* '''Illaoi''' cannot spawn '''''{{as|Tentacles|buzzword2}}''''' on ally invulnerable {{tip|turrets|structures}} {{bug|2|Added undocumented in 9.13}}, in addition to neither her nor the '''''{{as|Vessel|buzzword3}}''''' being able to spawn them in [[Nexus Obelisk|Nexus Obelisk's]] attack range.\n** Even after ''Nexus turrets'' have lost their invulnerability, '''Illaoi''' still has issues spawning '''''{{as|Tentacles|buzzword2}}''''' on them (probably because of the nearby invulnerable ''Nexus''). {{bug|1}}\n* '''''{{as|Tentacles|buzzword2}}''''' will prioritize spawning on map terrain before player-made ones.\n* If multiple {{as|Tentacles|buzzword2}} hit simultaneously, the received healing is calculated iteratively based on the new amount of '''missing''' health, as per this formula: {{as|('''maximum''' health{{minus}}'''current''' health)}}{{times}}(1{{minus}}0.955<sup>n</sup>), with 'n' the number of {{as|Tentacle|buzzword2}} hits."
+      }
+    },
+    "Q": {
+      "id": "IllaoiQ",
+      "name": "Tentacle Smash",
+      "description": "Increases the damage dealt by Tentacles. When activated, Illaoi smashes down a Tentacle that deals physical damage.",
+      "tooltip": "Passive: Slam damage is increased by {{ spell.illaoiq:tentacledamageamp*100 }}% (currently {{ spell.illaoiq:tentacledamagetotal }} physical damage).\n\nActive: Illaoi swings her idol, causing a Tentacle to Slam forward.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9/8/7/6",
+      "cost": "40/45/50/55/60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "850",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Slam Bonus",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ tentacledamageamp*100.000000 }}% -> {{ tentacledamageampnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Illaoi",
+        "skill": "Q",
+        "blurb": "{{sbc|Passive:}} {{ai|Prophet of an Elder God|Illaoi|{{as|Tentacle|buzzword2}}}} damage is increased.",
+        "blurb2": "{{sbc|Active:}} {{ci|Illaoi}} slams down a {{as|Tentacle|buzzword2}} in the target direction, dealing {{as|physical damage}}.",
+        "icon": "false",
+        "description": "{{sbc|Passive:}} {{as|Tentacle|buzzword2}} damage is increased.",
+        "leveling": "{{st|Damage Increase|{{ap|10|15|20|25|30}}%}}",
+        "icon2": "Tentacle Smash.png",
+        "description2": "{{sbc|Active:}} '''Illaoi''' slams down a {{as|Tentacle|buzzword2}} in the target direction.",
+        "cost": "{{ap|40|45|50|55|60}}",
+        "cast time": "{{fd|0.75}}",
+        "cooldown": "{{ap|10|9|8|7|6}}",
+        "costtype": "Mana",
+        "range": "{{tip|er|icononly = true}} {{tt|{{fd|-52.75}}|Backwards edge range}} - {{tt|{{fd|802.75|Forwards edge range}}}}",
+        "width": "{{tip|er|icononly = true}} 200",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "False",
+        "grounded": "|knockdown    =",
+        "notes": "{{Effect at cast time end}}\n** ''Tentacle Smash's'' hitbox is fixed in front of '''Illaoi''', while the indicator on the ground is fixed to the targeted direction.\n* {{pending for test}} ''Tentacle Smash'' visual indicator of the hitbox is visible to enemies even when cast in the fog of war. <!--[[V12.6]] Is it just the visual indicator? or also Illaoi herself? Globally? Or does she need to be close to an enemy champion? Does she need to point the ability towards the enemy champion? Or also if she points the other way?-->\n{{ct|cast|cast={{ai|E|Illaoi}} and {{ai|R|Illaoi}} are buffered. {{ai|W|Illaoi}} is usable.|spells=true,false,false,false,false}}\n\n\nPotential bug: If you hit someone with illaoi Q, while having the conquerer rune, the damage of the slam is always amplified by one bonus conquerer stack.",
+        "_comments": [
+          "[[V12.6]] Is it just the visual indicator? or also Illaoi herself? Globally? Or does she need to be close to an enemy champion? Does she need to point the ability towards the enemy champion? Or also if she points the other way?"
+        ]
+      }
+    },
+    "W": {
+      "id": "IllaoiW",
+      "name": "Harsh Lesson",
+      "description": "Illaoi leaps to her target, dealing physical damage and causing nearby Tentacles to also swing at the target.",
+      "tooltip": "Illaoi's next Attack causes her to leap at the target, dealing an additional {{ healthpercenttotal }} max Health physical damage. When she strikes, nearby Tentacles will Slam at the target.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "4",
+      "cost": "30",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "2",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Maximum Health Damage",
+          "Minimum Damage"
+        ],
+        "effect": [
+          "{{ healthpercentdamage }}% -> {{ healthpercentdamageNL }}%",
+          "{{ wmindamage }} -> {{ wmindamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Illaoi",
+        "skill": "W",
+        "icon": "Harsh Lesson.png",
+        "blurb": "{{sbc|Active:}} {{cis|Illaoi}} next basic attack gains {{sti|'''bonus''' attack range}} and causes her to {{tip|dash|leap}} to her target, dealing {{as|'''bonus''' physical damage}} and commanding nearby {{as|Tentacles|buzzword2}} to attack the target.",
+        "description": "{{sbc|Active:}} '''Illaoi's''' next [[basic attack]] within 6 seconds gains {{sti|range|225 '''bonus''' range}} and causes her to {{tip|dash|leap}} to the target's location if they're beyond her normal basic attack range.",
+        "description2": "The attack deals {{as|'''bonus''' physical damage}}, with a minimum threshold, and capped at 300 against non-champions, and commands all {{as|Tentacles|buzzword2}} in range to attack the target. The minimum '''bonus''' damage can also be applied against {{tip|turrets}}.",
+        "leveling2": "{{st|Bonus Physical Damage|{{as|{{ap|3 to 5}}% {{as|(+ 4% per 100 AD)}} of target's '''maximum''' health|health}}}}\n{{st|Minimum Physical Damage|{{ap|20 to 60}}}}",
+        "description3": "''Harsh Lesson'' {{tip|basic attack reset|resets}} '''Illaoi's''' basic attack timer.",
+        "description4": "''Harsh Lesson can be activated during '''Illaoi's''' other abilities, other than while {{ai|E|Illaoi|pulling}} a {{as|Spirit|buzzword}}.''",
+        "cooldown": "4",
+        "cdstart": "post-effect",
+        "cost": "30",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "cast time": "none",
+        "affects": "Self",
+        "spelleffects": "spell",
+        "damagetype": "Physical",
+        "spellshield": "false",
+        "grounded": "Special",
+        "knockdown": "Special",
+        "parry": "Special",
+        "notes": "* The '''bonus''' damage doesn't apply {{sti|life steal|link=true}} but it does apply {{stil|spell vamp}} and [[Omnivamp]].\n* ''Harsh Lesson'' is made of two different abilities which are decided by '''Illaoi's''' range to the target, being either {{tip|melee}} or within {{tip|dash}} range.\n* The close range ability:\n** Has an {{tip|uncancellable windup}}.\n** Can be used while {{tip|ground|grounded}} or {{tip|root|rooted}}. If '''Illaoi''' attack commands and then casts ''Harsh Lesson'' while ''rooted'', she is able to use the close range version within its dash range. {{bug|1|There have been tries to fix this bug in 9.9, 9.18 and 9.19, and yet it's still partially here.}}\n** Starting the attack before triggering {{iis|Guardian Angel}} passive and hitting while she's in it will not cause the '''''{{as|Tentacles|buzzword2}}''''' to slam. {{bug|1}}\n** The attack will still hit if the target becomes {{tip|untargetable}}, but will not if it {{tip|death|dies}}. {{bug|2}}\n** '''''{{as|Tentacles|buzzword2}}''''' will slam if the attack is {{tip|block|blocked}}, but not if it's {{tip|dodge|dodged}} or if it {{tip|blind|misses}}. {{bug|2}}\n** Does trigger {{ri|Hail of Blades}}.\n** Triggers {{ii|Kircheis Shard|Energized}} effects [[on-hit]].\n** If the empowered attack duration ends during the attack animation, the attack won't be empowered. {{bug|2}}\n** After hitting the target, '''Illaoi''' can quickly cast other abilities.\n** Abilities cannot be buffered during the windup.\n** {{pending for test}} The attack goes through {{tip|spell shield|spell shields}}.\n* The dash range ability:\n** Does not have an uncancellable windup, meaning effects that can interrupt the dash will cancel the attack and put the ability on cooldown.\n** Can be cast but cannot be used while {{tip|ground|grounded}} or {{tip|root|rooted}} because '''Illaoi''' loses the {{sti|'''bonus''' attack range}}.\n** The attack will not hit if the target becomes {{tip|untargetable}}, but does hit if it {{tip|death|dies}}. {{bug|2}}\n** '''''{{as|Tentacles|buzzword2}}''''' will slam if the attack is {{tip|dodge|dodged}}, {{tip|block|blocked}} or if it {{tip|blind|misses}}.\n** Does not trigger {{ri|Hail of Blades}}. {{bug|1}}\n** Triggers {{ii|Kircheis Shard|Energized}} effects during the jump. {{bug|1|Garen Q had a similar issue before 10.3 or so, and he was fixed}}\n** Having enough attack speed will perform an unusual dunk. {{bug|2}}\n** If the empowered attack duration ends during the dash, the buff will linger until the attack has finished.\n** After hitting the target, '''Illaoi''' has a short delay before she can cast other abilities. {{bug|2}}\n** Abilities can be buffered during the windup.\n** The attack goes through {{tip|spell shield|spell shields}}, but also triggers them. {{bug|1}}\n* If the target dies at the instant ''Harsh Lesson'' is about to hit the target, the attack will hit, be consumed, but will not make the '''''{{as|Tentacles|buzzword2}}''''' slam. {{bug|1}}\n* The '''''{{as|Tentacle|buzzword2}}''''' attacking because of ''Harsh Lesson'' is considered to be of the same {{tip|cast instance}}, and thus will not grant additional stacks of {{ri|Conqueror}}, {{ri|Electrocute}}, {{ri|Phase Rush}} and [[Named item effect#|Tribute]]. {{bug|2}}\n* ''Harsh Lesson'' triggers {{ri|Bone Plating}} and one of its plates with the same attack. {{bug|2}}\n** It also triggers {{ri|Arcane Comet}} and reduces its cooldown twice.\n* While the ability is active, '''''{{as|Tentacles|buzzword2}}''''' are commanded to attack [[on-hit]], interacting with {{ii|Guinsoo's Rageblade}} without consuming the empowered attack.\n* Attack moving while charging {{si|Hexflash}} will delay the attack."
+      }
+    },
+    "E": {
+      "id": "IllaoiE",
+      "name": "Test of Spirit",
+      "description": "Illaoi rips the spirit from a foe's body, forcing it to stand before her. Spirits echo a percentage of the damage they take to the original target. If killed, or if the target gets too far from the spirit, the target will become a Vessel and begin spawning Tentacles.",
+      "tooltip": "Illaoi pulls the spirit from an enemy champion for {{ spiritduration }} seconds. The spirit can be damaged like a champion, with {{ echopercent }} of that damage echoing to its owner.\n\nIf the spirit dies or the target leaves its range, the target becomes marked for {{ vesselduration }} seconds and is Slowed by {{ slowamount*100 }}% for {{ slowduration }} seconds. Marked enemies spawn Tentacles if possible.\n\nTentacles will automatically Slam at spirits and marked enemies once every {{ timebetweenvesseltentacleslams }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16/15/14/13/12",
+      "cost": "35/40/45/50/55",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage Echo",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamagetransferpercent*100.000000 }}% -> {{ basedamagetransferpercentnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Illaoi",
+        "skill": "E",
+        "icon": "Test of Spirit.png",
+        "blurb": "{{sbc|Active:}} {{ci|Illaoi}} reaches with a tendril in the target direction that stops upon the first enemy hit. If the target is a {{tip|champion}}, she rips their {{as|Spirit|buzzword}} out from them to stand before her.",
+        "blurb2": "The {{as|Spirit|buzzword}} {{tip|tether|tethers}} to the target for a duration, dealing a portion of any damage it takes. If the {{as|Spirit|buzzword}} is killed or the target leaves its range, the target will be {{tip|slow|slowed}} and marked as a {{as|Vessel|buzzword3}} for a duration or until they {{tip|takedown}} '''Illaoi''', spawning {{as|Tentacles|buzzword2}} while marked.",
+        "blurb3": "{{as|Tentacles|buzzword2}} will autonomously attack the nearest {{as|Spirit|buzzword}} or {{as|Vessel|buzzword3}}.",
+        "description": "{{sbc|Active:}} '''Illaoi''' launches a tendril in the target direction that stops at the first enemy hit, pulling their {{as|Spirit|buzzword}} out in front of '''Illaoi''' over {{fd|0.75}} seconds if they're a {{tip|champion}}. The target is {{tip|tether|tethered}} to the {{as|Spirit|buzzword}} for {{tt|7 seconds|Timer starts when the target gets hit}}, {{tip|true sight|revealing}} them in addition to granting {{tip|sight}} of the area around them while the tether remains.",
+        "description2": "The {{as|Spirit|buzzword}} spawns with the target's {{sti|health|{{as|'''current''' health}}}}, {{sti|{{as|armor}}}} and {{sti|mr|{{as|magic resist}}}}, and redirects a portion of the {{tt|pre-mitigation damage|Damage calculated before modifiers}} received to the tethered champion.",
+        "leveling2": "{{st|Damage Transmission|{{ap|25 to 45}}% {{as|(+ 8% per 100 AD)}}}}",
+        "description3": "When the {{as|Spirit|buzzword}} is killed or the target leaves tether range, the tether is severed, marking the target as a {{as|Vessel|buzzword3}} for 10 seconds and {{tip|slow|slowing}} them by 80% for {{fd|1.5}} seconds once the tether returns back to them. Each {{as|Tentacle|buzzword2}} autonomously attacks the closest {{as|Vessel|buzzword3}} or {{as|Spirit|buzzword}}, prioritizing the latter, once every {{pp|5.5 to 3.5 for 3|1 to 13|formula=5.5-1 every 6 lvls. Cooldown starts upon starting the slam}} seconds.",
+        "icon4": "Vessel.png",
+        "description4": "Enemies made a {{as|Vessel|buzzword3}} also spawn a {{as|Tentacle|buzzword2}} near themselves every {{pp|5 to 3 for 3|1 to 13}} seconds. {{as|Tentacles|buzzword2}} can spawn 250 units closer to each other than when spawned by '''Illaoi'''.",
+        "description5": "'''''Illaoi''' is {{tip|lockout|unable to act}} while firing the projectile and while the target's {{as|Spirit|buzzword}} is being pulled.''<br>\n'''''Illaoi''' cannot cast Test of Spirit again until the {{as|Spirit|buzzword}} dies.''<br>\n''{{as|Vessels|buzzword3}} can dispel the [[debuff]] by scoring a {{tip|takedown}} against '''Illaoi'''.''",
+        "cooldown": "{{ap|16 to 12}}",
+        "cdstart": "on-cast",
+        "cost": "{{ap|35 to 55}}",
+        "costtype": "Mana",
+        "range": "{{tip|cr|icononly = true}} 950 / {{tip|cr|icononly = true}} {{tt|100|Distance in front of Illaoi the Spirit is pulled to}}",
+        "tether radius": "{{tip|er|icononly = true}} {{tt|1500|Actual tether}} / {{tip|cr|icononly=true}} {{tt|1700|Static indicator}}",
+        "cast time": "{{fd|0.25}}",
+        "speed": "1900",
+        "width": "{{tip|er|icononly = true}} 100",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "{{tip|Physical damage|Physical}} / {{tip|Magic damage|Magic}} / {{tip|True damage|True}} (Redirected damage)",
+        "spellshield": "Special",
+        "projectile": "special",
+        "grounded": "|knockdown    =",
+        "notes": "* {{as|Spirits|buzzword}} are classified as {{tip|clone|clones}}:\n** {{as|Spirits|buzzword}} can only be fully targeted by '''Illaoi's''' team and neutral monsters. The {{as|Spirit's|buzzword}} allies cannot manually select it as a valid target for spells and abilities, but they can still do so with automatically targetted effects. {{bug|1}}\n** {{as|Spirits|buzzword}} take 50% damage from [[turret]]s. {{bug|1}}\n** {{as|Spirits|buzzword}} cannot be {{tip|heal|healed}} nor {{tip|shield|shielded}} ({{ri|Summon Aery}} excluded {{bug|1}}).\n** The {{as|Spirit|buzzword}} levels up when the {{as|Vessel|buzzword2}} does, gaining the target's stats per level. If the target has a resource that also increases per level (i.e {{tip|mana}}), the {{as|Spirit's|buzzword}} lifetime will increase instead. {{bug|1}}\n* The {{as|Spirit's|buzzword}} destination is decided based on '''Illaoi's''' position and facing direction when the target is hit.\n* The {{as|Spirit|buzzword}} is {{tip|untargetable}} while it is being pulled, and spawns with the tethered champion's default model and size.\n** The {{as|Spirit's|buzzword}} lifetime is sometimes {{fd|0.25}} seconds longer, while its ''untargetability'' is sometimes shorter, causing {{as|Tentacles|buzzword2}} to hit an inconsistent amount of times.\n* Redirected damage is calculated by taking the pre-mitigation damage against the {{as|Spirit|buzzword}}, applying ''Test of Spirit's'' damage modifier, and then capping it to the {{as|Spirit's|buzzword}} {{as|'''current''' health}}. This damage will then be affected by damage modifiers (resistances and other effects) of the {{as|Vessel|buzzword3}}.\n** This order of operations allows ''Test of Spirit'' to deal more or less percentage of the {{as|Vessel's|buzzword3}} {{as|health}} than would be expected:\n**# Because the {{as|Spirit's|buzzword}} modifiers can be different from the {{as|Vessel's|buzzword3}}, and the damage being pre-mitigated, allowing the {{as|Spirit|buzzword}} to have higher or lower [[health|effective health]], respectively increasing or decreasing the maximum achievable damage from killing it.\n**# Because the cap is supposed to block excess damage over the {{as|Spirit's|buzzword}} {{as|'''current''' health}}, which does not reliably do so or does too well, depending on whether the {{as|Spirit's|buzzword}} damage modifier is higher than ''Test of Spirit's'' or not, respectively. This causes an increasing difference of damage when the pre-mitigated damage is between <code>Spirit current health{{divided by}}Spiritmod</code> and <code>Spirit current health{{divided by}}Emod</code>. {{bug|1}}\n**#* To fix this case, pre-mitigated damage would need to be capped at the amount that kills the {{as|Spirit|buzzword}}, and only then have ''Test of Spirit's'' damage modifier apply.\n** '''Illaoi''' needs {{as|{{ap|(100-(25 to 45))/8*100}} '''total''' AD}} to reach 100% redirected damage. As per above, the damage is still dependent on the {{as|Spirit's|buzzword}} and {{as|Vessel's|buzzword3}} damage modifiers and may not always be able to deal 100% of the target's '''current''' health as total redirected damage.\n* {{tip|Spell shield|Spell shields}} may only prevent the initial spirit grab and the ''slow'' upon becoming a {{as|Vessel|buzzword3}}. ''Spell shields'' will not prevent becoming a {{as|Vessel|buzzword3}} or {{as|Tentacles|buzzword2}} from attacking.\n* The tendril can be blocked by abilities such as {{cai|W|Yasuo}}, but the returning tether slow cannot, even if it can otherwise be {{tip|homing projectile destruction|destroyed}} by effects that can do so (i.e {{tip|untargetability}}).\n** The tether slow will not be fired if the target is already {{tip|untargetability|untargetable}} when the {{as|Spirit|buzzword}} dies.\n* The spirit pull is not considered a {{tip|crowd control}} effect and will not be blocked by {{tip|cc-immune|crowd control immunity}}, with the exception of {{cai|E|Morgana}}.{{bug|2}}\n* The projectile tentacle model is linked to '''Illaoi's''' model animation and size. However gameplay wise it is not, thus the actual hitbox being different than the position, width and length of the visible model. {{bug|1}}\n** The model will stop mid-air / vanish if '''Illaoi''' goes into {{tip|stasis}}, {{tip|sleep}} or {{tip|airborne}}, however the actual hitbox will continue its trajectory unseen.\n** {{pending for test}} The projectile is however seen by enemies if '''Illaoi''' is not {{tip|Sight|visible}}. <!--[[V12.6]] just the projectile? or also Illaoi herself? Globally? Or does she need to be close to an enemy champion? Does she need to point the ability towards them? Or also if she points the other way?-->\n{{Effect at cast time end}}\n** And will fire towards the same pointed location.\n* Grabbing the {{as|Spirit|buzzword}} of a champion before it goes into {{tip|resurrection}} via {{ai|R|Zilean}} or {{ii|Guardian Angel}} will spawn the {{as|Spirit|buzzword}} with 0 health, making it {{tip|invulnerable}}. {{bug|1}}\n** The same does not happen with other ''resurrection'' effects (i.e {{cai|I|Karthus}}) since they leave the champion with more than 0 health.\n* Grabbing the {{as|Spirit|buzzword}} of {{ci|Viego}} will make the {{as|Spirit's|buzzword}} lifetime (the white bar below the lifebar) disappear. {{bug|1}}\n* {{pending for test}} Grabbing the {{as|Spirit|buzzword}} of an {{ai|R|Kalista|Oathsworn}} will make the {{as|Spirit|buzzword}} invisible. {{bug|1}}\n* '''Illaoi''' is the only one able to see who's been {{as|Vesseled|buzzword3}}, by adding a layer of watery effects on their model. The {{as|Vessel|buzzword3}} will also be let known it's debuffed, by having a layer of watery effects on its screen instead.\n** If the target becomes a {{as|Vessel|buzzword3}} while {{tip|vanish|vanished}}, the layer on their model will fail to be added. {{bug|1}}\n* The {{as|Vessel|buzzword3}} status effect is a debuff that doesn't ''persist through death''.\n* If the target is made a {{as|Vessel|buzzword3}} while {{tip|resurrection|resurrecting}}, they will not revive as a {{as|Vessel|buzzword3}}.\n* Runes consider the {{as|Spirit|Buzzword}} as a champion for their effects and stat-tracking. {{bug|2}}\n** {{as|Tentacles|buzzword2}} damage with {{ri|First Strike}} only reflects double bonus damage, not taking into account actual damage done to the {{as|Spirit|buzzword}} (e.g if {{ri|First Strike}} would deal 3 bonus damage, what would get reflected is 6 damage). {{bug|1}}\n* Transferred damage will apply on-damage effects, such as {{ii|Black Cleaver}}, {{ii|Morellonomicon}}, {{ii|Executioner's Calling}}, {{ii|Riftmaker}}, {{bi|Aspect of the Dragon}} burn damage, and {{ai|The Darkin Scythe A|Shadow Assassin|The Darkin Scythe}}.\n** Redirected damage always counts as single target for the purpose of {{tip|Omnivamp}}.\n** Transferred damage will not doubly apply on-hit or on-spell effects versus the target (e.g. {{ii|Liandry's Torment}}, {{ri|Phase Rush}} stacks). These effects are only applied versus the {{as|Spirit|buzzword}}.\n** Attacking the {{as|Vessel|buzzword3}} and its {{as|Spirit|buzzword}} simultaneously will only apply one stack of {{ii|Black Cleaver}} to the {{as|Vessel|buzzword3}}. {{bug|2}}\n* When the tether is broken (whether the {{as|Spirit's|buzzword}} lifetime ran out or the target moved out of range), the {{as|Spirit|buzzword}} will {{tip|vanish}} and move to '''Illaoi's''' location.\n** An {{tip|uncancellable windup}} attack may still kill the {{as|Spirit|buzzword}} after it ''vanished'' to grant the gold, but without making the target a {{as|Vessel|buzzword3}}.\n* The {{as|Spirit|buzzword}} is immune to {{tip|stasis}} (i.e. {{cai|Tempered Fate|Bard}}).\n* {{cai|Riposte|Fiora}} can be used to prevent becoming a {{as|Vessel|buzzword3}} if used before the {{as|Spirit|buzzword}} is killed or while leaving the tether's range.\n* {{cis|Sion}} {{as|Spirit|buzzword}} cannot be spawned during {{ai|Glory in Death|Sion}}. {{as|Spirits|buzzword}} created before ''Sion's'' {{tip|zombie state}} will remain active.\n* If the target that had its {{as|Spirit|buzzword}} pulled from them is taken into the {{ai|Realm of Death|Mordekaiser}}, the tether will break, but they will not be made into a {{as|Vessel|buzzword3}}.\n* The following table refers for interactions while '''Illaoi''' is firing the projectile and while the target's {{as|Spirit|buzzword}} is being pulled:\n{{ct|attack=false|move=false|cast={{ai|Q|Illaoi}} and {{ai|R|Illaoi}} are buffered. {{ai|W|Illaoi}} is usable, but is buffered while pulling the {{as|Spirit|buzzword}}. {{bug|2}}|items=false|consume=false|spells=true,false,false,false,false|interrupts=death}}",
+        "tips": "* Other than [[area of effect]]s, since {{ii|Riftmaker}}, {{bi|Aspect of the Dragon}} burn damage, and {{ai|The Darkin Scythe A|Shadow Assassin|The Darkin Scythe}} apply on the {{as|Spirit|Buzzword}} and the {{as|Vessel|buzzword3}} individually and as separate instances of damage, their '''bonus''' damage through the redirection is effectively enhanced. In particular, ''Riftmaker'' and ''The Darkin Scyte'' will further apply on their own redirected '''bonus''' damage.\n** Note, the same does not apply for damage modifiers without a separate instance of damage (i.e {{ri|Last Stand}}).\n** {{pending for test}} Does the above still apply for ''Riftmaker'' after its [[V12.23]] change?",
+        "flavorsound": "{{sm2|Illaoi_Original_E_SpiritRealm_21.ogg}} ''\"Take back your spirit.\"''",
+        "_comments": [
+          "[[V12.6]] just the projectile? or also Illaoi herself? Globally? Or does she need to be close to an enemy champion? Does she need to point the ability towards them? Or also if she points the other way?"
+        ]
+      }
+    },
+    "R": {
+      "id": "IllaoiR",
+      "name": "Leap of Faith",
+      "description": "Illaoi smashes her idol into the ground, dealing physical damage to nearby enemies. A Tentacle spawns for each enemy champion hit.",
+      "tooltip": "Illaoi smashes her idol into the ground, dealing {{ damagecalc }} physical damage to nearby enemies and spawning a Tentacle for each enemy champion hit.\n\nFor the next {{ duration }} seconds, Tentacles are untargetable and Slam 50% faster, and Harsh Lesson has a {{ spell.illaoiw:cooldownduringr }} second cooldown.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/95/70",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "450",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Illaoi",
+        "skill": "R",
+        "icon": "Leap of Faith.png",
+        "blurb": "{{sbc|Active:}} {{ci|Illaoi}} becomes {{tip|displacement immunity|unstoppable}} before dealing {{as|physical damage}} to nearby enemies. For each enemy {{tip|champion}} hit, a {{as|Tentacle|buzzword2}} is summoned around her for a period.",
+        "blurb2": "For the duration, ''{{ais|Harsh Lesson|Illaoi}}'' cooldown is {{sti|ah|reduced}} and nearby {{as|Tentacles|buzzword2}} attack faster.",
+        "description": "{{sbc|Active:}} '''Illaoi''' gains {{tip|displacement immunity}} and leaps into the air for the cast time. She then slams her idol into the ground, dealing {{as|physical damage}} to nearby enemies. For each enemy champion hit, a {{as|Tentacle|buzzword2}} is summoned for 8 seconds (up to a maximum of 6 summons).",
+        "leveling": "{{st|Physical Damage|{{ap|150 to 350}} {{as|(+ 50% '''bonus''' AD)}}}}",
+        "description2": "For the duration, ''{{ais|Harsh Lesson|Illaoi}}'' {{sti|cooldown}} is halved, all {{as|Tentacles|buzzword2}} awakened by '''Illaoi''' are {{tip|untargetable}}, will not show their hitboxes, nor go dormant, and will take half the amount of time to make an attack. This however does not affect the {{as|Tentacle|buzzword2}} attack from ''{{ai|Tentacle Smash|Illaoi}}''.",
+        "cooldown": "{{ap|120 to 70}}",
+        "cost": "100",
+        "cast time": "{{fd|0.5}}",
+        "costtype": "Mana",
+        "effect radius": "{{tip|cr|icononly = true}} 500",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "Special",
+        "spelleffects": "spellaoe",
+        "projectile": "|grounded     =",
+        "knockdown": "|flavorsound  = {{sm2|Illaoi_Original_Move_29.ogg}} ''\"There are kind and gentle gods. Mine isn't one of those.\"''",
+        "notes": "{{Effect at cast time end}}\n* '''Illaoi''' spawns the '''''{{ai|Prophet of an Elder God|Illaoi|{{as|Tentacle|buzzword2}}}}''''' 700 range away from her, unless there's a natural wall blocking the way making the '''''{{as|Tentacle|buzzword2}}''''' spawn on it, with an angle relative to the direction she's facing.\n** 1+ champions: one {{ai|Prophet of an Elder God|Illaoi|{{as|Tentacle|buzzword2}}}} at 0 degrees. (towards '''Illaoi's''' facing direction)\n** 2+ champions: one {{ai|Prophet of an Elder God|Illaoi|{{as|Tentacle|buzzword2}}}} at 60 degrees.\n** 3+ champions: one {{ai|Prophet of an Elder God|Illaoi|{{as|Tentacle|buzzword2}}}} at 300 degrees.\n** 4+ champions: one {{ai|Prophet of an Elder God|Illaoi|{{as|Tentacle|buzzword2}}}} at 120 degrees.\n** 5+ champions: one {{ai|Prophet of an Elder God|Illaoi|{{as|Tentacle|buzzword2}}}} at 240 degrees.\n** 6+ champions: one {{ai|Prophet of an Elder God|Illaoi|{{as|Tentacle|buzzword2}}}} at 180 degrees.\n** '''''{{as|Tentacles|buzzword2}}''''' may spawn on base barriers. If '''Illaoi''' is in the center of a base barrier, all '''''{{as|Tentacles|buzzword2}}''''' will spawn in the same position and stack over each other, making it appear as if there was only one '''''{{as|Tentacle|buzzword2}}'''''.\n** '''Illaoi's''' facing direction is decided by the position of the cursor on cast, but can also be changed mid-cast through other effects, such as {{si|Flash}}.\n** If there are no walls nearby, spawning the last {{ai|Prophet of an Elder God|Illaoi|{{as|Tentacle|buzzword2}}}} will form a perfect hexagon.\n* {{tip|Spell shield|Spell shields}} will block the ability's damage but will not prevent '''''{{as|Tentacles|buzzword2}}''''' from spawning.\n* If '''Illaoi''' {{tip|death|dies}} within {{fd|0.25}} seconds of dropping down, she will spawn buffed '''''{{as|Tentacles|buzzword2}}''''', but she won't manage in time to buff the already spawned ones. {{bug|1|Added undocumented on 9.13}}\n* If '''Illaoi''' is near a '''''{{as|Tentacle|buzzword2}}''''' that is about to spawn, it will spawn buffed by ''Leap of Faith'' even if '''Illaoi''' is no longer nearby.\n* Using ''{{ai|Harsh Lesson|Illaoi}}'' after '''Illaoi''' drops down will command '''''{{as|Tentacles|buzzword2}}''''' to instantly attack, regardless if they were already attacking. Their old attack will keep on going and will hit while the second attack is on its animation attack. {{bug|1}}\n** This makes it possible for the same tentacle to reduce its own damage by having the second attack hit too fast, which is not otherwise possible.\n* Using ''{{ai|Harsh Lesson|Illaoi}}'' an instant before ''Leap of Faith's'' buff finishes will delay the '''''{{as|Tentacle's|buzzword2}}''''' attack. {{bug|1}}"
+      }
+    }
+  }
+}

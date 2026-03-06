@@ -1,0 +1,184 @@
+[hero]
+name = "Arcanist"
+
+[stats]
+hp = 85
+move_speed = 2.8
+
+[stats.tags]
+MAGIC = 40.0
+
+[attack]
+damage = 10
+range = 4.0
+cooldown = 1200
+cast_time = 300
+
+# --- Ability 1: Fire Ring --- zone, fire-tagged, 15 dmg/tick r=2.5
+[[abilities]]
+name = "FireRing"
+targeting = "ground_target"
+range = 6.0
+cooldown_ms = 6000
+cast_time_ms = 300
+ai_hint = "damage"
+zone_tag = "fire"
+
+[abilities.delivery]
+method = "zone"
+duration_ms = 5000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "damage"
+amount_per_tick = 15
+tick_interval_ms = 500
+duration_ms = 5000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+FIRE = 50.0
+
+# --- Ability 2: Frost Field --- zone, frost-tagged, 40% slow + 8 dmg/tick r=2.5
+[[abilities]]
+name = "FrostField"
+targeting = "ground_target"
+range = 6.0
+cooldown_ms = 7000
+cast_time_ms = 300
+ai_hint = "crowd_control"
+zone_tag = "frost"
+
+[abilities.delivery]
+method = "zone"
+duration_ms = 5000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.4
+duration_ms = 1500
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+CROWD_CONTROL = 40.0
+
+[[abilities.effects]]
+type = "damage"
+amount_per_tick = 8
+tick_interval_ms = 500
+duration_ms = 5000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+MAGIC = 40.0
+
+# --- Ability 3: Lightning Storm --- zone, lightning-tagged, 20 dmg/tick r=2.0
+[[abilities]]
+name = "LightningStorm"
+targeting = "ground_target"
+range = 6.0
+cooldown_ms = 8000
+cast_time_ms = 400
+ai_hint = "damage"
+zone_tag = "lightning"
+
+[abilities.delivery]
+method = "zone"
+duration_ms = 4000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "damage"
+amount_per_tick = 20
+tick_interval_ms = 500
+duration_ms = 4000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.0
+
+[abilities.effects.tags]
+MAGIC = 45.0
+
+# --- Ability 4: Arcane Bolt --- single target nuke 40 dmg
+[[abilities]]
+name = "ArcaneBolt"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 3000
+cast_time_ms = 200
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 40
+
+[abilities.effects.tags]
+MAGIC = 50.0
+
+# --- Ability 5: Arcane Shield --- self shield 50 hp
+[[abilities]]
+name = "ArcaneShield"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 14000
+cast_time_ms = 200
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 50
+duration_ms = 5000
+
+# --- Ability 6: Blink --- dash away for escape
+[[abilities]]
+name = "Blink"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 10000
+cast_time_ms = 0
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "dash"
+to_target = false
+distance = 4.0
+
+# --- Passive 1: Elemental Mastery --- on ability used, +15% dmg buff 3s
+[[passives]]
+name = "ElementalMastery"
+cooldown_ms = 8000
+range = 0.0
+
+[passives.trigger]
+type = "on_ability_used"
+
+[[passives.effects]]
+type = "buff"
+stat = "damage_output"
+factor = 0.15
+duration_ms = 3000
+
+# --- Passive 2: Arcane Barrier --- on damage taken, shield 20 hp
+[[passives]]
+name = "ArcaneBarrier"
+cooldown_ms = 10000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_taken"
+
+[[passives.effects]]
+type = "shield"
+amount = 20
+duration_ms = 3000

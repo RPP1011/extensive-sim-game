@@ -1,0 +1,12 @@
+[scenario]
+name        = "3x Warlock + Cleric"
+seed        = 380154
+hero_count  = 4
+enemy_count = 16
+difficulty  = 3
+max_ticks   = 5000
+room_type   = "Climax"
+hero_templates = ["Warlock", "Warlock", "Warlock", "Cleric"]
+
+[assert]
+outcome = "Either"

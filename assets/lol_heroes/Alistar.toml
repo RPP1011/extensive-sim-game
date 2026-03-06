@@ -1,0 +1,129 @@
+[hero]
+name = "Alistar"
+
+[stats]
+hp = 150
+move_speed = 3.3
+armor = 40.0
+magic_resist = 35.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 14
+range = 1.5
+cooldown = 900
+
+# --- Q: Pulverize ---
+[[abilities]]
+name = "Pulverize"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 14000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.75
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+# --- W: Headbutt ---
+[[abilities]]
+name = "Headbutt"
+targeting = "target_enemy"
+range = 6.5
+cooldown_ms = 14000
+ai_hint = "damage"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "damage"
+amount = 13
+damage_type = "magic"
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- E: Trample ---
+[[abilities]]
+name = "Trample"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 12000
+ai_hint = "damage"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "damage"
+amount = 0
+damage_type = "magic"
+duration_ms = 5000
+tick_interval_ms = 1000
+amount_per_tick = 4
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.5
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+# --- R: Unbreakable Will ---
+[[abilities]]
+name = "Unbreakable Will"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 23900
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 20
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- Passive: Triumphant Roar ---
+[[passives]]
+name = "Triumphant Roar"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_dealt"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+
+[[passives.effects]]
+type = "apply_stacks"
+name = "alistar"
+count = 1
+max_stacks = 4
+

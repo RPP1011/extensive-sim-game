@@ -1,0 +1,13 @@
+[scenario]
+name = "stress_all_ranged_climax_s1"
+seed = 11726
+hero_count = 4
+enemy_count = 7
+difficulty = 2
+max_ticks = 10000
+room_type = "Climax"
+hero_templates = ["cryomancer", "elementalist", "arcanist", "mage"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

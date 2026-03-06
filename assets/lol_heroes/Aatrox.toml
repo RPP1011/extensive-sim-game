@@ -1,0 +1,130 @@
+[hero]
+name = "Aatrox"
+
+[stats]
+hp = 120
+move_speed = 3.4
+armor = 35.0
+magic_resist = 32.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 1.5
+cooldown = 800
+
+# --- Q: The Darkin Blade ---
+[[abilities]]
+name = "The Darkin Blade"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 14000
+cast_time_ms = 600
+ai_hint = "crowd_control"
+recast_count = 1
+recast_window_ms = 4000
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+# --- W: Infernal Chains ---
+[[abilities]]
+name = "Infernal Chains"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 20000
+cast_time_ms = 250
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "projectile"
+speed = 18.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 7
+damage_type = "physical"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 2.5
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- E: Umbral Dash ---
+[[abilities]]
+name = "Umbral Dash"
+targeting = "ground_target"
+range = 0.8
+cooldown_ms = 9000
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "heal"
+amount = 7
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- R: World Ender ---
+[[abilities]]
+name = "World Ender"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 23900
+cast_time_ms = 250
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "heal"
+amount = 7
+
+[[abilities.effects]]
+type = "fear"
+duration_ms = 1500
+
+[abilities.effects.area]
+shape = "circle"
+radius = 6.0
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 5000
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 10000
+
+# --- Passive: Deathbringer Stance ---
+[[passives]]
+name = "Deathbringer Stance"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 5000
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

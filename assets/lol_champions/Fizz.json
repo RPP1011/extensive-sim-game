@@ -1,0 +1,272 @@
+{
+  "id": "Fizz",
+  "name": "Fizz",
+  "title": "the Tidal Trickster",
+  "resource_type": "Mana",
+  "tags": [
+    "Assassin",
+    "Fighter"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Nimble Fighter",
+      "description": "Fizz can move through units and takes a flat amount of reduced damage from all sources",
+      "wiki_detail": {
+        "champion": "Fizz",
+        "skill": "I",
+        "icon": "Nimble Fighter.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Fizz}} ignores {{tip|ghosted|unit collision}}, and takes reduced damage.",
+        "description": "{{sbc|Innate:}} '''Fizz''' gains {{tip|ghosting}} and reduces every instance of incoming damage by 4 {{as|(+ 1% AP)}}, up to a maximum of 50% reduction.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|projectile   =",
+        "grounded": "|knockdown    =",
+        "notes": "* No additional notes."
+      }
+    },
+    "Q": {
+      "id": "FizzQ",
+      "name": "Urchin Strike",
+      "description": "Fizz dashes through his target, dealing magic damage and applying on hit effects.",
+      "tooltip": "Fizz dashes through an enemy, dealing {{ totaldamage }} physical damage plus {{ qdamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8/7.5/7/6.5/6",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "550",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "10/25/40/55/70",
+        "0",
+        "650/750/850/950/1050",
+        "1.5",
+        "600",
+        "1",
+        "0.35",
+        "40",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Fizz",
+        "skill": "Q",
+        "icon": "Urchin Strike.png",
+        "blurb": "{{sbc|Active:}} {{ci|Fizz}} {{tip|dash|dashes}} through the target enemy, dealing {{as|magic damage}}, {{as|physical damage}}, and applying {{tip|on-hit}} effects.",
+        "description": "{{sbc|Active:}} '''Fizz''' {{tip|dashes}} a fixed distance in the direction of the target enemy. If they are in range upon arrival, he deals {{as|magic damage}} plus {{as|100% AD}} {{as|physical damage}} and applies {{tip|on-hit}} effects at 100% effectiveness.",
+        "description2": "''{{ai|Seastone Trident|Fizz}} and {{ai|Chum the Waters|Fizz}} can be cast during the dash.''",
+        "leveling": "{{st|Magic Damage|{{ap|10 to 70}} {{as|(+ 45% AP)}}}}",
+        "target range": "{{tip|cr|icononly = true}} 550",
+        "range": "{{tt|550|Fixed dash distance}}",
+        "speed": "|collision radius=",
+        "cooldown": "{{ap|8 to 6}}",
+        "cost": "50",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "cast time": "none",
+        "affects": "Enemies",
+        "damagetype": "{{tip|physical damage|Physical}} / {{tip|magic damage|Magic}}",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "projectile": "|grounded     = True",
+        "knockdown": "True",
+        "callforhelp": "True",
+        "parry": "true",
+        "notes": "* ''Urchin Strike'' can only go through walls if the target is on the other side.\n* ''Urchin Strike'' only damages targets if within 200 units of their original location upon completion of the dash.\n* '''Fizz''' will be automatically ordered to [[basic attack]] the target after ''Urchin Strike''.\n* ''Urchin Strike'' does not deal damage if the target is {{tip|untargetable}}.\n* {{stil|Life steal}} applies only on the physical damage component. {{stil|Spell vamp}} applies to both the physical damage and bonus magic damage."
+      }
+    },
+    "W": {
+      "id": "FizzW",
+      "name": "Seastone Trident",
+      "description": "Fizz's attacks bleed his enemies, dealing magic damage over several seconds. Fizz can empower his next attack to deal bonus damage and empower his further attacks for a short time.",
+      "tooltip": "Passive: Fizz's Attacks cause his enemies to bleed, dealing {{ dotdamage }} magic damage over {{ bleedduration }} seconds. \n\nActive: Fizz's next Attack deals an additional {{ activedamage }} magic damage. If this Attack kills its target, Fizz refunds {{ onkillmanarefund }} Mana and reduces the cooldown of this Ability to {{ onkillnewcooldown }} second. If it does not kill, Fizz's Attacks deal an additional {{ onhitbuffdamage }} magic damage for {{ onhitbuffduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7/6/5/4/3",
+      "cost": "30/40/50/60/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Passive Damage",
+          "Active Damage",
+          "On-Hit Damage",
+          "Mana Refund",
+          "@AbilityResourceName@ Cost",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ dotbasedamage }} -> {{ dotbasedamageNL }}",
+          "{{ activebasedamage }} -> {{ activebasedamageNL }}",
+          "{{ onhitbuffbasedamage }} -> {{ onhitbuffbasedamageNL }}",
+          "{{ onkillmanarefund }} -> {{ onkillmanarefundNL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Fizz",
+        "skill": "W",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} {{ci|Fizz}} basic attacks bleed his enemies, continually dealing {{as|magic damage}}.",
+        "blurb2": "{{sbc|Active:}} {{ci|Fizz}} empowers his next basic attack to deal {{as|'''bonus''' magic damage}}, and has an additional effect based on fatality.\n* If this attack kills the target, the cooldown is {{sti|ah|reduced}} and the {{sti|{{as|mana cost}}}} is refunded.\n* If this attack does not kill the target, '''Fizz's''' basic attacks deal {{as|'''bonus''' magic damage}} for a few seconds.",
+        "description": "{{sbc|Passive:}} '''Fizz's''' basic attacks rend enemies {{tip|on-hit}}, dealing {{as|magic damage}} every {{fd|0.5}} seconds over 3 seconds, refreshing on subsequent hits.",
+        "leveling": "{{st|Total Magic Damage|{{ap|20 to 60}} {{as|(+ 30% AP)}}|Magic Damage per Tick|{{ap|20/6 to 60/6|round=2}} {{as|(+ {{ap|30/6|round=2}}% AP)}}}}",
+        "icon2": "Seastone Trident.png",
+        "description2": "{{sbc|Active:}} '''Fizz''' empowers his next [[basic attack]] within 4 seconds to have an {{tip|uncancellable windup}}, gain {{sti|range|50 '''bonus''' range}}, and deal {{as|'''bonus''' magic damage}}.",
+        "leveling2": "{{st|Bonus Magic Damage|{{ap|50 to 130}} {{as|(+ 40% AP)}}}}",
+        "description3": "If ''Seastone Trident'' kills its target, the {{sti|cooldown}} is reduced to 1 second and '''Fizz''' restores {{sti|{{as|mana}}}}. Otherwise, if the target is not killed, '''Fizz's''' basic attacks deal {{as|'''bonus''' magic damage}} {{tip|on-hit}} for the next 5 seconds.",
+        "leveling3": "{{st|Mana Restored|{{as|{{ap|30 to 70}}|mana}}}}\n{{st|Bonus Magic Damage On-Hit|{{ap|10 to 30}} {{as|(+ 35% AP)}}}}",
+        "description4": "''Seastone Trident'' deals 50% damage to [[structures]].",
+        "description5": "''Seastone Trident {{tip|basic attack reset|resets}} '''Fizz's''' basic attack timer.''",
+        "cooldown": "{{ap|7 to 5}}",
+        "cdstart": "post-effect",
+        "cost": "{{ap|30 to 70}}",
+        "costtype": "Mana",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "special",
+        "occurrence": "On-hit",
+        "parry": "Special",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* Applies {{tip|spell damage}} on the empowered attack, {{tip|persistent damage}} on the damage over time effect, and {{tip|proc damage}} on the bonus damage on-hit.\n* ''Seastone Trident's '' interactions with {{tip|dodge|dodging}}, {{tip|block|blocking}}, and {{tip|blind|blinding}} effects.\n** The passive bonus damage gets negated by {{tip|dodge|dodging}} or {{tip|block|blocking}} the attack, or if '''Fizz''' is {{tip|blind|blinded}}.\n** The active:\n*** If the attacked enemy is {{tip|dodge|dodging}} or if '''Fizz''' is {{tip|blind|blinded}}, the empowered attack won't deal any damage, but the empowered attack won't be consumed.\n*** If the attacked enemy is {{tip|block|blocking}}, the empowered attack won't deal any damage despite being consumed. But the attack will apply the passive bonus damage of ''Seastone Trident''.\n* The empowered attack will trigger against [[structures]].\n* The damage over time effect is not applied to [[inhibitor]]s."
+      }
+    },
+    "E": {
+      "id": "FizzE",
+      "name": "Playful / Trickster",
+      "description": "Fizz hops into the air, landing gracefully upon his spear and becoming untargetable. From this position, Fizz can either slam the ground or choose to jump again before smashing back down.",
+      "tooltip": "Fizz hops onto his trident, becoming Untargetable for 0.75 seconds, after which he deals {{ edamage }} magic damage to nearby enemies and Slows them by {{ slowamount*100 }}% for {{ slowduration }} seconds. \n\nFizz can Recast this Ability while Untargetable to dash again, which ends the effect early, deals damage in a smaller area, and doesn't Slow.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16/14/12/10/8",
+      "cost": "75/80/85/90/95",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "@AbilityResourceName@ Cost",
+          "Damage",
+          "Slow"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ slowamount*100.000000 }}% -> {{ slowamountnl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "R": {
+      "id": "FizzR",
+      "name": "Chum the Waters",
+      "description": "Fizz tosses a fish in a direction that attaches to any champion that touches it, slowing the target. After a short delay, a shark erupts from the ground, knocking up the target and knocking any nearby enemies aside. All enemies hit are dealt magic damage and slowed.",
+      "tooltip": "Fizz launches a fish that attaches to the first champion hit. The victim is afflicted with True Sight and Slowed by between 40% to 80% based on how far the fish travelled before attaching. \n\nAfter {{ detonationtime }} seconds a shark erupts on the target, Knocking Up the target with the fish for 1 second, Knocking Back everything else, and dealing between {{ smallsharkdamage }} to {{ bigsharkdamage }} magic damage based on how far the fish travelled before attaching.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1300",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Small Shark Damage",
+          "Medium Shark Damage",
+          "Big Shark Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ smalldamage }} -> {{ smalldamageNL }}",
+          "{{ smalldamage*1.250000 }} -> {{ smalldamagenl*1.250000 }}",
+          "{{ smalldamage*1.500000 }} -> {{ smalldamagenl*1.500000 }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Fizz",
+        "skill": "R",
+        "icon": "Chum the Waters.png",
+        "blurb": "{{sbc|Active:}} {{ci|Fizz}} tosses a lure in the target direction that lands on the ground, attracting a shark that erupts after a short delay, dealing {{as|magic damage}} to nearby enemies, {{tip|airborne|knocking them back}} and {{tip|slow|slowing}} them.<br/>The farther the lure flies, the larger the shark that is attracted, increasing the effects.",
+        "blurb2": "The lure attaches to the first enemy champion that touches it, {{tip|slow|slowing}} them. The shark will {{tip|airborne|knockup}} the target instead of knocking them back.",
+        "description": "{{sbc|Active:}} '''Fizz''' throws down a lure at the target location that attracts a shark, granting {{tip|sight}} of the area before it emerges to chomp at the lure after 2 seconds, dealing {{as|magic damage}} to nearby enemies, {{tip|airborne|knocking them back}}, though not through terrain, and {{tip|slow|slowing}} them for 2 seconds. The further the lure travels in its initial flight, the larger the shark that is attracted; increasing ''Chum the Waters' '' damage, slow, eruption radius and knock back distance.",
+        "description2": "{{sbc|Guppy (<455):}} 40% slow, 200 eruption radius and 150 unit knock back distance.",
+        "leveling2": "{{st|Guppy Damage|{{ap|150 to 350}} {{as|(+ 80% AP)}}}}",
+        "description3": "{{sbc|Chomper (455-910):}} 60% slow, 325 eruption radius and 250 unit knock back distance.",
+        "leveling3": "{{st|Chomper Damage|{{ap|225 to 425}} {{as|(+ 100% AP)}}}}",
+        "description4": "{{sbc|Gigalodon (>910):}} 80% slow, 450 eruption radius and 350 unit knock back distance.",
+        "leveling4": "{{st|Gigalodon Damage|{{ap|300 to 500}} {{as|(+ 120% AP)}}}}",
+        "description5": "Enemy {{tip|champion|champions}} can intercept the lure while it is in flight, which attaches to them upon contact and causes the shark to emerge at their position after the same delay. The lure's holder is {{tip|slow|slowed}} and {{tip|true sight|revealed}} for the duration and afterwards is impacted by the eruption but is {{tip|airborne|knocked up}} for 1 second instead of knocked back.",
+        "description6": "''Chum the Waters will cast at max range if cast beyond that.''",
+        "target range": "1300",
+        "speed": "1300",
+        "cooldown": "{{ap|100 to 70}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "special",
+        "spelleffects": "spellaoe",
+        "projectile": "special",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Chum the Waters'' will stop its movement if the lure collides with an enemy champion with a {{tip|spell shield}} (does not attach) or upon colliding with {{ai|W|Yasuo}} (does not get destroyed).\n{{Effect at cast time end}}\n** The targeted area does not change unless the ability was cast beyond maximum range.\n* If the lure attaches to an enemy champion, a countdown will appear at their position to signify when the shark is about to emerge. The countdown begins from 4, and ticks down by one every 0.5 second.",
+        "flavorsound": "{{sm2|Fizz_Original_R_6.ogg}} ''\"Feeding time!\"''"
+      }
+    }
+  }
+}

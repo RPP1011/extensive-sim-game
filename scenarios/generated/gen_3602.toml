@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0080_4v6_d5_s2"
+seed = 22203
+hero_count = 4
+enemy_count = 6
+difficulty = 5
+max_ticks = 10000
+room_type = "Climax"
+hero_templates = ["cryomancer", "elementalist", "engineer", "arcanist"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

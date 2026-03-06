@@ -1,0 +1,110 @@
+[hero]
+name = "Riven"
+
+[stats]
+hp = 120
+move_speed = 3.5
+armor = 35.0
+magic_resist = 32.0
+
+[attack]
+damage = 21
+range = 1.5
+cooldown = 800
+
+# --- Q: Broken Wings ---
+[[abilities]]
+name = "Broken Wings"
+targeting = "target_enemy"
+range = 2.8
+cooldown_ms = 13000
+ai_hint = "damage"
+recast_count = 1
+recast_window_ms = 4000
+
+[[abilities.effects]]
+type = "damage"
+amount = 11
+damage_type = "physical"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 1.5
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+# --- W: Ki Burst ---
+[[abilities]]
+name = "Ki Burst"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 11000
+cast_time_ms = 250
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 16
+damage_type = "physical"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+# --- E: Valor ---
+[[abilities]]
+name = "Valor"
+targeting = "direction"
+range = 2.5
+cooldown_ms = 10000
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "shield"
+amount = 20
+duration_ms = 3000
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- R: Blade of the Exile ---
+[[abilities]]
+name = "Blade of the Exile"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 23900
+cast_time_ms = 250
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- Passive: Runic Blade ---
+[[passives]]
+name = "Runic Blade"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_auto_attack"
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+
+[[passives.effects]]
+type = "apply_stacks"
+name = "charge"
+count = 1
+max_stacks = 4
+

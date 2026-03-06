@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "total": 12,
+  "remaining": 8,
+  "quality_gates": [
+    "cargo test"
+  ],
+  "id": "US-005",
+  "title": "Implement character creation step 2 (backstory/archetype effects)"
+}

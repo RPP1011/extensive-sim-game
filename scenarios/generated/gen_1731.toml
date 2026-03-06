@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_monk_cryomancer_assassin"
+seed = 1578
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["monk", "cryomancer", "assassin"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

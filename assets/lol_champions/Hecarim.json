@@ -1,0 +1,272 @@
+{
+  "id": "Hecarim",
+  "name": "Hecarim",
+  "title": "the Shadow of War",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Warpath",
+      "description": "Hecarim gains Attack Damage equal to a percentage of his bonus Move Speed.",
+      "wiki_detail": {
+        "champion": "Hecarim",
+        "skill": "I",
+        "icon": "Warpath.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Hecarim}} gains {{sti|{{as|'''bonus''' attack damage}}}} equal to a portion of his {{sti|{{as|'''bonus''' movement speed}}}}.",
+        "description": "{{sbc|Innate:}} '''Hecarim''' gains {{sti|{{as|'''bonus''' attack damage}}}} equal to {{as|{{pp|key=%|12 to 24 for 7|1;3 to 18|formula=12%+2% every 3 levels starting from level 3}} of his {{sti|'''bonus''' movement speed}}}}.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "notes": "* ''Warpath's'' '''bonus''' attack damage will adjust itself to any temporary movement speed [[buff|buffs]] and [[debuff]]s '''Hecarim''' is affected by.\n** Since this only affects '''bonus''' values '''Hecarim''' will not dip below his regular attack damage if he is {{tip|slow|slowed}} below his '''base''' movement speed.\n* The amount of movement speed scaling to '''bonus''' attack damage is refreshed every {{fd|0.25}} seconds."
+      }
+    },
+    "Q": {
+      "id": "HecarimRapidSlash",
+      "name": "Rampage",
+      "description": "Hecarim cleaves nearby enemies dealing physical damage. If Hecarim damages at least one enemy, he increases the damage and lowers the cooldown of subsequent Rampages.",
+      "tooltip": "Hecarim cleaves nearby enemies for {{ damage }} physical damage. If this Ability hits, he gains a stack that decreases its Cooldown by {{ rampagecooldownreduction }} seconds and increases its damage by {{ rampagebonusdamageperc }}% for {{ e6 }} seconds. Stacks up to {{ e2 }} times.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "4",
+      "cost": "28/26/24/22/20",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "350",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "3",
+        "1",
+        "3",
+        "60",
+        "8",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Mana Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Hecarim",
+        "skill": "Q",
+        "icon": "Rampage.png",
+        "blurb": "{{sbc|Active:}} {{ci|Hecarim}} cleaves his glaive to deal {{as|physical damage}} to nearby enemies.",
+        "blurb2": "Whenever ''Rampage'' hits at least one enemy, he gains a stack, up to a cap.",
+        "blurb4": "{{sbc|Rampage:}} For each stack, ''Rampage's'' damage is increased and the cooldown is {{sti|ah|reduced}}.",
+        "description": "{{sbc|Active:}} '''Hecarim''' cleaves his glaive around himself, dealing {{as|physical damage}} to nearby enemies, reduced to 60% against {{tip|minions}}.",
+        "leveling": "{{st|Physical Damage|{{ap|60 to 160}} {{as|(+ 90% '''bonus''' AD)}}|Minion damage|{{ap|60*0.6 to 160*0.6}} {{as|(+ {{ap|90*0.6}}% '''bonus''' AD)}}}}",
+        "description2": "If this damages an enemy, '''Hecarim''' gains a [[stack]] of ''Rampage'' for 8 seconds,  refreshing on subsequent damage and stacking up to 3 times. Each stack increases ''Rampage's'' damage by 3% {{as|(+ 4% per 100 '''bonus''' AD)}} and reduces its {{sti|cd|'''base''' cooldown}} by {{fd|0.75}} seconds, up to a 9% {{as|(+ 12% per 100 '''bonus''' AD)}} damage increase and a {{fd|2.25}}-second reduction of the '''base''' cooldown at maximum stacks. Stacks expire by one every 1 second when the duration ends.",
+        "effect radius": "{{tip|cr|icononly = true}} 375",
+        "cooldown": "4",
+        "cast time": "none",
+        "cost": "{{ap|28 to 20}}",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "damagetype": "Physical",
+        "spelleffects": "spellaoe",
+        "affects": "Self, Enemies",
+        "spellshield": "True",
+        "notes": "* No additional notes."
+      }
+    },
+    "W": {
+      "id": "HecarimW",
+      "name": "Spirit of Dread",
+      "description": "Hecarim gains Armor and Magic Resist. Hecarim deals magic damage to nearby enemies, and gains Health equal to a percentage of any damage those enemies suffer.",
+      "tooltip": "Hecarim deals {{ totaldamage }} magic damage over {{ buffduration }} seconds to nearby enemies. \n\nHecarim gains {{ resistamount }} Armor and Magic Resist and heals for {{ leechamount }}% of damage nearby enemies take from Hecarim and {{ allytooltipleachvalue }}% of damage taken from his allies.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "525",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Bonus Resistances",
+          "Healing Cap",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ resistamount }} -> {{ resistamountNL }}",
+          "{{ minionhealcap }} -> {{ minionhealcapNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Hecarim",
+        "skill": "W",
+        "icon": "Spirit of Dread.png",
+        "blurb": "{{sbc|Active:}} {{ci|Hecarim}} continually deals {{as|magic damage}} to nearby enemies for a short time.",
+        "blurb2": "During this time, he gains '''bonus''' resistances and {{tip|heal|heals}} for a portion of any damage he and his allies deal to nearby enemies, with reduced healing on ally damage.",
+        "description": "{{sbc|Active:}} '''Hecarim''' surrounds himself with the Spirit of Dread for 4 seconds, dealing {{as|magic damage}} every second to nearby enemies.",
+        "leveling": "{{st|Magic Damage Per Tick|{{ap|20 to 60}} {{as|(+ 20% AP)}}|Total Magic Damage|{{ap|20*5 to 60*5}} {{as|(+ {{ap|20*5}}% AP)}}}}",
+        "description2": "While active, '''Hecarim''' gains {{sti|{{as|'''bonus''' armor}}}} and {{sti|{{as|'''bonus''' magic resistance}}}} and is {{tip|heal|healed}} for 25% of the {{tt|post-mitigation damage|Damage calculated after modifiers}} dealt to enemies within the area from all sources, halved to {{ap|25/2}}% for damage dealt by allies. The healing is capped against {{tip|minions}} and {{tip|monsters}}.",
+        "leveling2": "{{st|Bonus Resistances|{{ap|5 to 25}}}}\n{{st|Capped Healing|{{ap|120 to 240}}}}",
+        "effect radius": "{{tip|cr|icononly = true}} 525",
+        "cooldown": "14",
+        "cdstart": "on-cast",
+        "cost": "{{ap|50 to 70}}",
+        "cast time": "none",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "damagetype": "Magic",
+        "spelleffects": "AoeDoT",
+        "affects": "Self, Enemies",
+        "spellshield": "False",
+        "notes": "* The healing cap against minions accounts for every single one regardless of how many are present and/or affected by ''Spirit of Dread'' at the time of cast."
+      }
+    },
+    "E": {
+      "id": "HecarimRamp",
+      "name": "Devastating Charge",
+      "description": "Hecarim gains increasing Move Speed and can move through units for a short duration. His next attack knocks the target back and deals additional physical damage based on the distance he has traveled since activating the ability.",
+      "tooltip": "Hecarim becomes Ghosted and gains {{ minmovespeed*100 }}% Move Speed increasing to {{ maxmovespeed*100 }}% over {{ e5 }} seconds. His next Attack Knocks Back and deals between {{ mindamage }} and {{ maxdamage }} physical damage. Knock Back distance and damage scales with distance travelled during this Ability.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "20/19/18/17/16",
+      "cost": "60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "300",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "150",
+        "350",
+        "60/90/120/150/180",
+        "30/45/60/75/90",
+        "4",
+        "0.65",
+        "1200",
+        "0.25",
+        "2.5",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Minimum Damage",
+          "Maximum Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ minbasedamage }} -> {{ minbasedamageNL }}",
+          "{{ maxbasedamage }} -> {{ maxbasedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Hecarim",
+        "skill": "E",
+        "icon": "Devastating Charge.png",
+        "blurb": "{{sbc|Active:}} {{ci|Hecarim}} ignores unit collision and builds up {{sti|{{as|'''bonus''' movement speed}}}} over a short time.",
+        "blurb2": "During this time, '''Hecarim's''' next basic attack will gain {{sti|range|'''bonus''' range}} and cause him to {{tip|dash}}. Upon arrival, he deals {{as|'''modified''' physical damage}} and {{tip|airborne|knocks back}} the target, briefly {{tip|stun|stunning}} them afterward.",
+        "blurb3": "The effects are increased based on the distance he traveled in the duration.",
+        "description": "{{sbc|Active:}} '''Hecarim''' becomes {{tip|ghosted}} and gains {{sti|ms|{{as|{{pp|type=time active|key=%|25 to 65 for 13|0 to 3|formula=3.3% '''total bonus''' movement speed every 0.25 seconds. ''This is capped at 3 seconds.''}} '''bonus total''' movement speed|ms}}}} for 4 seconds.",
+        "description2": "During this time, '''Hecarim''' empowers his next [[basic attack]] to gain {{pp|type=distance traveled|50 to 250 for 9|0 to 1200}} {{sti|range|'''bonus''' range}} and cause him to {{tip|dash}} in the target's direction, {{tip|standard sight|revealing}} them for 1 second. If the target remains nearby during the dash, the {{tip|ghosting}} and {{as|'''bonus''' movement speed}} ends prematurely and '''Hecarim''' {{tip|airborne|knocks them back}} {{pp|type=distance traveled|150 to 350 for 9|0 to 1200}} units, though not through terrain, {{tip|stun|stuns}} them for {{fd|0.25}} seconds, and deals them {{as|'''modified''' physical damage}}, increased by {{pp|type=distance traveled|key=%|0 to 100 for 9|0 to 1200}}.",
+        "description3": "''Devastating Charge'' can {{tip|critically strike}} for {{as|{{critical damage|{{ccd|Hecarim|crit_base}}|100|base=100}} AD}} {{as|'''bonus''' physical damage}}.",
+        "description4": "''Devastating Charge {{tip|basic attack reset|resets}} '''Hecarim's''' basic attack timer. '''Hecarim''' can cast any of his [[champion ability|abilities]] during the dash. Devastating Charge's duration is paused during {{ai|Onslaught of Shadows|Hecarim}}.''",
+        "leveling2": "{{st|Minimum Physical Damage|{{ap|30 to 90}} {{as|(+ 50% '''bonus''' AD)}}|Maximum Physical Damage|{{ap|30*2 to 90*2}} {{as|(+ {{ap|50*2}}% '''bonus''' AD)}}}}",
+        "cooldown": "{{ap|20 to 16}}",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "cost": "60",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Self",
+        "damagetype": "Physical",
+        "spelleffects": "spell",
+        "parry": "Special",
+        "grounded": "special",
+        "knockdown": "special",
+        "spellshield": "True",
+        "notes": "* '''Hecarim''' can cast any of his [[champion ability|abilities]] while {{tip|dash|dashing}}.\n** {{ai|Onslaught of Shadows|Hecarim}} will interrupt the dash.\n* If the target does not remain nearby during the dash, ''Devastating Charge's'' effect will not be consumed.\n* The {{as|'''bonus''' movement speed}} {{tip|stacks multiplicatively}} with other sources of movement speed boosts.\n* The bonus attack range stacks additively with {{ii|Rapid Firecannon}}.\n* ''Devastating Charge'' will still apply its effects to the target even if the {{tip|dash}} is {{tip|interrupt|interrupted}}, but not if he goes into {{tip|resurrection}}.\n* ''Devastating Charge's'' damage will apply {{sti|life steal|link=true}} and will affect structures.\n* ''\"Distance traveled\"'' can be simple movement as well as {{tip|dash|dashing}} and {{tip|blink|blinking}}.\n* ''Devastating Charge's'' damage will not bypass {{tip|block}} or {{tip|dodge}} but the {{tip|airborne|knock back}} will still be applied.\n** ''Devastating Charge'' will still deal damage while {{tip|blind|blinded}}.\n* While {{tip|ground|grounded}} or {{tip|root|rooted}}, '''Hecarim''' loses the {{sti|'''bonus''' attack range}} from ''Devastating Charge''.\n** '''Hecarim''' will not use the empowered attack while {{tip|root|rooted}}.\n* The {{tip|dash}} does not follow targets. The target's position at the time of the enhanced attack is the direction '''Hecarim''' will leap to.\n* {{tip|Displacement immunity}} will not resist the application of the {{tip|stun}}."
+      }
+    },
+    "R": {
+      "id": "HecarimUlt",
+      "name": "Onslaught of Shadows",
+      "description": "Hecarim summons spectral riders and charges forward, dealing magic damage in a line. Hecarim creates a shockwave when he finishes his charge, causing nearby enemies to flee in terror.",
+      "tooltip": "Hecarim summons spectral riders and charges forward, dealing {{ damagedone }} magic damage. Hecarim unleashes a shockwave at the end of the charge that Fears for between {{ feardurationmin }} to {{ feardurationmax }} seconds, increased by charge distance.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "140/120/100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "50000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "150/250/350",
+        "0.75",
+        "1.5",
+        "1100",
+        "1000",
+        "950",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Hecarim",
+        "skill": "R",
+        "icon": "Onslaught of Shadows.png",
+        "blurb": "{{sbc|Active:}} {{ci|Hecarim}} summons spectral riders and {{tip|dash|charges}} in the target direction, dealing {{as|magic damage}} to enemies they pass through.",
+        "blurb2": "Upon arrival, he {{tip|fear|fears}} and gradually {{tip|slow|slows}} enemies for a duration based on the distance traveled.",
+        "description": "{{sbc|Active:}} '''Hecarim''' {{tip|dash|dashes}} with {{tip|displacement immunity}} to the target location and summons 5 spectral riders {{tt|in an arrow formation|see notes}} that charge alongside him in the target direction, dealing {{as|magic damage}} to all enemies in their path and {{tip|standard sight|revealing}} them for {{fd|2.5}} seconds.",
+        "leveling": "{{st|Magic damage|{{ap|150 to 350}} {{as|(+ 100% AP)}}}}",
+        "description2": "Upon arrival, he {{tip|fear|fears}} nearby enemies for {{pp|type=distance traveled|0.75 to 1.5 for 11|0 to 1000}} seconds and {{tip|slow|slows}} them, ramping to 99% over the duration.",
+        "description3": "''The wave of spectral riders travels independently of '''Hecarim''' and will always charge at the same distance. The slow's strength cannot be reduced and is increased based on how far away the affected units are from '''Hecarim'''. Onslaught of Shadows will cast at max range if cast beyond that.''",
+        "target range": "{{tt|1000|Maximum range}} / {{tt|300|Minimum range}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|315|Fear radius around dash end}}",
+        "range": "{{tip|cr|icononly = true}} {{tt|1510|Spectral riders missile range, estimated}}",
+        "speed": "{{tt|1100|Both dash and spectral riders missile speed}}",
+        "width": "{{tip|er|icononly = true}} {{tt|80|Individual spectral riders missile width}} / {{tt|480|Width of full effect given by outermost riders}}",
+        "cooldown": "{{ap|140|120|100}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "cast time": "none",
+        "damagetype": "Magic",
+        "projectile": "True",
+        "grounded": "True",
+        "knockdown": "False",
+        "spelleffects": "spellaoe",
+        "spellshield": "True",
+        "notes": "* The spectral rider missiles originate at '''Hecarim's''' location, 145 units behind and 100 units to either side of him, and 290 units behind and 200 units to either side. They travel 1510 units forward parallel to Hecarim from their origin each.\n* Only the spectral riders deal damage to enemies they pierce, '''Hecarim''' only dashes and fears enemies at the end of it."
+      }
+    }
+  }
+}

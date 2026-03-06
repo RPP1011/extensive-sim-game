@@ -1,0 +1,136 @@
+[hero]
+name = "Caitlyn"
+
+[stats]
+hp = 80
+move_speed = 3.3
+armor = 22.0
+magic_resist = 28.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 5.5
+cooldown = 700
+
+# --- Q: Piltover Peacemaker ---
+[[abilities]]
+name = "Piltover Peacemaker"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 10000
+cast_time_ms = 625
+ai_hint = "damage"
+resource_cost = 11
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 0
+damage_type = "physical"
+duration_ms = 1000
+tick_interval_ms = 1000
+amount_per_tick = 12
+
+# --- W: Yordle Snap Trap ---
+[[abilities]]
+name = "Yordle Snap Trap"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 8000
+cast_time_ms = 250
+ai_hint = "crowd_control"
+resource_cost = 4
+max_charges = 2
+charge_recharge_ms = 26000
+
+[[abilities.effects]]
+type = "root"
+duration_ms = 1000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+# --- E: 90 Caliber Net ---
+[[abilities]]
+name = "90 Caliber Net"
+targeting = "direction"
+range = 7.5
+cooldown_ms = 16000
+cast_time_ms = 150
+ai_hint = "damage"
+resource_cost = 15
+
+[abilities.delivery]
+method = "projectile"
+speed = 16.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 20
+damage_type = "magic"
+
+[[abilities.delivery.on_hit]]
+type = "root"
+duration_ms = 1000
+
+[[abilities.delivery.on_hit]]
+type = "grounded"
+duration_ms = 2000
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- R: Ace in the Hole ---
+[[abilities]]
+name = "Ace in the Hole"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 20600
+cast_time_ms = 375
+ai_hint = "damage"
+resource_cost = 20
+
+[abilities.delivery]
+method = "channel"
+duration_ms = 2000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- Passive: Headshot ---
+[[passives]]
+name = "Headshot"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 5000
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+
+[[passives.effects]]
+type = "apply_stacks"
+name = "count"
+count = 1
+max_stacks = 4
+

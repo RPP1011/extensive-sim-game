@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0061_5v5_s2"
+seed = 21984
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["Rengar", "Shen", "Milio", "Fizz", "Volibear"]
+enemy_hero_templates = ["Khazix", "Malphite", "Elise", "Nami", "Annie"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

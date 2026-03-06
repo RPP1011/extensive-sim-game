@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_alchemist_cryomancer_necromancer_s1"
+seed = 11416
+hero_count = 3
+enemy_count = 4
+difficulty = 2
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["alchemist", "cryomancer", "necromancer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

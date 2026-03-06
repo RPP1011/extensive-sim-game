@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0063_3v3_s2"
+seed = 21986
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["Rell", "berserker", "Aphelios"]
+enemy_hero_templates = ["Swain", "Zyra", "Varus"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

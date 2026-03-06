@@ -1,0 +1,285 @@
+{
+  "id": "Rumble",
+  "name": "Rumble",
+  "title": "the Mechanized Menace",
+  "resource_type": "Heat",
+  "tags": [
+    "Fighter",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Junkyard Titan",
+      "description": "Every spell Rumble casts gives him Heat. When he reaches 50% Heat he reaches Danger Zone, granting all his basic abilities bonus effects. When he reaches 100% Heat, he starts Overheating, gaining bonus Attack Speed and granting his basic attacks bonus damage, but making him unable to cast spells for a few seconds.",
+      "wiki_detail": {
+        "champion": "Rumble",
+        "skill": "I",
+        "icon": "Junkyard Titan.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Rumble}} [[Champion ability|basic ability]] casts generate {{tip|Heat}}, which gradually expires after a few seconds without generating Heat. Rumble enters the ''Danger Zone'' while he has at least {{tip|Heat|50 Heat}}, and becomes ''Overheated'' at {{tip|Heat|Max Heat}}.",
+        "blurb2": "{{sbc|[[File:Junkyard Titan 2.png|24px]] Danger Zone:}} '''Rumble's''' basic abilities are empowered.",
+        "blurb3": "{{sbc|[[File:Junkyard Titan 3.png|24px]] Overheated:}} '''Rumble's''' abilities are disabled as his {{tip|Heat}} decays over a few seconds. During this time, his basic attacks gain {{sti|as|{{as|'''bonus''' attack speed}}}} and deal {{as|'''bonus''' magic damage}} based on the {{as|target's '''maximum''' health}}.",
+        "description": "{{sbc|Innate:}} '''Rumble's''' [[Champion ability|basic ability]] casts generate {{tip|Heat}}, which refreshes on subsequent casts and decays by {{tip|Heat|10 Heat}} per second after not using any basic ability within 4 seconds or ''{{ai|The Equalizer|Rumble}}'' within 2 seconds. '''Rumble's''' mech enters the ''Danger Zone'' when at or above {{tip|Heat|50 Heat}}, and becomes ''Overheated'' while at {{tip|Heat|150 Heat}}.",
+        "icon2": "Junkyard Titan 2.png",
+        "description2": "{{sbc|Danger Zone:}} '''Rumble's''' mech enters the ''Danger Zone'', empowering his basic abilities.",
+        "icon3": "Junkyard Titan 3.png",
+        "description3": "{{sbc|Overheated:}} '''Rumble's''' mech becomes ''Overheated'', disabling his [[champion ability|abilities]] as his {{tip|Heat}} decays back down to 0 over 4 seconds. During this time, he gains {{sti|{{as|{{pp|50+((130-50)/17)*(x-1)*(0.7025+0.0175*(x-1))|key=%}} '''bonus''' attack speed}}}} and empowers his [[basic attack]]s to deal {{pp|5 to 40|color=magic damage}} {{as|(+ 25% AP)}} {{as|(+ 5% of the target's '''maximum''' health)}} {{as|'''bonus''' magic damage}} {{tip|on-hit}}. The damage based on the target's health ratio is capped at {{pp|65+((150-65)/17)*(x-1)*(0.7025+0.0175*(x-1))}} against {{tip|monsters}}.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "Magic",
+        "spelleffects": "Proc",
+        "parry": "True",
+        "spellshield": "|notes = \n* While '''Rumble''' is ''overheating'', a [[File: Silence icon.png|20px]] ''Silenced'' icon will appear above him to signify he cannot cast [[champion ability|abilities]]. This is visible to all units.\n* The attacks do not deal the '''bonus''' damage against [[structures]]."
+      }
+    },
+    "Q": {
+      "id": "RumbleFlameThrower",
+      "name": "Flamespitter",
+      "description": "Rumble torches opponents in front of him, dealing magic damage in a cone for 3 seconds. While in Danger Zone this damage is increased.",
+      "tooltip": "Rumble ignites his flamethrower, dealing {{ flatdamage }} plus {{ healthdamage*100 }}% max Health magic damage over {{ flamespitterduration }} seconds, reduced to {{ minionmod*100 }}% against minions.\n\nDanger Zone: Damage is increased to {{ empowereddamage }} plus {{ empoweredhealth }} max Health.\n\nPercent damage is limited to {{ monstercap }} damage on Monsters. {{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9/8/7/6",
+      "cost": "0",
+      "cost_type": " Heat",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "% Max Health",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ healthdamage*100.000000 }}% -> {{ healthdamagenl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ initialheatcost }} Heat",
+      "wiki_detail": {
+        "variables": {
+          "b1": "60",
+          "b5": "180",
+          "hr1": "6",
+          "hr5": "10",
+          "r": "100",
+          "m1": "70"
+        },
+        "champion": "Rumble",
+        "skill": "Q",
+        "icon": "Flamespitter.png",
+        "blurb": "{{sbc|Active:}} {{ci|Rumble}} activates a flamethrower for a short time that continually deals {{as|magic damage}} in a frontal cone.",
+        "blurb4": "{{sbc|{{ai|Junkyard Titan 2|Rumble|Danger Zone}} Bonus:}} ''Flamespitter's'' damage is increased.",
+        "description": "{{sbc|Active:}} '''Rumble''' generates {{tip|Heat|20 Heat}} to activate his flamethrower for 3 seconds, dealing {{as|magic damage}} every {{fd|0.25}} seconds to enemies hit in a frontal cone, reduced to 70% against {{tip|minions}}.",
+        "leveling": "{{st|Total Magic Damage|{{ap|{{#var:b1}} to {{#var:b5}}}} {{as|(+ {{fd|{{#var:r}}}}% AP)}} {{as|(+ {{ap|{{#var:hr1}} to {{#var:hr5}}}}% of target's '''maximum''' health)}}|Magic Damage Per Tick|{{ap|{{#var:b1}}/12 to {{#var:b5}}/12|round=3}} {{as|(+ {{ap|{{#var:r}}/12|round=2}}% AP)}} {{as|(+ {{ap|{{#var:hr1}}/12 to {{#var:hr5}}/12|round=3}}% of target's '''maximum''' health)}}}}<!--\n-->{{st|Total Minion Damage|{{ap|({{#var:b1}} to {{#var:b5}})*{{#var:m1}}/100}} {{as|(+ {{ap|{{#var:r}}*({{#var:m1}}/100)}}% AP)}} {{as|(+ {{ap|({{#var:hr1}} to {{#var:hr5}})*{{#var:m1}}/100}}% of target's '''maximum''' health)}}|Minion Damage Per Tick|{{ap|({{#var:b1}} to {{#var:b5}})*({{#var:m1}}/100)/12|round=3}} {{as|(+ {{ap|({{#var:r}}*{{#var:m1}}/100)/12|round=3}}% AP)}} {{as|(+ {{ap|({{#var:hr1}} to {{#var:hr5}})*({{#var:m1}}/100)/12|round=3}}% of target's '''maximum''' health)}}}}",
+        "description2": "{{sbc|{{ai|Junkyard Titan 2|Rumble|Danger Zone}} Bonus:}} ''Flamespitter's'' [[damage]] is increased by 50%.",
+        "leveling2": "{{st|Total Enhanced Damage|{{ap|{{#var:b1}}*1.5 to {{#var:b5}}*1.5}} {{as|(+ {{ap|{{#var:r}}*1.5}}% AP)}} {{as|(+ {{ap|{{#var:hr1}}*1.5 to {{#var:hr5}}*1.5}}% of target's '''maximum''' health)}}|Enhanced Damage Per Tick|{{ap|{{#var:b1}}*1.5/12 to {{#var:b5}}*1.5/12}} {{as|(+ {{ap|{{#var:r}}*1.5/12}}% AP)}} {{as|(+ {{ap|{{#var:hr1}}*1.5/12 to {{#var:hr5}}*1.5/12}}% of target's '''maximum''' health)}}}}<!--\n-->{{st|Total Enhanced Minion Damage|{{ap|({{#var:b1}} to {{#var:b5}})*({{#var:m1}}/100)*1.5}} {{as|(+ {{ap|{{#var:r}}*{{#var:m1}}/100*1.5}}% AP)}} {{as|(+ {{ap|({{#var:hr1}} to {{#var:hr5}})*{{#var:m1}}/100*1.5}}% of target's '''maximum''' health)}}|Enhanced Minion Damage Per Tick|{{ap|({{#var:b1}} to {{#var:b5}})*({{#var:m1}}/100)/12*1.5}} {{as|(+ {{ap|({{#var:r}}*{{#var:m1}}/100)/12*1.5}}% AP)}} {{as|(+ {{ap|(({{#var:hr1}} to {{#var:hr5}})*({{#var:m1}}/100))/12*1.5|round=4}}% of target's '''maximum''' health)}}}}",
+        "description3": "''Flamespitter's'' damage based on the target's health ratio against monsters is capped at {{pp|65+((300-65)/17)*(x-1)*(0.7025+0.0175*(x-1))}}.",
+        "cooldown": "{{ap|10 to 6}}",
+        "cdstart": "on-cast",
+        "range": "{{tip|er|icononly = true}} {{tt|600 -50|Cone originates 50 units behind Rumble}}",
+        "angle": "{{tip|er|icononly = true}} 64{{degree}}",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "false",
+        "spelleffects": "AoeDoT",
+        "grounded": "|knockdown    =",
+        "projectile": "False",
+        "notes": "* ''Flamespitter'' will deal an additional tick of damage to a minion if it would die to its per-tick damage.\n* '''Rumble''' will instantly turn to face the cursor if he is not moving when ''Flamespitter'' is cast."
+      }
+    },
+    "W": {
+      "id": "RumbleShield",
+      "name": "Scrap Shield",
+      "description": "Rumble pulls up a shield, protecting him from damage and granting him a quick burst of speed. While in Danger Zone, the shield strength and speed bonus is increased.",
+      "tooltip": "Rumble tosses up a barrier, gaining {{ totalshield }} Shield for {{ shieldduration.1 }} seconds and {{ movespeed*100 }}% Move Speed for {{ movespeedduration }} second.\n\nDanger Zone: The barrier grants {{ empoweredshield }} Shield and {{ empoweredms }} Move Speed instead.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "6",
+      "cost": "0",
+      "cost_type": " Heat",
+      "range": "20",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "60/90/120/150/180",
+        "10/15/20/25/30",
+        "20",
+        "0",
+        "1.5",
+        "1",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Shield Amount",
+          "Move Speed"
+        ],
+        "effect": [
+          "{{ baseshield }} -> {{ baseshieldNL }}",
+          "{{ movespeed*100.000000 }}% -> {{ movespeednl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ heatcost }} Heat",
+      "wiki_detail": {
+        "champion": "Rumble",
+        "skill": "W",
+        "icon": "Scrap Shield.png",
+        "blurb": "{{sbc|Active:}} {{ci|Rumble}} briefly {{tip|shields}} himself and gains {{sti|ms|{{as|'''bonus''' movement speed}}}}.",
+        "blurb4": "{{sbc|{{ai|Junkyard Titan 2|Rumble|Danger Zone}} Bonus:}} ''Scrap Shield's'' effects are increased.",
+        "description": "{{sbc|Active:}} '''Rumble''' generates {{tip|Heat|20 Heat}} to grant himself a {{tip|shield}} for {{fd|1.5}} seconds.",
+        "leveling": "{{st|Shield Strength|{{ap|25 to 145}} {{as|(+ 25% AP)}} {{as|(+ 4% of '''maximum''' health)}}}}",
+        "icon2": "Scrap Shield 2.png",
+        "description2": "'''Rumble''' also gains {{sti|ms|{{as|'''bonus''' movement speed}}}} for {{tt|1 to {{fd|1.32}} seconds.|See notes}}",
+        "leveling2": "{{st|Bonus Movement Speed|{{ap|10 to 30}}%}}",
+        "description3": "{{sbc|{{ai|Junkyard Titan 2|Rumble|Danger Zone}} Bonus:}} ''Scrap Shield's'' shield strength and {{as|'''bonus''' movement speed}} are increased in effectiveness by 50%.",
+        "leveling3": "{{st|Enhanced Shield Strength|{{ap|25*1.5 to 145*1.5}} {{as|(+ {{ap|25*1.5}}% AP)}} {{as|(+ {{ap|4*1.5}}% of '''maximum''' health)}}}}\n{{st|Enhanced Bonus Movement Speed|{{ap|10*1.5 to 30*1.5}}%}}",
+        "cooldown": "6",
+        "targeting": "Auto",
+        "cast time": "none",
+        "affects": "Self",
+        "spelleffects": "Shield",
+        "notes": "* The movement speed buff is supposed to last for 1 second, but due to a bug may last {{rutngt|0.25}} longer.\n** Like most buffs, the stat bonus is already only gained at the next stat update (every {{rutngt|0.25}}). Despite this, the duration still inconsistent."
+      }
+    },
+    "E": {
+      "id": "RumbleGrenade",
+      "name": "Electro Harpoon",
+      "description": "Rumble launches a harpoon, electrocuting his target with magic damage, slowing their Move Speed, and reducing their Magic Resist. Rumble can carry 2 harpoons at a time. While in Danger Zone the damage and slow percentage is increased.",
+      "tooltip": "Rumble launches an electrified harpoon, dealing {{ totaldamage }} magic damage, Slowing by {{ baseslowamount }}% for {{ slowduration }} seconds, and reducing the enemy's Magic Resist by {{ percmagicpen*100 }}% for {{ shredduration }} seconds.\n\nHitting an enemy who's already Slowed by this Ability increases the Slow to {{ empoweredslowamount }}% and reduces the enemy's Magic Resist by {{ enhancedmagicpen*100 }}%\n\nDanger Zone: The harpoon deals {{ empdamage }} magic damage instead and the Slow and reduced Magic Resist are increased by 50%.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0.5",
+      "cost": "0",
+      "cost_type": " Heat",
+      "range": "850",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow",
+          "Magic Resist Shred"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ baseslowamount }}% -> {{ baseslowamountNL }}%",
+          "{{ percmagicpen*100.000000 }}% -> {{ percmagicpennl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ firstcastheatcost }} Heat",
+      "wiki_detail": {
+        "champion": "Rumble",
+        "skill": "E",
+        "icon": "Electro Harpoon.png",
+        "blurb": "{{sbc|Active:}} {{ci|Rumble}} shoots a harpoon in the target direction that deals {{as|magic damage}} and briefly {{tip|slow|slows}} the first enemy hit, reducing their {{sti|mpen|{{as|magic resist}}}} for a few seconds. These effects can stack with multiple harpoons.",
+        "blurb2": "'''Rumble''' periodically [[stocks]] an ''Electro Harpoon'', up to a cap.",
+        "blurb3": "{{sbc|{{ai|Junkyard Titan 2|Rumble|Danger Zone}} Bonus:}} ''Electro Harpoon's'' effects are increased.",
+        "description": "{{sbc|Active:}} '''Rumble''' generates {{tip|Heat|20 Heat}} to shoot a harpoon in the target direction that deals {{as|magic damage}} to the first enemy hit, inflicting them with {{sti|magic penetration|{{as|magic resistance reduction}}}} for 4 seconds and {{tip|slow|slowing}} them for 2 seconds. These effects [[stack]] additively with multiple harpoons, refreshing their duration and stacking up to 2 times.",
+        "leveling": "{{st|Magic Damage|{{ap|55 to 155}} {{as|(+ 50% AP)}}|Total Magic Damage|{{ap|55*2 to 155*2}} {{as|(+ {{ap|50*2}}% AP)}}}}\n{{st|Magic Resistance Reduction|{{ap|10 to 18}}%|Total MR Reduction|{{ap|10*2 to 18*2}}%}}\n{{st|Slow|{{ap|15 to 35}}%|Total Slow|{{ap|15*2 to 35*2}}%}}",
+        "description2": "'''Rumble''' periodically [[stocks]] an ''Electro Harpoon'' charge, up to a maximum of 2.",
+        "description3": "{{sbc|{{ai|Junkyard Titan 2|Rumble|Danger Zone}} Bonus:}} ''Electro Harpoon's'' effects are increased by 50%.",
+        "leveling3": "{{st|Enhanced Damage|{{ap|55*1.5 to 155*1.5}} {{as|(+ {{ap|50*1.5}}% AP)}}|Total Enhanced Damage|{{ap|55*1.5*2 to 155*1.5*2}} {{as|(+ {{ap|50*1.5*2}}% AP)}}}}\n{{st|Enhanced Magic Resistance Reduction|{{ap|10*1.5 to 18*1.5}}%|Total Enhanced MR Reduction|{{ap|10*1.5*2 to 18*1.5*2}}%}}\n{{st|Enhanced Slow|{{ap|15*1.5 to 35*1.5}}%|Total Enhanced Slow|{{ap|15*1.5*2 to 35*1.5*2}}%}}",
+        "description4": "''If '''Rumble''' casts Electro Harpoon before his mech becomes {{ai|Junkyard Titan 3|Rumble|Overheated}}, he may still use another charge within 3 seconds of the initial cast.''",
+        "recharge": "6",
+        "range": "{{tip|cr|icononly = true}} 950 / {{tip|er|icononly = true}} 890",
+        "width": "{{tip|er|icononly = true}} 120",
+        "cast time": "{{fd|0.25}}",
+        "cooldown": "{{fd|0.5}}",
+        "speed": "2000",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "projectile": "True",
+        "notes": "* If '''Rumble''' lands a Harpoon on a target that already has a stack of magic resistance reduction while in {{ai|Junkyard Titan 2|Rumble|Danger Zone}}, it will increase the reduction from this first stack to the enhanced amount, as well.\n* A buff with the magic resistance reduction tooltip is applied to {{tip|minions}} and {{tip|pets}}, but their magic resistance is unaffected by ''Electro Harpoon''.{{bug}}\n* Each ''Electro Harpoon'' cast triggers {{tip|Spellblade}} and stacks {{ai|Force Pulse|Kassadin}}.\n* ''Electro Harpoon's'' missile will fail to fire if '''Rumble''' is {{tip|suppression|suppressed}} during the cast time.{{bug|2}}\n{{Effect at cast time end}}\n* '''Rumble''' stocks an ''Electro Harpoon'' charge before the ability is even learned."
+      }
+    },
+    "R": {
+      "id": "RumbleCarpetBomb",
+      "name": "The Equalizer",
+      "description": "Rumble fires off a group of rockets, creating a wall of flames that damages and slows enemies.",
+      "tooltip": "Rumble launches a line of rockets, creating a burning trail that lasts {{ trailduration }} seconds, Slowing by {{ slowamount }}% and dealing {{ damagepersecond }} magic damage per second.\n\nRumble can control the direction of the trail by clicking and dragging while casting this Ability.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "130/105/80",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "1750",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "6",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage Per Second",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamagepersecond }} -> {{ basedamagepersecondNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Rumble",
+        "skill": "R",
+        "icon": "The Equalizer.png",
+        "blurb": "{{sbc|Active:}} {{ci|Rumble}} deploys a barrage of rockets along the target path that create a field which lingers for a few seconds.",
+        "blurb2": "Enemies within the area are continually dealt {{as|magic damage}} and {{tip|slow|slowed}}.",
+        "description": "{{sbc|Active:}} '''Rumble''' deploys a barrage of rockets along the target path that land in a line over {{fd|0.75}} seconds, creating a field of fire for {{fd|4.5}} seconds after the last rocket lands.",
+        "description2": "Enemies struck by the impact or within the field are marked as ''Burning'' for 1 second, which deals {{as|magic damage}} every {{fd|0.5}} seconds, {{tip|slow|slows}} by 35%, and refreshes continuously while in the area.",
+        "leveling2": "{{st|Magic Damage Per Tick|{{ap|70 to 140}} {{as|(+ {{fd|17.5}}% AP)}}}}\n{{st|Minimum Magic Damage|{{ap|70*2 to 140*2}} {{as|(+ {{ap|17.5*2}}% AP)}}|Maximum Magic Damage|{{ap|70*5*2 to 140*5*2}} {{as|(+ {{ap|17.5*5*2}}% AP)}}}}",
+        "cooldown": "{{ap|130 to 80}}",
+        "target range": "1700 <!--Indicator override says 1750 range, but you do have to walk into range for 1700-->",
+        "range": "{{tip|cr|icononly = true}} {{tt|-175|Damage range behind vector origin}} / {{tt|1135|Maximum damage range forward, estimated}}",
+        "width": "{{tip|cr|icononly = true}} {{tt|410 - {{fd|368.4}}|Widest and thinnest point of the chain of circles, respectively}}",
+        "speed": "{{tt|1600|Vector deployment speed}}",
+        "targeting": "Vector",
+        "cast time": "None / {{tt|{{fd|0.5833}}|Starts after the spell is cast}}",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "False",
+        "spelleffects": "aoedot",
+        "projectile": "false",
+        "notes": "* A static target standing where the missiles first impact may take an extra tick of damage (11 ticks), while a static target standing at the end of the trail may take one fewer tick (9 ticks).{{bug}}\n* ''The Equalizer's'' hitbox consists of a row of rockets with a circular damage hitbox each. The radius of each is 205 units, and rockets drop at a distance of 180 units between one another when ''The Equalizer'' is cast. \n** The missile that manages the rockets being deployed starts 150 units behind the target vector origin, and thus drops the first rocket at 30 units in front of the cast vector origin after {{rutngt|0.1125}}.\n** The rockets are intended to not deal damage for the first {{fd|0.25}} seconds. Due to a bug, this becomes {{fd|0.25}}-{{fd|0.5}} seconds 'at random'.\n*** If Rumble dies while ''The Equalizer'' is just cast, this buff will be removed by death and the area of effect will start dealing damage sooner.{{bug}}",
+        "_comments": [
+          "Indicator override says 1750 range, but you do have to walk into range for 1700"
+        ]
+      }
+    }
+  }
+}

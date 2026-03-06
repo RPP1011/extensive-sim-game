@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0062_5v5_s1"
+seed = 11985
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["knight", "elementalist", "cleric", "mage", "engineer"]
+enemy_hero_templates = ["Sivir", "Aurora", "Vayne", "XinZhao", "Soraka"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

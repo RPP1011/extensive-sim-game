@@ -1,0 +1,309 @@
+{
+  "id": "Ornn",
+  "name": "Ornn",
+  "title": "The Fire below the Mountain",
+  "resource_type": "Mana",
+  "tags": [
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Living Forge",
+      "description": "Ornn gains an additional bonus Armor and Magic Resist from all sources.\n\nOrnn can spend gold to forge non-consumable items anywhere.\n\nAdditionally, he can create masterwork items for himself and for his allies.",
+      "wiki_detail": {
+        "champion": "Ornn",
+        "skill": "I",
+        "description": "{{sbc|Innate - Living Forge:}} '''Ornn''' can purchase non-[[Consumable item|consumable]] [[items]] from anywhere on the field by forging them himself, and is also presented a ''Forge Menu'' to quickly forge his recommended items. Once '''Ornn''' selects an item to forge, he {{tip|channel|channels}} for 4 seconds, building the item and paying its {{g|gold}} cost upon completion. The channel is {{tip|interrupt|interrupted}} if '''Ornn''' takes damage from enemy {{tip|champions}} or {{tip|turrets}}. ''Living Forge'' is disabled for 4 seconds after starting the channel.",
+        "description2": "{{sbc|Innate - Master Craftsman:}} '''Ornn''' uses his craftsmanship in forgery to upgrade most [[Legendary item]]s that he and his teammates own into {{sbc|Masterwork}} items, increasing the [[Gold efficiency (League of Legends)|gold value]] of all {{tt|upgradeable stats|See Details.}} by exactly {{g|1000}}, shared equally among them. When '''Ornn''' reaches [[Experience (champion)|level]] 13, the first eligible [[Legendary item]] in his inventory is upgraded automatically. For each level after 13 and before 18 (levels 14–17, total of 4, once per ally per game), '''Ornn''' can upgrade the first eligible [[Legendary item]] in an allied champion's inventory into its {{sbc|Masterwork}} variant. He can do so by selecting the ally while within 600 range, and forges the item by performing ''Living Forge's'' {{tip|channel}}.<br><br>Additionally, '''Ornn''' increases his {{sti|{{as|'''bonus''' armor}}}}, {{sti|{{as|'''bonus''' magic resistance}}}} and {{sti|{{as|'''bonus''' health}}}} by 10% from all sources, further increased by 4% each time he upgrades a ''Legendary'' item into a {{sbc|Masterwork}} item, for a total increase of 30% to each stat after the maximum of 5 upgrades.",
+        "description3": "{{sbc|Innate - Temper:}} '''Ornn's''' [[basic attack]]s against {{tip|Brittle}} enemies {{tip|airborne|knock them back}} a short distance. '''Ornn's''' and allies' {{tip|immobilize|immobilizing}} effects against ''Brittle'' enemies will consume the debuff to deal {{as|'''bonus''' magic damage}} equal to {{as|{{pp|key=%|type='''Ornn's''' level|10 to 18}} of the target's '''maximum''' health}}, capped at 250 against {{tip|monsters}}, and cause the crowd control to last 30% longer (if applicable).",
+        "description4": "'''''Ornn''' will prioritize upgrading the first Legendary item eligible for a {{sbc|Masterwork}} upgrade based on its position in the inventory, detecting each slot until an eligible item is found.''",
+        "customlabel": "{{tt|Forge Disable Time|Unaffected by ability haste}}",
+        "custominfo": "{{tt|4|Cooldown begins on channel start}}",
+        "targeting": "Passive",
+        "parry": "true",
+        "affects": "Allies",
+        "damagetype": "Magic",
+        "spelleffects": "Proc",
+        "spellshield": "true",
+        "silence": "true",
+        "notes": "* {{sbc|Masterwork}} items inherit all properties of their pre-upgrade version, including the cooldowns of their [[Named item effect|effects]]. Internally, they are handled through an item modifier. An upgraded item gains the <code>('''{{as|Masterwork|buzzword3}}''')</code> descriptor next to its name in tooltips as well as a special Masterwork frame overlay on the item's icon itself, both indicating the application of ''Living Forge's'' modifier.\n* Statistics' gold value for {{sbc|Masterwork}} item purposes is shown in the following table. The table also indicates all upgradeable stats.\n** {{g|31.25}} per 1 point of {{as|ability haste}}.\n** {{g|20}} per 1 point of {{as|ability power}}.\n** {{g|35}} per 1 point of {{as|attack damage}}.\n** {{g|30}} per 1% of {{as|attack speed}}.\n** {{g|20}} per 1 point of {{as|armor}}.\n** {{g|18}} per 1 point of {{as|magic resistance}}.\n** 1 point of {{as|health}} has a variable {{g|gold value}}, based on the number of upgradeable stats that exist on the item:\n**# If health is the item's only upgradeable stat, it receives +375 health and health is valued at {{g|2.{{recurring|6}}}} per point.\n**# If the item has health and only one other upgradeable stat, it receives +185 health and health is valued at {{g|2.{{recurring|702}}}} per point.\n**# If the item has health and two other upgradeable stats, it receives +125 health and health is valued at {{g|2.{{recurring|6}}}} per point.\n**# If the item has health and three other upgradeable stats, it receives +90 health and health is valued at {{g|2.{{recurring|7}}}} per point.\n** While not currently possible, if an item has no upgradeable stats, {{g|1000}} worth of health (valued at {{g|2.{{recurring|6}}}} per point) is added to the item.<ref>[https://www.reddit.com/r/leagueoflegends/comments/1d2g5g8/why_does_edge_of_finality_only_give_525_gold/l64is3z/?context=3 GalaxySmash on if an item has no upgradeable stats]</ref>\n* Decimal values are not displayed for stats in {{sbc|Masterwork}} items' tooltips, but they are still granted as normal.<!--\n* Below is a table of all eligible items and their stats ([[Template:Ornn Masterwork items|edit]])            ----       feature is planned\n{{Ornn Masterwork items}}-->\n* Health and mana items built on the field will retain '''Ornn's''' previous {{as|health}} and {{as|mana}} percentage. Returning to base still brings health and mana back to full.\n* '''Ornn's''' basic attacks against {{tip|Brittle}} enemies will end the duration of the debuff [[on-hit]] prematurely even if the {{tip|airborne|knock back}} is not applied.\n** His basic attacks against {{tip|Brittle}} epic {{tip|monster|monsters}} will still render the debuff without the {{tip|airborne|knock back}} being applied against them.\n* {{tip|Brittle|Brittle's}} {{tip|Tenacity}} reduction will benefit all applicable types of {{tip|crowd control}}, not just {{tip|immobilize|immobilizes}}. The following do not consume ''Brittle'' but benefit from the reduction: {{tip|blind|blinds}}, {{tip|cripple|cripples}}, {{tip|disarm|disarms}}, {{tip|ground|grounding}}, {{tip|silence|silences}}, and {{tip|slow|slows}}.\n* {{tip|Spell shield}} will block both the knock back and the bonus damage from '''Ornn's''' empowered {{tip|brittle}} attack.\n* The {{as|'''bonus''' magic damage}} inflicted by ''Brittle'' is credited to '''Ornn''', and benefits from his {{sti|{{as|magic penetration}}}}.\n* The following table refers for interactions while '''Ornn''' is {{tip|channel|channeling}}:\n** All of '''Ornn's''' actions are disabled during the first {{fd|0.5}} seconds of the channel.\n{{ct|channel|attack=interrupts|cast=interrupts|move=interrupts|items=interrupts,,, false|consume=interrupts|spells=interrupts|interrupts=death, silence|damage=true}}",
+        "tips": "* Although {{tip|airborne}} effects won't be extended by {{tip|Brittle}}, if the spell simultaneously {{tip|stun|stuns}} the target, this stun will be extended and persist past the airborne duration, for an overall increased crowd control duration.\n** ''{{cai|Searing Charge|Ornn}}'' and ''{{ai|Call of the Forge God|Ornn}}'' each apply both airborne and stun simultaneously for the same duration for this reason.",
+        "yvideo": "Ornn - Passive",
+        "flavorsound": "{{sm2|Ornn Original P allypurchasesitem 11.ogg}} ''\"The weapons I forge do not have names. They have ambitions.\"''<br>{{sm2|Ornn Original Passive SFX 0.ogg}} ''Masterwork item alert.''\n<!-- Blurb -->",
+        "blurb": "{{sbc|Innate - Living Forge:}} {{ci|Ornn}} can {{g|purchase}} items from anywhere by {{tip|channel|channeling}} for a few seconds.",
+        "blurb2": "{{sbc|Innate - Master Craftsman:}} At levels 13 and above, '''Ornn''' , he can upgrade a nearby ally's item into a Masterwork item. '''Ornn''' increases his '''bonus''' {{sti|{{as|health}}}}, {{sti|{{as| armor}}}} and {{sti|mr|{{as|magic resist}}}} from all sources, further increased each time he makes a Masterwork item.",
+        "blurb3": "{{sbc|Innate - Temper:}} '''Ornn's''' basic attacks against {{tip|Brittle}} targets {{tip|airborne|knock them back}}. {{tip|immobilize|Immobilizing}} effects against Brittle targets will consume the debuff to deal {{as|'''bonus''' magic damage}} based on the {{as|'''target's''' maximum health}}.",
+        "icon": "Living Forge.png",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "OrnnQ",
+      "name": "Volcanic Rupture",
+      "description": "Ornn slams the ground, sending out a fissure dealing damage and slowing enemies hit. After a small delay, a magma pillar forms at the end location.",
+      "tooltip": "Ornn slams the ground, creating a fissure dealing {{ totaldamage }} physical damage and Slowing by {{ e5 }}% for {{ e6 }} seconds. A pillar of rock forms at the fissure's end for {{ e3 }} seconds. {{ spellmodifierdescriptionappend }}",
+      "cooldown": "9/8.5/8/7.5/7",
+      "cost": "45",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "20/45/70/95/120",
+        "1",
+        "4",
+        "0",
+        "40",
+        "2",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ornn",
+        "skill": "Q",
+        "icon": "Volcanic Rupture.png",
+        "blurb": "{{sbc|Active:}} {{ci|Ornn}} sends a fissure in the target direction that deals {{as|physical damage}} and {{tip|slow|slows}} enemies hit for a short time.",
+        "blurb2": "The fissure stops upon hitting an enemy {{tip|champion}} or max range, erupting a pillar of [[terrain]] that {{tip|airborne|knocks aside}} enemies and lingers for a few seconds.",
+        "description": "{{sbc|Active:}} '''Ornn''' sends a fissure in the target direction that deals {{as|physical damage}} to enemies hit and {{tip|slow|slows}} them by 40% for 2 seconds.",
+        "leveling": "{{st|Physical Damage|{{ap|20 to 120}} {{as|(+ 110% AD)}}}}",
+        "description2": "The fissure stops at maximum range or 200 units behind the first enemy champion struck. After {{fd|1.125}}-seconds, a magma pillar then erupts to {{tip|airborne|knock aside}} enemies, though not through terrain, and linger as impassible terrain for 4 seconds.",
+        "description3": "''The pillar will not expire while '''Ornn''' is {{ai|Searing Charge|Ornn|charging}}.''",
+        "target range": "{{tip|cr|icononly = true}} 750",
+        "width": "{{tip|er|icononly = true}} 130",
+        "speed": "1800",
+        "cost": "45",
+        "costtype": "Mana",
+        "cooldown": "{{ap|9|8.5|8|7.5|7}}",
+        "cast time": "{{fd|0.25}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spelleffects": "spellaoe",
+        "spellshield": "special",
+        "projectile": "true",
+        "notes": "* The fissure will move an 200 units beyond the first champion it hits, not exceeding the maximum range of the ability. ''It can still damage additional targets.''\n* If launched in a wall, pillar will try to appear on the other side of the wall, if it cannot the pillar will be destroyed.\n* {{tip|Spell shield}} will not prevent the {{tip|airborne|knock aside}} from the magma pillar forming.\n{{Effect at cast time start}}",
+        "yvideo": "Ornn - Q"
+      }
+    },
+    "W": {
+      "id": "OrnnW",
+      "name": "Bellows Breath",
+      "description": "Ornn advances, breathing fire. Enemies hit by the final gout of flame become Brittle.",
+      "tooltip": "Ornn stomps forward Unstoppably while breathing fire, dealing {{ maxpercenthpperticktooltip }}% max Health magic damage over {{ breathduration }} seconds. Enemies hit by the final bout of flame become Brittle for {{ brittleduration }} seconds.\n\nImmobilizing effects on Brittle targets have their duration increased by 30% and deal an additional {{ brittlepercentmaxhpcalc }} max Health magic damage. Ornn's Attacks against Brittle targets Knock them Back, dealing the additional damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/11.5/11/10.5/10",
+      "cost": "45/50/55/60/65",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "25000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "% Health damage",
+          "Minimum Damage",
+          "Maximum Damage",
+          "@AbilityResourceName@ Cost",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ maxpercenthpperticktooltip }}% -> {{ maxpercenthpperticktooltipNL }}%",
+          "{{ minimumdamagepertick*5.000000 }} -> {{ minimumdamageperticknl*5.000000 }}",
+          "{{ monsterdamagepertickcap*5.000000 }} -> {{ monsterdamagepertickcapnl*5.000000 }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ornn",
+        "skill": "W",
+        "icon": "Bellows Breath.png",
+        "blurb": "{{sbc|Active:}} {{ci|Ornn}} marches in the target direction with {{tip|displacement immunity}}, belching fire in a cone that continually deals {{as|magic damage}} for a brief time. The final gout of flame will apply {{tip|Brittle}} for a short time.",
+        "blurb4": "{{sbc|{{tip|displacement immunity|nolink=true}}:}} The march cannot be deterred by {{tip|crowd control}}. <br/><br/>\n{{sbc|{{tip|Brittle|nolink=true}}:}} The target loses {{sti|tenacity}}, increasing the duration of incoming {{tip|crowd control}}.",
+        "description": "{{sbc|Active:}} '''Ornn''' {{tip|lunge|marches}} forward {{tt|90|Estimated}} units in the target direction over {{fd|0.75}} seconds, gaining {{tip|displacement immunity}} and becoming {{tip|lockout|unable to act}} for the duration.",
+        "description2": "Over the march he belches fire over a cone in front of him, dealing {{as|magic damage}} every {{fd|0.15}} seconds to enemies hit. The final gout of flame will apply {{tip|Brittle}} for 3 seconds.",
+        "description3": "''Bellows Breath'' has a minimum damage threshold, which is also the damage dealt to {{tip|minion|minions}}. {{tip|Monster|Monsters}} take modified damage as well.",
+        "leveling2": "{{st|Total Magic Damage|{{as|{{ap|12 to 16}}% of target's '''maximum''' health}}|Magic Damage Per Tick|{{as|{{ap|12/5 to 16/5}}% of target's '''maximum''' health}}}}",
+        "leveling3": "{{st|Total Minimum/Minion Damage|{{ap|80 to 280}}|Minimum/Minion Damage Per Tick|{{ap|80/5 to 280/5}}}}\n{{st|Total Monster Damage|{{ap|155 to 255}}|Monster Damage Per Tick|{{ap|155/5 to 255/5}}}}",
+        "target range": "500",
+        "effect radius": "{{tt|175|Flame width (estimated)}}",
+        "cast time": "none",
+        "cost": "{{ap|45 to 65}}",
+        "costtype": "Mana",
+        "cooldown": "{{ap|12 to 10}}",
+        "targeting": "Direction",
+        "affects": "Self / Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "aoe",
+        "spellshield": "Special",
+        "projectile": "False",
+        "grounded": "false",
+        "notes": "* {{tip|Spell shield}} will negate the final instance of damage and prevents {{tip|Brittle}} from being applied.\n* '''Ornn''' can see the on-target VFX on targets that are being struck even while they are in the [[Sight|fog of war]].\n* '''Ornn''' places himself onto the ground and interrupts {{tip|airborne|displacements}} affecting him upon casting ''Bellow's Breath''.\n* The following table refers for interactions while '''Ornn''' is performing ''Bellows Breath'':\n{{ct|attack=false|move=false|cast=false|items=false|consume=false|spells=true,false,false,false,false|interrupts=death}}",
+        "yvideo": "Ornn - W"
+      }
+    },
+    "E": {
+      "id": "OrnnE",
+      "name": "Searing Charge",
+      "description": "Ornn charges, dealing damage to enemies he passes through. If Ornn collides with terrain while charging, the impact creates a shockwave around him which deals damage and knocks up enemies.",
+      "tooltip": "Ornn charges, dealing {{ totaldamage }} physical damage. If Ornn rams into terrain, he creates a shockwave that Knocks Up enemies for {{ knockupduration }} seconds and applies the same damage to those not hit by the charge.\n\nOrnn's charge destroys magma pillars and terrain created by enemies.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13.5/13/12.5/12",
+      "cost": "35/40/45/50/55",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "450",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Dash Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ornn",
+        "skill": "E",
+        "icon": "Searing Charge.png",
+        "blurb": "{{sbc|Active:}} {{ci|Ornn}} charges in the target direction, dealing {{as|physical damage}} to enemies he passes through.",
+        "blurb2": "'''Ornn''' will stop upon hitting terrain, creating a shockwave that deals {{as|physical damage}} to enemies, {{tip|airborne|knocks them up}} and briefly {{tip|stun|stuns}} them. This will also destruct his ''{{ai|Volcanic Rupture|Ornn}}'' and enemy-created [[terrain]].",
+        "description": "{{sbc|Active:}} '''Ornn''' {{tip|dash|charges}} in the target direction, dealing {{as|physical damage}} to enemies he passes through and stopping upon colliding with terrain.",
+        "leveling": "{{st|Physical Damage|{{ap|80|125|170|215|260}} {{as|(+ 40% '''bonus''' armor)}} {{as|(+ 40% '''bonus''' magic resistance)}}}}",
+        "description2": "If '''Ornn''' collides with terrain during the charge, he creates a shockwave that {{tip|airborne|knocks up}} and {{tip|stuns}} nearby enemies for {{fd|1.25}} seconds and deals the same damage if they were not already hit by the charge.",
+        "description3": "The shockwave destroys the pillar formed by ''{{ai|Volcanic Rupture|Ornn}}'' and partially destroys [[terrain]] created by enemy {{tip|champions}}.",
+        "target range": "800 / {{tt|650|dash distance}}",
+        "effect radius": "360 / {{tt|150|Terrain collision range}}",
+        "speed": "1600",
+        "cost": "{{ap|35 to 55}}",
+        "costtype": "Mana",
+        "cooldown": "{{ap|14 to 12}}",
+        "cast time": "{{fd|0.35}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spelleffects": "Area of effect",
+        "spellshield": "True",
+        "grounded": "True",
+        "knockdown": "True",
+        "notes": "* {{tip|Spell shield|Spell shields}} may only block one instance of damage.\n* The area in which enemies will be knocked up is indicated at '''Ornn''''s impact location.\n** The indicator is not shown for [[Terrain#Player-Generated|player-generated terrain]].\n* {{tip|Brittle}} enemies without {{tip|Tenacity}} of their own will be {{tip|stun|stunned}} for a total of {{fd|1.625}} seconds.\n* ''Searing Charge'' can interact with [[Terrain#Player-Generated|player-generated terrain]].\n* '''Ornn''' will not {{tip|dash}} after the cast time if he is {{tip|airborne}} or {{tip|resurrection|resurrecting}}.\n* {{tip|Displacement immunity}} will also resist the application of the {{tip|stun}}.\n* The following table refers for interactions while '''Ornn''' is in cast time:\n** The lockout persists for the dash and for {{fd|0.5}} seconds after the dash ends.\n{{ct|cast|items=false|consume=false|spells=true,false,false,false,false}}",
+        "yvideo": "Ornn - E"
+      }
+    },
+    "R": {
+      "id": "OrnnR",
+      "name": "Call of the Forge God",
+      "description": "Ornn summons a massive elemental at a location which travels toward him with increasing speed. Enemies run over by the elemental take damage, are slowed and are made Brittle. Ornn can recast the ability to charge into the elemental, redirecting it in the direction he hits it, causing the elemental to affect any enemies it runs over to be knocked up, dealing the same damage and re-applying Brittle.",
+      "tooltip": "Ornn summons a massive lava elemental, which stampedes towards him, dealing {{ rdamagecalc }} magic damage, applying Brittle to, and Slowing enemies hit by {{ rslowpercentbasepremath }}% for {{ brittledurationtooltiponly }} seconds.\n\nOrnn can Recast to dash with a headbutt. If he dashes into the elemental, he redirects and empowers it, causing it to Knock Up the first champion for {{ rstunduration }} second and subsequent champions for {{ minstun }} seconds. The elemental also deals {{ rdamagecalc }} magic damage and reapplies Brittle.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "140/120/100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "2500",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ rbasedamage }} -> {{ rbasedamageNL }}",
+          "{{ rslowpercentbasepremath }} -> {{ rslowpercentbasepremathNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ornn",
+        "skill": "R",
+        "icon": "Call of the Forge God.png",
+        "blurb": "{{sbc|Active:}} {{ci|Ornn}} summons a lava elemental that stampedes toward him, dealing {{as|magic damage}} and {{tip|slow|slowing}} enemies hit for a short time. <br/><br/>''Call of the Forge God'' can be recast while the elemental is active.",
+        "blurb2": "{{sbc|Recast:}} '''Ornn''' {{tip|dash|dashes}} in the target direction. If he hits the elemental, he sends it stampeding in the new direction, dealing {{as|magic damage}} to enemies hit, {{tip|airborne|knocking them up}} and {{tip|stun|stunning}} them for a brief time.",
+        "blurb3": "Each pass applies {{tip|Brittle}} to enemies hit for a short time.",
+        "blurb4": "{{sbc|{{tip|Brittle|nolink=true}}:}} The target loses {{sti|tenacity}}, increasing the duration of incoming {{tip|crowd control}}.",
+        "description": "{{sbc|Active:}} '''Ornn''' sounds his horn, summoning a lava elemental at maximum range from the target direction that stampedes towards his casting position at increasing speed. The elemental deals {{as|magic damage}} to enemies it passes through and {{tip|slow|slows}} them for 2 seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|125|175|225}} {{as|(+ 20% AP)}}}}\n{{st|Slow|{{ap|40 to 60}}%}}",
+        "description2": "''Call of the Forge God'' can be recast after {{tt|{{fd|1.25}}|Includes the cast time}} seconds while the elemental is active.",
+        "icon3": "Call of the Forge God 2.png",
+        "description3": "{{sbc|Recast:}} '''Ornn''' {{tip|dash|dashes}} in the target direction, though not through terrain. If he collides with the elemental, he sends it stampeding in the same direction. The elemental deals the same damage to enemies it passes through and {{tip|airborne|knocks them up}} and {{tip|stun|stuns}} them for 1 second, reduced to {{fd|0.5}} seconds after the first enemy {{tip|champion}} hit.",
+        "leveling3": "{{st|Total Magic Damage|{{ap|250|350|450}} {{as|(+ 40% AP)}}}}",
+        "description4": "Each pass applies {{tip|Brittle}} to targets for 3 seconds and can affect enemies only once. The elemental briefly grants {{tip|sight}} around its trajectory as it travels.",
+        "target range": "300",
+        "effect radius": "{{tt|3000|1st pass}} / {{tt|2550|2nd pass}}",
+        "width": "340",
+        "speed": "{{tt|1200|Base}} / {{tt|100|Acceleration}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "cooldown": "{{ap|140|120|100}}",
+        "cdstart": "post-effect",
+        "cast time": "{{fd|0.5}}",
+        "targeting": "Direction",
+        "affects": "Enemies / Elemental",
+        "damagetype": "Magic",
+        "spelleffects": "spellaoe",
+        "spellshield": "Special",
+        "projectile": "True",
+        "grounded": "special",
+        "knockdown": "true",
+        "notes": "* Both casts count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n** Despite this, the effects of both casts count as the same {{tip|cast instance}}.\n* ''Call of the Forge God'' cannot be recast while {{tip|ground|grounded}} or {{tip|root|rooted}}.\n* {{tip|Brittle}} enemies without {{tip|Tenacity}} of their own will be {{tip|stun|stunned}} for a total of {{fd|1.3}} seconds.\n* {{tip|Spell shield|Spell shields}} may only block one pass.\n* '''Ornn''' becomes locked out of all actions during the recast's dash and for {{fd|0.5}} seconds afterwards.\n{{Effect at cast time start}}\n* {{tip|Displacement immunity}} will also resist the application of the {{tip|stun}}.\n{{ct|cast}}",
+        "yvideo": "Ornn - R",
+        "flavorsound": "<sm2 vol=0.4>Ornn_Original_SFX_R.ogg</sm2> ''Activation alert.''"
+      }
+    }
+  }
+}

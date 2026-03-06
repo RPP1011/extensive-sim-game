@@ -1,0 +1,288 @@
+{
+  "id": "DrMundo",
+  "name": "Dr. Mundo",
+  "title": "the Madman of Zaun",
+  "resource_type": "None",
+  "tags": [
+    "Tank",
+    "Fighter"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Goes Where He Pleases",
+      "description": "Dr. Mundo resists the first Immobilizing effect that hits him, instead losing Health and dropping a chemical cannister nearby. Dr. Mundo can pick it up by walking over it, restoring Health and reducing this Ability's Cooldown.\n\nDr. Mundo also has significantly increased Health regeneration.",
+      "wiki_detail": {
+        "champion": "Dr. Mundo",
+        "skill": "I",
+        "icon": "false",
+        "blurbicon": "Goes Where He Pleases.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Dr. Mundo}} {{sti|health regeneration|regenerates}} an additional portion of {{as|his '''maximum''' health}}.",
+        "blurb2": "{{sbc|Passive:}} Periodically, '''Dr. Mundo''' gains immunity to the next hostile spell's {{tip|immobilize|immobilizing}} effects, and upon resisting one, he loses a portion of {{as|his '''current''' health}} and drops a canister nearby.",
+        "blurb3": "'''Dr. Mundo''' and enemy {{tip|champions}} can move near the canister to destroy it. If he destroys the canister, the cooldown is {{sti|cdr|reduced}} and he will {{tip|heal}} for a portion of {{as|his '''maximum''' health}}.",
+        "description": "{{sbc|Innate:}} '''Dr. Mundo''' {{stil|health regeneration|regenerates}} an additional{{ft|{{as|{{pp|0.4 to 0.65 for 6;0.75 to 1.25 for 6;1.4;1.55;1.7;1.9;2.1;2.3|1 to 18 by 1|formula=0.4% + 0.05% per level at level 1, then + 0.1% per level starting at level 7, then + 0.15% per level starting at level 13, then + 0.2% per level starting at level 16|key=%}} of his {{sti|'''maximum''' health}}}} every 5 seconds.|{{as|{{pp|0.4/5 to 0.65/5 for 6;0.75/5 to 1.25/5 for 6;1.4/5;1.55/5;1.7/5;1.9/5;2.1/5;2.3/5|key=%}} of his {{sti|'''maximum''' health}}}} each second.}}",
+        "icon2": "Goes Where He Pleases.png",
+        "description2": "{{sbc|Passive:}} Periodically, '''Dr. Mundo''' gains immunity to the {{tip|immobilize|immobilizing}} effects of the next hostile spell to affect him. Upon resisting one, '''Dr. Mundo''' pays a {{as|health cost}} equal to {{as|4% of his '''current''' health}} and propels a canister that lands 525 units in the general direction of its source, remaining on the ground for 7 seconds.",
+        "description3": "'''Dr. Mundo''' can move near the canister to consume it, {{tip|heal|healing}} himself for {{as|4% of his '''maximum''' health}} and reducing the {{sti|cooldown}} of ''Goes Where He Pleases'' by 15 seconds. Enemy {{tip|champion|champions}} can move near it to destroy it.",
+        "description4": "''Goes Where He Pleases' '' cooldown resets upon [[respawn|respawning]].",
+        "static": "{{pp|60 to 15 for 7|1;3;6;8;11;13;16}}",
+        "targeting": "Passive",
+        "affects": "Self",
+        "projectile": "false",
+        "video": "|notes        = \n* Upon being triggered by a hostile {{tip|immobilize|immobilizing}} effect, ''Goes Where He Pleases'' will also grant '''Dr. Mundo''' immunity to additional immobilizing effects from the same {{tip|cast instance}}.\n** Abilities where non-immobilizing effects and damage are nested into immobilizing ones will have them also prevented. Non-immobilizing effects and damage applied separately (the vast majority of cases) are not prevented.\n* {{tip|Spell shield}} and {{ai|Black Shield|Morgana}} take priority over ''Goes Where He Pleases''.\n* ''Goes Where He Pleases'' will not trigger against nor resist {{cais|R|Rell}} {{tip|kinematics|ongoing kinematic effect}}.\n** It will trigger against and prevent the ability's initial {{tip|airborne|displacement}}, but even in that case, not prevent the continous effect.\n* The canister, whether in flight and on the ground, will transition in and out of {{cai|Realm of Death|Mordekaiser}} alongside ''Dr. Mundo''.{{bug|2}}\n* The canister cannot be interacted with while {{tip|untargetable}}.",
+        "flavorsound": "{{sm2|Dr. Mundo_Original_Move_2.ogg}} ''\"Mundo goes where he pleases!\"''"
+      }
+    },
+    "Q": {
+      "id": "DrMundoQ",
+      "name": "Infected Bonesaw",
+      "description": "Dr. Mundo throws an infected bonesaw, dealing damage to the first enemy hit based on their current health and slowing them.",
+      "tooltip": "Dr. Mundo hurls his bonesaw, dealing {{ currenthealthdamage*100 }}% current Health magic damage to the first enemy hit and Slowing them by {{ slowamount*100 }}% for {{ slowduration }} seconds.\n\nIf the bonesaw hits a champion or monster, Dr. Mundo restores {{ healthrestoreonhitchampionmonster }} Health. If it hits a non-champion or non-monster, Dr. Mundo instead restores {{ healthrestoreonhitminion }} Health.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "4",
+      "cost": "0",
+      "cost_type": " Health",
+      "range": "975",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Current Health Damage",
+          "Minimum Damage",
+          "Monster Damage Cap",
+          "Health Cost"
+        ],
+        "effect": [
+          "{{ currenthealthdamage*100.000000 }}% -> {{ currenthealthdamagenl*100.000000 }}%",
+          "{{ minimumdamage }} -> {{ minimumdamageNL }}",
+          "{{ maximummonsterdamage }} -> {{ maximummonsterdamageNL }}",
+          "{{ healthcost }} -> {{ healthcostNL }}"
+        ]
+      },
+      "resource": "{{ healthcost }} Health",
+      "wiki_detail": {
+        "champion": "Dr. Mundo",
+        "skill": "Q",
+        "icon": "Infected Bonesaw.png",
+        "blurbicon": "Infected Bonesaw.png",
+        "blurb": "{{sbc|Active:}} {{ci|Dr. Mundo}} throws an infected bonesaw in the target direction that deals {{as|magic damage}} and {{tip|slow|slows}} the first enemy hit.",
+        "blurb2": "If the bonesaw hits an enemy {{tip|champion}}, '''Dr. Mundo''' {{tip|heals}} for the entire {{as|health cost}}, reduced to half {{as|health cost}} when a non-champion is hit.",
+        "description": "{{sbc|Active:}} '''Dr. Mundo''' throws an infected bonesaw in the target direction that deals {{as|magic damage}} to the first enemy hit and {{tip|slow|slows}} them by 40% for 2 seconds.",
+        "leveling": "{{st|Magic Damage|{{as|{{ap|20 to 30}}% of target's '''current''' health}}}}",
+        "description2": "''Infected Bonesaw'' has a minimum damage threshold, and is capped against {{tip|monsters}}.",
+        "leveling2": "{{st|Minimum Damage|{{ap|80 to 280}}}}\n{{st|Capped Monster Damage|{{ap|350 to 650}}}}",
+        "description3": "If the bonesaw hits an enemy, '''Dr. Mundo''' {{tip|heals}} for 50% of the {{as|health cost}}, increased to 100% against {{tip|champions}} or {{tip|monsters}}.",
+        "cooldown": "4",
+        "cost": "{{as|{{ap|50 to 90}}|health}}",
+        "costtype": "{{as|Health}}",
+        "cast time": "{{fd|0.25}}",
+        "target range": "{{tip|cr|icononly = true}} 1050 / {{tip|er|icononly = true}} 990",
+        "width": "{{tip|er|icononly = true}} 120",
+        "speed": "2000",
+        "targeting": "Direction",
+        "affects": "Self, Enemies",
+        "damagetype": "magic",
+        "spellshield": "true",
+        "spelleffects": "spell",
+        "projectile": "true",
+        "video": "|notes        = \n{{Effect at cast time start}}\n* {{tip|Spell shield}} blocking the ability's effects on the enemy does not prevent '''Dr. Mundo''' from receiving the health cost refund.",
+        "flavorsound": "{{sm2|Dr. Mundo_Original_Q_0.ogg}} ''\"Bonesaw!\"''"
+      }
+    },
+    "W": {
+      "id": "DrMundoW",
+      "name": "Heart Zapper",
+      "description": "Dr. Mundo electrocutes himself, dealing persistent damage to nearby enemies and storing a portion of damage he takes. At the end of the duration or on Recast, Dr. Mundo deals a burst of damage to nearby enemies. If the burst hit an enemy, he heals a percentage of the stored damage.",
+      "tooltip": "Dr. Mundo charges up a defibrilator, dealing {{ damagepertick*4 }} magic damage each second for up to {{ duration }} seconds to nearby enemies. Additionally he stores {{ grayhealthstorageinitial }} of damage taken for the first {{ grayhealthinitialduration }} seconds and {{ grayhealthstorage*100 }}% for the remaining duration as gray health and can Recast.\n\nRecast: Detonate the defibrilator, dealing {{ totaldamage }} magic damage to nearby enemies. If this hits at least one champion, Dr. Mundo restores {{ grayhealthbigmod*100 }}% of gray health, otherwise he instead restores {{ grayhealthsmallmod*100 }}% of gray health.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "17/16.5/16/15.5/15",
+      "cost": "0",
+      "cost_type": "% Current Health",
+      "range": "325",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage per Tick",
+          "Recast Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ damagepertick }} -> {{ damagepertickNL }}",
+          "{{ recastbasedamage }} -> {{ recastbasedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ currenthealthcost*100 }}% Current Health",
+      "wiki_detail": {
+        "champion": "Dr. Mundo",
+        "skill": "W",
+        "icon": "Heart Zapper.png",
+        "blurbicon": "Heart Zapper.png",
+        "blurb": "{{sbc|Active:}} {{ci|Dr. Mundo}} charges up a defibrillator for a few seconds, continually dealing {{as|magic damage}} to nearby enemies and storing a portion of the post-mitigation damage he takes.",
+        "blurb2": "''Heart Zapper'' can be recast within the duration, and does so automatically after the duration.",
+        "blurb3": "{{sbc|Recast:}} '''Dr. Mundo''' detonates the defibrillator, dealing {{as|magic damage}} to nearby enemies and {{tip|heal|healing}} for an amount equal to the stored damage, which is increased if at least one enemy {{tip|champion}} or large {{tip|monster}} is hit.",
+        "description": "{{sbc|Active:}} '''Dr. Mundo''' charges up a defibrillator for up to 3 seconds, dealing {{as|magic damage}} every {{fd|0.25}} seconds to nearby enemies and storing {{pp|80 to 95|key=%}} of {{tt|post-mitigation damage|Damage calculated after modifiers}} he takes as [[Health#Grey health|grey health]] on his [[health bar]], reduced to 25% after the first {{fd|0.75}} seconds.",
+        "leveling": "{{st|Magic Damage per Tick|{{ap|5 to 20}}|Total Magic Damage|{{ap|5*16 to 20*16}}}}",
+        "description2": "''Heart Zapper'' can be recast after {{fd|0.5}} seconds within the duration, and does so automatically after the duration.",
+        "icon3": "Heart Zapper 2.png",
+        "description3": "{{sbc|Recast:}} '''Dr. Mundo''' detonates the defibrillator, dealing {{as|magic damage}} to nearby enemies and {{tip|heal|healing}} for 50% of [[Health#Grey health|grey health]], increased to 100% if at least one enemy champion or large monster is hit.",
+        "leveling3": "{{st|Magic Damage|{{ap|20 to 80}} {{as|(+ 7% '''bonus''' health)}}}}",
+        "cooldown": "{{ap|17 to 15}}",
+        "cdstart": "post-effect",
+        "cost": "{{as|8%|health}}",
+        "costtype": "{{as|'''current''' health}}",
+        "effect radius": "{{tip|cr|icononly = true}} 325",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Self, Enemies",
+        "damagetype": "magic",
+        "spellshield": "special",
+        "spelleffects": "special",
+        "video": "|notes        = \n* The charge up applies {{tip|persistent area damage}} and the detonation deals {{tip|area damage}}.\n* {{tip|Spell shield}} will only block the detonation.\n* ''Heart Zapper'' will occasionally deal an additional tick of damage.{{bug}}\n* ''Heart Zapper'' and its recast will buffer and cast at the end of {{ais|Infected Bonesaw|Dr. Mundo}} cast time if attempted to cast during it.\n** As with all buffering of this type, another input such as a movement command can override the buffering of the spell again."
+      }
+    },
+    "E": {
+      "id": "DrMundoE",
+      "name": "Blunt Force Trauma",
+      "description": "Passive - Dr. Mundo gains bonus Attack Damage, increasing based on his max Health.\n\nActive - Dr. Mundo slams his “medical” bag into an enemy, dealing additional damage based on his missing Health. If the enemy dies they are swatted away, dealing damage to enemies they pass through.",
+      "tooltip": "Passive: Dr Mundo gains {{ passivebonusad }} Attack Damage.\n\nActive: Dr Mundo violently swings his \"medical\" bag, causing his next Attack to deal an additional {{ additionaldamage }} physical damage, increased by up to {{ maxdamageamptooltip }} based on his missing Health. If the enemy is killed, Mundo swats them away, dealing {{ additionaldamage }} physical damage to enemies they pass through.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9/8.25/7.5/6.75/6",
+      "cost": "0",
+      "cost_type": " Health",
+      "range": "0",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Base Damage",
+          "Health Cost",
+          "Health Into Attack Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ flathealthcost }} -> {{ flathealthcostNL }}",
+          "{{ healthtoadratio }}% -> {{ healthtoadratioNL }}%"
+        ]
+      },
+      "resource": "{{ flathealthcost }} Health",
+      "wiki_detail": {
+        "champion": "Dr. Mundo",
+        "skill": "E",
+        "icon": "false",
+        "blurbicon": "Blunt Force Trauma.png",
+        "blurb": "{{sbc|Passive:}} {{ci|Dr. Mundo}} gains {{sti|{{as|'''bonus''' attack damage}}}} based on his {{as|'''maximum''' health}}.",
+        "blurb2": "{{sbc|Active:}} '''Dr. Mundo's''' next basic attack deals {{as|'''bonus''' physical damage}}, increased based on {{as|his '''missing''' health}}. If the target dies, their corpse is sent flying away in a line, dealing {{as|physical damage}} to enemies it passes through.",
+        "description": "{{sbc|Passive:}} '''Dr. Mundo''' gains {{sti|{{as|'''bonus''' attack damage}}}}.",
+        "leveling": "{{st|Bonus Attack Damage|{{as|{{ap|2 to 3}}% '''maximum''' health}}}}",
+        "icon2": "Blunt Force Trauma.png",
+        "description2": "{{sbc|Active:}} '''Dr. Mundo''' empowers his next basic attack within 4 seconds to have an {{tip|uncancellable windup}}, gain {{sti|50 '''bonus''' range}}, and deal {{as|'''bonus''' physical damage}}, increased by {{pp|key=%|key1=%|type='''Dr. Mundo's missing''' health|0 to 40 for 11|0 to 70|formula=0.57% per missing health %. Missing health % can be decimal and up to a cap of 70%.|color=health}}. If the target dies or is a small monster, they are sent flying away in a line, though not through terrain, causing all enemies they pass through to take {{as|100% AD}} plus ''Blunt Force Trauma's'' minimum '''bonus''' damage.",
+        "leveling2": "{{st|Minimum Bonus Physical Damage|{{ap|5 to 45}} {{as|(+ 7% '''bonus''' health)}}|Maximum Bonus Physical Damage|{{ap|5*1.4 to 45*1.4}} {{as|(+ {{ap|7*1.4}}% '''bonus''' health)}}}}",
+        "description3": "''Blunt Force Trauma'' as well as the triggering {{as|attack's damage}} is increased to 140% against {{tip|minions}} and 200% against {{tip|monsters}}.",
+        "description4": "''Blunt Force Trauma {{tip|basic attack reset|resets}} '''Dr. Mundo's''' basic attack timer.''",
+        "cooldown": "{{ap|9 to 6}}",
+        "cdstart": "post-effect",
+        "cost": "{{as|{{ap|10 to 70}}|health}}",
+        "costtype": "{{as|Health}}",
+        "cast time": "none",
+        "targeting": "Auto",
+        "range": "{{tt|800|Corpse push distance, from Dr. Mundo's center}}",
+        "collision radius": "|affects      =",
+        "damagetype": "physical",
+        "spellshield": "false",
+        "spelleffects": "special",
+        "parry": "true",
+        "video": "|notes        = \n* ''Blunt Force Trauma's'' attack deals {{tip|spell damage}}, while the target's body being shoved deals {{tip|area damage}} to enemies it passes through.\n* ''Blunt Force Trauma's'' attack works against [[structures]], consuming the buff and dealing its full damage.\n* ''Blunt Force Trauma'' cannot knock back {{tip|wards}}, [[structures]] or epic {{tip|monsters}} it kills, nor champions that enter a {{tip|zombie state}} upon dying.\n* Targets flung away are rendered {{tip|untargetable}} in the process.\n* The damage of the enemy's corpse colliding with enemies does not benefit from ''Blunt Force Trauma's'' attack {{tip|critical strike|critically striking}}."
+      }
+    },
+    "R": {
+      "id": "DrMundoR",
+      "name": "Maximum Dosage",
+      "description": "Dr. Mundo pumps himself with chemicals, instantly healing a percent of his missing Health. He then gains Move Speed and regenerates a portion of his maximum Health over a long duration.",
+      "tooltip": "Dr. Mundo pumps himself with chemicals, gaining {{ missinghealthheal*100 }}% of his missing Health as max Health, {{ speedboostamount*100 }}% Move Speed, and regenerating {{ maxhealthhot*100 }}% max Health over {{ duration }} seconds.\n\nAt Rank 3, both healing effects are increased by an additional {{ bonuspernearbychampion*100 }}% per nearby enemy champion.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "20",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Bonus Health",
+          "Move Speed",
+          "Max Health %"
+        ],
+        "effect": [
+          "{{ missinghealthheal*100.000000 }}% -> {{ missinghealthhealnl*100.000000 }}%",
+          "{{ speedboostamount*100.000000 }}% -> {{ speedboostamountnl*100.000000 }}%",
+          "{{ maxhealthhot*100.000000 }}% -> {{ maxhealthhotnl*100.000000 }}%"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Dr. Mundo",
+        "skill": "R",
+        "icon": "Maximum Dosage.png",
+        "blurbicon": "Maximum Dosage.png",
+        "blurb": "{{sbc|Active:}} {{ci|Dr. Mundo}} injects himself with chemicals, gaining {{sti|{{as|'''increased''' base health}}}} and {{sti|ms|{{as|'''bonus''' movement speed}}}}, in addition to {{sti|health regeneration|regenerating}} {{as|health}} over the duration.",
+        "description": "{{sbc|Active:}} '''Dr. Mundo''' injects himself with chemicals to become enhanced for 10 seconds, gaining increased {{sti|health|{{as|'''base''' health}}}}, {{sti|ms|{{as|'''bonus''' movement speed}}}}, and {{sti|{{as|'''bonus''' health regeneration}}}}.",
+        "leveling": "{{st|Increased Base Health|{{as|{{ap|15 to 25}}% '''missing''' health}}}}\n{{st|Bonus Movement Speed|{{ap|15 to 35}}%}}\n{{st|Bonus Health Regeneration|{{as|{{ap|20 to 60}}% '''maximum''' health}}|Health Regenerated per Second|{{as|{{ap|20/10 to 60/10}}% '''maximum''' health}}}}",
+        "description2": "At rank 3, ''Maximum Dosage's'' increased {{as|'''base''' health}} and {{as|'''bonus''' health regeneration}} are both increased by 5% for each enemy {{tip|champion}} within 1200 units at the time of cast.",
+        "cooldown": "120",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Self",
+        "video": "|notes        = \n* The health regeneration granted by ''Maximum Dosage'' adjusts dynamically to '''Dr. Mundo's''' {{as|'''maximum''' health}}.\n* ''Maximum Dosage'' will end prematurely upon entering {{tip|resurrection}}.",
+        "flavorsound": "{{sm2|Dr. Mundo_Original_R_1.ogg}} ''\"Medicine time!\"''"
+      }
+    }
+  }
+}

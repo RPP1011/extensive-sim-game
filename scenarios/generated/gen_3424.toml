@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0021_3v3_d1_s1"
+seed = 12144
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["blood_mage", "mage", "druid"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,13 @@
+[scenario]
+name = "pair_shaman_pyromancer_s2"
+seed = 21379
+hero_count = 2
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["shaman", "pyromancer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

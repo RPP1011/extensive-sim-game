@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0064_4v7_d2"
+seed = 2187
+hero_count = 4
+enemy_count = 7
+difficulty = 2
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["blood_mage", "warlock", "samurai", "alchemist"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

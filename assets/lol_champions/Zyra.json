@@ -1,0 +1,261 @@
+{
+  "id": "Zyra",
+  "name": "Zyra",
+  "title": "Rise of the Thorns",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage",
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Garden of Thorns",
+      "description": "Seeds spawn around Zyra periodically, becoming faster with level. Zyra can cast Deadly Spines or Grasping Roots near seeds to grow plants, who fight for Zyra.",
+      "wiki_detail": {
+        "champion": "Zyra",
+        "skill": "I",
+        "icon": "Garden of Thorns.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Zyra}} {{as|Seeds|buzzword2}} can be turned into plants by hitting them with her basic abilities. Enemy {{tip|champions}} can step over a {{as|Seed|buzzword2}} to destroy it.",
+        "blurb2": "{{sbc|Innate:}} Periodically, '''Zyra''' plants one or two {{as|Seeds|buzzword2}} nearby that remain for some time.",
+        "description": "{{sbc|Innate:}} Periodically, '''Zyra''' spawns one or two {{as|Seeds|buzzword2}} nearby that last for 30 seconds, granting {{tip|sight}} over the surrounding area for 1 second.",
+        "static": "{{pp|13.6 to 9.05}}",
+        "description2": "After 1 second, enemy {{tip|champions}} can destroy Seeds by stepping on them.",
+        "description3": "'''Zyra''' can only have a total of 8 ''Seeds'' planted at a time, preserving {{as|Seeds|buzzword}} spawned by ''{{ai|Rampant Growth|Zyra}}'' over {{as|Seeds|buzzword2}} spawned by ''Garden of Thorns''.",
+        "effect radius": "900",
+        "targeting": "Passive",
+        "affects": "Self",
+        "spelleffects": "|notes        = \n* '''Zyra''' tries to plant {{as|Seeds|buzzword}} in brush and not on top of walls.\n* '''Zyra''' tries not to plant {{as|Seeds|buzzword}} too close together and at different angles.\n* '''Zyra''' does not plant any {{as|Seeds|buzzword}} if she is concealed within a brush (unless there is an enemy ward in it, in which case it takes her a little longer to plant the {{as|Seed|buzzword}}) or when there is no room for additional ones.\n* '''Zyra''' does not plant any {{as|Seeds|buzzword}} if she is within {{tip|cr|icononly = true}} 1400 units of the coordinate points (400, 400) or (14000, 14000), which are roughly at the center of the fountains on {{tip|Summoner's Rift}}.\n** These same coordinates may not hold as fountain positions on other maps (e.g. on the {{tip|Arena}} map, the Magma Chamber area overlaps with the second exclusion radius) and may prompt the implementation of this behaviour to be changed in the future.{{bug}}\n* '''Zyra''' tries to plant {{as|Seeds|buzzword}} close to an enemy near her.\n* {{Pending for test}}: '''Zyra''' tries to plant {{as|Seeds|buzzword}} under enemy structures only if she is in basic attack range of them.\n* {{Pending for test}}: '''Zyra''' tries to plant {{as|Seeds|buzzword}} on the other side of the wall she is facing and/or standing right next to.\n* {{Pending for test}}: '''Zyra''' tries to plant {{as|Seeds|buzzword}} in the direction she is facing and/or moving.\n* '''Zyra''' tries to plant {{as|Seeds|buzzword}} near jungle path entrances.\n* {{Pending for test}}: '''Zyra''' tries to plant {{as|Seeds|buzzword}} behind herself when she is walking through the river and there are no jungle path entrances near her.\n* '''Zyra''' tries to plant {{as|Seeds|buzzword}} between herself and the enemy champion she has vision of (or is heading towards her) in a 45º angle to the left or to the right depending on where on lane she is standing.\n* '''Zyra''' tries to plant {{as|Seeds|buzzword}} against the inner walls of epic monster pits ({{ui|Dragon}}, {{ui|Rift Herald}}, {{ui|Baron Nashor}})\n* '''Zyra''' has a hidden passive that grants her 10% increased [[size]] for {{tt|33 seconds|Estimated}} after having {{cai|Sunlight|Leona}} applied to her."
+      }
+    },
+    "Q": {
+      "id": "ZyraQ",
+      "name": "Deadly Spines",
+      "description": "Thick vines spread through the ground and explode into spines, dealing magic damage to enemies within the area. If cast near a seed, Deadly Spines grows a Thorn Spitter plant, which fires at enemies from afar.",
+      "tooltip": "Zyra causes thick vines to spread and explode into spines, dealing {{ initialdamage }} magic damage.\n\nIf this Ability is cast near a Seed, the Seed grows into a Thorn Spitter that deals {{ spell.zyrap:plantdamage }} magic damage and lasts {{ spell.zyrap:plantduration }} seconds. Thorn Spitters have 575 range.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7/6.5/6/5.5/5",
+      "cost": "55",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "60/100/140/180/220",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ e1 }} -> {{ e1NL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Zyra",
+        "skill": "Q",
+        "icon": "Deadly Spines.png",
+        "blurb": "{{sbc|Active:}} {{ci|Zyra}} sprouts a field of thorny vines at the target location that deals {{as|magic damage}} to enemies hit.",
+        "blurb4": "{{sbc|{{ai|Garden of Thorns|Zyra|Seed}} Bonus:}} The {{as|Seed|buzzword2}} spawns a ''Thorn Spitter'' that inflicts {{tip|ranged}} attacks.",
+        "description": "{{sbc|Active:}} '''Zyra''' sprouts thorny spines at the target location that appear after a {{fd|0.625}}-seconds delay, dealing {{as|magic damage}} to enemies hit.",
+        "leveling": "{{st|Magic Damage|{{ap|60 to 220}} {{as|(+ 65% AP)}}}}",
+        "description2": "If ''Deadly Spine'' hits a {{as|Seed|buzzword2}}, it sprouts into a [[File:Zyra Deadly Spines Render.png|20px|link=Zyra/LoL#Pets]] ''[[Zyra/LoL#Pets|Thorn Spitter]]'' that remains for 8 seconds.",
+        "target range": "800",
+        "cooldown": "{{ap|7 to 5}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "55",
+        "costtype": "mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* Each [[File:Zyra Deadly Spines Render.png|20px|link=Zyra/LoL#Pets]] ''[[Zyra/LoL#Pets|Thorn Spitter]]'' will generate 2 stacks of {{ri|Conqueror}} and 1 stack of each of {{ri|Phase Rush}} and {{ri|Electrocute}}."
+      }
+    },
+    "W": {
+      "id": "ZyraW",
+      "name": "Rampant Growth",
+      "description": "Zyra plants a seed, lasting up to 60 seconds. Deadly Spines and Grasping Roots cast near seeds will turn them into plants who fight for Zyra. Zyra can store multiple seeds at once, and killing enemies reduces Rampant Growth's recharge time.",
+      "tooltip": "Zyra plants a Seed that lasts {{ e6 }} seconds. These Seeds grant True Sight of enemy champions that step on them for {{ e3 }} seconds, but are still destroyed.\n\nThis Ability has 2 charges with a {{ ammorechargetime }} second recharge time. Killing an enemy minion or monster reduces the recharge time by {{ e1 }}%. Champion takedowns reduce the recharge time by {{ e2 }}% instead.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0",
+      "cost": "0",
+      "cost_type": "1 Seed",
+      "range": "850",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "35",
+        "100",
+        "2",
+        "0",
+        "0",
+        "60",
+        "0",
+        "10/20/30/40/50",
+        "0.4/0.8/1.2/1.6/2",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Seed Recharge Rate"
+        ],
+        "effect": [
+          "{{ ammorechargetime }} -> {{ ammorechargetimeNL }}"
+        ]
+      },
+      "resource": "1 Seed",
+      "wiki_detail": {
+        "champion": "Zyra",
+        "skill": "W",
+        "icon": "Rampant Growth.png",
+        "blurb": "{{sbc|Active:}} {{ci|Zyra}} plants a {{as|Seed|buzzword}} at the target location that remains for a while. It will briefly {{tip|true sight|reveal}} the enemy that destroys it.",
+        "blurb2": "'''Zyra''' periodically stocks a ''Rampant Growth'' charge, up to a maximum of 2. The charge cooldown is {{sti|cdr|reduced}} each time she kills an enemy, increased on large enemies and {{tip|champion}} {{tip|takedowns}}.",
+        "description": "{{sbc|Active:}} '''Zyra''' plants a {{as|Seed|placed}} at the target location that remains for 60 seconds and grants {{tip|sight}} over the surrounding area, though decreasing in radius after 1 second. After {{fd|1.5}} seconds, enemy champions can destroy the {{as|Seed|buzzword}} by stepping on it, which {{tip|true sight|reveals}} them for 2 seconds.",
+        "description2": "'''Zyra''' periodically [[stock]]s a ''Seed'' charge, up to a maximum of 2. Killing an enemy generates 35% charge toward a ''Seed'', increased to 100% for large enemies and whenever scoring an enemy {{tip|champion}} {{tip|takedown}}.",
+        "target range": "850",
+        "cost": "1",
+        "costtype": "Seed",
+        "recharge": "{{ap|18 to 10}}",
+        "cast time": "none",
+        "targeting": "Location",
+        "affects": "Self, Enemies",
+        "damagetype": "|spellshield  = false",
+        "notes": "* Upon first rank up, ''Rampant Growth'' gains 2 charges.\n* {{as|Seeds|placed}} are {{tip|untargetable}}."
+      }
+    },
+    "E": {
+      "id": "ZyraE",
+      "name": "Grasping Roots",
+      "description": "Zyra sends forth vines through the ground to ensnare her target, dealing damage and rooting enemies they come across. If cast near a seed, Grasping Roots grows a Vine Lasher, whose short range attacks reduce enemy Move Speed.",
+      "tooltip": "Zyra sends vines forward, Rooting for {{ e5 }} second(s) and dealing {{ totaldamage }} magic damage. \n\nIf this Ability passes near a Seed, the Seed grows into a Vine Lasher that deals {{ spell.zyrap:plantdamage }} magic damage and lasts {{ spell.zyrap:plantduration }} seconds. Vine Lashers have 400 range, and their Attacks Slow by {{ e2 }}% for {{ e3 }} seconds. The Slow from multiple Vine Lashers stacks up to {{ maxslowstacks }} times.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11",
+      "cost": "70/75/80/85/90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1100",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "60/95/130/165/200",
+        "30",
+        "2",
+        "4/4/4/0/0",
+        "1/1.25/1.5/1.75/2",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "@AbilityResourceName@ Cost",
+          "Damage",
+          "Root Duration"
+        ],
+        "effect": [
+          "{{ cost }} -> {{ costNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ rootduration }} -> {{ rootdurationNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Zyra",
+        "skill": "E",
+        "icon": "Grasping Roots.png",
+        "blurb": "{{sbc|Active:}} {{ci|Zyra}} shoots a surge of vines in the target direction that deals {{as|magic damage}} to enemies hit and briefly {{tip|root|roots}} them.",
+        "blurb4": "{{sbc|{{ai|Garden of Thorns|Zyra|Seed}} Bonus:}} The {{as|Seed|buzzword2}} spawns a ''Vine Lasher'' that inflicts {{tip|melee}} attacks that briefly {{tip|slow}} the target.",
+        "description": "{{sbc|Active:}} '''Zyra''' shoots a surge of vines in the target direction that deals {{as|magic damage}} to enemies hit and {{tip|root|roots}} them for a duration.",
+        "leveling": "{{st|Magic Damage|{{ap|60 to 200}} {{as|(+ 60% AP)}}}}\n{{st|Root Duration|{{ap|1 to 2}} seconds}}",
+        "description2": "If ''Grasping Roots'' hits a {{as|Seed|buzzword2}}, it sprouts into a [[File:Zyra Grasping Roots Render.png|20px|link=Zyra/LoL#Pets]] ''[[Zyra/LoL#Pets|Vine Lasher]]'', which remains on the battlefield for 8 seconds.",
+        "target range": "1100",
+        "cooldown": "12",
+        "cost": "{{ap|70 to 90}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "speed": "1150",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "{{Effect at cast time end}}\n* '''Zyra''' will be locked out of actions for {{fd|0.15}} seconds after casting ''Grasping Roots''.\n* Each [[File:Zyra Grasping Roots Render.png|20px|link=Zyra/LoL#Pets]] ''[[Zyra/LoL#Pets|Vine Lasher]]'' will generate 2 stacks of {{ri|Conqueror}} and 1 stack of each of {{ri|Phase Rush}} and {{ri|Electrocute}}."
+      }
+    },
+    "R": {
+      "id": "ZyraR",
+      "name": "Stranglethorns",
+      "description": "Zyra summons a twisted thicket at her target location, dealing damage to enemies as it expands and knocking them airborne as it contracts. Plants within the thicket are enraged.",
+      "tooltip": "Zyra summons the fury of nature, growing a twisted thicket that deals {{ totaldamage }} magic damage. After 2 seconds, the vines snap upwards, Knocking Up for {{ e1 }} second.\n\nZyra's plants within the thicket become enraged, resetting their duration, gaining {{ e2 }}% Health and Attacking for {{ plantdamagebonus }}% bonus damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "110/100/90",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "700",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "1",
+        "50",
+        "200/300/400",
+        "0",
+        "0",
+        "0",
+        "150",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ e3 }} -> {{ e3NL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Zyra",
+        "skill": "R",
+        "icon": "Stranglethorns.png",
+        "blurb": "{{sbc|Active:}} {{ci|Zyra}} summons a monstrous thicket at the target location that deals {{as|magic damage}} to enemies hit as it expands.",
+        "blurb2": "After a brief moment, the thicket snaps upward to briefly {{tip|airborne|knock up}} enemies within.",
+        "blurb3": "All {{ai|Garden of Thorns|Zyra|Plants}} hit will gain {{as|{{sti|health}}}} and attack in double strikes.",
+        "description": "{{sbc|Active:}} '''Zyra''' summons a monstrous thicket at the target location that deals {{as|magic damage}} to enemies hit as it expands.",
+        "leveling": "{{st|Magic Damage|{{ap|180 to 350}} {{as|(+ 70% AP)}}}}",
+        "description2": "After 2 seconds, the thicket snaps upward to {{tip|airborne|knock up}} enemies within for 1 second.",
+        "description3": "''{{ai|Garden of Thorns|Zyra|Plants}}'' hit by the thicket become enraged, restoring {{as|{{sti|health|50% of their '''current''' health}}}}, increasing their {{as|'''maximum''' health by 50%}}, gaining 25% increased [[size]] and refreshing their duration while the thicket expands. Additionally they attack in a flurry, launching two shots per attack, dealing {{ft|150% damage per flurry.|75% damage per shot.}}",
+        "description4": "''Stranglethorns will cast at max range if cast beyond that.''",
+        "cast time": "{{fd|0.25}}",
+        "target range": "700",
+        "effect radius": "500",
+        "cooldown": "{{ap|110 to 90}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* {{ai|Garden of Thorns|Zyra|Plants}} grown during the 2 seconds prior to the displacement will also be enraged.\n* {{ai|Garden of Thorns|Zyra|Plants}} already grown before ''Stranglethorns'' is cast will have their duration refreshed if they are inside the area of effect.\n* ''Stranglethorns' ''buff on {{ai|Garden of Thorns|Zyra|Plants}} lasts 10 seconds, however the ''Plants'' normally die naturally after 8 seconds."
+      }
+    }
+  }
+}

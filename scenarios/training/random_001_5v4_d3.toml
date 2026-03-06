@@ -1,0 +1,13 @@
+[scenario]
+name = "random_001_5v4_d3"
+seed = 8001
+hero_count = 5
+enemy_count = 4
+difficulty = 3
+max_ticks = 10000
+room_type = "Climax"
+hero_templates = ["knight", "assassin", "warrior", "shadow_dancer", "ranger"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Either"

@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_ranger_blood_mage_shaman_s1"
+seed = 11624
+hero_count = 3
+enemy_count = 4
+difficulty = 2
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["ranger", "blood_mage", "shaman"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

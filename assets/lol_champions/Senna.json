@@ -1,0 +1,315 @@
+{
+  "id": "Senna",
+  "name": "Senna",
+  "title": "the Redeemer",
+  "resource_type": "Mana",
+  "tags": [
+    "Support",
+    "Marksman"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Absolution",
+      "description": "When units die near Senna, their souls are periodically trapped by the Black Mist. Senna can attack these souls to free them, absorbing the Mist that held them in death. Mist fuels her Relic Cannon's power with increased Attack Damage, Attack Range, and Critical Strike Chance. \n\nAttacks from Senna's Relic Cannon take longer to fire, deal bonus damage, and briefly grant her a portion of her target's Move Speed.",
+      "wiki_detail": {
+        "champion": "Senna",
+        "skill": "I",
+        "icon": "Absolution.png",
+        "blurb": "{{sbc|Innate - Weakened Soul}}: {{cis|Senna}} basic attacks and abilities against enemy {{tip|champions}} apply a [[stack]] of ''Mist'' for a few seconds. Subsequent hits collect the ''Mist'', dealing {{as|'''bonus''' physical damage}} based on the {{as|target's '''current''' health}} and rendering the target immune to further ''Mist'' applications for a few seconds.",
+        "blurb2": "Enemies that die near '''Senna''' may spawn a ''Mist Wrath'' from their corpse, which lasts for a period. She can kill ''Mist Wraiths'' to gain {{g|gold}} and ''Mist'' stacks.",
+        "blurb3": "{{sbc|Innate - Relic Cannon}}: '''Senna's''' basic attacks deal {{as|'''bonus''' physical damage}} and briefly grant her {{sti|ms|{{as|'''bonus''' movement speed}}}} based on the {{as|target's movement speed|ms}}.",
+        "blurb4": "{{sbc|Mist}}: For each stack, '''Senna''' gains {{sti|ad|{{as|'''bonus''' attack damage}}}}. Every few stacks, she also gains {{sti|range|'''bonus''' attack range}} and {{as|{{sti|critical strike chance}}}}, or {{stil|life steal}} if she has max critical strike chance.",
+        "description": "{{sbc|Innate - Weakened Soul}}: '''Senna's''' [[basic attack]]s {{tip|on-hit}} and [[champion ability|ability]] hits against enemy champions apply a [[stack]] of {{as|Mist}} for 4 seconds, modified to {{fd|0.75}} seconds if '''Senna''' starts winding up a basic attack on them, and limited to once per target per cast. Subsequent hits will collect {{as|Mist}} and deal {{as|'''bonus''' physical damage}} equal to {{as|{{pp|1 to 10 for 10|key=%}} of target's '''current''' health}}, rendering the target immune to further {{as|Mist}} infliction for a few seconds. This damage {{tip|applies lifesteal|applies}} {{stil|life steal}} at 100% effectiveness.",
+        "icon2": "MistWraithSquare.png",
+        "description2": "Enemies that die near '''Senna''' may spawn a ''Mist Wraith'' from their corpse. A ''Mist Wraith'' lasts 8 seconds and '''Senna''' can basic attack or hit it with ''{{ai|Piercing Darkness|Senna}}'' or ''{{ai|Dawning Shadow|Senna}}'' to kill them instantly, granting her {{g|8}} and collecting their {{as|Mist}}.\n* Enemy {{tip|champions}} and large {{tip|monsters}} will spawn a ''Mist Wraith''.\n* Epic {{tip|monsters}} will spawn 2 ''Mist Wraiths''.\n* {{tip|Minions}} and lesser {{tip|monsters}} that '''Senna''' kills have a {{fd|8.{{Recurring|4}}}}% chance to spawn a ''Mist Wraith''.\n* Large {{tip|minions}} that '''Senna''' does not kill will spawn a ''Mist Wraith'', while lesser {{tip|minions}} and lesser {{tip|monsters}} that '''Senna''' does not kill have a 28% chance to spawn.\n** Lesser minions executed by an allied champion's {{nie|Quest}} item have a {{fd|8.{{Recurring|4}}}}% chance to spawn a ''Mist Wraith''.",
+        "description3": "{{sbc|Mist}}: For each stack of {{as|Mist}}, '''Senna''' gains {{sti|attack damage|{{as|{{fd|0.75}} '''bonus''' attack damage}}}}. For every 20 stacks, she also gains {{sti|attack range|20 '''bonus''' attack range}} and {{sti|critical strike chance|{{as|8% critical strike chance}}}}. Additionally, every {{tt|{{as|1% critical strike chance}}|Counts critical strike chance from all sources, including Mist stacks}} in excess of {{as|100%|critical strike chance}} is converted into {{fd|0.35}}% {{stil|life steal}}.",
+        "icon4": "Absolution 2.png",
+        "description4": "{{sbc|Innate - Relic Cannon}}: '''Senna's''' basic attacks {{tip|on-hit}} deal {{as|20% AD}} {{as|'''bonus''' physical damage}} and grant her {{as|{{pp|key=%|10 to 20 for 3|1;6;9}} of the target's movement speed|ms}} as {{sti|ms|{{as|'''bonus''' movement speed}}}} for {{fd|0.5}} seconds. This damage {{tip|applies lifesteal|applies}} {{stil|life steal}} at 100% effectiveness.",
+        "ontargetcdstatic": "{{pp|6;5;4|1;6;11}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|2000|Mist Wraith spawn area}}",
+        "targeting": "Passive",
+        "affects": "Self, Enemies",
+        "spellshield": "False",
+        "parry": "Special",
+        "video": "Senna - Passive",
+        "notes": "* Despite '''Senna''' dealing 1 damage to ''Mist Wraiths'', attacking them will calculate the {{as|attack's damage|AD}} (including {{tip|critical strike}} modifiers) and any [[on-hit]] effects for the purposes of {{stil|life steal}} and {{tip|drain}} effects.\n* ''Relic Cannon'' is only applied if the attack deals more than 0 damage.\n** Hence, it is not applied if the target is {{tip|invulnerable}} or '''Senna's''' basic attack's {{sti|{{as|attack damage}}}} is reduced to 0 or below.\n* Dealing 0 damage is valid for marking and collecting {{as|Mist}} from champions, but dealing no damage at all is not.\n** Hence, '''Senna''' can mark and collect from {{tip|invulnerable}} enemies.\n** {{tip|Dodge}} prevents marking and collecting a {{as|Mist}} via '''Senna's''' basic attacks and {{ai|Q|Senna}}.\n** {{Pending for test}}: {{as|Mist}} interaction with {{tip|block}} and {{tip|blind}}.\n* {{ci|Nunu|Nunu & Willump}} spawn a wraith each.\n* Enemies will not see newly spawned wraiths while '''Senna''' is not visible.\n* A wraith can be hit by {{ai|Cosmic Binding|Bard}} and it will interact with it the same way minions or monsters interact with Cosmic Binding but it will not take damage.\n* ''Mist Wraith'' has a spawn animation, but is targetable immediately.\n* ''Mist Wraith'' grants a small amount of {{tip|sight}} around itself.\n* {{ii|Runaan's Hurricane}} secondary bolts will ignore ''Mist Wraiths''.\n* Attacking a ''Mist Wraith'' will not consume energized stacks, but you can benefit from the range increase of {{ii|Rapid Firecannon}} when collecting wraiths.\n* Critical strike chance in excess of 100% is converted into negative critical strike chance for the life steal scaling.\n* {{tt|Excluding|Due to lack of available metric}} the range increase and the bonus shielding on {{ai|Dawning Shadow|Senna}}, one stack of {{as|Mist}} is worth approximately {{g|{{fd|44.55}}}} ({{g|+8}} from ''Mist Wraith'' pickup), {{g|{{fd|32.8125}}}} if the critical chance is converted to life steal. The bonuses have a gross value of {{g|{{fd|46.25}}}} ({{g|{{fd|32.8125}}}} with life steal).\n** {{sti|{{as|{{fd|0.75 AD}}}}}} is worth {{g|26.25‬}}.\n** {{sti|critical chance|{{fd|0.5}}%}} [[Critical_strike#Critical_strike_chance|critical strike chance]] is worth {{g|20}}. ''Absolution'' reduces its efficiency by {{fd|8.5}}%, making the value {{g|{{fd|18.3}}}}.\n*** {{sti|life steal|{{fd|0.175%}}}} [[life steal]] is worth ≈{{g|{{fd|6.5625}}}}.\n* The bonus on-hit damage does '''not''' apply an additional stack of {{iis|Black Cleaver}} {{nie|Carve}} to offset '''Senna's''' low attack speed.{{bug}}<!--This does not function properly after V12.18 due to the changes to Titanic Hydra-->",
+        "_comments": [
+          "This does not function properly after V12.18 due to the changes to Titanic Hydra"
+        ]
+      }
+    },
+    "Q": {
+      "id": "SennaQ",
+      "name": "Piercing Darkness",
+      "description": "From the twin barrels of her Relic Cannon, Senna fires a unified beam of light and shadow through a target, healing allies and damaging enemies.",
+      "tooltip": "Senna shoots a bolt of piercing shadow through an ally or enemy, dealing {{ totaldamage }} physical damage to enemies and Slowing them by {{ totalslow }} for {{ slowduration }} second(s). Restores {{ totalheal }} Health to allied champions. \n\nAttacks reduce this Ability's Cooldown by {{ cdreductiononhit }} second.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "15",
+      "cost": "70/80/90/100/110",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Healing",
+          "Slow Duration",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ baseheal }} -> {{ basehealNL }}",
+          "{{ slowduration }} -> {{ slowdurationNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Senna",
+        "skill": "Q",
+        "icon": "Piercing Darkness.png",
+        "blurb": "{{sbc|Active:}} {{ci|Senna}} fires a spectral laser toward the target unit, {{tip|heal|healing}} herself and allied {{tip|champions}} hit while dealing {{as|physical damage}} and lightly {{tip|slow|slowing}} enemies hit for a short time.",
+        "blurb2": "''Piercing Darkness' '' cooldown is {{sti|cdr|reduced}} {{tip|on-hit}}.",
+        "blurb4": "''Piercing Darkness'' {{tip|applies lifesteal|applies}} {{stil|life steal}} and {{tip|on-hit}} effects.",
+        "description": "{{sbc|Active:}} '''Senna''' fires a spectral laser in the direction of the target unit, {{tip|heal|healing}} herself and allied {{tip|champions}} hit, and dealing {{as|physical damage}} to enemies hit in a thinner line. Enemies hit are {{tip|slow|slowed}} by 15% {{as|(+ 15% per 100 '''bonus''' AD)}} {{as|(+ 10% per 100 AP)}} for a duration. The damage against champions {{tip|applies lifesteal|applies}} {{stil|life steal}} at 100% effectiveness.",
+        "leveling": "{{st|Healing|{{ap|40 to 100}} {{as|(+ 40% '''bonus''' AD)}} {{as|(+ 60% AP)}}}}\n{{st|Physical Damage|{{ap|30 to 150}} {{as|(+ 40% '''bonus''' AD)}}}}\n{{st|Slow Duration|{{ap|1 to 2}} seconds}}",
+        "description2": "Upon being hit, enemy {{tip|turrets}}, {{tip|wards}}, [[jungle plants]], [[File: MistWraithSquare.png|20px|link=Senna#Absolution]] [[Senna#Absolution|Mist Wraiths]] and [[Champion_summoned_units#Targetable|any other attack-interactive units]] are {{tt|''considered'' basic attacked once|Piercing Darkness doesn't actually apply basic damage}}, while {{tip|champions}} and {{tip|turrets}}{{tt|*|Considers all turret-specific rules}} are applied {{tip|on-hit}} effects at 100% effectiveness.",
+        "description3": "''Piercing Darkness' '' {{sti|'''current''' cooldown}} is reduced by 1 second {{tip|on-hit}}.",
+        "cast time": "{{tt|{{as|{{fd|0.4}}-{{fd|0.25}}|attack speed}}|Based on level, further reduced by attack speed}}\n<!--Cast time scales down with attack speed - {{as|{{pp|X;X|showtype=true|type='''bonus''' attack speed}}|as}}-->",
+        "cost": "{{ap|70 to 110}}",
+        "costtype": "Mana",
+        "cooldown": "15",
+        "target range": "{{tip|er|icononly = true}} {{tt|600 - 1100|Based on attack range}}",
+        "range": "{{tip|er|icononly = true}} 1300",
+        "width": "{{tip|er|icononly = true}} {{tt|100|Damage}} / {{tt|280|Heal}}",
+        "targeting": "Unit",
+        "affects": "Allies, Enemies, Turrets, Wards",
+        "damagetype": "Physical",
+        "onhiteffects": "true",
+        "spelleffects": "AoE",
+        "parry": "Unknown",
+        "spellshield": "special",
+        "projectile": "False",
+        "video": "Senna - Q",
+        "notes": "* ''Piercing Darkness'' also applies most {{tip|on-attack}} effects to one enemy champion struck, and ocassionally to two.{{bug|2}}\n** {{ri|Hail of Blades}} will spend a stack on hitting a champion with ''Piercing Darkness'' but only if {{ri|Hail of Blades}} was activated first by an auto-attack.\n* ''Piercing Darkness' ''cast time is always 80% of the caster's attack windup time.\n** Because '''Senna's''' windup percent scales down with levels but her windup time also only scales with 60% attack speed, the precise numbers get complicated quickly.\n** At base attack speed and level 1, '''Senna's''' attack windup is {{fd|0.5}} seconds.\n<!-- ** The exact simplified formula to calculate the cast time is [ {{fd|0.XX}}-{{fd|0.XX}} seconds (based on level) divided by X% {{as|'''total''' attack speed|attack speed}} ]. TODO: do.-->\n** Reducing '''Senna's''' attack speed via {{tip|cripple|attack speed reductions}} also increases ''Piercing Darkness' ''cast time by 60% of the fraction.\n<!-- ** It is calculated from '''Senna's''' total attack speed after cap (2.5) and floor (0.2), making the maximum possible cast time {{rutngt|X.XX}}. TODO: calculate-->\n** ''Piercing Darkness' ''cast time reduction per level via her own windup-per-level-reduction mirrors {{cais|Piercing Light|Lucian}} cast time values.\n<!-- todo: table? -->\n\n* '''Senna''' can generally target anything that is not either explicitly {{tip|untargetable}} or herself.\n** Valid targets include anything that can be targeted by a basic attack from someone.\n* ''Piercing Darkness'' will attempt to lead the target if it is moving but does not adjust further during cast time (enemies can dodge the laser if they change their position by a sufficient amount during the cast time).\n** It leads by (up-to?) 80 units.\n* On-hit effects are applied in order of struck units' spawn IDs. This matters for effects that are consumed on-hit (e.g. {{tip|Spellblade}}), which are applied to the target with the lowest {{tt|Spawn ID|among enemy champions, this would also be the enemy first pick in Blind Pick mode}}.\n** \"Spawn ID\" is an unofficial abbreviation to describe the spawn order for all units at the beginning of games, below are some examples.\n** If '''Senna''' targets an enemy champion but hits at least one more enemy champion simultaneously, {{ris|Press the Attack}} first stack will be applied to that target. If no champion was targeted, it will default to the champion with the lowest Spawn ID out of the ones struck by the ability. Whether the effect stacks up on a champion or not when multiple enemy champions are stuck also depends on Spawn ID.\n** If ''Piercing Darkness'' struck an enemy champion and turret simultaneously, with {{ii|Rapid Firecannon}} fully charged, the passive effect will most likely proc on the turret since towers are often spawned before champions.\n* For on-attack effects, they are also applied in order of struck units' spawn IDs. However, there are some specific on-attack effects that will apply to both the target of ''Piercing Darkness'' and the target with the lowest {{tt|Spawn ID|among enemy champions, this would also be the enemy first pick in Blind Pick mode}} if the two unit is not identical. {{bug|2}} {{tt|Confirmed cases|all under condition that the targeted enemy champion is not having lowest Spawn ID among all struck enemy champions}}:\n**{{nie|Energized}} effects are stacked 2 stacks\n**{{nie|Spectral Waltz}} are granted 2 stacks\n**{{Pending for test}}\n* {{tip|Spell shield}} will not prevent on-hit effects from being applied.\n* {{Pending for test}}: ''Piercing Darkness'' interaction with {{tip|dodge|dodging}}, {{tip|block|blocking}}, and {{tip|blind|blinding}} effects.",
+        "_comments": [
+          "Cast time scales down with attack speed - {{as|{{pp|X;X|showtype=true|type='''bonus''' attack speed}}|as}}",
+          "** The exact simplified formula to calculate the cast time is [ {{fd|0.XX}}-{{fd|0.XX}} seconds (based on level) divided by X% {{as|'''total''' attack speed|attack speed}} ]. TODO: do.",
+          "** It is calculated from '''Senna's''' total attack speed after cap (2.5) and floor (0.2), making the maximum possible cast time {{rutngt|X.XX}}. TODO: calculate",
+          "todo: table?"
+        ]
+      }
+    },
+    "W": {
+      "id": "SennaW",
+      "name": "Last Embrace",
+      "description": "Senna sends forth a wave of Black Mist. If it hits an enemy it latches onto them hungrily, rooting them and everything nearby after a brief delay.",
+      "tooltip": "Senna sends forth the Black Mist, dealing {{ damage }} physical damage to the first enemy hit. After a {{ delaytime }} second delay the target and other nearby enemies are Rooted for {{ rootduration }} second(s).{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1250",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Root Duration",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ rootduration }} -> {{ rootdurationNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Senna",
+        "skill": "W",
+        "icon": "Last Embrace.png",
+        "blurb": "{{sbc|Active:}} {{ci|Senna}} throws a globule of Black Mist in the target direction that deals {{as|physical damage}} to the first enemy hit and sticks onto them.",
+        "blurb2": "After a brief moment, the Black Mist spreads out from the target, briefly {{tip|root|rooting}} them and surrounding enemies.",
+        "description": "{{sbc|Active:}} '''Senna''' throws a globule of Black Mist in the target direction that deals {{as|physical damage}} to the first enemy hit and attaches to them for 1 second.",
+        "leveling": "{{st|Physical Damage|{{ap|70 to 250}} {{as|(+ 70% '''bonus''' AD)}}}}",
+        "description2": "After the duration or when the target dies, the Black Mist spreads out of the target, {{tip|root|rooting}} them and surrounding enemies for a few seconds.",
+        "leveling2": "{{st|Root Duration|{{ap|1.25 to 2.25}} seconds}}",
+        "cooldown": "11",
+        "cost": "{{ap|50 to 70}}",
+        "costtype": "Mana",
+        "target range": "{{tip|cr|icononly = true}} 1300",
+        "effect radius": "{{tip|cr|icononly = true}} 280",
+        "speed": "1200",
+        "width": "{{tip|er|icononly = true}} 140",
+        "targeting": "Direction",
+        "cast time": "{{fd|0.25}}",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "projectile": "True",
+        "parry": "|onhiteffects =",
+        "callforhelp": "|grounded     =",
+        "knockdown": "|video        = Senna - W",
+        "notes": "* ''Last Embrace'' will not {{tip|root}} the primary target if they are {{tip|untargetable}}.\n{{Effect at cast time end}}"
+      }
+    },
+    "E": {
+      "id": "SennaE",
+      "name": "Curse of the Black Mist",
+      "description": "Senna draws the Mist she has stored in her weapon into a storm around her, embracing darkness and becoming a wraith within. Allies who enter the area are camouflaged and also appear as wraiths as the Mist shrouds them. Wraiths gain increased Move Speed, are unselectable, and hide their identities.",
+      "tooltip": "Senna dissolves into a cloud of Black Mist for {{ buffduration }} seconds, becoming a Wraith. Allied champions who enter the Mist are Camouflaged and become Wraiths when they leave. Wraiths gain {{ totalms }} Move Speed, are Unselectable, and hide their identities as long as no enemy champions are nearby.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "26/24.5/23/21.5/20",
+      "cost": "70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Duration",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ buffduration }} -> {{ buffdurationNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Senna",
+        "skill": "E",
+        "icon": "Curse of the Black Mist.png",
+        "blurb": "{{sbc|Active:}} {{ci|Senna}} creates an aura of mist and gains {{tip|camouflage}} for a few seconds. She will quickly regain camouflage after breaking stealth.",
+        "blurb2": "{{ci|Senna}} grants allied champions that enter the mist ''Wraith Form'' for the remaining duration. '''Senna''' and allies camouflaged by ''Curse of the Black Mist'' also gain {{sti|{{as|'''bonus''' movement speed}}}}.",
+        "blurb4": "[[File:Curse of the Black Mist 2.png|20px|link=]] {{sbc|Wraith Form}}: Gain {{tip|camouflage}}. Enemies will have {{tip|obscured vision}} of camouflaged ''Wraiths'' moving outside the mist. ''Wraiths'' will quickly regain camouflage after breaking stealth.",
+        "description": "{{sbc|Active:}} '''Senna''' surrounds herself with an [[aura]] of mist and gains {{tip|camouflage}} for a duration. If '''Senna''' {{tt|breaks the camouflage|Attacking, casting abilities, etc}}, she regains it after {{fd|1.75}} seconds without performing actions that [[Stealth#Breaking stealth|break stealth]].",
+        "description2": "Allied champions who enter the mist gain ''Wraith Form'' for a duration equal to the aura's remaining duration.",
+        "leveling": "{{st|Effect Duration|{{ap|6 to 8}} seconds}}",
+        "icon3": "Curse of the Black Mist 2.png",
+        "description3": "{{sbc|Wraith Form:}} Gain {{tip|camouflage}}. Enemies will have {{tip|obscured vision}} of camouflaged ''Wraiths'' moving outside of the mist. ''Wraith Form'' can be regained if lost by breaking the camouflage after {{fd|1.75}} seconds without performing actions that break stealth. ''Wraith Form'' ends immediately upon '''Senna's''' {{tip|death}}.",
+        "description4": "'''Senna''' and allies camouflaged by ''Curse of the Black Mist'' also gain {{sti|ms|{{as|20%|ms}}}} {{as|(+ 5% per 100 AP)}} {{as|'''bonus''' movement speed}}.",
+        "effect radius": "400",
+        "cast time": "1",
+        "cost": "70",
+        "costtype": "Mana",
+        "cooldown": "{{ap|26 to 20}}",
+        "cdstart": "post-effect",
+        "customlabel": "Detection Radius",
+        "custominfo": "400",
+        "targeting": "Auto",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|occurrence   =",
+        "projectile": "|grounded     =",
+        "knockdown": "|parry        =",
+        "video": "Senna - E",
+        "notes": "* '''Senna''' can move while casting ''Curse of the Black Mist''.\n* Allies affected by the ''Curse of the Blast Mist'' aura receive a buff called ''Cloak of Mist''.\n* Obscured units appear as ''Wraiths'', hence the name. The wraith model does not distinguish which champion is obscured.\n** On the [[Map (League of Legends)|mini-map]], obscured champions will be displayed as wraith icons instead of champion icons to the enemy team.\n* In-game, the 'Cloak of Mist' buff grants camouflage and the 'Wraith Form' buff obscures the unit and grants movement speed. However, 'Cloak of Mist' has the unspecified effect of negating the obscuring effects of 'Wraith Form' (i.e. the unit is not a wraith while inside the mist); the unit has the bonus movement speed even when they are not a wraith (e.g. inside the mist or an enemy is nearby); and 'Wraith Form' also grants the functionality of camouflage (i.e. the unit is treated as a camouflaged unit with regards to {{tip|True Sight}}, {{ii|Control Ward|Control Wards}}, and enemy {{tip|champions}}).\n** Given this overly complex interaction between the two buffs granted as well as the overlapping effects, it is easier to describe the effects as a single buff that is modified in specific circumstances rather than trying to establish a new game mechanic.\n** '''Senna''' likewise has her aura buff and the 'Wraith Form' buff, but her 'Wraith Form' does not share gameplay functionality with other allies benefiting from Wraith Form. For '''Senna''', the appearance of being a wraith is a form-swap while camouflaged (similar to {{cai|Demon Shade|Evelynn}}). '''Senna''' will remain in her wraith form when she is detected so long as the camouflage effect isn't broken, and her wraith's appearance is very distinct from other wraiths.\n* Allied champions who enter the mist and have {{tip|stealth}} of their own will still gain the ''Wraith Form'' buff but they will not grant {{tip|obscured vision}} of themselves to the enemy while out of the mist nor will they appear as a ''Wraith''.\n** Allies who have their own {{tip|camouflage}} and also have ''Wraith Form'' will be revealed to enemies from their stealth's detection range, not ''Wraith Form's''.\n* If '''Senna''' gains {{tip|invisibility}} while {{tip|camouflage|camouflaged}} by ''Curse of the Black Mist'', the visual effects of her aura will be hidden while she is invisible.\n* ''Curse of the Black Mist'' will not activate if '''Senna''' enters {{tip|resurrection}} during the cast time.\n* ''Wraith Form'' will not be granted to allies that are in a {{tip|zombie state}} or are {{tip|channel|channeling}}. It will be granted to allies even if they are {{tip|untargetable}}.\n* Using a basic attack breaks the stealth at the start of the attack windup.\n** The stealth regain timer is refreshed from basic attacks at the start of their attack windup.",
+        "flavorsound": "{{sm2|Senna Original_E_0.ogg}} ''\"Shadows catch the fallen...\"''"
+      }
+    },
+    "R": {
+      "id": "SennaR",
+      "name": "Dawning Shadow",
+      "description": "Senna calls upon the relic stones of fallen Sentinels, splitting her relic cannon into a holy array of shadow and light. She then fires a global beam that shields allies from harm, while damaging enemies caught in the center.",
+      "tooltip": "Senna fires a beam of light that deals {{ totaldamage }} physical damage to all enemy champions hit. Allied champions hit in a wider area receive {{ totalshield }} Shield for {{ shieldduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "140/120/100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "25000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Shield Amount",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ shield }} -> {{ shieldNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Senna",
+        "skill": "R",
+        "icon": "Dawning Shadow.png",
+        "blurb": "{{sbc|Active:}} {{ci|Senna}} fires two waves of spectral light in the target direction. The center wave deals {{as|physical damage}} to enemy champions hit and {{tip|standard sight|reveals}} them for a short time.",
+        "blurb2": "The broad wave {{tip|shields}} '''Senna''' and allied champions hit for a short time.",
+        "description": "{{sbc|Active:}} '''Senna''' fires two waves of spectral light in the target direction, granting {{tip|sight}} of the area briefly along the path. The center wave deals {{as|physical damage}} to enemy {{tip|champions}} hit and {{tip|standard sight|reveals}} them for 3 seconds, as well as hits all ''{{ai|Absolution|Senna|Mist Wraiths}}''.",
+        "leveling": "{{st|Physical Damage|{{ap|250 to 550}} {{as|(+ 115% '''bonus''' AD)}} {{as|(+ 70% AP)}}}}",
+        "icon2": "Dawning Shadow 2.png",
+        "description2": "The broad wave grants a {{tip|shield}} to '''Senna''' and allied champions hit for 3 seconds.",
+        "leveling2": "{{st|Shield Strength|{{ap|120 to 200}} {{as|(+ 50% AP)}}<br />{{as|(+ {{fd|1.5}} per {{ai|Absolution|Senna|Mist}} collected)|mist}}}}",
+        "cast time": "1",
+        "width": "{{tip|er|icononly = true}} {{tt|320|Central beam}} / {{tt|2400|Wide beam}}",
+        "cooldown": "{{ap|140 to 100}}",
+        "cost": "{{ap|100}}",
+        "costtype": "Mana",
+        "target range": "Global",
+        "speed": "20000",
+        "targeting": "Direction",
+        "affects": "Allies / Enemies",
+        "damagetype": "physical",
+        "spellshield": "true",
+        "spelleffects": "aoe",
+        "projectile": "true",
+        "grounded": "|knockdown    =",
+        "video": "Senna - R",
+        "flavorsound": "{{sm2|Senna Original_R_0.ogg}} ''\"No shadow without light!\"''",
+        "notes": "{{Effect at cast time start}}\n* '''Senna''' reveals herself during the cast time.",
+        "tips": "* The broad wave is a singular projectile that can be {{tip|projectile|destroyed}}."
+      }
+    }
+  }
+}

@@ -1,0 +1,121 @@
+[hero]
+name = "Lux"
+
+[stats]
+hp = 90
+move_speed = 3.3
+armor = 20.0
+magic_resist = 30.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 12
+range = 5.5
+cooldown = 1000
+
+# --- Q: Light Binding ---
+[[abilities]]
+name = "Light Binding"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 11000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 10
+
+[abilities.delivery]
+method = "projectile"
+speed = 12.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 20
+damage_type = "magic"
+
+[[abilities.delivery.on_hit]]
+type = "root"
+duration_ms = 1000
+
+# --- W: Prismatic Barrier ---
+[[abilities]]
+name = "Prismatic Barrier"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 14000
+cast_time_ms = 250
+ai_hint = "defense"
+resource_cost = 12
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.effects]]
+type = "shield"
+amount = 10
+duration_ms = 3000
+
+# --- E: Lucent Singularity ---
+[[abilities]]
+name = "Lucent Singularity"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 10000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 14
+recast_count = 1
+recast_window_ms = 10000
+
+[abilities.delivery]
+method = "projectile"
+speed = 12.0
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 3.1
+
+# --- R: Final Spark ---
+[[abilities]]
+name = "Final Spark"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 17300
+cast_time_ms = 1000
+ai_hint = "damage"
+resource_cost = 20
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 75
+damage_type = "magic"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 2.5
+
+# --- Passive: Illumination ---
+[[passives]]
+name = "Illumination"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_auto_attack"
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

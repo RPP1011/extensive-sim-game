@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0049_4v6_d3_s2"
+seed = 22172
+hero_count = 4
+enemy_count = 6
+difficulty = 3
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["shaman", "alchemist", "witch_doctor", "monk"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Any"

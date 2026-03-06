@@ -1,0 +1,112 @@
+[hero]
+name = "Gangplank"
+
+[stats]
+hp = 120
+move_speed = 3.4
+armor = 35.0
+magic_resist = 32.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 1.5
+cooldown = 800
+
+# --- Q: Parrrley ---
+[[abilities]]
+name = "Parrrley"
+targeting = "target_enemy"
+range = 6.2
+cooldown_ms = 4000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 11
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 2
+damage_type = "physical"
+
+# --- W: Remove Scurvy ---
+[[abilities]]
+name = "Remove Scurvy"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 22000
+cast_time_ms = 250
+ai_hint = "heal"
+resource_cost = 12
+
+[[abilities.effects]]
+type = "heal"
+amount = 11
+
+# --- E: Powder Keg ---
+[[abilities]]
+name = "Powder Keg"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 8000
+cast_time_ms = 250
+ai_hint = "damage"
+max_charges = 2
+charge_recharge_ms = 18000
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.45
+
+# --- R: Cannon Barrage ---
+[[abilities]]
+name = "Cannon Barrage"
+targeting = "ground_target"
+range = 0.0
+cooldown_ms = 29400
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 20
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 10
+damage_type = "magic"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 5.8
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- Passive: Trial by Fire ---
+[[passives]]
+name = "Trial by Fire"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 5000
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+

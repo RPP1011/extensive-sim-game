@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0106_2v2_s1"
+seed = 12029
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["templar", "Rammus"]
+enemy_hero_templates = ["warrior", "Ambessa"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

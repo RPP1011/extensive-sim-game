@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0107_3v3"
+seed = 2030
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["Sejuani", "Akshan", "paladin"]
+enemy_hero_templates = ["Mordekaiser", "Warwick", "paladin"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

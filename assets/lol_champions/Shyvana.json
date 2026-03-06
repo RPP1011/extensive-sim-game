@@ -1,0 +1,293 @@
+{
+  "id": "Shyvana",
+  "name": "Shyvana",
+  "title": "the Half-Dragon",
+  "resource_type": "Fury",
+  "tags": [
+    "Fighter",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Fury of the Dragonborn",
+      "description": "Shyvana deals bonus damage to dragons and gains Armor and Magic Resistance. As Shyvana and her allies slay more dragons, she gains more bonus Armor and Magic Resistance.",
+      "wiki_detail": {
+        "champion": "Shyvana",
+        "skill": "I",
+        "icon": "Fury of the Dragonborn.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Shyvana}} gains {{sti|armor|{{as|'''bonus''' armor}}}} and {{sti|mr|{{as|'''bonus''' magic resist}}}}, which is permanently increased for every [[File:Elemental Drakes icon.png|16px|link=]] [[elemental drake]] and {{ui|Elder Dragon}} her team slays.",
+        "blurb2": "Additionally, '''Shyvana''' deals {{as|'''bonus''' physical damage}} and {{as|'''bonus''' magic damage}} to Dragons.",
+        "description": "{{sbc|Innate:}} '''Shyvana''' gains {{sti|armor|{{as|5 '''bonus''' armor}}}} and {{sti|mr|{{as|5 '''bonus''' magic resistance}}}}, which are each increased by 5 for every [[File:Elemental Drakes icon.png|16px|link=]] [[elemental drake]] and {{ui|Elder Dragon}} her team slays.",
+        "description2": "Additionally, '''Shyvana''' deals 20% increased damage to {{ui|Dragon|Dragons}}.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "|spelleffects =",
+        "onhiteffects": "|spellshield  =",
+        "notes": "* ''Fury of the Dragonborn's'' increased damage modifier to {{ui|Dragon|Dragons}} does not affect [[true damage]]."
+      }
+    },
+    "Q": {
+      "id": "ShyvanaDoubleAttack",
+      "name": "Twin Bite",
+      "description": "Shyvana strikes twice on her next attack and grants herself Attack Speed for her next attacks. Basic attacks reduce the cooldown of Twin Bite by 0.5 seconds.\n\nDragon Form: Twin Bite cleaves all units in front of Shyvana.",
+      "tooltip": "Shyvana's next Attack strikes twice, dealing {{ firsthitdamagecalc }} then {{ secondhitdamagecalc }} physical damage. Her next 2 Attacks gain {{ bonusas }}% Attack Speed.\n\nAttacks reduce this Ability's Cooldown by {{ cdreductiononhit }} seconds.\n\nDragon Form: The empowered Attacks hit all units in front of Shyvana.\n\nThis Ability triggers spell effects upon dealing damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8/7.5/7/6.5/6",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Bonus Damage:",
+          "Cooldown",
+          "Attack Speed"
+        ],
+        "effect": [
+          "{{ secondhitdamage*100.000000 }}% -> {{ secondhitdamagenl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ bonusas }}% -> {{ bonusasNL }}%"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Shyvana",
+        "skill": "Q",
+        "icon": "Twin Bite.png",
+        "blurb": "{{sbc|Active:}} {{cis|Shyvana}} next basic attack within a few seconds will cause her to quickly strike again, dealing {{as|'''bonus''' physical damage}}.",
+        "blurb2": "Basic attacks {{sti|cdr|reduce}} ''Twin Bite's'' cooldown.",
+        "blurb4": "{{sbc|{{ai|Dragon's Descent|Shyvana|Dragon Form}} Bonus:}} '''Shyvana''' also hits enemies in a cone around the target.",
+        "description": "{{sbc|Active:}} '''Shyvana''' empowers her next [[basic attack]] within 6 seconds to gain {{sti|range|25 '''bonus''' range}}, deal {{as|100% AD}} {{as|(+ 50% AP)}} {{as|physical damage}}, and cause her to strike again after {{fd|0.25}} seconds to deal {{as|'''bonus''' physical damage}}.<br><br>The second strike applies {{tip|on-hit}} and {{tip|on-attack}} effects at 100% effectiveness and is affected by {{tip|critical strike}} modifiers.",
+        "leveling": "{{st|Bonus Physical Damage|{{as|{{ap|20 to 100}}% AD}} {{as|(+ 25% AP)}}}}",
+        "description2": "After consuming the empowered attack, her next two basic attacks within 5 seconds gain {{sti|{{as|'''bonus''' attack speed}}}}",
+        "leveling2": "{{st|Bonus Attack Speed|{{ap|50 to 70}}%}}",
+        "description3": "Basic attacks reduce ''Twin Bite's'' {{sti|'''current''' cooldown}} by {{fd|0.5}} seconds {{tip|on-hit}}.",
+        "description4": "{{sbc|{{ai|Dragon's Descent|Shyvana|Dragon Form}} Bonus:}} '''Shyvana''' attacks enemies in a cone in front of her and applies the second strike to enemies surrounding the primary target. Both the attack and the strike occur at the same time and each of them apply ''Twin Bite's'' respective effects to all targets hit, with the exception of the second strike not applying {{tip|on-attack}} effects and being unable to {{tip|critically strike}}. The attack is affected by {{tip|critical strike}} modifiers, applies {{tip|on-hit}} effects to enemies hit, and triggers {{tip|on-attack}} effects against only the primary target. Additionally, ''Twin Bite's'' empowered attack has an {{tip|uncancellable windup}}.",
+        "description5": "''Twin Bite {{tip|basic attack reset|resets}} '''Shyvana's''' basic attack timer.''",
+        "cooldown": "{{ap|8 to 6}}",
+        "cdstart": "post-effect",
+        "effect radius": "{{tip|cr|icononly=true}} {{tt|325|Dragon Form second strike around primary target}} / {{tip|er|icononly=true}} {{tt|250|Dragon Form first strike in front of caster}}",
+        "angle": "{{tt|180|Dragon Form first strike cone}}{{degrees}}",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "cast time": "none",
+        "damagetype": "Physical",
+        "occurrence": "On-hit",
+        "parry": "True",
+        "spelleffects": "special",
+        "spellshield": "True",
+        "notes": "* Applies {{tip|spell damage}} and procs {{tip|basic damage}} required effects.\n* ''Dragon Form's'' ''Twin Bite'' cannot apply {{iis|Tiamat}} {{nie|Cleave}} on each target hit because of {{nies|Cleave}} internal {{fd|0.05}} seconds interval during which it cannot be applied on a different target.\n* ''Dragon Form's'' ''Twin Bite'' only applies the attack to enemies that would be hit by the second strike.\n* In ''Dragon Form'', both strikes belong to the same {{tip|cast instance}}. In ''Human Form'', they belong in separate ones.\n* Since the second strike applies after the ability goes on cooldown, it will reduce its own cooldown.\n* Unlike most [[on-hit]] effects, the one reducing the cooldown of ''Twin Bite'' also triggers against {{tip|turret|structures}}.\n* In ''Dragon Form'', ''Twin Bite'' consumes an additional stack of {{ri|Hail of Blades}}. {{bug}}",
+        "yvideo": "Shyvana - Q"
+      }
+    },
+    "W": {
+      "id": "ShyvanaImmolationAura",
+      "name": "Burnout",
+      "description": "Shyvana surrounds herself in fire, dealing magic damage per second to nearby enemies and moving faster for 3 seconds, part of this damage is applied again when Shyvana basic attacks an enemy with Burnout active. The Move Speed reduces over the duration of the spell. Basic attacks extend the duration of Burnout. \n\nDragon Form: Burnout grows in size.",
+      "tooltip": "Shyvana summons a flame storm around her, gaining {{ finalmsperc }} decaying Move Speed and dealing {{ damagepertickcalc }} magic damage per second for {{ baseduration }} seconds. \n\nThe flame storm also causes Shyvana's Attacks to deal an additional {{ damageonhitcalc }} magic damage to surrounding enemies and extend this Ability's duration by {{ bonusdurationonhit }} second.\n\nDragon Form: The size of the flame storm is increased.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "325",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage (aura)",
+          "Damage (on hit)",
+          "Move Speed"
+        ],
+        "effect": [
+          "{{ damagepertick }} -> {{ damagepertickNL }}",
+          "{{ onhitdamage }} -> {{ onhitdamageNL }}",
+          "{{ mspercent*100.000000 }}% -> {{ mspercentnl*100.000000 }}%"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Shyvana",
+        "skill": "W",
+        "icon": "Burnout.png",
+        "blurb": "{{sbc|Active:}} {{ci|Shyvana}} creates a flame aura, gaining a burst of {{sti|ms|{{as|movement speed}}}} and continually dealing {{as|magic damage}} to nearby enemies.",
+        "blurb2": "During this time, her basic attacks deal additional {{as|magic damage}} to surrounding enemies and extend the duration, up to a cap.",
+        "blurb4": "{{sbc|{{ai|Dragon's Descent|Shyvana|Dragon Form}} Bonus:}} The aura is enlarged.",
+        "description": "{{sbc|Active:}} '''Shyvana''' surrounds herself in flames for 3 seconds, gaining {{sti|ms|{{as|decaying '''bonus''' movement speed}}}} and dealing {{as|magic damage}} every {{fd|0.5}} seconds to nearby enemies.",
+        "leveling": "{{st|Bonus Movement Speed|{{ap|30 to 50}}% {{as|(+ 12% per 100 AP)}}|Bonus Movement Speed Decay|{{ap|4.5 to 7.5}}%}}\n{{st|Magic Damage Per Tick|{{ap|10 to 30}} {{as|(+ 10% '''bonus''' AD)}}}}",
+        "description2": "During this time, '''Shyvana's''' basic attacks deal {{as|'''bonus''' magic damage}} {{tip|on-hit}} to surrounding enemies and extend the duration of ''Burnout'' by 1 second, which can occur up to 4 times for a total of 4 additional seconds.",
+        "leveling2": "{{st|Bonus Magic Damage|{{ap|5 to 13}} {{as|(+ 5% '''bonus''' AD)}}}}",
+        "description3": "{{sbc|{{ai|Dragon's Descent|Shyvana|Dragon Form}} Bonus:}} ''Burnout's'' radius increases, scaling with ''{{ais|Dragon's Descent|Shyvana}}'' rank.",
+        "cooldown": "12",
+        "cdstart": "on-cast",
+        "effect radius": "{{tt|162.5|Human form range}} / {{tt|{{ap|350|365|380}}|Dragon form range, scales with Dragon's Descent}}",
+        "targeting": "Auto",
+        "cast time": "none",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spelleffects": "aoedot",
+        "onhiteffects": "|parry = unknown",
+        "spellshield": "False",
+        "notes": "* {{as|Magic damage}} on-hit can be dodged with {{tip|dodge|dodging}} effects.\n* {{Pending for test}}: {{as|Magic damage}} on-hit's interactions with {{tip|block|blocking}} and {{tip|blind|blinding}} effects.",
+        "yvideo": "Shyvana - W"
+      }
+    },
+    "E": {
+      "id": "ShyvanaFireball",
+      "name": "Flame Breath",
+      "description": "Shyvana unleashes a fireball that deals damage to all enemies it encounters and leaves cinders on the target, marking them for 5 seconds. Shyvana's basic attacks on marked targets deal a percentage of their maximum Health as damage on-hit.\n\nDragon Form: Flame Breath explodes on impact or at target location, dealing bonus damage and scorching the earth for a short duration.",
+      "tooltip": "Shyvana unleashes a fireball that deals {{ damagecalc }} magic damage and marks for {{ markduration }} seconds. The fireball stops on the first champion hit.\n\nShyvana's Attacks against marked targets deal an additional {{ percenthpdamageonhit }}% max Health magic damage.\n\nDragon Form: The fireball explodes once it ends, dealing an additional {{ dragonexplosioncalc }} magic damage and scorching the earth, dealing {{ dragondamagetotalcalc }} magic damage over 4 seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/11/10/9/8",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "925",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "60/100/140/180/220",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Shyvana",
+        "skill": "E",
+        "icon": "Flame Breath.png",
+        "blurb": "{{sbc|Active:}} {{ci|Shyvana}} unleashes a fireball in the target direction that stops upon hitting an enemy {{tip|champion}}. The fireball deals {{as|magic damage}} to enemies hit and marks them for a few seconds.",
+        "blurb2": "'''Shyvana's''' basic attacks against marked enemies deal {{as|'''bonus''' magic damage}} based on {{as|their '''maximum''' health}}.",
+        "blurb4": "{{sbc|{{ai|Dragon's Descent|Shyvana|Dragon Form}} Bonus:}} The fireball deals increased {{as|magic damage}} and explodes upon hitting an enemy {{tip|champion}} or reaching the target location, creating a scorched field for a few seconds that continually deals {{as|magic damage}} to enemies within.",
+        "description": "{{sbc|Active:}} '''Shyvana''' unleashes a fireball in the target direction that stops upon hitting an enemy {{tip|champion}}, dealing {{as|magic damage}} to all enemies hit and marking them for 5 seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|85 to 245}} {{as|(+ 50% '''bonus''' AD)}} {{as|(+ 80% AP)}}}}",
+        "description2": "'''Shyvana's''' basic attacks against marked enemies are empowered to deal {{as|'''bonus''' magic damage}} {{tip|on-hit}} equal to {{as|3% {{as|(+ 1% per 100 '''bonus''' AD)}} of the target's '''maximum''' health}}, capped at 150 against monsters.",
+        "description3": "{{sbc|{{ai|Dragon's Descent|Shyvana|Dragon Form}} Bonus:}} The fireball explodes upon hitting an enemy {{tip|champion}} or reaching the target location, dealing increased {{as|magic damage}} and creating a scorched field for 4 seconds. Enemies within the field are marked once and dealt {{pp|30 to 60 for 13|6 to 18|formula=30 + 2.5 per level|color=magic damage}} {{as|(+ 15% '''bonus''' AD)}} {{as|(+ 10% AP)}} {{as|magic damage}} every {{fd|0.5}} seconds.",
+        "leveling3": "{{st|Increased Damage|{{pp|75 to 135 for 13|1;7 to 18|formula=75 at level 1, then + 5 per level starting at level 7}} (+ {{ap|85 to 245}}) {{as|(+ 100% '''bonus''' AD)}} {{as|(+ 100% AP)}}}}",
+        "description4": "''Flame Breath while in {{ai|Dragon's Descent|Shyvana|Dragon Form}} will cast at max range if cast beyond that.''",
+        "cooldown": "{{ap|12 to 8}}",
+        "target range": "925",
+        "width": "{{tip|er|icononly = true}} {{tt|120|Human fireball missile}} <!--/ {{tt|?|Dragon fireball missile}}-->",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|345|Explosion and Scorched Ground Radius}}",
+        "cast time": "{{tt|{{fd|0.25}}|Human form}} / {{tt|{{fd|0.3333}}|Dragon form}}",
+        "speed": "{{tt|1600|Human form}} / {{tt|1575|Dragon form}}",
+        "targeting": "[[Direction-targeted|Direction]] / [[Location-targeted|Location]]",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "projectile": "true",
+        "spelleffects": "special",
+        "parry": "unknown",
+        "onhiteffects": "|spellshield  = True",
+        "notes": "* The fireball applies {{tip|area damage}} and the [[on-hit]] effect against marked targets deals {{tip|proc damage}}.\n** In ''Dragon Form'', the fiery explosion applies {{tip|area damage}} and the burning scorch deals {{tip|persistent area damage}} to all enemies within the area of effect.\n* In ''Dragon Form'', both areas of effect will be centered on the first champion struck, not at the location the missile collided with them.\n{{Effect at cast time end}}\n* In ''Dragon Form'', the visual mark will not be applied to non-champions, but the debuff will still be applied for gameplay purposes.{{bug}}\n* {{as|Magic damage}} on-hit can be dodged by {{tip|dodge|dodging}} effects.\n* {{Pending for test}}: {{as|Magic damage}} on-hit's interactions with {{tip|block|blocking}} and {{tip|blind|blinding}} effects.",
+        "yvideo": "Shyvana - E",
+        "_comments": [
+          "/ {{tt|?|Dragon fireball missile}}"
+        ]
+      }
+    },
+    "R": {
+      "id": "ShyvanaTransformCast",
+      "name": "Dragon's Descent",
+      "description": "Shyvana transforms into a dragon and takes flight to a target location. Enemies along her path take damage and are knocked toward her target location.\n\nShyvana passively gains Fury per second and gains 2 Fury on basic attack.",
+      "tooltip": "Passive: Shyvana generates {{ furygainpertick }} Fury every second, and Attacks generate an extra {{ furygainonhit }} Fury.\n\nActive: Shyvana transforms into Dragon Form, gaining {{ bonushp }} max Health and flying forward, dealing {{ damagecalc }} magic damage and Knocking enemies toward her target location.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0",
+      "cost": "0",
+      "cost_type": " Fury a Second",
+      "range": "850",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Passive Fury Gain",
+          "Bonus Health",
+          "Flight Damage"
+        ],
+        "effect": [
+          "{{ furygainpertick }} -> {{ furygainpertickNL }}",
+          "{{ bonushp }} -> {{ bonushpNL }}",
+          "{{ damage }} -> {{ damageNL }}"
+        ]
+      },
+      "resource": "{{ furydrainpersecond }} Fury a Second",
+      "wiki_detail": {
+        "champion": "Shyvana",
+        "skill": "R",
+        "icon": "false",
+        "blurb": "{{sbc|Passive - Fury:}} {{ci|Shyvana}} generates {{tip|Fury|{{as|Fury}}}} per second while alive in {{sbc|Human form}}, and also generates {{as|Fury}} per basic attack in either form.",
+        "blurb2": "{{sbc|Active:}} '''Shyvana''' transforms into {{sbc|Dragon Form}}, {{tip|dash|dashing}} with {{tip|displacement immunity}} to the target location and {{tip|airborne|carrying}} along enemies she passes through, dealing {{as|magic damage}}.",
+        "blurb3": "{{sbc|Dragon Form}}: '''Shyvana''' gains {{sti|health|{{as|'''bonus''' health}}}}, {{sti|range|'''bonus''' attack range}}, and increased [[size]]. Her abilities are also empowered to apply an additional effect.",
+        "blurb4": "''Dragon's Descent'' requires {{as|max Fury}} to be cast, and has a recurring {{as|Fury}} cost.<br/>\n{{sbc|{{tip|displacement immunity|nolink=true}}:}} The dash cannot be deterred by {{tip|crowd control}}.",
+        "description": "{{sbc|Passive - Fury:}} ''Dragon's Descent'' requires {{tip|Fury|{{as|100 Fury}}}} to be cast. '''Shyvana''' generates {{as|Fury}} per second while alive and in {{sbc|Human form}} and {{as|2 Fury}} per basic attack {{tip|on-hit}} in either form. '''Shyvana''' gains {{as|100 Fury}} upon learning ''Dragon's Descent''.",
+        "leveling": "{{st|Fury Generation per Second|{{as|{{ap|1 to 2}}|Fury}}}}",
+        "icon2": "Dragon's Descent.png",
+        "description2": "{{sbc|Active:}} '''Shyvana''' transforms into {{sbc|Dragon Form}} and {{tip|dash|dashes}} with {{tip|displacement immunity}} to the target location, dealing {{as|magic damage}} to enemies she passes through and {{tip|airborne|carrying}} them alongside her.",
+        "leveling2": "{{st|Magic Damage|{{ap|150 to 350}} {{as|(+ 130% AP)}}}}",
+        "description3": "{{sbc|Dragon Form}}: '''Shyvana''' gains {{sti|health|{{as|'''bonus''' health}}}}, {{sti|range|'''bonus''' attack range}}, and increased [[size]]. Her abilities are also empowered to apply an additional effect. She maintains {{sbc|Dragon Form}} at a recurring cost of {{as|Fury}}, returning to {{sbc|Human Form}} once all {{as|Fury}} has been depleted.",
+        "leveling3": "{{st|Bonus Health|{{ap|150 to 350}}}}\n{{st|Bonus Range|{{ap|50 to 80}}}}\n{{st|Size Increase|{{ap|0|8.5|16}}%}}",
+        "description4": "''Dragon's Descent will cast at max range if cast beyond that.''",
+        "target range": "850",
+        "cost": "{{as|{{fd|2.5}}|Fury}}",
+        "costtype": "{{as|Fury}} every {{fd|0.5}} seconds",
+        "cast time": "{{fd|0.25}}",
+        "targeting": "Location",
+        "affects": "Enemies, Self",
+        "damagetype": "magic",
+        "spelleffects": "aoe",
+        "onhiteffects": "|spellshield  = True",
+        "grounded": "true",
+        "knockdown": "false",
+        "notes": "* ''Dragon Descent's'' {{tip|displacement immunity}} begins from the start of the cast time.\n* ''Dragon's Descent'' has a {{ap|100/(1 to 2)|round=2}} seconds effective cooldown when not attacking and not dead.\n{{ct|cast|spells=true,false,false,false,false}}",
+        "yvideo": "Shyvana - R",
+        "flavorsound": "{{sm2|Shyvana_Original_RLeap_Deactivate_3.ogg}} ''\"Behold my true form!\"''"
+      }
+    }
+  }
+}

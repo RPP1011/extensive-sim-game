@@ -1,0 +1,290 @@
+{
+  "id": "Vex",
+  "name": "Vex",
+  "title": "the Gloomist",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Doom 'n Gloom",
+      "description": "Vex periodically becomes empowered, causing her next basic Ability to fear enemies and interrupt dashes. Whenever a nearby enemy dashes, Vex applies a mark that can be consumed for bonus damage that also reduces the cooldown of her empowered state.",
+      "wiki_detail": {
+        "champion": "Vex",
+        "skill": "I",
+        "blurbicon": "Vex Doom 'n Gloom.png",
+        "icon": "false",
+        "icon2": "Vex Doom 'n Gloom.png",
+        "blurb": "{{sbc|Passive - Doom:}} Periodically, {{ci|Vex}} empowers her next basic ability to {{tip|knockdown|knock down}} and briefly {{tip|flee|fear}} enemies hit.",
+        "blurb2": "{{sbc|Innate - Gloom:}} Nearby enemies that {{tip|dash}} or {{tip|blink}} become marked with ''Gloom'' for a few seconds. '''Vex's''' next basic attack or basic ability hit will consume the mark to deal {{as|'''bonus''' magic damage}} and {{sti|cdr|reduce}} ''Doom's'' cooldown.<br/>''{{ai|Looming Darkness|Vex}}'' will also inflict ''Gloom'', but cannot detonate it.",
+        "description": "{{sbc|Passive - Doom:}} Periodically, '''Vex''' empowers her next [[champion ability|basic ability]] to {{tip|knockdown|knock down}} and {{tip|fear}} enemies hit for {{pp|0.75 to 1.5 for 4|1;6;9;13}} seconds, during which they are {{tip|slow|slowed}} by {{pp|type=distance from '''Vex'''|60 to 99 for 11|250 to 800|key=%|formula=60% + 3.9% for every 55 units away from Vex}}. If ''{{ai|Looming Darkness 2|Vex|Looming Darkness}}'' triggers ''Doom'', enemies hit will {{tip|flee}} from the epicenter instead.<br/>''Doom's'' {{sti|cooldown}} resets upon [[death|respawning]].",
+        "description2": "{{sbc|Innate - Gloom:}} Nearby enemy {{tip|champions}} and {{tip|monsters}} that {{tip|dash}} or {{tip|blink}} will be marked with ''Gloom'' for 6 seconds. '''Vex's''' next [[basic attack]], which becomes {{tip|projectile|non-projectile}}, or basic ability hit against an enemy with ''Gloom'' will detonate the mark. ''{{ai|Looming Darkness|Vex}}'' will also inflict ''Gloom'', but cannot detonate it.",
+        "description3": "''Gloom's'' detonation deals {{pp|40 to 150|color=magic damage}} {{as|(+ 25% AP)}} {{ccs|{{as|'''bonus''' magic damage}}|magic}} and refunds 25% of ''Doom's'' cooldown. Against non-champions, this instead deals {{pp|40 to 60 for 5|1;6;9;13;16|key=%}} damage and refunds 10% of ''Doom's'' cooldown.",
+        "static": "{{pp|25 to 16 for 4|1;6;11;16}}",
+        "cast time": "|cost         =",
+        "costtype": "|effect radius= {{tt|1600|Dash and blink detection radius}}",
+        "width": "|speed        =",
+        "targeting": "Passive",
+        "damagetype": "Magic",
+        "projectile": "false",
+        "affects": "Self, Enemies",
+        "spelleffects": "proc",
+        "onhiteffects": "|spellshield  = special",
+        "parry": "true",
+        "callforhelp": "|flavorsound  = {{sm2|Vex_Original_P1_1.ogg}} ('''Doom''' charged) \"Ugghh...\"<br>{{sm2|Vex_Original_P2_1.ogg}} ('''Gloom''' triggered) \"Bring it down a notch.\"",
+        "notes": "* ''Gloom'' will mark {{ui|Rift Herald}} and {{ui|Rift Scuttler}} when they use their dashes.\n* ''Gloom'' can mark {{tip|clone|clones}}, but not other {{tip|pet|pets}}.\n* ''Gloom's'' mark has a very brief cooldown and refreshes on subsequent dashes or blinks nearby enemies use.\n* ''Gloom's'' mark duration will refresh to {{fd|0.5}} seconds when '''Vex''' starts an attack windup against a target that has a mark which is about to expire.\n* ''Gloom'' will mark enemies even if they are {{tip|untargetable}}.\n* ''Gloom'' will mark enemies that are inside the detection radius when they blink, but will not mark those that blink inside from far away.{{bug|2}}\n* ''Doom's'' cooldown starts as soon as the basic ability is cast.\n* Non-champions (e.g. {{ui|Rift Scuttler}}) are not {{tip|knockdown|knocked down}} by the fear-empowered ability.{{bug|2}}\n* {{tip|Spell shield}} will block all of ''Doom's'' effects but not ''Gloom's'' empowered attack nor mark.\n* Nearby enemies that become displaced do not count for being marked by ''Gloom''.\n* '''Vex's''' basic abilities use a different icon when ''Doom'' is ready:\n** [[File:Vex Mistral Bolt 2.png|20px|border]] Mistral Bolt\n** [[File:Vex Personal Space 2.png|20px|border]] Personal Space\n** [[File:Vex Looming Darkness 2.png|20px|border]] Looming Darkness"
+      }
+    },
+    "Q": {
+      "id": "VexQ",
+      "name": "Mistral Bolt",
+      "description": "Launch a damaging missile that accelerates mid-flight.",
+      "tooltip": "Vex launches a wave of mist that deals {{ qdamagecalc }} magic damage. After a delay, the wave becomes smaller and faster.\n\nConsumes Gloom on enemies hit.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8/7/6/5/4",
+      "cost": "45/50/55/60/65",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1200",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "@AbilityResourceName@ Cost",
+          "Cooldown",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cost }} -> {{ costNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Vex",
+        "skill": "Q",
+        "icon": "Vex Mistral Bolt.png",
+        "blurb": "{{sbc|Active:}} {{ci|Vex}} launches a wave of mist in the target direction that deals {{as|magic damage}} to enemies hit. After a short delay, the wave accelerates but also narrows.",
+        "description": "{{sbc|Active:}} '''Vex''' launches a wave of mist in the target direction that deals {{as|magic damage}} to enemies hit. After travelling 500 units, the wave accelerates but also narrows itself.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 250}} {{as|(+ 70% AP)}}}}",
+        "cooldown": "{{ap|8 to 4}}",
+        "cast time": "{{fd|0.15}}",
+        "cost": "{{ap|45 to 65}}",
+        "costtype": "Mana",
+        "range": "{{tip|cr|icononly = true}} 1200",
+        "width": "{{tip|er|icononly = true}} {{tt|360|First part}} / {{tt|160|Second part}}",
+        "speed": "{{tt|600|First part}} / {{tt|3200|Second part}}",
+        "targeting": "Direction",
+        "damagetype": "Magic",
+        "projectile": "true",
+        "affects": "Ememies",
+        "spelleffects": "spellaoe",
+        "onhiteffects": "|spellshield  = true",
+        "callforhelp": "|notes        = \n{{Effect at cast time end}}\n** ''Mistral Bolt'' will fire from wherever '''Vex''' is at the end of the cast time, towards the originally targeted location or 1200 units in the originally targeted direction if cast beyond that."
+      }
+    },
+    "W": {
+      "id": "VexW",
+      "name": "Personal Space",
+      "description": "Gain a shield and damage nearby enemies.",
+      "tooltip": "Vex gains {{ shieldcalc }} Shield for {{ shieldduration }} seconds and emits a shockwave that deals {{ wdamagecalc }} magic damage.\n\nConsumes Gloom on enemies hit.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16/15/14/13/12",
+      "cost": "75",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "475",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Shield Amount",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ shieldamount }} -> {{ shieldamountNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Vex",
+        "skill": "W",
+        "icon": "Vex Personal Space.png",
+        "blurb": "{{sbc|Active:}} {{ci|Vex}} emits a shockwave, dealing {{as|magic damage}} to nearby enemies and {{tip|shield|shielding}} herself for a short time.",
+        "description": "{{sbc|Active:}} '''Vex''' emits a shockwave around her before the cast time, dealing {{as|magic damage}} to nearby enemies and granting herself a {{tip|shield}} for {{fd|2.5}} seconds.",
+        "leveling": "{{st|Shield Strength|{{ap|50 to 150}} {{as|(+ 75% AP)}}}}\n{{st|Magic Damage|{{ap|80 to 240}} {{as|(+ 30% AP)}}}}",
+        "cooldown": "{{ap|16 to 12}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "75",
+        "costtype": "mana",
+        "effect radius": "{{tip|cr|icononly = true}} 475 / {{tt|550|Against dashing enemies}}",
+        "width": "|speed        =",
+        "targeting": "Auto",
+        "damagetype": "Magic",
+        "projectile": "|affects      = Self, Enemies",
+        "spelleffects": "spellaoe",
+        "onhiteffects": "|spellshield  = true",
+        "callforhelp": "|notes        = \n* ''Personal Space'' can be buffered {{fd|0.1}} seconds before it comes off cooldown or becomes available otherwise.\n* '''Vex''' can move during ''Personal Space's'' cast time."
+      }
+    },
+    "E": {
+      "id": "VexE",
+      "name": "Looming Darkness",
+      "description": "Summon a damaging and slowing zone that applies Gloom to enemies.",
+      "tooltip": "Vex commands Shadow to fly to a location, increasing in size as it travels. Upon arriving, it deals {{ edamagecalc }} magic damage and Slows by {{ slowamount*100 }}% for {{ slowduration }} seconds.\n\nKilling an enemy with this ability reduces Doom'n Gloom's Cooldown by {{ gloomcdnonchamptooltip*100 }}%.\n\nApplies Gloom to enemies hit.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "13",
+      "cost": "70/80/90/100/110",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow",
+          "Total AP Ratio"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ slowamount*100.000000 }}% -> {{ slowamountnl*100.000000 }}%",
+          "{{ apratio*100.000000 }}% -> {{ aprationl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Vex",
+        "skill": "E",
+        "icon": "Vex Looming Darkness.png",
+        "blurb": "{{sbc|Active:}} {{ci|Vex}} tosses her ''Shadow'' to explode at the target location, dealing {{as|magic damage}} and {{tip|slow|slowing}} enemies hit for a short time. The explosion widens based on cast distance.",
+        "description": "{{sbc|Active:}} '''Vex''' tosses her ''Shadow'' to explode at the target location, dealing {{as|magic damage}} to enemies hit and {{tip|slow|slowing}} them for 2 seconds. The explosion's radius increases based on cast distance.",
+        "leveling": "{{st|Magic Damage|{{ap|50 to 130}} {{as|(+ {{ap|40 to 60}}% AP)}}}}\n{{st|Slow|{{ap|30 to 50}}%}}",
+        "description2": "Killing an enemy with ''Looming Darkness'' refunds 10% of {{ai|Doom 'n Gloom|Vex|Doom's}} {{sti|cooldown}}, increased to 25% for champion kills.",
+        "description3": "''Looming Darkness will cast at max range if cast beyond that.''",
+        "cooldown": "13",
+        "cast time": "{{fd|0.25}}",
+        "cost": "{{ap|70 to 110}}",
+        "costtype": "mana",
+        "target range": "800",
+        "effect radius": "{{tip|cr|icononly = true}} {{pp|type = cast distance|200;200+13;200+13*2;200+13*3;200+13*4;200+13*5;200+13*6;200+13*7;300|0;X;X;X;X;X;X;X;800|formula=200 +13 per X cast distance. ''This is capped at 300 effect radius.''}}",
+        "width": "|speed        = 1300",
+        "targeting": "Location",
+        "damagetype": "Magic",
+        "projectile": "true",
+        "affects": "Enemies",
+        "spelleffects": "spellaoe",
+        "onhiteffects": "|spellshield  = true",
+        "callforhelp": "|notes        = \n* No additional details."
+      }
+    },
+    "R": {
+      "id": "VexR",
+      "name": "Shadow Surge",
+      "description": "Fire a missile that marks an enemy champion.  Recast to dash to them and deal damage.",
+      "tooltip": "Shadow excitedly surges forward, dealing {{ spell.vexr:rdamagecalc }} magic damage and marking the first enemy champion hit for 4 seconds.\n\nRecast: Dash to the marked champion, dealing {{ spell.vexr:recastdamagecalc }} magic damage on arrival.\n\nIf the marked champion dies within {{ spell.vexr:takedownwindow }} seconds of taking damage from this Ability, its Cooldown is temporarily reset.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "140/120/100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "2000/2500/3000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage",
+          "Recast Damage",
+          "Range"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ recastdamage }} -> {{ recastdamageNL }}",
+          "{{ castrange }} -> {{ castrangeNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Vex",
+        "skill": "R",
+        "icon": "Vex Shadow Surge.png",
+        "blurb": "{{sbc|Active:}} {{ci|Vex}} sends her ''Shadow'' in the target direction that deals {{as|magic damage}} to enemies hit. ''Shadow'' stops upon hitting an enemy {{tip|champion}}, marking and {{tip|true sight|revealing}} them for a few seconds. <br/>''Shadow Surge'' can be recast while the target is marked.",
+        "blurb2": "{{sbc|Recast:}} '''Vex''' {{tip|dashes}} towards the marked target. Upon arrival, the mark is consumed to deal {{as|magic damage}}.",
+        "blurb3": "If the target dies within a few seconds of being marked, '''Vex''' can cast ''Shadow Surge'' again within some time.",
+        "description": "{{sbc|Active:}} '''Vex''' sends her ''Shadow'' in the target direction that grants {{tip|sight}} around its {{tt|trajectory|Does not see into bush or across terrain}} and deals {{as|magic damage}} to enemies hit.",
+        "leveling": "{{st|Magic Damage|{{ap|75 to 175}} {{as|(+ 20% AP)}}}}",
+        "description2": "''Shadow'' stops upon hitting an enemy {{tip|champion}} to mark them for 4 seconds, during which they are {{tip|true sight|revealed}}. ''Shadow Surge'' can be recast while the target is marked.",
+        "icon3": "Vex Shadow Surge 2.png",
+        "description3": "{{sbc|Recast:}} '''Vex''' {{tip|dashes}} towards the marked target with {{tip|displacement immunity}}. Upon arrival, she consumes their mark and deals {{as|magic damage}}.",
+        "leveling3": "{{st|Magic Damage|{{ap|150 to 350}} {{as|(+ 50% AP)}}|Total Magic Damage|{{ap|75+150 to 175+350}} {{as|(+ {{ap|20+50}}% AP)}}}}",
+        "description4": "If the target dies within 6 seconds of being marked, '''Vex''' can cast ''Shadow Surge'' again within 12 seconds at no cost after {{fd|0.5}} seconds.",
+        "cooldown": "{{tt|{{ap|140 to 100}}|Starts post-effect of initial cast}}",
+        "cdstart": "post-effect",
+        "cast time": "{{tt|{{fd|0.25}}|Active}} / {{tt|None|Recast}}",
+        "cost": "100",
+        "costtype": "mana",
+        "effect radius": "{{tip|sight|icononly=true}}{{tt|650|Missile sight radius}} / {{tt|Global|Recast radius}}",
+        "range": "{{tip|cr|icononly = true}}  {{tt|{{ap|2000 to 3000}}|Shadow missile range}}",
+        "width": "{{tip|er|icononly = true}} {{tt|260|First cast missile width}}",
+        "speed": "{{tt|1600|First cast missile speed}} / {{tt|2200|Dash speed, estimated}}",
+        "targeting": "[[Direction-targeted|Direction]] / [[Auto-targeted|Auto]]",
+        "damagetype": "Magic",
+        "projectile": "true",
+        "affects": "Self, Enemies",
+        "spelleffects": "spell",
+        "onhiteffects": "|spellshield  = true",
+        "grounded": "special",
+        "knockdown": "false",
+        "callforhelp": "|notes        = \n{{Effect at cast time end}}\n* '''Vex's''' dash will track the target if they change locations.\n** She will not stop tracking the target until she reaches them, as there is no maximum tracking distance.\n* ''Shadow Surge'' grants sight of the area along its path for {{fd|{{tt|0.4|Estimated}}}} seconds each.\n* ''Shadow Surge'' cannot be recast while {{tip|ground|grounded}} or {{tip|root|rooted}}, or if the target is {{tip|untargetable}}.\n* ''Shadow Surge'' may also be recast if the target died to the ability.\n* The following table refers for interactions while '''Vex''' is dashing:\n** All movement spells are disabled during the first {{fd|0.25}} seconds of the dash.\n{{ct|attack=false|move=false|cast=false|items=true,,,interrupts|consume=true|spells=true,interrupts,true,true,false|interrupts=death}}",
+        "flavorsound": "{{sm2|Vex_Original_R_0.ogg}} ''\"Do the thing, Shadow.\"''"
+      }
+    }
+  }
+}

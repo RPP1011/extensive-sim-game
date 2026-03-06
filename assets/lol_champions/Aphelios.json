@@ -1,0 +1,223 @@
+{
+  "id": "Aphelios",
+  "name": "Aphelios",
+  "title": "the Weapon of the Faithful",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "The Hitman and the Seer",
+      "description": "Aphelios wields 5 Lunari Weapons made by his sister Alune. He has access to two at a time: one main-hand and one off-hand. Each weapon has a unique Basic Attack and Ability. Attacks and abilities consume a weapon's ammo. When out of ammo, Aphelios discards the weapon and Alune summons the next of the 5.",
+      "wiki_detail": {
+        "champion": "Aphelios",
+        "skill": "I",
+        "icon": "The Hitman and the Seer.png",
+        "description": "{{sbc|Innate:}} '''Aphelios''' has access to an arsenal of 5 ''Moonstone Weapons'', created by his sister '''Alune'''. He equips two weapons at any one time, one as his {{as|main weapon}} and one as his {{as|off-hand}}. Each weapon has a unique [[basic attack]] and passive effect.",
+        "description2": "'''Aphelios''' begins the game with {{ai|Calibrum|Aphelios}} as his {{as|main weapon}} and {{ai|Severum|Aphelios}} in his {{as|off-hand}}, with {{ai|Gravitum|Aphelios}}, {{ai|Infernum|Aphelios}}, and {{ai|Crescendum|Aphelios}} queued in reserve. The queue order can be rearranged based on weapon usage.",
+        "icon3": "The Hitman and the Seer 2.png",
+        "description3": "{{sbc|Innate - Moonlight:}} Weapons spawn with 50 ''Moonlight'' for [[ammunition]], which is consumed on basic attacks {{tip|on-attack}} or to cast his {{cci|Q.png|champion ability|abilities}}. Abilities that cause '''Aphelios''' to attack do not cost additional ''Moonlight'' on top of their ability cost. Once his {{as|main weapon}} is exhausted of ''Moonlight'', it is moved to the end of the queue and '''Aphelios''' assembles his next available weapon over 1 second to equip it from his reserve, with its [[File:Q.png|20px|link=]] ability being placed on a {{fd|1.5}}-second {{sti|cooldown}} before that time. '''Aphelios''' cannot cast {{ai|Phase|Aphelios}} during the assembly.",
+        "description4": "{{sbc|Innate - Weapon Master:}} '''Aphelios''' cannot improve his abilities with [[Experience (champion)|skill points]]. He starts the game with {{ai|Phase|Aphelios}} and gains access to {{cci|Q.png|champion ability|abilities}} at level 2 and {{ai|Moonlight Vigil|Aphelios}} at level 6, with the latter improving automatically at levels 11 and 16. Instead, '''Aphelios''' may spend his skill points to gain {{as|{{sti|'''bonus''' attack damage}}}}, {{as|{{sti|'''bonus''' attack speed}}}} or {{sti|{{as|lethality}}}}.",
+        "leveling4": "{{st|Bonus Attack Damage|{{as|{{ap|4.5 to 27 6}}|ad}}}}\n{{st|Bonus Attack Speed|{{as|{{ap|9 to 54 6}}%|as}}}}\n{{st|Lethality|{{as|{{ap|5.5 to 33 6}}|lethality}}}}",
+        "targeting": "Passive",
+        "affects": "Self",
+        "notes": "* The [[Experience_(champion)|level up]] for the bonus [[attack damage]], [[attack speed]], and [[armor penetration]] have hotkeys Q, W, E, respectively.\n** Assigning points '''does not''' follow the same rules as conventional point expenditure. The quickest you can get an individual statistic to rank-6 is by assigning points at {{ap|1|2|3|5|7|9}}.\n* An ammunition counter will appear to the right side of the screen at 10 or less ''Moonlight''.\n* Abilities can still be used with less than the required amount of ''Moonlight'', consuming all remaining ''Moonlight'' in the process.\n*{{ii|Runaan's Hurricane}} does not consume additional ''Moonlight'' for his basic attacks.\n* The icon for this ability changes based on the active skin and functions as '''Alune's''' portrait, similarly to '''Aphelios'''' portrait.",
+        "tips": "<!--objective strategy-->",
+        "differences": "<!--map-specific-->",
+        "flavorsound": "{{sm2|Aphelios_Original_Attack_6.ogg}} ''\"This will be your voice.\"''\n<!--Blurb-->",
+        "blurb": "{{sbc|Innate:}} {{ci|Aphelios}} wields 5 Lunari Weapons made by his sister '''Alune'''. He has access to two at a time: {{as|main weapon}} and {{as|off-hand}} weapon. Each weapon has a unique basic attack and a [[File:Q.png|20px]] active ability.",
+        "blurb2": "{{sbc|Moonlight:}} Attacks and abilities consume a weapon's ammo. When out of ammo, '''Aphelios''' discards the weapon to the reserve and '''Alune''' summons the next of the 5.",
+        "blurb3": "{{sbc|Weapon Master:}} '''Aphelios''' cannot improve his abilities with skill points, instead he spend those for '''bonus''' stats: {{as|{{sti|attack damage}}}}, {{as|{{sti|attack speed}}}}, and {{as|{{sti|lethality}}}}.",
+        "_comments": [
+          "objective strategy",
+          "map-specific",
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "ApheliosQ_ClientTooltipWrapper",
+      "name": "Weapon Abilites",
+      "description": "Aphelios has 5 different activated abilities, based on his main-hand weapon:\n\nCalibrum (Rifle): Long range shot that marks its target for a long-range follow-up attack.\nSeverum (Scythe Pistol): Run fast while attacking nearby enemies with both weapons.\nGravitum (Cannon): Root all enemies slowed by this weapon.\nInfernum (Flamethrower): Blast enemies in a cone and attack them with your off-hand weapon.\nCrescendum (Chakram): Deploy a sentry that shoots your off-hand weapon.",
+      "tooltip": "{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9",
+      "cost": "60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1450",
+      "max_rank": 6,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [],
+        "effect": []
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "W": {
+      "id": "ApheliosW",
+      "name": "Phase",
+      "description": "Aphelios swaps his main-hand gun with his off-hand gun, replacing his basic attack and activated ability.",
+      "tooltip": "Swap main-hand and off-hand weapons, equipping Gravitum.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0.8",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "250",
+      "max_rank": 6,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [],
+        "effect": []
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Aphelios",
+        "skill": "W",
+        "icon": "Phase.png",
+        "description": "{{sbc|Active:}} '''Aphelios''' switches between his {{as|main weapon}} and {{as|off-hand}} weapon over {{fd|0.25}} seconds.",
+        "cast time": "None",
+        "static": "{{fd|0.8}}",
+        "targeting": "Auto",
+        "video": "Aphelios WVideo.webm",
+        "notes": "* Switching does not interrupt '''any''' commands '''Aphelios''' was issued before or during ''Phase''.\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Aphelios}} switches between his {{as|main weapon}} and {{as|off-hand}} weapon.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "E": {
+      "id": "ApheliosE_ClientTooltipWrapper",
+      "name": "Weapon Queue System",
+      "description": "Aphelios has no third ability. This slot shows the next weapon Alune will give him. Weapon order begins fixed but may change over game time -- when a weapon is out of ammo it goes to the end of the order.",
+      "tooltip": "{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0",
+      "cost": "0",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 6,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [],
+        "effect": []
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Aphelios",
+        "skill": "E",
+        "icon": "false",
+        "blurb": "The icon of this ability reflects the next weapon that is the next in {{cis|Aphelios}} weapon queue.",
+        "description": "The icon of this ability reflects the next weapon that is in reserve.",
+        "description2": "{{sbc|Active:}} '''Aphelios''' receives a text prompt of the weapon '''Alune''' will create next.",
+        "details": "false",
+        "targeting": "Auto",
+        "notes": "* This ability also includes the icon of the {{as|off-hand}}."
+      }
+    },
+    "R": {
+      "id": "ApheliosR",
+      "name": "Moonlight Vigil",
+      "description": "Fire a concentrated blast of moonlight that explodes on enemy champions. Applies the unique effect of Aphelios' main-hand gun.",
+      "tooltip": "Aphelios fires a concentrated blast of moonlight that explodes when it hits a champion, dealing {{ maxdamage }} physical damage to surrounding enemies.\n\nThen, Aphelios attacks all champions hit with his main-hand weapon. {{ Spell_ApheliosR_WeaponMod_{{ f1 }} }}{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/110/100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1300",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Calibrum Bonus: Mark Damage",
+          "Severum Bonus: Heal",
+          "Infernum Bonus: Damage"
+        ],
+        "effect": [
+          "{{ rbasedamage }} -> {{ rbasedamageNL }}",
+          "{{ calibrumrmarkbonusdamage }} -> {{ calibrumrmarkbonusdamageNL }}",
+          "{{ severumrhealbonus }} -> {{ severumrhealbonusNL }}",
+          "{{ infernumrbonusdamagebase }} -> {{ infernumrbonusdamagebaseNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Aphelios",
+        "skill": "R",
+        "icon": "Moonlight Vigil.png",
+        "name": "Moonlight Vigil",
+        "description": "{{sbc|Active:}} '''Aphelios''' casts forth a lunar spotlight in the target direction that briefly grants {{tip|sight}} of the area along its path and stops upon illuminating an enemy {{tip|champion|champion}}. '''Alune''' smites the area centered on the illuminated target, dealing {{as|{{pp|125 to 225 for 3|6 to 16}}|physical damage}} {{as|(+ 20% '''bonus''' AD)}} {{as|(+ 100% AP)}} {{as|physical damage}} to enemy champions struck and locking-on to each target hit, as well as granting {{tip|sight}} of the area for 2 seconds.",
+        "description2": "After {{fd|0.3}} seconds of the illumination, attacks based on '''Aphelios' ''' current {{as|main weapon}} will launch from the sky against each locked-on target, dealing {{as|100% AD}} with {{ai|Calibrum|Aphelios}} or {{ai|Gravitum|Aphelios}}, {{as|105% AD}} with {{ai|Severum|Aphelios}} or {{ai|Crescendum|Aphelios}}, {{as|110% AD}} with {{ai|Infernum|Aphelios}} {{as|physical damage}} and applying {{tip|on-hit}} effects at 100% effectiveness. These attacks can {{tip|critically strike}} for {{as|{{critical damage|20|100}} AD}} {{as|'''bonus''' physical damage}}. There is no {{sti|range}} limit for locked-on targets.\n\n{{lc|{{ai|Calibrum|Aphelios}}}} Applies an empowered mark that deals {{as|{{pp|50 to 110 for 3|6 to 16}} {{as|'''bonus''' physical damage}}}} per ''mark'' consumed.\n{{lc|{{ai|Severum|Aphelios}}}} {{tip|Heals}} '''Aphelios''' for {{pp|250 to 450 for 3|6 to 16}} if at least one enemy champion is hit.\n{{lc|{{ai|Gravitum|Aphelios}}}} Increases the initial {{tip|slow}} to 99% and empowers ''{{ai|Binding Eclipse|Aphelios}}'' to {{tip|root}} targets affected by the enhanced slow for {{fd|1.35}} seconds.\n{{lc|{{ai|Infernum|Aphelios}}}} Deals {{as|{{pp|50 to 150 for 3|6 to 16}}|physical damage}} {{as|(+ 25% '''bonus''' AD)}} {{as|'''bonus''' physical damage}} on the initial blast. Attacks splash in a 400 radius instead of a cone, dealing{{ft|90% of that damage.|{{as|{{pp|50*0.9 to 150*0.9 for 3|6 to 16}}|physical damage}} {{as|(+ {{ap|25*0.9}}% '''bonus''' AD)}} {{as|physical damage}}.}}Enemy champions will take damage from overlapping areas.\n{{lc|{{ai|Crescendum|Aphelios}}}} Generates 5 additional spectral ''Chakrams'' that return to '''Aphelios''' from the first enemy champion hit, for a total of 6, on top of those from other targets hit.",
+        "cooldown": "{{pp|120 to 100 for 3|6 to 16}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "cast time": "{{fd|0.6}}",
+        "speed": "1000",
+        "affects": "Enemies",
+        "target range": "1300",
+        "effect radius": "300",
+        "damagetype": "physical",
+        "spelleffects": "aoe",
+        "spellshield": "special",
+        "projectile": "Special",
+        "parry": "special",
+        "callforhelp": "true",
+        "video": "Aphelios RVideo.webm",
+        "notes": "* The basic attacks always count as {{tip|projectile|projectiles}} unless {{ai|Severum|Aphelios}} is being used. The lunar beam, however, may always be intercepted regardless of which weapon is in play as the main weapon.\n* {{tip|Spell shield}} blocks the ''Moonlight Vigil's'' initial detonation damage but does not prevent the attacks from locking-on.\n* The basic attacks from ''Moonlight Vigil'' {{tip|critically strike}} independently from each other. Targets further away from the center of the blast are hit after a slightly longer delay. These attacks do not apply [[on-attack effects]].\n*Changing weapons while ''Moonlight Vigil'' is in flight does not change the effect it has when it hits.\n{{Effect at cast time start}}\n* ''Moonlight Vigil's'' effect radius is centered around the location of the missile as it collides.\n* With {{ai|Calibrum|Aphelios}}, the extra damage from consuming the mark is a bonus damage on top of ''Calibrum's '' normal mark consumption damage.\n* With {{ai|Infernum|Aphelios}}, 14 fire bolts splash from each target hit (18 for {{tip|critical strike|critical strikes}}). This does not occur if the initial damage of ''Moonlight Vigil'' [[kill]]s the target.\n* With {{ai|Infernum|Aphelios}},the splash attacks damage is also modified by Infernum attack secondary target damage amplifier, which means it only deals 70.125% (=82.5%*85%) of attack damage to secondary targets before level 9. \n* With {{ai|Crescendum|Aphelios}}, 1 spectral chakram is gained for every target hit by the blast, meaning it is possible to gain up to 10 spectral chakrams with one use of ''Moonlight Vigil'' if it hits 5 enemy champions.\n* With {{ai|Severum|Aphelios}}, the extra flat heal is given only once, not per target. However, all damage done by ''Moonlight Vigil'' with it also heals him from ''Severum's '' own passive effect.\n* The locked-on attacks' can be {{tip|dodge|dodged}} and {{tip|block|blocked}}, but won't be prevented if '''Aphelios''' is {{tip|blind|blinded}}.\n** Preventing the attack also prevents the additional effect (e.g. marking them with {{ai|Gravitum|Aphelios}} or granting {{ai|Crescendum|Aphelios|spectral chakrams}}).\n* ''Moonlight Vigil'' has different visual effects changed accordingly to each weapon. ''This may vary depending on the [[skin]], this showcases the '''default''':''\n<gallery navigation=true widths=\"100px\">\nMoonlight_Vigil_(Calibrum)_screenshot.png|'''{{ai|Calibrum|Aphelios}}'''\nMoonlight_Vigil_(Severum)_screenshot.png|'''{{ai|Severum|Aphelios}}'''\nMoonlight_Vigil_(Gravitum)_screenshot.png|'''{{ai|Gravitum|Aphelios}}'''\nMoonlight_Vigil_(Infernum)_screenshot.png|'''{{ai|Infernum|Aphelios}}'''\nMoonlight_Vigil_(Crescendum)_screenshot.png|'''{{ai|Crescendum|Aphelios}}'''\n</gallery>",
+        "flavorsound": "{{sm2|Aphelios_Original_R_1.ogg}} ''\"I am with you!\"''\n<!--Blurb-->",
+        "blurb": "{{sbc|Active:}} {{ci|Aphelios}} fires a concentrated blast of moonlight that explodes upon hitting an enemy champion, dealing {{as|physical damage}} to enemy champions in the area.",
+        "blurb2": "Then {{tip|basic damage|basic attacks}} rain from the sky to the targets, dealing {{as|physical damage}} and applying unique effects of his {{as|main weapon}}.\n*{{ai|Calibrum|Aphelios}}: Applies an empowered mark on all targets.\n*{{ai|Severum|Aphelios}}: The initial blast {{tip|heal|heals}} '''Aphelios''', and so do the attacks.\n*{{ai|Gravitum|Aphelios}}: An empowered {{tip|slow}} applied on all targets.\n*{{ai|Infernum|Aphelios}}: The initial blast deals increased damage, and the attacks splash on each target.\n*{{ai|Crescendum|Aphelios}}: '''Aphelios''' gains more mirror chakrams with the more targets hit with the initial blast.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    }
+  }
+}

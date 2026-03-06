@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0047_5v5_s1"
+seed = 11970
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["bard", "cryomancer", "knight", "warrior", "necromancer"]
+enemy_hero_templates = ["Aatrox", "Heimerdinger", "Karthus", "Draven", "Nami"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

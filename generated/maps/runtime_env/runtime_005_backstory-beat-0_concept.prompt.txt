@@ -1,0 +1,3 @@
+Epic fantasy story scene concept art depicting the homeland roots of a Scout operative aligned with Iron Marches. The same protagonist from the provided reference portrait must be visible in frame.
+Style direction: environment concept art, production paintover quality, broad-to-fine brushwork.
+Hard constraints: include exactly one human protagonist, keep face/features/wardrobe consistent with the provided reference portrait, no extra characters, no text, no watermark, no UI.

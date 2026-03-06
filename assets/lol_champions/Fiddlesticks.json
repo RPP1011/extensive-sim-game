@@ -1,0 +1,299 @@
+{
+  "id": "Fiddlesticks",
+  "name": "Fiddlesticks",
+  "title": "the Ancient Fear",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage",
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "A Harmless Scarecrow",
+      "description": "Fiddlesticks' trinket is replaced by scarecrow effigies.",
+      "wiki_detail": {
+        "champion": "Fiddlesticks",
+        "skill": "I",
+        "icon": "A Harmless Scarecrow.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Fiddlesticks}} has a {{ii|Scarecrow Effigy}} in place of a trinket, which will imitate '''Fiddlesticks'''. '''Fiddlesticks''' can impersonate an effigy by remaining idle [[Combat status|out of combat]].",
+        "blurb2": "After level 6, placing an effigy will {{tip|true sight|reveal}} the area for a few seconds.",
+        "description": "{{sbc|Innate - Scarecrow Effigy:}} '''Fiddlesticks''' begins the game with an exclusive {{ii|Scarecrow Effigy}}, which permanently occupies the [[Trinket item|trinket]] slot. '''Fiddlesticks''' can pretend to be an {{tip|Effigy}} by standing still and not acting nor being acted upon for 2 seconds, during which it adjusts its body into a scarecrow and extends its arm out to expose its lantern.",
+        "icon2": "A Harmless Scarecrow 2.png",
+        "description2": "{{sbc|Innate - A Harmless Scarecrow:}} From [[Experience (champion)|level]] 6 onward, placing an {{tip|Effigy}} also summons a {{tip|Sweeper Drone}} at the location for 6 seconds.",
+        "effect radius": "{{tt|900|Reveal radius, center to edge}}",
+        "targeting": "Vector",
+        "affects": "Self",
+        "notes": "* {{ii|Scarecrow Effigy|Scarecrow Effigies}} are unavailable on [[ARAM]] until '''Fiddlesticks''' uses or sells its {{ii|Poro-Snax}}.\n* The process of or the act of pretending to be an {{tip|Effigy}} will be interrupted if '''Fiddlesticks''':\n** Moves.\n** Takes damage.\n** Declares an attack.\n** Casts any ability or spell.\n** Starts {{tip|channel|channeling}}.\n** Is hit by an ability.\n** Is affected by a {{tip|crowd control}} effect.\n** Uses item (not [[Trinket item|trinket]]).\n* ''Effigies'' will mimic '''Fiddlesticks' ''' idle animations and their [[health bar]]s are hidden until they fake an action.\n** If '''Fiddlesticks''' pretends to be an {{tip|Effigy}}, its health bar stays hidden until the pose is interrupted.\n* Effigies are considered {{tip|clone|clones}}.\n** They are not valid targets to [[direction-targeted|direction]], [[ground-targeted|ground]], and [[auto-targeted]] effects for first {{tt|{{fd|1.5}} seconds|Estimated}} of their lifespan.\n* The trinket slot can still be temporarily replaced by {{ii|Eye of the Herald}}.\n* [[File:A Harmless Scarecrow Surprise Party.png|30px|border]] - {{csl|Fiddlesticks|Surprise Party}} has a special icon for this ability.\n* While pretending to be an {{tip|Effigy}} '''Fiddlesticks''' gets ''Harmless Scarecrow'' buff in row of buffs.\n* Recharge time and duration of trincket described on separate page: {{ii|Scarecrow Effigy}}"
+      }
+    },
+    "Q": {
+      "id": "FiddleSticksQ",
+      "name": "Terrify",
+      "description": "Fiddlesticks damaging enemies with spells while unseen or targeting an enemy with Terrify's activation strikes a target unit with fear, causing it to flee in terror for a duration.",
+      "tooltip": "Passive: While unseen and out of combat or impersonating an Effigy, damaging an enemy with an ability Fears them for {{ fearduration }} second(s).\n\nActive: Fear an enemy for {{ fearduration }} second(s) and deal {{ totalpercenthealthdamage }} current Health magic damage. If the target has recently been Feared by Fiddlesticks, instead deal {{ totalpercenthealthdamagefeared }} current Health magic damage.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "15/14.5/14/13.5/13",
+      "cost": "65",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "575",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Duration",
+          "Cooldown",
+          "Current Health %"
+        ],
+        "effect": [
+          "{{ fearduration }} -> {{ feardurationNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ maxhealthdamage*100.000000 }}% -> {{ maxhealthdamagenl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Fiddlesticks",
+        "skill": "Q",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} While {{ci|Fiddlesticks}} is unseen or impersonating an {{ai|A Harmless Scarecrow|Fiddlesticks|effigy}}, its next damaging ability will briefly {{tip|fear}} targets hit.",
+        "blurb2": "{{sbc|Active:}} {{ci|Fiddlesticks}} screeches at the target enemy, {{tip|fear|fearing}} them and dealing {{as|magic damage}} based on the {{as|target's '''current''' health}}.",
+        "blurb3": "If the target has recently been feared by '''Fiddlesticks''', ''Terrify'' will instead deal {{ccs|double damage|magic}}.",
+        "description": "{{sbc|Passive:}} While '''Fiddlesticks''' has been [[combat status|out of combat]] for at least {{tt|{{fd|2.5}} seconds|Estimated}} and is not {{tip|sight|visible}} to the enemy team, or is pretending to be an {{tip|Effigy}}, its next damaging ability will additionally {{tip|fear}} targets hit for a duration.",
+        "leveling": "{{st|Fear Duration|{{ap|1.25 to 2.25}} seconds}}",
+        "icon2": "Terrify.png",
+        "description2": "{{sbc|Active:}} '''Fiddlesticks''' launches a crow at the target enemy that deals {{as|magic damage}} and {{tip|fear|fears}} them for a duration. ''Terrify'' has a minimum damage threshold and is capped at 400 against {{tip|monsters}}.",
+        "leveling2": "{{st|Magic Damage|{{as|{{ap|6 to 10}}% {{as|(+ 2% per 100 AP)}} of target's '''current''' health}}}}\n{{st|Minimum Damage|{{ap|40 to 120}}}}\n{{st|Fear Duration|{{ap|1.25 to 2.25}} seconds}}",
+        "description3": "Targets feared by '''Fiddlesticks''' by any means cannot be affected by it again for a duration equal to ''Terrify's'' cooldown. Against these targets, ''Terrify's'' {{ccs|damage|magic}} and minimum threshold are doubled.",
+        "leveling3": "{{st|Increased Magic Damage|{{as|{{ap|6*2 to 10*2}}% {{as|(+ 4% per 100 AP)}} of target's '''current''' health}}}}\n{{st|Increased Minimum Damage|{{ap|40*2 to 120*2}}}}",
+        "description4": "''Terrify'' {{tip|slow|slows}} affected targets by 90%.",
+        "target range": "{{tip|cr|icononly = true}} 575",
+        "cost": "65",
+        "costtype": "Mana",
+        "cast time": "{{fd|0.35}}",
+        "cooldown": "{{ap|15 to 13}}",
+        "ontargetcd": "{{ap|15 to 13}}",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "true",
+        "spelleffects": "Spell",
+        "projectile": "true",
+        "callforhelp": "True",
+        "grounded": "|knockdown    =",
+        "notes": "* The fear-immunity timer is not refreshed by subsequent attempts to fear the target.\n* The {{tip|fear}} is applied {{tt|at the end of the cast time|0.363 seconds after the start of cast, due game tick rate}}, regardless of the target's distance or the missile landing.\n** The missile cannot be destroyed except by {{tip|projectile|projectile-interception}} effects.\n* '''Fiddlesticks''' is considered \"seen\" if it is visible and is inside an enemy champion's {{tt|sight radius|1350 units}}. Vision from {{tip|minion|minions}}, {{tip|ward|wards}}, and {{tip|turret|turrets}} will not prevent '''Fiddlesticks''' from {{tip|flee|fearing}} if there are no nearby enemy champions.\n** There is a very brief grace period after being seen or when entering combat. This can allow for multiple spells to inflict {{tip|fear}}.\n* {{tip|Monster|Monsters}} are feared by '''Fiddlesticks's''' abilities when '''Fiddlesticks''' is out of combat, with some exceptions.\n** If '''Fiddlesticks''' has recently damaged a monster from a camp with a basic attack or abilities (including {{si|Smite}} but not item active abilities), monsters in that camp will not be feared by his other abilities.\n** {{ai|Bountiful Harvest|Fiddlesticks}} will not fear monsters unless '''Fiddlesticks''' is pretending to be an {{tip|Effigy}} or is not visible to them.\n* {{tip|minion|Minions}} are always feared if '''Fiddlesticks''' is not attacking them and there is no enemy champion in its view.\n* The passive portion does not currently communicate any information to '''Fiddlesticks''', its allies nor its enemies. There is no indicator to say that '''Fiddlesticks''' is out of combat; and no indicator or debuff icon on affected enemies.\n** A visual indicator will circle around all enemy champions while '''Fiddlesticks''' is channeling {{ai|Crowstorm|Fiddlesticks}} if it is unseen. This is only visible to '''Fiddlesticks'''.\n* The fear immunity applies even if the target is {{tip|cc-immune|crowd control immune}}. It is not applied if it is blocked by {{tip|spell shield}}.\n* ''Terrify'' will still cast and affect the target even if '''Fiddlesticks''' dies or loses {{tip|sight}} of them during the cast time.\n** ''Terrify'' will still cast but not affect the target if they die or become {{tip|untargetable}} during the cast time. There is no compensation.\n* The [[summoner|player's]] screen will have a visual effect when successfully {{tip|flee|feared}} by ''Terrify''.\n* [[File:Terrify Surprise Party.png|30px|border]] - {{csl|Fiddlesticks|Surprise Party}} has a special icon for this ability.\n* {{ai|Crowstorm|Fiddlesticks}} will not fear enemy champions if cast while they have vision of '''Fiddlesticks''', even if '''Fiddlesticks''' is pretending to be an {{tip|Effigy}}.",
+        "tips": "* {{tip|Nearsight}} reduces an enemy {{tip|champion|champion's}} {{tip|sight}} radius, thus allowing '''Fiddlesticks''' to utilize the passive portion of ''Terrify'' more effectively."
+      }
+    },
+    "W": {
+      "id": "FiddleSticksW",
+      "name": "Bountiful Harvest",
+      "description": "Fiddlesticks drains health from nearby enemies, dealing bonus execute damage at the end of the duration.",
+      "tooltip": "Fiddlesticks channels and drains the souls of nearby enemies, dealing {{ draindamagecalc }} magic damage per second for 2 seconds, plus {{ percentfortooltip }}% missing Health magic damage at the end. Fiddlesticks restores {{ vamppercentage }}% of damage as Health.\n\nIf Fiddlesticks ends the channel without interruption, the remaining Cooldown is reduced by 60%.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9.5/9/8.5/8",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage Per Second",
+          "Missing Health Damage",
+          "Percent Healed",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ damagepersecond }} -> {{ damagepersecondNL }}",
+          "{{ percentfortooltip }}% -> {{ percentfortooltipNL }}%",
+          "{{ vamppercentage }}% -> {{ vamppercentageNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "variables": {
+          "min_base_damage": "120",
+          "max_base_damage": "360",
+          "ap_ratio": "70",
+          "min_execute_damage": "12",
+          "max_execute_damage": "22",
+          "min_champ_heal": "25",
+          "max_champ_heal": "55",
+          "monster_damage": "135",
+          "minion_damage": "50",
+          "monster_heal": "45",
+          "minion_heal": "15"
+        },
+        "champion": "Fiddlesticks",
+        "skill": "W",
+        "icon": "Bountiful Harvest.png",
+        "blurb": "{{sbc|Active:}} {{ci|Fiddlesticks}} {{tip|tethers}} to nearby enemies, continually dealing {{as|magic damage}} and {{tip|heal|healing}} for a portion of damage dealt.",
+        "blurb2": "If Fiddlesticks ends the channel without interruption, the last tick deals increased {{as|magic damage}} and the remaining cooldown is {{sti|ah|reduced}}.",
+        "description": "{{sbc|Active:}} '''Fiddlesticks''' forms a {{tip|tether}} between itself and each nearby enemy over the cast time, then {{tip|channel|channels}} for up to 2 seconds to harvest their souls, {{tip|true sight|revealing}} them in the process.",
+        "description2": "While '''Fiddlesticks''' is channeling, the tethered enemies are dealt {{as|magic damage}} every {{fd|0.25}} seconds, with the final tick at the end of the channel dealing an additional {{as|12% missing health magic damage}}. ''Bountiful Harvest'' deals {{#var:monster_damage}}% damage against {{tip|monster|monsters}} and {{#var:minion_damage}}% damage against {{tip|minions|minions}}.",
+        "leveling2": "{{st|Magic Damage per Tick|{{ap|{{#var:min_base_damage}}*0.125 to {{#var:max_base_damage}}*0.125}} {{as|(+ {{fd|{{#expr:{{#var:ap_ratio}}/8}}}}% AP)}}|Last Tick of Damage|{{ap|{{#var:min_base_damage}}*0.125 to {{#var:max_base_damage}}*0.125}} {{as|(+ {{fd|{{#expr:{{#var:ap_ratio}}/8}}}}% AP)}} {{as|(+ {{ap|{{#var:min_execute_damage}} to {{#var:max_execute_damage}}}}% of target's '''missing''' health)}}|Total Magic Damage|{{ap|{{#var:min_base_damage}} to {{#var:max_base_damage}}}} {{as|(+ {{#var:ap_ratio}}% AP)}} {{as|(+ {{ap|{{#var:min_execute_damage}} to {{#var:max_execute_damage}}}}% of target's '''missing''' health)}}}}",
+        "description3": "'''Fiddlesticks''' {{tip|heals}} itself for a percentage of the {{tt|pre-mitigation damage|Damage dealt before modifiers}} dealt, modified to {{#var:monster_heal}}% against monsters and {{#var:minion_heal}}% against minions.",
+        "leveling3": "{{st|Champion Heal Percentage|{{ap|{{#var:min_champ_heal}} to {{#var:max_champ_heal}}}}%|Total Heal per Champion|{{ap|({{#var:min_base_damage}} to {{#var:max_base_damage}})*({{#var:min_champ_heal}} to {{#var:max_champ_heal}})/100}} {{as|(+ {{ap|{{#var:ap_ratio}}/100*({{#var:min_champ_heal}} to {{#var:max_champ_heal}})}}% AP)}} {{as|(+ {{ap|({{#var:min_execute_damage}} to {{#var:max_execute_damage}})*({{#var:min_champ_heal}} to {{#var:max_champ_heal}})/100}}% of target's '''missing''' health)}}|Total Heal per Monster|{{ap|{{#var:min_base_damage}}*{{#var:monster_damage}}/100*{{#var:monster_heal}}/100 to {{#var:max_base_damage}}*{{#var:monster_damage}}/100*{{#var:monster_heal}}/100}} {{as|(+ {{ap|{{#var:ap_ratio}}*{{#var:monster_damage}}/100*{{#var:monster_heal}}/100}}% AP)}} {{as|(+ {{ap|{{#var:min_execute_damage}}*{{#var:monster_damage}}/100*{{#var:monster_heal}}/100 to {{#var:max_execute_damage}}*{{#var:monster_damage}}/100*{{#var:monster_heal}}/100}}% of target's '''missing''' health)}}|Total Heal per Minion|{{ap|{{#var:min_base_damage}}*{{#var:minion_damage}}/100*{{#var:minion_heal}}/100 to {{#var:max_base_damage}}*{{#var:minion_damage}}/100*{{#var:minion_heal}}/100}} {{as|(+ {{ap|{{#var:ap_ratio}}*{{#var:minion_damage}}/100*{{#var:minion_heal}}/100}}% AP)}} {{as|(+ {{ap|{{#var:min_execute_damage}}*{{#var:minion_damage}}/100*{{#var:minion_heal}}/100 to {{#var:max_execute_damage}}*{{#var:minion_damage}}/100*{{#var:minion_heal}}/100}}% of target's '''missing''' health)}}}}",
+        "description4": "''Bountiful Harvest'' ends if all targets have died or broken their tethers. If the channel was not {{tt|interrupted|e.g. by Fiddlesticks or crowd control effects}}, 60% of the {{sti|'''current''' cooldown}} is refunded.",
+        "description5": "''A nearby enemy is required to cast this ability. The target does not have to be {{tip|sight|visible}} to be tethered by this ability.''",
+        "target range": "|effect radius= {{tip|cr|icononly = true}} 650",
+        "tether radius": "725",
+        "cast time": "{{fd|0.25}}",
+        "cooldown": "{{ap|10 to 8}}",
+        "cdstart": "on-cast",
+        "cost": "{{ap|60 to 80}}",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "Special",
+        "spelleffects": "aoedot",
+        "silence": "true",
+        "notes": "* {{tip|Spell shield}} will block the tether's application but not the damage of one already applied.\n* [[File:Bountiful Harvest Surprise Party.png|30px|border]] - {{csl|Fiddlesticks|Surprise Party}} has a special icon for this ability.\n* The following table refers for interactions while '''Fiddlesticks''' is {{tip|channel|channeling}}:\n{{ct|channel|attack=interrupts|cast=interrupts|move=interrupts|items=interrupts,true,,false|spells=true, interrupts, interrupts, interrupts, interrupts, interrupts, interrupts}}"
+      }
+    },
+    "E": {
+      "id": "FiddleSticksE",
+      "name": "Reap",
+      "description": "Fiddlesticks slashes an area with its scythe, slowing all enemies hit and silencing enemies hit in the center of the slash.",
+      "tooltip": "Fiddlesticks unleashes dark magic, dealing {{ damage }} magic damage and Slowing by {{ slowamount*-100 }}% for {{ silenceduration }} seconds. Enemies in the center are also Silenced for the duration.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9/8/7/6",
+      "cost": "40/45/50/55/60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "850",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ slowamount*-100.000000 }}% -> {{ slowamountnl*-100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Fiddlesticks",
+        "skill": "E",
+        "icon": "Reap.png",
+        "blurb": "{{sbc|Active:}} {{ci|Fiddlesticks}} slashes the target area, dealing {{as|magic damage}} and {{tip|slow|slowing}} enemies hit.",
+        "blurb2": "Enemies hit in the center of the slash are also {{tip|silence|silenced}}.",
+        "description": "{{sbc|Active:}} '''Fiddlesticks''' slashes the target location with its scythe, dealing {{as|magic damage}} to enemies within the area and {{tip|slow|slowing}} them for {{fd|1.25}} seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 210}} {{as|(+ 50% AP)}}}}\n{{st|Slow|{{ap|30 to 50}}%}}",
+        "description2": "Enemies hit in the center of the area are also {{tip|silence|silenced}} for {{fd|1.25}} seconds.",
+        "target range": "850",
+        "effect radius": "|cooldown     = {{ap|10 to 6}}",
+        "cost": "{{ap|40 to 60}}",
+        "cast time": "{{fd|0.4}}",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "|damagetype   = Magic",
+        "spellshield": "True",
+        "spelleffects": "AoE",
+        "projectile": "|callforhelp  =",
+        "grounded": "|knockdown    =",
+        "notes": "* [[File:Reap Surprise Party.png|30px|border]] - {{csl|Fiddlesticks|Surprise Party}} has a special icon for this ability.",
+        "flavorsound": "{{sm2|Fiddlesticks_Original_E_6.ogg}} ''\"Reap!\"''"
+      }
+    },
+    "R": {
+      "id": "FiddleSticksR",
+      "name": "Crowstorm",
+      "description": "A murder of crows flock wildly around Fiddlesticks, dealing damage per second to all enemy units in the area.",
+      "tooltip": "Fiddlesticks channels for {{ channeltime }} seconds, then teleports and unleashes a murder of crows, dealing {{ totaldamage }} magic damage over {{ duration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "140/110/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "125/225/325",
+        "5",
+        "1.5",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage Per Second",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ damagepersecond }} -> {{ damagepersecondNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Fiddlesticks",
+        "skill": "R",
+        "icon": "Crowstorm.png",
+        "blurb": "{{sbc|Active:}} {{ci|Fiddlesticks}} {{tip|channels}}, then {{tip|blinks}} to the target location surrounded by a murder of crows, continually dealing {{as|magic damage}} to nearby enemies.",
+        "description": "{{sbc|Active:}} '''Fiddlesticks''' {{tip|channel|channels}} for {{fd|1.5}} seconds, then {{tip|blink|blinks}} to the target location upon completion with a murder of crows flying wildly around it for 5 seconds, dealing {{as|magic damage}} every {{fd|0.25}} seconds to nearby enemies.",
+        "leveling": "{{st|Magic Damage per Tick|{{ap|150*0.25 to 350*0.25}} {{as|(+ {{fd|12.5}}% AP)}}|Total Magic Damage|{{ap|150*5 to 350*5}} {{as|(+ 250% AP)}}}}",
+        "description2": "''Crowstorm will cast at max range if cast beyond that.''",
+        "target range": "800",
+        "effect radius": "{{tip|cr|icononly = true}} 600",
+        "cooldown": "{{ap|140 to 80}}",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "|damagetype   = Magic",
+        "spellshield": "|spelleffects = aoe",
+        "grounded": "true",
+        "silence": "true",
+        "notes": "* {{tip|Root|Roots}} do not {{tip|interrupt}} the ability despite being a [[Channel#Movement Channels|movement channel]].\n* '''Fiddlesticks''' will always {{tip|blink}} to its intended location even if its position changes during the {{tip|channel}} without being interrupted (e.g. by {{ai|Realm Warp|Ryze}}).\n* [[File:Crowstorm Surprise Party.png|30px|border]] - {{csl|Fiddlesticks|Surprise Party}} has a special icon for this ability.\n* The following table refers for interactions while '''Fiddlesticks''' is {{tip|channel|channeling}}:\n{{ct|channel|attack=false|cast=false|move=false|items=false, true|spells=true, false, false, false, false|interrupts=death, silence, ground}}",
+        "flavorsound": "{{sm2|Fiddlesticks_Original_R_0.ogg}} ''\"Fear!\"''"
+      }
+    }
+  }
+}

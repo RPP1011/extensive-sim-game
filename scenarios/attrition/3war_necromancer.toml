@@ -1,0 +1,13 @@
+[scenario]
+name = "3W+necromancer vs 6e d2 hp5x"
+seed = 42
+hero_count = 4
+enemy_count = 6
+difficulty = 2
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["warrior", "warrior", "warrior", "necromancer"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Either"

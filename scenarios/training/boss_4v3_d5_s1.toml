@@ -1,0 +1,13 @@
+[scenario]
+name = "boss_4v3_d5_s1"
+seed = 16207
+hero_count = 4
+enemy_count = 3
+difficulty = 5
+max_ticks = 10000
+room_type = "Climax"
+hero_templates = ["templar", "shaman", "warlock", "samurai"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Either"

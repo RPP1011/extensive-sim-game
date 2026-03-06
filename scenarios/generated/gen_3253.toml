@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0164_4v4_s1"
+seed = 12087
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["Ambessa", "Caitlyn", "Azir", "Darius"]
+enemy_hero_templates = ["Aatrox", "Alistar", "Draven", "Blitzcrank"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

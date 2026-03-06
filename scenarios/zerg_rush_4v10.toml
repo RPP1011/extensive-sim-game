@@ -1,0 +1,11 @@
+[scenario]
+name        = "Zerg Rush 4v10 — Massive Swarm"
+seed        = 777
+hero_count  = 4
+enemy_count = 10
+difficulty  = 1
+max_ticks   = 4000
+room_type   = "Entry"
+
+[assert]
+outcome = "Either"

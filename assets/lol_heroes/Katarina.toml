@@ -1,0 +1,119 @@
+[hero]
+name = "Katarina"
+
+[stats]
+hp = 85
+move_speed = 3.5
+armor = 25.0
+magic_resist = 33.0
+
+[attack]
+damage = 20
+range = 1.5
+cooldown = 750
+
+# --- Q: Bouncing Blade ---
+[[abilities]]
+name = "Bouncing Blade"
+targeting = "target_enemy"
+range = 6.2
+cooldown_ms = 11000
+cast_time_ms = 250
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "chain"
+bounces = 3
+bounce_range = 4.0
+
+[[abilities.effects]]
+type = "damage"
+amount = 20
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 4.5
+
+# --- W: Preparation ---
+[[abilities]]
+name = "Preparation"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 15000
+ai_hint = "buff"
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 3000
+
+# --- E: Shunpo ---
+[[abilities]]
+name = "Shunpo"
+targeting = "ground_target"
+range = 7.2
+cooldown_ms = 14000
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 5
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[[abilities.effects]]
+type = "dash"
+is_blink = true
+
+# --- R: Death Lotus ---
+[[abilities]]
+name = "Death Lotus"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 20600
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "channel"
+duration_ms = 2000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "damage"
+amount = 6
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 5.5
+
+[[abilities.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.3
+duration_ms = 5000
+
+[[abilities.effects]]
+type = "lifesteal"
+percent = 0.16
+duration_ms = 5000
+
+# --- Passive: Voracity ---
+[[passives]]
+name = "Voracity"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_taken"
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

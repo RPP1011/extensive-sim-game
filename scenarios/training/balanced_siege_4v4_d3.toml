@@ -1,0 +1,13 @@
+[scenario]
+name = "balanced_siege_4v4_d3"
+seed = 1024
+hero_count = 4
+enemy_count = 4
+difficulty = 3
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["knight", "bard", "pyromancer", "berserker"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Either"

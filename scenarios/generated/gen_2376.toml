@@ -1,0 +1,13 @@
+[scenario]
+name = "ladder_paladin_d2_hp3x"
+seed = 1794
+hero_count = 4
+enemy_count = 5
+difficulty = 2
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["paladin", "druid", "ranger", "assassin"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

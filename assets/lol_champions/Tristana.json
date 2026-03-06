@@ -1,0 +1,281 @@
+{
+  "id": "Tristana",
+  "name": "Tristana",
+  "title": "the Yordle Gunner",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Draw a Bead",
+      "description": "Increases Tristana's Attack Range as she levels.",
+      "wiki_detail": {
+        "champion": "Tristana",
+        "skill": "I",
+        "icon": "Draw a Bead.png",
+        "blurb": "{{sbc|Innate:}} Based on level, {{ci|Tristana}} gains {{sti|range|'''bonus''' range}} on her [[basic attack]]s, ''{{ai|Explosive Charge|Tristana}}'' and ''{{ai|Buster Shot|Tristana}}''.",
+        "description": "{{sbc|Innate:}} '''Tristana's''' [[basic attack]]s, ''{{ai|Explosive Charge|Tristana}}'' and ''{{ai|Buster Shot|Tristana}}'' gain {{sti|attack range|{{pp|0 to 150}} '''bonus''' range}}, for a total of {{pp|550 to 700}}.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "|spelleffects =",
+        "spellshield": "|projectile   =",
+        "knockdown": "|grounded     =",
+        "notes": "* No additional details."
+      }
+    },
+    "Q": {
+      "id": "TristanaQ",
+      "name": "Rapid Fire",
+      "description": "Tristana fires her weapon rapidly, increasing her Attack Speed for a short time.",
+      "tooltip": "Tristana goes full-auto, gaining {{ attackspeedmod*100 }}% Attack Speed for {{ buffduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "20/19/18/17/16",
+      "cost": "30/35/40/45/50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "20",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Attack Speed",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ attackspeedmod*100.000000 }}% -> {{ attackspeedmodnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Tristana",
+        "skill": "Q",
+        "icon": "Rapid Fire.png",
+        "blurb": "{{sbc|Active:}} {{ci|Tristana}} gains tremendous {{sti|as|{{as|'''bonus''' attack speed}}}} for a few seconds.",
+        "description": "{{sbc|Active:}} '''Tristana''' empowers her cannon, gaining {{sti|as|{{as|'''bonus''' attack speed}}}} for 7 seconds.",
+        "leveling": "{{st|Bonus Attack Speed|{{ap|60 to 120}}%}}",
+        "cost": "{{ap|30 to 50}}",
+        "costtype": "Mana",
+        "cooldown": "{{ap|20 to 16}}",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "range": "|targeting    = Auto",
+        "affects": "Self",
+        "damagetype": "|spelleffects =",
+        "spellshield": "|projectile   =",
+        "knockdown": "|grounded     =",
+        "notes": "* ''Rapid Fire'' is a non-refreshing buff that will not update on rank-up."
+      }
+    },
+    "W": {
+      "id": "TristanaW",
+      "name": "Rocket Jump",
+      "description": "Tristana fires at the ground to propel her to a distant location, dealing damage and slowing surrounding units for a brief period where she lands.",
+      "tooltip": "Tristana launches herself, dealing {{ landingdamage }} magic damage and Slowing by {{ slowmod*-100 }}% for {{ slowduration }} seconds upon landing.\n\nChampion takedowns and max stack Explosive Charge detonations on champions refresh this Ability's Cooldown.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "22/20/18/16/14",
+      "cost": "30/35/40/45/50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Tristana",
+        "skill": "W",
+        "icon": "Rocket Jump.png",
+        "blurb": "{{sbc|Active:}} {{ci|Tristana}} jumps to the target location. Upon landing, she deals {{as|magic damage}} and {{tip|slows}} nearby enemies for a short time.",
+        "blurb2": "When '''Tristana''' scores an enemy {{tip|champion}} {{tip|takedown}} or detonate ''{{ai|Explosive Charge|Tristana}}'' at max stacks on a {{tip|champion}}, it will {{sti|cdr|reset}} ''Rocket Jump's'' cooldown.",
+        "description": "{{sbc|Active:}} '''Tristana''' {{tip|dash|jumps}} to the target location. Upon landing, she deals {{as|magic damage}} to nearby enemies and {{tip|slows}} them by 40% for 2 seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 210}} {{as|(+ 100% '''bonus''' AD)}} {{as|(+ 50% AP)}}}}",
+        "description2": "Scoring an enemy {{tip|champion}} {{tip|takedown}} or detonating ''{{ai|Explosive Charge|Tristana}}'' at maximum stacks on a champion will reset ''Rocket Jump's'' {{sti|cooldown}}.",
+        "description3": "'''''Tristana''' can cast any of her [[champion ability|abilities]] during the dash. Rocket Jump will cast at max range if cast beyond that.''",
+        "cooldown": "{{ap|22 to 14}}",
+        "cost": "{{ap|30 to 50}}",
+        "costtype": "mana",
+        "target range": "{{tip|cr|icononly = true}} 900",
+        "targeting": "Location",
+        "cast time": "{{fd|0.25}}",
+        "effect radius": "{{tip|cr|icononly = true}} 350",
+        "speed": "{{tt|1100|Can differ based on dash range/terrain interference}}",
+        "affects": "Enemies / Self",
+        "damagetype": "Magic",
+        "spelleffects": "spellaoe",
+        "spellshield": "True",
+        "projectile": "|knockdown    = True",
+        "grounded": "True",
+        "notes": "* '''Tristana''' can still use her [[champion ability|abilities]], [[summoner spell]]s, and [[active ability items|item actives]] during ''Rocket Jump''.\n* ''Rocket Jump's'' dash speed depends on the distance of the jump. Close-ranged jumps are much shorter while long-ranged jumps leave '''Tristana''' in the air significantly longer.\n* If '''Tristana''' has less than 850 movement speed, a full-range ''Rocket Jump'' (including its cast time) will make her arrive quicker at its destination than walking at this speed could.\n* Killing {{tip|clone|clones}} or detonating {{ai|Explosive Charge|Tristana}} on them also resets ''Rocket Jump's'' cooldown.\n** The former may be unintended."
+      }
+    },
+    "E": {
+      "id": "TristanaE",
+      "name": "Explosive Charge",
+      "description": "When Tristana kills a unit, her cannonballs burst into shrapnel, dealing damage to surrounding enemies. Can be activated to place a bomb on a target enemy that explodes after a short duration dealing damage to surrounding units.",
+      "tooltip": "Passive: Tristana's Attacks that kill enemies deal {{ passivedamage }} magic damage to surrounding enemies.\n\nActive: Tristana attaches a bomb to an enemy or turret that deals {{ activedamage }} physical damage to surrounding enemies after {{ activeduration }} seconds. The damage is increased by {{ activeperstackamp*100 }}% each time Tristana hits an Attack or Ability (max 4 stacks).\n\nAt {{ activemaxstacks }} stacks, the bomb explodes immediately (max {{ activemaxdamage }} physical damage).{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16/15.5/15/14.5/14",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "550",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Passive Explosion Damage",
+          "Base Charge Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ passivebasedamage }} -> {{ passivebasedamageNL }}",
+          "{{ activebasedamage }} -> {{ activebasedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Tristana",
+        "skill": "E",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} Enemies explode when killed by {{cis|Tristana}} basic attacks, dealing {{as|magic damage}} to nearby enemies.",
+        "blurb2": "{{sbc|Active:}} '''Tristana''' tosses an explosive charge that attaches to the target enemy for a few seconds. The charge then explodes to deal {{as|physical damage}} to nearby enemies, increased based on {{as|{{sti|critical strike chance}}}}.",
+        "blurb3": "'''Tristana's''' [[basic attack]]s and [[champion ability|abilities]] against the target will increase the charge's damage. Upon reaching the cap, the charge explodes instantly.",
+        "blurb4": "The charge can target and damage {{tip|turrets}} and explodes farther on a turret.",
+        "description": "{{sbc|Passive:}} '''Tristana's''' basic attacks are empowered to trigger an explosion when they kill the target, dealing {{as|magic damage}} to nearby enemies.",
+        "leveling": "{{st|Magic Damage|{{ap|45 to 105}} {{as|(+ 25% AP)}}}}",
+        "icon2": "Explosive Charge.png",
+        "description2": "{{sbc|Active:}} '''Tristana''' tosses an explosive charge at the target enemy that attaches to them for 4 seconds. The charge then detonates, dealing {{as|physical damage}} to nearby enemies. ''Explosive Charge'' can target and damage {{tip|turrets}}, and explodes in a larger radius on a turret.",
+        "leveling2": "{{st|Minimum Physical Damage|{{ap|60 to 100}} {{as|(+ {{ap|100 to 140}}% '''bonus''' AD)}} {{as|(+ 50% AP)}}}}",
+        "leveling3": "{{st|Bonus Damage Per Stack|{{ap|(60 to 100)*0.25}} {{as|(+ {{ap|(100 to 140)*0.25}}% '''bonus''' AD)}} {{as|(+ {{ap|50*0.25}}% AP)}}|Maximum Bonus Damage|{{ap|60 to 100}} {{as|(+ {{ap|100 to 140}}% '''bonus''' AD)}} {{as|(+ 50% AP)}}}}\n{{st|Maximum Physical Damage|{{ap|60*2 to 100*2}} {{as|(+ {{ap|100*2 to 140*2}}% '''bonus''' AD)}} {{as|(+ {{ap|50*2}}% AP)}}}}",
+        "description3": "'''Tristana's''' [[basic attack]]s {{tip|on-hit}} and [[champion ability|abilities]] against the target increase ''Explosive Charge's'' damage by 25%, [[stack]]ing up to 4 times for a maximum 100% increase, upon which the charge also detonates instantly. The charge's '''total''' damage is additionally increased by {{as|{{pp|key=%|key1=%|type=critical strike chance|color=critical strike chance|0 to 75 for 11|0 to 100|formula=0.75 * critical strike chance, capped at 75% increase}}|critical strike chance}} {{ii|Infinity Edge|icononly=true}} {{as|(+ {{pp|key=%|key1=%|type=critical strike chance|color=critical strike damage|0 to 40 for 11|0 to 100|formula=0.4 * critical strike chance, capped at 40% increase}}|critical strike damage}}.",
+        "description4": "''If {{ai|Buster Shot|Tristana}} is used to apply the last stack, the detonation will instead be delayed until the end of the {{tip|airborne|knock back}} or the 4 seconds expire.''",
+        "cooldown": "{{ap|16 to 14}}",
+        "cost": "{{ap|50 to 70}}",
+        "costtype": "mana",
+        "target range": "{{tip|er|icononly = true}} {{pp|550 to 700}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|300|Passive}} / {{tt|300|Active}} / {{tt|600|Active (turret)}}",
+        "cast time": "{{tt|{{as|{{fd|0.226}} (at base attack speed)|attack speed}}|Always equal to 100% of Tristana's attack windup}}",
+        "speed": "2400",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spelleffects": "spellaoe",
+        "spellshield": "True",
+        "projectile": "True",
+        "knockdown": "|parry        = special",
+        "callforhelp": "True",
+        "grounded": "|notes        = \n* ''Explosive Charge's'' cast time is always 100% of the caster's attack windup time.\n** At base attack speed, '''Tristana's''' attack windup is {{fd|0.225625}} seconds.\n** An easy formula to calculate the cast time is [ {{fd|0.14801}} seconds divided by {{as|'''total''' attack speed|attack speed}} ].\n** Reducing '''Tristana's''' attack speed via {{tip|cripple|attack speed reductions}} also increases ''Explosive Charge's'' cast time by the same fraction.\n** It is calculated from '''Tristana's''' total attack speed after cap (2.5) and floor (0.2), making the maximum possible cast time {{rutngt|0.74005}}.\n* '''Tristana''' will be automatically ordered to basic attack the target after the cast time.\n* ''Explosive Charge's'' initial application deals 0 {{as|physical|physical damage}} {{tt|damage|sourcetype pending for test, but probably proc}}, triggering {{tip|turret}} aggro.\n** It also triggers a [[stack]] of effects such as {{ri|Electrocute}}.\n* All explosions by ''Explosive Charge's'' passive count as the same cast instance. Every cast of the active is a separate cast instance:\n** Hitting a champion with the passive by killing a nearby unit, casting the active on them (see note above) and landing a basic attack against them triggers {{ri|Electrocute}}.\n** Hitting a champion with the passive by killing a nearby unit, casting the active on them and hitting them again with the Passive by killing another nearby unit does '''not''' trigger {{ri|Electrocute}}.\n* {{tip|Dodge}}, {{tip|block}} and {{tip|blind}} all prevent ''Explosive Charge's'' stack application via basic attacks.\n* ''Explosive Charge's'' detonation will deal damage to the primary target even if they have become {{tip|untargetable}}.\n* ''Explosive Charge's'' stacks from basic attacks are applied as an [[on-hit]] effect and will therefore interact with {{iis|Guinsoo's Rageblade}} Phantom Hit and {{iis|Runaan's Hurricane}} bolts.\n{{Unit-targeted cancel conditions}}"
+      }
+    },
+    "R": {
+      "id": "TristanaR",
+      "name": "Buster Shot",
+      "description": "Tristana loads a massive cannonball into her weapon and fires it at an enemy unit. This deals Magic Damage and knocks the target back. If the target is carrying the Explosive Charge bomb, the bomb detonation radius is doubled.",
+      "tooltip": "Tristana fires a massive cannonball, dealing {{ damagecalc }} magic damage to the target, Knocking Back and Stunning them and surrounding enemies for {{ stunduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "550",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Knockback Distance",
+          "Stun Duration:"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ knockbackdistance }} -> {{ knockbackdistanceNL }}",
+          "{{ stunduration }} -> {{ stundurationNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Tristana",
+        "skill": "R",
+        "icon": "Buster Shot.png",
+        "blurb": "{{sbc|Active:}} {{ci|Tristana}} fires a massive cannonball at the target enemy that deals {{as|magic damage}}. They and surrounding enemies are also briefly {{tip|airborne|knocked back}} and {{tip|stun|stunned}}, during which they are {{tip|standard sight|revealed}}.",
+        "description": "{{sbc|Active:}} '''Tristana''' fires a massive cannonball at the target enemy that deals {{as|magic damage}}. They and surrounding enemies are also {{tip|airborne|knocked back}} and {{tip|stun|stunned}} for a duration, during which all targets are {{tip|standard sight|revealed}}.",
+        "leveling": "{{st|Magic Damage|{{ap|275 to 375}} {{as|(+ 70% '''bonus''' AD)}} {{as|(+ 100% AP)}}}}\n{{st|Knock Back Distance|{{ap|600|800|1000}}}}\n{{st|Stun Duration|{{ap|0.4 to 0.7}} seconds}}",
+        "cooldown": "100",
+        "cost": "100",
+        "costtype": "mana",
+        "target range": "{{tip|er|icononly = true}} {{pp|550 to 700}}",
+        "cast time": "{{fd|0.25}}",
+        "targeting": "Unit",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|200|Around target once the missile hits}}",
+        "speed": "{{tt|2000|Missile speed}} / {{tt|1500|Knockback speed, can differ slightly based on circumstance}}",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "special",
+        "spellshield": "True",
+        "projectile": "True",
+        "callforhelp": "True",
+        "knockdown": "|grounded     =",
+        "notes": "* Applies {{tip|spell damage}} to the primary target and deals 0 {{tip|default damage}} to secondary targets.\n** The 0 damage to secondary targets triggers {{tip|turret}} aggro, but does not stack ''{{ai|Explosive Charge|Tristana}}''.\n* '''Tristana''' will attempt to basic attack the target afterwards.\n* ''Buster Shot's'' {{tip|airborne|displacement}} direction is based on '''Tristana's''' location at the end of the cast time.\n** The primary target is pushed in a straight line away from that location, but the knockback distance and speed may be impeded by terrain.\n** Secondary targets are displaced parallel to the primary target's displacement.\n* The {{tip|airborne|icononly = true}} debuff is removed early when the forced movement stops.\n* {{tip|Displacement immunity}} will also resist the application of the {{tip|stun}}.\n{{Unit-targeted cancel conditions}}"
+      }
+    }
+  }
+}

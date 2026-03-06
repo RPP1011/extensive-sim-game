@@ -1,0 +1,13 @@
+[scenario]
+name = "random_052_4v6_d2"
+seed = 8052
+hero_count = 4
+enemy_count = 6
+difficulty = 2
+max_ticks = 10000
+room_type = "Climax"
+hero_templates = ["pyromancer", "berserker", "cryomancer", "cleric"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Either"

@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0153_4v4"
+seed = 2076
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["elementalist", "mage", "arcanist", "bard"]
+enemy_hero_templates = ["witch_doctor", "cleric", "knight", "engineer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

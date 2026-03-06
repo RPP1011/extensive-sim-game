@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0163_2v2_d3_s2"
+seed = 22286
+hero_count = 2
+enemy_count = 2
+difficulty = 3
+max_ticks = 10000
+room_type = "Climax"
+hero_templates = ["templar", "alchemist"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

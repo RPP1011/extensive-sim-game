@@ -1,0 +1,302 @@
+{
+  "id": "Viego",
+  "name": "Viego",
+  "title": "The Ruined King",
+  "resource_type": "None",
+  "tags": [
+    "Fighter",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Sovereign's Domination",
+      "description": "Enemies who fall before Viego become wraiths. By attacking a wraith, Viego temporarily seizes control of the dead enemy's body, healing for a percentage of his target's max health and gaining access to their basic abilities and items. He replaces their Ultimate with a free cast of his own.",
+      "wiki_detail": {
+        "champion": "Viego",
+        "skill": "I",
+        "icon": "Sovereign's Domination.png",
+        "blurbicon": "Sovereign's Domination.png",
+        "blurb": "{{sbc|Innate:}} Scoring an enemy champion {{tip|takedown}} will spawn a ''Mist Wraith'' for a period. {{ci|Viego}} can consume the ''Mist Wraith'' to briefly become {{tip|untargetable}} and {{tip|blink}} to it, which {{tip|heals}} him for a portion of the {{as|target's '''maximum''' health}} and grants ''Possession''.",
+        "blurb2": "Casting ''{{ai|Heartbreaker|Viego}}'' or consuming a ''Mist Wraith'' will end ''Possession'' early.",
+        "blurb4": "{{sbc|Possession:}} For a period, '''Viego's''' items, stats, basic attacks, and basic abilities become those of the slain enemy's. He also gains a free cast of ''{{ai|Heartbreaker|Viego}}'' and {{sti|ms|{{as|'''bonus''' movement speed}}}} while facing an enemy champion.",
+        "description": "{{sbc|Innate:}} Whenever '''Viego''' scores an enemy champion {{tip|takedown}} while alive and within 3 seconds of damaging them, a ''Mist Wraith'' spawns from that champion's corpse for 8 seconds. '''Viego''' can basic attack a ''Mist Wraith'' to consume it: causing him to {{tip|blink}} to its location after winding up for 1 second, during which he is {{tip|untargetable}} (except to {{tip|turrets}}) and {{tip|lockout|unable to act}}. He then gains ''Possession'' and {{tip|heals}} himself for {{as|2%|health}} {{as|(+ {{fd|2.5}}% per 100 '''bonus''' AD)}} {{as|(+ 2% per 100 AP)}} {{as|(+ 5% per 100% '''bonus''' attack speed)}} {{as|of the target's '''maximum''' health}}.",
+        "icon2": "Sovereign's Domination 2.png",
+        "description2": "{{sbc|Possession:}} For 10 seconds, '''Viego''' assumes the enemy champion's form and gains their [[basic attack]]s, [[champion ability|basic abilities]], [[item]]s, and base [[champion statistic|stats]] (based on '''Viego's''' [[Experience (champion)|level]]). He also gains a free cast of ''{{ai|Heartbreaker|Viego}}'', which is initially placed on a {{sti|cd|{{fd|1.5}}-second}} cooldown, and {{sti|{{as|10% '''bonus''' movement speed}}}} while facing enemy champions within 2500 units.",
+        "description3": "'''Viego''' cannot use [[Active ability items|item actives]], [[consumable item]]s, nor the [[shop]] during ''Possession''. Casting ''{{ai|Heartbreaker|Viego}}'' or attacking a ''Mist Wraith'' ends ''Possession'' immediately.",
+        "description4": "'''''Viego''' will preserve his {{as|'''current''' health percentage}} between transformations.''",
+        "cooldown": "|cost         =",
+        "costtype": "|target range =",
+        "effect radius": "|width        =",
+        "angle": "|cast time    =",
+        "speed": "|targeting    = Passive",
+        "affects": "|damagetype   =",
+        "spellshield": "|spelleffects =",
+        "grounded": "false",
+        "projectile": "|callforhelp  =",
+        "notes": "* '''Viego''' will copy the possessed champion's ability ranks.\n** '''Viego''' cannot level up their abilities with his available skill points.\n* ''Mist Wraiths'' will expire when '''Viego''' dies, and they will not expire while he is winding up on them.\n* '''Viego''' gains the bonus movement speed during possession even while moving towards nearby enemy champions that are {{tip|untargetable}}.\n* Finishing the possessing attack against a ''Mist Wraith'' kills it, rewarding '''Viego''' an extra {{g|3}} as he becomes the target champion.\n* The wind up's {{tip|untargetability}} does not {{tip|homing projectile destruction|destroy}} in-flight {{tip|projectiles}} from {{tip|turret|turrets}}.\n* The possessed champion's abilities do not cost any {{tip|mana}} or {{tip|energy}} even if that specific champion normally uses either as a [[casting resource]].\n** [[Manaless#Alternative_gating_mechanics|Alternative resources]], such as {{tip|Fury}}, {{tip|Flow}}, or {{tip|Health resource|Health}}, will still be utilized.\n* The current cooldowns of '''Viego's''' abilities will '''not''' be reset between transformations.\n** Those of the possessed champion's abilities will be reset between transformations.\n** This does not apply to the following long-cooldown abilities. '''Viego''' specifically tracks their proper cooldowns which can be seen via a buff in his hotbar for each when applicable.\n*** {{cai|Rebirth|Anivia}}\n*** {{cai|Shurima's Legacy|Azir}}\n*** {{cai|Cell Division|Zac}}\n* The passive cooldowns of items are shared between '''Viego's''' and the possessed champion's.\n** This does not apply to {{nie|Lifeline}} items.{{bug|2}}\n* Once ''possession'' ends, '''Viego''' returns to his normal state and certain effects gained from the possessed champion's abilities will be immediately removed.\n** Some buffs will be kept and some buffs will be lost.\n*** '''Viego''' will almost always keep {{tip|shield|shields}} and {{tip|spell shield|spell shields}}.\n*** [[Passive]] effects will be lost by default, as '''Viego''' no longer has their abilities.\n** {{tip|Channel|Channeled abilities}} maintained will be interrupted.\n** [[Champion ability|Toggled abilities]] will be automatically toggled off.\n* '''Viego''' retains his own [[summoner spell]]s, [[trinket item]], and [[rune]]s during ''possession''.\n* ''Mist Wraiths'' will still spawn while '''Viego''' is in a zombie state.\n* ''Sovereign's Domination'' will not summon a ''Mist Wraith'' from {{tip|clone|clones}}.\n* The ''possession'' will not expire while '''Viego''' is in a {{tip|zombie state}}.\n** While in a zombie state, ''{{ai|Heartbreaker|Viego}}'' is disabled.\n** If '''Viego''' enters a zombie state while winding up on a ''Mist Wraith'', the possession will still last its normal duration.{{bug|2}}\n* The ''possession'' will not end prematurely if '''Viego''' enters {{tip|resurrection}}.\n* The ''possession'' will acquire the basic abilities of shapeshifting champions (e.g. {{cai|Spider Form / Human Form|Elise}}, {{cai|Transform Mercury Cannon|Jayce}} / {{ai|Transform Mercury Hammer|Jayce}}, and {{cai|Aspect of the Cougar|Nidalee}}) based on which form they died as.\n* ''Mist Wraiths'' are considered {{tip|clone|clones}} and can only be targeted by '''Viego'''.\n* If '''Viego''' possesses an enemy champion who owns {{ii|Dark Seal}} or {{ii|Mejai's Soulstealer}}, he will gain their {{nie|Glory}} stacks for the possession.\n* As {{ii|Cull}} tracks its progress for each player even if they do not possess the item at the time, '''Viego''' may discharge stacks for the benefit of {{g|1}} each per {{tip|minion}} kill, and if '''Viego''' killed 100 minions possessing {{ii|Cull}}, no matter whether bought himself or acquired via a possessed champion's inventory, he receives the {{g|350}} payout and can no longer discharge stacks. \n** This entire interaction does not interact with the state of the {{ii|Cull}} stacks of the enemy.\n** The stacks shown on the item in the inventory and scoreboard may not update properly, however.\n* If '''Viego''' possesses an enemy champion who owns {{ii|Tear of the Goddess}}, the stacks it has will be transferred to his {{ii|Tear of the Goddess}} if he owns one.\n* If '''Viego''' possesses an enemy {{ci|Bel'Veth}}, his attack speed cap will be modified to 90 permanently.{{bug|1}}\n* If '''Viego''' possesses an enemy {{csl|Evelynn|KDA}}, he will still hear {{ais|Demon Shade|Evelynn}} music upon discarding the possession if he does it while active.{{bug|1}}\n* If '''Viego''' targets a ''Mist Wraith'' while already {{tip|untargetable}} he will become targetable once again during the cast time.{{bug|1}}\n* If '''Viego''' possesses an enemy on {{tip|Howling Abyss}}, he will be able to use the [[shop]] upon returning to the [[fountain]] and discarding the possession.{{bug|1}}\n* If '''Viego''' posesses an enemy {{ci|Naafiri}}, he will keep her {{ai|We Are More|Naafiri|Packmates}} upon discarding the possession.{{bug|1}}\n* The following table refers for interactions while '''Viego''' is winding up on a ''Mist Wraith'':\n{{ct|attack=false|move=false|cast=false|items=false|consume=false|spells=true,false,false,false,false|interrupts=death}}",
+        "flavorsound": "{{sm2|Viego_Original_KillFirst_3.ogg}} ''\"You will serve!\"''"
+      }
+    },
+    "Q": {
+      "id": "ViegoQ",
+      "name": "Blade of the Ruined King",
+      "description": "Viego's spectral blade passively deals bonus percent current Health damage On-Hit and strikes twice vs. enemies he recently hit with an Ability, stealing Health.\n\nViego can activate this Ability to thrust his zweihander forward, impaling enemies in front of him.",
+      "tooltip": "Passive: Viego's Attacks deal an additional {{ totalpercenthealthonhit }} current Health physical damage. His first Attack against an enemy he has recently damaged with an Ability hits a second time, dealing {{ secondattackdamage }} physical damage and restoring {{ healmodvschamps*100 }}% of damage dealt as Health. These bonuses are kept during Possession.\n\nActive: Viego stabs forward, dealing {{ totaldamage }} physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "5/4.5/4/3.5/3",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Current Health %",
+          "Minimum Current Health Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ percenthealthonhit }}% -> {{ percenthealthonhitNL }}%",
+          "{{ mindamageonhit }} -> {{ mindamageonhitNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Viego",
+        "skill": "Q",
+        "icon": "false",
+        "blurbicon": "Blade of the Ruined King.png",
+        "blurb": "{{sbc|Passive:}} {{cis|Viego}} basic attacks deal {{as|'''bonus''' physical damage}} by a portion of the {{as|target's '''current''' health}}. \n'''Viego's''' damaging abilities apply a mark to enemies hit, his next basic attack will consume the mark to strike a second time, dealing {{as|'''modified''' physical damage}} and {{tip|healing}} him based on the damage dealt.",
+        "blurb2": "{{sbc|Active:}} '''Viego''' stabs in a line in the target direction that deals {{as|physical damage}} to enemies hit based on his {{as|{{sti|critical strike chance}}}}.",
+        "blurb4": "''Blade of the Ruined King's'' passive remains under ''{{ai|Sovereign's Domination|Viego|Possession}}''.",
+        "description": "{{sbc|Passive:}} '''Viego's''' basic attacks are empowered to deal {{as|'''bonus''' physical damage}} {{tip|on-hit}}, which has a minimum threshold and is capped at 80 against {{tip|monsters}}. This damage is affected by {{tip|critical strike}} modifiers.",
+        "leveling": "{{st|Bonus Physical Damage|{{as|{{ap|2 to 6}}% of target's '''current''' health}}}}\n{{st|Minimum Bonus Damage|{{ap|10 to 30}}}}",
+        "description2": "Additionally, his damaging [[champion ability|abilities]] apply a mark to enemies hit for 4 seconds. '''Viego's''' next basic attack against a marked target is empowered to consume the mark {{tip|on-hit}} to strike a second time, dealing {{tt|{{as|20% AD}} {{as|(+ 15% AP)}}|Scales on current AD and AP}} {{as|physical damage}} and {{tip|heal|healing}} him for 135% of the {{tt|post-mitigation damage|Damage calculated after modifiers}} dealt. The healing based on damage dealt is increased to 145% against monsters and reduced to 50% against {{tip|minions}}.",
+        "description3": "The second strike applies {{tip|on-hit}} effects at 100% effectiveness and can {{tip|critically strike}} for {{as|{{critical damage|{{ccd|Viego|crit_base}}|100}} physical damage}} if the triggering attack does.",
+        "icon4": "Blade of the Ruined King.png",
+        "description4": "{{sbc|Active:}} '''Viego''' stabs in a line in the target direction that deals {{as|physical damage}} to enemies hit. ''Blade of the Ruined King'' deals {{as|15 '''bonus''' physical damage}} against monsters.",
+        "leveling4": "{{st|Physical Damage|{{ap|15 to 75}} {{as|(+ 70% AD)}}<br>{{times}}{{as|(1 + {{critical damage|100|0}} critical strike chance)|critical chance}}|Monster Damage|{{ap|15+15 to 75+15}} {{as|(+ 70% AD)}}<br>{{times}}{{as|(1 + {{critical damage|100|0}} critical strike chance)|critical chance}}}}",
+        "description5": "''Blade of the Ruined King's passive remains under {{ai|Sovereign's Domination|Viego|Possession}}, and while transformed, the second strike is instead converted to '''bonus''' damage on-hit which no longer applies on-hit effects but can still {{tip|critically strike}} (based on possessed stats).''",
+        "cooldown": "{{ap|5 to 3}}",
+        "range": "{{tip|er|icononly = true}} {{tt|-25 - 600|Rectangle length is 625 units total}}",
+        "width": "{{tip|er|icononly = true}} {{tt|125|Rectangle full width}}",
+        "angle": "|cast time    = {{tt|{{as|{{fd|0.35}} (at base attack speed)|attack speed}}|Always equal to 140% of Viego's attack windup}}",
+        "speed": "|targeting    = Direction",
+        "affects": "Self, Enemies",
+        "damagetype": "Physical",
+        "spellshield": "true",
+        "spelleffects": "special",
+        "parry": "special",
+        "projectile": "false",
+        "callforhelp": "|notes        = \n* The mark will not be applied to the primary target struck by ''{{ai|Heartbreaker|Viego}}'', but it can triggered from it.\n* ''Blade of the Ruined King's'' cast time is always 140% of the caster's attack windup time.\n** At base attack speed, '''Viego's''' attack windup is {{fd|0.25}} seconds.\n** An easy formula to calculate the cast time is [ {{fd|0.23}} seconds divided by {{as|'''total''' attack speed|attack speed}} ].\n** Reducing '''Viego's''' attack speed via {{tip|cripple|attack speed reductions}} also increases ''Blade of the Ruined King's'' cast time by the same fraction.\n** It is calculated from '''Viego's''' total attack speed after cap (2.5) and floor (0.2), making the maximum possible cast time {{rutngt|1.152}}.\n** ''Blade of the Ruined King's'' cast time becomes the same as the standard {{rutngt|0.25}} cast time for most abilities at {{as|{{fd|32.6}}% '''bonus''' attack speed|attack speed}}.\n<!-- todo: table? -->\n* Applies {{tip|area damage}} for the thrust, {{tip|basic damage}} for the second strike, and {{tip|proc damage}} for the bonus damage on-hit.\n{{Effect at cast time end}}\n* '''Viego''' will not perform the second strike if the first attack was {{tip|dodge|dodged}}, {{tip|blocked|blocked}}, and {{tip|blind|missed}}.\n* If the second strike hits a dead unit, '''Viego''' will still {{tip|heal}} based on the post-mitigation damage that he would deal with it.\n* The attacks do not deal the '''bonus''' damage against [[structures]].",
+        "_comments": [
+          "todo: table?"
+        ]
+      }
+    },
+    "W": {
+      "id": "ViegoW",
+      "name": "Spectral Maw",
+      "description": "Viego charges up before dashing forward, releasing a ball of concentrated Black Mist that stuns the first enemy hit.",
+      "tooltip": "Begin Charging: Viego begins gathering Mist, Slowing himself by {{ selfslowpercent*100 }}%.\n\nRelease: Viego dashes forward and hurls the gathered Mist. Deals {{ totaldamage }} magic damage and Stuns the first enemy hit for {{ stunduration }} to {{ maxstuntt }} seconds based on charge time.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Viego",
+        "skill": "W",
+        "icon": "Spectral Maw.png",
+        "blurb": "{{sbc|Active:}} {{ci|Viego}} {{tip|channel|charges}} up to a short time to increase the {{sti|range}} and stun of his blast. ''Spectral Maw'' can be recast within the duration and automatically cancels afterwards.",
+        "blurb2": "{{sbc|Recast:}} '''Viego''' {{tip|dashes}} in the target direction, hurling a blast of mist that deals {{as|magic damage}} to the first enemy hit and briefly {{tip|stuns}} them based on charge time.",
+        "description": "{{sbc|Active:}} '''Viego''' {{tip|channel|charges}} while being {{tip|slow|slowed}} by 10% for up to 3 seconds to increase ''Spectral Maw's'' missile range and {{tip|stun}} duration over the first second of the channel.",
+        "description2": "''Spectral Maw'' can be recast within the duration. If the charge completes without reactivation, ''Spectral Maw'' is cancelled and placed on {{sti|full cooldown}}. If the charge is {{tip|interrupt|interrupted}}, it will be placed on a 3-second cooldown.",
+        "description3": "{{sbc|Recast:}} '''Viego''' hurls a blast of mist in the target direction and {{tip|dash|dashes}} a fixed distance in the same direction, though not through terrain. The mist deals {{as|magic damage}} to the first enemy hit and {{tip|stuns}} them for {{pp|type=channel time|0.25 to 1.25 for 5|0 to 1|formula=0.25 + (0.25 per 0.25 seconds channeled).|changedisplay = true}} seconds.",
+        "leveling3": "{{st|Magic Damage|{{ap|80 to 300}} {{as|(+ 100% AP)}}}}",
+        "description4": "''Spectral Maw {{tip|Basic attack reset|resets}} '''Viego's''' basic attack timer. '''Viego''' can cast any of his abilities during the dash.''",
+        "cooldown": "{{tt|8|Starts when the channel ends}}",
+        "cdstart": "post-effect",
+        "cost": "|costtype     =",
+        "target range": "{{tt|300|Dash distance}} / {{tip|cr|icononly = true}} {{pp|type=channel time|500 to 900 for 5|0 to 1|formula=500 + (100 per 0.25 seconds channeled).|changedisplay = true}}",
+        "width": "{{tip|er|icononly = true}} {{tt|120|Mist missile width}}",
+        "cast time": "none",
+        "speed": "{{tt|1000|Dash speed}} / {{tt|1300|Missile speed}}",
+        "targeting": "[[Auto-targeted|Auto]] / [[Direction-targeted|Direction]]",
+        "affects": "Self, Enemies",
+        "damagetype": "Magic",
+        "spellshield": "true",
+        "spelleffects": "spell",
+        "projectile": "true",
+        "grounded": "true",
+        "knockdown": "true",
+        "silence": "true",
+        "callforhelp": "|notes        = \n* The reduced cooldown from the charge will not occur if ''Spectral Maw's'' cooldown is already below 3 seconds.\n* The following table refers for interactions while '''Viego''' is {{tip|channel|channeling}}:\n{{ct|charge|attack=false|move=true|cast={{ai|Harrowed Path|Viego}} is usable. {{ai|Blade of the Ruined King|Viego}} and {{ai|Heartbreaker|Viego}} are disabled.|items=false|consume=Disabled, but can still use trinkets.|spells=true, true, false, false, recasts|interrupts=death, silence, ground, root}}"
+      }
+    },
+    "E": {
+      "id": "ViegoE",
+      "name": "Harrowed Path",
+      "description": "Viego commands the Black Mist to haunt and surround a piece of terrain. Viego can hide in the Mist as a wraith, gaining camouflage, Move Speed, and Attack Speed.",
+      "tooltip": "Viego sends forth a spectre to haunt the first terrain hit, surrounding it with Mist for {{ mistduration }} seconds. Viego gains Camouflage, {{ totalmovespeed }} Move Speed, and {{ attackspeed*100 }}% Attack Speed while inside the Mist.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/12/10/8/6",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "750",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Move Speed",
+          "Attack Speed",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ movespeed*100.000000 }}% -> {{ movespeednl*100.000000 }}%",
+          "{{ attackspeed*100.000000 }}% -> {{ attackspeednl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Viego",
+        "skill": "E",
+        "icon": "Harrowed Path.png",
+        "blurb": "{{sbc|Active:}} {{ci|Viego}} sends a spectre in the target direction that creates a trail of mist in its wake for a period. If it hits [[terrain]], the mist is spread further around either side.",
+        "blurb2": "While inside the mist, '''Viego''' gains {{sti|{{as|'''bonus''' attack speed}}}}. If he does not attack or cast abilities, he also gains {{sti|{{as|'''bonus''' movement speed}}}} and {{tip|camouflage}}.",
+        "description": "{{sbc|Active:}} '''Viego''' sends a spectre in the target direction that creates a trail of mist in its wake which lasts 8 seconds. If it hits [[terrain]], the mist will spread further around either side.",
+        "description2": "While inside the mist, '''Viego''' gains {{sti|{{as|'''bonus''' attack speed}}}}. If he does not attack or cast abilities, he also gains {{sti|{{as|'''bonus''' movement speed}}}} and {{tip|camouflage}}.",
+        "leveling2": "{{st|Bonus Attack Speed|{{ap|30 to 50}}%}}\n{{st|Bonus Movement Speed|{{ap|25 to 35}}% {{as|(+ 4% per 100 AP)}}}}",
+        "icon2": "Harrowed Path 2.png",
+        "description3": "Declaring a basic attack or casting an ability will break the camouflage and remove the {{as|'''bonus''' movement speed}}, preventing '''Viego''' from gaining them again for 1 second, increased to 2 seconds if he attacked a large {{tip|monster}}. This duration refreshes on subsequent attacks and ability casts.",
+        "description4": "''Harrowed Path can be cast during any of '''Viego's''' abilities. '''Viego''' cannot gain the camouflage nor {{as|'''bonus''' movement speed}} from Harrowed Path for 1 second if he casted it during {{ais|Spectral Maw|Viego}} channel or started the channel while the mist was active.''",
+        "cooldown": "{{ap|14 to 6}}",
+        "cdstart": "post-effect",
+        "cost": "|costtype     =",
+        "customlabel": "Detection Radius",
+        "custominfo": "450",
+        "range": "{{tt|775|Initial missile reach for collision with a wall}} / {{tt|8000|Maximum distance of spreading along a very long wall}}",
+        "width": "{{tt|500|Initial area width, estimated}} / {{tt|500|Zone from wall, estimated}}",
+        "cast time": "none",
+        "speed": "{{tt|1600|Initial missile speed}} / {{tt|1200|Speed of spreading around a wall}}",
+        "targeting": "Direction",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|projectile   = false",
+        "callforhelp": "|notes        = \n* {{ais|Spectral Maw|Viego}} recast does not incur the 1 second cooldown for regaining the stealth and instead prevents the stealth from being gained until the dash ends, resetting the cooldown if it is active.\n** The cooldown is not reset if it was incurred by basic attacking a large monster, but is however reset from it being incurred by {{ais|Spectral Maw|Viego}} channel.\n* The bonus movement speed and camouflage are granted by the same buff.\n* '''Viego''' will enter camouflage even while {{si|Recall|Recalling}}.\n* '''Viego''' can cast ''Harrowed Path'' during the cast time of any ability or spell.\n* Ranking up ''Harrowed Path'' while the effect is already active will still immediately improve the bonuses it grants.\n* ''Harrowed Path'' can interact with [[Terrain#Player-Generated|player-generated terrain]].\n* Using a basic attack breaks the stealth at the start of the attack windup.\n** The stealth regain timer is refreshed from basic attacks at the start of their attack windup.\n* '''Viego''' can benefit from an enemy's ''Harrowed Path''.\n**{{Pending for test}}: Enemy's ''Harrowed Path'' grant Viego his ability's bonus or the enemy's.",
+        "tips": "* ''Harrowed Path'' will grant the {{tip|camouflage}} immediately if cast during {{ai|Spectral Maw|Viego}} or {{ai|Heartbreaker|Viego}}."
+      }
+    },
+    "R": {
+      "id": "ViegoR",
+      "name": "Heartbreaker",
+      "description": "Viego teleports to a nearby location and executes an enemy champion on arrival, piercing their heart and causing a destructive shockwave around them that knocks away their allies.",
+      "tooltip": "Viego discards any souls he is currently Possessing and teleports. On arrival he Attacks the champion with the lowest percent Health, briefly Slowing them by {{ slowpercent*100 }}% and dealing {{ totaldamage }} + {{ totalpercenthealth }}% missing Health physical damage. Other nearby enemies are Knocked Back and take {{ totaldamage }} physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "500",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Missing Health Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ maxhealthdamage }}% -> {{ maxhealthdamageNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Viego",
+        "skill": "R",
+        "icon": "Heartbreaker.png",
+        "blurb": "{{sbc|Active:}} {{ci|Viego}} {{tip|blinks}} with {{tip|displacement immunity}} to the target location and attacks the {{as|most wounded}} enemy champion nearby, which briefly {{tip|slows}} them, applies {{tip|on-hit}} effects, and deals {{as|'''bonus''' physical damage}} by a portion of {{as|their '''missing''' health}}.",
+        "blurb2": "Other nearby enemies are {{tip|airborne|knocked back}} and dealt {{as|physical damage}} based on his {{as|{{sti|critical strike chance}}}}.",
+        "blurb4": "{{sbc|{{tip|displacement immunity|nolink=true}}:}} The blink cannot be deterred by {{tip|crowd control}}.",
+        "description": "{{sbc|Active:}} '''Viego''' gains {{tip|displacement immunity}} over the cast time, then {{tip|blink|blinks}} to the target location. Upon arrival, he strikes the {{tt|most wounded|Lowest health percent}} enemy champion {{tt|nearby|Alternatively the closest one if all targets have the same percent health}}, dealing {{as|physical damage}}, {{tip|slow|slowing}} them by 99% for {{fd|0.25}} seconds, and applying {{tip|on-hit}} effects at 100% effectiveness. Other nearby enemies are {{tip|airborne|knocked back}} up to 400-units away based on proximity, though not through terrain.",
+        "leveling": "{{st|Physical Damage|{{as|{{ap|12 to 20}}% {{as|(+ 5% per 100 '''bonus''' AD)}} of target's '''missing''' health}}}}",
+        "description2": "All targets hit are dealt {{as|{{pp|key=%|key1=%|type=critical strike chance|120 to 240 for 11|0 to 100|formula=120 x (1 + critical strike chance)}}|critical chance}} {{as|AD}} {{as|physical damage}}.",
+        "description3": "''If a {{ai|Sovereign's Domination|Viego|Possession}} is discarded, Heartbreaker will be placed on a {{sti|cd|{{fd|1.5}}-second}} cooldown if it is not already on cooldown. Heartbreaker will cast at max range if cast beyond that.''",
+        "cooldown": "{{ap|120 to 80}}",
+        "cost": "|costtype     =",
+        "target range": "500",
+        "effect radius": "{{tip|cr|icononly = true}} 300",
+        "width": "|angle        =",
+        "cast time": "{{fd|0.5}}",
+        "speed": "|targeting    = Location",
+        "affects": "Self, Enemies",
+        "damagetype": "Physical",
+        "spellshield": "true",
+        "spelleffects": "special",
+        "grounded": "true",
+        "parry": "special",
+        "projectile": "|callforhelp  = true",
+        "notes": "* ''Heartbreaker'' will cast at the edge of its range if the target location is further beyond.\n* ''Heartbreaker'' will cast at maximum range from the end of {{ais|Spectral Maw|Viego}} dash if it is cast during the dash.\n* The knockback speed is 1000 units per second. The airborne is removed as soon as the displacement ends.\n** The maximum airborne duration is therefore {{fd|0.4}} seconds. The minimum is {{fd|0.1}} seconds.\n* Applies {{tip|spell damage}} to the struck champion and {{tip|area damage}} to all other enemies.\n* '''Viego''' will enter a {{fd|0.25}}-second [[cast time]] if he strikes an enemy champion.\n** After this cast time, he will automatically receive an attack command against that enemy. Previous movement inputs from the player are ignored.{{bug|1}}\n* ''Heartbreaker's'' strike to the champion can be {{tip|dodge|dodged}} and {{tip|block|blocked}}, but not {{tip|blind|missed}}.\n* '''Viego''' will be ordered to [[basic attack]] the primary target afterwards.",
+        "flavorsound": "{{sm2|Viego_Original_R_2.ogg}} ''\"Isolde!\"''"
+      }
+    }
+  }
+}

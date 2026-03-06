@@ -1,0 +1,13 @@
+[scenario]
+name        = "Easy Warmup 4v3 — Low Difficulty Advantage"
+seed        = 11
+hero_count  = 4
+enemy_count = 3
+difficulty  = 1
+max_ticks   = 2000
+room_type   = "Entry"
+
+[assert]
+outcome          = "Victory"
+max_ticks_to_win = 1500
+min_heroes_alive = 3

@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0091_4v7_d5"
+seed = 2214
+hero_count = 4
+enemy_count = 7
+difficulty = 5
+max_ticks = 10000
+room_type = "Setpiece"
+hero_templates = ["shadow_dancer", "witch_doctor", "pyromancer", "arcanist"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

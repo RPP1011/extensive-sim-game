@@ -1,0 +1,119 @@
+[hero]
+name = "Sylas"
+
+[stats]
+hp = 90
+move_speed = 3.5
+armor = 20.0
+magic_resist = 30.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 15
+range = 5.5
+cooldown = 1000
+
+# --- Q: Chain Lash ---
+[[abilities]]
+name = "Chain Lash"
+targeting = "ground_target"
+range = 0.5
+cooldown_ms = 10000
+cast_time_ms = 400
+ai_hint = "damage"
+resource_cost = 11
+
+[[abilities.effects]]
+type = "damage"
+amount = 10
+damage_type = "magic"
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- W: Kingslayer ---
+[[abilities]]
+name = "Kingslayer"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 12000
+ai_hint = "damage"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "damage"
+amount = 18
+damage_type = "magic"
+
+[[abilities.effects]]
+type = "heal"
+amount = 18
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- E: Abscond / Abduct ---
+[[abilities]]
+name = "Abscond / Abduct"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 13000
+ai_hint = "utility"
+resource_cost = 13
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- R: Hijack ---
+[[abilities]]
+name = "Hijack"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 19500
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 15
+recast_count = 1
+recast_window_ms = 10000
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 15
+damage_type = "true"
+
+# --- Passive: Petricite Burst ---
+[[passives]]
+name = "Petricite Burst"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_auto_attack"
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+
+[[passives.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.2
+duration_ms = 5000
+
+[[passives.effects]]
+type = "apply_stacks"
+name = "sylas"
+count = 1
+max_stacks = 4
+

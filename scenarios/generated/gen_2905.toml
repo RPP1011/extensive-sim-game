@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0048_4v4_s1"
+seed = 11971
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["necromancer", "witch_doctor", "elementalist", "samurai"]
+enemy_hero_templates = ["Aurora", "Nilah", "DrMundo", "Sivir"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

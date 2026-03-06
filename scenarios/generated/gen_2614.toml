@@ -1,0 +1,13 @@
+[scenario]
+name = "room_fit_setpiece_2613_s1"
+seed = 11874
+hero_count = 4
+enemy_count = 5
+difficulty = 2
+max_ticks = 10000
+room_type = "Setpiece"
+hero_templates = ["templar", "witch_doctor", "necromancer", "elementalist"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

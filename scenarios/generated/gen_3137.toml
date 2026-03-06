@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0125_3v3_s2"
+seed = 22048
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["Brand", "Aatrox", "Braum"]
+enemy_hero_templates = ["Viktor", "Nunu", "Alistar"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

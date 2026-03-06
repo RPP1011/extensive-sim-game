@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0156_5v5"
+seed = 2079
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["mage", "shadow_dancer", "arcanist", "witch_doctor", "samurai"]
+enemy_hero_templates = ["pyromancer", "witch_doctor", "elementalist", "alchemist", "warden"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

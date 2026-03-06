@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0120_2v2_s2"
+seed = 22043
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["Seraphine", "Karthus"]
+enemy_hero_templates = ["Quinn", "shaman"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

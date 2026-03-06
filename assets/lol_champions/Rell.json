@@ -1,0 +1,289 @@
+{
+  "id": "Rell",
+  "name": "Rell",
+  "title": "the Iron Maiden",
+  "resource_type": "Mana",
+  "tags": [
+    "Tank",
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Break the Mold",
+      "description": "Rell's Attacks and Abilities deal additional magic damage and steal Armor and Magic Resist on hit.",
+      "wiki_detail": {
+        "champion": "Rell",
+        "skill": "I",
+        "icon": "Break the Mold.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Rell}} basic attacks reduce the target's {{sti|ar|{{as|armor}}}} and {{sti|mr|{{as|magic resist}}}} for a few seconds. Basic attacks against enemy {{tip|champions}} will refresh the duration for all nearby afflicted enemies.",
+        "blurb2": "'''Rell''' gains {{sti|ar|{{as|'''bonus''' armor}}}} and {{sti|mr|{{as|'''bonus''' magic resist}}}} equal to the sum reduced from all afflicted enemies, ''Break the Mold's'' damage is increased by the sum resistances reduced from the target.",
+        "description": "{{sbc|Innate:}} '''Rell's''' [[basic attack]]s and [[ability|abilities]] against non-{{tip|minions}} reduce the target's {{sti|ar|{{as|armor}}}} and {{sti|mr|{{as|magic resistance}}}} by 2% for 5 seconds, refreshing on subsequent hits and stacking up to 5 times for a maximum of 10% reduction.",
+        "description2": "'''Rell''' gains {{as|'''bonus''' armor}} and {{as|'''bonus''' magic resistance}} equal to the sum resistances reduced from all afflicted enemies.",
+        "description3": "''Break the Mold'' will reduce the target's {{as|armor}} and {{as|magic resistance}} by a minimum of {{pp|0.8 to 2 for 8|1;3;5;8;10;12;15;17}}.",
+        "description4": "'''Rell's''' {{tip|attack windup}} is reduced{{ft|by {{pp|100-(0.42 to 0.39)/0.42*100|key=%}}.|to {{pp|((0.42 to 0.39)/2)*(1/{{ccd|Rell|as_base}})|round=3}} seconds (with 0% bonus attack speed).}}",
+        "cooldown": "|target range =",
+        "effect radius": "|speed        =",
+        "width": "|angle        =",
+        "cast time": "|targeting    = Passive",
+        "affects": "Self, Enemies",
+        "damagetype": "magic",
+        "spellshield": "false",
+        "spelleffects": "proc",
+        "projectile": "|parry        = true",
+        "callforhelp": "|video        =",
+        "notes": "* The attacks do not affect [[structures]]."
+      }
+    },
+    "Q": {
+      "id": "RellQ",
+      "name": "Shattering Strike",
+      "description": "Rell deals magic damage to units in a line, breaking their shields and stunning them.",
+      "tooltip": "Rell thrusts her lance, Stunning targets for {{ stunduration }} seconds, destroying all Shields, and dealing {{ damage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11/10.5/10/9.5/9",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Rell",
+        "skill": "Q",
+        "icon": "Shattering Strike.png",
+        "blurb": "{{sbc|Active:}} {{ci|Rell}} thrusts her lance in the target direction that destroys damage {{tip|shield|shields}} of enemies hit before dealing {{as|magic damage}} and {{tip|stun|stunning}}.",
+        "description": "{{sbc|Active:}} '''Rell''' thrusts her lance in the target direction, {{tip|lunge|lunging}} forward 100 units and destroying the damage-mitigating {{tip|shield|shields}} of all enemies hit (excluding the shields of {{tip|monsters}}) before dealing them {{as|magic damage}} and {{tip|stun|stunning}} them for {{fd|0.75}} seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|60 to 220}} {{as|(+ 60% AP)}}}}",
+        "cooldown": "{{ap|11 to 9}}",
+        "cost": "50",
+        "costtype": "mana",
+        "range": "{{tip|er|icononly = true}} {{tt|520|Forward Range}} / {{tt|-220|Backward Range}}",
+        "width": "{{tip|er|icononly = true}} {{tt|150|Rectangle width}}",
+        "cast time": "{{fd|0.4}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spellshield": "true",
+        "spelleffects": "spellaoe",
+        "projectile": "false",
+        "callforhelp": "|video        =",
+        "notes": "{{Effect at cast time end}}\n* '''Rell''' is {{tip|lockout|locked out}} of moving, attacking, and casting any other ability for {{fd|0.35}} seconds after ''Shattering Strike'' is cast."
+      }
+    },
+    "W": {
+      "id": "RellW_Dismount",
+      "name": "Ferromancy: Crash Down",
+      "description": "Mounted: Rell Dismounts, crashing down in her armor, Knocking enemies up and gaining a large Shield. While dismounted, she gains Armor, Magic Resist, Attack Speed, and Attack Range, but is Slowed.\n\nDismounted: Rell forms her Mount, gaining a burst of speed and Knocking Up the next enemy she attacks.",
+      "tooltip": "Passive - Mounted Alacrity: Rell gains {{ spell.rellw_dismount:mountedmovespeed }} Move Speed while mounted.\n\nActive - Ferromancy: Crash Down: Rell leaps off her mount, Knocking Up enemies and dealing {{ spell.rellw_dismount:dismountdamage }} magic damage. Rell gains {{ spell.rellw_dismount:shield }} Shield, which lasts until she remounts.\n\nRell then enters her armored form, gaining {{ spell.rellw_dismount:resistanceincrease*100 }}% increased Armor and Magic Resist, {{ spell.rellw_dismount:dismountedasboost*100 }}% Attack Speed and {{ spell.rellw_dismount:dismountedrangeboost }} Attack Range. In this armored form, she can use Ferromancy: Mount Up.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "450",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Dismount Damage",
+          "Shield Amount",
+          "Flip Damage",
+          "Passive Move Speed"
+        ],
+        "effect": [
+          "{{ crashdowndamage }} -> {{ crashdowndamageNL }}",
+          "{{ shieldbase }} -> {{ shieldbaseNL }}",
+          "{{ mountupdamage }} -> {{ mountupdamageNL }}",
+          "{{ mountedmovespeed }} -> {{ mountedmovespeedNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Rell",
+        "skill": "W",
+        "icon": "Ferromancy Crash Down.png",
+        "blurb": "{{sbc|Active:}} '''Rell''' becomes {{sbc|Dismounted}} and {{tip|dash|leaps}} to the target location, gaining a {{tip|shield}} that lasts until destroyed or casting ''{{ai|Ferromancy: Mount Up|Rell}}''.",
+        "blurb2": "Upon arrival, she deals {{as|magic damage}} and briefly {{tip|airborne|knocks up}} nearby enemies. She will continue {{tip|dash|sliding}} forward to affect further enemies along her path.",
+        "blurb3": "While '''Rell''' is {{sbc|Dismounted}}, she can cast ''{{ai|Ferromancy: Mount Up|Rell}}''. She will revert to {{sbc|Mounted}} form after {{si|Recall|recalling}} or respawning.",
+        "description": "{{sbc|Active:}} '''Rell''' becomes {{sbc|Dismounted}} and {{tip|dash|leaps}} to the target location over the cast time, granting herself a {{tip|shield}} that lasts until destroyed or casting ''{{ai|Ferromancy: Mount Up|Rell}}''. Upon arrival, she deals {{as|magic damage}} to nearby enemies and {{tip|airborne|knocks them up}} for 1 second. She will continue {{tip|dash|sliding}} forward another 320 units over {{tt|{{fd|0.5}} seconds|Estimated}}, though not through terrain, affecting further enemies along her path.",
+        "leveling": "{{st|Shield Strength|{{ap|15|40|65|90|110}} {{as|(+ 12% of '''maximum''' health)}}}}\n{{st|Magic Damage|{{ap|60 to 180}} {{as|(+ 60% AP)}}}}",
+        "description2": "While '''Rell''' is {{sbc|Dismounted}}, she can cast ''{{ai|Ferromancy: Mount Up|Rell}}''. Upon completing a {{si|Recall}} channel or respawning, '''Rell''' will automatically revert to {{sbc|Mounted}} form without casting the ability and reset ''{{ais|Ferromancy: Mount Up|Rell}}'' {{sti|cooldown}}.",
+        "description3": "''This ability can be cast only while Rell is {{sbc|Mounted}}. '''Rell''' can cast {{ai|Magnet Storm|Rell}} during the dash, and is not considered to be dismounted until after the leap ends. Ferromancy: Crash Down will cast at max range if cast beyond that.''",
+        "cooldown": "11",
+        "cost": "40",
+        "costtype": "Mana",
+        "target range": "{{tt|400|Initial dash range}} / {{tt|100|Minimum landing range}}",
+        "effect radius": "180",
+        "collision radius": "{{tip|er|icononly = true}} {{tt|200|Sliding dash collision radius}}",
+        "cast time": "{{fd|0.625}}",
+        "speed": "|targeting    = Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "true",
+        "spelleffects": "spellaoe",
+        "grounded": "true",
+        "knockdown": "true",
+        "projectile": "|callforhelp  =",
+        "video": "|notes        = \n* '''Rell''' {{tip|dash|slides}} between 250 and 350 units in testing, depending on how far the spell was targeted. It is not known where this is intended.\n* If '''Rell''' dashes before a wall on the map, the slide will cover a shorter distance to the terrain over the same time, moving slower.\n** {{pending for test}} Interaction with player-made walls.\n* The following table refers for interactions while '''Rell''' is dashing/in cast time:\n{{ct|attack=false|move=false|cast={{ai|Q|Rell}} is disabled. {{ai|E|Rell}} and {{ai|R|Rell}} are usable.|items=true,,,false|spells=true,false,false,false,false|interrupts=death}}",
+        "flavorsound": "{{sm2|Rell_Original_W_Dismount_4.ogg}} ''\"Armoring up!\"''"
+      }
+    },
+    "E": {
+      "id": "RellE",
+      "name": "Full Tilt",
+      "description": "Passive: Rell gains out of combat Move Speed.\n\nActive: Rell and an ally gain ramping Move Speed, doubled toward enemies and each other. Her next Attack explodes, dealing magic damage.",
+      "tooltip": "Rell and an ally charge, gaining {{ minms*100 }}% Move Speed, increased to {{ maxms*100 }}% when facing enemy champions or each other for {{ duration }} seconds. Rell's next Attack or Shattering Strike explodes in an area for {{ maxhealthdamagecalc }} max Health magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1200",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ percenthealthdamage*100.000000 }}% -> {{ percenthealthdamagenl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Rell",
+        "skill": "E",
+        "icon": "false",
+        "icon2": "Full Tilt.png",
+        "description": "{{sbc|Passive - Mounted Alacrity:}} '''Rell''' gains {{as|{{pp|5 to 20 for 6;24 to 40 for 5;45;50}} '''bonus''' movement speed}}, reduced{{ft|by 50%|to {{as|{{pp|2.5 to 10 for 6;12 to 20 for 2.5;22.5;25}}|ms}}}}while in combat.",
+        "description2": "{{sbc|Active:}} '''Rell''' powers up herself and the target allied champion for 3 seconds, both gaining {{as|'''bonus''' movement speed}} which doubles while moving within 1200 units of the empowered ally or an enemy. The {{as|'''bonus''' movement speed}} ramps up linearly from 75% of its maximum value over the first 2 seconds.",
+        "leveling2": "{{st|Initial Bonus Movement Speed|{{ap|12*0.75 to 16*0.75}}%|Maximum Bonus Movement Speed|{{ap|12 to 16}}%}}\n{{st|Initial Rally Bonus Movement Speed|{{ap|12*2*0.75 to 16*2*0.75}}%|Maximum Rally Bonus Movement Speed|{{ap|12*2 to 16*2}}%}}",
+        "description3": "Additionally, '''Rell's''' next basic attack or ''{{ai|Shattering Strike|Rell}}'' within 5 seconds creates an explosion that deals {{as|'''bonus''' magic damage}}. The damage based on the target's health ratio is capped at 150 against monsters.",
+        "leveling3": "{{st|Bonus Magic Damage|{{ap|25 to 65}} {{as|(+ 50% AP)}} {{as|(+ 3% of target's '''maximum''' health)}}}}",
+        "description4": "If cast without a valid target, or [[self-targeted|self-cast]], ''Full Tilt'' will automatically target the closest allied champion in range.",
+        "cooldown": "15",
+        "cost": "40",
+        "costtype": "Mana",
+        "range": "1200",
+        "effect radius": "{{tt|300|Explosion radius}}",
+        "cast time": "none",
+        "targeting": "[[Unit-targeted|Unit]] / [[Auto-targeted|Auto]]",
+        "affects": "Self, Allies, Enemies",
+        "damagetype": "Magic",
+        "spellshield": "true",
+        "spelleffects": "spellaoe",
+        "video": "|notes        = \n* No additional details.\n<!--Blurb-->",
+        "blurb": "{{sbc|Passive:}} '''{{ci|Rell}}''' gains {{as|'''bonus''' movement speed}}, reduced while [[combat status|in-combat]].",
+        "blurb2": "{{sbc|Active:}} '''Rell''' empowers herself and an ally with {{as|'''bonus''' movement speed}} for a few seconds, which is increased when moving near the empowered ally or an enemy {{tip|champion}}.",
+        "blurb3": "'''Rell's''' next basic attack or {{ai|Shattering Strike|Rell}} within 5 seconds will also explode, dealing {{as|magic damage}} to nearby enemies.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "R": {
+      "id": "RellR",
+      "name": "Magnet Storm",
+      "description": "Rell explodes in a magnetic fury, violently Pulling nearby enemies toward herself. Then Rell constantly Drags nearby enemies toward herself for a short while, dealing magic damage over time.",
+      "tooltip": "Rell explodes in a magnetic fury, violently Pulling nearby enemies towards herself. Then Rell constantly Drags nearby enemies towards herself and deals {{ totaldamage }} magic damage over the next {{ duration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "200",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamagepersecond*2.000000 }} -> {{ basedamagepersecondnl*2.000000 }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Rell",
+        "skill": "R",
+        "icon": "Magnet Storm.png",
+        "blurb": "{{sbc|Active:}} {{ci|Rell}} erupts in magnetic fury, {{tip|airborne|pulling}} nearby enemies inward. She then emits a {{tip|Kinematics|Kinematic}} field that continually deals {{as|magic damage}} over a short time.",
+        "blurb4": "{{sbc|{{tip|Kinematics|nolink=true}}:}} Kinematics drags enemies toward the '''Source''', but does not disable their actions nor intercept other forms of movement.",
+        "description": "{{sbc|Active:}} '''Rell''' erupts with magnetic fury, {{tip|airborne|pulling}} nearby enemies {{tt|inward|to a ring 225 units around Rell, but minimum 100 pull distance}}. She then creates a gravitational field around her for the next 2 seconds that deals {{as|magic damage}} every {{fd|0.25}} seconds to nearby enemies and {{tip|kinematics|drags}} them towards her.",
+        "leveling": "{{st|Magic Damage Per Tick|{{ap|15 to 35}} {{as|(+ {{fd|13.75}}% AP)}}|Total Magic Damage|{{ap|120 to 280}} {{as|(+ 110% AP)}}}}",
+        "cooldown": "{{ap|120 to 80}}",
+        "cdstart": "on-cast",
+        "cost": "100",
+        "costtype": "Mana",
+        "target range": "|effect radius= {{tip|cr|icononly = true}} {{tt|450|Initial knockup radius}} / {{tip|er|icononly = true}} {{tt|375|Continous effect radius, center to edge}}",
+        "inner radius": "{{tip|cr|icononly = true}} {{tt|225|Pulls target into at least this radius, continuous kinetics does not affect targets already in this radius}}",
+        "width": "|angle        =",
+        "cast time": "{{fd|0.25}}",
+        "speed": "{{tt|300|Kinematic attraction speed, in units per second}}",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "special",
+        "spelleffects": "aoedot",
+        "projectile": "|callforhelp  =",
+        "video": "|notes        = \n{{Effect at cast time end}}\n* ''Magnet Storm'' will '''not''' drag units that are:\n** {{tip|Dash|Dashing}}.\n** Being displaced (e.g. by {{tip|airborne}} effects)\n** {{tip|Attach|Attached}}.\n** {{tip|Displacement immune|Displacement immune}}.\n** {{tip|cc-immune|Immune to crowd control}}.\n* {{tip|Spell shield}} will block the initial {{tip|airborne|pull}} but not the dragging effect.",
+        "flavorsound": "{{sm2|Rell_Original_R_0.ogg}} ''\"Nobody leaves!\"''"
+      }
+    }
+  }
+}

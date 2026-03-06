@@ -1,0 +1,306 @@
+{
+  "id": "Thresh",
+  "name": "Thresh",
+  "title": "the Chain Warden",
+  "resource_type": "Mana",
+  "tags": [
+    "Support",
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Damnation",
+      "description": "Thresh can harvest the souls of enemies that die near him, permanently granting him Armor and Ability Power.",
+      "wiki_detail": {
+        "champion": "Thresh",
+        "skill": "I",
+        "icon": "false",
+        "blurbicon": "Damnation.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Thresh}} {{as|{{sti|armor}}}} does not increase by {{sti|xp|leveling}} up.",
+        "blurb2": "{{sbc|Innate:}} Enemy {{tip|champions}} and large enemies that die near '''Thresh''' will drop a ''Soul'' for a period. '''Thresh''' automatically collects ''Souls'' near him or ''{{ai|Dark Passage|Thresh}}''.",
+        "blurb4": "{{sbc|Soul:}} For each stack, '''Thresh''' gains {{sti|ap|{{as|ability power}}}} and {{sti|armor|{{as|'''bonus''' armor}}}}.",
+        "description": "{{sbc|Innate:}} '''Thresh's''' {{as|armor}} does not increase through [[Growth#Increasing_Statistics|growth (per level)]].",
+        "icon2": "Damnation.png",
+        "description2": "{{sbc|Innate:}} Enemy {{tip|champions}}, large {{tip|minions}} and large {{tip|monsters}} that die near '''Thresh''' drop a ''Soul'' for 8 seconds. Epic monsters drop 2 ''Souls'' while lesser minions and monsters have a {{fd|33.{{recurring|3}}}}% chance to drop a ''Soul''.",
+        "description3": "'''Thresh''' automatically collects ''Souls'' near him or a placed ''{{ai|Dark Passage|Thresh}}''.",
+        "description4": "{{sbc|Soul:}} For each [[stack]], '''Thresh''' gains {{sti|ap|{{as|1 ability power}}}} and {{sti|armor|{{as|1 '''bonus''' armor}}}}.",
+        "effect radius": "1900",
+        "targeting": "Passive",
+        "affects": "Self",
+        "notes": "* ''Souls'' grant a small area of {{tip|sight}}.\n* ''Souls'' are visible to allies and only become visible to enemies if their team has {{tip|sight}} of '''Thresh'''.\n* The probability for ''souls'' dropping from small minions and monster on {{tip|Summoner's Rift}} starts at 33% but adjusts dynamically to match the expected quota of ''souls'' dropped (lowers if above, rises if below, remains if even). ''Souls'' collected are not considered when adjusting the probability.\n* {{ci|Nunu|Nunu & Willump}} drop a soul each."
+      }
+    },
+    "Q": {
+      "id": "ThreshQ",
+      "name": "Death Sentence",
+      "description": "Thresh binds an enemy in chains and pulls them toward him. Activating this ability a second time pulls Thresh to the enemy.",
+      "tooltip": "Thresh throws out his scythe, Stunning the first unit hit and Pulling them towards Thresh for {{ tauntlength }} seconds. The scythe does {{ totaldamage }} magic damage and also grants True Sight for the duration.\n\nThresh can Recast this Ability to pull himself to the enemy.\n\nIf this Ability hits, its Cooldown is reduced by {{ hitbonuscooldown }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "19/16.5/14/11.5/9",
+      "cost": "70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1075",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "100",
+        "1.5",
+        "75",
+        "12",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Thresh",
+        "skill": "Q",
+        "icon": "Death Sentence.png",
+        "blurb": "{{sbc|Active:}} {{ci|Thresh}} casts out his scythe in the target direction that catches the first enemy hit, dealing {{as|magic damage}}, {{sti|cdr|reducing}} the cooldown, and briefly {{tip|stun|stunning}} and {{tip|true sight|revealing}} them. '''Thresh''' will also mark them ''Shackled'', during which he is briefly {{tip|slow|slowed}} and unable to declare basic attacks.",
+        "blurb2": "While the target is {{tip|stun|stunned}}, '''Thresh''' {{tip|airborne|pulls}} them twice over a short distance. He can also recast ''Death Sentence''.",
+        "blurb3": "{{sbc|Recast - Deathly Leap:}} '''Thresh''' {{tip|dashes}} to the ''Shackled'' enemy.",
+        "description": "{{sbc|Active:}} '''Thresh''' throws out his scythe in the target direction, becoming {{tip|lockout|unable}} to move or attack while it is in flight.",
+        "description2": "The scythe catches the first enemy hit to deal {{as|magic damage}} and {{tip|stun}} and {{tip|true sight|reveal}} them for {{fd|1.5}} seconds, as well as reduce ''Death Sentence's'' {{sti|'''current''' cooldown}} by 2 seconds. '''Thresh''' will also mark the target ''Shackled'' for {{fd|1.5}} seconds, during which he is unable to declare basic attacks, and is {{tip|slow|slowed}} by 20% for 1 second.",
+        "leveling2": "{{st|Magic Damage|{{ap|100 to 300}} {{as|(+ 90% AP)}}}}",
+        "description3": "While the target is {{tip|stun|stunned}}, '''Thresh''' tugs twice over {{fd|0.8}} seconds, {{tip|airborne|pulling}} the target a short distance with each tug. After {{fd|0.5}} seconds of hitting an enemy or instantly after hitting a {{tip|minion}} or {{tip|monster}}, '''Thresh''' can recast the ability while the target is ''Shackled'', which will cause him to stop tugging.",
+        "icon4": "Deathly Leap.png",
+        "description4": "{{sbc|Recast - Deathly Leap:}} '''Thresh''' {{tip|dashes}} to the ''Shackled'' enemy, becoming able to attack again upon arrival. He can cast ''{{ai|Dark Passage|Thresh}}'' and ''{{ai|Flay|Thresh}}'' during the dash.",
+        "range": "{{tip|cr|icononly = true}} 1100 / {{tip|er|icononly = true}} 1040",
+        "width": "{{tip|er|icononly = true}} 140",
+        "effect radius": "{{tt|Global|For the stun and pulling}} / {{tt|3000|For being able to cast Deathly Leap; estimated}}",
+        "speed": "{{tt|1900|Missile speed}} / {{tt|1400|Dash speed, estimated}}",
+        "cast time": "{{fd|0.5}}",
+        "cooldown": "{{ap|19 to 9}}",
+        "cdstart": "on-cast",
+        "cost": "70",
+        "costtype": "Mana",
+        "targeting": "[[Direction-targeted|Direction]] / [[Auto-targeted|Auto]]",
+        "affects": "Enemies / Self",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "grounded": "special",
+        "spelleffects": "spell",
+        "knockdown": "True",
+        "projectile": "True",
+        "notes": "* '''Thresh''' will track the target if they change locations.\n** He will dash to the target's previous location if the target is too far away or moves beyond {{tt|2000|Estimated}} units.\n{{Effect at cast time end}}\n* '''Thresh''' will not tug if the target is too close to him.\n* '''Thresh''' will turn his facing direction towards the cast direction only after ''Death Sentence's'' cast is complete.\n** If '''Thresh''' is facing '''more''' than 90{{degree}} away from the cast direction in either direction, he will turn to face ''exactly'' 90{{degree}} away from the cast direction over the cast time, then turn towards the cast direction when the missile is fired.\n** If '''Thresh''' is facing '''less''' than 90{{degree}} away from the cast direction, he will keep his facing direction until the missile is fired.\n** [http://web.archive.org/web/0/http://na.leagueoflegends.com/board/showthread.php?p=33837947#post33837947 This prevents the enemy from knowing where exactly '''Thresh''' is aiming at before the cast animation is complete.]\n*''Death Sentence'' triggers on-cast effects (such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive) once at the start of the cast, and once at the end of the cast. It may trigger on-cast effects a third time when casting ''Deathly Leap''.\n** This is because a separate spell is cast to prevent '''Thresh''' from facing towards the target direction immediately, which is (incorrectly) flagged to trigger on-cast effects.{{bug}}\n* ''Deathly Leap'' has a maximum cast range. If '''Thresh''' or his victim move too far away from one another, ''Death Sentence'' will show its cooldown prematurely, preventing ''Deathly Leap'' from being cast.\n** This behaves similarly to a tether range.\n** If '''Thresh''' is already outside the maximum range when the scythe lands and the ''hook'' is created, ''Death Sentence'' will not be on cooldown{{bug}}, however actually casting ''Deathly Leap'' will cause it to fizzle unless '''Thresh''' has walked into range again.\n* ''Death Sentence'' cannot be recast while {{tip|ground|grounded}} or {{tip|root|rooted}}.\n* ''Death Sentence'' can be recast even while the target is {{tip|untargetable}}.\n* Only ''Death Sentence's'' first chain tug puts the target {{tip|airborne}}. Outside the first ~{{fd|0.3}} seconds, the target is only stunned.{{bug}}\n* ''Death Sentence'' will not {{tip|stun}} enemies that are {{tip|displacement immune}} or {{tip|cc-immune|immune to crowd control}} but the target will still be ''hooked'' and '''Thresh''' is still granted the ability to recast for his dash.\n* '''Thresh''' will not tug at all if the {{tip|stun}} is not active on the target or if he used the recast.\n* {{tip|Spell shield}} will block all of ''Death Sentence's'' effects, including the ''hook'' as well as prevent the cooldown reduction.\n* ''Death Sentence's'' {{tip|stun}} duration is affected by {{tip|tenacity}} but the ''hook'' will always persist for {{fd|1.5}} seconds, unless the target uses a {{tip|cleanse|cleansing}} effect, in which case the ''hook'' is removed.\n** ''Death Sentence's'' {{tip|stun}} will persist even if '''Thresh''' dies before the duration ends. The tug will not occur as '''Thresh''' is not alive.\n{{ct|cast|spells=true,false,false,false,false}}"
+      }
+    },
+    "W": {
+      "id": "ThreshW",
+      "name": "Dark Passage",
+      "description": "Thresh throws out a lantern that shields nearby allied Champions from damage. Allies can click the lantern to dash to Thresh.",
+      "tooltip": "Thresh throws his lantern, allowing an ally to click on it to dash to Thresh.\n\nThe lantern also grants {{ totalshield }} Shield for {{ shieldduration }} seconds to Thresh and the first ally champion to come in contact with it.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "21/20/19/18/17",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "950",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "1",
+        "2",
+        "0",
+        "6",
+        "4",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Shield Amount",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ baseshieldvalue }} -> {{ baseshieldvalueNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Thresh",
+        "skill": "W",
+        "icon": "Dark Passage.png",
+        "blurb": "{{sbc|Active:}} {{ci|Thresh}} throws his lantern to the target location that remains for a few seconds while he remains nearby. He and the first allied champion to come near the lantern are granted a {{tip|shield}} for a few seconds, with the amount based on ''{{ai|Damnation|Thresh|Souls}}''.",
+        "blurb2": "An ally can grab the lantern to {{tip|dash}} to '''Thresh''' and gain the shield, but cannot do so while {{tip|immobilize|immobilized}}, {{tip|ground|grounded}}, or {{tip|silence|silenced}}.",
+        "description": "{{sbc|Active:}} '''Thresh''' throws his lantern to the target location over {{fd|0.5}} seconds, lasting for 6 seconds while he remains nearby and granting {{tip|sight}} of its surroundings. If '''Thresh''' moves too far away from the lantern, it returns back to him immediately.",
+        "description2": "'''Thresh''' and the first allied champion to come near the lantern are granted a {{tip|shield}} for 4 seconds. An ally can select the lantern while in proximity of it, {{tip|dash|dashing}} to '''Thresh''' and gaining the shield.",
+        "leveling2": "{{st|Shield Strength|{{ap|50 to 130}} (+ 2 per {{ai|Damnation|Thresh|Soul}} collected)}}",
+        "description3": "''An ally cannot select the lantern while {{tip|immobilize|immobilized}}, {{tip|ground|grounded}}, or {{tip|silence|silenced}}. The lantern will not expire from '''Thresh''' moving too far away if he is dashing with {{ai|Deathly Leap|Thresh}}.''",
+        "target range": "950 <!--center range, obviously-->",
+        "tether radius": "1500 <!--center range, obviously-->",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|350|Shield granting radius}} / <!--{{tip|?|icononly = true}} -->{{tt|150|Lantern pickup radius, radius and range behaviour pending for test}}",
+        "cooldown": "{{ap|21 to 17}}",
+        "cost": "{{ap|50 to 70}}",
+        "cast time": "none",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Allies",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "Shield",
+        "grounded": "|knockdown    =",
+        "projectile": "True",
+        "notes": "* The dashing ally will track '''Thresh''' if he changes locations.\n** They will dash to '''Thresh's''' previous location if he is too far away or moves beyond {{tt|2200|Estimated}} units.\n* The lantern is considered a unit and can be targeted by an allied {{si|Teleport}}, ''{{ai|Leap Strike|Jax}}'', ''{{ai|Shunpo|Katarina}}'', and ''{{ai|Safeguard|Lee Sin}}''.\n** It is {{tip|untargetable}} to enemies.\n* The lantern's duration and maximum leash range are each displayed as a circle on the ground.\n* '''Thresh''' will gain ''Dark Passage's'' shield from moving out of leash range of the lantern.\n* ''Dark Passage'' is special cased to trigger {{ri|Guardian}}.",
+        "tips": "* Since the ally needs to select the lantern, enemies may create targetable units on top of the lantern to impede allies from grabbing it (i.e {{ii|Warding Totem}}).",
+        "_comments": [
+          "center range, obviously",
+          "center range, obviously",
+          "{{tip|?|icononly = true}}"
+        ]
+      }
+    },
+    "E": {
+      "id": "ThreshE",
+      "name": "Flay",
+      "description": "Thresh's attacks wind up, dealing more damage the longer he waits between attacks. When activated, Thresh sweeps his chain, knocking all enemies hit in the direction of the blow.",
+      "tooltip": "Passive: Thresh's Attacks deal additional damage based on how long since he last Attacked. They deal between {{ pattackdamagemin }} and {{ pattackdamagemax }} magic damage.\n\nActive: Thresh whips his chains, Pulling or Pushing enemies in the direction of the swing. Enemies hit are also Slowed by {{ e2 }}% for {{ e4 }} second and take {{ totaldamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "13/12.25/11.5/10.75/10",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "500",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "75/120/165/210/255",
+        "20/25/30/35/40",
+        "80/110/140/170/200",
+        "1",
+        "1.5",
+        "1.7",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Passive Damage",
+          "Active Damage",
+          "Slow",
+          "@AbilityResourceName@ Cost",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ passiveadratio }}% -> {{ passiveadratioNL }}%",
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ e2 }}% -> {{ e2NL }}%",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Thresh",
+        "skill": "E",
+        "icon": "Flay.gif",
+        "icon2": "Flay.png",
+        "blurbicon": "Flay.png",
+        "blurb": "{{sbc|Passive:}} {{cis|Thresh}} basic attacks deal {{as|'''bonus''' magic damage}} based on ''{{ai|Damnation|Thresh|Souls}}'', which increases over a period without basic attacking enemies.",
+        "blurb2": "{{sbc|Active:}} '''Thresh''' sweeps his chain in a broad area, dealing {{as|magic damage}} to enemies hit and {{tip|airborne|knocking}} them in the target direction, after which they are briefly {{tip|slow|slowed}}.",
+        "description": "{{sbc|Passive:}} '''Thresh's''' [[basic attack]]s are empowered to deal {{as|'''bonus''' magic damage}}, with the {{sti|{{as|AD}}}} ratio increasing over 10 seconds without basic attacking enemies.",
+        "leveling": "{{st|Minimum Bonus Magic Damage|{{fd|1.7}} per {{ai|Damnation|Thresh|Soul}} collected {{as|(+ 0% AD)}}}}\n{{st|Maximum Bonus Magic Damage|{{fd|1.7}} per {{ai|Damnation|Thresh|Soul}} collected {{as|(+ {{ap|90 to 210}}% AD)}}}}",
+        "description2": "{{sbc|Active:}} '''Thresh''' sweeps his chain across the ground in a broad line and a radius around him, starting behind him and towards the target direction. Enemies hit are dealt {{as|magic damage}} and {{tip|airborne|knocked}} 200 units in the target direction, and then are {{tip|slow|slowed}} for 1 second. =====",
+        "leveling2": "{{st|Magic Damage|{{ap|75 to 255}} {{as|(+ 70% AP)}}}}{{st|Slow|{{ap|20 to 40}}%}}",
+        "range": "{{tip|cr|icononly = true}} {{tt|-550|Origin behind}} / <!--standard missile front collision type-->{{tt|525|End range in front}}",
+        "width": "{{tip|er|icononly = true}} {{tt|220|Missile width}}",
+        "speed": "{{tt|2000|Missile speed}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|270|Radius around Thresh, estimated}}",
+        "cooldown": "{{ap|13 to 10}}",
+        "cost": "{{ap|60 to 80}}",
+        "cast time": "{{tt|{{fd|0.3889}}|Effects start immediately}}",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "special",
+        "projectile": "false",
+        "grounded": "|knockdown    =",
+        "parry": "unknown",
+        "notes": "* ''Flay's'' effects start at the start of the cast time. '''Thresh''' can cast other spells once the cast time completes, but remains unable to attack and move and use mobility spells (such as {{si|Flash}}) until the chain completed its way entirely.\n* Applies {{tip|area damage}} on the ability and deals {{tip|proc damage}} on the enhanced basic attack.\n* The knockback's {{tip|airborne}} debuff is set to last longer than the forced movement, but gets removed as soon as the forced movement from ''Flay'' ends or is overridden by another.\n*''Flay's'' passive's buff icon changes colors depending on charge level. At 100%, ''Thresh's'' scythe will glow green and a sound effect will play.\n<center><gallery id=\"noaccent\" columns=\"4\" captionalign=\"center\" widths=\"64\" orientation=\"square\" spacing=\"small\">\nThresh Flay 2.png|0 - 50%\nThresh Flay 3.png|50 - 75%\nThresh Flay 4.png|75% - 100%\nThresh Flay 5.png|100%\n</gallery></center>\n* {{iis|Runaan's Hurricane}} {{nie|Wind's Fury}} will apply ''Flay's'' passive to each enemy hit, with the secondary targets taking minimum damage (charge resets upon hitting the primary target).\n* The enhanced attack applies other [[on-hit effect]]s and can {{tip|critical strike|critically strike}} as normal (the bonus damage cannot).\n* ''Flay's'' passive enhanced attack can be {{tip|dodged}} (the enhanced attack is not consumed and the charge is not reset) and {{tip|blocked}} (the enhanced attack is consumed and the charge is reset).\n* The empowered attack will not trigger against [[structures]] nor [[ward]]s.\n** {{Pending for test}}: Enhanced attack's interactions with {{tip|blind|blinding}} effects (regarding both bonus damage and charge reset).\n{{ct|cast|spells=true,false,false,false,false}}",
+        "flavorsound": "{{sm2|Thresh_Original_E_5.ogg}} ''\"This way!\"''",
+        "_comments": [
+          "standard missile front collision type"
+        ]
+      }
+    },
+    "R": {
+      "id": "ThreshRPenta",
+      "name": "The Box",
+      "description": "A prison of walls that slow and deal damage if broken.",
+      "tooltip": "Thresh creates a prison of spectral walls, Slowing champions by {{ e3 }}% for {{ e2 }} seconds and dealing {{ totaldamage }} magic damage. Walls break after one collision, and after one is broken, the rest deal no damage and Slow for half duration.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "450",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "250/400/550",
+        "2",
+        "99",
+        "4",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Thresh",
+        "skill": "R",
+        "icon": "The Box.png",
+        "blurb": "{{sbc|Active:}} {{ci|Thresh}} erects a pentagon of spectral walls around him that each last a few seconds. A wall will break upon enemy champion contact, dealing {{as|magic damage}} and {{tip|slow|slowing}} them for a short time.",
+        "description": "{{sbc|Active:}} '''Thresh''' erects a pentagon of spectral walls around him that each last for 5 seconds. A wall will break upon enemy champion contact, dealing {{as|magic damage}} and {{tip|slow|slowing}} them by 99% for 2 seconds. After the first wall breaks, the rest will deal no damage and {{tip|slow}} for only 1 second.",
+        "leveling": "{{st|Magic Damage|{{ap|250 to 550}} {{as|(+ 100% AP)}}}}",
+        "description2": "Enemies that break a wall cannot do so again for 1 second.",
+        "customlabel": "Side length",
+        "custominfo": "{{tip|er|icononly = true}} 470",
+        "width": "{{tip|er|icononly = true}} 30",
+        "cast time": "{{fd|0.45}}",
+        "cooldown": "{{ap|120 to 80}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "grounded": "|knockdown    =",
+        "notes": "{{Effect at cast time start}}\n* ''The Box'' always uses [[quick cast]], regardless of player settings. <!-- It used to be direction cast, and then have the box face the target direction. Dunno if this change was intentional but I won't assume a bug here ~Caenen-->\n** ''The Box'' always faces the same direction Thresh is facing on cast, placing a corner directly in front of him.\n*** The cast indicator displays the opposite of the true behavior.\n* If The Box hits multiple champions with different walls on cast, only one of the walls will deal damage and apply the extended slow duration. This wall is chosen by starting at the wall in front of and to the right of Thresh's facing direction on cast, and progressing clockwise.\n* The corners of ''The Box'' are placed 400 units around '''Thresh'''.\n** Each wall is {{fd|470.228}} units long.\n** Each wall passes {{fd|323.607}} units from the center of ''The Box'' at the closest approach (ignoring its width).\n** As a regular pentagon, The Box has an angle of 72{{degree}} between each corner.",
+        "flavorsound": "{{sm2|Thresh_Original_R_3.ogg}} ''\"Nowhere to hide.\"''",
+        "_comments": [
+          "It used to be direction cast, and then have the box face the target direction. Dunno if this change was intentional but I won't assume a bug here ~Caenen"
+        ]
+      }
+    }
+  }
+}

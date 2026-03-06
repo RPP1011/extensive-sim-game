@@ -1,0 +1,135 @@
+[hero]
+name = "Samira"
+
+[stats]
+hp = 80
+move_speed = 3.5
+armor = 22.0
+magic_resist = 28.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 21
+range = 5.5
+cooldown = 700
+
+# --- Q: Flair ---
+[[abilities]]
+name = "Flair"
+targeting = "direction"
+range = 3.4
+cooldown_ms = 6000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 6
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- W: Blade Whirl ---
+[[abilities]]
+name = "Blade Whirl"
+targeting = "target_enemy"
+range = 3.2
+cooldown_ms = 30000
+ai_hint = "damage"
+resource_cost = 12
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 5
+damage_type = "physical"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 3.25
+
+# --- E: Wild Rush ---
+[[abilities]]
+name = "Wild Rush"
+targeting = "target_enemy"
+range = 6.0
+cooldown_ms = 20000
+ai_hint = "damage"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "damage"
+amount = 12
+damage_type = "magic"
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+[[abilities.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.3
+duration_ms = 5000
+
+# --- R: Inferno Trigger ---
+[[abilities]]
+name = "Inferno Trigger"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 5000
+ai_hint = "damage"
+resource_cost = 1
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 1
+damage_type = "physical"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 2.5
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 3000
+
+[[abilities.effects]]
+type = "lifesteal"
+percent = 0.3
+duration_ms = 5000
+
+# --- Passive: Daredevil Impulse ---
+[[passives]]
+name = "Daredevil Impulse"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_auto_attack"
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+
+[[passives.effects]]
+type = "apply_stacks"
+name = "style"
+count = 1
+max_stacks = 4
+

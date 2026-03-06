@@ -1,0 +1,281 @@
+{
+  "id": "Lux",
+  "name": "Lux",
+  "title": "the Lady of Luminosity",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage",
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Illumination",
+      "description": "Lux's damaging spells charge the target with energy for a few seconds. Lux's next attack ignites the energy, dealing bonus magic damage (depending on Lux's level) to the target.",
+      "wiki_detail": {
+        "champion": "Lux",
+        "skill": "I",
+        "icon": "Illumination.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Lux}} abilities apply a mark to enemies hit for a few seconds. Her basic attacks and ''{{ai|Final Spark|Lux}}'' consume the mark to deal {{as|'''bonus''' magic damage}}.",
+        "description": "{{sbc|Innate:}} '''Lux's''' [[champion ability|abilities]] apply a mark to enemies hit for 6 seconds, refreshing on subsequent hits. <br/><br/>'''Lux's''' [[basic attack]]s and ''{{ai|Final Spark|Lux}}'' consume the mark to deal {{as|{{pp|30 to 200}}|magic damage}} {{as|(+ 30% AP)}} {{as|'''bonus''' magic damage}}.",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "special",
+        "spelleffects": "Proc",
+        "parry": "unknown",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        =\n* Starting an {{tip|attack windup}} against a target with a mark that is about to expire refreshes its duration to {{fd|0.25}} seconds. Casting ''{{ai|Final Spark|Lux}}'' refreshes the marks of all marked enemies to {{fd|1.25}} seconds if they are within {{tt|5000|Estimated}} units of the ability's casting position and have a mark with a remaining duration of less than 1 second.\n* {{tip|Spell shield}} prevents {{ai|Final Spark|Lux}} from consuming the mark.\n** The on-hit damage from ''Illumination'' via basic attack cannot be blocked by ''spell shield''.\n* ''Illumination's'' trigger from a basic attack can be {{tip|blocked}} (bonus damage is negated and the mark will still be consumed).\n* {{Pending for test}}: Parry interactions ({{tip|dodge}}, {{tip|blind}}).",
+        "yvideo": "Lux - Passive"
+      }
+    },
+    "Q": {
+      "id": "LuxLightBinding",
+      "name": "Light Binding",
+      "description": "Lux releases a sphere of light that binds and deals damage to up to two enemy units.",
+      "tooltip": "Lux fires a ball of light, Rooting the first two enemies for {{ e3 }} seconds and dealing {{ totaldamagett }} magic damage to each.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1175",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "2",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lux",
+        "skill": "Q",
+        "icon": "Light Binding.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lux}} shoots a sphere of light in the target direction that deals {{as|magic damage}} to the first two enemies hit and {{tip|root|roots}} them for a short time.",
+        "description": "{{sbc|Active:}} '''Lux''' shoots a sphere of light in the target direction that deals {{as|magic damage}} to the first two enemies hit and {{tip|root|roots}} them for 2 seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|80 to 240}} {{as|(+ 65% AP)}}}}",
+        "range": "{{tip|cr|icononly = true}} 1300 / {{tip|er|icononly = true}} 1240",
+        "speed": "1200",
+        "width": "{{tip|er|icononly = true}} 140",
+        "cooldown": "{{ap|11 to 9}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "50",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "* Targets immune to the {{tip|root}} still count towards ''Light Binding's'' two-target limit.\n{{Effect at cast time end}}\n* ''Light Binding'' spawns an additional missile at the same location and vector as the main missile. This additional \"Dummy\" missile has the same visual effects as the main missile and gets destroyed when it hits a single enemy, thereby making the surviving VFX of the single missile weaker in intensity.\n** {{pending for test}} This hacky solution also causes Lux Q to count as two skillshots for things such as \"skillshots dodged\" Eternals.",
+        "yvideo": "Lux - Q"
+      }
+    },
+    "W": {
+      "id": "LuxPrismaticWave",
+      "name": "Prismatic Barrier",
+      "description": "Lux throws her wand and bends the light around any friendly target it touches, protecting them from enemy damage.",
+      "tooltip": "Lux throws her wand, granting {{ totalshieldtt }} Shield for {{ e3 }} seconds to allies it passes through. Then it returns, granting the same Shield on its return.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/11.5/11/10.5/10",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1150",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "2/4/6/8/10",
+        "0",
+        "2.5",
+        "100",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Shield Amount",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ baseshieldamount }} -> {{ baseshieldamountNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lux",
+        "skill": "W",
+        "icon": "Prismatic Barrier.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lux}} throws her wand in the target direction that homes back to her after reaching maximum range.",
+        "blurb2": "Allied champions hit by the wand gain a {{tip|shield}} for a short time, which can stack up to twice. '''Lux''' receives the shield upon throwing the wand and upon its return.",
+        "description": "{{sbc|Active:}} '''Lux''' throws her wand in the target direction that homes back to her after reaching maximum range. Allied champions hit by the wand gain a {{tip|shield}} for {{fd|2.5}} seconds, which can stack up to 2 times, stacking with the previous shield and refreshing its duration.",
+        "leveling": "{{st|Shield Strength|{{ap|40 to 100}} {{as|(+ 40% AP)}}|Maximum Shield|{{ap|40*2 to 100*2}} {{as|(+ {{ap|40*2}}% AP)}}}}",
+        "description2": "'''Lux''' receives the shield upon throwing the wand and upon its return.",
+        "range": "{{tip|cr|icononly = true}}{{tt|*|circle check at end allows hitting edge of ally radius}} 1175",
+        "width": "{{tip|er|icononly = true}} {{tt|220|both outgoing and returning, homing missile}}",
+        "effect radius": "{{tip|er|icononly = true}} {{tt|110|circle check upon commencing of direction reversal}}",
+        "speed": "{{tt|2400|Original speed; decelerates/accelerates depending on travel time, see notes}}",
+        "cooldown": "{{ap|14 to 10}}",
+        "cast time": "{{tt|{{fd|0.25}}|Effect starts at beginning of cast time}}",
+        "cost": "{{ap|60 to 80}}",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Allies",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "Shield",
+        "projectile": "special",
+        "grounded": "|knockdown    =",
+        "notes": "* Each pass of the wand grants a shield to each target once.\n* ''Prismatic Barrier'' may only stack up to 2 times. Subsequent instances of passing through the wand have no effect on the shield's strength nor duration.\n* The shield will also be granted to allies near the wand's return location.\n* Both passes of ''Prismatic Barrier'' cannot hit units whose {{tip|center range|center}} is beyond the missile range or behind its origin, even if their {{tip|edge range|hitbox radius}} overlaps.\n** At the return location, this behaviour is overridden by an additional center check with the same diameter as the missile width.\n* If '''Lux''' {{tip|death|dies}} before her wand returns it will fizzle upon reaching maximum range.\n* '''Lux's''' wand decelerates on the way out and accelerates on the way back.\n{{Effect at cast time start}}\n* ''Prismatic Barrier'' is destroyed by {{ai|Wind Wall|Yasuo}} and {{ai|Blade Whirl|Samira}} but not {{ai|Unbreakable|Braum}}.",
+        "yvideo": "Lux - W"
+      }
+    },
+    "E": {
+      "id": "LuxLightStrikeKugel",
+      "name": "Lucent Singularity",
+      "description": "Fires an anomaly of twisted light to an area, which slows nearby enemies. Lux can detonate it to damage enemies in the area of effect.",
+      "tooltip": "Lux creates a light zone that Slows by {{ e1 }}% and reveals the area. After {{ e3 }} seconds or on Recasting this Ability, it detonates, dealing {{ totaldamagett }} magic damage and Slowing for an additional {{ slowlingerduration }} second.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9.5/9/8.5/8",
+      "cost": "70/80/90/100/110",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1100",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "25/30/35/40/45",
+        "65/115/165/215/265",
+        "5",
+        "310",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Movement Slow",
+          "@AbilityResourceName@ Cost",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e2 }} -> {{ e2NL }}",
+          "{{ slowpercent }}% -> {{ slowpercentNL }}%",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lux",
+        "skill": "E",
+        "icon": "Lucent Singularity.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lux}} sends a lucent singularity to the target location that lasts for a few seconds and slows enemies within.",
+        "blurb2": "''Lucent Singularity'' can be recast within this time, and does so automatically after the duration.",
+        "blurb3": "{{sbc|Recast:}} '''Lux''' detonates the singularity, dealing {{as|magic damage}} to enemies within.",
+        "description": "{{sbc|Active:}} '''Lux''' sends a lucent singularity to the target location, remaining there for 5 seconds to grant {{tip|sight}} of the area and {{tip|slow}} nearby enemies.",
+        "leveling": "{{st|Slow|{{ap|25 to 45}}%}}",
+        "description2": "''Lucent Singularity'' can be recast at any time while it is in flight or within the duration, and does so automatically after the duration.",
+        "description3": "{{sbc|Recast:}} '''Lux''' detonates the singularity, dealing {{as|magic damage}} to enemies within. If ''Lucent Singularity'' was recast while in flight, it will detonate upon arrival.",
+        "leveling3": "{{st|Magic Damage|{{ap|65 to 265}} {{as|(+ 80% AP)}}}}",
+        "description4": "The slow lingers for 1 second after leaving the area. Enemies hit by ''Lucent Singularity's'' detonation are also slowed by the same amount for 1 second.",
+        "target range": "1100",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|310|Area of effect radius}} / {{tt|600|Sight radius}}",
+        "speed": "1200",
+        "cooldown": "{{ap|10 to 8}}",
+        "cdstart": "on-cast",
+        "cost": "{{ap|70 to 110}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "targeting": "[[Location-targeted|Location]] / [[Auto-targeted|Auto]]",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "* The initial cast counts as an ability activation for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n** The manual recast does not.\n* ''Lucent Singularity'' grants {{tip|sight}} while also in flight.",
+        "yvideo": "Lux - E"
+      }
+    },
+    "R": {
+      "id": "LuxR",
+      "name": "Final Spark",
+      "description": "After gathering energy, Lux fires a beam of light that deals damage to all targets in the area. In addition, triggers Lux's passive ability and refreshes the Illumination debuff duration.",
+      "tooltip": "Lux fires a dazzling ray of light, dealing {{ totaldamage }} magic damage to all enemies in a line.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "60/50/40",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "3340",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lux",
+        "skill": "R",
+        "icon": "Final Spark.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lux}} fires a massive laser in a line in the target direction that deals {{as|magic damage}} and briefly {{tip|standard sight|reveals}} enemies hit.",
+        "description": "{{sbc|Active:}} '''Lux''' fires a massive laser in a line in the target direction that deals {{as|magic damage}} to enemies hit and {{tip|standard sight|reveals}} them for {{fd|1.5}} seconds, as well as granting {{tip|sight}} of the surrounding area.",
+        "leveling": "{{st|Magic Damage|{{ap|300 to 500}} {{as|(+ 120% AP)}}}}",
+        "range": "{{tip|er|icononly = true}} 3400",
+        "cast time": "1",
+        "width": "{{tip|er|icononly = true}} 200",
+        "cooldown": "{{ap|60 to 40}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "False",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Final Spark'' grants sight of its surroundings during the cast time and for {{fd|0.5}} seconds afterwards.\n{{Effect at cast time start}}\n{{ct|cast|cast={{ai|Lucent Singularity|Lux}} can only be recast if it is present. {{ai|Light Binding|Lux}} and {{ai|Prismatic Barrier|Lux}} are disabled.}}",
+        "flavorsound": "{{sm2|Lux_Original_R_2.ogg}} ''\"By the light!\"''",
+        "yvideo": "Lux - R"
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+[scenario]
+name = "size_5v5_2721"
+seed = 1910
+hero_count = 5
+enemy_count = 5
+difficulty = 3
+max_ticks = 10000
+room_type = "Pivot"
+hero_templates = ["berserker", "assassin", "rogue", "samurai", "witch_doctor"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

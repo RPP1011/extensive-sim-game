@@ -1,0 +1,13 @@
+[scenario]
+name        = "Climax Room with Boss"
+seed        = 99
+hero_count  = 4
+enemy_count = 2
+difficulty  = 3
+max_ticks   = 5000
+room_type   = "Climax"
+
+[assert]
+outcome          = "Victory"
+max_ticks_to_win = 4000
+min_heroes_alive = 1

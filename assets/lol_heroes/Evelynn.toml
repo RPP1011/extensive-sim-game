@@ -1,0 +1,112 @@
+[hero]
+name = "Evelynn"
+
+[stats]
+hp = 85
+move_speed = 3.5
+armor = 25.0
+magic_resist = 33.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 20
+range = 1.5
+cooldown = 750
+
+# --- Q: Hate Spike ---
+[[abilities]]
+name = "Hate Spike"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 4000
+cast_time_ms = 300
+ai_hint = "damage"
+resource_cost = 8
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 6
+damage_type = "magic"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 2.5
+
+# --- W: Allure ---
+[[abilities]]
+name = "Allure"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 15000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 12
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- E: Whiplash ---
+[[abilities]]
+name = "Whiplash"
+targeting = "target_enemy"
+range = 2.1
+cooldown_ms = 8000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "damage"
+amount = 13
+damage_type = "magic"
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 2000
+
+# --- R: Last Caress ---
+[[abilities]]
+name = "Last Caress"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 23900
+cast_time_ms = 350
+ai_hint = "damage"
+resource_cost = 20
+
+[[abilities.effects]]
+type = "damage"
+amount = 31
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 5.0
+
+[[abilities.effects]]
+type = "dash"
+is_blink = true
+
+# --- Passive: Demon Shade ---
+[[passives]]
+name = "Demon Shade"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_ability_used"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+

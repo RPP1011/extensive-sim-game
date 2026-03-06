@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0160_3v3_s2"
+seed = 22083
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["Akali", "Thresh", "Anivia"]
+enemy_hero_templates = ["Soraka", "Corki", "Shen"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

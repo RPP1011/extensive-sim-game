@@ -1,0 +1,281 @@
+{
+  "id": "Kindred",
+  "name": "Kindred",
+  "title": "The Eternal Hunters",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Mark of the Kindred",
+      "description": "Kindred can mark targets to Hunt. Successfully completing a Hunt permanently empowers Kindred's basic abilities. Every 4 hunts completed also increases Kindred's basic attack range.",
+      "wiki_detail": {
+        "champion": "Kindred",
+        "skill": "I",
+        "icon": "Mark of the Kindred.png",
+        "icon2": "Lamb's Mask profileicon.png",
+        "icon3": "Wolf's Mask profileicon.png",
+        "blurb": "{{sbc|Innate:}} Both {{ci|Lamb}} and {{ci|Wolf}} mark targets to ''hunt''. Scoring a {{tip|takedown}} against a ''hunted'' target collects a permanent stack of ''Mark of the Kindred''. '''Lamb''' can select an enemy {{tip|champion}} to ''hunt'', and '''Wolf''' automatically selects a large {{tip|monster}} to ''hunt''.",
+        "blurb4": "{{sbc|Mark of the Kindred:}} '''Lamb''' gains {{sti|range|'''bonus''' range}} on her basic attacks and ''{{ai|Mounting Dread|Kindred}}''. For each stack, {{cis|Kindred}} abilities become more potent.",
+        "description": "{{sbc|Innate:}} Both '''Lamb''' and '''Wolf''' mark targets to ''hunt''. Scoring a {{tip|takedown}} against a ''hunted'' target collects a stack of ''Mark of the Kindred''. <br/><br/>{{sbc|Mark of the Kindred:}} '''Lamb''' gains {{pp|type=marks|75;100;125;150;175;200;225;250|4;7;10;13;16;19;22;25|formula=+75 at 4 stacks, and +25 every 3 stacks thereafter, up to 250 bonus range at 25 stacks.}} {{sti|range|'''bonus''' range}} on her basic attacks and ''{{ai|Mounting Dread|Kindred}}''.",
+        "description2": "{{sbc|Innate - Lamb:}} '''Lamb''' is offered a selection of enemy {{tip|champions}} to ''hunt'' if she has not been [[combat status|in combat]] with them in the last 6 seconds. Once selected, the mark is applied after an 8-second delay and thereafter it can be collected by '''Kindred'''. '''Lamb''' gains the ability to select a new target every 75 seconds. ''Targets successfully hunted cannot be marked again for 4 minutes.''",
+        "description3": "{{sbc|Innate - Wolf:}} Starting at {{sbc|3:15}}, '''Wolf''' periodically marks a random large {{tip|monster}} within the enemy team's jungle for 180 seconds. The ''hunted'' camp is highlighted on the [[Map (League of Legends)|mini map]] to both teams. Once the ''hunted'' target is slain or the mark expires, '''Wolf''' will wait 45 seconds before selecting a new target. <br/>The type of monster that '''Wolf''' can mark changes based on '''Kindred's''' current ''Mark of the Kindred'' stacks:\n* {{sbc|0 :}} {{ui|Rift Scuttler}}\n* {{sbc|1 – 3:}} {{ui|Rift Scuttler}}, {{ui|Crimson Raptor}}, {{ui|Gromp}}\n* {{sbc|4 – 7:}} {{ui|Ancient Krug}}, {{ui|Blue Sentinel}}, {{ui|Greater Murk Wolf}}, or {{ui|Red Brambleback}}\n* {{sbc|8 + :}} {{ui|Rift Herald}} or {{ui|Baron Nashor}}, {{ui|Dragon}} or {{ui|Elder Dragon}}",
+        "ontargetcdstatic": "{{tt|240|Lamb's mark}}",
+        "targeting": "Passive",
+        "affects": "Self, Enemies",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|projectile   =",
+        "grounded": "|knockdown    =",
+        "notes": "* {{tip|Takedown|Takedowns}} on {{tip|monsters}} occur if '''Kindred''' had damaged them within the last 6 seconds.\n** This only includes if the monster was slain by '''Kindred''' or an ally.\n* Only killing the large monster is required to claim '''Wolf's''' mark.\n* Gaining stacks from champions that would change what constitutes as a valid target for '''Wolf''' will not affect '''Kindred's''' ability to claim '''Wolf's''' current target.\n* '''Wolf''' cannot mark monsters that have been slain, even if '''Kindred's''' team doesn't know that the camp has been slain. \n* '''Wolf's''' cooldown is not displayed in-game. Combined with the above point and the target restrictions, '''Wolf''' may go extended periods of time without seeming to do anything. \n* '''Wolf's''' marked target will always have its mark removed from the map 15 seconds after dying for both teams, regardless of whether they have vision of it or not.",
+        "flavorsound": "{{sm2|Kindred_Original_P_Mark_Enemy_10.ogg}} ''\"Our mark looms over you.\"''"
+      }
+    },
+    "Q": {
+      "id": "KindredQ",
+      "name": "Dance of Arrows",
+      "description": "Kindred tumbles and shoots up to three arrows at nearby targets.",
+      "tooltip": "Kindred vaults, firing an arrow at up to 3 enemies, dealing {{ totaldamage }} physical damage and gaining {{ totalqattackspeed }} Attack Speed for {{ e8 }} seconds.\n\nWhile inside of Wolf's Frenzy, this Ability's Cooldown is reduced to {{ e4 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9",
+      "cost": "35",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "340",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "40/65/90/115/140",
+        "0",
+        "500",
+        "4/3.5/3/2.5/2",
+        "100",
+        "12",
+        "0.35",
+        "4",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown in Wolf's Frenzy"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ e4 }} -> {{ e4NL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kindred",
+        "skill": "Q",
+        "icon": "Dance of Arrows.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lamb}} {{tip|dashes}} toward the target location, gaining {{sti|attack speed|{{as|'''bonus''' attack speed}}}} for a few seconds. She then fires at up to three nearby enemies, dealing {{as|physical damage}}.",
+        "blurb2": "This cooldown is {{sti|cdr|reduced}} by casting ''{{ai|Wolf's Frenzy|Kindred}}'' or using ''Dance of Arrows'' within its area.",
+        "description": "{{sbc|Active:}} '''Lamb''' {{tip|dashes}} toward the target location, gaining {{sti|attack speed|{{as|35%|attack speed}}}} {{as|(+ 5% per {{ai|Mark of the Kindred|Kindred|mark}})|buzzword}} {{as|'''bonus''' attack speed}} for 4 seconds and firing an arrow at up to 3 nearby {{tip|sight|visible}} enemies that deals {{as|physical damage}}. Her current attack target within any proximity will be prioritized by one of the arrows.",
+        "leveling": "{{st|Physical Damage|{{ap|40 to 140}} {{as|(+ 75% '''bonus''' AD)}}}}",
+        "description2": "''Dance of Arrows' '' {{sti|'''total''' cooldown}} is reduced to an amount while '''Lamb''' is within the area of ''{{ai|Wolf's Frenzy|Kindred}}''. Casting ''{{ai|Wolf's Frenzy|Kindred}}'' reduces ''Dance of Arrows' '' '''current''' cooldown to the same amount.",
+        "leveling2": "{{st|Static Cooldown|{{ap|4 to 2}} seconds}}",
+        "description3": "''Dance of Arrows {{tip|basic attack reset|resets}} '''Lamb's''' basic attack timer. '''Lamb''' can cast any of her [[champion ability|abilities]] during the dash. Dance of Arrows will cast at max range if cast beyond that.''",
+        "target range": "{{tt|300|Dash range, no minimum dash range}}",
+        "effect radius": "{{tip|er|icononly = true}} {{tt|Kindred's {{sti|attack range}}|affected by Rapid Firecannon}}",
+        "speed": "{{tt|500 + {{as|100% movement speed}}|Estimated}}",
+        "cooldown": "9",
+        "static": "|cost         = 35",
+        "costtype": "Mana",
+        "cast time": "none",
+        "targeting": "Location",
+        "terraingrace": "true",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "True",
+        "grounded": "True",
+        "knockdown": "True",
+        "notes": "* The dash distance can be extended to up to 400 units when dashing across terrain.\n* The cooldown will not be modified if it cannot be reduced (the current cooldown would have to be less than the reduction amount in this case)."
+      }
+    },
+    "W": {
+      "id": "KindredW",
+      "name": "Wolf's Frenzy",
+      "description": "Wolf enrages and attacks enemies around him.  Lamb passively gains stacks by moving and attacking. When fully charged, Lamb's next attack restores health.",
+      "tooltip": "Passive: Kindred gains stacks as they move and attack. At 100 stacks, Kindred's next Attack restores up to {{ attackheal }} Health based on their missing Health.\n\nActive: Kindred claims a territory, ordering Wolf to bite at the last enemy Lamb Attacked. Wolf's bites deal {{ basewolfdamage }} plus {{ percentwolfdamage }} current Health magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "18/17/16/15/14",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "560",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "40/45/50/55/60",
+        "1",
+        "1.5",
+        "8.5",
+        "25/30/35/40/45",
+        "800",
+        "0.5",
+        "0.5",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e5 }} -> {{ e5NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kindred",
+        "skill": "W",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} As {{ci|Kindred}} move and attack, they build up stacks of ''Hunter's Vigor''. At full stacks, {{cis|Lamb}} next basic attack {{tip|heals}} her.",
+        "blurb2": "{{sbc|Active:}} {{ci|Wolf}} {{tip|dashes}} to the target location and occupies the area for a period. He attacks enemies within the area, dealing {{as|magic damage}}. Against {{tip|monsters}}, '''Wolf's''' attacks deal increased damage and {{tip|slow}} the target for a short time.",
+        "blurb3": "''Wolf's Frenzy'' ends immediately if '''Lamb''' leaves the area or dies.",
+        "description": "{{sbc|Passive:}} As '''Kindred''' move and attack, they build up to 100 stacks of ''Hunter's Vigor''. At maximum stacks, '''Lamb's''' next basic attack {{tip|heals}} her for {{as|{{pp|0 to 100 by 25|0 to 80|formula= 1.25% per 1% of '''Kindred's missing''' health. ''This is capped at 80% '''missing''' health.''|label1='''Missing''' health|type='''Kindred's''' '''missing''' health|label=Percent of level-scaling value|key=%|key1=%|changedisplay = true}}}} of {{pp|47 to 81}}. The heal is not triggered if '''Kindred''' is at full health.",
+        "icon2": "Wolf's Frenzy.png",
+        "description2": "{{sbc|Active:}} '''Wolf''' {{tip|dashes}} to the target location, then claims the surrounding area as his territory for the next {{fd|8.5}} seconds, separating from '''Lamb'''. He automatically attacks the closest nearby {{tip|sight|visible}} enemy within the area, prioritizing the last enemy '''Lamb''' has attacked, then enemy champions, then non-champions.",
+        "description3": "'''Wolf's''' attacks deal {{as|magic damage}} and the rate at which he attacks scale with {{as|25% of '''Kindred's bonus''' attack speed}}. Against monsters, his attacks deal 150% damage and {{tip|slow}} the target by 50% for 2 seconds.",
+        "leveling3": "{{st|Magic Damage|{{ap|25 to 45}} {{as|(+ 20% '''bonus''' AD)}} {{as|(+ 20% AP)}} {{as|(+ {{fd|1.5}}% {{as|(+ 1% per {{ai|Mark of the Kindred|Kindred|mark}})|buzzword}} of target's '''current''' health)}}|Monster Damage|{{ap|25*1.5 to 45*1.5}} {{as|(+ {{ap|20*1.5}}% '''bonus''' AD)}} {{as|(+ {{ap|20*1.5}}% AP)}} {{as|(+ {{ap|1.5*1.5}}% {{as|(+ {{ap|1*1.5}}% per {{ai|Mark of the Kindred|Kindred|mark}})|buzzword}} of target's '''current''' health)}}}}",
+        "description4": "''Wolf's Frenzy'' ends immediately if '''Lamb''' leaves the area or dies.",
+        "target range": "500",
+        "effect radius": "{{tip|cr|icononly = true}} 800",
+        "speed": "1400",
+        "cast time": "none",
+        "cooldown": "{{ap|18 to 14}}",
+        "cdstart": "on-cast",
+        "cost": "40",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "False",
+        "grounded": "|knockdown    =",
+        "notes": "* '''Wolf''' is {{tip|untargetable}} and {{tip|ghosted}} but he cannot move through terrain other than the initial dash on activation. \n* '''Wolf''' is not able to re-target {{ui|Rift Scuttler}} if he loses {{tip|sight}} of her while he's attacking it.\n* ''Wolf's Frenzy'' does not end if '''Lamb''' enters {{tip|resurrection}}.\n* ''Wolf's Frenzy'' applies ability haste to its cooldown post-effect.\n** Given a base cooldown of 14 seconds at rank 5 with 100 ability haste, casting the ability and then ending it after 4 seconds will result in a remaining cooldown of <math>(14 - 4) \\times 0.5 = 5</math> seconds, where 0.5 is [https://leagueoflegends.fandom.com/wiki/Haste#Formula derived from ability haste].\n** Because of this, there will always be some cooldown time remaining post-effect regardless of the amount of ability haste, unlike certain other abilities with cooldowns that start on-cast."
+      }
+    },
+    "E": {
+      "id": "KindredEWrapper",
+      "name": "Mounting Dread",
+      "description": "Lamb fires a carefully placed shot, slowing the target. If Lamb attacks the target two more times, her third attack instead directs Wolf to pounce on the enemy, savaging them for massive damage.",
+      "tooltip": "Kindred weakens an enemy, Slowing them by {{ totalslow }}% for {{ slowduration }} second.\n\nKindred's third Attack against the target within {{ totalduration }} seconds of each other directs Wolf to pounce on the enemy, dealing an additional {{ basebitedamage }} plus {{ percentbitedamage }} missing Health physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/12.5/11/9.5/8",
+      "cost": "0",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "500",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kindred",
+        "skill": "E",
+        "icon": "Mounting Dread.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lamb}} fires a shot at the target enemy that briefly {{tip|slow|slows}} them applies a stack of ''Mounting Dread''. '''Lamb's''' basic attacks against this target stack ''Mounting Dread'' up to a cap.",
+        "blurb2": "Applying maximum stacks consumes them all, causing {{ci|Wolf}} to pounce on the target and deal {{as| physical damage}} based on its {{as|'''missing''' health}}.",
+        "blurb3": "{{tip|critical strike|Critically strikes}} targets {{as|at low health}}.",
+        "description": "{{sbc|Active:}} '''Lamb''' fires a shot at the target enemy that {{tip|slow|slows}} them by 30% {{as|(+ 5% per 100 AP)}} for 1 second and marks them for 4 seconds. Her basic attacks against the marked target each apply a [[stack]], refreshing the duration and stacking up to 3 times.",
+        "description2": "The third stack directs '''Wolf''' to pounce on the target, consuming all stacks to deal {{as|'''additional''' physical damage|physical damage}}, capped at 300 against {{tip|monster|monsters}}.",
+        "leveling2": "{{st|Additional Physical Damage|{{ap|80 to 200}} {{as|(+ 100% '''bonus''' AD)}} {{as|(+ 5% {{as|(+ {{fd|0.5}}% per {{ai|Mark of the Kindred|Kindred|Mark}})|buzzword}} of target's '''missing''' health)}}|Enhanced damage below threshold|{{ap|80 to 200}} {{as|(+ 100% '''bonus''' AD)}} {{tip|critical strike|icononly=true}} {{as|(+ {{fd|7.5}}% (+ {{ii|Infinity Edge|icononly=true}} 2%)|health}} {{as|(+ {{fd|0.75}}% (+ {{ii|Infinity Edge|icononly=true}} {{fd|0.2}}%) per {{ai|Mark of the Kindred|Kindred|Mark}})|buzzword}} {{as|of target's '''missing''' health)}}}}",
+        "description3": "The '''additional''' damage will {{tip|critically strike}} against targets below {{as|{{as|{{pp|type=critical strike chance|key=%|key1=%|25 to 75 for 11|0 to 100|formula=25% + 0.5% per 1% critical strike chance. ''This is capped at 100% critical strike chance.''}}|health}} of their {{sti|'''maximum''' health}}}}, increasing the {{as|'''missing''' health}} portion by {{as|{{critical damage|50|100}}|critical damage}}, and cannot {{tip|critical strike|critically strike}} otherwise. The '''base''' damage of the pounce can independently {{tip|critical strike|critically strike}}.",
+        "target range": "{{tip|er|icononly = true}} {{pp|500;575;600;625;650;675;700;725;750|0;4;7;10;13;16;19;22;25|type=Marks}}",
+        "cooldown": "{{ap|14 to 8}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "50",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "projectile": "True",
+        "parry": "true",
+        "grounded": "|knockdown    =",
+        "notes": "* {{ii|Guinsoo's Rageblade}} does not prevent the '''additional''' damage from {{tip|critical strike|critically striking}}.\n* If the target becomes {{tip|untargetable}}, {{tip|death|dies}}, or is too far away or no longer in {{tip|sight}} during the cast time, this ability will cancel and not pay its cost but still go on {{sti|cooldown}}.{{bug}}\n* This ability cannot be cast on a target with ''Mounting Dread'' stacks."
+      }
+    },
+    "R": {
+      "id": "KindredR",
+      "name": "Lamb's Respite",
+      "description": "Lamb grants all living things inside a zone a respite from death. Until the effect ends, nothing can die. At the end, units are healed.",
+      "tooltip": "Kindred blesses the ground for {{ e2 }} seconds, allowing no unit, ally, enemy, or neutral to die while inside. Upon reaching 10% Health, units can't be damaged or healed while still inside the zone.\n\nWhen the blessing ends, all units inside heal for {{ e1 }} Health.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "160/140/120",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "500",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "225/300/375",
+        "4",
+        "530",
+        "400",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Healing",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kindred",
+        "skill": "R",
+        "icon": "Lamb's Respite.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lamb}} blesses the ground under herself for a few seconds. Any unit inside the area will become {{tip|invulnerable}} upon reaching {{tip|minimum health threshold|low health}}.",
+        "blurb2": "Units within the area are {{tip|heal|healed}} when the blessing ends.",
+        "description": "{{sbc|Active:}} '''Lamb''' blesses the ground under herself for 4 seconds and enters a {{rutngt|0.25}} [[Channel#Casting Times|cast time]]. '''All''' units inside the zone gain a {{tip|minimum health threshold}} of {{as|{{sti|health|10% of their '''maximum''' health}}}}, and will become {{tip|invulnerable}} for the remaining duration when they reach or are at the threshold, during which they also cannot be {{tip|heal|healed}}, but can still {{sti|health regeneration|regenerate health|link=health regeneration}}.",
+        "description3": "All targetable units within the zone are {{tip|heal|healed}} when the blessing ends.",
+        "leveling3": "{{st|Heal|{{ap|225 to 375}}}}",
+        "effect radius": "{{tip|cr|icononly = true}} 535",
+        "cooldown": "{{ap|180 to 120}}",
+        "cast time": "None",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Self, Allies, Enemies",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "Heal",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* ''Lamb's Respite'' will affect all {{tip|champions}}, {{tip|minions}}, and {{tip|monsters}}, but not {{tip|ward|wards}}, {{tip|turret|turrets}}, or [[jungle plants]].\n* ''Lamb's Respite'' will affect {{tip|untargetable}} units but does not grant them the {{tip|heal}} at the end of the blessing.\n** It will specifically not affect champions that are {{tip|resurrection|resurrecting}} from {{ii|Guardian Angel}}.\n* {{tip|Health resource|Health costs}} will ignore ''Lamb's Respite's'' threshold.\n** The cost will not be paid if the caster is below the threshold.\n* ''Lamb's Respite'' has no effect on {{tip|zombie state}} or {{tip|clone}} units.\n* The effects are applied before the cast time."
+      }
+    }
+  }
+}

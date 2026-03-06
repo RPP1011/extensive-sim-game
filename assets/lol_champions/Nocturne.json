@@ -1,0 +1,294 @@
+{
+  "id": "Nocturne",
+  "name": "Nocturne",
+  "title": "the Eternal Nightmare",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Umbra Blades",
+      "description": "Every few seconds, Nocturne's next attack strikes surrounding enemies for bonus physical damage and heals himself. \n\nNocturne's basic attacks reduce this cooldown.",
+      "wiki_detail": {
+        "champion": "Nocturne",
+        "skill": "I",
+        "icon": "Umbra Blades.png",
+        "blurb": "{{sbc|Innate:}} Periodically, {{cis|Nocturne}} next basic attack causes him to slash in a circle that deals {{as|'''increased''' physical damage}} to the target and nearby enemies, {{tip|heal|healing}} him for each enemy hit.",
+        "blurb2": "Basic attacks {{sti|cdr|reduce}} ''Umbra Blade's'' cooldown, increased against {{tip|monsters}} and {{tip|champions}}.",
+        "description": "{{sbc|Innate:}} Periodically, '''Nocturne''' empowers his next [[basic attack]] to slash in a circle, dealing {{as|120% AD}} {{as|physical damage}} to the target and nearby enemies and {{tip|healing}} himself for {{pp|13 to 30}} {{as|(+ 30% AP)}} per enemy hit. Against {{tip|minions}}, ''Umbra Blade's'' damage to secondary targets and healing are reduced by 50% and it applies {{tip|on-hit}} effects{{bug|2}} to all targets at 100% effectiveness.",
+        "description2": "''Umbra Blades'' can {{tip|critically strike}} against the primary target, modifying the {{as|physical damage}} dealt to{{ft|{{as|{{critical damage|{{ccd|Nocturne|crit_base}}|100|mod=1.1}} AD}}.|110% of the {{sti|{{as|critical damage}}}} of his basic attacks.}}",
+        "icon3": "Steel Blades.png",
+        "description3": "Basic attacks reduce ''Umbra Blades' '' {{sti|cooldown}} by 1 second, increased to 3 against enemy {{tip|champions}} and {{tip|monsters}}.",
+        "static": "13",
+        "effect radius": "{{tip|cr|icononly = true}} 360",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spelleffects": "special",
+        "spellshield": "False",
+        "parry": "true",
+        "notes": "* The primary target of the enhanced attack takes {{tip|basic damage}} while the secondary targets of the slash are dealt {{tip|default damage}}.\n* The enhanced attack will apply other [[on-hit effect]]s (only to main target) and can {{tip|critical strike|critically strike}} as normal.\n** The critical strike damage of the attack is notably unusual.{{bug|2}} It stems from a time where critical strikes by default did {{as|200% AD}} damage, which meant that 110% of it equaled {{as|220% AD}}, equal to a more standard ''Umbral Blades' ''bonus damage of {{as|20% AD}} added to the critical damage. This also causes bonus critial damage such as {{iis|Infinity Edge}} passive to be 10% stronger on the attack. <br>Now, the formula reduces the expected critical damage slightly by {{as|{{fd|-2.5}}% AD}}, which is 10% of the reduction in base critical damage from [[Patch (League of Legends)/Season_Eleven#Pre-Season_Eleven|Pre-Season 11]].\n* The empowered attack will not trigger against [[structures]] nor [[ward]]s.\n** Basic attacks against them will still grant the cooldown reduction.\n* Parry effects will only block the damage dealt to the primary target."
+      }
+    },
+    "Q": {
+      "id": "NocturneDuskbringer",
+      "name": "Duskbringer",
+      "description": "Nocturne throws a shadow blade that deals damage, leaves a Dusk Trail, and causes champions to leave a Dusk Trail. While on the trail, Nocturne can move through units and has increased Move Speed and Attack Damage.",
+      "tooltip": "Nocturne throws a shadow blade, dealing {{ totaldamage }} physical damage and leaving a dusk trail for {{ e3 }} seconds. Enemy champions hit also leave a trail. \n\nWhile on the trail, Nocturne is Ghosted and gains {{ movespeed }}% Move Speed and {{ bonustrailad }} Attack Damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1125",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "15/20/25/30/35",
+        "65/110/155/200/245",
+        "5",
+        "15/25/35/45/55",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Move Speed",
+          "Bonus Attack Damage",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ movespeed }}% -> {{ movespeedNL }}%",
+          "{{ bonustrailad }} -> {{ bonustrailadNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Nocturne",
+        "skill": "Q",
+        "icon": "Duskbringer.png",
+        "blurb": "{{sbc|Active:}} {{ci|Nocturne}} casts out a shadow blade in the target direction that leaves a ''Dusk Trail'' in its wake, dealing {{as|physical damage}} to enemies hit. Enemy {{tip|champions}} hit will leave a ''Dusk Trail'' in their wake for a few seconds.",
+        "blurb2": "While on the ''Dusk Trail'', Nocturne is {{tip|ghosted}} and gains {{sti|ms|{{as|'''bonus''' movement speed}}}} and {{as|{{sti|'''bonus''' attack damage}}}}.",
+        "description": "{{sbc|Active:}} '''Nocturne''' casts out a shadow blade in the target direction that leaves a ''Dusk Trail'' in its wake, dealing {{as|physical damage}} to enemies hit. Enemy {{tip|champions}} and large {{tip|monsters}} hit will leave a ''Dusk Trail'' behind while moving. ''Dusk Trails'' last 5 seconds and will slowly disappear afterwards.",
+        "leveling": "{{st|Physical damage|{{ap|65 to 245}} {{as|(+ 85% '''bonus''' AD)}}}}",
+        "description2": "While on the ''Dusk Trail'', '''Nocturne''' is {{tip|ghosted}} and gains {{as|{{sti|'''bonus''' attack damage}}}} and {{sti|ms|{{as|'''bonus total''' movement speed}}}}.",
+        "leveling2": "{{st|Bonus Attack Damage|{{ap|15 to 55}}}}\n{{st|Bonus Movement Speed|{{ap|15 to 35}}%}}",
+        "range": "{{tip|cr|icononly = true}} {{tt|1200|Shadow blade missile range}}",
+        "width": "{{tip|er|icononly = true}} {{tt|120|Shadow blade missile width}}",
+        "speed": "1600",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|150|Dusk Trail blob radiuses}}",
+        "cooldown": "8",
+        "cost": "{{ap|60 to 80}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "True",
+        "notes": "* ''Duskbringer'' checks for and hits targets 25 units outside of the missile's maximum range.\n* ''Duskbringer's'' damage is not increased by the {{as|'''bonus''' AD}} gained from its trail, meaning that casting it again while on the trail from the last cast will not result in higher damage.\n** It is observed from seasons ago that this is intentionally hard-coded into the ability to avoid the projectile increasing its own damage. This feature is somewhat deprecated as it also limits chain-casting ''Duskbringer''.\n* ''Duskbringer's Dusk Trail'' will expose the path of affected units until its duration ends. It is a form of {{tip|obscured vision}}; the trail indirectly reveals the location of enemy units even in the fog of war, including those shrouded by {{tip|stealth}}.\n* {{tip|Spell shield}} will block the damage and also prevents the ''Dusk Trail'' from following the target.\n* The formed ''Dusk Trail'' does not disappear if ''Duskbringer'' is intercepted by {{ai|Wind Wall|Yasuo}} or {{ai|Unbreakable|Braum}}.\n{{Effect at cast time start}}\n* The {{as|'''bonus''' movement speed}} {{tip|stacks multiplicatively}} with other sources of movement speed boosts."
+      }
+    },
+    "W": {
+      "id": "NocturneShroudofDarkness",
+      "name": "Shroud of Darkness",
+      "description": "Nocturne empowers his blades, passively gaining Attack Speed. Activating Shroud of Darkness allows Nocturne to fade into the shadows, creating a magical barrier which blocks a single enemy ability and doubles his passive Attack Speed if successful.",
+      "tooltip": "Passive: Nocturne gains {{ e1 }}% Attack Speed.\n\nActive: Nocturne creates a shadow barrier for 1.5 seconds that blocks the next enemy Ability. If an Ability is blocked, this Ability's passive effect is increased to {{ e1 }}% Attack Speed for {{ e4 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "20/18/16/14/12",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "20",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "60/70/80/90/100",
+        "0.3/0.05/0.05/0.05/0.05",
+        "1.5",
+        "5",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Bonus Attack Speed",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e1 }}% -> {{ e1NL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Nocturne",
+        "skill": "W",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} {{ci|Nocturne}} gains {{sti|{{as|'''bonus''' attack speed}}}}.",
+        "blurb2": "{{sbc|Active:}} '''Nocturne''' gains a brief {{tip|spell shield}}. If it blocks an ability, the {{as|'''bonus''' attack speed}} is doubled for a few seconds.",
+        "description": "{{sbc|Passive:}} '''Nocturne''' gains {{sti|{{as|'''bonus''' attack speed}}}}.",
+        "leveling": "{{st|Bonus Attack Speed|{{ap|30 to 50}}%|Enhanced Bonus Attack Speed|{{ap|30*2 to 50*2}}%}}",
+        "icon2": "Shroud of Darkness.png",
+        "description2": "{{sbc|Active:}} '''Nocturne''' gains a {{tip|spell shield}} for {{fd|1.5}} seconds. Upon successfully blocking a hostile effect, ''Shroud of Darkness' ''{{as|'''bonus''' attack speed}} is doubled for 5 seconds.",
+        "cooldown": "{{ap|20 to 12}}",
+        "cast time": "none",
+        "cost": "50",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Self",
+        "spelleffects": "|notes        = \n* If ''Shroud of Darkness'' is active when '''Nocturne''' re-casts ''{{ai|Paranoia|Nocturne}}'' to dash to a target, its duration is refreshed every {{fd|0.25 seconds}} during the dash."
+      }
+    },
+    "E": {
+      "id": "NocturneUnspeakableHorror",
+      "name": "Unspeakable Horror",
+      "description": "Nocturne plants a nightmare into his target's mind, dealing damage each second and applying fear to the target if they do not get out of range by the end of the duration.",
+      "tooltip": "Passive: Nocturne gains {{ tooltipfearms*100 }}% Move Speed toward Feared enemies.\n\nActive: Nocturne plants a nightmare tether into his target, dealing {{ totaldamage }} magic damage over {{ e3 }} seconds. If the tether remains unbroken, the target is Feared for {{ e2 }} second(s).{{ spellmodifierdescriptionappend }}",
+      "cooldown": "15/14/13/12/11",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "425",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "80/125/170/215/260",
+        "1.25/1.5/1.75/2/2.25",
+        "2",
+        "465",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Fear Duration",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ e2 }} -> {{ e2NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Nocturne",
+        "skill": "E",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} {{ci|Nocturne}} gains {{sti|ms|{{as|'''bonus''' movement speed}}}} while moving towards {{tip|fear|feared}} targets.",
+        "blurb2": "{{sbc|Active:}} '''Nocturne''' torments the target, forming a {{tip|tether}} that continually deals {{as|magic damage}}.",
+        "blurb3": "If the tether is not broken after a short time, the target is briefly {{tip|fear|feared}} and {{tip|slow|slowed}}.",
+        "description": "{{sbc|Passive:}} '''Nocturne''' gains {{sti|ms|{{as|90% '''bonus''' movement speed}}}} while facing nearby {{tip|fear|feared}} targets.",
+        "icon2": "Unspeakable Horror.png",
+        "description2": "{{sbc|Active:}} '''Nocturne''' torments the target, forming a {{tip|tether}} between himself and the target for 2 seconds, during which the target takes {{as|magic damage}} every {{fd|0.5}} seconds over the duration.",
+        "leveling2": "{{st|Total Magic Damage|{{ap|80 to 260}} {{as|(+ 100% AP)}}|Magic Damage per Tick|{{ap|80/4 to 260/4}} {{as|(+ {{ap|100/4}}% AP)}}}}",
+        "description3": "If the tether is not broken by the end of its duration, the target is {{tip|fear|feared}} for a duration while being {{tip|slow|slowed}} by 90%.",
+        "leveling3": "{{st|Disable Duration|{{ap|1.25 to 2.25}} seconds}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|1000|Fear MS radius}}",
+        "target range": "{{tip|cr|icononly = true}} 425",
+        "tether radius": "{{tip|er|icononly = true}} 465",
+        "cooldown": "{{ap|15 to 11}}",
+        "cost": "{{ap|60 to 80}}",
+        "costtype": "mana",
+        "cast time": "none",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "Special",
+        "spelleffects": "DoT",
+        "projectile": "False",
+        "callforhelp": "True",
+        "notes": "* Feared enemies in a {{tip|cr|icononly = true}} 180° total angle within '''Nocturne's''' facing direction will trigger ''Unspeakable Horror's'' passive.\n** The movement speed buff is granted even while '''Nocturne''' is standing still.\n** '''Nocturne''' does not need to have sight of fleeing targets to gain movement speed towards them.\n* {{tip|Spell shield}} will block the tether's application but not the damage and aftereffects of one already applied."
+      }
+    },
+    "R": {
+      "id": "NocturneParanoia",
+      "name": "Paranoia",
+      "description": "Nocturne reduces the sight radius of all enemy champions and removes their ally vision in the process. He can then launch himself at a nearby enemy champion.",
+      "tooltip": "Nocturne darkens the map, reducing the sight radius of all enemy champions and removing their vision of allies for {{ paranoiaduration }} seconds. Nocturne can Recast this Ability during the duration to launch himself at an enemy champion dealing {{ damage }} physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "140/115/90",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "2500/3250/4000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Range",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ castrange }} -> {{ castrangeNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Nocturne",
+        "skill": "R",
+        "icon": "Paranoia.png",
+        "blurb": "{{sbc|Active:}} {{ci|Nocturne}} terrorizes all enemy champions, {{tip|nearsight|nearsighting}} them for a few seconds. He can recast ''Paranoia'' during this time.",
+        "blurb2": "{{sbc|Recast:}} '''Nocturne''' {{tip|dash|dashes}} with {{tip|displacement immunity}} to the target enemy champion, dealing {{as|physical damage}} upon arrival.",
+        "blurb4": "{{sbc|{{tip|displacement immunity|nolink=true}}:}} The dash cannot be deterred by {{tip|crowd control}}.",
+        "description": "{{sbc|Active:}} '''Nocturne''' terrorizes all enemy champions, {{tip|nearsight|nearsighting}} them for 6 seconds. He can recast ''Paranoia'' for the same duration after {{fd|0.25}} seconds.",
+        "description2": "{{sbc|Recast:}} '''Nocturne''' {{tip|dash|dashes}} with {{tip|displacement immunity}} to the target enemy champion, dealing {{as|physical damage}} upon arrival.",
+        "leveling2": "{{st|Physical Damage|{{ap|150|275|400}} {{as|(+ 120% '''bonus''' AD)}}}}",
+        "description3": "'''''Nocturne''' can cast any of his [[champion ability|abilities]] during the dash.''",
+        "target range": "{{tip|cr|icononly = true}} {{ap|2500|3250|4000}}",
+        "speed": "1800",
+        "effect radius": "Global",
+        "customlabel": "Sight Reduction",
+        "custominfo": "{{tt|300|Reduces enemy champions' sight radius to 1,050 units}}",
+        "cooldown": "{{tt|{{ap|140 to 90}}|Starts after recast times out or is used}}",
+        "cdstart": "post-effect",
+        "cost": "100",
+        "cast time": "none",
+        "costtype": "Mana",
+        "targeting": "[[Auto-targeted|Auto]] / [[Unit-targeted|Unit]]",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "callforhelp": "true",
+        "grounded": "special",
+        "knockdown": "False",
+        "flavorsound": "{{sm2|Nocturne_Original_R_1.ogg}} ''\"Darkness... \"''<br>{{sm2|Nocturne Original R SFX 0.ogg}} ''Activation alert.''",
+        "notes": "* '''Nocturne''' will track the target if they change locations.\n** He will dash to the target's previous location without dealing damage if the target is too far away or moves beyond {{ap|3500|4250|5000}} (based on ''Paranoia's'' rank) units.\n* Enemy players affected by ''Paranoia's'' {{tip|nearsight}} cannot interact with the allied portrait icons on the HUD.\n* ''Paranoia's'' {{tip|nearsight}} will apply to enemy champions that are {{tip|untargetable}} or are dead, and will persist through {{tip|death}}.\n* '''Nocturne''' can cast any of his [[champion ability|abilities]], [[summoner spell|summoner spells]] (excluding {{si|Hexflash}}), or [[active ability items|item actives]] during flight.\n** Using a {{tip|dash}} or {{tip|blink}} ability will interrupt the flight.\n** The flight will also be interrupted if '''Nocturne''' is affected by a {{ui|Blast Cone}} triggered by an allied champion.{{bug|1}}<!-- Has only been tested with the chemtech map's blast cones -->\n* ''Paranoia'' cannot be recast while {{tip|ground|grounded}} or {{tip|root|rooted}}.\n* ''Paranoia's'' {{tip|nearsight}} does not apply to {{tip|clone|clones}}.\n* [[summoner|Players']] screens will turn a different color when ''Paranoia'' is cast, based on their perspective: blue for allies and red for enemies.\n* A [[spell indicator]] telegraphed to '''Nocturne''' and his allies will be placed on all enemy {{tip|champion|champions}} within range of ''Paranoia's'' recast while the ability is active. ''The following images display the indicator for the default [[skin]]:''\n[[File:Nocturne_Original_Paranoia_Indicator_Red.png|thumb|left|A glowing '''{{color|#8b0000|red silhouette}}''' of '''Nocturne's''' blades indicates an enemy champion can be targeted by ''Paranoia's'' recast.]]\n[[File:Nocturne Original Paranoia Indicator.png|thumb|left|A glowing '''{{color|#32CD32|green silhouette}}''' of '''Nocturne's''' blades signifies an enemy champion has been targeted by ''Paranoia's'' recast.]]",
+        "_comments": [
+          "Has only been tested with the chemtech map's blast cones"
+        ]
+      }
+    }
+  }
+}

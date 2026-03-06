@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0092_4v4_d4_s2"
+seed = 22215
+hero_count = 4
+enemy_count = 4
+difficulty = 4
+max_ticks = 10000
+room_type = "Setpiece"
+hero_templates = ["blood_mage", "alchemist", "knight", "warrior"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Any"

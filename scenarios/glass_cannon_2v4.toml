@@ -1,0 +1,11 @@
+[scenario]
+name        = "Glass Cannon 2v4 — High Difficulty Few Heroes"
+seed        = 200
+hero_count  = 2
+enemy_count = 4
+difficulty  = 4
+max_ticks   = 3000
+room_type   = "Pressure"
+
+[assert]
+outcome = "Either"

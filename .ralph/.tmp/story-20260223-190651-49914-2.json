@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "total": 12,
+  "remaining": 10,
+  "quality_gates": [
+    "cargo test"
+  ],
+  "id": "US-003",
+  "title": "Isolate menu subtitle/status text from in-session notices"
+}

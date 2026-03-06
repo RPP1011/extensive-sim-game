@@ -1,0 +1,12 @@
+[scenario]
+name = "engineer+templar+warlock vs 8 d3"
+seed = 42
+hero_count = 3
+enemy_count = 8
+difficulty = 3
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["engineer", "templar", "warlock"]
+
+[assert]
+outcome = "Either"

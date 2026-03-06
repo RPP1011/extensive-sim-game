@@ -1,0 +1,126 @@
+[hero]
+name = "Ezreal"
+
+[stats]
+hp = 80
+move_speed = 3.3
+armor = 22.0
+magic_resist = 31.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 5.5
+cooldown = 700
+
+# --- Q: Mystic Shot ---
+[[abilities]]
+name = "Mystic Shot"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 5000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 5
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 5
+damage_type = "physical"
+
+# --- W: Essence Flux ---
+[[abilities]]
+name = "Essence Flux"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 8000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 10
+
+[abilities.delivery]
+method = "projectile"
+speed = 17.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 20
+damage_type = "magic"
+
+# --- E: Arcane Shift ---
+[[abilities]]
+name = "Arcane Shift"
+targeting = "ground_target"
+range = 4.8
+cooldown_ms = 26000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 14
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 20
+damage_type = "magic"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 7.5
+
+[[abilities.effects]]
+type = "dash"
+is_blink = true
+
+# --- R: Trueshot Barrage ---
+[[abilities]]
+name = "Trueshot Barrage"
+targeting = "direction"
+range = 0.0
+cooldown_ms = 23900
+cast_time_ms = 1000
+ai_hint = "damage"
+resource_cost = 20
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 87
+damage_type = "magic"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 2.5
+
+# --- Passive: Rising Spell Force ---
+[[passives]]
+name = "Rising Spell Force"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_taken"
+
+[[passives.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.2
+duration_ms = 5000
+
+[[passives.effects]]
+type = "apply_stacks"
+name = "ezreal"
+count = 1
+max_stacks = 4
+

@@ -1,0 +1,127 @@
+[hero]
+name = "Irelia"
+
+[stats]
+hp = 120
+move_speed = 3.5
+armor = 35.0
+magic_resist = 32.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 21
+range = 1.5
+cooldown = 800
+
+# --- Q: Bladesurge ---
+[[abilities]]
+name = "Bladesurge"
+targeting = "target_enemy"
+range = 6.0
+cooldown_ms = 11000
+ai_hint = "damage"
+resource_cost = 4
+
+[[abilities.effects]]
+type = "damage"
+amount = 1
+damage_type = "physical"
+
+[[abilities.effects]]
+type = "heal"
+amount = 1
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- W: Defiant Dance ---
+[[abilities]]
+name = "Defiant Dance"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 20000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 14
+max_charges = 2
+charge_recharge_ms = 10000
+recast_count = 1
+recast_window_ms = 10000
+
+[abilities.delivery]
+method = "channel"
+duration_ms = 2000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- E: Flawless Duet ---
+[[abilities]]
+name = "Flawless Duet"
+targeting = "ground_target"
+range = 7.8
+cooldown_ms = 16000
+ai_hint = "crowd_control"
+resource_cost = 10
+recast_count = 1
+recast_window_ms = 10000
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "stun"
+duration_ms = 1000
+
+# --- R: Vanguard's Edge ---
+[[abilities]]
+name = "Vanguard's Edge"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 24450
+cast_time_ms = 400
+ai_hint = "damage"
+resource_cost = 20
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 31
+damage_type = "magic"
+
+# --- Passive: Ionian Fervor ---
+[[passives]]
+name = "Ionian Fervor"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_taken"
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+
+[[passives.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.2
+duration_ms = 5000
+
+[[passives.effects]]
+type = "apply_stacks"
+name = "irelia"
+count = 1
+max_stacks = 4
+

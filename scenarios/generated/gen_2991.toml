@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0077_4v4"
+seed = 2000
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["Renekton", "Singed", "Corki", "Karma"]
+enemy_hero_templates = ["knight", "blood_mage", "cryomancer", "Zed"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

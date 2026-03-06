@@ -1,0 +1,272 @@
+use super::*;
+
+#[test]
+fn parse_damage_modify_effect() {
+    let toml_str = r#"type = "damage_modify"
+factor = 0.75
+duration_ms = 6000"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::DamageModify { factor, duration_ms } => {
+            assert!((factor - 0.75).abs() < 0.01);
+            assert_eq!(duration_ms, 6000);
+        }
+        _ => panic!("expected DamageModify"),
+    }
+}
+
+#[test]
+fn parse_execute_effect() {
+    let toml_str = r#"type = "execute"
+hp_threshold_percent = 20.0"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::Execute { hp_threshold_percent } => {
+            assert!((hp_threshold_percent - 20.0).abs() < 0.01);
+        }
+        _ => panic!("expected Execute"),
+    }
+}
+
+#[test]
+fn parse_resurrect_effect() {
+    let toml_str = r#"type = "resurrect"
+hp_percent = 50.0"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::Resurrect { hp_percent } => {
+            assert!((hp_percent - 50.0).abs() < 0.01);
+        }
+        _ => panic!("expected Resurrect"),
+    }
+}
+
+#[test]
+fn parse_immunity_effect() {
+    let toml_str = r#"type = "immunity"
+immune_to = ["stun", "silence"]
+duration_ms = 5000"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::Immunity { immune_to, duration_ms } => {
+            assert_eq!(immune_to, vec!["stun", "silence"]);
+            assert_eq!(duration_ms, 5000);
+        }
+        _ => panic!("expected Immunity"),
+    }
+}
+
+#[test]
+fn parse_polymorph_effect() {
+    let toml_str = r#"type = "polymorph"
+duration_ms = 3000"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    assert!(matches!(effect, Effect::Polymorph { duration_ms: 3000 }));
+}
+
+#[test]
+fn parse_stealth_effect() {
+    let toml_str = r#"type = "stealth"
+duration_ms = 5000
+break_on_damage = true
+break_on_ability = true"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::Stealth { duration_ms, break_on_damage, break_on_ability } => {
+            assert_eq!(duration_ms, 5000);
+            assert!(break_on_damage);
+            assert!(break_on_ability);
+        }
+        _ => panic!("expected Stealth"),
+    }
+}
+
+#[test]
+fn parse_delivery_chain() {
+    let toml_str = r#"
+method = "chain"
+bounces = 3
+bounce_range = 4.0
+falloff = 0.15
+"#;
+    let delivery: Delivery = toml::from_str(toml_str).unwrap();
+    match delivery {
+        Delivery::Chain { bounces, bounce_range, falloff, .. } => {
+            assert_eq!(bounces, 3);
+            assert!((bounce_range - 4.0).abs() < 0.01);
+            assert!((falloff - 0.15).abs() < 0.01);
+        }
+        _ => panic!("expected Chain"),
+    }
+}
+
+#[test]
+fn parse_area_spread() {
+    let toml_str = r#"
+shape = "spread"
+radius = 3.0
+max_targets = 4
+"#;
+    let area: Area = toml::from_str(toml_str).unwrap();
+    match area {
+        Area::Spread { radius, max_targets } => {
+            assert!((radius - 3.0).abs() < 0.01);
+            assert_eq!(max_targets, 4);
+        }
+        _ => panic!("expected Spread"),
+    }
+}
+
+#[test]
+fn parse_damage_with_scaling() {
+    let toml_str = r#"
+type = "damage"
+amount = 30
+scaling_stat = "caster_max_hp"
+scaling_percent = 10.0
+"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::Damage { amount, scaling_stat, scaling_percent, .. } => {
+            assert_eq!(amount, 30);
+            assert_eq!(scaling_stat.as_deref(), Some("caster_max_hp"));
+            assert!((scaling_percent - 10.0).abs() < 0.01);
+        }
+        _ => panic!("expected Damage"),
+    }
+}
+
+#[test]
+fn parse_summon_with_hp_percent() {
+    let toml_str = r#"
+type = "summon"
+template = "self"
+count = 1
+hp_percent = 50.0
+"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::Summon { template, hp_percent, .. } => {
+            assert_eq!(template, "self");
+            assert!((hp_percent - 50.0).abs() < 0.01);
+        }
+        _ => panic!("expected Summon"),
+    }
+}
+
+#[test]
+fn parse_new_conditions() {
+    let toml_str = r#"type = "target_is_rooted""#;
+    let cond: Condition = toml::from_str(toml_str).unwrap();
+    assert!(matches!(cond, Condition::TargetIsRooted));
+
+    let toml_str = r#"type = "target_is_silenced""#;
+    let cond: Condition = toml::from_str(toml_str).unwrap();
+    assert!(matches!(cond, Condition::TargetIsSilenced));
+
+    let toml_str = r#"type = "target_debuff_count"
+min_count = 3"#;
+    let cond: Condition = toml::from_str(toml_str).unwrap();
+    assert!(matches!(cond, Condition::TargetDebuffCount { min_count: 3 }));
+}
+
+#[test]
+fn parse_new_triggers() {
+    let toml_str = r#"type = "on_heal_received""#;
+    let trigger: Trigger = toml::from_str(toml_str).unwrap();
+    assert!(matches!(trigger, Trigger::OnHealReceived));
+
+    let toml_str = r#"type = "on_auto_attack""#;
+    let trigger: Trigger = toml::from_str(toml_str).unwrap();
+    assert!(matches!(trigger, Trigger::OnAutoAttack));
+
+    let toml_str = r#"type = "on_ally_killed"
+range = 8.0"#;
+    let trigger: Trigger = toml::from_str(toml_str).unwrap();
+    match trigger {
+        Trigger::OnAllyKilled { range } => assert!((range - 8.0).abs() < 0.01),
+        _ => panic!("expected OnAllyKilled"),
+    }
+}
+
+#[test]
+fn parse_cooldown_modify_effect() {
+    let toml_str = r#"type = "cooldown_modify"
+amount_ms = -2000"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::CooldownModify { amount_ms, .. } => assert_eq!(amount_ms, -2000),
+        _ => panic!("expected CooldownModify"),
+    }
+}
+
+#[test]
+fn parse_death_mark_effect() {
+    let toml_str = r#"type = "death_mark"
+duration_ms = 5000
+damage_percent = 40.0"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::DeathMark { duration_ms, damage_percent } => {
+            assert_eq!(duration_ms, 5000);
+            assert!((damage_percent - 40.0).abs() < 0.01);
+        }
+        _ => panic!("expected DeathMark"),
+    }
+}
+
+#[test]
+fn parse_blind_effect() {
+    let toml_str = r#"type = "blind"
+miss_chance = 0.5
+duration_ms = 3000"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::Blind { miss_chance, duration_ms } => {
+            assert!((miss_chance - 0.5).abs() < 0.01);
+            assert_eq!(duration_ms, 3000);
+        }
+        _ => panic!("expected Blind"),
+    }
+}
+
+#[test]
+fn parse_lifesteal_effect() {
+    let toml_str = r#"type = "lifesteal"
+percent = 25.0
+duration_ms = 6000"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::Lifesteal { percent, duration_ms } => {
+            assert!((percent - 25.0).abs() < 0.01);
+            assert_eq!(duration_ms, 6000);
+        }
+        _ => panic!("expected Lifesteal"),
+    }
+}
+
+#[test]
+fn parse_link_effect() {
+    let toml_str = r#"type = "link"
+duration_ms = 8000
+share_percent = 30.0"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::Link { duration_ms, share_percent } => {
+            assert_eq!(duration_ms, 8000);
+            assert!((share_percent - 30.0).abs() < 0.01);
+        }
+        _ => panic!("expected Link"),
+    }
+}
+
+#[test]
+fn parse_rewind_effect() {
+    let toml_str = r#"type = "rewind"
+lookback_ms = 5000"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::Rewind { lookback_ms } => assert_eq!(lookback_ms, 5000),
+        _ => panic!("expected Rewind"),
+    }
+}

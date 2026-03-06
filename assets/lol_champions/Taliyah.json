@@ -1,0 +1,284 @@
+{
+  "id": "Taliyah",
+  "name": "Taliyah",
+  "title": "the Stoneweaver",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage",
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Rock Surfing",
+      "description": "Taliyah gains Move Speed near walls.",
+      "wiki_detail": {
+        "champion": "Taliyah",
+        "skill": "I",
+        "icon": "Rock Surfing.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Taliyah}} gains {{sti|ms|{{as|'''bonus''' movement speed}}}} while near [[terrain]]. This effect will be put on {{sti|cooldown}} while in combat or casting an ability.",
+        "description": "{{sbc|Innate:}} While near [[terrain]], '''Taliyah''' gains {{sti|ms|{{as|{{pp|10;15;25;40|1;9;12;15|key=%}}|ms}}}} {{as|'''bonus''' movement speed}}, which builds up over 1 second while in range for at least {{fd|0.4}} seconds, and decays {{tt|at the same rate|See notes}} once out of range for at least 3 seconds.",
+        "description2": "If '''Taliyah''' is casting an [[champion ability|ability]] or enters [[combat status|champion combat]], ''Rock Surfing'' cannot occur again for a few seconds.",
+        "static": "2",
+        "targeting": "Passive",
+        "affects": "Self",
+        "notes": "* The movement speed builds up and decays linearly (by the same amount in the same interval), 25% of the maximum value every {{fd|0.25}} seconds.\n* ''Rock Surfing'' can interact with [[Terrain#Player-Generated|player-generated terrain]].\n* Dealing {{tip|default damage|default}} or {{tip|proc damage|proc}} damage does not put ''Rock Surfing'' on cooldown."
+      }
+    },
+    "Q": {
+      "id": "TaliyahQ",
+      "name": "Threaded Volley",
+      "description": "Taliyah throws a volley of rocks in a target direction, moving freely as she casts. This creates Worked Ground below her. If Taliyah casts Threaded Volley on Worked Ground, she consumes the ground to throw a stronger boulder that slows enemies.",
+      "tooltip": "Taliyah hurls 5 rocks, each dealing {{ rockdamage }} magic damage in an area around the first enemy hit while creating Worked Ground at that area. Subsequent hits against the same enemy deal {{ extramissilereduceddamagepercent }}% less damage.\n\nCasts on worked ground cost {{ e7 }} Mana and have {{ workedgroundcdr*100 }}% less Cooldown, consume the Worked Ground, and hurl a boulder that Slows enemies it hits by {{ slowpercent*100 }}% for {{ slowduration }} seconds, dealing {{ bigrockdamage }} magic damage to the primary target. Monsters hit by the boulder are Stunned for {{ monsterstunduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7/6/5/4/3",
+      "cost": "55/60/65/70/75",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "30",
+        "10",
+        "400",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow",
+          "Monster Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ slowpercent*100.000000 }}% -> {{ slowpercentnl*100.000000 }}%",
+          "{{ monsterbonusflatdamage }} -> {{ monsterbonusflatdamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Taliyah",
+        "skill": "Q",
+        "icon": "Threaded Volley.png",
+        "blurb": "{{sbc|Active:}} {{ci|Taliyah}} barrages out 5 ''Stone Shards'' that each explode upon the first enemy hit, dealing {{as|magic damage}} to nearby enemies. This also creates an area of {{as|Worked Ground|terrain}} under '''Taliyah's''' location that lasts for a while.",
+        "blurb2": "Casting ''Threaded Volley'' on {{as|Worked Ground|terrain}} will consume the area to become empowered with a new effect as well as reduced {{sti|{{as|mana cost}}}} and {{sti|cooldown}}.",
+        "blurb3": "{{sbc|Empowered Active:}} '''Taliyah''' hurls a ''Boulder'' that explodes upon the first enemy hit, dealing {{as|magic damage}} and briefly {{tip|slow|slowing}} nearby enemies. The first enemy hit takes {{ccs|increased|magic}} damage from the ''Boulder''.",
+        "blurb4": "'''Taliyah''' can move and cast other abilities while launching ''Stone Shards''.",
+        "description": "{{sbc|Active:}} '''Taliyah''' barrages 5 ''Stone Shards'' in the target direction over {{fd|1.5}} seconds that each shatter upon the first enemy hit, dealing {{as|magic damage}} to nearby enemies and {{tip|standard sight|revealing}} them for {{fd|0.5}} seconds. Subsequent hits deal 40% damage.",
+        "leveling": "{{st|Magic Damage|{{ap|56 to 130}} {{as|(+ 50% AP)}}|Reduced Damage|{{ap|56*0.4 to 130*0.4}} {{as|(+ {{ap|50*0.4}}% AP)}}|Total Magic Damage|{{ap|56*2.6 to 130*2.6}} {{as|(+ 130% AP)}}}}",
+        "description2": "'''Taliyah''' can move and cast other abilities while launching ''Stone Shards'', and is unable to basic attack until she launches the third ''Stone Shard''.",
+        "description3": "Casting ''Threaded Volley'' creates an area of {{as|Worked Ground|terrain}} at '''Taliyah's''' cast location that has a radius of 400 units and lasts {{tt|30|Unaffected by ability haste}} seconds. While on {{as|Worked Ground|terrain}}, ''Threaded Volley's'' cast consumes the area to become empowered with a new effect, costing {{sti|{{as|20 mana}}}} and having {{sti|cd|50%}} reduced cooldown, though not below {{fd|0.75}} seconds.",
+        "icon4": "Threaded Volley 2.png",
+        "description4": "{{sbc|Empowered Active:}} '''Taliyah''' hurls a ''Boulder'' that explodes upon the first enemy hit, dealing {{ccs|190%|magic}} damage to them and normal damage to nearby enemies, {{tip|slow|slowing}} all targets hit for {{fd|1.5}} seconds, and {{tip|standard sight|revealing}} them for {{fd|0.5}} seconds. {{tip|Monsters}} hit are also {{tip|stun|stunned}} for 3 seconds.",
+        "leveling4": "{{st|Empowered Damage|{{ap|56*1.9 to 130*1.9}} {{as|(+ {{ap|50*1.9}}% AP)}}}}\n{{st|Slow|{{ap|20 to 40}}%}}",
+        "description5": "Against {{tip|monsters}}, ''Threaded Volley'' deals {{as|10 '''bonus''' magic damage}} per ''Stone Shard'', and the ''Boulder'' deals {{as|{{ap|10*1.9}} '''bonus''' magic damage}} against the primary target. This '''bonus''' damage is unaffected by the damage modifier from subsequent hits.",
+        "cooldown": "{{ap|7 to 3}}",
+        "cost": "{{ap|65 to 85}}",
+        "costtype": "Mana",
+        "cast time": "{{fd|0.25}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|175|Stone Shard radius}} / {{tip|cr|icononly = true}} {{tt|225|Boulder radius}}",
+        "range": "{{tip|cr|icononly = true}} {{tt|1000|From Taliyah, when each missile is launched. Missiles originate 50 units in front of Taliyah}}",
+        "width": "{{tip|er|icononly = true}} {{tt|200|Missile width, no offset to either side}}",
+        "speed": "{{tt|3600 - 1950|5000 units per second² deceleration, minimum is 1500 speed but it reaches its destination earlier than it can slow down to it}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "projectile": "true",
+        "spellshield": "Special",
+        "spelleffects": "special",
+        "notes": "* ''Threaded Volley'' will continue casting while in {{tip|stasis}}.\n* The first ''Stone Shard'' hit on each target is considered {{tip|area damage}}, while additional ones of the same cast are considered {{tip|persistent area damage}}.\n** The ''Boulder'' applies {{tip|area damage}}.\n* The first ''Stone Shard'' is launched instantly after the cast time ends, then the second and third ''Stone Shards'' are both launched over 1 second, and finally the fourth and fifth ''Stone Shards'' are both launched over {{fd|0.5}} seconds. \n* {{tip|Spell shield}} only prevents one instance of damage.",
+        "flavorsound": "{{sm2|Taliyah_Original_Q_5.ogg}} \"If at first you don't succeed, '''throw another rock'''!\""
+      }
+    },
+    "W": {
+      "id": "TaliyahWVC",
+      "name": "Seismic Shove",
+      "description": "Taliyah causes an area of ground to erupt and throws enemies within it in a direction of her choosing.",
+      "tooltip": "Taliyah quakes the earth, Knocking enemies in an area in the chosen direction.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/12.5/11/9.5/8",
+      "cost": "40/30/20/10/0",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0.5",
+        "400",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Taliyah",
+        "skill": "W",
+        "icon": "Seismic Shove.png",
+        "blurb": "{{sbc|Active:}} {{ci|Taliyah}} creates a ledge at the target location that erects after a brief delay, briefly {{tip|airborne|knocking}} enemies hit in the target direction.",
+        "description": "{{sbc|Active:}} '''Taliyah''' marks the target location and selects a direction. After {{tt|{{fd|0.792 seconds}}|Under normal tick interval circumstances, both cast time and 0.5s delay are rounding up}}, a ledge erupts from the area that {{tip|airborne|knocks}} enemies hit 400 units in the target direction over 1 second.",
+        "cooldown": "{{ap|14 to 8}}",
+        "cost": "{{ap|40 to 0}}",
+        "costtype": "Mana",
+        "cast time": "{{fd|0.25}}",
+        "target range": "900",
+        "effect radius": "{{tip|cr|icononly = true}} 225",
+        "targeting": "Vector",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spellshield": "True",
+        "spelleffects": "aoe",
+        "notes": "* The delay is measured from the start of the cast, before the cast time."
+      }
+    },
+    "E": {
+      "id": "TaliyahE",
+      "name": "Unraveled Earth",
+      "description": "Taliyah creates a slowing minefield. If enemies dash through it or are knocked through it, the mines explode and stun them.",
+      "tooltip": "Taliyah scatters loose stones in an area, Slowing enemies hit by {{ slowpercent*100 }}% and dealing {{ scatterdamage }} magic damage. The stones detonate when enemies dash or are Knocked through them, Stunning for the remaining movement duration + {{ stunduration }} seconds and dealing {{ detonationdamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14",
+      "cost": "90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "950",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "4",
+        "85",
+        "0",
+        "4",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Detonation Damage"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ basedetonationdamage }} -> {{ basedetonationdamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Taliyah",
+        "skill": "E",
+        "icon": "Unraveled Earth.png",
+        "blurb": "{{sbc|Active:}} {{ci|Taliyah}} scatters a field of stones in the target direction that deals {{as|magic damage}} to enemies hit. The stones remain for a few seconds and {{tip|slow}} enemies within.",
+        "blurb2": "Enemies that {{tip|dash}} or are {{tip|airborne|knocked}} into a stone will detonate it, dealing {{as|magic damage}} and {{tip|stun|stunning}} them for a short time.",
+        "description": "{{sbc|Active:}} '''Taliyah''' scatters a field of 22 stones across the ground in the target direction that deals {{as|magic damage}} to enemies hit while they erupt. The stones then remain for 4 seconds and {{tip|slow}} enemies within the area by 20%.",
+        "leveling": "{{st|Magic Damage|{{ap|60 to 240}} {{as|(+ 60% AP)}}}}",
+        "description2": "Enemies that {{tip|dash}} or are {{tip|airborne|knocked}} over a stone will detonate it, taking {{as|magic damage}} and becoming {{tip|stun|stunned}} for {{fd|0.75}} seconds, increased to 2 seconds if they are a {{tip|monster}}. The stun is applied once the displacement ends.",
+        "leveling2": "{{st|Detonation Magic Damage|{{ap|25 to 105}} {{as|(+ 30% AP)}}}}",
+        "description3": "An enemy can detonate up to 4 stones, but the damage is reduced by {{pp|changedisplay=true|key=%|type=stones detonated|0 to 75 for 4}}. ''Unraveled Earth'' can affect targets only once per cast; the stones will still detonate but not apply their effects.",
+        "leveling3": "{{st|Total Maximum Detonation Damage|{{ap|25*(1+0.75+0.5+0.25) to 105*(1+0.75+0.5+0.25)}} {{as|(+ 75% AP)}}}}",
+        "description4": "''Unraveled Earth'' deals 175% damage against {{tip|monsters}}.",
+        "cooldown": "14",
+        "cost": "{{ap|90 to 110}}",
+        "costtype": "Mana",
+        "effect radius": "800",
+        "angle": "{{tt|80{{degree}}|Estimated}}",
+        "cast time": "{{fd|0.25}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spellshield": "true",
+        "projectile": "false",
+        "spelleffects": "spellaoe",
+        "notes": "* ''Unraveled Earth'' fires 6 rows of stones: the first row has 2 stones, and the rest have 4 each.\n** The stones spawn in rows that cascade in {{fd|0.17}} second intervals.\n* ''Unraveled Earth'' will not detonate if the target dashes over the stones while being untargetable.\n* ''Unraveled Earth'' will not detonate against enemies that blink onto the stones.\n{{Effect at cast time start}}"
+      }
+    },
+    "R": {
+      "id": "TaliyahR",
+      "name": "Weaver's Wall",
+      "description": "Taliyah creates a very long wall and then surfs it.",
+      "tooltip": "Taliyah creates a massive earthen wall for {{ e1 }} seconds. If she immediately Recasts, she will ride along the wall as it unravels. Moving or being immobilized will end the ride.\n\nThis ability cannot be cast if Taliyah has taken damage from Champions or structures within the last {{ damagelockouttime }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "180/150/120",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "2500/4500/6500",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "4",
+        "2500/4500/6500",
+        "0.1",
+        "2500",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Wall length",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ walllength }} -> {{ walllengthNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Taliyah",
+        "skill": "R",
+        "icon": "Weaver's Wall.png",
+        "blurb": "{{sbc|Active:}} {{ci|Taliyah}} summons a torrent of spiraling rocks that cascades in the target direction, which {{tip|airborne|knocks aside}} champions hit and erects a wall of [[terrain]] in its wake. The wall lasts a few seconds before slowly disintegrating from the starting end.",
+        "blurb2": "'''Taliyah''' will also briefly {{tip|channel}}, during which ''Weaver's Wall'' can be recast. While the wall remains fully formed, she gains another recast empowered with a new effect.",
+        "blurb3": "{{sbc|Recast:}} After the channel, '''Taliyah''' will {{tip|dash|surf}} along the wall as it erects. She can move to {{tip|dash|exit}} the wall early, and automatically does so upon being {{tip|immobilize|immobilized}} or reaching the finishing end. <br/><br/>\n{{sbc|Empowered Recast:}} '''Taliyah''' instantly destroys the wall.",
+        "description": "{{sbc|Active:}} '''Taliyah''' summons a torrent of spiraling rocks that cascades in the target direction, {{tip|airborne|knocking aside}} champions hit and erecting a wall of [[terrain]] in its wake. The wall lasts for 4 seconds after completion, then slowly disintegrates from its starting point.",
+        "description2": "'''Taliyah''' also {{tip|channels}} for 1 second, during which ''Weaver's Wall'' can be recast and she {{tip|sight|reveals}} herself.",
+        "icon3": "Weaver's Wall 2.png",
+        "description3": "{{sbc|Recast:}} Upon completing the {{tip|channel}}, '''Taliyah''' {{tip|dash|surfs}} on the wall as it emerges, {{tip|sight|revealing}} herself in the process. After {{fd|0.75}} seconds, she may input a movement command to {{tip|dash|jump}} off the wall to the target location, and automatically does so upon being {{tip|immobilize|immobilized}} or {{tip|polymorph|polymorphed}} or reaching maximum range.<br><br>Once the wall has fully formed, '''Taliyah''' can recast to destroy the wall instantly.",
+        "description4": "''Weaver's Wall'' is placed on a {{sti|cd|3-second}} {{tt|static cooldown|Unaffected by ability haste}} upon taking {{tip|champion}} or {{tip|turret}} damage.",
+        "cooldown": "{{tt|{{ap|180 to 120}}|Starts after wall expires or is destroyed}}",
+        "cdstart": "post-effect",
+        "cost": "100",
+        "costtype": "Mana",
+        "cast time": "none",
+        "speed": "1500 / {{tt|1200|Jump off dash speed}}",
+        "target range": "{{ap|2500 to 6500}}",
+        "range": "{{tt|700|Jump off dash range}}",
+        "targeting": "[[Direction-targeted|Direction]] / [[Auto-targeted|Auto]]",
+        "affects": "Self, Enemies",
+        "projectile": "true",
+        "spellshield": "false",
+        "grounded": "true",
+        "knockdown": "True",
+        "terraingrace": "true",
+        "silence": "true",
+        "notes": "* The {{tip|dash|jump}} off distance can be extended to up to 1000 units when targeting across terrain.\n* The initial cast counts as an ability activation for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n**However neither recasts do.\n* '''Taliyah''' can recast to destroy the wall even if she did not surf it or it is in the process of disintegrating.\n* '''Taliyah''' almost always jumps off of the wall to her left from when it reaches maximum range. If she is forced to jump off of the wall, she will do so towards the source that dealt damage or applied the crowd control to her.\n* ''Weaver's Wall'', while {{tip|channel|channeling}}, can be recast while {{tip|ground|grounded}} but not while {{tip|root|rooted}}.\n* {{ai|Wind Wall|Yasuo}} and {{ai|Blade Whirl|Samira}} will prevent ''Weaver's Wall'' from summoning any further but does not destroy any initial terrain it spawned. If '''Taliyah''' is surfing during the collision, she immediately becomes {{tip|stun|stunned}} for {{fd|0.25}} seconds, interrupting the surf.\n* If '''Taliyah''' would enter terrain and the wall reaches maximum range inside, she is preemptively forced off the wall before entering.\n** The wall can surpass the edges of the map, but '''Taliyah''' cannot.\n* Dealing damage to a ward or trap does not trigger ''Weaver's Wall's'' 3-second cooldown.\n* The following table refers for interactions while '''Taliyah''' is {{tip|channel|channeling}}:\n** The channel is not {{tip|interrupt|interrupted}} by {{tip|ground}} and {{tip|root}} despite being a [[Channel#Movement Channels|movement channel]].\n{{ct|channel|attack=false|move=false|cast=false|consume=Disabled, but can activate trinkets|items=false|spells=false,false,false,interrupts,false|interrupts=death, silence}}\n* The following table refers for interactions while '''Taliyah''' is {{tip|dash|surfing}}:\n{{ct|channel|attack=false|move=false|cast=false|consume=Disabled, but can activate trinkets|items=false|spells=false,false,false,interrupts,false|interrupts=death, root|damage=true}}",
+        "flavorsound": "{{sm2|Taliyah_Original_R_4.ogg}} ''\"Let's shake things up.\"''"
+      }
+    }
+  }
+}

@@ -1,0 +1,255 @@
+{
+  "id": "Jax",
+  "name": "Jax",
+  "title": "Grandmaster at Arms",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Relentless Assault",
+      "description": "Jax's consecutive basic attacks continuously increase his Attack Speed.",
+      "wiki_detail": {
+        "champion": "Jax",
+        "skill": "I",
+        "icon": "Relentless Assault.png",
+        "icon3": "Jax Grandmaster at Angling.png",
+        "blurbicon": "Relentless Assault.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Jax}} basic attacks generate stacks, up to a cap. Stacks expire one at a time.",
+        "blurb4": "{{sbc|Relentless Assault:}} For each stack, '''Jax''' gains {{as|{{sti|'''bonus''' attack speed}}|as}}.",
+        "description": "{{sbc|Innate:}} '''Jax's''' [[basic attack]]s generate a [[stack]] of ''Relentless Assault'' {{tip|on-attack}} for {{fd|2.5}} seconds, refreshing on subsequent attacks and stacking up to 8 times. Stacks expire by one every {{fd|0.25}} seconds when the duration ends.",
+        "description2": "{{sbc|Relentless Assault:}} For each stack, '''Jax''' gains {{as|{{sti|{{pp|key=%|3.5 to 11 for 6|1 to 16}} '''bonus''' attack speed}}|as}}, up to a maximum of {{as|{{pp|key=%|28 to 88 for 6|1 to 16}}|attack speed}}.",
+        "description3": "{{sbc|Grandmaster at Angling:}} While out-of-combat with champions and idle in the river for 10 seconds, '''Jax''' will occasionally catch a fish, granting him {{g|1}} and {{as|1 ability power}} for 5 seconds. He catches a fish at an average rate of one every 15 seconds. He also has a 5% chance to catch a [[File:Jax Grandmaster at Angling 2.png|link=|20 px]] rare fish that grants {{g|10}} and {{as|10 ability power}} for 5 seconds.",
+        "targeting": "Passive",
+        "affects": "Enemies, Self",
+        "damagetype": "|spelleffects =",
+        "onhiteffects": "|spellshield  =",
+        "parry": "|notes        =\n* '''Jax''' will start fishing while idle in the river if he is in-combat with only monsters (e.g. any of the three Epic monsters).{{bug|1}}\n* '''Jax''' catching a fish is a random event and will play a special animation.\n* The total number of fish caught during the game is displayed when fishing as {{ai|Relentless Assault|Jax|Grandmaster at Angling|image=Grandmaster at Angling.png}} passive."
+      }
+    },
+    "Q": {
+      "id": "JaxQ",
+      "name": "Leap Strike",
+      "description": "Jax leaps toward a unit. If they are an enemy, he strikes them with his weapon.",
+      "tooltip": "Jax leaps to a friendly or enemy unit or ward, dealing {{ totaldamage }} physical damage if it is an enemy.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8/7.5/7/6.5/6",
+      "cost": "65",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "700",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Jax",
+        "skill": "Q",
+        "icon": "Leap Strike.png",
+        "blurbicon": "Leap Strike.png",
+        "blurb": "{{sbc|Active:}} {{ci|Jax}} {{tip|dash|dashes}} to the target unit. If they are an enemy, he deals {{as|physical damage}}.",
+        "description": "{{sbc|Active:}} '''Jax''' {{tip|dashes}} to the target unit's location.",
+        "description2": "If the target is an enemy and they are in range upon arrival, '''Jax''' deals them {{as|physical damage}}.",
+        "leveling2": "{{st|Physical Damage|{{ap|65 to 225}} {{as|(+ 100% '''bonus''' AD)}}}}",
+        "description3": "'''''Jax''' can cast any of his [[champion ability|abilities]] during the dash.''",
+        "cooldown": "{{ap|8 to 6}}",
+        "cost": "65",
+        "costtype": "Mana",
+        "cast time": "false",
+        "target range": "{{tip|cr|icononly = true}} 700",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "physical",
+        "spelleffects": "single",
+        "onhiteffects": "|spellshield  = special",
+        "callforhelp": "True",
+        "grounded": "true",
+        "knockdown": "true",
+        "notes": "* ''Leap Strike'' cannot be cast on [[structures]].\n* If the target is an enemy champion, '''Jax''' will be ordered to basic attack them after the dash ends.\n* {{tip|Spell shield}} will block the damage, including when {{ai|Empower|Jax|empowered}}."
+      }
+    },
+    "W": {
+      "id": "JaxW",
+      "name": "Empower",
+      "description": "Jax charges his weapon with energy, causing his next attack to deal additional damage.",
+      "tooltip": "Jax charges his weapon with energy, causing his next Attack or Leap Strike to deal an additional {{ totaldamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7/6/5/4/3",
+      "cost": "30",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "300",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Jax",
+        "skill": "W",
+        "icon": "Empower.png",
+        "blurbicon": "Empower.png",
+        "blurb": "{{sbc|Active:}} {{cis|Jax}} empowers his next basic attack or ''{{ai|Leap Strike|Jax}}'' against an enemy to deal {{as|'''bonus''' magic damage}}.",
+        "description": "{{sbc|Active:}} '''Jax''' empowers his next [[basic attack]] or ''{{ai|Leap Strike|Jax}}'' against an enemy within 10 seconds to deal {{as|'''bonus''' magic damage}}, reduced to 50% against [[structures]]. If ''Empower'' is used on a basic attack, it will gain {{sti|range|50 '''bonus''' range}} and have an {{tip|uncancellable windup}}.",
+        "leveling": "{{st|Bonus Magic Damage|{{ap|50 to 190}} {{as|(+ 60% AP)}}}}",
+        "description2": "''Empower {{tip|basic attack reset|resets}} '''Jax's''' basic attack timer.''",
+        "cooldown": "{{ap|7 to 3}}",
+        "cdstart": "post-effect",
+        "cost": "30",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Self, Enemies",
+        "cast time": "none",
+        "damagetype": "magic",
+        "spelleffects": "spell",
+        "parry": "true",
+        "spellshield": "true",
+        "notes": "}}"
+      }
+    },
+    "E": {
+      "id": "JaxE",
+      "name": "Counter Strike",
+      "description": "Jax's combat prowess allows him to dodge all incoming attacks for a short duration and then quickly counterattack, stunning all surrounding enemies.",
+      "tooltip": "Jax enters a defensive stance for up to {{ dodgeduration }} seconds, dodging incoming Attacks and taking {{ aoedamagereduction }}% less damage from area of effect Abilities. After {{ dodgeduration }} seconds or Recasting, Jax deals {{ totaldamage }} + {{ percenthealthdamage }}% max Health magic damage and Stuns nearby enemies for {{ stunduration }} second. \n\nThe damage is increased by {{ percentincreasedperdodge*100 }}% per Attack dodged, up to a maximum of {{ maxdamage }} + {{ maxpercenthealthdamage }}% max Health.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "17/15/13/11/9",
+      "cost": "50/60/70/80/90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "300",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Jax",
+        "skill": "E",
+        "icon": "Counter Strike.png",
+        "blurbicon": "Counter Strike.png",
+        "blurb": "{{sbc|Active:}} {{ci|Jax}} enters ''Evasion'' for a short time: a defensive stance that causes him to {{tip|dodge}} all incoming non-{{tip|turret}} basic attacks and take reduced damage from all {{tip|area of effect}} abilities from {{tip|champions}}.",
+        "blurb2": "''Counter Strike'' can be recast within this time, and does so automatically after the duration.",
+        "blurb3": "{{sbc|Recast:}} '''Jax''' deals {{as|magic damage}} and {{tip|stun|stuns}} nearby enemies, the damage is increased if he dodged more attacks.",
+        "description": "{{sbc|Active:}} '''Jax''' enters ''Evasion'' for 2 seconds: a defensive stance that causes him to {{tip|dodge}} all incoming non-{{tip|turret}} basic attacks and take 25% reduced damage from all [[area of effect]] abilities from {{tip|champions}}. <br/><br/> ''Counter Strike'' can be recast after 1 second, and does so automatically after the duration.",
+        "description2": "{{sbc|Recast:}} '''Jax''' deals {{as|magic damage}} to nearby enemies, with the '''total''' damage increased by 20% for each attack dodged, up to a 100% increase, and {{tip|stun|stuns}} them for 1 second.",
+        "leveling2": "{{st|Minimum Magic Damage|{{ap|40 to 160}} {{as|(+ 70% AP)}} {{as|(+ {{fd|3.5}}% of target's '''maximum''' health)}}|Maximum Magic Damage|{{ap|40*2 to 160*2}} {{as|(+ {{ap|70*2}}% AP)}} {{as|(+ {{ap|3.5*2}}% of target's '''maximum''' health)}}}}",
+        "effect radius": "{{tip|cr|icononly = true}} 375",
+        "cooldown": "{{ap|17 to 9}}",
+        "cdstart": "post-effect",
+        "cost": "{{ap|50 to 90}}",
+        "cast time": "None",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Self, Enemies",
+        "damagetype": "magic",
+        "spelleffects": "aoe",
+        "onhiteffects": "|spellshield  = True",
+        "notes": "* The initial cast and the manual recast count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n* ''Counter Strike'' will also dodge abilities that can trigger [[on-hit effect]]s ({{ai|Parrrley|Gangplank}}, {{ai|Mystic Shot|Ezreal}}) which will count towards ''Counter Strike's'' increased damage. There are exceptions however."
+      }
+    },
+    "R": {
+      "id": "JaxR",
+      "name": "Grandmaster-at-Arms",
+      "description": "Every third consecutive attack deals additional Magic Damage. Additionally, Jax can activate this ability to deal damage around himself and strengthen his resolve, increasing his Armor and Magic Resist for a short duration.",
+      "tooltip": "Passive: Every third Attack within {{ passivefallofftime }} seconds deals an additional {{ onhitdamage }} magic damage.\n\nActive: Jax slams his lantern down, dealing {{ swingdamagetotal }} magic damage to nearby enemies. If he hits a champion he gains {{ basearmor }} Armor and {{ basemr }} Magic Resist plus {{ bonusarmor }} Armor and {{ bonusmr }} Magic Resist per additional champion hit for {{ duration }} seconds. During this time every second Attack deals additional magic damage instead of every third.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "110/100/90",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "260",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Passive Damage",
+          "Active Damage",
+          "Base Armor",
+          "Base Magic Resist",
+          "Armor per Additional Champion",
+          "Magic Resist per Additional Champion",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ passivebasedamage }} -> {{ passivebasedamageNL }}",
+          "{{ swingdamagebase }} -> {{ swingdamagebaseNL }}",
+          "{{ baseresists }} -> {{ baseresistsNL }}",
+          "{{ baseresists*0.600000 }} -> {{ baseresistsnl*0.600000 }}",
+          "{{ resistsperextratarget }} -> {{ resistsperextratargetNL }}",
+          "{{ resistsperextratarget*0.600000 }} -> {{ resistsperextratargetnl*0.600000 }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    }
+  }
+}

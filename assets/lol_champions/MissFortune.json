@@ -1,0 +1,268 @@
+{
+  "id": "MissFortune",
+  "name": "Miss Fortune",
+  "title": "the Bounty Hunter",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Love Tap",
+      "description": "Miss Fortune deals bonus physical damage whenever she basic attacks a new target.",
+      "wiki_detail": {
+        "champion": "Miss Fortune",
+        "skill": "I",
+        "icon": "Love Tap.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Miss Fortune}} basic attacks apply a mark that expires when attacking a new enemy. If the enemy was unmarked, this also deals {{as|'''bonus''' physical damage}}.",
+        "description": "{{sbc|Innate:}} '''Miss Fortune's''' [[basic attack]]s are empowered to apply a mark that expires upon attacking a new enemy. If the enemy was unmarked, this also deals {{as|{{pp|key=%|50 to 100 for 6|1;4;7 to 13|formula=50% + 10% every 3 levels up to 7, then + 10% every 2 levels up to 13}} AD}} {{as|'''bonus''' physical damage}}, halved to {{as|{{pp|key=%|50/2 to 100/2 for 6|1;4;7 to 13|formula=25% + 5% every 3 levels up to 7, then + 5% every 2 levels up to 13}} AD}} against {{tip|minion|minions}}.",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "|spelleffects = Proc",
+        "parry": "True",
+        "notes": "* With {{ii|Runaan's Hurricane}}, ''Love Tap'' only applies to the primary target.\n* The bonus damage applies {{sti|life steal|link=true}}.\n* The empowered attack will not trigger against [[buildings]]."
+      }
+    },
+    "Q": {
+      "id": "MissFortuneRicochetShot",
+      "name": "Double Up",
+      "description": "Miss Fortune fires a bullet at an enemy, damaging them and a target behind them. Both strikes can also apply Love Tap.",
+      "tooltip": "Miss Fortune fires a bouncing shot, dealing {{ totaldamagetooltip }} physical damage to an enemy and to another one behind them. \n\nThe second shot can critically strike for {{ totaldamagecrit }} physical damage. It always critically strikes if the first shot kills its target.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7/6/5/4/3",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "20/45/70/95/120",
+        "0",
+        "0",
+        "40",
+        "20",
+        "40",
+        "110",
+        "160",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Miss Fortune",
+        "skill": "Q",
+        "icon": "Double Up.png",
+        "blurb": "{{sbc|Active:}} {{ci|Miss Fortune}} fires a shot at the target enemy that deals {{as|physical damage}}, which then bounces to hit another enemy behind them. This applies {{tip|on-hit}} effects to both enemies hit.",
+        "blurb2": "''Double Up's'' bounce can {{tip|critically strike}}, and does so if ''Double Up'' kills the primary target.",
+        "description": "{{sbc|Active:}} '''Miss Fortune''' fires a shot at the target enemy that deals {{as|physical damage}}, which then bounces to hit another enemy behind them. This applies {{tip|on-attack}} effects to the first enemy hit, and {{tip|on-hit}} effects to both enemies hit.",
+        "leveling": "{{st|Physical Damage|{{ap|20 to 120}} {{as|(+ 100% AD)}} {{as|(+ 35% AP)}}}}",
+        "description2": "''Double Up's'' bounce is affected by {{tip|critical strike}} modifiers. If ''Double Up'' kills the primary target, the bounce will {{tip|critically strike}}.",
+        "description3": "''The bounce prioritizes units directly behind the primary target. A target does not have to be {{tip|sight|visible}} be hit by the bounce.''",
+        "cooldown": "{{ap|7 to 3}}",
+        "cost": "{{ap|43 to 55}}",
+        "cast time": "Basic Attack Timer",
+        "costtype": "Mana",
+        "target range": "{{tip|er|icononly = true}} Miss Fortune's {{sti|attack range}}",
+        "effect radius": "500",
+        "angle": "160{{degree}}",
+        "speed": "1400",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "Special",
+        "spelleffects": "special",
+        "projectile": "True",
+        "callforhelp": "true",
+        "onhiteffects": "True",
+        "parry": "True",
+        "notes": "* ''Double Up'' deals {{tip|basic damage}} to both targets, but also triggers spell effects by dealing an additional 0 {{tip|spell damage}}.\n* {{tip|Spell shield|Spell shields}} can be used by either target. If it is on the primary target, the spell shield will not prevent the shot from bouncing. \n* Neutral units count as valid targets to bounce.\n* The bounce follows a priority order on targets behind in a certain angle:\n*# 500 units in 20º.\n*# 500 units in 40º.\n*# 500 units in 110º.\n*# {{tt|150 units|Estimated}} in 160º.\n* ''Double Up's'' cast range adjusts based on '''Miss Fortune's''' {{sti|attack range}}, which can be increased by items such as {{ii|Rapid Firecannon}}.\n* The damage of a {{tip|critical strike|critically striking}} shot is {{ap|20*1.75 to 100*1.75}} {{as|(+ 175% AD)}} {{as|(+ 61.25% AP)}} {{as|physical damage}}, increased to {{ap|20*2.1 to 100*2.1}} {{as|(+ 210% AD)}} {{as|(+ 73.5% AP)}} {{as|physical damage}} by {{iis|Infinity Edge}} bonus critical damage.\n* If there is no secondary target, the shot will not bounce and the dud will instead fall to the ground.\n** The dud lands on the ground 176 units behind the primary target and has a missile speed of 400 on its way there.\n{{Unit-targeted cancel conditions}}"
+      }
+    },
+    "W": {
+      "id": "MissFortuneViciousStrikes",
+      "name": "Strut",
+      "description": "Miss Fortune passively gains Move Speed when not attacked. This ability can be activated to grant bonus Attack Speed for a short duration. While it's on cooldown, Love Taps reduce the remaining cooldown of Strut.",
+      "tooltip": "Passive: After {{ passivebasemsooc }} seconds of not taking damage, Miss Fortune gains {{ passivebasems }} Move Speed. After another {{ passivemaxmsextraooc }} seconds, this increases to {{ passivemaxms }}.\n\nActive: Gain the passive effect's full Move Speed bonus and {{ activeas*100 }}% Attack Speed for {{ activeduration }} seconds.\n\nLove Taps reduce the Cooldown of this Ability by {{ lovetaprefund }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "45",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Attack Speed",
+          "Move Speed",
+          "Max Move Speed"
+        ],
+        "effect": [
+          "{{ activeas*100.000000 }}% -> {{ activeasnl*100.000000 }}%",
+          "{{ passivebasems }} -> {{ passivebasemsNL }}",
+          "{{ passivemaxms }} -> {{ passivemaxmsNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Miss Fortune",
+        "skill": "W",
+        "icon": "Strut.png",
+        "blurb": "{{sbc|Passive:}} {{ci|Miss Fortune}} gains {{sti|ms|{{as|'''bonus''' movement speed}}}} after a few seconds without being attacked. This bonus is increased after another few seconds, and is granted instantly whenever ''Strut'' is cast.",
+        "blurb2": "Marking a new target with ''{{ai|Love Tap|Miss Fortune}}'' reduces ''Strut's'' cooldown.",
+        "blurb3": "{{sbc|Active:}} '''Miss Fortune''' gains {{sti|as|{{as|'''bonus''' attack speed}}}} for a few seconds.",
+        "description": "{{sbc|Passive:}} '''Miss Fortune''' gains {{sti|ms|{{as|'''bonus''' movement speed}}}} after 4 seconds without taking non-{{tip|persistent damage|persistent}} damage. This bonus is increased after another 3 seconds, and is granted instantly whenever ''Strut'' is cast or upon [[death|respawning]].",
+        "leveling": "{{st|Bonus Movement Speed|{{ap|30 to 50}}}}\n{{st|Increased Bonus Movement Speed|{{ap|60 to 100}}}}",
+        "icon2": "Guns Blazing.png",
+        "description2": "{{sbc|Active:}} '''Miss Fortune''' gains {{sti|as|{{as|'''bonus''' attack speed}}}} for 4 seconds.",
+        "leveling2": "{{st|Bonus Attack Speed|{{ap|40 to 100}}%}}",
+        "description3": "Marking a new target with ''{{ai|Love Tap|Miss Fortune}}'' reduces ''Strut's'' {{sti|'''current''' cooldown}} by {{tt|2 seconds|Affected by ability haste}}.",
+        "cooldown": "12",
+        "cast time": "none",
+        "cost": "45",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Self",
+        "notes": "* No additional notes."
+      }
+    },
+    "E": {
+      "id": "MissFortuneScattershot",
+      "name": "Make It Rain",
+      "description": "Miss Fortune reveals an area with a flurry of bullets, dealing waves of damage to opponents and slowing them.",
+      "tooltip": "Miss Fortune rains bullets, revealing an area, Slowing by {{ totalslowamount }} and dealing {{ totaldamagepersecond }} magic damage per second for {{ baseduration }} seconds (total {{ totaldamage }} magic damage).{{ spellmodifierdescriptionappend }}",
+      "cooldown": "18/17/16/15/14",
+      "cost": "80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage Per Second",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamagepersecond }} -> {{ basedamagepersecondNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Miss Fortune",
+        "skill": "E",
+        "icon": "Make It Rain.png",
+        "blurb": "{{sbc|Active:}} '''Miss Fortune''' casts a storm of bullets at the target location for a short time, which continually deals {{as|magic damage}} and {{tip|slow|slows}} enemies within.",
+        "description": "{{sbc|Active:}} '''Miss Fortune''' casts a storm of bullets at the target location for 2 seconds, granting {{tip|sight}} of the area, dealing {{as|magic damage}} every {{fd|0.25}} seconds to enemies within, and {{tip|slow|slowing}} them by 40% {{as|(+ 6% per 100 AP)}}.",
+        "leveling": "{{st|Magic Damage Per Tick|{{ap|70/8 to 190/8}} {{as|(+ {{ap|120/8}}% AP)}}|Total Magic Damage|{{ap|70 to 190}} {{as|(+ 120% AP)}}}}",
+        "description2": "''Make It Rain will cast at max range if cast beyond that.''",
+        "cooldown": "{{ap|18 to 14}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "80",
+        "costtype": "Mana",
+        "target range": "1000",
+        "effect radius": "200",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "False",
+        "spelleffects": "aoedot",
+        "notes": "* ''Make It Rain's'' {{tip|slow}} cannot be {{tip|cleanse|cleansed}}."
+      }
+    },
+    "R": {
+      "id": "MissFortuneBulletTime",
+      "name": "Bullet Time",
+      "description": "Miss Fortune channels a barrage of bullets into a cone in front of her, dealing large amounts of damage to enemies. Each wave of Bullet Time can critically strike",
+      "tooltip": "Miss Fortune channels a barrage of bullets, firing {{ basewaves }} waves over {{ basechannelduration }} seconds, dealing {{ physicaldamageperwave }} physical damage per wave (total {{ totalphysicaldamage }} physical damage).\n\nEach wave can critically strike for %i:scaleCrit% {{ critdamageperwave }} physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/110/100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "25000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Bullet Barrages",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basewaves }} -> {{ basewavesNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Miss Fortune",
+        "skill": "R",
+        "icon": "Bullet Time.png",
+        "blurb": "{{sbc|Active:}} '''Miss Fortune''' {{tip|channel|channels}} for a short time, firing several waves of bullets in the target direction that deal {{as|physical damage}} to enemies hit. Each wave can {{tip|critically strike}}.",
+        "description": "{{sbc|Active:}} '''Miss Fortune''' {{tip|channel|channels}} for up to 3 seconds, firing a number of waves of bullets in the target direction. Each wave is in a spread of 6 projectiles that deals {{as|75% AD}} {{as|(+ 25% AP)}} {{as|physical damage}} to enemies hit.",
+        "leveling": "{{st|Total Waves|{{ap|14 to 18}}|Maximum Total Physical Damage|{{as|{{ap|75*14 to 75*18}}% AD}} {{as|(+ {{ap|25*14 to 25*18}}% AP)}}}} {{st|Wave Interval Time| {{ap|2.85/(14 to 18)|round=4}}}}",
+        "description2": "Each of the waves can {{tip|critical strike|critically strike}} for {{as|{{critical damage|20}} '''bonus''' physical damage}}.",
+        "cooldown": "{{ap|120 to 100}}",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "cost": "100",
+        "costtype": "Mana",
+        "effect radius": "{{tt|1450|range of each bullet stream}}",
+        "width": "{{tt|40|width of each bullet stream}}",
+        "speed": "2000",
+        "angle": "{{tt|30{{degree}}|The effective angle is wider based the width of the missile streams + enemy size}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "False",
+        "spelleffects": "aoedot",
+        "projectile": "True",
+        "silence": "true",
+        "notes": "* The damage dealt by each wave of ''Bullet Time'' is calculated when the wave reaches the target.\n* '''Miss Fortune''' {{tip|sight|reveals}} herself for {{fd|4.5}} seconds if there is an enemy champion within the area.\n* Targets cannot be damaged by more than one projectile per wave.\n* The bullet streams that each fire 1 projectile per wave are spead by 6{{degree}} between one another, aiming towards the angles +-3/9/15{{degree}} from '''Miss Fortune's''' facing direction.\n* ''Bullet time'' picks 6 locations on the ground 500 units from '''Miss Fortune''' (with the aforementioned angles) and fires a bullet stream towards each.\n** If '''Miss Fortune''' is moved to a new location, these locations '''will''' update (since patch [[V13.3]]); the cone will fire towards her new facing direction.\n* ''Bullet time'' fires the first wave at {{rutngt|0.05}}, and the last at {{rutngt|2.9}}. Times between waves are equally spread between these values.\n** '''Miss Fortune''' may cancel the last ~{{fd|0.1}} seconds of channel time at no loss of effect.\n* The following table refers for interactions while '''Miss Fortune''' is {{tip|channel|channeling}}:\n{{ct|channel|attack=interrupts|cast=interrupts|move=interrupts|items=interrupts,true,,false|consume=true|spells=true,interrupts,interrupts,interrupts,interrupts}}"
+      }
+    }
+  }
+}

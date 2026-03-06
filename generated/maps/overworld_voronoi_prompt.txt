@@ -1,0 +1,32 @@
+Top-down fantasy campaign map, Mount & Blade style strategic overworld.
+
+Render goals:
+- Organic territorial regions with irregular Voronoi-like borders.
+- Territory size should visibly scale with faction power.
+- Soft terrain shapes and painterly, hand-drawn contour treatment.
+- Distinct frontier lines where hostile factions meet.
+- Roads connecting neighboring settlements and passes.
+- Show one player party route projection between two regions.
+
+World facts (from simulation):
+- Guild Compact: strength 180, cohesion 95, territory share ~52.2%
+- Iron Marches: strength 180, cohesion 95, territory share ~27.6%
+- River Concord: strength 180, cohesion 95, territory share ~20.2%
+
+- Roads in graph: 42
+- Terrain blend guidance: organic edge roughness 0.18, mean boundary complexity 4.91
+- Frontier guidance: 14 inter-faction front edges across 42 total edges
+
+Settlement anchors:
+- Dawn Spire 1 (Faction 0)
+- Dawn Fen 2 (Faction 0)
+- Rift Roads 12 (Faction 2)
+- Rift Crossing 7 (Faction 2)
+- Dawn Spire 18 (Faction 1)
+- Stone March 19 (Faction 1)
+
+Style:
+- Stylized 2D parchment + painted relief hybrid.
+- High readability, low clutter, no text labels embedded in image.
+- Faction colors should be distinct but slightly desaturated.
+- Avoid UI panels; output should be pure map art.

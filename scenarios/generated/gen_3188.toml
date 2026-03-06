@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0142_2v2_s2"
+seed = 22065
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["shaman", "warden"]
+enemy_hero_templates = ["Yasuo", "Akshan"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

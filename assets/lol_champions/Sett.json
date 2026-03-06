@@ -1,0 +1,288 @@
+{
+  "id": "Sett",
+  "name": "Sett",
+  "title": "the Boss",
+  "resource_type": "Grit",
+  "tags": [
+    "Fighter",
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Pit Grit",
+      "description": "Sett's basic attacks alternate between left and right punch. Right punch is slightly stronger and faster. Sett also hates losing, gaining additional health regeneration based off of his missing health.",
+      "wiki_detail": {
+        "disp_name": "Pit Grit",
+        "champion": "Sett",
+        "skill": "I",
+        "icon": "false",
+        "icon2": "Pit Grit.png",
+        "blurbicon": "Pit Grit.png",
+        "blurb": "{{sbc|Innate - Heart of the Half-Beast:}} {{ci|Sett}} {{sti|health regeneration|regenerates}} additional health based on {{as|his '''missing''' health}}.",
+        "blurb2": "{{sbc|Innate - Heavy Hands:}} '''Sett's''' basic attacks alternate between his {{as|Left Punch|armor}} and a {{as|Right Punch|buzzword3}}. His {{as|Right Punch|buzzword3}} attacks more quickly with {{sti|range|'''bonus''' range}} and deals {{as|'''bonus''' physical damage}}.",
+        "description": "{{sbc|Innate - Heart of the Half-Beast:}} '''Sett''' {{sti|health regeneration|link=true|regenerates}}{{ft|an additional {{as|{{pp|0.15;0.5;1;2|1 to 16 for 4}} health}} per second for every {{sti|{{as|5% of his '''missing''' health}}}}.|up-to {{as|{{pp|0.15*19;0.5*19;1*19;2*19|1 to 16 for 4}} health}} per second (maximum reached at {{sti|{{as|95% '''missing''' health}}}}).}}",
+        "description2": "{{sbc|Innate - Heavy Hands:}} '''Sett's''' [[basic attack]]s alternate between his {{as|Left Punch|armor}} and a {{as|Right Punch|buzzword3}} {{tip|on-attack}}. '''Sett''' begins attacking with his {{as|Left Punch|armor}}, and will reset back to it after 2 seconds of not performing a {{as|Right Punch|buzzword3}}.",
+        "description3": "'''Sett's''' {{as|Right Punch|buzzword3}} is empowered to gain {{sti|range|50 '''bonus''' range}} (unless ''{{ai|Knuckle Down|Sett}}'' is active), attack at 8 times the {{as|Left Punch's|armor}} {{as|attack speed}}, and deal {{as|{{pp|5 to 90}}|physical damage}} {{as|(+ 55% '''bonus''' AD)}} {{as|'''bonus''' physical damage}}.",
+        "targeting": "Passive",
+        "affects": "Self, Enemies",
+        "damagetype": "physical",
+        "spellshield": "|spelleffects = Proc",
+        "occurrence": "|projectile   =",
+        "grounded": "|knockdown    =",
+        "parry": "true",
+        "video": "|notes        = \n* The {{as|Right Punch|buzzword3}} does not grant {{as|{{sti|'''bonus''' attack speed}}}}, rather its windup is sped up and fixed at {{ft|{{fd|12.5%}} of a {{as|Left Punch's|armor}} windup time.|800% of a {{as|Left Punch's|armor}} windup speed.}}\n** The windup is still affected by {{tip|cripple|cripples}} and attack speed buffs that were not already active for the previous {{as|Left Punch's|armor}}.\n* The bonus physical damage from the {{as|Right Punch|buzzword3}} benefits from {{stil|life steal}}."
+      }
+    },
+    "Q": {
+      "id": "SettQ",
+      "name": "Knuckle Down",
+      "description": "Sett's next two attacks deal additional damage based off of the target's max health. Sett also gains Move Speed while moving towards enemy champions.",
+      "tooltip": "Sett itches for a fight, gaining {{ msamount*100 }}% Move Speed towards enemy champions for {{ msduration }} seconds.\n\nAdditionally Sett's next two Attacks deal an additional {{ basedamage }} plus {{ maxhealthdamagecalc }} max Health physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9/8/7/6/5",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "0",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Base Damage",
+          "% Max Health Per 100 AD"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ maxhealthtadratiotooltip }}% -> {{ maxhealthtadratiotooltipNL }}%"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "disp_name": "Knuckle Down",
+        "champion": "Sett",
+        "skill": "Q",
+        "icon": "Knuckle Down.png",
+        "blurb": "{{sbc|Active:}} {{ci|Sett}} empowers his next two basic attacks within a few seconds to gain {{sti|'''bonus''' range}} and deal {{as|'''bonus''' physical damage}} based on the {{as|target's '''maximum''' health}}.",
+        "blurb2": "He also briefly gains {{sti|ms|{{as|'''bonus''' movement speed}}}} while moving toward enemy {{tip|champions}}.",
+        "description": "{{sbc|Active:}} '''Sett''' empowers his next two basic attacks within 5 seconds to gain {{sti|50 '''bonus''' range}} and deal {{as|'''bonus''' physical damage}}, capped at 400 '''total''' damage of each attack against {{tip|monsters}}.",
+        "leveling": "{{st|Bonus Physical Damage|{{ap|10 to 50}} {{as|(+ 1% {{as|(+ {{ap|1 to 3}}% per 100 AD)}} of target's '''maximum''' health)}}|Total Bonus Physical Damage|{{ap|10*2 to 50*2}} {{as|(+ 2% {{as|(+ {{ap|1*2 to 3*2}}% per 100 AD)}} of target's '''maximum''' health)}}}}",
+        "icon2": "Looking for a Fight.png",
+        "description2": "For {{fd|1.5}} seconds, '''Sett''' also gains {{sti|movement speed|{{as|30% '''bonus''' movement speed}}}} while facing {{tip|sight|visible}} enemy {{tip|champions}} within 2000 units.",
+        "description3": "''Knuckle Down {{tip|basic attack reset|resets}} '''Sett's''' basic attack timer. The empowered attacks are guaranteed to be a {{as|Left Punch|Armor}} followed by a {{as|Right Punch|buzzword3}}, resetting '''Sett's''' current {{ai|Pit Grit|Sett}} state (if applicable) and ignoring the usual time-out period for a follow-up {{as|Right Punch|buzzword3}}.''",
+        "cooldown": "{{ap|9 to 5}}",
+        "cdstart": "post-effect",
+        "targeting": "Auto",
+        "affects": "Self, Enemies",
+        "cast time": "none",
+        "damagetype": "Physical",
+        "spellshield": "False",
+        "spelleffects": "spell",
+        "occurrence": "|projectile   =",
+        "parry": "special",
+        "grounded": "|knockdown    =",
+        "video": "|notes        = \n* The bonus movement speed buff is named ''Looking For a Fight''.\n* ''Knuckle Down'' can be {{tip|dodged}}, {{tip|blocked}} or missed while '''Sett''' is {{tip|blind|blinded}}."
+      }
+    },
+    "W": {
+      "id": "SettW",
+      "name": "Haymaker",
+      "description": "Sett passively stores damage he takes as Grit. On cast, Sett expends all stored Grit to gain a shield and punch an area, dealing true damage in the center and physical damage on the sides.",
+      "tooltip": "Passive: Sett stores {{ damagestored*100 }}% of damage taken as Grit, up to {{ maxgrit }}. Grit decays quickly {{ adrenalinestoragewindow }} seconds after the damage was taken.\n\nActive: Sett consumes all Grit, gaining a {{ shieldconversion*100 }}% Grit consumed Shield decaying over {{ shieldmaxduration }} seconds. Sett then delivers a massive punch, dealing {{ damagecalc }} plus {{ damageconversion }} Grit consumed true damage to enemies in the center (max {{ f1 }} damage). Enemies not in the center instead take physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "18/16.5/15/13.5/12",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "25000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Base Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "disp_name": "Haymaker",
+        "champion": "Sett",
+        "skill": "W",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} {{ci|Sett}} stores ''Grit'' equal to damage taken, which gradually expires after a few seconds.",
+        "blurb2": "{{sbc|Active:}} '''Sett''' converts his current ''Grit'' into a {{tip|shield}} that decays over a short time. He also unleashes a blast in a cone in the target direction that deals {{as|physical damage}} to enemies hit based on his expended ''Grit''. Enemies hit in a center line are dealt {{as|true damage}} instead.",
+        "description": "{{sbc|Passive:}} '''Sett''' stores 100% of {{tt|post-mitigation damage|Damage calculated after resistances and modifiers.}} taken as ''Grit'' on his resource bar, up to a cap of {{as|50% of his '''maximum''' health}}. Each instance of stored ''Grit'' decays in value by 30% every second after 4 seconds.",
+        "icon2": "Haymaker.png",
+        "description2": "{{sbc|Active:}} '''Sett''' charges up a strike over the cast time. Additionally, he immediately consumes all of his stored ''Grit'' to grant himself a {{tip|shield}} at the start of the cast time that is equal to the expended ''Grit'' for 3 seconds, decaying in strength over the duration after {{fd|0.75}} seconds.",
+        "description3": "After the cast time, he unleashes a blast in a cone in the target direction that deals {{as|physical damage}} to enemies hit; those hit in a center line are dealt {{ccs|{{sti|{{as|true damage}}}}|true}} instead.",
+        "leveling3": "{{st|Damage|{{ap|80 to 160}} (+ 25% {{as|(+ 25% per 100 '''bonus''' AD)}} of expended ''Grit'')}}",
+        "cast time": "{{fd|0.75}}",
+        "range": "{{tip|er|icononly = true}} {{tt|725|Inner true damage rectangle reach, center-to-edge range}}",
+        "width": "{{tip|er|icononly = true}} {{tt|60|Inner true damage rectangle width, center-to-edge range}}",
+        "angle": "27{{degree}}",
+        "cost": "100%",
+        "costtype": "'''Current''' Grit",
+        "cooldown": "{{ap|18 to 12}}",
+        "targeting": "Direction",
+        "affects": "Self, Enemies",
+        "damagetype": "{{tip|physical damage|{{as|Physical damage}}}} / {{tip|True damage|{{as|True damage}}}}",
+        "spellshield": "True",
+        "spelleffects": "aoe",
+        "occurrence": "|projectile   = false",
+        "grounded": "|knockdown    =",
+        "parry": "|video        =",
+        "notes": "* {{pending for test}} Trapezoid effect hitbox geometry values, backwards range (true damage rectangle does NOT start at 0 distance from Sett; doesn't have as much reach backwards while still being edge range).\n* The shield is granted at the start of the cast time and will decay afterwards.\n** The buff for the shield is named ''Down But Not Out''.\n* '''Sett''' does not store ''Grit'' from damage that was mitigated by {{tip|shield|shields}}.\n{{Effect at cast time end}}\n* '''Sett''' will turn towards the target direction at the start of the cast time.\n* '''Sett''' will glow when attaining 90% ''Grit''. Casting ''Haymaker'' at this amount has a different visual and audio effect.\n[[File:90%_Grit_Sett.png|thumb|left|'''Sett''' will turn {{color|#FFDF00|'''golden'''}} ''(base skin)''.]]"
+      }
+    },
+    "E": {
+      "id": "SettE",
+      "name": "Facebreaker",
+      "description": "Sett pulls in all enemies on opposite sides of him, dealing damage and stunning them. If enemies were only on one side, they are slowed instead of stunned.",
+      "tooltip": "Sett smashes enemies on either side of him into each other, dealing {{ damagecalc }} physical damage and Slowing them by {{ slowamount*100 }}% for {{ slowduration }} seconds. If Sett grabbed at least one enemy on each side, all enemies are Stunned for {{ stunduration }} second.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16/14.5/13/11.5/10",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "490",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Base Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "disp_name": "Facebreaker",
+        "champion": "Sett",
+        "skill": "E",
+        "icon": "Facebreaker.png",
+        "blurb": "{{sbc|Active:}} {{ci|Sett}} {{tip|airborne|pulls in}} enemies along the target direction from both sides of himself, dealing {{as|physical damage}} and briefly {{tip|slow|slowing}}.",
+        "blurb2": "If ''Facebreaker'' affects at least one enemy on each side, all enemies are also briefly {{tip|stun|stunned}}.",
+        "description": "{{sbc|Active:}} '''Sett''' {{tip|airborne|pulls in}} enemies at his front and back along the target direction, dealing {{as|physical damage}} and {{tip|slow|slowing}} them by 70% for {{fd|0.5}} seconds. ''Facebreaker'' deals {{as|100 '''bonus''' physical damage}} to {{tip|monsters}}.",
+        "leveling": "{{st|Physical Damage|{{ap|50 to 130}} {{as|(+ 60% AD)}}}}\n{{st|Monster Physical Damage|{{ap|50+100 to 130+100}} {{as|(+ 60% AD)}}}}",
+        "description2": "If ''Facebreaker'' affects at least one enemy on each side, all enemies are {{tip|stun|stunned}} for 1 second upon landing.",
+        "description3": "If no enemies are hit, '''''Sett''' is unable to move or attack for {{fd|0.25}} seconds after Facebreaker's cast time.''",
+        "range": "{{tip|er|icononly = true}} {{tt|450|In front and behind of Sett, center-to-edge range}}",
+        "width": "{{tip|er|icononly = true}} {{tt|280|Rectangle width, center-to-edge range}}",
+        "cooldown": "{{ap|16 to 10}}",
+        "cast time": "{{fd|0.25}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "true",
+        "spelleffects": "aoe",
+        "occurrence": "|projectile   = False",
+        "grounded": "|knockdown    =",
+        "parry": "|video        =",
+        "notes": "* '''Sett''' will afterwards attempt to basic attack the closest target picked up by ''Facebreaker'', prioritising champions and prioritising those in front of him.\n* Targets will be pulled towards '''Sett's''' location in a straight line and rebound to 150 units from him back in the same line.\n* The [[spell indicator]] is slightly shorter than the actual hitbox' rectangle length, and slightly wider than the width (note that the effects are edge-range from the hitbox rectangle).\n* Targets protected by {{tip|spell shield|spell shields}} don't count toward the requirement to {{tip|stun}}.\n{{Effect at cast time end}}\n{{ct|cast|spells=true,false,false,false,false}}",
+        "flavorsound": "{{sm2|Sett_Original_E_1.ogg}} ''\"Facebreaker!\"''"
+      }
+    },
+    "R": {
+      "id": "SettR",
+      "name": "The Show Stopper",
+      "description": "Sett carries an enemy champion through the air and slams them into the ground, dealing damage and slowing all enemies near where they land.",
+      "tooltip": "Sett grabs an enemy champion and Suppresses them as he carries them forward, then slams them into the ground, dealing {{ damagecalc }} plus {{ maxhealthdamage*100 }}% of the grabbed enemy's bonus Health physical damage to surrounding enemies and Slowing them by {{ slowamount*100 }}% for {{ slowduration }} second. Enemies take less damage the further they are from where Sett lands.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "400",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Bonus Health Damage",
+          "Base Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ maxhealthdamage*100.000000 }}% -> {{ maxhealthdamagenl*100.000000 }}%",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "disp_name": "The Show Stopper",
+        "champion": "Sett",
+        "skill": "R",
+        "icon": "The Show Stopper.png",
+        "blurb": "{{sbc|Active:}} {{ci|Sett}} {{tip|suppression|carries}} the target enemy {{tip|champion}} and {{tip|dash|dashes}} through the air with {{tip|displacement immunity}}, then slams them into the ground to deal {{as|physical damage}} to nearby enemies based on the {{as|target's '''bonus''' health}}. Enemies hit are also briefly {{tip|slow|slowed}}.",
+        "blurb4": "{{sbc|{{tip|displacement immunity|nolink=true}}:}} The dash cannot be deterred by {{tip|crowd control}}.",
+        "description": "{{sbc|Active:}} '''Sett''' {{tip|suppression|suppresses}} and {{tip|true sight|reveals}} the target enemy {{tip|champion}} while {{tip|dash|dashing}} with {{tip|displacement immunity}} to their location and {{tip|attach|attaching}} them to himself upon arrival. He leaps another 600 units in the same direction to slam the target into the ground, creating a massive shockwave and quickly {{tip|dash|sliding}} forward 250 units beyond the impact.",
+        "description2": "Enemies within {{tt|the epicenter|125 unit radius around the target's landing location, but not the true center of the area of effect}} take {{ccs|{{as|physical damage}}|physical}}, and other enemies hit by the shockwave take {{as|physical damage}} that is reduced by up to 75% based on proximity. All targets hit are {{tip|slow|slowed}} by 99% for 1 second.",
+        "leveling2": "{{st|Physical Damage|{{ap|200 to 400}} {{as|(+ 120% '''bonus''' AD)}} {{as|(+ {{ap|40 to 60}}% of primary target's '''bonus''' health)}}|Reduced Damage|{{ap|200*0.25 to 400*0.25}} {{as|(+ 30% '''bonus''' AD)}} {{as|(+ {{ap|40*0.25 to 60*0.25}}% of primary target's '''bonus''' health)}}}}",
+        "description3": "''The dash will end and create the impact prematurely upon encountering terrain that cannot be dashed through, whether by distance or invalid space.''",
+        "cooldown": "{{ap|120 to 80}}",
+        "target range": "{{tip|cr|icononly = true}} 400",
+        "cast time": "none",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|600|From Sett's own final landing destination (may be a bug)}}",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "physical",
+        "spellshield": "true",
+        "spelleffects": "aoe",
+        "occurrence": "|projectile   =",
+        "grounded": "true",
+        "knockdown": "False",
+        "parry": "|video        =",
+        "notes": "* At maximum cast range and if the dash is not shortened due to terrain in '''Sett's''' way, ''The Show Stopper's'' movement takes {{fd|1.5}} seconds, causing the slam {{tt|within {{fd|1.23}} seconds.|Estimated}}\n* '''Sett''' will dash from ''The Show Stopper'' even if the target resists the {{tip|attach|attachment}} or detaches from him, which can be done so by negating or removing the {{tip|suppression}}. This includes if the target:\n** Has a {{tip|spell shield}}.\n** Is {{tip|cc-immune|crowd control immune}} or {{tip|displacement immune}}.\n** Uses a {{tip|cleanse|cleansing}} effect, either before or after the attachment.\n** {{tip|Death|Dies}} or enters {{tip|resurrection}}.\n** Is {{ai|Devour|Tahm Kench|Devoured}}.\n* '''Sett''' will only attach the target to him if they are still suppressed upon his arrival.\n* If the dash is interrupted, the target will be detached from '''Sett''' and the suppression will end immediately.\n** If '''Sett''' enters {{tip|resurrection}} the moment before the attachment, '''Sett''' will continue to perform the dash.{{bug}}\n* If the target is {{tip|untargetable}} upon '''Sett's''' arrival, he will stop the dash immediately.\n* If the target is 2000 or more units away before '''Sett's''' arrival, he will not attach them to him. The {{tip|suppression}} will last 5 seconds in this case.{{bug}}\n* The \"crater\" VFX originates from the target's landing, which inaccurately illustrates the damage's area of effect (from Sett).{{bug|2}}",
+        "flavorsound": "{{sm2|Sett_Original_R_0.ogg}} ''\"This is gonna hurt!\"''"
+      }
+    }
+  }
+}

@@ -1,0 +1,297 @@
+{
+  "id": "Gangplank",
+  "name": "Gangplank",
+  "title": "the Saltwater Scourge",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Trial by Fire",
+      "description": "Every few seconds, Gangplank's melee strike will set his opponent on fire.",
+      "wiki_detail": {
+        "champion": "Gangplank",
+        "skill": "I",
+        "icon": "Gangplank Trial by Fire.png",
+        "blurbicon": "Gangplank Trial by Fire.png",
+        "blurb": "{{sbc|Innate:}} Every few seconds, Gangplank's next basic attack will burn the target, continually dealing {{as|'''bonus''' true damage}} and granting him {{sti|ms|{{as|'''bonus''' movement speed}}}}.",
+        "blurb2": "Whenever a ''{{ai|Powder Keg|Gangplank}}'' explodes, ''Trial by Fire's'' cooldown will {{sti|ah|reset}} and '''Gangplank''' will gain the {{as|movement speed}}.",
+        "description": "{{sbc|Innate:}} Periodically, '''Gangplank''' empowers his next [[basic attack]] to set the target on fire, dealing them{{ft|{{pp|50 to 250|color=true damage}} {{as|(+ 100% '''bonus''' AD)}} {{as|(+ 2 per 1% critical strike chance)}} {{sti|{{as|'''bonus''' true damage}}}} over {{fd|2.5}} seconds.|{{pp|50/10 to 250/10|color=true damage}} {{as|(+ 10% '''bonus''' AD)}} {{as|(+ {{fd|0.2}} per 1% critical strike chance)}} {{sti|{{as|'''bonus''' true damage}}}} every {{fd|0.25}} seconds over {{fd|2.5}} seconds.}}{{tip|turret|Turrets}} are dealt 50% damage.",
+        "icon2": "Gangplank Trial by Fire 2.png",
+        "description2": "If '''Gangplank''' successfully hits a target with ''Trial by Fire'', he gains {{sti|ms|{{as|{{pp|15 to 30|key=%}} '''bonus''' movement speed}}}} for 2 seconds. Every time a ''{{ai|Powder Keg|Gangplank}}'' explodes, the {{sti|cooldown}} for ''Trial by Fire'' resets and '''Gangplank''' gains its {{as|'''bonus''' movement speed}}.",
+        "description3": "''Trial by Fire cannot be applied with {{ai|Parrrley|Gangplank}} nor {{ai|Powder Keg|Gangplank}}.''",
+        "static": "15",
+        "targeting": "Passive",
+        "affects": "Self, Enemies",
+        "damagetype": "True",
+        "spellshield": "False",
+        "spelleffects": "default",
+        "parry": "unknown",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* Reapplying ''Trial by Fire'' before a previous application has run out will stack the full damage, instead of refreshing the duration.\n* The bonus true damage scaling based on critical strike chance is capped at 100% of the stat.\n* If the attack is {{tip|dodge|dodged}} or if '''Gangplank''' is {{tip|blind|blinded}}, the effect is not applied nor does ''Trial by Fire'' go on cooldown. If the attack is {{tip|block|blocked}}, the effect is not applied, but ''Trial by Fire'' will go on cooldown.\n* The empowered attack will not trigger against non-{{tip|turret}} [[:Category:Structure|structures]] nor [[ward]]s."
+      }
+    },
+    "Q": {
+      "id": "GangplankQWrapper",
+      "name": "Parrrley",
+      "description": "Shoots target, plundering Gold for each enemy unit killed.",
+      "tooltip": "{{Spell_GangplankQWrapper_Tooltip_{{ gamemodeinteger }}}}{{ spellmodifierdescriptionappend }}",
+      "cooldown": "4.5",
+      "cost": "50/45/40/35/30",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "625",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "10/40/70/100/130",
+        "3/4/5/6/7",
+        "0",
+        "500",
+        "4/5/6/7/8",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Plunder Gold",
+          "Plunder Silver Serpents",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ spelldamage }} -> {{ spelldamageNL }}",
+          "{{ e2 }} -> {{ e2NL }}",
+          "{{ e5 }} -> {{ e5NL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Gangplank",
+        "skill": "Q",
+        "icon": "Parrrley.png",
+        "blurb": "{{sbc|Active:}} {{ci|Gangplank}} shoots the target enemy with his pistol, dealing {{as|physical damage}} and applying {{tip|on-hit}} and {{tip|on-attack}} effects.",
+        "blurb2": "If this attack kills the target, he gains {{g|gold}} and {{ai|Silver Serpents|Gangplank}}.",
+        "description": "{{sbc|Active:}} '''Gangplank''' fires a shot at the target enemy that deals {{as|physical damage}} and applies {{tip|on-hit}} and {{tip|on-attack}} effects at 100% effectiveness as a {{tip|ranged}} attack. ''Parrrley'' can {{tip|critically strike}} for {{critical damage|{{ccd|Gangplank|crit_base}}|100}} '''total''' damage.",
+        "leveling": "{{st|Physical Damage|{{ap|10 to 130}} {{as|(+ 100% AD)}}}}",
+        "icon2": "Silver Serpents.png",
+        "description2": "If ''Parrrley'' kills the target, '''Gangplank''' plunders {{g|gold}} and ''{{ai|Silver Serpents|Gangplank}}''. Each enemy killed by a ''{{ai|Powder Keg|Gangplank}}'' explosion that was originally set off by ''Parrrley'' also counts for the plunder.",
+        "leveling2": "{{st|Gold Plunder|{{g|{{ap|3 to 7}}}}}}\n{{st|Silver Serpent Plunder|{{ai|Silver Serpents|Gangplank|icononly=yes}} {{ap|4 to 8}}}}",
+        "description3": "''{{ai|Silver Serpents|Gangplank}}'' can be spent in the [[shop]] to upgrade ''{{ai|Cannon Barrage|Gangplank}}''.",
+        "target range": "{{tip|cr|icononly = true}} 625",
+        "speed": "{{tt|2600|Missile speed}}",
+        "cooldown": "{{fd|4.5}}",
+        "cost": "{{ap|55 to 35}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "affects": "Enemies, Self",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "basic",
+        "projectile": "True",
+        "parry": "True",
+        "onhiteffects": "True",
+        "callforhelp": "True",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Parrrley'' deals {{tip|basic damage}}, but also triggers spell effects by dealing an additional 0 {{tip|spell damage}}.\n* {{tip|On-hit}} effects that deal damage to secondary targets will allow ''Parrrley'' to plunder from enemies killed that way, much like with {{ai|Powder Keg|Gangplank|Powder Kegs}}.\n** {{ii|Ravenous Hydra}} and {{ii|Titanic Hydra}} work like this and will grant additional plunder from enemies they kill when triggered by ''Parrrley'' as their {{tip|cast instance}}.\n** Even spell effects such as {{ii|Luden's Companion}} will work with this when triggered by ''Parrrley'' as their {{tip|cast instance}}. Spell effects that do not belong to their triggering cast instance, such as {{iis|Liandry's Torment}} damage debuff, do not grant plunder for enemies they kill.\n{{Unit-targeted cancel conditions}}"
+      }
+    },
+    "W": {
+      "id": "GangplankW",
+      "name": "Remove Scurvy",
+      "description": "Eats citrus to cure crowd control effects and restore Health.",
+      "tooltip": "Gangplank consumes a large amount of citrus fruit, removing all Disabling effects and restoring {{ basehealth }} plus {{ e2 }}% missing Health.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "22/20/18/16/14",
+      "cost": "60/70/80/90/100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "45/70/95/120/145",
+        "13",
+        "0.25",
+        "200",
+        "30/40/50/60/70",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Healing",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Gangplank",
+        "skill": "W",
+        "icon": "Remove Scurvy.png",
+        "blurb": "{{sbc|Active:}} {{ci|Gangplank}} eats citrus to {{tip|cleanse}} {{tip|crowd control}} effects and {{tip|heal}} based on {{as|his '''missing''' health}}.",
+        "description": "{{sbc|Active:}} '''Gangplank''' consumes a large quantity of citrus fruit, {{tip|cleanse|cleansing}} himself from all {{tip|crowd control}} and {{tip|heal|healing}} himself.",
+        "leveling": "{{st|Heal|{{ap|45 to 145}} {{as|(+ 90% AP)}} {{as|(+ 13% '''missing''' health)}}}}",
+        "cooldown": "{{ap|22 to 14}}",
+        "cost": "{{ap|60 to 100}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "Heal",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* ''Remove Scury'' does not remove [[debuff]]s other than {{tip|crowd control}}, even if both occur from the same effect. For example, ''Remove Scurvy'' will dispel the {{tip|slow}} from {{si|Exhaust}}, but not its [[damage modifier|damage reduction]].\n* ''Remove Scurvy'' can remove the underlying {{tip|stun}} from {{tip|airborne}}, but a {{tip|blink}} or {{tip|dash}} ability is required to override the displacement."
+      }
+    },
+    "E": {
+      "id": "GangplankE",
+      "name": "Powder Keg",
+      "description": "Gangplank uncovers a powder keg at target location. If he attacks it, it explodes, spreading the attack's damage to enemies in the area, slowing them.",
+      "tooltip": "Gangplank places a powder keg that can be attacked by Gangplank and enemy champions for {{ e5 }} seconds. When an enemy destroys it, the keg is defused. When Gangplank destroys it, it explodes, Slowing by {{ finalslowamount }}% for {{ e2 }} seconds and dealing the Attack's damage, ignoring {{ e0 }}% Armor. Champions take an additional {{ e3 }} physical damage.\n\nKeg health decays every {{ barreldecaytime }} seconds. Keg explosions detonate other kegs with overlapping blast zones, but don't deal damage to the same target more than once. Keg explosions triggered by Parrrley will grant the bonus gold for targets killed.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "1000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "3/3/4/4/5",
+        "2",
+        "75/95/115/135/155",
+        "40/50/60/70/80",
+        "25",
+        "2",
+        "10",
+        "100",
+        "0.5",
+        "40"
+      ],
+      "leveltip": {
+        "label": [
+          "Bonus Damage Against Champions",
+          "Max Charges",
+          "Slow",
+          "Recharge Time"
+        ],
+        "effect": [
+          "{{ e3 }} -> {{ e3NL }}",
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ barrelslow }}% -> {{ barrelslowNL }}%",
+          "{{ ammorechargetime }} -> {{ ammorechargetimeNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Gangplank",
+        "skill": "E",
+        "blurb": "{{sbc|Active:}} {{ci|Gangplank}} places a ''Powder Keg'' at the target location, which can be basic attacked or {{ai|Parrrley|Gangplank|shot}} to damage it. If an enemy destroys a ''Powder Keg'', it is safely dismantled.",
+        "blurb2": "If '''Gangplank''' destroys a ''Powder Keg'', it will explode to deal the {{as|attack's damage|pdamage}} to nearby enemies and {{tip|slow}} them. Against an enemy {{tip|champion}}, the explosion additionally deals {{as|'''bonus''' physical damage}} and ignores a {{sti|armor penetration|{{as|portion of their armor}}}}.<br/><br/>\nThe explosion will cause nearby ''Powder Kegs'' to also explode.",
+        "blurb3": "'''Gangplank''' stocks a ''Powder Keg'' every few seconds, up to a maximum.",
+        "icon": "Powder Keg.png",
+        "description": "{{sbc|Active:}} '''Gangplank''' consumes a charge to place a powder keg at the target location that lasts for 25 seconds and will connect to other kegs with overlapping connection radius through a trail of black powder. The keg starts with {{as|3 health}} and loses {{as|1|health}} every {{pp|2;1;0.5|1;7;13}} seconds until it is left with {{as|1 health}}.",
+        "description2": "'''Gangplank''' periodically [[stock]]s a ''Powder Keg'' charge, up to a maximum.",
+        "leveling2": "{{st|Maximum charges|{{ap|3|3|4|4|5}}}}",
+        "description3": "Kegs can be [[basic attack]]ed by enemies or '''Gangplank''' (including his ''{{ai|Parrrley|Gangplank}}''), dealing 1 damage to it. When an enemy destroys it, it is safely defused. When '''Gangplank''' destroys it, it explodes and also triggers a chain reaction that explodes other nearby connected kegs with a {{rutngt|0.3}}-delay between explosions. The explosions also grant {{tip|sight}} of their radiuses for 2 seconds.",
+        "description4": "Enemies caught in an explosion are {{tip|slow|slowed}} for 2 seconds, and are dealt the triggering {{as|attack's damage}}, dealing {{as|'''bonus''' physical damage}} against {{tip|champion|champions}}. Each enemy can only be hit once per chain and the damage dealt ignores {{sti|armor penetration|{{as|40% of the target's armor}}}}.",
+        "leveling4": "{{st|Slow|{{ap|40 to 80}}%}}\n{{st|Bonus Champion Damage|{{ap|75 to 195}}}}",
+        "description5": "If the triggering attack was a {{tip|critical strike}}, the explosions deal 5% more damage on top of the critical damage.",
+        "target range": "1000",
+        "effect radius": "{{tt|345|Connection radius}} / {{tip|cr|icononly = true}} {{tt|360|Explosion radius}}",
+        "cost": "1",
+        "costtype": "Charge",
+        "cast time": "{{fd|0.25}}",
+        "recharge": "{{ap|18 to 14}}",
+        "static": "{{fd|0.5}}",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* The triggering attack's damage can include {{ai|Parrrley|Gangplank}}'s base damage and {{tip|Spellblade}}.\n* When triggered with critical strike, ''Spellblade'' and the bonus damage to champions are added after the calculations, meaning that these effects are not increased by 5%.\n* The total damage can be easily calculated with this formula:<br>{aDMG * [1.75 ({{ii|Infinity Edge|+ 0.45}})] * 1.05} + sDMG + cDMG<br>Where:\n** aDMG = Triggering attack's damage\n** sDMG = Spellblade's damage\n** cDMG = Bonus damage to champions\n* Kegs have special interactions with {{tip|Spellblade}}:\n** If the keg destroying attack was empowered with ''Spellblade'', its damage will be added to the explosions' damage.\n** If the keg was not destroyed, it will consume the effect and the keg will store the damage it would have dealt. If the storing keg is the initial detonation of the chain, it will add its damage to the explosions' damage as if it was triggered with ''Spellblade''.\n** If the storing keg was attacked with a new instance of ''Spellblade'', it will override the previously stored damage (if different).\n** Damage can only be stored if ''Spellblade'' was consumed by '''Gangplank'''.\n** The stored damage is static and will not change if '''Gangplank's''' '''base''' attack damage or ability power (see below) changes. \n* Specific {{tip|Spellblade}} item interactions:\n** {{ii|Trinity Force}}: Attacking kegs or dealing damage to champions with the explosion does not increase the {{as|base attack damage}}.\n** {{ii|Lich Bane}}: The {{as|magic damage}} will be added to the explosions' damage, but will be dealt as {{as|physical damage}}.\n** {{ii|Essence Reaver}}: Consuming the effect on kegs will restore {{as|mana}}. Explosions does not trigger this.\n* Placed barrels do '''not''' grant {{tip|sight|vision}} until they explode, but they are revealed to '''Gangplank'''.\n** If '''Gangplank''' loses allied vision, for instance due to {{tip|nearsight}}, he will also lose vision on his barrels temporarily.\n** Barrels prematurely grant {{tip|sight}} of their explosion radius (including across terrain and into bushes) if {{ai|Parrrley|Gangplank}} or a lit fuse is travelling towards them.\n*** This area reveal happens even if {{ai|Parrrley|Gangplank}} is not going to make it explode.\n* An exploding ''Powder Keg'' will splash {{ais|Parrrley|Gangplank}} '''bonus''' damage, and will also be modified if the attack {{tip|critical strike|critically strikes}}.\n* Attacks against ''Powder Kegs'' will apply [[on-hit]] effects (such as {{iis|Tiamat}} {{nie|Cleave}}), but {{tip|proc damage}} against the barrel itself is reduced to 0.\n** Damage from [[on-hit]] effects will '''not''' increase the damage of the explosion.\n** {{tip|Spellblade}} is a {{tt|special-cased exception|Since late Season 9 - previously, Spellblade worked simply because it would add to the attack's damage directly}}.\n* {{iis|Dead Man's Plate}} {{nie|Crushing Blow}} will not trigger from ''Powder Kegs'' destroyed from '''Gangplank''', even with {{ai|Parrrley|Gangplank}}.\n* The number of ''Powder Kegs'' in stock is visible under '''Gangplank's''' [[health bar]] for all players.\n* '''Gangplank''' stocks ''Powder Kegs'' even if the ability hasn't been learned yet.\n** This is due to the recharge rate at level 1 being set the same as level 0.\n** While at maximum charges, ranking up the ability to rank 3 or 5 grants the remaining charge immediately regardless of the recharge timer.\n* If a barrel is destroyed during the {{rutngt|0.3}}-delay between explosions, '''Gangplank''' will plunder {{g|gold}} and ''{{ai|Silver Serpents|Gangplank}}'' upon killing enemies as if he had done so using {{ai|Parrrley|Gangplank}}.{{bug|1}}\n** This effect persists through {{tip|death}} and will only end upon killing an enemy with {{ai|Parrrley|Gangplank}}."
+      }
+    },
+    "R": {
+      "id": "GangplankR",
+      "name": "Cannon Barrage",
+      "description": "Gangplank signals his ship to bombard an area, slowing and damaging enemies.",
+      "tooltip": "Gangplank signals his ship to fire {{ totalwavestooltip }} waves of cannonballs anywhere on the map over {{ zoneduration }} seconds. Each wave Slows by {{ slowpercent }}% for {{ slowduration }} seconds and deals {{ onewavedamage }} magic damage. Maximum damage: {{ totaldamagetooltip }}\n\nThis Ability can be upgraded in the shop via Parrrley.\n\nFire at Will: Fires 6 additional waves of cannonballs.\nDeath's Daughter: Fires a Mega-Cannonball that deals {{ deathsdaughterdamage }} true damage and Slows by {{ deathsdaughterslow }}% for {{ deathsdaughterslowduration }} second.\nRaise Morale: Allies inside Cannon Barrage gain {{ raisemoralehaste }}% Move Speed for {{ raisemoralehasteduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "160/140/120",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "30000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "1.5/0.5/0.5",
+        "0",
+        "300",
+        "75",
+        "1",
+        "40"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage Per Wave",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ damageperwave }} -> {{ damageperwaveNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Gangplank",
+        "skill": "R",
+        "icon": "Cannon Barrage.png",
+        "blurbicon": "Cannon Barrage.png",
+        "blurb": "{{sbc|Active:}} {{ci|Gangplank}} orders a cannon bombardment to the target location, each blast deals {{as|magic damage}} and {{tip|slow|slows}} enemies within.",
+        "blurb2": "'''Gangplank''' can improve ''Cannon Barrage'' by purchasing upgrades in the shop with {{ai|Silver Serpents|Gangplank}}.",
+        "description": "{{sbc|Active:}} '''Gangplank''' shoots a flare into the air, signaling his ship off-shore to fire upon the target location for 8 seconds, calling down 12 waves of cannonballs in clusters of 3 every 2 seconds, and granting {{tip|sight}} of the area for the duration. Each wave deals {{as|magic damage}} to all enemies within the area and {{tip|slow|slows}} them by 30% for {{fd|0.5}} seconds.",
+        "leveling": "{{st|Magic Damage Per Wave|{{ap|40 to 100}} {{as|(+ 10% AP)}}|Magic Damage Per Cluster|{{ap|40*3 to 100*3}} {{as|(+ {{ap|10*3}}% AP)}}}}\n{{st|Total Magic Damage|{{ap|40*12 to 100*12}} {{as|(+ {{ap|10*12}}% AP)}}}}",
+        "description2": "'''Gangplank''' can purchase upgrades for his ship in the store at the cost of 500 ''{{ai|Silver Serpents|Gangplank}}'' each, which improve ''Cannon Barrage'':",
+        "icon3": "Death's Daughter item.png",
+        "description3": "{{sbc|{{ii|Death's Daughter}}:}} A large cannonball lands in the center of the barrage after the first cluster of waves occur, dealing a cluster's worth of {{as|true damage}} to enemies within the impact and {{tip|slow|slowing}} them by 75% for 1 second.",
+        "leveling3": "{{st|True Damage with {{ii|Death's Daughter}}|{{ap|40*3 to 100*3}} {{as|(+ {{ap|10*3}}% AP)}}}}\n{{st|Total Mixed Damage with {{ii|Death's Daughter}}|{{ap|40*12+40*3 to 100*12+100*3}} {{as|(+ {{ap|10*12+10*3}}% AP)}}}}",
+        "icon4": "Fire at Will item.png",
+        "description4": "{{sbc|{{ii|Fire at Will}}:}} ''Cannon Barrage'' fires{{ft|6 additional waves|2 additional clusters}} over its duration; 18 waves of cannonballs are called down in clusters of 3 every {{fd|1.3{{recurring|3}}}} seconds.",
+        "leveling4": "{{st|Total Magic Damage with {{ii|Fire at Will}}|{{ap|40*18 to 100*18}} {{as|(+ {{ap|10*18}}% AP)}}}}\n{{st|Maximum Mixed Total Damage with {{ii|Fire at Will}} and {{ii|Death's Daughter}}|{{ap|40*18+40*3 to 100*18+100*3}} {{as|(+ {{ap|10*18+10*3}}% AP)}}}}",
+        "icon5": "Raise Morale item.png",
+        "description5": "{{sbc|{{ii|Raise Morale}}:}} ''Cannon Barrage'' grants '''Gangplank''' and all allies within the area {{sti|{{as|40% '''bonus''' movement speed}}}}, lingering for 2 seconds.",
+        "target range": "Global",
+        "cast time": "{{fd|0.25}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|580|Volley damage and Raise Morale effect radius}}",
+        "inner radius": "{{tip|cr|icononly = true}} {{tt|170|Death's Daughter}}",
+        "cooldown": "{{tt|{{ap|170 to 130}}|Starts on cast}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "area",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* ''Cannon Barrage's'' slow lingers for {{fd|0.25}} seconds after affected enemies leave the target area.",
+        "flavorsound": "{{sm2|Gangplank_Original_R_2.ogg}} ''\"Volley fire!\"''"
+      }
+    }
+  }
+}

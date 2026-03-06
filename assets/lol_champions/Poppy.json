@@ -1,0 +1,299 @@
+{
+  "id": "Poppy",
+  "name": "Poppy",
+  "title": "Keeper of the Hammer",
+  "resource_type": "Mana",
+  "tags": [
+    "Tank",
+    "Fighter"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Iron Ambassador",
+      "description": "Poppy throws her buckler that bounces off the target. Poppy can pick it up to gain a temporary shield.",
+      "wiki_detail": {
+        "champion": "Poppy",
+        "skill": "I",
+        "icon": "Iron Ambassador.png",
+        "blurb": "{{sbc|Innate:}} Periodically, {{ci|Poppy}} {{tip|projectile|throws}} her buckler as her next basic attack, which has {{sti|'''bonus''' range}} and deals {{as|'''bonus''' magic damage}}. The buckler then falls nearby and remains for a few seconds, which she and enemy champions can step over to either retrieve or destroy it.",
+        "blurb2": "If this attack kills the target, the buckler bounces back to Poppy instead of falling.",
+        "blurb3": "Upon retrieving the buckler, '''Poppy''' {{tip|shield|shields}} herself for a portion of {{as|her '''maximum''' health}}, lasting a short time.",
+        "description": "{{sbc|Innate:}} Periodically, '''Poppy's''' next [[basic attack]] is empowered to throw her buckler, gaining {{sti|350 '''bonus''' range}} and dealing {{pp|20 to 180|color=magic damage}} {{as|'''bonus''' magic damage}}. After it hits, the buckler then falls to a location near the target over 1 second, landing and remaining there for up to 4 seconds.",
+        "icon2": "Iron Ambassador 2.png",
+        "description2": "'''Poppy''' can move over the buckler to retrieve it, gaining a {{tip|shield}} for {{sti|health|{{as|{{pp|key=%|13 to 18 for 3|1 to 13}} of her '''maximum''' health}}}} for 3 seconds. If the buckler kills the target, or if the target is already dead when the buckler hits it, the buckler will bounce back to '''Poppy''' instead of falling. Enemy {{tip|champion|champions}} can move over the buckler to destroy it.",
+        "flavorsound": "{{sm2|Poppy_Original_PAttack_hit_0.ogg}} ''\"Shield to the face!\"''",
+        "static": "{{pp|16 to 8 for 3|1 to 13}}",
+        "speed": "{{tt|1600|Both attack missile and on-kill return missile speeds}}",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "Magic",
+        "spellshield": "False",
+        "spelleffects": "Proc",
+        "parry": "true",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "* No additional details."
+      }
+    },
+    "Q": {
+      "id": "PoppyQ",
+      "name": "Hammer Shock",
+      "description": "Poppy swings her hammer, dealing damage and creating a zone that will slow enemies and explode after a delay.",
+      "tooltip": "Poppy smashes the ground, dealing {{ basedamage }} plus {{ healthdamagepercent }}% max Health physical damage and making the ground unstable. \n\nThe unstable area Slows enemies by {{ e3 }}% and erupts after {{ e4 }} second, dealing {{ basedamage }} plus {{ healthdamagepercent }}% max Health physical damage again.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8/7/6/5/4",
+      "cost": "35/40/45/50/55",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "430",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "30/55/80/105/130",
+        "0.5",
+        "20/25/30/35/40",
+        "1",
+        "9",
+        "50/80/110/140/170",
+        "100",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow",
+          "Cooldown",
+          "@AbilityResourceName@ Cost",
+          "Monster Cap"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ e3 }}% -> {{ e3NL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ e6 }} -> {{ e6NL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Poppy",
+        "skill": "Q",
+        "icon": "Hammer Shock.png",
+        "blurb": "{{sbc|Active:}} {{ci|Poppy}} smashes the area in the target direction, dealing {{as|physical damage}} to enemies hit based on {{as|their '''maximum''' health}}.",
+        "blurb2": "The impact creates a brief field that {{tip|slow|slows}} enemies within, then ruptures to deal the same {{as|physical damage}} again.",
+        "description": "{{sbc|Active:}} '''Poppy''' smashes the area in the target direction, dealing {{as|physical damage}} to enemies hit. Against {{tip|monsters}}, the damage based on their health ratio is capped.",
+        "leveling": "{{st|Physical Damage|{{ap|40 to 120}} {{as|(+ 90% '''bonus''' AD)}} {{as|(+ 9% of target's '''maximum''' health)}}}}\n{{st|Capped Monster Health Damage|{{ap|30 to 150}}|Maximum Monster Damage|{{ap|40+30 to 120+150}} {{as|(+ 90% '''bonus''' AD)}}}}",
+        "description2": "The impact creates a field for 1 second that {{tip|slow|slows}} enemies within, which then ruptures to deal the same {{as|physical damage}}.",
+        "leveling2": "{{st|Slow|{{ap|20 to 40}}%}}\n{{st|Total Physical Damage|{{ap|40*2 to 120*2}} {{as|(+ 180% '''bonus''' AD)}} {{as|(+ 18% of target's '''maximum''' health)}}|Total Maximum Monster Damage|{{ap|(40+30)*2 to (120+150)*2}} {{as|(+ 180% '''bonus''' AD)}}}}",
+        "cooldown": "{{ap|8 to 4}}",
+        "cost": "{{ap|35 to 55}}",
+        "costtype": "Mana",
+        "range": "{{tt|460 / -120|Edge range, but behaves very weirdly. These values are for targets of 65 radius}}",
+        "width": "{{tip|er|icononly = true}} 160",
+        "targeting": "Direction",
+        "cast time": "{{fd|0.25}}",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "Special",
+        "spelleffects": "spellaoe",
+        "projectile": "False",
+        "grounded": "|knockdown    =",
+        "notes": "* {{tip|Spell shield|Spell shields}} will block only a single instance of damage.\n{{Effect at cast time end}}"
+      }
+    },
+    "W": {
+      "id": "PoppyW",
+      "name": "Steadfast Presence",
+      "description": "Poppy passively gains Armor and Magic Resist. This bonus increases when she is low on Health. Poppy can activate Steadfast Presence to gain Move Speed and stop enemy dashes around her. If a dash is stopped, the enemy is slowed and grounded.",
+      "tooltip": "Passive: Poppy gains {{ bonusarmor }} Armor and {{ bonusmr }} Magic Resist. This bonus is doubled if Poppy is below {{ passiveempoweredhealthpercent*100 }}% Health.\n\nActive: Poppy gains {{ e2 }}% Move Speed and projects a field around her for {{ e1 }} seconds that stops enemy dashes. Enemies who are stopped by the field are Grounded and Slowed by {{ slowamount*-100 }}% for {{ groundingduration }} seconds and take {{ interruptdamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "20/18/16/14/12",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "2",
+        "40",
+        "10",
+        "0.5",
+        "70/110/150/190/230",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ e5 }} -> {{ e5NL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Poppy",
+        "skill": "W",
+        "icon": "Stubborn to a Fault.png",
+        "icon2": "Steadfast Presence.png",
+        "blurb": "{{sbc|Passive:}} {{ci|Poppy}} increases her {{sti|armor|{{as|'''total''' armor}}}} and {{sti|mr|{{as|'''total''' magic resist}}}}. This effect is doubled while she is {{as|at low health}}.",
+        "blurb2": "{{sbc|Active:}} '''Poppy''' gains {{sti|ms|{{as|'''bonus''' movement speed}}}} for a short time and creates an [[aura]] that stops enemy dashes. Enemies that {{tip|dash}} within the aura are dealt {{as|magic damage}} and briefly {{tip|airborne|knocked up}}, they are then {{tip|grounded}} and {{tip|slow|slowed}} for a short time.",
+        "description": "{{sbc|Passive:}} '''Poppy''' increases her {{sti|armor|{{as|'''total''' armor}}}} and {{sti|mr|{{as|'''total''' magic resistance}}}} by 12%, doubled to 24% while she is {{as|below 40% '''maximum''' health}}.",
+        "description2": "{{sbc|Active:}} '''Poppy''' gains {{sti|ms|{{as|40% '''bonus''' movement speed}}}} and creates an [[aura]] around herself for 2 seconds, causing all enemies who attempt to {{tip|dash}} into or within it to be dealt {{as|magic damage}} and {{tip|airborne|knocked up}} for {{fd|0.5}} seconds. If a target was successfully interrupted, they become {{tip|grounded}} and {{tip|slow|slowed}} by 25% for 2 seconds.",
+        "leveling2": "{{st|Magic Damage|{{ap|70 to 230}} {{as|(+ 70% AP)}}}}",
+        "description3": "''Steadfast Presence'' can only block a single dash per enemy per cast.",
+        "cooldown": "{{ap|20 to 12}}",
+        "cost": "50",
+        "costtype": "Mana",
+        "effect radius": "400",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Self",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "aoe",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* ''Steadfast Presence'' does not stop {{tip|dash|dashes}} if the unit is {{tip|cc-immune|crowd control immune}}, {{tip|displacement immune}}, {{tip|untargetable}}, or protected by {{tip|spell shield}} in the process (e.g. {{ai|Death Mark|Zed}}, {{ai|Stormbringer|Volibear}}, {{ai|Unstoppable Force|Malphite}}).\n** Dashes when the unit is {{tip|cc-immune|crowd control immune}} or {{tip|displacement immune}} still trigger the aura and take the damage, but do not get {{tip|airborne|knocked up}} and thus also never become {{tip|ground|grounded}} and {{tip|slow|slowed}}.\n** {{tip|spell shield|Spell shields}} deny all the effects if ''Steadfast Presence'' is triggered by their holder, and are consumed in the process.\n** Being {{tip|untargetable}} prevents ''Steadfast Presence'' from triggering, but this does not prevent it from triggering against another, targetable dash.\n* ''Steadfast Presence'' does not trigger against {{tip|lunge|lunges}}."
+      }
+    },
+    "E": {
+      "id": "PoppyE",
+      "name": "Heroic Charge",
+      "description": "Poppy dashes to the target and pushes it back. If the target is pushed into a wall, it is stunned.",
+      "tooltip": "Poppy tackles an enemy, dealing {{ tackledamage }} physical damage and carrying them forward. If Poppy tackles them into terrain, the enemy is Stunned for {{ e3 }} seconds and take an additional {{ tackledamage }} physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "475",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "40/60/80/100/120",
+        "40/60/80/100/120",
+        "1.6/1.7/1.8/1.9/2",
+        "1800",
+        "400",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Initial Damage",
+          "Wall Damage",
+          "Stun Duration:",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ e2 }} -> {{ e2NL }}",
+          "{{ e3 }} -> {{ e3NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Poppy",
+        "skill": "E",
+        "icon": "Heroic Charge.png",
+        "blurb": "{{sbc|Active:}} {{ci|Poppy}} {{tip|dashes}} to the target enemy, dealing {{as|physical damage}} and {{tip|airborne|carrying}} them forward. If the target hits terrain, '''Poppy''' deals the same {{as|physical damage}} again and briefly {{tip|stun|stuns}} them.",
+        "description": "{{sbc|Active:}} '''Poppy''' {{tip|dashes}} to the target enemy's location. If they are in range upon arrival, she deals {{as|physical damage}} and {{tip|airborne|carries}} them along with her for up to 400 units.",
+        "leveling": "{{st|Physical Damage|{{ap|60 to 140}} {{as|(+ 50% '''bonus''' AD)}}}}",
+        "description2": "If the target hits terrain, she stops to deal the same {{as|physical damage}} again and {{tip|stun|stuns}} them for a duration.",
+        "leveling2": "{{st|Stun Duration|{{ap|1.6 to 2}} seconds}}\n{{st|Total Physical Damage|{{ap|60*2 to 140*2}} {{as|(+ 100% '''bonus''' AD)}}}}",
+        "cooldown": "{{ap|14 to 10}}",
+        "cast time": "none",
+        "cost": "70",
+        "costtype": "Mana",
+        "target range": "{{tip|er|icononly = true}} 475",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "projectile": "|callforhelp  = true",
+        "grounded": "True",
+        "knockdown": "True",
+        "notes": "* '''Poppy''' will be ordered to basic attack the target.\n* ''Heroic Charge'' can apply [[Ability effects|spell effects]] twice (once when '''Poppy''' hits her target and once she stuns them against a wall). \n** Both instances of damage and crowd control are all the same {{tip|cast instance}}. Effects that only trigger once per spell cast will not trigger twice.\n* '''Poppy''' dashes slightly less far than the distance she pushes the target.\n* ''Heroic Charge'' can interact with [[Terrain#Player-Generated|player-generated terrain]].\n* The {{tip|dash}} does not follow targets. The target's position at the time of ''Heroic Charge's'' cast is the direction '''Poppy''' will dash towards.\n** '''Poppy''' does not {{tip|airborne|carry}} nor deal damage to the target if they have left a certain radius before she collides with them.",
+        "tips": "* ''Heroic Charge'' can traverse terrain, provided that the target is within range."
+      }
+    },
+    "R": {
+      "id": "PoppyR",
+      "name": "Keeper's Verdict",
+      "description": "Poppy channels a hammer strike that knocks enemies very far away.",
+      "tooltip": "Begin Casting: Poppy begins charging her hammer for up to {{ channelmaxduration }} seconds, Slowing herself by {{ selfslow }}%.\n\nRelease: Poppy smashes the ground, creating a shockwave that deals {{ damage }} physical damage to the first champion hit and surrounding enemies, Knocks them Back towards their Nexus, and makes them Untargetable while they fly. The range and Knock Back distance increase with charge duration.\n\nAn uncharged swing deals {{ halfdamage }} physical damage and Knocks Up for {{ knockupdurationsnap }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "140/120/100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "500",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Poppy",
+        "skill": "R",
+        "icon": "Keeper's Verdict.png",
+        "blurb": "{{sbc|Active:}} {{ci|Poppy}} {{tip|channels|charges}} up to a few seconds, increasing the {{sti|range}} and {{tip|airborne|knockback}} distance of her hammer. After a brief period, it becomes empowered with a new effect.",
+        "blurb2": "{{sbc|Recast:}} '''Poppy''' swings her hammer, dealing {{as|physical damage}} to enemies nearby and in the area in front of her, briefly {{tip|airborne|knocking them up}}.",
+        "blurb3": "{{sbc|Empowered Recast:}} '''Poppy''' sends a shockwave in the target direction that deals {{as|physical damage}} to enemies hit. Upon hitting an enemy {{tip|champion}}, a hammer erupts dealing {{as|physical damage}} to nearby enemies, {{tip|airborne|knocking them back}} based on how long she charged up.",
+        "description": "{{sbc|Active:}} '''Poppy''' {{tip|channels|charges}} while being {{tip|slow|slowed}} by 15% for up to 4 seconds to increase ''Keeper's Verdict's'' {{sti|range}} and {{tip|airborne|knock back}} distance over {{fd|0.5}} seconds after the first {{fd|0.5}} seconds of the channel. ''Keeper's Verdict'' can be recast within the duration.",
+        "description2": "{{sbc|Recast:}} '''Poppy''' releases the charge to launch her hammer upwards, dealing {{as|physical damage}} to enemies nearby and in an area in front of her and {{tip|airborne|knocking them up}} for 1 second.",
+        "leveling2": "{{st|Physical Damage|{{ap|100|150|200}} {{as|(+ 45% '''bonus''' AD)}}}}",
+        "description3": "If ''Keeper's Verdict'' was charged for at least {{fd|0.5}} seconds, it deals 100% increased damage and enemies hit are {{tip|airborne|knocked back}} {{tt|up-to 3400 units|Scales up to this value over the first 1 second of the channel}} toward the enemy team's [[Spawn|fountain]]. Additionally, if no enemies are hit {{tt|in front|Same as uncharged radius}} of '''Poppy''', she sends a shockwave that travels in the target direction until it collides with an enemy champion, which causes a hammer to erupt. Targets hit by the shockwave or the eruption receive the charged effects.",
+        "leveling3": "{{st|Increased Damage|{{ap|200|300|400}} {{as|(+ 90% '''bonus''' AD)}}}}",
+        "description4": "If the charge is {{tip|interrupt|interrupted}} or completes without reactivation, ''Keeper's Verdict'' is cancelled and the ability is put on a {{sti|cd|15-second}} cooldown.",
+        "description5": "Enemies knocked {{tip|airborne}} are {{tip|standard sight|revealed}} and are rendered {{tip|untargetable}} while being displaced if ''Keeper's Verdict'' was charged for more than {{fd|0.5}} seconds.",
+        "cooldown": "{{ap|140 to 100}}",
+        "cdstart": "post-effect",
+        "cast time": "{{tt|{{fd|0.25}}|Uncharged release}} / {{tt|{{fd|0.35}}|Charged release}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "range": "{{tip|er|icononly = true}} {{tt|500|Uncharged range}} / {{tip|cr|icononly = true}} {{pp|type=channel time|850 to 1200 for 3|0.5 to 1|formula=500 + (175 per 0.25 seconds channeled)|changedisplay = true}}<!--This 2nd range still needs to be fact checked/improved-->",
+        "width": "{{tip|er|icononly = true}} {{tt|180|Both uncharged area and shockwave missile width}}",
+        "speed": "{{tt|2500|Shockwave missile speed}} <!--/ {{tt|X|Knockback movement speed}}-->",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|180|Uncharged radius around Poppy}} / {{tt|225|Eruption radius upon missile collision}}",
+        "targeting": "[[Auto-targeted|Auto]] / [[Direction-targeted|Direction]]",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "True",
+        "silence": "true",
+        "notes": "* During the Recast's cast time, '''Poppy's''' {{si|Flash}} is {{tip|lockout|sealed}}.\n* The erupting hammer of the charged cast that sends out a missile will be centered on the first champion struck, not at the location the missile collided with them.\n* Enemies within the enemy team's fountain (at least 400 units away from the {{tt|center of the fountain|the respawning point}}) that are hit by a ''Keeper's Verdict'' that would knock them back are instead {{tip|airborne|knocked up}} for {{fd|0.75}} seconds and not rendered {{tip|untargetable}}, like the uncharged effect. They still receive the full damage.\n* ''Keeper's Verdict'' does not destroy in-flight {{tip|projectile|projectiles}} for enemies hit if they are rendered {{tip|untargetable}}.\n* The {{tip|airborne|knock back}} will only displace enemies as far as they can go (e.g. to the furthest current spot available of {{ais|Realm of Death|Mordekaiser}} and {{ais|The Hextech Ultimatum|Camille}} borders and to the corner of the fountain).\n** The displacement's duration will remain unchanged regardless of if the knock back cannot achieve its full distance due to the affected target being restricted by boundaries they are unable to cross. In order for this to be possible, the speed of the knock back is decreased (based on where the actual landing point is) to match the amount of distance covered to time spent displaced.\n* ''Keeper's Verdict's'' {{tip|airborne}} debuff is non-dispellable and thus cannot be removed by {{tip|cleanse|cleansing}} effects.\n** The debuff will remove itself automatically when the forced movement ends.\n* The following table refers for interactions while '''Poppy''' is {{tip|channel|channeling}}:\n{{ct|charge|attack=false|move=true|cast=false|items=interrupts, true,, false|spells=true, true, interrupts, interrupts, recasts}}\n{{ct|cast|spells=true,false,false,false,false}}",
+        "_comments": [
+          "This 2nd range still needs to be fact checked/improved",
+          "/ {{tt|X|Knockback movement speed}}"
+        ]
+      }
+    }
+  }
+}

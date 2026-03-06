@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0098_3v3"
+seed = 2021
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["Anivia", "paladin", "Cassiopeia"]
+enemy_hero_templates = ["Xerath", "berserker", "AurelionSol"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

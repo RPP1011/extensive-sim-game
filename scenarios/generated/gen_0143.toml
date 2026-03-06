@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_warrior_necromancer_samurai_s2"
+seed = 21048
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["warrior", "necromancer", "samurai"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_druid_mage_monk_s2"
+seed = 21302
+hero_count = 3
+enemy_count = 4
+difficulty = 2
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["druid", "mage", "monk"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

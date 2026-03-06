@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0007_4v7_d5_s2"
+seed = 22130
+hero_count = 4
+enemy_count = 7
+difficulty = 5
+max_ticks = 10000
+room_type = "Climax"
+hero_templates = ["blood_mage", "warden", "mage", "cryomancer"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

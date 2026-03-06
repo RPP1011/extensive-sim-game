@@ -1,0 +1,293 @@
+{
+  "id": "Ashe",
+  "name": "Ashe",
+  "title": "the Frost Archer",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman",
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Frost Shot",
+      "description": "Ashe's attacks slow their target, causing her to deal increased damage to these targets.\n\nAshe's critical strikes deal no bonus damage but apply an empowered slow to the target.",
+      "wiki_detail": {
+        "champion": "Ashe",
+        "skill": "I",
+        "icon": "Frost Shot.png",
+        "description": "{{sbc|Innate - Frost Shot:}} '''Ashe's''' [[basic attack]]s and [[champion ability|ability]] hits apply ''Frost'' to enemies for 2 seconds, which {{tip|slow|slows}} them by {{pp|key=%|20 to 30}} for the duration. Basic attacks against enemies with ''Frost'' are modified to deal 115% {{as|(+ {{critical damage|75|100}} of critical strike chance)|critical chance}} damage.",
+        "icon2": "Frost Shot 2.png",
+        "description2": "{{sbc|Innate - Critical Slow:}} '''Ashe's''' {{tip|critical strike|critical strikes}} do not deal any additional damage, instead they double ''Frost's'' slow strength to {{pp|key=%|20*2 to 30*2}}, decaying over the first second of the duration to its normal strength.",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "parry": "True",
+        "video": "Ashe_Passive_Video.webm",
+        "notes": "* '''Ashe's''' critical strikes are still considered {{as|critical strike damage}} that will be reduced by {{ii|Randuin's Omen}}.\n* {{iis|Runaan's Hurricane}} will not deal additional damage on {{tip|critical strike|critical strikes}}.\n* {{ri|Cheap Shot}} will trigger on a subsequent basic attack even when the target is no longer slowed.{{bug|2}}\n<!--Blurb-->",
+        "blurb": "{{sbc|Innate - Frost Shot:}} {{cis|Ashe}} basic attacks apply a {{tip|slow}} on-hit and cause her subsequent attacks to deal increased damage.",
+        "blurb2": "{{sbc|Innate - Critical Slow:}} {{cis|Ashe}} {{tip|Critical Strike|critical strikes}} deal no bonus damage but apply an empowered {{tip|slow}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "AsheQ",
+      "name": "Ranger's Focus",
+      "description": "Ashe builds up Focus by attacking. At maximum Focus, Ashe can cast Ranger's Focus to consume all stacks of Focus, temporarily increasing her Attack Speed and transforming her basic attack into a powerful flurry attack for the duration.",
+      "tooltip": "Passive: Ashe's Attacks grant a stack for {{ e1 }} seconds. At {{ e2 }} stacks, she may activate this Ability.\n\nActive: Ashe gains {{ e4 }}% Attack Speed and her Attacks deal {{ empowereddamage }} damage instead for {{ e3 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0",
+      "cost": "30",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "4",
+        "4",
+        "6",
+        "20/30/40/50/60",
+        "0.22/0.235/0.25/0.265/0.28",
+        "1.1/1.175/1.25/1.325/1.4",
+        "1",
+        "1",
+        "1",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Attack Speed",
+          "Flurry Attack Damage ratio"
+        ],
+        "effect": [
+          "{{ e4 }}% -> {{ e4NL }}%",
+          "{{ effect6amount*100.000000 }}% -> {{ effect6amountnl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ashe",
+        "skill": "Q",
+        "icon": "Ashe Ranger's Focus.png",
+        "description": "{{sbc|Passive:}} While ''Ranger's Focus'' is inactive, '''Ashe's''' basic attacks {{tip|on-attack}} generate a [[stack]] of ''Focus'' for 4 seconds, which refreshes on subsequent attacks and stacks up to 4 times. Stacks expire by one every 1 second.",
+        "icon2": "Ashe Ranger's Focus 2.png",
+        "description2": "{{sbc|Active:}} For 6 seconds, '''Ashe''' gains {{sti|as|{{as|'''bonus''' attack speed}}}} and empowers her basic attacks to fire a flurry of five arrows.",
+        "leveling2": "{{st|Bonus Attack Speed|{{ap|25 to 55}}%}}",
+        "description3": "Each arrow deals {{as|'''modified''' physical damage}} that benefits from ''{{ai|Frost Shot|Ashe}}'' and {{stil|life steal}}. Flurries apply [[on-hit]] effects only once.",
+        "leveling3": "{{st|Physical Damage Per Arrow|{{as|{{ap|105/5 to 125/5}}% AD}}|Total Damage Per Flurry|{{as|{{ap|105 to 125}}% AD}}}}",
+        "description4": "''Ranger's Focus {{tip|basic attack reset|resets}} '''Ashe's''' basic attack timer.''",
+        "cost": "30",
+        "cast time": "none",
+        "costtype": "Mana + 4 Focus",
+        "targeting": "Auto",
+        "affects": "Self",
+        "damagetype": "Physical",
+        "spellshield": "false",
+        "spelleffects": "special",
+        "projectile": "True",
+        "parry": "True",
+        "video": "Ashe_Q_Video.webm",
+        "notes": "* The first attack from Ranger's Focus has 6 arrows, thus dealing 20% more total damage than expected.\n* ''Ranger's Focus'' first bolt deals {{tip|basic damage}} with the subsequent 4 bolts dealing a non-reactive damage type (e.g. {{tip|default damage}} or {{tip|proc damage}}). <!--One test to determine the difference is Teemo's W, but the test is hard to set-up since the first bolt removes Teemo's W.--> The entire effect is classified as a basic attack on a {{tip|script}}-level, but is considered an ability for other effects (i.e {{ai|I|Maokai}}), which is likely due to a mistaken script-level tag.\n* Although ''Ranger's Focus'' has no actual cooldown, 4 stacks of focus are needed before ''Ranger's Focus'' can be reactivated. The time before being able to reactivate ''Ranger's Focus'' is {{pp|type=attack speed|1/(0.625/(1-0.05))*4;1/(0.75+0.25*(x-1))*4 for 8|0.625/(1-0.05);0.75 to 2.5|round1=3|formula=4/average attack speed. ''This is using her base attack speed as the minimum, and considering the time over the course of 4 consecutive attacks.''}} seconds.\n* Each arrow from a flurry applies {{ai|Frost Shot 2|Ashe|Frost}} and the bonus damage from {{ai|Frost Shot|Ashe}} is calculated individually per arrow.\n** Similarly, since a flurry is 5 instances of physical damage, {{ii|Black Cleaver}} allows her to cleave the enemy target 5 times per flurry.\n** Sources of flat damage reduction against any (physical) damage such as {{cai|Tantrum|Amumu}}, {{cai|Eclipse|Leona}} or {{cai|Nimble Fighter|Fizz}} will apply the reduction to each arrow's damage, resulting in extremely reduced damaged compared to a normal attack.\n* Each additional arrow from {{ii|Runaan's Hurricane}} will also split into 5 arrows.\n** The arrows are evenly distributed among secondary enemies but one enemy cannot be hit by more than 5 arrows.\n** The flurry will trigger on-hit effects once to each enemy hit, but no more than 3 targets per attack.\n* The flurry applies against [[structures]]. Stacks of ''Focus'' will not be granted when attacking structures.\n<!--Blurb-->",
+        "blurbicon": "Ranger's Focus.png",
+        "blurb": "{{sbc|Passive:}} {{cis|Ashe}} basic attacks generate stacks of ''Focus'', up to a cap. Once the stacks reach the cap, she can cast ''Ranger's Focus''.",
+        "blurb2": "{{sbc|Active:}} '''Ashe''' gains {{as|{{sti|'''bonus''' attack speed}}}} and augments her basic attacks to fire a flurry of arrows.",
+        "_comments": [
+          "One test to determine the difference is Teemo's W, but the test is hard to set-up since the first bolt removes Teemo's W.",
+          "Blurb"
+        ]
+      }
+    },
+    "W": {
+      "id": "Volley",
+      "name": "Volley",
+      "description": "Ashe fires arrows in a cone for increased damage. Also applies Frost Shot.",
+      "tooltip": "Ashe fires a volley of {{ numberofarrowstooltip }} arrows, each dealing {{ totaldamage }} physical damage. Enemies can be hit by multiple arrows, but only take damage from the first.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "18/14.5/11/7.5/4",
+      "cost": "75/70/65/60/55",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1200",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "5/7/9/11/13",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Arrows Fired",
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ numberofarrowstooltip }} -> {{ numberofarrowstooltipNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ashe",
+        "skill": "W",
+        "icon": "Volley.png",
+        "description": "{{sbc|Active:}} '''Ashe''' shoots a volley of arrows in a cone in the target direction, each dealing {{as|physical damage}} to the first enemy hit, and applying ''{{ai|Frost Shot 2|Ashe|Critical Slow}}'' to enemy {{tip|champions}} hit.",
+        "leveling": "{{st|Arrows|{{ap|7 to 11}}}}\n{{st|Physical Damage|{{ap|20 to 80}} {{as|(+ 100% AD)}}}}",
+        "description2": "Enemies can intercept multiple arrows but do not take damage from any beyond the first.",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|1200|Not including the offset, see notes}}",
+        "angle": "{{tt|{{fd|27.75}}{{degrees}}/ 37{{degrees}} / {{fd|46.25}}{{degrees}}|Full cone at ranks 1, 2/3 and 4/5, respectively}} / {{tt|{{fd|4.625}}{{degrees}}|Angle between individual missiles}}",
+        "width": "{{tip|er|icononly = true}} {{tt|20|Each missile}}",
+        "speed": "2000",
+        "cooldown": "{{ap|18 to 4}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "{{ap|75 to 55}}",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "aoe",
+        "projectile": "True",
+        "video": "Ashe_W_Video.webm",
+        "notes": "* The missiles are spawned in a straight horizontal line 75 units in front of '''Ashe''', with a total width of 75/100/100/123/123 units.\n** Between each missile spawn location is a distance of {{fd|12.5}} units, except for the two outermost ones at the last two ranks (which are {{fd|11.5}} units from the closest other one), and the two centermost missiles at ranks 2 and 4 (which have 20 units between them and 15 units to the next missile, respectively).\n** This inconsistent behaviour of spawn locations means the angle between each missile can vary off of {{fd|4.625}}{{degrees}} slighty.\n{{Effect at cast time end}}\n<!--Blurb-->",
+        "blurb": "{{sbc|Active:}} {{ci|Ashe}} fires arrows in a cone dealing {{as|physical damage}} and applying {{ai|Frost Shot|Ashe|Critical Slow}} to the first enemies hit.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "E": {
+      "id": "AsheSpiritOfTheHawk",
+      "name": "Hawkshot",
+      "description": "Ashe sends her Hawk Spirit on a scouting mission anywhere on the map.",
+      "tooltip": "Ashe sends forth a hawk to grant vision for 5 seconds anywhere on the map. It also reveals the area around it as it flies.\n\nThis Ability has 2 charges ({{ chargecooldown }} second recharge).{{ spellmodifierdescriptionappend }}",
+      "cooldown": "5",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "25000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "3",
+        "50/90/130/170/210",
+        "25000",
+        "5",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Recharge Time"
+        ],
+        "effect": [
+          "{{ ammorechargetime }} -> {{ ammorechargetimeNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Ashe",
+        "skill": "E",
+        "icon": "Hawkshot.png",
+        "description": "{{sbc|Active:}} '''Ashe''' sends a hawk spirit toward the target location, granting {{tip|sight}} of the area along its path{{ft|repeatedly for {{fd|0.5}} seconds after every 100 units traveled|for effectively up-to {{fd|1.8}} seconds at any location}}and at its destination for 5 seconds.",
+        "description2": "'''Ashe''' periodically [[ammunition|stocks]] a ''Hawkshot'' charge, up to a maximum of 2.",
+        "target range": "Global",
+        "effect radius": "{{tt|1000|Vision bubble radiuses}}",
+        "speed": "1400",
+        "cooldown": "5",
+        "recharge": "{{ap|90 to 50}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "1",
+        "costtype": "Charge",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "spellshield": "false",
+        "projectile": "special",
+        "video": "Ashe_E_Video.webm",
+        "notes": "* ''Hawkshot's'' recharge timer seems to start at the beginning of the game, even prior to ranking the ability, but upon actually ranking the ability, it starts with one charge and the recharge timer starts from 0.\n* ''Hawkshot'' will ping enemy champions it spots if allies didn't already have vision of them, and put a 'revealed' visual effect on them for {{tt|{{fd|2.75 seconds}}|Estimated}}, but does not actually reveal the units in particular, and is removed if the champion leaves the area.\n* ''Hawkshot'' will grant assist credit if a previously-unseen enemy champion is killed within 10 seconds of being revealed by the ability.\n* ''Hawkshot'' will trigger upon colliding with {{ai|Blade Whirl|Samira}} or {{ai|Wind Wall|Yasuo}} or but not {{ai|Unbreakable|Braum}}.\n* ''Hawkshot'' will grant 0.33 points of [[vision score]] for each champion revealed.\n<!--Blurb-->",
+        "blurb": "{{sbc|Active:}} {{ci|Ashe}} sends out her Hawk Spirit. The spirit {{tip|expose|exposes}} the area along its path and a large area at its destination.",
+        "blurb2": "'''Ashe''' periodically [[ammunition|stocks]] a charge of ''Hawkshot'', up to a cap.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "R": {
+      "id": "EnchantedCrystalArrow",
+      "name": "Enchanted Crystal Arrow",
+      "description": "Ashe fires a missile of ice in a straight line. If the arrow collides with an enemy Champion, it deals damage and stuns the Champion, stunning for longer the farther arrow has traveled. In addition, surrounding enemy units take damage and are slowed.",
+      "tooltip": "Ashe launches a crystal arrow of ice that Stuns the first champion hit and deals {{ rmaindamage }} magic damage. The Stun duration increases with distance travelled, up to {{ maxstunduration }} seconds. Surrounding enemies are Slowed by Frost Shot.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "100/80/60",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "25000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ rbasedamage }} -> {{ rbasedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Ashe",
+        "skill": "R",
+        "icon": "Enchanted Crystal Arrow.png",
+        "description": "{{sbc|Active:}} '''Ashe''' fires a massive arrow of ice in the target direction, granting {{tip|sight}} of the {{tt|area|Cannot grant sight through terrain and can only grant sight into brush when the missile flies through that brush}} it flies through each for 1 second. The arrow shatters upon hitting an enemy {{tip|champion}}, dealing them {{as|magic damage}}, {{tip|stun|stunning}} them for {{pp|type=distance traveled|1 to 3.5 for 15|0 to 2800|formula=1+(0.18 per 200 units). ''This is capped at 2800 units traveled.''}} seconds, and granting {{tip|sight}} of the area around them for 1 second.",
+        "leveling": "{{st|Magic Damage|{{ap|200 to 600}} {{as|(+ 120% AP)}}}}",
+        "description2": "Enemies surrounding the primary target are dealt 50% damage and afflicted with ''{{ai|Frost Shot|Ashe}}''.",
+        "leveling2": "{{st|Reduced Damage|{{ap|200/2 to 600/2}} {{as|(+ {{ap|120/2}}% AP)}}}}",
+        "range": "Global",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|400|Radius of explosion}} / {{tt|350|Sight radius of missile}}",
+        "speed": "{{tt|1500 - 2100|accelerates with 200 speed per second}}",
+        "width": "{{tip|er|icononly = true}} {{tt|260|Missile width}}",
+        "cooldown": "{{ap|100 to 60}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "aoe",
+        "projectile": "True",
+        "video": "Ashe_R_Video.webm",
+        "notes": "* ''Enchanted Crystal Arrow's'' projectile has an [[File:Enchanted Crystal Arrow Minimap.png|40px|link=]] icon on the mini-map while it is in flight. It can be seen by only '''Ashe''' and her allies.\n{{Effect at cast time start}}\n* The effect will be centered on the first champion struck, not at the location the missile collided with them.\n<!--Blurb-->",
+        "blurb": "{{sbc|Active:}} {{ci|Ashe}} launches a crystal arrow of ice that {{tip|stun|stuns}} the first enemy champion hit, dealing {{as|magic damage}}. The arrow accelerates initially and its stun duration increases the farther the arrow has traveled.",
+        "blurb2": "Surrounding enemies take {{as|magic damage}} and are {{ai|Frost Shot|Ashe|slowed}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0196_5v8_d2"
+seed = 2319
+hero_count = 5
+enemy_count = 8
+difficulty = 2
+max_ticks = 10000
+room_type = "Pivot"
+hero_templates = ["berserker", "arcanist", "samurai", "rogue", "warden"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Any"

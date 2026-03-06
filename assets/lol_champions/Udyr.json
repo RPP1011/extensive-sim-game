@@ -1,0 +1,300 @@
+{
+  "id": "Udyr",
+  "name": "Udyr",
+  "title": "the Spirit Walker",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Bridge Between",
+      "description": "Udyr has four basic Abilities that swap between Stances and can Recast an Ability to renew it with Ultimate benefits. Additionally, after using an Ability, Udyr's next two Attacks gain Attack Speed.",
+      "wiki_detail": {
+        "champion": "Udyr",
+        "skill": "I",
+        "icon": "Udyr Bridge Between.png",
+        "description": "{{sbc|Innate - Awakened Spirit:}} '''Udyr''' has no [[Champion ability|ultimate ability]] and instead has 4 [[Champion ability|basic abilities]] that each incur a {{sti|cd|{{tt|{{fd|1.5}}-second global cooldown|Affected by ability haste}}}} when cast. Each ability grants a ''Stance'' that empowers his next two basic attacks, and switching ''Stances'' will replace the empowered attacks from the previous ''Stance''.",
+        "description2": "Periodically, after '''Udyr''' enters a ''Stance'', he can cast it again at no cost after {{fd|0.25}} seconds and within the following 5 seconds to ''Awaken'' it, empowering the ''Stance'' with an additional effect and placing the effect on cooldown.<br>If '''Udyr''' does not consume the ''Awaken'' cast within the duration and has not switched ''Stances'', his current ''Stance's'' respective ability incurs a {{fd|0.25}}-second cooldown. ''Awakened Spirit'' is placed on full cooldown at the start of the game.",
+        "icon3": "Udyr Bridge Between 2.png",
+        "description3": "{{sbc|Innate - Monk Training:}} After casting an ability, '''Udyr''' empowers his next two [[basic attack]]s within 4 seconds to gain {{sti|{{as|30% '''bonus''' attack speed}}}} and refund 5% of ''Awakened Spirit's'' '''total''' cooldown, though not if the remaining cooldown is less than 1 second.",
+        "targeting": "Passive",
+        "customlabel": "{{tt|Cooldown|Unaffected by ability haste, but affected by ultimate haste}}",
+        "custominfo": "{{pp|50 to 20 for 4|1 to 16}}",
+        "affects": "Self",
+        "parry": "true",
+        "notes": "* ''Awakened Spirit's'' cooldown is affected by [[ultimate haste]].\n* All of '''Udyr's''' abilities are special cased to trigger {{iis|Experimental Hexplate}} {{nie|Overdrive}} and {{bi|Cloud Dragon Soul|possessive=true}} increased movement speed when cast.\n** The ability cast does not need to be an ''Awakened'' one.\n* The ''Awakened'' casts of ''{{ai|Wilding Claw|Udyr}}'' and ''{{ai|Wingborne Storm|Udyr}}'' are special cased to trigger {{iis|Malignance}} {{nie|Hatefog}} from their damage.\n* {{iis|Axiom Arc}} {{nie|Flux}} does not count neither ''Awakened Spirit'' nor ''{{ai|Wingborne Storm|Udyr}}'' as ultimate abilities.\n* ''Awakened Spirit's'' cooldown is tracked on his [[health bar]] by an {{tip|Fury|Awakening}} resource, visible to all teams. This secondary resource bar is non-descript and represents the effect's percentage charge.\n** The bar has a '''<span style=\"color:white\">white</span>''' color when ''Awakened Spirit'' is under 80% charge, a '''<span style=\"color:yellow\">yellow</span>''' color when at 80% charge or above, and a '''<span style=\"color:red\">red</span>''' color when an ''Awaken'' cast is available.\n* Switching ''Stances'' will not cause any additional effects granted by the previous one to end prematurely.\n* The global cooldown will not incur on abilities that are currently on a greater cooldown.\n* The empowered attacks will not get consumed if they are parried.\n* ''Awakened Spirit's'' cast also activates ''Monk Training'' and empowers the next 2 attacks by the stances unawakened effects as well, overriding unused unawakened stance attacks.\n<!-- Blurb -->",
+        "blurbicon": "Udyr Bridge Between.png",
+        "blurb": "{{sbc|Innate - Awakened Spirit:}} {{ci|Udyr}} has no ultimate ability and instead he has 4 basic abilities that each incur a {{sti|cd|brief}} global cooldown. Each ability grants a ''Stance'' that empowers his next two basic attacks.",
+        "blurb2": "Periodically, after '''Udyr''' enters a ''Stance'', he can cast it again to ''Awaken'' it: empowering the ''Stance'' with an additional effect.",
+        "blurb3": "{{sbc|Innate - Monk Training:}} After casting any of his abilities, ''Udyr's'' next two basic attacks gain {{sti|as|{{as|attack speed}}}} and reduce {{sti|cd|''Awakened Spirit's''}} cooldown.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "UdyrQ",
+      "name": "Wilding Claw",
+      "description": "Udyr gains attack speed and his next two attacks deal bonus physical damage. Recast: Gain even more attack speed, and the next two attacks call lightning to strike the target.",
+      "tooltip": "Claw Stance: Udyr gains {{ attackspeedbase*100 }}% Attack Speed and his Attacks deal {{ onhitdamage }} physical damage %i:OnHit% On-Hit for {{ attackspeeddurationbase }} seconds. Additionally, Udyr's next two Attacks in this stance deal a bonus {{ maxhponhit1 }} max Health physical damage and gain {{ attackrange }} range.\n\nAwaken: Increase bonus Attack Speed to {{ empoweredtotalas }} and max Health damage to {{ q2totalonhithpdamage }}. Additionally, Udyr's next two Attacks call lightning six times, dealing a total of {{ empoweredlightningbonusmax }} max Health magic damage to isolated targets (strikes bounce to other nearby targets when possible).\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "6",
+      "cost": "20",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 6,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Attack Speed",
+          "% Max Health Damage",
+          "On-Hit Damage"
+        ],
+        "effect": [
+          "{{ attackspeedbase*100.000000 }}% -> {{ attackspeedbasenl*100.000000 }}%",
+          "{{ maxhponhitbase*100.000000 }}% -> {{ maxhponhitbasenl*100.000000 }}%",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Udyr",
+        "skill": "Q",
+        "icon": "Udyr Wilding Claw.png",
+        "description": "{{sbc|Active - Stance:}} '''Udyr''' enters ''Claw Stance'', empowering his next two basic attacks to gain {{sti|range|50}} '''bonus''' range and deal {{as|'''bonus''' physical damage}}.",
+        "leveling": "{{st|Bonus Physical Damage|{{as|{{ap|3 to 8 6}}% {{as|(+ 4% per 100 '''bonus''' AD)}} of target's '''maximum''' health}}|Total Physical Damage|{{as|{{ap|3*2 to 8*2 6}}% {{as|(+ {{ap|4*2}}% per 100 '''bonus''' AD)}} of target's '''maximum''' health}}}}",
+        "description2": "Additionally, '''Udyr''' gains {{as|'''bonus''' attack speed}} and deals {{as|'''bonus''' physical damage}} {{tip|on-hit}} for 4 seconds.",
+        "leveling2": "{{st|Bonus Attack Speed|{{ap|20 to 80 6}}%}}\n{{st|Bonus Physical Damage On-Hit|{{ap|5 to 35 6}} {{as|(+ 25% '''bonus''' AD)}}}}",
+        "description3": "{{sbc|Recast - Awaken:}} '''Udyr''' gains an additional {{as|{{pp|20 to 70|key=%}} '''bonus''' attack speed|attack speed}}. The empowered attacks deal an additional {{as|{{pp|2 to 4|key=%}} {{as|(+ 2% per 100 '''bonus''' AD)}} of the target's '''maximum''' health}} {{ccs|{{as|'''bonus''' physical damage}}}}. '''Udyr's''' next two basic attacks in any ''Stance'' within 4 seconds are empowered to strike with lightning{{ft|6 times over 1 second,|every {{tt|{{fd|0.2}}|First strike happens instantly, the other 5 are dealt after 0.2 second delays}} seconds over 1 second,}}dealing {{ccs|{{as|'''bonus''' magic damage}}|magic}} equal to {{as|{{pp|1.5 to 3|key=%}}|health}} {{as|(+ {{fd|0.8}}% per 100 AP)}} {{as|of the target's '''maximum''' health}} per hit, chaining to up to 3 nearby {{tip|sight|visible}} enemies and being able to hit the same target multiple times, for a total of {{as|{{pp|1.5*6 to 3*6|key=%}}|health}} {{as|(+ {{ap|0.8*6}}% per 100 AP)}} {{as|of the target's '''maximum''' health}}. Each lightning strike deals a minimum of {{pp|40 to 160}} against {{tip|minions}} and is capped at 20 {{as|(+ 100% '''bonus''' AD)}} {{as|(+ 50% AP)}} against {{tip|monster|monsters}}.",
+        "effect radius": "{{tip|cr|icononly=true}} {{tt|450|Lightning bounce radius}}",
+        "cooldown": "{{tt|6|Starts on-cast, but recasting refreshes the cooldown}}",
+        "cdstart": "on-cast",
+        "cost": "20",
+        "costtype": "mana",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Self, Enemies",
+        "damagetype": "{{tip|Physical damage|Physical}} / {{tip|Magic damage|Magic}}",
+        "spellshield": "special",
+        "spelleffects": "special",
+        "projectile": "true",
+        "parry": "true",
+        "notes": "* Deals {{tip|spell damage}} to the primary target and applies {{tip|area damage}} on the lightning strikes.\n* The lightning strikes can deal up to {{as|{{pp|1.5*6 to 3*6|key=%}}|health}} {{as|(+ {{ap|0.8*6}}% per 100 AP)}} {{as|of the target's '''maximum''' health}} {{as|'''bonus''' magic damage}} per empowered basic attack against an isolated target. \n**If both empowered attacks are used on the same isolated target, the lightning strikes can deal up to {{as|{{pp|3*6 to 6*6|key=%}}|health}} {{as|(+ {{ap|1.6*6}}% per 100 AP)}} {{as|of the target's '''maximum''' health}} {{as|'''bonus''' magic damage}}.\n* The lightning strikes from two separate empowered attacks can overlap with each other on the same target for additional damage.\n* {{tip|Spell shield}} will only block an empowered attack's application of the lightning strikes.\n* The empowered attacks will not trigger nor be consumed if they hit a structure or ward or are parried.\n\n<!-- Blurb -->",
+        "blurbicon": "Udyr Wilding Claw.png",
+        "blurb": "{{sbc|Claw Stance:}} {{ci|Udyr}} first two basic attacks deal bonus {{as|physical damage}} equal to a portion of the {{as|target's '''maximum''' health}}. Additionally, he gains {{sti|{{as|attack speed}}}} and bonus on-hit {{as|physical damage}} for a few seconds.",
+        "blurb2": "{{sbc|Awaken:}} The next two basic attacks release a chain of lighting that bounces to nearby enemies, dealing {{as|magic damage}} equal to a portion of {{as|their '''maximum''' health}} and can bounce to the same enemy multiple times for a lack of targets. Additionally, he gains even greater {{sti|{{as|attack speed}}}} for a few seconds.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "W": {
+      "id": "UdyrW",
+      "name": "Iron Mantle",
+      "description": "Udyr gains a shield and his next two attacks heal him. Recast: Gain an even bigger shield and heal based on max health over the next couple seconds.",
+      "tooltip": "Mantle Stance: Udyr gains {{ totalshield }} Shield for {{ shieldduration }} seconds. Additionally, Udyr's next two Attacks gain {{ lifesteal*100 }}% Life Steal and restore {{ lifeonhit }} Health.\n\nAwaken: Gain {{ recastshield }} Shield, restore {{ recastheal }} Health over {{ shieldduration }} seconds, and Udyr's next two Attacks instead have {{ lifesteal*200 }}% Life Steal and restore {{ lifeonhitawakened }} Health.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "6",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "0",
+      "max_rank": 6,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Shield Amount",
+          "% Health Shield",
+          "Life Steal"
+        ],
+        "effect": [
+          "{{ shieldbase }} -> {{ shieldbaseNL }}",
+          "{{ shieldpercenthealth*100.000000 }}% -> {{ shieldpercenthealthnl*100.000000 }}%",
+          "{{ lifesteal*100.000000 }}% -> {{ lifestealnl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Udyr",
+        "skill": "W",
+        "icon": "Udyr Iron Mantle.png",
+        "description": "{{sbc|Active - Stance:}} '''Udyr''' enters ''Mantle Stance'', empowering his next two basic attacks to gain {{stil|life steal}} and {{tip|heal}} him for {{as|{{fd|1.2}}% of his '''maximum''' health}} {{as|(+ 8% AP)}} on-hit.",
+        "leveling": "{{st|Life Steal|{{ap|15 to 20 6}}%}}",
+        "description2": "Additionally, '''Udyr''' grants himself a {{tip|shield}} for 4 seconds.",
+        "leveling2": "{{st|Shield Strength|{{ap|45 to 120 6}} {{as|(+ 40% AP)}} {{as|(+ {{ap|2 to 3.5 6}}% '''maximum''' health)}}}}",
+        "description3": "{{sbc|Recast - Awaken:}} '''Udyr''' increases the {{tip|shield|shield's}} strength, stacking with the remaining shield from the first cast, and {{tip|heal|heals}} every {{fd|0.25}} seconds over the next 4 seconds, as well as causes the empowered attacks to instead gain doubled {{stil|life steal}} and {{tip|heal}} him for {{as|{{fd|2.4}}% of his '''maximum''' health}} {{as|(+ 16% AP)}} on-hit.",
+        "leveling3": "{{st|Increased Shield Strength|{{pp|20 to 150}} (+ {{ap|45 to 120 6}}) {{as|(+ 65% AP)}} {{as|(+ 8% '''maximum''' health)}}}}\n{{st|Total Healing|{{pp|20/2 to 150/2}} (+ {{ap|45/2 to 120/2 6}}) {{as|(+ {{ap|65/2}}% AP)}} {{as|(+ {{ap|8/2}}% '''maximum''' health)}}|Heal per Tick|{{pp|20/16/2 to 150/16/2|round=2}} (+ {{ap|45/16/2 to 120/16/2 6|round=2}}) {{as|(+ {{ap|65/16/2|round=2}}% AP)}} {{as|(+ {{ap|8/16/2}}% '''maximum''' health)}}}}\n{{st|Increased Life Steal|{{ap|15*2 to 20*2 6}}%}}",
+        "description4": "Healing [[on-hit]] is reduced to 60% against {{tip|minions}}.",
+        "cooldown": "{{tt|6|Starts on-cast, but recasting refreshes the cooldown}}",
+        "cdstart": "on-cast",
+        "cost": "{{pp|40 to 23}}",
+        "costtype": "mana",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Self",
+        "spelleffects": "spell",
+        "parry": "true",
+        "notes": "* The empowered attacks apply [[spell effects]] to the target.\n* The empowered attacks will not trigger nor be consumed if they hit a structure or ward or are parried.\n<!-- Blurb -->",
+        "blurbicon": "Udyr Iron Mantle.png",
+        "blurb": "{{sbc|Mantle Stance:}} {{ci|Udyr}} gains a {{tip|shield}} and his next two basic attacks gain {{sti|{{as|life steal}}}} and {{as|{{sti|heal}}}} him.",
+        "blurb2": "{{sbc|Awaken:}} Gain an even greater shield. The next two basic attack's {{sti|{{as|life steal}}}} and {{as|{{sti|healing}}}} is also greatly increased.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "E": {
+      "id": "UdyrE",
+      "name": "Blazing Stampede",
+      "description": "Udyr gains movement speed and his first attack against each target will Stun them. Recast: Gain even more movement speed and immunity to immobilizing effects for a couple seconds.",
+      "tooltip": "Stampede Stance: Udyr gains {{ movespeed*100 }}% Move Speed, decaying over {{ movespeedduration }} seconds. Additionally, Udyr's Attacks dash him to the target and Stun for {{ stunduration }} seconds ({{ icd }} second Cooldown per target).\n\nAwaken: Grants immunity to Immobilizing and Disabling effects and an additional {{ movespeedbonus }} Move Speed for {{ unstoppableduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "6",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 6,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Move Speed",
+          "Per Unit Cooldown"
+        ],
+        "effect": [
+          "{{ movespeed*100.000000 }}% -> {{ movespeednl*100.000000 }}%",
+          "{{ icd }} -> {{ icdNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Udyr",
+        "skill": "E",
+        "icon": "Udyr Blazing Stampede.png",
+        "description": "{{sbc|Active - Stance:}} '''Udyr''' enters ''Stampede Stance'', empowering his basic attacks to have an {{tip|uncancellable windup}} and {{tt|{{tip|dash|pounce}} on the target|to 75 units closer than attack range, if Udyr is not closer already (pending for test)}} to {{tip|stun}} them for {{fd|0.75}} seconds. This cannot affect the same target more than once every few seconds.",
+        "description2": "Additionally, '''Udyr''' becomes {{tip|ghosted}} and gains {{sti|{{as|'''bonus''' movement speed}}}} for 4 seconds, which decays to 30% effectiveness over {{fd|1.5}} seconds.",
+        "leveling2": "{{st|Bonus Movement Speed|{{ap|30 to 65 6}}%}}\n{{st|Decayed Bonus Movement Speed|{{ap|30*0.3 to 65*0.3 6}}%}}",
+        "description3": "{{sbc|Recast - Awaken:}} '''Udyr''' gains {{sti|range|75}} '''bonus''' attack range and an additional {{as|{{pp|30 to 40|key=%}} '''bonus''' movement speed|ms}}. He also gains {{tip|cc-immune|immunity to crowd control}} for {{fd|1.5}} seconds.",
+        "ontargetcdstatic": "{{ap|6 to 4 6}}",
+        "cooldown": "{{tt|6|Starts on-cast, but recasting refreshes the cooldown}}",
+        "cdstart": "on-cast",
+        "cost": "{{pp|40 to 23}}",
+        "costtype": "mana",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Self, Enemies",
+        "spellshield": "true",
+        "grounded": "special",
+        "knockdown": "special",
+        "parry": "true",
+        "notes": "* '''Udyr''' cannot dash while {{tip|ground|grounded}} or {{tip|root|rooted}}, but he will still declare the empowered attack.\n* The empowered attack will still apply its effects even if the dash is interrupted.\n* The empowered attacks will not trigger nor be consumed if they hit a structure or ward or are parried.\n** The immunity to the stun is not applied in any case.\n<!-- Blurb -->",
+        "blurbicon": "Udyr Blazing Stampede.png",
+        "blurb": "{{sbc|Stampede Stance:}} {{ci|Udyr}} gains a burst of {{sti|{{as|movement speed}}}} that decays over a few seconds. His attacks in this stance briefly {{tip|stun}} his target, but this cannot affect them more than once every few seconds.",
+        "blurb2": "{{sbc|Awaken:}} '''Udyr''' gains an even greater burst of {{sti|{{as|movement speed}}}} and {{tip|cc-immune|cc-immunity}} for a brief duration.",
+        "blurb4": "{{sbc|{{tip|cc-immune|Cc-immunity|nolink=true}}}}: {{tip|Crowd control}} cannot be applied during this time.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "R": {
+      "id": "UdyrR",
+      "name": "Wingborne Storm",
+      "description": "Udyr surrounds himself in a glacial storm, damaging and slowing nearby enemies. Recast: Empower and unleash the storm, causing it to track enemies and deal additional damage.",
+      "tooltip": "Storm Stance: Udyr surrounds himself in a glacial storm for {{ buffduration }} seconds, dealing {{ stormdamage }} magic damage per second to nearby enemies and Slowing them by {{ slowpotency*100 }}%. Additionally, Udyr's next two Attacks in this stance deal {{ pulsedamage }} magic damage to enemies in the storm.\n\nAwaken: Unleash the storm, causing it to follow Udyr's last Attacked enemy, deal an additional {{ percenthpblast }} max Health magic damage over the duration, and Slow by an additional {{ empoweredslow }}.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "6",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "370",
+      "max_rank": 6,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage Per Second",
+          "Slow"
+        ],
+        "effect": [
+          "{{ stormbasedamage }} -> {{ stormbasedamageNL }}",
+          "{{ slowpotency*100.000000 }}% -> {{ slowpotencynl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Udyr",
+        "skill": "R",
+        "icon": "Udyr Wingborne Storm.png",
+        "description": "{{sbc|Active - Stance:}} '''Udyr''' enters ''Storm Stance'', empowering his next two basic attacks to deal {{as|{{pp|10 to 30}}|magic damage}} {{as|(+ 30% AP)}} {{as|magic damage}} to nearby enemies.",
+        "description2": "Additionally, '''Udyr''' summons a blizzard around himself for 4 seconds that deals {{as|magic damage}} every {{fd|0.5}} seconds to nearby enemies and {{tip|slow|slows}} them. {{tip|Minions}} take {{pp|50 to 80 for 4|1 to 16|key=%}} damage.",
+        "leveling2": "{{st|Magic Damage per Tick|{{ap|10 to 55 6}} {{as|(+ {{fd|17.5}}% AP)}}|Total Magic Damage|{{ap|10*8 to 55*8 6}} {{as|(+ {{ap|17.5*8}}% AP)}}}}\n{{st|Slow|{{ap|15 to 30 6}}%}}",
+        "description3": "{{sbc|Recast - Awaken:}} '''Udyr''' ends the blizzard if it is active and unleashes a glacial storm for 4 seconds that is able to move on its own, as well as causes the empowered attacks to instead deal their damage to enemies within that storm. The storm follows the closest nearby {{tip|sight|visible}} target and applies the same effects but deals {{ccs|{{as|'''bonus''' magic damage}}|magic}} equal to{{ft|{{as|{{pp|8/8 to 16/8|key=%}}|health}} {{as|(+ {{ap|3.5/8}}% per 100 AP)}} {{as|of the target's '''maximum''' health}} per tick, capped at {{pp|80/8 to 400/8}}|{{as|{{pp|8 to 16|key=%}}|health}} {{as|(+ {{fd|3.5}}% per 100 AP)}} {{as|of the target's '''maximum''' health}} over the duration, capped at {{pp|80 to 400}}}}against {{tip|monsters}}, and {{tip|slow|slows}} by an additional 5%.",
+        "leveling3": "{{st|Increased Slow|{{ap|15+5 to 30+5 6}}%}}",
+        "description4": "The unleashed storm grants {{tip|sight}} of its {{tt|surroundings|Does not permeate through terrain or brush}} and prioritizes following the last enemy '''Udyr''' has attacked while he is nearby, then enemy {{tip|champions}}, then non-champions, then '''Udyr'''.",
+        "effect radius": "{{tip|er|icononly=true}} {{tt|370|Storm and empowered attack radius, center to edge}} / {{tip|cr|icononly=true}} {{tt|1300|Storm lock-on radius}}",
+        "speed": "{{pp|109.5;109.676;109.853;111.471;120.294;129.118;137.941;146.765;155.588;164.412;173.235;182.059;190.882;199.706;208.529;217.353;232.353;250|label=Move Speed|formula=The spawned unit has 350 base speed and gains a -400 to -100 MS modifier to its raw MS based on Udyr's champion level at time of the Awaken cast, scaling linearly. The final MS of the unit is the raw MS after movement speed soft caps. The storm's travel speed does not scale past level 18 in Ultra Rapid Fire game mode.}}",
+        "cooldown": "{{tt|6|Starts on-cast, but recasting refreshes the cooldown}}",
+        "cdstart": "on-cast",
+        "cost": "{{pp|40 to 23}}",
+        "costtype": "mana",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Self, Enemies",
+        "damagetype": "magic",
+        "spellshield": "false",
+        "spelleffects": "aoedot",
+        "parry": "true",
+        "notes": "* The storm that '''Udyr''' surrounds himself with is independent from the unleashed storm.\n** He can still cast ''Wingborne Storm'' to surround himself with a storm while an unleashed storm from an ''Awakened'' cast is active.\n** Using the ''Awakened'' cast ends the storm around '''Udyr''' if it is active and summons a separate storm that is able to move on its own.\n* The slow debuff has a duration equal to the storm's remaining duration and is removed immediately when the unit leaves the storm's area of effect.\n** Units receive the debuff whenever they are in the storm, even after having it removed from leaving the area.\n* If the target '''Udyr''' has most recently attacked is invalid and there are no nearby enemies then the storm will follow him instead.\n** The storm can follow '''Udyr''' regardless of how far away he is from it.\n* The storm will remain active even if '''Udyr''' dies. Any commands it was issued to follow a target will not be interrupted.\n* The storm will follow its target even if they are not {{tip|sight|visible}}, but only for up to 1 second. \n** If it does not gain vision of its target within that time, it changes its target.\n* The storm is obstructed by terrain. If it encounters terrain, then it will automatically navigate its path towards the target.\n* The empowered attacks will not trigger nor be consumed if they hit a structure or ward or are parried.\n<!-- Blurb -->",
+        "blurbicon": "Udyr Wingborne Storm.png",
+        "blurb": "{{sbc|Storm Stance:}} {{ci|Udyr}} summons a blizzard around himself for a few seconds that continuously deals {{as|magic damage}} and {{tip|slow|slows}} enemies inside. His next two basic attacks each cause the blizzard to deal a burst of additional {{as|magic damage}} to enemies inside it.",
+        "blurb2": "{{sbc|Awaken:}} '''Udyr''' unleashes the blizzard to seek out the enemy, prioritizing the target of '''Udyr's''' attacks. It also deals increased {{as|magic damage}} equal to a portion of {{as|their '''maximum''' health}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    }
+  }
+}

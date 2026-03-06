@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0067_2v2_s2"
+seed = 21990
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["rogue", "paladin"]
+enemy_hero_templates = ["rogue", "elementalist"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

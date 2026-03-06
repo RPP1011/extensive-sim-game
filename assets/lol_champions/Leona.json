@@ -1,0 +1,270 @@
+{
+  "id": "Leona",
+  "name": "Leona",
+  "title": "the Radiant Dawn",
+  "resource_type": "Mana",
+  "tags": [
+    "Tank",
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Sunlight",
+      "description": "Damaging spells afflict enemies with Sunlight for 1.5 seconds. When allied Champions deal damage to those targets, they consume the Sunlight to deal additional magic damage.",
+      "wiki_detail": {
+        "champion": "Leona",
+        "skill": "I",
+        "icon": "Sunlight.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Leona}} abilities briefly mark enemies hit.",
+        "blurb2": "Allied {{tip|champions|champions'}} damaging attacks and abilities against a marked target will consume the mark to deal {{as|magic damage}}.",
+        "description": "{{sbc|Innate:}} '''Leona's''' [[champion ability|abilities]] mark enemies hit for {{fd|1.5}} seconds, refreshing on subsequent hits. <br/><br/>Allied {{tip|champions|champions'}} damaging attacks and abilities against a marked target will consume the mark to deal {{as|{{pp|32 to 151}}|magic damage}} {{as|'''bonus''' magic damage}}.",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spelleffects": "spell",
+        "onhiteffects": "|spellshield  = true",
+        "notes": "* ''Sunlight's'' damage respects {{tip|enchantment redirection}}.\n* {{ci|Zyra}} has a hidden passive that grants her 10% increased size for {{tt|33 seconds|Estimated}} after having ''Sunlight'' applied to her."
+      }
+    },
+    "Q": {
+      "id": "LeonaShieldOfDaybreak",
+      "name": "Shield of Daybreak",
+      "description": "Leona uses her shield to perform her next basic attack, dealing bonus magic damage and stunning the target.",
+      "tooltip": "Leona's next Attack Stuns for {{ e1 }} seconds and deals an additional {{ totaldamagetooltip }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "5",
+      "cost": "30/35/40/45/50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "100",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "1",
+        "10/35/60/85/110",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e2 }} -> {{ e2NL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Leona",
+        "skill": "Q",
+        "icon": "Shield of Daybreak.png",
+        "blurb": "{{sbc|Active:}} {{ci|Leona}} illuminates her shield, causing her next [[basic attack]] within a few seconds to deal {{as|'''bonus''' magic damage}} and briefly {{tip|stun}} the target.",
+        "description": "{{sbc|Active:}} '''Leona''' illuminates her shield, empowering her next [[basic attack]] within 6 seconds to have a {{fd|0.25}}-second cast time, gain {{sti|range|50 '''bonus''' range}}, deal {{as|'''bonus''' magic damage}} and {{tip|stun}} the target for 1 second.",
+        "leveling": "{{st|Bonus Magic Damage|{{ap|10 to 110}} {{as|(+ 30% AP)}}}}",
+        "description2": "''Shield of Daybreak {{tip|basic attack reset|resets}} '''Leona's''' basic attack timer.''",
+        "cooldown": "5",
+        "cdstart": "post-effect",
+        "cost": "{{ap|35 to 55}}",
+        "cast time": "none",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spelleffects": "spell",
+        "spellshield": "True",
+        "parry": "unknown",
+        "notes": "* The enhanced attack will apply other {{tip|on-hit}} effects and can {{tip|critical strike|critically strike}} as normal.\n** {{tip|critical strike|Critical strikes}} do not interact with ''Shield of Daybreak's'' bonus damage.\n* {{Pending for test}}: ''Shield of Daybreak's'' interactions with {{tip|dodge|dodging}}, {{tip|block|blocking}}, and {{tip|blind|blinding}} effects.\n* ''Shield of Daybreak's'' attack does not put '''Leona's''' basic attack on cooldown.{{bug|2}}\n** This effectively performs a second {{tip|basic attack reset|attack reset}}.\n** This is unlike other empowered attacks (including those which, similar to ''Shield of Daybreak'', use a more unconventional spell cast rather than an attack override).\n** '''Leona''' will wait out ''Shield of Daybreak's'' wind-down before automatically attacking, anyway. The player must issue the next attack themselves to gain the full benefit of the second reset.\n** Probably not a bug because her High Noon skin gives the second attack a new distinguishable attack animation, which means that it's designed so.\n* If the target becomes {{tip|untargetable}}, {{tip|death|dies}}, or is too far away during the empowered attack's cast time, it is cancelled but not consumed.\n* The empowered attack will not trigger against [[buildings]]."
+      }
+    },
+    "W": {
+      "id": "LeonaSolarBarrier",
+      "name": "Eclipse",
+      "description": "Leona raises her shield to gain Damage Reduction, Armor, and Magic Resist. When the duration first ends, if there are nearby enemies, she will deal magic damage to them and prolong the duration of the effect.",
+      "tooltip": "Leona raises her shield, reducing incoming damage by {{ flatdamagereduction }} and gaining {{ bonusarmortooltip }} Armor and {{ bonusmrtooltip }} Magic Resist for {{ e3 }} seconds. Afterwards, her shield detonates, dealing {{ totaldamagetooltip }} magic damage to nearby enemies. If she hits at least one, she retains the Armor and Magic Resist bonuses for an additional {{ e3 }} seconds.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "450",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "55/85/115/145/175",
+        "20/27.5/35/42.5/50",
+        "3",
+        "20/27.5/35/42.5/50",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Armor and Magic Resist",
+          "Damage Reduction",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ e4 }} -> {{ e4NL }}",
+          "{{ flatdamagereduction }} -> {{ flatdamagereductionNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Leona",
+        "skill": "W",
+        "icon": "Eclipse.png",
+        "blurb": "{{sbc|Active:}} {{ci|Leona}} raises her ''guard'' for a short time, gaining flat damage reduction, {{sti|{{as|'''bonus''' armor}}}} and {{sti|{{as|'''bonus''' magic resistance}}}}.",
+        "blurb2": "Her shield detonates afterward, dealing {{as|magic damage}} to all nearby enemies. If this hits an enemy, '''Leona's''' ''guard'' is extended for a short time.",
+        "description": "{{sbc|Active:}} '''Leona''' raises her ''guard'' for 3 seconds, gaining flat damage reduction of up to 50% of the damage instance and {{sti|{{as|'''bonus''' armor}}}} and {{sti|{{as|'''bonus''' magic resistance}}}}.",
+        "leveling": "{{st|Flat Damage Reduction|{{ap|8 to 24}}}}\n{{st|Bonus Armor|{{ap|20 to 50}} {{as|(+ 20% '''bonus''' armor)}}}}\n{{st|Bonus Magic Resistance|{{ap|20 to 50}} {{as|(+ 20% '''bonus''' magic resistance)}}}}",
+        "description2": "Her shield detonates after the duration, dealing {{as|magic damage}} to nearby enemies. If this hits an enemy, '''Leona's''' ''guard'' is extended for an additional 3 seconds.",
+        "leveling2": "{{st|Magic Damage|{{ap|55 to 175}} {{as|(+ 40% AP)}}}}",
+        "cooldown": "{{ap|14 to 10}}",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "cost": "60",
+        "costtype": "Mana",
+        "effect radius": "{{tip|cr|icononly = true}} 450",
+        "targeting": "Auto",
+        "affects": "Self, Enemies",
+        "damagetype": "magic",
+        "spelleffects": "spellaoe",
+        "onhiteffects": "|spellshield  = special",
+        "notes": "* Neither the cast nor detonation of ''Eclipse'' interrupts any of '''Leona's''' previous orders or ongoing attack windups.\n* The resistance scaling will factor from all other sources, excluding ''Eclipse's'' flat bonus. This will recalculate over the duration.\n* {{tip|Spell shield}} will block the damage but ''Eclipse's'' extended duration will not be prevented."
+      }
+    },
+    "E": {
+      "id": "LeonaZenithBlade",
+      "name": "Zenith Blade",
+      "description": "Leona projects a solar image of her sword, dealing magic damage to all enemies in a line. When the image fades, the last enemy champion struck will be briefly immobilized and Leona will dash to them.",
+      "tooltip": "Leona thrusts with a sword of light, dealing {{ totaldamagetooltip }} magic damage. The last champion struck will be Rooted for {{ e2 }} seconds and Leona will dash to them.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/10.5/9/7.5/6",
+      "cost": "40/45/50/55/60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "875",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "50/90/130/170/210",
+        "0.5",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Leona",
+        "skill": "E",
+        "icon": "Zenith Blade.png",
+        "blurb": "{{sbc|Active:}} {{ci|Leona}} projects her sword in the target direction that deals {{as|magic damage}} to enemies hit.",
+        "blurb2": "If she hits at least one enemy {{tip|champion}}, she will {{tip|dash}} to the last one struck and briefly {{tip|root}} them.",
+        "description": "{{sbc|Active:}} '''Leona''' projects her sword in the target direction that deals {{as|magic damage}} to enemies hit.",
+        "leveling": "{{st|Magic Damage|{{ap|50 to 210}} {{as|(+ 40% AP)}}}}",
+        "description2": "If she hits at least one enemy {{tip|champion}}, she will {{tip|dash}} 225 units behind the last one struck within 3000 range and {{tip|root}} them for {{fd|0.5}} seconds.",
+        "description3": "'''''Leona''' is {{tip|lockout|unable}} to move or attack while Zenith Blade is in flight. She can cast any of her abilities during the dash.''",
+        "cooldown": "{{ap|12 to 6}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "60",
+        "costtype": "Mana",
+        "target range": "{{tip|cr|icononly = true}} 900",
+        "width": "{{tip|er|icononly = true}} 140",
+        "speed": "2000",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "projectile": "true",
+        "spelleffects": "aoe",
+        "onhiteffects": "|spellshield  = true",
+        "knockdown": "true",
+        "grounded": "true",
+        "notes": "* '''Leona''' will be ordered to basic attack the target.\n* {{tip|Spell shield}} will block ''Zenith Blade's'' effects, and prevent '''Leona''' from dashing to the target.\n<!--\n* '''Leona''' will fail to {{tip|root}} or {{tip|dash}} to the target if it becomes {{tip|untargetable}} after being struck or is not within 3000 range.-->\n{{Effect at cast time end}}"
+      }
+    },
+    "R": {
+      "id": "LeonaSolarFlare",
+      "name": "Solar Flare",
+      "description": "Leona calls down a beam of solar energy, dealing damage to enemies in an area. Enemies in the center of the area are stunned, while enemies on the outside are slowed.",
+      "tooltip": "Leona calls down a radiant beam of solar energy dealing {{ explosioncalculateddamage }} magic damage and Slowing by {{ slowpercent }}% for {{ ccduration }} seconds. Enemies in the center of the flare are Stunned instead of Slowed.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "90/75/60",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1200",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "100",
+        "3",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ explosionbasedamage }} -> {{ explosionbasedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Leona",
+        "skill": "R",
+        "icon": "Solar Flare.png",
+        "blurb": "{{sbc|Active:}} {{ci|Leona}} calls down a solar flare that strikes upon the target location, dealing {{as|magic damage}} to enemies hit.",
+        "blurb2": "Enemies hit are briefly {{tip|slow|slowed}}, or {{tip|stun|stunned}} for the same duration if they are hit by the epicenter.",
+        "description": "{{sbc|Active:}} '''Leona''' calls down a solar flare that strikes upon the target location after {{fd|0.625}} seconds, granting {{tip|sight}} of the area before impact and for another 3 seconds afterwards. Enemies hit are dealt {{as|magic damage}}.",
+        "leveling": "{{st|Magic Damage|{{ap|150 to 300}} {{as|(+ 80% AP)}}}}",
+        "description2": "Targets are also {{tip|slow|slowed}} by 80% for {{fd|1.75}} seconds, or {{tip|stun|stunned}} for the same duration if they are hit by the epicenter.",
+        "cooldown": "{{ap|90|75|60}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "target range": "1200",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|325|Damage radius}} / {{tt|175|Epicenter radius}} / {{tt|800|Area reveal radius}}",
+        "damagetype": "magic",
+        "inner radius": "100",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "spelleffects": "aoe",
+        "onhiteffects": "|spellshield  = True",
+        "notes": "* ''Solar Flare's'' visual effects are only visible to enemies if they have {{tip|sight}} of the area it was cast upon.\n* The cast indicator shows 300 radius for the [[area of effect]] and 120 radius for the epicenter, however the actual hitbox radii are larger than those values.\n* The revealed radius is not obstructed by [[terrain]] or {{tip|brush}}."
+      }
+    }
+  }
+}

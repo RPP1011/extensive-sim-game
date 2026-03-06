@@ -1,0 +1,13 @@
+[scenario]
+name = "size_8v10_2757"
+seed = 1922
+hero_count = 8
+enemy_count = 10
+difficulty = 1
+max_ticks = 10000
+room_type = "Pivot"
+hero_templates = ["cryomancer", "warden", "ranger", "bard", "druid", "samurai", "shaman", "engineer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

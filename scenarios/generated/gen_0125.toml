@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_warrior_engineer_cryomancer_s2"
+seed = 21042
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["warrior", "engineer", "cryomancer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

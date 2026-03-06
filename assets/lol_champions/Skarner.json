@@ -1,0 +1,275 @@
+{
+  "id": "Skarner",
+  "name": "Skarner",
+  "title": "the Primordial Sovereign",
+  "resource_type": "Mana",
+  "tags": [
+    "Tank",
+    "Fighter"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Threads of Vibration",
+      "description": "Skarner's Attacks, Shattered Earth, Upheaval, and Impale, apply Quaking. At max stacks of Quaking, enemies take max Health magic damage over its duration.",
+      "wiki_detail": {
+        "champion": "Skarner",
+        "skill": "I",
+        "icon": "Skarner Threads of Vibration.png",
+        "description": "{{sbc|Innate:}} '''Skarner's''' [[basic attack]]s [[on-hit]], ''{{ai|Shattered Earth|Skarner}}'', ''{{ai|Upheaval|Skarner}}'', and ''{{ai|Impale|Skarner}}'' apply a [[stack]] of ''Quaking'' to enemies hit for 4 seconds, refreshing on subsequent applications and stacking up to 3 times. Enemies afflicted with 3 stacks take {{as|magic damage}} equal to {{ft|{{as|{{pp|5 to 11|key=%}} of their '''maximum''' health}} over the duration, capped at {{pp|100 to 300}} against {{tip|monsters}}.|{{as|{{pp|5*0.125 to 11*0.125|key=%}} of their '''maximum''' health}} every {{fd|0.5}} seconds over the duration, capped at {{pp|100/8 to 300/8}} per tick against {{tip|monsters}}.}}",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "proc",
+        "spellshield": "special",
+        "parry": "special",
+        "notes": "* Basic attacks that are {{tip|dodge|dodged}} by the target or missed while '''Skarner''' is {{tip|blind|blinded}} do not apply stacks of ''Quake''. {{tip|Block|Blocked}} attacks will still apply stacks.\n* {{tip|Spell shield}} prevents ''Quaking's'' application from {{ai|Upheaval|Skarner}} and {{ai|Impale|Skarner}} only.\n<!-- Blurb -->",
+        "blurbicon": "Skarner Threads of Vibration.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Skarner}} basic attacks, ''{{ai|Shattered Earth|Skarner}}'', ''{{ai|Upheaval|Skarner}}'', and ''{{ai|Impale|Skarner}}'' apply a stack of ''Quaking'' to enemies hit for 4 seconds, refreshing on subsequent applications and stacking up to 3 times. Enemies afflicted with 3 stacks take {{as|magic damage}} based on {{as|their '''maximum''' health}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "SkarnerQ",
+      "name": "Shattered Earth / Upheaval",
+      "description": "Skarner rips a boulder from the earth that empowers his attacks and can be thrown as a powerful projectile.",
+      "tooltip": "Skarner rips a boulder from the ground, empowering his next 3 Attacks with {{ attackspeed*100 }}% Attack Speed and dealing {{ abilitydamage }} physical damage to surrounding enemies. His final Attack will deal an additional {{ maxhppercent*100 }}% max Health physical damage and Slow affected foes by {{ slowpercent*100 }}% for {{ slowduration }}s.\n\nRecast: Skarner ends this Ability and throws his boulder, dealing {{ spell.skarnerq:abilitydamage }} + {{ spell.skarnerq:maxhppercent*100 }}% max Health physical damage, and additionally Slowing the first enemy hit — and any other surrounding enemies — by {{ spell.skarnerq:slowpercent*100 }}% for {{ spell.skarnerq:slowduration }}s.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8/6.75/5.5/4.25/3",
+      "cost": "45",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Attack Speed",
+          "Monster Cap",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ attackspeed*100.000000 }}% -> {{ attackspeednl*100.000000 }}%",
+          "{{ monsterdamagecap }} -> {{ monsterdamagecapNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "W": {
+      "id": "SkarnerW",
+      "name": "Seismic Bastion",
+      "description": "Skarner gains a shield and creates an earthquake whose shockwave damages and slows foes.",
+      "tooltip": "Skarner gains {{ initialshield }} Shield for {{ shieldduration }}s and triggers an earthquake that deals {{ damage }} magic damage and Slows nearby enemies by {{ sloweffect*-100 }}% for {{ slowduration }}s.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9/8/7/6",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "700",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Skarner",
+        "skill": "W",
+        "icon": "Skarner Seismic Bastion.png",
+        "description": "{{sbc|Active:}} '''Skarner''' slams his claws into the ground, {{tip|shield|shielding}} himself equal to {{as|8% of his '''maximum''' health}} for {{fd|2.5}} seconds and releasing a shockwave that {{tt|quickly|~0.25 seconds}} expands in a radius around him to deal {{as|magic damage}} to enemies hit and {{tip|slow}} them by 20% for 1 second.",
+        "leveling": "{{st|Magic Damage|{{ap|50 to 130}} {{as|(+ 80% AP)}}}}",
+        "description2": "'''''Skarner''' can move during Seismic Bastion's cast time.''",
+        "effect radius": "{{tip|er|icononly = true}} {{tt|600|Radial missile range within an arc forward, increasing towards the edges of this angle}} / {{tt|700|Radial missile range at every other angle}}<!--/ {{tt|200|Radial missile width}}-->",
+        "speed": "{{tt|1650|Radial missile speed}}",
+        "cooldown": "{{ap|10 to 6}}",
+        "cost": "{{ap|60 to 80}}",
+        "costtype": "mana",
+        "cast time": "{{ap|0.3}}",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Magical",
+        "spelleffects": "spellaoe",
+        "spellshield": "true",
+        "projectile": "false",
+        "notes": "* The shield is granted at the start of the cast time.\n* The shield ratio is equal to {{pp|0.08*({{ccd|Skarner|hp_base}}+({{ccd|Skarner|hp_lvl}})*(x-1)*(0.7025+0.0175*(x-1)))}} {{as|(+ 8% of his '''bonus''' health)}}.\n* ''Seismic Bastion'' does '''not''' affect enemies inside of '''Skarner'''.{{bug|1}}\n{{Effect at cast time end}}\n<!-- Blurb -->",
+        "blurbicon": "Skarner Seismic Bastion.png",
+        "blurb": "{{sbc|Active:}} {{ci|Skarner}} slams his claws into the ground, {{tip|shield|shielding}} himself based on {{as|his '''maximum''' health}} and releasing a shockwave that quickly expands in a radius around him to deal {{as|magic damage}} to enemies hit and briefly {{tip|slow}} them.",
+        "_comments": [
+          "/ {{tt|200|Radial missile width}}",
+          "Blurb"
+        ]
+      }
+    },
+    "E": {
+      "id": "SkarnerE",
+      "name": "Ixtal's Impact",
+      "description": "Skarner charges forward and passes through terrain. If he collides with a champion or large monster, he'll slam them into the next wall he hits to damage and stun them.",
+      "tooltip": "Skarner charges forward, steering toward the chosen direction and ignoring terrain. If he runs into a champion or large monster, Skarner drags them along for the rest of his charge.\n\nColliding into a wall with an enemy in tow deals {{ pindamage }} physical damage to the enemy and Stuns them for {{ stunduration }}s.\n\nSkarner can Recast this Ability to end his charge early.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "22/21/20/19/18",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1700",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ pinbasedamage }} -> {{ pinbasedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Skarner",
+        "skill": "E",
+        "icon": "Skarner Ixtal's Impact.png",
+        "icon4": "Skarner Ixtal's Impact 2.png",
+        "description": "{{sbc|Active:}} '''Skarner''' charges forward in the direction of the cursor for up to {{fd|2.75}} seconds, during which he gains {{tip|slow immunity}}, becomes {{tip|ghosted}}, ignores [[terrain]]  collision, and has {{tip|unobstructed vision}} of the surrounding 650 units. He automatically navigates his movement along the way and is able to steer himself with a slow turn rate that increases over time, resetting upon changing direction. ''Ixtal's Impact'' can be recast after 1 second, and does so automatically after the duration.",
+        "description2": "'''Skarner''' begins the charge at a {{tt|static amount|Cannot be modified by any means}} of {{sti|{{as|150 movement speed}}}} that increases by {{as|100|ms}} every {{rutngt|0.25}}, up to {{as|950 '''total''' movement speed}} by the end of the duration. If '''Skarner''' collides with an enemy {{tip|champion}} or large {{tip|monster}}, he grabs them with his claws for the time of the remaining charge, {{tip|attach|attaching}} them to himself, {{tip|suppression|suppressing}} them, {{tip|true sight|revealing}} them, increasing the charge's turn rate to the maximum, and gaining {{as|300 '''bonus''' movement speed|ms}}, with a minimum total of {{as|650|ms}} and a maximum total of {{as|1150|ms}}. If a target has been grabbed before the first {{fd|1.75}} seconds of the charge, the remaining duration is set to 1 second, and set to {{fd|0.5}} seconds otherwise. The charge does not ramp up in speed while a target is grabbed.",
+        "description3": "If '''Skarner's''' attached target collides with terrain while being held, the charge ends, detaching them from him, dealing {{as|physical damage}}, {{tip|stun|stunning}} them for {{fd|1.5}} seconds, and reducing ''Ixtal's Impact's'' {{sti|cooldown}} by 35%.",
+        "leveling3": "{{st|Physical Damage|{{ap|30 to 150}} {{as|(+ 8% of his '''maximum''' health)}}}}",
+        "description4": "{{sbc|Recast:}} '''Skarner''' ends ''Ixtal's Impact''. If a target has been grabbed, he detaches them from himself.",
+        "description5": "''Ixtal's Impact ends immediately if '''Skarner''' becomes {{tip|immobilize|immobilized}}, {{tip|ground|grounded}}, or {{tip|silence|silenced}} during the charge, detaching the grabbed target. While the target is grabbed, they are attached to '''Skarner''' in a position that is directly in front of him.''",
+        "cooldown": "{{ap|20 to 16}}",
+        "cdstart": "post-effect",
+        "cost": "{{ap|50 to 70}}",
+        "costtype": "mana",
+        "target range": "|collision radius= {{tip|cr|icononly=true}} {{tt|160|Grab range}}",
+        "speed": "|targeting    = Direction",
+        "cast time": "none",
+        "affects": "|damagetype   = Physical",
+        "spelleffects": "spell",
+        "spellshield": "true",
+        "grounded": "true",
+        "knockdown": "false",
+        "silence": "true",
+        "flavorsound": "{{sm2|Skarner_Original_EStun_2.ogg}} (Stunning an enemy) \"I am calamity!\"",
+        "notes": "* While ''Ixtal's Impact'' is active, '''Skarner's''' movement speed is set to a static amount that cannot change by any means other than by the ability itself.\n** Any movement speed modifiers gained before or during the charge are retained however, and will take effect after the charge if the duration permits.\n* The {{as|'''bonus''' movement speed}} from grabbing a target is {{as|300|ms}} only if '''Skarner's''' movement speed was between {{as|350|ms}} and {{as|850|ms}} at the time.\n** If '''Skarner''' was at less than {{as|350 movement speed}} when he grabbed the target, his total movement speed is instead set to {{as|650|ms}}. If he was at {{as|950 movement speed}}, his total movement speed is set to the cap of {{as|1150|ms}}.\n* '''Skarner''' gains a slightly larger field of view during ''Ixtal's Impact's'' charge.\n* ''Ixtal's Impact's'' attachment depends on the application of the {{tip|suppression}}; if the suppression is not applied, neither is the attachment. Similarly, if the suppression is removed, so is the attachment.\n** If the target resists the suppression through {{tip|cc-immune|total crowd control immunity}}, {{tip|displacement immune|displacement immunity}}, or a {{tip|spell shield}}. '''Skarner''' will not attach them to himself, causing the charge to end instantly. The collision's damage is special-cased to still apply to a target under these effects immediately upon contact.\n** If the target removes the suppression by any means, including with an applicable {{tip|cleanse}} effect or {{tip|dispel}}, they will detach themselves from '''Skarner''' immediately which forces the charge to end instantly and not apply any damage.\n* '''Skarner''' can move up to 550 units beyond the outer-edge of the battlefield with the charge.\n** Once he has surpassed this boundary, ''Ixtal's Impact'' ends immediately and '''Skarner''' is moved to the nearest valid space.\n* ''Ixtal's Impact'' can interact with [[Terrain#Player-Generated|player-generated terrain]].\n* If '''Skarner''' is inside terrain when the effect ends, he will be moved to the nearest valid space.\n* Enemies cannot see '''Skarner''' while he is inside terrain, unless they grant sight into the area of terrain he is inside (such as with {{ai|Hawkshot|Ashe}} or {{ai|Heightened Senses|Quinn}}) or have {{tip|unobstructed vision}}.\n** However, enemies will be notified when '''Skarner''' is inside nearby terrain while within a certain distance of him. An indicator will be visible to the enemy player's perspective to represent this.\n* The following table refers for interactions while '''Skarner''' is charging:\n{{ct|attack=false|move=Allowed, but cannot input movement commands.|cast=false|items=false|consume=false|spells=true,false,false,false,false|interrupts=death,root,ground,silence}}\n* A special indicator for ''Ixtal's Impact's'' direction and expected ending location is visible to '''Skarner''' only during his charge.\n<!-- Blurb -->",
+        "blurbicon": "Skarner Ixtal's Impact.png",
+        "blurb": "{{sbc|Active:}} {{ci|Skarner}} charges in the target direction for a duration while ignoring terrain collision and having {{tip|slow immunity}}. He starts slowly but ramps up in {{sti|movement speed|{{as|movement speed}}}} over the course of the charge, and is able to steer himself increasingly fast when keeping the same direction. ''Ixtal's Impact'' can be recast after 1 second, and does so automatically after the duration.",
+        "blurb2": "Colliding with an enemy {{tip|champion}} or large {{tip|monster}} causes '''Skarner''' to increase his {{sti|movement speed|{{as|movement speed}}}}, forcibly grab them to {{tip|attach}} them to him, and {{tip|suppression|suppress}} them while dragging them along for the remainder of the charge. If the attached target collides with terrain while grabbed, they are {{tip|stun|stunned}} and dealt {{as|physical damage}}, ending the charge, and reducing ''Ixtal's Impact'' {{sti|cooldown}}.",
+        "blurb3": "{{sbc|Recast:}} '''Skarner''' ends ''Ixtal's Impact'' early.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "R": {
+      "id": "SkarnerR",
+      "name": "Impale",
+      "description": "Skarner's tails lash forward to suppress enemy champions. Once suppressed, the victims will be dragged along by Skarner as he moves around.",
+      "tooltip": "Skarner's tails lash forward, dealing {{ damage }} magic damage and Suppressing the first 3 champions he hits for {{ duration }}s. Those hit are dragged along by Skarner for the duration of this Ability.\n\nIf Skarner hits at least one champion he gains {{ speedboostamount*100 }}% Move Speed for {{ speedboostduration }} seconds.\n\nIf Shattered Earth is active, Skarner will cast Upheaval first.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/105/90",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "625",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "disp_name": "Impale",
+        "champion": "Skarner",
+        "skill": "R",
+        "icon": "Skarner Impale.png",
+        "description": "{{sbc|Active:}} '''Skarner''' winds up his stingers over the cast time, then lashes them forward in an isosceles trapezoid in the target direction, dealing {{as|magic damage}} to enemies hit and impaling up to 3 of the closest enemy champions within the area to {{tip|suppression|suppress}} them for {{fd|1.5}} seconds. While suppressed, the targets are {{tip|true sight|revealed}} and {{tip|attach|attached}} to '''Skarner'''. If he successfully impales at least one enemy champion, '''Skarner''' gains {{as|40% '''bonus''' movement speed}} for the same duration.",
+        "leveling": "{{st|Magic Damage|{{ap|150 to 350}} {{as|(+ 100% AP)}}}}",
+        "description2": "''If Impale is cast during {{ai|Shattered Earth|Skarner}}, '''Skarner''' automatically casts {{ai|Upheaval|Skarner}} in the direction of Impale's cast. '''Skarner''' is unable to basic attack, cast {{ai|Shattered Earth|Skarner}} or {{ai|Ixtal's Impact|Skarner}}, or use {{si|Flash}} during Impale. While the targets are impaled, they are attached to '''Skarner''' 300 units {{tt|in front of him|In the direction he cast Impale}}. Targets are placed 200 units in the same direction at the end of the effect.''",
+        "cooldown": "{{ap|120 to 90}}",
+        "cdstart": "on-cast",
+        "cost": "100",
+        "costtype": "mana",
+        "range": "{{tip|er|icononly = true}} {{tt|-50 – 625|Height placement relative to Skarner, 675 total length}}",
+        "width": "{{tip|er|icononly = true}} {{tt|350|Larger base}} / {{tt|200|Smaller base}}",
+        "angle": "<!-- {{tt|72{{degree}}|Larger base angles}} (estimated) -->",
+        "targeting": "Direction",
+        "affects": "|cast time    = {{fd|0.65}}",
+        "damagetype": "Magic",
+        "spelleffects": "spellaoe",
+        "spellshield": "true",
+        "projectile": "false",
+        "flavorsound": "{{sm2|Skarner_Original_R_1.ogg}} \"Feel my sting!\"",
+        "notes": "* ''Impale's'' attachment depends on the application of the {{tip|suppression}}; if the suppression is not applied, neither is the attachment. Similarly, if the suppression is removed, so is the attachment.\n** If a target resists the suppression by being {{tip|cc-immune|immune to crowd control}}, {{tip|displacement immune}}, or having a {{tip|spell shield}}, '''Skarner''' will not attach them to himself.\n*** If all targets hit resist the suppression, '''Skarner''' will fail to attach any of them to himself and thus will not initiate ''Impale'', causing the ability to behave as if no valid impale targets were hit.\n** If a target removes the suppression by any means, including with an applicable {{tip|cleanse}} effect or {{tip|dispel}}, they will detach themselves from '''Skarner''' immediately.\n*** If all targets remove the suppression, ''Impale'' ends prematurely and is cancelled for '''Skarner'''.\n* If a target would be inside of terrain at the end of the effect, they are moved to the nearest valid space.\n* If a target would be on the other side of a wall, they are moved to the same side as '''Skarner'''.\n* During ''Impale'', '''Skarner''' always faces in the direction of the nearest attached target.\n{{Effect at cast time end}}\n* The following table refers for interactions while '''Skarner''' is in cast time:\n{{ct|attack=false|cast=false|move=false|items=false,true|consume=true|spells=true,false,false,false,false|interrupts=revival-false}}\n* The following table refers for interactions while '''Skarner''' is performing ''Impale'':\n{{ct|attack=false|move=true|cast={{ai|Q|Skarner}} and {{ai|E|Skarner}} are disabled, but can be buffered. {{ai|W|Skarner}} is usable.|items=true|consume=true|spells=true,false,true,false,false|interrupts=death}}",
+        "tips": "* Since '''Skarner''' forcibly faces toward his {{tip|suppression|suppressed}} target(s), he will constantly refresh the bonus granted by {{ri|Approach Velocity}} while performing ''Impale'', thus allowing him to drag enemies much further.\n<!-- Blurb -->",
+        "blurbicon": "Skarner Impale.png",
+        "blurb": "{{sbc|Active:}} {{ci|Skarner}} winds up his stingers over the cast time with {{tip|displacement immune|displacement immunity}}, then lashes them forward in the target direction, dealing {{as|magic damage}} to enemies hit and impaling up to 3 of the closest enemy champions within the area to briefly {{tip|suppression|suppress}}. While suppressed, the targets are {{tip|true sight|revealed}} and {{tip|attach|attached}} to '''Skarner'''. If he successfully impales at least one enemy champion, '''Skarner''' gains {{sti|movement speed|{{as|'''bonus''' movement speed}}}} for ''Impale's'' duration.",
+        "blurb2": "'''Skarner''' will automatically cast ''{{ai|Upheaval|Skarner}}'' in the direction of ''Impale's'' cast.",
+        "_comments": [
+          "{{tt|72{{degree}}|Larger base angles}} (estimated)",
+          "Blurb"
+        ]
+      }
+    }
+  }
+}

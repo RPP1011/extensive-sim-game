@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0179_3v3"
+seed = 2102
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["paladin", "berserker", "warrior"]
+enemy_hero_templates = ["Karthus", "Lissandra", "Ambessa"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

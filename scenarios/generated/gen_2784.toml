@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0008_4v4"
+seed = 1931
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["Lissandra", "Janna", "Maokai", "Malphite"]
+enemy_hero_templates = ["Annie", "Cassiopeia", "Braum", "Diana"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

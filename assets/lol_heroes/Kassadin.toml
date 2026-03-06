@@ -1,0 +1,119 @@
+[hero]
+name = "Kassadin"
+
+[stats]
+hp = 85
+move_speed = 3.5
+armor = 25.0
+magic_resist = 33.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 20
+range = 1.5
+cooldown = 750
+
+# --- Q: Null Sphere ---
+[[abilities]]
+name = "Null Sphere"
+targeting = "target_enemy"
+range = 6.5
+cooldown_ms = 10000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 12
+
+[abilities.delivery]
+method = "projectile"
+speed = 14.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 16
+damage_type = "magic"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 2.5
+
+[[abilities.effects]]
+type = "shield"
+amount = 16
+duration_ms = 3000
+
+# --- W: Nether Blade ---
+[[abilities]]
+name = "Nether Blade"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 7000
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 12
+damage_type = "magic"
+
+# --- E: Force Pulse ---
+[[abilities]]
+name = "Force Pulse"
+targeting = "direction"
+range = 4.0
+cooldown_ms = 21000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 12
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 6.0
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 1000
+
+# --- R: Riftwalk ---
+[[abilities]]
+name = "Riftwalk"
+targeting = "ground_target"
+range = 5.0
+cooldown_ms = 5000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "damage"
+amount = 17
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.7
+
+[[abilities.effects]]
+type = "dash"
+is_blink = true
+
+# --- Passive: Void Stone ---
+[[passives]]
+name = "Void Stone"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_dealt"
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

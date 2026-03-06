@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0169_4v4"
+seed = 2092
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["rogue", "Tryndamere", "warden", "bard"]
+enemy_hero_templates = ["Ahri", "Gwen", "Evelynn", "alchemist"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

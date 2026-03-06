@@ -1,0 +1,12 @@
+[scenario]
+name        = "2x WitchDoctor + 2x Cleric"
+seed        = 1195811
+hero_count  = 4
+enemy_count = 16
+difficulty  = 3
+max_ticks   = 5000
+room_type   = "Climax"
+hero_templates = ["WitchDoctor", "WitchDoctor", "Cleric", "Cleric"]
+
+[assert]
+outcome = "Either"

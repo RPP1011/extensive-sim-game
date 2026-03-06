@@ -1,0 +1,108 @@
+[hero]
+name = "Hwei"
+
+[stats]
+hp = 90
+move_speed = 3.3
+armor = 20.0
+magic_resist = 30.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 12
+range = 5.5
+cooldown = 1000
+
+# --- Q: Subject: Disaster ---
+[[abilities]]
+name = "Subject: Disaster"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 10000
+ai_hint = "damage"
+resource_cost = 16
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- W: Subject: Serenity ---
+[[abilities]]
+name = "Subject: Serenity"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 18000
+ai_hint = "damage"
+resource_cost = 18
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- E: Subject: Torment ---
+[[abilities]]
+name = "Subject: Torment"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 12000
+ai_hint = "damage"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- R: Spiraling Despair ---
+[[abilities]]
+name = "Spiraling Despair"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 26100
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 20
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 0
+damage_type = "magic"
+duration_ms = 3000
+tick_interval_ms = 1000
+amount_per_tick = 1
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 5.0
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- Passive: Signature of the Visionary ---
+[[passives]]
+name = "Signature of the Visionary"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_dealt"
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

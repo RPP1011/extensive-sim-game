@@ -1,0 +1,13 @@
+[scenario]
+name = "dual_healer_war_alch_cler_v5_hp2x_s1"
+seed = 12090
+hero_count = 4
+enemy_count = 5
+difficulty = 2
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["warrior", "warrior", "alchemist", "cleric"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Either"

@@ -1,0 +1,21 @@
+Top-down 3D fantasy mission map concept for a guild-led dungeon assault.
+
+Concept: Skybridge Citadel Breach
+- Cliffside fortress district with suspended bridges and rune towers.
+- Mission objective is to interrupt a storm-summoning ritual at summit keep.
+
+Required beats:
+- Three tactical lanes:
+  1) Gate Ramp (frontline attrition lane)
+  2) Wind Bridge (risky fast lane with exposure zones)
+  3) Tower Steps (defensive lane with staggered choke points)
+- One optional side room for resource pickup/recovery.
+- Penultimate antechamber encounter before boss platform.
+- Final circular summit ritual arena.
+
+Art direction:
+- Dawn storm lighting, dramatic clouds, magical wind effects.
+- Stylized 3D map blockout with clean tactical readability.
+- Distinct lane identity via architecture and color accents.
+- No UI, no text labels.
+

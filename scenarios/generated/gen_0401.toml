@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_paladin_pyromancer_warrior_s2"
+seed = 21134
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["paladin", "pyromancer", "warrior"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

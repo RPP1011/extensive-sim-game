@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0044_5v5_s2"
+seed = 21967
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["Ezreal", "Malzahar", "Neeko", "Swain", "cleric"]
+enemy_hero_templates = ["Shaco", "Neeko", "Naafiri", "Kindred", "Lucian"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

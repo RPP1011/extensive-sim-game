@@ -1,0 +1,112 @@
+[hero]
+name = "Twisted Fate"
+
+[stats]
+hp = 90
+move_speed = 3.3
+armor = 20.0
+magic_resist = 30.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 12
+range = 5.5
+cooldown = 1000
+
+# --- Q: Wild Cards ---
+[[abilities]]
+name = "Wild Cards"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 6000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 12
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+[abilities.delivery.on_hit.area]
+shape = "cone"
+radius = 4.0
+angle_deg = 60.0
+
+# --- W: Pick a Card ---
+[[abilities]]
+name = "Pick a Card"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 6000
+ai_hint = "damage"
+resource_cost = 10
+recast_count = 1
+recast_window_ms = 6000
+
+[abilities.delivery]
+method = "projectile"
+speed = 15.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+# --- E: Stacked Deck ---
+[[abilities]]
+name = "Stacked Deck"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 8000
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 16
+damage_type = "magic"
+
+[[abilities.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.3
+duration_ms = 5000
+
+# --- R: Destiny ---
+[[abilities]]
+name = "Destiny"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 30000
+ai_hint = "utility"
+resource_cost = 20
+recast_count = 1
+recast_window_ms = 10000
+
+[[abilities.effects]]
+type = "dash"
+is_blink = true
+
+# --- Passive: Loaded Dice ---
+[[passives]]
+name = "Loaded Dice"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_kill"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+

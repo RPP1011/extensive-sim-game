@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_mage_warlock_blood_mage_s2"
+seed = 21610
+hero_count = 3
+enemy_count = 4
+difficulty = 2
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["mage", "warlock", "blood_mage"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

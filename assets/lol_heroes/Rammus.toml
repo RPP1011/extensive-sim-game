@@ -1,0 +1,139 @@
+[hero]
+name = "Rammus"
+
+[stats]
+hp = 150
+move_speed = 3.3
+armor = 40.0
+magic_resist = 35.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 14
+range = 1.5
+cooldown = 900
+
+# --- Q: Powerball ---
+[[abilities]]
+name = "Powerball"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 16000
+ai_hint = "damage"
+resource_cost = 12
+recast_count = 1
+recast_window_ms = 10000
+
+[abilities.delivery]
+method = "channel"
+duration_ms = 2000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "damage"
+amount = 0
+damage_type = "magic"
+duration_ms = 1000
+tick_interval_ms = 1000
+amount_per_tick = 20
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 1000
+
+# --- W: Defensive Ball Curl ---
+[[abilities]]
+name = "Defensive Ball Curl"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 7000
+ai_hint = "damage"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+# --- E: Frenzying Taunt ---
+[[abilities]]
+name = "Frenzying Taunt"
+targeting = "target_enemy"
+range = 3.2
+cooldown_ms = 12000
+cast_time_ms = 250
+ai_hint = "crowd_control"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "taunt"
+duration_ms = 1500
+
+[[abilities.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.3
+duration_ms = 5000
+
+# --- R: Soaring Slam ---
+[[abilities]]
+name = "Soaring Slam"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 20600
+ai_hint = "damage"
+resource_cost = 20
+
+[[abilities.effects]]
+type = "damage"
+amount = 25
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 4.0
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- Passive: Spiked Shell ---
+[[passives]]
+name = "Spiked Shell"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_auto_attack"
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

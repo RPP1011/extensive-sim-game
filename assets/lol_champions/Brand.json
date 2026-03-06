@@ -1,0 +1,305 @@
+{
+  "id": "Brand",
+  "name": "Brand",
+  "title": "the Burning Vengeance",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage",
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Blaze",
+      "description": "Brand's spells light his targets ablaze, dealing damage over 4 seconds, stacking up to 3 times. If Brand kills an enemy while it is ablaze he regains mana. When Blaze reaches max stacks on a Champion or large monster, it becomes unstable. It detonates in 2 seconds, applying spell effects and dealing massive damage in an area around the victim.",
+      "wiki_detail": {
+        "champion": "Brand",
+        "skill": "I",
+        "icon": "false",
+        "icon2": "Blaze.png",
+        "blurbicon": "Blaze.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Brand}} abilities apply a stack of ''Ablaze'' to enemies hit. Subsequent abilities used against a target with ''Ablaze'' are empowered. Killing an enemy afflicted with ''Ablaze'' or with an ability restores {{as|{{sti|mana}}}}.",
+        "blurb2": "At three stacks, {{tip|champion|champions}} and large {{tip|monsters}} become unstable and explode, dealing {{as|magic damage}} to nearby enemies and applying a stack of ''Ablaze''. ''Ablaze'' cannot stack more than once on enemies who have recently exploded.",
+        "blurb4": "{{sbc|Ablaze:}} While afflicted with ''Ablaze'', the target is continually dealt {{as|magic damage}} equal to a portion of {{as|their '''maximum''' health}}.",
+        "description": "{{sbc|Innate:}} '''Brand's''' [[champion ability|abilities]] apply a [[stack]] of ''Ablaze'' to enemies hit for 4 seconds, stacking up to 3 times and refreshing the duration of all stacks with each application. Subsequent abilities used against a target with ''Ablaze'' are empowered. Killing an enemy afflicted with ''Ablaze'' or any enemy with an ability restores {{as|{{pp|20 to 40 for 5|1;6 to 15|changedisplay=true}} {{sti|mana}}}}.",
+        "description2": "{{sbc|Ablaze:}} While afflicted with ''Ablaze'', the target is dealt {{as|magic damage}} equal to{{ft|{{as|2% of their '''maximum''' health}} over 4 seconds.|{{as|{{ap|2/12|round=3}}% of their '''maximum''' health}} every {{fd|0.25}} seconds over 4 seconds.}}Each stack of ''Ablaze'' deals damage to the target individually and applies their damage ticks dependent on the time they were applied, even if the duration of all the stacks are refreshed. ''Ablaze'' deals 260% damage per tick to {{tip|monsters}}; this damage is capped at{{ft|{{pp|30/4 to (30/4)*3|1;2;3|type=''Ablaze'' stacks}} per tick against non-epic monsters and {{pp|80/4 to (80/4)*3|1;2;3|type=''Ablaze'' stacks}} per tick against epic monsters.|a total of {{pp|30*4 to 30*4*3|1;2;3|type=''Ablaze'' stacks}} against non-epic monsters and {{pp|80*4 to 80*4*3|1;2;3|type=''Ablaze'' stacks}} against epic monsters.}}",
+        "icon3": "Blaze 2.png",
+        "description3": "Upon applying 3 stacks of ''Ablaze'' to a large {{tip|monster}} or enemy {{tip|champion}}, the fire becomes unstable, forming an area around the target that grants {{tip|sight}} and explodes after 2 seconds, consuming all of their stacks. All enemies within the detonation are dealt {{as|magic damage}} equal to {{as|{{pp|key=%|8 to 12 for 17|1 to 17}} of their '''maximum''' health}} {{as|(+ 2% per 100 AP)}}, capped at {{pp|250 to 475|1;6;11;16}} against {{tip|monsters}}, and applied a stack of ''Ablaze''. ''The explosion will still occur if the target dies to the ability applying the third stack or during the delay.''",
+        "description4": "'''Brand''' cannot stack ''Ablaze'' more than once on enemies who have exploded in the last 4 seconds.",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Special",
+        "effect radius": "{{tip|cr|icononly=true}} 475",
+        "projectile": "|grounded     =",
+        "knockdown": "|video        = Brand IVideo.ogv",
+        "notes": "* ''Ablaze'' is a {{tip|debuff}} that persists through [[death]].\n* ''Ablaze's'' damage cap against a {{tip|monster}} is applied after the increased monster damage.\n* The explosion is not considered a {{tip|tether}} effect and will not affect {{tip|untargetable}} targets, even if the explosion originated from them.\n* Given the behavior of the stacking mechanic, the damage over time will deal varying amounts of damage based on the time the stacks were applied:\n** At sub-optimal applied times, 2 stacks will deal a minimum of {{as|6% '''maximum''' health}} damage over 4 seconds, but will deal {{as|7% '''maximum''' health}} at optimal applied times.\n** Against small-medium units 3 stacks will deal a minimum of {{as|9% '''maximum''' health}} at sub-optimal times, but {{as|11% '''maximum''' health}} at optimal times. If these stacks are further {{tt|refreshed|By ablazing a target that's already at 3 stacks}} at optimal times they can deal up to {{as|12% '''maximum''' health}} over 4 seconds.\n* The burn is {{tip|persistent damage}} and the explosion is {{tip|area damage}}."
+      }
+    },
+    "Q": {
+      "id": "BrandQ",
+      "name": "Sear",
+      "description": "Brand launches a ball of fire forward that deals magic damage. If the target is ablaze, Sear will stun the target.",
+      "tooltip": "Brand launches a fireball that deals {{ totaldamage }} magic damage to the first enemy hit.\n\nIf the target is Ablaze, they will be Stunned for {{ stunduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8/7.5/7/6.5/6",
+      "cost": "70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1050",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "70/100/130/160/190",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Brand",
+        "skill": "Q",
+        "icon": "Sear.png",
+        "blurbicon": "Sear.png",
+        "blurb": "{{sbc|Active:}} {{ci|Brand}} launches a fireball in the target direction that deals {{as|magic damage}} to the first enemy hit.",
+        "blurb2": "{{sbc|{{ai|Blaze|Brand|Ablaze}} Bonus:}} An ''Ablaze'' target hit will also be briefly {{tip|stun|stunned}}.",
+        "description": "{{sbc|Active:}} '''Brand''' launches a fireball in the target direction that deals {{as|magic damage}} to the first enemy hit.",
+        "description2": "{{sbc|{{ai|Blaze|Brand|Ablaze}} Bonus:}} The target is {{tip|stun|stunned}} for {{fd|1.75}} seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 190}} {{as|(+ 65% AP)}}}}",
+        "cast time": "{{fd|0.25}}",
+        "range": "{{tip|cr|icononly=true}} 1100 / {{tip|er|icononly=true}} 1040",
+        "width": "{{tip|er|icononly=true}} 120",
+        "speed": "1600",
+        "cooldown": "{{ap|8|7.5|7|6.5|6}}",
+        "cost": "70",
+        "costtype": "mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "video": "Brand QVideo.ogv",
+        "notes": "* With an ability haste value of {{ap|(<!--cooldown-->(8 to 6)/(<!--passive duration-->4-<!--cast time-->0.25+<!--range-->1100/<!--speed-->1600)-1)*100|round=ceil}}<!--minimum is reached when first hit is from maximum range and second from minimum--> to {{ap|((8 to 6)/(4-0.25-1100/1600)-1)*100|round=ceil}}<!--when first is at minimum and second at maximum--> based on the ranges of applications from the target, it is possible to apply the stun without having to use other abilities. ''Sear'' will apply before the duration of the pre-applied {{ai|Blaze|Brand}} times out.\n** The needed ability haste value if you remained at the same range from the target for both casts would be {{ap|((8 to 6)/(4-0.25)-1)*100|round=ceil}}.\n{{Effect at cast time end}}",
+        "_comments": [
+          "cooldown",
+          "passive duration",
+          "cast time",
+          "range",
+          "speed",
+          "minimum is reached when first hit is from maximum range and second from minimum",
+          "when first is at minimum and second at maximum"
+        ]
+      }
+    },
+    "W": {
+      "id": "BrandW",
+      "name": "Pillar of Flame",
+      "description": "After a short delay, Brand creates a Pillar of Flame at a target area, dealing magic damage to enemy units within the area. Units that are ablaze take an additional 25% damage.",
+      "tooltip": "Brand creates a pillar of pure fire, dealing {{ totaldamage }} magic damage.\n\nUnits that are Ablaze take {{ empowereddamage }} damage instead.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9.5/9/8.5/8",
+      "cost": "60/70/80/90/100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "20/40/60/80/100",
+        "0.25",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Brand",
+        "skill": "W",
+        "icon": "Pillar of Flame.png",
+        "blurb": "{{sbc|Active:}} After a brief delay, {{ci|Brand}} erupts a pillar of flame at the target location that deals {{as|magic damage}} to enemies hit.",
+        "blurb2": "{{sbc|{{ai|Blaze|Brand|Ablaze}} Bonus:}} An ''Ablaze'' target hit will take bonus damage.",
+        "description": "{{sbc|Active:}} After a {{rutngt|0.625}} delay, '''Brand''' erupts a pillar of flame at the target location that deals {{as|magic damage}} to enemies hit.",
+        "leveling": "{{st|Magic Damage|{{ap|75|120|165|210|255}} {{as|(+ 60% AP)}}}}",
+        "description2": "{{sbc|{{ai|Blaze|Brand|Ablaze}} Bonus:}} The target takes 25% increased damage.",
+        "leveling2": "{{st|Increased Damage|{{ap|93.75|150|206.25|262.5|318.75}} {{as|(+ 75% AP)}}}}",
+        "target range": "900",
+        "effect radius": "{{tip|cr|icononly=true}} 260",
+        "cooldown": "{{ap|10|9.5|9|8.5|8}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "{{ap|60|70|80|90|100}}",
+        "costtype": "mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "|grounded     =",
+        "knockdown": "|video        = Brand WVideo.ogv",
+        "notes": "* The delay before the eruption does not include the cast time. The delay would be a total of {{rutngt|0.889}} if it included the cast time."
+      }
+    },
+    "E": {
+      "id": "BrandE",
+      "name": "Conflagration",
+      "description": "Brand conjures a powerful blast at his target that spreads to nearby enemies, dealing magic damage. If the target is ablaze, Conflagration's spread is doubled.",
+      "tooltip": "Brand conjures a powerful blast at his target, dealing {{ edamagecalc }} magic damage to surrounding units.\n\nIf the target is Ablaze, the spread range is doubled.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "13/12/11/10/9",
+      "cost": "70/75/80/85/90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "625",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "375",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Brand",
+        "skill": "E",
+        "icon": "Conflagration.png",
+        "blurbicon": "Conflagration.png",
+        "blurb": "{{sbc|Active:}} {{ci|Brand}} sets the target enemy aflame, which creates a blast that deals {{as|magic damage}} to them and nearby enemies.",
+        "blurb2": "{{sbc|{{ai|Blaze|Brand|Ablaze}} Bonus:}} The blast spreads twice as far on an ''Ablaze'' target.",
+        "description": "{{sbc|Active:}} '''Brand''' sets the target enemy aflame, which creates a blast that deals {{as|magic damage}} to them and causes the flame to spread from the target to nearby enemies, dealing them the same damage.",
+        "leveling": "{{st|Magic Damage|{{ap|55 to 155}} {{as|(+ 60% AP)}}}}",
+        "description2": "{{sbc|{{ai|Blaze|Brand|Ablaze}} Bonus:}} ''Conflagration's'' spread range is doubled.",
+        "target range": "{{tip|cr|icononly=true}} 675",
+        "effect radius": "{{tip|cr|icononly=true}} 300 / 600",
+        "cooldown": "{{ap|13 to 9}}",
+        "cost": "{{ap|70 to 90}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "mana",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "aoe",
+        "projectile": "False",
+        "callforhelp": "True",
+        "grounded": "|knockdown    =",
+        "video": "Brand EVideo.ogv",
+        "notes": "* The flame spreads to enemies near the primary target at the time of cast.\n** Enemies that move out of range after the fact will still be hit, as the flame is spread as homing missiles to each of its targets.\n{{Unit-targeted cancel conditions}}"
+      }
+    },
+    "R": {
+      "id": "BrandR",
+      "name": "Pyroclasm",
+      "description": "Brand unleashes a devastating torrent of fire that bounces up to 5 times off of Brand and nearby enemies, dealing magic damage to enemies each time bounce. Bounces prioritize stacking Blaze to max on Champions. If a target is ablaze, Pyroclasm will briefly slow them.",
+      "tooltip": "Brand unleashes a devastating torrent of fire that can bounce to Brand or another enemy up to 5 times, dealing {{ totaldamage }} magic damage to enemies each bounce. Bounces prioritize stacking Blaze to max on champions.\n\nIf the target is Ablaze, they are briefly Slowed by {{ slowamount }}%.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "100/90/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "750",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage per Bounce",
+          "Slow",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ slowamount }}% -> {{ slowamountNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Brand",
+        "skill": "R",
+        "icon": "Pyroclasm.png",
+        "blurbicon": "Pyroclasm.png",
+        "blurb": "{{sbc|Active:}} {{ci|Brand}} unleashes a devastating torrent of fire that bounces to nearby enemies, dealing {{as|magic damage}} each time it bounces.",
+        "blurb2": "{{sbc|{{ai|Blaze|Brand|Ablaze}} Bonus:}} An ''Ablaze'' target will also be briefly {{tip|slow|slowed}} when hit.",
+        "description": "{{sbc|Active:}} '''Brand''' launches a fireball at the target enemy that bounces between nearby enemies and '''Brand''' up to four times, dealing {{as|magic damage}} to enemies each time.",
+        "leveling": "{{st|Magic Damage|{{ap|100 to 250}} {{as|(+ 25% AP)}}|Total Single-Target Damage|{{ap|100*3 to 250*3}} {{as|(+ 75% AP)}}}}",
+        "description2": "''Pyroclasm'' prioritizes ''{{ai|Blaze|Brand|ablazed}}'' enemy champions, then other enemy champions, then any valid bounce target, then '''Brand'''.",
+        "description3": "{{sbc|{{ai|Blaze|Brand|Ablaze}} Bonus:}} The target is {{tip|slow|slowed}} for {{fd|0.25}} seconds. This can affect the same enemy more than once.",
+        "leveling3": "{{st|Slow|{{ap|30 to 60}}%}}",
+        "description4": "''The target does not have to be {{tip|sight|visible}} for the fireball to bounce to them.''",
+        "target range": "{{tip|cr|icononly=true}} 750",
+        "effect radius": "{{tip|cr|icononly=true}} {{tt|600|Bounce range, checked when fireball arrives at a target}}",
+        "speed": "{{tt|750 - 3000|Acceleration 500u/s}}",
+        "cooldown": "{{ap|100 to 80}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "100",
+        "costtype": "mana",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "special",
+        "spelleffects": "spellaoe",
+        "projectile": "True",
+        "callforhelp": "false",
+        "grounded": "|knockdown    =",
+        "video": "Brand RVideo.ogv",
+        "notes": "* If ''Pyroclasm's'' current target becomes invalid, it selects a new target at its remaining bounces. \n** The fireball will bounce to '''Brand''' even if he becomes an invalid target while it is currently on a target or is in flight towards him.\n* The fireball acquires a new target as soon as it hits its current target.\n** If the new target becomes invalid, the fireball will fizzle.\n* The fireball may only bounce to valid targets, including '''Brand'''.\n* If the initial cast target uses {{tip|spell shield}}, ''Pyroclasm'' will not bounce. If the bounce is blocked by an enemy's ''spell shield'' it will not deal any damage, but it will keep on bouncing.\n* ''Pyroclasm's'' damage against enemy champions will not aggro nearby enemy minions.{{bug}}\n{{Unit-targeted cancel conditions}}"
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+[scenario]
+name        = "BloodMage+Necromancer+Warlock+Cleric"
+seed        = 1393786
+hero_count  = 4
+enemy_count = 16
+difficulty  = 3
+max_ticks   = 5000
+room_type   = "Climax"
+hero_templates = ["BloodMage", "Necromancer", "Warlock", "Cleric"]
+
+[assert]
+outcome = "Either"

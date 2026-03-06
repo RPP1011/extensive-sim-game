@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0174_3v3_s2"
+seed = 22097
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["Alistar", "Nidalee", "Sett"]
+enemy_hero_templates = ["Akshan", "Brand", "Yorick"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

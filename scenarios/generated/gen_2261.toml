@@ -1,0 +1,13 @@
+[scenario]
+name = "stress_double_front_recovery_s2"
+seed = 21755
+hero_count = 4
+enemy_count = 7
+difficulty = 2
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["knight", "knight", "cleric", "druid"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

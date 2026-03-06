@@ -1,0 +1,13 @@
+[scenario]
+name        = "Basic 4v4 Entry Room"
+seed        = 42
+hero_count  = 4
+enemy_count = 4
+difficulty  = 2
+max_ticks   = 3000
+room_type   = "Entry"
+
+[assert]
+outcome          = "Victory"
+max_ticks_to_win = 2500
+min_heroes_alive = 1

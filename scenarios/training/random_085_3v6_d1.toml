@@ -1,0 +1,13 @@
+[scenario]
+name = "random_085_3v6_d1"
+seed = 8085
+hero_count = 3
+enemy_count = 6
+difficulty = 1
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["blood_mage", "cleric", "warden"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Either"

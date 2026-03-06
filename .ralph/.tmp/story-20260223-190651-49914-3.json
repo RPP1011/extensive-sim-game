@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "total": 12,
+  "remaining": 9,
+  "quality_gates": [
+    "cargo test"
+  ],
+  "id": "US-004",
+  "title": "Implement character creation step 1 (faction selection)"
+}

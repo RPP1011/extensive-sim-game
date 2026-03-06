@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0057_4v4_s1"
+seed = 11980
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["Alistar", "Shen", "Aurora", "Ivern"]
+enemy_hero_templates = ["Kaisa", "Lissandra", "Nocturne", "DrMundo"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

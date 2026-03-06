@@ -1,0 +1,13 @@
+[scenario]
+name        = "Skirmish 3v3 — Tight Engagement"
+seed        = 101
+hero_count  = 3
+enemy_count = 3
+difficulty  = 2
+max_ticks   = 2500
+room_type   = "Entry"
+
+[assert]
+outcome          = "Victory"
+max_ticks_to_win = 2000
+min_heroes_alive = 1

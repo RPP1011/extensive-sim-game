@@ -1,0 +1,262 @@
+{
+  "id": "Singed",
+  "name": "Singed",
+  "title": "the Mad Chemist",
+  "resource_type": "Mana",
+  "tags": [
+    "Tank",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Noxious Slipstream",
+      "description": "Singed drafts off nearby champions, gaining a burst of Move Speed when passing them.",
+      "wiki_detail": {
+        "champion": "Singed",
+        "skill": "I",
+        "icon": "false",
+        "icon2": "Noxious Slipstream.png",
+        "blurb": "{{sbc|Innate:}} Whenever {{ci|Singed}} moves near a {{tip|champion}}, he gains {{sti|ms|{{as|'''bonus''' movement speed}}}} for a short time, which refreshes on subsequent passes and stacks up to a cap.",
+        "blurb2": "This effect cannot occur on the same target more than once every few seconds.",
+        "description": "{{sbc|Innate:}} Whenever '''Singed''' moves near a {{tip|champion}}, he gains a [[stack]] of ''Noxious Slipstream'' for 2 seconds, refreshing on subsequent passes and stacking up to 25 times.",
+        "description2": "{{sbc|Noxious Slipstream:}} For each stack, '''Singed''' gains {{sti|ms|{{as|25% '''bonus''' movement speed}}}}, up to a maximum of {{as|625%|ms}}.",
+        "description3": "This effect cannot occur on the same target more than once every few seconds.",
+        "effect radius": "{{tt|225|Center-to-edge}}",
+        "ontargetcdstatic": "8",
+        "targeting": "Passive",
+        "affects": "Self",
+        "notes": "* No additional details."
+      }
+    },
+    "Q": {
+      "id": "PoisonTrail",
+      "name": "Poison Trail",
+      "description": "Leaves a trail of poison behind Singed, dealing damage to enemies caught in the path.",
+      "tooltip": "Toggle: Singed lays a poisonous trail that deals {{ damagepersecond }} magic damage per second.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0",
+      "cost": "13",
+      "cost_type": " Mana per Second",
+      "range": "20",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage"
+        ],
+        "effect": [
+          "{{ basedamagepersecond }} -> {{ basedamagepersecondNL }}"
+        ]
+      },
+      "resource": "{{ cost }} Mana per Second",
+      "wiki_detail": {
+        "champion": "Singed",
+        "skill": "Q",
+        "icon": "Poison Trail.png",
+        "blurb": "{{sbc|Toggle:}} {{ci|Singed}} continually creates a toxic cloud that shortly lingers in his wake, which continually inflicts {{tip|poison}} to enemies within.",
+        "blurb4": "{{sbc|{{tip|poison|nolink=true}}:}} The target continually takes {{as|magic damage}} over a short time. Subsequent inflictions refresh the duration.",
+        "description": "{{sbc|Toggle:}} '''Singed''' continually creates a toxic cloud in his wake that lingers for {{fd|3.25}} seconds. The cloud inflicts {{tip|poison}} to enemies within, and resets the duration every {{fd|0.5}} seconds while they remain.",
+        "description2": "{{sbc|{{tip|poison|nolink=true}}:}} The target takes {{as|magic damage}} every {{fd|0.25}} seconds over 2 seconds. Subsequent inflictions refresh the duration.",
+        "leveling2": "{{st|Magic Damage per Tick|{{ap|5 to 15}} {{as|(+ {{fd|10.625}}% AP)}}|Total Magic Damage|{{ap|5*8 to 15*8}} {{as|(+ {{ap|10.625*8}}% AP)}}}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|180|Individual gas clouds}}",
+        "cost": "13",
+        "static": "1",
+        "costtype": "Mana per second",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "|spelleffects = AoEDoT",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n*Toggle abilities do not count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n* The clouds check for enemy targets in the area immediately upon being spawned. After a {{fd|0.25}}-{{fd|0.5}} second delay, they check every {{fd|0.25}} seconds again until they fade.\n** Targets already with the DoT can have the debuff refreshed only every {{fd|0.5}} seconds.\n** Due to the inconsistent offset between the first and future ticks is it possible for a static target to miss out on one refresh of the debuff, equal to 3 ticks of damage.\n* If '''Singed''' has moved less than 90 units since spawning the last poison cloud, it will spawn 35 units in front of him. They also only spawn every 1 second in this case. \n** When '''Singed''' is moving faster than that, the poison clouds spawn more frequently and on top of himself."
+      }
+    },
+    "W": {
+      "id": "MegaAdhesive",
+      "name": "Mega Adhesive",
+      "description": "Throws a vial of mega adhesive on the ground, slowing and grounding enemies who walk on it.",
+      "tooltip": "Singed hurls a cask of sticky liquid, Grounding and Slowing enemies in the area by {{ slowpercent }}% for {{ wduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "17/16/15/14/13",
+      "cost": "60/70/80/90/100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Slow",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ slowpercent }}% -> {{ slowpercentNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Singed",
+        "skill": "W",
+        "icon": "Mega Adhesive.png",
+        "blurb": "{{sbc|Active:}} {{ci|Singed}} creates a field of adhesive at the target location for a short time that {{tip|ground|grounds}} and {{tip|slows}} enemies within.",
+        "description": "{{sbc|Active:}} '''Singed''' spills a potent adhesive that lands at the target location after {{fd|0.375}} seconds, creating a field for 3 seconds that {{tip|ground|grounds}} enemies within and {{tip|slows}} them.",
+        "leveling": "{{st|Slow|{{ap|50 to 70}}%}}",
+        "target range": "1000",
+        "effect radius": "{{tip|cr|icononly = true}} 265",
+        "cooldown": "{{ap|17 to 13}}",
+        "cost": "{{ap|60 to 100}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "|spellshield  = false",
+        "spelleffects": "|projectile   = false",
+        "grounded": "|knockdown    =",
+        "notes": "* The goo missile has a fixed travel time but is independent from when the zone is established. The puddle is destructible by effects such as {{ai|Wind Wall|Yasuo}}. The missile will also destroy {{ai|Void Shift|Malzihar}}\n* ''Mega Adhesive's'' {{tip|slow}} and {{tip|ground}} debuffs are each marked as non-dispellable, so they are not removed by most {{tip|cleanse|cleanses}}. Each is however allowed to be removed by cleanses that '''also''' grant immunity to the debuff type, such as {{cai|Ragnarok|Olaf}}.\n* '''Singed''' {{tip|sight|reveals}} himself to enemies briefly on-cast from fog of war if enemy targets are in the target area of ''Mega Adhesive''.{{bug|2}}"
+      }
+    },
+    "E": {
+      "id": "Fling",
+      "name": "Fling",
+      "description": "Damages target enemy unit and flings them into the air behind Singed. If the target Singed flings lands in his Mega Adhesive, they are also rooted.",
+      "tooltip": "Singed flings an enemy over his shoulder, dealing {{ basedamage }} plus {{ e3 }}% max Health magic damage.\n\nIf Singed flings a target into his Mega Adhesive, they are Rooted for {{ e2 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9.5/9/8.5/8",
+      "cost": "60/70/80/90/100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "125",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "50/60/70/80/90",
+        "1/1.25/1.5/1.75/2",
+        "6/6.5/7/7.5/8",
+        "420",
+        "300",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Maximum Health Damage",
+          "Root Duration",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ e3 }}% -> {{ e3NL }}%",
+          "{{ e2 }} -> {{ e2NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Singed",
+        "skill": "E",
+        "icon": "Fling.png",
+        "blurb": "{{sbc|Active:}} {{ci|Singed}} {{tip|airborne|flings}} the target enemy over, dealing {{as|magic damage}} based on {{as|their '''maximum''' health}}.",
+        "blurb2": "If the target lands on ''{{ai|Mega Adhesive|Singed}}'', they are briefly {{tip|root|rooted}}.",
+        "description": "{{sbc|Active:}} '''Singed''' {{tip|airborne|flings}} the target enemy 550 units over himself, dealing {{as|magic damage}}. The damage based on the target's health ratio is capped at 300 against {{tip|minions}} and {{tip|monsters}}.",
+        "leveling": "{{st|Magic Damage|{{ap|50 to 90}} {{as|(+ {{ap|6 to 8}}% of target's '''maximum''' health)}} {{as|(+ 60% AP)}}}}",
+        "description2": "If the target lands on ''{{ai|Mega Adhesive|Singed}}'', they are {{tip|root|rooted}} for a duration.",
+        "leveling2": "{{st|Root Duration|{{ap|1 to 2}} seconds}}",
+        "target range": "{{tip|er|icononly = true}} 125",
+        "cooldown": "{{ap|10 to 8}}",
+        "cost": "{{ap|60 to 100}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Spell",
+        "projectile": "|callforhelp  = true",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Fling'' can throw enemies over walls (circumstances permitting).\n* {{tip|Slow-immune}} enemies will not be {{tip|root|rooted}} when ''flung'' into {{ai|Mega Adhesive|Singed}}.\n* ''Fling'' is special cased to not {{tip|airborne|fling}} {{ci|Warwick}} while '''Singed''' is {{tip|suppression|suppressed}} by {{ai|Infinite Duress|Warwick}} after the cast time.\n{{Unit-targeted cancel conditions}}",
+        "tips": "* '''Singed''' may successfully issue a basic attack against the target of ''Fling'' while it is mid-air."
+      }
+    },
+    "R": {
+      "id": "InsanityPotion",
+      "name": "Insanity Potion",
+      "description": "Singed drinks a potent brew of chemicals, granting him increased combat stats, and making his Poison Trail apply Grievous Wounds.",
+      "tooltip": "Singed drinks a potent brew of chemicals, granting him {{ statamount }} Ability Power, Armor, Magic Resist, Move Speed, Health Regen, and Mana Regen for {{ duration }} seconds. During this effect, Singed's Poison Trail also applies {{ grievousamount*100 }}% Grievous Wounds for {{ grievousduration }} second.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "20",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Bonus Stats"
+        ],
+        "effect": [
+          "{{ statamount }} -> {{ statamountNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Singed",
+        "skill": "R",
+        "icon": "Insanity Potion.png",
+        "blurb": "{{sbc|Active:}} {{ci|Singed}} empowers himself for some time with {{sti|ap|{{as|'''bonus''' ability power}}}}, {{sti|armor|{{as|'''bonus''' armor}}}}, {{sti|mr|{{as|'''bonus''' magic resist}}}}, {{sti|ms|{{as|'''bonus''' movement speed}}}}, {{sti|{{as|'''bonus''' health regen}}}}, and {{sti|{{as|'''bonus''' mana regen}}}}.",
+        "blurb2": "During this time, ''{{ai|Poison Trail|Singed}}'' additionally applies {{tip|Grievous Wounds}}.",
+        "description": "{{sbc|Active:}} '''Singed''' empowers himself for 25 seconds with {{sti|ap|{{as|ability power}}}}, {{sti|armor|{{as|'''bonus''' armor}}}}, {{sti|mr|{{as|'''bonus''' magic resistance}}}}, {{sti|ms|{{as|'''bonus''' movement speed}}}}, {{sti|{{as|'''bonus''' health regeneration}}}}, and {{sti|{{as|'''bonus''' mana regeneration}}}}.",
+        "leveling": "{{st|Bonus Stats|{{ap|30 to 100}}}}\n{{st|Regeneration per Second|{{ap|30/5 to 100/5}}|Total Regeneration|{{ap|30*5 to 100*5}}}}",
+        "description2": "During this time, ''{{ai|Poison Trail|Singed}}'' additionally applies {{tip|Grievous Wounds}} for 1 second, which refreshes every {{fd|0.25}} seconds while the {{tip|poison}} persists.",
+        "cooldown": "100",
+        "cdstart": "on-cast",
+        "cost": "100",
+        "costtype": "mana",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|projectile   =",
+        "notes": "* No additional notes."
+      }
+    }
+  }
+}

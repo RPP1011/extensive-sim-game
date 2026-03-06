@@ -1,0 +1,125 @@
+[hero]
+name = "Draven"
+
+[stats]
+hp = 80
+move_speed = 3.3
+armor = 22.0
+magic_resist = 28.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 5.5
+cooldown = 700
+
+# --- Q: Spinning Axe ---
+[[abilities]]
+name = "Spinning Axe"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 12000
+ai_hint = "damage"
+resource_cost = 9
+
+[[abilities.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+
+# --- W: Blood Rush ---
+[[abilities]]
+name = "Blood Rush"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 12000
+ai_hint = "buff"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 3000
+
+[[abilities.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.3
+duration_ms = 5000
+
+# --- E: Stand Aside ---
+[[abilities]]
+name = "Stand Aside"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 18000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 14
+
+[abilities.delivery]
+method = "projectile"
+speed = 14.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 18
+damage_type = "physical"
+
+[abilities.delivery.on_hit.area]
+shape = "line"
+length = 6.0
+width = 2.6
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[[abilities.delivery.on_hit]]
+type = "knockback"
+distance = 2.0
+
+# --- R: Whirling Death ---
+[[abilities]]
+name = "Whirling Death"
+targeting = "direction"
+range = 0.0
+cooldown_ms = 21700
+cast_time_ms = 500
+ai_hint = "damage"
+resource_cost = 20
+recast_count = 1
+recast_window_ms = 10000
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 43
+damage_type = "physical"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 2.5
+
+# --- Passive: League of Draven ---
+[[passives]]
+name = "League of Draven"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_kill"
+
+[[passives.effects]]
+type = "apply_stacks"
+name = "draven"
+count = 1
+max_stacks = 4
+

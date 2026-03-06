@@ -1,0 +1,298 @@
+{
+  "id": "Kalista",
+  "name": "Kalista",
+  "title": "the Spear of Vengeance",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Martial Poise",
+      "description": "Enter a movement command while winding up Kalista's basic attack or Pierce to lunge a short distance when she launches her attack.",
+      "wiki_detail": {
+        "champion": "Kalista",
+        "skill": "I",
+        "icon": "Martial Poise.png",
+        "blurb": "{{sbc|Innate:}} During each basic attack or ''{{ai|Pierce|Kalista}}'', {{ci|Kalista}} can choose a target direction to quickly {{tip|dash}} to. The range and speed is based on the tier of '''Kalista's''' [[Boots]].",
+        "blurb2": "{{sbc|Innate - Oathsworn Bond:}} '''Kalista''' begins the game with an exclusive {{ii|Black Spear}}.",
+        "description": "{{sbc|Innate:}} Whenever '''Kalista''' inputs a movement command during her ''{{ai|Basic Attack|Kalista|basic attack}}'' windup or the cast time of ''{{ai|Pierce|Kalista}}'', she will {{tip|dash}} in the target direction.<br/><br/>'''''Kalista's''' dash from Martial Poise will be {{tip|knockdown|knocked down}} by any {{tip|immobilize|immobilizing}} or {{tip|polymorph|polymorphing}} crowd control, excluding {{tip|sleep}}{{bug}}.''",
+        "description2": "The range and speed of ''Martial Poise'' are modified by the tier of '''Kalista's''' [[Boots]]. The base range when dashing from a basic attack is {{pp|250;265;280|None;Basic;Finished|type=Boots Tier}} units. This base distance is reduced when dashing toward the direction of her attack, to a minimum of {{pp|150;165;180|None;Basic;Finished|type=Boots Tier}} units.",
+        "description3": "The base range when dashing from ''{{ai|Pierce|Kalista|Pierce's}}'' cast is increased{{ft|by 50 units.|to {{pp|300;315;330|None;Basic;Finished|type=Boots Tier}} units.}}If dashing ''away'' from the point of cast, the dash range is reduced, to a minimum of {{pp|165;180;195|None;Basic;Finished|type=Boots Tier}} units.",
+        "description4": "{{sbc|Innate - Oathsworn Bond:}} '''Kalista''' begins the game with an exclusive ''{{ii|Black Spear}}''.",
+        "speed": "{{pp|1025;1100;1160|None;Basic;Finished|type=Boots Tier}}",
+        "target range": "{{pp|250;265;280|None;Basic;Finished|type=Boots Tier}}",
+        "targeting": "Direction",
+        "affects": "Self",
+        "damagetype": "|grounded     = True",
+        "knockdown": "True",
+        "spellshield": "|spelleffects =",
+        "projectile": "|notes        = \n* There is a very brief grace period in excess of the on-screen timers wherein '''Kalista''' can still trigger ''Martial Poise''.\n* The dash speed depends on '''Kalista's''' {{as|'''bonus''' attack speed}} and {{ig|Boots}} Tier. Basic boots increase the dash speed by 75, and Finished boots increase it by 135.\n* The dash speed is affected by {{as|{{stil|multiplicative movement speed modifiers}}}} such as {{tip|slow|slows}}.\n** {{as|{{sti|movement speed|Additive movement speed modifiers}}|movement speed}} do not affect it.\n* There are a total of 24 different dash ranges based on direction with {{ig|Boots}} and {{ai|Pierce|Kalista}} being cast.\n* Dash distance decreases exponentially as the dash direction becomes closer to the minimum direction (forward for basic attacks, backward for {{ai|Pierce|Kalista}}. <!-- Determine exact calculation. Seems to at least be a steady decrease until the difference in angle from target to dash position is less than 15 degrees, at which point the distance drops off significantly. -->\n* '''Kalista''' will attempt to attack her target again at the end of the dash, allowing the player to kite with only movement commands as long as they remain in attack range.\n* Attack move click checks for targets in brief intervals, but only while '''Kalista''' is not in a dash, resulting in lost DPS if it is used to automatically dash.\n* '''Kalista's''' facing direction when dashing is considered to be in the direction of the dash, not her visual facing direction.",
+        "flavorsound": "{{sm2|Kalista_Original_BindAllyGlobal_0.ogg}} ''\"The oath has been taken.\"''",
+        "_comments": [
+          "Determine exact calculation. Seems to at least be a steady decrease until the difference in angle from target to dash position is less than 15 degrees, at which point the distance drops off significantly."
+        ]
+      }
+    },
+    "Q": {
+      "id": "KalistaMysticShot",
+      "name": "Pierce",
+      "description": "Throw a fast moving spear that passes through enemies it kills.",
+      "tooltip": "Kalista hurls a spear, dealing {{ totaldamage }} physical damage to the first target hit. If this kills the target, the spear continues onward, carrying any Rend stacks to the next target hit.\n\nKalista can dash after using this Ability using Martial Poise.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1150",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "@AbilityResourceName@ Cost",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cost }} -> {{ costNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kalista",
+        "skill": "Q",
+        "icon": "Pierce.png",
+        "blurb": "{{sbc|Active:}} {{ci|Kalista}} throws a spear in the target direction that deals {{as|physical damage}} to the first enemy hit.",
+        "blurb2": "If ''Pierce'' kills the target, the spear continues onward to transfer all of the target's ''{{ai|Rend|Kalista}}'' stacks to the next enemy it hits.",
+        "description": "{{sbc|Active:}} '''Kalista''' launches a spear in the target direction that deals {{as|physical damage}} to the first enemy hit.",
+        "leveling": "{{st|Physical Damage|{{ap|20 to 280}} {{as|(+ 105% AD)}}}}",
+        "description2": "If ''Pierce'' kills the target, the spear continues onward to transfer all of the target's ''{{ai|Rend|Kalista}}'' stacks to the next enemy it hits. This can repeat indefinitely until the spear reaches its maximum range.",
+        "target range": "{{tip|cr|icononly = true}} 1200",
+        "cooldown": "8",
+        "cost": "{{ap|50 to 70}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "speed": "2400",
+        "width": "{{tip|er|icononly = true}} 80",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "Single target",
+        "grounded": "|knockdown    =",
+        "projectile": "True",
+        "notes": "{{Effect at cast time end}}"
+      }
+    },
+    "W": {
+      "id": "KalistaW",
+      "name": "Sentinel",
+      "description": "Gain bonus damage when Kalista and her Oathsworn strike the same target. \n\nActivate to send a soul to scout out the path, revealing the area in front of it.",
+      "tooltip": "Passive: When Kalista and her Oathsworn both Attack the same target, she deals {{ maxhealthdamage*100 }}% max Health magic damage. This effect has a {{ pertargetcooldown }} second Cooldown per target and a cap of {{ maximummonsterdamage }} to non-champions.\n\nActive: Kalista sends a ghost to patrol an area for three laps. Champions spotted are revealed for 4 seconds. This ability has 2 charges ({{ ammorechargetooltip }} second refresh).{{ spellmodifierdescriptionappend }}",
+      "cooldown": "30",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "5000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "80",
+        "0",
+        "125/150/175/200/225",
+        "90/80/70/60/50",
+        "0",
+        "75/100/125/150/175",
+        "10",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Maximum Health Damage",
+          "Ammo Recharge",
+          "Monster Damage Cap"
+        ],
+        "effect": [
+          "{{ maxhealthdamage*100.000000 }}% -> {{ maxhealthdamagenl*100.000000 }}%",
+          "{{ ammorechargetooltip }} -> {{ ammorechargetooltipNL }}",
+          "{{ maximummonsterdamage }} -> {{ maximummonsterdamageNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Kalista",
+        "skill": "W",
+        "icon": "Sentinel 2.png",
+        "blurbicon": "Sentinel.png",
+        "blurb": "{{sbc|Passive - Soul-Marked:}} While {{ci|Kalista}} and her {{ii|The Black Spear|Oathsworn}} are {{tip|tether|tethered}}, their basic attacks and ''{{ai|Pierce|Kalista}}'' apply a ''Soul-Mark'' to their targets for a few seconds. If both ''Soul-Marks'' are applied to the same target, they take {{as|'''bonus''' magic damage}}.",
+        "blurb2": "{{sbc|Passive:}} '''Kalista''' periodically [[stock]]s a ''Sentinel'' charge, up to a cap.",
+        "blurb3": "{{sbc|Active:}} '''Kalista''' summons a ''Sentinel'' that patrols back and forth on a path to the target location, granting {{tip|sight}} along its trajectory as it travels.",
+        "description": "{{sbc|Passive - Soul-Marked:}} While '''Kalista''' and her ''{{ii|The Black Spear|Oathsworn}}'' are {{tip|tether|tethered}}, their basic attacks and ''{{ai|Pierce|Kalista}}'' apply a ''Soul-Mark'' to the target hit for 4 seconds.",
+        "icon2": "Sentinel 3.png",
+        "description2": "If both '''Kalista's''' and the ''Oathsworn's'' ''Soul-Mark'' are applied to the same enemy, the marks are consumed to deal {{as|magic damage}} to the target, capped against non-champions. ''Soul-Mark'' cannot affect an enemy more than once every few seconds.",
+        "leveling2": "{{st|Bonus Magic Damage|{{as|{{ap|14 to 18}}% of target's '''maximum''' health}}}}\n{{st|Maximum Non-Champion Damage|{{ap|100 to 200}}}}",
+        "icon3": "Sentinel.png",
+        "description3": "{{sbc|Active:}} '''Kalista''' summons a ''Sentinel'' that patrols back and forth on a path along the target location, granting {{tip|sight}} of its surroundings as it travels.",
+        "description4": "'''Kalista''' periodically [[stock]]s a ''Sentinel'' charge, up to a maximum of 2.",
+        "description5": "''See [[Kalista/LoL#Pets|Pets]] for more details about Sentinels.''",
+        "target range": "{{tt|1400|Minimum range}} / {{tt|5000|Maximum range}}",
+        "tether radius": "{{tip|cr|1100|nolink=true}}",
+        "ontargetcdstatic": "10",
+        "cooldown": "30",
+        "recharge": "{{ap|90 to 50}}",
+        "cast time": "{{fd|0.5}}",
+        "cost": "|costtype     =",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spelleffects": "proc",
+        "parry": "unknown",
+        "spellshield": "|projectile   =",
+        "notes": "* The damage is dealt {{tip|on-attack}} of '''Kalista's''' basic attack if she applies the second mark. If the ''Oathsworn'' does so instead, the damage is dealt [[on-hit]] of their basic attack.\n* ''Soul-Marked's'' bonus damage is credited to '''Kalista''' and will benefit from both her {{sti|magic penetration|{{as|magic penetration}}}} and [[spell effects]].\n** If her {{ii|The Black Spear|Oathsworn}} ally scores a kill using ''Soul-Marked's'' bonus damage they will get a message stating 'Kill Secured' in place of the usual gold pop-up (the gold itself is credited to '''Kalista''').\n* The ''Sentinel's'' {{tip|sight}} reveal on enemy {{tip|champion|champions}} is accredited for [[assist|assists]] and potentially [[kill|kills]] (if they die shortly after being spotted).\n** It does not reveal {{tip|stealth|stealthed}} targets.\n* ''Sentinel'' will cast from wherever '''Kalista''' is at the end of the cast time.\n* {{Pending for test}}: ''Soul Mark's'' interaction with ''parrying'' effects ({{tip|dodge}}, {{tip|block}}, {{tip|blind}}).\n* {{pending for test}} If ''Pierce'' kills the target by ''Soul-Mark's'' additional damage, it will/will not continue."
+      }
+    },
+    "E": {
+      "id": "KalistaExpungeWrapper",
+      "name": "Rend",
+      "description": "Attacks impale their targets with spears. Activate to rip the spears out, slowing and dealing escalating damage.",
+      "tooltip": "Passive: Kalista's spears linger in their target for 4 seconds, stacking any number of times.\n\nActive: Kalista rips the spears from nearby enemies, dealing {{ normaldamage }} plus {{ additionaldamage }} physical damage per spear beyond the first. Slows enemies hit by {{ totalslowamount }} for {{ slowduration }} seconds.\n\nIf this Ability kills at least one target, its Cooldown is refreshed and it refunds {{ manarefund }} Mana.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0",
+      "cost": "30",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Damage per Stack",
+          "AD Ratio per Stack",
+          "Move Speed Slow",
+          "Mana Refund",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ additionalbasedamage }} -> {{ additionalbasedamageNL }}",
+          "{{ additionaladratio*100.000000 }}% -> {{ additionaladrationl*100.000000 }}%",
+          "{{ slowamount*100.000000 }}% -> {{ slowamountnl*100.000000 }}%",
+          "{{ manarefund }} -> {{ manarefundNL }}",
+          "{{ fakedcooldown }} -> {{ fakedcooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kalista",
+        "skill": "E",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} '''Kalista's''' basic attacks and ''{{ai|Pierce|Kalista}}'' lodge a spear into their target, applying a [[stack]] of ''Rend'' for a few seconds.",
+        "blurb2": "{{sbc|Active:}} '''Kalista''' rips all lodged spears from nearby enemies, consuming all of their stacks to deal {{as|physical damage}} and {{tip|slow}} them for a short time. Each additional spear on the target deals reduced damage.",
+        "blurb3": "If ''Rend'' [[kill]]s at least one target, the cooldown is {{sti|cdr|reset}} and the {{sti|mana|{{as|mana cost}}}} is partially refunded.",
+        "description": "{{sbc|Passive:}} '''Kalista's''' basic attacks {{tip|on-hit}} and ''{{ai|Pierce|Kalista}}'' apply a [[stack]] of ''Rend'' to enemies for 4 seconds, refreshing on subsequent hits and stacking up to 254 times.",
+        "icon2": "Rend.png",
+        "description2": "{{sbc|Active:}} '''Kalista''' rips all lodged spears from nearby enemies, consuming all of their stacks to deal them {{as|physical damage}} and {{tip|slow}} them for 2 seconds. Each additional spear on the target deals reduced damage. ''Rend'' deals 50% reduced damage against epic {{tip|monsters}}.",
+        "leveling2": "{{st|Physical Damage|{{ap|10 to 50}} {{as|(+ 70% AD)}} {{as|(+ 20% AP)}}|Damage per Additional Stack|{{ap|8 to 24}} {{as|(+ {{ap|25 to 45}}% AD)}} {{as|(+ 20% AP)}}}}\n{{st|Slow|{{ap|10 to 42}}% {{as|(+ 5% per 100 AP)}}}}",
+        "description3": "If ''Rend'' [[kill]]s at least one target, the {{sti|cooldown}} is reset and '''Kalista''' restores {{sti|{{as|mana}}}}.",
+        "description4": "''A nearby enemy with a Rend stack is required to cast this ability. Rend can be used during the dash of {{ai|Martial Poise|Kalista}} and the cast time of {{ai|Pierce|Kalista}}. In-flight spears and {{ai|Pierce|Kalista}} if in cast will be empowered to apply Rend's effects to their targets. These empowered spears can also trigger Rend's refund.''",
+        "leveling3": "{{st|Mana Restored|{{as|{{ap|10 to 30}}|mana}}}}",
+        "cast time": "{{fd|0.25}}",
+        "effect radius": "{{tip|er|icononly = true}} 1100",
+        "cooldown": "{{ap|10 to 8}}",
+        "cost": "30",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "parry": "special",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Rend'' at maximum stacks will deal a total of {{as|{{ap|(20 to 60)+(8+3*(x-1)+x*(x-1)/2)*253}}|physical damage}} {{as|(+ {{ap|70*(1+0.33*253)|70*(1+0.3958*253) to 70*(1+0.5833*253) 4}}% AD)}} {{as|physical damage}}.\n* ''Rend'' cannot activate on {{tip|untargetable}} enemies.\n* ''Rend'' applies its effects instantly on cast.\n* The cooldown will not reset if the target is protected by {{tip|resurrection}} effects.\n* If ''Rend'' is used against {{ci|Sion}} under the effects of {{ai|Glory in Death|Sion}}, the cooldown will reset even if it does not kill him.{{bug}}\n* A stack is not applied if the attack is {{tip|dodge|dodged}}, {{tip|block|blocked}} or missed while '''Kalista''' is {{tip|blind|blinded}}. \n* {{ai|Pierce|Kalista}} does not apply a stack of ''Rend'' if blocked by {{tip|spell shield}}.\n* While {{ai|Hostile Takeover|Renata Glasc|beserk}}, '''Kalista's''' attacks will also stack ''Rend'' on allies.\n** '''Kalista''' will be unable to cast ''Rend'' if there are no stacks on an enemy in range.\n** ''Rend'' will only remove enemy spears if cast while both an ally and enemy with stacks are in range."
+      }
+    },
+    "R": {
+      "id": "KalistaRx",
+      "name": "Fate's Call",
+      "description": "Kalista teleports the Oathsworn ally to herself. They gain the ability to dash toward a position, knocking enemy champions back.",
+      "tooltip": "Kalista puts her Oathsworn into Stasis and draws them to herself for up to 4 seconds. The Oathsworn can click to launch themselves, stopping at the first champion hit and Knocking Back all nearby enemies. If the Oathsworn hits a champion, they are placed at their maximum attack range from it.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "160/140/120",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "1/1.5/2",
+        "40/60/80",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Knockup Duration"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ e2 }} -> {{ e2NL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kalista",
+        "skill": "R",
+        "icon": "Fate's Call.png",
+        "blurb": "{{sbc|Active:}} {{ci|Kalista}} invokes her {{ii|The Black Spear|tether}} to retrieve her ''Oathsworn'', {{tip|vanish|vanishing}} and {{tip|cleanse|cleansing}} them from all {{tip|crowd control}}, and hold them for a few seconds.",
+        "blurb2": "While held, the ''Oathsworn'' may {{tip|dash}} to reappear at the target location. If they collide with an enemy {{tip|champion}}, they {{tip|airborne|knock up}} all nearby enemies.",
+        "description": "{{sbc|Active:}} '''Kalista''' invokes her {{ii|The Black Spear|tether}} to retrieve and hold her ''Oathsworn'' for 4 seconds. '''Kalista''' {{tip|cleanse|cleanses}} the ''Oathsworn'' from all {{tip|crowd control}} and renders them {{tip|invulnerable}} and {{tip|untargetable}} for the duration, and {{tip|dash|pulls}} them to her over 1 second.",
+        "description2": "While held, the ''Oathsworn'' is {{tip|vanish|vanished}} and may {{tt|select|Default MB1 / left-click}} a target location to {{tip|dash}} to with {{tip|displacement immunity}}, ending ''Fate's Call's'' invocation and reappearing at the location. If the invocation ends without the ''Oathsworn'' selecting a target location, they will automatically do so at maximum range from '''Kalista's''' facing direction.",
+        "description3": "The ''Oathsworn's''  dash stops upon colliding with an enemy {{tip|champion}}, {{tip|airborne|knocking up}} all nearby enemies for a duration and landing to their {{sti|attack range|'''base''' attack range}} from the target collided with.",
+        "description4": "''The Oathsworn must be nearby to cast this ability, and is also {{tip|silence|silenced}} and unable to perform movement or attack commands while Fate's Call is in effect.''",
+        "leveling3": "{{st|Knock Up Duration|{{ap|1 to 2}} seconds}}",
+        "target range": "1200",
+        "tether radius": "1100",
+        "cooldown": "{{ap|160 to 120}}",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "cost": "100",
+        "costtype": "mana",
+        "targeting": "Auto",
+        "affects": "{{ai|Oathsworn|Kalista}} Ally / Enemies",
+        "damagetype": "|spellshield  = True",
+        "spelleffects": "False",
+        "grounded": "|knockdown    =",
+        "projectile": "|notes        = \n* The following will defer ''Fate's Call's'' effects at the time of cast to the end of their duration if the ''Oathsworn'' is:\n** In a [[Channel#Casting Times|cast time]].\n** {{tip|Channel|Channeling}}.\n*** ''Fate's Call'' will not defer by the following channels: {{si|Recall}}, {{ai|Defiant Dance|Irelia}}, {{ai|Realm Warp|Ryze}}, and {{ai|The Culling|Lucian}}.\n*** ''Fate's Call'' cannot be cast during the following channels: {{si|Teleport}}, {{ai|Gate|Twisted Fate}}, {{ai|Grand Starfall|Pantheon}}, {{ai|Hero's Entrance|Galio}} and {{ai|Stand United|Shen}}.\n** Using an ability that preloads {{tip|unstoppableforcemarker|UnstoppableForceMarker}}.\n*** If the ''Oathsworn'' is still occupied after 6 seconds of being deferred from this time, ''Fate's Call'' will cancel.\n* ''Fate's Call'' will not pull the ''Oathsworn'' if they are {{tip|dash|dashing}} but they will be retrieved after 1 second regardless.\n* ''Fate's Call'' can be cast even if the ''Oathsworn'' is {{tip|untargetable}}.\n* ''Fate's Call'' is disabled if the ''Oathsworn'' is {{tip|resurrection|resurrecting}} or is being affected by another ''Fate's Call''.\n* ''Fate's Call'' can be used even if the ''Oathsworn'' is in a {{tip|zombie state}}.\n* ''Fate's Call'' does not render the target {{tip|vanish|vanished}} while being held if they are creating {{ais|E|Senna}} aura.\n* The ''Oathsworn'' being held is represented by a light over '''Kalista's''' head.\n* '''Kalista's''' [[death]] does not cancel ''Fate's Call''.",
+        "flavorsound": "{{sm2|Kalista_Original_RAllyLowHealth_0.ogg}} ''\"They shall not have you!\"''"
+      }
+    }
+  }
+}

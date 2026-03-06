@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0192_5v5_s1"
+seed = 12115
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["knight", "ranger", "cleric", "bard", "shaman"]
+enemy_hero_templates = ["Soraka", "Nami", "MasterYi", "Lillia", "Aatrox"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

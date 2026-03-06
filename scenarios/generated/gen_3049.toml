@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0096_2v2_s1"
+seed = 12019
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["elementalist", "Akshan"]
+enemy_hero_templates = ["mage", "Neeko"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

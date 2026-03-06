@@ -1,0 +1,138 @@
+[hero]
+name = "Warwick"
+
+[stats]
+hp = 138
+move_speed = 3.4
+armor = 40.0
+magic_resist = 32.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 1.5
+cooldown = 800
+
+# --- Q: Jaws of the Beast ---
+[[abilities]]
+name = "Jaws of the Beast"
+targeting = "target_enemy"
+range = 3.5
+cooldown_ms = 6000
+ai_hint = "damage"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "damage"
+amount = 37
+damage_type = "magic"
+
+[[abilities.effects]]
+type = "heal"
+amount = 1
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+[[abilities.effects]]
+type = "lifesteal"
+percent = 1.0
+duration_ms = 5000
+
+# --- W: Blood Hunt ---
+[[abilities]]
+name = "Blood Hunt"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 21700
+cast_time_ms = 500
+ai_hint = "buff"
+resource_cost = 14
+
+[[abilities.effects]]
+type = "heal"
+amount = 17
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 3000
+
+[[abilities.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.3
+duration_ms = 5000
+
+# --- E: Primal Howl ---
+[[abilities]]
+name = "Primal Howl"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 15000
+ai_hint = "damage"
+resource_cost = 8
+recast_count = 1
+recast_window_ms = 10000
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- R: Infinite Duress ---
+[[abilities]]
+name = "Infinite Duress"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 22800
+cast_time_ms = 100
+ai_hint = "damage"
+resource_cost = 20
+
+[abilities.delivery]
+method = "channel"
+duration_ms = 2000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "damage"
+amount = 43
+damage_type = "magic"
+
+[[abilities.effects]]
+type = "suppress"
+duration_ms = 1500
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 1500
+
+# --- Passive: Eternal Hunger ---
+[[passives]]
+name = "Eternal Hunger"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_auto_attack"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

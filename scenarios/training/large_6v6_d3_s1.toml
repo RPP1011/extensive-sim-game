@@ -1,0 +1,13 @@
+[scenario]
+name = "large_6v6_d3_s1"
+seed = 15187
+hero_count = 6
+enemy_count = 6
+difficulty = 3
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["paladin", "knight", "bard", "shaman", "elementalist", "rogue"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Either"

@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0075_4v4_s2"
+seed = 21998
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["knight", "assassin", "warden", "bard"]
+enemy_hero_templates = ["knight", "warden", "rogue", "berserker"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

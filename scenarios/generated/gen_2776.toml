@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0005_4v4_s1"
+seed = 11928
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["Camille", "Skarner", "Darius", "Kalista"]
+enemy_hero_templates = ["Elise", "Lux", "Annie", "Kennen"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

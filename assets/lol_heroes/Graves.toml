@@ -1,0 +1,121 @@
+[hero]
+name = "Graves"
+
+[stats]
+hp = 80
+move_speed = 3.3
+armor = 22.0
+magic_resist = 28.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 5.5
+cooldown = 700
+
+# --- Q: End of the Line ---
+[[abilities]]
+name = "End of the Line"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 13000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 16
+
+[abilities.delivery]
+method = "zone"
+duration_ms = 4000
+tick_interval_ms = 1000
+
+[[abilities.effects]]
+type = "damage"
+amount = 11
+damage_type = "physical"
+
+# --- W: Smoke Screen ---
+[[abilities]]
+name = "Smoke Screen"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 26000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 14
+
+[abilities.delivery]
+method = "projectile"
+speed = 15.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 2.0
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 4000
+
+# --- E: Quickdraw ---
+[[abilities]]
+name = "Quickdraw"
+targeting = "ground_target"
+range = 3.8
+cooldown_ms = 16000
+ai_hint = "utility"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- R: Collateral Damage ---
+[[abilities]]
+name = "Collateral Damage"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 21700
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 20
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 68
+damage_type = "physical"
+
+[abilities.delivery.on_hit.area]
+shape = "cone"
+radius = 4.0
+angle_deg = 60.0
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- Passive: New Destiny ---
+[[passives]]
+name = "New Destiny"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_auto_attack"
+
+[[passives.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.2
+duration_ms = 5000
+

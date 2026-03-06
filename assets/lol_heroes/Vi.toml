@@ -1,0 +1,120 @@
+[hero]
+name = "Vi"
+
+[stats]
+hp = 120
+move_speed = 3.5
+armor = 35.0
+magic_resist = 32.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 21
+range = 1.5
+cooldown = 800
+
+# --- Q: Vault Breaker ---
+[[abilities]]
+name = "Vault Breaker"
+targeting = "target_enemy"
+range = 2.5
+cooldown_ms = 12000
+ai_hint = "crowd_control"
+resource_cost = 10
+max_charges = 2
+charge_recharge_ms = 10000
+recast_count = 1
+recast_window_ms = 10000
+
+[abilities.delivery]
+method = "channel"
+duration_ms = 2000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 4000
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+# --- W: Denting Blows ---
+[[abilities]]
+name = "Denting Blows"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 8000
+ai_hint = "buff"
+
+[[abilities.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.3
+duration_ms = 5000
+
+# --- E: Relentless Force ---
+[[abilities]]
+name = "Relentless Force"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 1000
+ai_hint = "damage"
+resource_cost = 5
+max_charges = 2
+charge_recharge_ms = 12000
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- R: Cease and Desist ---
+[[abilities]]
+name = "Cease and Desist"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 26100
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 20
+
+[[abilities.effects]]
+type = "damage"
+amount = 37
+damage_type = "physical"
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- Passive: Blast Shield ---
+[[passives]]
+name = "Blast Shield"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 5000
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+
+[[passives.effects]]
+type = "shield"
+amount = 20
+duration_ms = 3000
+

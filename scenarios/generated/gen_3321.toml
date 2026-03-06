@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0187_3v3"
+seed = 2110
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["Lulu", "Sejuani", "MissFortune"]
+enemy_hero_templates = ["Illaoi", "Sett", "Rakan"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

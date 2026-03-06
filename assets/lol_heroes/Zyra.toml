@@ -1,0 +1,119 @@
+[hero]
+name = "Zyra"
+
+[stats]
+hp = 90
+move_speed = 3.3
+armor = 20.0
+magic_resist = 30.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 12
+range = 5.5
+cooldown = 1000
+
+# --- Q: Deadly Spines ---
+[[abilities]]
+name = "Deadly Spines"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 7000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 11
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 2.5
+
+# --- W: Rampant Growth ---
+[[abilities]]
+name = "Rampant Growth"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 8000
+ai_hint = "crowd_control"
+max_charges = 2
+charge_recharge_ms = 18000
+
+[[abilities.effects]]
+type = "root"
+duration_ms = 1000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+# --- E: Grasping Roots ---
+[[abilities]]
+name = "Grasping Roots"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 12000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 14
+
+[abilities.delivery]
+method = "projectile"
+speed = 11.5
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+[[abilities.delivery.on_hit]]
+type = "root"
+duration_ms = 1000
+
+# --- R: Stranglethorns ---
+[[abilities]]
+name = "Stranglethorns"
+targeting = "ground_target"
+range = 7.0
+cooldown_ms = 22800
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 20
+
+[[abilities.effects]]
+type = "damage"
+amount = 45
+damage_type = "magic"
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+[[abilities.effects]]
+type = "summon"
+template = "minion"
+count = 1
+
+# --- Passive: Garden of Thorns ---
+[[passives]]
+name = "Garden of Thorns"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 5000
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+

@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0004_4v4"
+seed = 1927
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["pyromancer", "warden", "paladin", "assassin"]
+enemy_hero_templates = ["Annie", "Bard", "Rammus", "Kennen"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

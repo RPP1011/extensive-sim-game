@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0087_3v3_s2"
+seed = 22010
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["Cassiopeia", "Rell", "Zeri"]
+enemy_hero_templates = ["Azir", "Yuumi", "Lillia"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,13 @@
+[scenario]
+name        = "Pressure Room Mid-Difficulty"
+seed        = 1337
+hero_count  = 4
+enemy_count = 5
+difficulty  = 3
+max_ticks   = 3500
+room_type   = "Pressure"
+
+[assert]
+outcome          = "Victory"
+max_ticks_to_win = 3000
+min_heroes_alive = 1

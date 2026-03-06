@@ -1,0 +1,293 @@
+{
+  "id": "Briar",
+  "name": "Briar",
+  "title": "the Restrained Hunger",
+  "resource_type": "Fury",
+  "tags": [
+    "Fighter",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Crimson Curse",
+      "description": "Briar's attacks and abilities apply a stacking bleed that heals her for a portion of the damage it deals. Perpetually hungry, she gains increased healing based on her missing Health, but lacks innate Health Regeneration.",
+      "wiki_detail": {
+        "champion": "Briar",
+        "skill": "I",
+        "icon": "Briar Crimson Curse.png",
+        "description": "{{sbc|Innate:}} '''Briar's''' [[basic attack]]s and [[champion ability|abilities]] inflict a bleed against enemies for 5 seconds, refreshing on subsequent applications, [[stack]]ing up to 7 times and dealing 25% damage for stacks beyond the first. The bleed deals{{ft|{{as|{{pp|10 to 50}}|physical damage}} {{as|(+ 50% '''bonus''' AD)}} {{as|'''total''' physical damage}} over the duration, increased by {{as|{{pp|10*0.25 to 50*0.25}}|physical damage}} {{as|(+ {{ap|50*0.25}}% '''bonus''' AD)}} for each subsequent stack and up to a maximum of {{as|{{pp|10*3 to 50*3}}|physical damage}} {{as|(+ {{ap|50*3}}% '''bonus''' AD)}}.|{{as|{{pp|10/10 to 50/10}}|physical damage}} {{as|(+ {{ap|50/10}}% '''bonus''' AD)}} {{as|physical damage}} every {{fd|0.5}} seconds, increased by {{as|{{pp|10*0.25/10 to 50*0.25/10}}|physical damage}} {{as|(+ {{ap|50*0.25/10}}% '''bonus''' AD)}} for each subsequent stack and up to a maximum of {{as|{{pp|10*3/10 to 50*3/10}}|physical damage}} {{as|(+ {{ap|50*3/10}}% '''bonus''' AD)}} per tick.}}'''Briar''' {{tip|heal|heals}} herself equal to 25% of the {{tt|pre-mitigation damage|Damage calculated before modifiers}} dealt. If a target dies while bleeding, she will heal herself equal to 125% of the remaining bleed damage.",
+        "description2": "'''Briar''' has no {{sti|health regeneration|{{as|'''base''' health regeneration}}}}, but she increases healing from all sources by {{as|{{pp|key=%|key1=%|type='''missing''' health|0 to 40 for 11|0 to 100|formula=0.4% per 1% missing health}}|health}} {{as|(+ {{as|{{pp|key=%|key1=%|type='''missing''' health|0 to 2.5 for 11|0 to 100|formula=0.025% per 1% missing health}}|health}} per 100 '''bonus''' health)}}.",
+        "targeting": "Passive",
+        "affects": "Enemies, Self",
+        "damagetype": "Physical",
+        "spellshield": "true",
+        "spelleffects": "default",
+        "parry": "true",
+        "notes": "* {{ais|Blood Frenzy|Briar}} area of effect damage around the target does not apply bleed stacks.\n<!-- Blurb -->",
+        "blurb": "{{sbc|Innate:}} {{ci|Briar}} has no {{sti|health regeneration|{{as|'''base''' health regeneration}}}} but she gains increased healing from other sources based on her {{as|'''missing''' health}}.",
+        "blurb2": "{{sbc|Innate:}} '''Briar's''' [[basic attack|attacks]] and [[champion ability|abilities]] inflict a bleed on the target for a few seconds, which may stack up to 9 times. For each stack, the target is dealt {{as|physical damage}} and '''Briar''' {{tip|heal|heals}} for a portion of it.",
+        "blurb3": "If a target affected by her bleed dies, '''Briar''' heals for the remaining amount.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "BriarQ",
+      "name": "Head Rush",
+      "description": "Briar leaps to a unit and hits enemies with The Heel Wheel (of Pain), stunning them and breaking their Armor.",
+      "tooltip": "Briar leaps to a target, Stunning it for {{ stunduration }} seconds, dealing {{ totaldamage }} physical damage and reducing {{ shredpercent*100 }}% Armor and Magic Resist for {{ shredduration }} seconds.\n\nBriar will stop prioritizing champions if she casts this Ability on a minion or monster during Blood Frenzy.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "13/12/11/10/9",
+      "cost": "0",
+      "cost_type": "% of current Health",
+      "range": "475",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Armor and Magic Resist Shred",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ shredpercent*100.000000 }}% -> {{ shredpercentnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ spell.briarp:currenthealthpercentcost*100 }}% of current Health",
+      "wiki_detail": {
+        "champion": "Briar",
+        "skill": "Q",
+        "icon": "Briar Head Rush.png",
+        "description": "{{sbc|Active:}} '''Briar''' {{tip|dash|leaps}} to the target unit. If the target is an enemy, she deals {{as|physical damage}}, applies {{tip|on-hit}} and {{tip|on-attack}} effects, {{tip|stun|stuns}} them for {{fd|0.85}} seconds, and reduces their {{sti|armor penetration|{{as|armor}}}} and {{sti|magic penetration|{{as|magic resistance}}}} for 5 seconds.",
+        "description2": "''Head Rush {{tip|basic attack reset|resets}} '''Briar's''' basic attack timer.''",
+        "leveling": "{{st|Magic Damage|{{ap|60 to 180}} {{as|(+ 80% '''bonus''' AD)}} {{as|(+ 60% AP)}}}}\n{{st|Resistances Reduction|{{ap|10 to 20}}%}}",
+        "cooldown": "{{ap|13 to 9}}",
+        "cdstart": "|cost         = {{as|6%|health}}",
+        "costtype": "{{as|'''current''' Health}}",
+        "cast time": "none",
+        "target range": "{{tip|cr|icononly = true}} 475",
+        "speed": "<!-- {{pp|type=distance|??? to 1200|0 to 450 for 10}} + ?% MS (?) -->",
+        "targeting": "Unit",
+        "affects": "Enemies, Self",
+        "damagetype": "Physical",
+        "spellshield": "true",
+        "spelleffects": "spell",
+        "grounded": "true",
+        "knockdown": "true",
+        "notes": "* ''Head Rush'' can be cast on [[jungle plants]], [[ward]]s, and [[Stealth#Stealthed traps and wards|traps]].\n** It cannot be cast on [[structure]]s.\n* ''Head Rush's'' damage benefits from life steal.\n* ''Head Rush'' is a non-following dash.\n** It picks its dash destination ~100 units in front of enemy targets, 75 units in front enemy targets when already very close to them, 75 units in front of of allied targets. \n** If already within 75 units of her target, she dashes to her current location, which takes 0 time but still triggers dash effects such as {{ri|Sudden Impact}}.\n** It does not force the target's resistance values to update immediately outside of the natural stat update cycle, which means it will typically still be mitigated by the unreduced magic resistance value.\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Briar}} {{tip|dash|leaps}} to the target unit. If the target is an enemy, she deals {{as|physical damage}}, {{tip|stun|stuns}} them briefly, and additionally {{sti|armor penetration|{{as|reduces their armor|armor reduction}}}} for a few seconds.",
+        "_comments": [
+          "{{pp|type=distance|??? to 1200|0 to 450 for 10}} + ?% MS (?)",
+          "Blurb"
+        ]
+      }
+    },
+    "W": {
+      "id": "BriarW",
+      "name": "Blood Frenzy / Snack Attack",
+      "description": "Briar leaps forward and shatters her pillory, entering a Blood Frenzy that causes her to relentlessly pursue the nearest enemy (prioritizing champions). While frenzied, she gains increased Attack Speed and Move Speed, and her attacks deal damage in an area around her target.\n\nBriar can reactivate this ability while frenzied to take a CHOMP out of her target on her next attack, dealing additional damage based on their missing Health, and healing Briar based on the damage she deals.",
+      "tooltip": "Briar leaps and enters a Blood Frenzy, self-taunting to the nearest enemy for {{ berserkduration }} seconds, prioritizing Champions. While in Blood Frenzy she gains {{ berserkas*100 }}% Attack Speed and {{ berserkms*100 }}% Move Speed, and her Attacks deal {{ totalaoedamage }} physical damage to enemies surrounding her target.\n\nBriar can Recast this Ability to empower her next Attack. It deals {{ totalattackbonusdamage }} + {{ totalattackpercentmissinghealth }}% missing Health physical damage and heals Briar for {{ attackmaxhpheal }} + {{ attackhealpercent*100 }}% of the damage dealt.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "0",
+      "cost_type": "% of current Health",
+      "range": "350",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Attack Speed",
+          "Move Speed",
+          "Area Damage AD Ratio",
+          "Damage",
+          "Healing",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ berserkas*100.000000 }}% -> {{ berserkasnl*100.000000 }}%",
+          "{{ berserkms*100.000000 }}% -> {{ berserkmsnl*100.000000 }}%",
+          "{{ aoeattackdamagepercent*100.000000 }}% -> {{ aoeattackdamagepercentnl*100.000000 }}%",
+          "{{ attackbonusdamage }} -> {{ attackbonusdamageNL }}",
+          "{{ attackhealpercent*100.000000 }}% -> {{ attackhealpercentnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ spell.briarp:currenthealthpercentcost*100 }}% of current Health"
+    },
+    "E": {
+      "id": "BriarE",
+      "name": "Chilling Scream",
+      "description": "Briar refocuses her mind, removing Blood Frenzy and channeling energy into a powerful scream that damages and slows enemies. While charging, she takes reduced damage and heals for a portion of her max Health. A fully charged scream knocks foes back, dealing additional damage and stunning those who collide with a wall.",
+      "tooltip": "Begin Charging: Briar removes Blood Frenzy and gathers energy, gaining {{ drpercent }}% damage reduction and restoring {{ percentmaxhpheal }} Health over 1 second.\n\nRelease: Briar unleashes a scream that deals up to {{ damage }} magic damage based on time charged, and Slows by {{ slowpercent*100 }}% for {{ slowduration }} seconds. When fully charged, the scream Knocks Back enemies, dealing {{ wallhitdamage }} magic damage to those who hit a wall and Stunning them for {{ wallstunduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16",
+      "cost": "0",
+      "cost_type": "% of current Health",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Additional Damage",
+          "Heal Ratio"
+        ],
+        "effect": [
+          "{{ maxbasedamage }} -> {{ maxbasedamageNL }}",
+          "{{ wallhitbasedamage }} -> {{ wallhitbasedamageNL }}",
+          "{{ healhppercent*100.000000 }}% -> {{ healhppercentnl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ spell.briarp:currenthealthpercentcost*100 }}% of current Health",
+      "wiki_detail": {
+        "champion": "Briar",
+        "skill": "E",
+        "icon": "Briar Chilling Scream.png",
+        "description": "{{sbc|Active:}} '''Briar''' prepares to unleash a scream in the target direction, {{tip|channel|charging}} for up to 1 second, during which she increases ''Chilling Scream's'' damage and range, and gains 35% damage reduction and {{tip|heal|heals}} herself every {{fd|0.25}} seconds.",
+        "leveling": "{{st|Heal Per Tick|{{as|{{ap|10/4 to 16/4}}% '''maximum''' health}}|Maximum Heal|{{as|{{ap|10 to 16}}% '''maximum''' health}}}}",
+        "description2": "''Chilling Scream'' can be recast within the duration, and does so automatically afterwards. ''Chilling Scream's'' charge cannot be {{tip|interrupt|interrupted}} by {{tip|crowd control}}.",
+        "description3": "{{sbc|Recast:}} '''Briar''' unleashes the scream in the direction she targeted at the time of cast, dealing {{as|magic damage}} to enemies hit and {{tip|slow|slowing}} them by 80% for {{fd|0.5}} seconds.",
+        "leveling3": "{{st|Maximum Magic Damage|{{ap|80 to 220}} {{as|(+ 100% '''bonus''' AD)}} {{as|(+ 100% AP)}}|Minimum Magic Damage|{{ap|80*0.025 to 220*0.025}} {{as|(+ {{ap|100*0.025}}% '''bonus''' AD)}} {{as|(+ {{ap|100*0.025}}% AP)}}}}",
+        "description4": "If ''Chilling Scream'' was charged for its full duration, enemies hit are also {{tip|airborne|knocked back}} 575 units. If they collide with terrain, they will rebound to take {{ccs|{{as|'''bonus''' magic damage}}|magic}} and become {{tip|airborne|knocked up}} for {{fd|0.5}} seconds and {{tip|stun|stunned}} for {{fd|1.5}} seconds.",
+        "leveling4": "{{st|Bonus Magic Damage|{{ap|140 to 440}} {{as|(+ 240% '''bonus''' AD)}} {{as|(+ 240% AP)}}}}\n{{st|Total Magic Damage|{{ap|80+140 to 220+440}} {{as|(+ {{ap|100+240}}% '''bonus''' AD)}} {{as|(+ {{ap|100+240}}% AP)}}}}",
+        "cooldown": "16",
+        "cdstart": "post-effect",
+        "cost": "{{as|6%|health}}",
+        "costtype": "{{as|'''current''' Health}}",
+        "cast time": "{{tt|None|Immediately starts charging}} / {{tt|{{as|{{fd|0.291}} (at base attack speed)|attack speed}}|Recast; always equal to 100% of Briar's attack windup}}",
+        "range": "{{tip|er|icononly = true}} {{tt|-100|Backwards rectangle reach}} / {{tip|cr|icononly = true}} {{pp|400 to 600|0 to 1 for 11|type=charge time|formula=400 + 20 for every 0.1 seconds, capped at 1 second}}",
+        "width": "{{tip|er|icononly = true}} 380",
+        "speed": "{{tt|1900|Missile speed}} / {{tt|1800|Knockback speed}}",
+        "targeting": "[[Auto-targeted|Auto]] / [[Self-targeted|Self]]",
+        "affects": "Enemies, Self",
+        "spellshield": "true",
+        "spelleffects": "spellaoe",
+        "damagetype": "Magic",
+        "projectile": "true",
+        "silence": "false",
+        "notes": "* ''Chilling Scream'' increases its damage by its minimum every {{fd|0.025}} seconds over the duration.\n{{Effect at cast time end}}\n* The following table refers for interactions while '''Briar''' is {{tip|channel|channeling}}:\n{{ct|charge|attack=false|move=false|cast=false|items=false|consume=Disabled, but can still use trinkets|spells=true,false,false,false,recasts|interrupts=death}}\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Briar}} {{tip|channel|charges}} to increase ''Chilling Scream's'' damage and range, gaining damage reduction and {{tip|heal|healing}} herself. ''Chilling Scream'' can be recast within the duration, and does so automatically afterwards. The charge cannot be {{tip|interrupt|interrupted}}.",
+        "blurb2": "{{sbc|Recast:}} '''Briar''' unleashes a scream in the target direction that deals {{as|magic damage}} to enemies hit and briefly {{tip|slow|slows}} them.",
+        "blurb3": "If ''Chilling Scream'' was charged for its full duration, the scream forcefully {{tip|airborne|knocks back}} enemies hit, and if they collide with terrain, they rebound to take massive {{ccs|{{as|'''bonus''' magic damage}}|magic}}, and they are {{tip|airborne|knocked airborne}} briefly and {{tip|stun|stunned}} for longer.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "R": {
+      "id": "BriarR",
+      "name": "Certain Death",
+      "description": "Briar kicks her pillory's hemolith gemstone, marking the first champion it hits as her prey. She then beelines straight to them, fearing other surrounding enemies upon arriving at her target, and enters a state of complete hemomania. She will pursue her prey until death, gaining the benefits of Blood Frenzy as well as additional Armor, Magic Resistance, Life Steal, and Move Speed.",
+      "tooltip": "Briar kicks her pillory's hemolith gemstone and flies to the location of the first champion it hits, marking them as her prey. On landing, she deals {{ damage }} magic damage to everything nearby and causes enemies who are not her prey to Flee for {{ fearduration }} seconds. She then enters an empowered Blood Frenzy and will pursue her prey until death. During this time, she gains {{ totalresists }} Armor and Magic Resist, {{ lifestealpercent*100 }}% Lifesteal, and an additional {{ extramovespeedpercent*100 }}% Move Speed.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "0",
+      "cost_type": "% of current Health",
+      "range": "12000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Life Steal",
+          "Move Speed",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ lifestealpercent*100.000000 }}% -> {{ lifestealpercentnl*100.000000 }}%",
+          "{{ extramovespeedpercent*100.000000 }}% -> {{ extramovespeedpercentnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ spell.briarp:currenthealthpercentcost*100 }}% of current Health",
+      "wiki_detail": {
+        "champion": "Briar",
+        "skill": "R",
+        "icon": "Briar Certain Death.png",
+        "description": "{{sbc|Active:}} '''Briar''' kicks her pillory's hemolith in the target direction, briefly granting {{tip|sight}} of its {{tt|surroundings|Can grant sight of area into brush and through terrain}} as it {{tt|travels|creates vision bubbles every 0.25 seconds}} and marking the first enemy champion hit as her prey. The mark's application {{tip|disrupt|disrupts}} the target's ongoing {{tip|channel|channels}}. While the target is marked, they are {{tip|true sight|revealed}}.",
+        "description2": "If a target is hit, '''Briar''' {{tip|cleanse|cleanses}} herself from all {{tip|crowd control}} and destroys her pillory over a cast time, afterwards {{tip|dash|dashing}} to them with {{tip|displacement immunity}}. Upon arrival, she creates an explosion around the marked target that deals {{as|magic damage}} to them and nearby enemies and {{tip|flee|fears}} all non-marked targets for {{fd|1.5}} seconds, during which they are {{tip|slow|slowed}} by 35%. She then enters a state of ''Hematomania''.",
+        "leveling2": "{{st|Magic Damage|{{ap|150 to 350}} {{as|(+ 50% '''bonus''' AD)}} {{as|(+ 120% AP)}}}}",
+        "icon3": "Briar Certain Death 2.png",
+        "description3": "{{sbc|Hematomania:}} '''Briar''' gains all effects of ''{{ai|Blood Frenzy|Briar}}'' as well as {{sti|{{as|'''bonus''' armor}}}} and {{sti|{{as|'''bonus''' magic resistance}}}} equal to {{as|20% AD}}, {{stil|life steal}}, and {{sti|ms|{{as|'''additional bonus''' movement speed|ms}}}}.",
+        "leveling3": "{{st|Life Steal|{{ap|10 to 20}}%}}\n{{st|Additional Bonus Movement Speed|{{ap|10 to 30}}%}}",
+        "icon4": "Briar Certain Death 3.png",
+        "description4": "While in the empowered frenzy, '''Briar''' prioritizes attacking the marked target over all other units and regardless of range. If that target becomes invalid, she will shift back to her {{tt|normal targeting priority|nearest non-marked champion, then large monster or minion, and then any other unit}} until the marked target can be attacked again. ''Hematomania'' lasts until the mark is dispelled by any means, including '''Briar's''' or the target's death.",
+        "description5": "''Casting {{ai|Chilling Scream|Briar}} removes the target's mark and ends Hematomania early. {{ais|Head Rush|Briar}} cast does not shift her targeting priority during Hematomania.''",
+        "cooldown": "{{ap|120 to 80}}",
+        "cdstart": "post-effect",
+        "cost": "{{as|6%|health}}",
+        "costtype": "{{as|'''current''' Health}}",
+        "cast time": "{{tt|1|Active}} / {{tt|{{fd|1.25}}|Active hits}}",
+        "range": "{{tip|cr|icononly = true}} {{tt|10000|Missile range}}",
+        "width": "{{tip|er|icononly = true}} {{tt|320|Missile width}}",
+        "effect radius": "{{tt|Global|Second cast dash range and frenzy marked/non-marked target radius (see notes)}} / {{tip|cr|icononly=true}} {{tt|1500|Frenzy non-marked target radius}} / {{tip|er|icononly = true}} {{tt|575|Fear radius on impact around target}}",
+        "speed": "{{tt|2000|Missile speed}} / {{tt|2500 - 5000|Dash speed}}",
+        "targeting": "Direction",
+        "affects": "Enemies, Self",
+        "damagetype": "Magic",
+        "spellshield": "true",
+        "spelleffects": "spellaoe",
+        "projectile": "true",
+        "grounded": "true",
+        "knockdown": "false",
+        "flavorsound": "<sm2 vol=\"0.55\">Briar_Original_SFX_R_cast_warning.ogg</sm2> ''Activation alert.''<br>{{sm2|Briar_Original_RHit_0.ogg}} ''\"'''FOUND YOU!!'''\"''",
+        "notes": "* '''Briar''' will track the target if they change locations.\n* '''Briar''' lands 100 units in front of her target at the end of the dash.\n* '''Briar''' will not initiate the second cast if she is being {{tip|suppression|suppressed}}, is under {{tip|resurrection}}, or is in the {{ai|Realm of Death|Mordekaiser}} when her target is hit by the missile in the normal realm.\n** Since ''Certain Death'' cleanses herself from all crowd control when the first cast hits, she will be able to start the second cast due to removing the suppression effect.\n* '''Briar''' will still dash to the target even if they die before she reaches them.\n* '''Briar''' gains the displacement immunity upon starting the second cast time.\n* '''Briar''' will place herself onto the ground and interrupts {{tip|airborne|displacements}} affecting her upon starting the second cast time.\n* ''Hematomania's'' targeting priorities differ slightly from that of ''{{ais|Blood Frenzy|Briar}}'':\n** She will prioritize the marked target regardless of range and over all other units as long as it can be attacked.\n*** If the marked target is not available, then she shifts her priority to the nearest other champion, then large monster or minion, and then any other unit.\n**** If neither the marked target is valid or any other valid targets are close nearby, then she will prioritize targeting the nearest other champion, then large monster or minion, and then any other unit within a global radius.\n* Starting the second cast interrupts any spells that '''Briar''' is channeling.\n* The mark will expire if ''Hematomania's'' buff is dispelled.\n* Casting ''{{ai|Blood Frenzy|Briar}}'' during ''Hematomania'' will not grant any additional bonuses nor will it override ''Hematomania's'' effects.\n** Gaining ''Hematomania'' while ''Blood Frenzy'' is active will override the previous buff.\n* The {{tip|disrupt}} is 'wrapped' into a status effect that says the target is {{tip|Silence|Silenced}} for {{fd|0.3}} seconds, but it does not actually ''silence''. It however makes sure that the ''disrupt'' is prevented by {{tip|Cc-immune|immunity to silences}}.\n{{Effect at cast time start}}\n* The following table refers for interactions while '''Briar''' is in either the first or second cast time:\n{{ct|cast}}\n* The following table refers for interactions while '''Briar''' is dashing:\n{{ct|cast=false|move=false|attack=false|items=false|consume=false|spells=true,false,false,false,false|interrupts=death}}\n* The following table refers for interactions while '''Briar''' is in ''Hematomania'':\n{{ct|attack=Uncontrollable|move=Uncontrollable|cast=''{{ai|Head Rush|Briar}}'' can only be cast on targets within its radius. ''{{ai|E|Briar}}'' interrupts the frenzy. ''{{ai|R|Briar}}'' is disabled.|items=true|consume=true|spells=true,true,false,false|interrupts=death}}\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Briar}} kicks her pillory's hemolith a large distance toward the target direction which marks the first enemy {{tip|champion}} hit and {{tip|true sight|reveals}} them.",
+        "blurb2": "If a target is hit, '''Briar''' destroys her pillory and {{tip|dash|dashes}} to them. Upon arrival, she creates an explosion that deals {{as|magic damage}} to the marked champion and enemies around them, and also {{tip|flee|fears}} all non-marked enemies. '''Briar''' then enters ''Hematomania''.<hr>",
+        "blurb3": "{{sbc|Hematomania:}} '''Briar''' gains all effects of ''{{ai|Blood Frenzy|Briar}}'' against the marked target as well as {{sti|{{as|'''bonus''' armor}}}}, {{sti|{{as|'''bonus''' magic resistance}}}}, {{as|{{sti|life steal}}|life steal}}, and {{sti|ms|{{as|'''additional bonus''' movement speed|ms}}}}. ''Hematomania'' lasts until the marked target dies",
+        "blurb4": "'''Briar''' can cast {{ai|Chilling Scream|Briar}} to end ''Hematomania'' early.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,260 @@
+{
+  "id": "Karma",
+  "name": "Karma",
+  "title": "the Enlightened One",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage",
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Gathering Fire",
+      "description": "Karma's damaging abilities will reduce the cooldown of Mantra.",
+      "wiki_detail": {
+        "champion": "Karma",
+        "skill": "I",
+        "icon": "Gathering Fire.png",
+        "blurb": "{{sbc|Innate:}} ''{{ais|Mantra|Karma}}'' current cooldown is {{sti|cdr|reduced}} by a few seconds for each enemy champion hit by {{cis|Karma}} damaging [[Champion ability|abilities]].",
+        "description": "{{sbc|Innate:}} ''{{ais|Mantra|Karma}}'' {{sti|'''current''' cooldown}} is reduced by 4 seconds for each enemy champion hit by '''Karma's''' damaging [[Champion ability|abilities]].",
+        "targeting": "Passive",
+        "affects": "Self",
+        "notes": "* {{ai|Inner Flame|Karma}} / {{ai|Soulflare|Karma}} reduces {{ais|Mantra|Karma}} cooldown per champion hit by either damage instance (up to a maximum total reduction of {{ap|4*10}} seconds if 5 enemy champions are hit by both instances of damage).\n* {{ai|Focused Resolve|Karma}} / {{ai|Renewal|Karma}} reduces {{ais|Mantra|Karma}} cooldown when initially cast and again after the duration for the tether has expired (for a total reduction of {{ap|4*2}} seconds)."
+      }
+    },
+    "Q": {
+      "id": "KarmaQ",
+      "name": "Inner Flame",
+      "description": "Karma sends forth a ball of spirit energy that explodes and deals damage upon hitting an enemy unit.\n\nMantra Bonus: In addition to the explosion, Mantra increases the destructive power of her Inner Flame, creating a cataclysm which deals damage after a short delay.",
+      "tooltip": "Karma fires a blast of energy, dealing {{ totaldamage }} magic damage to the first target hit and surrounding enemies, and Slowing them by {{ slowamount*-100 }}% for {{ slowduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9/8/7/6/5",
+      "cost": "40/50/60/70/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "950",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Karma",
+        "skill": "Q",
+        "icon": "Inner Flame.png",
+        "blurb": "{{sbc|Active:}} {{ci|Karma}} fires a bolt in the target direction that explodes on the first enemy hit, dealing {{as|magic damage}} to nearby enemies and briefly {{tip|slow|slowing}} them.",
+        "description": "{{sbc|Active:}} '''Karma''' fires a bolt in the target direction that explodes on the first enemy hit, dealing {{as|magic damage}} to nearby enemies and {{tip|slow|slowing}} them by 40% for {{fd|1.5}} seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 270}} {{as|(+ 70% AP)}}}}",
+        "target range": "{{tip|cr|icononly = true}} 950 / {{tip|er|icononly = true}} 890",
+        "width": "{{tip|er|icononly = true}} {{tt|120|Missile width}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|280|Collision detonation radius}}",
+        "speed": "{{tt|1700|Missile speed}}",
+        "cooldown": "{{ap|9 to 5}}",
+        "cost": "{{ap|40 to 80}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "* {{tip|Spell shield}} will block the initial impact from ''Inner Flame''.\n{{Effect at cast time end}}\n* ''Inner Flame's'' effect radius is centered around the location of the missile as it collides."
+      }
+    },
+    "W": {
+      "id": "KarmaSpiritBind",
+      "name": "Focused Resolve",
+      "description": "Karma creates a tether between herself and a targeted enemy, dealing damage and revealing them. If the tether is not broken, the enemy will be rooted and damaged again.\n\nMantra Bonus: Karma strengthens the link, healing herself and extending the root duration.",
+      "tooltip": "Karma tethers herself to a champion or jungle monster, dealing {{ initialdamage }} magic damage and revealing them for {{ tetherduration }}s. If the tether remains unbroken, the target takes {{ initialdamage }} magic damage again and is Rooted for {{ rootduration }}s.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "675",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Root Duration",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ rootduration }} -> {{ rootdurationNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Karma",
+        "skill": "W",
+        "icon": "Focused Resolve.png",
+        "blurb": "{{sbc|Active:}} {{ci|Karma}} deals {{as|magic damage}} and {{tip|tether|tethers}} to the target enemy {{tip|champion}} or {{tip|monster}}.",
+        "blurb2": "If the tether is not broken after a short time, the target is dealt {{as|magic damage}}, briefly {{tip|root|rooted}}, and {{tip|true sight|revealed}} for a short time.",
+        "description": "{{sbc|Active:}} '''Karma''' deals {{as|magic damage}} to the target enemy {{tip|champion}} or {{tip|monster}} and forms a {{tip|tether}} between her and them for 2 seconds, during which they are {{tip|true sight|revealed}}.",
+        "leveling": "{{st|Magic Damage|{{ap|40 to 140}} {{as|(+ 45% AP)}}}}",
+        "description2": "If the tether is not broken by the end of its duration, the target is dealt the same {{as|magic damage}} again and is {{tip|root|rooted}} for a duration, during which they are {{tip|true sight|revealed}}.",
+        "leveling2": "{{st|Total Magic Damage|{{ap|40*2 to 140*2}} {{as|(+ 90% AP)}}}}\n{{st|Root Duration|{{ap|1.6 to 2}} seconds}}",
+        "target range": "{{tip|cr|icononly = true}} 675",
+        "tether radius": "{{tip|cr|icononly = true}} 825",
+        "cooldown": "12",
+        "cost": "{{ap|50 to 70}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "affects": "Enemies / Self",
+        "damagetype": "Magic",
+        "spellshield": "Special",
+        "spelleffects": "spell",
+        "projectile": "False",
+        "callforhelp": "True",
+        "grounded": "|knockdown    =",
+        "notes": "* {{tip|Spell shield}} will block the tether's application and damage but not the aftereffects of one already applied.\n{{Unit-targeted cancel conditions}}"
+      }
+    },
+    "E": {
+      "id": "KarmaSolKimShield",
+      "name": "Inspire",
+      "description": "Karma summons a protective shield that absorbs incoming damage and increases the Move Speed of the protected ally.\n\nMantra Bonus: Energy radiates out from her target, strengthening the initial shield and applying Inspire to nearby allied champions.",
+      "tooltip": "Karma grants an allied champion {{ totalshield }} Shield for {{ shieldduration }}s and {{ movespeed*100 }}% Move Speed for {{ movespeedduration }}s.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9.5/9/8.5/8",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Shield Amount",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ baseshield }} -> {{ baseshieldNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Karma",
+        "skill": "E",
+        "icon": "Inspire.png",
+        "blurb": "{{sbc|Active:}} {{ci|Karma}} applies a {{tip|shield}} on herself or the target allied champion for a short time, which briefly grants {{sti|ms|{{as|'''bonus''' movement speed}}}}.",
+        "description": "{{sbc|Active:}} '''Karma''' grants a {{tip|shield}} to herself or the target allied champion for {{fd|2.5}} seconds as well as {{sti|ms|{{as|40% '''bonus''' movement speed}}}} for 2 seconds.",
+        "leveling": "{{st|Shield Strength|{{ap|80 to 280}} {{as|(+ 60% AP)}}}}",
+        "target range": "{{tip|cr|icononly = true}} 800",
+        "cooldown": "{{ap|10 to 8}}",
+        "cost": "{{ap|50 to 70}}",
+        "cast time": "none",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "affects": "Allies",
+        "spelleffects": "Shield",
+        "notes": "* No additional notes."
+      }
+    },
+    "R": {
+      "id": "KarmaMantra",
+      "name": "Mantra",
+      "description": "Karma empowers her next ability to do an additional effect. Mantra is available at level 1 and does not require a skill point.",
+      "tooltip": "Karma empowers her next Ability used within 8 seconds.\nInner Flame: Deals an additional {{ rqimpactdamage }} magic damage and leaves behind a circle of flame, Slowing enemies and dealing an additional {{ rqfielddamage }} magic damage.Focused Resolve: Karma will restore {{ rwhealamount }} missing Health at the beginning and end of the tether, and Root for {{ rwbonusroot }}s longer.Inspire: Karma shields her target for {{ rebonusshield }} more Shield, and also shields allies near her target, granting them {{ rebonusshieldarea }} Shield and {{ removespeed*100 }}% Move Speed.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "40/38/36/34",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "1100",
+      "max_rank": 4,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Soulflare Impact",
+          "Soulflare Circle Damage",
+          "Renewal Root Extension",
+          "Defiance Shield",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ qbonusdamage }} -> {{ qbonusdamageNL }}",
+          "{{ qdetonationdamage }} -> {{ qdetonationdamageNL }}",
+          "{{ rwbonusroot }} -> {{ rwbonusrootNL }}",
+          "{{ ebonusshield }} -> {{ ebonusshieldNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Karma",
+        "skill": "R",
+        "icon": "Mantra.png",
+        "blurb": "{{sbc|Active:}} {{ci|Karma}} empowers her next ability within a period to apply an additional effect.",
+        "blurb4": "'''Karma''' begins the game with one rank in ''Mantra''. Her empowered abilities scale based on ''Mantra's'' rank.",
+        "description": "{{sbc|Active:}} '''Karma''' empowers her next basic ability within 8 seconds for an additional effect. <br/><br/>''Mantra can be used while affected by {{tip|cast-inhibiting crowd control}}.''",
+        "description2": "'''Karma''' begins the game with one rank in ''Mantra''. Her empowered abilities scale based on ''Mantra's'' rank.",
+        "cast time": "none",
+        "cooldown": "{{ap|40 to 34 4}}",
+        "cdstart": "on-cast",
+        "targeting": "Auto",
+        "affects": "Self",
+        "notes": "|flavorsound = {{sm2|Karma_Original_Mantra_1.ogg}} ''\"Sae Eleisa Tera Vi.\"''"
+      }
+    }
+  }
+}

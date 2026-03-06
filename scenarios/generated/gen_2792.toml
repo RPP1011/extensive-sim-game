@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0010_2v2_s2"
+seed = 21933
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["Ahri", "Leblanc"]
+enemy_hero_templates = ["Kayle", "Akali"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0084_2v2_d3_s1"
+seed = 12207
+hero_count = 2
+enemy_count = 2
+difficulty = 3
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["assassin", "shadow_dancer"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

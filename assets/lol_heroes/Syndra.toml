@@ -1,0 +1,122 @@
+[hero]
+name = "Syndra"
+
+[stats]
+hp = 90
+move_speed = 3.3
+armor = 20.0
+magic_resist = 30.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 12
+range = 5.5
+cooldown = 1000
+
+# --- Q: Dark Sphere ---
+[[abilities]]
+name = "Dark Sphere"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 7000
+ai_hint = "damage"
+resource_cost = 8
+max_charges = 2
+charge_recharge_ms = 7000
+
+[[abilities.effects]]
+type = "damage"
+amount = 18
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.1
+
+# --- W: Force of Will ---
+[[abilities]]
+name = "Force of Will"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 12000
+ai_hint = "damage"
+resource_cost = 12
+recast_count = 1
+recast_window_ms = 10000
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- E: Scatter the Weak ---
+[[abilities]]
+name = "Scatter the Weak"
+targeting = "direction"
+range = 6.5
+cooldown_ms = 17000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "damage"
+amount = 18
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "cone"
+radius = 4.0
+angle_deg = 60.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+# --- R: Unleashed Power ---
+[[abilities]]
+name = "Unleashed Power"
+targeting = "target_enemy"
+range = 6.8
+cooldown_ms = 23900
+ai_hint = "damage"
+resource_cost = 20
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 25
+damage_type = "magic"
+
+# --- Passive: Transcendent ---
+[[passives]]
+name = "Transcendent"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_kill"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+
+[[passives.effects]]
+type = "apply_stacks"
+name = "syndra"
+count = 1
+max_stacks = 4
+

@@ -1,0 +1,292 @@
+{
+  "id": "Swain",
+  "name": "Swain",
+  "title": "the Noxian Grand General",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage",
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Ravenous Flock",
+      "description": "Swain's ravens collect Soul Fragments that heal him and permanently increase his maximum health.",
+      "wiki_detail": {
+        "champion": "Swain",
+        "skill": "I",
+        "icon": "Ravenous Flock.png",
+        "blurb": "{{sbc|Innate:}} Enemy champions that {{tip|death|die}} will leave behind a {{as|Soul Fragment|buzzword3}} for some time. {{ci|Swain}} will collect nearby {{as|Soul Fragments|buzzword3}}, as well as with ''{{ai|Vision of Empire|Swain}}'' and ''{{ai|Nevermove|Swain}}''.",
+        "blurb4": "{{sbc|Soul Fragment:}} For each stack, '''Swain''' gains {{sti|{{as|'''bonus''' health}}}}. Upon collection, he will {{tip|heal}} for a portion of {{as|his '''maximum''' health}}.",
+        "description": "{{sbc|Innate:}} Enemy champions that {{tip|death|die}} will leave behind a {{as|Soul Fragment|buzzword3}} for 16 seconds, which can be collected by '''Swain''' after 1 second. '''Swain's''' ravens collect nearby {{as|Soul Fragments|buzzword3}}, as well as with ''{{ai|Vision of Empire|Swain}}'' and ''{{ai|Nevermove|Swain}}''.<br/><br/>\n{{sbc|Soul Fragment:}} For each stack, '''Swain''' gains {{as|12 '''bonus''' health}}. Upon collection, he will {{tip|heal}} for {{as|{{pp|key=%|3;4;5;6|1 to 16}} of his '''maximum''' health}}.",
+        "speed": "{{tt|1200|Raven missile speed}}",
+        "targeting": "Passive",
+        "affects": "Self, Enemies",
+        "projectile": "false",
+        "notes": "* The ravens will only be seen by enemies if they have {{tip|sight|vision}} of '''Swain'''.",
+        "video": "Swain - Passive"
+      }
+    },
+    "Q": {
+      "id": "SwainQ",
+      "name": "Death's Hand",
+      "description": "Swain unleashes several bolts of eldritch power that pierce through enemies. Enemies hit take more damage for each bolt they are struck by.",
+      "tooltip": "Swain unleashes 5 eldritch bolts, dealing {{ initialdamage }} magic damage plus {{ extraboltdamage }} magic damage per bolt past the first (max {{ maxdamage }} magic damage).{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7/6/5/4/3",
+      "cost": "40/45/50/55/60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "750",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Bolt Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Swain",
+        "skill": "Q",
+        "icon": "Death's Hand.png",
+        "blurb": "{{sbc|Active:}} {{ci|Swain}} unleashes five bolts of eldritch power over {{rutngt|0.25}} in a cone in the target direction that deal {{as|magic damage}} to enemies hit. Subsequent bolts against an enemy deal {{as|'''bonus''' magic damage}}.",
+        "description": "{{sbc|Active:}} '''Swain''' unleashes five bolts of eldritch power over {{rutngt|0.25}} in a cone in the target direction that deal {{as|magic damage}} to enemies hit. Subsequent bolts against an enemy deal only {{as|'''bonus''' magic damage}}.",
+        "leveling": "{{st|Magic Damage|{{ap|60 to 160}} {{as|(+ 45% AP)}}}}\n{{st|Bonus Damage Per Bolt|{{ap|15 to 55}} {{as|(+ 10% AP)}}|Total Damage|{{ap|125 to 365}} {{as|(+ 80% AP)}}}}",
+        "target range": "|effect radius= 725",
+        "angle": "32{{degree}}",
+        "speed": "|cost         = {{ap|40 to 60}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "cooldown": "{{ap|7 to 3}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "Area of effect",
+        "spellshield": "True",
+        "parry": "|projectile   = False",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Death's Hand'' will still cast and deal damage if '''Swain''' dies during the cast time. \n{{Effect at cast time end}}\n* The total damage to a single target will be split evenly among each bolt that hits, meaning that hitting with more bolts will deal less damage per hit (but more overall damage).<!-- this needs to be tested with some flat reduction effect since it doesn't seem to be 100% true. It's likely it deals damage in multiple instances but the first instance should deal more than the others, instead of an even split of the damage-->\n* {{tip|Spell shield}} will block all bolts.",
+        "video": "Swain - Q",
+        "_comments": [
+          "this needs to be tested with some flat reduction effect since it doesn't seem to be 100% true. It's likely it deals damage in multiple instances but the first instance should deal more than the others, instead of an even split of the damage"
+        ]
+      }
+    },
+    "W": {
+      "id": "SwainW",
+      "name": "Vision of Empire",
+      "description": "Swain opens a demon eye that deals damage and slows enemies. Champions hit are revealed and also grant Swain a Soul Fragment.",
+      "tooltip": "Swain opens a demon eye, revealing a location for 1.5 seconds, then deals {{ totaldamage }} magic damage and Slows by {{ slow*-100 }}% for {{ slowduration }} seconds.\n\nChampions hit grant Swain a Soul Fragment and are revealed for {{ revealduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "22/21/20/19/18",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "5500/6000/6500/7000/7500",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Range",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ castrange }} -> {{ castrangeNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Swain",
+        "skill": "W",
+        "icon": "Vision of Empire.png",
+        "blurb": "{{sbc|Active:}} {{ci|Swain}} summons a demonic eye at the target location that explodes after a brief moment, dealing {{as|magic damage}} and {{tip|slow|slowing}} enemies within for a short time.",
+        "blurb2": "Enemy {{tip|champions}} hit are also {{tip|standard sight|revealed}} for 6 seconds and have a {{as|Soul Fragment|buzzword3}} collected from them.",
+        "description": "{{sbc|Active:}} '''Swain''' summons a demonic eye at the target location that grants {{tip|sight}} of the area for 2 seconds and explodes after {{fd|1.5}} seconds, dealing {{as|magic damage}} to enemies within, halved against {{tip|minions}}, and {{tip|slow|slowing}} them for {{fd|2.5}} seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 210}} {{as|(+ 60% AP)}}|Minion Damage|{{ap|80/2 to 220/2}} {{as|(+ {{fd|27.5}}% AP)}}}}\n{{st|Slow|{{ap|50 to 70}}%}}",
+        "description2": "Enemy {{tip|champions}} hit are also {{tip|standard sight|revealed}} for a duration and have a {{as|Soul Fragment|buzzword3}} collected from them.",
+        "leveling2": "{{st|Reveal Duration|{{ap|6}} seconds}}",
+        "target range": "{{ap|5500 to 7500}}",
+        "effect radius": "325",
+        "cost": "{{ap|60 to 80}}",
+        "costtype": "Mana",
+        "cooldown": "{{ap|22 to 18}}",
+        "cast time": "{{fd|0.25}}",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "spellaoe",
+        "spellshield": "Special",
+        "parry": "|projectile   =",
+        "grounded": "|knockdown    =",
+        "notes": "* Enemy {{tip|champions}} protected by a {{tip|spell shield}} do not have a {{as|Soul Fragment|buzzword3}} collected from them but are {{tip|standard sight|revealed}} anyway.\n* ''Vision of Empire'' will grant {{as|Soul Fragments|buzzword3}} from hitting {{tip|clone|clones}}.\n* '''Swain''' will not receive the {{as|Soul Fragments|buzzword3}} if ''Vision of Empire'' hits enemy champions while he is dead.\n* ''Vision of Empire'' is visible and audible to enemies through the [[sight|fog of war]].\n* Hitting an enemy champion with ''Vision of Empire'' collects nearby {{as|Soul Fragments|buzzword3}}.",
+        "video": "Swain - W"
+      }
+    },
+    "E": {
+      "id": "SwainE",
+      "name": "Nevermove",
+      "description": "Swain launches a wave of demonic power forward. It then returns to Swain and roots enemies it hits. Swain can then choose to pull all rooted champions closer. This ability has a shorter cooldown during Demonic Ascension.",
+      "tooltip": "Swain launches a wave of demonic power that returns, detonating on the first enemy hit to deal {{ secondarydamage }} magic damage and Root enemies in the area for {{ rootduration }} seconds.\n\nRooting a champion allows Swain to reactivate this ability to pull all champions Rooted by Nevermove toward him, gaining a Soul Fragment for each.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/11.5/11/10.5/10",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "850",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e2damage }} -> {{ e2damageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Swain",
+        "skill": "E",
+        "icon": "Nevermove.png",
+        "blurb": "{{sbc|Active:}} {{ci|Swain}} launches a demonic wave in the target direction that deals {{as|magic damage}} to enemies hit.",
+        "blurb2": "At max range, the wave homes back to '''Swain''' and detonates upon the first enemy hit, dealing {{as|magic damage}} to nearby enemies as well as briefly {{tip|standard sight|revealing}} and {{tip|root|rooting}} them. ''Nevermove'' can be recast while {{tip|champions}} hit are rooted.",
+        "blurb3": "{{sbc|Recast:}} '''Swain''' {{tip|airborne|pulls}} the rooted champions and collects a {{as|Soul Fragment|buzzword3}} from each of them.",
+        "description": "{{sbc|Active:}} '''Swain''' launches a demonic wave in the target direction that deals {{as|magic damage}} to enemies hit.",
+        "leveling": "{{st|Magic Damage|{{ap|80|120|160|200|240}} {{as|(+ 60% AP)}}}}",
+        "description2": "At maximum range, the wave homes back to '''Swain''' and detonates upon the first enemy hit, dealing {{as|magic damage}} to nearby enemies and {{tip|root|rooting}} them for {{fd|1.5}} seconds, during which they are {{tip|standard sight|revealed}}. ''Nevermove'' can be recast while {{tip|champions}} hit are rooted.",
+        "leveling2": "{{st|Magic Damage|{{ap|80|120|160|200|240}} {{as|(+ 60% AP)}}|Total Magic Damage|{{ap|70|115|160|205|250}} {{as|(+ 50% AP)}}}}",
+        "icon3": "Nevermove 2.png",
+        "description3": "{{sbc|Recast:}} '''Swain''' {{tip|airborne|pulls}} the rooted champions over 290 units and collects a {{as|Soul Fragment|buzzword3}} from each of them. If the targets would be brought past '''Swain''', they are instead {{tip|airborne|knocked back}} the excess distance.",
+        "target range": "850",
+        "width": "{{tip|er|icononly = true}} 170",
+        "effect radius": "100",
+        "speed": "{{pp|type=seconds|round=3|935;1235;1735;2735|0;0;0.033*4;0.033*13|formula=Outgoing missile starts with 935 missile speed and gains +300 after 0 seconds, +500 after 0.1 seconds (rounds up) and +1000 after 0.425 seconds (rounds up).}} / {{pp|type=seconds|round=3|600;1400;2200|0;0.033*4;0.033*11|formula=Returning missile starts with 600 missile speed and gains +800 after 0.1 seconds (rounds up) and +800 after another 0.2 seconds (rounds up).}}",
+        "cost": "{{ap| 60 to 80}}",
+        "costtype": "Mana",
+        "cooldown": "{{ap| 14 to 10}}",
+        "cdstart": "on-cast",
+        "cast time": "{{fd|0.25}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "Area of effect",
+        "spellshield": "special",
+        "parry": "|projectile   = True",
+        "callforhelp": "|grounded     =",
+        "knockdown": "|video       = Swain - E",
+        "notes": "* ''Nevermove's'' missiles have their speed update to accelerate at specific times by the server. The client applies these speed increases after additional specified delays, while the hitbox behaviour itself only uses the timings noted above.\n* ''Nevermove's'' recast can be used during the cast time of other spells.\n* {{tip|Spell shield|Spell shields}} block either the pass-through or the detonation, not both.\n* If the root is not applied to or is removed from all champions, the recast does not become available.\n* The pull will interrupt {{tip|channel|channels}} at the very beginning, but does not keep the target stunned for the rest of the movement.\n** {{tip|channel|Channels}} can be started successfully during the pull, provided the previous crowd control does not prevent them still.\n{{Effect at cast time start}}\n* if the target champion is rooted by Nevermove but becomes spell-immune before the pull, Swain will not receive a soul fragment on reactivation since the champion cannot be displaced."
+      }
+    },
+    "R": {
+      "id": "SwainR",
+      "name": "Demonic Ascension",
+      "description": "Swain transforms into a demon and drains health from nearby enemy champions, minions, and neutral monsters. Swain can cast Demonflare to decimate and slow nearby enemies with a nova of soulfire. This form is indefinite as long as Swain drains enemy champions.",
+      "tooltip": "Swain frees the demon, which deals {{ damagecalc }} magic damage and drains {{ healingcalc }} Health per second from nearby enemies. His Demonic Energy depletes over time but can be recharged indefinitely by draining enemy Champions and is fully restored on Champion takedowns.\n\nAfter {{ demonflarecastdelay }} seconds and every {{ demonflarecooldowntooltip }} seconds thereafter, Swain can cast Demonflare while transformed, which deals {{ demonflaredamagetotal }} magic damage and Slows enemies by {{ demonflareslowamount*100 }}%, decaying over {{ demonflareslowduration }}s.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Drain Damage",
+          "Drain Heal",
+          "Demonflare Damage"
+        ],
+        "effect": [
+          "{{ damagepersecond }} -> {{ damagepersecondNL }}",
+          "{{ healpersecond }} -> {{ healpersecondNL }}",
+          "{{ demonflaredamagebase }} -> {{ demonflaredamagebaseNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Swain",
+        "skill": "R",
+        "icon": "Demonic Ascension.png",
+        "blurb": "{{sbc|Active:}} {{ci|Swain}} frees the demon within, gaining ''Demonic Ascension'' and generating {{as|Demonic Energy|azakana}}. ''Demonic Ascension'' is maintained with {{as|Demonic Energy|azakana}} that gradually decays over time.",
+        "blurb2": "'''Swain''' generates {{as|Demonic Energy|azakana}} while draining from at least one enemy {{tip|champion}}, and fully restores it upon scoring a {{tip|champion}} {{tip|takedown}}.",
+        "blurb3": "After a short time, '''Swain''' can cast ''{{ai|Demonflare|Swain}}'' and does so automatically when ''Demonic Ascension'' expires.",
+        "blurb4": "{{sbc|Demonic Ascension:}} '''Swain''' becomes {{tip|ghosted}} and continually drains the lifeforce of nearby enemies, dealing {{as|magic damage}} and {{tip|healing}} himself. ''{{ais|Nevermove|Swain}}'' {{sti|cooldown}} is also reduced.",
+        "description": "{{sbc|Active:}} '''Swain''' frees the demon within himself, gaining ''Demonic Ascension'' and generating {{as|50 Demonic Energy|azakana}}. ''Demonic Ascension'' is maintained with {{as|Demonic Energy|azakana}}, which decays by {{as|5|azakana}} every {{fd|0.5}} seconds, increased to {{as|{{fd|7.5}}|azakana}} after 5 seconds have elapsed. '''Swain''' generates {{as|10 Demonic Energy|azakana}} every {{fd|0.5}} seconds while draining from at least one enemy {{tip|champion}}, and fully restores it to the maximum of {{as|50|azakana}} upon scoring a {{tip|champion}} {{tip|takedown}}.",
+        "description2": "{{sbc|Demonic Ascension:}} '''Swain''' is {{tip|ghosted}} and drains the lifeforce of nearby enemies, both dealing {{as|magic damage}} and {{tip|healing}} himself every {{fd|0.5}} seconds per target affected. The heal is reduced by 90% against {{tip|minions}} and {{tip|monsters}}. ''{{ais|Nevermove|Swain}}'' {{sti|cooldown}} is also reduced by 20%.",
+        "leveling2": "{{st|Magic Damage per Tick|{{ap|20/2 to 60/2}} {{as|(+ {{ap|10/2}}% AP)}}}}\n{{st|Heal per Tick|{{ap|15/2 to 40/2}} {{as|(+ {{ap|18/2}}% AP)}}|Reduced Heal per Tick|{{ap|15*0.5*0.1 to 40*0.5*0.1}} {{as|(+ {{ap|18*0.5*0.1}}% AP)}}}}",
+        "description3": "After 2 seconds, '''Swain''' can cast ''{{ai|Demonflare|Swain}}'', and does so automatically when ''Demonic Ascension'' expires.",
+        "description4": "''The targets do not have to be {{tip|sight|visible}} to be hit by this ability.''",
+        "effect radius": "650",
+        "cost": "100",
+        "costtype": "Mana",
+        "cast time": "{{fd|0.5}}",
+        "cooldown": "{{ap|100 to 60}}",
+        "cdstart": "post-effect",
+        "targeting": "Auto",
+        "affects": "Self, Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "aoedot",
+        "spellshield": "False",
+        "parry": "|projectile   = False",
+        "grounded": "|knockdown    =",
+        "callforhelp": "|notes        = \n* {{ai|Demonflare|Swain}} will not automatically cast at the end of ''Demonic Ascension'' if it occurs due to '''Swain's''' death.\n* '''Swain''' can still move during ''Demonic Ascension's'' cast time.\n[[File: Swain_-_R|center]]"
+      }
+    }
+  }
+}

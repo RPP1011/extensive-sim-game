@@ -1,0 +1,285 @@
+{
+  "id": "Rammus",
+  "name": "Rammus",
+  "title": "the Armordillo",
+  "resource_type": "Mana",
+  "tags": [
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Spiked Shell",
+      "description": "Rammus gains bonus Attack Damage scaling with his Armor and Magic Resistance.",
+      "wiki_detail": {
+        "champion": "Rammus",
+        "skill": "I",
+        "icon": "Spiked Shell.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Rammus}} basic attacks deal {{as|'''bonus''' magic damage}} based on his {{as|{{sti|armor}}}}. This effect is increased during ''{{ai|Defensive Ball Curl|Rammus}}''.",
+        "description": "{{sbc|Innate:}} '''Rammus' ''' [[basic attack]]s deal {{as|10|magic damage}} {{as|(+ 10% armor)}} {{as|'''bonus''' magic damage}} {{tip|on-hit}}, increased to {{as|15|magic damage}} {{as|(+ 15% armor)}} during ''{{ai|Defensive Ball Curl|Rammus}}''.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "Magic",
+        "spellshield": "|spelleffects = proc",
+        "projectile": "|grounded     =",
+        "knockdown": "|parry        = true",
+        "notes": "* ''Spiked Shell'' applies to [[structures]]."
+      }
+    },
+    "Q": {
+      "id": "PowerBall",
+      "name": "Powerball",
+      "description": "Rammus accelerates in a ball towards his enemies, dealing damage and slowing targets affected by the impact.",
+      "tooltip": "Rammus curls into a ball, gaining {{ minimummovespeed }} Move Speed, accelerating up to {{ maximummovespeed }} Move Speed over {{ rollduration }} seconds. Rammus stops after colliding with an enemy, dealing {{ powerballdamage }} magic damage, Knocking Back, and Slowing nearby enemies by {{ slowpercent }}% for {{ slowduration }} second.\n\nRecast: Rammus ends this Ability early.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/10.5/9/7.5/6",
+      "cost": "60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "300",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "1000"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ qbasedamage }} -> {{ qbasedamageNL }}",
+          "{{ slowpercent }}% -> {{ slowpercentNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Rammus",
+        "skill": "Q",
+        "icon": "Powerball.png",
+        "blurb": "{{sbc|Active:}} {{ci|Rammus}} {{tip|channel|channels}} for a few seconds to roll into a ball, gradually gaining {{sti|ms|{{as|'''bonus''' movement speed}}}}. ''Powerball'' can be recast within the duration, and does so automatically afterwards.",
+        "blurb2": "'''Rammus''' stops rolling upon hitting an enemy, dealing {{as|magic damage}} to all nearby enemies and {{tip|airborne|knocking them back}}. Enemies hit are then briefly {{tip|stun|stunned}} and {{tip|slow|slowed}}.",
+        "blurb3": "{{sbc|Recast:}} '''Rammus''' ends ''Powerball''.",
+        "description": "{{sbc|Active:}} '''Rammus''' {{tip|channel|channels}} for up to 6 seconds to roll into a ball, gaining {{sti|ms|{{pp|key=%|150/6 to 235/6|color=ms}} {{as|'''bonus total''' movement speed}}}} per second over the duration, up to a maximum of {{pp|key=%|150 to 235|color=ms}}. <br/><br/>''Powerball'' can be recast after 1 second within the duration, and does so automatically afterwards or when {{tip|interrupt|interrupted}}.",
+        "description2": "'''Rammus''' stops rolling upon colliding with an enemy, dealing {{as|magic damage}} to all nearby enemies and {{tip|airborne|knocking them back}} 125 units, though not through terrain. Enemies hit are then {{tip|stun|stunned}} and {{tip|standard sight|revealed}} for {{tt|{{fd|0.4}}|Estimated}} seconds, as well as {{tip|slow|slowed}} for 1 second.",
+        "leveling2": "{{st|Magic Damage|{{ap|80 to 200}} {{as|(+ 100% AP)}}}}\n{{st|Slow|{{ap|40 to 80}}%}}",
+        "description3": "{{sbc|Recast:}} '''Rammus''' ends ''Powerball''.",
+        "cooldown": "{{ap|16 to 6}}",
+        "cdstart": "post-effect",
+        "cast time": "none",
+        "cost": "60",
+        "costtype": "Mana",
+        "collision radius": "{{tip|er|icononly = true}} {{tt|75|center-to-edge, against champions}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|250|effect radius upon collision}}",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "grounded": "false",
+        "silence": "true",
+        "notes": "* The initial cast and the manual recast count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n** If the ability is not manually recasted, the secondary effect will trigger without being considered as an ability activation.\n* The {{as|'''bonus''' movement speed}} {{tip|stacks multiplicatively}} with other sources of movement speed boosts.\n* ''Powerball'' will still collide with enemies if '''Rammus''' is {{tip|ghosted}}.\n* For the purpose of moving closer to an enemy when right clicking them, ''Powerball'' also reduces '''Rammus'''' {{stil|attack range|link=range}}{{ft|to 0|by 125}}for the duration.\n** Regardless of this, during ''Powerball'' '''Rammus''' will also always attempt to path towards his target's center instead.\n* '''Rammus''' will ignore [[unit collision]] for the purpose of pathfinding during ''Powerball''.\n** Rammus acts as if he were {{tip|ghosted}} for the duration of ''Powerball''.\n* ''Powerball'' is not a [[Channel#Movement Channels|movement channel]], and so will not be {{tip|interrupt|interrupted}} by {{tip|root}} and {{tip|ground}}.\n* {{tip|Displacement immunity}} will also resist the application of the {{tip|stun}}.\n* The following table refers for interactions while '''Rammus''' is {{tip|channel|channeling}}:\n{{ct|channel|attack=false|move=true|cast={{ai|Defensive Ball Curl|Rammus}} interrupts. {{ai|Frenzying Taunt|Rammus}} is disabled. {{ai|Soaring Slam|Rammus}} modifies this ability. This ability recasts to end channel.|items=interrupts,true,,false|spells=true,true,interrupts,interrupts,interrupts}}"
+      }
+    },
+    "W": {
+      "id": "DefensiveBallCurl",
+      "name": "Defensive Ball Curl",
+      "description": "Rammus goes into a defensive formation, vastly increasing his Armor and Magic Resistance, and returning damage to enemies that attack him.",
+      "tooltip": "Rammus enters a defensive formation for {{ buffduration }} seconds, gaining {{ bonusarmortooltip }} Armor and {{ bonusmrtooltip }} Magic Resist and dealing {{ returndamagecalc }} magic damage to enemies that Attack him.\n\nRecast: Rammus ends this Ability early.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "300",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Armor Bonus",
+          "Magic Resist Bonus",
+          "Percent Armor Bonus",
+          "Percent Magic Resist Bonus"
+        ],
+        "effect": [
+          "{{ flatbonusarmor }} -> {{ flatbonusarmorNL }}",
+          "{{ flatbonusmr }} -> {{ flatbonusmrNL }}",
+          "{{ bonusarmorpercent*100.000000 }}% -> {{ bonusarmorpercentnl*100.000000 }}%",
+          "{{ bonusmrpercent*100.000000 }}% -> {{ bonusmrpercentnl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Rammus",
+        "skill": "W",
+        "icon": "Defensive Ball Curl.png",
+        "blurb": "{{sbc|Active:}} {{ci|Rammus}} enters a defensive stance for a few seconds, gaining {{sti|armor|{{as|'''bonus''' armor}}}} and {{sti|mr|{{as|'''bonus''' magic resist}}}}. During this time, ''{{ais|Spiked Shell|Rammus}}'' damage is increased and also applies to enemies that land a basic attack against '''Rammus'''.",
+        "blurb2": "''Defensive Ball Curl'' can be recast within the duration, and does so automatically afterward. '''Rammus'''' basic attacks extend ''Defensive Ball Curl's'' duration up to a few seconds.",
+        "blurb3": "{{sbc|Recast:}} '''Rammus''' ends ''Defensive Ball Curl''.",
+        "description": "{{sbc|Active:}} '''Rammus''' enters a defensive stance for 6 seconds, gaining {{sti|armor|{{as|'''bonus''' armor}}}} and {{sti|mr|{{as|'''bonus''' magic resistance}}}}. While active, enemies that use a basic attack {{tip|on-hit}} against '''Rammus''' are dealt {{as|magic damage}} equal to ''{{ais|Spiked Shell|Rammus}}'' '''bonus''' damage.",
+        "leveling": "{{st|Bonus Armor|40 {{as|(+ {{ap|35 to 75}}% '''total''' armor)}}}}\n{{st|Bonus Magic Resistance|10 {{as|(+ {{ap|30 to 50}}% '''total''' magic resistance)}}}}",
+        "description2": "'''Rammus' ''' basic attacks extend the remaining duration of ''Defensive Ball Curl'' by {{fd|0.4}} seconds, up to a maximum of 4 additional seconds.",
+        "description3": "''Defensive Ball Curl'' can be recast after 1 second within the duration, and does so automatically upon casting ''{{ai|Powerball|Rammus}}''.",
+        "description4": "{{sbc|Recast:}} '''Rammus''' ends ''Defensive Ball Curl''.",
+        "cooldown": "7",
+        "cdstart": "post-effect",
+        "cost": "40",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "cast time": "none",
+        "affects": "Self, Enemies",
+        "damagetype": "Magic",
+        "spellshield": "False",
+        "spelleffects": "aoe",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n*The initial cast counts as an ability activation for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n**Deactivating the ability manually does not.\n* ''Defensive Ball Curl'' ends immediately if {{ai|Powerball|Rammus}} is cast.\n* ''Defensive Ball Curl'' will return damage from attacks and/or abilities that apply [[on-hit effect]]s ({{ai|Mystic Shot|Ezreal}}) as well as from {{iis|Runaan's Hurricane}} {{nie|Wind's Fury}} (will not return damage from [[turret]]s, {{ai|H-28G Evolution Turret|Heimerdinger}}, or {{ai|Jack in the Box|Shaco}}).\n* The resistance scaling will factor from all sources, including ''Defensive Ball Curl's'' flat bonus. This will recalculate over the duration."
+      }
+    },
+    "E": {
+      "id": "PuncturingTaunt",
+      "name": "Frenzying Taunt",
+      "description": "Rammus taunts an enemy champion or monster into a reckless assault against him.",
+      "tooltip": "Rammus Taunts an enemy champion or monster for {{ duration }} seconds. Monsters are dealt {{ monsterdamagecalc }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "325",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Duration",
+          "Monster Damage"
+        ],
+        "effect": [
+          "{{ duration }} -> {{ durationNL }}",
+          "{{ monsterdamage }} -> {{ monsterdamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Rammus",
+        "skill": "E",
+        "icon": "Frenzying Taunt.png",
+        "blurb": "{{sbc|Active:}} {{ci|Rammus}} briefly {{tip|taunt|taunts}} the target enemy {{tip|champion}} or {{tip|monster}}, and gains {{sti|{{as|'''bonus''' attack speed}}}} for the same duration.",
+        "description": "{{sbc|Active:}} '''Rammus''' {{tip|taunt|taunts}} the target enemy {{tip|champion}} or {{tip|monster}} for a duration and gains {{sti|{{as|'''bonus''' attack speed}}}} for the same duration.",
+        "leveling": "{{st|Taunt/Bonus Attack Speed Duration|{{ap|1.2 to 2}} seconds}}\n{{st|Bonus Attack Speed|{{ap|20 to 40}}%}}",
+        "description2": "The duration of the {{as|'''bonus''' attack speed}} continuously refreshes during ''{{ai|Powerball|Rammus}}'', ''{{ai|Defensive Ball Curl|Rammus}}'' and ''{{ai|Soaring Slam|Rammus}}''.",
+        "cooldown": "12",
+        "cast time": "{{fd|0.25}}",
+        "cost": "50",
+        "costtype": "Mana",
+        "target range": "{{tip|cr|icononly = true}} 325",
+        "targeting": "Unit",
+        "affects": "Enemies, Self",
+        "spellshield": "True",
+        "spelleffects": "false",
+        "grounded": "|knockdown    =",
+        "callforhelp": "|notes        = \n* ''Frenzying Taunt'', despite being usable on {{tip|monster|monsters}}, does not force them to attack '''Rammus'''. He does not draw aggro since the ability does not deal damage.\n* The bonus attack speed duration is separate from the {{tip|taunt}} duration.\n{{Unit-targeted cancel conditions}}"
+      }
+    },
+    "R": {
+      "id": "Tremors2",
+      "name": "Soaring Slam",
+      "description": "Rammus hops into the air and slams down at a target area, dealing magic damage and slowing enemies. If cast while Rammus is in Powerball, Rammus knocks up enemies near the center as well.",
+      "tooltip": "Rammus hops into the air and slams down in an area, dealing {{ initialdamagecalc }} magic damage and Slowing by {{ slowamount*100 }}% for {{ slowduration }} seconds. If used during Powerball, enemies in the center take an additional {{ spell.powerball:powerballdamage }} magic damage and are Knocked Up for {{ knockupduration }} seconds.\n\nRammus then creates {{ numberofpulses }} aftershocks in the area over {{ buffduration }} seconds, repeating the Slow.\n\nThe range of this Ability is increased by Rammus's Move Speed.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/105/90",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "25000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ initialdamage }} -> {{ initialdamageNL }}",
+          "{{ slowamount*100.000000 }}% -> {{ slowamountnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Rammus",
+        "skill": "R",
+        "icon": "Soaring Slam.png",
+        "blurb": "{{sbc|Active:}} {{ci|Rammus}} {{tip|dash|leaps}} to the target location with {{tip|Cc-immunity}}, dealing {{as|magic damage}} to nearby enemies and briefly {{tip|slow|slowing}} them. The impact deals increased damage at the epicenter based on how far ''Soaring Slam'' was cast.",
+        "blurb2": "''Soaring Slam'' gains increased {{sti|range}} based on '''Rammus'''' {{sti|movement speed}}. '''Rammus''' can cast this ability during ''{{ai|Powerball|Rammus}}'', which will additionally {{tip|airborne|knock up}} enemies in the epicenter.",
+        "blurb3": "The impact causes 3 aftershocks to burst from the area over a short time, each dealing {{as|magic damage}} and {{tip|slow|slowing}} nearby enemies. <br/><br/>''Soaring Slam's'' damage affects [[structures]] and is doubled against {{tip|turrets}}.",
+        "blurb4": "{{sbc|{{tip|Cc-immunity|nolink=true}}}}: {{tip|Crowd control}} cannot be applied during this time.",
+        "description": "{{sbc|Active:}} '''Rammus''' {{tip|dash|leaps}} to the target location with {{tip|Cc-immunity|immunity to crowd control}}. Upon arrival, he creates an impact that deals {{as|magic damage}} to nearby enemies and {{tip|slow|slows}} them for {{fd|1.5}} seconds. The impact deals increased damage at the epicenter if ''Soaring Slam'' was cast further than 800 units, capped at 1700 units with 50% increased damage.",
+        "leveling": "{{st|Magic Damage|{{ap|100 to 250}} {{as|(+ 60% AP)}}|Center Increased Damage|{{ap|100*1.5 to 250*1.5}} {{as|(+ {{ap|60*1.5}}% AP)}}}}\n{{st|Slow|{{ap|15 to 20}}%}}",
+        "description2": "If ''Soaring Slam'' was cast during ''{{ai|Powerball|Rammus}}'', enemies within the epicenter are also {{tip|airborne|knocked up}} for {{fd|0.75}} seconds and are dealt ''{{ais|Powerball|Rammus}}'' damage. ''{{ai|Powerball|Rammus}}'' will not collide with enemies during the dash, and its channel will be maintained for the dash and end afterwards.",
+        "leveling2": "{{st|Center Minimum Damage|{{ap|100 to 250}} {{as|(+ 60% AP)}} (+ {{ai|Powerball|Rammus|{{ap|80 to 200 5}} {{as|(+ 100% AP)}}}})|Center Maximum Damage|{{ap|100*1.5 to 250*1.5}} {{as|(+ {{ap|60*1.5}}% AP)}} (+ {{ai|Powerball|Rammus|{{ap|80 to 200 5}} {{as|(+ 100% AP)}}}})}}",
+        "description3": "The impact causes 3 aftershocks to burst from the area over {{fd|3.5}} seconds, each one dealing {{as|magic damage}} to enemies within and applying the initial {{tip|slow}}, which stacks up to 4 times.",
+        "leveling3": "{{st|Magic Damage per Hit|{{ap|20 to 40}} {{as|(+ 10% AP)}}|Total Magic Damage|{{ap|20*3 to 40*3}} {{as|(+ {{ap|10*3}}% AP)}}}}\n{{st|Maximum Slow|{{ap|15*4 to 20*4}}%}}",
+        "description4": "''Soaring Slam's'' damage affects [[structures]] and is doubled against {{tip|turrets}}.",
+        "description5": "''Soaring Slam will cast at max range if cast beyond that.''",
+        "cooldown": "90",
+        "cost": "100",
+        "costtype": "Mana",
+        "cast time": "None",
+        "target range": "{{tt|800|Minimum cast range}} OR {{tt|{{as|150% movement speed}}|Measures the average of this percentage of movement speed in the last second. Updates every 0.25 seconds.}}",
+        "speed": "{{tt|900|Minimum dash speed}} / {{tt|2000|Maximum dash speed}} <!--Dash speed growth is 110%-->",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|400|Slam radius}} / {{tt|200|Inner radius}} / {{tt|400|Tremors radius}}",
+        "targeting": "Location",
+        "damagetype": "Magic",
+        "affects": "Enemies",
+        "spelleffects": "special",
+        "spellshield": "special",
+        "grounded": "true",
+        "knockdown": "false",
+        "notes": "* Applies {{tip|area damage}} for the impact and {{tip|persistent area damage}} for the aftershocks.\n* {{tip|Spell shield}} will block the impact (including with {{ai|Powerball|Rammus}}) but not each aftershock.\n* '''Rammus''' is required to have had at least {{as|{{fd|461.5}} movement speed}} ''average'' over the last second to be able to cast ''Soaring Slam'' further than its minimum cast range and thereby deal the increased center damage.\n** The maximum increased center damage is reachable once  '''Rammus''' has had at least {{as|{{fd|1307.69}} movement speed}} ''average'' for the past second.\n* ''Soaring Slam'' will not impact nor generate aftershocks if the dash is interrupted.<!--and always impacts after {{fd|3.5}} seconds if the dash had not already ended before that time. This part might be changed soon-->\n* The following table refers for interactions while '''Rammus''' is dashing:\n{{ct|attack=false|move=false|cast=false|items=false|consume=true|spells=true,false,false,false,false|interrupts=death}}",
+        "_comments": [
+          "Dash speed growth is 110%",
+          "and always impacts after {{fd|3.5}} seconds if the dash had not already ended before that time. This part might be changed soon"
+        ]
+      }
+    }
+  }
+}

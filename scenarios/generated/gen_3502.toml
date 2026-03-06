@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0047_2v5_d2_s1"
+seed = 12170
+hero_count = 2
+enemy_count = 5
+difficulty = 2
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["elementalist", "rogue"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

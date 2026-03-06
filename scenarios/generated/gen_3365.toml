@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0001_4v5_d5_s2"
+seed = 22124
+hero_count = 4
+enemy_count = 5
+difficulty = 5
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["assassin", "knight", "witch_doctor", "cryomancer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

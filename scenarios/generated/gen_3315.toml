@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0185_3v3"
+seed = 2108
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["Jayce", "Kindred", "Jinx"]
+enemy_hero_templates = ["Trundle", "ranger", "Bard"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,12 @@
+[scenario]
+name        = "Bench 30 units (6v24 d2)"
+seed        = 42
+hero_count  = 6
+enemy_count = 24
+difficulty  = 2
+max_ticks   = 3000
+room_type   = "Entry"
+hero_templates = ["Warrior", "Cleric", "Rogue", "Mage", "Ranger", "Paladin"]
+
+[assert]
+outcome = "Either"

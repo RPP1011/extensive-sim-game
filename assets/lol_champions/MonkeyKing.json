@@ -1,0 +1,297 @@
+{
+  "id": "MonkeyKing",
+  "name": "Wukong",
+  "title": "the Monkey King",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Stone Skin",
+      "description": "Wukong gains stacking armor and max health regeneration while fighting champions and monsters.",
+      "wiki_detail": {
+        "champion": "Wukong",
+        "skill": "I",
+        "icon": "Stone Skin.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Wukong}} gains {{as|{{sti|'''bonus''' armor}}|armor}} based on level and {{stil|health regeneration}} equal to a portion of {{as|his '''maximum''' health}}.",
+        "blurb2": "Whenever '''Wukong''' or his ''{{ai|Warrior Trickster|Wukong|clone}}'' damage an enemy {{tip|champion}} or {{tip|monster}}, he generates a stack of ''Strength of Stone'', which stacks up to 5 times.",
+        "blurb4": "{{sbc|Strength of Stone:}} For each stack, '''Wukong''' increases the {{as|'''bonus''' armor}} and {{stil|health regeneration}} gained.",
+        "description": "{{sbc|Innate:}} '''Wukong''' gains {{sti|armor|{{as|{{pp|6 to 10}} '''bonus''' armor}}|armor}} and {{stil|health regeneration|regenerates}} an additional{{ft|{{as|{{fd|0.35}}% of his {{sti|'''maximum''' health}}}} every 5 seconds.|{{as|{{fd|0.07}}% of his {{sti|'''maximum''' health}}}} each second.}}<br><br>Whenever '''Wukong''' or his ''{{ai|Warrior Trickster|Wukong|clone}}'' damage an enemy {{tip|champion}} or {{tip|monster}}, he generates a [[stack]] of ''Strength of Stone'' for 5 seconds, refreshing on subsequent hits and stacking up to 5 times. Stacks expire by one every second when the duration ends.",
+        "description2": "{{sbc|Strength of Stone:}} For each stack,{{ft|''Stone Skin's'' effects are increased by 100%,|'''Wukong''' gains {{as|{{pp|6 to 10}} '''additional bonus''' armor|armor}} and regenerates an additional {{as|{{fd|0.07}}% of his '''maximum''' health}} each second,}}up to a maximum of {{as|{{pp|6*(1+1*5) to 10*(1+1*5)}} '''bonus''' armor}} and {{ft|{{as|{{fd|2.1}}% '''maximum''' health}} regeneration every 5 seconds.|{{as|{{fd|0.42}}% '''maximum''' health}} regeneration each second.}}",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "|spelleffects =",
+        "onhiteffects": "|spellshield  =",
+        "notes": "}}"
+      }
+    },
+    "Q": {
+      "id": "MonkeyKingDoubleAttack",
+      "name": "Crushing Blow",
+      "description": "Wukong's next attack gains attack range, deals bonus damage, and reduces the target's armor for a few seconds.",
+      "tooltip": "Wukong and his Clone's next Attack gains {{ attackrangebonus }} range, deals an additional {{ bonusdamagett }} physical damage, and removes {{ armorshredpercent*100 }}% Armor for {{ shredduration }} seconds.\n\nThis Ability's cooldown is reduced by {{ cooldowndecrease }} seconds every time Wukong or his Clone hit an enemy with an Attack or Ability.\n\nThis Ability triggers spell effects upon dealing damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8/7.5/7/6.5/6",
+      "cost": "20",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "250/275/300/325/350",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Armor Reduction %",
+          "Range",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ armorshredpercent*100.000000 }}% -> {{ armorshredpercentnl*100.000000 }}%",
+          "{{ attackrangebonus }} -> {{ attackrangebonusNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Wukong",
+        "skill": "Q",
+        "icon": "Crushing Blow.png",
+        "blurb": "{{sbc|Active:}} {{cis|Wukong}} next basic attack within a few seconds will gain {{sti|range|'''bonus''' range}}, deal {{as|'''bonus''' physical damage}}, and inflict {{sti|armor penetration|{{as|armor reduction}}}} for a short time.",
+        "blurb2": "The cooldown is {{sti|cdr|reduced}} whenever '''Wukong''' or his ''{{ai|Warrior Trickster|Wukong|clone}}'' damage an enemy.",
+        "description": "{{sbc|Active:}} '''Wukong''' empowers his next [[basic attack]] within 5 seconds to have an {{tip|uncancellable windup}}, gain {{sti|range|'''bonus''' range}}, deal {{as|'''bonus''' physical damage}}, and inflict {{sti|armor penetration|{{as|armor reduction}}}} for 3 seconds.",
+        "leveling": "{{st|Bonus Range|{{ap|135 to 175}}}}\n{{st|Bonus Physical Damage|{{ap|20 to 120}} {{as|(+ 55% '''bonus''' AD)}}}}\n{{st|Armor Reduction|{{as|{{ap|10 to 30}}% of target's armor}}}}",
+        "description2": "''Crushing Blow's'' {{sti|cooldown}} is reduced by {{fd|0.5}} seconds whenever '''Wukong''' or his ''{{ai|Warrior Trickster|Wukong|clone}}'' damage an enemy.",
+        "description3": "''Crushing Blow {{tip|basic attack reset|resets}} '''Wukong's''' and his {{ai|Warrior Trickster|Wukong|clone's}} basic attack timer. Other abilities can be used during the attack's animation.''",
+        "cooldown": "{{ap|8 to 6}}",
+        "cdstart": "post-effect",
+        "cost": "20",
+        "cast time": "none",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Self, Enemies",
+        "damagetype": "Physical",
+        "spelleffects": "spell",
+        "parry": "true",
+        "spellshield": "True",
+        "notes": "* ''Crushing Blow'' triggers on {{tip|turret|structures}} and {{tip|ward|wards}} but the armor reduction is not applied.\n* Pressing ''S'' will cancel the animation and the attack will still land, but '''Wukong''' will not be able to move until it lands.",
+        "yvideo": "Wukong - Q"
+      }
+    },
+    "W": {
+      "id": "MonkeyKingDecoy",
+      "name": "Warrior Trickster",
+      "description": "Wukong becomes Invisible and dashes in a direction, leaving behind a clone that will attack nearby enemies.",
+      "tooltip": "Wukong dashes and becomes Invisible for {{ stealthduration }} second, leaving behind a stationary Clone for {{ cloneduration }} seconds.\n\nThe Clone Attacks nearby enemies Wukong has recently damaged and will mimic his ultimate, each dealing {{ clonedamagemod*100 }}% of normal damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "22/21/20/19/18",
+      "cost": "60/55/50/45/40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "275",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage Percent",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ clonedamagemod*100.000000 }}% -> {{ clonedamagemodnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Wukong",
+        "skill": "W",
+        "icon": "Warrior Trickster.png",
+        "blurb": "{{sbc|Active:}} {{ci|Wukong}} enters brief {{tip|invisibility}} and {{tip|dash|dashes}} to the target location, leaving behind a {{tip|clone}} that remains for a short time.",
+        "blurb2": "The clone will basic attack autonomously and gain the effects of his other abilities, as well as cast ''{{ai|Cyclone|Wukong}}''.",
+        "description": "{{sbc|Active:}} '''Wukong''' enters {{tip|invisibility}} for 1 second and {{tip|dash|dashes}} in the target direction, leaving behind a {{tip|clone}} of himself at his casting position for {{fd|3.25}} seconds.",
+        "description2": "The clone is {{tip|untargetable}} to allies and can basic attack autonomously, prioritizing the last enemy '''Wukong''' damaged. It can also gain the effects of ''{{ai|Crushing Blow|Wukong}}'' and ''{{ais|Nimbus Strike|Wukong}}'' {{as|'''bonus''' attack speed}}, and casts ''{{ai|Cyclone|Wukong}}'' whenever '''Wukong''' does.",
+        "description3": "The clone deals reduced outgoing damage.",
+        "leveling3": "{{st|Clone Outgoing Damage|{{ap|35 to 55}}%}}",
+        "description4": "''See [[Wukong/LoL#Pets|Pets]] for more details about '''Wukong's''' clone. '''Wukong''' can cast any of his [[champion ability|abilities]] during the dash. Warrior Trickster will cast at max range if cast beyond that.''",
+        "cooldown": "{{ap|18 to 14}}",
+        "cdstart": "on-cast",
+        "cost": "{{ap|60 to 40}}",
+        "target range": "<!--{{tt|X|Minimum dash range}} / -->{{tt|300|Maximum dash range}}",
+        "costtype": "mana",
+        "effect radius": "{{sti|Clone's attack range}}",
+        "cast time": "none",
+        "speed": "{{tt|1200|Dash speed}}",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "physical",
+        "spelleffects": "pet",
+        "parry": "true",
+        "grounded": "true",
+        "knockdown": "true",
+        "onhiteffects": "|spellshield  = True",
+        "notes": "* Casting ''Warrior Trickster'' during an ability's effects will transfer them to the clone.\n* {{tip|Turret}} shots instantly kill the clone.\n* The clone is immune to {{tip|stasis}} and {{ui|Blast Cone}}.\n* The clone can still be targeted by allied {{tip|auto-targeted}} effects (e.g. {{si|Heal}}, {{ai|Celestial Blessing|Kayle}}).\n* Using a basic attack breaks the stealth at the end of the attack windup.",
+        "tips": "* Pressing the {{tt|''S'' key|A key bind that exists in-game that stops a champion in place while moving}} (or Ctrl-5) is special cased for '''Wukong''' to instantly snap into his idle animation like his clone would, which can be used to trick his opponents.",
+        "yvideo": "Wukong - W",
+        "_comments": [
+          "{{tt|X|Minimum dash range}} /"
+        ]
+      }
+    },
+    "E": {
+      "id": "MonkeyKingNimbus",
+      "name": "Nimbus Strike",
+      "description": "Wukong dashes to a targeted enemy and sends out images to attack enemies near his target, dealing damage to each enemy struck.",
+      "tooltip": "Wukong dashes to an enemy, sending out Clones that mimic the dash to up to {{ extratargets }} additional enemies nearby. Each enemy struck takes {{ totaldamage }} magic damage. He and his Clone gain {{ attackspeed*100 }}% Attack Speed for {{ attackspeedduration }} seconds.\n\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9.25/8.5/7.75/7",
+      "cost": "30/35/40/45/50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Attack Speed",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ attackspeed*100.000000 }}% -> {{ attackspeednl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Wukong",
+        "skill": "E",
+        "icon": "Nimbus Strike.png",
+        "blurb": "{{sbc|Active:}} {{ci|Wukong}} {{tip|dashes}} to the target enemy and sends {{tip|untargetable}} clones to briefly attack up to two surrounding enemies, dealing {{as|magic damage}}.",
+        "blurb2": "Upon arrival, '''Wukong''' gains {{sti|{{as|'''bonus''' attack speed}}}} for a few seconds.",
+        "description": "{{sbc|Active:}} '''Wukong''' {{tip|dashes}} to the target enemy's location and sends out {{tip|untargetable}} ''clones'' to strike up to two additional enemies near the target's location, dealing {{as|magic damage}}.",
+        "leveling": "{{st|Magic Damage|{{ap|80 to 200}} {{as|(+ 100% AP)}}}}",
+        "description2": "Upon arrival, '''Wukong''' gains {{sti|{{as|'''bonus''' attack speed}}}} for 5 seconds.",
+        "leveling2": "{{st|Bonus Attack Speed|{{ap|40 to 60}}%}}",
+        "description3": "''{{ai|Crushing Blow|Wukong}} can be cast during the dash.''",
+        "target range": "625",
+        "effect radius": "{{fd|187.5}}",
+        "cooldown": "{{ap|10 to 7}}",
+        "cost": "{{ap|30 to 50}}",
+        "costtype": "mana",
+        "targeting": "Unit",
+        "cast time": "none",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spelleffects": "spellaoe",
+        "onhiteffects": "|projectile = false",
+        "spellshield": "True",
+        "grounded": "true",
+        "knockdown": "true",
+        "callforhelp": "True",
+        "notes": "* The ''clones'' can block non-targeted attacks or abilities for {{fd|0.25}} seconds after hitting their targets.\n* ''Nimbus Strike'' has an offset distance of 75 units from the target dashed to.\n* The ability applies a stack of {{ri|Electrocute}} / {{ri|Phase Rush}} even if the target is {{tip|untargetable}}.\n* The created ''clones'' are considered champions for {{ii|Turret Plating|Turret Plating's}} {{g|gold}} sharing.",
+        "yvideo": "Wukong - E"
+      }
+    },
+    "R": {
+      "id": "MonkeyKingSpinToWin",
+      "name": "Cyclone",
+      "description": "Wukong's extends his staff and spins it around repeatedly, gaining Move Speed.\n\nEnemies struck take damage and are knocked up.",
+      "tooltip": "Wukong gains {{ movespeed*100 }}% Move Speed and spins his staff, Knocking Up nearby enemies for {{ knockupduration }} seconds and take {{ totaldamagett }} plus {{ percenthpdamagett }} max Health physical damage over {{ spinduration }} seconds.\n\nThis Ability can be cast a second time within {{ recastwindow }} seconds before going on cooldown.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "130/110/90",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "315",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Maximum Health Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basepercentmaxhpdmgpersec*200.000000 }}% -> {{ basepercentmaxhpdmgpersecnl*200.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Wukong",
+        "skill": "R",
+        "icon": "Cyclone.png",
+        "blurb": "{{sbc|Active:}} {{ci|Wukong}} spins his staff around for a short time, becoming {{tip|ghosted}} and gaining {{sti|ms|{{as|'''bonus''' movement speed}}}}. The staff continually deals {{as|physical damage}} to enemies hit based on {{as|their '''maximum''' health}}, and can briefly {{tip|airborne|knock them up}} once.",
+        "blurb2": "''Cyclone'' can be recast within the duration, and does so automatically afterwards.",
+        "blurb3": "{{sbc|Recast:}} '''Wukong''' ends ''Cyclone''. He cast ''Cyclone'' a second time within a period after the first cast has ended.",
+        "description": "{{sbc|Active:}} '''Wukong''' spins his staff around for up to 2 seconds, becoming {{tip|ghosted}} and gaining {{sti|ms|{{as|20% '''bonus''' movement speed|ms}}}}. The staff deals {{as|physical damage}} every {{fd|0.25}} seconds to enemies hit, and can {{tip|airborne|knock them up}} once for {{fd|0.6}} seconds. ''Cyclone'' will not {{tip|airborne|knock up}} enemies who were already hit by either '''Wukong''' or his ''{{ai|Warrior Trickster|Wukong|clone}}'' within the same cast.",
+        "leveling": "{{st|Physical Damage Per Tick|{{as|{{ap|8/8 to 16/8}}% of target's '''maximum''' health}} {{as|(+ {{ap|275/8}}% AD)}}|Total Physical Damage|{{as|{{ap|8 to 16}}% of target's '''maximum''' health}} {{as|(+ 275% AD)}}}}",
+        "description2": "''Cyclone'' can be recast after {{fd|0.5}} seconds within the duration, and does so automatically afterwards or by casting another [[champion ability|ability]].",
+        "icon3": "Cyclone 2.png",
+        "description3": "{{sbc|Recast:}} '''Wukong''' ends ''Cyclone''. After 1 second, he can cast ''Cyclone'' a second time within 8 seconds of the first cast.",
+        "leveling3": "{{st|Maximum Total Physical Damage|{{as|{{ap|8*2 to 16*2}}% of target's '''maximum''' health}} {{as|(+ {{ap|275*2}}% AD)}}}}",
+        "description4": "''{{ais|Nimbus Strike|Wukong}}'' {{as|'''bonus''' attack speed}} duration is continuously refreshed while spinning.",
+        "description5": "''Cyclone's'' damage is capped at {{pp|200 to 600 for 3|6;11;16}} per second against {{tip|monsters}}.",
+        "effect radius": "{{fd|162.5}}",
+        "cooldown": "{{ap|130 to 90}}",
+        "cdstart": "post-effect",
+        "cast time": "none",
+        "cost": "100",
+        "costtype": "mana",
+        "targeting": "Auto",
+        "affects": "Enemies, Self",
+        "damagetype": "physical",
+        "spelleffects": "aoedot",
+        "onhiteffects": "|spellshield  = Special",
+        "notes": "* ''Cyclone'' is special cased to grant stacks of {{ri|Conqueror}} for each tick of damage.\n* Casting {{ai|Crushing Blow|Wukong}} will cancel ''Cyclone'' for both '''Wukong''' and his clone. {{ai|Warrior Trickster|Wukong}} and {{ai|Nimbus Strike|Wukong}} will only interrupt '''Wukong's''' ''Cyclone''.\n* ''Cyclone's'' remaining duration always stays the same even after the clone replicated the ability.\n* During ''Cyclone'', '''Wukong''' and his clone's {{sti|attack ranges|link=range}} are reduced{{ft|to 50|by 125}}.\n* {{tip|Spell shield}} will block one instance of damage.\n** Blocking the {{tip|airborne|knock up}} will still grant immunity to it from either of ''Cyclone's'' casts.\n{{ct|attack=false|move=true|cast=Other abilities are disabled for the first {{fd|0.3}} seconds, casting them afterwards interrupts.|items=true|consume=true|spells=true,true,true,false,true|interrupts=death}}",
+        "yvideo": "Wukong - R"
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+[scenario]
+name        = "Outnumbered 2v6 — Expected Defeat"
+seed        = 77
+hero_count  = 2
+enemy_count = 6
+difficulty  = 3
+max_ticks   = 2000
+room_type   = "Entry"
+
+[assert]
+outcome = "Defeat"

@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_shaman_arcanist_shadow_dancer"
+seed = 1388
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["shaman", "arcanist", "shadow_dancer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

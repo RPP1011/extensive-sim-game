@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0104_2v2"
+seed = 2027
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["Zilean", "shaman"]
+enemy_hero_templates = ["templar", "Vladimir"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

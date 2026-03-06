@@ -1,0 +1,14 @@
+[scenario]
+name = "4v4 hero mirror"
+seed = 42
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 5000
+room_type = "Entry"
+hero_templates = ["warrior", "paladin", "mage", "cleric"]
+enemy_hero_templates = ["berserker", "monk", "pyromancer", "shaman"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Either"

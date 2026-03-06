@@ -1,0 +1,287 @@
+{
+  "id": "Lissandra",
+  "name": "Lissandra",
+  "title": "the Ice Witch",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Iceborn Subjugation",
+      "description": "When an enemy champion dies near Lissandra they become a Frozen Thrall. Frozen Thralls slow nearby enemies and then, after a delay, shatter from the intense cold, dealing magic damage to nearby targets.",
+      "wiki_detail": {
+        "champion": "Lissandra",
+        "skill": "I",
+        "icon": "Iceborn Subjugation.png",
+        "blurb": "{{sbc|Innate:}} Whenever an enemy champion dies while {{ci|Lissandra}} is nearby, she spawns a ''Frozen Thrall'' from their corpse.",
+        "blurb2": "''Frozen Thralls'' are {{tip|invulnerable}} and {{tip|untargetable}} ice spirits that {{tip|slow}} nearby enemies and gain increasing {{sti|ms|{{as|movement speed}}}} over their lifespan. They will chase nearby enemies for a few seconds before exploding, dealing {{as|magic damage}} in an area.",
+        "description": "{{sbc|Innate:}} Whenever a nearby enemy champion dies, '''Lissandra''' spawns a ''Frozen Thrall'' from their corpse.<br><br/>''Frozen Thralls'' are ice spirits that have {{as|{{pp|325*.103;325*.242;325*.361;325*.461;325*.547;325*.619;325*.681;325*.733;325*.778;325*.812;325*.848;325*.876;325*.899;325*.919;325*.935;325*.95;325|0 to 4|type=seconds}} movement speed}} and {{tip|slow}} nearby enemies by 25%. They will chase nearby {{tip|sight|visible}} enemies for 4 seconds, prioritizing {{tip|champion|champions}}, after which they shatter to deal {{as|{{pp|120 to 340;370;400;430;460;490;520}}|magic damage}} {{as|(+ 50% AP)}} {{as|magic damage}} to nearby enemies.",
+        "effect radius": "{{tip|er|icononly = true}} {{tt|1350|Aura radius around Lissandra, center-to-edge}} / {{tip|cr|icononly = true}} {{tt|450|Thrall slow field and explosion radius}}",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "spellaoe",
+        "spellshield": "true",
+        "notes": "* ''Thralls'' are units that are considered champions (they are {{tip|clone|clones}}) and they take the form of the champion they arise from.\n** Additionally, near the end of their life span, they will cue that champion's [[basic attack]] animation.\n** They cannot be teleported by an allied {{ai|Realm Warp|Ryze}}.\n* ''Thralls'' are {{tip|untargetable}} and {{tip|invulnerable}}.\n* ''Thralls'' are revealed to enemies through the fog of war.\n* ''Thralls'' will continue to chase their target even if they enter a {{tip|brush}}.\n* ''Iceborn Subjugation'' will not summon a ''Thrall'' against enemy champions that enter a {{tip|zombie state}}, and will instead summon one after they've left the state.",
+        "yvideo": "Lissandra - Passive"
+      }
+    },
+    "Q": {
+      "id": "LissandraQ",
+      "name": "Ice Shard",
+      "description": "Throws a spear of ice that shatters when it hits an enemy, dealing magic damage and slowing Move Speed. Shards pass through the target, dealing the same damage to other enemies hit.",
+      "tooltip": "Lissandra throws a spear of ice that shatters on the first enemy hit, dealing {{ totaldamage }} magic damage, Slowing them by {{ e3 }}% for {{ e2 }} seconds, and also damaging and slowing the enemies behind them.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8/7/6/5/4",
+      "cost": "55/60/65/70/75",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "725",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "1.5",
+        "20/24/28/32/36",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ effect3amount*-100.000000 }}% -> {{ effect3amountnl*-100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lissandra",
+        "skill": "Q",
+        "icon": "Ice Shard.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lissandra}} throws a spear of ice in the target direction that {{tip|slows}} the first target hit and deals {{as|magic damage}} to all enemies it passes through.",
+        "blurb2": "If ''Ice Shard'' hits an enemy, it will shatter, increasing its width and maximum range.",
+        "description": "{{sbc|Active:}} '''Lissandra''' launches a shard of ice in the target direction that deals {{as|magic damage}} and {{tip|slow|slows}} enemies hit for {{fd|1.5}} seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|80 to 220}} {{as|(+ 75% AP)}}}}\n{{st|Slow|{{ap|20 to 36}}%}}",
+        "description2": "If ''Ice Shard'' hits an enemy, it will shatter, increasing its width and maximum range.",
+        "cooldown": "{{ap|8 to 4}}",
+        "cost": "{{ap|55 to 75}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "range": "{{tip|cr|icononly = true}} {{tt|825|Standard range including area check after missile end}} / {{tt|950|Enhanced range from cast origin}}",
+        "width": "{{tip|er|icononly = true}} {{tt|150|standard width}} / {{tt|180|Width after shattering}}",
+        "speed": "{{tt|2200|Both before and after shattering}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "projectile": "true",
+        "spelleffects": "aoe",
+        "onhiteffects": "|spellshield  = Special",
+        "notes": "{{Effect at cast time end}}\n* ''Ice Shard'' picks a location 950 units away in the direction of the cast for the shattered missile to end up at.\n* The initial ''Ice Shard'' missile has a range of 700 units which it arrives at after {{rutngt|{{#expr:700/2200}}}}. If it hasn't collided with an enemy in this path when it does, it checks for enemies in a {{tip|cr|icononly = true}} 100 radius around the point 25 units in front of it.\n** Colliding or hitting an enemy in either fashion creates a new \"shattered\" missile with the same speed but greater width that continues to travel along the same line to the designated point 950 units from the cast's original position, originating at the location at which the initial missile collided at.<!-- or collision point? what about when spawned from the lollipop hit? to be determined later-->\n* {{tip|Spell shield}} will block the damage and the slow but will not stop the projectile from shattering.",
+        "yvideo": "Lissandra - Q",
+        "_comments": [
+          "or collision point? what about when spawned from the lollipop hit? to be determined later"
+        ]
+      }
+    },
+    "W": {
+      "id": "LissandraW",
+      "name": "Ring of Frost",
+      "description": "Freezes nearby enemies in ice, dealing magic damage and rooting them.",
+      "tooltip": "Lissandra creates an ice field, Rooting nearby enemies for {{ e2 }} seconds and dealing {{ totaldamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9.5/9/8.5/8",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "450",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "70/105/140/175/210",
+        "1.25/1.35/1.45/1.55/1.65",
+        "3",
+        "8",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Root Duration",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ e2 }} -> {{ e2NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lissandra",
+        "skill": "W",
+        "icon": "Ring of Frost.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lissandra}} freezes nearby enemies, dealing {{as|magic damage}} and briefly {{tip|root|rooting}} them.",
+        "description": "{{sbc|Active:}} '''Lissandra''' freezes nearby enemies, dealing {{as|magic damage}} and {{tip|root|rooting}} them for a duration.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 210}} {{as|(+ 70% AP)}}}}\n{{st|Root Duration|{{ap|1.25 to 1.65}} seconds}}",
+        "cooldown": "{{ap|10 to 8}}",
+        "cost": "40",
+        "costtype": "Mana",
+        "effect radius": "450",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spelleffects": "spellaoe",
+        "onhiteffects": "|spellshield  = True",
+        "notes": "* No additional information.",
+        "yvideo": "Lissandra - W"
+      }
+    },
+    "E": {
+      "id": "LissandraE",
+      "name": "Glacial Path",
+      "description": "Lissandra creates an ice claw that deals magic damage. Reactivating this ability transports Lissandra to the claw's current location.",
+      "tooltip": "Lissandra casts forth an ice claw that deals {{ totaldamage }} magic damage. Lissandra can Recast while the claw travels to teleport to its location.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "24/21/18/15/12",
+      "cost": "80/85/90/95/100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1050",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "70/105/140/175/210",
+        "14/13/12/11/10",
+        "20",
+        "1",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lissandra",
+        "skill": "E",
+        "icon": "Glacial Path.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lissandra}} sends a claw of ice in the target direction that deals {{as|magic damage}} to enemies it passes through. ''Glacial Path'' can be recast while the claw is active.",
+        "blurb2": "{{sbc|Recast:}} '''Lissandra''' {{tip|blinks}} to the claw.",
+        "description": "{{sbc|Active:}} '''Lissandra''' sends a claw of ice in the target direction that deals {{as|magic damage}} to enemies it passes through, decelerating over {{fd|1.25}} seconds. ''Glacial Path'' can be recast after {{fd|0.5}} seconds while the claw is active.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 210}} {{as|(+ 60% AP)}}}}",
+        "description2": "{{sbc|Recast:}} '''Lissandra''' consumes the claw and {{tip|blinks}} to its current location.",
+        "cooldown": "{{tt|{{ap|24 to 12}}|Starts on cast}}",
+        "cost": "{{ap|80 to 100}}",
+        "costtype": "Mana",
+        "speed": "{{tt|1200|starting speed}} / {{tt|640|minimum speed}}",
+        "range": "1025",
+        "width": "{{tip|er|icononly = true}} 250",
+        "cast time": "{{fd|0.25}}",
+        "targeting": "[[Direction-targeted|Direction]] / [[Auto-targeted|Auto]]",
+        "affects": "Enemies, Self",
+        "damagetype": "magic",
+        "projectile": "true",
+        "spelleffects": "aoe",
+        "grounded": "special",
+        "onhiteffects": "|spellshield  = True",
+        "notes": "*Both casts count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n* '''Lissandra''' can reactivate ''Glacial Path'' for the duration (plus another {{fd|0.2}}-{{fd|0.3}} seconds after the claw 'sinks' into the ground).\n** The Claw can also hit enemies near the end point at this time, shortly after the missile has reached its maximum range.\n* ''Glacial Path'' allows '''Lissandra''' to surpass through every single wall in all maps, so long as the claw is at least halfway through them.\n* ''Glacial Path'' cannot be recast while {{tip|ground|grounded}} or {{tip|root|rooted}}.\n* ''Glacial Path's'' endpoint shows through terrain, [[sight|fog of war]] and {{tip|brush}} to enemies within 600 range of it.",
+        "yvideo": "Lissandra - E"
+      }
+    },
+    "R": {
+      "id": "LissandraR",
+      "name": "Frozen Tomb",
+      "description": "If cast on an enemy champion, the target is frozen solid, stunning it. If cast on Lissandra, she encases herself in dark ice, healing herself while becoming untargetable and invulnerable. Dark ice then emanates from the target dealing magic damage to enemies and slowing Move Speed.",
+      "tooltip": "Lissandra encases herself or an enemy champion in ice. Enemies are Stunned for {{ enemycastduration }} seconds. When self cast, Lissandra enters Stasis for {{ selfcastduration }} seconds and restores {{ healamount }} Health, increased by {{ selfcastmissinghpratio }}% for each {{ selfcastmissinghpperabove }}% missing Health.\n\nIn either case, dark ice eminates from the target, dealing {{ calculateddamage }} magic damage. The ice persists for {{ slowduration }} seconds, Slowing enemies by {{ slowamount*-100 }}%.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "550",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow",
+          "Healing",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ slowamount*-100.000000 }}% -> {{ slowamountnl*-100.000000 }}%",
+          "{{ selfcastflatheal }} -> {{ selfcastflathealNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lissandra",
+        "skill": "R",
+        "icon": "Frozen Tomb.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lissandra}} can cast ''Frozen Tomb'' on herself or an enemy champion.",
+        "blurb2": "{{sbc|Enemy Cast:}} '''Lissandra''' briefly freezes the target enemy champion, {{tip|knockdown|knocking them down}} and {{tip|stun|stunning}} them.",
+        "blurb3": "{{sbc|Self Cast:}} '''Lissandra''' instantly entombs herself in ice, entering {{tip|stasis (buff)|stasis}} for {{fd|2.5}} seconds and {{tip|heal|healing}} herself over the duration based on {{as|her '''missing''' health}}.",
+        "blurb4": "{{sbc|Frozen Tomb:}} ''Frozen Tomb'' creates a field of ice that deals {{as|magic damage}} to enemies and briefly {{tip|slow|slows}} them.",
+        "description": "{{sbc|Active:}} '''Lissandra''' can cast ''Frozen Tomb'' on herself or an enemy champion.",
+        "description2": "{{sbc|Enemy Cast:}} '''Lissandra''' freezes the target enemy champion, {{tip|knockdown|knocking them down}} and {{tip|stun|stunning}} them for {{fd|1.5}} seconds.",
+        "description3": "{{sbc|Self Cast:}} '''Lissandra''' instantly entombs herself in ice, entering {{tip|stasis (buff)|stasis}} for {{fd|2.5}} seconds and {{tip|healing}} herself every {{fd|0.25}} seconds over the duration. The healing is increased by {{as|{{pp|type='''missing''' health at the time of cast|key=%|0 to 100 for 11|key1=%|0 to 100|formula=1% per 1% of '''missing''' health}}}}.",
+        "leveling3": "{{st|Minimum Heal per Tick|{{ap|100/10 to 200/10}} {{as|(+ {{ap|55/10}}% AP)}}|Maximum Heal per Tick|{{ap|100*2/10 to 200*2/10}} {{as|(+ {{ap|55*2/10}} AP)}}}}\n{{st|Minimum Total Heal|{{ap|100 to 200}} {{as|(+ 55% AP)}}|Maximum Total Heal|{{ap|100*2 to 200*2}} {{as|(+ {{ap|55*2}}% AP)}}}}",
+        "description4": "''Frozen Tomb'' creates a field of ice that spreads out from the target over {{fd|1.5}} seconds and covers the surrounding area for 3 seconds, dealing {{as|magic damage}} to enemies and {{tip|slow|slowing}} them for {{fd|0.5}} seconds, refreshing every {{fd|0.25}} seconds while they remain.",
+        "leveling4": "{{st|Magic Damage|{{ap|150 to 350}} {{as|(+ 75% AP)}}}}\n{{st|Slow|{{ap|45 to 75}}%}}",
+        "cooldown": "{{ap|120 to 80}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "cast time": "{{tt|{{fd|0.375}}|Enemy cast}} / {{tt|None|Self cast}}",
+        "target range": "{{tip|cr|icononly = true}} 550",
+        "effect radius": "{{tip|cr|icononly = true}} 550",
+        "targeting": "Unit",
+        "affects": "Enemies, Self",
+        "damagetype": "magic",
+        "spelleffects": "spellaoe",
+        "onhiteffects": "|spellshield  = special",
+        "callforhelp": "true",
+        "notes": "* Enemies can only be damaged by the field of ice once every 4 seconds.\n** Under normal circumstances, this means once per cast of ''Frozen Tomb''.\n* Enemies who come in contact with ''Frozen Tomb's'' slow field will be damaged and a small visual and sound effect will play.\n* {{tip|Spell shield}} will block the single-targeted portion and the radiating ice damage, but will not stop it from spreading.\n* If the target becomes {{tip|untargetable}}, {{tip|death|dies}}, or is too far away during the cast time, this ability will cancel but does not go on {{sti|cooldown}} nor pay its cost.\n** This only applies to the enemy cast.",
+        "yvideo": "Lissandra - R",
+        "flavorsound": "{{sm2|Lissandra_Original_R_hitEnemy_0.ogg}} \"Entomb!\""
+      }
+    }
+  }
+}

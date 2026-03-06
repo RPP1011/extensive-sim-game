@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0087_3v4_d3_s2"
+seed = 22210
+hero_count = 3
+enemy_count = 4
+difficulty = 3
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["arcanist", "necromancer", "warlock"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Any"

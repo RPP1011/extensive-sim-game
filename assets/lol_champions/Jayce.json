@@ -1,0 +1,162 @@
+{
+  "id": "Jayce",
+  "name": "Jayce",
+  "title": "the Defender of Tomorrow",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Marksman"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Hextech Capacitor",
+      "description": "When Jayce swaps weapons he gains Move Speed for a short duration.",
+      "wiki_detail": {
+        "champion": "Jayce",
+        "skill": "I",
+        "icon": "Hextech Capacitor.png",
+        "blurbicon": "Hextech Capacitor.png",
+        "blurb": "{{sbc|Innate:}} Whenever {{ci|Jayce}} switches between {{sbc|{{ai|Transform Mercury Hammer|Jayce|Hammer Stance}}}} and {{sbc|{{ai|Transform Mercury Cannon|Jayce|Cannon Stance}}}}, he briefly gains {{sti|{{as|'''bonus''' movement speed}}}} and {{tip|ghosting|ignores}} unit collision.",
+        "description": "{{sbc|Innate:}} Whenever '''Jayce''' switches between either {{sbc|{{ai|Transform Mercury Hammer|Jayce|Hammer Stance}}}} or {{sbc|{{ai|Transform Mercury Cannon|Jayce|Cannon Stance}}}}, he gains {{tip|ghosting}} and {{sti|ms|{{as|40 '''bonus''' movement speed}}}} for {{fd|0.75}} seconds.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "notes": "* No additional details."
+      }
+    },
+    "Q": {
+      "id": "JayceToTheSkies",
+      "name": "To the Skies! / Shock Blast",
+      "description": "Hammer Stance: Leaps to an enemy dealing physical damage and slowing enemies.\n\nCannon Stance: Fires an orb of electricity that detonates upon hitting an enemy (or reaching the end of its path) dealing physical damage to all enemies hit.",
+      "tooltip": "Mercury Hammer: Jayce leaps to an enemy, dealing {{ spell.jaycetotheskies:damage }} physical damage to surrounding enemies and Slowing them by {{ spell.jaycetotheskies:slow*-100 }}% for {{ spell.jaycetotheskies:slowduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16/14/12/10/8/6",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 6,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "Slow"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ slow*-100.000000 }}% -> {{ slownl*-100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "W": {
+      "id": "JayceStaticField",
+      "name": "Lightning Field / Hyper Charge",
+      "description": "Hammer Stance: Passive: Restores Mana per strike. Active: Creates a field of lightning damaging nearby enemies for several seconds.\n\nCannon Stance: Gains a burst of energy, increasing Attack Speed to maximum for several attacks.",
+      "tooltip": "Mercury Hammer - Passive: Jayce's Hammer Attacks grant {{ spell.jaycestaticfield:managain }} Mana.\n\nMercury Hammer - Active: Jayce creates an electric aura dealing {{ spell.jaycestaticfield:damage }} magic damage over {{ spell.jaycestaticfield:duration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "285",
+      "max_rank": 6,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Mana Restore"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ managain }} -> {{ managainNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "E": {
+      "id": "JayceThunderingBlow",
+      "name": "Thundering Blow / Acceleration Gate",
+      "description": "Hammer Stance: Deals magic damage to an enemy and knocks them back a short distance.\n\nCannon Stance: Deploys an Acceleration Gate increasing the Move Speed of all allied champions who pass through it. If Shock Blast is fired through the gate the missile speed, range, and damage will increase.",
+      "tooltip": "Hammer Form: Jayce swings his hammer, Knocking Back his target and dealing {{ spell.jaycethunderingblow:flatdamage }} plus {{ spell.jaycethunderingblow:perchpdamage*100 }}% max Health magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "20/18/16/14/12/10",
+      "cost": "55",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "240",
+      "max_rank": 6,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Max Health %",
+          "Cooldown",
+          "Monster Damage Cap"
+        ],
+        "effect": [
+          "{{ perchpdamage*100.000000 }}% -> {{ perchpdamagenl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ monstercap }} -> {{ monstercapNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "R": {
+      "id": "JayceStanceHtG",
+      "name": "Mercury Cannon / Mercury Hammer",
+      "description": "Hammer Stance: Transforms the Mercury Hammer into the Mercury Cannon gaining new abilities and increased range. The first attack in this form reduces the target's Armor and Magic Resist.\n\nCannon Stance: Transforms the Mercury Cannon into the Mercury Hammer gaining new abilities and increasing Armor and Magic Resist. The first attack in this form deals additional magic damage.",
+      "tooltip": "Mercury Hammer: Jayce transforms his weapon into the Mercury Cannon, gaining Attack Range and new Abilities. Jayce's next Attack removes {{ spell.jaycestancehtg:rangedformshred }} Armor and Magic Resist for {{ spell.jaycestancehtg:shredduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "6",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "600",
+      "max_rank": 1,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {},
+      "resource": "No Cost"
+    }
+  }
+}

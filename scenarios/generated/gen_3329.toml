@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0189_4v4_s2"
+seed = 22112
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["cleric", "Jax", "engineer", "Singed"]
+enemy_hero_templates = ["Zilean", "Alistar", "alchemist", "Viego"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

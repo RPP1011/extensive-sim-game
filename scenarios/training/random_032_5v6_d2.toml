@@ -1,0 +1,13 @@
+[scenario]
+name = "random_032_5v6_d2"
+seed = 8032
+hero_count = 5
+enemy_count = 6
+difficulty = 2
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["blood_mage", "bard", "samurai", "ranger", "berserker"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Either"

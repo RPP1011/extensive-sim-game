@@ -1,0 +1,115 @@
+[hero]
+name = "Corki"
+
+[stats]
+hp = 80
+move_speed = 3.3
+armor = 22.0
+magic_resist = 31.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 5.5
+cooldown = 700
+
+# --- Q: Phosphorus Bomb ---
+[[abilities]]
+name = "Phosphorus Bomb"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 9000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 16
+
+[abilities.delivery]
+method = "projectile"
+speed = 11.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 17
+damage_type = "magic"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 2.75
+
+# --- W: Valkyrie ---
+[[abilities]]
+name = "Valkyrie"
+targeting = "ground_target"
+range = 3.0
+cooldown_ms = 20000
+ai_hint = "damage"
+resource_cost = 16
+
+[[abilities.effects]]
+type = "damage"
+amount = 7
+damage_type = "magic"
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- E: Gatling Gun ---
+[[abilities]]
+name = "Gatling Gun"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 12000
+ai_hint = "damage"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "damage"
+amount = 25
+damage_type = "physical"
+
+[abilities.effects.area]
+shape = "cone"
+radius = 4.0
+angle_deg = 60.0
+
+# --- R: Missile Barrage ---
+[[abilities]]
+name = "Missile Barrage"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 2000
+cast_time_ms = 175
+ai_hint = "damage"
+resource_cost = 7
+max_charges = 2
+charge_recharge_ms = 20000
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 20
+damage_type = "physical"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 1.5
+
+# --- Passive: Hextech Munitions ---
+[[passives]]
+name = "Hextech Munitions"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_auto_attack"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+

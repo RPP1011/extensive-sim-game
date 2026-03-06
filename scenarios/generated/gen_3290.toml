@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0176_5v5_s2"
+seed = 22099
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["bard", "Vayne", "knight", "Katarina", "Ambessa"]
+enemy_hero_templates = ["Xerath", "Seraphine", "monk", "cleric", "Warwick"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

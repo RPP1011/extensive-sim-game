@@ -1,0 +1,12 @@
+[scenario]
+name        = "2x Knight + 2x Mage"
+seed        = 950322
+hero_count  = 4
+enemy_count = 16
+difficulty  = 3
+max_ticks   = 5000
+room_type   = "Climax"
+hero_templates = ["Knight", "Knight", "Mage", "Mage"]
+
+[assert]
+outcome = "Either"

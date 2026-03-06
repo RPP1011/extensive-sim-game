@@ -1,0 +1,176 @@
+{
+  "id": "Mel",
+  "name": "Mel",
+  "title": "the Soul's Reflection",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage",
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Searing Brilliance",
+      "description": "Whenever Mel uses an ability, she gains three bonus projectiles (up to nine maximum) on her next attack.\n\nWhen Mel deals damage through an ability or attack, she applies Overwhelm, which can stack infinitely. If the enemy is hit by Mel with enough Overwhelm damage, the stacks are consumed to execute the target."
+    },
+    "Q": {
+      "id": "MelQ",
+      "name": "Radiant Volley",
+      "description": "Mel fires a barrage of projectiles that explode around a target location, dealing damage repeatedly to enemies within the area.",
+      "tooltip": "Mel unleashes a barrage of {{ explosioncount }} projectiles that explode in the area around a target location.\n\nThe first explosion hit deals {{ initialexplosiondamage }} magic damage and each subsequent explosion deals {{ totalexplosiondamage }} magic damage, adding up to {{ alldamagehit }} magic damage total.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9/8/7/6",
+      "cost": "70/75/80/85/90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "950",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Initial Damage",
+          "Explosion Damage",
+          "Explosion Count",
+          "Cooldown",
+          "Mana Cost"
+        ],
+        "effect": [
+          "{{ initialdamage }} -> {{ initialdamageNL }}",
+          "{{ explosiondamage }} -> {{ explosiondamageNL }}",
+          "{{ explosioncount }} -> {{ explosioncountNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "W": {
+      "id": "MelW",
+      "name": "Rebuttal",
+      "description": "Mel forms a barrier around herself that reflects enemy projectiles back at the attacker, prevents her from taking damage, and grants her movement speed.",
+      "tooltip": "Mel forms a barrier around herself that reflects projectiles from enemy champions, gaining {{ shieldamount }} Shields for {{ duration }} seconds and {{ movespeed*100 }}% decaying Move Speed for {{ movespeedduration }} seconds.\n\nReflected projectiles deal {{ damagepercent }} original damage as magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "35/32/29/26/23",
+      "cost": "80/60/40/20/0",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "250",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Reflected Damage",
+          "Shield Amount",
+          "Cooldown",
+          "Mana Cost"
+        ],
+        "effect": [
+          "{{ basedamagepercent*100.000000 }}% -> {{ basedamagepercentnl*100.000000 }}%",
+          "{{ baseshieldamount }} -> {{ baseshieldamountNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "E": {
+      "id": "MelE",
+      "name": "Solar Snare",
+      "description": "Mel fires a radiant orb forward, rooting those at its center while the area around it slows enemies and deals damage over time.",
+      "tooltip": "Mel fires a radiating orb, Rooting enemies at its center for {{ rootduration }} seconds and dealing {{ damage }} magic damage.\n\nThe orb builds up a hostile area around it that Slows enemies by {{ areaslowamount*100 }}% and deals {{ areadamagepersecond }} magic damage per second.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11/10.5/10/9.5/9",
+      "cost": "50/60/70/80/90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Damage Per Second",
+          "Cooldown",
+          "Mana Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ baseareadamage }} -> {{ baseareadamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "R": {
+      "id": "MelR",
+      "name": "Golden Eclipse",
+      "description": "Mel strikes all enemies marked with Overwhelm regardless of their distance from her, dealing additional damage for each stack of Overwhelm.\n\nRanks of Golden Eclipse increase Overwhelm's damage.",
+      "tooltip": "Passive: Overwhelm damage is increased to {{ passiveflatdamage }} magic damage plus {{ passivestackdamage }} magic damage per stack.\n\nActive: Mel unleashes her power on all enemies affected by Overwhelm, dealing {{ ultflatdamage }} magic damage plus {{ ultstackdamage }} magic damage per Overwhelm stack.\n\nCan only be cast when an enemy champion is affected by Overwhelm.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "25000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "<spellName>Golden Eclipse</spellName> Flat Damage",
+          "<spellName>Golden Eclipse</spellName> Stack Damage",
+          "Cooldown",
+          "<keywordMajor>Overwhelm</keywordMajor> Flat Damage",
+          "<keywordMajor>Overwhelm</keywordMajor> Stack Damage"
+        ],
+        "effect": [
+          "{{ baseultflatdamage }} -> {{ baseultflatdamageNL }}",
+          "{{ baseultstackdamage }} -> {{ baseultstackdamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basepassiveflatdamage }} -> {{ basepassiveflatdamageNL }}",
+          "{{ basepassivestackdamage }} -> {{ basepassivestackdamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    }
+  }
+}

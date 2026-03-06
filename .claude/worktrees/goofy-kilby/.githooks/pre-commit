@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "[pre-commit] Running cargo check..."
+cargo check
+
+echo "[pre-commit] OK"

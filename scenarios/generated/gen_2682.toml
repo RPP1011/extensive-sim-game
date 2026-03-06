@@ -1,0 +1,13 @@
+[scenario]
+name = "size_3v4_2682"
+seed = 1897
+hero_count = 3
+enemy_count = 4
+difficulty = 3
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["knight", "warden", "druid"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

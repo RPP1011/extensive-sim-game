@@ -1,0 +1,270 @@
+{
+  "id": "Kled",
+  "name": "Kled",
+  "title": "the Cantankerous Cavalier",
+  "resource_type": "Courage",
+  "tags": [
+    "Fighter"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Skaarl, the Cowardly Lizard",
+      "description": "Kled rides his trusty steed, Skaarl, who takes damage for him. When Skaarl's health depletes, Kled dismounts.\n\nWhile dismounted, Kled's abilities change and he deals less damage to champions. Kled can restore Skaarl's courage by fighting enemies. At maximum courage, Kled remounts with a portion of Skaarl's health."
+    },
+    "Q": {
+      "id": "KledQ",
+      "name": "Bear Trap on a Rope",
+      "description": "Kled throws a bear trap that damages and hooks an enemy champion. If shackled for a short duration, the target takes additional physical damage and is yanked toward Kled.\n\nWhen dismounted, this ability is replaced by Pocket Pistol, a ranged gun blast that knocks back Kled and restores courage.",
+      "tooltip": "Mounted: Kled throws a bear trap that deals {{ totaldamage }} physical damage and hooks onto the first enemy champion or large jungle monster hit.\n\nIf Kled stays near a hooked enemy for {{ tetherpoptime }} seconds, he yanks out the trap, dealing {{ totalyankdamage }} physical damage, Pulling them, and Slowing by {{ slowamount*-100 }}% for {{ slowduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11/10/9/8/7",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "800",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Throw Damage",
+          "Rip Damage",
+          "Slow",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ firsthitbasedamage }} -> {{ firsthitbasedamageNL }}",
+          "{{ firsthitbasedamage*2.000000 }} -> {{ firsthitbasedamagenl*2.000000 }}",
+          "{{ slowamount*-100.000000 }}% -> {{ slowamountnl*-100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Kled",
+        "skill": "Q",
+        "icon": "Bear Trap on a Rope.png",
+        "blurb": "{{sbc|Active:}} {{ci|Kled}} throws a bear trap in the target direction that deals {{as|physical damage}} to enemies hit and forms a {{tip|tether}} against the first {{tip|champion}} or large {{tip|monster}} hit, {{tip|true sight|revealing}} them.",
+        "blurb2": "The tether shrinks over a brief time, after which '''Kled''' {{tip|airborne|pulls}} the target, deaIing {{as|physical damage}}, inflicting {{tip|Grievous Wounds}}, and briefly {{tip|slow|slowing}} them.",
+        "description": "{{sbc|Active:}} '''Kled''' throws a bear trap in the target direction that deals {{as|physical damage}} to enemies hit, increased by 50% against {{tip|minion|minions}} and small {{tip|monsters}}. The bear trap collides against the first enemy {{tip|champion}} or large {{tip|monster}} hit, forming a {{tip|tether}} between '''Kled''' and the target for {{fd|1.75}} seconds, during which they are {{tip|true sight|revealed}}.",
+        "leveling": "{{st|Physical Damage|{{ap|30 to 130}} {{as|(+ 65% '''bonus''' AD)}}|Minion and Small Monster Damage|{{ap|30*1.5 to 130*1.5}} {{as|(+ 90% '''bonus''' AD)}}}}",
+        "description2": "The tether's radius shrinks over its duration, and if it is not broken before then, '''Kled''' {{tip|airborne|pulls}} the target {{tt|100|Estimated}} units toward him, deals {{as|physical damage}}, inflicts {{tip|Grievous Wounds}} for 5 seconds, and {{tip|slow|slows}} them for {{fd|1.5}} seconds.",
+        "leveling2": "{{st|Physical Damage|{{ap|60 to 260}} {{as|(+ 130% '''bonus''' AD)}}|Total Physical Damage|{{ap|30+60 to 130+260}} {{as|(+ 195% '''bonus''' AD)}}}}\n{{st|Slow|{{ap|40 to 60}}%}}",
+        "description3": "''Bear Trap on a Rope can be cast while {{ai|Jousting|Kled}}.''",
+        "cooldown": "{{ap|11 to 7}}",
+        "cast time": "{{fd|0.25}}",
+        "tether radius": "{{pp|round=ceil|type=time active|800 to 650 for 7|0 to 1.75}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "{{Effect at cast time end}}\n* ''Bear Trap on a Rope'' will not {{tip|airborne|pull}} the target if they are in {{tip|stasis (buff)|stasis}}.",
+        "video": "Kled - Q (Mounted)"
+      }
+    },
+    "W": {
+      "id": "KledW",
+      "name": "Violent Tendencies",
+      "description": "Kled gains massive attack speed for four attacks. The fourth attack deals more damage.",
+      "tooltip": "Passive: Kled's next Attack grants {{ attackspeed*100 }}% Attack Speed for four Attacks or {{ activeduration }} seconds.\n\nThe fourth hit deals an additional {{ baseflatdamage }} plus {{ percentdamage }} max Health physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "13/12/11/10/9",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "0",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Flat Damage",
+          "Percentage Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ baseflatdamage }} -> {{ baseflatdamageNL }}",
+          "{{ 4hitmaxhealthdamage }}% -> {{ 4hitmaxhealthdamageNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Kled",
+        "skill": "W",
+        "icon": "false",
+        "icon2": "Violent Tendencies.png",
+        "blurb": "{{sbc|Passive:}} {{ci|Kled}} periodically gains ''Violent Tendencies'', which starts expiring upon his next basic attack.",
+        "blurb4": "{{sbc|Violent Tendencies:}} '''Kled''' gains {{sti|attack speed|{{as|'''bonus''' attack speed}}}} for his next 4 basic attacks within a few seconds. The final attack deals {{as|'''bonus''' physical damage}} based on the {{as|target's '''maximum''' health}}.",
+        "description": "{{sbc|Passive:}} '''Kled''' periodically gains ''Violent Tendencies'', which starts expiring upon his next basic attack.",
+        "description2": "{{sbc|Violent Tendencies:}} '''Kled''' gains {{sti|attack speed|{{as|150% '''bonus''' attack speed}}}} on his next 4 basic attacks within 4 seconds. The fourth attack deals {{as|'''bonus''' physical damage}}, capped against {{tip|monster|monsters}}.",
+        "leveling2": "{{st|Bonus Physical Damage|{{ap|20 to 60}} {{as|(+ {{ap|4.5 to 6.5}}% {{as|(+ 5% per 100 '''bonus''' AD)}} of target's '''maximum''' health)}}|Capped Monster Damage|{{ap|220 to 260}}}}",
+        "description3": "''{{tip|Turrets}} are only affected by the base damage.''",
+        "cooldown": "{{tt|{{ap|11 to 5}}|Starts after the attacks time out or are consumed}}",
+        "cdstart": "post-effect",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "False",
+        "spelleffects": "Proc",
+        "projectile": "|grounded     =",
+        "knockdown": "|parry        = True",
+        "notes": "* The bonus damage applies {{sti|life steal|link=true}}.\n* Attacking a [[jungle plants|plant]] will not activate the effect.\n** This is intentional to prevent '''Kled''' from \"wasting\" the cooldown.",
+        "video": "Kled - W"
+      }
+    },
+    "E": {
+      "id": "KledE",
+      "name": "Jousting",
+      "description": "Kled dashes, dealing physical damage and gaining a short burst of speed. Kled can cast this ability again to dash back through his initial target, dealing the same damage.",
+      "tooltip": "Kled dashes, dealing {{ totaldamage }} physical damage to enemies he passes through, pulling minions and small monsters towards him.\n\nIf this Ability hits an enemy champion or large jungle monster, Kled gains {{ movespeed*100 }}% Move Speed for {{ movespeedduration }} second(s) and can Recast within {{ recastwindow }} seconds to dash back through the same target.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "13/12/11/10/9",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "550",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Kled",
+        "skill": "E",
+        "icon": "Jousting.png",
+        "icon3": "Jousting 2.png",
+        "blurb": "{{sbc|Active:}} {{cci|Kled Skaarl the Cowardly Lizard 3.png}} '''{{ui|Skaarl|nolink=true}}''' {{tip|dashes}} in the target direction, dealing {{as|physical damage}} to enemies he passes through and marking enemy {{tip|champions}} hit. The mark {{tip|true sight|reveals}} the target for a short time, during which ''Jousting'' can be recast.",
+        "blurb2": "{{sbc|Recast:}} '''{{ui|Skaarl|nolink=true}}''' consumes the mark to {{tip|dash}} through the marked target.",
+        "description": "{{sbc|Active:}} '''{{ui|Skaarl|nolink=true}}''' {{tip|dashes}} in the target direction, though not through terrain, dealing {{as|physical damage}} to enemies he passes through and {{tip|airborne|pulling}} {{tip|minion|minions}} and small {{tip|monster|monsters}} hit towards them.",
+        "leveling": "{{st|Physical Damage|{{ap|35 to 135}} {{as|(+ 65% '''bonus''' AD)}}}}",
+        "description2": "Upon hitting an enemy {{tip|champion}} or large {{tip|monster}}, '''{{ui|Skaarl|nolink=true}}''' {{tip|dashes}} a fixed {{tt|200|estimated}}-units through them, marking them for 3 seconds, during which they are {{tip|true sight|revealed}}. After the dash ends, the duo gain {{sti|ms|{{as|50% '''bonus''' movement speed}}}} for 1 second. ''Jousting'' can be recast after {{fd|0.5}} seconds of the first dash ending while the target is marked.",
+        "description3": "{{sbc|Recast:}} '''{{ui|Skaarl|nolink=true}}''' consumes the mark to {{tip|dash}} through the marked target, applying the same effects as the first cast.",
+        "leveling3": "{{st|Total Physical Damage|{{ap|35*2 to 135*2}} {{as|(+ 130% '''bonus''' AD)}}}}",
+        "description4": "The mark will remain even if the target dies, and ends prematurely if the duo are too far away or '''Kled''' ''{{ai|Dismounted Skaarl the Cowardly Lizard|Kled|dismounts}}''.",
+        "description5": "''{{ai|Bear Trap on a Rope|Kled}} and {{ai|Chaaaaaaaarge!!!|Kled}} can be cast during either of the dashes.''",
+        "cooldown": "{{tt|{{ap|13 to 9}}|Starts after dash is complete. If recast is available, starts after completing the second dash.}}",
+        "cdstart": "Special",
+        "target range": "{{tt|550|first dash}} / {{tt|700|second dash, center to edge, estimated}}",
+        "cast time": "none",
+        "targeting": "[[Direction-targeted|Direction]] / [[Auto-targeted|Auto]]",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "special",
+        "projectile": "|grounded     = True",
+        "knockdown": "True",
+        "notes": "* Both casts count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n* Casting {{ai|Chaaaaaaaarge!!!|Kled}} during ''Jousting'' will not interrupt the dash.\n* Recasting ''Jousting'' while outside of maximum range will cause the ability to go on cooldown without activation.\n* ''Jousting'' can be recast even while the target is {{tip|untargetable}}.",
+        "video": "Kled - E"
+      }
+    },
+    "R": {
+      "id": "KledR",
+      "name": "Chaaaaaaaarge!!!",
+      "description": "Kled and Skaarl charge to a location, leaving a speed-granting trail behind them and gaining a shield. Skaarl locks onto and rams the first enemy champion encountered.",
+      "tooltip": "Kled charges toward an area, leaving a trail that grants allies increasing Move Speed. While charging and for 2 seconds after Kled gains up to {{ maximumshield }} Shield. Skaarl rams the first enemy champion encountered, dealing {{ minimumdamagetooltip }} to {{ maximumchargedamage }} max Health magic damage (based on distance travelled) and briefly Knocking Back.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "140/125/110",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "3500/4000/4500",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Maximum Damage",
+          "Maximum Shield Health",
+          "Range",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ percenthpbase*3.000000 }}% -> {{ percenthpbasenl*3.000000 }}%",
+          "{{ shieldcapbase }} -> {{ shieldcapbaseNL }}",
+          "{{ tooltiprange }} -> {{ tooltiprangeNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Kled",
+        "skill": "R",
+        "icon": "Chaaaaaaaarge!!!.png",
+        "blurb": "{{sbc|Active:}} '''Kled''' & '''{{ui|Skaarl|nolink=true}}'''  {{tip|Cc-immune|unstoppably}} charge to a location, building up {{sti|ms|{{as|'''bonus''' movement speed}}}} and {{tip|shield}} and leaving a draft in their wake that grants ''Mr. Kled's Wild Ride'' to allied champions that follow the draft.",
+        "blurb2": "'''{{ui|Skaarl|nolink=true}}''' {{tip|dash|dashes}} to the first enemy champion encountered, {{tip|airborne|knocking them back}}, and dealing {{as|physical damage}} based on travel time.",
+        "blurb4": "{{sbc|Mr. Kled's Wild Ride:}} Gain a large amount of {{sti|ms|{{as|movement speed|ms}}}}.",
+        "description": "{{sbc|Active:}} '''Kled''' & '''{{ui|Skaarl|nolink=true}}''' charge toward the target location, automatically navigating terrain along the way, during which they're {{tip|ghosted}} and {{tip|Cc-immune|immune to crowd control}}. If the charge does not complete within 15 seconds, it will end prematurely. The charge is interrupted instantly if '''Kled''' ''{{ai|Dismounted Skaarl the Cowardly Lizard|Kled|dismounts}}'' during it.",
+        "icon2": "Chaaaaaaaarge!!! 2.png",
+        "description2": "While charging, the duo gain {{sti|ms|{{as|'''bonus''' movement speed}}}} and a {{tip|shield}} for every {{fd|0.25}} seconds of traveling, up to {{tt|{{as|950 '''total''' movement speed|ms}}|after movement speed soft caps}} over 3 seconds and {{pp|type=time traveling|key=%|label=Shield Percentage|10 to 100 for 10|0 to 2.25|formula=('''maximum''' shield)/10*((time+0.25)/0.25). ''This is capped at 2.25 seconds of time active.''}} of the '''maximum''' shield amount over {{fd|2.25}} seconds respectively. The shield lasts for 2 seconds upon finishing the charge. The duo trails a directional draft in their wake, lasting 9 seconds. Allied champions following the draft gain ''Mr. Kled's Wild Ride''.",
+        "leveling2": "{{st|Minimum Shield|{{ap|20 to 40}} {{as|(+ 30% '''bonus''' AD)}}|Maximum Shield|{{ap|200 to 400}} {{as|(+ 300% '''bonus''' AD)}}}}",
+        "description3": "{{sbc|Mr. Kled's Wild Ride:}} Gain {{tt|{{as|650 '''total''' movement speed|ms}}|after movement speed soft caps}}.",
+        "description4": "'''Kled''' & '''{{ui|Skaarl|nolink=true}}''' {{tip|dash}} toward the first enemy champion in range, colliding with the first {{tip|sight|visible}} enemy champion in his path to deal {{as|physical damage}}, increased by {{pp|type=time traveling|key=%|label=Damage Increase|0 to 200 for 26|0 to 4|formula=8% increase per 0.16 seconds. ''This is capped at 4 seconds of time active.''}}, and {{tip|airborne|knock them back}} {{tt|100|Estimated}} units, though not through terrain.",
+        "leveling4": "{{st|Minimum Physical Damage|{{as|{{ap|4 to 6}}% {{as|(+ 4% per 100 '''bonus''' AD)}} of target's '''maximum''' health}}|Maximum Physical Damage|{{as|{{ap|4*3 to 6*3}}% {{as|(+ 12% per 100 '''bonus''' AD)}} of target's '''maximum''' health}}}}",
+        "target range": "{{ap|3500 to 4500}}",
+        "speed": "{{tt|1000|Dash speed on enemy champion}} / {{tt|600|Knockback speed}}",
+        "cooldown": "{{ap|140 to 110}}",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "projectile": "|grounded     = True",
+        "knockdown": "False",
+        "notes": "* '''Kled''' and '''{{ui|Skaarl|nolink=true}}''' will track the target if they change locations.\n** They will dash to the target's previous location if the target is too far away or moves beyond {{tt|2500|Estimated}} units.\n* During the charge the duo gain:\n** (950{{minus}}({{tt|'''current''' movement speed|after movement speed soft caps}})){{divided by}}12{{times}}(time{{divided by}}{{fd|0.25}}) {{as|'''bonus''' movement speed}}\n* The bonus movement speed is not affected by [[movement speed|movement speed caps]].\n* '''Kled''' and '''{{ui|Skaarl|nolink=true}}''' are {{tip|cc-immune|immune to crowd control}} during the charge as well as while dashing to the target.\n** '''Kled''' and '''{{ui|Skaarl|nolink=true}}''' will not be {{tip|cc-immune|immune to crowd control}} while dashing to the target if the charge ends before the dash begins.{{bug}}\n* The charge will not give any movement speed to '''Kled''' if he has more than {{tt|1440 raw movement speed|950 after movement speed soft caps}}.\n* The trail will not give '''Kled''' and his allies any movement speed if they have more than {{tt|840 raw movement speed|650 after movement speed soft caps}}.\n** Movement speed is granted by facing the direction of the draft and lasts for {{rutngt|0.5}} seconds upon exiting the trail or facing another direction.\n* Enemies gain partial vision of '''Kled''' when he charges nearby.\n* '''Kled''' will re-path if his current pathing is blocked by a newly created terrain (either player created or by the {{ui|Mountain Drake|Mountainous Rift}}).\n* The charge will continue towards the target location even if '''Kled's''' location changes drastically.\n* ''Chaaaaaaaarge!!!'s'' {{tip|airborne|knockback}} distance and speed may be impeded by terrain.\n* The {{tip|airborne|icononly = true}} debuff is removed early when the forced movement stops.\n* The following table refers for interactions while '''Kled''' is charging:\n{{ct|attack=false|move=\tAllowed, but cannot input movement commands.|cast=false|items=false|consume=false|spells=true, false, false, false, false, false, false|interrupts=false}}",
+        "flavorsound": "{{sm2|Kled Original R SFX 0.ogg}} ''Charge alert.''",
+        "video": "Kled - R"
+      }
+    }
+  }
+}

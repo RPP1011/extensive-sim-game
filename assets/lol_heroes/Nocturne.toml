@@ -1,0 +1,131 @@
+[hero]
+name = "Nocturne"
+
+[stats]
+hp = 120
+move_speed = 3.5
+armor = 35.0
+magic_resist = 32.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 21
+range = 1.5
+cooldown = 800
+
+# --- Q: Duskbringer ---
+[[abilities]]
+name = "Duskbringer"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 8000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 12
+
+[abilities.delivery]
+method = "projectile"
+speed = 16.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 16
+damage_type = "physical"
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 3000
+
+# --- W: Shroud of Darkness ---
+[[abilities]]
+name = "Shroud of Darkness"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 20000
+ai_hint = "buff"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.3
+duration_ms = 5000
+
+# --- E: Unspeakable Horror ---
+[[abilities]]
+name = "Unspeakable Horror"
+targeting = "target_enemy"
+range = 4.2
+cooldown_ms = 15000
+ai_hint = "damage"
+resource_cost = 12
+
+[[abilities.effects]]
+type = "damage"
+amount = 0
+damage_type = "magic"
+duration_ms = 2000
+tick_interval_ms = 1000
+amount_per_tick = 10
+
+[abilities.effects.area]
+shape = "circle"
+radius = 8.0
+
+[[abilities.effects]]
+type = "fear"
+duration_ms = 1500
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 2000
+
+# --- R: Paranoia ---
+[[abilities]]
+name = "Paranoia"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 26100
+ai_hint = "damage"
+resource_cost = 20
+recast_count = 1
+recast_window_ms = 10000
+
+[[abilities.effects]]
+type = "damage"
+amount = 37
+damage_type = "physical"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- Passive: Umbra Blades ---
+[[passives]]
+name = "Umbra Blades"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 5000
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

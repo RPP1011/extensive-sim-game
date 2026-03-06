@@ -1,0 +1,275 @@
+{
+  "id": "Khazix",
+  "name": "Kha'Zix",
+  "title": "the Voidreaver",
+  "resource_type": "Mana",
+  "tags": [
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Unseen Threat",
+      "description": "Nearby enemies that are Isolated from their allies are marked. Kha'Zix's abilities have interactions with Isolated targets.\n\nWhen Kha'Zix is not visible to the enemy team, he gains Unseen Threat, causing his next basic attack against an enemy champion to deal bonus magic damage and slow them for a few seconds.",
+      "wiki_detail": {
+        "champion": "Kha'Zix",
+        "skill": "I",
+        "blurb": "{{sbc|Innate:}} {{ci|Kha'Zix}} gains ''Unseen Threat'' whenever the enemy loses {{tip|sight}} of him causing his next basic attack against an enemy Champion to deal bonus magic damage and slow.",
+        "blurb4": "{{sbc|Unseen Threat:}} '''Kha'Zix's''' next basic attack against an enemy champion deals {{as|'''bonus''' magic damage}} and {{tip|slow|slows}} them for a short time.",
+        "icon": "Unseen Threat.png",
+        "description": "{{sbc|Innate:}} '''Kha'Zix''' gains ''Unseen Threat'' whenever the enemy loses {{tip|sight}} of him or he activates ''{{ai|Void Assault|Kha'Zix}}''. <br/><br/>{{sbc|Unseen Threat:}} '''Kha'Zix''' empowers his next [[basic attack]] against an enemy champion to deal {{pp|14 to 116|color=magic damage}} {{as|(+ 40% '''bonus''' AD)}} {{as|'''bonus''' magic damage}} and {{tip|slow}} them by 25% for 2 seconds.",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "False",
+        "spelleffects": "spell",
+        "grounded": "|knockdown    =",
+        "parry": "True",
+        "notes": "* Any form of vision loss may trigger ''Unseen Threat'', such as {{ai|Curse of the Black Mist|Senna}}, {{tip|nearsight}} and {{ai|Brushmaker|Ivern}}.\n* {{ai|Void Assault|Kha'Zix}} grants ''Unseen Threat'' even if '''Kha'Zix''' never becomes unseen (e.g. affected by {{tip|true sight}}).\n** Other {{tip|stealth}} such as {{cai|E|Senna}} does not do this.\n* Both the attack's damage and bonus spell damage are grouped under the same Spell ID.\n** Because of this, a single ''Unseen Threat'' attack does '''not''' trigger two {{ri|Electrocute}} stacks.",
+        "yvideo": "Kha'Zix - Passive"
+      }
+    },
+    "Q": {
+      "id": "KhazixQ",
+      "name": "Taste Their Fear",
+      "description": "Deals physical damage to the target. Damage increased on Isolated targets. If he chooses to Evolve Reaper Claws, this refunds a percent of it's cooldown against Isolated targets. Kha'Zix also gains increased range on his basic attacks and Taste Their Fear.",
+      "tooltip": "Kha'Zix slashes a nearby enemy, dealing {{ spell.khazixq:basedamage }} physical damage. This deals {{ spell.khazixq:isodamage }} damage instead to enemies Isolated from their allies. {{ spellmodifierdescriptionappend }}",
+      "cooldown": "4",
+      "cost": "20",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "325",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "80/105/130/155/180",
+        "110",
+        "50",
+        "45",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kha'Zix",
+        "skill": "Q",
+        "icon": "Unseen Threat 2.png",
+        "blurbicon": "Taste Their Fear.png",
+        "blurb": "{{sbc|Passive:}} {{ci|Kha'Zix}} considers any enemy unit to be {{as|Isolated|buzzword}} if they are not nearby to one of their allies. His abilities have special interactions against {{as|Isolated|buzzword}} targets.",
+        "blurb2": "{{sbc|Active:}} '''Kha'Zix''' slashes the target enemy, dealing {{as|physical damage}}, increased against {{as|Isolated|buzzword}} targets.",
+        "description": "{{sbc|Passive:}} '''Kha'Zix''' considers any enemy unit to be {{as|Isolated|buzzword}} if they are not nearby to one of their allies. ''{{ai|Taste Their Fear|Kha'Zix}}'', ''{{ai|Evolved Reaper Claws|Kha'Zix}}'', and ''{{ai|Evolved Spike Racks|Kha'Zix}}'' have special interactions against {{as|Isolated|buzzword}} targets.",
+        "icon2": "Taste Their Fear.png",
+        "description2": "{{sbc|Active:}} '''Kha'Zix''' slashes the target enemy, dealing {{as|physical damage}}, increased by 110% against {{as|Isolated|buzzword}} targets.",
+        "leveling2": "{{st|Physical Damage|{{ap|80 to 180}} {{as|(+ 110% '''bonus''' AD)}}|Increased Damage|{{ap|80*2.1 to 180*2.1}} {{as|(+ {{ap|110*2.1}}% '''bonus''' AD)}}}}",
+        "target range": "{{tip|cr|icononly = true}} 325",
+        "effect radius": "{{tt|375|Non-isolated radius between enemies / monsters}}",
+        "cooldown": "4",
+        "cost": "20",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "Single target",
+        "grounded": "|knockdown    =",
+        "yvideo": "Kha'Zix - Q",
+        "callforhelp": "True",
+        "notes": "* A team's allies are {{tip|champions}}, {{tip|pet|pets}}, {{tip|minions}} and outer {{tip|turret|turrets}}. \n** {{tip|Monsters}} are considered allies for other monsters.\n** {{tip|Wards}} do not prevent ''Isolation''.\n* A number of targetable [[champion summoned units]] are specifically tagged to not be a valid ally of a potentially ''Isolated'' target. These units are:\n** {{cai|Powder Keg|Gangplank}}\n** {{cai|Prophet of an Elder God|Illaoi}}\n** {{cai|Captive Audience|Jhin}}\n** {{cai|Bushwhack|Nidalee}}\n** {{cai|Tunnel|Rek'Sai}}\n** {{cais|Absolution|Senna}} ''Mist Wraiths''\n** {{cai|Noxious Trap|Teemo}}\n** {{cais|Sovereign's Domination|Viego}} ''Mist Wraiths''\n** {{cai|Dark Procession|Yorick}}\n* ''Isolated'' targets are marked by an [[File:Unseen Threat 2.png|20px]] indicator to '''Kha'Zix''' when visible and within {{tt|2500|Estimated}} units of him. However, ''Isolation'' bonuses are evaluated when the relevant spells hit and thus enemies do not need to show the indicator for them to receive the effects.\n{{Unit-targeted cancel conditions}}\n<!--Isolated indicator. How much range required for each target type to be isolated. Enemy decoys, hidden in bush (whether revealed as red silhoutte by oracle), stealth or Senna wraith not visible to Kha'Zix's team counted?-->",
+        "_comments": [
+          "Isolated indicator. How much range required for each target type to be isolated. Enemy decoys, hidden in bush (whether revealed as red silhoutte by oracle), stealth or Senna wraith not visible to Kha'Zix's team counted?"
+        ]
+      }
+    },
+    "W": {
+      "id": "KhazixW",
+      "name": "Void Spike",
+      "description": "Kha'Zix fires exploding spikes that deal physical damage to enemies hit. Kha'Zix is healed if he is also within the explosion radius. If he chooses to Evolve Spike Racks, Void Spike now fires three spikes in a cone, slow enemies hit, and reveals enemy champions hit for 2 seconds. Isolated targets are slowed for extra.",
+      "tooltip": "Kha'Zix fires a spike dealing {{ basedamage }} physical damage to the first enemy hit in a small area. If Kha'Zix is inside the area, he restores {{ healamount }} Health{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9",
+      "cost": "55/60/65/70/75",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "75/105/135/165/195",
+        "55/75/95/115/135",
+        "40",
+        "2",
+        "0",
+        "2",
+        "60",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Healing",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ baseheal }} -> {{ basehealNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kha'Zix",
+        "skill": "W",
+        "icon": "Void Spike.png",
+        "blurb": "{{sbc|Active:}} {{ci|Kha'Zix}} fires a bolt of spikes in the target direction that explodes upon hitting an enemy, dealing {{as|physical damage}} to nearby enemies.",
+        "blurb2": "'''Kha'Zix''' {{tip|heals}} himself if he is within the explosion.",
+        "description": "{{sbc|Active:}} '''Kha'Zix''' fires a bolt of spikes in the target direction that explodes upon hitting an enemy, dealing {{as|physical damage}} to nearby enemies.",
+        "leveling": "{{st|Physical Damage|{{ap|85 to 205}} {{as|(+ 100% '''bonus''' AD)}}}}",
+        "description2": "'''Kha'Zix''' {{tip|heals}} himself if he is within the explosion.",
+        "leveling2": "{{st|Heal|{{ap|55 to 135}} {{as|(+ 50% AP)}}}}",
+        "cooldown": "9",
+        "cost": "{{ap|55 to 75}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "target range": "1025",
+        "width": "{{tip|er|icononly = true}} 140",
+        "effect radius": "275",
+        "speed": "1700",
+        "targeting": "Direction",
+        "affects": "Enemies, Self",
+        "damagetype": "physical",
+        "projectile": "true",
+        "spelleffects": "spellaoe",
+        "onhiteffects": "|spellshield  = True",
+        "notes": "{{Effect at cast time end}}\n* ''Void Spike's'' effect radius is centered around the location of the missile as it collides.",
+        "video": "Kha'Zix - W"
+      }
+    },
+    "E": {
+      "id": "KhazixE",
+      "name": "Leap",
+      "description": "Kha'Zix leaps to an area, dealing physical damage upon landing. If he chooses to Evolve Wings, Leap's range increases by 200 and the cooldown resets on champion kill or assist.",
+      "tooltip": "Kha'Zix leaps, dealing {{ totaldamage }} physical damage upon landing.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "20/18/16/14/12",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "700",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "65/100/135/170/205",
+        "30/35/40/45/50",
+        "10",
+        "2.5",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kha'Zix",
+        "skill": "E",
+        "icon": "Leap.png",
+        "blurb": "{{sbc|Active:}} {{ci|Kha'Zix}} {{tip|dash|leaps}} to the target location, dealing {{as|physical damage}} to nearby enemies upon landing.",
+        "description": "{{sbc|Active:}} '''Kha'Zix''' {{tip|dash|leaps}} to the target location, dealing {{as|physical damage}} to nearby enemies upon arrival.",
+        "leveling": "{{st|Physical Damage|{{ap|65 to 205}} {{as|(+ 20% '''bonus''' AD)}}}}",
+        "description2": "''{{ai|Taste Their Fear|Kha'Zix}} can be cast during the dash. Leap will cast at max range if cast beyond that.''",
+        "cooldown": "{{ap|20 to 12}}",
+        "effect radius": "300",
+        "cost": "50",
+        "costtype": "Mana",
+        "target range": "700",
+        "cast time": "none",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "physical",
+        "spelleffects": "spellaoe",
+        "spellshield": "True",
+        "knockdown": "true",
+        "grounded": "true",
+        "notes": "* '''Kha'Zix''' can use his [[summoner spells]] and [[active ability items|item actives]] while {{tip|dash|leaping}}.",
+        "yvideo": "Kha'Zix - E"
+      }
+    },
+    "R": {
+      "id": "KhazixR",
+      "name": "Void Assault",
+      "description": "Each rank allows Kha'Zix to evolve one of his abilities, giving it a unique additional effect. When activated, Kha'Zix becomes Invisible, triggering Unseen Threat and increasing Move Speed. If he chooses to Evolve Adaptive Cloaking, Void Assault gains increased Invisibility duration, and an additional use.",
+      "tooltip": "Active: Kha'Zix becomes Invisible for {{ stealthduration }} seconds and gains {{ bonusmovementspeedpercent*100 }}% Move Speed. Kha'zix may Recast this Ability once within {{ recastwindow }} seconds.\n\nPassive: Leveling up this Ability allows Kha'zix to Evolve one of his Abilities, granting it additional effects.Taste Their Fear: Gain Ability range, Attack range, and lowers Cooldown by {{ spell.khazixq:effect4amount }}% against Isolated targets.Void Spike: Fires 3 spikes and Slows by {{ spell.khazixw:effect3amount }}%, increased against Isolated targets.Leap: Increased range and refreshes Cooldown on champion takedown.Void Assault: Invisibility duration lasts {{ evolvedstealthduration }} seconds and gains second Recast.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "100/85/70",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "25000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Evolutions Available",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ evolutionsavailable }} -> {{ evolutionsavailableNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kha'Zix",
+        "skill": "R",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} Each rank in ''Void Assault'' allows '''Kha'Zix''' to evolve one of his abilities, granting it additional effects.",
+        "blurb2": "{{sbc|Active:}} {{ci|Kha'Zix}} becomes {{tip|invisible}} and gains {{sti|ms|{{as|'''bonus''' movement speed}}}} for a brief time. Upon breaking invisibility, ''Void Assault'' can be cast a second time at no additional cost.",
+        "description": "{{sbc|Passive:}} Each rank in ''Void Assault'' allows '''Kha'Zix''' to evolve one of his abilities, granting it additional effects. Evolving an ability causes him to enter a 2-second cast time. '''Kha'Zix''' cannot evolve while he is unable to cast abilities.",
+        "icon2": "Void Assault.png",
+        "description2": "{{sbc|Active:}} '''Kha'Zix''' becomes {{tip|invisible}} for {{ap|1.25}} seconds, during which he gains {{sti|ms|{{as|40% '''bonus''' movement speed}}}}.",
+        "icon3": "Void Assault 2.png",
+        "description3": "After 2 seconds of leaving {{tip|invisibility}}, and for the next 12 seconds, ''Void Assault'' can be recast at no additional cost.",
+        "description4": "{{sbc|Recast}}: '''Kha'Zix''' mimics the first cast's effects.",
+        "cooldown": "{{ap|100 to 70}}",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Self",
+        "notes": "*Each cast counts as an ability activation for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n* '''Kha'Zix''' receives the evolution even if he dies while in cast time.\n* Every time ''Void Assault'' is ranked, a secondary menu will pop up for '''Kha'Zix''' to select an ability to evolve, this can only be done once per ability.\n** The only way for '''Kha'Zix''' to evolve all of his abilities is to gain the fourth evolution point by being victorious in [[The Hunt is On!]] (by scoring a {{tip|takedown}} on {{ci|Rengar}}).\n* Using a basic attack breaks the stealth at the end of the attack windup.",
+        "yvideo": "Kha'Zix - R"
+      }
+    }
+  }
+}

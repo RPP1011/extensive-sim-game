@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0071_4v4_s1"
+seed = 11994
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["warden", "shadow_dancer", "knight", "samurai"]
+enemy_hero_templates = ["knight", "rogue", "paladin", "pyromancer"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

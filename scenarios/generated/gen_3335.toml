@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0191_3v3_s2"
+seed = 22114
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["knight", "warden", "paladin"]
+enemy_hero_templates = ["knight", "assassin", "witch_doctor"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

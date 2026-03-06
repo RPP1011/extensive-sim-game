@@ -1,0 +1,238 @@
+[hero]
+name = "Paladin"
+
+[stats]
+hp = 160
+move_speed = 2.4
+
+[stats.tags]
+CROWD_CONTROL = 50.0
+HOLY = 40.0
+DARK = 60.0
+
+[attack]
+damage = 14
+range = 1.5
+
+# --- Ability 1: Holy Strike --- 30 dmg + 15 self-heal
+[[abilities]]
+name = "HolyStrike"
+targeting = "target_enemy"
+range = 1.8
+cooldown_ms = 3500
+cast_time_ms = 300
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 30
+
+[abilities.effects.tags]
+HOLY = 50.0
+PHYSICAL = 40.0
+
+[[abilities.effects]]
+type = "heal"
+amount = 15
+
+[abilities.effects.area]
+shape = "self"
+
+# --- Ability 2: Blessing --- 40 shield 4s + 25% dmg buff 4s on ally
+[[abilities]]
+name = "Blessing"
+targeting = "target_ally"
+range = 3.0
+cooldown_ms = 12000
+cast_time_ms = 300
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 40
+duration_ms = 4000
+
+[[abilities.effects]]
+type = "buff"
+stat = "damage_output"
+factor = 0.25
+duration_ms = 4000
+
+# --- Ability 3: Hammer of Justice --- 25 dmg + 2s stun
+[[abilities]]
+name = "HammerOfJustice"
+targeting = "target_enemy"
+range = 1.8
+cooldown_ms = 8000
+cast_time_ms = 200
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "damage"
+amount = 25
+
+[abilities.effects.tags]
+HOLY = 40.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 2000
+
+[abilities.effects.tags]
+CROWD_CONTROL = 70.0
+
+# --- Ability 4: Lay on Hands --- 80 heal on ally, long CD
+[[abilities]]
+name = "LayOnHands"
+targeting = "target_ally"
+range = 1.8
+cooldown_ms = 25000
+cast_time_ms = 300
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount = 80
+
+[abilities.effects.tags]
+HOLY = 60.0
+
+# --- Ability 5: Consecration --- AoE zone 35 dmg/tick r=3.0, 4s
+[[abilities]]
+name = "Consecration"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 10000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "zone"
+duration_ms = 4000
+tick_interval_ms = 1000
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 35
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 3.0
+
+[abilities.delivery.on_hit.tags]
+HOLY = 50.0
+
+# --- Ability 6: Divine Shield --- self immunity 2.5s
+[[abilities]]
+name = "DivineShield"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 30000
+cast_time_ms = 0
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "banish"
+duration_ms = 2500
+
+# --- Ability 7: Avenging Wrath --- self +35% dmg + 20% move speed 6s
+[[abilities]]
+name = "AvengingWrath"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 20000
+cast_time_ms = 300
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "buff"
+stat = "damage_output"
+factor = 0.35
+duration_ms = 6000
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.2
+duration_ms = 6000
+
+# --- Ability 8: Judgment --- Mark enemy: +30% damage taken for 5s
+[[abilities]]
+name = "Judgment"
+targeting = "target_enemy"
+range = 2.5
+cooldown_ms = 8000
+cast_time_ms = 200
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "damage_modify"
+factor = 1.3
+duration_ms = 5000
+
+[abilities.effects.tags]
+HOLY = 50.0
+
+# --- Ability 9: Divine Smite --- 50 dmg, +25 bonus vs stunned
+[[abilities]]
+name = "DivineSmite"
+targeting = "target_enemy"
+range = 1.8
+cooldown_ms = 6000
+cast_time_ms = 200
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 50
+
+[abilities.effects.tags]
+HOLY = 60.0
+
+[[abilities.effects]]
+type = "damage"
+amount = 25
+
+[abilities.effects.condition]
+type = "target_is_stunned"
+
+[abilities.effects.tags]
+HOLY = 60.0
+
+# --- Passive 1: Retribution Aura --- Every 2s, apply 18% reflect to all allies in r=3.5 for 2.5s
+[[passives]]
+name = "RetributionAura"
+cooldown_ms = 0
+range = 3.5
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 2000
+
+[[passives.effects]]
+type = "reflect"
+percent = 18.0
+duration_ms = 2500
+
+[passives.effects.area]
+shape = "circle"
+radius = 3.5
+
+# --- Passive 2: Divine Favor --- on_hp_below(30%), cd:20s, 60 shield + 30 heal
+[[passives]]
+name = "DivineFavor"
+cooldown_ms = 20000
+range = 0.0
+
+[passives.trigger]
+type = "on_hp_below"
+percent = 30.0
+
+[[passives.effects]]
+type = "shield"
+amount = 60
+duration_ms = 4000
+
+[[passives.effects]]
+type = "heal"
+amount = 30

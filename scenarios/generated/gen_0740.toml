@@ -1,0 +1,13 @@
+[scenario]
+name = "pair_cleric_alchemist_s2"
+seed = 21247
+hero_count = 2
+enemy_count = 3
+difficulty = 2
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["cleric", "alchemist"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

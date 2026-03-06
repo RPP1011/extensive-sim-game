@@ -1,0 +1,11 @@
+[scenario]
+name        = "Escort 5v7 — Protect the Line"
+seed        = 1500
+hero_count  = 5
+enemy_count = 7
+difficulty  = 4
+max_ticks   = 4000
+room_type   = "Pressure"
+
+[assert]
+outcome = "Either"

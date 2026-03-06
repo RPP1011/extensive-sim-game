@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0170_4v6_d4_s2"
+seed = 22293
+hero_count = 4
+enemy_count = 6
+difficulty = 4
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["templar", "alchemist", "rogue", "paladin"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

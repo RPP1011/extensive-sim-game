@@ -1,0 +1,13 @@
+[scenario]
+name = "random_022_3v5_d3"
+seed = 8022
+hero_count = 3
+enemy_count = 5
+difficulty = 3
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["samurai", "necromancer", "druid"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Either"

@@ -1,0 +1,258 @@
+{
+  "id": "Qiyana",
+  "name": "Qiyana",
+  "title": "Empress of the Elements",
+  "resource_type": "Mana",
+  "tags": [
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Royal Privilege",
+      "description": "Qiyana's first basic attack or ability against each enemy deals bonus damage.",
+      "wiki_detail": {
+        "champion": "Qiyana",
+        "skill": "I",
+        "icon": "Royal Privilege.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Qiyana}} basic attacks and basic abilities deal {{as|'''additional''' physical damage|physical damage}}.",
+        "blurb2": "This effect cannot recur on the same target for a period of time. Gathering an {{as|Element|buzzword}} with ''{{ai|Terrashape|Qiyana}}'' will {{sti|cdr|reset}} the cooldown.",
+        "description": "{{sbc|Innate:}} '''Qiyana's''' [[basic attack]]s and [[champion ability|basic abilities]] deal {{pp|15 to 83|color=physical damage}} {{as|(+ 30% '''bonus''' AD)}} {{as|(+ 30% AP)}} {{as|'''additional''' physical damage|physical damage}}. <br/><br/>This effect cannot occur on the same target more than once every few seconds.",
+        "description2": "Gathering an {{as|Element|buzzword}} with ''{{ai|Terrashape|Qiyana}}'' resets ''Royal Privilege's'' per-target {{sti|cooldown}} for enemies affected by ''Royal Privilege'' using a different {{as|Element|buzzword}} (or no {{as|Element|buzzword}}).",
+        "ontargetcdstatic": "25",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "physical",
+        "spellshield": "|spelleffects = proc",
+        "projectile": "|parry        = Unknown",
+        "grounded": "|knockdown    =",
+        "yvideo": "Qiyana - Passive",
+        "notes": "* ''Royal Privilege's'' trigger from a basic attack can be {{tip|blocked}} (bonus damage is negated and the on-target cooldown does not apply).\n* ''Royal Privilege'' will not apply a cooldown to targets that are hit with an {{ai|Elemental Wrath|Qiyana}} that has a different {{ai|Terrashape|Qiyana|Element}} than the {{ai|Terrashape|Qiyana|Element}} '''Qiyana''' currently holds.\n** This does not occur if a new {{ai|Elemental Wrath|Qiyana}} with a different {{ai|Terrashape|Qiyana|Element}} is cast before the first one lands.\n* The effect will not trigger against [[structures]] nor [[ward]]s.\n* {{Pending for test}}: ''Royal Privilege's'' interaction with ''parrying'' effects ({{tip|dodge}}, {{tip|blind}})."
+      }
+    },
+    "Q": {
+      "id": "QiyanaQ",
+      "name": "Elemental Wrath / Edge of Ixtal",
+      "description": "Qiyana swings her weapon, dealing damage with a bonus effect based on her element.",
+      "tooltip": "If Qiyana does not have an Enchantment, she slashes, dealing {{ vanilladamage }} physical damage to enemies in a small area. If she does, this Ability gains extra range and an additional effect based on the type of Enchantment:Ice Enchantment: Briefly Roots, then Slows by {{ slowpotency*-100 }}% for {{ slowduration }} second.Rock Enchantment: Deals an additional {{ tremordamage }} physical damage to units below {{ critthreshold*100 }}% Health.Wild Enchantment: Leaves a trail that turns Qiyana Invisible and grants {{ haste*100 }}% Move Speed.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7",
+      "cost": "35",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "525",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage"
+        ],
+        "effect": [
+          "{{ vanillabase }} -> {{ vanillabaseNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "W": {
+      "id": "QiyanaW",
+      "name": "Terrashape",
+      "description": "Qiyana dashes to a location and enchants her weapon with an element. Her attacks and abilities deal bonus damage while her weapon is enchanted.",
+      "tooltip": "Passive: While Qiyana's weapon is Enchanted, she gains {{ attackspeed*100 }}% Attack Speed and her Attacks deal an additional {{ onhitdamage }} magic damage. She also gains {{ passivems*100 }}% Move Speed while out of combat near the corresponding terrain type.\n\nActive: Qiyana dashes towards a nearby brush, terrain, or river and Enchants her weapon with that particular terrain type. This refreshes Elemental Wrath / Edge of Ixtal's Cooldown.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7",
+      "cost": "25/30/35/40/45",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1100",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "On-Hit Damage",
+          "Move Speed",
+          "Bonus Attack Speed",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ passivems*100.000000 }}% -> {{ passivemsnl*100.000000 }}%",
+          "{{ attackspeed*100.000000 }}% -> {{ attackspeednl*100.000000 }}%",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Qiyana",
+        "skill": "W",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} While holding an {{as|Element|buzzword}}, {{ci|Qiyana}} gains '''bonus''' {{sti|as|{{as|attack speed}}}} and {{sti|range|attack range}}, as well as {{as|'''bonus''' magic damage}} on her basic attacks and basic abilities. '''Qiyana''' gains {{sti|ms|{{as|'''bonus''' movement speed}}}} speed while moving near the current {{as|Element|buzzword}}.",
+        "blurb2": "{{sbc|Active:}} '''Qiyana''' {{tip|dashes}} in the target direction to gather the {{as|Element|buzzword}} of the nearest {{cci|Terrashape Brush.png}} {{sbc|{{as|Brush}}}}, {{cci|Terrashape River.png}} {{sbc|{{as|River}}}} or {{cci|Terrashape Rock.png}} {{sbc|{{as|Terrain}}}} she targeted.",
+        "description": "{{sbc|Passive:}} While holding an {{as|Element|buzzword}}, '''Qiyana''' gains {{sti|as|{{as|'''bonus''' attack speed}}}}, {{sti|range|25 '''bonus''' attack range}} and {{as|'''bonus''' magic damage}} on her basic attacks {{tip|on-hit}} and basic abilities. While [[Combat status|out-of-combat]] and moving near the {{as|Element|buzzword}} currently being held, she gains {{sti|ms|{{as|'''bonus''' movement speed}}}}.",
+        "leveling": "{{st|Bonus Attack Speed|{{ap|5 to 25}}%}}\n{{st|Bonus Magic Damage|{{ap|8 to 40}} {{as|(+ 10% '''bonus''' AD)}} {{as|(+ 45% AP)}}}}\n{{st|Bonus Movement Speed|{{ap|3 to 11}}%}}",
+        "icon2": "Terrashape.png",
+        "description2": "{{sbc|Active:}} '''Qiyana''' {{tip|dashes}} up to 300 units towards the target location to gather the {{as|Element|buzzword}} of the nearest {{cci|Terrashape Brush.png}} {{sbc|{{as|Brush}}}}, {{cci|Terrashape River.png}} {{sbc|{{as|River}}}} or {{cci|Terrashape Rock.png}} {{sbc|{{as|Terrain}}}} she targeted.",
+        "description3": "''A target Element is required to cast this ability''.",
+        "description4": "Once ''Terrashape'' has been learned, '''Qiyana''' is automatically given the {{cci|Terrashape Rock.png}} {{sbc|{{as|Terrain}}}} element upon [[Death|respawning]].",
+        "description5": "'''''Qiyana''' can cast any of her abilities during the dash.''",
+        "target range": "1100",
+        "cast time": "none",
+        "effect radius": "{{tt|366|Element targeting range}}",
+        "speed": "440 + {{as|100% movement speed}}",
+        "cooldown": "7",
+        "cost": "{{ap|25 to 45}}",
+        "costtype": "mana",
+        "targeting": "Location",
+        "affects": "Self",
+        "damagetype": "magic",
+        "spellshield": "|spelleffects = proc",
+        "projectile": "|grounded     = True",
+        "knockdown": "True",
+        "parry": "Unknown",
+        "yvideo": "Qiyana - W",
+        "notes": "* ''Terrashape'' does not interact with [[Terrain#Player-Generated|player-generated terrain]].\n* The water puddles formed by the {{ui|Ocean Drake|Ocean Rift}} on {{tip|Summoner's Rift}} count as valid terrain for obtaining the {{cci|Terrashape River.png}} {{sbc|{{as|River}}}} element.\n* The {{tip|brush|brushes}} grown by {{cai|Brushmaker|Ivern}} count for gathering the {{cci|Terrashape Brush.png}} {{sbc|{{as|Brush}}}} element.\n* Passive bonus damage from basic attacks can be {{tip|blocked}}.\n* The passive damage works with {{iis|Guinsoo's Rageblade}} ''Phantom Hit''.\n* {{Pending for test}}: Passive bonus damage interaction with ''parrying'' effects ({{tip|dodge}}, {{tip|blind}})."
+      }
+    },
+    "E": {
+      "id": "QiyanaE",
+      "name": "Audacity",
+      "description": "Qiyana dashes to an enemy, damaging them.",
+      "tooltip": "Qiyana dashes through an enemy and deals {{ damage }} physical damage to them.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11/10/9/8/7",
+      "cost": "40/45/50/55/60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Base Damage",
+          "Cooldown",
+          "Mana Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basecost }} -> {{ basecostNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Qiyana",
+        "skill": "E",
+        "icon": "Audacity.png",
+        "blurb": "{{sbc|Active:}} {{ci|Qiyana}} {{tip|dash|dashes}} toward the target enemy and deals {{as|physical damage}} upon arrival.",
+        "description": "{{sbc|Active:}} '''Qiyana''' {{tip|dash|dashes}} a fixed distance in the direction of the target enemy. If they are in range upon arrival, she deals {{as|physical damage}}.",
+        "leveling": "{{st|Physical Damage|{{ap|50 to 210}} {{as|(+ 50% '''bonus''' AD)}}}}",
+        "description2": "'''''Qiyana''' can cast any of her abilities during the dash.''",
+        "target range": "650",
+        "cast time": "none",
+        "speed": "{{tt|600 + {{as|100% movement speed}}|Capped at 1200}}",
+        "cooldown": "{{ap|11 to 7}}",
+        "cost": "{{ap|40 to 60}}",
+        "costtype": "mana",
+        "targeting": "Unit",
+        "affects": "Enemies, Self",
+        "damagetype": "physical",
+        "onhiteffects": "|callforhelp  =",
+        "parry": "|spelleffects = Single",
+        "spellshield": "True",
+        "grounded": "True",
+        "knockdown": "True",
+        "yvideo": "Qiyana - E",
+        "notes": "* ''Audacity'' only damages targets if within 250 range upon completion of the dash."
+      }
+    },
+    "R": {
+      "id": "QiyanaR",
+      "name": "Supreme Display of Talent",
+      "description": "Qiyana sends out a shockwave that detonates whatever elements she hits with it, stunning and damaging nearby enemies.",
+      "tooltip": "Qiyana launches a shockwave that Knocks Back enemies and detonates when it hits terrain. The explosion follows the entire edge of the terrain, Stunning for between 0.5 and {{ stunduration }} seconds and dealing {{ damage }} plus {{ missinghealthdamagerock }} max Health physical damage. Stun duration scales down with distance the shockwave has travelled.\n\nAny river or brush the shockwave passes through also explode after a delay for the same damage and Stun.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "950",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Initial Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Qiyana",
+        "skill": "R",
+        "icon": "Supreme Display of Talent.png",
+        "blurb": "{{sbc|Active:}} {{ci|Qiyana}} sweeps a windblast in the target direction that {{tip|airborne|knocks back}} enemies hit and stops upon hitting {{sbc|{{as|Terrain}}}}.",
+        "blurb2": "The windblast creates a cascading shockwave across any {{sbc|{{as|River}}}} or {{sbc|{{as|Brush}}}} it passes, as well as around the borders of {{sbc|{{as|Terrain}}}} it hits. The shockwave briefly {{tip|stun|stuns}} enemies hit and deals {{as|physical damage}} based on {{as|their '''maximum''' health}}.",
+        "description": "{{sbc|Active:}} '''Qiyana''' sweeps a windblast in the target direction that {{tip|airborne|knocks back}} enemies hit, though not through terrain, and stops upon hitting {{sbc|{{as|Terrain}}}}.",
+        "description2": "The windblast creates a cascading shockwave across any {{sbc|{{as|River}}}} or {{sbc|{{as|Brush}}}} it passes through, as well as around the borders of {{sbc|{{as|Terrain}}}} it reaches, dealing {{as|physical damage}} to enemies hit, {{tip|stun|stunning}} them for {{pp|changedisplay=true|type=proximity|0.5;1|0;X}} seconds, and briefly granting {{tip|sight}} of the area along its path. The damage based on the target's health ratio is capped against {{tip|monster|monsters}}.",
+        "leveling2": "{{st|Physical Damage|{{ap|100 to 300 3}} {{as|(+ 125% '''bonus''' AD)}} {{as|(+ 10% of target's '''maximum''' health)}}}}\n{{st|Capped Monster Health Damage|{{ap|500 to 1000 3}} {{as|(+ 125% '''bonus''' AD)}}}}",
+        "effect radius": "{{tt|11000|Border limit}}",
+        "target range": "875",
+        "width": "{{tt|280|Windblast}} / {{tt|120|Terrain Shockwave}}",
+        "speed": "{{tt|2000|Windblast}} / {{tt|2840|Shockwave}}",
+        "cooldown": "120",
+        "cost": "100",
+        "costtype": "mana",
+        "targeting": "Direction",
+        "cast time": "{{fd|0.25}}",
+        "affects": "Enemies, Terrain",
+        "damagetype": "physical",
+        "projectile": "special",
+        "spelleffects": "spellaoe",
+        "onhiteffects": "|spellshield  = True",
+        "yvideo": "Qiyana - R",
+        "notes": "* The windblast needs only to reach near terrain to trigger the terrain shockwave.\n* The shockwave grants sight along each part of its path for {{fd|0.75}} seconds.\n* Artificial terrain (e.g, {{cai|Crystallize|Anivia}}, {{cai|Weaver's Wall|Taliyah}}, {{cai|Pillar of Ice|Trundle}}) touching map terrain will be treated as a single piece of terrain, even when bridging two pieces of map terrain together; the shockwave will wrap around all connecting terrain. The shockwave's path is determined once it initially spreads; any expired terrain will be treated as if it were still there.\n* {{tip|Projectile|Projectile-intercepting}} effects will block the windblast but not the shockwave.\n{{Effect at cast time end}}"
+      }
+    }
+  }
+}

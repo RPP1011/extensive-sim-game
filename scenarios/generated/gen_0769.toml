@@ -1,0 +1,13 @@
+[scenario]
+name = "pair_cleric_shadow_dancer_s1"
+seed = 11257
+hero_count = 2
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["cleric", "shadow_dancer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_monk_engineer_warden"
+seed = 1582
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["monk", "engineer", "warden"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

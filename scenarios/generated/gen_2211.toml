@@ -1,0 +1,13 @@
+[scenario]
+name = "stress_no_healer_entry"
+seed = 1739
+hero_count = 4
+enemy_count = 5
+difficulty = 2
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["knight", "berserker", "pyromancer", "shadow_dancer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

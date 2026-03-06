@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_rogue_necromancer_druid_s1"
+seed = 11458
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["rogue", "necromancer", "druid"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

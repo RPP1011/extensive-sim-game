@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0004_5v6_d3_s2"
+seed = 22127
+hero_count = 5
+enemy_count = 6
+difficulty = 3
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["arcanist", "samurai", "mage", "blood_mage", "necromancer"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0093_4v4"
+seed = 2016
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["berserker", "pyromancer", "arcanist", "shaman"]
+enemy_hero_templates = ["paladin", "arcanist", "warrior", "necromancer"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,119 @@
+[hero]
+name = "Yasuo"
+
+[stats]
+hp = 120
+move_speed = 3.5
+armor = 35.0
+magic_resist = 32.0
+
+[attack]
+damage = 21
+range = 1.5
+cooldown = 800
+
+# --- Q: Steel Tempest ---
+[[abilities]]
+name = "Steel Tempest"
+targeting = "direction"
+range = 4.8
+cooldown_ms = 4000
+cast_time_ms = 3000
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "projectile"
+speed = 12.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 5
+damage_type = "physical"
+
+[abilities.delivery.on_hit.area]
+shape = "line"
+length = 6.0
+width = 0.8
+
+[[abilities.delivery.on_hit]]
+type = "knockback"
+distance = 2.0
+
+# --- W: Wind Wall ---
+[[abilities]]
+name = "Wind Wall"
+targeting = "direction"
+range = 4.0
+cooldown_ms = 25000
+cast_time_ms = 13
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "summon"
+template = "minion"
+count = 1
+
+# --- E: Sweeping Blade ---
+[[abilities]]
+name = "Sweeping Blade"
+targeting = "target_enemy"
+range = 4.8
+cooldown_ms = 8000
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 17
+damage_type = "magic"
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- R: Last Breath ---
+[[abilities]]
+name = "Last Breath"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 18400
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 0
+damage_type = "physical"
+duration_ms = 1000
+tick_interval_ms = 1000
+amount_per_tick = 50
+
+[abilities.effects.area]
+shape = "circle"
+radius = 4.0
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+[[abilities.effects]]
+type = "dash"
+is_blink = true
+
+# --- Passive: Way of the Wanderer ---
+[[passives]]
+name = "Way of the Wanderer"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_taken"
+
+[[passives.effects]]
+type = "shield"
+amount = 20
+duration_ms = 3000
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

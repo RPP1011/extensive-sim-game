@@ -1,0 +1,290 @@
+{
+  "id": "Rakan",
+  "name": "Rakan",
+  "title": "The Charmer",
+  "resource_type": "Mana",
+  "tags": [
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Fey Feathers",
+      "description": "Rakan periodically gains a shield.",
+      "wiki_detail": {
+        "champion": "Rakan",
+        "skill": "I",
+        "blurb": "{{sbc|Innate:}} Periodically, {{ci|Rakan}} generates a {{tip|shield}} that regenerates out of combat if not broken.",
+        "blurb2": "'''Rakan's''' basic attacks and ability hits against enemy {{tip|champions}} {{sti|ah|reduce}} this ability's cooldown.",
+        "blurb3": "{{sbc|Innate - Lover's Leap:}} '''Rakan''' and {{ci|Xayah}} may {{si|recall|Recall}} together by {{tip|channel|channeling}} their ''Recalls'' beside each other.",
+        "icon": "Fey Feathers.png",
+        "description": "{{sbc|Innate:}} Periodically, '''Rakan''' grants himself a {{tip|shield}} for {{pp|30 to 225}} {{as|(+ 95% AP)}} that lasts until broken. After being [[out of combat]] for 5 seconds, any leftover shield will be restored to '''maximum''' value.",
+        "description2": "'''Rakan's''' [[basic attack]]s and [[champion ability|ability]] hits reduce ''Fey Feathers' '' {{sti|cooldown}} by 1 second for each enemy {{tip|champion}} hit.",
+        "icon3": "ProfileIcon1634 Blazing Feathers.png",
+        "description3": "{{sbc|Innate - Lover's Leap:}} If either '''Rakan''' or {{ci|Xayah}} is channeling {{si|Recall}}, the other may move nearby and channel their own to join alongside them. '''Both''' reach base at the time of which the initiator's {{si|Recall}} completes.",
+        "cooldown": "{{pp|40 to 14.5}}",
+        "range": "|targeting    = Passive",
+        "affects": "Self",
+        "damagetype": "|spelleffects = Shield",
+        "spellshield": "|parry        =",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* {{ri|Revitalize}} will record bonus shielding when a new shield is created, but not when it regenerates. In either case, there is no bonus shielding received.\n* The cooldown reduction is granted even if the ability is blocked by a {{tip|spell shield}}.",
+        "yvideo": "Rakan - Passive",
+        "yvideo2": "Rakan - Passive 2"
+      }
+    },
+    "Q": {
+      "id": "RakanQ",
+      "name": "Gleaming Quill",
+      "description": "Flings a magical feather that deals magic damage. Striking a champion or epic monster enables Rakan to heal his allies.",
+      "tooltip": "Rakan flings a magical feather that deals {{ totaldamage }} magic damage to the first enemy hit.\n\nIf the feather hits a champion or epic jungle monster, Rakan restores {{ totalheal }} Health to himself and nearby allies after {{ healdelay }} seconds or when he touches an allied champion.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11/10/9/8/7",
+      "cost": "45",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "850",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Rakan",
+        "skill": "Q",
+        "icon": "Gleaming Quill.png",
+        "blurb": "{{sbc|Active:}} {{ci|Rakan}} slings an enchanted feather in the target direction that deals {{as|magic damage}} to the first enemy hit.",
+        "blurb2": "If the feather hits an enemy {{tip|champion}} or epic {{tip|monster}}, '''Rakan''' winds up a circular mark around him over a few seconds. When the mark completes, Rakan {{tip|heal|heals}} himself.",
+        "blurb3": "If '''Rakan''' collides with an allied champion, the mark instantly completes to grant an increased heal to all champions within the circle.",
+        "description": "{{sbc|Active:}} '''Rakan''' slings an enchanted feather in the target direction that deals {{as|magic damage}} to the first enemy hit.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 250}} {{as|(+ 70% AP)}}}}",
+        "description2": "If the target was an enemy {{tip|champion}} or epic {{tip|monster}}, a radius is marked around '''Rakan'''. After 3 seconds or if an allied champion enters the radius, '''Rakan''' {{tip|heals}} himself and nearby allied champions for {{pp|40 to 210}} {{as|(+ 55% AP)}}.",
+        "target range": "900",
+        "effect radius": "200",
+        "cooldown": "{{tt|{{ap|11 to 7}}|Starts once the projectile vanishes}}",
+        "cdstart": "post-effect",
+        "cast time": "{{fd|0.25}}",
+        "cost": "45",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Enemies / Allies",
+        "damagetype": "Magic",
+        "spelleffects": "spell",
+        "spellshield": "Special",
+        "projectile": "True",
+        "notes": "* The trigger radius is slightly smaller than the heal radius.\n* {{tip|Spell shield}} will not prevent the marked area from being formed.\n* The heal can activate immediately after the projectile hits the target, before the healing return animation completes.\n{{Effect at cast time end}}\n* The heal will trigger and affect '''Rakan''' even if he is {{tip|untargetable}}.",
+        "yvideo": "Rakan - Q"
+      }
+    },
+    "W": {
+      "id": "RakanW",
+      "name": "Grand Entrance",
+      "description": "Dashes to a location, knocking up nearby enemies on arrival.",
+      "tooltip": "Rakan dashes, then spirals into the air, Knocking Up for {{ knockupduration }} second and dealing {{ totaldamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "50/60/70/80/90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "70/120/170/220/270",
+        "0",
+        "1",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "Mana Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basecost }} -> {{ basecostNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Rakan",
+        "skill": "W",
+        "icon": "Grand Entrance.png",
+        "blurb": "{{sbc|Active:}} {{ci|Rakan}} {{tip|dashes}} to the target location.",
+        "blurb2": "After a brief delay, he deals {{as|magic damage}} and briefly {{tip|airborne|knocks up}} nearby enemies.",
+        "description": "{{sbc|Active:}} '''Rakan''' {{tip|dashes}} to the target location. After a {{fd|0.35}}-second delay upon arrival, he deals {{as|magic damage}} to nearby enemies and {{tip|airborne|knocks them up}} for 1 second.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 270}} {{as|(+ 80% AP)}}}}",
+        "description2": "'''''Rakan''' will be {{tip|knockdown|knocked down}} by any {{tip|immobilize|immobilizing}} or {{tip|polymorph|polymorphing}} crowd control, excluding {{tip|sleep}}{{bug}}, during Grand Entrance.''",
+        "description3": "''Grand Entrance will cast at max range if cast beyond that.''",
+        "target range": "600",
+        "effect radius": "250",
+        "cast time": "none",
+        "speed": "1700",
+        "cooldown": "{{ap|16 to 10}}",
+        "cdstart": "on-cast",
+        "cost": "{{ap|50 to 90}}",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "spellaoe",
+        "spellshield": "True",
+        "grounded": "True",
+        "knockdown": "True",
+        "notes": "* No additional details.",
+        "yvideo": "Rakan - W"
+      }
+    },
+    "E": {
+      "id": "RakanE",
+      "name": "Battle Dance",
+      "description": "Flies to an allied champion granting them a shield. Can be re-cast for free for a short duration.",
+      "tooltip": "Rakan dashes to an allied champion, granting them {{ totalshield }} Shield for {{ e3 }} seconds.\n\nRakan can Recast this Ability once within {{ e2 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0",
+      "cost": "40/45/50/55/60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "5",
+        "3",
+        "20/18/16/14/12",
+        "40/45/50/55/60",
+        "700",
+        "1000",
+        "1150",
+        "1250",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Shield Health",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ baseshield }} -> {{ baseshieldNL }}",
+          "{{ e4 }} -> {{ e4NL }}",
+          "{{ e5 }} -> {{ e5NL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Rakan",
+        "skill": "E",
+        "icon": "Battle Dance.png",
+        "icon2": "Battle Dance 2.png",
+        "blurb": "{{sbc|Passive:}} {{ci|Rakan}} can cast or re-cast ''Battle Dance'' at an increased {{sti|range}} when targeting {{ci|Xayah}}.",
+        "blurb2": "{{sbc|Active:}} '''Rakan''' {{tip|shield|shields}} the target allied champion for a short time, then {{tip|dash|dashes}} to them. ''Battle Dance'' can be recast once with no cost.",
+        "blurb3": "{{sbc|Recast:}} '''Rakan''' mimics the first cast.",
+        "description": "{{sbc|Active:}} '''Rakan''' grants a {{tip|shield}} to the target allied champion for 3 seconds and then {{tip|dash|dashes}} to and around them. ''Battle Dance'' can be recast within 5 seconds at no additional cost.",
+        "leveling": "{{st|Shield Strength|{{ap|50 to 150}} {{as|(+ 70% AP)}}}}",
+        "description2": "{{sbc|Recast:}} '''Rakan''' mimics the first cast's effects.",
+        "description3": "'''''Rakan''' will be {{tip|knockdown|knocked down}} by any {{tip|immobilize|immobilizing}} or {{tip|polymorph|polymorphing}} crowd control, excluding {{tip|sleep}}{{bug}}, during Battle Dance.''",
+        "description4": "''If {{ci|Xayah}} is the target, Battle Dance can be cast from an increased range.''",
+        "cost": "{{ap|40 to 60}}",
+        "costtype": "Mana",
+        "cast time": "none",
+        "cooldown": "{{ap|20 to 12}}",
+        "cdstart": "on-cast",
+        "target range": "{{ap|{{tt|700|Standard range}}|{{tt|1000|Enhanced range}}}}",
+        "targeting": "Unit",
+        "speed": "1250 {{as|+ 80% movement speed}}",
+        "affects": "Allies",
+        "spelleffects": "Shield",
+        "grounded": "True",
+        "knockdown": "True",
+        "notes": "*Both casts count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n* The shields do not stack if ''Battle Dance'' is cast on the same target twice. Only the duration and shield amount is refreshed.",
+        "yvideo": "Rakan - E"
+      }
+    },
+    "R": {
+      "id": "RakanR",
+      "name": "The Quickness",
+      "description": "Gains Move Speed, charming and dealing magic damage to enemies touched.",
+      "tooltip": "Rakan gains {{ e5 }}% Move Speed for {{ e2 }} seconds. Rakan deals {{ totaldamagetooltip }} magic damage and Charms enemies for {{ e3 }} second(s) the first time he touches them. The first champion touched grants Rakan {{ e6 }}% decaying Move Speed.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "130/110/90",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "150",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "100/200/300",
+        "4",
+        "1/1.25/1.5",
+        "0.25",
+        "75",
+        "150",
+        "150",
+        "130/110/90",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Charm Duration",
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e3 }} -> {{ e3NL }}",
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Rakan",
+        "skill": "R",
+        "icon": "The Quickness.png",
+        "blurb": "{{sbc|Active:}} {{ci|Rakan}} breaks into a captivating sprint, {{tip|ghosted|ghosting}} and gaining {{sti|ms|{{as|'''bonus''' movement speed}}}} for a few seconds. '''Rakan''' deals {{as|magic damage}} to enemies he touches, briefly {{tip|charm|charming}} and {{tip|slow|slowing}} them.",
+        "blurb2": "Unique enemy {{tip|champion}} collisions slightly extend ''The Quickness' ''duration. The first enemy {{tip|champion|champion}} '''Rakan''' touches also grants him a burst of {{sti|ms|{{as|'''bonus''' movement speed}}}}.",
+        "description": "{{sbc|Active:}} '''Rakan''' breaks into a captivating sprint for 4 seconds, gaining {{tip|ghosting}} and {{sti|ms|{{as|75% '''bonus''' movement speed}}}} for the duration. During this time, he deals {{as|magic damage}} to enemies he collides with and {{tip|charm|charms}} and {{tip|slow|slows}} them by 75% for a duration. This cannot affect the same enemy more than once.",
+        "leveling": "{{st|Magic Damage|{{ap|100 to 300}} {{as|(+ 50% AP)}}}}\n{{st|Disable Duration|{{ap|1 to 1.5}} seconds}}",
+        "description2": "Colliding with an enemy {{tip|champion}} extends ''The Quickness' ''duration by {{fd|0.25}} seconds, which can occur once per champion. When '''Rakan''' collides with his first enemy champion, he gains an additional {{as|75% '''bonus''' movement speed}} that decays after {{fd|0.5}} seconds by 20% every {{fd|0.5}} seconds, then by 15% after decaying by 60% over {{fd|1.5}} seconds.",
+        "description4": "''During The Quickness, '''Rakan''' cannot basic attack enemy champions he did not collide with, unless the attack command was inputted before the ability was activated.''",
+        "collision radius": "150",
+        "cooldown": "{{ap|130 to 90}}",
+        "cdstart": "on-cast",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "cast time": "0.5",
+        "affects": "Self / Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "spellaoe",
+        "spellshield": "True",
+        "grounded": "|knockdown    =",
+        "notes": "{{clr}}\n* The following table refers for interactions while '''Rakan''' is in cast time:\n{{ct|cast|attack=true|cast=[[File: Grand Entrance.png|20px|link=]] ''Grand Entrance'' is disabled but can still be buffered. [[File: Gleaming Quill.png|20px|link=]] ''Gleaming Quill'' and [[File: Battle Dance.png|20px|link=]] ''Battle Dance'' are usable.|move=true|items=true|consume=true|spells=true,false,true,true,true}}",
+        "yvideo": "Rakan - R",
+        "flavorsound": "{{sm2|Rakan_Original_R_0.ogg}} ''\"Party starter!\"''"
+      }
+    }
+  }
+}

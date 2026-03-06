@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0018_3v3"
+seed = 1941
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["knight", "monk", "warrior"]
+enemy_hero_templates = ["Annie", "Gragas", "Amumu"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

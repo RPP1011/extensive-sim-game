@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0141_4v4_s1"
+seed = 12064
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["shadow_dancer", "rogue", "Kled", "Fiddlesticks"]
+enemy_hero_templates = ["Rammus", "shaman", "druid", "pyromancer"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

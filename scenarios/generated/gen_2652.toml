@@ -1,0 +1,13 @@
+[scenario]
+name = "size_1v3_2652"
+seed = 1887
+hero_count = 1
+enemy_count = 3
+difficulty = 2
+max_ticks = 10000
+room_type = "Pivot"
+hero_templates = ["samurai"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

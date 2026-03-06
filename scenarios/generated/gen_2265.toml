@@ -1,0 +1,13 @@
+[scenario]
+name = "stress_solo_tank_entry"
+seed = 1757
+hero_count = 1
+enemy_count = 4
+difficulty = 1
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["paladin"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

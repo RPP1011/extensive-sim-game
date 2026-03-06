@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0142_4v4_d4_s2"
+seed = 22265
+hero_count = 4
+enemy_count = 4
+difficulty = 4
+max_ticks = 10000
+room_type = "Climax"
+hero_templates = ["ranger", "pyromancer", "druid", "warrior"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

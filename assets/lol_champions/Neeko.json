@@ -1,0 +1,321 @@
+{
+  "id": "Neeko",
+  "name": "Neeko",
+  "title": "the Curious Chameleon",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage",
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Inherent Glamour",
+      "description": "Neeko can look like an ally champion or as other units on the map. Receiving immobilizing crowd control, casting damaging spells, damaging enemy towers as a non-champion, or your disguise taking damage equal to its healthbar breaks the disguise.",
+      "wiki_detail": {
+        "champion": "Neeko",
+        "skill": "I",
+        "icon": "Inherent Glamour.png",
+        "description": "{{sbc|Innate:}} '''Neeko''' has a collection of disguises to take on the appearance of allied champions. She can choose a new champion to switch her disguise or select herself to deactivate her disguise, placing ''Inherent Glamour'' on a {{fd|0.5}}-second cooldown. Taking damage from a {{tip|champion}} or {{tip|turret}} puts ''Inherent Glamour'' on a 2-second cooldown.",
+        "description2": "Standing by the {{tt|nearest|300 units}} {{tip|sight|visible}} allied or neutral non-champion non-structure unit while not disguised will gather its ''Sho'Ma'' over 2 seconds, adding its disguise to the collection. Activating this disguise places ''Inherent Glamour'' on a 1-second cooldown. '''Neeko''' can collect only one ''Sho'Ma'', but can discard or consume it. She can store ''Sho'Ma'' from the following units:\n{{column|2|\n* Non-epic {{tip|monsters}}\n* {{tip|Minions}}\n* {{tip|Stealthed trap|Traps}}\n* {{tip|Ward|Wards}}\n* {{tip|Pet|Pets}}\n* [[Jungle plants]]",
+        "description3": "While disguised, '''Neeko''' can use basic attacks while keeping her form. Her disguise breaks if her form takes lethal damage or if she becomes {{tip|immobilize|immobilized}}, deals damage to a [[structure]] with a non-champion form, or uses a damaging [[champion ability|ability]], [[summoner spell]], or [[active ability items|item active]].",
+        "description4": "''Inherent Glamour's disguise is not deactivated from {{ai|Pop Blossom|Neeko}} until after {{fd|0.5}} seconds of its cast. '''Neeko''' cannot activate Inherent Glamour while she is unable to cast abilities.''",
+        "static": "|targeting    = Passive",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|occurrence   =",
+        "projectile": "|grounded     =",
+        "knockdown": "|parry        =",
+        "notes": "* '''Neeko''' can store up the ''Sho'Ma'' of multiple units at a time.\n* ''Inherent Glamour's'' cooldown only prevents '''Neeko''' from activating disguises; she can still store and remove ''Sho'Ma'' while the passive is on cooldown.\n* If '''Neeko''' attempts to activate a disguise while near and for the trap, ward, or jungle plant she stored ''Sho'Ma'' for, she will leap to that unit's exact position over 1 second and then become disguised. If she does so for a monster and is near its respective jungle camp, she will leap to that monster's usual position in the camp.\n** She will fail to activate the disguise after the leap if she is affected by the same conditions that would break a disguise.\n* '''Neeko''' will copy aesthetics as well as superficial mechanical [[Champion statistic|statistics]]. She will fake a number of readings:\n** [[Health|Health bar]] (original's current amount becomes her apparent maximum)\n** [[Manaless|Secondary resource]] - e.g. {{as|mana}}, {{as|energy}} or none at all (original's current amount becomes her apparent maximum)\n** [[Champion statistic|Stats]]\n** [[Buff|Buffs]] and [[Debuff|debuffs]] with their respective icons and VFX/SFX (there are exceptions)\n*** '''Neeko''' sees the buffs that are actually applied to her, while enemies see the disguised champion's buffs.\n** Kill feed icon\n* A number of attributes she actually adopts are:\n** Base movement speed\n** The melee or ranged classification of the champion\n** Base attack speed and attack ratio\n** The projectile or non-projectile quality of their attack\n** Attack range (adopt the new form [[Range|attack range]])\n** [[Size]] (including size modifiers and base champion size)\n** Default transformation toggle (non-innate)\n** Voice lines\n** Character interactions (jokes, taunts, dances, laughs, toggle effects), as well as their {{si|Recall}} animation\n*** '''Neeko''' can copy {{cis|Samira}} taunt animation but she will not actually throw the coin via the {{ai|Taunt|Samira|image = Samira splash coin.png}} ability.\n* ''Inherent Glamour's'' disguise is broken by the following spell casts:\n** Casting {{ai|Q|Neeko}} or {{ai|E|Neeko}}.\n*** Casting {{ai|R|Neeko}} will not break the disguise immediately, but after a delay.\n** Using {{si|Exhaust}}, {{si|Ignite}}, or {{si|Smite}}.\n** Activating {{ii|Hextech Rocketbelt}}, {{ii|Stridebreaker}}, or {{ii|Redemption}}.\n* The scoreboard's question mark of '''Neeko''' (which indicates an enemy is not currently visible to your team) will disappear, if the {{ai|Inherent Glamour|Neeko|disguised}} '''Neeko''' is visible. Therefore, it can be used to determine, whether a unit is '''Neeko''' or not.",
+        "video": "Neeko - Passive\n<!--  Blurb -->",
+        "blurb": "{{sbc|Innate:}} {{ci|Neeko}} has a collection of disguises to take on the appearance of allied champions. She can choose a new champion to switch her disguise or select herself to deactivate her disguise. Standing near a non-champion unit will collect its ''Sho'Ma'', adding its disguise to the collection. She can collect only one ''Sho'Ma'', but can discard or consume it.",
+        "blurb2": "The disguise will break when '''Neeko''' takes \"lethal\" damage, becomes {{tip|immobilized}}, or performs her damaging abilities. This will also incur the cooldown.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "NeekoQ",
+      "name": "Blooming Burst",
+      "description": "Neeko throws a seed dealing magic damage. The seed blooms again on hitting champions or killing units.",
+      "tooltip": "Neeko throws a seed that blooms to deal {{ explosiondamage }} magic damage. If it kills a unit or hits a champion or large monster, it will bloom again, dealing {{ seconddamage }} magic damage. Max 2 extra blooms.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9/8.5/8/7.5/7",
+      "cost": "50/60/70/80/90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Initial Damage",
+          "Explosion Damage",
+          "@AbilityResourceName@ Cost",
+          "Bonus Monster Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ zonedamage }} -> {{ zonedamageNL }}",
+          "{{ secondarydamage }} -> {{ secondarydamageNL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ monsterbonus }} -> {{ monsterbonusNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Neeko",
+        "skill": "Q",
+        "icon": "Blooming Burst.png",
+        "description": "{{sbc|Active:}} '''Neeko''' tosses a seed that ''blooms'' at the target location, dealing {{as|magic damage}} to nearby enemies.",
+        "leveling": "{{st|Magic Damage|{{ap|80 to 260}} {{as|(+ 50% AP)}}}}",
+        "description2": "If the ''bloom'' kills an enemy or hits a {{tip|champion}} or large {{tip|monster}}, it will ''bloom'' again after {{fd|0.75}} seconds to deal {{as|magic damage}}. This may occur up to 2 times per cast.",
+        "leveling2": "{{st|Magic Damage|{{ap|35 to 135}} {{as|(+ 25% AP)}}|Total Maximum Magic Damage|{{ap|80+35*2 to 260+135*2}} {{as|(+ 100% AP)}}}}",
+        "description3": "Each bloom deals {{as|'''bonus''' magic damage}} against {{tip|monsters}}.",
+        "leveling3": "{{st|Bonus Monster Damage|{{ap|35 to 95}}}}",
+        "description4": "''Blooming Burst will cast at max range if cast beyond that.''",
+        "range": "800",
+        "effect radius": "250",
+        "cost": "{{ap|50 to 90}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "cooldown": "{{ap|9 to 7}}",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "special",
+        "spelleffects": "spellaoe",
+        "occurrence": "|projectile   = True",
+        "grounded": "|knockdown    =",
+        "parry": "|notes        = \n* {{tip|Spell shield}} blocks an instance of damage but does not prevent subsequent ''Blooms''.",
+        "video": "Neeko - Q\n<!--  Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Neeko}} tosses a seed that ''blooms'' at the target location, dealing {{as|magic damage}} to nearby enemies.",
+        "blurb2": "If the ''bloom'' kills an enemy or hits a {{tip|champion}} or large {{tip|monster}}, it will ''bloom'' again to deal {{as|magic damage}}, up to two times per cast.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "W": {
+      "id": "NeekoW",
+      "name": "Shapesplitter",
+      "description": "Neeko passively deals bonus magic damage every third attack, briefly increasing her move speed. Neeko can activate to send a clone in a direction and recast to change the direction of the clone.",
+      "tooltip": "Passive: Every 3rd Attack deals an additional {{ passivebonusdamagecalc }} bonus magic damage and increases Neeko's Move Speed by {{ passivehaste }}% for {{ passivehasteduration }} second.\n\nActive: Neeko becomes invisible for {{ stealthduration }} seconds and projects a clone that lasts {{ cloneduration }} seconds. Neeko and the clone gain {{ haste }}% Move Speed for {{ hasteduration }} seconds. \n\nThe clone can be controlled using the Move Pet Click hotkey or by Recasting this Ability.\nThe clone mirrors her spellcasts, emotes, and recall.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16/15/14/13/12",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Passive Damage",
+          "Active Move Speed",
+          "Passive Move Speed",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ passivedamage }} -> {{ passivedamageNL }}",
+          "{{ haste }}% -> {{ hasteNL }}%",
+          "{{ passivehaste }}% -> {{ passivehasteNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Neeko",
+        "skill": "W",
+        "icon": "Shapesplitter 3.png",
+        "description": "{{sbc|Passive:}} '''Neeko's''' basic attacks {{tip|on-hit}} generate a [[stack]] of ''Shapesplitter'',  which refreshes on subsequent attacks and stacks up to 2 times. At 2 stacks, her next basic attack {{tip|on-attack}} consumes them all to become {{tip|projectile|non-projectile}}, deal {{as|'''bonus''' magic damage}} and grant her {{sti|ms|{{as|'''bonus''' movement speed}}}} for 1 second. This attack deals {{as|75 '''bonus''' magic damage}} against {{tip|monsters}}.",
+        "leveling": "{{st|Bonus Magic Damage|{{ap|40 to 180}} {{as|(+ 60% AP)}}}}\n{{st|Bonus Movement Speed|{{ap|10 to 40}}%}}",
+        "icon2": "Shapesplitter.png",
+        "description2": "{{sbc|Active:}} '''Neeko''' creates a {{tip|clone}} of her {{ai|Inherent Glamour|Neeko|current form}}, after which they both instantly become {{tip|invisible}} for {{fd|0.5}} seconds and gain {{as|'''bonus''' movement speed}} for 3 seconds. ''Shapesplitter'' can be recast at any time while the clone is active.",
+        "leveling2": "{{st|Bonus Movement Speed|{{ap|20 to 40}}%}}",
+        "description3": "The clone lasts for 3 seconds, starts running a fixed distance in the target direction, and is {{tip|untargetable}} to allies and for the first {{fd|0.5}} seconds of its lifespan to enemies.<br><br>Additionally, the clone plays the animations for ''{{ai|Blooming Burst|Neeko}}'' and ''{{ai|Tangle-Barbs|Neeko}}'' whenever '''Neeko''' casts them. She can also command the clone once to play the animation of her next [[Emoting|emote]] or {{si|Recall}} for a {{tt|set duration|See notes}} that overrides its original duration.",
+        "icon4": "Shapesplitter 2.png",
+        "description4": "{{sbc|Recast:}} '''Neeko''' sends her clone to the target location if it is not playing an emote or {{si|Recall}} animation.",
+        "cost": "|costtype     =",
+        "cooldown": "{{ap|16 to 12}}",
+        "cdstart": "on-cast",
+        "target range": "900",
+        "targeting": "Direction",
+        "cast time": "none",
+        "affects": "Self",
+        "damagetype": "Magic",
+        "spellshield": "|spelleffects = Proc",
+        "occurrence": "on-hit",
+        "projectile": "False",
+        "grounded": "|knockdown    =",
+        "parry": "True",
+        "notes": "* When '''Neeko''' forces her clone to play an emote or {{si|Recall}} animation, she modifies its duration based on the animation played.\n** Joke - 8 seconds.\n** Dance - 8 seconds.\n** Taunt - {{fd|4.25}} seconds.\n** Laugh - 3 seconds.\n** Toggle - Plays the Joke emote but for the clone only.\n** {{si|Recall}} - 8 seconds.\n** {{si|Empowered Recall}} - 4 seconds.\n* Both '''Neeko''' and the clone use the same running animation.\n* The clone can still be targeted by allied {{tip|auto-targeted}} effects (e.g. {{si|Heal}}, {{ai|Celestial Blessing|Kayle}}).\n* The empowered attack will not trigger against [[ward]]s and [[jungle plants]].\n* Using a basic attack breaks the stealth at the start of the attack windup.",
+        "flavorsound": "{{sm2|Neeko_Original_W_CloneDestroyed_6.ogg}} (Clone is destroyed) \"Hahaa! You fell for it!\"",
+        "video": "Neeko - W\n<!--  Blurb -->",
+        "blurb": "{{sbc|Passive:}} {{cis|Neeko}} basic attacks generate stacks of ''Shapesplitter''. At 2 stacks, her next basic attack will consume them all to become {{tip|projectile|non-projectile}}, deal {{as|'''bonus''' magic damage}}, and briefly grant her {{sti|ms|{{as|'''bonus''' move speed}}}}.",
+        "blurb2": "{{sbc|Active:}} '''Neeko''' creates a {{tip|clone}} of her {{ai|Inherent Glamour|Neeko|current form}}, together they enter brief {{tip|invisibility}} and gain {{as|'''bonus''' move speed}} for a short time. The clone will run in the target direction for a short time before expiring, during which ''Shapesplitter'' can be recast.",
+        "blurb3": "{{sbc|Recast:}} '''Neeko''' directs the clone to the target location.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "E": {
+      "id": "NeekoE",
+      "name": "Tangle-Barbs",
+      "description": "Neeko slings a tangle that damages and roots everything it passes through. If the tangle kills an enemy or passes through a champion, it becomes larger, faster, and roots for longer.",
+      "tooltip": "Neeko slings a tangle that deals {{ basedamage }} magic damage and Roots for {{ minrootduration }} seconds.\n\nThe tangle becomes empowered after hitting an enemy, growing larger, moving faster, and Rooting for {{ maxrootduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/11.5/11/10.5/10",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Minimum Root Duration",
+          "Empowered Root Duration",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ minrootduration }} -> {{ minrootdurationNL }}",
+          "{{ maxrootduration }} -> {{ maxrootdurationNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Neeko",
+        "skill": "E",
+        "icon": "Tangle-Barbs.png",
+        "description": "{{sbc|Active:}} '''Neeko''' slings a magical spiral in the target direction that deals {{as|magic damage}} to enemies hit and {{tip|root|roots}} them for a duration.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 210}} {{as|(+ 65% AP)}}}}\n{{st|Root Duration|{{ap|0.7 to 1.5}} seconds}}",
+        "description2": "If the spiral hits at least one enemy, it grows in size and its speed and root duration is increased.",
+        "leveling2": "{{st|Empowered Root Duration|{{ap|1.8 to 3}} seconds}}",
+        "range": "1000",
+        "speed": "1300 / {{tt|1500|Empowered}}",
+        "width": "140 / {{tt|200|Empowered}}",
+        "cooldown": "{{ap|12 to 10}}",
+        "cost": "{{ap|60 to 80}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "AoE",
+        "occurrence": "|projectile   = True",
+        "grounded": "|knockdown    =",
+        "parry": "|notes        = \n{{Effect at cast time end}}",
+        "video": "Neeko - E\n<!--  Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Neeko}} slings a magical spiral in the target direction that deals {{as|magic damage}} and {{tip|root|roots}} enemies hit.",
+        "blurb2": "If the spiral hits at least one enemy, it grows in size, speed, and root duration.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "R": {
+      "id": "NeekoR",
+      "name": "Pop Blossom",
+      "description": "After a short preparation, Neeko leaps into the air, knocking up all nearby enemies. Upon landing, nearby enemies are damaged and stunned. The preparation is hidden if Neeko is disguised.",
+      "tooltip": "After a delay Neeko leaps into the air, Knocking Up all nearby enemies for {{ delayuntilexplosion }} seconds. She then crashes down, dealing {{ totaldamage }} magic damage to all nearby enemies and Stunning them for {{ stunduration }} seconds.\n\nThis Ability can be prepared in secret if Neeko is disguised. {{ delaybeforepassiveremoval }} seconds after casting this ability Neeko breaks her disguise.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/105/90",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Neeko",
+        "skill": "R",
+        "icon": "Pop Blossom.png",
+        "description": "{{sbc|Active:}} '''Neeko''' winds up spiritual essence over {{fd|1.25}} seconds and highlights an area around herself, which is visible to enemies unless she is ''{{ai|Inherent Glamour|Neeko|disguised}}''. If '''Neeko''' is in a ''{{ai|Inherent Glamour|Neeko|disguise}}'', it will break after {{fd|0.5}} seconds into the duration.",
+        "description2": "After winding up, the cast time begins and '''Neeko''' leaps upward, {{tip|airborne|knocking up}} nearby enemies for {{fd|0.6}} seconds.",
+        "description3": "When the cast time ends, she lands to emit a burst of energy that deals {{as|magic damage}} to nearby enemies and {{tip|stun|stuns}} them for {{fd|0.75}} seconds.",
+        "leveling3": "{{st|Magic Damage|{{ap|150 to 550}} {{as|(+ 120% AP)}}}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|600|Burst radius}}",
+        "cost": "100",
+        "cast time": "{{fd|0.6}}",
+        "costtype": "Mana",
+        "cooldown": "{{ap|120 to 90}}",
+        "cdstart": "on-cast",
+        "targeting": "Auto",
+        "affects": "Enemies, Self",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "occurrence": "|projectile   =",
+        "grounded": "|knockdown    =",
+        "parry": "|notes        = \n'''Ability details:'''\n* The wind up uses a special bar similar to cast bars to represent when ''Pop Blossom's'' cast time will start.\n** The wind up has no special interactions.\n* The highlighted area is fixed around '''Neeko'''.\n* '''Neeko's''' most recent {{ai|Shapesplitter|Neeko}} clone disappears when ''Pop Blossom's'' cast time starts.\n{{Effect at cast time end}}\n'''Interactions:'''\n* On-cast effects are applied on activation.\n* ''Pop Blossom'' can start its cast time during {{tip|stasis (buff)|stasis}}.\n{{ct|cast|move=false|cast=false|attack=false|items=false|consume=false|spells=true,false,false,false,false|interrupts=revival-false}}",
+        "video": "Neeko - R",
+        "flavorsound": "{{sm2|Neeko_Original_R_0.ogg}} ''\"Get ready!\"''\n<!--  Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Neeko}} briefly winds up spiritual essence and highlights the area around her, which is visible to enemies unless she is {{ai|Inherent Glamour|Neeko|disguised}}.",
+        "blurb2": "Afterwards, '''Neeko''' briefly leaps upward and {{tip|airborne|knocks up}} nearby enemies. She then lands to emit a burst of energy that deals {{as|magic damage}} and briefly {{tip|stun|stuns}} nearby enemies.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    }
+  }
+}

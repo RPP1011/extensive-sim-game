@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0121_4v4"
+seed = 2044
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["warrior", "shaman", "templar", "bard"]
+enemy_hero_templates = ["templar", "druid", "engineer", "elementalist"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

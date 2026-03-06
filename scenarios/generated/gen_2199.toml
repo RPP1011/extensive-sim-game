@@ -1,0 +1,13 @@
+[scenario]
+name = "stress_no_tank_pivot"
+seed = 1735
+hero_count = 4
+enemy_count = 5
+difficulty = 3
+max_ticks = 10000
+room_type = "Pivot"
+hero_templates = ["cleric", "shadow_dancer", "pyromancer", "blood_mage"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

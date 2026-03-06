@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0178_4v4_s1"
+seed = 12101
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["Gnar", "Vex", "Azir", "Camille"]
+enemy_hero_templates = ["Sivir", "Ashe", "Nidalee", "Braum"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

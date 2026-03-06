@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0056_4v4"
+seed = 1979
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["Nidalee", "Ambessa", "Zed", "Nami"]
+enemy_hero_templates = ["Pyke", "Hwei", "Graves", "Lissandra"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

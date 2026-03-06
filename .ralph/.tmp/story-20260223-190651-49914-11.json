@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "total": 12,
+  "remaining": 1,
+  "quality_gates": [
+    "cargo test"
+  ],
+  "id": "US-012",
+  "title": "Add deterministic regression fixtures and screenshot stages"
+}

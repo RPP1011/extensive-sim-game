@@ -1,0 +1,291 @@
+{
+  "id": "Maokai",
+  "name": "Maokai",
+  "title": "the Twisted Treant",
+  "resource_type": "Mana",
+  "tags": [
+    "Tank",
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Sap Magic",
+      "description": "Maokai's basic attack also heals him and deals additional damage on a moderate cooldown. Each time Maokai casts a spell or is struck by an enemy's spell, this cooldown is reduced.",
+      "wiki_detail": {
+        "champion": "Maokai",
+        "skill": "I",
+        "icon": "Sap Magic.png",
+        "icon2": "Sap Magic 2.png",
+        "blurb": "{{sbc|Innate:}} Periodically, {{cis|Maokai}} next basic attack will {{tip|heal}} him for a portion of {{as|his '''maximum''' health}}.",
+        "blurb2": "Each time '''Maokai''' casts an ability or is hit by an enemy ability, ''Sap Magic'' cooldown is {{sti|cdr|reduced}} by a few seconds.",
+        "description": "{{sbc|Innate:}} Periodically, '''Maokai''' empowers his next [[basic attack]] to have an {{tip|uncancellable windup}} and {{tip|heal}} him for {{as|{{pp|4;4.2;4.4;4.8;5;5.65;6.3;6.95;7.6;8.25;8.9;9.55;10.2;10.85;11.5;12.15;12.8|key=%}} '''maximum''' health}} after a {{tt|{{fd|0.25}}|Reduced by attack speed.}}-second delay.",
+        "description2": "Each time '''Maokai''' casts an [[Champion ability|ability]], hits at least one enemy champion or epic monster with ''{{ai|Sapling Toss|Maokai}}'', or is struck by an enemy's ability, ''Sap Magic's'' {{sti|cooldown}} is reduced by 4 seconds, modified to {{fd|1.5}} if he is hit by a large {{tip|monster|monster's}} basic attack or ability.",
+        "description3": "''Sap Magic {{tip|basic attack reset|resets}} '''Maokai's''' basic attack timer, and will not trigger if he is above {{sti|{{as|95% '''maximum''' health}}}}.''",
+        "static": "{{pp|30 to 20 for 3|1 to 11}}",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "|spelleffects     = Heal",
+        "spellshield": "|parry            = Special",
+        "projectile": "|grounded         =",
+        "knockdown": "|notes            = \n* ''Sap Magic'' does not occur if the attack is {{tip|dodge|dodged}} and/or missed if '''Maokai''' is {{tip|blind|blinded}}. It will occur if it is {{tip|block|blocked}}.\n* The striking ability has to trigger [[ability effects|spell effects]] such as {{tip|spell damage}} or {{tip|area damage}} for the cooldown to be reduced.\n* If '''Maokai''' possesses a {{tip|spell shield}} and it consumes an enemy ability, he will still receive the cooldown reduction.\n* The empowered attack will not trigger against [[structures]] nor [[ward]]s."
+      }
+    },
+    "Q": {
+      "id": "MaokaiQ",
+      "name": "Bramble Smash",
+      "description": "Maokai knocks back nearby enemies with a shockwave, dealing magic damage and slowing them.",
+      "tooltip": "Maokai smashes his fist into the ground, dealing {{ totaldamage }} plus {{ basepercenthealth*100 }}% max Health magic damage and briefly Slowing. Nearby enemies are also Knocked Back.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7/6.5/6/5.5/5",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Max Health %",
+          "Monster Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ basepercenthealth*100.000000 }}% -> {{ basepercenthealthnl*100.000000 }}%",
+          "{{ bonusmonsterdamage }} -> {{ bonusmonsterdamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Maokai",
+        "skill": "Q",
+        "icon": "Bramble Smash.png",
+        "blurb": "{{sbc|Active:}} {{ci|Maokai}} sends a shockwave in the target direction that deals {{as|magic damage}} and briefly {{tip|slow|slows}} enemies hit.",
+        "blurb2": "Enemies near '''Maokai''' are also briefly {{tip|stun|stunned}} and {{tip|airborne|knocked back}}.",
+        "description": "{{sbc|Active:}} '''Maokai''' sends a shockwave in the target direction that deals {{as|magic damage}} to enemies hit and {{tip|slow|slows}} them by 99% for {{fd|0.25}} seconds. ''Bramble Smash'' deals {{as|'''bonus''' magic damage}} to {{tip|monsters}}.",
+        "leveling": "{{st|Magic Damage|{{ap|65 to 245}} {{as|(+ {{ap|2 to 4}}% of the target's '''maximum''' health)}} {{as|(+ 40% AP)}}}}\n{{st|Bonus Monster Damage|{{ap|120 to 160}}|Total Monster Damage|{{ap|65+120 to 245+160}} {{as|(+ {{ap|2 to 4}}% of the target's '''maximum''' health)}} {{as|(+ 40% AP)}}}}",
+        "description2": "Enemies near '''Maokai''' are also {{tip|stun|stunned}} for {{fd|0.5}} seconds and {{tip|airborne|knocked back}} up to 300 units based on their proximity to him.",
+        "target range": "600",
+        "effect radius": "{{tt|300|Estimated}}",
+        "cost": "40",
+        "costtype": "Mana",
+        "cooldown": "{{ap|7 to 5}}",
+        "cast time": "{{fd|0.3889}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "Area of effect",
+        "spellshield": "True",
+        "parry": "|projectile   = True",
+        "grounded": "|knockdown    =",
+        "notes": "{{Effect at cast time end}}\n* ''Bramble Smash's'' damage based on the target's health ratio is capped at 9999 against non-champions.\n* {{tip|Displacement immunity}} will also resist the application of the {{tip|stun}}."
+      }
+    },
+    "W": {
+      "id": "MaokaiW",
+      "name": "Twisted Advance",
+      "description": "Maokai contorts into a mass of moving roots, becoming untargetable and dashing to the target. Upon arrival, he roots the target.",
+      "tooltip": "Maokai transforms into a moving mass of roots, becoming Untargetable and dashing to an enemy. Upon arrival, he Roots the enemy for {{ e2 }} second(s) and deals {{ totaldamage }} magic damage. {{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "525",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "60/85/110/135/160",
+        "1/1.1/1.2/1.3/1.4",
+        "0",
+        "0",
+        "1300",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Root Duration",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ e2 }} -> {{ e2NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Maokai",
+        "skill": "W",
+        "icon": "Twisted Advance.png",
+        "blurb": "{{sbc|Active:}} {{ci|Maokai}} {{tip|dashes}} to the target enemy while being {{tip|untargetable}}, dealing {{as|magic damage}} and briefly {{tip|root|rooting}} them upon arrival.",
+        "description": "{{sbc|Active:}} '''Maokai''' {{tip|dashes}} to the target enemy while being {{tip|untargetable}}. Upon arrival, he deals {{as|magic damage}} and {{tip|root|roots}} them for a duration.",
+        "leveling": "{{st|Magic Damage|{{ap|60 to 160}} {{as|(+ 40% AP)}}}}\n{{st|Root Duration|{{ap|1 to 1.4}} seconds}}",
+        "target range": "525",
+        "cooldown": "{{ap|14 to 10}}",
+        "cost": "60",
+        "speed": "{{tt|1300|Dash speed, estimated}}",
+        "cast time": "none",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "spell",
+        "spellshield": "True",
+        "parry": "|projectile    =",
+        "callforhelp": "true",
+        "grounded": "True",
+        "knockdown": "true",
+        "notes": "* '''Maokai''' will track the target if they change locations.\n** He will dash to the target's previous location without applying ''Twisted Advance's'' effects if the target is too far away or moves beyond {{tt|2000|Estimated}} units.\n** He will stop dashing if the target is too far away the moment the dash begins.\n* ''Twisted Advance'' will fail to deal damage and apply the {{tip|root}} if the target is {{tip|untargetable}} upon arrival."
+      }
+    },
+    "E": {
+      "id": "MaokaiE",
+      "name": "Sapling Toss",
+      "description": "Maokai flings a sapling to the target area to stand guard. More effective in brush.",
+      "tooltip": "Maokai flings a sapling, which stands watch for {{ saplingduration }} seconds. Saplings chase nearby enemies, detonating on arrival to deal {{ totaldamage }} magic damage and Slow surrounding enemies by {{ slowamount*100 }}% for {{ slowduration }} seconds. Sap Magic's Cooldown is reduced by an additional 4 seconds if the sapling hits an enemy champion or epic monster.\n\nIf placed in brush, Saplings instead last for {{ empoweredsaplingduration }} seconds and cause a larger explosion, dealing {{ totalempowereddamage }} magic damage over {{ empowereddotduration }} seconds and Slowing enemies by {{ empoweredslowamount }}.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "18/17/16/15/14",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1100",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Empowered Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ empoweredbasedamage }} -> {{ empoweredbasedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Maokai",
+        "skill": "E",
+        "icon": "Sapling Toss.png",
+        "blurb": "{{sbc|Active:}} {{ci|Maokai}} flings a ''Sapling'' to the target location, where it remains for some time. A ''Sapling'' will chase nearby enemies for a short time, expiring afterward or upon contact.",
+        "blurb2": "When a ''Sapling'' expires, it deals {{as|magic damage}} to nearby enemies based on {{as|their '''maximum''' health}} and {{tip|slow|slows}} them for a short time.",
+        "blurb3": "A ''Sapling'' placed in {{tip|brush}} will last longer, and deal double damage over 3 bursts.",
+        "description": "{{sbc|Active:}} '''Maokai''' {{tip|projectile|flings}} a ''Sapling'' to the target location, granting {{tip|sight}} of the {{tt|area|can see across terrain from the center, but not into brush}}.",
+        "description2": "Once landed, a ''Sapling'' remains stationary for 30 seconds or until it reacts to the first nearby visible enemy, chasing them for up to {{fd|2.5}} seconds. The ''Sapling'' explodes upon colliding with an enemy or when it expires, dealing {{as|magic damage}} to nearby enemies, capped at 300 against non-champions, and {{tip|slow|slowing}} them by 45% for 2 seconds.",
+        "leveling2": "{{st|Magic Damage|{{ap|50 to 150}} {{as|(+ 5% '''bonus''' health)}} {{as|(+ 25% AP)}}}}",
+        "description3": "A ''Sapling'' placed in {{tip|brush}} instead lasts 30 {{as|(+ {{fd|1.5}}% '''bonus''' health)}} seconds, deals double damage to struck non-{{tip|minion}} targets over 3 bursts, and {{tip|slow|slows}} them by 45% {{as|(+ 1% per 100 '''bonus''' health)}} {{as|(+ 1% per 100 AP)}}, as well as {{tip|standard sight|reveals}} them for 3 seconds. The first instance of damage is dealt instantly and the second and third instances occur each {{fd|0.75}} seconds thereafter. The '''total''' damage is capped at 600 against non-champions.",
+        "leveling3": "{{st|Total Enhanced Damage|{{ap|50*2 to 150*2}} {{as|(+ {{ap|5*2}}% '''bonus''' health)}} {{as|(+ {{ap|25*2}}% AP)}}|Enhanced Damage Per Tick|{{ap|50*2/3 to 150*2/3|round=2}} {{as|(+ {{ap|5*2/3|round=2}}% '''bonus''' health)}} {{as|(+ {{ap|25*2/3|round=2}}% AP)}}}}",
+        "description4": "''See [[Maokai/LoL#Pets|Pets]] for more details about Saplings.''",
+        "target range": "1100",
+        "effect radius": "{{tt|175|Damage range}} / {{tt|350|Initial sight range, pending for confirmation}} / {{tt|475|Sight range, while on the ground}}",
+        "tether radius": "250",
+        "speed": "{{tt|400 - 460|Sapling movement speed, based on Maokai's boots.}}",
+        "cast time": "{{fd|0.25}}",
+        "cooldown": "{{ap|18 to 14}}",
+        "cost": "{{ap|60 to 80}}",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "special",
+        "spellshield": "true",
+        "parry": "|projectile   = true",
+        "grounded": "|knockdown    =",
+        "flavorsound": "{{sm2|Maokai_Original_E_0.ogg}} ''\"Away, my sapling.\"''",
+        "notes": "* Applies {{tip|area damage}} from a normal ''Sapling'' and deals {{tip|persistent damage}} to enemies hit by an empowered ''Sapling''.\n* ''Saplings'' have a base [[movement speed]] of 400, increased based on '''Maokai's''' [[boots]]:\n** {{ii|Boots}}: 425\n** {{ii|Berserker's Greaves}}, {{ii|Ionian Boots of Lucidity}}, {{ii|Mercury's Treads}}, {{ii|Plated Steelcaps}} and {{ii|Sorcerer's Shoes}}: 445\n** {{ii|Boots of Swiftness}}: 460\n* ''Sapling Toss'' grants {{tip|sight}} of the target location even while the ''Sapling'' is in flight.\n* The ''Saplings'' will continue to chase their target even if they lose {{tip|sight}} of them (but they do not prioritize champions so they will chase the first target they encounter).\n* ''Saplings'' will appear on the map as minions despite being untargetable and invulnerable.\n* ''Saplings'' cannot stack on top of each other (they will move a short distance away from one another if they are aimed at the same location).\n* The damage of empowered ''Saplings'' is equally split into chunks of {{fd|66.7}}% of the normal ''Sapling'' damage every second, once immediately, and then at the 1 and 2 second mark.\n* The ''Sapling'' will stop its movement upon colliding with {{ai|Unbreakable|Braum}}.\n* ''Saplings'' attack {{ui|Baron Nashor}} always at the same two points, no matter where they were placed.[[File:Sapling Toss Baron_Nashor.png|center|200px]]"
+      }
+    },
+    "R": {
+      "id": "MaokaiR",
+      "name": "Nature's Grasp",
+      "description": "Maokai summons a colossal wall of brambles and thorns that slowly advances forwards, damaging and rooting any enemies in the path.",
+      "tooltip": "Maokai summons a colossal wave of brambles and thorns, Rooting enemies for {{ minrootduration }} to {{ maxrootduration }} seconds, increasing with distance travelled, and dealing {{ totaldamage }} magic damage. Hitting a champion gives Maokai {{ movehaste*100 }}% Move Speed, decaying over {{ hasteduration }} seconds. {{ spellmodifierdescriptionappend }}",
+      "cooldown": "130/110/90",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "3000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0.6",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Move Speed",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ movehaste*100.000000 }}% -> {{ movehastenl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Maokai",
+        "skill": "R",
+        "icon": "Nature's Grasp.png",
+        "blurb": "{{sbc|Active:}} {{ci|Maokai}} summons a colossal wall of five thorny brambles that slowly advances in the target direction, each stopping when they collide with an enemy {{tip|champion}}.",
+        "blurb2": "Each bramble deals {{as|magic damage}} to enemies hit and {{tip|root|roots}} them for a short time based on the bramble's distance travelled.",
+        "description": "{{sbc|Active:}} '''Maokai''' summons a colossal wall of five thorny brambles that slowly advances in the target direction, accelerating over time, each stopping when they collide with an enemy {{tip|champion}}. Hitting at least one enemy champion grants '''Maokai''' {{sti|{{as|'''bonus''' movement speed}}}} decaying over 2 seconds.",
+        "leveling": "{{st|Bonus Movement Speed|{{ap|40 to 60}}%}}",
+        "description2": "Each bramble deals {{as|magic damage}} to enemies hit and {{tip|root|roots}} them for {{pp|type=distance traveled|0.75 to 2.25|0 to 1000 by 100|formula=Starts at 0.75 seconds and increases up to 2.25 seconds over 1000 units traveled}} seconds.",
+        "leveling2": "{{st|Magic Damage|{{ap|150 to 300}} {{as|(+ 75% AP)}}}}",
+        "target range": "{{tip|cr|icononly = true}} {{tt|3000|See notes}}",
+        "width": "{{tip|er|icononly = true}} 240",
+        "speed": "{{pp|100;400;700;750|0 to 3|type=seconds active|formula=100 + 300 per second, capped at 750}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "cooldown": "{{ap|130 to 90}}",
+        "cast time": "{{fd|0.5}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "Area of effect",
+        "spellshield": "True",
+        "parry": "|projectile       = True",
+        "grounded": "|knockdown        =",
+        "notes": "* The brambles are made up of 4 {{tip|projectile|missiles}} each which trail 100 units behind one another. The front missile carries the visual effect. When colliding with a champion, all missiles of one bramble are destroyed simultaneously.\n** Missiles destroyed by other means such as {{cai|Blade Whirl|Samira}} may not destroy their fellows from the same branch, resulting in one or more invisible missiles that may still collide.{{bug}}\n{{Effect at cast time start}}"
+      }
+    }
+  }
+}

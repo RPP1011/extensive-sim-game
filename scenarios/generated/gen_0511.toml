@@ -1,0 +1,13 @@
+[scenario]
+name = "pair_warden_shadow_dancer_s1"
+seed = 11171
+hero_count = 2
+enemy_count = 3
+difficulty = 2
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["warden", "shadow_dancer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

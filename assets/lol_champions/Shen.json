@@ -1,0 +1,285 @@
+{
+  "id": "Shen",
+  "name": "Shen",
+  "title": "the Eye of Twilight",
+  "resource_type": "Energy",
+  "tags": [
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Ki Barrier",
+      "description": "After casting a spell, Shen gets a shield. Affecting other champions reduces the cooldown of this effect.",
+      "wiki_detail": {
+        "champion": "Shen",
+        "skill": "I",
+        "icon": "Ki Barrier.png",
+        "blurbicon": "Ki Barrier.png",
+        "blurb": "{{sbc|Innate:}} '''Shen''' manifests a {{as|Spirit Blade|buzzword}} that he can control with his abilities.",
+        "blurb2": "{{sbc|Passive:}} {{cis|Shen}} ability casts grant him a {{tip|shield}} based on {{as|his '''bonus''' health}} for a short time. If he affects at least one other {{tip|champion}} with an ability, ''Ki Barrier's'' cooldown is {{sti|cdr|reduced}}.",
+        "description": "{{sbc|Innate:}} After completing an [[champion ability|ability's]] effects, '''Shen''' grants himself a {{tip|shield}} for {{pp|47 to 120}} {{as|(+ 13% '''bonus''' health)}} for {{fd|2.5}} seconds. If '''Shen''' affects at least one other {{tip|champion}} with an ability, ''Ki Barrier's'' {{sti|cooldown}} is reduced by {{pp|4 to 7.5}} seconds.",
+        "description2": "'''Shen''' manifests a {{as|Spirit Blade|buzzword}} that he can control with ''{{ai|Twilight Assault|Shen}}'' and ''{{ai|Spirit's Refuge|Shen}}''.",
+        "static": "10",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "|spelleffects     = Shield",
+        "spellshield": "|parry            =",
+        "projectile": "|grounded         =",
+        "knockdown": "|notes            =\n* The {{as|Spirit Blade|buzzword}} spawns with '''Shen''', teleports closer to him if he gets too far away, and instantly blinks to him if he uses any global {{tip|blink}} ({{si|Teleport}}, {{si|Recall}}, or {{ai|Stand United|Shen}}). It will also dissappear if '''Shen''' dies and reappear upon [[death|respawning]].\n* Enemies see an arrow pointing from '''Shen''' to the location of his {{as|Spirit Blade|buzzword}} even if it is not visible.\n* {{ai|Twilight Assault|Shen}} will grant the shield if the {{as|Spirit Blade|buzzword}} reaches '''Shen'''. If it is stopped, no shield is granted. It will grant the cooldown reduction upon hitting an enemy champion.\n* {{ai|Spirit's Refuge|Shen}} will grant the shield and/or the cooldown reduction after the protective zone disappears. It does not need to block attacks to trigger the cooldown reduction, just touch an ally champion at any point of the duration.\n* {{ai|Shadow Dash|Shen}} will grant the shield when the dash ends. It will grant the cooldown reduction upon hitting an enemy champion.\n** If the dash is {{tip|interrupt|interrupted}}, the shield will instead be received the moment the {{tip|crowd control}} source is applied, before damage calculation (if any).\n* {{ai|Stand United|Shen}} will give the shield and/or the cooldown reduction upon completing the channel."
+      }
+    },
+    "Q": {
+      "id": "ShenQ",
+      "name": "Twilight Assault",
+      "description": "Shen recalls his spirit blade to attack with it, dealing damage based on the target's max health. The attacks are greatly empowered if it collides with an enemy champion, and all collided enemies are slowed while running away from Shen.",
+      "tooltip": "Shen recalls his Spirit Blade. Enemies hit by the pull are Slowed by {{ e4 }}% while moving away from Shen for the next {{ e5 }} seconds.\n\nAdditionally, Shen's next {{ e3 }} Attacks deal an additional {{ baseflatdamage }} plus {{ basepercenthealth }} max Health magic damage. If Shen hit an enemy champion with the Spirit Blade, the damage is increased to {{ baseflatdamage }} plus {{ emppercenthealth }} max Health magic damage and he gains {{ e9 }}% Attack Speed for those Attacks.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8/7.25/6.5/5.75/5",
+      "cost": "140/130/120/110/100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "1",
+        "2/2.5/3/3.5/4",
+        "3",
+        "25/30/35/40/45",
+        "2",
+        "5/5.5/6/6.5/7",
+        "120/140/160/180/200",
+        "8",
+        "50",
+        "75"
+      ],
+      "leveltip": {
+        "label": [
+          "Base Percent Damage",
+          "Enhanced Percent Damage",
+          "Slow",
+          "@AbilityResourceName@ Cost",
+          "Monster Damage Cap",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e2 }}% -> {{ e2NL }}%",
+          "{{ e6 }}% -> {{ e6NL }}%",
+          "{{ e4 }}% -> {{ e4NL }}%",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ e7 }} -> {{ e7NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Shen",
+        "skill": "Q",
+        "icon": "Twilight Assault.png",
+        "blurb": "{{sbc|Active:}} {{ci|Shen}} recalls his {{as|Spirit Blade|buzzword}} to his location, which shortly {{tip|slow|slows}} enemies hit while moving away from him.",
+        "blurb2": "Once it arrives, '''Shen''' empowers his next three basic attacks within a period to gain {{sti|range|'''bonus''' range}} and deal {{as|'''bonus''' magic damage}} based on the {{as|target's '''maximum''' health}}.",
+        "blurb3": "If the {{as|Spirit Blade|buzzword}} hit at least one enemy {{tip|champion}} during the travel, the empowerment is enhanced and additionally grants him {{sti|as|{{as|'''bonus''' attack speed}}}}.",
+        "description": "{{sbc|Active:}} '''Shen''' recalls his {{as|Spirit Blade|buzzword}} to his location. Enemy champions hit are {{tip|slow|slowed}} for the next 2 seconds while moving away from '''Shen'''.",
+        "leveling": "{{st|Slow|{{ap|15 to 35}}%}}",
+        "icon2": "Twilight Assault 2.png",
+        "description2": "Once it arrives, '''Shen''' empowers his next 3 [[basic attack]]s within 8 seconds to gain {{sti|range|75 '''bonus''' range}} and deal {{as|'''bonus''' magic damage}}.",
+        "leveling2": "{{st|Bonus Magic Damage|{{pp|10 to 40 for 6|1 to 16}} {{as|(+ {{ap|2 to 4}}% {{as|(+ {{fd|1.5}}% per 100 AP)}} of target's '''maximum''' health)|health}}|Total Magic Damage|{{pp|10*3 to 40*3 for 6|1 to 16}} {{as|(+ {{ap|2*3 to 4*3}}% {{as|(+ {{fd|4.5}}% per 100 AP)}} of target's '''maximum''' health)|health}}}}",
+        "icon3": "Twilight Assault 3.png",
+        "description3": "If the {{as|Spirit Blade|buzzword}} hit at least one enemy {{tip|champion}} during the travel, the empowerment is enhanced to deal increased {{as|'''bonus''' magic damage}} and additionally grant '''Shen''' {{sti|as|{{as|50% '''bonus''' attack speed}}}}.",
+        "leveling3": "{{st|Increased Bonus Damage|{{pp|10 to 40 for 6|1 to 16}} {{as|(+ {{ap|4 to 6}}% {{as|(+ 2% per 100 AP)}} of target's '''maximum''' health)|health}}|Total Increased Damage|{{pp|10*3 to 40*3 for 6|1 to 16}} {{as|(+ {{ap|4*3 to 6*3}}% {{as|(+ 6% per 100 AP)}} of target's '''maximum''' health)|health}}}}",
+        "description4": "Empowered attacks against {{tip|monsters}} deal 100% '''bonus''' damage, but their '''total''' damage is capped.",
+        "leveling4": "{{st|Maximum Monster Damage|{{ap|120 to 200}}}}",
+        "cooldown": "{{ap|8 to 5}}",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "cost": "{{ap|140 to 100}}",
+        "costtype": "energy",
+        "effect radius": "{{tt|Global|Recall range}}",
+        "width": "{{tip|er|icononly = true}} {{tt|160|Chasing blade missile width}}",
+        "speed": "{{tt|2000 - 5000|Acceleration 2000 per second}}",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "Spell",
+        "spellshield": "True",
+        "parry": "true",
+        "projectile": "Special",
+        "grounded": "|knockdown        =",
+        "notes": "* The {{as|Spirit Blade|buzzword}} will stop in place upon colliding with {{ai|Wind Wall|Yasuo}} or {{ai|Unbreakable|Braum}}. If this occurs, '''Shen''' will not receive the empowered attacks.\n* When it is called, the {{as|Spirit Blade|buzzword}} also checks for units which's {{tip|gameplay radius}} it overlaps which (equal to a {{tip|er|icononly = true}} 0 radius check) before flying off, allowing it to hit enemies whose center is behind the missile origin.\n* The empowered attack will not trigger against [[structures]] nor [[ward]]s."
+      }
+    },
+    "W": {
+      "id": "ShenW",
+      "name": "Spirit's Refuge",
+      "description": "Attacks that would hit Shen or his allies near his spirit blade are blocked.",
+      "tooltip": "Shen creates a defensive zone at his Spirit Blade for {{ e1 }} seconds. Attacks against allied champions in the zone are blocked. \n\nIf there are no champions to protect in the zone when it starts, it will wait for up to {{ e2 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16/14.5/13/11.5/10",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "1.75",
+        "2",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Shen",
+        "skill": "W",
+        "icon": "Spirit's Refuge.png",
+        "blurb": "{{sbc|Active:}} {{ci|Shen}} primes his {{as|Spirit Blade|buzzword}}, creating an area around it. After a short time, or when '''Shen''' or allied champions enter the area, the {{as|Spirit Blade|buzzword}} briefly erupts a protective zone that {{tip|block|blocks}} enemy basic attacks that hit '''Shen''' or allied champions in the area.",
+        "description": "{{sbc|Active:}} '''Shen''' primes his {{as|Spirit Blade|buzzword}}, creating an area around it. After 2 seconds, or when '''Shen''' or an allied champion enters the area, the {{as|Spirit Blade|buzzword}} generates a protective zone for {{fd|1.75}} seconds, {{tip|block|blocking}} all non-{{tip|turret}} basic attacks that hit '''Shen''' or allied champions in the area.",
+        "cooldown": "{{ap|18 to 12}}",
+        "cdstart": "post-effect",
+        "cost": "40",
+        "costtype": "energy",
+        "effect radius": "{{tip|cr|icononly = true}} 350",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Allies",
+        "damagetype": "|spelleffects =",
+        "spellshield": "|parry        =",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* ''Spirit's Refuge's'' protective zone can be moved while active if '''Shen''' uses {{ai|Twilight Assault|Shen}}.\n* ''Spirit's Refuge'' cannot be ranked up at [[Experience (champion)|Level]] 1.\n* ''Spirit's Refuge'' will also block damage from all abilities that use {{tip|basic damage}} ({{ai|Lunge|Fiora}}, {{ai|Mystic Shot|Ezreal}}, {{ai|Steel Tempest|Yasuo}})."
+      }
+    },
+    "E": {
+      "id": "ShenE",
+      "name": "Shadow Dash",
+      "description": "Shen dashes in a direction, taunting enemies in his path.",
+      "tooltip": "Passive: Dealing damage with Twilight Assault or this Ability recovers {{ energyrefund }} Energy.\n\nActive: Shen dashes, Taunting champions and jungle monsters for {{ ccduration }} seconds and dealing {{ tauntdamage }} physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "18/16/14/12/10",
+      "cost": "150",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Shen",
+        "skill": "E",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} Dealing damage with ''{{ai|Twilight Assault|Shen}}'' or ''Shadow Dash'' will restore {{sti|{{as|energy}}}}.",
+        "blurb2": "{{sbc|Active:}} {{ci|Shen}} {{tip|dashes}} to the target location, briefly {{tip|taunt|taunting}} enemy {{tip|champions}} and {{tip|monsters}} he passes through and dealing {{as|physical damage}} based on {{as|his '''bonus''' health}}.",
+        "description": "{{sbc|Passive:}} Dealing damage with ''{{ai|Twilight Assault|Shen}}'' or ''Shadow Dash'' restores {{sti|energy|{{as|{{pp|30 to 50 for 3|1;4;12}} energy}}}}.",
+        "icon2": "Shadow Dash.png",
+        "description2": "{{sbc|Active:}} '''Shen''' {{tip|dashes}} to the target location, dealing {{as|physical damage}} to enemy {{tip|champions}} and {{tip|monsters}} he passes through and {{tip|taunt|taunting}} them for {{fd|1.5}} seconds.",
+        "leveling2": "{{st|Physical Damage|{{ap|60 to 160}} {{as|(+ 15% '''bonus''' health)}}}}",
+        "description3": "''{{ai|Twilight Assault|Shen}} and {{ai|Spirit's Refuge|Shen}} can be cast during the dash. Shadow Dash will cast at max range if cast beyond that.''",
+        "cooldown": "{{tt|{{ap|18 to 10}}|Starts after the dash ends}}",
+        "cdstart": "post-effect",
+        "cost": "150",
+        "costtype": "energy",
+        "target range": "{{tt|600|Maximum range}} / {{tt|300|Minimum range}}",
+        "collision radius": "{{tip|er|icononly = true}} {{tt|50|Start location check radius}} / {{tt|60|Check radius during dash and at dash end}}",
+        "speed": "{{tt|800 + {{as|100% movement speed}}|Dash speed, slightly irregular}}",
+        "targeting": "Location",
+        "cast time": "none",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spelleffects": "Area of effect",
+        "spellshield": "True",
+        "parry": "|projectile       =",
+        "grounded": "True",
+        "knockdown": "True",
+        "notes": "* Casting {{si|Flash}} during ''Shadow Dash'' will end the dash prematurely, but the end-of-dash collision check will hit enemies at the [[blink|blink's]] location still.\n** This still cannot affect the same enemy more than once.\n* The energy restore from ''Shadow Dash'' may only occur once."
+      }
+    },
+    "R": {
+      "id": "ShenR",
+      "name": "Stand United",
+      "description": "Shen shields target allied champion from incoming damage, and soon after teleports to their location.",
+      "tooltip": "Shen grants an allied champion anywhere on the map between {{ shield }} and {{ maxshield }} Shield based on their missing Health for {{ shieldduration }} seconds (max Shield at 60% missing Health). After channeling for {{ channelduration }} seconds, Shen teleports to his ally's location with his Spirit Blade.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "200/180/160",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "35000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Minimum Shield Health",
+          "Maximum Shield Health",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ baseshieldamount }} -> {{ baseshieldamountNL }}",
+          "{{ baseshieldamount*1.600000 }} -> {{ baseshieldamountnl*1.600000 }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Shen",
+        "skill": "R",
+        "icon": "Stand United.png",
+        "blurb": "{{sbc|Active:}} {{ci|Shen}} {{tip|channels}} for a short time, {{tip|shield|shielding}} the target allied champion for a few seconds. The {{sti|shield}} is based on {{as|his '''bonus''' health}} and increases based on the {{as|target's '''missing''' health}}.",
+        "blurb2": "Upon completing the channel, '''Shen''' and his {{as|Spirit Blade|buzzword}} {{tip|blink}} to the target ally, placed between them and the nearest enemy champion.",
+        "description": "{{sbc|Active:}} '''Shen''' focuses his will, {{ccib|Stand United Minimap.png}} {{tip|channel|channeling|noimg=true}} for 3 seconds and granting the target allied champion a {{tip|shield}} for 5 seconds at the time of cast, increased by {{as|{{pp|type=target's '''missing''' health|key=%|0 to 60 for 7|key1=%|0 to 60|formula=1% per 1% of target's '''missing''' health. ''This is capped at 60% '''missing''' health.''}}|health}}.",
+        "leveling": "{{st|Minimum Shield Strength|{{ap|130 to 450}} {{as|(+ 135% AP)}} {{as|(+ 16% of his '''bonus''' health)}}|Maximum Shield Strength|{{ap|130*1.6 to 450*1.6}} {{as|(+ 216% AP)}} {{as|(+ {{fd|25.6}}% of his '''bonus''' health)}}}}",
+        "icon2": "Stand United 2.png",
+        "description2": "Upon completing the channel, '''Shen''' and his {{as|Spirit Blade|buzzword}} {{tip|blink}} to the target ally's location, placed between them and the nearest enemy champion. '''Shen''' also {{tip|homing projectile destruction|destroys}} any {{tip|projectiles}} targeting him at the time of completion.",
+        "cooldown": "{{ap|200 to 160}}",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "cost": "|costtype     =",
+        "target range": "Global",
+        "targeting": "Unit",
+        "affects": "Allies",
+        "spelleffects": "Shield",
+        "grounded": "True",
+        "silence": "true",
+        "notes": "* Due to several character stats needing to be recalculated each time a character spawns, casting ''Stand United'' immediately upon respawning will cause its cooldown to be unaffected by ability haste, and the shielding will not be increased by '''Shen's''' {{as|ability power}}, but will be increased by his {{as|'''bonus''' maximum health}}. {{bug}}\n* ''Stand United'' can target allies via the [[Map (League of Legends)|mini map]] or on their portraits or by using the {{sbc|F2 - F5}} keys (none of this can be done if '''Shen''' is affected by {{tip|nearsight}} or his target is {{tip|untargetable}}).\n* '''Shen''' will turn to face towards his target ally at the start of the channel.\n** If the target is {{tip|stealth|stealthed}}, enemies could, in theory, use this to estimate their location.\n* '''Shen''' will channel so long as his target is alive (even if the granted shield is broken). If his target dies, the channel is canceled and ''Stand United'' goes on full cooldown.\n** {{tip|Interrupt|Interrupting}} ''Stand United's'' channel will not remove the shield prematurely.\n* The target's screen will glow purple to telegraph that '''Shen''' has targeted them with ''Stand United''.\n** It will change back when the channel ends.\n* Shen finds the nearest visible enemy champion within 2000 range from the ally or the nearest invisible champion within 600 range to place himself 175 units from his ally towards that enemy.\n* The following table refers for interactions while '''Shen''' is {{tip|channel|channeling}}:\n{{ct|channel|attack=false|move=false|consume=false|cast=false|items=false|spells=false|interrupts=death, ground, root, silence}}"
+      }
+    }
+  }
+}

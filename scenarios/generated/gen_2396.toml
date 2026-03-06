@@ -1,0 +1,13 @@
+[scenario]
+name = "ladder_paladin_d5_hp3x_s2"
+seed = 21800
+hero_count = 4
+enemy_count = 5
+difficulty = 5
+max_ticks = 10000
+room_type = "Pivot"
+hero_templates = ["paladin", "druid", "ranger", "assassin"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

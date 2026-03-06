@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "total": 12,
+  "remaining": 5,
+  "quality_gates": [
+    "cargo test"
+  ],
+  "id": "US-008",
+  "title": "Add camera focus interpolation for party swaps"
+}

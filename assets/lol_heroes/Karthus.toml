@@ -1,0 +1,103 @@
+[hero]
+name = "Karthus"
+
+[stats]
+hp = 90
+move_speed = 3.3
+armor = 20.0
+magic_resist = 30.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 12
+range = 5.5
+cooldown = 1000
+
+# --- Q: Lay Waste ---
+[[abilities]]
+name = "Lay Waste"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 1000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 4
+
+[[abilities.effects]]
+type = "damage"
+amount = 10
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 1.6
+
+# --- W: Wall of Pain ---
+[[abilities]]
+name = "Wall of Pain"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 15000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 14
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 5000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+# --- E: Defile ---
+[[abilities]]
+name = "Defile"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 8000
+ai_hint = "damage"
+resource_cost = 6
+is_toggle = true
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+# --- R: Requiem ---
+[[abilities]]
+name = "Requiem"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 200
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 20
+
+[abilities.delivery]
+method = "channel"
+duration_ms = 2000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "damage"
+amount = 50
+damage_type = "magic"
+
+# --- Passive: Death Defied ---
+[[passives]]
+name = "Death Defied"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_death"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+

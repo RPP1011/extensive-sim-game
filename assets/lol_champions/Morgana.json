@@ -1,0 +1,290 @@
+{
+  "id": "Morgana",
+  "name": "Morgana",
+  "title": "the Fallen",
+  "resource_type": "Mana",
+  "tags": [
+    "Support",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Soul Siphon",
+      "description": "Morgana drains spirit from her enemies, healing as she deals damage to champions, large minions, and medium and larger jungler monsters.",
+      "wiki_detail": {
+        "champion": "Morgana",
+        "skill": "I",
+        "icon": "Soul Siphon.png",
+        "description": "{{sbc|Innate:}} '''Morgana''' {{tip|heal|heals}} herself for 18% of the {{tt|post-mitigation damage|Damage calculated after modifiers}} dealt by her [[champion ability|abilities]] against {{tip|champions}}, large {{tip|minions}}, and medium and large {{tip|monsters}}.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "Heal",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* No additional details.",
+        "yvideo": "Morgana Passive Soul Siphon\n<!-- Blurb -->",
+        "blurb": "{{sbc|Innate:}} {{ci|Morgana}} {{tip|heal|heals}} herself for a portion of the damage dealt by her abilities against {{tip|champions}}, large {{tip|minions}}, and medium and large {{tip|monsters}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "MorganaQ",
+      "name": "Dark Binding",
+      "description": "Morgana binds an enemy in place with dark magic, forcing them to feel the pain they've caused and dealing magic damage.",
+      "tooltip": "Morgana hurls a blast of starfire that Roots the first enemy hit for {{ rootduration }} seconds and deals {{ totaldamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1250",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Root Duration",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ rootduration }} -> {{ rootdurationNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Morgana",
+        "skill": "Q",
+        "icon": "Dark Binding.png",
+        "description": "{{sbc|Active:}} '''Morgana''' throws a sphere of dark magic in the target direction that deals {{as|magic damage}} to the first enemy hit and {{tip|root|roots}} them for a duration.",
+        "leveling": "{{st|Magic Damage|{{ap|80|135|190|245|300}} {{as|(+ 90% AP)}}}}\n{{st|Root Duration|{{ap|2 to 3}} seconds}}",
+        "cooldown": "10",
+        "cost": "{{ap|50|55|60|65|70}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "range": "{{tip|cr|icononly = true}} 1300",
+        "speed": "1200",
+        "width": "{{tip|er|icononly = true}} 140",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Single target",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "{{Effect at cast time start}}",
+        "yvideo": "Morgana Q Dark Binding\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} '''Morgana''' throws a sphere of dark magic in the target direction that deals {{as|magic damage}} to the first enemy hit and {{tip|root|roots}} them for a \"short time\".",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "W": {
+      "id": "MorganaW",
+      "name": "Tormented Shadow",
+      "description": "Morgana casts a cursed shadow on an area, damaging enemies who dare stand in her dark circle. They receive magic damage over time, which increases the lower health they are.",
+      "tooltip": "Morgana ignites the ground for {{ wduration }} seconds, dealing {{ totalmindamage }} magic damage per second, increased by up to {{ totalmaxdamage }} based on the targets' missing Health.\n\nThis Ability's Cooldown is reduced by {{ cdrefundpercent*100 }}% every time Morgana is healed by Soul Siphon.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "70/80/90/100/110",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage Per Second",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Morgana",
+        "skill": "W",
+        "icon": "false",
+        "icon2": "Tormented Shadow.png",
+        "description": "{{sbc|Passive:}} ''Tormented Shadow's'' {{sti|'''current''' cooldown}} is reduced by 5% of its '''total''' cooldown whenever ''{{ai|Soul Siphon|Morgana}}'' triggers. Simultaneous triggers from multiple targets will stack the cooldown reduction.",
+        "description2": "{{sbc|Active:}} '''Morgana''' torments the soil at the target location, causing the area to become desecrated for 5 seconds. Enemies within take {{as|magic damage}} on-cast and every {{fd|0.5}} seconds, increased by {{as|{{pp|type=target's '''missing''' health|key=%|key1=%|0 to 170 for 11|0 to 100|formula=1.7% per 1% of target's '''missing''' health}}|health}}. ''Tormented Shadow'' deals 170% damage against {{tip|monsters}}.",
+        "leveling2": "{{st|Minimum Damage Per Tick|{{ap|6 to 28}} {{as|(+ {{fd|8.5}}% AP)}}|Maximum Damage Per Tick|{{ap|6*2.7 to 28*2.7}} {{as|(+ {{ap|8.5*2.7}}% AP)}}}}\n{{st|Minimum Total Damage|{{ap|6*10 to 28*10}} {{as|(+ {{ap|8.5*10}}% AP)}}|Maximum Total Damage|{{ap|6*10*2.7 to 28*10*2.7}} {{as|(+ {{ap|8.5*10*2.7}}% AP)}}}}",
+        "cooldown": "12",
+        "cost": "{{ap|70 to 130}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "target range": "900",
+        "effect radius": "275",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "False",
+        "spelleffects": "aoedot",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* Damage from multiple ''Tormented Shadows'' does not stack.",
+        "tips": "* The interaction with ''{{ai|Soul Siphon|Morgana}}'' does not exclude ''Tormented Shadow's'' damage, which means it can effectively reduce its own cooldown.",
+        "yvideo": "Morgana W Tormented Soil\n<!-- Blurb -->",
+        "blurbicon": "Tormented Shadow.png",
+        "blurb": "{{sbc|Passive:}} ''Tormented Shadow's'' '''current''' cooldown is {{sti|cdr|reduced}} whenever ''{{ai|Soul Siphon|Morgana}}'' triggers.",
+        "blurb2": "{{sbc|Active:}} {{ci|Morgana}} desecrates the target area for a few seconds, which continually deals {{as|magic damage}} to enemies based on {{as|their '''missing''' health}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "E": {
+      "id": "MorganaE",
+      "name": "Black Shield",
+      "description": "Morgana anoints an ally with a protective barrier of starfire, which absorbs magical damage and disabling effects until it is broken.",
+      "tooltip": "Morgana grants an ally champion {{ totalshieldstrength }} Magic Shield for {{ shieldduration }} seconds. The shield prevents Disabling and Immobilizing effects until it breaks.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "26/23.5/21/18.5/16",
+      "cost": "80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Shield Amount",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ shieldstrength }} -> {{ shieldstrengthNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Morgana",
+        "skill": "E",
+        "icon": "Black Shield.png",
+        "description": "{{sbc|Active:}} '''Morgana''' grants a {{tip|shield}} to the target allied {{tip|champion}} or herself for 5 seconds, which absorbs incoming {{as|magic damage}} and grants {{tip|cc-immune|crowd control immunity}} while it holds.",
+        "leveling": "{{st|Magic Shield Strength|{{ap|80 to 300}} {{as|(+ 70% AP)}}}}",
+        "cooldown": "{{ap|26 to 16}}",
+        "cost": "80",
+        "cast time": "none",
+        "costtype": "mana",
+        "target range": "800",
+        "targeting": "Unit",
+        "affects": "Self, Allies",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "Shield",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* ''Black Shield'' will not resist self nor allied {{tip|crowd control}} (including e.g. an allied {{ai|Tempered Fate|Bard}}).\n* ''Black Shield'' will not resist {{tip|nearsight}}.\n* ''Black Shield'' negates {{tip|crowd control}} effects before any magic damage is absorbed; even if the shield is broken by an enemy dealing enough damage, its associated disables will not apply. [[Shield#Shield_destruction|Shield-destroying effects]] bypass this however, since they destroy the shield before applying their effects.\n* ''Black Shield'' will not prevent effects other than {{tip|crowd control}} from triggering (e.g. {{cai|Nether Grasp|Malzahar}} will not {{tip|suppression|suppress}} a target protected by ''Black Shield'' but the {{tip|tether}} still applies).\n** Although not considered a ''crowd control'' effect, ''Black Shield'' is special-cased to block {{cais|Test of Spirit|Illaoi}} spirit pull.\n* ''Black Shield'' takes priority over other sources of {{tip|cc-immune|crowd control immunity}} and those that grant immunity to specific types of crowd control ({{tip|displacement immunity}} and {{tip|slow-immune|slow immunity}}).\n* {{tip|Spell shield}} will take priority over ''Black Shield''.\n* ''Black Shield'' will always take priority over regular {{tip|shield|shields}}. If used in conjunction with {{nie|Lifeline}}, the most recently-applied one will have priority however.",
+        "yvideo": "Morgana E Dark Shield\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Morgana}} {{tip|shields}} the target allied champion or herself for a few seconds, which absorbs {{as|magic damage}} and grants {{tip|cc-immune|crowd control immunity}} while the shield holds.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "R": {
+      "id": "MorganaR",
+      "name": "Soul Shackles",
+      "description": "Morgana unleashes the full force of her Celestial power as she unbinds her wings and hovers above the ground. She lashes chains of dark pain onto nearby enemy champions, gaining Move Speed. The chains slow and deal initial damage and, after a delay, stun those who are unable to break them.",
+      "tooltip": "Morgana chains herself to nearby enemy Champions, dealing {{ totaldamage }} magic damage and Slowing them by {{ slowpercent }}%. After {{ chainduration }} seconds, enemies unable to break the chains take an additional {{ totaldamage }} magic damage and are Stunned for {{ stunduration }} seconds.\n\nWhile casting this Ability, Morgana gains {{ hastepercent }}% Move Speed.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/110/100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "625",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Move Speed",
+          "Stun Duration:",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ hastepercent }}% -> {{ hastepercentNL }}%",
+          "{{ stunduration }} -> {{ stundurationNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Morgana",
+        "skill": "R",
+        "icon": "Soul Shackles.png",
+        "description": "{{sbc|Active:}} '''Morgana''' latches chains of energy onto nearby enemy champions over the cast time, dealing {{as|magic damage}} and forming a {{tip|tether}} between herself and each target for 3 seconds, during which she gains {{sti|{{as|'''bonus''' movement speed}}}} and the targets are {{tip|true sight|revealed}} and {{tip|slow|slowed}} by 20%.",
+        "leveling": "{{st|Magic Damage|{{ap|175 to 325}} {{as|(+ 80% AP)}}|Total Magic Damage|{{ap|175*2 to 325*2}} {{as|(+ {{ap|80*2}}% AP)}}}}\n{{st|Bonus Movement Speed|{{ap|10 to 60}}%}}",
+        "description2": "If a target does not break their tether by the end of its duration, they are dealt the same {{as|magic damage}} again and become {{tip|stun|stunned}} for a duration, during which they are {{tip|true sight|revealed}}.",
+        "leveling2": "{{st|Stun Duration|{{ap|1.5 to 2}} seconds}}",
+        "description3": "''A nearby enemy champion is required to cast this ability. The target does not have to be {{tip|sight|visible}} to be tethered by this ability.''",
+        "cooldown": "{{ap|120 to 100}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|575|Can only cast if an enemy champion is within this range}} / {{tt|625|Latch-on range}}",
+        "tether radius": "{{tip|er|icononly = true}} 625",
+        "cast time": "{{fd|0.35}}",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "Special",
+        "spelleffects": "aoe",
+        "projectile": "False",
+        "grounded": "|knockdown    =",
+        "notes": "* {{tip|Spell shield}} will block the tether's application and initial damage but not the aftereffects of one already applied.\n* '''Morgana''' will turn to face southeast upon casting ''Soul Shackles''.\n* A circle indicator for <i>Soul Shackles'</i> maximum tether range is visible to '''Morgana''' and her tethered targets only.",
+        "yvideo": "Morgana R Soul Shackles",
+        "flavorsound": "{{sm2|Morgana_Original_R_7.ogg}} ''\"I will take on everything!\"''\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Morgana}} latches chains of energy onto nearby enemy champions, dealing {{as|magic damage}} and forming a {{tip|tether}} between herself and each target for a short time, during which the targets are {{tip|true sight|revealed}} and {{tip|slow|slowed}}, and '''Morgana''' gains {{sti|{{as|'''bonus''' movement speed}}}}.",
+        "blurb2": "If a target maintains the tether after its duration, they are dealt the same {{as|magic damage}} and become briefly {{tip|true sight|revealed}} and {{tip|stun|stunned}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    }
+  }
+}

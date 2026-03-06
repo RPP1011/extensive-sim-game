@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0154_6v9_d3"
+seed = 2277
+hero_count = 6
+enemy_count = 9
+difficulty = 3
+max_ticks = 10000
+room_type = "Pivot"
+hero_templates = ["witch_doctor", "paladin", "warden", "shadow_dancer", "alchemist", "assassin"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

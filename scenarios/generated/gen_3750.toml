@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0130_5v6_d4"
+seed = 2253
+hero_count = 5
+enemy_count = 6
+difficulty = 4
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["berserker", "samurai", "knight", "alchemist", "shadow_dancer"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

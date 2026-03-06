@@ -1,0 +1,306 @@
+{
+  "id": "Akali",
+  "name": "Akali",
+  "title": "the Rogue Assassin",
+  "resource_type": "Energy",
+  "tags": [
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Assassin's Mark",
+      "description": "Dealing spell damage to a champion creates a ring of energy around them. Exiting that ring empowers Akali's next Attack with bonus range and damage.",
+      "wiki_detail": {
+        "champion": "Akali",
+        "skill": "I",
+        "icon": "Assassin's Mark.png",
+        "description": "{{sbc|Innate:}} When '''Akali''' damages an enemy {{tip|champion}} with an [[champion ability|ability]], she creates a ring around them for 4 seconds, refreshing on subsequent damaging abilities against champions. For 2 seconds, she gains {{as|{{pp|key=%|30 to 60 for 4|1 to 16}} {{sti|'''bonus''' movement speed}}}} while moving away from the center of the ring. Only one ring may be active at a time.",
+        "description2": "When '''Akali''' exits the ring, for 2 seconds, she regains the {{as|'''bonus''' movement speed}} while facing nearby enemy champions and becomes empowered with ''Swinging Kama'' for 4 seconds, during which she cannot create another ring.",
+        "description3": "{{sbc|Swinging Kama:}} '''Akali's''' next [[basic attack]] is empowered to have its {{sti|range}} doubled and deal {{pp|35 to 53 for 7; then + 9*x for 6; then + 15*x|formula=+3 per level until lvl 7; then +9 until lvl 13, then +15|color=magic damage}} {{as|(+ 60% '''bonus''' AD)}} {{as|(+ 55% AP)}} {{as|'''bonus''' magic damage}}.",
+        "targeting": "Passive",
+        "affects": "Self, Enemies",
+        "effect radius": "{{tt|500|Ring radius}}",
+        "damagetype": "Magic",
+        "spelleffects": "spell",
+        "parry": "true",
+        "spellshield": "false",
+        "notes": "* Enemies cannot see the ring, but can see the empower effect.\n* ''Swinging Kama'' gives a static '''bonus''' range which doesn't change if '''Akali's''' range changes during it (i.e {{ii|Rapid Firecannon}}):\n** If ''Rapid Firecannon'' fully charges within ''Swinging Kama's'' duration, '''Akali's''' total range increases to {{tt|337.5|(125 + 125 (which is the bonus range Swinging Kama gives)){{times}}1.35}}.\n** If ''Rapid Firecannon'' fully charges before gaining ''Swinging Kama'', '''Akali's''' total range is increased to {{tt|395|125{{times}}1.35 + 125{{times}}1.35 (which is the bonus range Swinging Kama gives){{times}}1.35 (further increased by Rapid Firecannon)}}.\n* The ring will be created around the last target hit by ''{{ai|Five Point Strike|Akali}}''.\n* The ring's center is offset 120 units away from the enemy's center, towards Akali.\n* The empowered attack can be {{tip|dodge|dodged}} and {{tip|block|blocked}}, and will be mitigated by {{tip|blind|blinds}}.\n* The empowered attack will trigger but not be consumed nor apply its effects against [[structures]] and [[ward]]s.",
+        "video": "Akali_Passive_Video.webm\n<!-- Blurb -->",
+        "blurb": "{{sbc|Innate:}} {{cis|Akali}} damage with abilities against a champion create a ring around them for a few seconds, and she gains {{sti|{{as|move speed}}}} while moving away from the ring.",
+        "blurb2": "Once '''Akali''' exits the ring, she regains the {{sti|{{as|move speed}}}} towards enemy champions and empowers her next {{tip|basic attack}} with {{sti|range|'''bonus''' range}} and {{as|magic damage}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "AkaliQ",
+      "name": "Five Point Strike",
+      "description": "Akali throws out five kunai, dealing damage based on her bonus Attack Damage and Ability Power and slowing.",
+      "tooltip": "Akali slings kunai in an arc, dealing {{ damage }} magic damage and Slowing enemies at the tip by {{ slowpercentage*100 }}% for {{ slowduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "1.5",
+      "cost": "110/100/90/80/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "550",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "@AbilityResourceName@ Cost",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cost }} -> {{ costNL }}",
+          "{{ basedamagenamed }} -> {{ basedamagenamedNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Akali",
+        "skill": "Q",
+        "icon": "Five Point Strike.png",
+        "icon2": "Five Point Strike 2.png",
+        "description": "{{sbc|Active:}} '''Akali''' unleashes kunais in a cone in the target direction, dealing {{as|magic damage}} to enemies hit. Targets beyond a certain range are also {{tip|slow|slowed}} by 50% for {{fd|0.5}} seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|45 to 145}} {{as|(+ 65% AD)}} {{as|(+ 60% AP)}}}}",
+        "target range": "500 / {{tt|120|Empowered range offset}}",
+        "width": "{{tt|350|Maximum width. Estimated.}}",
+        "angle": "20{{degree}}",
+        "cooldown": "{{fd|1.5}}",
+        "cast time": "{{pp|0.25 to 0.175 for 4|1;6;11;16|round=3}}",
+        "cost": "{{ap|110 to 70}}",
+        "costtype": "energy",
+        "targeting": "Direction",
+        "affects": "Enemies, Self",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "True",
+        "notes": "* ''Five Point Strike'' will hit enemies after only {{pp|0.25*0.75 to 0.175*0.75 for 4|1;6;11;16|round=3}} seconds (75% of cast time) into the cast time.\n** Due to [[tick and updates|any actions only starting on integer game ticks]], the effective cast time rounds up to {{pp|0.264;0.231;0.231;0.198|1;6;11;16|round=3}} and the hit will occur at {{pp|0.198;0.198;0.165;0.132|1;6;11;16|round=3}} seconds into it.\n{{Effect at cast time end}}",
+        "video": "Akali_Q_Video.webm\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Akali}} throws out a cone of kunai that deals {{as|magic damage}} to enemies hit. Targets hit at maximum range are briefly {{tip|slow|slowed}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "W": {
+      "id": "AkaliW",
+      "name": "Twilight Shroud",
+      "description": "Akali drops a cover of smoke and briefly gains Move Speed. While inside the shroud, Akali becomes invisible and unable to be selected by enemy spells and attacks. Attacking or using abilities will briefly reveal her.",
+      "tooltip": "Akali drops a smoke bomb, unleashing a spreading cover of smoke lasting {{ baseduration }} seconds and granting herself {{ movementspeed }}% Move Speed decaying over {{ movementspeedduration }} seconds.\n\nAkali increases her max Energy by {{ energyrestore }} while the shroud is active. \n\nWhile inside the smoke, Akali is Invisible.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "20/19/18/17/16",
+      "cost": "0",
+      "cost_type": " Energy",
+      "range": "350",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "140",
+        "4",
+        "0",
+        "250",
+        "60/65/70/75/80",
+        "0.3/0.35/0.4/0.45/0.5",
+        "1",
+        "0",
+        "5/5.5/6/6.5/7",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Move Speed",
+          "Duration",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ movementspeed }}% -> {{ movementspeedNL }}%",
+          "{{ baseduration }} -> {{ basedurationNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "Restores {{ energyrestore }} Energy",
+      "wiki_detail": {
+        "champion": "Akali",
+        "skill": "W",
+        "disp_name": "Twilight Shroud",
+        "icon": "Twilight Shroud.png",
+        "description": "{{sbc|Active:}} '''Akali''' restores {{sti|{{as|100 energy}}}} over {{fd|0.4}} seconds and gains {{sti|ms|{{as|'''bonus''' movement speed}}}} that decays over 2 seconds. She also detonates a smoke bomb a fixed distance away in the target direction, creating a circular shroud that expands over the next 5 seconds into a ring. The shroud does not permeate terrain, and will expand toward nearby enemy champions. While the shroud is active, '''Akali's''' {{as|'''maximum''' energy}} is increased by {{as|100|energy}}.",
+        "leveling": "{{st|Bonus Movement Speed|{{ap|30 to 50}}%}}\n{{st|Shroud Duration|{{ap|5 to 7}} seconds}}",
+        "description2": "Entering the shroud renders '''Akali''' {{tip|invisibility|invisible}}, unless she is {{tip|dash|dashing}}.",
+        "description3": "Declaring a basic attack or casting an ability will break the invisibility and prevent '''Akali''' from entering it for {{pp|type=minutes|changedisplay=true|round=3|1;0.9;0.825;0.725;0.625|1;8;11;20;30}} seconds, refreshing on subsequent attacks and casts.",
+        "description4": "''The {{ai|Shuriken Flip|Akali|marked}} section of Twilight Shroud will linger for the mark's duration, even after the shroud ends.''",
+        "target range": "250",
+        "effect radius": "{{tt|350|Minimum radius. Estimated.}} / {{tt|1175|Maximum radius. Estimated.}}",
+        "cooldown": "{{ap|20 to 16}}",
+        "cdstart": "post-effect",
+        "cast time": "{{fd|0.25}}",
+        "targeting": "Direction",
+        "affects": "Self, Enemies",
+        "video": "Akali_W_Video.webm",
+        "notes": "* '''Akali''' will also not gain the {{tip|invisibility}} if she is {{si|Recall|Recalling}}.\n* It is possible for '''Akali''' to detonate the smoke bomb on the far side of terrain from her current location.\n* The effects are applied before the cast time, and '''Akali''' can move during the cast time.\n* Using a basic attack breaks the stealth at the start of the attack windup.\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Akali}} restores {{as|{{sti|energy}}}} and gains a brief burst of {{sti|ms|{{as|move speed}}}}. She also drops a smoke shroud that makes her {{tip|invisibility|invisible}}, attacking or using abilities will briefly reveal her.",
+        "blurb2": "The shroud will expand into a ring over a few seconds, during which '''Akali''' gains increased {{as|energy}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "E": {
+      "id": "AkaliE",
+      "name": "Shuriken Flip",
+      "description": "Flip backward and fire a shuriken forward, dealing magic damage. The first enemy or smoke cloud hit is marked. Re-cast to dash to the marked target, dealing additional damage.",
+      "tooltip": "Akali flips backwards as she throws a shuriken, dealing {{ e1damage }} magic damage and marking the first enemy or smoke cloud hit. Akali can Recast this once to dash to the marked target, dealing {{ e2damagecalc }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16/14.5/13/11.5/10",
+      "cost": "30",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "825",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Base Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Akali",
+        "skill": "E",
+        "icon": "Shuriken Flip.png",
+        "description": "{{sbc|Active:}} '''Akali''' {{tip|dash|flips}} backward and, after the cast time, throws a shuriken in the target direction that deals {{as|magic damage}} to the first enemy hit.",
+        "leveling": "{{st|Magic Damage|{{ap|70*0.3 to 350*0.3}} {{as|(+ {{ap|100*0.3}}% AD)}} {{as|(+ {{ap|110*0.3}}% AP)}}}}",
+        "description2": "The shuriken ''marks'' and {{tip|true sight|reveals}} the enemy or the last ''{{ai|Twilight Shroud|Akali|smoke}}'' section hit for 3 seconds, during which ''Shuriken Flip'' can be recast to consume the mark.",
+        "icon3": "Shuriken Flip 2.png",
+        "description3": "{{sbc|Recast:}} '''Akali''' {{tip|dash|dashes}} towards the marked target or smoke section. Against enemies she deals {{as|magic damage}} upon arrival.",
+        "leveling3": "{{st|Magic Damage|{{ap|70*0.7 to 350*0.7}} {{as|(+ {{ap|100*0.7}}% AD)}} {{as|(+ {{ap|110*0.7}}% AP)}}|Total Magic Damage|{{ap|70 to 350}} {{as|(+ 100% AD)}} {{as|(+ 110% AP)}}}}",
+        "description4": "'''''Akali''' will not flip backwards if she is {{tip|immobilized}} or {{tip|grounded}} during the cast time. {{ai|Twilight Shroud|Akali}} and {{ai|Perfect Execution|Akali}} can be cast during the recast's dash.''",
+        "cooldown": "{{ap|16 to 10}}",
+        "cdstart": "on-cast",
+        "cast time": "{{tt|{{fd|0.4}}|Active}} / {{tt|{{fd|0.25}}|Recast}}",
+        "cost": "30",
+        "costtype": "energy",
+        "target range": "{{tip|er|icononly = true}} {{tt|825|Shuriken range, based off of Akali's original location}}",
+        "width": "{{tip|er|icononly = true}} {{tt|120|Shuriken missile width}}",
+        "speed": "{{tt|1800|Shuriken missile speed}} / {{tt|1500|First and second dash speed}}",
+        "effect radius": "{{tt|Global|Recast range}}",
+        "targeting": "[[Direction-targeted|Direction]] / [[Auto-targeted|Auto]]",
+        "affects": "Enemies, Self",
+        "damagetype": "magic",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "projectile": "True",
+        "grounded": "True",
+        "knockdown": "True",
+        "notes": "* '''Akali''' will track the target if they change locations.\n** She will not stop tracking the target until she reaches them, as there is no maximum tracking distance.\n* Both casts count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n* ''Shuriken Flip'' does not interrupt '''Akali's''' previous move or attack orders.\n** The recast does.\n* ''Shuriken Flip'' cannot be recast if the target is not {{tip|sight|visible}} or is {{tip|untargetable}}.\n* '''Akali''' will be ordered to basic attack the target after the recast's dash ends.\n* '''Akali''' will dash backwards up-to 400 units in a straight line. This dash can cross terrain if the end point is beyond it. If she would end the dash inside terrain, she will instead look for a location  in either direction left or right that is outside of terrain and dash there. If there is no such location, she will dash only up to the wall at her normal speed, ending the dash early.\n{{Effect at cast time end}}\n** The shuriken missile will fire from wherever '''Akali''' is at the end of the cast time (usually mid-dash), but always towards and reaching the location that was 825 units in front of her at the start of cast. The only exception is if she moves via {{si|Flash}}, in which case the range of the missile is decreased relative to the distance she blinked.\n* Killing an enemy with the shuriken will still mark the last area of the {{ai|Twilight Shroud|Akali|shroud}} hit.\n* Attempting to cast {{ai|Five Point Strike|Akali}} during either dash will buffer it to cast as soon as the dash ends.\n{{ct|attack=false|move=false|cast={{ai|Twilight Shroud|Akali}} is usable. {{ai|Shuriken Flip|Akali}} is disabled for 10 seconds and then interrupts. Both dashes of {{ai|Perfect Execution|Akali}} interrupt.|items=true,,,interrupts|spells=true,interrupts,true,true,false}}",
+        "video": "Akali_E_Video.webm\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Akali}} {{tip|dashes}} backward and throws a shuriken forward that deals {{as|magic damage}} and marks the first enemy or {{ai|Twilight Shroud|Akali|smoke cloud}} hit for a short time.",
+        "blurb2": "While ''Shuriken Flip'' marks a target, it can be recast.",
+        "blurb3": "{{sbc|Recast:}} '''Akali''' {{tip|dashes}} to the marked target across any distance, dealing {{as|magic damage}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "R": {
+      "id": "AkaliR",
+      "name": "Perfect Execution",
+      "description": "Akali leaps in a direction, damaging enemies she strikes. Re-cast: Akali dashes in a direction, executing all enemies she strikes.",
+      "tooltip": "Akali vaults over an enemy champion, dealing {{ cast1damage }} magic damage to all enemies in her path. \n\nAkali can Recast after {{ cooldownbetweencasts }} seconds to execute a piercing thrust, dashing and dealing {{ cast2damagemin }} to {{ cast2damagemax }} magic damage based on missing Health.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/90/60",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "675",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "1",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Initial Damage",
+          "Minimum Damage",
+          "Maximum Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ r2basedamage }} -> {{ r2basedamageNL }}",
+          "{{ r2basedamage*3.000000 }} -> {{ r2basedamagenl*3.000000 }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Akali",
+        "skill": "R",
+        "disp_name": "Perfect Execution",
+        "icon": "Perfect Execution.png",
+        "description": "{{sbc|Active:}} '''Akali''' {{tip|dash|dashes}} 750 units in the direction of the target enemy {{tip|champion}}, dealing {{as|magic damage}} to enemies she passes through. If this hits an enemy, she flips over them to continue the dash up to the normal range but for at least another 150 units.",
+        "leveling": "{{st|Magic Damage|{{ap|110 to 330}} {{as|(+ 50% '''bonus''' AD)}} {{as|(+ 30% AP)}}}}",
+        "description2": "''Perfect Execution'' can be recast after a {{fd|2.5}}-second {{tt|static cooldown|Unaffected by ability haste}} within 10 seconds of the first activation.",
+        "icon3": "Perfect Execution 2.png",
+        "description3": "{{sbc|Recast:}} '''Akali''' {{tip|dash|dashes}} {{tt|800|Estimated}} units in the target direction, dealing {{as|magic damage}} to enemies she passes through, increased by {{as|{{pp|key=%|key1=%|type=target's '''missing''' health|0 to 200 for 11|0 to 70|formula=2.86% per 1% of target's '''missing''' health, capped at 70% '''missing''' health}}|health}}.",
+        "leveling3": "{{st|Minimum Magic Damage|{{ap|70 to 210}} {{as|(+ 30% AP)}}|Maximum Magic Damage|{{ap|70*3 to 210*3}} {{as|(+ {{ap|30*3}}% AP)}}}}",
+        "target range": "{{tip|cr|icononly = true}} {{tt|675|First cast range}}",
+        "speed": "{{tt|1500|Initial dash speed}} / {{tt|3000|Second dash speed}}",
+        "collision radius": "{{tip|er|icononly = true}} {{tt|110|Both casts dash collision, estimated}}",
+        "cooldown": "{{ap|120 to 60}}",
+        "cdstart": "post-effect",
+        "cast time": "{{tt|None|Initial cast}} ({{tt|{{fd|0.25}}|During the dash, prevents the cast of other abilities}}) / {{tt|None|Recast}}",
+        "targeting": "[[Unit-targeted|Unit]] / [[Direction-targeted|Direction]]",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "grounded": "True",
+        "knockdown": "True",
+        "terraingrace": "true",
+        "video": "Akali_R_Video.webm",
+        "notes": "*Both casts count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n* With the first cast, '''Akali''' can dash up to a maximum of 900 units if the first enemy she hit was at the maximum dash range.\n* Casting {{si|Flash}} during either dashes will interrupt them, but '''Akali''' will deal damage to any enemies she comes in contact with at the new location.\n** Enemies already hit by either of ''Perfect Execution's'' casts cannot be affected more than once by the same cast.\n* {{ai|Shuriken Flip|Akali}} can be used during the initial dash if it is cast after '''Perfect Execution's''' cast time finishes.\n<!-- Blurb -->",
+        "blurb": "{{sbc|Active:}} {{ci|Akali}} {{tip|dashes}} in the direction of the target enemy champion, dealing {{as|physical damage}} to enemies she passes through.",
+        "blurb2": "''Perfect Execution'' can be recast within a period.",
+        "blurb3": "{{sbc|Recast:}} '''Akali''' {{tip|dashes}} in the target direction, dealing {{as|magic damage}} to enemies she passes through based on {{as|their '''missing''' health}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    }
+  }
+}

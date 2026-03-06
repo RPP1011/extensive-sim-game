@@ -1,0 +1,166 @@
+{
+  "id": "Nunu",
+  "name": "Nunu & Willump",
+  "title": "the Boy and His Yeti",
+  "resource_type": "Mana",
+  "tags": [
+    "Tank",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Call of the Freljord",
+      "description": "Nunu increases the attack speed and Move Speed of Willump and a nearby ally, and causes Willump's basic attacks to damage enemies around the target."
+    },
+    "Q": {
+      "id": "NunuQ",
+      "name": "Consume",
+      "description": "Willump takes a bite out of a minion, monster, or enemy champion, dealing damage and healing himself.",
+      "tooltip": "Nunu asks Willump to take a bite of an enemy, dealing {{ monsterminiondamage }} true damage and restoring {{ monsterhealing }} Health when used against a minion or jungle monster. Against a champion, it instead deals {{ totalchampiondamage }} magic damage and restores {{ championhealing }} Health.\n\nThe healing is increased by {{ lowhealthhealingscalar*100 }}% when Nunu and Willump are below {{ lowhealththreshhold*100 }}% Health.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "13/12/11/10/9",
+      "cost": "60",
+      "cost_type": " Mana",
+      "range": "125",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Monster Damage",
+          "Champion Damage",
+          "Heal",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ monsterminiondamage }} -> {{ monsterminiondamageNL }}",
+          "{{ championdamage }} -> {{ championdamageNL }}",
+          "{{ basehealing }} -> {{ basehealingNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} Mana"
+    },
+    "W": {
+      "id": "NunuW",
+      "name": "Biggest Snowball Ever!",
+      "description": "Willump creates a snowball that grows in size and speed as he rolls it.  The snowball damages and knocks up enemies.",
+      "tooltip": "Nunu and Willump create a snowball that grows in size and speed as they roll it. They turn slower while rolling it, but can increase turning speed by holding the turn.\n\nThe snowball does between {{ noimpactsnowballdamage }} and {{ maximumsnowballdamage }} magic damage, and Knocks Up for between {{ baseknockupduration }} and {{ maximumstunduration }} seconds when it collides with a champion, large monster or wall. These values scale up with distance rolled.\n\nNunu and Willump can Recast to let the snowball go early.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "7500",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Base Damage",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "E": {
+      "id": "NunuE",
+      "name": "Snowball Barrage",
+      "description": "Nunu throws multiple snowballs that damage enemies.  When he's finished, Willump roots any champions or large monsters that were hit by a snowball.",
+      "tooltip": "Nunu throws three snowballs, dealing {{ totalsnowballdamage }} magic damage per snowball and Slowing enemies hit by all three by {{ slowamount*-100 }}% for {{ slowduration }} second. Nunu can Recast this up to twice more.\n\nAfter {{ totalspellduration }} seconds, Nunu Roots all nearby enemies that had been Slowed by the snowballs for {{ rootduration }} seconds and deals an additional {{ totalrootdamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "625",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Movement Slow",
+          "Cooldown",
+          "Mana Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ slowamount*-100.000000 }}% -> {{ slowamountnl*-100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "R": {
+      "id": "NunuR",
+      "name": "Absolute Zero",
+      "description": "Nunu & Willump create a powerful blizzard in an area that slows enemies and deals massive damage at the end.",
+      "tooltip": "Nunu and Willump channel a powerful blizzard for up to {{ channelduration }} seconds. Enemies inside are Slowed by {{ slowstartamount*-100 }}%, increasing to {{ maxslowamount*-100 }}% over the duration. Nunu and Willump also gain {{ totalshieldamount }} Shield for the duration before decaying over {{ shielddecayduration }} seconds afterwards.\n\nWhen the blizzard ends, it detonates, dealing up to {{ maximumdamage }} magic damage based on channel time. Nunu and Willump can Recast to end the blizzard early.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "110/100/90",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Shield Amount",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ baseshieldamount }} -> {{ baseshieldamountNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    }
+  }
+}

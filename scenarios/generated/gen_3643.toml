@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0094_5v8_d4_s1"
+seed = 12217
+hero_count = 5
+enemy_count = 8
+difficulty = 4
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["assassin", "elementalist", "shaman", "engineer", "knight"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "total": 12,
+  "remaining": 12,
+  "quality_gates": [
+    "cargo test"
+  ],
+  "id": "US-001",
+  "title": "Complete party state foundation and persistence"
+}

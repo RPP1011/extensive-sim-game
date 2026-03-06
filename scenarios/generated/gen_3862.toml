@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0167_5v5_d1_s1"
+seed = 12290
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["shadow_dancer", "monk", "pyromancer", "cryomancer", "elementalist"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

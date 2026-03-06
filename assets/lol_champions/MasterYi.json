@@ -1,0 +1,279 @@
+{
+  "id": "MasterYi",
+  "name": "Master Yi",
+  "title": "the Wuju Bladesman",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Double Strike",
+      "description": "Every few consecutive basic attack, Master Yi strikes twice.",
+      "wiki_detail": {
+        "champion": "Master Yi",
+        "skill": "I",
+        "icon": "Double Strike.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Master Yi}} basic attacks generate a stack of ''Double Strike'' for a few seconds. At 3 stacks, his next basic attack will consume them to make a second attack that deals {{as|'''reduced''' physical damage}}.",
+        "description": "{{sbc|Innate:}} '''Master Yi's''' {{tip|basic attack|basic attacks}} {{tip|on-hit}} generate a [[stack]] of ''Double Strike'' for 4 seconds, refreshing on subsequent hits and stacking up to 3 times. At 3 stacks, '''Master Yi's''' next basic attack {{tip|on-attack}} is empowered to consume the stacks to strike twice, the second strike dealing {{as|50% AD}} {{as|physical damage}}.",
+        "description2": "The second strike applies {{tip|on-hit}} and {{tip|on-attack}} effects at 100% effectiveness and is affected by {{tip|critical strike}} modifiers.",
+        "description3": "If '''Master Yi's''' primary target is killed before the second strike, he automatically attacks another enemy within 300 range.",
+        "description4": "''The second strike can {{tip|critical strike|critically strike}} {{tip|turrets|structures}}.''",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "occurrence": "On-hit",
+        "spelleffects": "attack",
+        "callforhelp": "true",
+        "parry": "True",
+        "spellshield": "|notes        = \n* Since ''Double Strike'' resets the counter on-attack and the second strike applies on-hit effects, the second strike is able to add a stack for the next ''Double Strike'' activation.\n* If ''Double Strike's'' target becomes {{tip|untargetable}} shortly after the triggering attack, it will still occur and deal its effects as usual.\n* The second strike will trigger but not consume ''Double Strike'' stacks if the primary attack is {{tip|dodge|dodged}}.\n** {{pending for test}}: {{tip|Blind}}"
+      }
+    },
+    "Q": {
+      "id": "AlphaStrike",
+      "name": "Alpha Strike",
+      "description": "Master Yi teleports across the battlefield with blinding speed, dealing physical damage to multiple units in his path, while simultaneously becoming untargetable. Alpha Strike can critically strike and deals bonus physical damage to monsters. Basic attacks reduce Alpha Strike's cooldown.",
+      "tooltip": "Master Yi becomes Untargetable and teleports to rapidly strike enemies near his target, dealing {{ totaldamage }} physical damage to all enemies hit after {{ alphastrikebounces }} hits. \n\nThis Ability can strike the same enemy repeatedly if there are no other targets, dealing {{ subsequenthitmultiplier*100 }}% damage for subsequent hits ({{ subesquentdamage }}), for a maximum single target total of {{ singletotaldamage }} physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "20/19.5/19/18.5/18",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Bonus Monster Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ bonusmonsterdamage }} -> {{ bonusmonsterdamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "variables": {
+          "r": "70",
+          "b1": "20",
+          "b5": "100",
+          "m1": "60",
+          "m5": "160",
+          "l": "25"
+        },
+        "champion": "Master Yi",
+        "skill": "Q",
+        "icon": "Master Yi Alpha Strike.png",
+        "blurb": "{{sbc|Active:}} {{ci|Master Yi}} briefly {{tip|vanish|vanishes}} and marks the target enemy, then rapidly marks up to 3 other nearby enemies. If there are no other eligible targets before then, '''Master Yi''' can mark the same enemies again.",
+        "blurb2": "Upon finishing marking, he {{tip|blinks|reappears}} and detonates the marks, dealing {{as|physical damage}} and applying {{tip|on-hit}} effects. Subsequent marks on a target have less effect.",
+        "blurb3": "Basic attacks {{sti|cdr|reduce}} ''Alpha Strike's'' cooldown.",
+        "description": "{{sbc|Active:}} '''Master Yi''' {{tip|vanish|vanishes}} and becomes {{tip|lockout|unable to act}}. After {{rutngt|0.2}}, he marks the target enemy and then proceeds to mark the nearest {{tip|sight|visible}} un-marked enemy within 600 units, recurring every {{rutngt|0.2}}{{ft|up to 3 times.|for a total of 4 marks.}}If there are no other un-marked targets before then, '''Master Yi''' can mark the same enemies again. During ''Alpha Strike'', '''Master Yi''' can select a direction from the primary target.",
+        "description2": "Upon finishing marking, '''Master Yi''' {{tip|blinks|reappears}} 75 units in the targeted direction, or in front of the target otherwise, and then becomes able to act again{{ft|after {{rutngt|0.15}}.|{{tt|{{fd|1.087}} seconds total|Effective time due to game ticks}} after the start of the cast with 4 bounces.}}If the primary target {{tip|death|dies}} or is too far away during the delay, '''Master Yi''' will reappear at the initial cast location instead.",
+        "description3": "'''Master Yi''' then detonates the marks, dealing {{as|physical damage}} and applying {{tip|on-hit}} effects at 65% effectiveness. Marks after the first on the same target instantly deal {{fd|{{#var:l}}}}% damage and apply {{tip|on-hit}} effects at {{fd|16.25}}% effectiveness. ''Alpha Strike'' deals {{as|'''bonus''' physical damage}} to {{tip|monster|monsters}} per hit.",
+        "leveling3": "{{st|Physical Damage|{{ap|{{#var:b1}} to {{#var:b5}}}} {{as|(+ {{fd|{{#var:r}}}}% AD)}}|Reduced Damage per hit|{{ap|{{#var:b1}}*{{#var:l}}/100 to {{#var:b5}}*{{#var:l}}/100}} {{as|(+ {{ap|{{#var:r}}*{{#var:l}}/100}}% AD)}}|Maximum Single-Target Damage|{{ap|{{#var:b1}}*(1+{{#var:l}}/100*3) to {{#var:b5}}*(1+{{#var:l}}/100*3)}} {{as|(+ {{ap|{{#var:r}}*(1+{{#var:l}}/100*3)}}% AD)}}}}\n{{st|Monster Bonus Damage|{{ap|{{#var:m1}} to {{#var:m5}}}}|Monster Total Damage|{{ap|{{#var:b1}}+{{#var:m1}} to {{#var:b5}}+{{#var:m5}}}} {{as|(+ {{fd|{{#var:r}}}}% AD)}}|Reduced Monster Damage per hit|{{ap|({{#var:b1}}+{{#var:m1}})*{{#var:l}}/100 to ({{#var:b5}}+{{#var:m5}})*{{#var:l}}/100}} {{as|(+ {{ap|{{#var:r}}*{{#var:l}}/100}}% AD)}}|Max Monster Single-Target Damage|{{ap|({{#var:b1}}+{{#var:m1}})*(1+{{#var:l}}/100*3) to ({{#var:b5}}+{{#var:m5}})*(1+{{#var:l}}/100*3)}} {{as|(+ {{ap|{{#var:r}}*(1+{{#var:l}}/100*3)}}% AD)}}}}",
+        "description4": "''Alpha Strike's'' primary and lesser damage can {{tip|critically strike}} for {{as|'''bonus''' physical damage}} equal to {{as|{{critical damage|75}} AD}} and {{as|{{critical damage|{{#expr:75*{{#var:l}}/100}}}} AD}} respectively.",
+        "description5": "Basic attacks {{tip|on-hit}} reduce ''Alpha Strike's'' {{sti|'''current''' cooldown}} by {{tt|1 second|Affected by ability haste}}.",
+        "description6": "''{{ai|Wuju Style|Master Yi}} and {{ai|Highlander|Master Yi}} can be cast during Alpha Strike. Each time Alpha Strike hits a target, the durations of {{ai|Wuju Style|Master Yi}} and {{ai|Highlander|Master Yi}} are refreshed by their '''current''' duration. Alpha Strike does not trigger its cooldown reduction nor grant a stack of {{ai|Double Strike|Master Yi}} when applying on-hit effects.''",
+        "target range": "{{tip|cr|icononly = true}} 600",
+        "effect radius": "{{tip|cr|icononly = true}} 600",
+        "cooldown": "{{ap|20 to 18}}",
+        "cdstart": "on-cast",
+        "cost": "{{ap|50 to 70}}",
+        "cast time": "none",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "affects": "Self, Enemies",
+        "damagetype": "Physical",
+        "spelleffects": "AoE",
+        "spellshield": "Special",
+        "grounded": "True",
+        "parry": "Special",
+        "notes": "* ''Alpha Strike's'' primary damage applies after '''Master Yi''' reappears.\n* ''Alpha Strike's'' {{sti|cooldown reduction}} applies on {{tip|turret|structures}}.\n* When '''Master Yi''' bounces from a unit it will grant {{tip|sight|vision}} in a 600 radius around it for up-to {{rutngt|0.6}} <!-- this 0.6s after reappearing value is not confirmed as \"the one\", btw, might also be 0.625s after reappearing or 0.75s after last bounce --> after ''Alpha Strike'' ends, including across terrain, though not into {{tip|brush|brushes}}.\n** It will always grant vision around the primary target, even if he doesn't bounce off it.\n* ''Alpha Strike's'' damage is calculated at the moment that each mark is placed. Because of this, it is possible to inflict differing amounts of damage if '''Master Yi's '''{{as|AD}} changes between marks.\n* '''Master Yi''' will follow all his primary target's movements.\n** ''Alpha Strike'' can only follow up-to {{tt|2000|From Yi's location at start of cast}} units; If the target teleports a very long distance, it will not be followed.\n* If the primary target becomes {{tip|untargetable}} and there are no other nearby valid targets, ''Alpha Strike'' will end prematurely and will not deal the damage occurring after '''Master Yi's''' reappearance.\n* The choice of exit direction occurs through an indicator anchored to the target during the time that '''Master Yi''' is vanished. Selection commands (default: MB1/left click) and movement commands (default: MB2/right click) are both valid.\n** Multiple commands can be issued, but only the ''final'' command before exiting will determine the direction.\n* If the primary target is a champion, '''Master Yi''' will be automatically ordered to basic attack them after ''Alpha Strike'' ends.\n** '''Master Yi''' will not be able to buffer other abilities.{{bug}}\n* {{tip|Spell shield}} will only block a single instance of damage.\n* On-hit damage applied by ''Alpha Strike'' will be negated by {{tip|dodge}} and {{tip|block}}, but not while '''Master Yi''' is {{tip|blind|blinded}}.\n** ''Alpha Strike's'' own damage will not be negated.\n* If '''Master Yi''' {{tip|death|dies}} during ''Alpha Strike'' and he is only focusing one target, the ability will only deal the reduced damage strikes and not the final tick of damage from reappearing.\n** If he is striking multiple targets the damage will be dealt immediately when ''dying'', and if he ''dies'' before the bounce from the last target, ''Alpha Strike'' will deal reduced damage only to all units he already bounced from.{{bug}}\n* If '''Master Yi''' enters {{tip|resurrection}} during ''Alpha Strike'' and he is only focusing one target, the ability will deal the reduced damage strikes as normal and the final tick of damage after being ''resurrected''.\n** If he is striking multiple targets, ''Alpha Strike'' will ''sometimes'' deal the reduced damage from repeated bounces and the main damage after being ''resurrected'', and ''sometimes'' only the reduced damage, unrelated to the number of targets available.{{bug}}\n* The following table refers for interactions while '''Master Yi''' is performing ''Alpha Strike'':\n{{ct|attack=false|move=false|cast={{ai|Wuju Style|Master Yi}} and {{ai|Highlander|Master Yi}} are usable. {{ai|Meditate|Master Yi}} is disabled.|items=false|consume=false|spells=true,false,false,false,false|interrupts=death}}",
+        "flavorsound": "{{sm2|Master_Yi_Original_Q_5.ogg}} ''\"Many foes, one strike!\"''",
+        "_comments": [
+          "this 0.6s after reappearing value is not confirmed as \"the one\", btw, might also be 0.625s after reappearing or 0.75s after last bounce"
+        ]
+      }
+    },
+    "W": {
+      "id": "Meditate",
+      "name": "Meditate",
+      "description": "Master Yi rejuvenates his body by focus of mind, restoring Health and taking reduced damage for a short time. In addition, Master Yi will gain stacks of Double Strike and pause the remaining duration on Wuju Style and Highlander for each second he channels.",
+      "tooltip": "Master Yi channels, restoring {{ totalheal }} Health over {{ healduration }} seconds. This healing is increased by up to {{ maxmissinghealthpercent*100 }}% based on Master Yi's missing Health.\n\nWhile channeling and for {{ drlinger }} seconds afterwards, he takes {{ initialdr }} reduced damage, decreased to {{ damagereduction*100 }}% after the first {{ initialextradrduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10",
+      "cost": "40",
+      "cost_type": " Mana (+{{ percentmanacostpersecond*100 }}% Max Mana per second)",
+      "range": "20",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Health Restored",
+          "Damage Reduction"
+        ],
+        "effect": [
+          "{{ baseheal }} -> {{ basehealNL }}",
+          "{{ damagereduction*100.000000 }}% -> {{ damagereductionnl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ basemanacost }} Mana (+{{ percentmanacostpersecond*100 }}% Max Mana per second)",
+      "wiki_detail": {
+        "champion": "Master Yi",
+        "skill": "W",
+        "icon": "Meditate.png",
+        "blurb": "{{sbc|Active:}} {{ci|Master Yi}} {{tip|channels}} for a few seconds, rapidly {{tip|healing}} himself based on {{as|his '''missing''' health}}.",
+        "blurb2": "While channeling, '''Master Yi''' gains damage reduction, pauses ''{{ais|Wuju Style|Master Yi}}'' and ''{{ais|Highlander|Master Yi}}'' duration, and gains one stack of ''{{ai|Double Strike|Master Yi}}'' per second.",
+        "description": "{{sbc|Active:}} '''Master Yi''' {{tip|channels}} for up to 4 seconds, {{tip|healing}} himself every {{fd|0.5}} seconds, increased by {{as|{{pp|type='''missing''' health|key=%|0 to 100 for 11|key1=%|0 to 100|formula=1% per 1% missing health}}|health}}.",
+        "leveling": "{{st|Minimum Heal Per Tick|{{ap|15 to 55}} {{as|(+ {{fd|12.5}}% AP)}}|Maximum Heal Per Tick|{{ap|15*2 to 55*2}} {{as|(+ 25% AP)}}}}\n{{st|Minimum Total Heal|{{ap|15*8 to 55*8}} {{as|(+ 100% AP)}}|Maximum Total Heal|{{ap|15*8*2 to 55*8*2}} {{as|(+ 200% AP)}}}}",
+        "description2": "While channeling, '''Master Yi''' gains 70% damage reduction for the first {{fd|0.5}} seconds, which is then modified to a reduced amount for the remaining duration of the channel. ''Meditate's'' damage reduction is halved against {{tip|turret|turrets}} and lingers for {{fd|0.5}} seconds after the channel ends.",
+        "leveling2": "{{st|Modified Damage Reduction|{{ap|45 to 55}}%|Turret Modified Damage Reduction|{{ap|45/2 to 55/2}}%}}",
+        "description3": "''Meditate {{tip|basic attack reset|resets}} '''Master Yi's''' basic attack timer, pauses {{ais|Wuju Style|Master Yi}} and {{ais|Highlander|Master Yi}} duration, and grants one stack of {{ai|Double Strike|Master Yi}} per second during the channel.''",
+        "cooldown": "10",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "cost": "40 mana + {{as|6% '''maximum'''|mana}}",
+        "costtype": "{{as|mana}} per second",
+        "targeting": "Auto",
+        "affects": "Self",
+        "silence": "true",
+        "notes": "* ''Meditate's'' healing amount updates dynamically as he heals himself, making '''Master Yi''' heal for less as his '''current''' health increases.\n* The first tick of healing may occur at any moment on the first {{fd|0.5}} seconds of the channel. This means immediately canceling the channel for the attack reset does not guarantee one tick of healing, though it may occur with some chance.\n* The following table refers for interactions while '''Master Yi''' is {{tip|channel|channeling}}:\n{{ct|channel|attack=interrupts|cast=interrupts|move=interrupts|items=interrupts,true,,false|spells=true, interrupts, interrupts, interrupts, interrupts}}",
+        "flavorsound": "{{sm2|Master_Yi_Original_W_0.ogg}} ''\"Mind and body.\"''"
+      }
+    },
+    "E": {
+      "id": "WujuStyle",
+      "name": "Wuju Style",
+      "description": "Grants bonus true damage on basic attacks.",
+      "tooltip": "Master Yi's Attacks deal an additional {{ totaldamage }} true damage for {{ duration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "20",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Master Yi",
+        "skill": "E",
+        "icon": "Wuju Style.png",
+        "blurb": "{{sbc|Active:}} {{ci|Master Yi}} empowers his sword, causing his basic attacks to deal {{sti|{{as|'''bonus''' true damage}}}} {{tip|on-hit}} for a few seconds.",
+        "description": "{{sbc|Active:}} '''Master Yi''' empowers his basic attacks within the next 5 seconds to deal {{sti|{{as|'''bonus''' true damage}}}} {{tip|on-hit}}.",
+        "leveling": "{{st|Bonus True Damage|{{ap|20 to 40}} {{as|(+ 35% '''bonus''' AD)}}}}",
+        "cooldown": "14",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Self",
+        "damagetype": "True",
+        "spelleffects": "Proc",
+        "spellshield": "|parry        = Special",
+        "notes": "* ''Wuju Style'' can be cast during ''{{ai|Alpha Strike|Master Yi}}''.\n* ''Wuju Style'' can't be cast while it is already active.\n* ''Wuju Style's'' bonus true damage does not interact with {{tip|critical strike|critical strikes}}.\n* ''Wuju Style's'' bonus true damage cannot be {{tip|block|blocked}} but can be {{tip|dodge|dodged}} and/or missed if '''Master Yi''' is {{tip|blind|blinded}}.\n* The attacks do not deal the '''bonus''' damage against [[structures]].\n* While ''Wuju Style'' is active, the damage will dynamically update its calculations."
+      }
+    },
+    "R": {
+      "id": "Highlander",
+      "name": "Highlander",
+      "description": "Master Yi moves with unparalleled agility, temporarily increasing his Move Speed and Attack Speed as well as making him immune to all slowing effects. While active, Champion kills or assists extend Highlander's duration. Passively reduces cooldown for his other abilities on a kill or assist.",
+      "tooltip": "Passive: Champion takedowns reduce the remaining Cooldown of Master Yi's basic Abilities by {{ rcooldownrefund*100 }}%.\n\nActive: Master Yi enters a trance, gaining {{ rmsbonus }}% Move Speed, {{ rasbonus }}% Attack Speed, and immunity to Slows for {{ rduration }} seconds. Champion takedowns extend the duration of this Ability by {{ rkillassistextension }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "85",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Attack Speed",
+          "Move Speed"
+        ],
+        "effect": [
+          "{{ rasbonus }}% -> {{ rasbonusNL }}%",
+          "{{ rmsbonus }}% -> {{ rmsbonusNL }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Master Yi",
+        "skill": "R",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} Scoring a champion {{tip|takedown}} massively {{sti|cdr|reduces}} the '''current''' cooldowns of {{cis|Master Yi}} basic abilities.",
+        "blurb2": "{{sbc|Active:}} '''Master Yi''' {{tip|cleanse|cleanses}} himself from all {{tip|slow|slows}} and {{tip|cripple|cripples}} and gains {{tip|ghosting}}, {{sti|{{as|'''bonus''' attack speed}}}}, {{sti|ms|{{as|'''bonus''' movement speed}}}}, {{tip|slow-immune|slow immunity}}, and {{tip|cripple-immune|cripple immunity}} all for the next few seconds.",
+        "blurb3": "While active, scoring a champion {{tip|takedown}} extends ''Highlander's'' duration by a few seconds.",
+        "description": "{{sbc|Passive:}} Scoring a champion {{tip|takedown}} reduces the {{sti|'''current''' cooldowns}} of '''Master Yi's''' basic [[Champion ability|abilities]] by 70%.",
+        "icon2": "Highlander.png",
+        "description2": "{{sbc|Active:}} '''Master Yi''' {{tip|cleanse|cleanses}} himself from all {{tip|slow|slows}} and {{tip|cripple|cripples}}. For the next 7 seconds, he gains {{tip|ghosting}}, {{sti|{{as|'''bonus''' attack speed}}}}, {{sti|ms|{{as|'''bonus''' movement speed}}}}, {{tip|slow-immune|slow immunity}}, and {{tip|cripple-immune|cripple immunity}}.",
+        "leveling2": "{{st|Bonus Attack Speed|{{ap|25 to 45}}%}}\n{{st|Bonus Movement Speed|{{ap|35 to 55}}%}}",
+        "description3": "While active, scoring a champion {{tip|takedown}} extends ''Highlander's'' duration by 7 seconds.",
+        "cooldown": "85",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Self",
+        "notes": "* ''Highlander'' can be cast during {{ai|Alpha Strike|Master Yi}}.\n* There are two situations that can happen if '''Master Yi''' uses ''Highlander'' while ''Highlander's'' buff is active.\n** If the buff's duration is under 7 seconds, the buff refreshes to 7 seconds.\n** If the buff's duration is above 7 seconds, nothing happens.",
+        "flavorsound": "{{sm2|Master_Yi_Original_R_6.ogg}} ''\"Speed of thought!\"''"
+      }
+    }
+  }
+}

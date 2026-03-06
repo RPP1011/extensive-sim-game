@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0036_4v4_s2"
+seed = 21959
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["Xerath", "Anivia", "Leblanc", "AurelionSol"]
+enemy_hero_templates = ["Tryndamere", "Draven", "Bard", "Karma"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

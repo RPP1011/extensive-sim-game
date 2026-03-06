@@ -1,0 +1,13 @@
+[scenario]
+name = "stress_all_tank_pivot_s1"
+seed = 11705
+hero_count = 4
+enemy_count = 6
+difficulty = 2
+max_ticks = 10000
+room_type = "Pivot"
+hero_templates = ["knight", "warden", "warden", "warden"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

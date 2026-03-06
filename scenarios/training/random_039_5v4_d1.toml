@@ -1,0 +1,13 @@
+[scenario]
+name = "random_039_5v4_d1"
+seed = 8039
+hero_count = 5
+enemy_count = 4
+difficulty = 1
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["mage", "warlock", "rogue", "paladin", "shadow_dancer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Either"

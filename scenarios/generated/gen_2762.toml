@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0000_4v4_s2"
+seed = 21923
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["warden", "Kled", "Swain", "MissFortune"]
+enemy_hero_templates = ["Renata", "Volibear", "assassin", "cleric"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

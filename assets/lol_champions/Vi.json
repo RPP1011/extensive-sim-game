@@ -1,0 +1,286 @@
+{
+  "id": "Vi",
+  "name": "Vi",
+  "title": "the Piltover Enforcer",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Blast Shield",
+      "description": "Vi charges a shield over time. The shield can be activated by hitting an enemy with an ability.",
+      "wiki_detail": {
+        "champion": "Vi",
+        "skill": "I",
+        "icon": "Blast Shield.png",
+        "blurb": "{{sbc|Innate:}} Periodically, {{cis|Vi}} next ability hit will generate a {{tip|shield}} by a portion of {{as|her '''maximum''' health}} for a short time.",
+        "blurb2": "The cooldown is {{sti|cdr|reduced}} each time ''{{ai|Denting Blows|Vi}}'' is triggered.",
+        "description": "{{sbc|Innate:}} Periodically, '''Vi's''' next [[champion ability|ability]] hit grants her a {{tip|shield}} equal to {{as|12% of her '''maximum''' health}} for 3 seconds.",
+        "description2": "''Blast Shield's'' {{sti|cooldown}} is reduced by 4 seconds each time ''{{ai|Denting Blows|Vi}}'' is consumed.",
+        "static": "{{pp|16 to 12 for 9|formula=16.5-0.5 per level up to 9, where it caps}}",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "Shield",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* ''{{ai|Denting Blows|Vi}}'' will not activate ''Blast Shield''."
+      }
+    },
+    "Q": {
+      "id": "ViQ",
+      "name": "Vault Breaker",
+      "description": "Vi charges her gauntlets and unleashes a vault shattering punch, carrying her forward. Enemies she hits are knocked back and receive a stack of Denting Blows.",
+      "tooltip": "Begin Charging: Vi begins charging a powerful punch, Slowing herself by {{ e4 }}%.\n\nRelease: Vi dashes forward dealing between {{ totaldamage }} and {{ maxdamagetooltip }} physical damage based on charge time and applying Denting Blows to all enemies hit. Vi stops upon colliding with an enemy champion, and Knocks them Back.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/10.5/9/7.5/6",
+      "cost": "50/60/70/80/90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "250",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "15",
+        "6",
+        "5",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Minimum Damage",
+          "Maximum Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ mindamage }} -> {{ mindamageNL }}",
+          "{{ mindamage*2.500000 }} -> {{ mindamagenl*2.500000 }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Vi",
+        "skill": "Q",
+        "icon": "Vault Breaker.png",
+        "blurb": "{{sbc|Active:}} {{ci|Vi}} charges up to a few seconds to increase the {{sti|range}}, speed, and damage of her punch. ''Vault Breaker'' can be recast within the duration and cancels automatically afterwards.",
+        "blurb2": "{{sbc|Recast:}} '''Vi''' {{tip|dashes}} in the target direction to deal {{as|physical damage}} to enemies hit based on charge time. Non-champions hit are {{tip|airborne|pulled}} towards her.",
+        "blurb3": "She will stop upon hitting an enemy {{tip|champion}}, briefly {{tip|airborne|knocking them back}}.",
+        "description": "{{sbc|Active:}} '''Vi''' {{tip|channel|charges}} while being {{tip|slow|slowed}} by 15% for up to 4 seconds to increase ''Vault Breaker's'' {{sti|range}}, speed, and damage over the first {{fd|1.25}} seconds of the channel.",
+        "description2": "''Vault Breaker'' can be recast within the duration. If the charge completes without reactivation, ''Vault Breaker'' is cancelled and put on {{sti|cd|full}} cooldown. If the charge is {{tip|interrupt|interrupted}}, it will be put on a 3-second cooldown.",
+        "description3": "{{sbc|Recast:}} '''Vi''' {{tip|dashes}} in the target direction to deal {{as|physical damage}} to enemies within her path, increased by {{pp|type=channel time|key=%|0 to 100 for 11|0 to 1.25|round1=3|formula=10% per 0.125 seconds. ''This is capped at 1.25 seconds.''}}, and {{tip|airborne|pull}} all non-champions hit towards her.",
+        "leveling3": "{{st|Minimum Physical Damage|{{ap|45 to 145}} {{as|(+ 80% '''bonus''' AD)}}|Maximum Physical Damage|{{ap|45*2 to 145*2}} {{as|(+ 160% '''bonus''' AD)}}}}",
+        "description4": "She stops upon hitting an enemy {{tip|champion}}, {{tip|airborne|knocking them back}} over {{fd|0.75}} seconds.",
+        "description5": "''{{ai|Relentless Force|Vi}} and {{ai|Cease and Desist|Vi}} can be cast during the dash.''",
+        "cooldown": "{{ap|12 to 6}}",
+        "cdstart": "post-effect",
+        "cast time": "none",
+        "cost": "{{ap|50 to 90}}",
+        "costtype": "Mana",
+        "target range": "{{pp|type=channel time|250 to 725 for 11|round1=3|0 to 1.25}}",
+        "speed": "{{pp|type=channel time|1250 to 1400 for 11|round1=3|0 to 1.25}}",
+        "targeting": "[[Auto-targeted|Auto]] / [[Direction-targeted|Direction]]",
+        "affects": "Enemies, Self",
+        "damagetype": "physical",
+        "spelleffects": "aoe",
+        "grounded": "true",
+        "knockdown": "true",
+        "spellshield": "true",
+        "silence": "true",
+        "notes": "* ''Vault Breaker's'' dash range extends up to 50 units when going through a wall.\n* Targets will be hit as soon as they come into contact with '''Vi'''.\n* The knockback direction will be toward '''Vi's''' facing direction regardless of where she hit the target.\n* Casting {{si|Flash}} during the dash will cause enemies at the destination to be hit by ''Vault Breaker''.\n** As {{si|Flash}} updates '''Vi's''' facing direction, affected champions will be knocked back in the direction the summoner spell was cast in.\n* '''Vi''' may cast spells that change her facing direction during the dash, including certain item actives and her own {{ai|R|Vi}}, to knock champions she collides with in a different direction.{{bug|2}}\n** Items that also initiate their own {{tip|dash}} ''immediately'' without delay can only redirect targets struck at ''Vault Breaker's'' maximum range. These items include:\n*** {{ii|Hextech Rocketbelt}}\n* Stuck targets (including those that block ''Vault Breaker'' with a {{tip|spell shield}}) are briefly immune to being affected again by ''Vault Breaker'' from this player, for about {{fd|1.25}} seconds.\n* The following table refers for interactions while '''Vi''' is {{tip|channel|channeling}}:\n{{ct|charge|attack=false|move=true|cast=false|items=false|consume=Disabled, but can still use trinkets.|spells=true, true, false, false, recasts|interrupts=death, ground, root, silence}}"
+      }
+    },
+    "W": {
+      "id": "ViW",
+      "name": "Denting Blows",
+      "description": "Vi's punches break her opponent's Armor, dealing bonus damage and granting her Attack Speed.",
+      "tooltip": "Passive: Every 3rd Attack on the same target deals an additional {{ totaldamagetooltip }} max Health physical damage, removes {{ shredamount }}% Armor and grants Vi {{ attackspeed }}% Attack Speed for {{ sharedbuffsduration }} seconds. It also reduces the remaining Cooldown of Blast Shield by {{ spell.vipassive:cdreductionon3hit }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0",
+      "cost": "0",
+      "cost_type": "Passive",
+      "range": "750",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Maximum Health Damage",
+          "Attack Speed"
+        ],
+        "effect": [
+          "{{ maxhealthdamage }}% -> {{ maxhealthdamageNL }}%",
+          "{{ attackspeed }}% -> {{ attackspeedNL }}%"
+        ]
+      },
+      "resource": "Passive",
+      "wiki_detail": {
+        "champion": "Vi",
+        "skill": "W",
+        "icon": "Denting Blows.png",
+        "blurb": "{{sbc|Passive:}} {{cis|Vi}} [[basic attack]]s and ''{{ai|Vault Breaker|Vi}}'' apply a stack of ''Denting Blows''.",
+        "blurb2": "The third stack consumes them all to deal {{as|'''bonus''' physical damage}} based on the {{as|target's '''maximum''' health}} and inflict {{sti|armor|{{as|armor reduction}}}} for a few seconds. '''Vi''' will also gain {{sti|as|{{as|'''bonus''' attack speed}}}} for a few seconds.",
+        "description": "{{sbc|Passive:}} '''Vi's''' [[basic attack]]s {{tip|on-hit}} and ''{{ai|Vault Breaker|Vi}}'' apply a [[stack]] of ''Denting Blows'' to enemies hit for 4 seconds, refreshing on subsequent applications and stacking up to 3 times. The third stack consumes them all to deal {{as|'''bonus''' physical damage}}, capped at 300 against non-champions, and inflict {{sti|armor penetration|{{as|20% armor reduction}}}} for 4 seconds.",
+        "leveling": "{{st|Bonus Physical Damage|{{as|{{ap|4 to 10}}% {{as|(+{{ft|1% per 35|{{fd|2.86}}% per 100}}'''bonus''' AD)}} of target's '''maximum''' health}}}}",
+        "icon2": "Denting Blows 2.png",
+        "description2": "After consuming ''Denting Blows'', '''Vi''' gains {{sti|as|{{as|'''bonus''' attack speed}}}} for 4 seconds, which refreshes on subsequent triggers.",
+        "leveling2": "{{st|Bonus Attack Speed|{{ap|30 to 60}}%}}",
+        "targeting": "Passive",
+        "affects": "Self, Enemies",
+        "damagetype": "Physical",
+        "spellshield": "False",
+        "spelleffects": "Proc",
+        "parry": "Special",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* The armor penetration will apply after the triggering damage.\n* The enhanced attack applies other {{tip|on-hit}} effects and can both {{tip|critical strike|critically strike}} as normal as well as apply {{sti|life steal|link=true}} (the bonus damage cannot do either).\n* ''Denting Blows'' can be {{tip|blocked}} but cannot be {{tip|dodged}} nor missed while '''Vi''' is {{tip|blind|blinded}}.\n* The attacks do not affect [[structures]] nor [[ward]]s."
+      }
+    },
+    "E": {
+      "id": "ViE",
+      "name": "Relentless Force",
+      "description": "Vi's next attack blasts through her target, dealing damage to enemies behind it.",
+      "tooltip": "Vi's next Attack deals {{ totaldamagetooltip }} physical damage to the target and enemies behind them.\n\nThis Ability has 2 charges ({{ ammorechargetime }} second refresh).{{ spellmodifierdescriptionappend }}",
+      "cooldown": "1",
+      "cost": "26/32/38/44/50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "50",
+        "1.5",
+        "6",
+        "1",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Base Damage",
+          "Charge Time",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ ammorechargetime }} -> {{ ammorechargetimeNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Vi",
+        "skill": "E",
+        "icon": "Relentless Force 2.png",
+        "blurbicon": "Relentless Force.png",
+        "blurb": "{{sbc|Active:}} {{cis|Vi}} next basic attack gains {{sti|range|'''bonus''' range}} and deals {{as|'''modified''' physical damage}} to enemies hit in a cone.",
+        "blurb2": "'''Vi''' periodically stocks a charge of ''Relentless Force'', up to a maximum of 2.",
+        "description": "{{sbc|Active:}} '''Vi''' empowers her next basic attack within 6 seconds to have an {{tip|uncancellable windup}}, gain {{sti|range|50 '''bonus''' range}} and trigger a blast in the target's direction that deals {{as|'''modified''' physical damage}} to enemies hit in a cone.<br><br>''Relentless Force'' can {{tip|critically strike}} for {{as|{{critical damage|{{ccd|Vi|crit_base}}|100|base=100}} AD}} {{as|'''bonus''' physical damage}} against the primary target. Secondary targets take the same damage but do not count as being critically struck.",
+        "leveling": "{{st|Physical Damage|{{ap|0 to 60}} {{as|(+ 120% AD)}} {{as|(+ 100% AP)}}}}",
+        "icon2": "Relentless Force.png",
+        "description2": "'''Vi''' periodically [[stock]]s a ''Relentless Force'' charge, up to a maximum of 2.",
+        "description3": "''Relentless Force {{tip|basic attack reset|resets}} '''Vi's''' basic attack timer.''",
+        "static": "1",
+        "cdstart": "post-effect",
+        "recharge": "{{ap|12 to 8}}",
+        "cost": "{{ap|26 to 50}}",
+        "costtype": "Mana + 1 charge",
+        "effect radius": "{{tip|er|icononly = true}} 600",
+        "angle": "<!--{{tip|er|icononly = true}} X{{degree}}-->",
+        "targeting": "Auto",
+        "cast time": "none",
+        "affects": "Enemies",
+        "damagetype": "physical",
+        "spelleffects": "special",
+        "parry": "true",
+        "spellshield": "true",
+        "notes": "* Applies {{tip|spell damage}} to the primary target, applies {{tip|basic damage}} required effects on the primary target, and applies {{tip|area damage}} to secondary targets.\n* The empowered attack has the same windup time as '''Vi's''' basic attacks.\n* {{ai|Denting Blows|Vi}} will only apply a stack on ''Relentless Force's'' primary target (does not interact with the cone's damage).\n* If the ''Relentless Force'' buff is about to run out as '''Vi''' starts the attack windup, the duration will be updated and extended to allow '''Vi''' to still sucessfully attack.",
+        "_comments": [
+          "{{tip|er|icononly = true}} X{{degree}}"
+        ]
+      }
+    },
+    "R": {
+      "id": "ViR",
+      "name": "Cease and Desist",
+      "description": "Vi runs down an enemy, knocking aside anyone in the way. When she reaches her target she knocks it into the air, jumps after it, and slams it back into the ground.",
+      "tooltip": "Vi singles out an enemy champion, revealing them and dashing unstoppably towards them. Upon reaching them, Vi Knocks them Up for {{ rstunduration }} seconds and deals {{ damage }} physical damage.\n\nAny other enemies Vi collides with are dealt damage, knocked aside, and Stunned for {{ secondarytargetstunduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "140/115/90",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Base Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ rbasedamage }} -> {{ rbasedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Vi",
+        "skill": "R",
+        "icon": "Cease and Desist.png",
+        "blurb": "{{sbc|Active:}} {{ci|Vi}} {{tip|true sight|reveals}} the target enemy champion and {{tip|dashes}} to them with {{tip|displacement immunity}}, dealing {{as|physical damage}} to enemies she passes through and briefly {{tip|airborne|knocking aside}} and {{tip|stun|stunning}} them.",
+        "blurb2": "Upon reaching the target, she deals {{as|physical damage}} and briefly {{tip|airborne|knocks them up}}.",
+        "blurb4": "{{sbc|{{tip|displacement immunity|nolink=true}}:}} The dash cannot be deterred by {{tip|crowd control}}.",
+        "description": "{{sbc|Active:}} '''Vi''' singles out the target enemy {{tip|champion}} and {{tip|dashes}} with {{tip|displacement immunity}} towards them, during which they are {{tip|true sight|revealed}}. Upon approaching within 300-units, she {{tip|dashes}} through and grabs them, {{tip|airborne|knocking them up}} for {{fd|1.3}} seconds and dealing {{as|physical damage}} after {{fd|0.75}} seconds.",
+        "leveling": "{{st|Physical Damage|{{ap|150 to 400}} {{as|(+ 90% '''bonus''' AD)}}}}",
+        "description2": "Enemies she dashes through are dealt the same damage, {{tip|airborne|knocked aside}} by 350 units over {{fd|0.25}} seconds, and {{tip|stun|stunned}} for {{fd|0.75}} seconds.",
+        "target range": "{{tip|cr|icononly = true}} 800",
+        "speed": "{{tt|800|Initial speed, ramps up over the duration}}",
+        "cooldown": "{{ap|140 to 90}}",
+        "cdstart": "on-cast",
+        "cost": "{{ap|100 to 150}}",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "cast time": "{{fd|0.25}}",
+        "affects": "Enemies",
+        "knockdown": "False",
+        "grounded": "True",
+        "damagetype": "Physical",
+        "spelleffects": "spell",
+        "spellshield": "True",
+        "callforhelp": "True",
+        "notes": "* '''Vi''' will track the target if they change locations.\n** She will stop dashing if the target is too far away or moves beyond {{tt|1500|Estimated}} units.\n* '''Vi''' will land to the opposite side of the target after a delay of grabbing them.\n* Secondary targets will be affected as soon as they come into contact with '''Vi''', and cannot be affected by this again for ~4 seconds.\n* The {{tip|airborne}} debuff cannot be overridden.\n* The dash will not end prematurely if '''Vi''' {{tip|blink|blinks}}.\n* The {{tip|displacement immunity}} lasts until the ability fully ends.\n** If the dash ends from entering resurrection or the target being too far away, the displacement immunity will remain for 7 seconds, and will otherwise be lost.{{bug}}\n* The dash speed increases with time travelled.\n{{Unit-targeted cancel conditions}}\n* If the target becomes untargetable during the dash, '''Vi''' ends the dash prematurely and moves towards the target briefly, ignoring any movement commands. If '''Vi''' enters grabbing range, she will apply the {{tip|airborne}} effect but not dealing any damage.\n* If '''Vi''' enters {{tip|resurrection}} during the cast time, she will still dash and apply the airborne effect to the target upon entering grabbing range though not dealing any damage.\n* ''Cease and Desist'' will cancel and go on full cooldown if '''Vi''' is affected by {{ai|Fear Beyond Death 2|Urgot|Fear Beyond Death's}} recast during the cast time.\n* {{tip|Displacement immunity}} will not resist the application of the {{tip|stun}}.\n* The following table refers for interactions while '''Vi''' is {{tip|dash|dashing}}:\n** {{si|Flash}} cannot be used while '''Vi''' has grabbed the target.\n{{ct|attack=false|move=false|cast={{ai|Relentless Force|Vi}} is usable. {{ai|Vault Breaker|Vi}} is disabled.|items=false|consume=false|spells=true,true,false,false,true|interrupts=death}}"
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0011_3v3_s1"
+seed = 11934
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["Maokai", "Jax", "Trundle"]
+enemy_hero_templates = ["Rammus", "Kayn", "Anivia"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

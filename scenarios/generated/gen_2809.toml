@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0016_5v5_s1"
+seed = 11939
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["Olaf", "Gragas", "Kennen", "Poppy", "Taliyah"]
+enemy_hero_templates = ["Nasus", "Akshan", "Hecarim", "Quinn", "Morgana"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

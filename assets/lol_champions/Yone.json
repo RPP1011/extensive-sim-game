@@ -1,0 +1,289 @@
+{
+  "id": "Yone",
+  "name": "Yone",
+  "title": "the Unforgotten",
+  "resource_type": "Flow",
+  "tags": [
+    "Fighter",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Way of the Hunter",
+      "description": "Yone deals magic damage with every second Attack. In addition, his critical strike chance is increased.",
+      "wiki_detail": {
+        "champion": "Yone",
+        "skill": "I",
+        "name": "Way of the Hunter",
+        "icon": "Way of the Hunter.png",
+        "blurb": "{{sbc|Innate - Intent:}} {{ci|Yone}} gains increased {{as|{{sti|critical strike chance}}}}, but his {{tip|critical strikes}} deal reduced damage.",
+        "blurb2": "He also gains {{as|{{sti|attack damage}}}} from excess {{as|{{sti|critical strike chance}}}}.",
+        "blurb3": "{{sbc|Innate - Steel and Spirit:}} '''Yone's''' basic attacks alternate between his {{as|Steel Sword|Steel}} and {{as|Azakana Sword|azakana}}. His {{as|Azakana Sword|azakana}} deals equal parts {{as|physical|pdamage}} and {{as|magic|mdamage}} damage.",
+        "description": "{{sbc|Innate - Intent:}} '''Yone's''' {{as|{{sti|'''total''' critical strike chance}}}} is doubled from all other sources. Additionally,{{ft|every {{as|1% critical strike chance}} in excess of {{as|100%|critical strike chance}} is converted into {{sti|{{as|{{fd|0.5}} '''bonus''' attack damage}}}}.|every {{as|50% critical strike chance}} in excess of {{as|100%|critical strike chance}} is converted into {{sti|{{as|25 '''bonus''' attack damage}}}}.}}",
+        "description2": "{{sbc|Innate - Steel and Spirit:}} '''Yone's''' {{tip|basic attack|basic attacks}} alternate between his {{as|Steel Sword|Steel}} and {{as|Azakana Sword|azakana}} {{tip|on-attack}}. '''Yone''' begins attacking with {{as|Steel Sword|Steel}}, and basic attacks with {{as|Azakana Sword|azakana}} deal {{as|50% AD}} {{as|physical damage}} and {{as|50% AD}} {{as|magic damage}}.",
+        "targeting": "Passive",
+        "affects": "Self, Enemies",
+        "damagetype": "{{tip|Physical damage|Physical}} / {{tip|Magic damage|Magic}}",
+        "spelleffects": "basic",
+        "parry": "true",
+        "notes": "* There is no attack time-out between alternating swords. It will ''persist through {{tip|death}}''.\n* 50% of {{tip|Spellblade}} and {{ri|Demolish}} damage will be converted to {{as|magic damage}} if applied by the {{as|Azakana Sword|azakana}}.\n** This will also occur if applied by {{iis|Guinsoo's Rageblade}} ''Phantom Hit'' after having last attacked with the {{as|Azakana Sword|azakana}}.\n** This will also occur if applied by {{ai|Mortal Steel|Yone}} after having last attacked with the {{as|Azakana Sword|azakana}}.{{bug}}\n* The mixed damage is dealt in two simultaneous instances of damage, but will pretend to be a single instance for most effects (such as {{ris|Conqueror}} stacks).\n** Both instances deal {{tip|basic damage}} and thus natively apply {{sti|life steal}}.\n** The attack applies [[on-hit]] effects only once, right at the start.\n** Even if the target dies from the {{as|magic damage}}, the {{as|physical damage}} will still be applied to it.\n*** If the target dies from [[on-hit]] damage, the magic damage portion will be skipped and only the physical damage applied.{{bug}}\n* '''Yone''' requires at least {{sti|{{as|50% critical strike chance}}}} in order to reach {{as|100% critical strike chance}} from ''Way of the Hunter's'' multiplier."
+      }
+    },
+    "Q": {
+      "id": "YoneQ",
+      "name": "Mortal Steel",
+      "description": "Thrusts forward, damaging all enemies in a line.\n\nOn hit, grants a stack of Gathering Storm for a few seconds. At 2 stacks, Mortal Steel dashes Yone forward with a gust of wind knocking enemies Airborne.",
+      "tooltip": "Yone thrusts forward, dealing {{ qdamage }} physical damage.\n\nOn hit, grants a stack for {{ buffduration }} seconds. At 2 stacks, this ability causes Yone to dash forward with a wave of wind that Knocks Up for {{ q3knockupduration }} seconds and deals {{ qdamage }} physical damage. {{ spellmodifierdescriptionappend }}",
+      "cooldown": "4",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "450",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Base Damage"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Yone",
+        "skill": "Q",
+        "name": "Mortal Steel",
+        "icon": "Mortal Steel.png",
+        "blurb": "{{sbc|Active:}} {{ci|Yone}} thrusts his {{as|Steel Sword}} in a line in the target direction that deals {{as|physical damage}} to enemies hit and applies {{tip|on-hit}} and {{tip|on-attack}} effects to the first enemy hit. This can {{tip|critically strike}}.",
+        "blurb2": "If this hits an enemy, '''Yone''' generates a stack of ''Gathering Storm'' for a few seconds. At 2 stacks, the next ''Mortal Steel'' consumes them all to become empowered with a new effect.",
+        "blurb4": "{{sbc|Gathering Storm Bonus:}} '''Yone''' {{tip|dashes}} in the target direction and unleashes a whirlwind in the same direction, both deal {{as|physical damage}} and briefly {{tip|airborne|knocks up}} enemies hit.",
+        "description": "{{sbc|Active:}} '''Yone''' thrusts his {{as|Steel Sword}} in a line in the target direction that deals {{as|physical damage}} to enemies hit and applies {{tip|on-hit}} and {{tip|on-attack}} effects at 100% effectiveness to the first enemy hit. ''Mortal Steel's'' damage can {{tip|critically strike}}.",
+        "leveling": "{{st|Physical Damage|{{ap|25 to 125}} {{as|(+ 105% AD)}}}}",
+        "description2": "If this hits at least one enemy, '''Yone''' generates a [[stack]] of ''Gathering Storm'' for 6 seconds, stacking up to 2 times and refreshing on subsequent hits. At 2 stacks, the next ''Mortal Steel'' consumes them all to become empowered with a new effect.",
+        "icon3": "Mortal Steel 2.png",
+        "description3": "{{sbc|Gathering Storm Bonus:}} '''Yone''' {{tip|dashes}} a fixed distance in the target direction and unleashes a whirlwind in the same direction, both dealing the same damage to enemies hit in their path and {{tip|airborne|knocking them up}} for {{fd|0.75}} seconds, but being unable to affect the same target twice.",
+        "description4": "''Mortal Steel's'' thrust is {{tip|interrupt|interrupted}} if '''Yone''' is affected by {{tip|disarming crowd control}} during the cast time but its {{sti|cooldown}} is reset to {{fd|0.1}} seconds.",
+        "static": "{{as|{{pp|type='''bonus''' attack speed|4 to 1.48 for 8;4/3|key1=%|0 to 105;1000/9|formula=4*(1-(0.01 per 1.67% '''bonus''' attack speed)). ''This is capped at 67% reduction at 111.1% '''bonus''' attack speed.''}}|attack speed}}",
+        "cast time": "{{tt|{{as|{{pp|type='''bonus''' attack speed|round=3|0.35;0.33;0.297;0.264;0.231;0.198;0.175|key1=%|0;13.72;36.358;58.996;81.634;104.272;120|formula=0.35-0.035 per 24% '''bonus''' attack speed. ''This is capped at 50% reduction at 120% '''bonus''' attack speed.''}}|attack speed}}|Both thrust and whirlwind cast times}}",
+        "range": "{{tip|er|icononly = true}} {{tt|450|Thrust range}} / {{tt|450|Dash distance}} / {{tip|cr|icononly = true}} {{tt|1050|Whirlwind total range}}",
+        "width": "{{tip|er|icononly = true}} {{tt|80|Thrust width}} / {{tt|160|Missile width}}",
+        "collision radius": "{{tip|er|icononly = true}} {{tt|100|Q3 dash collision radius}}",
+        "speed": "{{tt|1500|Dash speed and missile speed}}",
+        "targeting": "Direction",
+        "affects": "Self, Enemies",
+        "damagetype": "Physical",
+        "spelleffects": "special",
+        "projectile": "special",
+        "parry": "special",
+        "spellshield": "true",
+        "grounded": "special",
+        "knockdown": "true",
+        "notes": "* ''Mortal Steel'' applies {{tip|basic damage}} for {{tt|the first (closest) enemy hit|including enemies hit by the dash}} and {{tip|area damage}} for secondary enemies:\n** ''Mortal Steel'' will apply [[on-hit]] effects to the first target hit, but will not do so to the secondary ones.\n** ''Mortal Steel'' will not apply [[ability effects|spell effects]] to the first target hit, but will do so to the secondary ones.\n** {{stil|Spell vamp}} will only grant {{tip|heal|healing}} from the damage dealt to secondary targets, and healing is reduced to 33% effectiveness, accordingly.\n** {{stil|Life steal}} will heal based on the damage dealt to the first target hit.\n* ''Mortal Steel'' will not benefit from the bonus attack speed gained by {{ri|Hail of Blades}}.{{bug}}\n* After a successful crit roll against one of the targets, ''Mortal Steel's'' thrust is guaranteed to {{tip|critically strike}} all further targets aswell.{{bug}}\n** This is unlike the behaviour of {{cai|Steel Tempest|Yasuo}}.\n** The whirlwind and dash roll their critical strike against each target individually.\n* {{tip|Blink|Blinking}} during ''Mortal Steel's'' cast with two stacks of ''Gathering Storm'' (after the cast time) will end the dash prematurely but enemies in range of '''Yone''' at the new location are affected. The whirlwind's trajectory cannot be changed once it has already been unleashed.\n* Only the whirlwind can be {{tip|projectile|intercepted}}.\n* Each parry has different interactions with this ability, whether it's the first target of ''Mortal Steel'' or the secondary one. In either case '''Yone''' still gains a stack of ''Gathering Storm'' and his whirlwind {{tip|airborne|knock up}} cannot be negated by parries:\n** {{tip|Dodge}} and {{tip|Block}}: first target '''does not''' take damage, secondary target '''does''' take damage.\n** {{tip|Blind}}: both first target and secondary target take damage.\n* {{tip|Spell shield}} does not prevent '''Yone''' from receiving a stack.\n* ''Mortal Steel'' is disabled while {{tip|ground|grounded}} or {{tip|root|rooted}} if '''Yone''' has two stacks of ''Gathering Storm''.\n* While at two stacks, a range indicator will be shown for the effective range of the whirlwind.\n* The {{tip|dash}} can cross terrain.\n{{Effect at cast time end}}\n** '''Yone''' will always cast ''Mortal Steel'' in his facing direction, and he will turn to face the target direction at the start of the cast time. While at two stacks, '''Yone''' will always cast it in the target direction."
+      }
+    },
+    "W": {
+      "id": "YoneW",
+      "name": "Spirit Cleave",
+      "description": "Cleaves forward, damaging all enemies in a cone. Grants a shield to Yone, the value is increased by the number of champions hit by the swipe.\n\nSpirit Cleave's cooldown and cast time scale with attack speed.",
+      "tooltip": "Yone cleaves forward, dealing {{ basedamage*0.5 }} + {{ maxhealthdamage*50 }}% max Health physical damage and {{ basedamage*0.5 }} + {{ maxhealthdamage*50 }}% max Health magic damage.\n\nIf Yone hits, he gains {{ wshield }} Shield for {{ shieldduration }} seconds. The amount of Shield increases for each champion struck. {{ spellmodifierdescriptionappend }}",
+      "cooldown": "14",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "700",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Base Damage",
+          "Total Max Health Damage"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ maxhealthdamage*100.000000 }}% -> {{ maxhealthdamagenl*100.000000 }}%"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Yone",
+        "skill": "W",
+        "name": "Spirit Cleave",
+        "icon": "Spirit Cleave.png",
+        "blurb": "{{sbc|Active:}} {{ci|Yone}} cleaves his {{as|Azakana Sword|azakana}} in a cone in the target direction, dealing equal parts {{as|physical|pdamage}} and {{as|magic|mdamage}} damage to enemies hit based on {{as|their '''maximum''' health}}.",
+        "blurb2": "If this hits an enemy, '''Yone''' briefly {{tip|shield|shields}} himself, increased per {{tip|champion}} hit.",
+        "description": "{{sbc|Active:}} '''Yone''' cleaves his {{as|Azakana Sword|azakana}} in a cone in the target direction, dealing equal parts {{as|physical|physical damage}} and {{as|magic|magic damage}} damage to enemies hit. The '''total''' mixed damage has a minimum threshold of {{pp|30+10*x for 8;then + 20*x for 5;then + 40*x for 5|formula=30 + 10 per level until lvl 8, then + 20 per level until lvl 13, then + 40 per level}} against {{tip|minions}} and a maximum threshold of {{pp|140+10*x for 18|formula=140 + 10 per level}} against {{tip|monsters}}.",
+        "leveling": "{{st|Total Mixed Damage|{{ap|10 to 50}} {{as|(+ {{ap|8 to 12}}% of target's '''maximum''' health)}}|Physical Damage|{{ap|5 to 25}} {{as|(+ {{ap|4 to 6}}% of target's '''maximum''' health)}}|Magic Damage|{{ap|5 to 25}} {{as|(+ {{ap|4 to 6}}% of target's '''maximum''' health)}}}}",
+        "description2": "If this hits an enemy, '''Yone''' grants himself a {{tip|shield}} for {{pp|40 to 90}} {{as|(+ 65% '''bonus''' AD)}} for {{fd|1.5}} seconds, increased by 100% if it hits a {{tip|champion}} and by 50% for each subsequent champion hit.",
+        "cast time": "{{as|{{pp|type='''bonus''' attack speed|0.5 to 0.1875 for 11|key1=%|0 to 105|formula=0.5*(1-(0.01 per 1.68% '''bonus''' attack speed)). ''This is capped at 62.5% reduction at 105% '''bonus''' attack speed.''}}|attack speed}}",
+        "static": "{{as|{{pp|type='''bonus''' attack speed|14 to 6 for 11|key1=%|0 to 94.553|formula=14*(1-(0.01 per 1.51% '''bonus''' attack speed)). ''This is capped at 62.5% reduction at 94.6% '''bonus''' attack speed.''}}|attack speed}}",
+        "effect radius": "{{tip|er|icononly = true}} 600",
+        "angle": "{{tip|er|icononly = true}} {{tt|80|Estimated, see notes}}{{degree}}",
+        "targeting": "Direction",
+        "affects": "Self, Enemies",
+        "damagetype": "{{tip|Physical damage|Physical}} / {{tip|Magic damage|Magic}}",
+        "projectile": "false",
+        "spelleffects": "aoe",
+        "spellshield": "true",
+        "notes": "* Despite ''Spirit Cleave'' generally hitting targets' {{tip|edge range}}, it ''cannot'' hit targets whose center is behind him.\n** This behaviour is common with [[Projectile|missiles]], however some cone spells such as this one also do it.\n* ''Spirit Cleave'' will not benefit from the bonus attack speed gained by {{ri|Hail of Blades}}.{{bug}}\n* {{tip|Spell shield}} does not prevent '''Yone''' from receiving and/or increasing the {{tip|shield}}.\n* The shield's amount will also increase for each {{tip|clone}} hit.\n{{Effect at cast time end}}\n** '''Yone''' will always cast ''Spirit Cleave'' in his facing direction, and he will turn to face the target direction at the start of the cast time.\n* The mixed damage is applied in two instances, and the {{as|physical damage}} will be dealt first within the same game tick.\n** If the {{as|physical damage}} finishes off the unit, the {{as|magic damage}} will not be dealt against it.{{bug}}"
+      }
+    },
+    "E": {
+      "id": "YoneE",
+      "name": "Soul Unbound",
+      "description": "Yone's spirit leaves his body behind, gaining Move Speed. When this ability ends, Yone's spirit is forced back to his body and he repeats a portion of the damage he dealt as a spirit.",
+      "tooltip": "Yone enters a spirit form for {{ returntimer }} seconds, leaving his body behind for the duration and gaining {{ startingms*100 }}% to {{ movementspeed*100 }}% ramping Move Speed. \n\nWhen the spirit form ends, Yone snaps back to his body and repeats {{ deathmarkpercent*100 }}% of all Attack and Ability damage he dealt to champions during this time. You may Recast this ability during spirit form.\n\nRecast: End spirit form early.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "22/19/16/13/10",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "25000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Repeated Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ deathmarkpercent*100.000000 }}% -> {{ deathmarkpercentnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Yone",
+        "skill": "E",
+        "name": "Soul Unbound",
+        "icon": "Soul Unbound.png",
+        "blurb": "{{sbc|Active:}} {{ci|Yone}} {{tip|dashes}} in the target direction, leaving his body behind and entering ''Spirit Form'' for a few seconds.",
+        "blurb2": "''Soul Unbound'' can be recast within the duration, and does so automatically afterwards.",
+        "blurb3": "{{sbc|Recast:}} '''Yone''' ends ''Spirit Form'' and {{tip|dashes}} back to his body with {{tip|displacement immunity}}. He detonates all ''marks'', dealing {{as|true damage}} equal to the amount stored on each champion.",
+        "blurb4": "{{sbc|Spirit Form:}} '''Yone''' becomes {{tip|ghosted}} and gains {{as|{{sti|'''bonus''' movement speed}}}}. Enemies he attacks are ''marked'', storing a portion of the damage taken from '''Yone'''.<br/><br/>\n{{sbc|{{tip|displacement immunity|nolink=true}}:}} The dash cannot be deterred by {{tip|crowd control}}.",
+        "description": "{{sbc|Active:}} '''Yone''' {{tip|dash|dashes}} a fixed distance in the target direction, discarding his body and entering ''Spirit Form'' for 5 seconds. '''Yone's''' body is {{tip|untargetable}} and is sent the same distance behind the cast location, though not through terrain, and is reclaimed when ''Soul Unbound'' ends.",
+        "icon2": "Soul Unbound 3.png",
+        "description2": "{{sbc|Spirit Form:}} '''Yone''' becomes {{tip|ghosted}} and gains {{sti|ms|{{as|{{pp|10 to 30 for 11|0 to 3|key=%|type=seconds active|label1=seconds since the start of the initial dash|label=bonus movement speed}} '''bonus''' movement speed}}}}. Enemy champions damaged by his [[basic attack]]s or [[champion ability|abilities]] are ''marked''. Each ''mark'' stores a portion of the {{tt|post-mitigation|Damage calculated after modifiers}} damage that '''Yone''' deals to the target with his basic attacks and abilities.",
+        "leveling2": "{{st|Damage Stored|{{ap|25 to 35}}% of damage dealt}}",
+        "description3": "Activation resets ''{{ais|Way of the Hunter|Yone}}'' current sword state. ''Soul Unbound'' can be recast after {{fd|0.5}} seconds, and automatically does so after the duration.",
+        "icon4": "Soul Unbound 2.png",
+        "description4": "{{sbc|Recast:}} '''Yone''' {{tip|dashes}} back to his body with {{tip|displacement immunity}}, ending ''Spirit Form'' and detonating the ''marks'' on each champion to deal {{sti|{{as|true damage}}}} equal to the amount stored against each of them.",
+        "description5": "''The automatic recast is delayed if '''Yone''' is {{tip|attack windup|winding up}} a basic attack or is unable to recast Soul Unbound under any circumstances, which includes if he cannot move or cast abilities. Soul Unbound will also immediately recast upon {{tip|death}} or entering {{tip|resurrection}}.''",
+        "cooldown": "{{tt|{{ap|22 to 10}}|Starts after recasting}}",
+        "cdstart": "post-effect",
+        "effect radius": "{{tt|Global|Return dash and detonation damage radius}}",
+        "range": "{{tt|300|Initial dash range and body distance in the opposite direction}}",
+        "speed": "{{tt|1200 <!--+ X-->|Initial and return dash speed, pending for test}}",
+        "cast time": "{{tt|None|Initial cast}} / {{tt|{{fd|0.25}}|Recast}}",
+        "targeting": "[[Direction-targeted|Direction]] / [[Auto-targeted|Auto]]",
+        "affects": "Self, Enemies",
+        "damagetype": "True",
+        "spelleffects": "aoe",
+        "spellshield": "false",
+        "grounded": "true",
+        "knockdown": "special",
+        "notes": "* The ''marks'' store {{tip|physical damage}}, {{tip|magic damage}}, and {{tip|true damage}}.\n* ''Soul Unbound'' stays on cooldown for the first 15 seconds of the game.\n<!--Spirit Form-->\n* {{si|Recall}} and {{si|Teleport}} are disabled during ''Soul Unbound''.\n* Only '''Yone's''' initial dash can be {{tip|interrupt|interrupted}}.\n* '''Yone''' is {{tip|displacement immune}} during the recast's cast time.\n* '''Yone''' uses {{tip|Flow}} as his [[resource]] to indicate the remaining amount of time in centiseconds (100 centiseconds = 1 second) that ''Soul Unbound'' can be active for before the ability automatically recasts.\n* With 1 second remaining before the recast occurs automatically, a soft, dark vignette will pulse over the screen, accompanied by a {{tt|distinct audio cue|The actual sound varies by skin}}. This warning is only visible and audible to '''Yone'''.\n* '''Yone's''' body unit cannot be interacted with by any means. It will despawn as soon as '''Yone's''' dash back ends.\n<!--Recast-->\n* ''Soul Unbound's'' recast, even when cast automatically, counts as an ability activation for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n* ''Soul Unbound's'' recast does not interrupt '''Yone's''' last movement or attack order.\n* '''Yone''' will place himself onto the ground and interrupts {{tip|airborne|displacements}} affecting him upon recasting.\n* Some examples of effects that can delay ''Soul Unbound's'' automatic recast:\n** {{tip|Attack windup}}\n** [[Channel#Casting Times|Cast time]]\n** {{tip|Channel|Channels}} (excluding {{si|Hexflash}})\n** {{tip|Lockout|Lockouts}}\n** {{tip|Dash|Dashes}}\n** {{tip|Immobilize|Immobilizes}}, {{tip|Silence}}, {{tip|Ground}}, and {{tip|Stasis}}\n** {{ai|Devour|Tahm Kench}}\n** {{ai|Fate's Call|Kalista}}\n*** '''Yone''' instantly appears at his body's location the moment this effect ends.\n** {{ai|Realm Warp|Ryze}}\n* ''Soul Unbound's'' recast is disabled (cannot be manually nor automatically cast) while '''Yone''' is in the {{ai|Realm of Death|Mordekaiser}} or {{ai|The Hextech Ultimatum|Camille}}. The recast will be deferred until those effects end.\n** {{ai|The Hextech Ultimatum|Camille}} will specifically end if '''Yone''' recasts ''Soul Unbound''.\n* If '''Yone''' uses {{ai|Mortal Steel|Yone}} at two ''Gathering Storm'' stacks to delay ''Soul Unbound's'' automatic recast, he will be able to basic attack once in a short time period before the automatic recast triggers.\n* If '''Yone''' {{tip|death|dies}} or enters {{tip|resurrection}} with ''Spirit Form'', he will immediately initiate the recast and dash back to his body while dead or resurrecting.\n** If he dies during the recast, the dash back is not interrupted.\n** His death animation will play upon arriving to his body.\n<!--Damage-->\n* The marks do not store damage from [[item]]s, [[rune]]s and [[summoner spell]]s.\n* The mark also automatically detonates without '''Yone''' having to recast when the marked champion dies or enters {{tip|resurrection}}.\n* The detonation damage cannot be dodged by becoming {{tip|untargetable}}.\n* The marks will not store damage dealt to {{tip|shield|shields}}.\n* If the mark's damage is higher than the target's '''current''' health, the mark indicator will have a slightly different appearance.\n** This does not take into account effects that would amplify the damage of the mark, such as {{ri|Coup de Grace}}.\n<!--Interactions Table-->\n* The following table refers for interactions while '''Yone''' is in cast time and dashing back to his body:\n{{ct|attack=false|move=false|cast=false|items=false|consume=false|spells=false|interrupts=false}}",
+        "flavorsound": "{{sm2|Yone_Original_E_1.ogg}} ''\"Spirit unmoored!\"''",
+        "_comments": [
+          "+ X",
+          "Spirit Form",
+          "Recast",
+          "Damage",
+          "Interactions Table"
+        ]
+      }
+    },
+    "R": {
+      "id": "YoneR",
+      "name": "Fate Sealed",
+      "description": "Yone blinks behind the last champion in a line with a slash so powerful it pulls all enemies hit towards him.",
+      "tooltip": "Yone strikes all enemies along a path for {{ tooltipdamage }} physical damage and {{ tooltipdamage }} magic damage, teleporting behind the last champion hit and Knocking Up victims towards Yone.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "1000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Base Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Yone",
+        "skill": "R",
+        "name": "Fate Sealed",
+        "icon": "Fate Sealed.png",
+        "blurb": "{{sbc|Active:}} {{ci|Yone}} prepares a strike over an area in the target direction, {{tip|knockdown|knocking down}} and briefly {{tip|stun|stunning}} enemies within. He then {{tip|blinks}} behind the furthest target, else to max range.",
+        "blurb2": "Afterwards, a gust rushes along the area that deals equal parts {{as|physical|pdamage}} and {{as|magic|mdamage}} damage to all targets, {{tip|airborne|pulling}} them towards '''Yone'''.",
+        "description": "{{sbc|Active:}} '''Yone''' prepares a strike over the cast time, then ''marks'' all enemies within an area in the target direction, {{tip|knockdown|knocking them down}} and {{tip|stun|stunning}} them for 1 second. He {{tip|blinks}} {{tt|200 units|Can place him beyond maximum range}} beyond the center of the last enemy {{tip|champion}} struck, or else to {{tt|maximum range|Uses center range}} instead.",
+        "description2": "After {{fd|0.3}} seconds, a gust rushes along the same area that deals equal parts {{as|physical|pdamage}} and {{as|magic|mdamage}} damage to ''marked'' enemies within and {{tip|airborne|pulls}} them towards the location '''Yone''' blinked to, then {{tip|airborne|knocks them up}} for {{fd|0.75}} seconds.",
+        "leveling2": "{{st|Total Mixed Damage|{{ap|200 to 600}} {{as|(+ 80% '''bonus''' AD)}}|Physical Damage|{{ap|100 to 300}} {{as|(+ 40% '''bonus''' AD)}}|Magic Damage|{{ap|100 to 300}} {{as|(+ 40% '''bonus''' AD)}}}}",
+        "description3": "''The {{tip|stun}} ends prematurely upon the knock up.''",
+        "cooldown": "{{ap|120 to 80}}",
+        "cast time": "{{fd|0.75}}",
+        "range": "{{tip|er|icononly = true}} 1000",
+        "width": "{{tip|er|icononly = true}} 225",
+        "targeting": "Direction",
+        "damagetype": "{{tip|Physical damage|Physical}} / {{tip|Magic damage|Magic}}",
+        "affects": "Self, Enemies",
+        "spelleffects": "aoe",
+        "spellshield": "special",
+        "projectile": "false",
+        "grounded": "true",
+        "flavorsound": "{{sm2|Yone_Original_R_0.ogg}} \"My blades know your name!\"",
+        "notes": "* ''Marked'' enemies that are not within the area will not be affected by the second portion of the ability.\n* If ''Fate Sealed's'' maximum range is inside terrain, enemies will not be {{tip|airborne|pulled}} through walls.\n* ''Fate Sealed'' {{tip|airborne|pulls}} targets to the location '''Yone''' ''would'' {{tip|blink}} to, and not towards his current position by the end of the cast time.\n* ''Fate Sealed'' '''can''' hit targets whose center is behind '''Yone''', if their {{tip|edge range|radius}} overlaps with the rectangle hitbox in front of him.\n* Enemies are {{tip|airborne|pulled}} with 3000 speed.\n{{Effect at cast time end}}\n* ''Fate Sealed'' will not {{tip|stun}} enemies that are {{tip|displacement immune}}.\n* '''Yone''' can blink up to 1200 units + enemy [[size]], if the last enemy champion's radius intersects with the maximum range slightly.\n* The mixed damage is applied in two instances, and the {{as|magic damage}} will be dealt first within the same game tick.\n** If the {{as|magic damage}} finishes off the unit, the {{as|physical damage}} will not be dealt against it.{{bug}}\n* '''Yone''' will {{tip|sight|reveal}} himself during the cast time if there is an enemy champion nearby.\n* When striking against {{tip|spell shield}}, '''Yone''' will still {{tip|blink}} to the last champion hit even if they block the effects to themselves.\n* The {{tip|airborne|knock up}} starts once the pull ends.\n* '''Yone''' is {{tip|lockout|locked out}} of performing actions for {{fd|0.45}} seconds after the cast time. All abilities that have been buffered during this time will cast shortly before the lock out ends.\n** The following table refers for interactions while '''Yone''' is in cast time:\n{{ct|attack=false|cast=false|move=false|items=false|consume=false|spells=true, false, false, false, false|interrupts=revival-false}}"
+      }
+    }
+  }
+}

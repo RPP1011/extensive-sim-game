@@ -1,0 +1,12 @@
+[scenario]
+name        = "4x Cryomancer"
+seed        = 47556
+hero_count  = 4
+enemy_count = 16
+difficulty  = 3
+max_ticks   = 5000
+room_type   = "Climax"
+hero_templates = ["Cryomancer", "Cryomancer", "Cryomancer", "Cryomancer"]
+
+[assert]
+outcome = "Either"

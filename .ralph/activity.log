@@ -1,0 +1,98 @@
+# Activity Log
+
+## Run Summary
+- 2026-02-23 20:48:29 | run=20260223-190651-49914 | iter=11 | mode=build | story=US-012 | duration=454s | status=success
+- 2026-02-23 20:40:52 | run=20260223-190651-49914 | iter=10 | mode=build | story=US-011 | duration=499s | status=success
+- 2026-02-23 20:32:30 | run=20260223-190651-49914 | iter=9 | mode=build | story=US-010 | duration=417s | status=success
+- 2026-02-23 20:25:30 | run=20260223-190651-49914 | iter=8 | mode=build | story=US-009 | duration=670s | status=success
+- 2026-02-23 20:14:17 | run=20260223-190651-49914 | iter=7 | mode=build | story=US-008 | duration=662s | status=success
+- 2026-02-23 20:03:12 | run=20260223-190651-49914 | iter=6 | mode=build | story=US-007 | duration=596s | status=success
+- 2026-02-23 19:53:14 | run=20260223-190651-49914 | iter=5 | mode=build | story=US-006 | duration=530s | status=success
+- 2026-02-23 19:44:21 | run=20260223-190651-49914 | iter=4 | mode=build | story=US-005 | duration=512s | status=success
+- 2026-02-23 19:35:46 | run=20260223-190651-49914 | iter=3 | mode=build | story=US-004 | duration=672s | status=success
+- 2026-02-23 19:24:31 | run=20260223-190651-49914 | iter=2 | mode=build | story=US-003 | duration=460s | status=success
+- 2026-02-23 19:16:47 | run=20260223-190651-49914 | iter=1 | mode=build | story=US-002 | duration=596s | status=success
+- 2026-02-23 18:13:53 | run=20260223-180726-47424 | iter=1 | mode=build | story=US-001 | duration=387s | status=success
+
+## Events
+
+[2026-02-22 22:15:25] ITERATION 1 start (mode=build story=US-001)
+[2026-02-23 18:07:27] ITERATION 1 start (mode=build story=US-001)
+[2026-02-23 18:07:47] Start US-001 work: reviewed guardrails/errors/PRD and beginning code audit
+[2026-02-23 18:09:01] Implemented strict campaign party save validation and added party persistence compatibility tests for US-001
+[2026-02-23 18:11:27] Adjusted campaign save/load determinism test setup to initialize CampaignParties before roundtrip signatures
+[2026-02-23 18:12:05] Ran cargo test for US-001; story tests pass, remaining suite has 3 pre-existing failures in game_core focus-progress and non_headless smoke tests
+[2026-02-23 18:13:01] Updated progress log for US-001 with commit, verification outcomes, and implementation details
+[2026-02-23 18:13:53] ITERATION 1 end (duration=387s)
+[2026-02-23 19:06:51] ITERATION 1 start (mode=build story=US-002)
+[2026-02-23 19:07:13] US-002: auditing start-menu and continue semantics
+[2026-02-23 19:09:38] US-002: added continue semantics tests in src/main.rs
+[2026-02-23 19:12:08] US-002: verification run complete (targeted tests pass; full cargo test has unrelated failures)
+[2026-02-23 19:15:41] US-002: progress log updated with verification and commit details
+[2026-02-23 19:16:07] US-002: finalized progress entry post-commit status
+[2026-02-23 19:16:47] ITERATION 1 end (duration=596s)
+[2026-02-23 19:16:50] ITERATION 2 start (mode=build story=US-003)
+[2026-02-23 19:17:17] US-003 started: completed required reads and beginning code-path audit
+[2026-02-23 19:19:11] US-003 major code changes: isolated StartMenu status/subtitle channel and added re-entry/reset tests
+[2026-02-23 19:20:19] US-003 verification: targeted tests passed; cargo test has unchanged known failures (focused/unfocused mission progression and non-headless smoke)
+[2026-02-23 19:22:33] US-003 browser verification completed via hub screenshots + Playwright localhost review (start menu and runtime notice screens checked)
+[2026-02-23 19:23:46] US-003 progress log updated with implementation, verification, and commit details
+[2026-02-23 19:24:30] ITERATION 2 end (duration=460s)
+[2026-02-23 19:24:33] ITERATION 3 start (mode=build story=US-004)
+[2026-02-23 19:24:57] US-004 audit in progress
+[2026-02-23 19:29:42] US-004 major code change: added faction selection screen, gating flow, character creation save field, and tests
+[2026-02-23 19:31:47] US-004 verification complete: targeted tests passed; cargo test shows known unrelated failures
+[2026-02-23 19:34:47] US-004 progress log updated with commit and verification details
+[2026-02-23 19:35:45] ITERATION 3 end (duration=672s)
+[2026-02-23 19:35:48] ITERATION 4 start (mode=build story=US-005)
+[2026-02-23 19:36:14] US-005 iteration 4 start: guardrails/errors/PRD reviewed; auditing main.rs character creation backstory flow
+[2026-02-23 19:38:39] US-005 major code change: implemented backstory archetype choices, confirmation validation, effect application, and coverage tests
+[2026-02-23 19:41:34] US-005 verification: cargo test run (known unrelated failures unchanged), targeted US-005 tests pass, runtime screenshot capture executed
+[2026-02-23 19:42:05] US-005 browser verification: reviewed generated UI capture frames through local HTTP in Playwright
+[2026-02-23 19:43:16] US-005 progress log updated with commit, verification, and run details
+[2026-02-23 19:44:20] ITERATION 4 end (duration=512s)
+[2026-02-23 19:44:23] ITERATION 5 start (mode=build story=US-006)
+[2026-02-23 19:45:05] US-006: located tooling; auditing party handoff implementation and tests
+[2026-02-23 19:46:52] US-006: implemented party panel markers and take-command handoff validation helpers with tests
+[2026-02-23 19:47:46] US-006: verification complete; targeted tests pass, full cargo test shows known unrelated failures
+[2026-02-23 19:51:30] US-006: preparing final audit and commit
+[2026-02-23 19:52:08] US-006: progress log updated with commit hash, verification, and learnings
+[2026-02-23 19:53:13] ITERATION 5 end (duration=530s)
+[2026-02-23 19:53:16] ITERATION 6 start (mode=build story=US-007)
+[2026-02-23 19:54:05] US-007: loaded guardrails/errors/prd and began code audit
+[2026-02-23 19:57:40] US-007: implemented region target picker flow, map click handling, patrol target movement, and tests
+[2026-02-23 20:01:24] US-007: verification complete (cargo test/cargo build); browser verification attempted but blocked by empty screenshot artifacts
+[2026-02-23 20:02:30] US-007: appended progress entry for iteration 6 and recorded verification/commit details
+[2026-02-23 20:03:12] ITERATION 6 end (duration=596s)
+[2026-02-23 20:03:14] ITERATION 7 start (mode=build story=US-008)
+[2026-02-24 04:03:40 UTC] Start US-008 work: review guardrails/errors/PRD and audit camera focus code
+[2026-02-24 04:12:31 UTC] US-008 major code change: added camera focus interpolation state machine, orbit input lock during transition, and UI transition status messaging.
+[2026-02-24 04:12:31 UTC] US-008 verification: cargo test camera_focus_transition PASS; cargo test (full) shows unchanged known failures in game_core focus tests and non_headless smoke test.
+[2026-02-24 04:13:30 UTC] US-008 progress log updated with implementation, verification, and known-failure notes.
+[2026-02-23 20:14:16] ITERATION 7 end (duration=662s)
+[2026-02-23 20:14:19] ITERATION 8 start (mode=build story=US-009)
+[2026-02-23 20:14:34] test
+[2026-02-23 20:14:36] US-009 iteration 8 start: auditing overworld-to-region transition payload implementation
+[2026-02-23 20:18:52] US-009: implemented region transition payload resource, explicit Enter Region action, transition lock handling, and new RegionView UI state
+[2026-02-23 20:22:31] US-009: verification complete (targeted transition tests pass, full cargo test run shows unchanged known baseline failures, hub screenshot capture executed for UI verification)
+[2026-02-23 20:24:34] US-009: progress log updated with implementation, verification, and commit details
+[2026-02-23 20:25:29] ITERATION 8 end (duration=670s)
+[2026-02-23 20:25:32] ITERATION 9 start (mode=build story=US-010)
+[2026-02-23 20:25:55] US-010 iteration 9 start: auditing region-to-local intro bootstrap implementation.
+[2026-02-23 20:29:13] US-010: implemented local eagle-eye intro bootstrap state, region trigger, sequence progression, and abort path for missing anchor geometry.
+[2026-02-23 20:30:14] US-010: verification complete. Story-targeted tests pass; full cargo test retains known unrelated failures (focused/unfocused mission + non_headless smoke).
+[2026-02-23 20:31:19] US-010: progress log updated with commit/test outcomes and implementation notes.
+[2026-02-23 20:32:29] ITERATION 9 end (duration=417s)
+[2026-02-23 20:32:32] ITERATION 10 start (mode=build story=US-011)
+[2026-02-23 20:32:56] Start US-011 implementation: auditing save/load layer progression and migration handling
+[2026-02-23 20:36:46] Implemented US-011 core changes: added campaign progression save schema, layer-aware load restore, and migration compatibility messaging
+[2026-02-23 20:38:43] Completed verification for US-011: targeted layer-resume tests pass; cargo test has known unrelated failures only
+[2026-02-23 20:39:48] Updated US-011 progress log with commit/test details and known-failure notes
+[2026-02-23 20:40:51] ITERATION 10 end (duration=499s)
+[2026-02-23 20:40:54] ITERATION 11 start (mode=build story=US-012)
+[2026-02-23 20:41:31] Start US-012 iteration 11 work
+[2026-02-23 20:44:27] US-012: implemented 5-stage hub capture fixtures and regression baseline tests
+[2026-02-23 20:46:24] US-012: ran verification tests (targeted + cargo test)
+[2026-02-23 20:47:21] US-012: updated progress log entry
+[2026-02-23 20:48:01] US-012: corrected post-commit status in progress log
+[2026-02-23 20:48:29] ITERATION 11 end (duration=454s)

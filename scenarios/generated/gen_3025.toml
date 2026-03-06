@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0088_3v3_s1"
+seed = 12011
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["Hecarim", "pyromancer", "Sivir"]
+enemy_hero_templates = ["warden", "Tristana", "Renekton"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

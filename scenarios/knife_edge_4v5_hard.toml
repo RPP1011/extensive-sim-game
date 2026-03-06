@@ -1,0 +1,11 @@
+[scenario]
+name        = "Knife Edge 4v5 — Barely Winnable"
+seed        = 6060
+hero_count  = 4
+enemy_count = 5
+difficulty  = 4
+max_ticks   = 4000
+room_type   = "Pivot"
+
+[assert]
+outcome = "Either"

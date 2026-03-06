@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_cleric_arcanist_engineer_s1"
+seed = 11274
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["cleric", "arcanist", "engineer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

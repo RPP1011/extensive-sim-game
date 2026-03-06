@@ -1,0 +1,290 @@
+{
+  "id": "Renata",
+  "name": "Renata Glasc",
+  "title": "the Chem-Baroness",
+  "resource_type": "Mana",
+  "tags": [
+    "Support",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Leverage",
+      "description": "Renata's Attacks deal bonus damage and mark enemies. Renata's allies can damage marked enemies to deal bonus damage.",
+      "wiki_detail": {
+        "champion": "Renata Glasc",
+        "skill": "I",
+        "icon": "Renata Glasc Leverage.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Renata Glasc|Renata}} basic attacks apply a mark that lasts a few seconds and expires when attacking a new enemy. If the enemy was unmarked, this also deals {{as|'''bonus''' magic damage}} based on the {{as|target's '''maximum''' health}}.",
+        "blurb2": "Allied {{tip|champions|champions'}} damaging attacks and abilities against a marked target will consume the mark to deal {{as|magic damage}} based on the {{as|target's '''maximum''' health}}.",
+        "description": "{{sbc|Innate:}} '''Renata's''' [[basic attack]]s are empowered to apply a mark that lasts 6 seconds, refreshes on subsequent hits and expires when attacking a new enemy. If the enemy was unmarked, the attack also deals {{as|'''bonus''' magic damage}} equal to {{as|{{pp|key=%|1 to 2 for 9}}|health}} {{as|(+ 2% per 100 AP)}} {{as|of the target's '''maximum''' health}}.",
+        "description2": "Allied {{tip|champions|champions'}} damaging attacks and abilities against a marked target will consume the mark to deal {{as|additional '''bonus''' magic damage|magic damage}} equal to {{as|{{pp|key=%|1 to 2 for 9}}|health}} {{as|(+ 2% per 100 AP)}} {{as|of the target's '''maximum''' health}}.",
+        "description3": "''Leverage's'' damage is capped at 150 against epic {{tip|monsters}}.",
+        "leveling": "|cooldown     =",
+        "cast time": "|cost         =",
+        "costtype": "|range        =",
+        "width": "|speed        =",
+        "targeting": "Passive",
+        "damagetype": "magic",
+        "projectile": "|affects      = Allies, Enemies",
+        "spelleffects": "proc",
+        "onhiteffects": "|spellshield  = special",
+        "callforhelp": "|notes        = \n* {{tip|Spell shield}} will not block the mark's application.\n** {{Pending for test}}: Interaction with mark consumption\n* The mark's consumption by an ally respects {{tip|enchantment redirection}}."
+      }
+    },
+    "Q": {
+      "id": "RenataQ",
+      "name": "Handshake",
+      "description": "Renata sends out a missile rooting the first enemy hit, and can recast the ability to throw the unit in a direction.",
+      "tooltip": "Renata sends out a missile from her arm, Rooting the first enemy hit for {{ rootduration }} second and dealing {{ totaldamage }} magic damage.\n\nRecast: Renata Pulls the enemy in a direction, dealing {{ totaldamage }} magic damage to enemies they are thrown into and Stunning for {{ stunduration }} seconds if the thrown enemy is a champion.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16",
+      "cost": "80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Renata Glasc",
+        "skill": "Q",
+        "icon": "Renata Glasc Handshake.png",
+        "blurb": "{{sbc|Active:}} {{cis|Renata Glasc|Renata}} fires a hook in the target direction that deals {{as|magic damage}} to the first enemy hit and briefly {{tip|root|roots}} them. She can recast the ability while the target is rooted.",
+        "blurb2": "{{sbc|Recast:}} '''Renata''' {{tip|airborne|knocks}} the target in the target direction that deals {{as|magic damage}} to enemies hit. If the thrown target is a {{tip|champion}}, enemies hit are briefly {{tip|stun|stunned}}.",
+        "description": "{{sbc|Active:}} '''Renata''' fires a hook in the target direction that deals {{as|magic damage}} to the first enemy hit and {{tip|root|roots}} them for 1 second, during which they are {{tip|true sight|revealed}}.<br><br>If the {{tip|root}} was applied, '''Renata''' forms a {{tip|tether}} between her and the target for the same duration, causing '''Renata''' to become unable to declare attacks and have her {{as|movement speed}} '''reduced''' by {{as|30%|ms}}.",
+        "description2": "''Handshake'' can be recast while the tether is active.",
+        "leveling": "{{st|Magic Damage|{{ap|80 to 260}} {{as|(+ 80% AP)}}}}",
+        "icon3": "Renata Glasc Handshake 2.png",
+        "description3": "{{sbc|Recast:}} '''Renata''' breaks the tether to {{tip|airborne|knock}} the target in the target direction, though not through terrain, dealing the same damage to enemies they pass through. If the thrown target is a {{tip|champion}}, all secondary targets hit are {{tip|stun|stunned}} for {{fd|0.5}} seconds.",
+        "cooldown": "{{tt|16|Starts post-effect if an enemy is hit, on-cast if not}}",
+        "cdstart": "Special",
+        "cast time": "{{fd|0.25}}",
+        "cost": "80",
+        "costtype": "Mana",
+        "range": "{{tip|cr|icononly = true}} {{tt|900|Missile range}} / {{tt|275|Recast throw range}}",
+        "width": "{{tip|er|icononly = true}} {{tt|140|Missile width}}",
+        "tether radius": "{{tip|er|icononly = true}} 1200",
+        "collision radius": "<!--{{tt|X|Throw collision radius}}-->",
+        "speed": "{{tt|1450|Missile speed}}<!-- / {{tt|X|Throw displacement speed}}-->",
+        "targeting": "Direction",
+        "damagetype": "magic",
+        "projectile": "true",
+        "affects": "Self, Ememies",
+        "spelleffects": "special",
+        "onhiteffects": "|spellshield  = special",
+        "callforhelp": "|notes        = \n* Applies {{tip|spell damage}} to the primary target and {{tip|area damage}} to secondary targets.\n* ''Handshake's'' interaction between its tether and root:\n** If the root is not applied, neither is the tether.\n** The tether's duration lasts the same as the root duration, even if it is modified by {{tip|tenacity}}.\n** If the root is removed, the tether is as well, but not vice versa.\n* {{tip|Spell shield}} will block the hook but not the recast's effects as the primary target.\n** As a secondary target, the recast's effects will be blocked.\n* '''Renata''' may still move while the hook is in flight.\n** Her facing direction is locked towards the target direction of the hook.\n* While the target is hooked, '''Renata's''' facing direction is considered to be in their direction and not in the one she is moving.\n* The {{stil|movement speed}} reduction stacks additively with other {{as|movement speed}} bonuses.\n** It is a negative bonus, not a {{tip|slow}}, and is thus not reduced by {{tip|slow resist}}.\n{{Effect at cast time start}}",
+        "_comments": [
+          "{{tt|X|Throw collision radius}}",
+          "/ {{tt|X|Throw displacement speed}}"
+        ]
+      }
+    },
+    "W": {
+      "id": "RenataW",
+      "name": "Bailout",
+      "description": "Renata buffs an allied champion to fight harder, delaying their death and potentially saving them if they get a takedown.",
+      "tooltip": "Renata infuses an ally champion, granting {{ ascalc }} Attack Speed and {{ mscalc }} Move Speed towards enemies, increasing to {{ finalascalc }} Attack Speed and {{ finalmscalc }} Move Speed over {{ duration }} seconds. Takedowns refresh the duration of the buff.\n\nIf the ally would die, they instead return to full Health, which then decays over 3 seconds.\n\nIf they get a Takedown while decaying, they will be set to {{ triumphpercent }}% max Health and stop decaying.\n\nThe Champion's death can be delayed by healing or similar effects while in the decaying state, but cannot be prevented unless the Champion gets a Takedown. Champions can only delay their death once.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "28/27/26/25/24",
+      "cost": "80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Attack Speed",
+          "Move Speed",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ bonusattackspeed }}% -> {{ bonusattackspeedNL }}%",
+          "{{ bonusmovespeed }}% -> {{ bonusmovespeedNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Renata Glasc",
+        "skill": "W",
+        "icon": "Renata Glasc Bailout.png",
+        "blurb": "{{sbc|Active:}} {{ci|Renata Glasc|Renata}} grants herself or the target allied champion ramping {{sti|{{as|'''bonus''' attack speed}}}} in addition to {{sti|{{as|'''bonus''' movement speed}}}} toward enemies. ''Bailout's'' duration resets whenever the target scores a {{tip|takedown}} against an enemy champion.",
+        "blurb2": "If the target would {{tip|death|die}} while ''Bailout'' is active, their health is set back to full but they suffer a {{as|true damage}} burn that would kill them over a short time. The target can stop the burn by scoring a {{tip|takedown}}.",
+        "description": "{{sbc|Active:}} '''Renata''' infuses herself or the target allied champion with a chemtech formula for 5 seconds, granting the target {{sti|{{as|'''bonus''' attack speed}}}} and {{sti|{{as|'''bonus''' movement speed}}}} while they are facing nearby {{tip|sight|visible}} enemy champions or minions, with both of the bonuses increasing in effectiveness by {{pp|key=%|type=seconds elapsed|0 to 100 for 21|0 to 5}}. ''Bailout's'' duration resets whenever the target scores a {{tip|takedown}} against an enemy champion within 6 seconds of damaging them.",
+        "leveling": "{{st|Bonus Attack Speed|{{ap|10 to 30}}% {{as|(+ 1% per 100 AP)}}|Maximum Bonus Attack Speed|{{ap|10*2 to 30*2}}% {{as|(+ {{ap|1*2}}% per 100 AP)}}}}\n{{st|Bonus Movement Speed|{{ap|10 to 20}}% {{as|(+ 1% per 100 AP)}}|Maximum Bonus Movement Speed|{{ap|10*2 to 20*2}}% {{as|(+ {{ap|1*2}}% per 100 AP)}}}}",
+        "description2": "If the target takes {{tip|death|fatal damage}} while ''Bailout'' is active, they are restored to {{as|100% of their '''maximum''' health}} but suffer a {{sti|{{as|true damage}}}} burn equal to {{as|10% of their '''maximum''' health}} every {{rutngt|0.25}} until they die from reaching 0 health, during which ''Bailout's'' duration is reset every {{fd|0.25}} seconds. This effect may occur only ''once'' per application of ''Bailout'' while the target already has the buff and is not burning.<br><br>The burn will stop once the target scores a {{tip|takedown}} against an enemy champion within 6 seconds of damaging them, setting their {{as|'''current''' health}} to {{as|20% of their '''maximum''' health}} immediately afterwards.",
+        "cooldown": "{{ap|28 to 24}}",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "cost": "80",
+        "costtype": "Mana",
+        "target range": "{{tip|cr|icononly = true}} 800",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|1300|Radius for movement speed towards enemies}}",
+        "width": "|speed        =",
+        "targeting": "Unit",
+        "damagetype": "|projectile   =",
+        "affects": "|spelleffects =",
+        "onhiteffects": "|spellshield  =",
+        "callforhelp": "|flavorsound  = <sm2 vol=\"0.6\">Renata_Glasc_Original_SFX_W_hit_player.ogg</sm2> ''Activation SFX''",
+        "notes": "* Damage taken in excess of the fatal damage taken does not apply to the target's health after it was restored.\n* The self-damage taken is considered {{tip|raw damage}} and is calculated based on the target's '''maximum''' health at the time of taking lethal damage.\n* ''Bailout's'' bonuses will not reset in effectiveness if its duration is refreshed.\n* ''Bailout'' takes priority over all {{tip|resurrection}} and {{tip|zombie state}} effects.\n* ''Bailout'' will stop refreshing its duration while the target is burning after 250 seconds have elapsed.\n* ''Bailout'' cannot be used on {{tip|clone|clones}} nor {{tip|zombie state|zombie state}} units.\n* If the target takes fatal damage during ''Bailout'', upon destroying a turret while being targeted by it, they will receive their own [[Kill#Champion bounties|bonus shut-down bounty]] (ignoring the base kill reward of 300 gold) instead of being executed.{{bug|1}}"
+      }
+    },
+    "E": {
+      "id": "RenataE",
+      "name": "Loyalty Program",
+      "description": "Renata sends out a pair of chemtech missiles, shielding allies and damaging and slowing enemies hit.",
+      "tooltip": "Renata sends out a pair of chemtech missiles, dealing {{ totaldamage }} magic damage and Slowing surrounding enemies and enemies hit by 30% for {{ slowduration }} seconds. Allies hit gain {{ shieldcalc }} Shield for {{ shieldduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "70/80/90/100/110",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "Shield Amount",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ shieldvalue }} -> {{ shieldvalueNL }}",
+          "{{ basecost }} -> {{ basecostNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Renata Glasc",
+        "skill": "E",
+        "icon": "Renata Glasc Loyalty Program.png",
+        "blurb": "{{sbc|Active:}} {{ci|Renata Glasc|Renata}} sends out two chemtech rockets that strike targets around her, then converge into a single missile that explodes at the target location.",
+        "blurb2": "'''Renata''' and allies struck are granted a {{tip|shield}}, and enemies struck are dealt {{as|magic damage}} and {{tip|slow|slowed}} for a short time.",
+        "description": "{{sbc|Active:}} '''Renata''' sends out chemtech rockets from either side of her that instantly strike targets around her. After {{rutngt|0.4}} they converge and travel to the target location as a single missile, striking targets along its path and exploding upon reaching the target location.",
+        "description2": "'''Renata''' and allies struck are granted a {{tip|shield}} for 3 seconds and enemies struck are dealt {{as|magic damage}} and {{tip|slow|slowed}} by 30% for 2 seconds.",
+        "leveling2": "{{st|Magic Damage|{{ap|65 to 185}} {{as|(+ 55% AP)}}}}\n{{st|Shield Strength|{{ap|50 to 110}} {{as|(+ 50% AP)}}}}",
+        "description3": "''Loyalty Program will cast at max range if cast beyond that.''",
+        "cooldown": "{{ap|14 to 10}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "{{ap|70 to 110}}",
+        "costtype": "Mana",
+        "target range": "800",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|325|Initial hit radius around Renata}} / {{tt|225|Missile explosion radius upon arriving at the target location}}",
+        "width": "{{tip|er|icononly = true}} {{tt|220|Missile width}}",
+        "speed": "{{tt|1450|Missile speed, spawns up-to 200 units closer to the cast location already}}",
+        "targeting": "Location",
+        "damagetype": "Magic",
+        "projectile": "true",
+        "affects": "Allies, Ememies",
+        "spelleffects": "spellaoe",
+        "onhiteffects": "|spellshield  = special",
+        "callforhelp": "|notes        = \n* {{tip|Spell shield}} will block either the rockets while they are in-flight or their explosion.\n{{Effect at cast time start}}"
+      }
+    },
+    "R": {
+      "id": "RenataR",
+      "name": "Hostile Takeover",
+      "description": "Renata sends out a wave of chemicals, causing any enemies hit to go Berserk.",
+      "tooltip": "Renata sends out a wave of chemicals, Berserking enemies for {{ berserkduration }} seconds, causing them to Attack the nearest unit, prioritizing their allies.\n\nWhile Berserk, enemies gain {{ bonusattackspeed*100 }}% Attack Speed.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "150/130/110",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "2000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Duration"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ berserkduration }} -> {{ berserkdurationNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Renata Glasc",
+        "skill": "R",
+        "icon": "Renata Glasc Hostile Takeover.png",
+        "blurb": "{{sbc|Active:}} '''Renata''' launches a cloud of potent chemicals that travels in the target direction. Enemy champions and minions hit briefly become {{tip|berserk}}, gaining {{sti|as|{{as|'''bonus''' attack speed}}}}.",
+        "blurb4": "{{sbc|{{tip|Berserk|nolink=true}}:}} Berserk causes the target to prioritize attacking their allies over their enemies.",
+        "description": "{{sbc|Active:}} '''Renata''' launches a cloud of potent chemicals that travels in the target direction, granting {{tip|sight}} of its surroundings. Enemy champions and minions hit become {{tip|berserk}} for a duration.",
+        "leveling": "{{st|Berserk Duration|{{ap|1.25 to 2.25}} seconds}}",
+        "description2": "''Berserked'' units gain {{sti|{{as|100% '''bonus''' attack speed}}}} and 25% increased [[size]]. Within their targeting radius, they prioritize attacking the closest unit by the following categories in descending order:\n# Their allied champions \n# Allied non-champions\n# Allied {{tip|wards}}\n# Enemy units (including {{tip|monster|monsters}})",
+        "cooldown": "{{ap|150 to 110}}",
+        "cast time": "{{fd|0.75}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "range": "{{tip|cr|icononly = true}} {{tt|2000|Range of individual cloud missiles}}",
+        "width": "{{tip|er|icononly = true}} {{tt|500|Individual cloud missiles}}",
+        "angle": "{{tt|14{{Degree}}|Angle at which the outermost cloud missiles fan out from Renata times two, estimated}}",
+        "effect radius": "{{tip|sight|icononly = true}} {{tt|750|Cloud missiles sight radius, pending for test}} / {{tip|cr|icononly = true}} {{tt|1000|Berserker seek target radius}}",
+        "speed": "{{tt|650 - 1000|Acceleration by 50 per second, pending for test}}",
+        "targeting": "Direction",
+        "damagetype": "|projectile   = true",
+        "affects": "Enemies",
+        "spelleffects": "|onhiteffects =",
+        "spellshield": "true",
+        "callforhelp": "|notes        = \n:''See [[Types of Crowd Control#Berserk]] for specific details on Berserk.''\n{{Effect at cast time end}}\n* Typically, any enemies killed that directly result from ''Berserk'' are credited to '''Renata Glasc'''.",
+        "tips": "* ''Berserked'' enemies that use {{si|Smite}} to execute monsters will gain kill credit, not '''Renata'''.",
+        "flavorsound": "{{sm2|Renata_Glasc_Original_R_1.ogg}} ''\"You work for me now!\"''"
+      }
+    }
+  }
+}

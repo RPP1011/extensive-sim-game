@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0083_5v8_d5_s1"
+seed = 12206
+hero_count = 5
+enemy_count = 8
+difficulty = 5
+max_ticks = 10000
+room_type = "Pivot"
+hero_templates = ["paladin", "ranger", "alchemist", "templar", "witch_doctor"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

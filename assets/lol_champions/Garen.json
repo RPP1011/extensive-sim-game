@@ -1,0 +1,271 @@
+{
+  "id": "Garen",
+  "name": "Garen",
+  "title": "The Might of Demacia",
+  "resource_type": "None",
+  "tags": [
+    "Fighter",
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Perseverance",
+      "description": "If Garen has not recently been struck by damage or enemy abilities, he regenerates a percentage of his total health each second.",
+      "wiki_detail": {
+        "champion": "Garen",
+        "skill": "I",
+        "icon": "Perseverance.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Garen}} continually {{sti|health regeneration|regenerates}} a portion of his {{sti|health|{{as|'''maximum''' health}}}}.",
+        "blurb2": "This ability is temporarily disabled if he is attacked by epic {{tip|monsters}}, enemy {{tip|turrets}}, or enemy {{tip|champions}}.",
+        "description": "{{sbc|Innate:}} '''Garen''' {{sti|health regeneration|link=true|regenerates}}{{ft|{{as|{{pp|key=%|1.5+0.2*(x-1) for 6;then + 0.8*x for 7; then + 0.4*x|formula=1.3%+0.2 per level up to level 6, then+0.8% up to level 13, then+0.4%}} of his {{sti|'''maximum''' health}}}} every 5 seconds.|{{as|{{pp|key=%|(1.5+0.2*(x-1))/10 for 6;then + 0.8/10*x for 7; then + 0.4/10*x|formula=0.13%+0.02% per level up to level 6, then+0.08% up to level 13, then+0.04%}} of his {{sti|'''maximum''' health}}}} every {{fd|0.5}} seconds.}}",
+        "description2": "''Perseverance'' is lost for {{tt|8 seconds|Not a cooldown, unaffected by ability haste}} if '''Garen''' takes damage from {{tip|champion|champions}}, epic {{tip|monster|monsters}}, or {{tip|turret|turrets}}, or if he is hit by an enemy [[Champion ability|ability]] or affected by an enemy [[summoner spell]], refreshing on subsequent damage and hits taken from them.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "spelleffects": "Heal",
+        "notes": "* ''Perseverance'' does not go on nor refresh its cooldown from damage which was fully prevented by a {{tip|shield}} or {{tip|invulnerability}}.",
+        "yvideo": "Garen - Passive"
+      }
+    },
+    "Q": {
+      "id": "GarenQ",
+      "name": "Decisive Strike",
+      "description": "Garen gains a burst of Move Speed, breaking free of all slows affecting him. His next attack strikes a vital area of his foe, dealing bonus damage and silencing them.",
+      "tooltip": "Garen removes all Slowing effects on him and gains {{ movementspeedamount*100 }}% Move Speed for {{ movementspeedduration }} second(s).\n\nHis next Attack Silences for {{ silenceduration }} seconds and does {{ totaldamage }} physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "300",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Move Speed Duration"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ movementspeedduration }} -> {{ movementspeeddurationNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Garen",
+        "skill": "Q",
+        "icon": "Decisive Strike.png",
+        "blurb": "{{sbc|Active:}} {{ci|Garen}} gains {{sti|ms|{{as|'''bonus''' movement speed}}}} and {{tip|cleanse|cleanses}} from {{tip|slow|slows}}.",
+        "blurb2": "His next {{tip|basic attack}} will {{tip|lunge}} and deal {{as|'''bonus''' physical damage}}, {{tip|silence|silencing}} the target.",
+        "description": "{{sbc|Active:}} '''Garen''' {{tip|cleanse|cleanses}} himself of all {{tip|slow|slows}} and gains {{sti|ms|{{as|35% '''bonus''' movement speed}}}} for a duration.",
+        "leveling": "{{st|Movement Speed Duration|{{ap|1 to 3.6}}}}",
+        "description2": "Additionally, '''Garen''' empowers his next [[basic attack]] within {{fd|4.5}} seconds to have an {{tip|uncancellable windup}}, {{tip|lunge}} at the target, deal {{as|'''bonus''' physical damage}}, and {{tip|silence}} them for {{fd|1.5}} seconds.",
+        "leveling2": "{{st|Bonus Physical Damage|{{ap|30 to 150}} {{as|(+ 50% AD)}}}}",
+        "description3": "''Decisive Strike {{tip|basic attack reset|resets}} '''Garen's''' basic attack timer.''",
+        "cooldown": "8",
+        "cdstart": "post-effect",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Self, Enemies",
+        "damagetype": "Physical",
+        "spellshield": "Special",
+        "spelleffects": "spell",
+        "parry": "True",
+        "projectile": "|grounded     =",
+        "knockdown": "False",
+        "notes": "* The enhanced attack will apply other [[on-hit effect]]s and can {{tip|critical strike|critically strike}} as normal (the bonus damage does not).\n** The bonus damage will also apply {{sti|life steal}}.\n** The bonus damage is applied to [[structures]].\n* ''Decisive Strike'' locks '''Garen''' out of using basic attacks for a short period of time. This is shortened with {{stil|attack speed}}.\n* The enhanced attack will still complete and hit the target even if they become {{tip|untargetable}} during the {{tip|attack windup|attack's windup}}.\n* ''Decisive Strike'' will not prevent the reapplication of {{tip|slow|slows}} (e.g. the persistent slow from {{ai|Pillar of Ice|Trundle}} will be immediately reapplied after removal if '''Garen''' is still within its [[area of effect]]).\n* {{tip|Spell shield}} will only negate the {{tip|silence}}.\n* ''Decisive Strike's'' {{tip|lunge}} can pass very thin terrain and will otherwise not be able to. In any case, '''Garen''' will still hit his target.",
+        "yvideo": "Garen - Q"
+      }
+    },
+    "W": {
+      "id": "GarenW",
+      "name": "Courage",
+      "description": "Garen passively increases his Armor and Magic Resist by killing enemies. He may also activate this ability to give him a shield and tenacity for a brief moment followed by a lesser amount of damage reduction for a longer duration.",
+      "tooltip": "Passive: Garen has {{ resistsfortooltip }} bonus Armor and {{ resistsfortooltip }} bonus Magic Resist. Killing units permanently grants {{ resistgainonkilltooltip }} resists, up to a max of {{ resistmax }}.\n\nActive: Garen steels his courage for {{ drduration }} seconds, reducing incoming damage by {{ drpercent*100 }}%. He also gains {{ totalshield }} Shield and {{ upfronttenacity*100 }}% Tenacity for {{ upfrontduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "22/19.5/17/14.5/12",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "0",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Shield Amount",
+          "Damage Reduction",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ baseshield }} -> {{ baseshieldNL }}",
+          "{{ drpercent*100.000000 }}% -> {{ drpercentnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Garen",
+        "skill": "W",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} {{ci|Garen}} permanently gains '''bonus''' {{as|{{sti|armor}}}} and {{sti|magic resistance|{{as|magic resist}}}} by killing enemies, up to a cap.",
+        "blurb2": "{{sbc|Active:}} '''Garen''' reduces incoming damage for a few seconds. He also briefly gains a {{tip|shield}} and increased {{tip|tenacity}}.",
+        "description": "{{sbc|Passive:}} Whenever '''Garen''' kills an enemy, he generates a [[stack]] of ''Courage'', stacking up to 150 times.",
+        "description2": "{{sbc|Courage:}} For each stack, '''Garen''' gains {{sti|armor|{{as|{{fd|0.2}} '''bonus''' armor}}}} and {{sti|mr|{{as|{{fd|0.2}} '''bonus''' magic resistance}}}}, up to a maximum of 30 '''bonus''' resistances each.",
+        "icon3": "Courage.png",
+        "description3": "{{sbc|Active:}} '''Garen''' reduces incoming damage for 4 seconds.",
+        "leveling3": "{{st|Damage Reduction|{{ap|25 to 41}}% }}",
+        "description4": "For the first {{fd|0.75}} seconds, '''Garen''' additionally grants himself a {{tip|shield}} and 60% {{tip|tenacity}}.",
+        "leveling4": "{{st|Shield Strength|{{ap|65 to 145}} {{as|(+ 18% '''bonus''' health)}}}}",
+        "cooldown": "{{ap|22 to 12}}",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Self",
+        "notes": "* ''Courage's'' bonus resistances are only gained when it is ranked up at least once, but ''Courage's'' passive is retroactive for units killed before it was learned.\n* ''Courage's'' '''bonus''' resistances can be obtained by any of '''Garen's''' damage sources (basic attacks, abilities, summoner spells, runes, item actives).\n** This does not include ''last hits'' transferred to '''Garen''' artificially.\n* The kills on these enemy unit types count towards ''Courage's'' '''bonus''' resistances:\n** {{tip|champion|Champions}} (Only [[kill]]s, [[Assist]]s don't grant the '''bonus''' resistances)\n** All {{tip|minions}} and {{tip|monster|monsters}}\n** [[Champion summoned units]] (e.g. {{ai|Noxious Trap|Teemo}}, {{ai|Powder Keg|Gangplank}}, {{ai|Dark Procession|Yorick}})\n** All {{tip|pet|pets}} and {{tip|clone|clones}}.\n*** The bonus is equal for all these units; ''Large'' units do not grant a larger bonus.\n* The kills on these enemy unit types do '''not''' count towards ''Courage's'' '''bonus''' resistances:\n** {{tip|Wards}}.\n** {{tip|Turrets}} (including {{ai|Shurima's Legacy|Azir|Sun Disk}}) and other [[structures]]\n** [[Jungle plants]].\n** Units destroyed by 'trampling' such as {{cai|Rampant Growth|Zyra|seeds}}, {{cai|Cell Division|Zac|goo}} or {{cai|Tunnel|Rek'Sai|tunnels}}.\n* ''Courage'' will only grant bonus resistances from units killed by '''Garen''' himself. {{ii|Eye of the Herald}} does not count.\n* The {{tip|Tenacity}} increase {{tip|stacks additively}} with the ''tenacity reduction'' from {{tip|Brittle}}, but multiplicatively with other sources.",
+        "yvideo": "Garen - W"
+      }
+    },
+    "E": {
+      "id": "GarenE",
+      "name": "Judgment",
+      "description": "Garen rapidly spins his sword around his body, dealing physical damage to nearby enemies.",
+      "tooltip": "Garen rapidly spins his sword for {{ duration }} seconds, dealing {{ totaldamage }} physical damage {{ f1 }} times over the duration. The nearest enemy takes {{ nearestenemybonus*100 }}% increased damage. Champions hit by {{ stackstoshred }} strikes lose {{ shredamount*100 }}% Armor for {{ shredduration }} seconds.\n\nRecast: Garen ends this Ability early.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9/8.25/7.5/6.75/6",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "325",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Base Damage Per Spin",
+          "Attack Damage Scaling Per Spin",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamagepertick }} -> {{ basedamagepertickNL }}",
+          "{{ adratiopertick*100.000000 }}% -> {{ adratioperticknl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Garen",
+        "skill": "E",
+        "icon": "Judgment.png",
+        "blurbicon": "Judgment.png",
+        "blurb": "{{sbc|Active:}} {{ci|Garen}} rapidly spins with his sword for a short time, continually dealing {{as|physical damage}} to nearby enemies. He spins more based on his {{sti|as|{{as|'''bonus''' attack speed}}}}.",
+        "blurb2": "The nearest enemy is dealt increased damage. Enemy {{tip|champions}} hit by enough spins will have {{sti|armor penetration|{{as|reduced armor}}}}.",
+        "blurb3": "{{sbc|Recast:}} ''Judgment'' is ended early, with the cooldown {{sti|ah|reduced}} by its remaining duration.",
+        "description": "{{sbc|Active:}} '''Garen''' rapidly spins his sword around himself 7 (+ 1 per {{tt|{{as|25% '''bonus''' attack speed}}|Only bonus attack speed from item stats and growth (per level)}}) times over 3 seconds, becoming unable to declare basic attacks but gaining {{tip|ghosting}} and dealing {{as|physical damage}} to nearby enemies {{tt|periodically|Spin rate is 3 ÷ number of spins}}. ''Judgment'' can be recast after 1 second while active, and does so automatically after it ends.",
+        "leveling": "{{st|Physical Damage Per Spin|{{ap|4 to 20}} {{as|(+ {{ap|36 to 44}}% AD)}}}}",
+        "description2": "Enemy champions hit 6 times by ''Judgment'' are inflicted with {{sti|armor penetration|{{as|25% armor reduction}}}} for 6 seconds, with the duration refreshing upon the 7th hit and every 6th hit thereafter.",
+        "icon3": "Judgment 3.png",
+        "description3": "''Judgment'' deals 25% increased damage against the nearest enemy hit.",
+        "leveling3": "{{st|Increased Damage Per Spin|{{ap|4*1.25 to 20*1.25}} (+ {{pp|0.8*(x-1)*1.25 for 9;then + 0.2*x*1.25}}) {{as|(+ {{ap|36*1.25 to 44*1.25}}% AD)}}}}",
+        "icon4": "Judgment 2.png",
+        "description4": "{{sbc|Recast:}} '''Garen''' ends ''Judgment'' prematurely.",
+        "description5": "''Judgment'' can {{tip|critical strike|critically strike}} for  {{as|{{critical damage|40|80}} '''bonus''' physical damage}}.",
+        "cooldown": "{{ap|9 to 6}}",
+        "cdstart": "post-effect",
+        "effect radius": "325",
+        "targeting": "Auto",
+        "cast time": "none",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "|spelleffects = aoedot",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n*The initial casts count as an ability activation for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n**Deactivating the ability manually does not.\n* Each spin triggers a stack of {{ri|Conqueror}}.\n* For the purpose of moving closer to an enemy when right clicking them, ''Judgment'' also reduces '''Garen's''' {{sti|attack range|link=range}} {{ft|to 100|by 75}} for the duration.\n* ''Judgment'' cancels '''Garen's''' last movement command upon ending.\n* Each spin deals damage simultaneously to all enemies within its range when the spin is completed.\n* The spin animation is capped at once per {{fd|0.2}} seconds, but the amount of ticks will keep on scaling.\n* The armor reduction stacks multiplicatively with other percentage armor penetration effects.\n{{ct|attack=false|cast=[[File:Decisive_Strike.png|20px|link=Garen#Decisive_Strike]] [[Garen#Decisive_Strike|Decisive Strike]] and [[File:Courage.png|20px|link=Garen#Courage]] [[Garen#Courage|Courage]] are usable. [[File:Demacian_Justice.png|20px|link=Garen#Demacian_Justice]] [[Garen#Demacian_Justice|Demacian Justice]] interrupts.|move=true|items=true|consume=true|spells=true,true,true,false,true|interrupts=death}}",
+        "yvideo": "Garen - E"
+      }
+    },
+    "R": {
+      "id": "GarenR",
+      "name": "Demacian Justice",
+      "description": "Garen calls upon the might of Demacia to attempt to execute an enemy champion.",
+      "tooltip": "Garen calls upon the might of Demacia to slay his enemy, dealing {{ basedamage }} plus {{ executedamage*100 }}% missing Health true damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "400",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage",
+          "Percent Missing Health Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ executedamage*100.000000 }}% -> {{ executedamagenl*100.000000 }}%"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Garen",
+        "skill": "R",
+        "blurb": "{{sbc|Active:}} {{ci|Garen}} strikes a lethal blow to an enemy champion that deals {{as|true damage}} based on the {{as|target's '''missing''' health}}.",
+        "icon": "Demacian Justice.png",
+        "description": "{{sbc|Active:}} '''Garen''' calls upon the might of ''Demacia'' onto the target enemy {{tip|champion}}, dealing them {{sti|{{as|true damage}}}} as well as {{tip|true sight|revealing}} them for 1 second at the start of the cast time.",
+        "leveling": "{{st|True Damage|{{ap|150 to 350}} {{as|(+ {{ap|25 to 35}}% of target's '''missing''' health)}}}}",
+        "cooldown": "{{ap|120 to 80}}",
+        "target range": "400",
+        "targeting": "Unit",
+        "cast time": "{{fd|0.435}}",
+        "affects": "Enemies",
+        "damagetype": "True",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "projectile": "|callforhelp  = True",
+        "grounded": "|knockdown    =",
+        "notes": "* The target will die if they're at least under {{as|{{ap|(25 to 35)/(1+(25 to 35)/100)|round=2}}% '''maximum''' health}} + {{as|{{ap|(150 to 350)/(1+(25 to 35)/100)|round=2}} '''flat''' health}} on top of that. This does not count effects that mitigate [[true damage]], such as {{tip|shield|shields}}.\n{{Unit-targeted cancel conditions}}",
+        "yvideo": "Garen - R"
+      }
+    }
+  }
+}

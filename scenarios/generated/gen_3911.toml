@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0183_4v5_d5_s2"
+seed = 22306
+hero_count = 4
+enemy_count = 5
+difficulty = 5
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["shaman", "elementalist", "templar", "druid"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

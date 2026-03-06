@@ -1,0 +1,13 @@
+[scenario]
+name = "pair_paladin_arcanist"
+seed = 1141
+hero_count = 2
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["paladin", "arcanist"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

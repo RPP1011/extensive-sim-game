@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0078_4v6_d4"
+seed = 2201
+hero_count = 4
+enemy_count = 6
+difficulty = 4
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["paladin", "templar", "alchemist", "shadow_dancer"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Any"

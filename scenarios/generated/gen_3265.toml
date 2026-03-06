@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0168_4v4_s1"
+seed = 12091
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["shadow_dancer", "samurai", "RekSai", "Kayle"]
+enemy_hero_templates = ["Nilah", "Vex", "templar", "samurai"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

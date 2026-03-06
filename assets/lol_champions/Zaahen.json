@@ -1,0 +1,168 @@
+{
+  "id": "Zaahen",
+  "name": "Zaahen",
+  "title": "The Unsundered",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Cultivation of War",
+      "description": "Zaahen's attacks and abilities against enemy champions  grant him stacks of Determination, gaining bonus Attack Damage per stack. When filled with Determination, Zaahen gains increased Attack Damage and can revive."
+    },
+    "Q": {
+      "id": "ZaahenQ",
+      "name": "The Darkin Glaive",
+      "description": "Zaahen slashes twice on his next attack, dealing bonus damage and healing himself. Zaahen can recast this ability to have his next attack deal bonus damage and knock up his target.",
+      "tooltip": "Zaahen slashes twice on his next Attack, dealing {{ initialdamage }} bonus physical damage and restoring {{ healpercent*100 }}% of his max Health.\n\nRecast: Zaahen's next Attack deals {{ secondhitdamage }} bonus physical damage and Knocks the target Up for {{ knockupduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9/8/7/6",
+      "cost": "25",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "25000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Recast Damage",
+          "Cooldown",
+          "Percent Healed",
+          "Bonus AD Ratio"
+        ],
+        "effect": [
+          "{{ q1basedamage }} -> {{ q1basedamageNL }}",
+          "{{ q2basedamage }} -> {{ q2basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ healpercent*100.000000 }}% -> {{ healpercentnl*100.000000 }}%",
+          "{{ qcoeff*100.000000 }}% -> {{ qcoeffnl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "W": {
+      "id": "ZaahenW",
+      "name": "Dreaded Return",
+      "description": "Zaahen stabs in a direction, damaging enemies hit, then pulls them toward him.",
+      "tooltip": "Zaahen stabs in a direction, dealing {{ initialdamage }} physical damage to enemies hit, then Pulls them toward him, dealing {{ secondarydamage }} physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16/15/14/13/12",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "850",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ initialbasedamage }} -> {{ initialbasedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "E": {
+      "id": "ZaahenE",
+      "name": "Aureate Rush",
+      "description": "Zaahen dashes to a location and slices around himself.",
+      "tooltip": "Zaahen dashes then slices around himself, dealing {{ basedamagecalc }} physical damage to nearby enemies.\n\nEnemies at the edge of the slice take {{ bonusdamagecalc }} physical damage +{{ percenthpdamage*100 }}% of their maximum Health as magic damage instead.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9.5/9/8.5/8",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "25000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Base Damage",
+          "Edge Damage",
+          "Cooldown",
+          "% Health damage"
+        ],
+        "effect": [
+          "{{ damage_base }} -> {{ damage_baseNL }}",
+          "{{ damagebonusbase }} -> {{ damagebonusbaseNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ percenthpdamage*100.000000 }}% -> {{ percenthpdamagenl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "R": {
+      "id": "ZaahenR",
+      "name": "Grim Deliverance",
+      "description": "Zaahen rises then stabs downward, damaging enemies and healing for a portion of the damage dealt.",
+      "tooltip": "Passive: Zaahen gains {{ armorpen*100 }}% %i:scaleAPen% Armor Penetration.\n\nActive: Zaahen rises, gaining {{ damagereduction*100 }}% Damage Reduction while casting.\n\nZaahen then stabs downward, dealing {{ damageendcalc }} physical damage and restoring {{ healpercent*100 }}% of the damage dealt to enemy champions as Health.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "110/95/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage",
+          "Armor Penetration"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ enddamage }} -> {{ enddamageNL }}",
+          "{{ armorpen*100.000000 }}% -> {{ armorpennl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    }
+  }
+}

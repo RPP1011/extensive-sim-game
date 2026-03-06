@@ -1,0 +1,183 @@
+{
+  "id": "Nidalee",
+  "name": "Nidalee",
+  "title": "the Bestial Huntress",
+  "resource_type": "Mana",
+  "tags": [
+    "Assassin",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Prowl",
+      "description": "Moving through brush increases Nidalee's Move Speed by 10% for 2 seconds, increased to 30% toward visible enemy champions within 1400 range.\n\nHitting champions or monsters with Javelin Toss or Bushwhack triggers a Hunt, granting True Sight of them for 4 seconds. During this time, Nidalee gains 10% Move Speed (increased to 30% toward the Hunted target) and her Takedown and Pounce are enhanced against them.",
+      "wiki_detail": {
+        "champion": "Nidalee",
+        "skill": "I",
+        "blurb": "{{sbc|Innate - Prowl:}} While in {{tip|brush}}, {{ci|Nidalee}} gains {{sti|ms|{{as|'''bonus''' movement speed}}}} for a short time, increased when facing a nearby enemy {{tip|champion}}.",
+        "blurb2": "{{sbc|Innate - Hunt:}} Hitting nearby {{tip|monsters}} or enemy champions with ''{{ai|Javelin Toss|Nidalee}}'' or ''{{ai|Bushwhack|Nidalee}}'' will apply a ''Hunted'' mark and {{tip|true sight|reveal}} them for a few seconds. During this time, '''Nidalee''' gains {{sti|ms|{{as|'''bonus''' movement speed}}}}, increased when facing a ''Hunted'' target.",
+        "blurb3": "'''Nidalee's''' first use of ''{{ai|Takedown|Nidalee}}'' and ''{{ai|Pounce|Nidalee}}'' against ''Hunted'' targets are empowered.",
+        "icon": "Prowl.png",
+        "description": "{{sbc|Innate - Prowl:}} While in {{tip|brush}}, '''Nidalee''' gains {{sti|ms|{{as|10% '''bonus''' movement speed}}}}, increased to {{as|30%|ms}} when facing a {{tt|nearby|1400 range}} {{tip|sight|visible}} enemy {{tip|champion}}, and persisting for 2 seconds after leaving brush.",
+        "description2": "{{sbc|Innate - Hunt:}} Hitting {{tip|monster|monsters}} or enemy champions with ''{{ai|Javelin Toss|Nidalee}}'', or ''{{ai|Bushwhack|Nidalee}}'' while they are {{tt|nearby|3000 range}}, applies a ''Hunted'' mark and {{tip|true sight|reveals}} them for 4 seconds. During this time, '''Nidalee''' gains {{sti|ms|{{as|10% '''bonus''' movement speed}}}}, increased to {{as|30%|ms}} when facing a {{tt|nearby|5500 range}} ''Hunted'' target.  Additionally, '''Nidalee's''' first use of ''{{ai|Takedown|Nidalee}}'' and ''{{ai|Pounce|Nidalee}}'' against ''Hunted'' targets are empowered.",
+        "description3": "The {{as|'''bonus''' movement speed}} from ''Prowl'' and ''Hunt'' can stack, but cannot exceed {{as|30%|ms}}.",
+        "targeting": "Passive",
+        "affects": "Enemies, Self",
+        "damagetype": "|spelleffects =",
+        "notes": "* {{ai|Bushwhack|Nidalee}} {{tip|true sight|reveals}} the target for 4 seconds even while '''Nidalee''' is not nearby."
+      }
+    },
+    "Q": {
+      "id": "JavelinToss",
+      "name": "Javelin Toss / Takedown",
+      "description": "In human form, Nidalee throws a spiked javelin at her target that gains damage as it flies.  As a cougar, her next attack will attempt to fatally wound her target, dealing more damage the less life they have.",
+      "tooltip": "Human Form: Nidalee throws her javelin, dealing {{ humanminimumdamage }} magic damage, increased up to {{ humanmaximumdamage }} magic damage based on distance flown.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "6",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1500",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "70/90/110/130/150",
+        "227.5/292.5/357.5/422.5/487.5",
+        "0",
+        "0",
+        "0.4",
+        "1.2",
+        "525",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Javelin Minimum Damage",
+          "Javelin Maximum Damage",
+          "Javelin Mana Cost"
+        ],
+        "effect": [
+          "{{ spearminimumdamage }} -> {{ spearminimumdamageNL }}",
+          "{{ spearmaximumdamage }} -> {{ spearmaximumdamageNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "W": {
+      "id": "Bushwhack",
+      "name": "Bushwhack / Pounce",
+      "description": "In human form, Nidalee lays a trap for unwary opponents that, when sprung, damages and reveals its target. As a cougar, she jumps in a direction, dealing damage in an area where she lands.",
+      "tooltip": "Human Form: Nidalee places an invisible trap for 2 minutes. When an enemy walks over it, they are dealt {{ damagepersecond }} magic damage per second for {{ e3 }} seconds.\n\n{{ maxtraps }} traps may be active at once.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "13/12/11/10/9",
+      "cost": "30/35/40/45/50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "4",
+        "13/12/11/10/9",
+        "10/20/30/40/50",
+        "120",
+        "40/80/120/160/200",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Trap Damage",
+          "Trap Cooldown",
+          "Trap Mana Cost"
+        ],
+        "effect": [
+          "{{ e7 }} -> {{ e7NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "E": {
+      "id": "PrimalSurge",
+      "name": "Primal Surge / Swipe",
+      "description": "In human form, Nidalee channels the spirit of the cougar to heal her allies and imbue them with Attack Speed for a short duration. As a cougar, she claws in a direction, dealing damage to enemies in front of her.",
+      "tooltip": "Human Form: Nidalee restores {{ totalhealing }} Health increased up to {{ maxhealing }} based on missing Health and grants them {{ bonusas*100 }}% Attack Speed for {{ asduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Primal Surge Heal",
+          "Primal Surge Attack Speed",
+          "Primal Surge Mana Cost"
+        ],
+        "effect": [
+          "{{ baseheal }} -> {{ basehealNL }}",
+          "{{ bonusas*100.000000 }}% -> {{ bonusasnl*100.000000 }}%",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    },
+    "R": {
+      "id": "AspectOfTheCougar",
+      "name": "Aspect Of The Cougar",
+      "description": "Nidalee transforms into a cougar, gaining new abilities.",
+      "tooltip": "Passive: While in Human Form, applying Hunted refreshes this Ability's Cooldown.\n\nHuman Form: Nidalee transforms into Cougar Form, gaining melee Attacks and replacing her Active Abilities.\n\nCougar Form: Nidalee transforms into Human Form, gaining ranged Attacks and replacing her Active Abilities.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "3",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "20",
+      "max_rank": 4,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "6",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Takedown Damage",
+          "Takedown Damage Amp",
+          "Pounce Damage",
+          "Swipe Damage",
+          "Enhanced Pounce Cooldown"
+        ],
+        "effect": [
+          "{{ takedownbasedamage }} -> {{ takedownbasedamageNL }}",
+          "{{ takedowndamageamp*100.000000 }}% -> {{ takedowndamageampnl*100.000000 }}%",
+          "{{ pouncedamage }} -> {{ pouncedamageNL }}",
+          "{{ swipedamage }} -> {{ swipedamageNL }}",
+          "{{ pouncecooldown }} -> {{ pouncecooldownNL }}"
+        ]
+      },
+      "resource": "No Cost"
+    }
+  }
+}

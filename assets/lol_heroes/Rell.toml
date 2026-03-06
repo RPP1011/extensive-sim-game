@@ -1,0 +1,154 @@
+[hero]
+name = "Rell"
+
+[stats]
+hp = 150
+move_speed = 3.3
+armor = 40.0
+magic_resist = 35.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 14
+range = 1.5
+cooldown = 900
+
+# --- Q: Shattering Strike ---
+[[abilities]]
+name = "Shattering Strike"
+targeting = "direction"
+range = 6.0
+cooldown_ms = 11000
+cast_time_ms = 400
+ai_hint = "damage"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "line"
+length = 6.0
+width = 1.5
+
+[[abilities.effects]]
+type = "shield"
+amount = 15
+duration_ms = 3000
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+# --- W: Ferromancy: Crash Down ---
+[[abilities]]
+name = "Ferromancy: Crash Down"
+targeting = "ground_target"
+range = 4.0
+cooldown_ms = 11000
+cast_time_ms = 625
+ai_hint = "damage"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "damage"
+amount = 0
+damage_type = "magic"
+duration_ms = 1000
+tick_interval_ms = 1000
+amount_per_tick = 15
+
+[abilities.effects.area]
+shape = "circle"
+radius = 1.8
+
+[[abilities.effects]]
+type = "shield"
+amount = 3
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+[[abilities.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.3
+duration_ms = 5000
+
+# --- E: Full Tilt ---
+[[abilities]]
+name = "Full Tilt"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 15000
+ai_hint = "buff"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 3000
+
+# --- R: Magnet Storm ---
+[[abilities]]
+name = "Magnet Storm"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 23900
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 20
+
+[[abilities.effects]]
+type = "damage"
+amount = 30
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+[[abilities.effects]]
+type = "pull"
+distance = 3.0
+
+# --- Passive: Break the Mold ---
+[[passives]]
+name = "Break the Mold"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_auto_attack"
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+
+[[passives.effects]]
+type = "apply_stacks"
+name = "passive_stacks"
+count = 1
+max_stacks = 4
+

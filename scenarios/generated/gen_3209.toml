@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0149_2v2_s2"
+seed = 22072
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["warrior", "knight"]
+enemy_hero_templates = ["Graves", "Akshan"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

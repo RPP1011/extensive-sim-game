@@ -1,0 +1,260 @@
+{
+  "id": "Pyke",
+  "name": "Pyke",
+  "title": "the Bloodharbor Ripper",
+  "resource_type": "Mana",
+  "tags": [
+    "Support",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Gift of the Drowned Ones",
+      "description": "When Pyke is hidden from enemies, he regenerates damage that he has recently taken from champions. Pyke also cannot gain extra Maximum Health from any source, and instead gains Bonus AD.",
+      "wiki_detail": {
+        "champion": "Pyke",
+        "skill": "I",
+        "icon": "false",
+        "blurb": "{{sbc|Innate:}} {{ci|Pyke}} gains {{as|{{sti|ad|attack damage}}}} equal to a portion of his {{as|{{sti|health|bonus health}}}}.",
+        "blurb2": "{{sbc|Innate:}} While nearby several enemy {{tip|champions}}, '''Pyke''' stores [[Health#Grey health|grey health]] when receiving damage from them.",
+        "blurb3": "'''Pyke''' can {{tip|heal}} himself by consuming grey health while hidden.",
+        "blurb4": "'''Pyke's''' {{sti|health|{{as|maximum health}}}} cannot increase except by {{sti|xp|leveling}}.",
+        "description": "{{sbc|Innate:}} '''Pyke's''' {{sti|health|{{as|'''maximum''' health}}}} cannot increase except through [[Growth#Increasing_Statistics|growth (per level)]], instead he gains{{ft|{{sti|{{as|1 '''bonus''' attack damage}}}} {{as|per 14 '''bonus''' health}}.|{{sti|{{as|'''bonus''' attack damage}}}} equal to {{as|{{fd|7.143}}% of '''bonus''' health}}.}}",
+        "description2": "{{sbc|Innate:}} '''Pyke''' gains {{as|1 '''bonus''' movement speed}} while in the river.",
+        "icon3": "Gift of the Drowned Ones.png",
+        "description3": "{{sbc|Innate:}} '''Pyke''' stores 9% {{as|(+ {{fd|0.2}}% per 1 Lethality)}} of the {{tt|post-mitigation damage|Damage calculated after modifiers}} he takes from enemy {{tip|champions}} as [[Health#Grey health|grey health]] on his [[health bar]], increased to 40% {{as|(+ {{fd|0.4}}% per 1 Lethality)}} while there are two or more {{tip|sight|visible}} enemy champions nearby. He can store up to 80 {{as|(+ 800% '''bonus''' AD)}} [[Health#Grey health|grey health]], with an upper cap of {{as|55% of his '''maximum''' health}}.",
+        "description4": "While '''Pyke''' is not {{tip|sight|visible}} to enemies, he rapidly consumes his [[Health#Grey health|grey health]] to {{tip|heal}} for the same amount.",
+        "effect radius": "{{tip|cr|icononly = true}} 1500",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|occurrence   =",
+        "projectile": "|grounded     =",
+        "knockdown": "|parry        =",
+        "notes": "* Game elements that increase health based on the champion's health (e.g {{ri|Overgrowth}}) will increase the health before getting converted by ''Gift of the Drowned Ones'', thus granting increased {{as|bonus AD}}.\n* {{ii|Spirit Visage}} and {{tip|Grievous Wounds}} take effect after ''Gift of the Drowned Ones's'' healing cap.\n*'''Pyke's''' ''grey health'' does not have a time limit, and will stay on his {{as|health bar}} until '''Pyke''' leaves enemy vision or dies.\n* Since '''Pyke's''' '''maximum''' health cannot be increased, ''Gift of the Drowned Ones'' reaches the upper cap of {{as|55% of '''maximum''' health}} at {{pp|(0.6*({{ccd|Pyke|hp_base}}+{{ccd|Pyke|hp_lvl}}*(x-1)*(0.7025+0.0175*(x-1)))-80)/8|color=ad}} {{as|'''bonus''' attack damage}}.\n* {{tip|Untargetable}} champions count towards '''Pyke's''' modified ''grey health'' storing.\n* Amount of attack damage granted from list of items that grants health, converted with ''Gift of the Drowned Ones'':\n{{Item stat table|pykehealth}}",
+        "yvideo": "Pyke - Passive"
+      }
+    },
+    "Q": {
+      "id": "PykeQ",
+      "name": "Bone Skewer",
+      "description": "Pyke either stabs an enemy in front of him or pulls an enemy towards him.",
+      "tooltip": "Tap: Pyke stabs, dealing {{ totaldamage }} physical damage to the first enemy hit, preferring champions. They are then Slowed by {{ slowamount*100 }}% for {{ slowduration }} second.\n\nHold: Pyke throws his harpoon, dealing {{ totaldamage }} physical damage to the first enemy hit and Pulling them towards him. They are then Slowed by {{ slowamount*100 }}% for {{ slowduration }} second.\n\nIf Pyke successfully hits an enemy champion or the channel does not complete successfully, {{ manarefund*100 }}% of the Mana cost is refunded.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9.5/9/8.5/8",
+      "cost": "70/75/80/85/90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Pyke",
+        "skill": "Q",
+        "icon": "Bone Skewer.png",
+        "blurb": "{{sbc|Active:}} {{ci|Pyke}} {{tip|channel|charges}} up to a short time, increasing the {{sti|range}} of his harpoon. After a brief period, it becomes empowered with a new effect.",
+        "blurb2": "''Bone Skewer'' can be recast within the duration, and will cancel automatically afterwards, refunding a portion of the {{sti|mana|{{as|mana cost}}}}.",
+        "blurb3": "{{sbc|Recast:}} '''Pyke''' thrusts his blade in the target direction that deals {{as|physical damage}} to the closest enemy {{tip|champion}} or closest enemy otherwise. <br/><br/>\n{{sbc|Empowered Recast:}} '''Pyke''' hurls his harpoon in the target direction that deals {{as|physical damage}} to the first enemy hit and {{tip|airborne|pulls}} them towards him. The target is then briefly {{tip|slow|slowed}}.",
+        "description": "{{sbc|Active:}} '''Pyke''' {{tip|channel|charges}} while being {{tip|slow|slowed}} by 20% for up to 3 seconds to increase ''Bone Skewer's'' {{sti|range}} over the first second of the channel. ''Bone Skewer'' can be recast within the duration.",
+        "description2": "{{sbc|Recast:}} '''Pyke''' hurls his harpoon in the target direction, becoming {{tip|lockout|unable to act}} while it is in flight and dealing {{as|physical damage}} to the first enemy hit and {{tip|airborne|pulling}} them, during which they are also {{tip|standard sight|revealed}}, then {{tip|slow|slowing}} them by 90% for 1 second.",
+        "leveling2": "{{st|Physical Damage|{{ap|100 to 300}} {{as|(+ 75% '''bonus''' AD)}}}}",
+        "description3": "Releasing the ability within {{fd|0.4}} seconds causes '''Pyke''' to instead thrust his blade in the target direction, dealing the same damage to the closest enemy {{tip|champion}}, or closest enemy otherwise.",
+        "description4": "If the charge is {{tip|interrupt|interrupted}} or completes without reactivation, ''Bone Skewer'' is cancelled and the ability is put on {{sti|cd|full}} cooldown but refunds {{sti|mana|{{as|75% of the mana cost}}}}. ''Bone Skewer's'' {{as|mana cost}} is also refunded if it hits an enemy champion.",
+        "target range": "{{tip|er|icononly = true}} {{pp|type=channel time|400;400 to 1100 for 7|0;0.4 to 1|formula=400+(116.67 per 0.1 seconds, starting at 0.4 seconds). ''This is capped at 1 second.''}}",
+        "width": "{{tip|er|icononly = true}} {{tt|140|Harpoon missile}} / {{tt|200|Thrust hitbox}}",
+        "effect radius": "{{tt|550|Pull range}}",
+        "cost": "{{ap|70 to 90}}",
+        "costtype": "Mana",
+        "cooldown": "{{ap|10 to 8}}",
+        "cdstart": "post-effect",
+        "cast time": "{{tt|{{fd|0.25}}|Quick-release}}",
+        "targeting": "[[Auto-targeted|Auto]] / [[Direction-targeted|Direction]]",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "Spell",
+        "projectile": "special",
+        "silence": "true",
+        "notes": "* Only the charged version of ''Bone Skewer'' will be {{tip|projectile|intercepted}}.\n* The pull can fling an enemy behind '''Pyke''' if the harpoon hits at close range.\n{{Effect at cast time end}}\n* The following table refers for interactions while '''Pyke''' is {{tip|channel|channeling}}:\n{{ct|charge|cast=interrupts|items=false|consume=Disabled, but can use trinkets}}\n* The following table refers for interactions while '''Pyke''' is locked out from the harpoon being in flight:\n** The lockout ends as soon as the missile fizzles from hitting a target or reaching maximum range, or being {{tip|projectile|intercepted}}.\n{{ct|cast=false|move=false|attack=false|items=false|consume=false|spells=true,false,false,false,false|interrupts=death}}",
+        "yvideo": "Pyke - Q"
+      }
+    },
+    "W": {
+      "id": "PykeW",
+      "name": "Ghostwater Dive",
+      "description": "Pyke enters Camouflage and gains significant Move Speed that decays over time.",
+      "tooltip": "Pyke gains Camouflage and {{ movespeed }}% Move Speed decaying over {{ e0 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "65",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "45",
+        "0",
+        "0.3",
+        "0.03",
+        "80",
+        "0.55",
+        "8",
+        "0.01",
+        "1.15",
+        "5"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Pyke",
+        "skill": "W",
+        "icon": "Ghostwater Dive.png",
+        "blurb": "{{sbc|Active:}} {{ci|Pyke}} submerges into water, entering {{tip|camouflage}} and gaining a burst of {{as|{{sti|movement speed}}}} for a few seconds. Nearby enemies are alerted of his presence.",
+        "blurb2": "Attacking or casting abilities ends ''Ghostwater Dive'' immediately.",
+        "description": "{{sbc|Active:}} '''Pyke''' submerges into water for 5 seconds, entering {{tip|camouflage}} and gaining {{sti|ms|{{as|45%|ms}} {{as|(+ 2% per 1 Lethality)}} {{as|'''bonus''' movement speed}}}} that decays over the duration. Attacking or casting abilities ends ''Ghostwater Dive'' immediately.",
+        "description2": "''Enemy champions within 1500 units of '''Pyke''' are alerted of his presence and whether he can execute them with {{ai|Death from Below|Pyke}}.''",
+        "customlabel": "Detection Radius",
+        "custominfo": "600",
+        "cost": "65",
+        "costtype": "Mana",
+        "cooldown": "{{ap|14 to 10}}",
+        "targeting": "Auto",
+        "cast time": "none",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|occurrence   =",
+        "projectile": "|grounded     =",
+        "knockdown": "|parry        =",
+        "flavorsound": "{{sm2|Pyke Original W SFX 0.ogg}} ''Dive alert.'' {{sm2|Pyke Original W SFX 1.ogg}} ''Execute alert.''",
+        "notes": "* When an enemy is alerted, sharks will circle underneath their feet while a sound will be played to them that changes based on health threshold.\n* Using a basic attack breaks the stealth at the end of the attack windup.",
+        "yvideo": "Pyke - W"
+      }
+    },
+    "E": {
+      "id": "PykeE",
+      "name": "Phantom Undertow",
+      "description": "Pyke dashes and leaves behind a phantom that will return to him, stunning enemy champions along its path.",
+      "tooltip": "Pyke dashes, leaving a drowned phantom behind him that returns to him shortly. The phantom Stuns for {{ stunduration }} seconds and deals {{ totaldamage }} physical damage to champions.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "15/14/13/12/11",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "550",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "100/150/200/250/300",
+        "1.25",
+        "550",
+        "1",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Pyke",
+        "skill": "E",
+        "icon": "Phantom Undertow.png",
+        "blurb": "{{sbc|Active:}} {{ci|Pyke}} dashes in the target direction, leaving behind a phantom.",
+        "blurb2": "After a brief period, the phantom homes back to '''Pyke''' to briefly {{tip|stun}} enemies it passes through. Enemy {{tip|champions}} hit also take {{as|physical damage}}.",
+        "description": "{{sbc|Active:}} '''Pyke''' {{tip|dash|dashes}} in the target direction, leaving behind a ''Phantom''.",
+        "description2": "After 1 second, the ''Phantom'' homes back to '''Pyke''' to {{tip|stun}} enemies around it and those it passes through along the way for {{fd|1.25}} {{as|(+ {{fd|0.1}} per 10 Lethality)}} seconds. Enemy champions hit also take {{as|physical damage}}.",
+        "leveling2": "{{st|Physical Damage|{{ap|100 to 300}} {{as|(+ 100% '''bonus''' AD)}}}}",
+        "target range": "550",
+        "effect radius": "{{tip|er|icononly = true}} {{tt|110|Phantom unit checking for nearby units}}",
+        "width": "{{tip|er|icononly = true}} {{tt|110|Phantom tracking missile}}",
+        "speed": "{{tt|3000|Both dash and returning phantom's missile speed}}",
+        "cast time": "none",
+        "cost": "65",
+        "costtype": "Mana",
+        "cooldown": "{{ap|14 to 10}}",
+        "targeting": "Direction",
+        "affects": "Self, Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "occurrence": "|projectile   = true",
+        "grounded": "true",
+        "knockdown": "true",
+        "parry": "|terraingrace = true",
+        "notes": "* The {{tip|dash}} distance can be extended to up to 900 units (estimated) when targeting across terrain.\n* Like most [[missiles|projectiles]], the flying ''Phantom'' cannot hit targets whose {{tip|center range|center}} is behind the position it originates at or beyond the position it catches up to '''Pyke''' at, but the spell ''can'' hit targets behind its origin as long as their {{tip|edge range|hitbox radius}} overlaps with the original unit ''Phantom's'' 110-radius check at the end of its lifespan.",
+        "yvideo": "Pyke - E"
+      }
+    },
+    "R": {
+      "id": "PykeR",
+      "name": "Death From Below",
+      "description": "Pyke blinks to and executes low health enemies, allowing him to cast this spell again and granting additional gold to an ally who assists.",
+      "tooltip": "Pyke strikes all enemy champions in an X, teleporting to and executing targets below {{ rdamage }} Health. Champions above the threshold and non-champions instead take physical damage equal to {{ reduceddamage*100 }}% of that amount ({{ reduceddamagefinal }}). \n\nWhen an enemy champion dies inside the X, Pyke can Recast this Ability for free within {{ rrecastduration }} seconds. If he executed that champion, the last assisting ally will also get kill gold. If he did not, he will still get kill gold as if he did.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "100/85/70",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "750",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    }
+  }
+}

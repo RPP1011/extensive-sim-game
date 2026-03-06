@@ -1,0 +1,141 @@
+[hero]
+name = "Aurelion Sol"
+
+[stats]
+hp = 90
+move_speed = 3.3
+armor = 20.0
+magic_resist = 30.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 12
+range = 5.5
+cooldown = 1000
+
+# --- Q: Breath of Light ---
+[[abilities]]
+name = "Breath of Light"
+targeting = "direction"
+range = 7.5
+cooldown_ms = 3000
+ai_hint = "damage"
+resource_cost = 7
+max_charges = 2
+charge_recharge_ms = 10000
+
+[abilities.delivery]
+method = "channel"
+duration_ms = 2000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "damage"
+amount = 13
+damage_type = "magic"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+# --- W: Astral Flight ---
+[[abilities]]
+name = "Astral Flight"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 22000
+cast_time_ms = 400
+ai_hint = "crowd_control"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "root"
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- E: Singularity ---
+[[abilities]]
+name = "Singularity"
+targeting = "ground_target"
+range = 7.5
+cooldown_ms = 12000
+cast_time_ms = 200
+ai_hint = "damage"
+resource_cost = 18
+
+[[abilities.effects]]
+type = "damage"
+amount = 0
+damage_type = "magic"
+duration_ms = 5000
+tick_interval_ms = 1000
+amount_per_tick = 1
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.75
+
+[[abilities.effects]]
+type = "summon"
+template = "minion"
+count = 1
+
+# --- R: Falling Star / The Skies Descend ---
+[[abilities]]
+name = "Falling Star / The Skies Descend"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 23900
+ai_hint = "crowd_control"
+resource_cost = 20
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+[[abilities.effects]]
+type = "pull"
+distance = 3.0
+
+# --- Passive: Cosmic Creator ---
+[[passives]]
+name = "Cosmic Creator"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_dealt"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+
+[[passives.effects]]
+type = "apply_stacks"
+name = "bonus"
+count = 1
+max_stacks = 4
+

@@ -1,0 +1,13 @@
+[scenario]
+name = "random_030_5v8_d3"
+seed = 8030
+hero_count = 5
+enemy_count = 8
+difficulty = 3
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["witch_doctor", "samurai", "warlock", "druid", "berserker"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Either"

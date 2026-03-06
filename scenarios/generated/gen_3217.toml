@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0152_4v4_s1"
+seed = 12075
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["Annie", "Fizz", "Gwen", "Illaoi"]
+enemy_hero_templates = ["Ornn", "Katarina", "DrMundo", "Pyke"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,115 @@
+[hero]
+name = "Yorick"
+
+[stats]
+hp = 138
+move_speed = 3.4
+armor = 40.0
+magic_resist = 32.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 1.5
+cooldown = 800
+
+# --- Q: Last Rites ---
+[[abilities]]
+name = "Last Rites"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 7000
+ai_hint = "damage"
+resource_cost = 4
+
+[[abilities.effects]]
+type = "damage"
+amount = 7
+damage_type = "physical"
+
+[[abilities.effects]]
+type = "heal"
+amount = 7
+
+# --- W: Dark Procession ---
+[[abilities]]
+name = "Dark Procession"
+targeting = "ground_target"
+range = 6.0
+cooldown_ms = 20000
+ai_hint = "crowd_control"
+resource_cost = 14
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.25
+
+[[abilities.effects]]
+type = "summon"
+template = "minion"
+count = 1
+
+# --- E: Mourning Mist ---
+[[abilities]]
+name = "Mourning Mist"
+targeting = "ground_target"
+range = 7.0
+cooldown_ms = 12000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 10
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 17
+damage_type = "magic"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 8.0
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- R: Eulogy of the Isles ---
+[[abilities]]
+name = "Eulogy of the Isles"
+targeting = "ground_target"
+range = 6.0
+cooldown_ms = 28300
+cast_time_ms = 500
+ai_hint = "damage"
+resource_cost = 20
+recast_count = 1
+recast_window_ms = 10000
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- Passive: Shepherd of Souls ---
+[[passives]]
+name = "Shepherd of Souls"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_kill"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+

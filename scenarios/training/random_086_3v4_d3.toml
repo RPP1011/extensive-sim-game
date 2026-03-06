@@ -1,0 +1,13 @@
+[scenario]
+name = "random_086_3v4_d3"
+seed = 8086
+hero_count = 3
+enemy_count = 4
+difficulty = 3
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["rogue", "cryomancer", "samurai"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Either"

@@ -1,0 +1,13 @@
+[scenario]
+name = "size_8v10_2754_s2"
+seed = 21921
+hero_count = 8
+enemy_count = 10
+difficulty = 3
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["knight", "warden", "shadow_dancer", "assassin", "cryomancer", "paladin", "cleric", "alchemist"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0020_3v5_d4_s2"
+seed = 22143
+hero_count = 3
+enemy_count = 5
+difficulty = 4
+max_ticks = 10000
+room_type = "Setpiece"
+hero_templates = ["arcanist", "pyromancer", "necromancer"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

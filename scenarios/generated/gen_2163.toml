@@ -1,0 +1,13 @@
+[scenario]
+name = "stress_all_ranged_pivot"
+seed = 1723
+hero_count = 4
+enemy_count = 7
+difficulty = 2
+max_ticks = 10000
+room_type = "Pivot"
+hero_templates = ["cryomancer", "arcanist", "ranger", "mage"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

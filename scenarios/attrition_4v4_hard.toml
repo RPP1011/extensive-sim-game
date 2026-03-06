@@ -1,0 +1,11 @@
+[scenario]
+name        = "Attrition 4v4 — High Difficulty Grind"
+seed        = 999
+hero_count  = 4
+enemy_count = 4
+difficulty  = 5
+max_ticks   = 5000
+room_type   = "Pressure"
+
+[assert]
+outcome = "Either"

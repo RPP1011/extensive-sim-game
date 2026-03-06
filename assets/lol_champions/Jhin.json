@@ -1,0 +1,304 @@
+{
+  "id": "Jhin",
+  "name": "Jhin",
+  "title": "the Virtuoso",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Whisper",
+      "description": "Jhin's hand cannon, Whisper, is a precise instrument designed to deal superior damage. It fires at a fixed rate and carries only four shots. Jhin imbues the final bullet with dark magics to critically strike and deal bonus execute damage. Whenever Whisper crits, it inspires Jhin with a burst of Move Speed.",
+      "wiki_detail": {
+        "champion": "Jhin",
+        "skill": "I",
+        "icon": "Whisper.png",
+        "blurb": "{{sbc|Innate - Death in 4 Acts:}} {{cis|Jhin}} gun may fire up to 4 times before needing to reload. The final round will {{tip|critically strike}}, dealing {{as|'''bonus''' physical damage}} based on the {{as|target's '''missing''' health}}.",
+        "blurb2": "{{sbc|Innate - Every Moment Matters:}} '''Jhin''' gains {{sti|{{as|'''bonus''' attack damage}}}}, increased by his {{sti|critical strike chance}} and {{sti|{{as|'''bonus''' attack speed}}}}. Whenever he {{tip|critically strike|critically strikes}}, he gains a burst of {{sti|{{as|movement speed}}}} based on his {{sti|{{as|'''bonus''' attack speed}}}}.",
+        "blurb4": "'''Jhin's''' {{sti|{{as|attack speed}}}} cannot increase except by {{sti|xp|leveling}} up, and he deals reduced {{tip|critically strike|critical strike damage}}.",
+        "description": "{{sbc|Innate - Death In 4 Acts:}} '''Jhin's''' [[basic attack]]s consume [[ammunition]] within 4 rounds. He will {{tt|reload|Jhin is unable to declare basic attacks during this time.}} over {{fd|2.5}} seconds immediately after expending all rounds or withholding leftover rounds after 10 seconds of being [[out of combat]] and not being affected by {{tip|crowd control}}. The latter reload can be interrupted by declaring an attack or casting an ability.",
+        "description2": "'''Jhin's''' final round attack has an {{tip|uncancellable windup}}, always {{tip|critically strike|critically strikes}}, including against {{tip|turrets|structures}}, and deals {{as|'''bonus''' physical damage}} equal to {{as|{{pp|key=%|15 to 25 for 3|1 to 11}} of the target's {{sti|'''missing''' health}}}}.",
+        "description3": "{{sbc|Innate - Every Moment Matters:}} '''Jhin''' gains {{sti|ad|{{as|'''bonus''' attack damage}}}} equal to {{as|{{pp|key=%|4;5;6;7;8;9;10;11;12;14;16;20;24;28;32;36;40;44|formula = 3% + 1% per level up to 9, then + 2% up to 11, then + 4% up to 18}}|attack damage}}{{ft|{{as|(+ {{fd|0.3}}% per 1% critical strike chance)}} {{as|(+ {{fd|0.25}}% per 1% '''bonus''' attack speed)}}|{{as|(+ 30% critical strike chance)}} {{as|(+ 25% '''bonus''' attack speed)}}}}{{as|AD}}.",
+        "description4": "Additionally, {{tip|critical strikes}} against enemies grant '''Jhin''' {{as|14%|movement speed}} {{as|(+ {{fd|0.4}}% per 1% '''bonus''' attack speed)}} {{sti|{{as|'''bonus''' movement speed}}}} for 2 seconds.",
+        "flavorsound": "{{sm2|Jhin_Original_P4Ready_4.ogg}} ''\"One, two, three, four, two, two, three, four.\"''",
+        "targeting": "Passive",
+        "affects": "Self, Enemies",
+        "damagetype": "Physical",
+        "parry": "true",
+        "spelleffects": "Proc",
+        "notes": "* The penalty to '''Jhin's''' {{as|critical damage}} also reduces the base damage ((100 + 75){{times}}0.86 rather than 100 + (75{{times}}0.86) and stacks with other sources (i.e {{ii|Infinity Edge}}) ((100 + 75 + 35){{times}}0.86).\n** This penalty does not affect {{ai|Curtain Call|Jhin}}.\n* The {{as|{{sti|'''missing''' health}}}} damage benefits from {{sti|life steal}}.\n* The 4th attack cannot be canceled by '''Jhin''' himself.\n* The 4th attack versus a structure is classified as a critical strike.\n* The attack damage multiplier stacks additively with {{bi|Dragon Slayer|Dragon Slayer's}}.\n* ''Every Moment Matters' '' bonus {{as|AD}} will benefit from any amount of {{as|'''bonus''' attack speed}}, even in excess of an amount that would usually reach the attacks per second cap ({{fd|2.5}}).\n** The maximum modifier without attack speed is 74%.\n*** 44% base modifier at level 18.\n*** 30% from critical strike chance on account of the 100% cap.\n*** [[Attack speed#Reducing attack speed|Attack speed slows]] will not affect '''Jhin's''' bonus attack damage from his passive and will ignore his attack speed as it is fixed.\n* Attack damage reductions apply before the multiplier causing them to be stronger against '''Jhin''' than advertised or versus other champions.\n* The bonus damage based on the target's missing health does not affect structures."
+      }
+    },
+    "Q": {
+      "id": "JhinQ",
+      "name": "Dancing Grenade",
+      "description": "Jhin launches a magical cartridge at an enemy. It can hit up to four targets and gains damage each time it kills.",
+      "tooltip": "Jhin launches a cartridge that deals {{ totaldamage }} physical damage before bouncing to a nearby enemy that has not been hit yet.\n\nThe cartridge can hit a maximum of {{ tooltipmaxtargetshit }} times. Enemies that die shortly after being hit increase the damage of subsequent hits by {{ percentamponkill*100 }}%.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7/6.5/6/5.5/5",
+      "cost": "40/45/50/55/60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "550",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Total AD Ratio",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ adratio*100.000000 }}% -> {{ adrationl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Jhin",
+        "skill": "Q",
+        "icon": "Dancing Grenade.png",
+        "blurb": "{{ci|Jhin}} throws a grenade at the target enemy that can bounce to up to three additional nearby enemies, dealing {{as|physical damage}}.",
+        "blurb2": "The grenade's damage increases any time an enemy dies by any means after being hit by the grenade before it strikes its next target.",
+        "description": "{{sbc|Active:}} '''Jhin''' throws a grenade at the target enemy that deals {{as|physical damage}} and can bounce to up to three additional nearby enemies, prioritizing the closest enemy that has not been hit.",
+        "leveling": "{{st|Physical Damage|{{ap|44 to 144}} {{as|(+ {{ap|44 to 74}}% AD)}} {{as|(+ 60% AP)}}}}",
+        "description2": "The grenade's damage is increased by 35% any time an enemy dies by any means after being hit by the grenade before it strikes its next target.",
+        "leveling2": "{{st|Bonus Damage per Target Death|{{ap|(44 to 144)*0.35}} {{as|(+ {{ap|(44 to 74)*0.35}}% AD)}} {{as|(+ {{ap|60*0.35}}% AP)}}}}\n{{st|Maximum Total Physical Damage|{{ap|(44 to 144)*(1+0.35*3)}} {{as|(+ {{ap|(44 to 74)*(1+0.35*3)}}% AD)}} {{as|(+ {{ap|60*(1+0.35*3)}}% AP)}}}}",
+        "cooldown": "{{ap|7 to 5}}",
+        "cost": "{{ap|40 to 60}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "target range": "{{tip|er|icononly = true}} 550",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|450|Bounce range}}",
+        "speed": "{{tt|1800|Initial missile speed}} / {{tt|600|Bounce missile speed}}",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spelleffects": "spellaoe",
+        "spellshield": "Special",
+        "projectile": "True",
+        "callforhelp": "true",
+        "knockdown": "|grounded     =",
+        "notes": "* {{tip|Spell shield}} will not prevent the canister from bouncing.\n{{Unit-targeted cancel conditions}}"
+      }
+    },
+    "W": {
+      "id": "JhinW",
+      "name": "Deadly Flourish",
+      "description": "Jhin brandishes his cane, firing a single shot with incredible range. It pierces through minions and monsters, but stops on the first champion hit. If the target was recently struck by Jhin's allies, lotus traps, or damaged by Jhin, they are rooted.",
+      "tooltip": "Jhin fires a long range shot dealing {{ totaldamage }} physical damage to the first champion hit and other enemies along the way.\n\nIf this skill strikes a champion that has been damaged by an allied champion within the last {{ spottingduration }} seconds, it will Root them for {{ rootduration }} seconds and grant Jhin Whisper's Move Speed.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "3000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Root Duration",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ rootduration }} -> {{ rootdurationNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Jhin",
+        "skill": "W",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} Enemy champions that trigger a ''{{ai|Captive Audience|Jhin|Lotus Trap}}'' or damaged by '''Jhin''' and his allies are marked with [[File: Caught Out.png|20px|link=]] ''Caught Out'' for a few seconds.",
+        "blurb2": "{{sbc|Active:}} '''Jhin''' fires a shot in the target direction that deals {{as|physical damage}} to all enemies in a line until colliding with an enemy {{tip|champion}}.",
+        "blurb3": "Hitting a marked [[File: Caught Out.png|20px|link=]] ''Caught Out'' champion {{tip|root|roots}} them for a duration and grants '''Jhin''' ''{{ai|Whisper|Jhin|Every Moment Matters'}}'' {{sti|ms|{{as|'''bonus''' movement speed|ms}}}}.",
+        "description": "{{sbc|Passive:}} Enemy {{tip|champions}} that trigger a ''{{ai|Captive Audience|Jhin|Lotus Trap}}'' to bloom or are damaged by '''Jhin''' or allied champions are ''marked'' for 4 seconds.",
+        "icon2": "Deadly Flourish.png",
+        "description2": "{{sbc|Active:}} '''Jhin''' fires a shot in the target direction that deals {{as|physical damage}} to all enemies in a line until colliding with an enemy champion, reduced by 25% against {{tip|minions}}.",
+        "leveling2": "{{st|Physical Damage|{{ap|60 to 200}} {{as|(+ 50% AD)}}|Minion Damage|{{ap|60*0.75 to 200*0.75}} {{as|(+ {{fd|37.5}}% AD)}}}}",
+        "description3": "Hitting a ''marked'' champion {{tip|root|roots}} them for a duration and grants '''Jhin''' {{ais|Whisper|Jhin|Every Moment Matters}} {{sti|ms|{{as|'''bonus''' movement speed|ms}}}}.",
+        "leveling3": "{{st|Root Duration|{{ap|1.25 to 2.25}} seconds}}",
+        "cast time": "{{fd|0.75}}",
+        "cooldown": "12",
+        "cost": "{{ap|50 to 70}}",
+        "costtype": "Mana",
+        "range": "{{tip|er|icononly = true}} {{tt|2520|Estimated}} / {{tt|-20|Backwards range}}",
+        "width": "{{tip|er|icononly = true}} 90",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spelleffects": "Special",
+        "spellshield": "True",
+        "projectile": "special",
+        "knockdown": "|grounded     =",
+        "notes": "* Applies {{tip|spell damage}} to the enemy champion and {{tip|area damage}} to all other enemy units.\n* The ''Caught Out'' mark only appears if ''Deadly Flourish'' can potentially {{tip|root}} the target, and will not if the ability's cooldown is longer than 4 seconds or isn't ranked up.\n{{Effect at cast time start}}\n* ''Deadly Flourish'' is blocked by {{ai|Wind Wall|Yasuo}} but not {{ai|Blade Whirl|Samira}}.\n** ''Deadly Flourish'' is special cased to be intercepted by the former because it looks like a blockable missile, even though it isn't functionally a missile."
+      }
+    },
+    "E": {
+      "id": "JhinE",
+      "name": "Captive Audience",
+      "description": "Jhin places an invisible lotus trap that blooms when walked over. It slows nearby enemies before dealing damage with an explosion of serrated petals. \n\nBeauty in Death - When Jhin kills an enemy champion, a lotus trap will bloom near their corpse.",
+      "tooltip": "Passive: Champions Jhin kills will create and detonate a Lotus Trap at their location.\n\nActive: Jhin places an invisible Lotus Trap for {{ trapduration }} minutes that creates a zone that Slows by {{ trapslowamount*100 }}% when stepped on by an enemy. After {{ trapdetonationtime }} seconds, the trap detonates, dealing {{ totaldamage }} magic damage.\n\nThis ability has 2 charges ({{ ammorechargeratetooltip }} second refresh).{{ spellmodifierdescriptionappend }}",
+      "cooldown": "2",
+      "cost": "30",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "750",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Recharge Time"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ ammorechargetime }} -> {{ ammorechargetimeNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Jhin",
+        "skill": "E",
+        "icon": "false",
+        "blurb": "{{sbc|Passive - Beauty in Death:}} Killing an enemy champion summons a free ''Blooming Lotus Trap'' under them.",
+        "blurb2": "{{sbc|Active:}} {{ci|Jhin}} places a {{tip|stealthed trap|stealthed}} ''Lotus Trap'' at the target location. When an enemy crosses, it will ''bloom'', {{tip|slow|slowing}} and {{tip|standard sight|revealing}} them. The trap detonates shortly after, dealing {{as|magic damage}} to enemies.",
+        "blurb3": "'''Jhin''' stocks a ''Lotus Trap'' every few seconds, holding up to two.",
+        "description": "{{sbc|Passive - Beauty in Death:}} Whenever '''Jhin''' kills an enemy champion, he summons a ''Blooming Lotus Trap'' on their corpse.",
+        "icon2": "Captive Audience.png",
+        "description2": "{{sbc|Active:}} '''Jhin''' places a ''Lotus Trap'' at the target location which, upon landing, becomes {{tip|stealthed trap|stealthed}} after arming over 1 second, lasting for up to 180 seconds and granting {{tip|sight}} within its radius. The ''Lotus Trap blooms'' upon enemy contact, with enemies in the area at the time of its trigger becoming {{tip|standard sight|revealed}} for 4 seconds.",
+        "description3": "'''Jhin''' periodically [[stock]]s a ''Lotus Trap'' charge, up to a maximum of 2.",
+        "description4": "''Blooming Lotus Traps'' {{tip|slow}} enemies within the area by 35% for 2 seconds before exploding, dealing {{as|magic damage}} to enemies. ''Lotus Traps'' deal 65% damage against {{tip|minions}} as well as {{tip|champions}} who have been struck by another ''Lotus Trap'' in the last 1 second.",
+        "leveling4": "{{st|Magic Damage|{{ap|20 to 260}} {{as|(+ 120% AD)}} {{as|(+ 100% AP)}}|Reduced Damage|{{ap|20*0.65 to 260*0.65}} {{as|(+ 78% AD)}} {{as|(+ 65% AP)}}}}",
+        "description5": "''See [[Jhin/LoL#Pets|Pets]] for more details about Lotus Traps.''",
+        "cooldown": "2",
+        "recharge": "{{ap|24 to 14}}",
+        "cost": "30",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana + 1 Charge",
+        "target range": "750",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|260|Trap sight radius}} / {{tt|260|On-trigger reveals and explosion radius}}",
+        "collision radius": "{{tip|er|icononly = true}} {{tt|160|Trigger radius}}",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "Special",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Beauty in Death'' does not consume ''Lotus Trap'' charges.\n* The ''Lotus Trap'' will stop upon encountering a {{ai|Wind Wall|Yasuo}} or {{ai|Unbreakable|Braum}}.\n* ''Beauty in Death'' does not trigger after killing a {{tip|clone}}.\n* The reveal debuff is named [[File: Caught Out.png|20px|link=]] ''Caught Out''.\n** This debuff is shared between ''Captive Audience'' and {{ai|Curtain Call|Jhin}}."
+      }
+    },
+    "R": {
+      "id": "JhinR",
+      "name": "Curtain Call",
+      "description": "Jhin channels, transforming Whisper into a shoulder-mounted mega-cannon. It is able to fire 4 super shots at extreme range that pierce through minions and monsters, but stop on the first champion impacted. Whisper cripples enemies hit, which slows them and deals execute damage. The 4th shot is perfectly crafted, epically powerful, and guaranteed to critically strike.",
+      "tooltip": "Jhin sets up and channels, enabling him to fire 4 super shots, each dealing between {{ damagecalc }} and {{ maxincreasecalc }} physical damage to the first champion hit based on their percentage missing health and Slowing them by {{ slowpercent*100 }}% for {{ slowduration }} seconds. The fourth shot critically strikes for {{ fourthshotmultiplier*100 }}% damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/105/90",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "25000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Jhin",
+        "skill": "R",
+        "icon": "Curtain Call.png",
+        "blurb": "{{sbc|Active:}} {{ci|Jhin}} {{tip|channels}} up to a period, being able to fire up to four shots in a large cone in front of him.",
+        "blurb2": "{{sbc|Recast:}} '''Jhin''' fires a round in the target direction that deals {{as|physical damage}} to enemies hit based on {{as|their '''missing''' health}}. It stops upon hitting an enemy {{tip|champion}}, {{tip|slow|slowing}} and {{tip|standard sight|revealing}} them for a short time.",
+        "blurb3": "The fourth shot {{tip|critical strike|critically strikes}} for {{as|'''bonus''' physical damage}}.",
+        "blurb4": "''Curtain Call'' plays music globally when first activated and its range is always {{tip|obscured|visible}}.",
+        "description": "{{sbc|Active:}} '''Jhin''' {{tip|channel|channels}} for up to 10 seconds, transforming his weapon into a cannon and gaining the ability to recast ''Curtain Call'' 4 times within the duration.",
+        "icon2": "Curtain Call 2.png",
+        "description2": "{{sbc|Recast:}} After {{fd|0.2}} seconds into the cast time, '''Jhin''' fires a round in the target direction that grants {{tip|sight}} around its trajectory for {{fd|0.5}} seconds and deals {{as|physical damage}} to enemies hit, increased by {{as|{{pp|type=target's '''missing''' health|key=%|key1=%|0 to 300 for 11|0 to 100|formula=3% per 1% of target's '''missing''' health.}}}}. The bullet stops upon hitting an enemy champion, {{tip|slow|slowing}} them by 80% for {{fd|0.5}} seconds and {{tip|standard sight|revealing}} them for 2 seconds. Each cast has a {{tt|static cooldown|Unaffected by ability haste}} of 1 second.",
+        "leveling2": "{{st|Minimum Physical Damage per Bullet|{{ap|64 to 244}} {{as|(+ 25% AD)}}|Maximum Physical Damage per Bullet|{{ap|64*4 to 244*4}} {{as|(+ {{ap|25*4}}% AD)}}}}",
+        "icon3": "Curtain Call 3.png",
+        "description3": "The fourth shot {{tip|critical strike|critically strikes}} for {{as|{{critical damage|100}} '''bonus''' physical damage}}.",
+        "leveling3": "{{st|Minimum Fourth Shot Damage|{{ap|64*2 to 244*2}} {{as|(+ {{ap|25*2}}% AD)}}|Maximum Fourth Shot Damage|{{ap|(64*2)*4 to (244*2)*4}} {{as|(+ {{ap|(25*2)*4}}% AD)}}}}",
+        "cooldown": "{{ap|120 to 90}}",
+        "cdstart": "post-effect",
+        "cost": "100",
+        "costtype": "Mana",
+        "cast time": "{{tt|1|Active}} / {{tt|{{fd|0.25}}|Recast}}",
+        "range": "{{tip|cr|icononly = true}} {{tt|3500|Missiles range}}",
+        "width": "{{tip|er|icononly = true}} {{tt|160|Missiles width}}",
+        "speed": "5000",
+        "angle": "{{tt|60{{degree}}|Estimated}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spelleffects": "Special",
+        "spellshield": "True",
+        "projectile": "True",
+        "silence": "true",
+        "flavorsound": "{{sm2|Jhin_Original_R_1.ogg}} ''\"Prepare... for your finale.\"''",
+        "notes": "* Applies {{tip|spell damage}} to enemy champions and {{tip|area damage}} to other enemy units.\n*Each cast counts as an ability activation for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n* ''Curtain Call's'' shooting range is fixed in front of '''Jhin'''.\n* The opening sound effect and area of range are audible and visible to both teams.\n* Leveling up the ability while channeling will change the final cooldown.\n* '''Jhin''' will turn to face in the target direction whenever he uses a recast.\n* '''Jhin''' gains a wider field of view during ''Curtain Call''.\n* The reveal debuff is named [[File: Caught Out.png|20px|link=]] ''Caught Out''.\n** This debuff is shared between {{ai|Captive Audience|Jhin}} and ''Curtain Call''.\n{{Effect at cast time end}}\n<!--Bullet travel speed approx 3200? -->\n* The following table refers for interactions while '''Jhin''' is {{tip|channel|channeling}}:\n{{ct|channel|cast=interrupts|items=interrupts,true,,false|spells=true,false,interrupts,interrupts,false}}\n{{ct|cast|spells=true,false,false,false,false}}",
+        "_comments": [
+          "Bullet travel speed approx 3200?"
+        ]
+      }
+    }
+  }
+}

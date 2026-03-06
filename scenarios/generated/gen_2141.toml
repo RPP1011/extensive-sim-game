@@ -1,0 +1,13 @@
+[scenario]
+name = "stress_all_melee_entry_s2"
+seed = 21715
+hero_count = 5
+enemy_count = 6
+difficulty = 2
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["samurai", "berserker", "samurai", "berserker", "assassin"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

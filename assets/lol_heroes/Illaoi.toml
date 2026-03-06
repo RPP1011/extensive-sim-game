@@ -1,0 +1,120 @@
+[hero]
+name = "Illaoi"
+
+[stats]
+hp = 138
+move_speed = 3.4
+armor = 40.0
+magic_resist = 32.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 1.5
+cooldown = 800
+
+# --- Q: Tentacle Smash ---
+[[abilities]]
+name = "Tentacle Smash"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 10000
+cast_time_ms = 750
+ai_hint = "damage"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- W: Harsh Lesson ---
+[[abilities]]
+name = "Harsh Lesson"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 4000
+ai_hint = "damage"
+resource_cost = 6
+
+[[abilities.effects]]
+type = "damage"
+amount = 5
+damage_type = "physical"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- E: Test of Spirit ---
+[[abilities]]
+name = "Test of Spirit"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 16000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 7
+
+[abilities.delivery]
+method = "tether"
+max_range = 6.0
+
+[[abilities.effects]]
+type = "summon"
+template = "minion"
+count = 1
+
+# --- R: Leap of Faith ---
+[[abilities]]
+name = "Leap of Faith"
+targeting = "direction"
+range = 4.5
+cooldown_ms = 23900
+cast_time_ms = 500
+ai_hint = "damage"
+resource_cost = 20
+
+[[abilities.effects]]
+type = "damage"
+amount = 37
+damage_type = "physical"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 5.0
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+[[abilities.effects]]
+type = "summon"
+template = "minion"
+count = 1
+
+# --- Passive: Prophet of an Elder God ---
+[[passives]]
+name = "Prophet of an Elder God"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 5000
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

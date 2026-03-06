@@ -1,0 +1,11 @@
+[scenario]
+name        = "Full Roster 8v8 — Chaotic Brawl"
+seed        = 512
+hero_count  = 8
+enemy_count = 8
+difficulty  = 3
+max_ticks   = 5000
+room_type   = "Pressure"
+
+[assert]
+outcome = "Either"

@@ -1,0 +1,287 @@
+{
+  "id": "Lulu",
+  "name": "Lulu",
+  "title": "the Fae Sorceress",
+  "resource_type": "Mana",
+  "tags": [
+    "Support",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Pix, Faerie Companion",
+      "description": "Pix fires magical bolts of energy whenever the champion he's following attacks another enemy unit. These bolts are homing, but can be intercepted by other units.",
+      "wiki_detail": {
+        "champion": "Lulu",
+        "skill": "I",
+        "icon": "Pix, Faerie Companion.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Lulu}} is assisted by '''Pix''', whom follows her around. Whenever '''Lulu''' basic attacks, '''Pix''' fires 3 bolts that deal {{as|magic damage}} to the first enemy hit.",
+        "blurb2": "Casting ''{{ai|Help, Pix!|Lulu}}'' on an ally champion transfers '''Pix''' to them, to which he fires with their basic attacks.",
+        "blurb3": "'''Pix''' snaps back to '''Lulu''' if she moves too far away.",
+        "description": "{{sbc|Innate:}} '''Lulu''' is assisted by ''Pix'', an {{tip|untargetable}} faerie, who follows her around and fires a barrage of 3 bolts towards her target whenever she uses a [[basic attack]] {{tip|on-attack}}. Each bolt deals {{as|{{pp|5 to 39}}|magic damage}} {{as|(+ 5% AP)}} {{as|magic damage}} to the first enemy it collides with, for a total of {{as|{{pp|5*3 to 39*3}}|magic damage}} {{as|(+ 15% AP)}} on hitting a single target with all three bolts.",
+        "description2": "Casting ''{{ai|Help, Pix!|Lulu}}'' on an ally champion transfers ''Pix's'' help to them, causing him to fire the bolts dependent on their basic attacks.",
+        "description3": "''Pix snaps back to '''Lulu''' if she is too far away.''",
+        "customlabel": "Leash Range",
+        "custominfo": "{{tt|1600|Pix' leash range when moving freely}} / {{tt|2050|Pix' leash range when on another unit (Estimated)}}",
+        "width": "{{tip|er|icononly = true}} {{tt|60|Bolt missile width}}",
+        "speed": "{{tt|900 - 2600|Bolt missile speed, 5200 acceleration; reaching maximum speed within 0.33 seconds}}",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "Magic",
+        "spellshield": "|spelleffects = default",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "parry": "False",
+        "notes": "* ''Pix's'' bolts do not fire alongside abilities that apply {{tip|on-hit}} effects (e.g. {{ii|Runaan's Hurricane}}).\n* ''Pix'' does not fire if the target dies.\n* ''Pix'' fires from his own location and not from the unit he is following.\n* When on an ally champion, ''Pix's'' damage respects {{tip|enchantment redirection}}.\n* The empowered attack does not trigger against [[structure]]s nor [[ward]]s.\n** Neither of them will intercept ''Pix's'' bolts."
+      }
+    },
+    "Q": {
+      "id": "LuluQ",
+      "name": "Glitterlance",
+      "description": "Pix and Lulu each fire a bolt of magical energy that damages and heavily slows all enemies it hits.",
+      "tooltip": "Lulu and Pix each fire a piercing bolt dealing {{ totaldamage }} magic damage and Slowing by {{ slowamount*-100 }}%, decaying over {{ slowduration }} seconds.\n\nEnemies take {{ bonusmissiledamage }} magic damage from additional bolts.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "925",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lulu",
+        "skill": "Q",
+        "icon": "Glitterlance.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lulu}} and '''{{ai|Pix, Faerie Companion|Lulu|Pix}}''' each fire a magic bolt toward the target location, dealing {{as|magic damage}} and {{tip|slow|slowing}} enemies hit for a short time.",
+        "description": "{{sbc|Active:}} '''Lulu''' and ''{{ai|Pix, Faerie Companion|Lulu|Pix}}'' each fire a magic bolt towards the target point, each one dealing {{as|magic damage}} to enemies hit, reduced to 70% against {{tip|minions}}, and {{tip|slow|slowing}} them by 80% decaying over 2 seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 210}} {{as|(+ 50% AP)}}|Minion Damage|{{ap|70*0.7 to 210*0.7}} {{as|(+ {{ap|50*0.7}}% AP)}}}}",
+        "description2": "Enemies take {{ccs|50% damage|magic}} from a second bolt.",
+        "leveling2": "{{st|Reduced Damage|{{ap|70*0.5 to 210*0.5}} {{as|(+ {{ap|50*0.5}}% AP)}}|Total Magic Damage|{{ap|70*1.5 to 210*1.5}} {{as|(+ {{ap|50*1.5}}% AP)}}}}\n{{st|Reduced Minion Damage|{{ap|70*0.7*0.5 to 210*0.7*0.5}} {{as|(+ {{ap|50*0.7*0.5}}% AP)}}|Total Minion Damage|{{ap|70*1.5*0.7 to 210*1.5*0.7}} {{as|(+ {{ap|50*1.5*0.7}}% AP)}}}}",
+        "cooldown": "7",
+        "cost": "{{ap|50 to 70}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "range": "{{tip|cr|icononly = true}} 950",
+        "width": "{{tip|er|icononly = true}} 120",
+        "speed": "1450",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "{{Effect at cast time end}}\n** ''Pix'' fires his bolt from wherever he is when '''Lulu''' casts ''Glitterlance''. '''Lulu's''' bolt will fire from wherever she is at the end of the cast time.\n*** Depending on cursor position both bolts can either crossfire, fire in parallel, or in opposite directions."
+      }
+    },
+    "W": {
+      "id": "LuluW",
+      "name": "Whimsy",
+      "description": "If cast on an ally, grants them Attack Speed and Move Speed for a short time. If cast on an enemy, turns them into an adorable critter that can't attack or cast spells.",
+      "tooltip": "When used on an ally, Lulu grants {{ totalms }} Move Speed and {{ e7 }}% Attack Speed for {{ e5 }} seconds.\n\nWhen used on an enemy, Lulu Polymorphs them for {{ e3 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "18",
+      "cost": "65",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0.25",
+        "0",
+        "1.2/1.4/1.6/1.8/2",
+        "-60",
+        "3/3.25/3.5/3.75/4",
+        "0.01",
+        "20/22.5/25/27.5/30",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Move Speed and Attack Speed Duration",
+          "Attack Speed",
+          "Polymorph Duration"
+        ],
+        "effect": [
+          "{{ e5 }} -> {{ e5NL }}",
+          "{{ effect7amount*100.000000 }}% -> {{ effect7amountnl*100.000000 }}%",
+          "{{ e3 }} -> {{ e3NL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lulu",
+        "skill": "W",
+        "icon": "Whimsy.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lulu}} can cast ''Whimsy'' on herself or the target champion.",
+        "blurb2": "{{sbc|Enemy cast:}} '''Lulu''' sends a spell to the target that {{tip|polymorph|polymorphs}} them into a harmless critter, {{tip|disarm|disarms}} them, and reduces their {{sti|{{as|'''base''' movement speed}}}} for a short time.",
+        "blurb3": "{{sbc|Ally cast:}} '''Lulu''' instantly casts a spell on the target that grants {{sti|as|{{as|'''bonus''' attack speed}}}} and {{sti|ms|{{as|'''bonus''' movement speed}}}} for a few seconds.",
+        "description": "{{sbc|Active:}} '''Lulu''' can cast ''Whimsy'' on herself or a champion.",
+        "description2": "{{sbc|Enemy Cast:}} '''Lulu''' launches a spell onto the target enemy champion that {{tip|polymorph|polymorphs}} them into a harmless critter for a duration, during which their {{as|'''base''' movement speed}} is reduced by {{as|60|ms}}, and {{tip|disarm|disarms}} them for the same duration.",
+        "leveling2": "{{st|Disable Duration|{{ap|1.2 to 2}} seconds}}",
+        "description3": "{{sbc|Self / Ally Cast:}} '''Lulu''' instantly casts erratic magic upon the target allied champion or herself, granting the target {{sti|{{as|'''bonus''' attack speed}}}} and {{sti|ms|{{as|25%|ms}} {{as|(+ 5% per 100 AP)}} {{as|'''bonus''' movement speed}}}} for a duration.",
+        "leveling3": "{{st|Bonus Attack Speed|{{ap|25 to 35}}%}}\n{{st|Effect Duration|{{ap|3 to 4}} seconds}}",
+        "cooldown": "{{ap|17 to 15}}",
+        "cast time": "{{tt|{{fd|0.2419}}|Enemy cast}} / {{tt|None|Ally cast}}",
+        "cost": "65",
+        "costtype": "Mana",
+        "target range": "{{tip|cr|icononly = true}} 650",
+        "speed": "{{tt|2250|Polymorph travel speed}}",
+        "targeting": "Unit",
+        "affects": "Enemies / Allies / Self",
+        "damagetype": "|spellshield  = True",
+        "spelleffects": "|projectile   = True",
+        "callforhelp": "false",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Whimsy's'' movement speed reduction is not affected by {{tip|slow resist}}.\n* If the target becomes {{tip|untargetable}}, {{tip|death|dies}}, or is too far away or no longer in {{tip|sight}} during the cast time, this ability will cancel but still go on {{sti|cooldown}} and pay its cost.{{bug}}\n** This only applies to the enemy cast."
+      }
+    },
+    "E": {
+      "id": "LuluE",
+      "name": "Help, Pix!",
+      "description": "If cast on an ally, commands Pix to jump to an ally and shield them. He then follows them and aids their attacks. If cast on an enemy, commands Pix to jump to an enemy and damage them. He then follows them and grants you vision of that enemy.",
+      "tooltip": "When used on an ally, Pix jumps to them and grants Pix, Faerie Companion for {{ e1 }} seconds. If the ally is a champion, Pix also grants {{ totalshield }} Shield for {{ e7 }} seconds.\n\nWhen used on an enemy champion, Pix hampers them, dealing {{ totaldamage }} magic damage and granting True Sight of them for {{ e6 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9.5/9/8.5/8",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "6",
+        "0",
+        "50",
+        "0",
+        "25",
+        "4",
+        "2.5",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Shield Amount",
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ baseshield }} -> {{ baseshieldNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lulu",
+        "skill": "E",
+        "icon": "Help, Pix!.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lulu}} can cast ''Help, Pix!'' on herself or a unit.",
+        "blurb2": "{{sbc|Enemy cast:}} '''Lulu''' sends '''{{ai|Pix, Faerie Companion|Lulu|Pix}}''' to the target for a few seconds, dealing {{as|magic damage}} and {{tip|true sight|revealing}} them.",
+        "blurb3": "{{sbc|Ally cast:}} '''Lulu''' sends '''{{ai|Pix, Faerie Companion|Lulu|Pix}}''' to the target, {{tip|shield|shielding}} them for a short time if they are a {{tip|champion}}.",
+        "description": "{{sbc|Active:}} '''Lulu''' can cast ''Help, Pix!'' on herself or an ally or enemy.",
+        "description2": "{{sbc|Enemy Cast:}} '''Lulu''' sends ''{{ai|Pix, Faerie Companion|Lulu|Pix}}'' to the far side of the target enemy for 4 seconds, dealing {{as|magic damage}} and {{tip|true sight|revealing}} them for the same duration.",
+        "leveling2": "{{st|Magic Damage|{{ap|80 to 260}} {{as|(+ 50% AP)}}}}",
+        "description3": "{{sbc|Self / Ally Cast:}} '''Lulu''' sends ''{{ai|Pix, Faerie Companion|Lulu|Pix}}'' to the target ally for {{fd|6.25}} seconds. If the target is a {{tip|champion}}, they are granted a {{tip|shield}} for {{fd|2.5}} seconds.",
+        "leveling3": "{{st|Shield Strength|{{ap|80 to 260}} {{as|(+ 55% AP)}}}}",
+        "cooldown": "8",
+        "cost": "{{ap|60 to 80}}",
+        "costtype": "Mana",
+        "cast time": "none",
+        "target range": "{{tip|cr|icononly = true}} 650",
+        "targeting": "Unit",
+        "affects": "Enemies / Allies / Self",
+        "damagetype": "Magic",
+        "spellshield": "special",
+        "spelleffects": "spell",
+        "projectile": "False",
+        "callforhelp": "true",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Help, Pix!'' can be [[Self-targeted|self-cast]].\n* If the player casts ''Help, Pix!'' on a non-champion target, the spell script will first search for a targetable allied or enemy champion within {{tip|cr|icononly = true}} 75 radius around the target. If there is at least one, it'll apply the effects to the closest one instead of the initial target.\n** {{pending for test}} Allies or enemies or proximity take priortity?\n** This effect does not respect that the champion may not be visible to '''Lulu''' and not a valid target for normal selection for this reason. Therefore it can for instance apply the effects to stealthed enemy champions this way.{{bug}}\n** Since the original cast did not target the champion, some effects (such as {{ri|Guardian}}) may behave incorrectly.{{bug}}\n** It is not known in which patch this effect was added.\n* {{tip|spell shield|Spell shield}} and {{ai|Riposte|Fiora}} will block the damage but '''Pix''' will still follow regardless.\n* ''Pix'' will continue to assist the target ally for the full duration even if the shield breaks (the same applies for the shield if the target ally leaves ''Pix's'' leash range).\n* ''Pix's'' {{ai|Glitterlance|Lulu}} bolt can be fired while he is away from '''Lulu''' from his location and towards the cursor (effectively extending {{ais|Glitterlance|Lulu}} range)."
+      }
+    },
+    "R": {
+      "id": "LuluR",
+      "name": "Wild Growth",
+      "description": "Lulu enlarges an ally, knocking nearby enemies into the air and granting the ally a large amount of bonus health. For the next few seconds, that ally gains an aura that slows nearby enemies.",
+      "tooltip": "Lulu enlarges an ally, Knocking Up surrounding enemies for {{ knockbackduration }} second. The enlarged ally gains {{ totalbonushealth }} max Health and Slows surrounding enemies by {{ slowpercent }}% for {{ buffduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Bonus Health",
+          "Slow",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ bonushealth }} -> {{ bonushealthNL }}",
+          "{{ slowpercent }}% -> {{ slowpercentNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Lulu",
+        "skill": "R",
+        "icon": "Wild Growth.png",
+        "blurb": "{{sbc|Active:}} {{ci|Lulu}} enchants herself or the target allied champion, {{tip|airborne|knocking up}} surrounding enemies.",
+        "blurb2": "The target remains enchanted for a few seconds, gaining {{as|{{sti|'''bonus''' health}}}}, size, and an aura that {{tip|slows}} nearby enemies.",
+        "description": "{{sbc|Active:}} '''Lulu''' enlarges herself or the target allied champion, {{tip|airborne|knocking up}} nearby enemies for 1 second. For the next 7 seconds, the target gains {{as|{{sti|health|'''bonus''' health}}}} and 40% increased [[size]] and {{tip|slow|slows}} nearby enemies, which lingers for {{fd|0.25}} seconds.",
+        "leveling": "{{st|Bonus Health|{{ap|275 to 575}} {{as|(+ 55% AP)}}}}\n{{st|Slow|{{ap|30 to 60}}%}}",
+        "cooldown": "{{ap|100 to 80}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "target range": "{{tip|cr|icononly = true}} 900",
+        "cast time": "none",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|400|Knockup radius}} / {{tt|400|Aura radius}}",
+        "targeting": "Unit",
+        "affects": "Allies / Self, Enemies",
+        "damagetype": "|spellshield  = True",
+        "spelleffects": "|projectile   =",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Wild Growth's'' size increase scales additively with other size increases.",
+        "flavorsound": "{{sm2|Lulu Original R 0.ogg}} ''\"Hugify!\"''"
+      }
+    }
+  }
+}

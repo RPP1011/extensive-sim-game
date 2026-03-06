@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0178_5v8_d3_s1"
+seed = 12301
+hero_count = 5
+enemy_count = 8
+difficulty = 3
+max_ticks = 10000
+room_type = "Setpiece"
+hero_templates = ["rogue", "assassin", "blood_mage", "berserker", "monk"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

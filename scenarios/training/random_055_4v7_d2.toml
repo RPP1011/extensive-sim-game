@@ -1,0 +1,13 @@
+[scenario]
+name = "random_055_4v7_d2"
+seed = 8055
+hero_count = 4
+enemy_count = 7
+difficulty = 2
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["druid", "pyromancer", "cleric", "shadow_dancer"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Either"

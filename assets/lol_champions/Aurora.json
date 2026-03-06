@@ -1,0 +1,307 @@
+{
+  "id": "Aurora",
+  "name": "Aurora",
+  "title": "the Witch Between Worlds",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Spirit Abjuration",
+      "description": "Aurora's spells and attacks exorcise spirits from the enemies she damages. Exorcised spirits follow Aurora around and heal her.",
+      "wiki_detail": {
+        "champion": "Aurora",
+        "skill": "I",
+        "icon": "Aurora Spirit Abjuration.png",
+        "icon3": "|description  = {{sbc|Innate:}} '''Aurora's''' damaging [[basic attack]]s and [[champion ability|abilities]] apply a [[stack]] of ''Spirit Abjuration'' to enemies for 4 seconds, refreshing on subsequent applications and stacking up to 3 times. The third stack against a target consumes them all to deal {{as|'''bonus''' magic damage}} equal to {{as|{{fd|2.5}}% {{as|(+ 2% per 100 AP)}} of the target's '''maximum''' health}}, capped at {{pp|100 to 180}} against {{tip|monsters}}.",
+        "description2": "Upon consuming the stacks from a {{tip|champion}}, '''Aurora''' additionally exorcises them, gaining ''Realm Hopper'' for 4 seconds and freeing a {{as|Spirit|buzzword}} from the target that follows her for the same duration. For each active {{as|Spirit|buzzword}}, '''Aurora''' is {{tip|heal|healed}} for {{pp|3 to 20}} {{as|(+ 2% AP)}} every second. Subsequent exorcisms free further {{as|Spirits|buzzword}} and refresh the duration of ''Realm Hopper'' and all active {{as|Spirits|buzzword}}. '''Aurora''' may have up to 4 {{as|Spirits|buzzword}} at a time, for a maximum heal per tick of {{pp|3*4 to 20*4}} {{as|(+ {{ap|2*4}}% AP)}}.",
+        "description3": "{{sbc|Realm Hopper:}} '''Aurora''' gains {{sti|ms|{{pp|5 to 8.6|key=%|color=ms}}}} {{as|(+ 3% per 100 AP)}} {{as|'''bonus''' movement speed}}.",
+        "cooldown": "|targeting    = Passive",
+        "affects": "Enemies, Self",
+        "damagetype": "magic",
+        "spelleffects": "proc",
+        "spellshield": "false",
+        "parry": "true",
+        "notes": "* The spirits grant vision of a small area around themselves.\n<!-- Blurb -->",
+        "blurbicon": "Aurora Spirit Abjuration.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Aurora}} basic attacks and damaging abilities will apply a stack of ''Spirit Abjuration'', stacking up to 3 times.",
+        "blurb2": "The third stack will consume them all to deal {{as|'''bonus''' magic damage}} based on the {{as|target's '''maximum''' health}}. If the target is a {{tip|champion}}, she exorcises them to enter ''Realm Hopper'' and free a {{as|Spirit|buzzword}} that follows her, both for a short duration. Subsequent exorcisms refresh the durations and free further {{as|Spirits|buzzword}}.",
+        "blurb4": "{{sbc|Realm Hopper:}} '''Aurora''' {{tip|heal|heals}} herself every second, and gains {{sti|{{as|'''bonus''' movement speed}}}} based on her {{as|Spirits|buzzword}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "AuroraQ",
+      "name": "Twofold Hex",
+      "description": "Aurora sends out a missile that curses any enemies it hits. She can then recast the ability to draw active curses back toward herself, damaging foes who are hit along the way.",
+      "tooltip": "Fire cursed energy in a direction, dealing {{ damage }} magic damage to enemies and cursing them for {{ markduration }} seconds.\n\nRecast: End the curse, drawing back part of the enemy's spirit to Aurora, dealing up to {{ q2damagemax }} magic damage to enemies passed through based on their missing Health. Damage beyond the first hit is reduced to 20%.\n\nIf the duration runs out, Aurora will automatically Recast the Ability.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9/8.5/8/7.5/7",
+      "cost": "60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "variables": {
+          "b1": "40",
+          "b5": "140",
+          "ap": "40",
+          "hpmod": "1.5",
+          "boltmod": "0.2"
+        },
+        "champion": "Aurora",
+        "skill": "Q",
+        "icon": "Aurora Twofold Hex.png",
+        "description": "{{sbc|Active:}} '''Aurora''' fires a bolt of energy in the target direction that deals {{as|magic damage}} to enemies hit and marks them with a curse for {{fd|3.5}} seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|{{#var:b1}} to {{#var:b5}}}} {{as|(+ {{#var:ap}}% AP)}}}}",
+        "description2": "''Twofold Hex'' can be recast after {{fd|0.1}} seconds while at least one target is marked.",
+        "icon3": "Aurora Twofold Hex 2.png",
+        "description3": "{{sbc|Recast:}} '''Aurora''' expunges the curse from all marked targets, drawing the spiritual energy back to her as bolts that each deal {{as|magic damage}} to all enemies they pass through, reduced to 40% against {{tip|minions}} and 50% against {{tip|monsters}} and increased by {{pp|key=%|type=target's '''missing''' health|0 to 100*({{#var:hpmod}}-1) for 11|0 to 100|key1=%|formula={{#expr:{{#var:hpmod}}-1}}% per 1% of target's '''missing''' health|color=health}}. Subsequent bolts against an enemy deal {{ap|{{#var:boltmod}}*100}}% damage.",
+        "leveling3": "{{st|Minimum Magic Damage|{{ap|{{#var:b1}} to {{#var:b5}}}} {{as|(+ {{#var:ap}}% AP)}}|Maximum Magic Damage|{{ap|{{#var:b1}}*{{#var:hpmod}} to {{#var:b5}}*{{#var:hpmod}}}} {{as|(+ {{ap|{{#var:ap}}*{{#var:hpmod}}}}% AP)}}}}\n{{st|Subsequent Bolt Minimum Magic Damage|{{ap|{{#var:b1}}*{{#var:boltmod}} to {{#var:b5}}*{{#var:boltmod}}}} {{as|(+ {{ap|{{#var:ap}}*{{#var:boltmod}}}}% AP)}}|Subsequent Bolt Maximum Magic Damage|{{ap|{{#var:b1}}*{{#var:hpmod}}*{{#var:boltmod}} to {{#var:b5}}*{{#var:hpmod}}*{{#var:boltmod}}}} {{as|(+ {{ap|{{#var:b1}}*{{#var:hpmod}}*{{#var:boltmod}}}}% AP)}}}}",
+        "cooldown": "{{ap|8 to 6}}",
+        "cdstart": "on-cast",
+        "cast time": "{{tt|{{fd|0.25}}|Active}} / {{tt|None|Recast}}",
+        "range": "{{tt|850|First cast missile range}}",
+        "width": "{{tt|210|First cast missile width}} / {{tt|90|Recast missile width}}",
+        "effect radius": "{{tt|Global|Recast range for marked targets}}",
+        "speed": "{{tt|1600|First cast missile speed}} / {{tt|2000|Recast missile speed}}",
+        "cost": "60",
+        "costtype": "mana",
+        "targeting": "[[Targeting#Direction|Direction]] / [[Targeting#Auto-targeted|Auto]]",
+        "affects": "Enemies, Self",
+        "damagetype": "magic",
+        "spelleffects": "spellaoe",
+        "spellshield": "true",
+        "projectile": "true",
+        "notes": "* ''Twofold Hex'' can also be recast for {{fd|0.66}} seconds after the {{fd|0.1}}-second delay. If the recast is used during this time window, ''Twofold Hex'' will be buffered to recast automatically as soon as the bolt missile from the first cast has fizzled from reaching maximum range, even if no targets are marked. This automatic recast can also be buffered during the {{fd|0.1}}-second delay.\n* {{tip|Spell shield}} can block the effects of the active and the recast.\n* The marked targets do not need to be visible in order for '''Aurora''' to recast ''Twofold Hex''.\n** They do however need to be targetable; if all marked targets are {{tip|untargetable}}, ''Twofold Hex's'' recast is disabled.\n{{Effect at cast time end}}\n<!-- Blurb -->",
+        "blurb": "}}",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "W": {
+      "id": "AuroraW",
+      "name": "Across the Veil",
+      "description": "Aurora leaps in a direction of her choosing, entering the spirit realm upon landing, becoming invisible, and gaining Move Speed for a short duration of time.",
+      "tooltip": "Hop in a direction. Upon landing, enter the spirit realm, becoming Invisible for {{ invisduration }} seconds and entering Realm Hopper, gaining {{ movespeedbonus }}% Move Speed.\n\nScoring a takedown on an enemy champion resets this Ability's Cooldown.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "22/21/20/19/18",
+      "cost": "80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "700",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Duration",
+          "Move Speed"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ invisduration }} -> {{ invisdurationNL }}",
+          "{{ movespeedbonus }}% -> {{ movespeedbonusNL }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Aurora",
+        "skill": "W",
+        "icon": "Aurora Across the Veil.png",
+        "description": "{{sbc|Active:}} '''Aurora''' {{tip|dash|hops}} in the target direction inside a portal to the Spirit Realm. Upon {{tt|completing|See notes}} the dash, she becomes {{tip|invisible}} for a duration and gains ''{{ai|Spirit Abjuration|Aurora|Realm Hopper}}'' for 4 seconds. Attacking or casting abilities ends the stealth immediately.",
+        "leveling": "{{st|Invisibility Duration|{{ap|1 to 1.6}} seconds}}",
+        "description2": "Scoring a {{tip|takedown}} against an enemy {{tip|champion}} within 3 seconds of damaging them resets ''Across the Veil's'' {{sti|cooldown}}.",
+        "cooldown": "{{ap|22 to 18}}",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "speed": "350",
+        "range": "{{tt|300|Regular dash distance}} / {{tt|450|Increased dash distance across terrain}}",
+        "cost": "80",
+        "costtype": "mana",
+        "targeting": "direction",
+        "affects": "self",
+        "grounded": "true",
+        "knockdown": "true",
+        "terraingrace": "true",
+        "notes": "* '''Aurora''' will '''not''' gain the stealth if her dash is interrupted.\n** She will however gain the stealth despite the dash being interrupted from colliding with ''{{ais|Between Worlds|Aurora}}'' border.\n*** Her dash is interrupted in this case from being overridden by the rift dash.\n* '''Aurora''' is locked out of using all abilities, summoner spells, and item actives during the dash.\n** She cannot buffer these spells to cast after the lockout. This is in place to prevent her from breaking the stealth from certain spell casts.\n*** This is the case even for spells that do not break stealth when cast.\n* Using a basic attack breaks the stealth at the end of the attack windup.\n<!-- Blurb -->",
+        "blurb": "}}",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "E": {
+      "id": "AuroraE",
+      "name": "The Weirding",
+      "description": "Aurora converges the realms, sending out a blast of spirit magic that damages and slows enemies before Aurora hops backward to safety.",
+      "tooltip": "Converge the realms, sending out a blast of spirit magic dealing {{ damagecalc }} magic damage to enemies in the area and Slowing them by {{ slowpercent*-100 }}% decaying over {{ slowduration }} second.\n\nAurora hops backwards a short distance after casting.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "15/14/13/12/11",
+      "cost": "80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "825",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Aurora",
+        "skill": "E",
+        "icon": "Aurora The Weirding.png",
+        "description": "{{sbc|Active:}} '''Aurora''' blasts energy in a line in the target direction and {{tip|dash|recoils}} 250 units in the opposite direction. The blast deals {{as|magic damage}} to enemies hit and {{tip|slow|slows}} them by 80% for 1 second decaying after the first {{fd|0.15}} seconds.",
+        "description2": "''{{ai|Between Worlds|Aurora}} can be cast during the dash.''",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 230}} {{as|(+ 80% AP)}}}}",
+        "cooldown": "{{ap|15 to 11}}",
+        "cast time": "{{fd|0.35}}",
+        "cost": "80",
+        "costtype": "mana",
+        "speed": "{{tt|150 + {{as|200% movement speed}}|Dash speed}}",
+        "range": "800",
+        "width": "175",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spelleffects": "spellaoe",
+        "spellshield": "true",
+        "projectile": "false",
+        "grounded": "special",
+        "knockdown": "true",
+        "notes": "* '''Aurora''' is locked out of using all abilities, summoner spells, and item actives during the dash, except for ''{{ai|Between Worlds|Aurora}}''.\n* While {{tip|ground|grounded}} or {{tip|root|rooted}}, ''The Weirding'' can be cast but '''Aurora''' will not {{tip|dash}}.\n** Similarly, if '''Aurora''' is affected by ground or root during the cast time, she will not dash afterwards.\n*** This only applies to ground and root. {{tip|Immobilize|Immobilizing}} effects will not prevent the dash afterwards.{{bug|2}}\n{{Effect at cast time end}}\n<!-- Blurb -->",
+        "blurb": "}}",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "R": {
+      "id": "AuroraR",
+      "name": "Between Worlds",
+      "description": "Aurora leaps in a direction of her choosing, releasing a shockwave that damages and slows any enemies it hits. Afterward, she creates an area that slows enemies within it and allows Aurora to teleport from one side of the area to the other.",
+      "tooltip": "Leap in a direction. Upon landing, Aurora converges the realms, sending out a pulse of spirit energy that deals {{ damagecalc }} magic damage and Slows enemies hit by {{ slowpercent*-100 }}% for 2 seconds.\n\nThe area of convergence stays active for {{ areaduration }} seconds, granting Aurora Realm Hopper for {{ rbuffduration }} seconds, allowing her to jump from one edge of the area to another.\n\nEnemies attempting to enter or leave the area are Slowed by {{ exitslowpercent*-100 }}% for {{ stunduration }} seconds.\n\nAurora can Recast this Ability to end the effect early.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "140/120/100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "250",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage",
+          "Duration"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ areaduration }} -> {{ areadurationNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Aurora",
+        "skill": "R",
+        "icon": "Aurora Between Worlds.png",
+        "description": "{{sbc|Active:}} '''Aurora''' {{tip|dash|leaps}} in the target direction with {{tip|displacement immunity}} over {{fd|0.4}} seconds. She then gains ''{{ai|Spirit Abjuration|Aurora|Realm Hopper}}'' for 4 seconds and unleashes a pulse of energy at a location directly {{tt|425 units|Estimated}} in front of her, expanding in a radius over {{fd|0.75}} seconds to deal {{as|magic damage}} to enemies hit and {{tip|slow}} them by 30% for 2 seconds. Once the pulse has fully expanded, it manifests a circular rift to the Spirit Realm for a duration.",
+        "leveling": "{{st|Magic Damage|{{ap|175 to 375}} {{as|(+ 60% AP)}}}}\n{{st|Rift Duration|{{ap|2-0.75 to 3-0.75}} seconds}}",
+        "description2": "While '''Aurora''' is inside the rift, she doubles the {{sti|{{as|'''bonus''' movement speed}}}} granted by ''{{ai|Spirit Abjuration|Aurora|Realm Hopper}}''.",
+        "description3": "'''Aurora''' and enemies within the rift are trapped inside. If '''Aurora''' {{tt|collides|See notes}} with the border, she {{tip|dash|dashes}} to the diametrically opposite side of the rift over {{fd|0.4}} seconds, becoming {{tip|untargetable}} and {{tip|lockout|unable to act}} during the travel. If an enemy {{tt|collides|See notes}} with the border, they are {{tip|airborne|knocked back}} 75 units away from it and are {{tip|slow|slowed}} by 75% for 2 seconds.",
+        "description4": "''Between Worlds'' can be recast after 1 second of unleashing the pulse while the rift is active.",
+        "description5": "{{sbc|Recast:}} '''Aurora''' closes the rift prematurely.",
+        "description6": "''Enemies that collide with the border from the outside of the rift will also be {{tip|airborne|pulled}} inside of it over 75 units and applied the same {{tip|slow}}. The rift closes immediately if '''Aurora''' dies.''",
+        "cooldown": "{{ap|140 to 100}}",
+        "cdstart": "post-effect",
+        "cast time": "none",
+        "cost": "100",
+        "costtype": "mana",
+        "range": "{{tt|25|Minimum initial dash distance}} / {{tt|250|Maximum initial dash distance}} / {{tt|450|Maximum initial dash distance over walls}}",
+        "effect radius": "{{tt|700|Rift radius}}",
+        "collision radius": "{{tip|cr|icononly=true}} {{tt|25|Radius for border collision}}",
+        "targeting": "Direction",
+        "affects": "Enemies, self",
+        "damagetype": "magic",
+        "spelleffects": "spellaoe",
+        "spellshield": "true",
+        "projectile": "false",
+        "grounded": "special",
+        "knockdown": "false",
+        "terraingrace": "true",
+        "notes": "* Collision with the border is essentially moving within range of it while being targetable, including via normal movement, dash, or displacement.\n** '''Aurora''' and enemies can collide with the border any number of times, as much as the duration permits.\n** Since the borders apply a {{tip|airborne|displacement}} upon collision, enemies that {{tip|dash}} or are displaced through the borders will be automatically interrupted.\t\n** Enemies that can resist the displacement from colliding with the border will be able to leave the rift's zone.\n*** This includes enemies that are {{tip|displacement immune}} or {{tip|cc-immune|immune to all crowd control}}, or have a {{tip|spell shield}}.\n** If '''Aurora''' or enemies are {{tip|attach|attached}} to a unit, they can be moved outside of the rift by the unit they are attached to, even after colliding with the border.\n*** The displacement upon collision with the border will not have any effect on targets that are being attached to another unit.\n** {{tip|Untargetable}} units cannot collide with the border, including '''Aurora''' herself.\n** {{tip|Blink|Blinks}} with a destination outside of the rift will not collide with the border and thus will ignore the range check.\n* The in-game tooltip claims that the rift lasts for {{ap|3 to 4}} seconds which is incorrect.{{bug}}\n** This duration seems to count the time it takes for the pulse to fully expand. However, the rift and its borders will only form after the fact, so the actual duration of the rift is the values in the tooltip minus {{fd|0.75}} seconds each rank.\n* The rift will close immediately if '''Aurora''' is not within the area when the pulse fully expands.\n* If '''Aurora''' {{tip|death|dies}} or enters {{tip|resurrection}}, or otherwise manages to escape the rift after it has formed, the rift is closed immediately.\n* ''Between Worlds' '' {{tip|untargetability}} from the rift dash does not {{tip|homing projectile destruction|destroy}} in-flight {{tip|projectiles}}.\n* ''Between Worlds' '' first cast is disabled while {{tip|ground|grounded}} or {{tip|root|rooted}}.\n* '''Aurora''' can still dash from colliding with the border even if she is {{tip|immobilize|immobilized}} or {{tip|ground|grounded}}.\n* {{tip|Spell shield}} can block both the initial pulse and the knock back and slow from colliding with the border.\n* A pair of portals signifying '''Aurora's''' nearest possible entry and its corresponding exit is visible to her at all times.\n* The following table refers for interactions while '''Aurora''' is dashing:\n** This lockout applies to both the initial dash and the dashes in the rift.\n*** The lockout during the initial cast's dash persists for another {{fd|0.5}} seconds after the dash ends.\n*** The lockout during the rift dash persists for another {{fd|0.15}} seconds after the dash ends.\n{{ct|cast=false|attack=false|move=false|items=false|consume=false|spells=true,false,false,false,false|interrupts=death}}\n<!-- Blurb -->",
+        "blurb": "}}",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    }
+  }
+}

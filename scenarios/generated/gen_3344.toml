@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0194_2v2_s2"
+seed = 22117
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["Ahri", "TwistedFate"]
+enemy_hero_templates = ["Nocturne", "Samira"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

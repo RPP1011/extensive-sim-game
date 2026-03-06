@@ -1,0 +1,113 @@
+[hero]
+name = "Zoe"
+
+[stats]
+hp = 90
+move_speed = 3.3
+armor = 20.0
+magic_resist = 30.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 12
+range = 5.5
+cooldown = 1000
+
+# --- Q: Paddle Star! ---
+[[abilities]]
+name = "Paddle Star!"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 8000
+ai_hint = "damage"
+resource_cost = 8
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- W: Spell Thief ---
+[[abilities]]
+name = "Spell Thief"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 8000
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 18
+damage_type = "physical"
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 3000
+
+# --- E: Sleepy Trouble Bubble ---
+[[abilities]]
+name = "Sleepy Trouble Bubble"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 16000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 16
+
+[abilities.delivery]
+method = "projectile"
+speed = 18.5
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 0
+damage_type = "magic"
+duration_ms = 1000
+tick_interval_ms = 1000
+amount_per_tick = 17
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- R: Portal Jump ---
+[[abilities]]
+name = "Portal Jump"
+targeting = "direction"
+range = 5.8
+cooldown_ms = 11000
+cast_time_ms = 250
+ai_hint = "utility"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "dash"
+is_blink = true
+
+# --- Passive: More Sparkles! ---
+[[passives]]
+name = "More Sparkles!"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_auto_attack"
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

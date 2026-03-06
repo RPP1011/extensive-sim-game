@@ -1,0 +1,289 @@
+{
+  "id": "Nautilus",
+  "name": "Nautilus",
+  "title": "the Titan of the Depths",
+  "resource_type": "Mana",
+  "tags": [
+    "Tank",
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Staggering Blow",
+      "description": "Nautilus' first Attack against a target deals increased physical damage and roots them briefly.",
+      "wiki_detail": {
+        "champion": "Nautilus",
+        "skill": "I",
+        "icon": "Staggering Blow.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Nautilus}} basic attacks deal {{as|'''bonus''' physical damage}} and briefly {{tip|root}} the target.",
+        "blurb2": "This effect cannot occur on the same target more than once every few seconds.",
+        "description": "{{sbc|Innate:}} '''Nautilus' ''' [[basic attack]]s are empowered to deal {{as|{{pp|14 to 116}}|physical damage}} {{as|'''bonus''' physical damage}} and {{tip|root}} the target for {{pp|changedisplay=true|0.75 to 1.5 for 4|1 to 16}} seconds.",
+        "description2": "This effect cannot occur on the same target more than once every few seconds.",
+        "ontargetcdstatic": "6",
+        "targeting": "Passive",
+        "damagetype": "Physical",
+        "affects": "Enemies",
+        "spelleffects": "Proc",
+        "spellshield": "Special",
+        "parry": "true",
+        "notes": "* {{tip|Spell shield}} will block the {{tip|root}} but not the bonus damage.\n* ''Staggering Blow's'' enhanced attack can be {{tip|blocked}} and {{tip|dodge|dodged}} (the on-target cooldown will still be applied).\n** It will fail to trigger while he is {{tip|blind|blinded}}.\n* The empowered attack will not trigger against [[structures]].\n*"
+      }
+    },
+    "Q": {
+      "id": "NautilusAnchorDrag",
+      "name": "Dredge Line",
+      "description": "Nautilus hurls his anchor forward.  Colliding with an enemy pulls them and Nautilus together, dealing magic damage.  Colliding with terrain pulls Nautilus towards it.",
+      "tooltip": "Nautilus hurls his anchor forward. If it hits an enemy, Nautilus drags himself and the target together, dealing {{ qdamagecalc }} magic damage and Stunning them briefly. If the anchor hits terrain, Nautilus will drag himself towards it.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1150",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "70/115/160/205/250",
+        "0",
+        "0.5",
+        "0.5",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Nautilus",
+        "skill": "Q",
+        "icon": "Dredge Line.png",
+        "blurb": "{{sbc|Active:}} {{ci|Nautilus}} hurls his anchor in the target direction that stops on the first enemy or terrain hit.",
+        "blurb2": "If the anchor hits an enemy, it deals {{as|magic damage}} and {{tip|airborne|drags}} them toward '''Nautilus''' while he also {{tip|dash|dashes}} toward them. Afterwards, the target is briefly {{tip|root|rooted}}.",
+        "blurb3": "If the anchor hits terrain, '''Nautilus''' {{tip|dash|dashes}} to that location and half of the {{sti|cooldown}} and {{sti|mana|{{as|mana cost}}}} are refunded.",
+        "description": "{{sbc|Active:}} '''Nautilus''' hurls his anchor in the target direction that stops on the first enemy or terrain hit.",
+        "description2": "If the anchor hits an enemy, it deals {{as|magic damage}}, {{tip|standard sight|reveals}} them for {{fd|1.15}} seconds, {{tip|stun|stuns}} them for 1 second, and {{tip|airborne|drags}} them toward '''Nautilus''' while he also {{tip|dash|dashes}} toward them, both over {{fd|0.9}} seconds.",
+        "leveling2": "{{st|Magic Damage|{{ap|70 to 250}} {{as|(+ 90% AP)}}}}",
+        "description3": "If the anchor hits terrain, '''Nautilus''' {{tip|dash|dashes}} to that location and 50% of ''Dredge Line's'' {{sti|cooldown}} and {{sti|mana|{{as|mana cost}}}} are refunded.",
+        "description4": "'''''Nautilus''' is {{tip|lockout|unable}} to move or attack while Dredge Line is in flight. He can cast {{ai|Titan's Wrath|Nautilus}} and {{ai|Riptide|Nautilus}} during the dash.''",
+        "cooldown": "{{ap|14 to 10}}",
+        "cast time": "{{fd|0.25}}",
+        "cost": "60",
+        "costtype": "Mana",
+        "range": "{{tip|er|icononly = true}} {{tt|1122|The missile is destroyed on the tick it passes 1100 distance, resulting in this unorthodox max-range collision behaviour compared to other missiles}}",
+        "speed": "2000",
+        "width": "{{tip|er|icononly = true}} {{tt|180|Unit collision}} / {{tip|cr|icononly = true}} {{tt|0|Terrain collision}}",
+        "targeting": "Direction",
+        "damagetype": "Magic",
+        "projectile": "true",
+        "spelleffects": "spell",
+        "grounded": "true",
+        "affects": "[[Self]], Enemies",
+        "onhiteffects": "|spellshield  = Special",
+        "knockdown": "true",
+        "notes": "* ''Dredge Line'' turns '''Nautilus'''' facing direction accordingly upon hitting a valid target.\n* ''Dredge Line'' can interact with [[Terrain#Player-Generated|player-generated terrain]].\n* '''Nautilus''' will {{tip|dash}} all the way to the target's location if ''Dredge Line'' executed them or they negated the {{tip|airborne|displacement}}.\n* ''Dredge Line'' will not interrupt any movement commands '''Nautilus''' was issued pre-cast so long as their directions somewhat correlate (this is intentional to smooth out traveling/escaping).\n* {{tip|Spell shield}} will block the ability but '''Nautilus''' will still dash partway to the target.\n* The anchor projectile will stop if '''Nautilus''' dies while the projectile is traveling. Enemies hit will still be dealt damage. The {{tip|airborne|drag}} and {{tip|root}} are not applied if '''Nautilus''' did not initiate the dash.\n{{Effect at cast time start}}\n{{ct|cast|spells=true,false,false,false,false}}"
+      }
+    },
+    "W": {
+      "id": "NautilusPiercingGaze",
+      "name": "Titan's Wrath",
+      "description": "Nautilus gains a temporary Shield.  While it persists, his Attacks deal damage over time to his target and surrounding enemies.",
+      "tooltip": "Nautilus gains a {{ shieldcalc }} Shield for {{ shieldduration }} seconds. While the Shield persists, Nautilus' Attacks deal an additional {{ dotdamagecalc }} magic damage over 2 seconds to his target and all surrounding enemies.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "350",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Shield Amount",
+          "Magic Damage",
+          "% Max Health"
+        ],
+        "effect": [
+          "{{ shieldbase }} -> {{ shieldbaseNL }}",
+          "{{ dotdamagebase }} -> {{ dotdamagebaseNL }}",
+          "{{ shieldhealthratio*100.000000 }}% -> {{ shieldhealthrationl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Nautilus",
+        "skill": "W",
+        "icon": "Titan's Wrath.png",
+        "blurb": "{{sbc|Active:}} {{ci|Nautilus}} {{tip|shields}} himself for a few seconds. While the shield holds, his basic attacks apply ''Pain of Wrath'' to the target and surrounding enemies.",
+        "blurb4": "{{sbc|Pain of Wrath:}} The target suffers {{as|magic damage}} over time, half dealt immediately and the other half dealt after a brief time.",
+        "description": "{{sbc|Active:}} '''Nautilus''' grants himself a {{tip|shield}} for 6 seconds, and while it holds, his [[basic attack]]s are empowered to apply ''Pain of Wrath'' to the target and surrounding enemies.",
+        "leveling": "{{st|Shield Strength|{{ap|50 to 90}} {{as|(+ {{ap|8 to 12}}% '''maximum''' health)}}}}",
+        "description2": "{{sbc|Pain of Wrath:}} The target takes {{as|magic damage}} over time, half dealt immediately and the other half dealt after {{fd|1.25}} seconds.",
+        "leveling2": "{{st|Magic Damage|{{ap|30 to 70}} {{as|(+ 40% AP)}}}}",
+        "description3": "''Titan's Wrath {{tip|basic attack reset|resets}} '''Nautilus' ''' basic attack timer.''",
+        "cooldown": "12",
+        "cdstart": "on-cast",
+        "cost": "60",
+        "costtype": "Mana",
+        "cast time": "none",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|250|Centered on target}}",
+        "targeting": "Auto",
+        "affects": "Self, Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "Proc",
+        "spellshield": "special",
+        "parry": "unknown",
+        "notes": "* '''Nautilus' ''' empowered attacks use different attack animations.\n** The damage over time will always apply when this animation plays (even if the shield fades during a basic attack).\n* The ''Pain of Wrath'' damage over time debuff replaces itself when reapplied to the target, restarting its tick timer. This will prevent the second instance of damage from the previous debuff.\n* The attacks do not deal the '''bonus''' damage against [[structures]].\n* {{pending for test}}: Interaction with {{tip|dodge}}, {{tip|block}} and {{tip|blind}}.\n* {{tip|Spell shield}} will block the ability (but only a single application)."
+      }
+    },
+    "E": {
+      "id": "NautilusSplashZone",
+      "name": "Riptide",
+      "description": "Nautilus creates three exploding waves around himself. Each explosion damages and slows enemies.",
+      "tooltip": "Nautilus creates three exploding waves around himself, each dealing {{ damagecalc }} magic damage to enemies in the area and Slows them by {{ slowpercent*100 }}% decaying over {{ slowduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7/6.5/6/5.5/5",
+      "cost": "50/60/70/80/90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "@AbilityResourceName@ Cost",
+          "Damage",
+          "Monster Damage",
+          "Slow"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ damagebase }} -> {{ damagebaseNL }}",
+          "{{ monsterbonusdamage }} -> {{ monsterbonusdamageNL }}",
+          "{{ slowpercent*100.000000 }}% -> {{ slowpercentnl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Nautilus",
+        "skill": "E",
+        "icon": "Riptide.png",
+        "blurb": "{{sbc|Active:}} {{ci|Nautilus}} sends three waves of explosions that radiate from him, each dealing {{as|magic damage}} and briefly {{tip|slow|slowing}} enemies hit.",
+        "description": "{{sbc|Active:}} '''Nautilus''' sends three waves of explosions that radiate from him {{tt|over {{fd|0.561}} seconds|See notes}}. Each wave deals {{as|magic damage}} to enemies hit, reduced to 50% against those hit by subsequent waves beyond the first, and {{tip|slow|slows}} them by an amount that decays over {{fd|1.5}} seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|55 to 195}} {{as|(+ 50% AP)}}|Reduced Damage|{{ap|55*0.5 to 195*0.5}} {{as|(+ {{ap|50*0.5}}% AP)}}|Maximum Total Damage|{{ap|55*2 to 195*2}} {{as|(+ {{ap|50*2}}% AP)}}}}\n{{st|Slow|{{ap|30 to 50}}%}}",
+        "description2": "''Riptide'' deals 150% damage against {{tip|monsters}}.",
+        "leveling2": "{{st|Monster Damage|{{ap|55*1.5 to 195*1.5}} {{as|(+ {{ap|50*1.5}}% AP)}}|Reduced Monster Damage|{{ap|55*0.75 to 195*0.75}} {{as|(+ {{ap|50*0.75}}% AP)}}|Maximum Total Monster Damage|{{ap|55*3 to 195*3}} {{as|(+ {{ap|50*3}}% AP)}}}}",
+        "cooldown": "{{ap|7 to 5}}",
+        "cost": "{{ap|50 to 90}}",
+        "costtype": "Mana",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|0 - 350|Wave 1}} / {{tt|215 - 465|Wave 2, offset by 25 units}} / {{tt|350 - 590|Wave 3, offset by 25 units}}",
+        "cast time": "{{fd|0.25}}",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "spellaoe",
+        "onhiteffects": "|spellshield  = true",
+        "notes": "{{Effect at cast time end}}\n* The first wave is centered around '''Nautilus''', while the second and third wave are centered at an offset of 25 units in front of '''Nautilus''' at the original cast location.\n** Because of this, there are a zone each in which you can be hit by only 1 wave, or all 3 waves, respectively, without moving.\n* The first wave happens at 0 seconds after the cast time ends, the second wave at {{fd|0.297}} seconds and the third wave at {{fd|0.561}} seconds.\n** The intended timing may be {{fd|0.25}} seconds for each delay, however these are the measured, effective times.\n* The ''explosions'' are only a visual effect. The first wave has 8, the seconds has 9, and the third wave has 10 explosions, equally distributed around the rings, starting with one explosion directly in '''Nautilus'''' facing direction on each."
+      }
+    },
+    "R": {
+      "id": "NautilusGrandLine",
+      "name": "Depth Charge",
+      "description": "Nautilus fires a shockwave into the earth that chases an opponent. This shockwave rips up the earth above it, knocking enemies into the air. When it reaches the opponent, the shockwave erupts, knocking his target into the air and stunning them.",
+      "tooltip": "Nautilus fires a shockwave that chases an enemy champion, dealing {{ primarytargetdamage }} magic damage, Knocking them Up and Stunning them for {{ stunduration }} seconds. Other enemies hit by the shockwave are also Knocked Up and Stunned and take {{ secondarytargetdamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "825",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Pass Through Damage",
+          "Stun Duration:",
+          "Explosion Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ primarydamage }} -> {{ primarydamageNL }}",
+          "{{ stunduration }} -> {{ stundurationNL }}",
+          "{{ secondarydamage }} -> {{ secondarydamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Nautilus",
+        "skill": "R",
+        "icon": "Depth Charge.png",
+        "blurb": "{{sbc|Active:}} {{ci|Nautilus}} sends a ''Depth Charge'' that chases the target enemy champion. It creates eruptions in its wake that deal {{as|magic damage}} to enemies hit, as well as briefly {{tip|airborne|knocking up}} and {{tip|stun|stunning}} them.",
+        "blurb2": "Upon reaching the target, the ''Depth Charge'' erupts a final time for increased effect against the target.",
+        "description": "{{sbc|Active:}} '''Nautilus''' sends out a [[File:Depth Charge 2.png|20px|link=]] ''Depth Charge'' that chases the target enemy {{tip|champion}}, accelerating over time and creating eruptions every {{rutngt|0.25}} in its wake that also briefly grant {{tip|sight}} of the area. Enemies hit by the eruptions are dealt {{as|magic damage}}, {{tip|airborne|knocked up}} for 1 second, and {{tip|stun|stunned}} for a duration.",
+        "leveling": "{{st|Magic Damage|{{ap|125 to 225}} {{as|(+ 40% AP)}}}}\n{{st|Stun Duration|{{ap|1 to 2}} seconds}}",
+        "icon2": "Depth Charge 2.png",
+        "description2": "Upon reaching the primary target, the ''Depth Charge'' erupts a final time at their location. The primary target takes increased damage, is {{tip|stun|stunned}} for the same duration, and {{tip|airborne|knocked up}} for a modified duration.",
+        "leveling2": "{{st|Increased Damage|{{ap|150 to 400}} {{as|(+ 80% AP)}}}}\n{{st|Knock Up Duration|{{ap|1 to 2}} seconds}}",
+        "cooldown": "{{ap|120 to 80}}",
+        "cast time": "{{fd|0.46}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "target range": "{{tip|cr|icononly = true}} 825",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|225|Underway eruptions, estimated}} / {{tt|300|Final eruption}} /{{tip|sight|icononly = true}} {{tt|750|Seeking charge sight radius}}",
+        "speed": "275 + {{fd|466.67}} per second",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spelleffects": "aoe",
+        "onhiteffects": "|spellshield  = true",
+        "projectile": "false",
+        "notes": "* ''Depth Charge'' starts in an offset from whichever direction '''Nautilus''' is facing at the end of the cast time.\n** Since {{ais|Dredge Line|Nautilus}} causes '''Nautilus''' to change his facing direction upon hitting a valid target, ''Depth Charge's'' starting point can be changed with a quick {{ai|Dredge Line|Nautilus}} + ''Depth Charge'' combo.\n* Enemies a certain distance away from the charge / eruption are instead {{tip|airborne|knocked back}}.\n* ''Depth Charge's'' final eruption will occur prematurely if the primary target moves more than 3000 units away from it.\n* ''Depth Charge'' will not stop chasing if the target dies or becomes untargetable.\n* {{ai|Dredge Line|Nautilus}} will not override ''Depth Charge's'' {{tip|airborne|knock up}}.\n* '''Nautilus''' will {{tip|sight|reveal}} himself during the cast time. <!--is this a normal cast-from-outta-vision reveal or linked vision? why is this here?-->\n* {{tip|Displacement immunity}} will not resist the application of the {{tip|stun}}.\n{{Unit-targeted cancel conditions}}",
+        "_comments": [
+          "is this a normal cast-from-outta-vision reveal or linked vision? why is this here?"
+        ]
+      }
+    }
+  }
+}

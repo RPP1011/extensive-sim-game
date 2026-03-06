@@ -1,0 +1,282 @@
+{
+  "id": "Quinn",
+  "name": "Quinn",
+  "title": "Demacia's Wings",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Harrier",
+      "description": "Valor, Quinn's Demacian eagle, periodically marks enemies as Vulnerable. Quinn's first basic attack against Vulnerable targets will deal bonus physical damage.",
+      "wiki_detail": {
+        "champion": "Quinn",
+        "skill": "I",
+        "icon": "Harrier.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Quinn}} damaging abilities mark enemies with ''Vulnerable'' and {{tip|standard sight|reveal}} them for a few seconds. Periodically, {{ui|Valor}} marks a nearby enemy with ''Vulnerable''.",
+        "blurb2": "'''Quinn's''' next basic attack against a ''Vulnerable'' target consumes the mark to deal {{as|'''bonus''' physical damage}}.",
+        "description": "{{sbc|Innate:}} '''Quinn's''' {{ai|Blinding Assault|Quinn}} against the primary target, {{ai|Vault|Quinn}}, and {{ai|Skystrike|Quinn}} mark enemies hit with ''Vulnerable'' for 4 seconds, during which they are {{tip|standard sight|revealed}}. If no ''Vulnerable'' target exists for 1 second, '''{{ci|Valor}}''' automatically marks a nearby {{tip|sight|visible}} enemy. He cannot do this again for {{pp|type=critical strike chance|color=critical chance|8*(0.99^((x-1)*10))|key1=%|0 to 100 by 10|formula=8*(0.99^critical strike chance %)}} seconds after the mark expired or was consumed or overwritten by another mark.",
+        "description2": "'''Quinn's''' [[basic attack]]s against ''Vulnerable'' targets are empowered to consume the mark to deal {{pp|10 to 95|color=physical damage}} {{as|(+ {{pp|key=%|16 to 50}} AD)}} {{as|'''bonus''' physical damage}}.",
+        "description3": "While ''{{ai|Behind Enemy Lines|Quinn}}'' is active, ''Harrier'' is disabled and all ''Vulnerable'' marks are removed.",
+        "effect radius": "525",
+        "cooldown": "|static       =",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "Physical",
+        "parry": "True",
+        "spelleffects": "Proc",
+        "spellshield": "False",
+        "video": "Quinn IVideo.ogv",
+        "notes": "* If a mark applied by an ability is overwritten, consumed, or timed out, ''Harrier'' goes on a 1-second cooldown if it's not already on cooldown.\n* ''Harrier's'' targeting priority:\n*# Last unit hit (if it was a small minion it appears to select a different target).\n*# Lowest-health enemy champion.\n*# Lowest-health enemy minion.\n* ''Harrier'' is consumed even if it is parried, the attack is negated in any case.\n* ''Harrier'' will not mark enemy {{tip|minions}} while '''Quinn''' is not {{tip|sight|visible}}, but will mark enemy {{tip|champions}}."
+      }
+    },
+    "Q": {
+      "id": "QuinnQ",
+      "name": "Blinding Assault",
+      "description": "Quinn calls Valor to mark an enemy and hinder its vision before damaging all enemies in the immediate area.",
+      "tooltip": "Quinn orders Valor to dive, making the first enemy hit Vulnerable, reducing their vision radius for {{ e3 }} seconds and dealing {{ totaldamage }} physical damage to all surrounding enemies.\n\nIf the first enemy struck is not a champion, it is Disarmed for {{ e3 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11/10.5/10/9.5/9",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1025",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "-1000",
+        "1.75",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Bonus AD Ratio",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ adratio*100.000000 }}% -> {{ adrationl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Quinn",
+        "skill": "Q",
+        "icon": "Blinding Assault.png",
+        "blurb": "{{sbc|Active:}} {{ci|Quinn}} sends {{ci|Valor}} in the target direction who stops upon hitting an enemy, dealing {{as|physical damage}} all nearby enemies.",
+        "blurb2": "If the primary target was a {{tip|champion}}, they become briefly {{tip|nearsight|nearsighted}}, otherwise they are {{tip|disarm|disarmed}} instead.",
+        "description": "{{sbc|Active:}} '''Quinn''' sends '''{{ci|Valor}}''' in the target direction who stops upon hitting an enemy, marking them as ''{{ai|Harrier|Quinn|Vulnerable}}'' and dealing {{as|physical damage}} to all nearby enemies.",
+        "leveling": "{{st|Physical Damage|{{ap|20 to 100}} {{as|(+ {{ap|80 to 120}}% AD)}} {{as|(+ 50% AP)}}}}",
+        "description2": "If the primary target was a {{tip|champion}}, they become {{tip|nearsight|nearsighted}} for {{fd|1.75}} seconds, otherwise they are {{tip|disarm|disarmed}} instead.",
+        "cooldown": "{{ap|11 to 9}}",
+        "cost": "{{ap|50 to 70}}",
+        "cast time": "{{fd|0.25}}",
+        "customlabel": "Sight Reduction",
+        "custominfo": "{{tt|350|Reduces sight radius to this number}}",
+        "costtype": "Mana",
+        "target range": "1050",
+        "width": "{{tip|er|icononly = true}} 120",
+        "speed": "1550",
+        "effect radius": "{{tt|210|Damage radius}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spelleffects": "spellaoe",
+        "spellshield": "True",
+        "projectile": "True",
+        "video": "Quinn QVideo.ogv",
+        "notes": "* ''Blinding Assault's'' {{tip|nearsight}} will persist through {{tip|death}}.\n{{Effect at cast time start}}",
+        "flavorsound": "{{sm2|Quinn_Original_Q_0.ogg}} ''\"Gouge 'em, Valor!\"''"
+      }
+    },
+    "W": {
+      "id": "QuinnW",
+      "name": "Heightened Senses",
+      "description": "Passively grants Quinn Attack Speed and Move Speed after she attacks a Vulnerable target. Activate to have Valor reveal a large area nearby.",
+      "tooltip": "Passive: Attacking a Vulnerable target grants Quinn {{ attackspeedbonus*100 }}% Attack Speed and {{ e3 }}% Move Speed for {{ e1 }} seconds.\n\nActive: Valor reveals a large area nearby for {{ e5 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "50/45/40/35/30",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "2100",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "2",
+        "0",
+        "20/25/30/35/40",
+        "2100",
+        "2",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Attack Speed",
+          "Move Speed",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ attackspeedbonus*100.000000 }}% -> {{ attackspeedbonusnl*100.000000 }}%",
+          "{{ effect3amount*100.000000 }}% -> {{ effect3amountnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Quinn",
+        "skill": "W",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} Attacking a {{ai|Harrier|Quinn|Vulnerable}} target or consuming a mark grants {{ci|Quinn}} {{sti|{{as|'''bonus''' attack speed}}}} and {{sti|ms|{{as|'''bonus''' movement speed}}}} for a short time.",
+        "blurb2": "{{sbc|Active:}} {{ci|Valor}} gains {{tip|sight}} of the surrounding area for a short time, {{tip|standard sight|revealing}} enemies detected.",
+        "description": "{{sbc|Passive:}} Whenever '''Quinn''' uses a basic attack {{tip|on-attack}} against a ''{{ai|Harrier|Quinn|Vulnerable}}'' target or consumes their mark, she gains {{sti|{{as|'''bonus''' attack speed}}}} and {{sti|ms|{{as|'''bonus''' movement speed}}}} for 2 seconds.",
+        "leveling": "{{st|Bonus Attack Speed|{{ap|28 to 80}}%}}\n{{st|Bonus Movement Speed|{{ap|20 to 40}}%}}",
+        "icon2": "Heightened Senses.png",
+        "description2": "{{sbc|Active:}} {{ci|Valor}} grants {{tip|sight}} of the surrounding area for 2 seconds and {{tip|standard sight|reveals}} enemy champions within for the same duration.",
+        "cooldown": "{{ap|50 to 30}}",
+        "effect radius": "2100",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Self",
+        "spelleffects": "|spellshield  = false",
+        "video": "Quinn WVideo.ogv",
+        "notes": "* Activating the passive with Harrier gives Quinn the equivalent of {{g|{{#expr:12*20+25*28}}}} to {{g|{{#expr:12*40+25*80}}}} of stats.<br>({{g|{{#expr:25*28}}}} to {{g|{{#expr:25*80}}}} in [[Attack Speed]]. {{g|{{#expr:12*20}}}} to {{g|{{#expr:12*40}}}} in [[Movement Speed]].)\n* The {{tip|standard sight|reveal}} can grant assists if the opponents were out of sight of allies when they are revealed.",
+        "flavorsound": "{{sm2|Quinn_Original_W_1.ogg}} ''\"Eyes in the sky.\"''"
+      }
+    },
+    "E": {
+      "id": "QuinnE",
+      "name": "Vault",
+      "description": "Quinn dashes to an enemy, dealing physical damage and slowing the target's Move Speed. Upon reaching the target, she leaps off the target, briefly interrupting it, and lands near her maximum Attack Range away from the target.",
+      "tooltip": "Quinn dashes to an enemy, dealing {{ totaldamage }} physical damage and marking them Vulnerable. Quinn then leaps backwards from the target, slightly Knocking them Back and Slowing them by {{ e1 }}%, decaying over {{ e3 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/11/10/9/8",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "675",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "50",
+        "40/65/90/115/140",
+        "1.5",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e2 }} -> {{ e2NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Quinn",
+        "skill": "E",
+        "icon": "Vault.png",
+        "blurb": "{{sbc|Active:}} {{ci|Quinn}} {{tip|dashes}} to the target enemy, dealing {{as|physical damage}}, {{tip|airborne|knocking them back}}, marking them as {{ai|Harrier|Quinn|Vulnerable}}, and briefly {{tip|slow|slowing}} them. She then {{tip|dash|leaps}} backward.",
+        "description": "{{sbc|Active:}} '''Quinn''' {{tip|dashes}} to the target enemy, marking them as ''{{ai|Harrier|Quinn|Vulnerable}}'', dealing {{as|physical damage}}, {{tip|airborne|knocking them back}} a very short distance over {{fd|0.5}} seconds, and {{tip|slow|slowing}} them by 50% decaying over {{fd|1.5}} seconds. She then {{tip|dash|leaps back}} 525 units away from them.",
+        "description2": "''{{ai|Heightened Senses|Quinn}} can be cast during either of the dashes.''",
+        "leveling": "{{st|Physical damage|{{ap|40 to 140}} {{as|(+ 20% '''bonus''' AD)}}}}",
+        "cooldown": "{{ap|12 to 8}}",
+        "cast time": "none",
+        "cost": "50",
+        "costtype": "Mana",
+        "target range": "{{tip|er|icononly = true}} 600",
+        "speed": "{{tt|2500|Initial dash speed, estimated}} / {{tt|850|Second dash speed, estimated}}",
+        "targeting": "Unit",
+        "damagetype": "Physical",
+        "affects": "Enemies",
+        "spelleffects": "Spell",
+        "spellshield": "True",
+        "callforhelp": "true",
+        "grounded": "True",
+        "knockdown": "True",
+        "video": "Quinn EVideo.ogv",
+        "notes": "* '''Quinn''' will track the target if they change locations.\n** She will dash to the target's previous location without applying ''Vault's'' effects if the target is too far away or moves beyond {{tt|1200|Estimated}} units.\n* ''Vault'' {{tip|basic attack reset|resets}} '''Quinn's''' remaining attack cooldown a short delay after the first dash ends (even if interrupted).\n** This delay is a fuzzy {{fd|0.25}} to {{fd|0.5}} seconds and this matches up with the moment the target of ''Vault'' is marked as {{ai|Harrier|Quinn|Vulnerable}}.\n* '''Quinn''' will automatically attempt to attack the target once she completes ''Vault''.\n* The target will turn to face the opposite direction after being {{tip|airborne|knocked back}}.\n* Unlike its constant cast range ''Vault's'' bounce's can vary to allow '''Quinn''' to close or to make a gap between herself and the target (depending on casting position) or even to jump through a wall (if there is enough landing room on the other side).\n* ''Vault'' also interrupts basic attacks with {{tip|uncancellable windup|uncancellable windups}}.{{bug|2}}"
+      }
+    },
+    "R": {
+      "id": "QuinnR",
+      "name": "Behind Enemy Lines",
+      "description": "Quinn and Valor team up to fly around at great speed.  Ending the ability casts Skystrike, which deals damage to nearby enemies and marks champions as Vulnerable.",
+      "tooltip": "Quinn calls to Valor, pairing up after channeling for 2 seconds gaining {{ movementspeedmod*100 }}% Move Speed and allowing her to Recast this Ability. Attacking or using Blinding Assault or Vault automatically Recasts this Ability.\n\nRecast: Quinn and Valor perform an aerial maneuver, dealing {{ damage }} physical damage, marking champions as Vulnerable, and ending this Ability.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "3",
+      "cost": "100/50/0",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "700",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Move Speed",
+          "Mana Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ movementspeedmod*100.000000 }}% -> {{ movementspeedmodnl*100.000000 }}%",
+          "{{ basecost }} -> {{ basecostNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Quinn",
+        "skill": "R",
+        "icon": "Behind Enemy Lines.png",
+        "blurb": "{{sbc|Active:}} {{ci|Quinn}} {{tip|channels}} for a short time to pair up with {{ci|Valor}}. They then become united, increasing her {{as|{{sti|movement speed}}}} and becoming {{tip|ghosted}}.",
+        "blurb2": "The duo lose the movement speed boost upon taking non-minion damage, and disband upon being {{tip|immobilize|immobilized}}, {{tip|ground|grounded}}, or {{tip|silence|silenced}}.",
+        "blurb3": "While united, '''Quinn''' can cast ''{{ai|Skystrike|Quinn}}''.",
+        "description": "{{sbc|Active:}} '''Quinn''' {{tip|channels}} for 2 seconds, signaling '''{{ci|Valor}}''' to pair up. Upon completion, he picks her up and they unite, increasing her {{sti|ms|{{as|{{tt|'''total''' movement speed|Increases base movement as well as bonus movement speed}}}}}}, granting her {{tip|ghosted|ghosting}}, and allowing her to cast ''{{ai|Skystrike|Quinn}}''. ''Behind Enemy Lines'' can be recast after {{fd|0.5}} seconds during the channel.",
+        "leveling": "{{st|Total Movement Speed Increase|{{ap|70 to 130}}%}}",
+        "description2": "Taking damage from non-{{tip|minions}} while ''Behind Enemy Lines'' is active or while '''Quinn''' is {{tip|channel|channeling}} the ability causes her to lose the {{as|'''bonus total''' movement speed}} for 3 seconds. Becoming {{tip|immobilize|immobilized}}, {{tip|ground|grounded}}, or {{tip|silence|silenced}} ends ''Behind Enemy Lines'' immediately and puts it on {{sti|cooldown}} without performing ''{{ai|Skystrike|Quinn}}''.",
+        "description3": "Once ''Behind Enemy Lines'' has been learned, [[death|respawning]] or returning to the allied [[Spawn|summoning platform]] will spawn '''{{ci|Valor}}''' instantly.",
+        "description4": "{{sbc|Recast:}} '''Quinn''' cancels the channel, placing ''Behind Enemy Lines'' on cooldown.",
+        "cooldown": "3",
+        "cdstart": "post-effect",
+        "cost": "{{ap|100 to 0}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Self",
+        "grounded": "true",
+        "silence": "true",
+        "video": "|notes        = \n* Taking damage from non-{{tip|minions}} removes the bonus movement speed buff temporarily by suppressing it with the status effect of a {{tip|slow}}.\n* ''Behind Enemy Lines'' does not refund its {{sti|{{as|mana cost}}}} if the channel was canceled via recast.\n** The only exception is if '''Quinn's''' {{as|mana}} falls below the {{as|mana cost}}, in which case she is granted enough {{as|mana}} back (the equal amount needed) to be able to cast ''Behind Enemy Lines'' again.\n* [[death|Respawning]] or returning to the [[Spawn|summoning platform]] will not spawn '''{{ci|Valor}}''' if ''Behind Enemy Lines'' is on cooldown.\n* If '''{{ci|Valor}}''' is spawned by [[death|respawning]] or returning to the [[Spawn|summoning platform]], {{ai|Skystrike|Quinn}} will be disabled from being manually cast for {{fd|2.5}} seconds upon uniting. However, it will still automatically activate upon declaring a [[basic attack]] or casting {{ai|Blinding Assault|Quinn}} or {{ai|Vault|Quinn}}.\n* ''Behind Enemy Lines'' ends immediately without {{ai|Skystrike|Quinn}} being cast if she enters or is inside the enemy [[fountain]]. The ability will go on full {{sti|cooldown}}.\n** '''Quinn''' will also spawn '''{{ci|Valor}}''' when entering the enemy fountain but she will instantly lose him afterwards.\n* Self-{{tip|immobilize|immobilizations}} such as {{ii|Zhonya's Hourglass}} also count for ending ''Behind Enemy Lines''.\n* The following table refers for interactions while '''Quinn''' is {{tip|channel|channeling}}:\n** ''Behind Enemy Lines'' is not a [[Channel#Movement Channels|movement channel]], and so will not be {{tip|interrupt|interrupted}} by {{tip|root}} and {{tip|ground}}.\n{{ct|channel|attack=interrupts|cast=interrupts|move=false|items=interrupts,true,,false|spells=true, interrupts, interrupts, interrupts, interrupts}}",
+        "flavorsound": "{{sm2|Quinn_Original_R_1.ogg}} ''\"Valor, to me!\"''"
+      }
+    }
+  }
+}

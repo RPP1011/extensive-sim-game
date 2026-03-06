@@ -1,0 +1,204 @@
+[hero]
+name = "Templar"
+
+[stats]
+hp = 140
+move_speed = 2.5
+
+[stats.tags]
+HOLY = 50.0
+DARK = 60.0
+CROWD_CONTROL = 45.0
+
+[attack]
+damage = 16
+range = 1.5
+cooldown = 1000
+cast_time = 300
+
+# --- Ability 1: Holy Smite ---
+[[abilities]]
+name = "HolySmite"
+targeting = "target_enemy"
+range = 3.0
+cooldown_ms = 4000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 45
+
+[abilities.effects.tags]
+HOLY = 55.0
+
+# --- Ability 2: Divine Shield ---
+[[abilities]]
+name = "DivineShield"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 16000
+cast_time_ms = 300
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 70
+duration_ms = 5000
+
+# --- Ability 3: Consecration ---
+[[abilities]]
+name = "Consecration"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 12000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "zone"
+duration_ms = 4000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "damage"
+amount_per_tick = 12
+tick_interval_ms = 500
+duration_ms = 4000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+HOLY = 50.0
+
+# --- Ability 4: Judgment ---
+[[abilities]]
+name = "Judgment"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 6000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "projectile"
+speed = 8.0
+pierce = false
+width = 0.3
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 50
+
+[abilities.delivery.on_hit.tags]
+HOLY = 55.0
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[abilities.delivery.on_hit.tags]
+SLOW = 45.0
+
+# --- Ability 5: Lay on Hands ---
+[[abilities]]
+name = "LayOnHands"
+targeting = "target_ally"
+range = 3.0
+cooldown_ms = 15000
+cast_time_ms = 500
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount = 60
+
+# --- Ability 6: Avenging Wrath ---
+[[abilities]]
+name = "AvengingWrath"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 20000
+cast_time_ms = 300
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "buff"
+stat = "damage_output"
+factor = 0.3
+duration_ms = 6000
+
+# --- Ability 7: Hammer of Justice ---
+[[abilities]]
+name = "HammerOfJustice"
+targeting = "target_enemy"
+range = 2.0
+cooldown_ms = 10000
+cast_time_ms = 300
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "damage"
+amount = 30
+
+[abilities.effects.tags]
+HOLY = 50.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 2500
+
+[abilities.effects.tags]
+HOLY = 50.0
+CROWD_CONTROL = 65.0
+
+# --- Ability 8: Holy Nova ---
+[[abilities]]
+name = "HolyNova"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 8000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 35
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+[abilities.effects.tags]
+HOLY = 50.0
+
+# --- Passive 1: Righteous Fury ---
+[[passives]]
+name = "RighteousFury"
+cooldown_ms = 3000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_dealt"
+
+[[passives.effects]]
+type = "heal"
+amount = 8
+
+# --- Passive 2: Divine Protection ---
+[[passives]]
+name = "DivineProtection"
+cooldown_ms = 4000
+range = 3.0
+
+[passives.trigger]
+type = "on_ally_damaged"
+range = 3.0
+
+[[passives.effects]]
+type = "shield"
+amount = 18
+duration_ms = 3000

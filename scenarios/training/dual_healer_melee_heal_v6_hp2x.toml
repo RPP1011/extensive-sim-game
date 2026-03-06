@@ -1,0 +1,13 @@
+[scenario]
+name = "dual_healer_melee_heal_v6_hp2x"
+seed = 2086
+hero_count = 4
+enemy_count = 6
+difficulty = 2
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["berserker", "samurai", "cleric", "bard"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Either"

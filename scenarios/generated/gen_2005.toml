@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_elementalist_warlock_berserker_s1"
+seed = 11670
+hero_count = 3
+enemy_count = 4
+difficulty = 2
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["elementalist", "warlock", "berserker"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

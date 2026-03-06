@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0175_5v5_s1"
+seed = 12098
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["Aurora", "Cassiopeia", "Kindred", "Blitzcrank", "Elise"]
+enemy_hero_templates = ["Ashe", "Lillia", "Yone", "JarvanIV", "Twitch"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

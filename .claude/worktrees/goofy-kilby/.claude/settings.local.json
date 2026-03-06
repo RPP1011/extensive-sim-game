@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /mnt/d/Projects/game/src/main.rs /mnt/d/Projects/game/src/game_core.rs /mnt/d/Projects/game/src/ai/*.rs)",
+      "Bash(cargo check 2>&1 | head -1002)",
+      "Bash(cargo check 2>&1 | tail -200)",
+      "Bash(cargo)",
+      "Bash(git -C \"D:\\\\Projects\\\\game\" log --oneline -10)",
+      "Bash(git -C \"D:\\\\Projects\\\\game\\\\.claude\\\\worktrees\\\\goofy-kilby\" log --oneline -5)",
+      "Bash(git -C \"D:\\\\Projects\\\\game\\\\.claude\\\\worktrees\\\\goofy-kilby\" status)"
+    ]
+  },
+  "enableAllProjectMcpServers": false
+}

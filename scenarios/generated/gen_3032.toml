@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0090_5v5_s2"
+seed = 22013
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["knight", "Smolder", "Qiyana", "samurai", "bard"]
+enemy_hero_templates = ["Fiddlesticks", "JarvanIV", "Annie", "Belveth", "engineer"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

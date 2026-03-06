@@ -1,0 +1,13 @@
+[scenario]
+name = "pair_berserker_cryomancer_s1"
+seed = 11505
+hero_count = 2
+enemy_count = 3
+difficulty = 2
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["berserker", "cryomancer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,274 @@
+{
+  "id": "Bard",
+  "name": "Bard",
+  "title": "the Wandering Caretaker",
+  "resource_type": "Mana",
+  "tags": [
+    "Support",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Traveler's Call",
+      "description": "Meeps: Bard attracts lesser spirits that assist with his basic attacks to deal extra magic damage. When Bard has collected enough  Chimes, his meeps will also deal damage in an area and slow enemies hit.\n\nChimes: Ancient chimes randomly appear for Bard to collect. These grant experience, restore mana, and provide out of combat Move Speed.",
+      "wiki_detail": {
+        "champion": "Bard",
+        "skill": "I",
+        "icon": "Traveler's Call.png",
+        "blurb": "{{sbc|Innate - Ancient Chimes:}} {{cis|Bard}} presence causes magical [[File:Traveler's Call Minimap.png|16px|link=]] {{as|chimes|buzzword2}} to appear across the map. Collecting a {{as|chime|buzzword2}} grants him {{sti|{{as|experience}}}}, {{sti|{{as|mana}}}}, and burst of {{sti|{{as|movement speed}}}}.",
+        "blurb2": "{{sbc|Meeps:}} {{ci|Bard}} generates {{as|meeps|buzzword3}} that are each consumed in his basic attacks, dealing {{as|'''bonus''' magic damage}}. Collecting {{as|chimes|buzzword2}} causes these {{as|meeps|buzzword3}} to ready more often and gain new effects.",
+        "blurb4": "<p>\n* At {{as|5 chimes|buzzword2}}, {{as|Meeps|buzzword3}} apply a {{tip|slow}} to enemies.\n* At {{as|15 chimes|buzzword2}}, {{as|Meeps|buzzword3}} deal damage to nearby enemies and in a cone behind the target.\n* At {{as|35 chimes|buzzword2}}, the cone's radius increases.</p>",
+        "description": "{{sbc|Innate - Ancient Chimes:}} '''Bard's''' presence causes sacred [[File:Traveler's Call Minimap.png|16px|link=]] {{as|Chimes|buzzword2}} to appear at random locations on the map, lingering for up to 10 minutes. Collecting a {{as|Chime|buzzword2}} restores {{sti|mana|{{as|12% '''maximum''' mana}}}} and grants '''Bard''' {{sti|Experience|{{as|20 + (''1 per minute after 5 minutes'') experience}}}}, as well as {{sti|ms|{{as|24% '''bonus''' movement speed}}}} [[combat status|out of combat]] for 20 seconds, which stacks up to 10 times. Each {{as|Chime|buzzword2}} collected beyond the first instead grants an additional {{as|14% '''bonus''' movement speed}}, up to a total of {{as|150% '''bonus''' movement speed}}. '''Bard''' empowers his {{as|Meeps|buzzword3}} each time he collects {{as|5 Chimes|buzzword2}}.",
+        "icon2": "Traveler's Call 2.png",
+        "description2": "{{sbc|Innate - Meeps:}} '''Bard's''' presence attracts {{as|Meeps|buzzword3}}, which are small spirits that come to his side. While he has {{as|Meeps|buzzword3}}, his basic attacks are empowered to each consume a {{as|Meep|buzzword3}} {{tip|on-attack}} to deal {{as|35|magic damage}} (''+ {{as|10|magic damage}} per 5 {{as|Chimes|buzzword2}} collected'') {{as|(+ 40% AP)}} {{as|'''bonus''' magic damage}}.\n* At {{as|5 Chimes|buzzword2}}, {{as|Meeps|buzzword3}} {{tip|slow}} damaged enemies by {{pp|type = number of ''Chimes''|key=%|25 to 75 for 6|5;25;45;60;75;85}} for 1 second.\n* At {{as|15 Chimes|buzzword2}}, {{as|Meeps|buzzword3}} deal the damage to enemies within 150 units of the primary target as well as those in a cone behind them.\n* At {{as|35 Chimes|buzzword2}}, the cone's radius increases.",
+        "description3": "{{as|Meeps|buzzword3}} spawn every {{pp|changedisplay=true|type = number of Chimes|8 to 4 for 5|0;20;40;55;70}} seconds and '''Bard''' can have up to {{pp|type = number of Chimes|1 to 9 for 9|0;10;30;50;65;80;90;95;100}} of them at a time.",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "Special",
+        "spelleffects": "mixed",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "parry": "Unknown",
+        "video": "Bard IVideo.ogv",
+        "notes": "* Primary target takes {{tip|spell damage}}, while secondary ones take {{tip|area damage}}.\n* {{as|Meeps|buzzword3}} grant additional stacks of {{ri|Electrocute}}, {{ri|Phase Rush}} and {{ri|Conqueror}}.\n* {{as|Chime|buzword2}} spawns are weighted towards the areas of the map that '''Bard''' is currently present in, and spawn every 50 seconds in pairs, with the only exception being the second and third spawns on {{tip|Summoner's Rift}}, which spawn only one.\n** {{as|Chimes|buzzword2}} will not spawn in either team's base and will not spawn in the enemy team's jungle before the 5 minute mark.\n* Only '''Bard''' can see a {{as|chime|buzzword2}} that is in the [[fog of war]]. All other players must have {{tip|sight}} of a {{as|chime|buzzword2}} for it to be visible to them.\n** Only '''Bard''' can see a minimap icon for an uncollected {{as|chime|buzzword2}}, regardless of whether other players have vision on it or not. The minimap icon will turn red when the {{as|chime|buzzword2}} is one minute away from expiration.\n** '''Bard''' cannot see {{as|chimes|buzzword2}} while {{tip|nearsight|nearsighted}}.\n* Only {{as|Meep|buzzword3}} cone attacks are absorbed by {{tip|spell shield|spell shields}}. Those that deal damage together with the basic attack don't.\n* If a {{as|Meep|buzzword3}} empowered auto attack is {{tip|dodged}}, {{tip|blocked}} or when '''Bard''' is {{tip|blind|blinded}}, the basic attack itself will deal no damage, but the {{as|Meep|buzzword3}} damage will still be applied.\n* The empowered attack will not trigger against [[structures]] and [[ward]]s.\n{{chime list}}"
+      }
+    },
+    "Q": {
+      "id": "BardQ",
+      "name": "Cosmic Binding",
+      "description": "Bard fires a missile which will slow the first enemy struck, and continue onward. If it strikes a wall, it will stun the initial target; if it strikes another enemy, it will stun them both.",
+      "tooltip": "Bard fires an energy bolt, dealing {{ totaldamage }} magic damage to the first two enemies hit. The first target hit is Slowed by {{ slowamountpercentage }}% for {{ slowduration }}s.\n\nIf the bolt hits a second enemy or a wall, any enemies hit are Stunned for {{ stunduration }}s.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11/10/9/8/7",
+      "cost": "60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "25000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow Duration",
+          "Stun Duration:",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ slowduration }} -> {{ slowdurationNL }}",
+          "{{ stunduration }} -> {{ stundurationNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Bard",
+        "skill": "Q",
+        "icon": "Cosmic Binding.png",
+        "blurb": "{{sbc|Active:}} {{ci|Bard}} fires an energy bolt in the target direction that deals {{as|magic damage}} and {{tip|slow|slows}} the first enemy hit.",
+        "blurb2": "After the bolt hits an enemy, it continues onward. If it hits [[terrain]] or another enemy, it will deal {{as|magic damage}} to them and {{tip|stun}} both targets.",
+        "description": "{{sbc|Active:}} '''Bard''' fires an energy bolt in the target direction that deals {{as|magic damage}} to the first enemy hit and {{tip|slow|slows}} them by 60% for a duration.",
+        "leveling": "{{st|Magic Damage|{{ap|80 to 240}} {{as|(+ 80% AP)}}}}\n{{st|Disable Duration|{{ap|1 to 1.8}} seconds}}",
+        "description2": "After ''Cosmic Binding'' hits an enemy, the bolt continues behind them for {{tt|300 units|Estimated}}. If the bolt hits terrain or a second enemy, it {{tip|stun|stuns}} both targets for the same duration, dealing the same damage to the secondary target.",
+        "target range": "850",
+        "width": "{{tip|er|icononly = true}} 60",
+        "speed": "1500",
+        "cost": "60",
+        "costtype": "Mana",
+        "cooldown": "{{ap|11 to 7}}",
+        "targeting": "Direction",
+        "cast time": "{{fd|0.25}}",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "Special",
+        "spelleffects": "aoe",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "video": "Bard QVideo.ogv",
+        "notes": "* ''Cosmic Binding's'' interaction with {{tip|spell shield|spell shields}}:\n** If the first target has a spell shield, they will block the damage but the bolt will still pass through them.\n*** If the bolt hits a second target, only they will be stunned.\n*** If the bolt hits terrain, the first target will be stunned.\n** If the second target has a spell shield, they will block the stun and damage.\n*** The first target will still be stunned.\n** If the first target gains a spell shield after being hit, the stun will not be blocked.\n* The {{tip|stun}} will apply even if the first target becomes {{tip|untargetable}}.\n* ''Cosmic Binding'' can interact with [[Terrain#Player-Generated|player-generated terrain]].\n* The {{tip|stun}} is still applied even if the first or second target dies to the ability itself or before the projectile can bind them.\n* ''Cosmic Binding'' does not grant {{tip|sight}} of enemies hit, but a hit can be seen and heard to indicate that at least one enemy is there.\n{{Effect at cast time end}}"
+      }
+    },
+    "W": {
+      "id": "BardW",
+      "name": "Caretaker's Shrine",
+      "description": "Reveals a Health shrine which powers up over a short time, disappearing after healing and speeding up the first ally that touches it.",
+      "tooltip": "Bard creates a Health shrine that grants {{ calc_movespeed }} Move Speed decaying over {{ movespeed_duration }} seconds and restores at least {{ initialheal }} Health to the first ally to enter. The shrine grows to restore {{ maxheal }} Health after existing for {{ chargeuptime }} seconds.\n\nBard can have up to {{ maxpacks }} shrines at once. If an enemy champion enters a shrine, it is destroyed.\n\nThis ability has {{ ammo_limit }} charges.\n\nCurrent Active Shrines: {{ f1 }} / {{ f2 }}{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0",
+      "cost": "70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "3",
+        "0",
+        "0",
+        "0",
+        "0",
+        "5",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Base Heal",
+          "Max Heal",
+          "Move Speed"
+        ],
+        "effect": [
+          "{{ minimumheal }} -> {{ minimumhealNL }}",
+          "{{ maximumheal }} -> {{ maximumhealNL }}",
+          "{{ movespeed_base*100.000000 }}% -> {{ movespeed_basenl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Bard",
+        "skill": "W",
+        "icon": "Caretaker's Shrine.png",
+        "blurb": "{{sbc|Active:}} {{ci|Bard}} conjures a shrine which powers up over a period, disappearing when a champion steps on it.",
+        "blurb2": "If an ally champion steps on the shrine, they gain a burst of {{sti|ms|{{as|movement speed}}}} and are {{tip|heal|healed}} based on the shrine's power.",
+        "description": "{{sbc|Active:}} '''Bard''' conjures a shrine at the target location that gathers power over 5 seconds, granting {{tip|sight}} of its surroundings for {{tt|{{fd|1.8}} seconds|Estimated}}. Shrines last until they are consumed by champions moving over them. Up to 3 shrines may be active at a time.",
+        "description2": "If the champion was an ally or '''Bard''' himself, they are {{tip|heal|healed}} for an amount based on the shrine's power and gain {{sti|ms|{{as|'''bonus''' movement speed}}}} that decays over {{fd|1.5}} seconds.",
+        "leveling2": "{{st|Minimum Heal|{{ap|25 to 125}} {{as|(+ 30% AP)}}|Maximum Heal|{{ap|50 to 200}} {{as|(+ 60% AP)}}}}\n{{st|Bonus Movement Speed|{{ap|20 to 30}}% {{as|(+ 5% per 100 AP)}}}}",
+        "description3": "'''Bard''' periodically [[stock]]s a ''Caretaker's Shrine'' charge, up to a maximum of 2.",
+        "target range": "800",
+        "cost": "70",
+        "costtype": "Mana",
+        "recharge": "18",
+        "targeting": "[[Location-targeted|Location]] / [[Unit-targeted|Unit]]",
+        "cast time": "{{fd|0.25}}",
+        "affects": "Allies",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "Heal",
+        "projectile": "|grounded     =",
+        "knockdown": "|video        = Bard WVideo.ogv",
+        "notes": "* ''Caretaker's Shrine'' can be cast directly on an ally and it will be treated as a [[unit-targeted]] ability for effects such as {{ri|Guardian}}.\n** If '''Bard''' has 3 ''shrines'' on the map and creates a new one that is cast directly on himself or an ally, the oldest shrine will not be destroyed. This is because the ''shrine'' is used as an actual targeted heal on himself or someone else, and not a permanent shrine, so the other 3 may stay.\n** The [[spell indicator]] of ''Caretaker's Shrine'' shows the area in which it can be used as a targeted heal. After a shrine has been placed on the ground its activation area becomes smaller: allies or enemies have to step directly on the shrine to use it or destroy it.\n* Leveling up ''Caretaker's Shrine'' will update the healing of existing shrines."
+      }
+    },
+    "E": {
+      "id": "BardE",
+      "name": "Magical Journey",
+      "description": "Bard opens a portal in nearby terrain. Allies and enemies alike can take a one-way trip through that terrain by moving into the portal.",
+      "tooltip": "Bard opens a one-way portal through Terrain for {{ e1 }} seconds. Any champion can enter the portal by moving onto it while near the entrance.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "22/20.5/19/17.5/16",
+      "cost": "30",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "10",
+        "33",
+        "900",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Bard",
+        "skill": "E",
+        "icon": "Magical Journey.png",
+        "blurb": "{{sbc|Active:}} {{ci|Bard}} opens a one-way portal through nearby [[terrain]]. Champions can enter by moving into the portal, however allies will be faster.",
+        "description": "{{sbc|Active:}} '''Bard''' opens a one-way magical corridor through a piece of [[terrain]] in the target direction for 10 seconds.",
+        "description2": "A champion can {{tip|dash|pass}} through the corridor by selecting it, becoming {{tip|standard sight|revealed}} during the travel. '''Bard''' and allies travel through the portal at 33% increased speed.",
+        "description3": "''A nearby valid piece of terrain is required to cast this ability. Magical Journey cannot be taken while {{tip|immobilize|immobilized}} or {{tip|ground|grounded}}.''",
+        "target range": "900",
+        "speed": "{{tt|900|Enemy travel speed}} / {{tt|1197|Bard and ally travel speed}}",
+        "cost": "30",
+        "costtype": "Mana",
+        "cooldown": "{{ap|22 to 16}}",
+        "cdstart": "on-cast",
+        "cast time": "{{fd|0.25}}",
+        "targeting": "Direction",
+        "outofrange": "Don't cast",
+        "affects": "Self, Allies, Enemies",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|projectile   = False",
+        "grounded": "special",
+        "knockdown": "True",
+        "video": "Bard EVideo.ogv",
+        "notes": "* Terrain also includes [[structures]].\n* ''Magical Journey's'' tunnel has a max range of 2600 units (about two screens long)<ref>[http://boards.na.leagueoflegends.com/en/c/gameplay-balance/Ev3qQR4G-bard-qa?show=flat&comment=00dc0001/ Bard Q&A comment by Rabid Llama]</ref>.\n* ''Magical Journey'' will score assists for '''Bard''' if an ally that uses it scores a [[kill]] or [[assist]] shortly after.\n* '''Bard''' can cast ''Magical Journey'' while {{tip|ground|grounded}} or {{tip|root|rooted}}.\n* There is no limit to how many times a given instance of ''Magical Journey'' may be used.\n* ''Magical Journey'' cannot interact with player-created terrain due to its short lifespan.<ref>[http://boards.na.leagueoflegends.com/en/c/gameplay-balance/Ev3qQR4G-bard-qa?show=flat&comment=001f0000/ Bard Q&A comment by Rabid Llama]</ref>\n* Any abilities that continue during normal movement, such as [[area of effect|point blank area of effects]] and various forms of {{tip|stealth}}, will continue during the travel within ''Magical Journey''.\n* If a champion's {{tip|dash}} is {{tip|interrupt|interrupted}} while inside terrain using ''Magical Journey'', they will be immediately displaced out to the nearest open space, but are not rendered {{tip|airborne}}.\n* Taking ''Magical Journey'' is considered a {{tip|dash}}, and so will interact with effects such as {{ri|Sudden Impact}} and {{tip|knockdown}}."
+      }
+    },
+    "R": {
+      "id": "BardR",
+      "name": "Tempered Fate",
+      "description": "Bard sends spirit energy arcing to a location, putting all champions, minions, monsters, and turrets hit into stasis for a brief time.",
+      "tooltip": "Bard hurls magical protective energy to an area, placing all units and structures hit into Stasis for {{ rstasisduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "110/95/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "3400",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Bard",
+        "skill": "R",
+        "icon": "Tempered Fate.png",
+        "blurb": "{{sbc|Active:}} {{ci|Bard}} sends spirit energy arcing to a location, putting all {{tip|champions}}, {{tip|minions}}, {{tip|monsters}}, and {{tip|turrets}} hit into {{tip|stasis}} for a short time.",
+        "description": "{{sbc|Active:}} '''Bard''' sends magical energy arcing to the target location, granting {{tip|sight}} of the area during travel. Upon impact, it puts all units within into {{tip|stasis}} for {{fd|2.5}} seconds, as well as {{tip|stun|stunning}} all enemy {{tip|champions}}, {{tip|minions}}, and {{tip|turret|turrets}} struck for the same duration. Enemies hit are {{tip|standard sight|revealed}} for the duration.",
+        "description2": "''Epic {{tip|monsters}} and {{tip|turrets}} are affected by Tempered Fate despite being {{tip|cc-immune|immune to crowd control}}.''",
+        "target range": "3400",
+        "effect radius": "350",
+        "cost": "100",
+        "costtype": "Mana",
+        "cast time": "{{fd|0.5}}",
+        "cooldown": "{{ap|110|95|80}}",
+        "targeting": "Location",
+        "damagetype": "|spellshield  = True",
+        "spelleffects": "|projectile   = False",
+        "grounded": "|knockdown    =",
+        "video": "Bard RVideo.ogv",
+        "notes": "* ''Tempered Fate's'' {{tip|stun}} is affected by {{tip|Tenacity}}.\n** The {{tip|stasis}} is unaffected.\n* ''Tempered Fate'' will affect all ''targetable'' {{tip|champions}}, {{tip|minions}}, {{tip|monster|monsters}}, {{tip|turret|turrets}}, {{tip|ward|wards}}, and [[jungle plants]].\n* ''Tempered Fate'' has no effect on enemies that have {{tip|displacement immunity}} or {{tip|cc-immune|total crowd control immunity}}, and allies that are immune from using an ability that preloads {{tip|unstoppableforcemarker|UnstoppableForceMarker}}.\n** The only exceptions are the crowd control immunity that {{tip|turret|turrets}} and epic {{tip|monsters}} have.\n* All {{tip|champion|champions}} (including allies) during the {{tip|stasis}} are prohibited from activating {{tip|cleanse|cleansing}} effects for its duration.\n** It will not disable [[File: Quicksilver Sash item.png|20px|link=]] {{nie|Quicksilver}} and instead put it on a 3-second {{sti|cooldown}}.\n* ''Tempered Fate'' deals 0 {{tip|proc damage|proc}} {{tip|true damage}}, which triggers [[combat status|in-combat]] effects such as drawing turret and [[Monster#Monster_Behavior|monster aggression]], {{ri|Sudden Impact}} or applying {{ii|Elixir of Sorcery}}.\n** {{ii|Elixir of Sorcery}} deals damage before the target is put into stasis.\n* ''Tempered Fate's'' travel time varies between ~{{fd|0.65}} at point blank and ~{{fd|1.8}} at max range, resulting in an overall delay of ~{{fd|1.15}}-{{fd|2.3}} seconds including the cast time depending on distance covered."
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0145_4v4_s2"
+seed = 22068
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["elementalist", "warrior", "warden", "samurai"]
+enemy_hero_templates = ["Tryndamere", "Galio", "Amumu", "Volibear"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,85 @@
+[hero]
+name = "Zaahen"
+
+[stats]
+hp = 120
+move_speed = 3.5
+armor = 35.0
+magic_resist = 32.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 21
+range = 1.5
+cooldown = 800
+
+# --- Q: The Darkin Glaive ---
+[[abilities]]
+name = "The Darkin Glaive"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 10000
+ai_hint = "heal"
+resource_cost = 5
+
+[[abilities.effects]]
+type = "heal"
+amount = 7
+
+# --- W: Dreaded Return ---
+[[abilities]]
+name = "Dreaded Return"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 16000
+ai_hint = "damage"
+resource_cost = 10
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- E: Aureate Rush ---
+[[abilities]]
+name = "Aureate Rush"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 10000
+ai_hint = "utility"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "dash"
+to_target = false
+
+# --- R: Grim Deliverance ---
+[[abilities]]
+name = "Grim Deliverance"
+targeting = "target_enemy"
+range = 6.0
+cooldown_ms = 22800
+ai_hint = "heal"
+resource_cost = 20
+
+[[abilities.effects]]
+type = "heal"
+amount = 7
+
+# --- Passive: Cultivation of War ---
+[[passives]]
+name = "Cultivation of War"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_dealt"
+
+[[passives.effects]]
+type = "apply_stacks"
+name = "passive_stacks"
+count = 1
+max_stacks = 4
+

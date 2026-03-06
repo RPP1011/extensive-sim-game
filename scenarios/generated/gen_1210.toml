@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_alchemist_samurai_blood_mage_s1"
+seed = 11404
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["alchemist", "samurai", "blood_mage"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

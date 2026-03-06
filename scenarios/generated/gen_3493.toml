@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0044_4v7_d2_s1"
+seed = 12167
+hero_count = 4
+enemy_count = 7
+difficulty = 2
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["cryomancer", "blood_mage", "berserker", "mage"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

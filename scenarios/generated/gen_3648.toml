@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0096_3v6_d4"
+seed = 2219
+hero_count = 3
+enemy_count = 6
+difficulty = 4
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["pyromancer", "ranger", "berserker"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

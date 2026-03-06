@@ -1,0 +1,13 @@
+[scenario]
+name = "room_mis_setpiece_s1"
+seed = 11876
+hero_count = 4
+enemy_count = 5
+difficulty = 2
+max_ticks = 10000
+room_type = "Setpiece"
+hero_templates = ["rogue", "shadow_dancer", "berserker", "rogue"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,315 @@
+{
+  "id": "Smolder",
+  "name": "Smolder",
+  "title": "the Fiery Fledgling",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Dragon Practice",
+      "description": "Hitting champions with Abilities and killing enemies with Super Scorcher Breath grants a stack of Dragon Practice. Stacks increase the damage of Smolders basic Abilities.",
+      "wiki_detail": {
+        "champion": "Smolder",
+        "skill": "I",
+        "icon": "Smolder Dragon Practice.png",
+        "description": "{{sbc|Innate:}} '''Smolder''' generates a [[stack]] of {{as|''Dragon Practice''|buzzword3}} each time he hits an enemy champion with an [[champion ability|ability]], or whenever ''{{ai|Super Scorcher Breath|Smolder}}'' kills a {{tip|minion}} or {{tip|monster}}. His basic abilities deal {{as|'''bonus''' magic damage}} based on stacks.\n* ''{{ai|Q|Smolder}}'': Deals {{as|'''bonus''' magic damage}} equal to {{pp|key=%|key1=%|type=critical strike chance|40 to 70 for 11|0 to 100|formula=40 x (1 + 0.75 * critical strike chance)|color=critical chance}} of {{as|''Dragon Practice'' stacks|buzzword3}}.\n* ''{{ai|W|Smolder}}'': Explosions deal {{as|'''bonus''' magic damage}} equal to {{as|55% of ''Dragon Practice'' stacks|buzzword3}}.\n* ''{{ai|E|Smolder}}'': Attacks each deal {{as|'''bonus''' magic damage}} equal to {{as|20% of ''Dragon Practice'' stacks|buzzword3}}.",
+        "targeting": "Passive",
+        "affects": "Self/Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "proc",
+        "spellshield": "true",
+        "parry": "true",
+        "notes": "* {{ai|Super Scorcher Breath|Smolder}} still grants stacks if the target dies while the initial missile is in flight.\n* {{ai|Achooo!|Smolder}} can only grant a stack of {{as|Dragon Practice|buzzword3}} with the first hit against each enemy champion.\n* {{ai|Flap, Flap, Flap|Smolder}} can only grant one stack of {{as|Dragon Practice|buzzword3}} per cast.\n<!-- Blurb -->",
+        "blurbicon": "Smolder Dragon Practice.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Smolder}} generates a stack of ''Dragon Practice'' from damaging champions with abilities, or when ''{{ai|Super Scorcher Breath|Smolder}}'' kills {{tip|minions}} and {{tip|monsters}}. His basic abilities deal {{as|'''bonus''' magic damage}} based on stacks.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "Q": {
+      "id": "SmolderQ",
+      "name": "Super Scorcher Breath",
+      "description": "Smolder breathes fire on an enemy. As he gains more stacks, this ability becomes more powerful.",
+      "tooltip": "Smolder belches flame, dealing {{ totaldamage }} physical damage + {{ spell.smolderp:passive_qdamageincrease }} magic damage. If the target dies, Smolder refunds {{ manarestore }} Mana, once per cast.\n\nBased on stacks of Dragon Practice, this Ability evolves to gain the following effects:{{ stacktier1 }} Stacks: Damages all enemies surrounding the target.{{ stacktier2 }} Stacks: Sends {{ tier2_numberofblowback }} explosions beyond the target that deal {{ tier2_blowbackpercentagedamage }}% of this Ability's damage.{{ stacktier3 }} Stacks: Burns the target, dealing {{ tier3_burn }} max Health true damage over {{ tier3_dotlength }} seconds. Enemy champions that drop below {{ tier3_executethreshold }} total health while burning are killed instantly.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "5.5/5/4.5/4/3.5",
+      "cost": "25",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "550",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Base Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "variables": {
+          "b1": "15",
+          "b5": "55",
+          "dmod": "1.1",
+          "cmod": "1.75",
+          "ad": "100",
+          "t2_mod": "0.75",
+          "t3_ad": "2",
+          "t3_ap": "1",
+          "t3_i": "0.8"
+        },
+        "champion": "Smolder",
+        "skill": "Q",
+        "icon": "Smolder Super Scorcher Breath.png",
+        "description": "{{sbc|Active:}} '''Smolder''' spits a fireball at the target enemy that deals {{as|physical damage}}, increased by {{as|{{pp|key=%|key1=%|type=critical strike chance|0 to {{#expr:({{#var:cmod}}-1)*100}} for 11|0 to 100|formula={{#expr:{{#var:cmod}}-1}} × critical strike chance}}|critical chance}}, and applies {{tip|on-hit}} and {{tip|on-attack}} effects at 100% effectiveness and {{stil|life steal}} at 50% effectiveness.",
+        "leveling": "{{st|Physical Damage|{{ap|{{#var:b1}} to {{#var:b5}}}} {{as|(+ {{#var:ad}}% AD)}}|Non-Champion Damage|{{ap|{{#var:b1}}*{{#var:dmod}} to {{#var:b5}}*{{#var:dmod}}}} {{as|(+ {{ap|{{#var:ad}}*{{#var:dmod}}}}% AD)}}}}\n{{st|Maximum Physical Damage|{{ap|{{#var:b1}}*{{#var:cmod}} to {{#var:b5}}*{{#var:cmod}}}} {{as|(+ {{ap|{{#var:ad}}*{{#var:cmod}}}}% AD)}}|Maximum Non-Champion Damage|{{ap|{{#var:b1}}*{{#var:cmod}}*{{#var:dmod}} to {{#var:b5}}*{{#var:cmod}}*{{#var:dmod}}}} {{as|(+ {{ap|{{#var:ad}}*{{#var:cmod}}*{{#var:dmod}}}}% AD)}}}}",
+        "description2": "''Super Scorcher Breath'' becomes empowered with new effects based on ''{{as|{{ai|I|Smolder}} stacks|buzzword3}}'':",
+        "icon3": "Smolder Super Scorcher Breath 2.png",
+        "description3": "{{sbc|Tier 1 - 25 stacks:}} The fireball explodes upon collision to deal the same {{as|physical damage}} to nearby enemies and apply {{tip|on-hit}} effects at 100% effectiveness and {{stil|life steal}} at 50% effectiveness.",
+        "icon4": "Smolder Super Scorcher Breath 3.png",
+        "description4": "{{sbc|Tier 2 - 125 stacks:}} The fireball sends forth 1 {{as|(+ {{fd|1.5}} per 100 ''{{ai|I|Smolder}}'' stacks)|buzzword3}} bolts of fire in an arc upon collision that explode at maximum range, dealing {{ap|{{#var:t2_mod}}*100}}% of the same damage to enemies hit and applying {{tip|on-hit}} effects at 75% effectiveness and {{stil|life steal}} at 50% effectiveness.",
+        "leveling4": "{{st|Physical Damage|{{ap|{{#var:b1}}*{{#var:t2_mod}} to {{#var:b5}}*{{#var:t2_mod}}}} {{as|(+ {{ap|{{#var:ad}}*{{#var:t2_mod}}}}% AD)}}|Non-Champion Damage|{{ap|{{#var:b1}}*{{#var:t2_mod}}*{{#var:dmod}} to {{#var:b5}}*{{#var:t2_mod}}*{{#var:dmod}}}} {{as|(+ {{ap|{{#var:ad}}*{{#var:t2_mod}}*{{#var:dmod}}}}% AD)}}}}\n{{st|Maximum Physical Damage|{{ap|{{#var:b1}}*{{#var:t2_mod}}*{{#var:cmod}} to {{#var:b5}}*{{#var:t2_mod}}*{{#var:cmod}}}} {{as|(+ {{ap|{{#var:ad}}*{{#var:t2_mod}}*{{#var:cmod}}}}% AD)}}|Maximum Non-Champion Damage|{{ap|{{#var:b1}}*{{#var:t2_mod}}*{{#var:cmod}}*{{#var:dmod}} to {{#var:b5}}*{{#var:t2_mod}}*{{#var:cmod}}*{{#var:dmod}}}} {{as|(+ {{ap|{{#var:ad}}*{{#var:t2_mod}}*{{#var:cmod}}*{{#var:dmod}}}}% AD)}}}}",
+        "icon5": "Smolder Super Scorcher Breath 4.png",
+        "description5": "{{sbc|Tier 3 - 225 stacks:}} Enemies hit are set on fire for 3 seconds, causing them to take {{as|'''bonus''' true damage}} equal to{{ft|{{as|{{#var:t3_ad}}% per 100 '''bonus''' AD}} {{as|(+ {{#var:t3_ap}}% per 100 AP)}} {{as|(+ {{fd|{{#var:t3_i}}}}% per 100 ''{{ai|Dragon Practice|Smolder}}'' stacks)|buzzword3}} {{as|of their '''maximum''' health}} over the duration, capped at 300 against monsters.|{{as|{{ap|{{#var:t3_ad}}/3|round=2}}% per 100 '''bonus''' AD}} {{as|(+ {{ap|{{#var:t3_ap}}/3|round=2}}% per 100 AP)}} {{as|(+ {{ap|{{#var:t3_i}}/3|round=2}}% per 100 ''{{ai|Dragon Practice|Smolder}}'' stacks)|buzzword3}} {{as| of their '''maximum''' health}} each second, capped at {{ap|300/3}} per tick against monsters.}}Subsequent applications of the burn stack, though not refreshing the duration of the previous burn. Enemy {{tip|champions}} afflicted with the burn are also {{tip|execute|executed}} once '''Smolder''' deals damage to them that would leave them below {{as|{{fd|6.5}}% of their '''maximum''' health}}.",
+        "description6": "''Super Scorcher Breath'' deals 110% damage against {{tip|minions}} and {{tip|monsters}}.",
+        "range": "{{tt|500|Tier 2 missiles}}",
+        "target range": "{{tt|{{tip|er|icononly = true}} 550 (+ 100% '''bonus''' [[range]])|Always equal to Smolder's attack range}}",
+        "speed": "{{tt|1800|Fireball}} / {{tt|900|Tier 2 missiles}}",
+        "effect radius": "{{tt|285|Tier 1 explosion}} / {{tt|150|Tier 2 missile explosions at max range}}",
+        "angle": "{{tip|er|icononly = true}} {{tt|15|Angle between tier 2 missiles}}{{degree}}",
+        "cooldown": "{{ap|5.5 to 3.5}}",
+        "cast time": "{{tt|{{as|{{fd|0.25}}|attack speed}}|Depends on attack speed}}",
+        "cost": "25",
+        "costtype": "mana",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "{{tip|Physical damage|Physical}} / {{tip|True damage|True}}",
+        "spelleffects": "special",
+        "spellshield": "true",
+        "projectile": "true",
+        "parry": "special",
+        "notes": "* Applies {{tip|default damage}} for the burn, {{tip|spell damage}} for the fireball, and {{tip|area damage}} for the explosions.\n* '''Smolder''' can't declare basic attacks for a brief moment after the cast time.\n* Only '''Smolder's''' damage counts for triggering the execute.\n** If the target is below the threshold while afflicted with the burn, they will be executed on the next instance of damage dealt by '''Smolder''', which includes the burn tick.\n* If ''Super Scorcher Breath'' would damage the target to below the execution threshold, they are executed on the same damage instance.\n* At 125 {{ai|Dragon Practice|Smolder}} stacks, the fireball will launch 2 bolts.\n* At 225 {{ai|Dragon Practice|Smolder}} stacks, the burn's damage based on the target's health ratio will increase by at least {{fd|1.8}}%.\n* ''Super Scorcher Breath'' can only hit enemies once per cast.\n* The minion and monster damage modifier applies only to the physical damage.\n* The bolts apply the bonus magic damage from {{ai|I|Smolder}} at 75% damage.\n** This damage does not benefit from life steal.\n* Only ''Super Scorcher Breath's'' initial fireball missile can be {{tip|block|blocked}} and {{tip|dodge|dodged}}.\n** The application of the burn is negated in both cases.\n** The fireball can still explode on-collision and fire the bolts in both cases.\n<!-- Blurb -->",
+        "blurbicon": "Smolder Super Scorcher Breath.png",
+        "blurb": "{{sbc|Active:}} {{ci|Smolder}} spits a fireball that deals {{as|physical damage}} to the target enemy.",
+        "blurb2": "''Super Scorcher Breath'' becomes empowered with new effects based ''{{as|{{ai|I|Smolder}} stacks|buzzword3}}'':\n* {{sbc|25 stacks:}} The fireball explodes upon collision to deal {{as|physical damage}} to nearby enemies.\n* {{sbc|125 stacks:}} The fireball sends forth bolts of fire that deal {{as|physical damage}} to enemies hit. The number of bolts increases based on stacks.\n* {{sbc|225 stacks:}} Enemies hit will burn for {{as|true damage}} based on {{as|their '''maximum''' health}} over a short time. Enemy {{WRtip|champions}} are also {{tip|execute|executed}} {{as|at low health}} based on stacks.",
+        "flavorsound": "<sm2 vol=0.6>Smolder_Original_SFX_Q3Burn_execute.ogg</sm2> ''Execution announcement.''",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "W": {
+      "id": "SmolderW",
+      "name": "Achooo!",
+      "description": "Smolder lets out an adorable flaming sneeze that explodes when hitting enemy champions.",
+      "tooltip": "Smolder lets out an adorable flaming sneeze, dealing {{ initialdamage }} physical damage and Slowing by {{ slowamount*100 }}% for {{ slowduration }} seconds.\n\nHitting champions causes an explosion, dealing {{ explosiondamage }} physical + {{ spell.smolderp:passive_wdamageincrease }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "50/55/60/65/70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1500",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Explosion Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ explosionbasedamage }} -> {{ explosionbasedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Smolder",
+        "skill": "W",
+        "icon": "Smolder Achooo!.png",
+        "description": "{{sbc|Active:}} '''Smolder''' sneezes a fiery glob in the target direction that deals {{as|physical damage}} to enemies hit and {{tip|slow|slows}} them by 35% for {{fd|1.5}} seconds, slowing down in missile speed after travelling {{tt|1200|estimated}} units. Hitting an enemy {{tip|champion}} creates an explosion that deals {{as|physical damage}} to nearby enemies, with subsequent explosions against the same target dealing 75% damage of the previous explosion's damage.",
+        "leveling": "{{st|Glob Physical Damage|{{ap|45 to 165}} {{as|(+ 25% '''bonus''' AD)}} {{as|(+ 20% AP)}}}}\n{{st|Explosion Physical Damage|{{ap|25 to 85}} {{as|(+ 25% '''bonus''' AD)}} {{as|(+ 80% AP)}}}}",
+        "description2": "''Achooo!'' deals 140% damage against {{tip|minions}} and {{tip|monsters}}.",
+        "leveling2": "{{st|Glob Non-Champion Damage|{{ap|45*1.4 to 165*1.4}} {{as|(+ {{ap|25*1.4}}% '''bonus''' AD)}} {{as|(+ {{ap|20*1.4}}% AP)}}}}\n{{st|Explosion Non-Champion Damage|{{ap|25*1.4 to 85*1.4}} {{as|(+ {{ap|25*1.4}}% '''bonus''' AD)}} {{as|(+ {{ap|80*1.4}}% AP)}}}}",
+        "range": "1500",
+        "speed": "{{tt|2000|Initial speed}} / {{tt|400|End speed}}",
+        "effect radius": "{{tt|385|Explosion}}",
+        "width": "{{tt|115|Sneeze}}",
+        "cooldown": "{{ap|14 to 10}}",
+        "cast time": "{{fd|0.35}}",
+        "cost": "60",
+        "costtype": "mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "physical",
+        "spelleffects": "spellaoe",
+        "spellshield": "special",
+        "projectile": "true",
+        "notes": "* '''Smolder''' can't declare basic attacks for a brief moment after the cast time.\n* {{tip|Spell shield}} can block either the glob or the explosion, but not both.\n<!-- Blurb -->",
+        "blurbicon": "Smolder Achooo!.png",
+        "blurb": "{{sbc|Active:}} {{ci|Smolder}} sneezes forth a glob that deals {{as|physical damage}} to enemies hit and {{tip|slow|slows}} them. Hitting an enemy {{tip|champion}} creates an explosion that deals {{as|physical damage}} to nearby enemies.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "E": {
+      "id": "SmolderE",
+      "name": "Flap, Flap, Flap",
+      "description": "Smolder takes flight ignoring terrain and bombarding the lowest health enemy.",
+      "tooltip": "Smolder takes flight, gaining {{ movespeed*100 }}% Move Speed and ignoring terrain for {{ duration }} seconds.\n\nWhile flying, Smolder bombards the lowest Health enemy {{ totalnumberofattacks }} (rounded down) times for {{ damageperhit }} physical damage + {{ spell.smolderp:ebonusdamage }} magic damage per hit.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "24/22/20/18/16",
+      "cost": "65",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "700",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Base Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Smolder",
+        "skill": "E",
+        "icon": "Smolder Flap, Flap, Flap.png",
+        "description": "{{sbc|Active:}} '''Smolder''' takes flight for {{fd|1.25}} seconds, becoming {{tip|ghosted}} and gaining {{sti|{{as|75% '''bonus''' movement speed}}}}, {{tip|unobstructed vision}}, and the ability to ignore terrain collision. While in flight, he automatically fires up to 5 {{as|(+ {{fd|0.75}} per 100 ''{{ai|Dragon Practice|Smolder}}'' stacks)|buzzword3}} bolts at the nearest and {{tt|most wounded|Lowest health percent}} {{tip|sight|visible}} enemy, dealing {{as|physical damage}} with each hit and prioritizing enemy champions.",
+        "leveling": "{{st|Physical Damage per Hit|{{ap|15 to 35}} {{as|(+ 10% AD)}}}}\n{{st|Minimum Total Physical Damage|{{ap|15*5 to 35*5}} {{as|(+ {{ap|10*5}}% AD)}}}}",
+        "description2": "''Flap, Flap, Flap'' ends immediately if '''Smolder''' casts one of his abilities or becomes {{tip|immobilize|immobilized}}.",
+        "range": "700",
+        "speed": "{{tt|1800|Bolt speed}}",
+        "cdstart": "on-cast",
+        "cooldown": "{{ap|24 to 16}}",
+        "cast time": "none",
+        "cost": "65",
+        "costtype": "mana",
+        "targeting": "Auto",
+        "affects": "Self, Enemies",
+        "damagetype": "physical",
+        "spelleffects": "spell",
+        "spellshield": "special",
+        "parry": "false",
+        "grounded": "true",
+        "notes": "* '''Smolder's''' {{stil|attack range}} is reduced to 0 during ''Flap, Flap, Flap''.\n* '''Smolder''' can't declare basic attacks for a brief moment after the end of the effect.\n** This is due to his attack range being reduced to 0, it doesn't apply when '''Smolder''' is very close to his target.\n* The number of additional bolts based on {{ai|Dragon Practice|Smolder}} stacks are rounded down.\n* '''Smolder''' reveals himself while attacking enemies, even inside terrain.\n* {{tip|Spell shield}} will block only one bolt.\n* Self {{tip|immobilize|immobilizations}} such as {{ii|Zhonya's Hourglass}} also count for ending ''Flap, Flap, Flap''.\n* {{si|Recall}} is disabled while '''Smolder''' is inside terrain.\n* ''Flap, Flap, Flap'' can interact with [[Terrain#Player-Generated|player-generated terrain]].\n* If '''Smolder''' is inside terrain when the effect ends, he will be placed correspondingly to the nearest valid space.\n* The following table refers for interactions while '''Smolder''' is flying:\n{{ct|attack=Causes '''Smolder''' to move towards the attack target.|cast=interrupts|move=true|items==true,,interrupts|spells=true|interrupts=death,root}}\n<!-- Blurb -->",
+        "blurbicon": "Smolder Flap, Flap, Flap.png",
+        "blurb": "{{sbc|Active:}} {{ci|Smolder}} takes flight for a short time, gaining {{sti|{{as|'''bonus''' movement speed}}}} and the ability to ignore terrain collision. While in flight, he automatically fires bolts at a nearby enemy, dealing {{as|physical damage}} with each hit. The number of attacks increases based on {{sti|{{as|critical strike chance}}}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    },
+    "R": {
+      "id": "SmolderR",
+      "name": "MMOOOMMMM!",
+      "description": "Smolder calls his mom to breath fire from above, dealing extra damage and slowing enemies in the center of her fire.",
+      "tooltip": "Smolder's mom breathes fire from above, dealing {{ totaldamage }} physical damage. Enemies in the center take {{ tooltiponly_totalsweetspotdamage }} physical damage instead and are Slowed by {{ slowamount*100 }}% for {{ slowduration }} seconds.\n\nSmolder's mom heals her son for {{ momhealcalc }} Health if she hits him.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/110/100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "4200",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Heal",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ momheal }} -> {{ momhealNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Smolder",
+        "skill": "R",
+        "icon": "Smolder MMOOOMMMM!.png",
+        "description": "{{sbc|Active:}} '''Smolder''' shouts for his mother to attack from above, causing her to exhale a wave of fire from behind him and towards the target direction, granting {{tip|sight}} of its {{tt|surroundings|Cannot grant sight through terrain and can only grant sight into brush when the center part goes through that brush}} as it travels. The wave {{tip|heal|heals}} '''Smolder''' and deals {{as|physical damage}} to enemies hit, with those in the center taking {{ccs|50% increased damage|physical}} and becoming {{tip|slow|slowed}} by 40% for 2 seconds.",
+        "leveling": "{{st|Self Heal|{{ap|100 to 170}} {{as|(+ 50% '''bonus''' AD)}} {{as|(+ 75% AP)}}}}\n{{st|Physical Damage|{{ap|200 to 400}} {{as|(+ 110% '''bonus''' AD)}} {{as|(+ 100% AP)}}|Increased Physical Damage|{{ap|200*1.5 to 400*1.5}} {{as|(+ {{ap|110*1.5}}% '''bonus''' AD)}} {{as|(+ {{ap|100*1.5}}% AP)}}}}",
+        "range": "4250 / {{tt|-600|Backwards range}}",
+        "effect radius": "{{tt|1000|Vision radius}}",
+        "speed": "1700",
+        "width": "{{tt|125|Sweetspot}}",
+        "cooldown": "{{ap|140 to 120}}",
+        "cast time": "{{fd|0.75}}",
+        "cost": "100",
+        "costtype": "mana",
+        "targeting": "Direction",
+        "affects": "Enemies, Self",
+        "damagetype": "physical",
+        "spelleffects": "spellaoe",
+        "spellshield": "true",
+        "projectile": "true",
+        "notes": "* ''MMOOOMMMM!'s'' cooldown starts at the end of the cast time.\n* '''Smolder''' can move {{fd|0.4}} seconds into ''MMOOOMMMM!'s'' cast time.\n{{Effect at cast time start}}\n{{ct|cast|spells=true,false,false,false,false}}\n<!-- Blurb -->",
+        "blurbicon": "Smolder MMOOOMMMM!.png",
+        "blurb": "{{sbc|Active:}} {{ci|Smolder}} shouts for his mother to attack from above, causing her to exhale a wave of fire along his path. The wave {{as|{{sti|heals}}|heal}} '''Smolder''' and deals {{as|physical damage}} to enemies hit, enemies within the center are dealt {{ccs|increased damage|physical}} and {{tip|slow|slowed}}.",
+        "_comments": [
+          "Blurb"
+        ]
+      }
+    }
+  }
+}

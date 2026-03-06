@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0002_4v4"
+seed = 1925
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["warden", "cleric", "samurai", "mage"]
+enemy_hero_templates = ["Malzahar", "Braum", "Akali", "Zaahen"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

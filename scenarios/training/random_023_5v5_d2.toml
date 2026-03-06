@@ -1,0 +1,13 @@
+[scenario]
+name = "random_023_5v5_d2"
+seed = 8023
+hero_count = 5
+enemy_count = 5
+difficulty = 2
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["warden", "ranger", "pyromancer", "elementalist", "mage"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Either"

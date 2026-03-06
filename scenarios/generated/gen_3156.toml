@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0132_4v4"
+seed = 2055
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["Kennen", "Jhin", "warden", "assassin"]
+enemy_hero_templates = ["Velkoz", "Graves", "JarvanIV", "Hecarim"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

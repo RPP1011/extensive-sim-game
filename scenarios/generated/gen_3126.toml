@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0122_2v2"
+seed = 2045
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["mage", "templar"]
+enemy_hero_templates = ["Ahri", "Ekko"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

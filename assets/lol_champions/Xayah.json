@@ -1,0 +1,288 @@
+{
+  "id": "Xayah",
+  "name": "Xayah",
+  "title": "the Rebel",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Clean Cuts",
+      "description": "After using an ability, Xayah's next basic attacks will hit all targets along their path and leave a Feather.",
+      "wiki_detail": {
+        "champion": "Xayah",
+        "skill": "I",
+        "icon": "false",
+        "icon2": "Clean Cuts.png",
+        "blurb": "{{sbc|Innate:}} {{as|Feathers|buzzword}} shot by {{ci|Xayah}} will linger in the ground at max range for a few seconds.",
+        "blurb2": "{{sbc|Innate:}} '''Xayah's''' ability casts generate three stacks of ''Clean Cuts'', stacking up to five times. '''Xayah's''' basic attacks consume a stack to instead shoot a {{as|Feather|buzzword}} that deals {{as|the attack's damage|pdamage}} to the target and {{as|physical damage}} to other enemies hit.",
+        "blurb3": "{{sbc|Innate - Lover's Leap:}} '''Xayah''' and {{ci|Rakan}} can join each other's {{si|Recall}} to complete together.",
+        "description": "{{sbc|Innate:}} {{as|Feathers|buzzword}} shot by '''Xayah''' will linger in the ground at maximum range for 6 seconds.",
+        "description2": "{{sbc|Innate:}} '''Xayah's''' [[Champion ability|ability]] casts generate 3 [[stack]]s of ''Clean Cuts'', lasting for 8 seconds, refreshing on subsequent casts, and stacking up to 5 times. '''Xayah's''' [[basic attack]]s are empowered to each consume a stack {{tip|on-attack}} to instead shoot a {{as|Feather|buzzword}} that deals the {{as|attack's damage}} to the primary target and {{as|{{pp|key=%|30 to 50 for 3|1 to 13}} AD}} {{as|physical damage}} to other enemies hit, with the secondary damage also {{tip|critical strike|critically striking}} if the main attack does.",
+        "icon3": "ProfileIcon1634 Blazing Feathers.png",
+        "description3": "{{sbc|Innate - Lover's Leap:}} If either '''Xayah''' or {{ci|Rakan}} is channeling {{si|Recall}}, the other may move nearby and channel their own to join alongside them. '''Both''' reach base at the time of which the initiator's {{si|Recall}} completes.",
+        "effect radius": "{{tt|1000|Feather landing location from Xayah's location, taken at the time of the attack dealing damage to main target}}",
+        "width": "{{tip|er|icononly = true}} 120",
+        "speed": "4000",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "|spellshield  = False",
+        "spelleffects": "|grounded     =",
+        "knockdown": "|parry        = unknown",
+        "callforhelp": "|projectile   = special",
+        "notes": "* {{as|Feathers|buzzword}} will stop upon being intercepted by {{tip|projectile|projectile-blocking}} effects.\n** {{Pending for test}}: {{tip|homing projectile destruction|Missile popping}} before and after striking the primary target.\n* After striking their target, the attack will proceed in a line in the same direction it was already flying.\n** If the target is more than 1000 units from '''Xayah''' when the empowered attack hits them, the attack will not keep flying in a line and drop the {{as|Feather|buzzword}} at their location immediately.\n** Unlike similar effects, the homing and line trajectories use the same missile.\n* All her {{as|Feathers|buzzword}} on the ground will be destroyed when '''Xayah''' {{tip|death|dies}}, and while she is dead, missiles that are still in flight will not spawn new ones, either.\n* ''Clean Cut's'' feathers will spawn even if the basic attack is {{tip|blocked}}.\n* ''Clean Cut's'' hit can be {{tip|dodge|dodged}} by or {{tip|blind|missed}} against the primary target. \n** This will not prevent the missile from continuing on its path nor from dealing damage to secondary targets. The damage cannot be dodged as or missed against a secondary target.\n* The empowered attack will not trigger against [[structures]] nor [[ward]]s.\n** The duration will be refreshed when starting the attack windup against them.\n* The number of ''Clean Cuts'' stacks available is represented by a [[File:Xayah Passive Feather.png|20px|link=]] feather counter in her ammo bar, visible to the player only.",
+        "yvideo": "Xayah - Passive",
+        "yvideo2": "Xayah - Passive 2"
+      }
+    },
+    "Q": {
+      "id": "XayahQ",
+      "name": "Double Daggers",
+      "description": "Xayah throws two damaging daggers that also drop Feathers she can recall.",
+      "tooltip": "Xayah throws two daggers, dealing {{ totaldamage }} physical damage each and leaving two Feathers. Targets hit after the first take {{ multihitdamage }} damage from each dagger.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9.5/9/8.5/8",
+      "cost": "35",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "45/60/75/90/105",
+        "0.5",
+        "0.33",
+        "0.58",
+        "3500",
+        "3500",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Xayah",
+        "skill": "Q",
+        "icon": "Double Daggers.png",
+        "blurb": "{{sbc|Active:}} {{ci|Xayah}} barrages out two {{as|Feathers|buzzword}} that each deal {{as|physical damage}} to enemies hit.",
+        "description": "{{sbc|Active:}} '''Xayah''' barrages two {{as|Feathers|buzzword}} in the target direction that each deal {{as|physical damage}} to enemies hit.",
+        "leveling": "{{st|Physical Damage Per Hit|{{ap|45 to 105}} {{as|(+ 50% '''bonus''' AD)}}|Total Physical Damage|{{ap|45*2 to 105*2}} {{as|(+ 100% '''bonus''' AD)}}}}",
+        "description2": "Targets hit after the first take 50% reduced damage.",
+        "leveling2": "{{st|Reduced Damage per Hit|{{ap|45/2 to 105/2}} {{as|(+ 25% '''bonus''' AD)}}|Total Reduced Damage|{{ap|45 to 105}} {{as|(+ 50% '''bonus''' AD)}}}}",
+        "cost": "50",
+        "costtype": "Mana",
+        "cooldown": "{{ap|10 to 8}}",
+        "cast time": "{{pp|type='''bonus''' attack speed|round=3|0.25;0.033*7;0.033*6;0.033*5;0.033*4;0.1|key1=%|0;27.15;74.29;121.43;168.58;214.3|formula=0.25-(0.07 per 100% '''bonus''' attack speed). ''This is capped at 60% reduction at 214.3% '''bonus''' attack speed.''|color=attack speed}}",
+        "range": "1100",
+        "width": "{{tip|er|icononly = true}} 100 (plus offset)",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "Special",
+        "spelleffects": "spellaoe",
+        "projectile": "special",
+        "notes": "* Daggers shoot from '''Xayah's''' left and right side.\n* Because of the usual tick intervals of the server, ''Double Daggers' ''minimum cast time is typically reached at {{as|{{fd|168.58}}% '''bonus''' attack speed}} already, for a cast time of {{fd|0.132}} seconds (from the default {{rutngt|0.25}}), or the duration of 4 game ticks.\n** If the first 3 game ticks happen to be slightly longer than normal, the minimum cast time of {{fd|0.1}} seconds can actually be reached in very rare cases because of that.\n* '''Xayah''' is unable to declare basic attacks for a set duration during the cast time of ''Double Daggers''. The lock out duration is reduced by {{ft|{{fd|0.007}} seconds per every {{as|1% '''bonus''' attack speed}}|1 second per every {{as|140% '''bonus''' attack speed}}}}.\n* The {{as|Feathers|buzzword}} will stop upon being intercepted by {{tip|projectile|projectile-blocking}} effects.\n* As the feathers are forming, they will deal damage in a small area around '''Xayah's''' before firing.\n* {{tip|Spell shield}} will only block a single instance of damage.\n{{Effect at cast time end}}",
+        "yvideo": "Xayah - Q"
+      }
+    },
+    "W": {
+      "id": "XayahW",
+      "name": "Deadly Plumage",
+      "description": "Xayah creates a storm of blades that increase her Attack Speed and damage while also granting her Move Speed if she attacks a champion.",
+      "tooltip": "Xayah creates a storm of blades for {{ e2 }} seconds that grants her {{ e1 }}% Attack Speed and cause her Attacks to fire a secondary blade that deals {{ bonusdamagepercent }}% damage.\n\nWhen the secondary blade hits a champion, she grants herself {{ e3 }}% Move Speed for {{ e4 }} seconds.\n\nIf Rakan is nearby he will also gain the effects of this Ability, except he gains Move Speed when Xayah strikes a target.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "18/17/16/15/14",
+      "cost": "60/55/50/45/40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "35/40/45/50/55",
+        "4",
+        "30",
+        "1.5",
+        "20",
+        "1000",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Attack Speed",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e1 }}% -> {{ e1NL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Xayah",
+        "skill": "W",
+        "icon": "Deadly Plumage.png",
+        "blurb": "{{sbc|Active:}} {{ci|Xayah}} empowers herself for a few seconds, gaining {{sti|{{as|'''bonus''' attack speed}}}} and causing her basic attacks to strike a second time, dealing '''reduced''' damage.",
+        "blurb2": "Whenever she hits an enemy {{tip|champion}}, she briefly gains {{sti|{{as|'''bonus''' movement speed}}}}.",
+        "blurb4": "''If {{ci|Rakan}} is nearby upon cast, he also becomes empowered and gains the {{sti|{{as|'''bonus''' movement speed}}}} at the same time as '''Xayah'''.''",
+        "description": "{{sbc|Active:}} '''Xayah''' enters a frenzy for 4 seconds, gaining {{sti|{{as|'''bonus''' attack speed}}}} and empowering her basic attacks to strike a second time, dealing 20% damage.",
+        "leveling": "{{st|Bonus Attack Speed|{{ap|35 to 55}}%}}",
+        "description2": "Whenever '''Xayah''' hits an enemy {{tip|champion}} with the strike, she gains {{sti|ms|{{as|30% '''bonus''' movement speed}}}} for {{fd|1.5}} seconds.",
+        "description3": "''If {{ci|Rakan}} is nearby upon cast, he also becomes empowered, and gains the {{sti|{{as|'''bonus''' movement speed}}}} at the same time as '''Xayah'''.''",
+        "speed": "{{tt|3000|Spline missile speed}}",
+        "cost": "{{ap|60 to 40}}",
+        "costtype": "Mana",
+        "cooldown": "{{ap|20 to 16}}",
+        "cdstart": "on-cast",
+        "targeting": "Auto",
+        "cast time": "none",
+        "affects": "Self, Rakan",
+        "damagetype": "Physical",
+        "projectile": "true",
+        "parry": "false",
+        "spelleffects": "periodic",
+        "notes": "* The lesser bolts count as additional sources of single target physical damage, and will apply bonus stacks of {{ii|The Black Cleaver}} and {{ri|Electrocute}}.<!--Needs to be reconfirmed, seems to be fixed-->\n* The lesser bolts from {{ii|Runaan's Hurricane}} will also deal 20% increased damage, which is represented with additional lesser bolts. The damage dealt by ''Deadly Plumage's'' bolts is 20% of the fired bolt from {{ii|Runaan's Hurricane}}, ''not'' of the initial basic attack.\n* The lesser bolts deal 20% of the triggering basic attack's damage, not based on her {{sti|{{as|attack damage}}}}. Thus, if the basic attack is a {{tip|critical strike}}, the lesser bolt will also deal increased damage.\n* The empowered attack will not trigger against [[ward]]s.",
+        "yvideo": "Xayah - W",
+        "_comments": [
+          "Needs to be reconfirmed, seems to be fixed"
+        ]
+      }
+    },
+    "E": {
+      "id": "XayahE",
+      "name": "Bladecaller",
+      "description": "Xayah calls back all her dropped Feathers dealing damage and rooting enemies.",
+      "tooltip": "Xayah calls all Feathers back to her, dealing {{ featherdamage }} physical damage each. If {{ featherthreshold }} or more Feathers hit an enemy, they are Rooted for {{ rootduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/11/10/9/8",
+      "cost": "20",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "2000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Xayah",
+        "skill": "E",
+        "icon": "Bladecaller.png",
+        "blurb": "{{sbc|Active:}} {{ci|Xayah}} recalls all {{as|Feathers|buzzword}} to shoot back to her, each dealing {{as|physical damage}} to enemies hit based on her {{as|{{sti|critical strike chance}}}}.",
+        "blurb2": "An enemy hit by at least three {{as|Feathers|buzzword}} is briefly {{tip|root|rooted}}.",
+        "description": "{{sbc|Active:}} '''Xayah''' recalls all planted {{as|Feathers|buzzword}} to shoot back to her, each dealing {{as|physical damage}} to enemies hit, increased by {{as|{{pp|key=%|key1=%|type=critical strike chance|0 to 75 for 11|0 to 100|formula=0.75 × critical strike chance}}|critical chance}}. ''Bladecaller'' deals 50% damage to {{tip|minions}}.",
+        "leveling": "{{st|Physical Damage Per Feather|{{ap|55 to 95}} {{as|(+ 60% '''bonus''' AD)}}|Minion Damage Per Feather|{{ap|55/2 to 95/2}} {{as|(+ 30% '''bonus''' AD)}}}}",
+        "description2": "An enemy takes {{pp|type=previous feathers hit|key=%|100 to 10 by 5|x-1|formula=100%-(5% per previous feather hit). ''This is capped at 10% damage.''}} damage from a {{as|Feather|buzzword}}.",
+        "description3": "A target hit by at least three {{as|Feathers|buzzword}} is {{tip|root|rooted}} for {{fd|1.25}} seconds.",
+        "description4": "''Enemies can be hit by an individual {{as|Feather|buzzword}} only once per pass.''",
+        "cost": "30",
+        "costtype": "Mana",
+        "cooldown": "{{ap|12 to 8}}",
+        "cast time": "none",
+        "effect radius": "Global",
+        "width": "{{tip|er|icononly = true}} 160",
+        "speed": "4000",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "projectile": "True",
+        "spellshield": "special",
+        "spelleffects": "spellaoe",
+        "notes": "* {{as|Feathers|buzzword}} that are 'in flight' will be called to '''Xayah''' too, but only once they've landed normally first.\n* {{tip|Spell shield}} will only block a single instance of damage.\n* This ability cannot be ranked at [[Experience (champion)|Level]] 1.\n* The damage dealt by ''Bladecaller'' follows a diminishing returns formula not mentioned in the ability's description, successively reducing extra damage from feathers beyond the first.\n** This formula is: \n*** For feathers <=19: Damage of one feather{{times}}(n{{minus}}{{fd|0.05}}{{times}}(n{{minus}}1){{divided by}}2{{times}}n) where n stands for the number of feathers hit.\n*** For feathers >=20: Damage of one feather{{times}}(19{{minus}}{{fd|0.05}}{{times}}(19{{minus}}1){{divided by}}2{{times}}19{{plus}}0.1{{times}}(n{{minus}}19)) where n stands for the number of feathers hit.\n** For example, at rank 1 ''Bladecaller'' deals {{pp|type=feathers hit|55*(x-0.05*(x-1)/2*x) for 19}}.\n* ''Bladecaller'' cannot be cast without a {{as|Feather|buzzword}} on the ground.",
+        "flavorsound": "{{sm2|Xayah_Original_ERoot_6.ogg}} \"Gotcha!\"",
+        "yvideo": "Xayah - E"
+      }
+    },
+    "R": {
+      "id": "XayahR",
+      "name": "Featherstorm",
+      "description": "Xayah leaps into the air becoming untargetable and throwing out a fan of daggers, dropping Feathers she can recall.",
+      "tooltip": "Xayah leaps into the air becoming Untargetable and Ghosted for 1.5 seconds before raining down daggers that deal {{ damage }} physical damage and leave behind a line of Feathers.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "140/120/100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "450",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ rbasedamage }} -> {{ rbasedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Xayah",
+        "skill": "R",
+        "icon": "Featherstorm.png",
+        "blurb": "{{sbc|Active:}} {{ci|Xayah}} leaps into the air and briefly becomes {{tip|untargetable}}, then throws five {{as|Feathers|buzzword}} in a cone in the target direction that each deal {{as|physical damage}} to enemies hit.",
+        "blurb4": "'''''Xayah''' can move during Featherstorm.''",
+        "description": "{{sbc|Active:}} '''Xayah''' leaps into the air, becoming {{tip|untargetable}} and {{tip|ghosted}} for {{fd|1.5}} seconds. After 1 second, she shoots 5 {{as|Feathers|buzzword}} in a cone in the target direction that deal {{as|physical damage}} to enemies hit.",
+        "leveling": "{{st|Physical Damage|{{ap|200 to 400}} {{as|(+ 100% '''bonus''' AD)}}}}",
+        "description2": "'''''Xayah''' is unable to basic attack or cast abilities during Featherstorm, but can still move.''",
+        "cost": "100",
+        "costtype": "Mana",
+        "cooldown": "{{ap|140 to 100}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|1060|Measured}} / {{tip|er|icononly = true}} 1000",
+        "angle": "{{tt|30{{degree}}|Estimated}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "cast time": "none",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "special",
+        "yvideo": "Xayah - R",
+        "notes": "* The individual missiles have 1100 range but start slightly behind Xayah, reducing their total range.\n* The following table refers for interactions while '''Xayah''' is in ''Featherstorm'':\n{{ct|attack=false|move=true|cast=false|items=false|consume=false|spells=true|interrupts=death}}",
+        "flavorsound": "{{sm2|Xayah_Original_R.ogg}} ''\"Feathers fly!\"''"
+      }
+    }
+  }
+}

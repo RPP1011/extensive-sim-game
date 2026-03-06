@@ -1,0 +1,13 @@
+[scenario]
+name = "random_006_5v8_d3"
+seed = 8006
+hero_count = 5
+enemy_count = 8
+difficulty = 3
+max_ticks = 10000
+room_type = "Climax"
+hero_templates = ["alchemist", "witch_doctor", "shadow_dancer", "monk", "elementalist"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Either"

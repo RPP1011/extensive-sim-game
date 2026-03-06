@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0156_4v6_d3"
+seed = 2279
+hero_count = 4
+enemy_count = 6
+difficulty = 3
+max_ticks = 10000
+room_type = "Climax"
+hero_templates = ["engineer", "warlock", "witch_doctor", "paladin"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Any"

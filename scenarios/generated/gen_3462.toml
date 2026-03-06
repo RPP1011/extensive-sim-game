@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0034_4v6_d5"
+seed = 2157
+hero_count = 4
+enemy_count = 6
+difficulty = 5
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["pyromancer", "assassin", "cryomancer", "engineer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

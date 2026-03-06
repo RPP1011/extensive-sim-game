@@ -1,0 +1,134 @@
+[hero]
+name = "Ornn"
+
+[stats]
+hp = 150
+move_speed = 3.3
+armor = 40.0
+magic_resist = 35.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 14
+range = 1.5
+cooldown = 900
+
+# --- Q: Volcanic Rupture ---
+[[abilities]]
+name = "Volcanic Rupture"
+targeting = "direction"
+range = 7.5
+cooldown_ms = 9000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 9
+
+[abilities.delivery]
+method = "projectile"
+speed = 18.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 5
+damage_type = "physical"
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[[abilities.delivery.on_hit]]
+type = "knockback"
+distance = 2.0
+
+# --- W: Bellows Breath ---
+[[abilities]]
+name = "Bellows Breath"
+targeting = "direction"
+range = 5.0
+cooldown_ms = 12000
+ai_hint = "damage"
+resource_cost = 9
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "magic"
+
+# --- E: Searing Charge ---
+[[abilities]]
+name = "Searing Charge"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 14000
+cast_time_ms = 350
+ai_hint = "damage"
+resource_cost = 7
+max_charges = 2
+charge_recharge_ms = 10000
+
+[[abilities.effects]]
+type = "damage"
+amount = 20
+damage_type = "physical"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.6
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- R: Call of the Forge God ---
+[[abilities]]
+name = "Call of the Forge God"
+targeting = "direction"
+range = 3.0
+cooldown_ms = 26100
+cast_time_ms = 500
+ai_hint = "damage"
+resource_cost = 20
+recast_count = 1
+recast_window_ms = 10000
+
+[abilities.delivery]
+method = "projectile"
+speed = 12.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 0
+damage_type = "magic"
+duration_ms = 2000
+tick_interval_ms = 1000
+amount_per_tick = 15
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- Passive: Living Forge ---
+[[passives]]
+name = "Living Forge"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_taken"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+

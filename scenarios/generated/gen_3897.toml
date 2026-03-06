@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0179_4v5_d4"
+seed = 2302
+hero_count = 4
+enemy_count = 5
+difficulty = 4
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["samurai", "berserker", "pyromancer", "assassin"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_samurai_ranger_elementalist_s2"
+seed = 21528
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["samurai", "ranger", "elementalist"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,13 @@
+[scenario]
+name = "pair_ranger_witch_doctor_s2"
+seed = 21629
+hero_count = 2
+enemy_count = 3
+difficulty = 2
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["ranger", "witch_doctor"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

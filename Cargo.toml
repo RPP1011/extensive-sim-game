@@ -1,0 +1,26 @@
+[package]
+name = "bevy_game"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+gemini = ["dep:gemini-rust"]
+app = []
+
+[dependencies]
+base64 = "0.22"
+bevy = { version = "0.13.2", features = ["jpeg"] }
+bevy_egui = "0.27"
+clap = { version = "4.5", features = ["derive"] }
+gemini-rust = { version = "1.7.1", optional = true }
+rand = "0.10.0"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+hnsw_rs = "0.3.3"
+image = "0.25"
+rayon = "1.10"

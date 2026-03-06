@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /mnt/d/Projects/game/src/main.rs /mnt/d/Projects/game/src/game_core.rs /mnt/d/Projects/game/src/ai/*.rs)",
+      "Bash(cargo check 2>&1 | head -1002)",
+      "Bash(cargo check 2>&1 | tail -200)",
+      "Bash(cargo)",
+      "Bash(cargo*)",
+      "Bash(xdpyinfo:*)",
+      "Bash(dpkg:*)"
+    ]
+  },
+  "enableAllProjectMcpServers": false
+}

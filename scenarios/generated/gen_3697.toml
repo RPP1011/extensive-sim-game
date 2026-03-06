@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0112_2v5_d3_s1"
+seed = 12235
+hero_count = 2
+enemy_count = 5
+difficulty = 3
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["assassin", "druid"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Any"

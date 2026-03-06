@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0119_3v3"
+seed = 2042
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["Zeri", "Naafiri", "Seraphine"]
+enemy_hero_templates = ["pyromancer", "paladin", "Nilah"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

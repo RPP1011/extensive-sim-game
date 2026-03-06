@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0066_4v4"
+seed = 1989
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["Aphelios", "paladin", "Vladimir", "Thresh"]
+enemy_hero_templates = ["Zyra", "Ambessa", "rogue", "Graves"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

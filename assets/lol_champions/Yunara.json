@@ -1,0 +1,159 @@
+{
+  "id": "Yunara",
+  "name": "Yunara",
+  "title": "the Unbroken Faith",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Vow of the First Lands",
+      "description": "Yunara's Critical Strikes deal bonus magic damage."
+    },
+    "Q": {
+      "id": "YunaraQ",
+      "name": "Cultivation of Spirit",
+      "description": "Yunara gains Attack Speed, bonus damage On-Hit, and her Attacks spread to nearby enemies.",
+      "tooltip": "Passive: Yunara deal {{ calc_passive_damage }} magic damage %i:OnHit% On-Hit and attacking grants {{ resource_nonchampion }} Unleash ({{ resource_champion }} Unleash for champions).\n\nActive: Yunara consumes {{ resource_max }} Unleash and for {{ buff_duration }} seconds gains {{ calc_attack_speed }} Attack Speed and deals an additional {{ calc_damage }} magic damage %i:OnHit% On-Hit. During this time, her Attacks spread to nearby enemies dealing them {{ calc_damage_spread }} physical damage.\n\nTranscendent State: This Ability is instantly activated for {{ spell.yunarar:buff_duration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "0",
+      "cost": "30",
+      "cost_type": " Mana",
+      "range": "0",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Passive On-Hit Damage",
+          "Attack Speed",
+          "Active On-Hit Damage"
+        ],
+        "effect": [
+          "{{ damage_passive }} -> {{ damage_passiveNL }}",
+          "{{ attack_speed*100.000000 }}% -> {{ attack_speednl*100.000000 }}%",
+          "{{ damage }} -> {{ damageNL }}"
+        ]
+      },
+      "resource": "{{ basecost }} Mana"
+    },
+    "W": {
+      "id": "YunaraW",
+      "name": "Arc of Judgment | Arc of Ruin",
+      "description": "Yunara fires a spinning prayer bead that deals damage and slows enemies. While in her Transcendent State she instead fires off a laser that deals damage and slows enemies.",
+      "tooltip": "Yunara lets rip a prayer bead that deals {{ calc_damage_initial }} magic damage and Slows by {{ calc_slow }} decaying over {{ slow_duration }} seconds. It deals an additional {{ calc_damage_per_second }} magic damage per second.\n\nTranscendent State - Arc of Ruin: Yunara fires a laser that deals {{ spell.yunarar:calc_rw_damage }} magic damage and Slows by {{ spell.yunarar:calc_rw_slow_amount }} decaying over {{ spell.yunarar:rw_slow_duration }} second.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10",
+      "cost": "60",
+      "cost_type": " Mana",
+      "range": "1150",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Damage Per Second"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ damage*0.600000 }} -> {{ damagenl*0.600000 }}"
+        ]
+      },
+      "resource": "{{ f2.0 }} Mana"
+    },
+    "E": {
+      "id": "YunaraE",
+      "name": "Kanmei's Steps | Untouchable Shadow",
+      "description": "Yunara gains Move Speed and becomes Ghosted. While in her Transcendent State she instead dashes in a direction.",
+      "tooltip": "Yunara gains {{ calc_move_speed }} Move Speed, increased to {{ calc_move_speed_enhanced }} Move Speed when moving toward an enemy champion, for {{ buff_duration }} seconds.\n\nTranscendent State - Untouchable Shadow: Yunara dashes in a direction.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "9",
+      "cost": "40",
+      "cost_type": " Mana",
+      "range": "0",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Move Speed",
+          "Max Move Speed"
+        ],
+        "effect": [
+          "{{ move_speed*100.000000 }}% -> {{ move_speednl*100.000000 }}%",
+          "{{ move_speed*150.000000 }}% -> {{ move_speednl*150.000000 }}%"
+        ]
+      },
+      "resource": "{{ f2.0 }} Mana"
+    },
+    "R": {
+      "id": "YunaraR",
+      "name": "Transcend One's Self",
+      "description": "Yunara enters a Transcendent State that upgrades her basic Abilities.",
+      "tooltip": "Yunara enters a Transcendent State for {{ buff_duration }} seconds upgrading her basic Abilities for the duration.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "100/90/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "0",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Arc of Ruin | Damage",
+          "Untouchable Shadow | Dash Speed"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ rw_damage_base }} -> {{ rw_damage_baseNL }}",
+          "{{ re_dash_speed }} -> {{ re_dash_speedNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}"
+    }
+  }
+}

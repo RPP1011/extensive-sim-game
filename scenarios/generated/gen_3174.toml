@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0138_4v4"
+seed = 2061
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["Lissandra", "witch_doctor", "Kayn", "Fiddlesticks"]
+enemy_hero_templates = ["Viego", "Soraka", "mage", "Veigar"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

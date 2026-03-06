@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0059_4v4_s1"
+seed = 11982
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["ranger", "Aatrox", "RekSai", "cleric"]
+enemy_hero_templates = ["bard", "cleric", "warden", "samurai"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

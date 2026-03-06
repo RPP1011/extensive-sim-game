@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0080_5v5"
+seed = 2003
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["alchemist", "samurai", "rogue", "monk", "mage"]
+enemy_hero_templates = ["necromancer", "cleric", "arcanist", "elementalist", "warlock"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

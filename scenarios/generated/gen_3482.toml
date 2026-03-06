@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0040_3v5_d4_s2"
+seed = 22163
+hero_count = 3
+enemy_count = 5
+difficulty = 4
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["pyromancer", "monk", "druid"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0173_4v4_s2"
+seed = 22096
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["Elise", "cleric", "templar", "Orianna"]
+enemy_hero_templates = ["Milio", "Aurora", "Alistar", "samurai"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

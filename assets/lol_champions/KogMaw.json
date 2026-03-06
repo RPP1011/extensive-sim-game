@@ -1,0 +1,275 @@
+{
+  "id": "KogMaw",
+  "name": "Kog'Maw",
+  "title": "the Mouth of the Abyss",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Icathian Surprise",
+      "description": "4 seconds after dying, Kogmaw explodes, dealing true damage to surrounding enemies.",
+      "wiki_detail": {
+        "champion": "Kog'Maw",
+        "skill": "I",
+        "icon": "Icathian Surprise.png",
+        "blurb": "{{sbc|Innate:}} Upon {{tip|death|dying}}, {{ci|Kog'Maw}} enters an {{tip|untargetable}} {{tip|zombie state}} for a few seconds, gradually gaining {{sti|ms|{{as|'''bonus''' movement speed}}}}. He explodes at the end of the duration, dealing {{as|true damage}} to nearby enemies.",
+        "description": "{{sbc|Innate:}} Upon taking {{tip|death|fatal damage}}, '''Kog'Maw''' enters a {{tip|zombie state}} for 4 seconds, becoming {{tip|ghosted}} and gaining {{sti|ms|{{as|10% '''bonus''' movement speed}}}} that increases up to {{as|50%|MS}} over the duration. At the end of the duration, he explodes to deal {{sti|true damage|{{as|{{pp|140 to 650}} true damage}}}} to nearby enemies.",
+        "description2": "While under this state, '''Kog'Maw''' becomes {{tip|invulnerability|invulnerable}}, {{tip|untargetable}}, and {{tip|cc-immune|immune to crowd control}}, but is also rendered unable to declare [[basic attack]]s, cast [[champion ability|abilities]], use [[summoner spell]]s, and [[active ability items|activate items]].",
+        "effect radius": "{{tip|cr|icononly = true}} 400",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "True",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "notes": "* ''Icathian Surprise'' grants {{as|{{ap|50/16}}% '''bonus''' movement speed}} every {{rutngt|0.25}} over the duration, up to the maximum of {{as|50%|ms}}. However, as a result of the ticks being rounded up from {{fd|0.25}} seconds, the movement speed only reaches up to {{as|{{ap|(50/16)*13}}%|ms}}.\n* ''Icathian Surprise's'' {{tip|untargetability}} does not {{tip|homing projectile destruction|destroy}} in-flight {{tip|projectiles}}.\n* ''Icathian Surprise'' will still trigger if '''Kog'Maw''' is killed by the {{tip|Nexus Obelisk}}.\n* If '''Kog'Maw''' has the missile from a basic attack in-flight at the same time that he's moving while he dies, as long as the missile hits the target after ''Icathian Surprise'' has started, '''Kog'Maw''' will be able to use a basic attack once during ''Icathian Surprise''.\n* '''Kog'Maw's''' usable [[summoner spell]]s will be placed on a 5 second cooldown upon becoming a zombie.\n* During ''Icathian Surprise'', '''Kog'Maw's''' {{stil|attack range}} is reduced{{ft|to 0|by 500}}, making him automatically path near enemies he is trying to target.\n{{Zombie state info}}"
+      }
+    },
+    "Q": {
+      "id": "KogMawQ",
+      "name": "Caustic Spittle",
+      "description": "Kog'Maw launches a corrosive projectile which deals magic damage and corrodes the target's armor and magic resist for a short time. Kog'Maw also gains additional attack speed.",
+      "tooltip": "Passive: Kog'Maw gains {{ attackspeed*100 }}% Attack Speed.\n\nActive: Kog'Maw vomits a corrosive projectile that deals {{ totaldamage }} magic damage to the first enemy hit and shreds {{ shredamount }}% Armor and Magic Resist for {{ shredduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1175",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "1",
+        "1",
+        "100",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Attack Speed",
+          "Damage",
+          "Armor and Magic Resist Shred"
+        ],
+        "effect": [
+          "{{ attackspeed*100.000000 }}% -> {{ attackspeednl*100.000000 }}%",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ shredamount }}% -> {{ shredamountNL }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kog'Maw",
+        "skill": "Q",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} {{ci|Kog'Maw}} gains {{sti|{{as|'''bonus''' attack speed}}}}.",
+        "blurb2": "{{sbc|Active:}} '''Kog'Maw''' ejects a wad of spittle in the target direction that deals {{as|magic damage}} to the first enemy hit, reducing their {{sti|armor penetration|{{as|armor}}}} and {{sti|magic penetration|{{as|magic resistance}}}} for a few seconds.",
+        "description": "{{sbc|Passive:}} '''Kog'Maw''' gains {{sti|{{as|'''bonus''' attack speed}}}}.",
+        "leveling": "{{st|Bonus Attack Speed|{{ap|10 to 30}}%}}",
+        "icon2": "Caustic Spittle.png",
+        "description2": "{{sbc|Active:}} '''Kog'Maw''' ejects a wad of spittle in the target direction that deals {{as|magic damage}} to the first enemy hit and reduces their {{sti|armor penetration|{{as|armor}}}} and {{sti|magic penetration|{{as|magic resistance}}}} for 4 seconds.",
+        "leveling2": "{{st|Magic Damage|{{ap|90 to 290}} {{as|(+ 70% AP)}}}}\n{{st|Resistances Reduction|{{ap|23 to 31}}%}}",
+        "range": "{{tip|cr|icononly = true}} 1200",
+        "speed": "1650",
+        "width": "{{tip|er|icononly = true}} 140",
+        "cast time": "Basic attack timer",
+        "cooldown": "7",
+        "cost": "40",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Single target",
+        "projectile": "True",
+        "notes": "{{Effect at cast time start}}"
+      }
+    },
+    "W": {
+      "id": "KogMawBioArcaneBarrage",
+      "name": "Bio-Arcane Barrage",
+      "description": "Kog'Maw's attacks gain range and deal a percent of the target's maximum health as magic damage.",
+      "tooltip": "Kog'Maw gains {{ range }} Attack Range and his Attacks deal an additional {{ totalhealthdamage }} max Health magic damage for {{ duration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "17",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "530",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Range",
+          "Maximum Health Damage"
+        ],
+        "effect": [
+          "{{ range }} -> {{ rangeNL }}",
+          "{{ maxhealthdamage }}% -> {{ maxhealthdamageNL }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kog'Maw",
+        "skill": "W",
+        "icon": "Bio-Arcane Barrage.png",
+        "blurb": "{{sbc|Active:}} {{ci|Kog'Maw}} empowers his basic attacks for a period, gaining {{sti|range|'''bonus''' attack range}} and dealing {{as|'''bonus''' magic damage}} based on the {{as|target's '''maximum''' health}}.",
+        "description": "{{sbc|Active:}} '''Kog'Maw''' empowers his [[basic attack]]s for the next 8 seconds to gain {{sti|range|'''bonus''' attack range}} and deal {{as|'''bonus''' magic damage}} {{tip|on-hit}}, capped at 100 against {{tip|minion|minions}} and {{tip|monster|monsters}}.",
+        "leveling": "{{st|Bonus Attack Range|{{ap|130 to 210}}}}\n{{st|Bonus Magic Damage|{{as|{{ap|3 to 6}}% {{as|(+ 1% per 100 AP)}} of target's '''maximum''' health}}}}",
+        "cooldown": "17",
+        "cdstart": "on-cast",
+        "cost": "40",
+        "cast time": "none",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "|damagetype   = Magic",
+        "spellshield": "false",
+        "spelleffects": "Proc",
+        "parry": "True",
+        "notes": "* The attacks do not deal the '''bonus''' damage against [[structures]]."
+      }
+    },
+    "E": {
+      "id": "KogMawVoidOoze",
+      "name": "Void Ooze",
+      "description": "Kog'Maw launches a peculiar ooze which damages all enemies it passes through and leaves a trail which slows enemies who stand on it.",
+      "tooltip": "Kog'Maw spits bile, dealing {{ totaldamage }} magic damage and leaving a trail of ooze for {{ trailduration }} seconds. Enemies in the ooze are Slowed by {{ slowamount }}%.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "40/55/70/85/100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1200",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ slowamount }}% -> {{ slowamountNL }}%",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kog'Maw",
+        "skill": "E",
+        "icon": "Void Ooze.png",
+        "blurb": "{{sbc|Active:}} {{ci|Kog'Maw}} spews a gob of ooze in the target direction that deals {{as|magic damage}} to enemies hit. It leaves a field of ooze in its wake for a few seconds that {{tip|slow|slows}} enemies.",
+        "description": "{{sbc|Active:}} '''Kog'Maw''' spews a gob of ooze in the target direction that deals {{as|magic damage}} to enemies hit.",
+        "leveling": "{{st|Magic Damage|{{ap|75 to 255}} {{as|(+ 70% AP)}}}}",
+        "description2": "A field of ooze is created in its wake for 4 seconds, {{tip|slow|slowing}} enemies every {{fd|0.25}} seconds.",
+        "leveling2": "{{st|Slow|{{ap|40 to 60}}%}}",
+        "range": "{{tip|cr|icononly = true}} 1360",
+        "width": "{{tip|er|icononly = true}} 240<!-- / {{tip|cr|icononly = true}} {{tt|X|Ooze field Width}}-->",
+        "speed": "1400",
+        "cooldown": "12",
+        "cost": "{{ap|40 to 100}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "True",
+        "notes": "{{Effect at cast time start}}\n* {{pending for test}}: The missile leaves a blob of ooze on the ground every 125 units traveled.",
+        "_comments": [
+          "/ {{tip|cr|icononly = true}} {{tt|X|Ooze field Width}}"
+        ]
+      }
+    },
+    "R": {
+      "id": "KogMawLivingArtillery",
+      "name": "Living Artillery",
+      "description": "Kog'Maw fires an artillery shell at a great distance dealing magic damage (increased significantly on low health enemies) and revealing non-stealthed targets. Additionally, multiple Living Artilleries in a short period of time cause them to cost additional Mana.",
+      "tooltip": "Kog'Maw shoots acid at an area, dealing {{ basedamagecalc }} plus {{ tooltipmissinghealthdamageamp }}% per 1% missing Health magic damage and revealing enemies hit for 2 seconds. Enemies below 40% Health instead take {{ maxdamagecalc }} magic damage.\n\nSubsequent shots within {{ manacostduration }} seconds cost an additional {{ basecost }} Mana (max: {{ manacostcap }} Mana).{{ spellmodifierdescriptionappend }}",
+      "cooldown": "2/1.5/1",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1300/1550/1800",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Range",
+          "Cooldown",
+          "Total AP Ratio"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ castrange }} -> {{ castrangeNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ apratio*100.000000 }}% -> {{ aprationl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kog'Maw",
+        "skill": "R",
+        "icon": "Living Artillery.png",
+        "blurb": "{{sbc|Active:}} {{ci|Kog'Maw}} spits a globule of acid into the air that drops to the target location, dealing {{as|magic damage}} to enemies hit based on {{as|their '''missing''' health}}. The damage is further {{ccs|doubled|magic}} against enemies at {{as|low health}}.",
+        "blurb2": "'''Kog'Maw''' then gains a stack of ''Living Artillery'', stacking up to a cap.",
+        "blurb4": "{{sbc|Living Artillery:}} For each stack, ''Living Artillery'' gains increased {{sti|{{as|mana cost}}}}.",
+        "description": "{{sbc|Active:}} '''Kog'Maw''' spits a globule of acid into the air that drops to the target location after {{fd|0.6}} seconds, granting {{tip|sight}} of the area before dealing {{as|magic damage}} to enemies hit and {{tip|standard sight|revealing}} them for 2 seconds. ''Living Artillery's'' damage is increased by {{as|{{pp|type=target's '''missing''' health|key=%|0 to 50 for 11|key1=%|0 to 60|formula=0.833% per 1% of target's '''missing''' health. ''This is capped at 50% increase at 60% '''missing''' health.''}}|health}}, or instead by {{ccs|100%|magic}} if the target is below {{as|40% '''maximum''' health}}.",
+        "leveling": "{{st|Minimum Magic Damage|{{ap|100 to 180}} {{as|(+ 75% '''bonus''' AD)}} {{as|(+ 35% AP)}}|Maximum Magic Damage|{{ap|100*2 to 180*2}} {{as|(+ {{ap|75*2}}% '''bonus''' AD)}} {{as|(+ {{ap|35*2}}% AP)}}}}",
+        "description2": "'''Kog'Maw''' then gains a [[stack]] of ''Living Artillery'' for 8 seconds, refreshing on subsequent casts and stacking up to 9 times.",
+        "description3": "{{sbc|Living Artillery:}} For each stack, ''Living Artillery's'' {{sti|{{as|mana cost}}}} is increased by {{as|40|mana}}.",
+        "target range": "{{ap|1300 to 1800}}",
+        "effect radius": "{{tip|cr|icononly = true}} 240",
+        "cooldown": "{{ap|2 to 1}}",
+        "cost": "{{pp|type=stacks|40 to 400 for 10|0 to 9}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "|notes        = \n* ''Living Artillery'' will not reveal {{tip|stealth|stealthed}} champions."
+      }
+    }
+  }
+}

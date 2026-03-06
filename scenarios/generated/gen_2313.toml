@@ -1,0 +1,13 @@
+[scenario]
+name = "stress_duo_heal_swarm_recovery"
+seed = 1773
+hero_count = 2
+enemy_count = 5
+difficulty = 1
+max_ticks = 10000
+room_type = "Recovery"
+hero_templates = ["shaman", "alchemist"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

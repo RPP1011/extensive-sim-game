@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0021_4v4"
+seed = 1944
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["druid", "necromancer", "shaman", "assassin"]
+enemy_hero_templates = ["knight", "blood_mage", "warlock", "paladin"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

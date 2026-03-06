@@ -1,0 +1,12 @@
+[scenario]
+name = "bard+berserker+blood_mage+rogue vs 8 d3"
+seed = 42
+hero_count = 4
+enemy_count = 8
+difficulty = 3
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["bard", "berserker", "blood_mage", "rogue"]
+
+[assert]
+outcome = "Either"

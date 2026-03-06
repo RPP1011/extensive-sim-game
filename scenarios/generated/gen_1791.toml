@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_mage_cryomancer_witch_doctor"
+seed = 1598
+hero_count = 3
+enemy_count = 4
+difficulty = 2
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["mage", "cryomancer", "witch_doctor"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

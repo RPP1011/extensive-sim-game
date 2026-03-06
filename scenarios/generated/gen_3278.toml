@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0172_5v5_s2"
+seed = 22095
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["Renata", "Gangplank", "Diana", "Kassadin", "Kaisa"]
+enemy_hero_templates = ["Brand", "Garen", "Ahri", "Singed", "Bard"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

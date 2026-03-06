@@ -1,0 +1,278 @@
+{
+  "id": "Kassadin",
+  "name": "Kassadin",
+  "title": "the Void Walker",
+  "resource_type": "Mana",
+  "tags": [
+    "Assassin",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Void Stone",
+      "description": "Kassadin takes reduced magic damage and ignores unit collision.",
+      "wiki_detail": {
+        "champion": "Kassadin",
+        "skill": "I",
+        "icon": "Void Stone.png",
+        "blurb": "{{sbc|Innate:}} '''Kassadin''' is permanently {{tip|ghosted}} and takes reduced {{tip|magic damage|{{as|magic damage}}}}.",
+        "description": "{{sbc|Innate:}} '''Kassadin''' is permanently {{tip|ghosted}} and takes 10% reduced {{tip|magic damage|{{as|magic damage}}}}.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "notes": "* No additional details."
+      }
+    },
+    "Q": {
+      "id": "NullLance",
+      "name": "Null Sphere",
+      "description": "Kassadin fires an orb of void energy at a target, dealing damage and interrupting channels. The excess energy forms around himself, granting a temporary shield that absorbs magic damage.",
+      "tooltip": "Kassadin fires an orb of void energy, dealing {{ totaldamage }} magic damage and interrupting channels. Kassadin also gains {{ totalshield }} Magic Shield for 1.5 seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9.5/9/8.5/8",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "65/95/125/155/185",
+        "0",
+        "80/110/140/170/200",
+        "1.5",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Shield Amount",
+          "@AbilityResourceName@ Cost",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ shieldamount }} -> {{ shieldamountNL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kassadin",
+        "skill": "Q",
+        "icon": "Null Sphere.png",
+        "blurb": "{{sbc|Active:}} {{ci|Kassadin}} fires an orb of void energy at the target enemy that deals {{as|magic damage}} and {{tip|disrupt|disrupts}} their ongoing {{tip|channel|channels}}.",
+        "blurb2": "He then gains a brief {{tip|shield}} that absorbs {{as|magic damage}}.",
+        "description": "{{sbc|Active:}} '''Kassadin''' fires an orb of void energy at the target enemy that deals {{as|magic damage}} and {{tip|disrupt|disrupts}} their ongoing {{tip|channel|channels}}.",
+        "leveling": "{{st|Magic Damage|{{ap|65 to 185}} {{as|(+ 70% AP)}}}}",
+        "description2": "He also gains a {{tip|shield}} that absorbs {{as|magic damage}} for {{fd|1.5}} seconds.",
+        "leveling2": "{{st|Magic Shield Strength|{{ap|80 to 200}} {{as|(+ 30% AP)}}}}",
+        "cooldown": "{{ap|10 to 8}}",
+        "cost": "{{ap|60 to 80}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "target range": "{{tip|cr|icononly = true}} 650",
+        "speed": "1400",
+        "targeting": "Unit",
+        "affects": "Enemies, Self",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spell",
+        "projectile": "True",
+        "notes": "* The {{tip|disrupt}} is 'wrapped' into a status effect that says the target is {{tip|Silence|Silenced}} for {{fd|0.25}} seconds, but it does not actually ''silence''. It however makes sure that the ''disrupt'' is prevented by {{tip|Cc-immune|immunity to silences}}.\n* The shield is granted at the start of the cast time."
+      }
+    },
+    "W": {
+      "id": "NetherBlade",
+      "name": "Nether Blade",
+      "description": "Passive: Kassadin's basic attacks deal bonus magic damage. Active: Kassadin's next basic attack deals significant bonus magic damage and restores Mana.",
+      "tooltip": "Passive: Kassadin's Attacks deal an additional {{ onhitdamage }} magic damage.\n\nActive: Kassadin charges his blade, causing his next Attack to deal {{ activedamage }} magic damage and restore {{ missingmanaratio }}% missing Mana, increased to {{ championmissingmanaratio }}% against champions.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7",
+      "cost": "1",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "4/4.5/5/5.5/6",
+        "20",
+        "50/75/100/125/150",
+        "20/22.5/25/27.5/30",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Active Damage",
+          "Base Mana Restore",
+          "Champion Mana Restore"
+        ],
+        "effect": [
+          "{{ activebasedamage }} -> {{ activebasedamageNL }}",
+          "{{ missingmanaratio }}% -> {{ missingmanaratioNL }}%",
+          "{{ championmissingmanaratio }}% -> {{ championmissingmanaratioNL }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kassadin",
+        "skill": "W",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} {{cis|Kassadin}} basic attacks deal {{as|'''bonus''' magic damage}}.",
+        "blurb2": "{{sbc|Active:}} '''Kassadin''' empowers his blade, causing his next basic attack within a few seconds to gain {{sti|range|'''bonus''' range}}, deal increased {{as|'''bonus''' magic damage}}, and restore {{as|{{sti|mana}}}}, with the restoration amount quintupled against {{tip|champion|champions}}.",
+        "description": "{{sbc|Passive:}} '''Kassadin's''' [[basic attack]]s deal {{as|20|magic damage}} {{as|(+ 10% AP)}} {{as|'''bonus''' magic damage}} {{tip|on-hit}}.",
+        "icon2": "Nether Blade.png",
+        "description2": "{{sbc|Active:}} '''Kassadin''' empowers his next basic attack within 5 seconds to have an {{tip|uncancellable windup}}, gain {{sti|range|50 '''bonus''' range}}, deal increased {{as|'''bonus''' magic damage}}, and restore {{as|{{sti|mana}}}}, with the restoration amount quintupled against {{tip|champion|champions}}.",
+        "leveling2": "{{st|Increased Bonus Magic Damage|{{ap|50 to 150}} {{as|(+ 80% AP)}}}}\n{{st|Mana Restored|{{as|{{ap|4 to 6}}% of '''missing''' mana}}|Mana Restored Against Champions|{{as|{{ap|4*5 to 6*5}}% of '''missing''' mana}}}}",
+        "description3": "''Nether Blade {{tip|basic attack reset|resets}} '''Kassadin's''' basic attack timer.''",
+        "cooldown": "7",
+        "cdstart": "post-effect",
+        "cost": "1",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "cast time": "none",
+        "affects": "Self",
+        "damagetype": "Magic",
+        "spellshield": "Special",
+        "spelleffects": "special",
+        "grounded": "|knockdown    =",
+        "parry": "Special",
+        "notes": "* The passive damage applies {{tip|proc damage}} and the active damage applies {{tip|spell damage}}.\n* The enhanced attack will apply other [[on-hit effect]]s and can {{tip|critical strike|critically strike}} as normal.\n* ''Nether Blade'' will not grant mana if the attack is {{tip|dodge|dodged}} or if it {{tip|blind|misses}}, but will do so if the attack is {{tip|block|blocked}}. In all cases the damage is parried.\n* {{tip|Spell shield}} will block the ''active'' damage but not the ''passive'' one.\n* The passive '''bonus''' damage applies to structures.\n* The empowered attack will trigger but not be consumed nor apply its effects against [[structures]]."
+      }
+    },
+    "E": {
+      "id": "ForcePulse",
+      "name": "Force Pulse",
+      "description": "Kassadin draws energy from spells cast in his vicinity. Upon charging up, Kassadin can use Force Pulse to damage and slow enemies in a cone in front of him.",
+      "tooltip": "Passive: Force Pulse's Cooldown is reduced by {{ reductionperspellcast }} second whenever any Ability is used near Kassadin.\n\nActive: Kassadin unleashes a void pulse, dealing {{ totaldamage }} magic damage and Slowing by {{ e2 }}% for {{ e3 }} second.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "21/20/19/18/17",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "50/55/60/65/70",
+        "1",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ e2 }}% -> {{ e2NL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kassadin",
+        "skill": "E",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} Ability casts reduce the cooldown of this ability.",
+        "blurb2": "{{sbc|Active:}} '''Kassadin''' emits a pulse of void energy in a cone in the target direction that deals {{as|magic damage}} to enemies and briefly {{tip|slow|slows}} them.",
+        "description": "{{sbc|Passive:}} Each time '''Kassadin''' or a nearby {{tip|champion}} casts an [[champion ability|ability]], ''Force Pulse's'' {{sti|'''current''' cooldown}} is reduced by {{fd|0.75}} seconds.",
+        "icon2": "Force Pulse.png",
+        "description2": "{{sbc|Active:}} '''Kassadin''' emits a pulse of void energy in a cone in the target direction that deals {{as|magic damage}} to enemies hit and {{tip|slow|slows}} them for 1 second.",
+        "leveling2": "{{st|Magic Damage|{{ap|60 to 180}} {{as|(+ 70% AP)}}}}\n{{st|Slow|{{ap|50 to 90}}%}}",
+        "cooldown": "{{ap|21 to 17}}",
+        "cost": "{{ap|60 to 80}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "effect radius": "{{tip|er|icononly = true}} 600 / {{tt|1800|Detection Radius}}",
+        "detection radius": "1800",
+        "angle": "{{tip|er|icononly = true}} 78{{degree}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "grounded": "|knockdown    =",
+        "projectile": "False",
+        "notes": "* {{tip|Untargetable}} champions do not grant stacks upon ability activations.\n*[[Toggle|Toggle abilities]] and transformation abilities do not count as ability activations and '''will not''' reduce ''Force Pulse's'' cooldown.\n{{Effect at cast time end}}"
+      }
+    },
+    "R": {
+      "id": "RiftWalk",
+      "name": "Riftwalk",
+      "description": "Kassadin teleports to a nearby location dealing damage to nearby enemy units. Multiple Riftwalks in a short period of time cost additional Mana but also deal additional damage.",
+      "tooltip": "Kassadin teleports to a nearby location, dealing {{ basedamage }} magic damage.\n\nEach subsequent use of this Ability within the next {{ rstackduration }} seconds doubles the Mana cost and deals an additional {{ bonusdamage }} magic damage. The cost and damage increases can stack up to {{ maxstacks }} times.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "5/3.5/2",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "500",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Damage Per Stack",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ rbasedamage }} -> {{ rbasedamageNL }}",
+          "{{ stackdamage }} -> {{ stackdamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kassadin",
+        "skill": "R",
+        "icon": "Riftwalk.png",
+        "blurb": "{{sbc|Active:}} '''Kassadin''' {{tip|blinks}} toward the target location, dealing {{as|magic damage}} to all nearby enemies upon arrival. He then gains a stack of ''Riftwalk'', stacking up to a cap.",
+        "blurb4": "{{sbc|Riftwalk:}} For each stack, ''Riftwalk'' gains '''bonus''' damage and increased {{as|{{sti|mana}} cost}}.",
+        "description": "{{sbc|Active:}} '''Kassadin''' {{tip|blinks}} toward the target location, dealing {{as|magic damage}} to all nearby enemies upon arrival. He then gains a stack of ''Riftwalk'' for 15 seconds, refreshing on subsequent casts and stacking up to 4 times.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 110}} {{as|(+ 50% AP)}} {{as|(+ 2% '''maximum''' mana)}}}}",
+        "description2": "{{sbc|Riftwalk:}} For each stack, ''Riftwalk'' deals {{as|'''bonus''' magic damage}} at an increased {{as|{{sti|mana}} cost}}.",
+        "leveling2": "{{st|Bonus Damage Per Stack|{{ap|35 to 55}} {{as|(+ 10% AP)}} {{as|(+ 1% '''maximum''' mana)}}|Maximum Bonus Damage|{{ap|35*4 to 55*4}} {{as|(+ 40% AP)}} {{as|(+ 4% '''maximum''' mana)}}|Maximum Magic Damage|{{ap|70+35*4 to 110+55*4}} {{as|(+ {{ap|50+10*4}}% AP)}} {{as|(+ 6% '''maximum''' mana)}}}}",
+        "description3": "''Riftwalk will cast at max range if cast beyond that.''",
+        "cooldown": "{{ap|5 to 2}}",
+        "cost": "{{pp|40*2^(x-1)|0 to 4 for 5|type=Stacks|formula=40 {{times}} 2 ^ Stacks}}",
+        "costtype": "Mana",
+        "cast time": "{{fd|0.25}}",
+        "target range": "{{tt|500|Maximum range, has no minimum range}}",
+        "effect radius": "{{tip|cr|icononly = true}} 270",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "grounded": "True",
+        "notes": "* {{si|Flash}} can be used during the cast time, allowing '''Kassadin''' to blink further away."
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "total": 12,
+  "remaining": 2,
+  "quality_gates": [
+    "cargo test"
+  ],
+  "id": "US-011",
+  "title": "Persist layered campaign progression and migration guards"
+}

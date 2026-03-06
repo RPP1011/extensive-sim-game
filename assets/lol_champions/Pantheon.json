@@ -1,0 +1,298 @@
+{
+  "id": "Pantheon",
+  "name": "Pantheon",
+  "title": "the Unbreakable Spear",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Mortal Will",
+      "description": "Every few spells or attacks, Pantheon's next spell is empowered.",
+      "wiki_detail": {
+        "champion": "Pantheon",
+        "skill": "I",
+        "icon": "Mortal Will.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Pantheon}} generates stacks of ''Mortal Will'' whenever he lands a basic attacks or casts an ability. At max stacks, his next basic ability consumes them to become empowered with an additional effect.",
+        "description": "{{sbc|Innate:}} '''Pantheon''' generates a [[stack]] of ''Mortal Will'' whenever he lands a [[basic attack]] {{tip|on-hit}} or casts an [[ability]], stacking up to 5 times. At 5 stacks, '''Pantheon's''' next basic ability consumes the stacks to become empowered with an additional effect.",
+        "description2": "'''Pantheon''' gains maximum stacks of ''Mortal Will'' upon starting the game, completing a {{si|Recall}} channel, and [[death|respawning]].",
+        "targeting": "Passive",
+        "affects": "Self",
+        "notes": "* The current number of ''Mortal Will'' stacks is represented by a counter under '''Pantheon's''' [[health bar]], visible to all players. It will light up when he reaches maximum stacks and the empowered effect is ready."
+      }
+    },
+    "Q": {
+      "id": "PantheonQ",
+      "name": "Comet Spear",
+      "description": "Pantheon either thrusts his spear or throws his spear in the chosen direction.",
+      "tooltip": "Tap: Pantheon thrusts his spear, dealing {{ tapdamagecalc }} physical damage to enemies hit. Refunds {{ tapcooldownrefund*100 }}% of this Ability's Cooldown.\n\nHold: Pantheon hurls his spear, dealing {{ holddamagecalc }} physical damage to the first enemy hit and {{ damagefalloff*100 }}% less to further targets. \n\nThis Ability is enhanced against enemies below {{ crithealththreshold*100 }}% Health to deal {{ executedamagecalcmodified }} physical damage instead.\n\nMortal Will Bonus: Deals an additional {{ empowereddamagecalc }} physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11/10.25/9.5/8.75/8",
+      "cost": "25",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "575",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Base Damage",
+          "Execute Base Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ tapdamage }} -> {{ tapdamageNL }}",
+          "{{ executebasedamage }} -> {{ executebasedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Pantheon",
+        "skill": "Q",
+        "icon": "Comet Spear.png",
+        "blurb": "{{sbc|Active:}} {{ci|Pantheon}} {{tip|channel|charges}} up to a few seconds, increasing the {{sti|range}} of his spear. After a brief period, it becomes empowered with a new effect.",
+        "blurb2": "''Comet Spear'' can be recast within the duration, and will cancel automatically afterwards, refunding a portion of the {{sti|mana|{{as|mana cost}}}}.",
+        "blurb3": "{{sbc|Recast:}} '''Pantheon''' thrusts his spear in the target direction that deals {{as|physical damage}} to enemies hit, increased against enemies at {{as|low health}}. This also {{sti|cdr|reduces}} the cooldown.<br/><br/>\n{{sbc|Empowered Recast:}} '''Pantheon''' hurls his spear in the target direction that deals {{as|physical damage}} to enemies hit, increased against enemies at {{as|low health}} and reduced against enemies beyond the first.",
+        "blurb4": "{{sbc|{{ai|Mortal Will|Pantheon}} Bonus:}} The spear gains {{as|'''bonus''' physical damage}}.",
+        "description": "{{sbc|Active:}} '''Pantheon''' {{tip|channel|charges}} while being {{tip|slow|slowed}} by 10% for up to 4 seconds to increase ''Comet Spear's'' {{sti|range}} after {{fd|0.35}} seconds of channeling. ''Comet Spear'' can be recast within the duration.",
+        "description2": "{{sbc|Recast:}} '''Pantheon''' hurls his spear in the target direction that deals {{as|physical damage}} to enemies hit, {{ccs|increased|physical}} against enemies {{as|below 20% of their '''maximum''' health}} but reduced by 50% against enemies beyond the first.",
+        "leveling2": "{{st|Hurl Physical Damage|{{ap|70 to 190}} {{as|(+ 115% '''bonus''' AD)}} {{as|(+ 50% AP)}}|Increased Hurl Damage|{{ap|155 to 455}} {{as|(+ 230% '''bonus''' AD)}} {{as|(+ 100% AP)}}}}\n{{st|Hurl Secondary Physical Damage|{{ap|70*0.5 to 190*0.5}} {{as|(+ {{ap|115*0.5}}% '''bonus''' AD)}} {{as|(+ {{ap|50*0.5}}% AP)}}|Increased Hurl Secondary Damage|{{ap|155*0.5 to 455*0.5}} {{as|(+ {{ap|230*0.5}}% '''bonus''' AD)}} {{as|(+ {{ap|100*0.5}}% AP)}}}}",
+        "description3": "Releasing the ability within {{fd|0.35}} seconds causes '''Pantheon''' to instead thrust his spear in the target direction, dealing {{as|physical damage}} to enemies hit, {{ccs|increased|physical}} against enemies {{as|below 20% of their '''maximum''' health}}, and refunding 60% of ''Comet Spear's'' {{sti|cooldown}}. The thrust's damage is not reduced against enemies beyond the first.",
+        "leveling3": "{{st|Thrust Physical Damage|{{ap|70 to 190}} {{as|(+ 115% '''bonus''' AD)}}|Increased Thrust Damage|{{ap|155 to 455}} {{as|(+ 230% '''bonus''' AD)}}}}",
+        "description4": "''Comet Spear's'' total damage is increased to 105% against {{tip|monsters}} and reduced to 70% against {{tip|minions}}.",
+        "description5": "If the charge is {{tip|interrupt|interrupted}} or completes without reactivation, ''Comet Spear'' is cancelled and the ability is put on full cooldown but refunds {{sti|mana|{{as|half the mana cost}}}}.",
+        "icon6": "Comet Spear 2.png",
+        "description6": "{{sbc|{{ai|Mortal Will|Pantheon}}:}} ''Comet Spear'' deals {{as|{{pp|20 to 240}}|physical damage}} {{as|(+ 115% '''bonus''' AD)}} {{as|'''bonus''' physical damage}}, affected by the previous damage reductions. Consumes the stacks upon recasting.",
+        "cooldown": "{{ap|11 to 8}}",
+        "cdstart": "post-effect",
+        "cast time": "{{tt|{{fd|0.2}}|Release}}",
+        "cost": "25",
+        "costtype": "Mana",
+        "range": "{{tip|er|icononly = true}} {{tt|-40 - 560|Rectangle starts at 40 units behind Pantheon and has 600 units length}} / {{tip|cr|icononly = true}} {{tt|1200|Spear missile range}}",
+        "width": "{{tip|er|icononly = true}} {{tt|120|Thrust width}} / {{tt|110|Spear missile width}}",
+        "speed": "{{tt|2700|Spear missile speed}}",
+        "targeting": "[[Auto-targeted|Auto]] / [[Direction-targeted|Direction]]",
+        "damagetype": "Physical",
+        "projectile": "special",
+        "affects": "Enemies",
+        "spelleffects": "spellaoe",
+        "spellshield": "True",
+        "silence": "true",
+        "notes": "* Only the ranged version of ''Comet Spear'' can be {{tip|projectile|intercepted}}.\n{{Effect at cast time end}}\n* The following table refers for interactions while '''Pantheon''' is {{tip|channel|channeling}}:\n** Item actives that interrupt and those with cast times as well as {{ii|Titanic Hydra}}, {{si|Hexflash}}, and {{si|Recall}} will cause ''Comet Spear'' to recast automatically and the active or spell to buffer to cast afterwards.\n*** {{si|Teleport}} will cancel the channel entirely.\n{{ct|charge|items=true,true,interrupts,false|spells=true,true,interrupts,interrupts,recasts}}"
+      }
+    },
+    "W": {
+      "id": "PantheonW",
+      "name": "Shield Vault",
+      "description": "Pantheon dashes to a target, damaging and stunning them.",
+      "tooltip": "Pantheon leaps on his target, Stunning for {{ stunduration }} second and dealing {{ maxhealthdamagecalc }} max Health physical damage.\n\nMortal Will Bonus: Pantheon's next Attack strikes {{ empowerednumhits }} times, dealing a total of {{ empowereddamagemultcalcmodified }} physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "13/12/11/10/9",
+      "cost": "55",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "600",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Max Health %",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ maxhealthdamage*100.000000 }}% -> {{ maxhealthdamagenl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Pantheon",
+        "skill": "W",
+        "icon": "Shield Vault.png",
+        "blurb": "{{sbc|Active:}} {{ci|Pantheon}} {{tip|dash|leaps}} to the target enemy, dealing {{as|physical damage}} and briefly {{tip|stun|stunning}} them.",
+        "blurb4": "{{sbc|{{ai|Mortal Will|Pantheon}} Bonus:}} '''Pantheon's''' next basic attack within a few seconds will strike 3 times to deal {{as|physical damage}}.",
+        "description": "{{sbc|Active:}} '''Pantheon''' {{tip|dash|leaps}} to the front of the target enemy's location. If the target is within 800 units upon arrival, he deals {{as|physical damage}} and {{tip|stun|stuns}} them for 1 second. Against minions and monsters, ''Shield Vault'' has a minimum damage of 60 and is capped at 200.",
+        "leveling": "{{st|Physical Damage|{{as|{{ap|6 to 8}}% of target's '''maximum''' health}} {{as|(+ {{fd|1.5}}% per 100 AP)}} {{as|(+ {{fd|0.4}}% per 100 '''Pantheon's''' '''bonus''' health)}}}}",
+        "icon2": "Shield Vault 2.png",
+        "description2": "{{sbc|{{ai|Mortal Will|Pantheon}}:}} '''Pantheon''' empowers his next basic attack within 4 seconds to have a cast time and strike the target 3 times over a brief period, dealing {{as|{{pp|120/3 to 165/3|key=%}} AD}} {{as|physical damage}} per hit, up to {{as|{{pp|120 to 165|key=%}} AD}}. Each hit is affected by {{tip|critical strike}} modifiers and applies {{tip|on-hit}} effects at 100% effectiveness.",
+        "description3": "''Empowered Shield Vault {{tip|basic attack reset|resets}} '''Pantheon's''' basic attack timer. '''Pantheon''' will attempt to basic attack the target at the end of the leap.''",
+        "cooldown": "{{ap|13 to 9}}",
+        "cost": "55",
+        "cast time": "none",
+        "costtype": "Mana",
+        "target range": "{{tip|cr|icononly = true}} 600",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "physical",
+        "spelleffects": "special",
+        "onhiteffects": "|spellshield  = True",
+        "callforhelp": "true",
+        "grounded": "true",
+        "knockdown": "true",
+        "parry": "true",
+        "notes": "* Applies {{tip|spell damage}} on the initial vault. Deals {{tip|basic damage}} on all the attacks from the empowered ability.\n* Despite the multi-hit attack only having a hidden {{fd|0.375}}-second cast time, '''Pantheon''' will remain {{tip|lockout|unable to act}} until the last strike has been dealt.\n** The empowered attack's total time is affected by '''Pantheon's''' {{stil|attack speed}}.\n** {{pending for test}} The attack's total time is the cast time plus '''Pantheon's''' attack windup time.\n* The 3 strikes that occurs after ''Empowered Shield Vault'' each apply a stack of {{ai|Mortal Will|Pantheon}}, even if the attacks are {{tip|dodged}}, {{tip|blocked}}, or missed while '''Pantheon''' is {{tip|blind|blinded}}.\n* The empowered attack will not trigger against [[structures]]."
+      }
+    },
+    "E": {
+      "id": "PantheonE",
+      "name": "Aegis Assault",
+      "description": "Pantheon sets his shield, becoming invulnerable to damage from the front and striking repeatedly with his spear.",
+      "tooltip": "Pantheon braces his shield and engages enemies in a chosen direction for {{ shieldduration }} seconds, becoming immune to non-tower damage from that direction and dealing {{ damagecalc }} physical damage over the duration. After channeling Pantheon slams with his shield, dealing {{ shielddamagecalc }} physical damage.\n\nMortal Will Bonus: When Pantheon slams his shield he gains {{ resistscalc }} Armor and {{ resistscalc }} Magic Resist for {{ resistsduration }} seconds, and {{ speedamount*100 }}% Move Speed for {{ speedduration }} seconds. \n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "22/21/20/19/18",
+      "cost": "80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Shield Slam Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ shieldbasedamage }} -> {{ shieldbasedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Pantheon",
+        "skill": "E",
+        "icon": "Aegis Assault.png",
+        "blurb": "{{sbc|Active:}} {{ci|Pantheon}} braces his shield in the target direction and {{tip|channel|channels}} for a brief period, during which he becomes {{tip|invulnerability|invulnerable}} against non-{{tip|turret}} damage from enemies in that direction. He will also strike in a cone that continually deals {{as|physical damage}} to enemies hit.",
+        "blurb2": "''Aegis Assault'' can be recast within this time, and does so automatically after the duration. The channel cannot be {{tip|interrupt|interrupted}}.",
+        "blurb3": "{{sbc|Recast:}} '''Pantheon''' slams his shield in a cone, dealing {{as|physical damage}} to enemies hit.",
+        "blurb4": "{{sbc|{{ai|Mortal Will|Pantheon}} Bonus:}} '''Pantheon''' briefly gains {{sti|{{as|'''bonus''' movement speed}}}} after recasting.",
+        "description": "{{sbc|Active:}} '''Pantheon''' braces his shield in the target direction and {{tip|channel|channels}} for {{fd|1.5}} seconds, during which he becomes {{tip|invulnerability|invulnerable}} to non-{{tip|turret}} damage dealt by enemies from the target direction. He also continually performs strikes in a cone in front of him, dealing {{as|{{fd|8.{{recurring|3}}}}% AD}} {{as|physical damage}} every {{fd|0.125}} seconds to enemies hit, reduced by 50% against {{tip|minions}} and up to {{as|100% AD}} {{as|'''total''' physical damage}}.",
+        "description2": "''Aegis Assault'' can be recast after {{fd|0.3}} seconds, and does so automatically after the duration. ''Aegis Assault's'' channel cannot be {{tip|interrupt|interrupted}} by {{tip|crowd control}}.",
+        "description3": "{{sbc|Recast:}} '''Pantheon''' slams with his shield in a cone in front of him, dealing {{as|physical damage}} to enemies hit.",
+        "leveling3": "{{st|Physical Damage|{{ap|55 to 255}} {{as|(+ 150% '''bonus''' AD)}}}}",
+        "icon4": "Aegis Assault 2.png",
+        "description4": "{{sbc|{{ai|Mortal Will|Pantheon}}:}} After recasting, '''Pantheon''' gains {{pp|5 to 30}} {{as|(+ {{fd|2.5}}% '''bonus''' health)}} {{sti|{{as|'''bonus''' armor}}}} and {{sti|{{as|'''bonus''' magic resistance}}}} for 4 seconds as well as {{sti|{{as|60% '''bonus''' movement speed}}}} for {{fd|1.5}} seconds.",
+        "cooldown": "{{ap|22 to 18}}",
+        "cdstart": "post-effect",
+        "cost": "80",
+        "costtype": "Mana",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|525|Cone radius, truncated in the back so it cannot hit behind Pantheon}}",
+        "cast time": "{{tt|None|Active}} / {{tt|{{fd|0.25}}|Recast}}",
+        "angle": "60{{degree}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "physical",
+        "spelleffects": "aoe",
+        "spellshield": "special",
+        "projectile": "false",
+        "silence": "false",
+        "notes": "*The initial cast count as an ability activation for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n**Detonating the ability manually is not.\n* '''Pantheon''' retains his {{tip|invulnerable|invulnerability}} during the recast's cast time.\n{{Effect at cast time start}}** '''Pantheon''' will slam from wherever he was at the start of the recast's' cast time.\n* {{tip|Spell shield}} will only block the slam's damage.\n* The following table refers for interactions while '''Pantheon''' is {{tip|channel|channeling}}:\n{{ct|channel|attack=false|move=true|cast=false|items=true,,, false|spells=true, true, true, false, false|interrupts=death}}"
+      }
+    },
+    "R": {
+      "id": "PantheonR",
+      "name": "Grand Starfall",
+      "description": "Pantheon composes himself and then leaps into the air, landing at a chosen location as a comet.",
+      "tooltip": "Passive: Pantheon gains {{ armorpenetration*100 }}% Armor Penetration.\n\nActive: Pantheon gathers his strength to leap high into the air. He throws his spear from above which in a small area deals {{ spell.pantheonq:holddamagecalc }} physical damage and Slows by {{ spearslow*100 }}% for {{ spearslowduration }} seconds. \n\nPantheon then crashes down as a meteor at the target area. Deals up to {{ damagecalc }} magic damage to enemies in a line (decreased by up to {{ edgedamagereduction*100 }}% at the edges of the area).\n\nThis Ability instantly readies Mortal Will.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "180/165/150",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "5500",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "Armor Penetration"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ armorpenetration*100.000000 }}% -> {{ armorpenetrationnl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Pantheon",
+        "skill": "R",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} {{ci|Pantheon}} gains {{sti|{{as|armor penetration}}}}.",
+        "blurb2": "{{sbc|Active:}} '''Pantheon''' {{tip|channel|channels}}, then leaps high into the air. After a short time, he throws a spear at the target location that deals {{as|physical damage}} to nearby enemies and {{tip|slows}} them.",
+        "blurb3": "'''Pantheon''' then crashes down and creates a shockwave alongside himself that travels toward the target location, dealing {{as|magic damage}} to enemies hit.",
+        "blurb4": "'''Pantheon''' gains full stacks of {{sbc|{{ai|Mortal Will|Pantheon}}}} upon landing.",
+        "description": "{{sbc|Passive:}} '''Pantheon''' gains {{sti|{{as|armor penetration}}}}.",
+        "leveling": "{{st|Armor Penetration|{{ap|10 to 30}}%}}",
+        "icon2": "Grand Starfall.png",
+        "description2": "{{sbc|Active:}} '''Pantheon''' {{tip|channel|channels}} for 2 seconds, then leaps high into the air, {{tip|vanish|vanishing}} and becoming {{tip|cc-immune|immune to crowd control}} until he reappears. While in the air, '''Pantheon''' {{tip|channel|channels}} again for {{fd|2.25}} seconds and grants {{tip|sight}} around the target location {{fd|0.5}} seconds into the channel.",
+        "description3": "After {{tt|{{fd|0.8}}|Estimated}} seconds into the channel, '''Pantheon''' prepares for landing by hurling his spear to the target location over {{tt|{{fd|0.2}}|Estimated}} seconds that deals {{as|{{pp|type=[[File:Comet Spear.png|20px|border]] ''Comet Spear's'' rank|40 to 190 for 6|0 to 5|formula=40 + 30 per rank of ''Comet Spear''}} {{as|(+ 115% '''bonus''' AD)}} {{as|(+ 50% AP)}} physical damage|physical damage}} to enemies near its landing point and {{tip|slows}} them by 50% for 2 seconds.",
+        "description4": "Over the remaining {{tt|{{fd|1.25}}|Estimated}} seconds, '''Pantheon''' crashes down after {{tt|{{fd|0.55}}|Estimated}} seconds and creates a shockwave alongside himself that travels toward the target location over {{tt|{{fd|0.7}}|Estimated}} seconds, dealing {{as|magic damage}} to enemies hit, reduced by up to 50% for those hit at the edge of the area. Upon completion of the channel, '''Pantheon''' {{tip|blink|reappears}} at the target location and gains maximum stacks of ''{{ai|Mortal Will|Pantheon}}''.",
+        "leveling4": "{{st|Magic Damage|{{ap|300 to 700}} {{as|(+ 100% AP)}}|Reduced Damage|{{ap|300/2 to 700/2}} {{as|(+ 50% AP)}}}}",
+        "description5": "''Grand Starfall'' is put on a {{sti|cd|30-second}} cooldown if the first channel is canceled.",
+        "description6": "''Grand Starfall will cast at max range if cast beyond that.''",
+        "cooldown": "{{ap|180 to 150}}",
+        "cdstart": "on-cast",
+        "cast time": "{{fd|0.1}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "target range": "5500 / {{tt|1350|Landing}}",
+        "effect radius": "{{tip|er|icononly = true}} {{tt|450|Outer width, reduced damage}} / {{tt|125|Inner width, maximum damage}}",
+        "inner radius": "{{tip|cr|icononly = true}} {{tt|225|Initial spear impact radius}}",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "{{tip|Physical damage|Physical}} / {{tip|Magic damage|Magic}}",
+        "spelleffects": "spellaoe",
+        "projectile": "false",
+        "spellshield": "True",
+        "grounded": "true",
+        "silence": "special",
+        "flavorsound": "{{sm2|Pantheon Original R SFX 0.ogg}} Landing alert.",
+        "notes": "* ''Grand Starfall's'' first channel can be interrupted by {{tip|cast-inhibiting crowd control}}, but its second channel cannot because '''Pantheon''' gains crowd control immunity during it.\n* The spear's damage is not empowered by {{ai|Mortal Will|Pantheon}}, nor increased against enemies below {{as|20% of their '''maximum''' health}}.\n* During the second channel, '''Pantheon''' gains a {{tip|minimum health threshold}} of 1.\n** '''Pantheon''' will instantly die upon reappearing if he reaches this threshold.\n* Abilities that target '''Pantheon''' will redirect to the last location.\n* [[Ping|Pinging]] the ability will inform allies in [[Hotkeys and commands|chat]] which {{tip|sight|visible}} enemy champions are in range of ''Grand Starfall''.\n* '''Pantheon''' is considered to be in his original casting position even after leaping, but he will {{tip|blink}} to the target location the moment the second channel completes.\n* Using ''Grand Starfall'' will inform allies with a ping.\n* The following table refers for interactions while '''Pantheon''' is {{tip|channel|channeling}} (first channel):\n{{ct|channel|items=false|spells=false|attack=false|move=false|cast=false|consume=false|interrupts=death, ground, root, silence}}\n* The cast time and second channel have the same interactions except they can only be interrupted by {{tip|death}}.\n* ''Grand Starfall's'' first channel will also be interrupted if he enters the {{ai|Realm of Death|Mordekaiser}}."
+      }
+    }
+  }
+}

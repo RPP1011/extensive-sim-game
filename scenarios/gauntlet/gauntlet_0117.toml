@@ -1,0 +1,12 @@
+[scenario]
+name        = "2x Assassin + 2x Mage"
+seed        = 926565
+hero_count  = 4
+enemy_count = 16
+difficulty  = 3
+max_ticks   = 5000
+room_type   = "Climax"
+hero_templates = ["Assassin", "Assassin", "Mage", "Mage"]
+
+[assert]
+outcome = "Either"

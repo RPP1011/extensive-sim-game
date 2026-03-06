@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0072_3v3"
+seed = 1995
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["knight", "necromancer", "templar"]
+enemy_hero_templates = ["cleric", "arcanist", "elementalist"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0171_4v4_d4_s1"
+seed = 12294
+hero_count = 4
+enemy_count = 4
+difficulty = 4
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["assassin", "berserker", "druid", "knight"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

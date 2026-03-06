@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0057_4v6_d5"
+seed = 2180
+hero_count = 4
+enemy_count = 6
+difficulty = 5
+max_ticks = 10000
+room_type = "Climax"
+hero_templates = ["elementalist", "berserker", "arcanist", "blood_mage"]
+hp_multiplier = 5.0
+
+[assert]
+outcome = "Any"

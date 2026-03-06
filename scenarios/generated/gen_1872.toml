@@ -1,0 +1,13 @@
+[scenario]
+name = "pair_ranger_necromancer"
+seed = 1625
+hero_count = 2
+enemy_count = 3
+difficulty = 2
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["ranger", "necromancer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

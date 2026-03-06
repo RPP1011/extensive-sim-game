@@ -1,0 +1,279 @@
+{
+  "id": "Draven",
+  "name": "Draven",
+  "title": "the Glorious Executioner",
+  "resource_type": "Mana",
+  "tags": [
+    "Marksman"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "League of Draven",
+      "description": "Draven gains his fans' Adoration when he catches a Spinning Axe or kills a minion, monster, or tower. Killing enemy champions grants Draven bonus gold based on how much Adoration he has.",
+      "wiki_detail": {
+        "champion": "Draven",
+        "skill": "I",
+        "icon": "League of Draven.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Draven}} gains an ''Adoration'' stack when he catches a {{ai|Spinning Axe|Draven}} or kills a minion, monster, or tower. He loses ''Adoration'' stacks when he {{tip|death|dies}}.",
+        "blurb2": "When '''Draven''' kills an enemy {{tip|champion}}, he consumes all ''Adoration'' stacks to gain {{g|'''bonus''' gold}}.",
+        "description": "{{sbc|Innate:}} When '''Draven''' catches a ''{{ai|Spinning Axe|Draven}}'', kills a non-champion, or destroys a {{tip|turret}}, he gains a [[stack]] of ''Adoration''.",
+        "description2": "Additionally, whenever '''Draven''' kills a {{tip|minion}} or destroys a {{tip|ward}} or {{tip|stealthed trap|trap}}, he generates a [[File:Strike.png|20px]] ''Strike'' stack for 10 seconds, refreshing on subsequent kills and stacking up to 6 times. All ''Strike'' stacks are lost if he drops an ''{{ai|Spinning Axe|Draven|axe}}'' or a nearby {{tip|minion}} dies without him killing it. The sixth stack consumes all stacks to grant him 2 ''Adoration'' stacks.",
+        "description3": "When '''Draven''' kills an enemy {{tip|champion}}, he consumes all of his ''Adoration'' stacks and gains {{g|25 + (2{{times}}stacks) '''bonus''' gold}}.",
+        "description4": "'''Draven''' loses 50% of his ''Adoration'' stacks upon [[death]].",
+        "targeting": "Passive",
+        "affects": "Self",
+        "video": "Draven IVideo.ogv",
+        "notes": "* [[Assist]]s from {{ai|Death from Below|Pyke}} will trigger ''League of Draven''.\n* Upon reaching 150 ''Adoration'' stacks, and every 100 stacks thereafter, as well as when he cashes at least 150 stacks in, '''Draven''' automatically sends a chat message notifying all players.\n* A chat message will display to all players whenever:\n** ''League of Draven'' grants over {{g|300 gold}}.\n** ''League of Draven'' gets reduced.\n* None of the parts of ''League of Draven'' require actually using a {{ai|Spinning Axe|Draven}} for a kill to get ''Strike'' or ''Adoration'' stacks, as well as to cash ''Adoration'' stacks.\n* ''League of Draven'' will trigger upon receiving an assist on an enemy {{tip|execute|executed}} by {{cai|Singularity|Aurelion Sol}}.{{bug|1}}"
+      }
+    },
+    "Q": {
+      "id": "DravenSpinning",
+      "name": "Spinning Axe",
+      "description": "Draven's next attack will deal bonus physical damage. This axe will ricochet off the target high up into the air. If Draven catches it, he automatically readies another Spinning Axe. Draven can have two Spinning Axes at once.",
+      "tooltip": "Draven readies a Spinning Axe, causing his next Attack to deal an additional {{ totaldamage }} physical damage and ricochet into the air. If Draven catches it, he readies another Spinning Axe.\n\nDraven can hold two Spinning Axes at once.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/11/10/9/8",
+      "cost": "45",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "300",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "75",
+        "0",
+        "5.75",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Bonus AD Percentage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ adscaling }}% -> {{ adscalingNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Draven",
+        "skill": "Q",
+        "icon": "Spinning Axe.png",
+        "blurb": "{{sbc|Active:}} {{ci|Draven|Draven's}} next basic attack will throw an axe, dealing {{as|'''bonus''' physical damage}}.",
+        "blurb2": "This axe will ricochet off the target high up into the air. If '''Draven''' catches it, he automatically readies another ''Spinning Axe''. '''Draven''' can have two ''Spinning Axes'' at once.",
+        "description": "{{sbc|Active:}} '''Draven''' starts spinning his axe, empowering his next [[basic attack]] within {{fd|5.8}} seconds to deal {{as|'''bonus''' physical damage}}.",
+        "leveling": "{{st|Bonus Physical Damage|{{ap|40 to 60}} {{as|(+ {{ap|75 to 115}}% '''bonus''' AD)}}}}",
+        "icon2": "Draven Axe Indicator.png",
+        "description2": "Upon hitting the target, the axe then ricochets off of them to land after 2 seconds, with the location being determined by '''Draven's''' {{tt|current movement|See notes}}. If '''Draven''' catches the axe, he gains ''Spinning Axe's'' empowered attack again.",
+        "description3": "'''Draven''' can hold up to two ''Spinning Axes'' at once.",
+        "cooldown": "{{ap|12 to 8}}",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "cost": "45",
+        "costtype": "mana",
+        "targeting": "Auto",
+        "spelleffects": "basic",
+        "affects": "Self",
+        "damagetype": "Physical",
+        "onhiteffects": "Special",
+        "parry": "true",
+        "spellshield": "|projectile   = Special",
+        "video": "Draven QVideo.ogv",
+        "notes": "* The landing location is determined by '''Draven's''' [[movement speed]] and direction at the time ''Spinning Axe'' hits the target. If '''Draven''' is actually moving, it will bounce directly into his path. Otherwise, it will bounce back towards his current location, either landing directly onto him or to his sides.\n* ''Spinning Axe'' will place a visual cue on the ground where it will land. This visual cue is visible to both teams, although '''Draven''' himself will see a more prominent marker.\n* Recasting ''Spinning Axe'' will refresh the [[buff]] and add another axe if possible.\n** There is no limit to how many axes can be juggled at once, just the limit of 2 of them at a time in '''Draven's''' hands.\n* '''Draven''' used to be able to catch (steal) an enemy '''Draven''''s axes. This event also prompted a few unique voice lines.  \n* ''Spinning Axes'' may optically bypass {{ai|Wind Wall|Yasuo}} and {{ai|Blade Whirl|Samira}} but they will be destroyed upon collision. {{ai|Unbreakable|Braum}} will not prevent the axe from bouncing off when {{ci|Braum}} is the target.\n* {{ai|Unbreakable|Braum}} will not prevent the axe from bouncing off when {{ci|Braum}} is not the target.\n* The axe will still bounce against parrying effects.\n* {{iis|Runaan's Hurricane}} {{nie|Wind's Fury}} does not interact with the effects of the axes.\n* If a ''Spinning Axe'' is readied during a basic attack wind-up, the effects will be applied to the fired attack.\n* ''Spinning Axe'' attacks deal their total increased damage in a single instance of {{tip|basic damage}}.\n* The empowered attack will not trigger against [[structures]].\n** The duration will refresh on-attack against them.\n* ''Spînning Axe'' has an indicator that appears on the ground for Draven to stand on. Some skins have a unique indicator.\n<gallery navigation=true widths=\"128px\">\nGladiator Draven Axe Indicator.png         |[[File:Draven GladiatorCircle.png|32px]] Gladiator\nSoul Reaver Draven Axe Indicator.png       |[[File:Draven SoulReaverCircle.png|32px]] Soul Reaver\nPrimetime Draven Axe Indicator.png         |[[File:Draven PrimetimeCircle.png|32px]] Primetime\nPool Party Draven Axe Indicator.png        |[[File:Draven PoolPartyCircle.png|32px]] Pool Party\nBeast Hunter Draven Axe Indicator.png      |[[File:Draven BeastHunterCircle.png|32px]] Beast Hunter\nSanta Draven Axe Indicator.png             |[[File:Draven SantaCircle.png|32px]] Santa\nMecha Kingdoms Draven Axe Indicator.png    |[[File:Draven MechaKingdomsCircle.png|32px]] Mecha Kingdoms\nRuined Draven Axe Indicator.png            |[[File:Draven RuinedCircle.png|32px]] Ruined\nDebonair Draven Axe Indicator.png          |[[File:Draven DebonairCircle.png|32px]] Debonair\nFright Night Draven Axe Indicator.png      |[[File:Draven FrightNightCircle.png|32px]] Fright Night\nLa Ilusión Draven Axe Indicator.png        |[[File:Draven LaIlusiónCircle.png|32px]] La Ilusión\n</gallery>"
+      }
+    },
+    "W": {
+      "id": "DravenFury",
+      "name": "Blood Rush",
+      "description": "Draven gains increased Move Speed and Attack Speed. The Move Speed bonus decreases rapidly over its duration. Catching a Spinning Axe will refresh the cooldown of Blood Rush.",
+      "tooltip": "Draven becomes Ghosted, gains {{ e2 }}% Move Speed decaying over {{ e3 }} seconds and {{ e4 }}% Attack Speed for {{ e5 }} seconds.\n\nWhen Draven catches a Spinning Axe, this Ability's Cooldown is refreshed.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "40/35/30/25/20",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "50/55/60/65/70",
+        "1.5",
+        "20/25/30/35/40",
+        "3",
+        "-0.062/-0.069/-0.075/-0.081/-0.087",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Move Speed",
+          "Attack Speed",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ movespeed*100.000000 }}% -> {{ movespeednl*100.000000 }}%",
+          "{{ attackspeed*100.000000 }}% -> {{ attackspeednl*100.000000 }}%",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Draven",
+        "skill": "W",
+        "icon": "Blood Rush.png",
+        "blurb": "{{sbc|Active:}} {{ci|Draven}} gains {{sti|as|{{as|'''bonus''' attack speed}}}} and a burst of {{as|{{sti|movement speed}}}}. Whenever a {{ai|Spinning Axe|Draven}} is caught, ''Blood Rush's'' cooldown will {{sti|ah|reset}}.",
+        "description": "{{sbc|Active:}} '''Draven''' enters an adrenaline rush, gaining {{sti|{{as|'''bonus''' attack speed}}}} for 3 seconds as well as decaying {{sti|{{as|'''bonus''' movement speed}}}} and {{tip|ghosting}} for {{fd|1.5}} seconds.",
+        "leveling": "{{st|Bonus Attack Speed|{{ap|20 to 40}}%}}\n{{st|Bonus Movement Speed|{{ap|50 to 70}}%}}",
+        "description2": "Catching a ''{{ai|Spinning Axe|Draven}}'' resets ''Blood Rush's'' {{sti|cooldown}}.",
+        "cooldown": "12",
+        "cdstart": "on-cast",
+        "cast time": "none",
+        "cost": "{{ap|40 to 20}}",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "affects": "Self",
+        "damagetype": "|onhiteffects =",
+        "spellshield": "|video        = Draven WVideo.ogv",
+        "notes": "* Activating ''Blood Rush'' while the effect is already active will refresh the duration."
+      }
+    },
+    "E": {
+      "id": "DravenDoubleShot",
+      "name": "Stand Aside",
+      "description": "Draven throws his axes, dealing physical damage to targets hit and knocking them aside. Targets hit are slowed.",
+      "tooltip": "Draven chucks a sideways axe that deals {{ totaldamage }} physical damage, Knocks Back, and Slows by {{ e2 }}% for {{ e3 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "18/17/16/15/14",
+      "cost": "70",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1050",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "75/110/145/180/215",
+        "20/25/30/35/40",
+        "2",
+        "0.5",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Slow",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ e2 }}% -> {{ e2NL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Draven",
+        "skill": "E",
+        "icon": "Stand Aside.png",
+        "blurb": "{{sbc|Active:}} {{ci|Draven}} throws a fan of axes in a line in the target direction that deal {{as|physical damage}} to enemies hit, {{tip|airborne|knocking them aside}} and {{tip|slow|slowing}} them.",
+        "description": "{{sbc|Active:}} '''Draven''' throws a fan of axes in a line in the target direction, dealing {{as|physical damage}} to enemies hit, {{tip|airborne|knocking them aside}}, though not through terrain, and {{tip|slow|slowing}} them for 2 seconds.",
+        "leveling": "{{st|Physical Damage|{{ap|75 to 215}} {{as|(+ 50% '''bonus''' AD)}}}}{{st|Slow|{{ap|20 to 40}}%}}",
+        "target range": "{{tip|cr|icononly = true}} 1100",
+        "width": "{{tip|er|icononly = true}} 260",
+        "speed": "1400",
+        "cooldown": "{{ap|18 to 14}}",
+        "cost": "70",
+        "costtype": "Mana",
+        "targeting": "Direction",
+        "cast time": "{{fd|0.25}}",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "projectile": "true",
+        "spelleffects": "aoe",
+        "onhiteffects": "|spellshield  = True",
+        "video": "Draven EVideo.ogv",
+        "notes": "{{Effect at cast time end}}"
+      }
+    },
+    "R": {
+      "id": "DravenRCast",
+      "name": "Whirling Death",
+      "description": "Draven hurls two massive axes to deal physical damage to each unit struck. Whirling Death slowly reverses direction and returns to Draven after striking an enemy champion. Draven may also activate this ability while the axes are in flight to cause it to return early. Deals less damage for each unit hit and resets when the axes reverse direction. Executes enemies who have less health than Draven's number of Adoration stacks.",
+      "tooltip": "Draven hurls two massive axes that deal {{ rcalculateddamage }} physical damage. Upon hitting a champion or Recasting, they reverse direction and return to Draven. The axes deal {{ rdamagereductionperhit*100 }}% less damage for each enemy hit, down to a minimum of {{ rmindamagepercent }}%.\n\nIf Whirling Death would leave an enemy champion with less health than {{ rpassivestackscoefficient*100 }}% of Draven's current League of Draven stacks ({{ rpassivetruedamage }}), he will execute them.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "100/90/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "20000",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "Bonus AD Ratio"
+        ],
+        "effect": [
+          "{{ rbasedamage }} -> {{ rbasedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ rcoefficient*100.000000 }}% -> {{ rcoefficientnl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Draven",
+        "skill": "R",
+        "icon": "Whirling Death.png",
+        "blurbicon": "Whirling Death.png",
+        "blurb": "{{sbc|Active:}} {{ci|Draven}} hurls forth two massive axes that deal {{as|physical damage}} to enemies hit. This {{tip|execute|executes}} enemy {{tip|champions}} with {{sti|{{as|health}}}} that would be left within the current number of ''{{ai|League of Draven|Draven}}'' stacks.",
+        "blurb2": "''Whirling Death'' can be recast while the axes are active, and does so automatically upon hitting an enemy {{tip|champion}} or the edge of the map.",
+        "blurb3": "{{sbc|Recast:}} ''Whirling Death'' slowly reverses direction and homes back to '''Draven''', dealing {{as|physical damage}} to enemies hit.",
+        "description": "{{sbc|Active:}} '''Draven''' hurls two massive axes in the target direction that briefly grant {{tip|sight}} of their surroundings and deal {{as|physical damage}} to enemies hit. Enemy {{tip|champions}} that are damaged to or while below a {{sti|{{as|health}}}} threshold equal to the number of ''{{ai|League of Draven|Draven|Adoration}}'' stacks are {{tip|execute|executed}}.",
+        "description2": "''Whirling Death'' can be recast after 1 second while the axes are traveling, and does so automatically after the axes hit an enemy {{tip|champion}} or the edge of the [[Map (League of Legends)|map]].",
+        "leveling": "{{st|Physical Damage|{{ap|175 to 375}} {{as|(+ {{ap|110 to 150}}% '''bonus''' AD)}}|Total Physical Damage|{{ap|175*2 to 375*2}} {{as|(+ {{ap|110*2 to 150*2}}% '''bonus''' AD)}}}}",
+        "icon3": "Whirling Death 2.png",
+        "description3": "{{sbc|Recast:}} '''Draven''' forces the axes to reverse direction, slowly coming to a stop before homing back to him, dealing the same damage to enemies hit.",
+        "description4": "''Whirling Death'' deals {{pp|key=%|type=enemies hit|100*0.92^(x-1);40|x-1 for 12|formula=(100%-8%)^(1 per enemy hit). ''This is capped at 40% damage.''}} damage, resetting upon reversing direction.",
+        "leveling4": "{{st|Minimum Physical Damage|{{ap|175*0.4 to 375*0.4}} {{as|(+ {{ap|110*0.4 to 150*0.4}}% '''bonus''' AD)}}|Minimum Total Damage|{{ap|175*0.4*2 to 375*0.4*2}} {{as|(+ {{ap|110*0.4*2 to 150*0.4*2}}% '''bonus''' AD)}}}}",
+        "description5": "''Enemies can be hit only once per pass.''",
+        "cooldown": "{{ap|100 to 80}}",
+        "cdstart": "on-cast",
+        "cast time": "{{fd|0.5}}",
+        "cost": "100",
+        "costtype": "mana",
+        "target range": "Global",
+        "width": "{{tip|er|icononly = true}} {{tt|320|missile width}}",
+        "speed": "2000",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "projectile": "true",
+        "spelleffects": "spellaoe",
+        "onhiteffects": "|spellshield  = Special",
+        "video": "Draven RVideo.ogv",
+        "notes": "* ''Whirling Death's'' projectile has an [[File:Whirling Death Minimap.png|40px|link=]] icon on the mini-map while it is in flight. It can be seen by only '''Draven''' and his allies.\n* {{tip|Spell shield}} will block one instance of damage.\n{{Effect at cast time end}}"
+      }
+    }
+  }
+}

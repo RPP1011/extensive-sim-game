@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_warden_shadow_dancer_alchemist"
+seed = 1172
+hero_count = 3
+enemy_count = 4
+difficulty = 2
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["warden", "shadow_dancer", "alchemist"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

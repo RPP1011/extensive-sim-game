@@ -1,0 +1,13 @@
+[scenario]
+name = "pair_templar_ranger_s1"
+seed = 11221
+hero_count = 2
+enemy_count = 3
+difficulty = 2
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["templar", "ranger"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

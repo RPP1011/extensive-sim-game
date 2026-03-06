@@ -1,0 +1,289 @@
+{
+  "id": "Syndra",
+  "name": "Syndra",
+  "title": "the Dark Sovereign",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Transcendent",
+      "description": "Syndra collects Splinters of Wrath from gaining levels and damaging enemies which upgrade her abilities.\n\nDark Sphere: Syndra can hold an additional charge\nForce of Will: Bonus true damage.\nScatter the Weak: Increased width and slows all targets\nUnleashed Power: Executes low health targets",
+      "wiki_detail": {
+        "champion": "Syndra",
+        "skill": "I",
+        "icon": "Transcendent.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Syndra}} collects {{as|Splinters of Wrath|buzzword}} that enhance her [[champion ability|abilities]] based on the number of them collected, up to a maximum amount. She can collect them from dealing damage to enemy {{tip|champions}}, ranking up her abilities, and killing large {{tip|minions}}.",
+        "blurb2": "Collecting a {{as|Splinter of Wrath|buzzword}} from an enemy restores {{sti|{{As|mana}}}} for '''Syndra'''.",
+        "blurb3": "At the maximum amount of {{as|Splinters|buzzword}}, her {{sti|{{as|ability power}}}} is increased.",
+        "description": "{{sbc|Innate:}} '''Syndra''' collects {{as|Splinters of Wrath|buzzword}} that enhance each of her abilities based on the number of them collected, [[stack]]ing up to 120 times. She gains {{as|Splinters of Wrath|buzzword}} from the following:\n* Dealing two instances of [[champion ability|ability]] damage to an enemy champion within 4 seconds grants {{as|{{pp|1;2;3|1;11;18}} Splinters|buzzword}}. This cannot occur on the same target more than once every 8 seconds.\n* Ranking up an ability with any skill points beyond level 1 grants {{as|5 Splinters|buzzword}}, up to {{as|85|buzzword}}.\n* Killing a large minion grants {{as|1 Splinter|buzzword}}.",
+        "description2": "Collecting a {{as|Splinter of Wrath|buzzword}} from an enemy restores {{sti|mana|{{as|{{pp|20;25;30;35;40;48;56;64;72;80;95;110;125;140;155;175;195;215|1 to 18 by 1|formula=20 + 5 per level until level 5, then + 8 per level until level 10, then + 15 per level until level 15, then + 20 per level.}} mana}}}}. {{as|Splinters of Wrath|buzzword}} are brought to '''Syndra''' from enemies over {{fd|0.6}} seconds.",
+        "icon3": "Transcendent 2.png",
+        "description3": "At {{as|120 Splinters of Wrath|buzzword}}, '''Syndra''' achieves ''Transcendence'', increasing her {{sti|{{as|ability power}}}} by 15%.",
+        "description4": "'''''Syndra''' can collect {{as|Splinters of Wrath|buzzword}} from enemies even if she is at maximum stacks. These {{as|Splinters|buzzword}} do not grant any stacks, but will still restore {{as|mana}} for '''Syndra'''.''",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|grounded     =",
+        "knockdown": "|notes        = \n* '''Syndra's''' abilities gain additional visual effects when they reach their {{as|Splinter of Wrath|buzzword}} thresholds. Her spells will also gain a red colored tint outlining the VFX.\n** ''{{ai|Dark Sphere|Syndra}}'' will cause fractures to appear in the earth when it is used."
+      }
+    },
+    "Q": {
+      "id": "SyndraQ",
+      "name": "Dark Sphere",
+      "description": "Syndra conjures a Dark Sphere dealing magic damage. The sphere remains and can be manipulated by her other powers.",
+      "tooltip": "Syndra conjures a Dark Sphere, dealing {{ totaldamage }} magic damage. The Dark Sphere remains for {{ sphereduration }} seconds and can be manipulated by Syndra's other Abilities.\n\n{{ spell.syndrapassive:q1upgradethreshold }} Splinters of Wrath: Syndra can store {{ upgrade1maxammo }} charges of Dark Sphere.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7",
+      "cost": "40/45/50/55/60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "800",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "@AbilityResourceName@ Cost",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cost }} -> {{ costNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Syndra",
+        "skill": "Q",
+        "icon": "Dark Sphere.png",
+        "blurb": "{{sbc|Active:}} After a brief delay, {{ci|Syndra}} conjures a ''Dark Sphere'' at the target location that deals {{as|magic damage}} to nearby enemies. The ''Dark Sphere'' then remains on the ground for a few seconds.",
+        "blurb4": "{{sbc|{{ai|Transcendent|Syndra}} Bonus:}} '''Syndra''' periodically stocks a ''Dark Sphere'' charge.",
+        "description": "{{sbc|Active:}} '''Syndra''' conjures a ''Dark Sphere'' at the target location that appears after a {{fd|0.6}}-second delay, dealing {{as|magic damage}} to nearby enemies. The ''Dark Sphere'' then remains on the ground for 6 seconds.",
+        "leveling": "{{st|Magic Damage|{{ap|75 to 215}} {{as|(+ 60% AP)}}}}",
+        "icon2": "Dark Sphere 2.png",
+        "description2": "{{sbc|{{ai|Transcendent|Syndra}} Bonus:}} Collecting {{as|40 Splinters of Wrath|buzzword}} causes '''Syndra''' to periodically [[stock]] a ''Dark Sphere'' charge, up to a maximum of 2.",
+        "description3": "''Dark Sphere will cast at max range if cast beyond that.''",
+        "cooldown": "7",
+        "recharge": "{{tt|7|Recharge timer for Dark Sphere with the Transcendent bonus}}",
+        "static": "{{tt|{{fd|1.25}}|Cooldown between casts for Dark Sphere with the Transcendent bonus}}",
+        "cost": "{{ap|40 to 60}}",
+        "costtype": "Mana",
+        "target range": "800",
+        "effect radius": "{{tip|cr|icononly = true}} 210",
+        "targeting": "Location",
+        "cast time": "none",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spelleffects": "Aoe",
+        "onhiteffects": "|spellshield  = True",
+        "notes": "* ''Dark Sphere'' can be conjured inside terrain, but cannot be thrown there with {{ai|Force of Will|Syndra}}.\n* There is no limit as to how many ''Dark Spheres'' can be active at a time.\n* After '''Syndra''' gains the {{ai|Transcendent|Syndra}} bonus, the number of ''Dark Sphere'' charges available is represented by small Sphere icons under her [[health bar]], visible to the player only."
+      }
+    },
+    "W": {
+      "id": "SyndraW",
+      "name": "Force of Will",
+      "description": "Syndra picks up and throws a Dark Sphere or enemy minion dealing magic damage and slowing the Move Speed of enemies.",
+      "tooltip": "Syndra grabs a Dark Sphere, enemy minion, or non-epic monster. She drags it with her and can Recast for up to 5 seconds.\n\nRecast: Syndra hurls the object, dealing {{ throwdamage }} magic damage and Slowing by {{ totalslowamount }}% for {{ f2 }} seconds.\n\n{{ spell.syndrapassive:wupgradethreshold }} Splinters of Wrath: This Ability deals an additional {{ tooltiponlypassivebonuspercent }} true damage.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/11/10/9/8",
+      "cost": "60/70/80/90/100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "925",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "@AbilityResourceName@ Cost",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Syndra",
+        "skill": "W",
+        "icon": "Force of Will.png",
+        "blurb": "{{sbc|Active:}} {{ci|Syndra}} grabs the nearest ''{{ai|Dark Sphere|Syndra}}'', enemy {{tip|minion}} or non-epic {{tip|monster}} from the target location, and holds it for a few seconds.",
+        "blurb2": "''Force of Will'' can be recast while the target is grabbed.",
+        "blurb3": "{{sbc|Recast:}} '''Syndra''' tosses the grabbed target to the target location, which deals {{as|magic damage}} and briefly {{tip|slows}} them and nearby enemies.",
+        "blurb4": "{{sbc|{{ai|Transcendent|Syndra}} Bonus:}} ''Force of Will'' deals {{as|'''bonus''' true damage}}.",
+        "description": "{{sbc|Active:}} '''Syndra''' grabs the nearest ''{{ai|Dark Sphere|Syndra}}'', enemy {{tip|minion}} or non-epic {{tip|monster}} within 500 units from the target location, and holds the target for 5 seconds. If a ''Dark Sphere'' is grabbed, its duration is refreshed; if a minion or monster is grabbed, it is put in {{tip|stasis}}. She prioritizes grabbing the nearest unit, then ''{{ai|Dark Sphere|Syndra|Dark Spheres}}''.",
+        "description2": "''Force of Will'' can be recast while the target is being held.",
+        "icon3": "Force of Will 2.png",
+        "description3": "{{sbc|Recast:}} '''Syndra''' throws the grabbed target towards the target location, granting {{tip|sight}} of their surroundings as they fall and dealing {{as|magic damage}} to them and nearby enemies. All targets hit are {{tip|slow|slowed}} for {{fd|1.5}} seconds.",
+        "leveling3": "{{st|Magic Damage|{{ap|70 to 230}} {{as|(+ 70% AP)}}}}<!--\n-->{{st|Slow|{{ap|25 to 45}}%}}",
+        "icon4": "Force of Will 4.png",
+        "description4": "{{sbc|{{ai|Transcendent|Syndra}} Bonus:}} Collecting {{as|60 Splinters of Wrath|buzzword}} enhances ''Force of Will'' to deal {{sti|true damage|{{as|12%|true damage}}}} {{as|(+ 2% per 100 AP)}} {{as|'''bonus''' true damage}}.",
+        "cooldown": "{{ap|12 to 8}}",
+        "cdstart": "post-effect",
+        "cost": "{{ap|60 to 100}}",
+        "costtype": "Mana",
+        "target range": "{{tip|cr|icononly = true}} {{tt|925|Grab range}} / {{tt|950|Throw range}} / {{tt|500|Nearest target grab range}}",
+        "effect radius": "{{tip|cr|icononly = true}} 225",
+        "targeting": "[[Unit-targeted|Unit]] / [[Location-targeted|Location]]",
+        "cast time": "none",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "spelleffects": "Aoe",
+        "projectile": "false",
+        "onhiteffects": "|spellshield  = True",
+        "notes": "* The initial cast does not count as an ability activation for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n**Detonating the ability manually does.\n* If the ability is not recast within the duration, '''Syndra''' will release the unit or ''Dark Sphere'' that she is holding.\n* ''Force of Will'' does not destroy in-flight {{tip|projectile|projectiles}} for the {{tip|minion}} or {{tip|monster}} grabbed.\n* ''Force of Will'' {{tip|cleanse|cleanses}} the target {{tip|minion}} or {{tip|monster}} grabbed from all {{tip|crowd control}}.\n* ''Force of Will'' prevents non-sphere targets from dying when picking them up.\n* ''Force of Will'' cannot grab units that are being {{si|Teleport|Teleported}} on.\n* '''Syndra''' can grab {{tip|pet|pets}}, such as {{cai|Jack in the Box|Shaco}}.\n* Casting {{si|Teleport}} or {{si|Recall}} will cause '''Syndra''' to cancel ''Force of Will'' autonomously and drop anything she is holding.\n* Grabbing prioritizes ''Dark Spheres''.\n* Enemy {{tip|pet|pets}} that passively have an effect on their surroundings will continue to affect the area around them while they are being held. For example, {{cai|Summon: Tibbers|Annie|Tibbers}} will continue to inflict burn damage on surrounding units while being held.\n* Grabbing a {{ai|Dark Sphere|Syndra}} will cause the duration on it to refresh, but only on the first cast, not when it is thrown.\n* ''Force of Will'' has additional effects when targeting the {{ui|Blue Sentinel}} and {{ui|Red Brambleback}}. Throwing the former will refund 10 {{tip|mana}} to '''Syndra''' upon cast and will reduce the {{sti|cooldown}} of ''Force of Will'' by 1 second, while throwing the latter will apply the {{bi|Crest of Cinders}} burn to any affected units in the [[area of effect]].\n* ''Force of Will's'' first cast uses a [[File:Force of Will 3.png|20px|link=]] modified icon while it has the {{ai|Transcendent|Syndra}} bonus."
+      }
+    },
+    "E": {
+      "id": "SyndraE",
+      "name": "Scatter the Weak",
+      "description": "Syndra knocks enemies and Dark Spheres back dealing magic damage. Enemies hit by Dark Spheres become stunned.",
+      "tooltip": "Syndra projects a wave of force, Knocking Back enemies and Dark Spheres and dealing {{ totaldamage }} magic damage.\n\nDark Spheres that are pushed Stun enemies for {{ stunduration }} seconds and deal {{ totaldamage }} magic damage.\n\n{{ spell.syndrapassive:eupgradethreshold }} Splinters of Wrath: This Ability's width is increased and Slows enemies by {{ upgradedslowamount*100 }}% for {{ upgradedslowduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "15",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Syndra",
+        "skill": "E",
+        "icon": "Scatter the Weak.png",
+        "blurb": "{{sbc|Active:}} {{ci|Syndra}} propels a wave of force in a cone in the target direction that deals {{as|magic damage}} and {{tip|airborne|knocks back}} enemies hit based on proximity.",
+        "blurb2": "A ''{{ai|Dark Sphere|Syndra}}'' can be knocked back further, which {{tip|airborne|knocks back}} enemies hit and briefly {{tip|stun|stuns}} and {{tip|standard sight|reveals}} them, dealing the same damage if they were not hit already.",
+        "blurb4": "{{sbc|{{ai|Transcendent|Syndra}} Bonus:}} ''Scatter the Weak's'' scatter angle is increased and it briefly {{tip|slow|slows}} enemies hit.",
+        "description": "{{sbc|Active:}} '''Syndra''' propels a wave of force in a cone in the target direction that deals {{as|magic damage}} to enemies hit and {{tip|airborne|knocks them back}} for 400 units and up to 800 units away from '''Syndra''' based on proximity, though not through terrain.",
+        "leveling": "{{st|Magic Damage|{{ap|75 to 235}} {{as|(+ 45% AP)}}}}",
+        "description2": "''{{ai|Dark Sphere|Syndra|Dark Spheres}}'' can be knocked back for 950 units and up to 1200 units away from '''Syndra''' based on proximity, {{tip|airborne|knocking back}} enemies they hit over 70 units, though not through terrain. Targets hit are also {{tip|stun|stunned}} for {{fd|1.25}} seconds, during which they are also {{tip|standard sight|revealed}}, and dealt ''Scatter the Weak's'' damage if they were not damaged by the initial cast.",
+        "icon3": "Scatter the Weak 2.png",
+        "description3": "{{sbc|{{ai|Transcendent|Syndra}} Bonus:}} Collecting {{as|80 Splinters of Wrath|buzzword}} enhances ''Scatter the Weak'' to have an increased scatter angle and {{tip|slow}} enemies hit by 70% for {{fd|1.25}} seconds starting after the {{tip|airborne|knock back}} ends or if the target was hit by a pushed ''Dark Sphere'', after the {{tip|stun}} has ended.",
+        "cooldown": "17",
+        "cost": "50",
+        "costtype": "Mana",
+        "range": "{{tip|cr|icononly = true}} 700 / {{tt|800|Dark Spheres}} / {{tt|1300|Maximum push range of 1200 with 100 bonus hit range of Spheres from Syndra's location at the time they are hit}}",
+        "cast time": "{{fd|0.25}}",
+        "collision radius": "{{tt|70|Dark Sphere collision radius}}",
+        "angle": "56{{degree}} / {{tt|84{{degree}}|Transcendent bonus}}",
+        "speed": "{{tt|2500|Visible cone missiles. 2 more waves of invisible cone missiles are spawned at 1600 and 1100 speed which hit only spheres spawned into the area late}} / {{tt|2000|Pushed spheres missile speed}}",
+        "width": "{{tip|er|icononly = true}} {{tt|120|Individual missiles making up the cone}} / {{tt|200|Pushed spheres missile width}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "projectile": "special",
+        "spelleffects": "Aoe",
+        "onhiteffects": "|spellshield  = True",
+        "notes": "* ''Scatter the Weak'' is blocked by the portion of {{ai|Wind Wall|Yasuo}} it collides with. ''Spheres'' thrown will stop upon colliding with the wall.\n* ''Spheres'' spawned at close range of the ability are more likely to be hit.\n* Enemies and spheres will be knocked into the direction directly away from '''Syndra''', and the knock back has no dispersion.\n* ''Scatter the Weak'' will knock back ''Spheres'' even farther if they are inside terrain, up until they reach open space. If the terrain they're inside in cannot be surpassed, the ''Spheres'' will be knocked in the opposite direction.\n* ''Scatter the Weak'' will delay the expiration of a ''Sphere'' until after it finishes being knocked back.\n{{Effect at cast time end}}\n* Once ''Scatter the Weak'' has been learned, an arrow directly in front of every {{ai|Dark Sphere|Syndra}} will appear to signify the direction the ''sphere'' will be knocked towards, each one corresponding to '''Syndra's''' position. This is only visible to '''Syndra'''.\n[[File:Dark_Sphere_directional_arrows.png|center|250px]]"
+      }
+    },
+    "R": {
+      "id": "SyndraR",
+      "name": "Unleashed Power",
+      "description": "Syndra bombards an enemy Champion with all of her Dark Spheres.",
+      "tooltip": "Passive: Dark Sphere gains an additional {{ qhasteperrank }} Ability Haste for each rank of Unleashed Power.\n\nSyndra draws on her full cataclysmic power, launching the 3 Dark Spheres orbiting her plus up to 4 more nearby at an enemy champion. Each Dark Sphere deals {{ damagecalc }} magic damage (max {{ maxdamagecalc }} magic damage).\n\n{{ spell.syndrapassive:rupgradethreshold }} Splinters of Wrath: This Ability executes enemies below {{ upgradeexecutethreshold*100 }}% Health.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "675",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "Dark Sphere Ability Haste"
+        ],
+        "effect": [
+          "{{ damagepersphere }} -> {{ damagepersphereNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ tooltiponlytotalqhaste }} -> {{ tooltipoNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Syndra",
+        "skill": "R",
+        "icon": "false",
+        "icon2": "Unleashed Power.png",
+        "blurb": "{{sbc|Active:}} {{ci|Syndra}} creates a few ''{{ai|Dark Sphere|Syndra|Dark Spheres}}'' and grabs a few more nearby, then barrages them at the target enemy champion. Each sphere deals {{as|magic damage}} upon hit, and remains on the ground for a few seconds.",
+        "blurb4": "{{sbc|{{ai|Transcendent|Syndra}} Bonus:}} ''Unleashed Power'' {{tip|execute|executes}} enemies once they reach a certain {{sti|{{as|health}}}} threshold.",
+        "description": "{{sbc|Passive:}} ''{{ai|Dark Sphere|Syndra}}'' gains ability haste.",
+        "leveling": "{{st|Ability Haste|{{ap|10 to 30}}}}",
+        "description2": "{{sbc|Active:}} '''Syndra''' enters a {{rutngt|0.25}} cast time, creating ''{{ai|Dark Sphere|Syndra|3 Dark Spheres}}'' and grabbing up to 4 nearby ''Dark Spheres'' that were last spawned. Afterwards, the collected ''Dark Spheres'' are barraged at the target enemy champion, each dealing {{as|magic damage}} upon hit.",
+        "leveling2": "{{st|Magic Damage per Sphere|{{ap|100 to 180}} {{as|(+ 17% AP)}}}}<!--\n-->{{st|Minimum Magic Damage|{{ap|100*3 to 180*3}} {{as|(+ {{ap|17*3}}% AP)}}|Maximum Magic Damage|{{ap|100*7 to 180*7}} {{as|(+ {{ap|17*7}}% AP)}}}}",
+        "description3": "The ''{{ai|Dark Sphere|Syndra|Dark Spheres}}'' will then remain on the ground for 6 seconds.",
+        "icon4": "Unleashed Power 2.png",
+        "description4": "{{sbc|{{ai|Transcendent|Syndra}} Bonus:}} Collecting {{as|100 Splinters of Wrath|buzzword}} enhances ''Unleashed Power'' to {{tip|execute}} the target if it would damage them to below {{sti|{{as|15% of their '''maximum''' health}}}}.",
+        "cooldown": "{{ap|120 to 80}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "target range": "{{tip|cr|icononly = true}} 675",
+        "effect radius": "{{tt|3000|Dark Sphere grab range}}",
+        "cast time": "none",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "magic",
+        "projectile": "true",
+        "spelleffects": "spell",
+        "onhiteffects": "|callforhelp  = true",
+        "spellshield": "Special",
+        "notes": "* ''Unleashed Power'' makes '''Syndra''' enter a brief cast time, but the initial cast is completed instantly. If she dies during this cast time, ''Unleashed Power'' will still complete the remaining effect.\n* Casting ''Unleashed Power'' on a target that becomes {{tip|untargetable}} while the ''spheres'' are in flight will not destroy them but cause them to deal no damage instead.\n* ''Spheres'' already in flight will still travel if '''Syndra's''' target dies, but any remaining ''sphere'' will not. However, their duration will still get reset.\n* A ''Dark Sphere'' summoned very shortly before ''Unleashed Power'' '''will''' be used as one of the spheres that get thrown. \n** Depending on how many ''spheres'' are on the map and how far away the enemy is upon casting ''Unleashed Power'' it is possible that '''Syndra''' would conjure the ''sphere'' behind her as if she was going to throw it, but she won't.\n* ''Unleashed Power'' will not add a ''Sphere'' that '''Syndra''' is holding with {{ai|Force of Will|Syndra}}.\n* ''Spheres'' that are being pushed by {{ai|Scatter the Weak|Syndra}} (normally ones that were made late during the push) will not get picked up for ''Unleashed Power''.\n* {{tip|Spell shield}} will only block the damage of a single ''sphere''."
+      }
+    }
+  }
+}

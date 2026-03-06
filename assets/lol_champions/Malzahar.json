@@ -1,0 +1,283 @@
+{
+  "id": "Malzahar",
+  "name": "Malzahar",
+  "title": "the Prophet of the Void",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Void Shift",
+      "description": "When he hasn't recently taken damage or been crowd controlled, Malzahar gains massive damage reduction and crowd control immunity, lingering for a short period after taking damage.",
+      "wiki_detail": {
+        "champion": "Malzahar",
+        "skill": "I",
+        "icon": "Void Shift.png",
+        "blurb": "{{sbc|Innate:}} Periodically, {{ci|Malzahar}} gains ''Void Shift'' until he takes non-{{tip|minion}} damage or negates a {{tip|crowd control}} effect, to which it then lingers for a brief time before expiring.",
+        "blurb2": "''Void Shift's'' {{sti|cooldown}} refreshes whenever '''Malzahar''' takes non-{{tip|minion}} damage or is affected by a {{tip|crowd control}} effect.",
+        "blurb4": "{{sbc|Void Shift:}} '''Malzahar''' gains {{tip|Cc-immune|crowd control immunity}} and massive damage reduction.",
+        "description": "{{sbc|Innate:}} Periodically, '''Malzahar''' gains ''Void Shift'' until he takes non-{{tip|minion}} damage or negates a {{tip|crowd control}} effect, to which it then lingers for {{fd|0.25}} seconds before expiring. <br/><br/>{{sbc|Void Shift:}} '''Malzahar''' gains {{tip|Cc-immune|crowd control immunity}} and 90% damage reduction.",
+        "description2": "''Void Shift's'' {{sti|cooldown}} refreshes whenever '''Malzahar''' takes non-{{tip|minion}} damage or is affected by a {{tip|crowd control}} effect, and resets upon [[death|respawning]].",
+        "targeting": "Passive",
+        "affects": "Self",
+        "static": "{{pp|30;24;18;12|1;6;11;16}}",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|projectile   =",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Void Shift'' will not resist allied {{tip|crowd control}} nor will it be deactivated by them.\n* ''Void Shift'' will not mitigate {{tip|true damage}} but the buff will still be consumed.\n** It does not deactivate against the {{tip|Nexus Obelisk}}.\n* {{tip|Shield|Shields}} will take priority over ''Void Shift'', but the buff will still be consumed (does not reduce damage inflicted). ''Void Shift'' triggers even if the shield negated the damage entirely.\n** However, if '''Malzahar''' has a {{tip|spell shield}} and the {{tip|shield}} fully mitigates the damage, ''Void Shift'' does not trigger.{{bug}} The damage taken must be from an effect that cannot be negated by ''spell shields''.\n* {{tip|Spell shield|Spell shields}} take priority over ''Void Shift''. If the triggering hostile ability does not contain a {{tip|crowd control}} effect, both ''Void Shift'' and the ''spell shield'' break simultaneously.\n** Since ''spell shields'' are precedent over ''Void Shift'', applied {{tip|crowd control}} from effects that cannot be blocked by ''spell shields'' (i.e. {{ai|Wall of Pain|Karthus}}) will also ignore ''Void Shift'' despite its {{tip|cc-immune|crowd control immunity}}. The effect must not damage '''Malzahar''' for this event to take place.\n* ''Void Shift'' will specifically not deactivate if '''Malzahar''' eats {{ui|Honeyfruit}} or is within a hostile {{ii|Frozen Heart}} passive [[aura]].\n* ''Void Shift'' will prevent {{ai|Chum the Waters|Fizz}} from attaching to him."
+      }
+    },
+    "Q": {
+      "id": "MalzaharQ",
+      "name": "Call of the Void",
+      "description": "Malzahar opens up two portals to the Void. After a short delay, they fire projectiles that deal Magic Damage and silence enemy champions.",
+      "tooltip": "Malzahar opens two portals to the Void that fire projectiles inward, dealing {{ totaldamagetooltip }} magic damage and Silencing for {{ e2 }} second(s).{{ spellmodifierdescriptionappend }}",
+      "cooldown": "6",
+      "cost": "60/65/70/75/80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "900",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "70/105/140/175/210",
+        "1/1.25/1.5/1.75/2",
+        "0.4",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Silence Duration",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ e2 }} -> {{ e2NL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Malzahar",
+        "skill": "Q",
+        "icon": "Call of the Void.png",
+        "blurb": "{{sbc|Active:}} {{ci|Malzahar}} opens two portals to the void at the target location that last a brief time, which then deal {{as|magic damage}} to enemies between and briefly {{tip|silence}} them.",
+        "description": "{{sbc|Active:}} '''Malzahar''' opens two portals to the void centered at the target location, granting {{tip|sight}} of the area in between. After {{fd|0.4}} seconds, enemies between the portals are dealt {{as|magic damage}} and {{tip|silence|silenced}} for a duration.",
+        "leveling": "{{st|Magic Damage|{{ap|70 to 210}} {{as|(+ 55% AP)}}}}\n{{st|Silence Duration|{{ap|1 to 2}} seconds}}",
+        "target range": "{{tt|900|Cast range}}",
+        "effect radius": "200",
+        "cooldown": "6",
+        "cast time": "{{fd|0.25}}",
+        "cost": "{{ap|60 to 80}}",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* {{tip|Spell shield}} will prevent ''Call of the Void's'' refresh on {{ai|Malefic Visions|Malzahar}}.\n** {{ais|Malefic Visions|Malzahar}} debuff will also be removed.{{bug|2}}"
+      }
+    },
+    "W": {
+      "id": "MalzaharW",
+      "name": "Void Swarm",
+      "description": "Malzahar summons Voidlings to attack nearby enemies.",
+      "tooltip": "Passive: Malzahar's other Abilities give him a stack when cast (max {{ stackcap }}).\n\nActive: Malzahar summons a Voidling plus an additional Voidling per stack. Voidlings last {{ voidlingduration }} seconds and deal {{ voidlingbonusdamagetooltip }} magic damage each hit.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8",
+      "cost": "40/45/50/55/60",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "150",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "25000",
+        "2",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Voidling Damage",
+          "Voidling Duration",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ voidlingbasedamage }} -> {{ voidlingbasedamageNL }}",
+          "{{ voidlingduration }} -> {{ voidlingdurationNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Malzahar",
+        "skill": "W",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} {{ci|Malzahar}} generates a stack of ''Zz'Rot Swarm'' when he casts another [[champion ability|ability]], up to a maximum.",
+        "blurb2": "{{sbc|Active:}} '''Malzahar''' consumes all ''Zz'Rot Swarm'' stacks to summon a {{ui|Voidling}} at the target location. Additional ''Voidlings'' are then summoned for each ''Zz'Rot Swarm'' stack consumed.",
+        "blurb3": "''Voidlings'' target nearby enemies and deal {{as|magic damage}} with their attacks, prioritizing those targeted by ''{{ai|Malefic Visions|Malzahar}}'' and ''{{ai|Nether Grasp|Malzahar}}''.",
+        "description": "{{sbc|Passive:}} '''Malzahar''' generates a stack of ''Zz'Rot Swarm'' when he casts another [[champion ability|ability]], up to a maximum of 2.",
+        "icon2": "Void Swarm.png",
+        "description2": "{{sbc|Active:}} '''Malzahar''' consumes all ''Zz'Rot Swarm'' stacks and, after a {{fd|0.5}}-second delay, summons a {{ui|Voidling}} at the target location. Additional ''Voidlings'' are then summoned for each ''Zz'Rot Swarm'' stack consumed.",
+        "leveling2": "{{st|Voidling Duration|{{ap|8|8|9|9|10}} seconds}}",
+        "description3": "''Voidlings'' deal {{as|magic damage}} with their attacks, reduced by 50% against epic [[monster]]s and increased by 200% to enemy {{tip|minions}} infected by ''{{ai|Malefic Visions|Malzahar}}''.",
+        "leveling3": "{{st|Magic Damage|{{pp|5+3.5*(x-1)*(0.7025+0.0175*(x-1))|formula=5 + 3.5 growth}} (+ {{ap|12 to 20}}) {{as|(+ 40% '''bonus''' AD)}} {{as|(+ 20% AP)}}}}",
+        "description4": "''See [[Malzahar/LoL#Pets|Pets]] for more details about Voidlings.''",
+        "target range": "150",
+        "cast time": "none",
+        "cooldown": "8",
+        "cost": "{{ap|40 to 60}}",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "|spelleffects = spellaoe",
+        "parry": "|projectile   =",
+        "grounded": "|knockdown    =",
+        "notes": "* '''Malzahar''' loses all [[stack]]s upon [[death]].\n* ''Zz'Rot Swarm'' stacks are gained per cast and not per ability activation. For example, if {{ai|Malefic Visions|Malzahar}} is cast and the ability cancels under certain circumstances, a ''Zz'Rot Swarm'' stack will still be granted despite the ability's failure to complete."
+      }
+    },
+    "E": {
+      "id": "MalzaharE",
+      "name": "Malefic Visions",
+      "description": "Malzahar infects his target's mind with cruel visions of their demise, dealing damage over time. Using Malzahar's other spells on the target will refresh the visions.\n\nIf the target dies while afflicted by the visions, they pass on to a nearby enemy unit and Malzahar gains Mana. Malzahar's Voidlings are attracted to affected units.",
+      "tooltip": "Malzahar inflicts terrible visions, dealing {{ totaldamage }} magic damage over {{ duration }} seconds. Applying Call of the Void or Nether Grasp to the victim during this time refreshes the visions.\n\nIf the victim dies, Malzahar gains {{ manarestore }} Mana and the visions spread to the nearest enemy.\n\nMalefic Visions executes minions below {{ minionexecutethreshold }} Health.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11/10/9/8/7",
+      "cost": "60/70/80/90/100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "8",
+        "2",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Malzahar",
+        "skill": "E",
+        "icon": "Malefic Visions.png",
+        "blurb": "{{sbc|Active:}} {{ci|Malzahar}} infects the target enemy's mind, continually dealing {{as|magic damage}} over a few seconds, which refreshes upon damaging them with ''{{ai|Call of the Void|Malzahar}}'' or ''{{ai|Nether Grasp|Malzahar}}''.",
+        "blurb2": "If the target dies while infected, they spread ''Malefic Visions'' onto the closest nearby enemy and '''Malzahar''' restores a portion of {{sti|mana|{{as|his '''maximum''' mana}}}}.",
+        "description": "{{sbc|Active:}} '''Malzahar''' infects the target enemy's mind, dealing {{as|magic damage}} every {{fd|0.25}} seconds over 4 seconds, which refreshes upon damaging them with ''{{ai|Call of the Void|Malzahar}}'' or ''{{ai|Nether Grasp|Malzahar}}''. ''Malefic Visions'' executes {{tip|minions}} if they would be damaged below {{sti|health|{{as|{{pp|10 to 30 for 11}} health}}}}.",
+        "leveling": "{{st|Total Magic Damage|{{ap|80 to 220}} {{as|(+ 80% AP)}}|Magic Damage Per Tick|{{ap|80/16 to 220/16}} {{as|(+ {{ap|80/16}}% AP)}}}}",
+        "description2": "If the target dies while infected, they spread ''Malefic Visions'' onto the closest nearby enemy and '''Malzahar''' restores {{sti|mana|{{as|2% of his '''maximum''' mana}}}}.",
+        "target range": "{{tip|cr|icononly = true}} 650",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|500|Bounce range}}",
+        "cooldown": "{{ap|11 to 7}}",
+        "cost": "{{ap|60 to 100}}",
+        "cast time": "{{fd|0.25}}",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "DoT",
+        "projectile": "false",
+        "callforhelp": "True",
+        "grounded": "|knockdown    =",
+        "notes": "* No additional notes."
+      }
+    },
+    "R": {
+      "id": "MalzaharR",
+      "name": "Nether Grasp",
+      "description": "Malzahar channels the essence of the Void to suppress an enemy champion over a zone of damaging negative energy.",
+      "tooltip": "Malzahar Suppresses an enemy champion and deals {{ totaldamagetooltip }} magic damage over {{ e4 }} seconds. A zone of negative energy is created around his target dealing {{ zonedamagetooltip }} max Health magic damage over {{ e3 }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "140/110/80",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "700",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "5",
+        "2.5",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Nether Grasp Damage",
+          "Null Zone Damage Per Second",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ beamdamage }} -> {{ beamdamageNL }}",
+          "{{ maxhealthdamage }}% -> {{ maxhealthdamageNL }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Malzahar",
+        "skill": "R",
+        "icon": "Nether Grasp.png",
+        "blurb": "{{sbc|Active:}} '''Malzahar''' {{tip|tether|tethers}} to the target enemy champion, {{tip|knockdown|knocking them down}}. The tether lasts a short time, during which he {{tip|channel|channels}} to {{tip|suppression|suppress}} and {{tip|true sight|reveal}} the target, continually dealing them {{as|magic damage}}.",
+        "blurb2": "Additionally, a ''Null Zone'' is opened beneath the target's location for a few seconds, which continually deals {{as|magic damage}} to enemies within.",
+        "description": "{{sbc|Active:}} '''Malzahar''' {{tip|tether|tethers}} to the target enemy champion, {{tip|knockdown|knocking them down}}. He then {{tip|channel|channels}} for up to {{fd|2.5}} seconds, {{tip|suppression|suppressing}} and {{tip|true sight|revealing}} the target and dealing them {{as|magic damage}} every {{fd|0.25}} seconds, {{tip|sight|revealing}} himself in the process.",
+        "leveling": "{{st|Total Magic Damage|{{ap|125 to 275}} {{as|(+ 80% AP)}}|Magic Damage Per Tick|{{ap|125/10 to 275/10}} {{as|(+ 8% AP)}}}}",
+        "description2": "'''''Malzahar''' will continue to channel as long as the tether is not broken, even if the suppression is removed.''",
+        "icon3": "Null Zone.png",
+        "description3": "Additionally, a ''Null Zone'' is opened beneath the target's location at the time of cast that lasts 5 seconds, dealing {{as|magic damage}} every {{fd|0.5}} seconds to enemies within, capped at 120 per tick against {{tip|minions}} and {{tip|monsters}}.",
+        "leveling3": "{{st|Total Magic Damage|{{as|{{ap|10 to 20}}% {{as|(+ {{fd|2.5}}% per 100 AP)}} of target's '''maximum''' health}}|Magic Damage Per Tick|{{as|{{ap|10/10 to 20/10}}% {{as|(+ {{fd|0.25}}% per 100 AP)}} of target's '''maximum''' health}}}}",
+        "description4": "''Null Zone will persist even if the channel is interrupted.",
+        "target range": "700",
+        "tether radius": "1250",
+        "cooldown": "{{ap|140 to 80}}",
+        "cdstart": "on-cast",
+        "cast time": "{{fd|0.005}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Special",
+        "projectile": "False",
+        "callforhelp": "true",
+        "silence": "true",
+        "notes": "* Applies {{tip|persistent damage}} for the [[tether]] and {{tip|persistent area damage}} to enemies within the ''Null Zone''.\n* The tether will not break if the target enters a {{tip|zombie state}} or enters {{tip|resurrection}}.\n* Removing the {{tip|suppression}} will also remove the {{tip|true sight|reveal}}.\n* ''Nether Grasp'' and ''Null Zone'' count as two different abilities for effects such as {{ri|Electrocute}}.\n* '''Malzahar''' places himself onto the ground and interrupts {{tip|airborne|displacements}} affecting him upon starting the channel.\n* The following table refers for interactions while '''Malzahar''' is {{tip|channel|channeling}}:\n{{ct|channel|attack=Disabled if attacking Nether Grasp target. Otherwise interrupts after {{fd|0.5}} seconds of channeling.|cast=interrupts|move=Disabled for the first {{fd|0.5}} seconds. Interrupts afterwards.|consume=true|items=interrupts,true,interrupts,false,interrupts|spells=true,interrupts,interrupts,interrupts}}"
+      }
+    }
+  }
+}

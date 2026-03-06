@@ -1,0 +1,288 @@
+{
+  "id": "XinZhao",
+  "name": "Xin Zhao",
+  "title": "the Seneschal of Demacia",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Determination",
+      "description": "Every third attack deals bonus damage and heals Xin Zhao.",
+      "wiki_detail": {
+        "champion": "Xin Zhao",
+        "skill": "I",
+        "icon": "Determination.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Xin Zhao}} [[basic attack]]s and ''{{ai|Wind Becomes Lightning|Xin Zhao}}'' strikes generate a stack of ''Determination'', stacking up to 3 times.",
+        "blurb2": "Upon generating the final atack, '''Xin Zhao''' consumes them to {{tip|heal}} himself and deal {{as|'''bonus''' physical damage}}.",
+        "description": "{{sbc|Innate:}} '''Xin Zhao's''' [[basic attack]]s and ''{{ai|Wind Becomes Lightning|Xin Zhao}}'' strikes generate a [[stack]] of ''Determination'', stacking up to 3 times. The third stack consumes them all to deal {{as|{{pp|15 to 60 for 4|key=%|1 to 16|formula=15% + 15% every 5 levels}} AD}} {{as|'''bonus''' physical damage}} and {{tip|heal}} '''Xin Zhao''' for {{as|{{pp|3 to 4|key=%|1;6;11}} of his '''maximum''' health}} {{as|(+ 65% AP)}}.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "Physical",
+        "spellshield": "special",
+        "spelleffects": "proc",
+        "parry": "unknown",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* The stack counter displays 1–3 rather than the usual 0–2, meaning that a count of 1 does not translate to having 1 stack.\n* ''{{ais|Wind Becomes Lightning|Xin Zhao}}'' generates one stack per strike that hits at least one enemy.\n* Stacks reset when '''Xin Zhao''' {{tip|death|dies}}.\n* Stacks of ''Determination'' will be gained even if the attack is {{tip|blocked}}.\n* {{Pending for test}}: ''Determination's'' interaction with ''parrying'' effects ({{tip|dodge}}, {{tip|blind}}).\n* ''Determination'' deals {{tip|proc damage}}.\n** Since it is a separate instance of damage when applied by basic attack or either of {{ais|W|Xin Zhao}} strikes, flat damage reduction that applies to both the main and bonus damage such as {{cais|Tantrum|Amumu}} passive will reduce each, for twice the reduction.\n** The bonus damage cannot {{tip|critical strike|critically strike}}.\n* When applied by a basic attack:\n** The attack uses a unique animation.\n** The bonus damage benefits from {{stil|life steal}}.\n*** {{pending for test}} It {{tip|applies life steal}} specifically.\n** Neither the bonus damage or heal will be blocked by {{tip|spell shield}}.\n* When applied by either of {{ais|W|Xin Zhao}} strikes:\n** Triggers against the closest target struck by the strike (equals first target to receive spell effects).\n** Does not benefit from {{sti|life steal}}, including not healing from ''Wind Becomes Lightning's'' 33% conversion for this bonus damage.\n** Since {{tip|proc damage}} is 'single target', {{tip|drain|Vamp}} will heal from 100% of the bonus damage.\n** The bonus damage will be blocked by {{tip|spell shield}}, the heal will not."
+      }
+    },
+    "Q": {
+      "id": "XinZhaoQ",
+      "name": "Three Talon Strike",
+      "description": "Xin Zhao's next 3 standard attacks deal increased damage with the third attack knocking an opponent into the air.",
+      "tooltip": "Xin Zhao's next 3 Attacks deal an additional {{ bonusdamage }} physical damage and reduces his other Ability's Cooldowns by 1 second. The third Attack also Knocks Up for {{ e2 }} seconds.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7/6.5/6/5.5/5",
+      "cost": "30",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "375",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "15/30/45/60/75",
+        "0.75",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Bonus Damage:",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Xin Zhao",
+        "skill": "Q",
+        "icon": "Three Talon Strike.png",
+        "blurb": "{{sbc|Active:}} {{ci|Xin Zhao}} empowers his next few attacks within a duration to deal {{as|'''bonus''' physical damage}} and {{sti|ah|reduce}} his other ability cooldowns.",
+        "blurb2": "The last empowered attack will also briefly {{tip|airborne|knock up}} the target.",
+        "description": "{{sbc|Active:}} '''Xin Zhao''' empowers his next three basic attacks {{tip|on-attack}} within 5 seconds to each have an {{tip|uncancellable windup}}, deal {{as|'''bonus''' physical damage}} and reduce his other [[Champion ability|abilities']] {{sti|'''current''' cooldowns}} by 1 second. Each attack refreshes the duration.",
+        "leveling": "{{st|Bonus Physical Damage|{{ap|16 to 68}} {{as|(+ 40% '''bonus''' AD)}}|Total Bonus Physical Damage|{{ap|16*3 to 68*3}} {{as|(+ 120% '''bonus''' AD)}}}}",
+        "description2": "The third attack {{tip|airborne|knocks up}} the target for {{fd|0.75}} seconds.",
+        "description3": "''Three Talon Strike's'' '''bonus''' damage is affected by {{tip|critical strike}} modifiers.",
+        "description4": "''Three Talon Strike {{tip|basic attack reset|resets}} '''Xin Zhao's''' basic attack timer.''",
+        "cooldown": "{{ap|7 to 5}}",
+        "cdstart": "post-effect",
+        "cost": "30",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "cast time": "none",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "Special",
+        "spelleffects": "spell",
+        "projectile": "|grounded     =",
+        "knockdown": "|parry        = True",
+        "notes": "* {{tip|Spell shield}} will only block the knock up.\n* The enhanced attacks present input buffering during their wind-up animation ('''Xin Zhao''' cannot be issued any commands until after it ends)."
+      }
+    },
+    "W": {
+      "id": "XinZhaoW",
+      "name": "Wind Becomes Lightning",
+      "description": "Xin Zhao slashes in front of himself with his spear, then thrusts it forward, slowing affected enemies and marking them as Challenged.",
+      "tooltip": "Xin Zhao slashes, dealing {{ slashdamage }} physical damage, then thrusts, dealing {{ thrustdamage }}. Enemies hit by the thrust are Slowed by {{ e6 }}% for {{ e7 }} seconds. \n\nChampions and Large Monsters hit by the thrust are marked as Challenged for {{ markduration }} seconds and revealed unless Stealthed.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/11/10/9/8",
+      "cost": "60/55/50/45/40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0.5",
+        "0.5",
+        "0.5",
+        "50",
+        "1.5",
+        "140",
+        "200",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Slash Damage",
+          "Thrust Damage",
+          "@AbilityResourceName@ Cost",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ slashbasedamage }} -> {{ slashbasedamageNL }}",
+          "{{ thrustbasedamage }} -> {{ thrustbasedamageNL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Xin Zhao",
+        "skill": "W",
+        "icon": "Wind Becomes Lightning.png",
+        "blurb": "{{sbc|Active:}} {{ci|Xin Zhao}} slashes in an arc, then thrusts his spear in a line in the target direction. Each strike deals {{as|physical damage}} to enemies hit and heals '''Xin Zhao''' based on his {{stil|life steal}}.",
+        "blurb2": "The thrust deals increased damage based on {{as|{{sti|critical strike chance}}}} and briefly {{tip|slows}} enemies hit, enemy {{tip|champions}} or {{tip|monsters}} hit are also {{tip|standard sight|revealed}} and marked [[File:Xin Zhao Challenged Mark.png|24px|link=]]''Challenged'' for a short time.",
+        "description": "{{sbc|Active:}} '''Xin Zhao''' slashes in an arc and, after the cast time, thrusts his spear in a line in the target direction. Each strike deals {{as|physical damage}} to enemies hit, modified to {{pp|50 to 100 for 16|key=%}} against {{tip|minions}}.<br/><br/>\nThe thrust deals increased damage, further by {{as|{{pp|key=%|key1=%|type=critical strike chance|0 to 33.3 for 11|0 to 100|formula=0.33 * critical strike chance}}|critical chance}}, and {{tip|slows}} enemies hit by 50% for {{fd|1.5}} seconds. Enemy {{tip|champions}} and {{tip|monsters}} hit are also marked [[File:Xin Zhao Challenged Mark.png|24px|link=]]''Challenged'' for 3 seconds, during which they are {{tip|standard sight|revealed}}.",
+        "leveling": "{{st|Slash Physical Damage|{{ap|30 to 70}} {{as|(+ 30% AD)}}}}\n{{st|Thrust Physical Damage|{{ap|50 to 190}} {{as|(+ 90% AD)}} {{as|(+ 65% AP)}}}}\n{{st|Total Physical Damage|{{ap|30+50 to 70+190}} {{as|(+ 120% AD)}} {{as|(+ 65% AP)}}}}",
+        "description2": "The durations of ''{{ai|Three Talon Strike|Xin Zhao}}'', ''{{ais|Audacious Charge|Xin Zhao}}'' {{as|'''bonus''' attack speed}}, and ''{{ai|Crescent Guard|Xin Zhao}}'' are delayed relative to ''Wind Becomes Lightning's'' cast time after {{fd|0.2}} seconds of its activation.",
+        "description3": "''Wind Becomes Lightning's'' damage {{tip|healing|heals}} '''Xin Zhao''' for {{fd|33.{{recurring|3}}}}% of his {{stil|life steal}}.",
+        "cast time": "{{fd|0.5}}",
+        "angle": "{{tip|er|icononly = true}} 160º",
+        "effect radius": "{{tip|er|icononly = true}} {{tt|275|Slash semi-circle radius}} / {{tip|cr|icononly = true}} {{tt|125|Slash and thrust extra check radius}}",
+        "range": "{{tip|cr|icononly = true}} {{tt|1000|Thrust range}} / {{tip|er|icononly = true}} {{tt|940|Maximum possible range; See notes}}",
+        "speed": "{{tt|6250|Thrust missile speed}}",
+        "width": "{{tip|er|icononly = true}} {{tt|80|Thrust missile width}}",
+        "cost": "{{ap|60 to 40}}",
+        "costtype": "Mana",
+        "cooldown": "{{ap|12 to 8}}",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "Special",
+        "spelleffects": "Area of effect",
+        "projectile": "False",
+        "grounded": "|knockdown    =",
+        "notes": "* {{tip|Spell shield}} will block only a single instance of damage - either the thrust or the slash.\n* The first strike will occur immediately and the second will occur after the cast time completes.\n{{Effect at cast time start}}\n** The first strike will occur from wherever '''Xin Zhao''' is at the start of the cast time.\n{{Effect at cast time end}}\n** The second strike will occur from wherever '''Xin Zhao''' is at the end of the cast time.\n* The first strike's hitbox includes a {{tip|er|icononly = true}} 275 radius 160° cone in front of '''Xin Zhao''' and an additional {{tip|cr|icononly = true}} 125 radius around him.\n* The second strike's hitbox includes the same {{tip|cr|icononly = true}} 125 radius around '''Xin Zhao''', a missile with {{tip|cr|icononly = true}} 1000 range and {{tip|er|icononly = true}} 80 total width, and a {{tip|er|icononly = true}} -60 radius area check upon the end of the missile.\n** The 125 radius check does not hit [[champion summoned units]].{{bug|2}}\n* Because ''Wind Becomes Lightning'' uses an older type of 'healing based on life steal' and not ''{{tip|applies life steal}}'', {{ii|Spirit Visage}} will amplify the life gain twice (+25% life steal and +25% healing), for a total of +{{fd|56.25}}%.",
+        "yvideo": "Xin Zhao - W"
+      }
+    },
+    "E": {
+      "id": "XinZhaoE",
+      "name": "Audacious Charge",
+      "description": "Xin Zhao charges to an enemy, gaining increased Attack Speed and dealing damage to all enemies in the area, slowing them briefly. This Ability gains increased range against Challenged targets.",
+      "tooltip": "Xin Zhao charges an enemy, dealing {{ chargedamage }} magic damage to nearby enemies and Slowing them by {{ baseslowamount }}% for {{ e6 }} seconds.\n\nXin Zhao also grants himself {{ e3 }}% Attack Speed for {{ e4 }} seconds.\n\nThis Ability's range is increased on enemies that are Challenged. \n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "50/75/100/125/150",
+        "-0.3",
+        "40/50/60/70/80",
+        "5",
+        "250",
+        "0.5",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Attack Speed"
+        ],
+        "effect": [
+          "{{ e1 }} -> {{ e1NL }}",
+          "{{ effect3amount*100.000000 }}% -> {{ effect3amountnl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Xin Zhao",
+        "skill": "E",
+        "icon": "Audacious Charge.png",
+        "blurb": "{{sbc|Active:}} {{ci|Xin Zhao}} {{tip|dashes}} to the target enemy, dealing {{as|magic damage}} to nearby enemies and briefly {{tip|slow|slowing}} them. He then gains {{sti|{{as|'''bonus''' attack speed}}}} for a few seconds.",
+        "blurb2": "''Audacious Charge's'' {{sti|range}} is increased against a [[File:Xin Zhao Challenged Mark.png|24px|link=]]''Challenged'' target.",
+        "description": "{{sbc|Active:}} '''Xin Zhao''' {{tip|dashes}} to the target enemy's location, dealing {{as|magic damage}} to enemies near them and {{tip|slow|slowing}} them by 30% for {{fd|0.5}} seconds. ''Audacious Charge's'' range is increased against <span style=\"white-space:nowrap\">[[File:Xin Zhao Challenged Mark.png|24px|link=]]''Challenged''</span> targets.",
+        "leveling": "{{st|Magic Damage|{{ap|50 to 150}} {{as|(+ 60% AP)}}}}",
+        "description2": "'''Xin Zhao''' then gains {{sti|{{as|'''bonus''' attack speed}}}} for 5 seconds.",
+        "leveling2": "{{st|Bonus Attack Speed|{{ap|40 to 60}}%}}",
+        "description3": "''{{ai|Three Talon Strike|Xin Zhao}} and {{ai|Crescent Guard|Xin Zhao}} can be cast during the dash.''",
+        "cooldown": "11",
+        "cost": "50",
+        "costtype": "Mana",
+        "cast time": "none",
+        "speed": "2500",
+        "target range": "{{tip|cr|icononly = true}} {{tt|650|Normal range}} / {{tt|1100|Enhanced range}}",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|250|Damage radius}}",
+        "targeting": "[[Unit-targeted|Unit]] / [[Location-targeted|Location]]",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "|callforhelp  = True",
+        "grounded": "True",
+        "knockdown": "True",
+        "notes": "* The primary target cannot dodge ''Audacious Charge's'' effects.\n** The target will always emit the area of effect from their position.\n* If no unit is targeted directly, ''Audacious Charge'' will search for possible targets in a 200 radius around the target location."
+      }
+    },
+    "R": {
+      "id": "XinZhaoR",
+      "name": "Crescent Guard",
+      "description": "Xin Zhao passively challenges an enemy he damaged recently. When activated, Xin Zhao deals damage to nearby enemies based on their current Health and knocks non-challenged targets back, becoming impervious to damage dealt by champions outside of the circle created.",
+      "tooltip": "Passive: The last champion Xin Zhao damaged with an Attack or Audacious Charge is Challenged for {{ markduration }} seconds.\n\nActive: Xin Zhao unleashes a sweep around him that deals {{ totaldamage }} plus {{ percentcurrenthealthdamage*100 }}% current Health physical damage and Knocks Back all non-Challenged enemies. \n  \nAfterwards, Xin Zhao becomes immune to damage from enemies outside the sweep range for {{ missiledefensebaseduration }} seconds. {{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/110/100",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "500",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Xin Zhao",
+        "skill": "R",
+        "icon": "Xin Zhao Challenged Mark.png",
+        "blurbicon": "Crescent Guard.png",
+        "blurb": "{{sbc|Passive - Challenge:}} The last enemy champion hit by {{cis|Xin Zhao}} basic attacks or ''{{ai|Audacious Charge|Xin Zhao}}'' is marked [[File:Xin Zhao Challenged Mark.png|24px|link=]]''Challenged'' for a short time.",
+        "blurb2": "{{sbc|Active:}} '''Xin Zhao''' sweeps his spear to deal {{as|physical damage}} to nearby enemies based on {{as|their '''current''' health}}, this will also briefly {{tip|airborne|knock back}} and {{tip|stun}} those not marked ''Challenged''.",
+        "blurb3": "For the next few seconds, '''Xin Zhao''' is {{tip|invulnerability|invulnerable}} against enemy {{tip|champions}} far away from of him.",
+        "description": "{{sbc|Passive - Challenge:}} The last enemy champion hit by '''Xin Zhao's''' basic attacks or ''{{ai|Audacious Charge|Xin Zhao}}'' is marked ''Challenged'' for 3 seconds.",
+        "icon2": "Crescent Guard.png",
+        "description2": "{{sbc|Active:}} '''Xin Zhao''' sweeps his spear around him, dealing {{as|physical damage}} to nearby enemies, capped at 600 against {{tip|monsters}}, and {{tip|airborne|knocking back}} all non-''Challenged'' targets hit up-to 700 units over {{fd|0.75}} seconds, as well as {{tip|stun|stunning}} them for the same duration.",
+        "leveling2": "{{st|Physical Damage|{{ap|75 to 275}} {{as|(+ 100% '''bonus''' AD)}} {{as|(+ 110% AP)}} {{as|(+ 15% of target's '''current''' health)}}}}",
+        "description3": "For the next 4 seconds, '''Xin Zhao''' is {{tip|invulnerable}} against enemy {{tip|champions}} far away from him.",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|500|Knockback radius}} / {{tt|450|Immunity minimum radius}}",
+        "cost": "100",
+        "costtype": "Mana",
+        "cooldown": "{{ap|120 to 100}}",
+        "cdstart": "on-cast",
+        "cast time": "{{fd|0.35}}",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Physical",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "False",
+        "grounded": "|knockdown    =",
+        "notes": "* {{tip|Pet|Pets}}, {{tip|stealthed trap|traps}}, [[ground-targeted|ground]] [[area of effect|AoEs]], {{tip|damage over time|DoTs}}, and delayed-damage abilities (e.g. {{ai|Death Mark|Zed}}, {{ai|Explosive Charge|Tristana}}, {{ai|Hemoplague|Vladimir}}) will not damage '''Xin Zhao''' if the enemy champion source is outside the circle when the damage applies.\n{{Effect at cast time end}}\n* {{tip|Displacement immunity}} will also resist the application of the {{tip|stun}}.",
+        "tips": "* Enemies will not be marked as ''{{ai|Challenge|Xin Zhao|Challenged}}'' if ''Crescent Guard'' has not been learned. Learning the ability after an enemy would have been marked will still cause them to be {{tip|airborne|knocked back}}.",
+        "yvideo": "Xin Zhao - R"
+      }
+    }
+  }
+}

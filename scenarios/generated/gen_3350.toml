@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0196_2v2_s2"
+seed = 22119
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["Hwei", "Shyvana"]
+enemy_hero_templates = ["Pyke", "Brand"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

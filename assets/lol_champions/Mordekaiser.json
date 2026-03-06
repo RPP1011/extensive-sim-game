@@ -1,0 +1,271 @@
+{
+  "id": "Mordekaiser",
+  "name": "Mordekaiser",
+  "title": "the Iron Revenant",
+  "resource_type": "Shield",
+  "tags": [
+    "Fighter",
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Darkness Rise",
+      "description": "Mordekaiser gains a powerful damage aura and Move Speed after landing 3 attacks or spells against champions or monsters.",
+      "wiki_detail": {
+        "champion": "Mordekaiser",
+        "skill": "I",
+        "icon": "false",
+        "blurb": "{{sbc|Innate:}} {{cis|Mordekaiser}} basic attacks deal {{as|'''bonus''' magic damage}}.",
+        "blurb2": "{{sbc|Innate:}} '''Mordekaiser''' generates a [[stack]] for each enemy {{tip|champion}} or {{tip|monster}} hit by his basic attacks and basic abilities, which lasts a few seconds. At max stacks, he gains ''Darkness Rise''.",
+        "blurb4": "{{sbc|Darkness Rise:}} '''Mordekaiser''' gains {{sti|{{as|'''bonus''' movement speed}}}} and creates an [[aura]] that continually deals {{as|magic damage}} to nearby enemies based on {{as|their '''maximum''' health}}.",
+        "description": "{{sbc|Innate:}} '''Mordekaiser's''' basic attacks are empowered to deal {{as|40% AP}} {{as|'''bonus''' magic damage}} {{tip|on-hit}}.",
+        "description2": "{{sbc|Innate:}} '''Morderkaiser''' generates a [[stack]] for each enemy {{tip|champion}} or large {{tip|monster}} hit by his damaging [[basic attack]]s or basic [[champion ability|abilities]], lasting for 4 seconds, refreshing on subsequent hits, and stacking up to 3 times. At 3 stacks, he gains ''Darkness Rise''.",
+        "icon3": "Darkness Rise.png",
+        "description3": "{{sbc|Darkness Rise:}} '''Mordekaiser''' gains {{sti|ms|{{as|{{pp|3 to 9 for|1;6;11|key=%}} '''bonus''' movement speed}}}} and deals{{ft|{{as|5|magic damage}} {{as|(+ 30% AP)}} {{as|(+ {{pp|key=%|1 to 5}} of target's '''maximum''' health)}} {{as|magic damage}} every second|{{as|{{ap|5*0.125}}|magic damage}} {{as|(+ {{ap|30*0.125}}% AP)}} {{as|(+ {{pp|key=%|1*0.125 to 5*0.125}} of target's '''maximum''' health)}} {{as|magic damage}} every {{fd|0.125}} seconds}}to nearby enemies. Against monsters, the damage is capped at{{ft|{{pp|40 to 200}} per second.|{{pp|40*0.125 to 200*0.125}} per {{fd|0.125}} seconds.}}",
+        "targeting": "Passive",
+        "effect radius": "375",
+        "affects": "Self / Enemies",
+        "damagetype": "Magic",
+        "projectile": "|spelleffects = aoedot",
+        "parry": "|onhiteffects =",
+        "spellshield": "|notes        = \n* '''Mordekaiser''' has a stack counter under his [[health bar]] that is not visible to other champions. It will light up when the maximum effect is active.\n* ''Darkness Rise's'' area damage alone does not refresh ''Darkness Rise's'' buff."
+      }
+    },
+    "Q": {
+      "id": "MordekaiserQ",
+      "name": "Obliterate",
+      "description": "Mordekaiser smashes the ground with his mace dealing damage to each enemy struck. Damage is increased when hitting a single enemy.",
+      "tooltip": "Mordekaiser smashes the ground with Nightfall dealing {{ qdamage }} magic damage, increased to {{ empowereddamagetooltip }} if it hits only a single enemy.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "8/7/6/5/4",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "675",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Isolation Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ qbasedamage }} -> {{ qbasedamageNL }}",
+          "{{ isolationscalar*100.000000 }}% -> {{ isolationscalarnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Mordekaiser",
+        "skill": "Q",
+        "icon": "Obliterate.png",
+        "blurb": "{{sbc|Active:}} {{ci|Mordekaiser}} smashes the area in the target direction, dealing {{as|magic damage}} to enemies within, {{ccs|increased|magic}} if it hits only one enemy.",
+        "description": "{{sbc|Active:}} '''Mordekaiser''' strikes his mace down in a line in the target direction, dealing {{as|magic damage}} to enemies within, {{ccs|increased|magic}} if only one enemy is hit.",
+        "leveling": "{{st|Magic Damage|{{pp|0 to 45 for 10|1;10 to 18}} (+ {{ap|80 to 200}}) {{as|(+ 70% AP)}}}}\n{{st|Damage Increase|{{ap|30 to 50}}%}}",
+        "cooldown": "{{ap|8 to 4}}",
+        "cast time": "{{fd|0.5}}",
+        "range": "625",
+        "width": "160",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "projectile": "False",
+        "spelleffects": "special",
+        "onhiteffects": "|spellshield  = True",
+        "notes": "* Applies {{tip|spell damage}} if it hits one target and {{tip|area damage}} to multiple targets.\n{{Effect at cast time end}}",
+        "flavorsound": "{{sm2|Mordekaiser_Original_Q_1.ogg}} ''\"Shatter!\"''"
+      }
+    },
+    "W": {
+      "id": "MordekaiserW",
+      "name": "Indestructible",
+      "description": "Mordekaiser stores damage he deals and takes to create a shield. He may consume the shield to heal.",
+      "tooltip": "Passive: Mordekaiser stores {{ damageconversion*100 }}% of the damage he deals and {{ damagetakenconversion*100 }}% of the damage he takes.\n\nActive: Mordekaiser gains the stored damage as Shield. He may Recast this Ability to restore {{ healingpercent*100 }}% of the remaining Shield as Health.\n\nMinimum Shield: {{ minhealthtooltip }}\nMaximum Shield: {{ maxhealthtooltip }}{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/11/10/9/8",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "25000",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Healing Percent",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ healingpercent*100.000000 }}% -> {{ healingpercentnl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Mordekaiser",
+        "skill": "W",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} {{ci|Mordekaiser}} stores a portion of the damage he deals and receives as ''Potential Shield'', up to a portion of {{as|his '''maximum''' health}}. This begins to decay after a brief time without fighting.",
+        "blurb2": "{{sbc|Active:}} '''Mordekaiser''' converts his ''Potential Shield'' to {{tip|shield}} himself for a few seconds, which decays over time. ''Indestructible'' can be recast while the shield is active.",
+        "blurb3": "{{sbc|Recast:}} '''Mordekaiser''' consumes the remaining shield, {{tip|healing}} for a portion of the amount.",
+        "description": "{{sbc|Passive:}} '''Mordekaiser''' stores 45% of the {{tt|post-mitigation|Damage calculated after modifiers}} damage he deals and {{fd|7.5}}% of the {{tt|pre-mitigation|Damage calculated before modifiers}} damage he takes,{{ft|reduced by 75% for non-champion sources,|reduced to {{fd|11.25}}% of damage dealt and {{fd|3.75}}% of damage taken for non-champion sources,}}as ''Potential Shield'' on his secondary resource bar, up to {{sti|health|{{as|30% of his '''maximum''' health}}}}. The ''Potential Shield'' decays by {{pp|8 to 25}} every second after not dealing or taking damage for 1 second. While ''Indestructible'' is not on cooldown, the ''Potential Shield'' will not decay below a minimum of {{as|5% of his '''maximum''' health}}, and it will be set to that amount when it comes off cooldown if it was previously below it.",
+        "icon2": "Indestructible.png",
+        "description2": "{{sbc|Active:}} '''Mordekaiser''' consumes his ''Potential Shield'' to grant himself a {{tip|shield}} for the same amount for 4 seconds. The shield decays exponentially over the duration. ''Indestructible'' can be recast after {{fd|0.5}} seconds while the shield is active.",
+        "icon3": "Indestructible 2.png",
+        "description3": "{{sbc|Recast:}} '''Mordekaiser''' consumes the remaining shield, {{tip|healing}} for a portion of the amount.",
+        "leveling3": "{{st|Shield to Healing|{{ap|35 to 45}}%}}",
+        "cooldown": "{{ap|12 to 8}}",
+        "cdstart": "post-effect",
+        "target range": "|cast time = none",
+        "effect radius": "|targeting    = Auto",
+        "affects": "Self",
+        "damagetype": "|projectile   =",
+        "spelleffects": "|onhiteffects =",
+        "spellshield": "|notes        = \n*Both casts count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.",
+        "flavorsound": "{{sm2|Mordekaiser_Original_W_0.ogg}} ''\"Unbreakable.\"''"
+      }
+    },
+    "E": {
+      "id": "MordekaiserE",
+      "name": "Death's Grasp",
+      "description": "Mordekaiser pulls all enemies in an area.",
+      "tooltip": "Passive: Mordekaiser gains {{ magicpen*100 }}% Magic Penetration.\n\nActive: Mordekaiser pulls enemies in his direction, dealing {{ totaldamage }} magic damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "18/16/14/12/10",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "700",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Percent Magic Penetration",
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ magicpen*100.000000 }}% -> {{ magicpennl*100.000000 }}%",
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Mordekaiser",
+        "skill": "E",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} {{ci|Mordekaiser}} gains {{sti|mpen|{{as|magic penetration}}}}.",
+        "blurb2": "{{sbc|Active:}} '''Mordekaiser''' summons a claw in the target direction that grants {{tip|sight}} of the area. After a brief time, it deals {{as|magic damage}} and {{tip|airborne|pulls}} enemies hit.",
+        "description": "{{sbc|Passive:}} '''Mordekaiser''' gains {{sti|mpen|{{as|magic penetration}}}}.",
+        "leveling": "{{st|Magic Penetration|{{ap|5 to 15}}%}}",
+        "icon2": "Death's Grasp.png",
+        "description2": "{{sbc|Active:}} '''Mordekaiser''' summons a claw in the target direction that grants {{tip|sight}} of the area. After {{fd|0.5}} seconds, it deals {{as|magic damage}} to enemies within and {{tip|airborne|pulls}} them 250 units.",
+        "leveling2": "{{st|Magic Damage|{{ap|70 to 130}} {{as|(+ 60% AP)}}}}",
+        "cooldown": "{{ap|18 to 10}}",
+        "target range": "{{tt|700|Maximum Cast Range}} / {{tt|900|Maximum range}}",
+        "effect range": "{{tt|800|Claw}} / {{tt|200|Claw offset}}",
+        "width": "200",
+        "speed": "3000",
+        "cast time": "{{fd|0.25}}",
+        "effect radius": "|angle        =",
+        "targeting": "Location",
+        "affects": "Self, Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "aoe",
+        "onhiteffects": "|spellshield  = True",
+        "projectile": "false",
+        "notes": "* ''Death's Grasp'' will still {{tip|airborne|pull}} even if '''Mordekaiser''' {{tip|death|dies}}.\n{{Effect at cast time start}}"
+      }
+    },
+    "R": {
+      "id": "MordekaiserR",
+      "name": "Realm of Death",
+      "description": "Mordekaiser drags his victim to a different dimension with him and steals a portion of their stats. If he kills them, he keeps the stats until the victim respawns.",
+      "tooltip": "Mordekaiser banishes a champion to the Death Realm with him for {{ spiritrealmduration }}s, stealing {{ statstealpercentscalar*100 }}% of their core stats for the duration.\n\nIf Mordekaiser kills that enemy in the Death Realm he consumes their soul, keeping the stats he stole until the target respawns.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "140/120/100",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "650",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Mordekaiser",
+        "skill": "R",
+        "icon": "Realm of Death.png",
+        "blurb": "{{sbc|Active:}} {{ci|Mordekaiser}} {{tip|slow|slows}} the target enemy champion, then banishes them with him to the ''Death Realm'' for a few seconds, cancelling all interactions with non-banished units.",
+        "blurb2": "Additionally, '''Mordekaiser''' {{tip|heal|heals}} himself for a portion of the {{as|target's '''maximum''' health}} and temporarily steals a portion of their '''current''' {{sti|{{as|attack damage}}}}, {{sti|{{as|ability power}}}}, {{sti|{{as|'''total''' attack speed}}}}, {{sti|{{as|'''maximum''' health}}}}, {{sti|armor|{{as|armor}}}}, {{sti|magic resistance|{{as|magic resist}}}}, and [[size]].",
+        "blurb3": "If the target dies while inside the ''Death Realm'', '''Mordekaiser''' keeps his stolen stats until they [[death|respawn]].",
+        "blurb4": "{{sbc|Death Realm:}} The ''Death Realm'' confines units in a small area. Allies and enemies cannot see or interact with those in the ''Death Realm'' but can see their locations and vice versa.",
+        "description": "{{sbc|Active:}} '''Mordekaiser''' aims his mace towards the target enemy champion, {{tip|slow|slowing}} them by 75% and {{tip|true sight|revealing}} them over the cast time, and then [[File:Mordekaiser Realm of Death banished icon.png|20px|link=]] {{tt|banishing|See notes}} them with him to the ''Death Realm'' for 7 seconds. <br/><br/>'''Mordekaiser''' also consumes the target's soul for 7 seconds, {{tip|heal|healing}} himself for {{as|10% of their '''maximum''' health}} and reducing their '''current''' {{sti|{{as|attack damage}}}}, {{sti|{{as|ability power}}}}, {{sti|{{as|'''total''' attack speed}}}}, {{sti|{{as|'''maximum''' health}}}}, {{sti|armor|{{as|armor}}}}, {{sti|magic resistance|{{as|magic resist}}}}, and [[size]] by 10%, in addition to gaining them for himself. If the target dies while inside the ''Death Realm'', '''Mordekaiser''' keeps their partial stats until they [[death|respawn]].",
+        "description3": "Units between realms see each other as spirits, considering each other dead and negating any {{tt|interactions|See notes}} between each other. Only '''Mordekaiser''' and the target will enter the realm; other champions cannot follow them. Everything that occurs inside the ''Death Realm'' is hidden to units outside of it, and vice versa. All {{tip|pet|pets}} still inside the realm are killed at its end.",
+        "description4": "''If one of the two affected champions leave the Death Realm, because of having died or having it dispelled, the other will do so as well.''",
+        "cooldown": "{{ap|140 to 100}}",
+        "cdstart": "on-cast",
+        "target range": "650",
+        "cast time": "{{fd|0.5}}",
+        "effect radius": "{{tt|1200|Death Realm radius, center changes based on Mordekaiser's position from the target}}",
+        "targeting": "Unit",
+        "affects": "Enemies",
+        "damagetype": "|spelleffects =",
+        "onhiteffects": "|projectile   =",
+        "spellshield": "special",
+        "callforhelp": "|flavorsound  = {{sm2|Mordekaiser_Original_R_6.ogg}} ''\"Welcome to oblivion.\"''",
+        "notes": "[[File:Mordekaiser Death Realm screenshot.png|thumb|right|400px|Mordekaiser's Realm of Death. Champions outside of the death realm are seen as spirits. Blue spirits (above Mordekaiser) are allied champions while red spirits (below Mordekaiser) are enemy champions.]]\n[[File:Realm_of_Death_ally_Spirit_screenshot.PNG|thumb|right|125px|Ally spirit]]\n[[File:Realm_of_Death_enemy_spirit_screenshot.PNG|thumb|right|125px|Enemy spirit]]\n* The ''Realm of Death'' is a battlefield that exists outside of the normal realm in an alternate \"dimension\". It exists only for '''Mordekaiser''' and his target. It consists of an arena that has a radius of 1200 units and includes any terrain features that would exist in the map of the normal realm, including walls and {{tip|brush|brushes}}.\n** The boundaries of the arena are impassable but not considered terrain themselves ({{ai|Unstoppable Onslaught|Sion}} exception), and enemies that try to move out of the area will be displaced back inside.\n** {{tip|Dash|Dashes}}, {{tip|blink|blinks}}, {{tip|airborne|displacements}} and other forms of movement will cap their effect range to the boundary. Targets will stop at the boundary even after it expired.\n* ''Realm of Death'' retains '''Mordekaiser's''' previous '''current''' health percentage when granting him a portion of the target's '''maximum''' health.\n* ''Realm of Death'' will cancel and go on cooldown after its cast time if:\n** The target is {{tip|displacement immune}}, {{tip|cc-immune|crowd control immune}} or protected by a {{tip|spell shield}}.\n*** Note that all of the above plus any {{tip|cleanse|cleanse}} effect are ineffective if they are applied '''after''' the target has been banished.\n** The target is a {{tip|clone}} or {{cai|Glory in Death|Sion}}.\n{{Unit-targeted cancel conditions}}\n* If '''Mordekaiser''' or the target cast another ''Realm of Death'', the affected champions will remain stuck for the duration of the new circle.\n** The previous circle will be overridden by the new one; it will be dispelled to enter the new circle.\n* {{tip|Spell shield}} will not block the initial {{tip|slow}}.\n* The reveal effect lasts for {{fd|1.25}} seconds from the start of the cast time if the cast does not complete. Otherwise, the reveal ends as soon as the cast time completes.\n* If the target's {{stil|health}} is lower than the amount that should be stolen, they will be brought down to 1 health. '''Mordekaiser''' will still get the usual amount of maximum health.\n* Entering or leaving the ''Death Realm'' will cause all targeted {{tip|projectile|projectiles}} to be {{tip|homing projectile destruction|destroyed}}.\n* The transition in and out of the ''Death Realm'' doesn't interrupt {{tip|channel|channels}}.\n** {{ai|Grand Starfall|Pantheon}} will always be interrupted by the transition into the realm.\n* ''Realm of Death'' will not be dispelled if either of the two affected champions enter {{tip|resurrection}} after taking lethal damage. It is dispelled if the target enters a {{tip|zombie state}}.\n* Any active {{tip|tether}} effects (both friendly and hostile ones) existing on either of the two champions entering the realm will be broken (unless the tether is between those two).\n* Upon entering the realm, '''Mordekaiser''' and the target are {{tip|cleanse|cleansed}} from all {{tip|forced action}} effects \n** The cleanse will occur even if the source enters the realm.{{bug}}\n* Unlike the other stats, '''Mordekaiser''' does not ''steal'' enemy total size; instead he gains 10% of his own size and reduces the enemy's size by 10% of theirs (all size modifiers stack additively).\n** '''Mordekaiser''' grows in size over {{fd|0.25}} seconds after successfully stealing his targets' stats, and shrinks over {{fd|0.25}} seconds after the buff runs out again. The target shrinks over {{fd|0.25}} seconds after their stats are stolen, but grows back to normal size instantly when the effect ends.\n* While '''Mordekaiser''' has hold of his enemy's stats, that champion's circular portrait will appear as a pip next to his health bar, visible to all players.\n* ''Realm of Death's'' interactions with other elements/abilities (''list is incomplete''):\n** Multiple ''Death Realms'' (possible through a {{ai|Hijack|Sylas|hijacked}} ''Realm of Death'' or if multiple '''Mordekaisers''' are in the same match) spawned will exist in the same dimension, allowing champions to see and interact with champions bound to other circles. Champions are only affected by their boundaries and are not able to see the others.\n*** {{cai|Devour|Tahm Kench}} can carry a target outside of their circle, but they will be displaced back inside once {{ai|Regurgitate|Tahm Kench|Regurgitated}}.\n*** An active {{ai|Cease and Desist|Vi}} on a target outside the perimeter will cause {{ci|Vi}} to continue her charge until her circle ends. She can knock back and damage secondary targets multiple times.\n** [[Structures]] exist in all realms at the same time. {{tip|Turret|Turrets}} will behave normally as if all units were in the same realm.\n** {{tip|Hex-gate|Hex-gates}} on {{ui|Hextech Drake|Hextech Rift}} will not be present between realms.\n** {{tip|Brush|Brushes}} will maintain their presence between realms.\n** Switching realms detaches all {{tip|attached}} champions on either of the two champions entering the realm.\n*** {{cai|Umbral Trespass|Kayn}} will cause him to detach immediately when ''Realm of Death'' ends.\n** The allied health, resource, and ultimate indicators (champion portraits located on the screen) will not update between realms as the [[Summoner|players]] have no {{tip|sight|vision}} of them.\n** {{cai|The Hextech Ultimatum|Camille}}, catching {{cai|Spinning Axe|Draven}}, {{cai|Timewinder|Ekko}} and {{ai|Parallel Convergence|Ekko}}, {{cai|Null Zone|Malzahar}}, {{cai|Twisted Advance|Maokai}}, {{cai|Pix, Faerie Companion|Lulu|Pix}}, {{cai|Death from Below|Pyke}}, {{cai|Threaded Volley 2|Taliyah|Worked Grounds}}, {{cai|Gravity Field|Viktor}}, {{cai|Satchel Charge|Ziggs}}, and {{ui|Rift Scuttler|Rift Scuttler's}} {{bi|Speed Shrine}} are exceptions and may still take effect between dimensions ''if'' the conditions are valid.\n** Effects such as {{ai|Requiem|Karthus}}, {{ai|Absolute Zero|Nunu}}, {{ai|Grand Starfall|Pantheon}} and {{ai|Final Spark|Lux}} will only deal damage to enemies of the dimension they're in at time of cast. Ending the channel or cast time while inside another dimension will not do damage to nearby enemies.\n** Any spawned terrain while in the ''Death Realm'' will remain inside until expired. They will not be destroyed.\n** {{cai|Shuriken Flip|Akali}} can be recast even if the target is in another realm.\n** {{cai|Lamb's Respite|Kindred}} is one of many area of effect abilities that will not take presence between realms.\n** {{cai|Void Shift|Malzahar}} is special cased to not resist the slow but instead resist the dimension swap after the cast completes.\n** {{cai|Paranoia|Nocturne}} only applies {{tip|nearsight}} to enemy champions in the same dimension as him.\n** {{cai|Clockwork Windup|Orianna|Ball}} will snap back to her the moment she switches realms.\n** If '''Mordekaiser''' uses ''Realm of Death'' on {{ci|Sion}} while charging {{ai|Decimating Smash|Sion}}, {{ci|Sion}} will continue charging in the realm, however {{ai|Decimating Smash|Sion}} will not deal any damage.\n** The target of {{ai|Devour|Tahm Kench}} will immediately leave {{cis|Tahm Kench}} belly when he enters or leaves the ''Realm of Death''.\n** {{cai|Weaver's Wall|Taliyah}} is interrupted both for if she enters or leaves the ''Realm of Death''.\n** {{cai|Fear Beyond Death 2|Urgot|Fear Beyond Death}} cannot be recast while the target is in a different dimension than him. If the target is being reeled in however, then the execution at the end of the channel will take place regardless of the dimension either he or the target is in.\n*** The fear upon a successful execution will occur in {{cis|Urgot}} realm.\n** {{cai|Sovereign's Domination|Viego|Mist Wraiths}} will spawn between realms. {{ai|Harrowed Path|Viego}} will also take presence between realms.\n** {{cai|Bladecaller|Xayah}} cannot call {{ai|Clean Cuts|Xayah|Feathers}} between dimensions.\n** {{cis|Zed}} [[File:Zed's Shadow.png|20px|border]] [[Zed/LoL|Shadows]] will take presence between realms.\n** {{ii|Eye of the Herald}} and {{si|Teleport}} are disabled while in the ''Realm of Death''.\n** Controllable [[pets]] and [[decoy]]s can still be commanded between realms.\n** [[Jungle plants]] ({{ui|Blast Cone}}, {{ui|Honeyfruit}}, {{ui|Scryer's Bloom}}) will not take presence between realms.\n{{ct|cast}}",
+        "tips": "* While in lane, ''Realm of Death'' is best used while the target is between you and your turret. This is so the target doesn't have much space to go towards their turret, since the area of the ''Death Realm'' is created in front of '''Mordekaiser''', leaving little space to move behind him."
+      }
+    }
+  }
+}

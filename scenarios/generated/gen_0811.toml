@@ -1,0 +1,13 @@
+[scenario]
+name = "pair_cleric_engineer_s1"
+seed = 11271
+hero_count = 2
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["cleric", "engineer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

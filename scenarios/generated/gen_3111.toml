@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0117_4v4"
+seed = 2040
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["Caitlyn", "Malphite", "JarvanIV", "Hecarim"]
+enemy_hero_templates = ["Kaisa", "Diana", "KogMaw", "XinZhao"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

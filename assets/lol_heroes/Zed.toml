@@ -1,0 +1,107 @@
+[hero]
+name = "Zed"
+
+[stats]
+hp = 85
+move_speed = 3.5
+armor = 25.0
+magic_resist = 30.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 20
+range = 1.5
+cooldown = 750
+
+# --- Q: Razor Shuriken ---
+[[abilities]]
+name = "Razor Shuriken"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 6000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 15
+
+[abilities.delivery]
+method = "projectile"
+speed = 17.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 20
+damage_type = "physical"
+
+# --- W: Living Shadow ---
+[[abilities]]
+name = "Living Shadow"
+targeting = "target_enemy"
+range = 6.5
+cooldown_ms = 20000
+ai_hint = "utility"
+resource_cost = 8
+recast_count = 1
+recast_window_ms = 10000
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- E: Shadow Slash ---
+[[abilities]]
+name = "Shadow Slash"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 5000
+ai_hint = "damage"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "damage"
+amount = 16
+damage_type = "physical"
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.15
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- R: Death Mark ---
+[[abilities]]
+name = "Death Mark"
+targeting = "target_enemy"
+range = 6.2
+cooldown_ms = 23900
+ai_hint = "utility"
+recast_count = 1
+recast_window_ms = 10000
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- Passive: Contempt for the Weak ---
+[[passives]]
+name = "Contempt for the Weak"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 5000
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

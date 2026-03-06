@@ -1,0 +1,126 @@
+[hero]
+name = "Ashe"
+
+[stats]
+hp = 80
+move_speed = 3.3
+armor = 22.0
+magic_resist = 28.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 18
+range = 5.5
+cooldown = 700
+
+# --- Q: Ranger's Focus ---
+[[abilities]]
+name = "Ranger's Focus"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 8000
+ai_hint = "buff"
+resource_cost = 6
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.effects]]
+type = "buff"
+stat = "attack_speed"
+factor = 0.3
+duration_ms = 5000
+
+# --- W: Volley ---
+[[abilities]]
+name = "Volley"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 18000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 15
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 5
+damage_type = "physical"
+
+[abilities.delivery.on_hit.area]
+shape = "cone"
+radius = 4.0
+angle_deg = 60.0
+
+# --- E: Hawkshot ---
+[[abilities]]
+name = "Hawkshot"
+targeting = "ground_target"
+range = 0.0
+cooldown_ms = 5000
+cast_time_ms = 250
+ai_hint = "damage"
+max_charges = 2
+charge_recharge_ms = 90000
+
+[abilities.delivery]
+method = "projectile"
+speed = 14.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- R: Enchanted Crystal Arrow ---
+[[abilities]]
+name = "Enchanted Crystal Arrow"
+targeting = "direction"
+range = 8.0
+cooldown_ms = 21700
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 20
+
+[abilities.delivery]
+method = "projectile"
+speed = 15.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 50
+damage_type = "magic"
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 4.0
+
+[[abilities.delivery.on_hit]]
+type = "stun"
+duration_ms = 1000
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- Passive: Frost Shot ---
+[[passives]]
+name = "Frost Shot"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_auto_attack"
+
+[[passives.effects]]
+type = "damage"
+amount = 10
+damage_type = "physical"
+

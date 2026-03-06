@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0191_5v5_d4"
+seed = 2314
+hero_count = 5
+enemy_count = 5
+difficulty = 4
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["samurai", "blood_mage", "bard", "mage", "ranger"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

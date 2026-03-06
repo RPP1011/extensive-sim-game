@@ -1,0 +1,977 @@
+{
+  "save_version": 2,
+  "run_state": {
+    "global_turn": 370
+  },
+  "mission_map": {
+    "map_name": "Emberwell Reliquary",
+    "rooms": [
+      {
+        "room_id": "entry_vault",
+        "room_name": "Moon Gate Vault",
+        "room_type": "Entry",
+        "interaction_nodes": [
+          {
+            "verb": "Drain",
+            "description": "Turn the rusted sluice wheel to lower cursed water."
+          }
+        ],
+        "threat_budget": 8.0,
+        "sabotage_threshold": 0.0
+      },
+      {
+        "room_id": "flood_walk",
+        "room_name": "Floodgate Walk",
+        "room_type": "Pressure",
+        "interaction_nodes": [
+          {
+            "verb": "Flood",
+            "description": "Crack the gate to split enemy lines at the cost of alert."
+          }
+        ],
+        "threat_budget": 14.0,
+        "sabotage_threshold": 18.0
+      },
+      {
+        "room_id": "reliquary_fork",
+        "room_name": "Reliquary Fork",
+        "room_type": "Pivot",
+        "interaction_nodes": [
+          {
+            "verb": "Dispel",
+            "description": "Shatter wardstones to remove cultist protection auras."
+          }
+        ],
+        "threat_budget": 20.0,
+        "sabotage_threshold": 36.0
+      },
+      {
+        "room_id": "bone_engine",
+        "room_name": "Bone Engine Chamber",
+        "room_type": "Setpiece",
+        "interaction_nodes": [
+          {
+            "verb": "Collapse",
+            "description": "Drop ossuary chains to stagger the grave colossus."
+          }
+        ],
+        "threat_budget": 28.0,
+        "sabotage_threshold": 58.0
+      },
+      {
+        "room_id": "quiet_cloister",
+        "room_name": "Quiet Cloister",
+        "room_type": "Recovery",
+        "interaction_nodes": [
+          {
+            "verb": "Sanctify",
+            "description": "Channel a sanctuary sigil to reduce stress for lost time."
+          }
+        ],
+        "threat_budget": 12.0,
+        "sabotage_threshold": 78.0
+      },
+      {
+        "room_id": "ritual_nave",
+        "room_name": "Ritual Nave",
+        "room_type": "Climax",
+        "interaction_nodes": [
+          {
+            "verb": "Rupture",
+            "description": "Overload the final anchor and expose the lich conduit."
+          }
+        ],
+        "threat_budget": 32.0,
+        "sabotage_threshold": 92.0
+      }
+    ]
+  },
+  "attention_state": {
+    "switch_cooldown_turns": 0,
+    "switch_cooldown_max": 3,
+    "global_energy": 100.0,
+    "max_energy": 100.0,
+    "switch_cost": 20.0,
+    "regen_per_turn": 6.0
+  },
+  "overworld_map": {
+    "regions": [
+      {
+        "id": 0,
+        "name": "Dawn Spire 1",
+        "neighbors": [
+          1,
+          3,
+          4
+        ],
+        "owner_faction_id": 0,
+        "mission_slot": null,
+        "unrest": 0.0,
+        "control": 100.0,
+        "intel_level": 100.0
+      },
+      {
+        "id": 1,
+        "name": "Dawn Fen 2",
+        "neighbors": [
+          0,
+          2,
+          4,
+          5
+        ],
+        "owner_faction_id": 0,
+        "mission_slot": null,
+        "unrest": 0.0,
+        "control": 100.0,
+        "intel_level": 100.0
+      },
+      {
+        "id": 2,
+        "name": "Rift Spire 3",
+        "neighbors": [
+          1,
+          5,
+          6
+        ],
+        "owner_faction_id": 0,
+        "mission_slot": null,
+        "unrest": 0.0,
+        "control": 100.0,
+        "intel_level": 30.0
+      },
+      {
+        "id": 3,
+        "name": "Rift Watch 4",
+        "neighbors": [
+          0,
+          4,
+          7,
+          8
+        ],
+        "owner_faction_id": 0,
+        "mission_slot": null,
+        "unrest": 0.0,
+        "control": 100.0,
+        "intel_level": 100.0
+      },
+      {
+        "id": 4,
+        "name": "Rift Watch 5",
+        "neighbors": [
+          0,
+          1,
+          3,
+          5,
+          8,
+          9
+        ],
+        "owner_faction_id": 0,
+        "mission_slot": null,
+        "unrest": 0.08966996,
+        "control": 99.920296,
+        "intel_level": 100.0
+      },
+      {
+        "id": 5,
+        "name": "Rift Reach 6",
+        "neighbors": [
+          1,
+          2,
+          4,
+          6,
+          9,
+          10
+        ],
+        "owner_faction_id": 0,
+        "mission_slot": 0,
+        "unrest": 20.226936,
+        "control": 79.9128,
+        "intel_level": 30.0
+      },
+      {
+        "id": 6,
+        "name": "Rift Crossing 7",
+        "neighbors": [
+          2,
+          5,
+          10,
+          11
+        ],
+        "owner_faction_id": 2,
+        "mission_slot": null,
+        "unrest": 4.727603,
+        "control": 95.38884,
+        "intel_level": 0.0
+      },
+      {
+        "id": 7,
+        "name": "Ash Bastion 8",
+        "neighbors": [
+          3,
+          8,
+          12
+        ],
+        "owner_faction_id": 0,
+        "mission_slot": null,
+        "unrest": 0.0,
+        "control": 100.0,
+        "intel_level": 30.0
+      },
+      {
+        "id": 8,
+        "name": "Hollow Crossing 9",
+        "neighbors": [
+          3,
+          4,
+          7,
+          9,
+          12,
+          13
+        ],
+        "owner_faction_id": 0,
+        "mission_slot": null,
+        "unrest": 0.0,
+        "control": 100.0,
+        "intel_level": 30.0
+      },
+      {
+        "id": 9,
+        "name": "Ash Bastion 10",
+        "neighbors": [
+          4,
+          5,
+          8,
+          10,
+          13,
+          14
+        ],
+        "owner_faction_id": 2,
+        "mission_slot": 2,
+        "unrest": 46.394882,
+        "control": 53.839363,
+        "intel_level": 100.0
+      },
+      {
+        "id": 10,
+        "name": "Mist Fen 11",
+        "neighbors": [
+          5,
+          6,
+          9,
+          11,
+          14,
+          15
+        ],
+        "owner_faction_id": 2,
+        "mission_slot": null,
+        "unrest": 23.915037,
+        "control": 76.19229,
+        "intel_level": 0.0
+      },
+      {
+        "id": 11,
+        "name": "Rift Roads 12",
+        "neighbors": [
+          6,
+          10,
+          15
+        ],
+        "owner_faction_id": 2,
+        "mission_slot": null,
+        "unrest": 0.0,
+        "control": 100.0,
+        "intel_level": 0.0
+      },
+      {
+        "id": 12,
+        "name": "Stone Reach 13",
+        "neighbors": [
+          7,
+          8,
+          13,
+          16
+        ],
+        "owner_faction_id": 0,
+        "mission_slot": null,
+        "unrest": 0.0,
+        "control": 100.0,
+        "intel_level": 30.0
+      },
+      {
+        "id": 13,
+        "name": "Mist Fen 14",
+        "neighbors": [
+          8,
+          9,
+          12,
+          14,
+          16,
+          17
+        ],
+        "owner_faction_id": 1,
+        "mission_slot": 1,
+        "unrest": 45.03947,
+        "control": 55.06416,
+        "intel_level": 100.0
+      },
+      {
+        "id": 14,
+        "name": "Stone Bastion 15",
+        "neighbors": [
+          9,
+          10,
+          13,
+          15,
+          17,
+          18
+        ],
+        "owner_faction_id": 1,
+        "mission_slot": null,
+        "unrest": 1.2510886,
+        "control": 98.78677,
+        "intel_level": 0.0
+      },
+      {
+        "id": 15,
+        "name": "Hollow Roads 16",
+        "neighbors": [
+          10,
+          11,
+          14,
+          18
+        ],
+        "owner_faction_id": 2,
+        "mission_slot": null,
+        "unrest": 19.978552,
+        "control": 80.0786,
+        "intel_level": 0.0
+      },
+      {
+        "id": 16,
+        "name": "Iron Fen 17",
+        "neighbors": [
+          12,
+          13,
+          17
+        ],
+        "owner_faction_id": 1,
+        "mission_slot": null,
+        "unrest": 0.41825205,
+        "control": 99.62822,
+        "intel_level": 0.0
+      },
+      {
+        "id": 17,
+        "name": "Dawn Spire 18",
+        "neighbors": [
+          13,
+          14,
+          16,
+          18
+        ],
+        "owner_faction_id": 1,
+        "mission_slot": null,
+        "unrest": 0.0,
+        "control": 100.0,
+        "intel_level": 0.0
+      },
+      {
+        "id": 18,
+        "name": "Stone March 19",
+        "neighbors": [
+          14,
+          15,
+          17
+        ],
+        "owner_faction_id": 1,
+        "mission_slot": null,
+        "unrest": 0.0,
+        "control": 100.0,
+        "intel_level": 0.0
+      }
+    ],
+    "factions": [
+      {
+        "id": 0,
+        "name": "Guild Compact",
+        "strength": 180.0,
+        "cohesion": 95.0,
+        "war_goal_faction_id": 2,
+        "war_focus": 21.1,
+        "vassals": [
+          {
+            "id": 1,
+            "name": "Steward Stone of Guild Compact",
+            "martial": 73.511215,
+            "loyalty": 58.869236,
+            "specialty": "Siege",
+            "post": "ZoneManager",
+            "home_region_id": 0
+          },
+          {
+            "id": 2,
+            "name": "Captain Iron of Guild Compact",
+            "martial": 56.564865,
+            "loyalty": 75.82649,
+            "specialty": "Escort",
+            "post": "ZoneManager",
+            "home_region_id": 1
+          },
+          {
+            "id": 3,
+            "name": "Castellan Gale of Guild Compact",
+            "martial": 58.709877,
+            "loyalty": 45.07764,
+            "specialty": "Escort",
+            "post": "ZoneManager",
+            "home_region_id": 2
+          },
+          {
+            "id": 4,
+            "name": "Captain Gale of Guild Compact",
+            "martial": 43.445618,
+            "loyalty": 43.21994,
+            "specialty": "Patrol",
+            "post": "ZoneManager",
+            "home_region_id": 3
+          },
+          {
+            "id": 5,
+            "name": "Marshal Sable of Guild Compact",
+            "martial": 66.377106,
+            "loyalty": 51.727234,
+            "specialty": "Logistics",
+            "post": "Roaming",
+            "home_region_id": 4
+          },
+          {
+            "id": 6,
+            "name": "Marshal Iron of Guild Compact",
+            "martial": 65.194954,
+            "loyalty": 83.839005,
+            "specialty": "Patrol",
+            "post": "Roaming",
+            "home_region_id": 5
+          },
+          {
+            "id": 7,
+            "name": "Castellan Iron of Guild Compact",
+            "martial": 80.39892,
+            "loyalty": 77.94724,
+            "specialty": "Escort",
+            "post": "Roaming",
+            "home_region_id": 7
+          },
+          {
+            "id": 8,
+            "name": "Captain Iron of Guild Compact",
+            "martial": 63.37957,
+            "loyalty": 71.11552,
+            "specialty": "Logistics",
+            "post": "Roaming",
+            "home_region_id": 8
+          },
+          {
+            "id": 9,
+            "name": "Captain Ash of Guild Compact",
+            "martial": 57.99939,
+            "loyalty": 72.68778,
+            "specialty": "Escort",
+            "post": "Roaming",
+            "home_region_id": 12
+          },
+          {
+            "id": 25,
+            "name": "Castellan Dawn of Guild Compact",
+            "martial": 69.67456,
+            "loyalty": 70.45122,
+            "specialty": "Escort",
+            "post": "Roaming",
+            "home_region_id": 0
+          }
+        ]
+      },
+      {
+        "id": 1,
+        "name": "Iron Marches",
+        "strength": 180.0,
+        "cohesion": 95.0,
+        "war_goal_faction_id": 2,
+        "war_focus": 39.1,
+        "vassals": [
+          {
+            "id": 10,
+            "name": "Captain Stone of Iron Marches",
+            "martial": 74.89811,
+            "loyalty": 69.187706,
+            "specialty": "Siege",
+            "post": "ZoneManager",
+            "home_region_id": 13
+          },
+          {
+            "id": 11,
+            "name": "Castellan Dawn of Iron Marches",
+            "martial": 65.79686,
+            "loyalty": 77.16818,
+            "specialty": "Siege",
+            "post": "ZoneManager",
+            "home_region_id": 14
+          },
+          {
+            "id": 12,
+            "name": "Castellan Dawn of Iron Marches",
+            "martial": 53.179733,
+            "loyalty": 75.688095,
+            "specialty": "Escort",
+            "post": "ZoneManager",
+            "home_region_id": 16
+          },
+          {
+            "id": 13,
+            "name": "Reeve Sable of Iron Marches",
+            "martial": 39.59893,
+            "loyalty": 67.9399,
+            "specialty": "Logistics",
+            "post": "ZoneManager",
+            "home_region_id": 17
+          },
+          {
+            "id": 14,
+            "name": "Marshal Stone of Iron Marches",
+            "martial": 70.75341,
+            "loyalty": 80.695694,
+            "specialty": "Patrol",
+            "post": "Roaming",
+            "home_region_id": 18
+          },
+          {
+            "id": 15,
+            "name": "Steward Sable of Iron Marches",
+            "martial": 67.688225,
+            "loyalty": 72.35479,
+            "specialty": "Patrol",
+            "post": "Roaming",
+            "home_region_id": 13
+          },
+          {
+            "id": 16,
+            "name": "Steward Iron of Iron Marches",
+            "martial": 81.6581,
+            "loyalty": 68.06183,
+            "specialty": "Patrol",
+            "post": "Roaming",
+            "home_region_id": 14
+          },
+          {
+            "id": 17,
+            "name": "Castellan Sable of Iron Marches",
+            "martial": 75.51016,
+            "loyalty": 82.63229,
+            "specialty": "Patrol",
+            "post": "Roaming",
+            "home_region_id": 16
+          },
+          {
+            "id": 27,
+            "name": "Captain Gale of Iron Marches",
+            "martial": 65.06772,
+            "loyalty": 43.532307,
+            "specialty": "Siege",
+            "post": "Roaming",
+            "home_region_id": 17
+          },
+          {
+            "id": 29,
+            "name": "Marshal Dawn of Iron Marches",
+            "martial": 74.697235,
+            "loyalty": 68.63866,
+            "specialty": "Siege",
+            "post": "Roaming",
+            "home_region_id": 18
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "name": "River Concord",
+        "strength": 180.0,
+        "cohesion": 95.0,
+        "war_goal_faction_id": 1,
+        "war_focus": 39.1,
+        "vassals": [
+          {
+            "id": 18,
+            "name": "Captain Dawn of River Concord",
+            "martial": 39.27298,
+            "loyalty": 47.218716,
+            "specialty": "Siege",
+            "post": "ZoneManager",
+            "home_region_id": 6
+          },
+          {
+            "id": 19,
+            "name": "Warden Sable of River Concord",
+            "martial": 48.150158,
+            "loyalty": 69.19473,
+            "specialty": "Escort",
+            "post": "ZoneManager",
+            "home_region_id": 9
+          },
+          {
+            "id": 20,
+            "name": "Warden Dawn of River Concord",
+            "martial": 73.29721,
+            "loyalty": 59.79133,
+            "specialty": "Patrol",
+            "post": "ZoneManager",
+            "home_region_id": 10
+          },
+          {
+            "id": 21,
+            "name": "Reeve Ash of River Concord",
+            "martial": 41.211452,
+            "loyalty": 61.84697,
+            "specialty": "Siege",
+            "post": "ZoneManager",
+            "home_region_id": 11
+          },
+          {
+            "id": 22,
+            "name": "Marshal Iron of River Concord",
+            "martial": 62.097015,
+            "loyalty": 59.932167,
+            "specialty": "Siege",
+            "post": "Roaming",
+            "home_region_id": 15
+          },
+          {
+            "id": 23,
+            "name": "Captain Gale of River Concord",
+            "martial": 55.60268,
+            "loyalty": 76.031586,
+            "specialty": "Siege",
+            "post": "Roaming",
+            "home_region_id": 6
+          },
+          {
+            "id": 24,
+            "name": "Warden Stone of River Concord",
+            "martial": 78.37811,
+            "loyalty": 73.38869,
+            "specialty": "Siege",
+            "post": "Roaming",
+            "home_region_id": 9
+          },
+          {
+            "id": 26,
+            "name": "Captain Stone of River Concord",
+            "martial": 73.1528,
+            "loyalty": 56.54724,
+            "specialty": "Escort",
+            "post": "Roaming",
+            "home_region_id": 10
+          },
+          {
+            "id": 28,
+            "name": "Captain Dawn of River Concord",
+            "martial": 66.36978,
+            "loyalty": 77.36069,
+            "specialty": "Siege",
+            "post": "Roaming",
+            "home_region_id": 11
+          },
+          {
+            "id": 30,
+            "name": "Marshal Stone of River Concord",
+            "martial": 68.38141,
+            "loyalty": 66.32209,
+            "specialty": "Escort",
+            "post": "Roaming",
+            "home_region_id": 15
+          }
+        ]
+      }
+    ],
+    "current_region": 0,
+    "selected_region": 0,
+    "travel_cooldown_turns": 0,
+    "travel_cooldown_max": 2,
+    "travel_cost": 12.0,
+    "next_vassal_id": 31,
+    "map_seed": 725587879915274462
+  },
+  "commander_state": {
+    "commanders": [
+      {
+        "faction_id": 0,
+        "name": "Marshal Elowen",
+        "aggression": 0.35,
+        "cooperation_bias": 0.75,
+        "competence": 0.82
+      },
+      {
+        "faction_id": 1,
+        "name": "Lord Caradoc",
+        "aggression": 0.78,
+        "cooperation_bias": 0.38,
+        "competence": 0.74
+      },
+      {
+        "faction_id": 2,
+        "name": "Steward Nima",
+        "aggression": 0.44,
+        "cooperation_bias": 0.68,
+        "competence": 0.71
+      }
+    ],
+    "intents": [
+      {
+        "faction_id": 0,
+        "region_id": 5,
+        "mission_slot": 0,
+        "urgency": 48.224644,
+        "kind": "StabilizeBorder"
+      },
+      {
+        "faction_id": 1,
+        "region_id": 13,
+        "mission_slot": 1,
+        "urgency": 100.0,
+        "kind": "StabilizeBorder"
+      },
+      {
+        "faction_id": 2,
+        "region_id": 9,
+        "mission_slot": 2,
+        "urgency": 100.0,
+        "kind": "TrainingExchange"
+      }
+    ]
+  },
+  "diplomacy_state": {
+    "player_faction_id": 0,
+    "relations": [
+      [
+        0,
+        10,
+        16
+      ],
+      [
+        10,
+        0,
+        -8
+      ],
+      [
+        16,
+        -8,
+        0
+      ]
+    ]
+  },
+  "interaction_board": {
+    "offers": [
+      {
+        "id": 370,
+        "from_faction_id": 2,
+        "region_id": 9,
+        "mission_slot": 2,
+        "kind": "TrainingLoan",
+        "summary": "River Concord offers cross-faction training in Ash Bastion 10."
+      }
+    ],
+    "selected": 0,
+    "notice": "No diplomatic proposals yet.",
+    "next_offer_id": 371
+  },
+  "campaign_roster": {
+    "heroes": [
+      {
+        "id": 1,
+        "name": "Warden Lyra",
+        "origin_faction_id": 1,
+        "origin_region_id": 16,
+        "backstory": "Silver Moth was raised in Iron Fen 17 under Iron Marches, through constant jurisdiction disputes, and survived by reading every battlefield angle.",
+        "archetype": "Guardian",
+        "loyalty": 0.0,
+        "stress": 100.0,
+        "fatigue": 100.0,
+        "injury": 4.0,
+        "resolve": 78.0,
+        "active": true,
+        "deserter": false
+      },
+      {
+        "id": 2,
+        "name": "Kade Ember",
+        "origin_faction_id": 0,
+        "origin_region_id": 7,
+        "backstory": "Ember Lance was raised in Ash Bastion 8 under Guild Compact, under disciplined garrison rule, and became a shield for civilians.",
+        "archetype": "Vanguard",
+        "loyalty": 78.76034,
+        "stress": 0.0,
+        "fatigue": 0.0,
+        "injury": 8.0,
+        "resolve": 66.0,
+        "active": true,
+        "deserter": false
+      },
+      {
+        "id": 3,
+        "name": "Iris Quill",
+        "origin_faction_id": 0,
+        "origin_region_id": 12,
+        "backstory": "Silver Fox was raised in Stone Reach 13 under Guild Compact, through constant jurisdiction disputes, and survived by reading every battlefield angle.",
+        "archetype": "Tactician",
+        "loyalty": 82.76034,
+        "stress": 0.0,
+        "fatigue": 0.0,
+        "injury": 2.0,
+        "resolve": 74.0,
+        "active": true,
+        "deserter": false
+      }
+    ],
+    "recruit_pool": [
+      {
+        "id": 4,
+        "codename": "Silver Warden",
+        "origin_faction_id": 2,
+        "origin_region_id": 15,
+        "backstory": "Rook Lance was raised in Hollow Roads 16 under River Concord, under disciplined garrison rule, and learned to lead from the front.",
+        "archetype": "Tactician",
+        "resolve": 58.595924,
+        "loyalty_bias": 62.342087,
+        "risk_tolerance": 68.8369
+      },
+      {
+        "id": 5,
+        "codename": "Gale Moth",
+        "origin_faction_id": 0,
+        "origin_region_id": 1,
+        "backstory": "Gale Sable was raised in Dawn Fen 2 under Guild Compact, under disciplined garrison rule, and survived by reading every battlefield angle.",
+        "archetype": "Tactician",
+        "resolve": 78.47125,
+        "loyalty_bias": 52.284348,
+        "risk_tolerance": 32.936554
+      },
+      {
+        "id": 6,
+        "codename": "Ember Sable",
+        "origin_faction_id": 0,
+        "origin_region_id": 12,
+        "backstory": "Ember Bell was raised in Stone Reach 13 under Guild Compact, under disciplined garrison rule, and became a shield for civilians.",
+        "archetype": "Guardian",
+        "resolve": 67.50207,
+        "loyalty_bias": 70.083336,
+        "risk_tolerance": 74.82221
+      }
+    ],
+    "next_id": 7,
+    "generation_counter": 0
+  },
+  "campaign_ledger": {
+    "records": []
+  },
+  "campaign_event_log": {
+    "entries": [
+      {
+        "turn": 1,
+        "summary": "Flashpoint opened in Ash Bastion 10: Guild Compact pushes against River Concord."
+      },
+      {
+        "turn": 9,
+        "summary": "Companion quest issued for Warden Lyra: Warden Lyra: Homefront Debt"
+      }
+    ],
+    "max_entries": 120
+  },
+  "companion_story_state": {
+    "quests": [
+      {
+        "id": 1,
+        "hero_id": 1,
+        "kind": "Homefront",
+        "status": "Active",
+        "title": "Warden Lyra: Homefront Debt",
+        "objective": "Secure one victory tied to Iron Fen 17.",
+        "progress": 0,
+        "target": 1,
+        "issued_turn": 9,
+        "reward_loyalty": 4.0,
+        "reward_resolve": 6.0
+      }
+    ],
+    "next_id": 2,
+    "processed_ledger_len": 0,
+    "notice": "Story quest issued: Warden Lyra: Homefront Debt"
+  },
+  "flashpoint_state": {
+    "chains": [
+      {
+        "id": 1,
+        "mission_slot": 2,
+        "region_id": 9,
+        "attacker_faction_id": 0,
+        "defender_faction_id": 2,
+        "stage": 1,
+        "completed": false,
+        "companion_hook_hero_id": null,
+        "intent": "StealthPush",
+        "objective": "No companion hook"
+      }
+    ],
+    "next_id": 2,
+    "notice": "Flashpoint opened in Ash Bastion 10: Guild Compact pushes against River Concord."
+  },
+  "mission_snapshots": [
+    {
+      "mission_name": "Insurgent Network: Rift Reach 6 [Guild Compact]",
+      "bound_region_id": 5,
+      "mission_active": true,
+      "result": "InProgress",
+      "turns_remaining": 17,
+      "reactor_integrity": 75.743126,
+      "sabotage_progress": 17.007092,
+      "sabotage_goal": 100.0,
+      "alert_level": 45.635475,
+      "room_index": 1,
+      "tactical_mode": "Defensive",
+      "command_cooldown_turns": 0,
+      "unattended_turns": 0,
+      "outcome_recorded": false
+    },
+    {
+      "mission_name": "Frontline Clash: Mist Fen 14 [Iron Marches]",
+      "bound_region_id": 13,
+      "mission_active": true,
+      "result": "InProgress",
+      "turns_remaining": 1,
+      "reactor_integrity": 25.880493,
+      "sabotage_progress": 60.75512,
+      "sabotage_goal": 100.0,
+      "alert_level": 100.0,
+      "room_index": 1,
+      "tactical_mode": "Aggressive",
+      "command_cooldown_turns": 0,
+      "unattended_turns": 13,
+      "outcome_recorded": false
+    },
+    {
+      "mission_name": "Border Uprising: Ash Bastion 10 [River Concord]",
+      "bound_region_id": 9,
+      "mission_active": true,
+      "result": "InProgress",
+      "turns_remaining": 2,
+      "reactor_integrity": 26.329231,
+      "sabotage_progress": 41.783886,
+      "sabotage_goal": 100.0,
+      "alert_level": 100.0,
+      "room_index": 4,
+      "tactical_mode": "Aggressive",
+      "command_cooldown_turns": 0,
+      "unattended_turns": 10,
+      "outcome_recorded": false
+    }
+  ],
+  "active_mission_id": 0
+}

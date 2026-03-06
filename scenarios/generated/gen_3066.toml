@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0102_5v5"
+seed = 2025
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["pyromancer", "berserker", "knight", "cleric", "samurai"]
+enemy_hero_templates = ["shadow_dancer", "warden", "cryomancer", "cleric", "bard"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

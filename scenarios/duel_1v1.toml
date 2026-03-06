@@ -1,0 +1,11 @@
+[scenario]
+name        = "Duel 1v1 — Pure Micro"
+seed        = 7
+hero_count  = 1
+enemy_count = 1
+difficulty  = 2
+max_ticks   = 2000
+room_type   = "Entry"
+
+[assert]
+outcome = "Either"

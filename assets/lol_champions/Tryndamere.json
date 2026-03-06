@@ -1,0 +1,256 @@
+{
+  "id": "Tryndamere",
+  "name": "Tryndamere",
+  "title": "the Barbarian King",
+  "resource_type": "Fury",
+  "tags": [
+    "Fighter",
+    "Assassin"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Battle Fury",
+      "description": "Tryndamere gains Fury for each attack, critical strike, and killing blow he makes. Fury passively increases his Critical Strike Chance and can be consumed with his Bloodlust spell.",
+      "wiki_detail": {
+        "champion": "Tryndamere",
+        "skill": "I",
+        "icon": "Battle Fury.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Tryndamere}} generates {{tip|fury|{{as|Fury}}}} on his [[basic attack]]s, {{tip|critical strikes}}, and enemy kills. His {{as|Fury}} begins to decay after a period without dealing or taking damage.",
+        "blurb2": "'''Tryndamere''' gains {{as|{{sti|critical strike chance}}}} based on his {{as|Fury}}.",
+        "description": "{{sbc|Innate:}} '''Tryndamere''' generates {{tip|fury|{{as|5 Fury}}}} on his [[basic attack]]s, and {{as|10 Fury}} on {{tip|critical strikes}} and each time he kills an enemy. After 8 seconds without dealing or taking damage, '''Tryndamere''' loses {{as|5 Fury}} per second.",
+        "description2": "'''Tryndamere''' gains {{sti|critical strike chance|{{as|{{pp|0 to 50 for 11|key=%|0 to 100|type=Fury|color=Fury}} critical strike chance}}}}.",
+        "targeting": "Passive",
+        "affects": "Self",
+        "damagetype": "|spelleffects =",
+        "onhiteffects": "|spellshields =",
+        "notes": "* {{as|Fury}} generation stacks additively: if the given action triggers multiple ways of generating {{as|Fury}}, all of them apply.\n** Killing an enemy with a basic attack [[basic attack]] generates {{as|15 Fury}} ({{as|5 Fury}} from the [[basic attack]] + {{as|10 Fury}} from the kill).\n** Killing an enemy with a {{tip|critical strike}} generates {{as|20 Fury}} ({{as|10 Fury}} from the {{tip|critical strike}} + {{as|10 Fury}} from the kill).\n** The {{as|Fury}} gain for killing an enemy also stacks with {{ai|Spinning Slash|Tryndamere}}'s {{as|Fury}} generation per enemy hit.\n* Attacks against {{tip|structures}} will not grant bonus {{as|Fury}}, but will still reset the timer on {{as|Fury}} decay.\n* Attacks against {{tip|wards}} behave like attacks on normal enemies, generating {{as|5 Fury}} and resetting the decay timer. Attacks against wards can {{tip|critically strike}}, generating {{as|10 Fury}}.\n* Attacks against [[jungle plants]] will generate {{as|5 Fury}} and reset the decay timer. Attacks can also {{tip|critically strike}}, generating {{as|10 Fury}}. Additionally, {{ui|Honeyfruit}} drops restore {{as|5 Fury}} for each pod collected and reset the decay timer.\n** Attacking an {{ui|Honeyfruit}} and collecting the pods generates {{as|30 Fury}}, or {{as|35 Fury}} if the plant was hit by a {{tip|critical strike}}.\n* {{as|Fury}} is only granted if the [[basic attack]] hits and will not be granted if '''Tryndamere''' cancels his [[basic attack]] windup."
+      }
+    },
+    "Q": {
+      "id": "TryndamereQ",
+      "name": "Bloodlust",
+      "description": "Tryndamere thrives on the thrills of combat, increasing his Attack Damage as he is more and more wounded. He can cast Bloodlust to consume his Fury and heal himself.",
+      "tooltip": "Passive: Tryndamere thirsts for blood, gaining up to {{ maximumbonusad }} Attack Damage based on his missing Health.\n\nActive: Tryndamere consumes his Fury, restoring {{ baseheal }} plus {{ healperfury }} Health per Fury (max: {{ maximumheal }}). {{ spellmodifierdescriptionappend }}",
+      "cooldown": "12",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "400",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Maximum Damage",
+          "Healing",
+          "Heal Per Fury"
+        ],
+        "effect": [
+          "{{ maximumbonusad }} -> {{ maximumbonusadNL }}",
+          "{{ basehealing }} -> {{ basehealingNL }}",
+          "{{ bonushealperfury }} -> {{ bonushealperfuryNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Tryndamere",
+        "skill": "Q",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} {{ci|Tryndamere}} gains {{sti|{{as|'''bonus''' attack damage}}}}, increased based on {{as|his '''missing''' health}}.",
+        "blurb2": "{{sbc|Active:}} '''Tryndamere''' consumes all of his {{tip|fury|{{as|Fury}}}} to {{tip|heal}} himself based on {{as|Fury}} consumed.",
+        "description": "{{sbc|Passive:}} '''Tryndamere''' gains {{sti|{{as|'''bonus''' attack damage}}}}, plus an additional amount based on his {{as|'''missing''' health}}.",
+        "leveling": "{{st|Bonus Attack Damage|{{ap|5 to 25}}}}\n{{st|Additional Bonus AD|{{ap|0.15 to 0.55}} per {{as|1% '''missing''' health}}|Maximum Total Bonus AD|{{ap|5+0.15*100 to 25+0.55*100}}}}",
+        "icon2": "Bloodlust.png",
+        "description2": "{{sbc|Active:}} '''Tryndamere''' consumes all of his {{tip|fury|{{as|Fury}}}} to {{tip|heal}} himself, increased for every point of {{as|Fury}} consumed.",
+        "leveling2": "{{st|Minimum Heal|{{ap|30 to 70}} {{as|(+ 30% AP)}}|Heal Per 1 Fury|{{ap|0.5 to 2.3}} {{as|(+ {{fd|1.2}}% AP)}}|Maximum Heal|{{ap|30+0.5*100 to 70+2.3*100}} {{as|(+ 150% AP)}}}}",
+        "cooldown": "12",
+        "cost": "{{as|100%|Fury}}",
+        "costtype": "{{as|'''Current''' Fury}}",
+        "targeting": "Auto",
+        "affects": "Self",
+        "cast time": "none",
+        "damagetype": "|spelleffects =",
+        "onhiteffects": "|spellshields =",
+        "notes": "* ''Bloodlust'' can still be activated even if '''Tryndamere''' does not have any '''Fury'''.\n* ''Bloodlust'' can be activated at any point of '''Tryndamere's''' [[basic attack]].\n** Note that if an [[basic attack]] will {{tip|critically strike}} is determined when the [[basic attack]] starts. \n*** This means that if {{ai|Bloodlust|Tryndamere}} is cast during Tryndamere's [[basic attack]] windup, the attack will use the {{tip|critical strike}} chance given by the {{as|Fury}} '''before''' the {{ai|Bloodlust|Tryndamere}} cast.\n*** Furthermore, the {{as|Fury}} for that [[basic attack]] will be given once the windup completes. This lets '''Tryndamere''' start building {{as|Fury}} immediately."
+      }
+    },
+    "W": {
+      "id": "TryndamereW",
+      "name": "Mocking Shout",
+      "description": "Tryndamere lets out an insulting cry, decreasing surrounding champions' Attack Damage. Enemies with their backs turned to Tryndamere also have their Move Speed reduced.",
+      "tooltip": "Tryndamere hurls insults, reducing champions' Attack Damage by {{ adreduction*-1 }} for {{ reductionduration }} seconds and Slowing by {{ slowpotency*-100 }}% while cowering from him for {{ slowduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "850",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Physical Damage Reduction",
+          "Slow"
+        ],
+        "effect": [
+          "{{ adreduction*-1.000000 }} -> {{ adreductionnl*-1.000000 }}",
+          "{{ slowpotency*-100.000000 }}% -> {{ slowpotencynl*-100.000000 }}%"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Tryndamere",
+        "skill": "W",
+        "icon": "Mocking Shout.png",
+        "blurb": "{{sbc|Active:}} {{ci|Tryndamere}} reduces the {{sti|{{as|attack damage}}}} of nearby champions for a few seconds. Targets facing away from him are also {{tip|slow|slowed}}.",
+        "description": "{{sbc|Active:}} '''Tryndamere''' reduces the {{sti|{{as|attack damage}}}} of nearby enemy champions for 4 seconds.",
+        "leveling": "{{st|Attack Damage Reduction|{{ap|20 to 80}}}}",
+        "description2": "Targets facing in the opposite direction of '''Tryndamere''' are also {{tip|slow|slowed}} for the duration.",
+        "leveling2": "{{st|Slow|{{ap|30|37.5|45|52.5|60}}%}}",
+        "description3": "''A nearby enemy champion is required to cast this ability. The target does not have to be {{tip|sight|visible}} to be targeted by this ability.''",
+        "cooldown": "14",
+        "effect radius": "850",
+        "targeting": "Auto",
+        "target warning": "auto warning",
+        "cast time": "{{fd|0.3}}",
+        "affects": "Enemies",
+        "damagetype": "|spelleffects =",
+        "onhiteffects": "|spellshield  = True",
+        "notes": "*''Mocking Shout'' very briefly {{tip|sight|reveals}} '''Tryndamere''' if he uses it while in the fog of war to enemies."
+      }
+    },
+    "E": {
+      "id": "TryndamereE",
+      "name": "Spinning Slash",
+      "description": "Tryndamere slices toward a target unit, dealing damage to enemies in his path.",
+      "tooltip": "Tryndamere spins through his enemies, dealing {{ totaldamage }} physical damage and generating {{ nonchampfurygain }} Fury per enemy hit, increased to {{ champfurygain }} Fury against enemy champions.\n\nThis Ability's Cooldown is reduced by {{ nonchampcdrefund }} seconds when Tryndamere critically strikes, and reduced by {{ champcdrefund }} seconds when critically striking a champion.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "12/11/10/9/8",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "650",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ damage }} -> {{ damageNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Tryndamere",
+        "skill": "E",
+        "icon": "Spinning Slash.png",
+        "blurb": "{{sbc|Active:}} {{ci|Tryndamere}} {{tip|dashes}} to the target location, dealing {{as|physical damage}} and generating {{tip|fury|{{as|Fury}}}} per enemy hit.",
+        "blurb2": "{{tip|Critical strikes}} {{sti|cdr|reduce}} ''Spinning Slash's'' cooldown, increased against {{tip|champions}}.",
+        "description": "{{sbc|Active:}} '''Tryndamere''' {{tip|dashes}} to the target location, dealing {{as|physical damage}} to enemies hit and generating {{tip|fury|{{as|2 Fury}}}} per enemy hit, increased to {{as|5 Fury}} against champions.",
+        "description2": "{{tip|Critical strikes}} reduce ''Spinning Slash's'' {{sti|'''current''' cooldown}} by {{fd|0.75}} seconds, doubled to {{fd|1.5}} seconds against {{tip|champions}}.",
+        "leveling": "{{st|Physical Damage|{{ap|75 to 195}} {{as|(+ 130% '''bonus''' AD)}} {{as|(+ 80% AP)}}}}",
+        "description3": "''{{ai|Bloodlust|Tryndamere}} and {{ai|Undying Rage|Tryndamere}} can be cast during the dash. Spinning Slash will cast at max range if cast beyond that.''",
+        "cooldown": "{{ap|12 to 8}}",
+        "target range": "660",
+        "effect radius": "{{tip|cr|icononly=true}} 225",
+        "targeting": "Location",
+        "cast time": "none",
+        "affects": "Enemies",
+        "damagetype": "physical",
+        "spelleffects": "aoe",
+        "onhiteffects": "|spellshield  = True",
+        "parry": "unknown",
+        "grounded": "true",
+        "knockdown": "true",
+        "notes": "* ''Spinning Slash'''s {{tip|fury|{{as|Fury}}}} generation stacks additively with {{ai|Battle Fury|Tryndamere}}'s {{as|Fury}} generation on kill.\n** Killing an minion with ''Spinning Slash'' grants {{as|12 Fury}} ({{as|2 Fury}} from enemy hit + {{as|10 Fury}} from the kill).\n** Killing an champion with ''Spinning Slash'' grants {{as|15 Fury}} ({{as|5 Fury}} from champion hit + {{as|10 Fury}} from the kill).\n* There is no cooldown on {{as|Fury}} generation on kill with ''Spinning Slash''.\n* ''Spinning Slash'' has no minimum dash range.\n* {{si|Flash}} will interrupt the {{tip|dash}} but ''Spinning Slash'' will deal damage to enemies at the new location instantly.\n** Enemies already hit by ''Spinning Slash'' cannot be damaged more than once.\n* To ensure ''Spinning Slash'' deals damage when dashing away from an enemy champion, '''Tryndamere''' needs to move ''r-35'' units towards the enemy beyond the distance he can basic attack at, where ''r'' represents the enemy's radius and ''35'' is the distance in units beyond '''Tryndamere's''' basic attack range that ''Spinning Slash'' can reach.\n* The cooldown reduction upon {{tip|critical strike|critically striking}} triggers on {{tip|wards}} and [[jungle plants]].\n* The cooldown reduction upon {{tip|critical strike|critically striking}} triggers even if the attack is {{tip|blocked}}.\n* {{Pending for test}}: Cooldown reduction on {{tip|critical strike}} interaction with ''parrying'' effects ({{tip|dodge}}, {{tip|blind}})."
+      }
+    },
+    "R": {
+      "id": "UndyingRage",
+      "name": "Undying Rage",
+      "description": "Tryndamere's lust for battle becomes so strong that he is unable to die, no matter how wounded he becomes.",
+      "tooltip": "Tryndamere becomes completely immune to death for {{ e3 }} seconds, refusing to be reduced below {{ e2 }} Health, and instantly gains {{ e1 }} Fury.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120/100/80",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "400",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "50/75/100",
+        "30/50/70",
+        "5",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Minimum Health",
+          "Fury Gained"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ e2 }} -> {{ e2NL }}",
+          "{{ e1 }} -> {{ e1NL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Tryndamere",
+        "skill": "R",
+        "icon": "Undying Rage.png",
+        "blurb": "{{sbc|Active:}} {{ci|Tryndamere}} becomes enraged, gaining {{tip|fury|{{as|Fury}}}} and a {{tip|minimum health threshold}} for a few seconds.",
+        "blurb4": "{{sbc|{{tip|minimum health threshold|nolink=true}}:}} The target's health cannot be reduced below the threshold.",
+        "description": "{{sbc|Active:}} '''Tryndamere''' becomes enraged, instantly gaining {{tip|fury|{{as|Fury}}}} and a {{tip|minimum health threshold}} for 5 seconds.",
+        "leveling": "{{st|Fury Gained|{{as|{{ap|50|75|100}}|Fury}}}}\n{{st|Minimum Health Threshold|{{ap|30|50|70}}}}",
+        "description2": "''Undying Rage can be used while affected by {{tip|cast-inhibiting crowd control}}.''",
+        "cooldown": "{{ap|120 to 80}}",
+        "targeting": "Auto",
+        "affects": "Self",
+        "cast time": "none",
+        "damagetype": "|spelleffects =",
+        "onhiteffects": "|spellshields =",
+        "notes": "* No additional notes."
+      }
+    }
+  }
+}

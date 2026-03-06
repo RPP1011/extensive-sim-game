@@ -1,0 +1,13 @@
+[scenario]
+name = "size_8v8_2748"
+seed = 1919
+hero_count = 8
+enemy_count = 8
+difficulty = 1
+max_ticks = 10000
+room_type = "Entry"
+hero_templates = ["mage", "rogue", "witch_doctor", "alchemist", "druid", "paladin", "cleric", "blood_mage"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

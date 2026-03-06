@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0101_3v3_s2"
+seed = 22024
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["Alistar", "Ivern", "Braum"]
+enemy_hero_templates = ["Gragas", "Sivir", "Skarner"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

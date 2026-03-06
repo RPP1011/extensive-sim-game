@@ -1,0 +1,276 @@
+{
+  "id": "Kennen",
+  "name": "Kennen",
+  "title": "the Heart of the Tempest",
+  "resource_type": "Energy",
+  "tags": [
+    "Mage"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Mark of the Storm",
+      "description": "Kennen stuns enemies he hits 3 times with his abilities.",
+      "wiki_detail": {
+        "champion": "Kennen",
+        "skill": "I",
+        "icon": "Mark of the Storm.png",
+        "blurb": "{{sbc|Innate:}} {{cis|Kennen}} abilities apply a stack of ''Mark of the Storm'' to enemies hit.",
+        "blurb2": "The third stack consumes them all to briefly {{tip|stun}} the target and restore {{as|{{sti|energy}}}}. The duration is dramatically reduced if this occurs on the same target again within a few seconds.",
+        "description": "{{sbc|Innate:}} '''Kennen's''' [[champion ability|abilities]] apply a [[stack]] of ''Mark of the Storm'' to enemies hit for 6 seconds, refreshing on subsequent applications and stacking up to 3 times.",
+        "description2": "The third stack against a target consumes them all to {{tip|stun}} them for {{fd|1.25}} seconds and restore {{sti|{{as|25 energy}}}}. The stun duration is reduced to {{fd|0.5}} seconds if this occurs on the same target again within 6 seconds.",
+        "description3": "''{{ai|Slicing Maelstrom|Kennen}} can apply only up to 3 stacks on a target.''",
+        "targeting": "Passive",
+        "affects": "Enemies",
+        "damagetype": "|spellshield  = True",
+        "notes": "* '''Kennen''' will still restore energy if the target dies from the third stack of ''Mark of the Storm''.\n* After {{ai|Slicing Maelstrom|Kennen}} applies its third stack, the target gains a 6-second stack immunity against ''Slicing Maelstrom'' that refreshes on subsequent hits."
+      }
+    },
+    "Q": {
+      "id": "KennenShurikenHurlMissile1",
+      "name": "Thundering Shuriken",
+      "description": "Kennen throws a fast moving shuriken towards a location, causing damage and adding a Mark of the Storm to any opponent that it hits.",
+      "tooltip": "Kennen throws a shuriken, dealing {{ totaldamage }} magic damage to the first enemy hit.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "7/6.25/5.5/4.75/4",
+      "cost": "60/55/50/45/40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "950",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "75/125/175/225/275",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "@AbilityResourceName@ Cost",
+          "Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ cost }} -> {{ costNL }}",
+          "{{ e1 }} -> {{ e1NL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kennen",
+        "skill": "Q",
+        "icon": "Thundering Shuriken.png",
+        "blurb": "{{sbc|Active:}} {{ci|Kennen}} throws a shuriken in the target direction that deals {{as|magic damage}} to the first enemy hit.",
+        "description": "{{sbc|Active:}} '''Kennen''' throws a shuriken in the target direction that deals {{as|magic damage}} to the first enemy hit.",
+        "leveling": "{{st|Magic Damage|{{ap|75 to 275}} {{as|(+ 75% AP)}}}}",
+        "cooldown": "{{ap|7 to 4}}",
+        "cast time": "{{fd|0.175}}",
+        "cost": "{{ap|60 to 40}}",
+        "costtype": "Energy",
+        "target range": "1050",
+        "width": "100",
+        "speed": "1700",
+        "targeting": "Direction",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Single target",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "{{Effect at cast time start}}"
+      }
+    },
+    "W": {
+      "id": "KennenBringTheLight",
+      "name": "Electrical Surge",
+      "description": "Kennen passively deals extra damage and adds a Mark of the Storm to his target every few attacks, and he can activate this ability to damage and add another Mark of the Storm to targets who are already marked.",
+      "tooltip": "Passive: Every 5th Attack deals an additional {{ totaldamagepassive }} magic damage.\n\nActive: Kennen sends out a blast of electricity, dealing {{ totaldamageactive }} magic damage to nearby enemies affected by Mark of the Storm.\n{{ spellmodifierdescriptionappend }}",
+      "cooldown": "13/11.25/9.5/7.75/6",
+      "cost": "40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "725",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "70/95/120/145/170",
+        "25",
+        "0.7",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Bonus AD Ratio",
+          "Damage (passive)",
+          "Damage (active)"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ badratio*100.000000 }}% -> {{ badrationl*100.000000 }}%",
+          "{{ baseonhitdamage }} -> {{ baseonhitdamageNL }}",
+          "{{ e1 }} -> {{ e1NL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kennen",
+        "skill": "W",
+        "icon": "false",
+        "blurb": "{{sbc|Passive:}} {{cis|Kennen}} basic attacks {{tip|on-attack}} generate a stack of ''Electrical Surge'', which stacks up to a cap. At max stacks, his next basic attack consumes them all to deal {{as|'''bonus''' magic damage}} and apply a stack of ''{{ai|Mark of the Storm|Kennen}}''.",
+        "blurb2": "{{sbc|Active:}} '''Kennen''' sends out a surge of electricity that deals {{as|magic damage}} to all nearby enemies afflicted by ''{{ai|Mark of the Storm|Kennen}}'' or within ''{{ai|Slicing Maelstrom|Kennen}}''.",
+        "description": "{{sbc|Passive:}} '''Kennen's''' basic attacks {{tip|on-attack}} generate a stack of ''Electrical Surge'', stacking up to 4 times. At 4 stacks, his next basic attack is empowered to consume them all to deal {{as|'''bonus''' magic damage}} and apply a stack of ''{{ai|Mark of the Storm|Kennen}}''.<br>'''Kennen''' gains maximum stacks of ''Electrical Surge'' upon [[death|respawning]].",
+        "icon2": "Electrical Surge.png",
+        "description2": "{{sbc|Active:}} '''Kennen''' sends out a surge of electricity that deals {{as|magic damage}} to all nearby enemies afflicted by ''{{ai|Mark of the Storm|Kennen}}'' or within ''{{ai|Slicing Maelstrom|Kennen}}''.",
+        "leveling": "{{st|Bonus Magic Damage|{{ap|35 to 75}} {{as|(+ {{ap|80 to 120}}% '''bonus''' AD)}} {{as|(+ 35% AP)}}}}",
+        "leveling2": "{{st|Magic Damage|{{ap|70 to 170}} {{as|(+ 80% AP)}}}}",
+        "description3": "''An enemy within {{tip|cr|icononly = true}} 775 units with {{ai|Mark of the Storm|Kennen}} or inside {{ai|Slicing Maelstrom|Kennen}} is required to cast this ability. The target does not have to be {{tip|sight|visible}} to be targeted by this ability.''",
+        "cast time": "{{fd|0.25}}",
+        "cooldown": "{{ap|13 to 6}}",
+        "cost": "40",
+        "costtype": "Energy",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|775|Pending for test; targets acquired at cast start or end}}",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "special",
+        "projectile": "False",
+        "onhiteffects": "Special",
+        "grounded": "|knockdown    =",
+        "parry": "Special",
+        "notes": "* The empowered basic attack applies bonus {{tip|spell damage}}, while the electrical surge deals {{tip|area damage}}.\n* ''Electrical Surge's'' enhanced attack will be consumed and the bonus damage will not be applied if '''Kennen''' is {{tip|blind|blinded}}.\n** ''Electrical Surge's'' enhanced attack cannot be {{tip|dodge|dodged}} or {{tip|block|blocked}}.\n* The empowered attack will trigger but not be consumed nor apply its effects against [[structures]] and [[ward]]s."
+      }
+    },
+    "E": {
+      "id": "KennenLightningRush",
+      "name": "Lightning Rush",
+      "description": "Kennen morphs into a lightning form, enabling him to pass through units and apply a Mark of the Storm. Kennen gains Move Speed when entering this form, and attack speed when leaving it.",
+      "tooltip": "Kennen turns into a ball of lightning, gaining {{ movementspeed*100 }}% Move Speed, dealing {{ totaldamage }} magic damage to enemies he passes through, and becoming Ghosted for {{ durationasball }} seconds. If Kennen damages at least one enemy, he gains {{ energyrefund }} Energy. \n\nAfter this ability ends, Kennen gains {{ attackspeed*100 }}% Attack Speed for {{ durationafterball }} seconds. Kennen can Recast to end this Ability early.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "10/9/8/7/6",
+      "cost": "80",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "170",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "85/125/165/205/245",
+        "40",
+        "10/20/30/40/50",
+        "1",
+        "2",
+        "0",
+        "4",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage",
+          "Attack Speed"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ attackspeed*100.000000 }}% -> {{ attackspeednl*100.000000 }}%"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Kennen",
+        "skill": "E",
+        "icon": "Lightning Rush.png",
+        "blurb": "{{sbc|Active:}} {{ci|Kennen}} becomes lightning, a {{tip|ghosted}} form that gains {{sti|ms|{{as|'''bonus''' movement speed}}}} for a short time. He deals {{as|magic damage}} to enemies he passes through and restores {{sti|{{as|energy}}}} if he damaged an enemy at all.",
+        "description": "{{sbc|Active:}} '''Kennen''' turns into lightning for 2 seconds, becoming unable to declare basic attacks but gaining {{tip|ghosting}} and {{sti|ms|{{as|100% '''bonus''' movement speed}}}}. He deals {{as|magic damage}} to enemies he passes through, reduced to 65% against non-champions, and restores {{sti|{{as|40 energy}}}} upon damaging at least one enemy.",
+        "leveling": "{{st|Magic Damage|{{ap|80 to 240}} {{as|(+ 80% AP)}}|Non-Champion Damage|{{ap|80*0.65 to 240*0.65}} {{as|(+ {{ap|80*0.65}}% AP)}}}}",
+        "description2": "''Lightning Rush'' can be recast after {{fd|0.5}} seconds, and does so automatically after the duration.",
+        "description3": "{{sbc|Recast:}} '''Kennen''' ends ''Lightning Rush'' to gain {{sti|{{as|'''bonus''' attack speed}}}} and be allowed to exceed the {{tt|attack speed cap|normally 2.5 attacks per second}} for 4 seconds.",
+        "leveling3": "{{st|Bonus Attack Speed|{{ap|40 to 80}}%}}",
+        "description4": "''Lightning Rush's recast can be used while affected by {{tip|cast-inhibiting crowd control}}.''",
+        "cooldown": "{{ap|10 to 6}}",
+        "cdstart": "post-effect",
+        "cost": "80",
+        "cast time": "none",
+        "costtype": "Energy",
+        "targeting": "Auto",
+        "affects": "Self, Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* ''Lightning Rush'' will only damage any particular enemy once per cast.\n* For the purpose of aim-assist, '''Kennen's''' {{stil|attack range}} is reduced{{ft|by 575|to -25}}during ''Lightning Rush'', further reduced to -{{fd|33.75}} with {{ii|Rapid Firecannon}}."
+      }
+    },
+    "R": {
+      "id": "KennenShurikenStorm",
+      "name": "Slicing Maelstrom",
+      "description": "Kennen summons a storm that strikes at nearby enemy champions for magical damage.",
+      "tooltip": "Kennen unleashes a magical storm, dealing {{ pertickdamagecalculated }} magic damage to all nearby enemies every {{ kennenrtickrate }} seconds, and gaining {{ kennenrdefenses }} Armor and {{ kennenrdefenses }} Magic Resist for {{ kennenrduration }} seconds. Successive hits deal {{ damageamp*100 }}% increased damage for each hit the enemy has already suffered.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "120",
+      "cost": "0",
+      "cost_type": "No Cost",
+      "range": "550",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Armor Bonus",
+          "Magic Resist Bonus"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ kennenrdefenses }} -> {{ kennenrdefensesNL }}",
+          "{{ kennenrdefenses }} -> {{ kennenrdefensesNL }}"
+        ]
+      },
+      "resource": "No Cost",
+      "wiki_detail": {
+        "champion": "Kennen",
+        "skill": "R",
+        "icon": "Slicing Maelstrom.png",
+        "blurb": "{{sbc|Active:}} {{ci|Kennen}} summons a storm that strikes at nearby enemy champions, dealing {{as|magic damage}}. Enemies take increased damage from each subsequent strike.",
+        "description": "{{sbc|Active:}} '''Kennen''' summons a storm around himself for 3 seconds, gaining {{sti|armor|{{as|'''bonus''' armor}}}} and {{sti|mr|{{as|'''bonus''' magic resistance}}}} for the duration.",
+        "leveling": "{{st|Bonus Resistances|{{ap|20 to 60}}}}",
+        "description2": "The storm strikes lightning bolts down on nearby enemies every {{fd|0.5}} seconds, each one dealing {{as|magic damage}}.",
+        "leveling2": "{{st|Magic Damage Per Bolt|{{ap|40 to 110}} {{as|(+ {{fd|22.5}}% AP)}}}}",
+        "description3": "''Slicing Maelstrom'' gains 10% additional damage for each subsequent strike a target has received up to a combined total of 150% of the damage of the initial strike.",
+        "leveling3": "{{st|Total Single-Target Damage|{{ap|40*7.5 to 110*7.5}} {{as|(+ {{ap|22.5*7.5}}% AP)}}}}",
+        "cast time": "{{fd|0.25}}",
+        "cooldown": "{{ap|120 to 80}}",
+        "effect radius": "550",
+        "targeting": "Auto",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "aoedot",
+        "projectile": "|grounded     =",
+        "knockdown": "|notes        = \n* '''Kennen''' can move during ''Slicing Maelstrom's'' cast time."
+      }
+    }
+  }
+}

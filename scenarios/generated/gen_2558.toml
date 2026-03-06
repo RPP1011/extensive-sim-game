@@ -1,0 +1,13 @@
+[scenario]
+name = "ladder_shadow_dancer_d3_hp1x_s2"
+seed = 21855
+hero_count = 4
+enemy_count = 5
+difficulty = 3
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["shadow_dancer", "monk", "cryomancer", "arcanist"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_shaman_shadow_dancer_engineer_s2"
+seed = 21372
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["shaman", "shadow_dancer", "engineer"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

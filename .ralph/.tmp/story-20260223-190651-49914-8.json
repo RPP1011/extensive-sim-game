@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "total": 12,
+  "remaining": 4,
+  "quality_gates": [
+    "cargo test"
+  ],
+  "id": "US-009",
+  "title": "Implement overworld-to-region transition payload"
+}

@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "total": 12,
+  "remaining": 6,
+  "quality_gates": [
+    "cargo test"
+  ],
+  "id": "US-007",
+  "title": "Implement explicit region target picker workflow"
+}

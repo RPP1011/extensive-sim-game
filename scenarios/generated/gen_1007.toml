@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_bard_shadow_dancer_warden_s2"
+seed = 21336
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["bard", "shadow_dancer", "warden"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

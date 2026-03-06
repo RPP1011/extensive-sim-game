@@ -1,0 +1,107 @@
+[hero]
+name = "Shen"
+
+[stats]
+hp = 150
+move_speed = 3.3
+armor = 40.0
+magic_resist = 35.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 14
+range = 1.5
+cooldown = 900
+
+# --- Q: Twilight Assault ---
+[[abilities]]
+name = "Twilight Assault"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 8000
+ai_hint = "damage"
+resource_cost = 28
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+# --- W: Spirit's Refuge ---
+[[abilities]]
+name = "Spirit's Refuge"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 18000
+ai_hint = "damage"
+resource_cost = 8
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+# --- E: Shadow Dash ---
+[[abilities]]
+name = "Shadow Dash"
+targeting = "ground_target"
+range = 6.0
+cooldown_ms = 18000
+ai_hint = "damage"
+resource_cost = 30
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+damage_type = "physical"
+
+[[abilities.effects]]
+type = "taunt"
+duration_ms = 1500
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- R: Stand United ---
+[[abilities]]
+name = "Stand United"
+targeting = "target_ally"
+range = 0.0
+cooldown_ms = 200
+ai_hint = "utility"
+
+[abilities.delivery]
+method = "channel"
+duration_ms = 2000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "shield"
+amount = 32
+duration_ms = 5000
+
+[[abilities.effects]]
+type = "dash"
+is_blink = true
+
+# --- Passive: Ki Barrier ---
+[[passives]]
+name = "Ki Barrier"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_ability_used"
+
+[[passives.effects]]
+type = "heal"
+amount = 10
+
+[[passives.effects]]
+type = "shield"
+amount = 20
+duration_ms = 3000
+

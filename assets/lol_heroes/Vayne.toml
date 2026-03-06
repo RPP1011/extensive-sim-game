@@ -1,0 +1,115 @@
+[hero]
+name = "Vayne"
+
+[stats]
+hp = 80
+move_speed = 3.5
+armor = 22.0
+magic_resist = 28.0
+resource = 60
+max_resource = 60
+resource_regen_per_sec = 2.0
+
+[attack]
+damage = 21
+range = 5.5
+cooldown = 700
+
+# --- Q: Tumble ---
+[[abilities]]
+name = "Tumble"
+targeting = "direction"
+range = 3.0
+cooldown_ms = 6000
+ai_hint = "utility"
+resource_cost = 6
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+# --- W: Silver Bolts ---
+[[abilities]]
+name = "Silver Bolts"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 8000
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 12
+damage_type = "true"
+
+# --- E: Condemn ---
+[[abilities]]
+name = "Condemn"
+targeting = "target_enemy"
+range = 5.5
+cooldown_ms = 20000
+cast_time_ms = 250
+ai_hint = "damage"
+resource_cost = 18
+
+[abilities.delivery]
+method = "projectile"
+speed = 20.0
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 12
+damage_type = "physical"
+
+[[abilities.delivery.on_hit]]
+type = "stun"
+duration_ms = 1000
+
+[[abilities.delivery.on_hit]]
+type = "knockback"
+distance = 2.0
+
+# --- R: Final Hour ---
+[[abilities]]
+name = "Final Hour"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 21700
+ai_hint = "damage"
+resource_cost = 16
+
+[[abilities.effects]]
+type = "damage"
+amount = 6
+damage_type = "physical"
+
+[[abilities.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 1000
+
+[[abilities.effects]]
+type = "stealth"
+duration_ms = 3000
+break_on_damage = true
+break_on_ability = true
+
+# --- Passive: Night Hunter ---
+[[passives]]
+name = "Night Hunter"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_dealt"
+
+[[passives.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.15
+duration_ms = 3000
+

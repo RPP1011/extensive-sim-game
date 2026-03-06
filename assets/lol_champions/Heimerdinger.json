@@ -1,0 +1,252 @@
+{
+  "id": "Heimerdinger",
+  "name": "Heimerdinger",
+  "title": "the Revered Inventor",
+  "resource_type": "Mana",
+  "tags": [
+    "Mage",
+    "Support"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "Hextech Affinity",
+      "description": "Gain Move Speed while near allied towers and turrets deployed by Heimerdinger.",
+      "wiki_detail": {
+        "champion": "Heimerdinger",
+        "skill": "I",
+        "icon": "Hextech Affinity.png",
+        "blurb": "{{sbc|Innate:}} {{ci|Heimerdinger}} gains {{sti|{{as|'''bonus''' movement speed}}}} while near allied {{tip|turret|towers}} and {{ai|H-28G Evolution Turret|Heimerdinger|icononly=true}}{{ai|H-28Q Apex Turret|Heimerdinger|turrets}} he deploys.",
+        "description": "{{sbc|Innate:}} '''Heimerdinger''' gains {{sti|ms|{{as|20% '''bonus''' movement speed}}}} while near an allied {{tip|turret}} or a ''{{ai|H-28G Evolution Turret|Heimerdinger}}'' or ''{{ai|H-28Q Apex Turret|Heimerdinger}}'' deployed by him.",
+        "effect radius": "300",
+        "targeting": "Passive",
+        "affects": "Self",
+        "notes": "* No additional details."
+      }
+    },
+    "Q": {
+      "id": "HeimerdingerQ",
+      "name": "H-28 G Evolution Turret",
+      "description": "Heimerdinger lays down a rapid-fire cannon turret equipped with a secondary pass-through beam attack (turrets deal half damage to towers).",
+      "tooltip": "Heimerdinger constructs a Turret that attacks nearby enemies. Heimerdinger can have {{ maxturrets }} turrets active at once. Turrets slowly build up charge. At max charge, they fire a stronger attack.\n\nIf Heimerdinger gets too far away, his Turrets will deactivate after 8 seconds.\n\nThis Ability has {{ maxkits }} charges.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "1",
+      "cost": "20",
+      "cost_type": " Turret Kit & {{ cost }} Mana",
+      "range": "350",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "900",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cannon Damage",
+          "Beam Damage"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ basedamagebeam }} -> {{ basedamagebeamNL }}"
+        ]
+      },
+      "resource": "{{ kitcost }} Turret Kit & {{ cost }} Mana"
+    },
+    "W": {
+      "id": "HeimerdingerW",
+      "name": "Hextech Micro-Rockets",
+      "description": "Heimerdinger fires long-range rockets that converge on his cursor.",
+      "tooltip": "Heimerdinger unleashes a barrage of {{ rockets }} rockets that deal {{ damage }} magic damage to the first enemy hit. Additional rocket hits deal reduced damage.\n\nMax Damage: {{ totaldamage }} magic damage.\n\nNearby Turrets gain 20% charge per rocket that hits a champion.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11/10/9/8/7",
+      "cost": "50/60/70/80/90",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1325",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "60/90/120/150/180",
+        "12/18/24/30/36",
+        "25",
+        "20",
+        "30",
+        "108/162/216/270/324",
+        "5",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Damage",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "variables": {
+          "r1": "40",
+          "r2": "140",
+          "apr": "55"
+        },
+        "champion": "Heimerdinger",
+        "skill": "W",
+        "icon": "Hextech Micro-Rockets.png",
+        "blurb": "{{sbc|Active:}} {{ci|Heimerdinger}} fires a wave of rockets that converge to the target location and fan beyond it to max range, each dealing {{as|magic damage}} to the first enemy hit.",
+        "blurb2": "Whenever a rocket hits an enemy {{tip|champion}}, nearby {{ai|H-28G Evolution Turret|Heimerdinger|icononly=true}}{{ai|H-28Q Apex Turret|Heimerdinger|turrets}} gain some beam charge.",
+        "description": "{{sbc|Active:}} '''Heimerdinger''' unleashes a wave of 5 rockets that converge to the target location and fan beyond it up to a maximum range, with each one dealing {{as|magic damage}} to the first enemy it hits. Every rocket hitting an enemy {{tip|champion}} grants 20% beam charge to all ''{{ai|H-28G Evolution Turret|Heimerdinger|icononly=yes}} {{ai|H-28Q Apex Turret|Heimerdinger|turrets}}'' within 1000 range, up to a maximum of 100% beam charge when hitting 5 rockets on an enemy champion.",
+        "leveling": "{{st|Initial Magic Damage|{{ap|{{#var:r1}} to {{#var:r2}}}} {{as|(+ {{#var:apr}}% AP)}}}}",
+        "description2": "Enemies can be hit by multiple rockets, with each one beyond the first dealing 20% damage, increased to 40% against {{tip|minions}}.",
+        "leveling2": "{{st|Additional Magic Damage|{{ap|{{#var:r1}}*0.2 to {{#var:r2}}*0.2}} {{as|(+ {{ap|{{#var:apr}}*0.2}}% AP)}}|Total Magic Damage|{{ap|{{#var:r1}}*1.8 to {{#var:r2}}*1.8}} {{as|(+ {{ap|{{#var:apr}}*1.8}}% AP)}}}}{{st|Additional Minion Damage|{{ap|{{#var:r1}}*0.6 to {{#var:r2}}*0.6}} {{as|(+ {{ap|{{#var:apr}}*0.6}}% AP)}}|Total Minion Damage|{{ap|{{#var:r1}}*3.4 to {{#var:r2}}*3.4}} {{as|(+ {{ap|{{#var:apr}}*3.4}}% AP)}}}}",
+        "cooldown": "{{ap|11 to 7}}",
+        "cast time": "{{fd|0.25}}",
+        "target range": "1325",
+        "cost": "{{ap|50 to 90}}",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "spellaoe",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "* ''Hextech Micro-Rockets' '' direction-targeting allows for custom spread.\n{{Effect at cast time end}}"
+      }
+    },
+    "E": {
+      "id": "HeimerdingerE",
+      "name": "CH-2 Electron Storm Grenade",
+      "description": "Heimerdinger lobs a grenade at a location, dealing damage to enemy units, as well as stunning anyone directly hit and slowing surrounding units.",
+      "tooltip": "Heimerdinger hurls a grenade that deals {{ damage }} magic damage in an area and Slows by {{ slowpercent.0*100 }}% for {{ slowduration }} seconds. Enemies in the center are also Stunned for {{ stunduration }} seconds.\n\nHitting a champion fully charges nearby Turrets.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "11",
+      "cost": "85",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "970",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Heimerdinger",
+        "skill": "E",
+        "icon": "CH-2 Electron Storm Grenade.png",
+        "blurb": "{{sbc|Active:}} {{ci|Heimerdinger}} lobs a grenade to the target location that deals {{as|magic damage}} and {{tip|slow|slows}} nearby enemies. Enemies hit at the epicenter are also {{tip|stun|stunned}}.",
+        "blurb2": "If the grenade hits an enemy {{tip|champion}}, nearby {{ai|H-28G Evolution Turret|Heimerdinger|icononly=true}}{{ai|H-28Q Apex Turret|Heimerdinger|turrets}} gain full beam charge.",
+        "description": "{{sbc|Active:}} '''Heimerdinger''' hurls a grenade at the target location that detonates upon impact, dealing {{as|magic damage}} to nearby enemies and {{tip|slow|slowing}} them by 35% for 2 seconds. If the grenade hits an enemy {{tip|champion}}, all ''{{ai|H-28G Evolution Turret|Heimerdinger|icononly=yes}} {{ai|H-28Q Apex Turret|Heimerdinger|turrets}}'' within 1000 range of the impact gain 100% beam charge.",
+        "leveling": "{{st|Magic Damage|{{ap|60 to 220}} {{as|(+ 60% AP)}}}}",
+        "description2": "Enemies hit at the center of the grenade's impact are also {{tip|stun|stunned}} for {{fd|1.5}} seconds.",
+        "target range": "970",
+        "effect radius": "250",
+        "inner radius": "135",
+        "speed": "1200",
+        "cooldown": "11",
+        "cast time": "{{fd|0.25}}",
+        "cost": "85",
+        "costtype": "Mana",
+        "targeting": "Location",
+        "affects": "Enemies",
+        "damagetype": "Magic",
+        "spellshield": "True",
+        "spelleffects": "Area of effect",
+        "projectile": "True",
+        "grounded": "|knockdown    =",
+        "notes": "{{Effect at cast time end}}"
+      }
+    },
+    "R": {
+      "id": "HeimerdingerR",
+      "name": "UPGRADE!!!",
+      "description": "Heimerdinger invents an upgrade, causing his next spell to have increased effects.",
+      "tooltip": "Heimerdinger upgrades his next non-ultimate Ability.\n\nH-28Q Apex Turret: Place an upgraded Turret for 8 seconds that doesn't count towards Heimerdinger's max turrets, deals {{ qultdamage }} magic damage per shot and {{ qultdamagebeam }} magic damage per charged shot. Its attacks deal damage in an area, Slow by 25% for 2 seconds, and it is immune to crowd control.\n\nHextech Rocket Swarm: Fires 4 waves of rockets that each deal {{ wultdamage }} magic damage. Champions and jungle monsters hit by additional rockets take reduced damage, and minions take increased damage. Max Damage: {{ wulttotaldamage }} magic damage. \n\nCH-3X Lightning Grenade: Throws a bouncing grenade that discharges three times, dealing {{ eultdamage }} magic damage. The Stun and Slow areas are larger.\n\nRecast: Cancel this Ability.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "100/85/70",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "100/140/180",
+        "80",
+        "1.5",
+        "0.12",
+        "500/690/865",
+        "0.45",
+        "80/100/120",
+        "135/180/225",
+        "28/39/49",
+        "150/250/350"
+      ],
+      "leveltip": {
+        "label": [
+          "Cooldown",
+          "Apex Turret Cannon Damage",
+          "Turret Beam Damage",
+          "Rocket Swarm Damage",
+          "Rocket Swarm Max Damage",
+          "Lightning Grenade Damage"
+        ],
+        "effect": [
+          "{{ cooldown }} -> {{ cooldownNL }}",
+          "{{ qultbasedamage }} -> {{ qultbasedamageNL }}",
+          "{{ qultbasedamagebeam }} -> {{ qultbasedamagebeamNL }}",
+          "{{ wultbasedamage }} -> {{ wultbasedamageNL }}",
+          "{{ wulttotalbasedamage }} -> {{ wulttotalbasedamageNL }}",
+          "{{ eultbasedamage }} -> {{ eultbasedamageNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Heimerdinger",
+        "skill": "R",
+        "icon": "UPGRADE!!!.png",
+        "blurb": "{{sbc|Active:}} {{ci|Heimerdinger}} can empower his next ability to apply an additional effect. These empowered abilities have the same {{sti|cooldowns}} as their basic forms, deal modified damage, and do not cost mana.",
+        "blurb2": "''UPGRADE!!!'' can be recast after a short time, and does so automatically upon casting another ability.",
+        "blurb3": "{{sbc|Recast:}} ''UPGRADE!!!'' ends and is put on a short {{sti|cooldown}}.",
+        "description": "{{sbc|Active:}} '''Heimerdinger''' empowers his next [[champion ability|basic ability]] for an additional effect, consuming the empowerment upon cast and placing ''UPGRADE!!!'' on full cooldown. These empowered abilities have the same cooldowns as their basic forms, deal modified damage, and do not have a {{sti|{{as|mana}}}} cost. <br/><br/>''UPGRADE!!!'' can be recast after 3 seconds while the empowerment is available.",
+        "description2": "{{sbc|Recast:}} '''Heimerdinger''' ends ''UPGRADE!!!'' and puts it on a 3-second {{sti|cooldown}}.",
+        "description3": "''UPGRADE!!! can be used while affected by {{tip|cast-inhibiting crowd control}}.''",
+        "cooldown": "{{tt|{{ap|100 to 70}}|Starts after using an empowered ability}}",
+        "cdstart": "Special",
+        "cost": "100",
+        "costtype": "Mana",
+        "cast time": "none",
+        "targeting": "Auto",
+        "affects": "Self",
+        "damagetype": "|spellshield  =",
+        "spelleffects": "|projectile   =",
+        "grounded": "|knockdown    =",
+        "notes": "*Toggle abilities do not count as ability activations for the purposes of on-cast effects such as {{tip|Spellblade}} and triggering {{ais|Force Pulse|Kassadin}} passive.\n**Consuming the buff for an empowered basic [[Champion ability|ability]] does.\n* No compensations for {{sti|{{as|mana}}}} are made if ''UPGRADE!!!'' is recast."
+      }
+    }
+  }
+}

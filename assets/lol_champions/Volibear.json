@@ -1,0 +1,298 @@
+{
+  "id": "Volibear",
+  "name": "Volibear",
+  "title": "the Relentless Storm",
+  "resource_type": "Mana",
+  "tags": [
+    "Fighter",
+    "Tank"
+  ],
+  "abilities": {
+    "passive": {
+      "name": "The Relentless Storm",
+      "description": "Volibear's Attacks and abilities grant Attack Speed, and eventually cause his Attacks to deal bonus magic damage to nearby enemies.",
+      "wiki_detail": {
+        "champion": "Volibear",
+        "skill": "I",
+        "blurb": "{{sbc|Innate:}} {{cis|Volibear}} basic attacks and ability hits generate a stack of ''The Relentless Storm'', which stacks up to 5 times. At 5 stacks, he gains Lightning Claws.",
+        "blurb4": "{{sbc|The Relentless Storm:}} For each stack, '''Volibear''' gains {{as|{{sti|'''bonus''' attack speed}}|as}}.<br/><br/>\n{{sbc|Lightning Claws:}} '''Volibear's''' basic attacks deal {{as|'''bonus''' magic damage}} that can chain to up to four surrounding enemies.",
+        "icon": "The Relentless Storm.png",
+        "description": "{{sbc|Innate:}} Whenever '''Volibear''' damages at least one enemy with a [[basic attack]] or [[champion ability|ability]], he generates a [[stack]] of ''The Relentless Storm'' for 6 seconds, refreshing on subsequent damage and stacking up to 5 times. At 5 stacks, '''Volibear''' gains ''Lightning Claws''.",
+        "description2": "{{sbc|The Relentless Storm:}} For each stack, '''Volibear''' gains {{sti|attack speed|{{as|5%|attack speed}} {{as|(+ 4% per 100 AP)}} {{as|'''bonus''' attack speed}}}}, up to {{as|25%|attack speed}} {{as|(+ 20% per 100 AP)}}.",
+        "description3": "{{sbc|Lightning Claws:}} '''Volibear's''' claws ignite with lightning, empowering his basic attacks {{tip|on-hit}} to deal {{as|{{pp|10+1*x for 3; then + 2*x for 3; then + 3*x for 7; then + 4*x|formula=10+1 per level until lvl 3, then+2 until lvl 6, then+3 per level until lvl 13, then+4 per level}} {{as|(+ 50% AP)}} '''bonus''' magic damage|magic damage}} to the target and the nearest {{tip|sight|visible}} enemy within 450 units of the target, chaining up to 4 subsequent targets.",
+        "effect radius": "{{tt|450|Maximum range to chain between targets}}",
+        "targeting": "Passive",
+        "affects": "Self, Enemies",
+        "damagetype": "Magic",
+        "spelleffects": "periodic",
+        "parry": "special",
+        "projectile": "false",
+        "onhiteffects": "|spellshield  = false",
+        "notes": "* '''Volibear's''' spikes visually grow as ''The Relentless Storm'' stacks.\n* Stacks of ''The Relentless Storm'' are also granted {{tip|on-hit}}, but will specifically not be if the target is {{tip|invulnerable}}.\n* While at four stacks, the next attack or ability on-hit reaching the fifth stack will be empowered by ''Lightning Claws''.\n* A stack of ''The Relentless Storm'' is not gained if the attack is {{tip|dodged}} and/or missed if '''Volibear''' is {{tip|blind|blinded}}. A stack is granted even if the attack is {{tip|blocked}}. In all cases, ''Lightning Claws'' will not apply (on-hit damage is parried and the bounce is prevented).\n** Since {{ai|Frenzied Maul|Volibear}} cannot be missed while '''Volibear''' is {{tip|blind|blinded}}, gaining stacks from ''The Relentless Storm'' and applying ''Lighting Claws'' from the ability will not be prevented from that parry effect.\n* '''Volibear''' has a hidden passive that grants him {{as|1 armor}} for every enemy {{ci|Zilean}} within 800 range of him.\n** Likewise, {{ci|Zilean}} gains {{as|1 ability power}} for every nearby '''Volibear'''.\n** Neither '''Volibear''' nor {{ci|Zilean}} need {{tip|sight}} of one another to gain these bonuses.\n* The empowered attacks do not affect [[structures]] nor [[ward]]s."
+      }
+    },
+    "Q": {
+      "id": "VolibearQ",
+      "name": "Thundering Smash",
+      "description": "Volibear gains speed towards enemies, Stunning and damaging the first one he Attacks.",
+      "tooltip": "Volibear gains {{ minspeedcalc }} Move Speed, doubled to {{ maxspeedcalc }} towards enemy champions for the next {{ duration }} seconds. While active, Volibear's next Attack deals {{ calculateddamage }} physical damage and Stuns the target for {{ stunduration }} second.\n\nVolibear becomes enraged if an enemy Immobilizes him before he Stuns a target, ending the Ability early but refreshing its Cooldown.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "14/13/12/11/10",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "300",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Move Speed",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ minspeed*100.000000 }}% -> {{ minspeednl*100.000000 }}%",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Volibear",
+        "skill": "Q",
+        "blurb": "{{sbc|Active:}} {{ci|Volibear}} becomes {{tip|ghosted}} and gains {{sti|{{as|'''bonus''' movement speed}}}} for a few seconds, increased while facing an enemy champion.",
+        "blurb2": "During this time, his next basic attack will {{tip|dash}} to the target, dealing {{as|'''bonus''' physical damage}} and briefly {{tip|stun|stunning}} them.",
+        "icon": "Thundering Smash.png",
+        "description": "{{sbc|Active:}} '''Volibear''' drops on all fours, becoming {{tip|ghosted}} and gaining {{sti|{{as|'''bonus''' movement speed}}}} for 4 seconds, doubled while facing a {{tip|sight|visible}} enemy {{tip|champion}} within 2000 units.",
+        "leveling": "{{st|Bonus Movement Speed|{{ap|12 to 28}}%|Increased Bonus Movement Speed|{{ap|12*2 to 28*2}}%}}",
+        "description2": "During this time, '''Volibear's''' next basic attack is empowered to have an {{tip|uncancellable windup}}, gain {{sti|25 '''bonus''' range}}, and {{tt|{{tip|dash|pounce}} on the target|to 25 to 150 units closer than attack range, if Volibear is not closer already}}, dealing {{as|'''bonus''' physical damage}} and {{tip|stun|stunning}} them for 1 second. This damage {{tip|applies life steal|applies}} {{stil|life steal}} at 100% effectiveness.",
+        "leveling2": "{{st|Bonus Physical Damage|{{ap|10 to 90}} {{as|(+ 120% '''bonus''' AD)}}}}",
+        "description3": "If '''Volibear''' becomes {{tip|immobilize|immobilized}} or {{tip|polymorph|polymorphed}} by an enemy during ''Thundering Smash'', the effect ends prematurely and the {{sti|cooldown}} is reset.",
+        "description4": "''Thundering Smash {{tip|basic attack reset|resets}} '''Volibear's''' basic attack timer.''",
+        "cooldown": "{{ap|14 to 10}}",
+        "cdstart": "post-effect",
+        "cost": "50",
+        "costtype": "Mana",
+        "targeting": "Auto",
+        "cast time": "none",
+        "affects": "Self, Enemies",
+        "spelleffects": "basic",
+        "parry": "true",
+        "damagetype": "Physical",
+        "onhiteffects": "|grounded     = false",
+        "knockdown": "special",
+        "callforhelp": "true",
+        "spellshield": "true",
+        "notes": "* ''Thundering Smash's'' empowered attack scales with '''Volibear's''' {{sti|{{as|attack speed}}}}.\n* ''Thundering Smash'' deals {{tip|basic damage}}, but also triggers spell effects by dealing an additional 0 {{tip|spell damage}}.\n* ''Thundering Smash'' will still apply its effects to the target even if the {{tip|dash}} is {{tip|interrupt|interrupted}}, but not if he goes into {{tip|resurrection}}.\n* ''Thundering Smash's'' attack triggers against {{tip|turret|structures}} and {{tip|wards}}, consuming the effect but dealing its bonus damage, if applicable.\n* The windup for the attack completes even if the target becomes {{tip|untargetable}} but the {{tip|stun}} and damage do not apply.\n* ''Thundering Smash's'' reset does not trigger from {{tip|drowsy}} and is only granted after falling {{tip|sleep|asleep}}.\n* The [[Summoner|player's]] screen will flash red briefly and cue a sound effect when '''Volibear''' becomes {{tip|immobilize|immobilized}} while ''Thundering Smash'' is active.\n* ''Thundering Smash's'' attack does not put '''Volibear's''' basic attack on cooldown.\n** This results in the same functionality as {{cis|Leona}} {{ai|Shield of Daybreak|Leona}}, effectively being a double attack reset.\n* If Thundering Smash's buff appears as the first on the buff bar, the empowered attack will fail against {{tip|structures}}.{{bug|1}}"
+      }
+    },
+    "W": {
+      "id": "VolibearW",
+      "name": "Frenzied Maul",
+      "description": "Volibear damages an enemy, applying on-hit effects and marking them.  Casting this ability again on the same target deals bonus damage and Heals Volibear.",
+      "tooltip": "Volibear mauls an enemy, dealing {{ totaldamage }} physical damage and marking them for {{ markduration }} seconds.\n\nIf this Ability is used on a marked target, its damage is increased to {{ empowereddamage }} and Volibear restores {{ baseheal }} plus {{ percentmissinghealthhealingratio }} missing Health.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "5",
+      "cost": "20/25/30/35/40",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "325",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Base Heal",
+          "Missing Health Percent",
+          "@AbilityResourceName@ Cost"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ baseheal }} -> {{ basehealNL }}",
+          "{{ healpercent*100.000000 }}% -> {{ healpercentnl*100.000000 }}%",
+          "{{ cost }} -> {{ costNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Volibear",
+        "skill": "W",
+        "blurb": "{{sbc|Active:}} {{ci|Volibear}} strikes the target enemy to deal {{as|physical damage}} based on {{as|his '''bonus''' health}}, apply {{tip|on-hit}} and {{tip|on-attack}} effects, and mark them ''Wounded'' for a period.",
+        "blurb4": "{{sbc|Wounded Bonus:}} ''Frenzied Maul'' deals increased damage and {{tip|heals}} '''Volibear''' based on {{as|his '''missing''' health}}.",
+        "icon": "Frenzied Maul.png",
+        "description": "{{sbc|Active:}} '''Volibear''' slashes the target enemy with his claws to deal {{as|physical damage}}, apply {{tip|on-hit}} and {{tip|on-attack}} effects at 100% effectiveness, and mark them ''Wounded'' for 8 seconds.",
+        "leveling": "{{st|Physical Damage|{{ap|5 to 105}} {{as|(+ 100% AD)}} {{as|(+ 6% of his '''bonus''' health)}}|Increased Damage|{{ap|5*1.5 to 105*1.5}} {{as|(+ 150% AD)}} {{as|(+ 9% of his '''bonus''' health)}}}}",
+        "description2": "{{sbc|Wounded Bonus:}} If the target is ''Wounded'', '''Volibear''' takes a bite out of them, dealing {{ccs|50% {{as|(+ 15% per 100 '''bonus''' AD)}} increased damage|physical}} and {{tip|heal|healing}} himself. The heal is halved against {{tip|minions}}.",
+        "leveling2": "{{st|Heal|{{ap|20 to 80}} {{as|(+ {{ap|8 to 20}}% of his '''missing''' health)}}|Minion Heal|{{ap|20*0.5 to 80*0.5}} {{as|(+ {{ap|8*0.5 to 20*0.5}}% of his '''missing''' health)}}}}",
+        "description3": "''Frenzied Maul'' {{tip|applies life steal|applies}} {{stil|life steal}} at 100% effectiveness.",
+        "cooldown": "5",
+        "cost": "{{ap|30 to 50}}",
+        "costtype": "Mana",
+        "targeting": "Unit",
+        "target range": "{{tip|cr|icononly = true}} {{tt|325|Standard Range}} / {{tt|350|Enhanced Range}}",
+        "cast time": "{{fd|0.25}}",
+        "affects": "Enemies, Self",
+        "spelleffects": "basic",
+        "parry": "special",
+        "damagetype": "Physical",
+        "callforhelp": "true",
+        "onhiteffects": "true",
+        "spellshield": "true",
+        "notes": "* '''Volibear''' will be ordered to [[basic attack]] the target after casting ''Frenzied Maul''.\n* ''Frenzied Maul'' deals {{tip|basic damage}}, but also triggers spell effects by dealing an additional 0 {{tip|spell damage}}.\n* ''Frenzied Maul's'' bite {{tip|heals}} even if it is blocked by {{tip|spell shield}}.\n* ''Frenzied Maul's'' strike can be {{tip|dodged}} and {{tip|blocked}}, but it cannot miss if '''Volibear''' is {{tip|blind|blinded}}. The ''Wound'' mark does not apply if {{tip|dodge|dodged}}, but will otherwise do so regardless.\n** The bite can be {{tip|blocked}} but '''Volibear''' still heals. It does not heal nor deal damage if the bite is {{tip|dodged}}. The bite cannot miss if '''Volibear''' is {{tip|blind|blinded}}.\n* ''Frenzied Maul'' deals bonus damage and heals if the target is still ''Wounded'' after the cast time. If the mark wares off before the cast time completes, the ability's animation will appear as if the bite was applied but there is no bonus damage or heal.\n{{Unit-targeted cancel conditions}}"
+      }
+    },
+    "E": {
+      "id": "VolibearE",
+      "name": "Sky Splitter",
+      "description": "Volibear summons a lightning bolt at a location, dealing damage and Slowing enemies while granting Volibear a Shield if he's inside the blast radius.",
+      "tooltip": "Volibear summons a thundercloud that fires a lightning bolt, dealing {{ totaldamagetooltip }} plus {{ percentdamage*100 }}% max Health magic damage and Slowing by {{ slowamount*100 }}% for {{ slowduration }} seconds.\n\nIf Volibear is inside the blast zone, he gains a {{ shieldapratiotooltip }} plus {{ shieldamount*100 }}% max Health Shield for {{ shieldduration }} seconds.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "16",
+      "cost": "50",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "1200",
+      "max_rank": 5,
+      "effect_burn": [
+        null,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Percentage Damage",
+          "Monster Damage Cap"
+        ],
+        "effect": [
+          "{{ basedamage }} -> {{ basedamageNL }}",
+          "{{ percentdamage*100.000000 }}% -> {{ percentdamagenl*100.000000 }}%",
+          "{{ monsterdamagecapbase }} -> {{ monsterdamagecapbaseNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Volibear",
+        "skill": "E",
+        "blurb": "{{sbc|Active:}} {{ci|Volibear}} conjures a lightning bolt that shortly strikes the target location to deal {{as|magic damage}} to enemies hit based on {{as|their '''maximum''' health}}, {{tip|slow|slowing}} them for a short time.",
+        "blurb2": "The bolt can hit '''Volibear''', which {{tip|shields}} him for a portion of {{as|his '''maximum''' health}} for a short time.",
+        "icon": "Sky Splitter.png",
+        "description": "{{sbc|Active:}} '''Volibear''' summons a lightning bolt to strike at the target location after a 2-second delay, granting {{tip|sight}} of the area for 1 second after the first second of the delay. If '''Volibear''' is within the strike, he gains a {{tip|shield}} equal to {{as|14% of his '''maximum''' health}} {{as|(+ 75% AP)}} for 3 seconds.",
+        "icon2": "Sky Splitter 2.png",
+        "description2": "The bolt deals {{as|magic damage}} to enemies hit, capped at 650 against non-{{tip|champions}}, and {{tip|slow|slows}} them by 40% for 2 seconds.",
+        "leveling2": "{{st|Magic Damage|{{ap|80 to 200}} {{as|(+ 80% AP)}} {{as|(+ {{ap|11 to 15}}% of target's '''maximum''' health)}}}}",
+        "cooldown": "12",
+        "cdstart": "on-cast",
+        "cost": "60",
+        "costtype": "Mana",
+        "target range": "1200",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|325|Damage radius}} / {{tt|425|Shield granting radius}}",
+        "targeting": "Location",
+        "cast time": "none",
+        "affects": "Enemies, Self",
+        "spelleffects": "spellaoe",
+        "parry": "|damagetype   = Magic",
+        "onhiteffects": "|spellshield  = True",
+        "notes": "* Enemies cannot see the location of the cast for the first second, but they can already tell that the spell is underway by noticing '''Volibear's''' cast animation.\n** Volibear can cast ''Sky Splitter'' during the movement speed boost from ''Thundering Smash'' to prevent the animation from playing.\n* '''Volibear''' will receive the {{tip|shield}} even if he is {{tip|untargetable}}."
+      }
+    },
+    "R": {
+      "id": "VolibearR",
+      "name": "Stormbringer",
+      "description": "Volibear leaps to a target location, Slowing and damaging enemies beneath him while gaining bonus Health.  Enemy towers near his landing location become temporarily disabled.",
+      "tooltip": "Volibear transforms and leaps, gaining {{ healthamount }} Health and {{ bonusattackrange }} Attack Range for the next {{ transformduration }} seconds.\n\nUpon landing, Volibear cracks the earth, Disabling nearby towers for {{ towerdisableduration }} seconds and dealing {{ towerdamagetooltip }} physical damage to them. Nearby enemies are Slowed by {{ slowamount*100 }}%, decaying over 1 second. Enemies directly underneath Volibear suffer {{ sweetspotdamagetooltip }} physical damage.{{ spellmodifierdescriptionappend }}",
+      "cooldown": "160/135/110",
+      "cost": "100",
+      "cost_type": " {{ abilityresourcename }}",
+      "range": "550",
+      "max_rank": 3,
+      "effect_burn": [
+        null,
+        "75/115/155",
+        "9",
+        "12",
+        "8",
+        "0.08",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "leveltip": {
+        "label": [
+          "Damage",
+          "Bonus Health",
+          "Tower Disable Duration",
+          "Cooldown"
+        ],
+        "effect": [
+          "{{ sweetspotdamage }} -> {{ sweetspotdamageNL }}",
+          "{{ healthamount }} -> {{ healthamountNL }}",
+          "{{ towerdisableduration }} -> {{ towerdisabledurationNL }}",
+          "{{ cooldown }} -> {{ cooldownNL }}"
+        ]
+      },
+      "resource": "{{ cost }} {{ abilityresourcename }}",
+      "wiki_detail": {
+        "champion": "Volibear",
+        "skill": "R",
+        "blurb": "{{sbc|Active:}} {{ci|Volibear}} gains ''Stormbringer'' and {{tip|dash|leaps}} with {{tip|Cc-immunity}} to the target location. The impact deals {{as|physical damage}} to enemies hit in the epicenter, and briefly {{tip|slows}} nearby enemies.",
+        "blurb2": "Nearby {{tip|turrets}} will be dealt the same {{as|physical damage}} and become disabled for a few seconds.",
+        "blurb4": "{{sbc|Stormbringer:}} '''Volibear''' embiggens for a period, gaining {{tip|ghosting}}, {{sti|{{as|'''bonus''' health}}}},  {{sti|'''bonus''' attack range}}.<br/><br/>\n{{sbc|{{tip|Cc-immunity|nolink=true}}}}: {{tip|Crowd control}} cannot be applied during this time.",
+        "icon": "Stormbringer.png",
+        "description": "{{sbc|Active:}} '''Volibear''' gains ''Stormbringer'' for 12 seconds and {{tip|dash|leaps}} to the target location with {{tip|displacement immunity}}, granting {{tip|sight}} of the area in a 500 radius during the travel.",
+        "description2": "{{sbc|Stormbringer:}} '''Volibear''' gains {{tip|ghosting}}, {{sti|{{as|'''bonus''' health}}}}, {{sti|50 '''bonus''' attack range}}, 25 increased range on ''{{ai|Frenzied Maul|Volibear}}'', and 35% increased [[size]].",
+        "leveling2": "{{st|Bonus Health|{{ap|175 to 525}}}}",
+        "description3": "'''Volibear''' {{tt|impacts|centered on Volibear's location when the dash ends in any way}} after 1 second, {{tip|slow|slowing}} nearby enemies by 50% decaying over 1 second. Enemies within the epicenter are also dealt {{ccs|{{as|physical damage}}|physical}}.",
+        "leveling3": "{{st|Physical Damage|{{ap|300 to 700}} {{as|(+ 250% '''bonus''' AD)}} {{as|(+ 125% AP)}}}}",
+        "description4": "'''Volibear''' also disables enemy {{tip|turrets}} in an area for a duration, rendering them unable to attack, as well as dealing them the {{ccs|same damage|physical}}.",
+        "leveling4": "{{st|Turret Disable Duration|{{ap|2 to 4}} seconds}}",
+        "description5": "''Stormbringer will cast at max range if cast beyond that. {{ais|Thundering Smash|Volibear}} duration will be paused for the {{tip|dash|leap}}.''",
+        "cooldown": "{{ap|160 to 110}}",
+        "cdstart": "on-cast",
+        "cost": "100",
+        "costtype": "Mana",
+        "target range": "700",
+        "effect radius": "{{tip|cr|icononly = true}} {{tt|300|Damage radius}} / {{tt|500|Slow radius}} / {{tt|700|Turret damage and disable radius}}",
+        "speed": "{{tt|750|Dash speed}}",
+        "targeting": "Location",
+        "cast time": "none",
+        "affects": "Enemies, Self",
+        "spelleffects": "spellaoe",
+        "parry": "|grounded     = true",
+        "knockdown": "false",
+        "damagetype": "Physical",
+        "onhiteffects": "|spellshield  = True",
+        "flavorsound": "{{sm2|Volibear Original R 0.ogg}} ''I am the storm!''",
+        "notes": "* ''Stormbringer'' will disable any turret that is not the {{tip|Nexus Obelisk}}, even if it is {{tip|untargetable}}.\n** ''Stormbringer'' will not deal damage to untargetable turrets.\n* '''Volibear''' grows to his new size over {{fd|1.25}} seconds, starting {{fd|0.25}} seconds after landing, and shrinks back to his normal size over {{fd|0.5}} seconds after ''Stormbinger's'' status ends, respectively.\n* '''Volibear''' {{tip|dash|leaps}} over 1 second regardless of distance or {{stil|movement speed}}.\n** '''Volibear''' impacts immediately at his current location if ''Stormbringer'' is cast over terrain he cannot pass through (due to not being able to cover the distance required).{{bug}}\n* The additional bonuses are granted on-cast.\n* The turret disable debuff is named ''Ohmwrecker''.\n* Disabling a {{tip|turret}} does not prevent aggro of the current target it is locked onto. The increased turret shot damage from {{ii|Ohmwrecker (Turret Item)|Ohmwrecker}} is also reset.\n** Turrets maintain the same targeting behavior even when disabled; damaging an enemy champion will still draw turret aggro. However, if the turret's desired target leaves range or has become an invalid target, it will lock onto the most previous target it was going to attack prior to becoming disabled, or instead, find a new one if that condition is not applicable.\n* The following table refers for interactions while '''Volibear''' is dashing:\n{{ct|dash|attack=false|move=false|cast=false|items=false|consume=false|spells=true, false, false, false, false|interrupts=death}}"
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+[scenario]
+name = "rand_0107_6v6_d3"
+seed = 2230
+hero_count = 6
+enemy_count = 6
+difficulty = 3
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["berserker", "templar", "mage", "monk", "pyromancer", "elementalist"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,13 @@
+[scenario]
+name = "stress_double_front_pressure_s1"
+seed = 11752
+hero_count = 4
+enemy_count = 7
+difficulty = 2
+max_ticks = 10000
+room_type = "Pressure"
+hero_templates = ["warden", "knight", "cleric", "bard"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

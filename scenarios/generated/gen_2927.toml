@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0055_4v4_s2"
+seed = 21978
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["Chogath", "Veigar", "samurai", "Heimerdinger"]
+enemy_hero_templates = ["witch_doctor", "cleric", "Annie", "Urgot"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

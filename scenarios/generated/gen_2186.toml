@@ -1,0 +1,13 @@
+[scenario]
+name = "stress_all_hybrid_setpiece_s2"
+seed = 21730
+hero_count = 4
+enemy_count = 5
+difficulty = 2
+max_ticks = 10000
+room_type = "Setpiece"
+hero_templates = ["witch_doctor", "warlock", "necromancer", "blood_mage"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

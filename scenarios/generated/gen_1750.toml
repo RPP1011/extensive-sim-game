@@ -1,0 +1,13 @@
+[scenario]
+name = "trio_monk_arcanist_knight_s1"
+seed = 11584
+hero_count = 3
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["monk", "arcanist", "knight"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"
