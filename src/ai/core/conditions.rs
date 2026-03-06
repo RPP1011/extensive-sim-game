@@ -149,6 +149,16 @@ pub fn evaluate_condition(
             }
             false
         }
+        // --- Compound Conditions ---
+        Condition::And { ref conditions } => {
+            conditions.iter().all(|c| evaluate_condition(&Some(c.clone()), caster_idx, target, state))
+        }
+        Condition::Or { ref conditions } => {
+            conditions.iter().any(|c| evaluate_condition(&Some(c.clone()), caster_idx, target, state))
+        }
+        Condition::Not { ref condition } => {
+            !evaluate_condition(&Some(*condition.clone()), caster_idx, target, state)
+        }
     }
 }
 

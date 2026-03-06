@@ -247,6 +247,19 @@ pub(super) fn summarize_effects(effects: &[&ConditionalEffect]) -> EffectSummary
             Effect::Obstacle { .. } => {
                 s.has_obstacle = 1.0;
             }
+            Effect::PercentHpDamage { percent, damage_type, .. } => {
+                // Estimate damage as percent of a nominal 100 HP target
+                s.total_instant_damage += percent;
+                match damage_type {
+                    DamageType::Physical => s.has_physical = 1.0,
+                    DamageType::Magic => s.has_magic = 1.0,
+                    DamageType::True => s.has_true = 1.0,
+                }
+            }
+            Effect::PercentMissingHpHeal { percent } | Effect::PercentMaxHpHeal { percent } => {
+                // Estimate heal as percent of a nominal 100 HP target
+                s.total_instant_heal += percent;
+            }
             _ => {}
         }
     }

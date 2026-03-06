@@ -279,6 +279,25 @@ pub enum Effect {
     EvolveAbility {
         ability_index: usize,
     },
+
+    // --- Expressiveness: Percent-Based HP Effects ---
+    /// Deal damage as a percentage of the target's max HP.
+    PercentHpDamage {
+        percent: f32,
+        #[serde(default)]
+        damage_type: DamageType,
+        /// Optional cap on the damage dealt (0 = uncapped).
+        #[serde(default)]
+        max_damage: i32,
+    },
+    /// Heal for a percentage of the target's missing HP.
+    PercentMissingHpHeal {
+        percent: f32,
+    },
+    /// Heal for a percentage of the target's max HP.
+    PercentMaxHpHeal {
+        percent: f32,
+    },
 }
 
 fn default_summon_count() -> u32 {

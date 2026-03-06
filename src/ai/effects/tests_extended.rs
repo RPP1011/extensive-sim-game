@@ -270,3 +270,115 @@ lookback_ms = 5000"#;
         _ => panic!("expected Rewind"),
     }
 }
+
+// --- Compound Condition Tests ---
+
+#[test]
+fn parse_compound_condition_and() {
+    let toml_str = r#"
+type = "and"
+[[conditions]]
+type = "target_hp_below"
+percent = 50.0
+[[conditions]]
+type = "target_is_stunned"
+"#;
+    let cond: Condition = toml::from_str(toml_str).unwrap();
+    match cond {
+        Condition::And { conditions } => {
+            assert_eq!(conditions.len(), 2);
+            assert!(matches!(conditions[0], Condition::TargetHpBelow { percent } if (percent - 50.0).abs() < 0.01));
+            assert!(matches!(conditions[1], Condition::TargetIsStunned));
+        }
+        _ => panic!("expected And"),
+    }
+}
+
+#[test]
+fn parse_compound_condition_or() {
+    let toml_str = r#"
+type = "or"
+[[conditions]]
+type = "caster_hp_below"
+percent = 30.0
+[[conditions]]
+type = "ally_count_below"
+count = 2
+"#;
+    let cond: Condition = toml::from_str(toml_str).unwrap();
+    match cond {
+        Condition::Or { conditions } => {
+            assert_eq!(conditions.len(), 2);
+            assert!(matches!(conditions[0], Condition::CasterHpBelow { .. }));
+            assert!(matches!(conditions[1], Condition::AllyCountBelow { .. }));
+        }
+        _ => panic!("expected Or"),
+    }
+}
+
+#[test]
+fn parse_compound_condition_not() {
+    let toml_str = r#"
+type = "not"
+[condition]
+type = "target_is_stunned"
+"#;
+    let cond: Condition = toml::from_str(toml_str).unwrap();
+    match cond {
+        Condition::Not { condition } => {
+            assert!(matches!(*condition, Condition::TargetIsStunned));
+        }
+        _ => panic!("expected Not"),
+    }
+}
+
+// --- Percent HP Effect Tests ---
+
+#[test]
+fn parse_percent_hp_damage() {
+    let toml_str = r#"
+type = "percent_hp_damage"
+percent = 10.0
+damage_type = "magic"
+max_damage = 200
+"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::PercentHpDamage { percent, damage_type, max_damage } => {
+            assert!((percent - 10.0).abs() < 0.01);
+            assert!(matches!(damage_type, DamageType::Magic));
+            assert_eq!(max_damage, 200);
+        }
+        _ => panic!("expected PercentHpDamage"),
+    }
+}
+
+#[test]
+fn parse_percent_missing_hp_heal() {
+    let toml_str = r#"
+type = "percent_missing_hp_heal"
+percent = 50.0
+"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::PercentMissingHpHeal { percent } => {
+            assert!((percent - 50.0).abs() < 0.01);
+        }
+        _ => panic!("expected PercentMissingHpHeal"),
+    }
+}
+
+#[test]
+fn parse_percent_max_hp_heal() {
+    let toml_str = r#"
+type = "percent_max_hp_heal"
+percent = 15.0
+"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::PercentMaxHpHeal { percent } => {
+            assert!((percent - 15.0).abs() < 0.01);
+        }
+        _ => panic!("expected PercentMaxHpHeal"),
+    }
+}

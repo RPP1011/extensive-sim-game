@@ -182,6 +182,14 @@ pub enum Condition {
     AllyCountBelow { count: u32 },
     EnemyCountBelow { count: u32 },
     TargetStackCount { name: String, min_count: u32 },
+
+    // --- Compound Conditions ---
+    /// All sub-conditions must be true.
+    And { conditions: Vec<Condition> },
+    /// At least one sub-condition must be true.
+    Or { conditions: Vec<Condition> },
+    /// Inverts the inner condition.
+    Not { condition: Box<Condition> },
 }
 
 impl Default for Condition {
