@@ -118,6 +118,18 @@ Models are evaluated on two scenario sets:
 | v2 balanced | 48 | 485K | 15K | 77.0% | 25 (89.3%) | 307 (55.5%) |
 | v2 115-feat (training...) | 115 | 485K | ~50K | TBD | TBD | TBD |
 
+### 8. Combat Action Classes (5-class, for use with ability evaluators)
+
+When the interrupt-driven ability evaluators handle ability selection (see [docs/ABILITY_PRIORITY_SYSTEM.md](ABILITY_PRIORITY_SYSTEM.md)), the combat model simplifies to 5 classes:
+
+0. AttackNearest
+1. AttackWeakest
+2. MoveToward
+3. MoveAway
+4. Hold
+
+Defined as `CombatActionClass` in `src/ai/core/dataset/actions.rs`. Ability actions map to `None` (handled by the frozen ability evaluators), so the combat model only handles movement and basic attacks.
+
 ## Known Limitations / Open Questions
 
 1. **Oracle horizon**: 10-tick rollouts (~1 second of game time). The oracle can't plan multi-step strategies (e.g., "kite for 3 seconds then re-engage"). Deeper rollouts (100 ticks) were tested but the single-tick action override gets drowned out by 99 ticks of default-AI behavior, causing Hold to dominate labels at 90%+.
