@@ -1,0 +1,79 @@
+// Arcanist abilities
+
+ability FireRing {
+    target: ground, range: 6.0
+    cooldown: 6s, cast: 300ms
+    hint: damage
+    zone_tag: "fire"
+
+    deliver zone { duration: 5s, tick: 500ms } {
+        on_hit {
+            damage 15 in circle(2.5) [FIRE: 50]
+        }
+    }
+}
+
+ability FrostField {
+    target: ground, range: 6.0
+    cooldown: 7s, cast: 300ms
+    hint: crowd_control
+    zone_tag: "frost"
+
+    deliver zone { duration: 5s, tick: 500ms } {
+        on_hit {
+            slow 0.4 for 1500ms in circle(2.5) [CROWD_CONTROL: 40]
+            damage 8 in circle(2.5) [MAGIC: 40]
+        }
+    }
+}
+
+ability LightningStorm {
+    target: ground, range: 6.0
+    cooldown: 8s, cast: 400ms
+    hint: damage
+    zone_tag: "lightning"
+
+    deliver zone { duration: 4s, tick: 500ms } {
+        on_hit {
+            damage 20 in circle(2.0) [MAGIC: 45]
+        }
+    }
+}
+
+ability ArcaneBolt {
+    target: enemy, range: 5.0
+    cooldown: 3s, cast: 200ms
+    hint: damage
+
+    damage 40 [MAGIC: 50]
+}
+
+ability ArcaneShield {
+    target: self
+    cooldown: 14s, cast: 200ms
+    hint: defense
+
+    shield 50 for 5s
+}
+
+ability Blink {
+    target: self
+    cooldown: 10s, cast: 0ms
+    hint: utility
+
+    dash 4.0
+}
+
+passive ElementalMastery {
+    trigger: on_ability_used
+    cooldown: 8s
+
+    buff damage_output 0.15 for 3s
+}
+
+passive ArcaneBarrier {
+    trigger: on_damage_taken
+    cooldown: 10s
+
+    shield 20 for 3s
+}

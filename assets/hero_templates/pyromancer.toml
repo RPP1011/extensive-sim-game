@@ -88,7 +88,7 @@ FIRE = 65.0
 # --- Ability 4: Fire Wall ---
 [[abilities]]
 name = "Fire Wall"
-targeting = "target_position"
+targeting = "ground_target"
 range = 5.0
 cooldown_ms = 12000
 cast_time_ms = 400

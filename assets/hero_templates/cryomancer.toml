@@ -47,7 +47,7 @@ SLOW = 45.0
 # --- Ability 2: Blizzard ---
 [[abilities]]
 name = "Blizzard"
-targeting = "target_position"
+targeting = "ground_target"
 range = 5.0
 cooldown_ms = 14000
 cast_time_ms = 400
@@ -196,7 +196,7 @@ CROWD_CONTROL = 60.0
 # --- Ability 7: Permafrost ---
 [[abilities]]
 name = "Permafrost"
-targeting = "target_position"
+targeting = "ground_target"
 range = 4.5
 cooldown_ms = 10000
 cast_time_ms = 300

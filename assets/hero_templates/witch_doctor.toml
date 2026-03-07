@@ -95,7 +95,7 @@ shape = "self"
 # --- Ability 4: Plague of Locusts ---
 [[abilities]]
 name = "Plague of Locusts"
-targeting = "target_position"
+targeting = "ground_target"
 range = 5.0
 cooldown_ms = 12000
 cast_time_ms = 400

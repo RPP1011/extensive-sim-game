@@ -1,0 +1,86 @@
+// Warrior abilities
+
+ability Whirlwind {
+    target: self_aoe
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 40 in circle(2.5) [PHYSICAL: 50]
+    damage 10 in circle(2.5) when hit_count_above(2) [PHYSICAL: 50]
+}
+
+ability ShieldWall {
+    target: self
+    cooldown: 15s, cast: 200ms
+    hint: defense
+
+    shield 60 for 5s
+}
+
+ability HeroicCharge {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 0ms
+    hint: crowd_control
+
+    dash to_target
+    damage 35 [PHYSICAL: 50]
+    stun 1500ms [CROWD_CONTROL: 70]
+}
+
+ability SunderArmor {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 20 [PHYSICAL: 40]
+    damage_modify 1.3 for 4s
+}
+
+ability IntimidatingShout {
+    target: self_aoe
+    cooldown: 18s, cast: 300ms
+    hint: crowd_control
+
+    fear 2s in circle(3.0) [CROWD_CONTROL: 70]
+}
+
+ability BattleCry {
+    target: self_aoe
+    cooldown: 15s, cast: 300ms
+    hint: utility
+
+    buff damage_output 0.2 for 5s in circle(4.0)
+}
+
+ability Slam {
+    target: enemy, range: 1.5
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    damage 45 [PHYSICAL: 55]
+    stun 1s [CROWD_CONTROL: 50]
+}
+
+ability Overpower {
+    target: enemy, range: 1.5
+    cooldown: 7s, cast: 200ms
+    hint: damage
+
+    damage 60 [PHYSICAL: 50]
+    damage 30 when target_is_stunned [PHYSICAL: 50]
+}
+
+passive IronSkin {
+    trigger: on_damage_taken
+    cooldown: 5s
+
+    shield 20 for 3s
+}
+
+passive LastStand {
+    trigger: on_hp_below(25%)
+    cooldown: 45s
+
+    heal 50
+    buff damage_output 0.3 for 5s
+}

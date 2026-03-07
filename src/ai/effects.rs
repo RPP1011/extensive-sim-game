@@ -1,6 +1,7 @@
 pub mod effect_enum;
 pub mod types;
 pub mod defs;
+pub mod dsl;
 
 pub use effect_enum::*;
 pub use types::*;

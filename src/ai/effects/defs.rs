@@ -317,6 +317,10 @@ pub struct HeroToml {
     pub abilities: Vec<AbilityDef>,
     #[serde(default)]
     pub passives: Vec<PassiveDef>,
+    /// Optional path to a `.ability` DSL file (relative to hero_templates dir).
+    /// When set, abilities and passives are loaded from this file instead of inline TOML.
+    #[serde(default)]
+    pub abilities_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

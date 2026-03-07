@@ -61,7 +61,7 @@ amount = 40
 # --- Ability 3: Volatile Mixture ---
 [[abilities]]
 name = "VolatileMixture"
-targeting = "target_position"
+targeting = "ground_target"
 range = 5.0
 cooldown_ms = 8000
 cast_time_ms = 300
@@ -82,7 +82,7 @@ POISON = 45.0
 # --- Ability 4: Toxic Cloud ---
 [[abilities]]
 name = "ToxicCloud"
-targeting = "target_position"
+targeting = "ground_target"
 range = 5.0
 cooldown_ms = 12000
 cast_time_ms = 400
