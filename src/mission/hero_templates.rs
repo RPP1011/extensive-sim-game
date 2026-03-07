@@ -4,6 +4,7 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::ai::core::{sim_vec2, SimState, SimVec2, Team, UnitState};
 use crate::ai::effects::{AbilitySlot, HeroToml, PassiveSlot};
+use crate::ai::effects::dsl;
 
 /// All built-in hero templates, loadable by name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,6 +42,22 @@ impl HeroTemplate {
 /// Load a hero TOML string into a HeroToml struct.
 pub fn parse_hero_toml(toml_str: &str) -> Result<HeroToml, String> {
     toml::from_str(toml_str).map_err(|e| format!("hero TOML parse error: {e}"))
+}
+
+/// Load a hero TOML with an optional DSL abilities file.
+/// `dsl_content` should be the contents of the `.ability` file if `abilities_file` is set.
+pub fn parse_hero_toml_with_dsl(toml_str: &str, dsl_content: Option<&str>) -> Result<HeroToml, String> {
+    let mut toml: HeroToml = toml::from_str(toml_str)
+        .map_err(|e| format!("hero TOML parse error: {e}"))?;
+
+    if let Some(dsl_str) = dsl_content {
+        let (abilities, passives) = dsl::parse_abilities(dsl_str)
+            .map_err(|e| format!("DSL parse error: {e}"))?;
+        toml.abilities = abilities;
+        toml.passives = passives;
+    }
+
+    Ok(toml)
 }
 
 /// Convert a HeroToml into a UnitState ready for simulation.
