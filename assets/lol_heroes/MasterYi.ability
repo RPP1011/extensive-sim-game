@@ -1,0 +1,51 @@
+// Master Yi abilities
+
+ability AlphaStrike {
+    target: enemy, range: 6.0
+    cooldown: 20s
+    hint: utility
+    cost: 10
+
+    dash to_target
+    stealth for 3s break_on_damage
+}
+
+ability Meditate {
+    target: self
+    cooldown: 10s
+    hint: heal
+    cost: 8
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            heal 3
+        }
+    }
+}
+
+ability WujuStyle {
+    target: self
+    cooldown: 14s
+    hint: damage
+
+    damage 5 [TRUE: 50]
+}
+
+ability Highlander {
+    target: self
+    cooldown: 20050ms
+    hint: buff
+    cost: 20
+
+    slow 0.3 for 7s
+    buff move_speed 0.3 for 3s
+    buff attack_speed 0.3 for 5s
+}
+
+passive DoubleStrike {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+    apply_stacks "double_strike" 1 max 4
+}

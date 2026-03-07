@@ -1,0 +1,60 @@
+// Kindred abilities
+
+ability DanceofArrows {
+    target: ground, range: 3.0
+    cooldown: 9s
+    hint: damage
+    cost: 7
+
+    deliver projectile { speed: 5.0 } {
+        on_hit {
+            damage 10 in circle(2.5) [PHYSICAL: 50]
+        }
+    }
+    dash to_target
+    buff attack_speed 0.3 for 5s
+}
+
+ability WolfsFrenzy {
+    target: ground, range: 5.0
+    cooldown: 18s
+    hint: utility
+    cost: 8
+
+    heal 7
+    dash to_target
+}
+
+ability MountingDread {
+    target: enemy, range: 5.0
+    cooldown: 14s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 20 [PHYSICAL: 50]
+            slow 0.3 for 1s
+        }
+    }
+}
+
+ability LambsRespite {
+    target: self
+    cooldown: 30s
+    hint: heal
+    cost: 20
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            heal 7
+        }
+    }
+}
+
+passive MarkoftheKindred {
+    trigger: on_kill
+    cooldown: 5s
+
+    apply_stacks "lamb" 1 max 4
+}

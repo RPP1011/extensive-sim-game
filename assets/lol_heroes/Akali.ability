@@ -1,0 +1,59 @@
+// Akali abilities
+
+ability FivePointStrike {
+    target: direction, range: 5.0
+    cooldown: 1s, cast: 250ms
+    hint: damage
+    cost: 22
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 11 in cone(4.0, 60.0) [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability TwilightShroud {
+    target: direction, range: 2.5
+    cooldown: 20s, cast: 250ms
+    hint: utility
+
+    dash to_target
+    buff move_speed 0.3 for 2s
+    stealth for 3s break_on_damage
+}
+
+ability ShurikenFlip {
+    target: direction, range: 8.0
+    cooldown: 16s, cast: 400ms
+    hint: damage
+    cost: 6
+    recast: 1
+    recast_window: 10s
+
+    deliver projectile { speed: 18.0 } {
+        on_hit {
+            damage 17 [MAGIC: 50]
+        }
+    }
+    dash to_target
+}
+
+ability PerfectExecution {
+    target: enemy, range: 6.8
+    cooldown: 23900ms, cast: 250ms
+    hint: damage
+    recast: 1
+    recast_window: 10s
+
+    damage 27 [MAGIC: 50]
+    dash to_target
+}
+
+passive AssassinsMark {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    buff move_speed 0.15 for 3s
+}

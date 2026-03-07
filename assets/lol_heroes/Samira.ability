@@ -1,0 +1,61 @@
+// Samira abilities
+
+ability Flair {
+    target: direction, range: 3.4
+    cooldown: 6s, cast: 250ms
+    hint: damage
+    cost: 6
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 15 [PHYSICAL: 50]
+        }
+    }
+}
+
+ability BladeWhirl {
+    target: enemy, range: 3.2
+    cooldown: 30s
+    hint: damage
+    cost: 12
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 5 in circle(3.25) [PHYSICAL: 50]
+        }
+    }
+}
+
+ability WildRush {
+    target: enemy, range: 6.0
+    cooldown: 20s
+    hint: damage
+    cost: 8
+
+    damage 12 [MAGIC: 50]
+    dash to_target
+    buff attack_speed 0.3 for 5s
+}
+
+ability InfernoTrigger {
+    target: self
+    cooldown: 5s
+    hint: damage
+    cost: 1
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 1 in circle(2.5) [PHYSICAL: 50]
+        }
+    }
+    buff move_speed 0.3 for 3s
+    lifesteal 0.3 for 5s
+}
+
+passive DaredevilImpulse {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+    apply_stacks "style" 1 max 4
+}

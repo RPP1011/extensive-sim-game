@@ -1,0 +1,46 @@
+// Aphelios abilities
+
+ability WeaponAbilites {
+    target: enemy, range: 8.0
+    cooldown: 9s
+    hint: damage
+    cost: 12
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            slow 0.3 for 2s in circle(2.5)
+        }
+    }
+}
+
+ability Phase {
+    target: self
+    cooldown: 8s
+    hint: damage
+
+    damage 15 [PHYSICAL: 50]
+}
+
+ability WeaponQueueSystem {
+    target: self
+    cooldown: 8s
+    hint: damage
+
+    damage 15 [PHYSICAL: 50]
+}
+
+ability MoonlightVigil {
+    target: direction, range: 8.0
+    cooldown: 23900ms, cast: 600ms
+    hint: heal
+    cost: 20
+
+    heal 7
+}
+
+passive TheHitmanandtheSeer {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    heal 10
+}

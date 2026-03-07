@@ -1,0 +1,51 @@
+// Kayn abilities
+
+ability ReapingSlash {
+    target: direction, range: 3.5
+    cooldown: 7s
+    hint: damage
+    cost: 10
+
+    damage 18 in circle(2.5) [PHYSICAL: 50]
+    dash to_target
+}
+
+ability BladesReach {
+    target: direction, range: 7.0
+    cooldown: 13s, cast: 550ms
+    hint: damage
+    cost: 12
+
+    damage 22 in line(6.0, 1.5) [PHYSICAL: 50]
+    slow 0.3 for 2s
+}
+
+ability ShadowStep {
+    target: self
+    cooldown: 21s
+    hint: buff
+    cost: 18
+
+    heal 1
+    buff move_speed 0.3 for 3s
+}
+
+ability UmbralTrespass {
+    target: enemy, range: 5.5
+    cooldown: 23900ms
+    hint: utility
+    cost: 20
+    recast: 1
+    recast_window: 10s
+
+    dash to_target
+    stealth for 3s break_on_damage
+}
+
+passive TheDarkinScythe {
+    trigger: on_kill
+    cooldown: 5s
+
+    heal 10
+    damage 10 [PHYSICAL: 50]
+}

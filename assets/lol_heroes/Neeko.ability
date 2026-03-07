@@ -1,0 +1,54 @@
+// Neeko abilities
+
+ability BloomingBurst {
+    target: ground, range: 8.0
+    cooldown: 9s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 20 in circle(2.5) [MAGIC: 50]
+        }
+    }
+}
+
+ability Shapesplitter {
+    target: direction, range: 8.0
+    cooldown: 16s
+    hint: damage
+    recast: 2
+    recast_window: 10s
+
+    damage 10 [MAGIC: 50]
+    buff move_speed 0.3 for 1s
+    stealth for 3s break_on_damage
+}
+
+ability TangleBarbs {
+    target: direction, range: 8.0
+    cooldown: 12s, cast: 250ms
+    hint: damage
+    cost: 12
+
+    damage 17 [MAGIC: 50]
+    root 1s
+}
+
+ability PopBlossom {
+    target: self
+    cooldown: 23900ms, cast: 600ms
+    hint: crowd_control
+    cost: 20
+
+    stun 1s in circle(6.0)
+    knockback 2.0
+    dash to_target
+}
+
+passive InherentGlamour {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    heal 10
+}

@@ -1,0 +1,54 @@
+// Bel'Veth abilities
+
+ability VoidSurge {
+    target: direction, range: 4.5
+    cooldown: 1s
+    hint: damage
+
+    damage 2 [PHYSICAL: 50]
+    dash to_target
+    lifesteal 0.75 for 5s
+}
+
+ability AboveandBelow {
+    target: direction, range: 7.2
+    cooldown: 12s
+    hint: damage
+
+    damage 17 [MAGIC: 50]
+    slow 0.3 for 2s
+    knockback 2.0
+    dash to_target
+}
+
+ability RoyalMaelstrom {
+    target: self
+    cooldown: 20s
+    hint: crowd_control
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            root 1s in circle(2.5)
+        }
+    }
+    buff attack_speed 0.3 for 5s
+    lifesteal 0.2 for 5s
+}
+
+ability EndlessBanquet {
+    target: enemy, range: 4.5
+    cooldown: 1s, cast: 1s
+    hint: damage
+
+    damage 1 [TRUE: 50]
+    buff move_speed 0.3 for 5s
+    buff attack_speed 0.3 for 5s
+}
+
+passive DeathinLavender {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    buff attack_speed 0.2 for 5s
+    apply_stacks "passive_stacks" 1 max 4
+}

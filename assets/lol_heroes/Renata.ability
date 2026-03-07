@@ -1,0 +1,61 @@
+// Renata Glasc abilities
+
+ability Handshake {
+    target: direction, range: 8.0
+    cooldown: 16s, cast: 250ms
+    hint: damage
+    cost: 16
+    recast: 1
+    recast_window: 10s
+
+    deliver tether { max_range: 6.0 } {
+        on_complete {
+            damage 20 [MAGIC: 50]
+            root 1s
+        }
+    }
+}
+
+ability Bailout {
+    target: enemy, range: 8.0
+    cooldown: 28s
+    hint: buff
+    cost: 16
+
+    buff move_speed 0.3 for 5s
+    buff attack_speed 0.3 for 5s
+}
+
+ability LoyaltyProgram {
+    target: ground, range: 8.0
+    cooldown: 14s, cast: 250ms
+    hint: damage
+    cost: 14
+
+    deliver projectile { speed: 14.5 } {
+        on_hit {
+            damage 16 in circle(3.25) [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+    shield 16 for 3s
+}
+
+ability HostileTakeover {
+    target: direction, range: 8.0
+    cooldown: 27200ms, cast: 750ms
+    hint: buff
+    cost: 20
+
+    deliver projectile { speed: 6.5 } {
+    }
+    buff attack_speed 0.3 for 5s
+}
+
+passive Leverage {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    heal 10
+    damage 10 [PHYSICAL: 50]
+}

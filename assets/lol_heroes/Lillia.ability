@@ -1,0 +1,56 @@
+// Lillia abilities
+
+ability BloomingBlows {
+    target: self
+    cooldown: 6s, cast: 250ms
+    hint: buff
+    cost: 13
+
+    buff move_speed 0.3 for 3s
+}
+
+ability WatchOutEep {
+    target: ground, range: 5.0
+    cooldown: 14s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    damage 20 in circle(1.5) [MAGIC: 50]
+    dash to_target
+}
+
+ability Swirlseed {
+    target: ground, range: 7.0
+    cooldown: 14s, cast: 400ms
+    hint: damage
+    cost: 14
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 15 in cone(4.0, 60.0) [MAGIC: 50]
+            slow 0.3 for 3s
+        }
+    }
+}
+
+ability LiltingLullaby {
+    target: self
+    cooldown: 27200ms, cast: 400ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 12 [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+passive DreamLadenBough {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+    damage 10 [PHYSICAL: 50]
+}

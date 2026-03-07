@@ -1,0 +1,50 @@
+// Zilean abilities
+
+ability TimeBomb {
+    target: ground, range: 8.0
+    cooldown: 10s, cast: 250ms
+    hint: damage
+    cost: 12
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 18 in circle(3.5) [MAGIC: 50]
+            stun 1s
+        }
+    }
+}
+
+ability Rewind {
+    target: self
+    cooldown: 14s
+    hint: damage
+    cost: 7
+
+    damage 15 [PHYSICAL: 50]
+}
+
+ability TimeWarp {
+    target: ally, range: 5.5
+    cooldown: 15s
+    hint: buff
+    cost: 10
+
+    slow 0.3 for 2s in circle(2.5)
+    buff move_speed 0.3 for 3s
+}
+
+ability Chronoshift {
+    target: ally, range: 8.0
+    cooldown: 23900ms
+    hint: utility
+    cost: 25
+
+    dash to_target
+}
+
+passive TimeInABottle {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    heal 10
+}

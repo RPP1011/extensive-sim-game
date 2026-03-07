@@ -1,0 +1,56 @@
+// Jayce abilities
+
+ability TotheSkiesShockBlast {
+    target: enemy, range: 6.0
+    cooldown: 16s
+    hint: utility
+    cost: 8
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            slow 0.3 for 2s
+        }
+    }
+    dash to_target
+}
+
+ability LightningFieldHyperCharge {
+    target: enemy, range: 2.9
+    cooldown: 10s
+    hint: buff
+    cost: 8
+
+    deliver zone { duration: 4s, tick: 1s } {
+        on_hit {
+        }
+    }
+    buff attack_speed 0.3 for 5s
+}
+
+ability ThunderingBlowAccelerationGate {
+    target: enemy, range: 2.4
+    cooldown: 20s
+    hint: damage
+    cost: 11
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 15 [PHYSICAL: 50]
+        }
+    }
+}
+
+ability MercuryCannonMercuryHammer {
+    target: enemy, range: 6.0
+    cooldown: 6s
+    hint: damage
+
+    damage 15 [PHYSICAL: 50]
+}
+
+passive HextechCapacitor {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    buff move_speed 0.15 for 3s
+}

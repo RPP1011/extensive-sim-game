@@ -1,0 +1,60 @@
+// Lissandra abilities
+
+ability IceShard {
+    target: direction, range: 7.2
+    cooldown: 8s, cast: 250ms
+    hint: damage
+    cost: 11
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 20 [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability RingofFrost {
+    target: self
+    cooldown: 10s
+    hint: damage
+    cost: 8
+
+    damage 17 in circle(4.5) [MAGIC: 50]
+    root 1s
+}
+
+ability GlacialPath {
+    target: direction, range: 8.0
+    cooldown: 24s, cast: 250ms
+    hint: damage
+    cost: 16
+    recast: 1
+    recast_window: 10s
+
+    deliver projectile { speed: 12.0 } {
+        on_hit {
+            damage 17 [MAGIC: 50]
+        }
+    }
+    dash to_target
+}
+
+ability FrozenTomb {
+    target: enemy, range: 5.5
+    cooldown: 23900ms, cast: 375ms
+    hint: crowd_control
+    cost: 20
+
+    heal 7
+    stun 1s
+    slow 0.3 for 2s
+}
+
+passive IcebornSubjugation {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+    buff move_speed 0.15 for 3s
+}

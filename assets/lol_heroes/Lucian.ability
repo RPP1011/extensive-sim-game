@@ -1,0 +1,61 @@
+// Lucian abilities
+
+ability PiercingLight {
+    target: enemy, range: 5.0
+    cooldown: 9s, cast: 400ms
+    hint: damage
+    cost: 9
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 21 in line(6.0, 1.2) [PHYSICAL: 50]
+        }
+    }
+}
+
+ability ArdentBlaze {
+    target: direction, range: 8.0
+    cooldown: 14s, cast: 250ms
+    hint: damage
+    cost: 12
+
+    deliver projectile { speed: 16.0 } {
+        on_hit {
+            damage 18 in circle(2.5) [MAGIC: 50]
+        }
+    }
+    buff move_speed 0.3 for 1s
+}
+
+ability RelentlessPursuit {
+    target: ground, range: 2.0
+    cooldown: 19s
+    hint: utility
+    cost: 8
+
+    dash to_target
+}
+
+ability TheCulling {
+    target: direction, range: 8.0
+    cooldown: 22800ms
+    hint: damage
+    cost: 20
+    recast: 1
+    recast_window: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            damage 3 [PHYSICAL: 50]
+        }
+    }
+}
+
+passive Lightslinger {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    heal 10
+    shield 20 for 3s
+    damage 10 [PHYSICAL: 50]
+}

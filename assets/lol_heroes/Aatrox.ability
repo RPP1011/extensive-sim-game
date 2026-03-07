@@ -1,0 +1,52 @@
+// Aatrox abilities
+
+ability TheDarkinBlade {
+    target: direction, range: 8.0
+    cooldown: 14s, cast: 600ms
+    hint: crowd_control
+    recast: 1
+    recast_window: 4s
+
+    knockback 2.0 in circle(2.5)
+}
+
+ability InfernalChains {
+    target: direction, range: 8.0
+    cooldown: 20s, cast: 250ms
+    hint: damage
+
+    deliver projectile { speed: 18.0 } {
+        on_hit {
+            damage 7 in circle(2.5) [PHYSICAL: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability UmbralDash {
+    target: ground, range: 0.8
+    cooldown: 9s
+    hint: utility
+
+    heal 7
+    dash to_target
+}
+
+ability WorldEnder {
+    target: self
+    cooldown: 23900ms, cast: 250ms
+    hint: crowd_control
+
+    heal 7
+    fear 1500ms in circle(6.0)
+    slow 0.3 for 5s
+    buff move_speed 0.3 for 10s
+}
+
+passive DeathbringerStance {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+    damage 10 [PHYSICAL: 50]
+}

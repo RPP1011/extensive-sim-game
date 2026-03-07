@@ -1,0 +1,57 @@
+// Rakan abilities
+
+ability GleamingQuill {
+    target: direction, range: 8.0
+    cooldown: 11s, cast: 250ms
+    hint: damage
+    cost: 9
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 17 [MAGIC: 50]
+        }
+    }
+    heal 17
+}
+
+ability GrandEntrance {
+    target: ground, range: 6.0
+    cooldown: 16s
+    hint: damage
+    cost: 10
+
+    damage 17 in circle(2.5) [MAGIC: 50]
+    root 1s
+    knockback 2.0
+    dash to_target
+}
+
+ability BattleDance {
+    target: ally, range: 7.0
+    cooldown: 20s
+    hint: utility
+    cost: 8
+    recast: 1
+    recast_window: 5s
+
+    shield 12 for 3s
+    dash to_target
+}
+
+ability TheQuickness {
+    target: self
+    cooldown: 25s, cast: 500ms
+    hint: damage
+    cost: 20
+
+    damage 6 [MAGIC: 50]
+    slow 0.3 for 2s
+    buff move_speed 0.3 for 4s
+}
+
+passive FeyFeathers {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    shield 20 for 3s
+}

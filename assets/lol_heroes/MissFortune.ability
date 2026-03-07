@@ -1,0 +1,54 @@
+// Miss Fortune abilities
+
+ability DoubleUp {
+    target: enemy
+    cooldown: 7s
+    hint: damage
+    cost: 8
+
+    deliver chain { bounces: 3, range: 4.0 } {
+        on_hit {
+            damage 5 [PHYSICAL: 50]
+        }
+    }
+}
+
+ability Strut {
+    target: self
+    cooldown: 12s
+    hint: buff
+    cost: 9
+
+    buff move_speed 0.3 for 4s
+    buff attack_speed 0.3 for 5s
+}
+
+ability MakeItRain {
+    target: ground, range: 8.0
+    cooldown: 18s, cast: 250ms
+    hint: damage
+    cost: 16
+
+    damage 17 in circle(2.0) [MAGIC: 50]
+    slow 0.3 for 2s
+}
+
+ability BulletTime {
+    target: direction, range: 8.0
+    cooldown: 23900ms
+    hint: damage
+    cost: 20
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            damage 15 [PHYSICAL: 50]
+        }
+    }
+}
+
+passive LoveTap {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+}

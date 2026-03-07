@@ -1,0 +1,58 @@
+// Cassiopeia abilities
+
+ability NoxiousBlast {
+    target: ground, range: 8.0
+    cooldown: 3s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    damage 6 in circle(2.0) [MAGIC: 50]
+    buff move_speed 0.3 for 3s
+}
+
+ability Miasma {
+    target: ground, range: 7.0
+    cooldown: 24s, cast: 250ms
+    hint: damage
+    cost: 14
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 5 in circle(2.0) [MAGIC: 50]
+            grounded 2s
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability TwinFang {
+    target: enemy, range: 7.0
+    cooldown: 8s, cast: 125ms
+    hint: damage
+    cost: 8
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 5 [MAGIC: 50]
+        }
+    }
+    heal 5
+}
+
+ability PetrifyingGaze {
+    target: direction, range: 8.0
+    cooldown: 23900ms, cast: 500ms
+    hint: damage
+    cost: 20
+
+    damage 37 in cone(4.0, 60.0) [MAGIC: 50]
+    stun 1s
+    slow 0.3 for 2s
+}
+
+passive SerpentineGrace {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    buff move_speed 0.15 for 3s
+}

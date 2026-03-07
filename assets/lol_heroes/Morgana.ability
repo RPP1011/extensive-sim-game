@@ -1,0 +1,56 @@
+// Morgana abilities
+
+ability DarkBinding {
+    target: direction, range: 8.0
+    cooldown: 10s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 12.0 } {
+        on_hit {
+            damage 20 [MAGIC: 50]
+            root 1s
+        }
+    }
+}
+
+ability TormentedShadow {
+    target: ground, range: 8.0
+    cooldown: 12s, cast: 250ms
+    hint: damage
+    cost: 14
+
+    damage 1 in circle(2.75) [MAGIC: 50]
+}
+
+ability BlackShield {
+    target: ally, range: 8.0
+    cooldown: 26s
+    hint: defense
+    cost: 16
+
+    shield 20 for 5s
+}
+
+ability SoulShackles {
+    target: self
+    cooldown: 23900ms, cast: 350ms
+    hint: damage
+    cost: 20
+
+    deliver tether { max_range: 6.0 } {
+        on_complete {
+            damage 14 in circle(5.75) [MAGIC: 50]
+            stun 1s
+            slow 0.3 for 2s
+        }
+    }
+    buff move_speed 0.3 for 3s
+}
+
+passive SoulSiphon {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    heal 10
+}

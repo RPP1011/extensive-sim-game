@@ -1,0 +1,44 @@
+// Nasus abilities
+
+ability SiphoningStrike {
+    target: self
+    cooldown: 7s
+    hint: damage
+    cost: 4
+
+    damage 10 [PHYSICAL: 50]
+}
+
+ability Wither {
+    target: enemy, range: 7.0
+    cooldown: 15s, cast: 250ms
+    hint: damage
+    cost: 16
+
+    slow 0.3 for 2s
+}
+
+ability SpiritFire {
+    target: ground, range: 6.5
+    cooldown: 12s, cast: 250ms
+    hint: damage
+    cost: 12
+
+    damage 2 in circle(4.0) [MAGIC: 50]
+}
+
+ability FuryoftheSands {
+    target: self
+    cooldown: 23900ms, cast: 200ms
+    hint: damage
+    cost: 20
+
+    damage 15 [MAGIC: 50]
+}
+
+passive SoulEater {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    heal 10
+}

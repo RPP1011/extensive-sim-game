@@ -1,0 +1,43 @@
+// Renekton abilities
+
+ability CulltheMeek {
+    target: self
+    cooldown: 7s
+    hint: damage
+
+    damage 15 in circle(4.0) [PHYSICAL: 50]
+    heal 15
+}
+
+ability RuthlessPredator {
+    target: self
+    cooldown: 16s
+    hint: damage
+
+    damage 1 [PHYSICAL: 50]
+    shield 1 for 750ms
+    stun 750ms
+}
+
+ability SliceandDice {
+    target: enemy, range: 4.5
+    cooldown: 16s
+    hint: utility
+
+    dash to_target
+}
+
+ability Dominus {
+    target: self
+    cooldown: 23900ms, cast: 250ms
+    hint: damage
+
+    damage 1 in circle(3.75) [MAGIC: 50]
+}
+
+passive ReignofAnger {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+}

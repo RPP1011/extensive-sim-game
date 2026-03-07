@@ -1,0 +1,58 @@
+// Swain abilities
+
+ability DeathsHand {
+    target: direction, range: 7.2
+    cooldown: 7s, cast: 250ms
+    hint: damage
+    cost: 8
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 15 in cone(4.0, 60.0) [MAGIC: 50]
+        }
+    }
+}
+
+ability VisionofEmpire {
+    target: ground, range: 8.0
+    cooldown: 22s, cast: 250ms
+    hint: damage
+    cost: 12
+
+    damage 17 in circle(3.25) [MAGIC: 50]
+    slow 0.3 for 2s
+    summon "minion"
+}
+
+ability Nevermove {
+    target: direction, range: 8.0
+    cooldown: 14s, cast: 250ms
+    hint: damage
+    cost: 12
+    recast: 1
+    recast_window: 10s
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 20 [MAGIC: 50]
+            root 1s
+        }
+    }
+}
+
+ability DemonicAscension {
+    target: self
+    cooldown: 21700ms, cast: 500ms
+    hint: heal
+    cost: 20
+
+    heal 5
+}
+
+passive RavenousFlock {
+    trigger: on_death
+    cooldown: 5s
+
+    heal 10
+    apply_stacks "swain" 1 max 4
+}

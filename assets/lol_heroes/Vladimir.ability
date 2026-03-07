@@ -1,0 +1,57 @@
+// Vladimir abilities
+
+ability Transfusion {
+    target: enemy, range: 6.0
+    cooldown: 9s, cast: 250ms
+    hint: damage
+
+    damage 20 [MAGIC: 50]
+    heal 20
+    buff move_speed 0.3 for 3s
+}
+
+ability SanguinePool {
+    target: self
+    cooldown: 28s
+    hint: damage
+    cost: 3
+
+    damage 2 [MAGIC: 50]
+    heal 7
+    slow 0.3 for 2s
+    buff move_speed 0.3 for 2s
+}
+
+ability TidesofBlood {
+    target: self
+    cooldown: 13s
+    hint: damage
+    charges: 2
+    recharge: 10s
+    recast: 1
+    recast_window: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            damage 7 in circle(6.0) [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability Hemoplague {
+    target: ground, range: 6.2
+    cooldown: 23900ms
+    hint: damage
+
+    damage 37 in circle(3.75) [MAGIC: 50]
+    heal 37
+}
+
+passive CrimsonPact {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+    apply_stacks "vladimir" 1 max 4
+}

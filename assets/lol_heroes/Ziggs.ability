@@ -1,0 +1,61 @@
+// Ziggs abilities
+
+ability BouncingBomb {
+    target: ground, range: 8.0
+    cooldown: 6s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 17.0 } {
+        on_hit {
+            damage 20 [MAGIC: 50]
+        }
+    }
+}
+
+ability SatchelCharge {
+    target: ground, range: 8.0
+    cooldown: 20s, cast: 250ms
+    hint: damage
+    cost: 16
+    recast: 1
+    recast_window: 10s
+
+    deliver projectile { speed: 17.5 } {
+        on_hit {
+            damage 17 in circle(3.25) [MAGIC: 50]
+            knockback 2.0
+        }
+    }
+    dash to_target
+}
+
+ability HexplosiveMinefield {
+    target: ground, range: 8.0
+    cooldown: 16s, cast: 250ms
+    hint: damage
+    cost: 14
+
+    deliver projectile { speed: 15.5 } {
+        on_hit {
+            damage 3 in circle(3.25) [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability MegaInfernoBomb {
+    target: ground, range: 8.0
+    cooldown: 23900ms, cast: 375ms
+    hint: damage
+    cost: 20
+
+    damage 50 in circle(5.25) [MAGIC: 50]
+}
+
+passive ShortFuse {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+}

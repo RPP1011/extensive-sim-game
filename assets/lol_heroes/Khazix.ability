@@ -1,0 +1,52 @@
+// Kha'Zix abilities
+
+ability TasteTheirFear {
+    target: enemy, range: 3.2
+    cooldown: 4s, cast: 250ms
+    hint: damage
+    cost: 4
+
+    damage 20 in circle(3.75) [PHYSICAL: 50]
+}
+
+ability VoidSpike {
+    target: direction, range: 8.0
+    cooldown: 9s, cast: 250ms
+    hint: damage
+    cost: 11
+
+    deliver projectile { speed: 17.0 } {
+        on_hit {
+            damage 21 in circle(2.75) [PHYSICAL: 50]
+            slow 0.3 for 2s
+        }
+    }
+    heal 21
+}
+
+ability Leap {
+    target: ground, range: 7.0
+    cooldown: 20s
+    hint: damage
+    cost: 10
+
+    damage 16 in circle(3.0) [PHYSICAL: 50]
+    dash to_target
+}
+
+ability VoidAssault {
+    target: self
+    cooldown: 21700ms
+    hint: utility
+    cost: 20
+
+    buff move_speed 0.3 for 3s
+    stealth for 3s break_on_damage
+}
+
+passive UnseenThreat {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+}

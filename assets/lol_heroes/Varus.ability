@@ -1,0 +1,63 @@
+// Varus abilities
+
+ability PiercingArrow {
+    target: enemy, range: 8.0
+    cooldown: 16s
+    hint: damage
+    cost: 13
+    charges: 2
+    recharge: 10s
+    recast: 1
+    recast_window: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            slow 0.3 for 4s
+        }
+    }
+}
+
+ability BlightedQuiver {
+    target: self
+    cooldown: 15100ms
+    hint: damage
+
+    damage 1 [MAGIC: 50]
+}
+
+ability HailofArrows {
+    target: ground, range: 8.0
+    cooldown: 18s, cast: 241ms
+    hint: damage
+    cost: 16
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 15 [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+    heal 7
+    buff move_speed 0.3 for 4s
+}
+
+ability ChainofCorruption {
+    target: direction, range: 8.0
+    cooldown: 21700ms, cast: 241ms
+    hint: damage
+    cost: 20
+
+    deliver projectile { speed: 15.0 } {
+        on_hit {
+            damage 18 in circle(6.5) [MAGIC: 50]
+            root 1s
+        }
+    }
+}
+
+passive LivingVengeance {
+    trigger: on_kill
+    cooldown: 5s
+
+    buff attack_speed 0.2 for 5s
+}

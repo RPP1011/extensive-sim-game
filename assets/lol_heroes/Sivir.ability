@@ -1,0 +1,50 @@
+// Sivir abilities
+
+ability BoomerangBlade {
+    target: direction, range: 8.0
+    cooldown: 10s, cast: 3s
+    hint: damage
+    cost: 11
+
+    deliver projectile { speed: 14.5 } {
+        on_hit {
+            damage 3 [PHYSICAL: 50]
+        }
+    }
+}
+
+ability Ricochet {
+    target: self
+    cooldown: 12s
+    hint: buff
+    cost: 12
+
+    deliver projectile { speed: 17.5 } {
+    }
+    buff attack_speed 0.3 for 5s
+}
+
+ability SpellShield {
+    target: self
+    cooldown: 24s
+    hint: buff
+
+    heal 15
+    buff move_speed 0.3 for 3s
+}
+
+ability OnTheHunt {
+    target: enemy, range: 8.0
+    cooldown: 23900ms
+    hint: damage
+    cost: 20
+
+    damage 15 [PHYSICAL: 50]
+}
+
+passive FleetofFoot {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    buff move_speed 0.15 for 3s
+}

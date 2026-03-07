@@ -1,0 +1,64 @@
+// Nautilus abilities
+
+ability DredgeLine {
+    target: direction, range: 8.0
+    cooldown: 14s, cast: 250ms
+    hint: damage
+    cost: 12
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 17 [MAGIC: 50]
+            stun 1s
+            knockback 2.0
+            pull 3.0
+        }
+    }
+    dash to_target
+}
+
+ability TitansWrath {
+    target: self
+    cooldown: 12s
+    hint: damage
+    cost: 12
+
+    damage 1 in circle(2.5) [MAGIC: 50]
+    shield 12 for 6s
+}
+
+ability Riptide {
+    target: self
+    cooldown: 7s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 13 in circle(1.5) [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability DepthCharge {
+    target: enemy, range: 8.0
+    cooldown: 23900ms, cast: 460ms
+    hint: damage
+    cost: 20
+
+    deliver projectile { speed: 2.75 } {
+        on_hit {
+            damage 31 in circle(2.25) [MAGIC: 50]
+            stun 1s
+            knockback 2.0
+        }
+    }
+}
+
+passive StaggeringBlow {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+}

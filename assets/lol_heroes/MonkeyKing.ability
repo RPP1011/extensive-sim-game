@@ -1,0 +1,56 @@
+// Wukong abilities
+
+ability CrushingBlow {
+    target: self
+    cooldown: 8s
+    hint: damage
+    cost: 4
+
+    damage 5 [PHYSICAL: 50]
+}
+
+ability WarriorTrickster {
+    target: ground, range: 3.0
+    cooldown: 18s
+    hint: utility
+    cost: 12
+
+    dash to_target
+    buff attack_speed 0.3 for 5s
+    stealth for 3s break_on_damage
+}
+
+ability NimbusStrike {
+    target: enemy, range: 6.2
+    cooldown: 10s
+    hint: damage
+    cost: 6
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 20 [MAGIC: 50]
+        }
+    }
+    dash to_target
+    buff attack_speed 0.3 for 5s
+}
+
+ability Cyclone {
+    target: self
+    cooldown: 25s
+    hint: crowd_control
+    cost: 20
+    recast: 1
+    recast_window: 10s
+
+    knockback 2.0 in circle(1.62)
+    buff move_speed 0.3 for 3s
+}
+
+passive StoneSkin {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+    apply_stacks "wukong" 1 max 4
+}

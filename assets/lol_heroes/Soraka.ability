@@ -1,0 +1,56 @@
+// Soraka abilities
+
+ability Starcall {
+    target: ground, range: 8.0
+    cooldown: 8s, cast: 250ms
+    hint: damage
+    cost: 9
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 21 in circle(2.65) [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability AstralInfusion {
+    target: ally, range: 5.5
+    cooldown: 6s, cast: 250ms
+    hint: heal
+    cost: 2
+
+    heal 22
+}
+
+ability Equinox {
+    target: ground, range: 8.0
+    cooldown: 20s, cast: 250ms
+    hint: damage
+    cost: 14
+
+    deliver zone { duration: 4s, tick: 1s } {
+        on_hit {
+            damage 17 [MAGIC: 50]
+            root 1s
+            silence 1500ms
+        }
+    }
+}
+
+ability Wish {
+    target: self
+    cooldown: 27200ms, cast: 250ms
+    hint: heal
+    cost: 20
+
+    heal 37
+}
+
+passive Salvation {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    heal 10
+    buff move_speed 0.15 for 3s
+}

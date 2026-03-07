@@ -1,0 +1,55 @@
+// LeBlanc abilities
+
+ability SigilofMalice {
+    target: enemy, range: 7.0
+    cooldown: 6s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 17 [MAGIC: 50]
+        }
+    }
+}
+
+ability Distortion {
+    target: ground, range: 6.0
+    cooldown: 15s
+    hint: damage
+    cost: 12
+    recast: 1
+    recast_window: 10s
+
+    damage 18 in circle(2.4) [MAGIC: 50]
+    dash to_target
+}
+
+ability EtherealChains {
+    target: direction, range: 8.0
+    cooldown: 14s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver tether { max_range: 6.0 } {
+        on_complete {
+            damage 12 [MAGIC: 50]
+            root 1s
+        }
+    }
+}
+
+ability Mimic {
+    target: enemy, range: 8.0
+    cooldown: 16200ms
+    hint: damage
+
+    damage 17 [MAGIC: 50]
+}
+
+passive MirrorImage {
+    trigger: on_damage_taken
+    cooldown: 5s
+
+    heal 10
+}

@@ -1,0 +1,57 @@
+// Milio abilities
+
+ability UltraMegaFireKick {
+    target: direction, range: 8.0
+    cooldown: 10s
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 12.0 } {
+        on_hit {
+            damage 20 in circle(1.5) [MAGIC: 50]
+            stun 1s
+            slow 0.3 for 2s
+            knockback 2.0
+        }
+    }
+}
+
+ability CozyCampfire {
+    target: ground, range: 6.5
+    cooldown: 29s, cast: 250ms
+    hint: heal
+    cost: 18
+    recast: 1
+    recast_window: 10s
+
+    heal 2
+}
+
+ability WarmHugs {
+    target: ally, range: 6.5
+    cooldown: 8s
+    hint: buff
+    cost: 10
+    charges: 2
+    recharge: 17s
+
+    shield 11 for 3s
+    buff move_speed 0.3 for 3s
+}
+
+ability BreathofLife {
+    target: self
+    cooldown: 28300ms
+    hint: crowd_control
+    cost: 20
+
+    heal 37
+    knockback 2.0 in circle(7.0)
+}
+
+passive FiredUp {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+}

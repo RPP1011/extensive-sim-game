@@ -1,0 +1,55 @@
+// Karma abilities
+
+ability InnerFlame {
+    target: direction, range: 8.0
+    cooldown: 9s, cast: 250ms
+    hint: damage
+    cost: 8
+
+    deliver projectile { speed: 17.0 } {
+        on_hit {
+            damage 17 in circle(2.8) [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability FocusedResolve {
+    target: enemy, range: 6.8
+    cooldown: 12s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver tether { max_range: 6.0 } {
+        on_complete {
+            damage 10 [MAGIC: 50]
+            heal 7
+            root 1s
+        }
+    }
+}
+
+ability Inspire {
+    target: ally, range: 8.0
+    cooldown: 10s
+    hint: buff
+    cost: 10
+
+    shield 20 for 2s
+    buff move_speed 0.3 for 2s
+}
+
+ability Mantra {
+    target: self
+    cooldown: 15100ms
+    hint: damage
+
+    damage 15 [PHYSICAL: 50]
+}
+
+passive GatheringFire {
+    trigger: on_damage_taken
+    cooldown: 5s
+
+    heal 10
+}

@@ -1,0 +1,53 @@
+// Gnar abilities
+
+ability BoomerangThrowBoulderToss {
+    target: enemy, range: 8.0
+    cooldown: 16s
+    hint: damage
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            slow 0.3 for 2s in circle(2.5)
+        }
+    }
+}
+
+ability HyperWallop {
+    target: enemy
+    cooldown: 7s
+    hint: crowd_control
+
+    stun 1s in circle(2.5)
+    buff move_speed 0.3 for 3s
+}
+
+ability HopCrunch {
+    target: enemy, range: 4.8
+    cooldown: 22s
+    hint: utility
+
+    dash to_target
+}
+
+ability GNAR {
+    target: direction, range: 5.9
+    cooldown: 20600ms, cast: 250ms
+    hint: damage
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 50 in circle(4.75) [PHYSICAL: 50]
+            stun 1s
+            slow 0.3 for 2s
+            knockback 2.0
+        }
+    }
+    buff move_speed 0.3 for 3s
+}
+
+passive RageGene {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    heal 10
+}

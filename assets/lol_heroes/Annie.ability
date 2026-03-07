@@ -1,0 +1,53 @@
+// Annie abilities
+
+ability Disintegrate {
+    target: enemy, range: 6.2
+    cooldown: 4s, cast: 250ms
+    hint: damage
+    cost: 12
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 17 [MAGIC: 50]
+        }
+    }
+}
+
+ability Incinerate {
+    target: direction, range: 6.0
+    cooldown: 8s, cast: 250ms
+    hint: damage
+    cost: 18
+
+    damage 17 in circle(6.0) [MAGIC: 50]
+}
+
+ability MoltenShield {
+    target: ally, range: 8.0
+    cooldown: 12s
+    hint: damage
+    cost: 12
+
+    damage 2 [MAGIC: 50]
+    shield 15 for 3s
+    buff move_speed 0.3 for 3s
+}
+
+ability SummonTibbers {
+    target: ground, range: 6.0
+    cooldown: 25s, cast: 250ms
+    hint: damage
+    cost: 20
+    recast: 1
+    recast_window: 10s
+
+    damage 37 in circle(2.5) [MAGIC: 50]
+    summon "minion"
+}
+
+passive Pyromania {
+    trigger: on_ability_used
+    cooldown: 5s
+
+    apply_stacks "annie" 1 max 4
+}

@@ -485,3 +485,31 @@ ability MultiShot {
         other => panic!("expected Spread area, got {other:?}"),
     }
 }
+
+#[test]
+fn parse_all_lol_heroes() {
+    let lol_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("assets/lol_heroes");
+    let mut count = 0;
+    let mut errors = Vec::new();
+
+    for entry in std::fs::read_dir(&lol_dir).expect("cannot read lol_heroes dir") {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if path.extension().map_or(true, |e| e != "ability") {
+            continue;
+        }
+        let content = std::fs::read_to_string(&path).unwrap();
+        match parse_abilities(&content) {
+            Ok(_) => count += 1,
+            Err(e) => errors.push(format!("{}: {e}", path.file_name().unwrap().to_string_lossy())),
+        }
+    }
+
+    if !errors.is_empty() {
+        panic!("{} / {} LoL hero .ability files failed to parse:\n{}",
+            errors.len(), count + errors.len(), errors.join("\n"));
+    }
+    assert!(count > 0, "no .ability files found in lol_heroes");
+    eprintln!("Successfully parsed {count} LoL hero .ability files");
+}

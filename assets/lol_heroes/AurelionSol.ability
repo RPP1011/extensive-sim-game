@@ -1,0 +1,57 @@
+// Aurelion Sol abilities
+
+ability BreathofLight {
+    target: direction, range: 7.5
+    cooldown: 3s
+    hint: damage
+    cost: 7
+    charges: 2
+    recharge: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            damage 13 in circle(2.5) [MAGIC: 50]
+        }
+    }
+}
+
+ability AstralFlight {
+    target: direction, range: 8.0
+    cooldown: 22s, cast: 400ms
+    hint: crowd_control
+    cost: 10
+
+    root 1s
+    dash to_target
+}
+
+ability Singularity {
+    target: ground, range: 7.5
+    cooldown: 12s, cast: 200ms
+    hint: damage
+    cost: 18
+
+    damage 1 in circle(2.75) [MAGIC: 50]
+    summon "minion"
+}
+
+ability FallingStarTheSkiesDescend {
+    target: enemy, range: 8.0
+    cooldown: 23900ms
+    hint: crowd_control
+    cost: 20
+
+    stun 1s in circle(2.5)
+    slow 0.3 for 2s
+    knockback 2.0
+    pull 3.0
+}
+
+passive CosmicCreator {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    heal 10
+    damage 10 [PHYSICAL: 50]
+    apply_stacks "bonus" 1 max 4
+}

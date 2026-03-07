@@ -1,0 +1,61 @@
+// Pyke abilities
+
+ability BoneSkewer {
+    target: enemy, range: 4.0
+    cooldown: 10s, cast: 250ms
+    hint: damage
+    cost: 14
+    charges: 2
+    recharge: 10s
+    recast: 1
+    recast_window: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            damage 25 [PHYSICAL: 50]
+            slow 0.3 for 3s
+            knockback 2.0
+        }
+    }
+}
+
+ability GhostwaterDive {
+    target: self
+    cooldown: 14s
+    hint: utility
+    cost: 13
+
+    buff move_speed 0.3 for 5s
+    stealth for 3s break_on_damage
+}
+
+ability PhantomUndertow {
+    target: direction, range: 5.5
+    cooldown: 14s
+    hint: damage
+    cost: 13
+
+    deliver zone { duration: 4s, tick: 1s } {
+        on_hit {
+            damage 25 [PHYSICAL: 50]
+            stun 1s
+        }
+    }
+    dash to_target
+}
+
+ability DeathFromBelow {
+    target: enemy, range: 7.5
+    cooldown: 21700ms
+    hint: utility
+    cost: 20
+
+    dash to_target
+}
+
+passive GiftoftheDrownedOnes {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    heal 10
+}

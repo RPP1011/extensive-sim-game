@@ -1,0 +1,46 @@
+// Ambessa abilities
+
+ability CunningSweepSunderingSlam {
+    target: enemy, range: 6.5
+    cooldown: 14s
+    hint: damage
+    cost: 14
+
+    damage 15 [PHYSICAL: 50]
+}
+
+ability Repudiation {
+    target: enemy, range: 3.2
+    cooldown: 18s
+    hint: defense
+    cost: 14
+
+    shield 10 for 3s
+}
+
+ability Lacerate {
+    target: enemy, range: 3.2
+    cooldown: 13s
+    hint: utility
+    cost: 14
+
+    slow 0.3 for 2s in circle(2.5)
+    dash to_target
+}
+
+ability PublicExecution {
+    target: enemy, range: 8.0
+    cooldown: 25s
+    hint: crowd_control
+
+    stun 1s in line(6.0, 1.5)
+    suppress 1500ms
+    dash to_target
+}
+
+passive DrakehoundsStep {
+    trigger: on_ability_used
+    cooldown: 5s
+
+    buff attack_speed 0.2 for 5s
+}

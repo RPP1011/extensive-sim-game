@@ -1,0 +1,65 @@
+// Xerath abilities
+
+ability Arcanopulse {
+    target: direction, range: 7.5
+    cooldown: 9s
+    hint: damage
+    cost: 16
+    charges: 2
+    recharge: 10s
+    recast: 1
+    recast_window: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            slow 0.3 for 250ms
+        }
+    }
+}
+
+ability EyeofDestruction {
+    target: ground, range: 8.0
+    cooldown: 14s, cast: 250ms
+    hint: damage
+    cost: 16
+
+    damage 15 in circle(2.75) [MAGIC: 50]
+    slow 0.3 for 2s
+}
+
+ability ShockingOrb {
+    target: direction, range: 8.0
+    cooldown: 13s, cast: 250ms
+    hint: damage
+    cost: 12
+
+    deliver projectile { speed: 14.0 } {
+        on_hit {
+            damage 20 [MAGIC: 50]
+            stun 1s
+        }
+    }
+}
+
+ability RiteoftheArcane {
+    target: enemy, range: 8.0
+    cooldown: 25s
+    hint: damage
+    cost: 20
+    recast: 1
+    recast_window: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            damage 45 [MAGIC: 50]
+            root 1s
+        }
+    }
+}
+
+passive ManaSurge {
+    trigger: on_kill
+    cooldown: 5s
+
+    heal 10
+}

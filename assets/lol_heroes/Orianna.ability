@@ -1,0 +1,53 @@
+// Orianna abilities
+
+ability CommandAttack {
+    target: ground, range: 8.0
+    cooldown: 6s
+    hint: damage
+    cost: 6
+
+    damage 15 in circle(1.75) [MAGIC: 50]
+}
+
+ability CommandDissonance {
+    target: self
+    cooldown: 7s
+    hint: damage
+    cost: 12
+
+    damage 8 in circle(2.25) [MAGIC: 50]
+    slow 0.3 for 2s
+    buff move_speed 0.3 for 2s
+}
+
+ability CommandProtect {
+    target: ally, range: 8.0
+    cooldown: 9s
+    hint: damage
+    cost: 12
+
+    deliver projectile { speed: 18.5 } {
+        on_hit {
+            damage 15 [MAGIC: 50]
+        }
+    }
+    shield 1 for 3s
+}
+
+ability CommandShockwave {
+    target: self
+    cooldown: 22800ms, cast: 500ms
+    hint: damage
+    cost: 20
+
+    damage 62 in circle(4.15) [MAGIC: 50]
+    stun 1s
+    knockback 2.0
+}
+
+passive ClockworkWindup {
+    trigger: on_ability_used
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+}

@@ -1,0 +1,46 @@
+// Elise abilities
+
+ability NeurotoxinVenomousBite {
+    target: enemy, range: 6.2
+    cooldown: 6s
+    hint: utility
+    cost: 16
+
+    dash to_target
+}
+
+ability VolatileSpiderlingSkitteringFrenzy {
+    target: enemy, range: 8.0
+    cooldown: 12s
+    hint: damage
+    cost: 12
+
+    damage 15 [PHYSICAL: 50]
+}
+
+ability CocoonRappel {
+    target: enemy, range: 8.0
+    cooldown: 12s
+    hint: crowd_control
+    cost: 10
+
+    heal 7
+    stun 1s
+    stealth for 3s break_on_damage
+}
+
+ability SpiderForm {
+    target: enemy, range: 8.0
+    cooldown: 3s
+    hint: damage
+
+    damage 15 [PHYSICAL: 50]
+}
+
+passive SpiderQueen {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    heal 10
+    damage 10 [PHYSICAL: 50]
+}

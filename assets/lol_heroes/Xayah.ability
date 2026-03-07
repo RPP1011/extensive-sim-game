@@ -1,0 +1,60 @@
+// Xayah abilities
+
+ability DoubleDaggers {
+    target: direction, range: 4.0
+    cooldown: 10s, cast: 3s
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 11 [PHYSICAL: 50]
+        }
+    }
+}
+
+ability DeadlyPlumage {
+    target: self
+    cooldown: 20s
+    hint: buff
+    cost: 12
+
+    deliver projectile { speed: 20.0 } {
+    }
+    buff move_speed 0.3 for 4s
+    buff attack_speed 0.3 for 5s
+}
+
+ability Bladecaller {
+    target: self
+    cooldown: 12s
+    hint: crowd_control
+    cost: 6
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            root 1s
+        }
+    }
+}
+
+ability Featherstorm {
+    target: direction, range: 4.5
+    cooldown: 26100ms
+    hint: damage
+    cost: 20
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 50 in cone(4.0, 60.0) [PHYSICAL: 50]
+        }
+    }
+    dash to_target
+}
+
+passive CleanCuts {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    heal 10
+}

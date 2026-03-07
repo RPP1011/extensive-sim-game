@@ -1,0 +1,44 @@
+// Zaahen abilities
+
+ability TheDarkinGlaive {
+    target: enemy, range: 8.0
+    cooldown: 10s
+    hint: heal
+    cost: 5
+
+    heal 7
+}
+
+ability DreadedReturn {
+    target: enemy, range: 8.0
+    cooldown: 16s
+    hint: damage
+    cost: 10
+
+    damage 15 [PHYSICAL: 50]
+}
+
+ability AureateRush {
+    target: enemy, range: 8.0
+    cooldown: 10s
+    hint: utility
+    cost: 8
+
+    dash to_target
+}
+
+ability GrimDeliverance {
+    target: enemy, range: 6.0
+    cooldown: 22800ms
+    hint: heal
+    cost: 20
+
+    heal 7
+}
+
+passive CultivationofWar {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    apply_stacks "passive_stacks" 1 max 4
+}

@@ -1,0 +1,61 @@
+// Lux abilities
+
+ability LightBinding {
+    target: direction, range: 8.0
+    cooldown: 11s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 12.0 } {
+        on_hit {
+            damage 20 [MAGIC: 50]
+            root 1s
+        }
+    }
+}
+
+ability PrismaticBarrier {
+    target: direction, range: 8.0
+    cooldown: 14s, cast: 250ms
+    hint: defense
+    cost: 12
+
+    deliver projectile { speed: 20.0 } {
+    }
+    shield 10 for 3s
+}
+
+ability LucentSingularity {
+    target: ground, range: 8.0
+    cooldown: 10s, cast: 250ms
+    hint: damage
+    cost: 14
+    recast: 1
+    recast_window: 10s
+
+    deliver projectile { speed: 12.0 } {
+        on_hit {
+            slow 0.3 for 2s in circle(3.1)
+        }
+    }
+}
+
+ability FinalSpark {
+    target: direction, range: 8.0
+    cooldown: 17300ms, cast: 1s
+    hint: damage
+    cost: 20
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 75 in circle(2.5) [MAGIC: 50]
+        }
+    }
+}
+
+passive Illumination {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+}

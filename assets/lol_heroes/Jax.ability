@@ -1,0 +1,49 @@
+// Jax abilities
+
+ability LeapStrike {
+    target: enemy, range: 7.0
+    cooldown: 8s
+    hint: damage
+    cost: 13
+
+    damage 16 [PHYSICAL: 50]
+    dash to_target
+}
+
+ability Empower {
+    target: self
+    cooldown: 7s
+    hint: damage
+    cost: 6
+
+    damage 12 [MAGIC: 50]
+}
+
+ability CounterStrike {
+    target: self
+    cooldown: 17s
+    hint: damage
+    cost: 10
+    recast: 1
+    recast_window: 10s
+
+    damage 10 in circle(3.75) [MAGIC: 50]
+    stun 1s
+}
+
+ability GrandmasteratArms {
+    target: enemy, range: 2.6
+    cooldown: 22800ms
+    hint: damage
+    cost: 20
+
+    damage 15 [PHYSICAL: 50]
+}
+
+passive RelentlessAssault {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    buff attack_speed 0.2 for 5s
+    apply_stacks "relentless_assault" 1 max 4
+}

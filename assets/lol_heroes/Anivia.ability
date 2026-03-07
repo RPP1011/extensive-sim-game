@@ -1,0 +1,56 @@
+// Anivia abilities
+
+ability FlashFrost {
+    target: direction, range: 8.0
+    cooldown: 12s, cast: 250ms
+    hint: damage
+    cost: 16
+    recast: 1
+    recast_window: 10s
+
+    deliver projectile { speed: 9.5 } {
+        on_hit {
+            damage 12 in circle(2.25) [MAGIC: 50]
+            stun 1s
+            slow 0.3 for 3s
+        }
+    }
+}
+
+ability Crystallize {
+    target: ground, range: 8.0
+    cooldown: 17s, cast: 250ms
+    hint: crowd_control
+    cost: 14
+
+    knockback 2.0
+}
+
+ability Frostbite {
+    target: enemy, range: 6.0
+    cooldown: 4s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 16.0 } {
+        on_hit {
+            damage 12 [MAGIC: 50]
+        }
+    }
+}
+
+ability GlacialStorm {
+    target: ground, range: 7.5
+    cooldown: 4s
+    hint: damage
+    cost: 12
+
+    slow 0.5 for 1s
+}
+
+passive Rebirth {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+}

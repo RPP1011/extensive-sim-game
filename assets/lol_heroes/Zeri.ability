@@ -1,0 +1,59 @@
+// Zeri abilities
+
+ability BurstFire {
+    target: direction, range: 7.0
+    cooldown: 1s
+    hint: damage
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 3 [PHYSICAL: 50]
+        }
+    }
+    buff attack_speed 0.3 for 5s
+}
+
+ability UltrashockLaser {
+    target: direction, range: 8.0
+    cooldown: 12s, cast: 3s
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 7 in circle(2.5) [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability SparkSurge {
+    target: direction, range: 8.0
+    cooldown: 22s
+    hint: damage
+    cost: 18
+
+    damage 1 in circle(2.5) [PHYSICAL: 50]
+    dash to_target
+    lifesteal 0.12 for 5s
+}
+
+ability LightningCrash {
+    target: self
+    cooldown: 19500ms
+    hint: damage
+    cost: 20
+    charges: 2
+    recharge: 10s
+
+    damage 10 in circle(8.0) [MAGIC: 50]
+    buff move_speed 0.3 for 5s
+    buff attack_speed 0.3 for 5s
+}
+
+passive LivingBattery {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+}

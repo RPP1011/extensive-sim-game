@@ -1,0 +1,63 @@
+// Taliyah abilities
+
+ability ThreadedVolley {
+    target: direction, range: 8.0
+    cooldown: 7s, cast: 250ms
+    hint: damage
+    cost: 13
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 14 in circle(1.75) [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability SeismicShove {
+    target: direction, range: 8.0
+    cooldown: 14s, cast: 250ms
+    hint: crowd_control
+    cost: 8
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            knockback 2.0 in circle(2.25)
+        }
+    }
+}
+
+ability UnraveledEarth {
+    target: direction, range: 8.0
+    cooldown: 14s, cast: 250ms
+    hint: damage
+    cost: 18
+
+    damage 3 in circle(8.0) [MAGIC: 50]
+    stun 1s
+    slow 0.3 for 2s
+    knockback 2.0
+    dash to_target
+}
+
+ability WeaversWall {
+    target: direction, range: 8.0
+    cooldown: 30s
+    hint: crowd_control
+    cost: 20
+    recast: 1
+    recast_window: 10s
+
+    deliver projectile { speed: 15.0 } {
+        on_hit {
+            knockback 2.0
+        }
+    }
+}
+
+passive RockSurfing {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    buff move_speed 0.15 for 3s
+}

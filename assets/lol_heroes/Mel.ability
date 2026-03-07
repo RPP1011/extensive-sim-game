@@ -1,0 +1,53 @@
+// Mel abilities
+
+ability RadiantVolley {
+    target: enemy, range: 8.0
+    cooldown: 10s
+    hint: damage
+    cost: 14
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 15 [PHYSICAL: 50]
+        }
+    }
+}
+
+ability Rebuttal {
+    target: enemy, range: 2.5
+    cooldown: 15s
+    hint: damage
+    cost: 16
+
+    reflect 0.3 for 3s
+}
+
+ability SolarSnare {
+    target: enemy, range: 8.0
+    cooldown: 11s
+    hint: crowd_control
+    cost: 10
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            root 1s in circle(2.5)
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability GoldenEclipse {
+    target: enemy, range: 8.0
+    cooldown: 23900ms
+    hint: damage
+    cost: 20
+
+    damage 15 [PHYSICAL: 50]
+}
+
+passive SearingBrilliance {
+    trigger: on_damage_taken
+    cooldown: 5s
+
+    apply_stacks "passive_stacks" 1 max 4
+}

@@ -1,0 +1,57 @@
+// Zoe abilities
+
+ability PaddleStar {
+    target: enemy, range: 8.0
+    cooldown: 8s
+    hint: damage
+    cost: 8
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 15 [PHYSICAL: 50]
+        }
+    }
+}
+
+ability SpellThief {
+    target: enemy, range: 8.0
+    cooldown: 8s
+    hint: damage
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 18 [PHYSICAL: 50]
+        }
+    }
+    buff move_speed 0.3 for 3s
+}
+
+ability SleepyTroubleBubble {
+    target: direction, range: 8.0
+    cooldown: 16s, cast: 250ms
+    hint: damage
+    cost: 16
+
+    deliver projectile { speed: 18.5 } {
+        on_hit {
+            damage 17 [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability PortalJump {
+    target: direction, range: 5.8
+    cooldown: 11s, cast: 250ms
+    hint: utility
+    cost: 8
+
+    dash to_target
+}
+
+passive MoreSparkles {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+}

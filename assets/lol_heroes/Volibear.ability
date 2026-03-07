@@ -1,0 +1,58 @@
+// Volibear abilities
+
+ability ThunderingSmash {
+    target: self
+    cooldown: 14s
+    hint: damage
+    cost: 10
+
+    damage 2 [PHYSICAL: 50]
+    stun 1s
+    dash to_target
+    buff move_speed 0.3 for 4s
+    lifesteal 1.0 for 5s
+}
+
+ability FrenziedMaul {
+    target: enemy, range: 3.2
+    cooldown: 5s, cast: 250ms
+    hint: damage
+    cost: 6
+
+    damage 1 [PHYSICAL: 50]
+    heal 1
+}
+
+ability SkySplitter {
+    target: ground, range: 8.0
+    cooldown: 12s
+    hint: damage
+    cost: 12
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 20 in circle(3.25) [PHYSICAL: 50]
+            slow 0.3 for 2s
+        }
+    }
+    shield 20 for 3s
+}
+
+ability Stormbringer {
+    target: ground, range: 7.0
+    cooldown: 28300ms
+    hint: utility
+    cost: 20
+
+    slow 0.3 for 2s in circle(3.0)
+    dash to_target
+}
+
+passive TheRelentlessStorm {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+    buff attack_speed 0.2 for 5s
+    apply_stacks "volibear" 1 max 4
+}

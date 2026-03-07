@@ -1,0 +1,53 @@
+// Zed abilities
+
+ability RazorShuriken {
+    target: direction, range: 8.0
+    cooldown: 6s, cast: 250ms
+    hint: damage
+    cost: 15
+
+    deliver projectile { speed: 17.0 } {
+        on_hit {
+            damage 20 [PHYSICAL: 50]
+        }
+    }
+}
+
+ability LivingShadow {
+    target: enemy, range: 6.5
+    cooldown: 20s
+    hint: utility
+    cost: 8
+    recast: 1
+    recast_window: 10s
+
+    dash to_target
+}
+
+ability ShadowSlash {
+    target: self
+    cooldown: 5s
+    hint: damage
+    cost: 8
+
+    damage 16 in circle(3.15) [PHYSICAL: 50]
+    slow 0.3 for 2s
+}
+
+ability DeathMark {
+    target: enemy, range: 6.2
+    cooldown: 23900ms
+    hint: utility
+    recast: 1
+    recast_window: 10s
+
+    dash to_target
+}
+
+passive ContemptfortheWeak {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+    damage 10 [PHYSICAL: 50]
+}

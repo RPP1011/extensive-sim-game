@@ -1,0 +1,48 @@
+// Rengar abilities
+
+ability Savagery {
+    target: self
+    cooldown: 6s
+    hint: buff
+
+    buff attack_speed 0.3 for 5s
+}
+
+ability BattleRoar {
+    target: self
+    cooldown: 16s
+    hint: damage
+
+    damage 12 [MAGIC: 50]
+    heal 12
+}
+
+ability BolaStrike {
+    target: direction, range: 8.0
+    cooldown: 10s, cast: 250ms
+    hint: damage
+
+    deliver projectile { speed: 15.0 } {
+        on_hit {
+            damage 13 in circle(2.5) [PHYSICAL: 50]
+            root 1s
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability ThrilloftheHunt {
+    target: self
+    cooldown: 22800ms
+    hint: utility
+
+    buff move_speed 0.3 for 3s
+    stealth for 3s break_on_damage
+}
+
+passive UnseenPredator {
+    trigger: on_kill
+    cooldown: 5s
+
+    buff move_speed 0.15 for 3s
+}

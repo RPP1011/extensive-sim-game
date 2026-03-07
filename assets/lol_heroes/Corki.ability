@@ -1,0 +1,55 @@
+// Corki abilities
+
+ability PhosphorusBomb {
+    target: ground, range: 8.0
+    cooldown: 9s, cast: 250ms
+    hint: damage
+    cost: 16
+
+    deliver projectile { speed: 11.0 } {
+        on_hit {
+            damage 17 in circle(2.75) [MAGIC: 50]
+        }
+    }
+}
+
+ability Valkyrie {
+    target: ground, range: 3.0
+    cooldown: 20s
+    hint: damage
+    cost: 16
+
+    damage 7 [MAGIC: 50]
+    dash to_target
+}
+
+ability GatlingGun {
+    target: self
+    cooldown: 12s
+    hint: damage
+    cost: 10
+
+    damage 25 in cone(4.0, 60.0) [PHYSICAL: 50]
+}
+
+ability MissileBarrage {
+    target: direction, range: 8.0
+    cooldown: 2s, cast: 175ms
+    hint: damage
+    cost: 7
+    charges: 2
+    recharge: 20s
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 20 in circle(1.5) [PHYSICAL: 50]
+        }
+    }
+}
+
+passive HextechMunitions {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    heal 10
+}

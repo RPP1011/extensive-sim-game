@@ -1,0 +1,61 @@
+// Quinn abilities
+
+ability BlindingAssault {
+    target: direction, range: 8.0
+    cooldown: 11s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 15.5 } {
+        on_hit {
+            damage 5 in circle(2.1) [PHYSICAL: 50]
+        }
+    }
+}
+
+ability HeightenedSenses {
+    target: self
+    cooldown: 16200ms
+    hint: buff
+
+    buff move_speed 0.3 for 2s
+    buff attack_speed 0.3 for 5s
+}
+
+ability Vault {
+    target: enemy, range: 6.0
+    cooldown: 12s
+    hint: damage
+    cost: 10
+
+    damage 10 [PHYSICAL: 50]
+    slow 0.3 for 2s
+    knockback 2.0
+    dash to_target
+    buff move_speed 0.3 for 3s
+}
+
+ability BehindEnemyLines {
+    target: self
+    cooldown: 3s, cast: 250ms
+    hint: crowd_control
+    cost: 20
+    recast: 1
+    recast_window: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            root 1s in circle(2.5)
+            silence 1500ms
+            grounded 2s
+        }
+    }
+    buff move_speed 0.3 for 2s
+}
+
+passive Harrier {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+}

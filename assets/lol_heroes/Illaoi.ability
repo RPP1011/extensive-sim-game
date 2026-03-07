@@ -1,0 +1,52 @@
+// Illaoi abilities
+
+ability TentacleSmash {
+    target: direction, range: 8.0
+    cooldown: 10s, cast: 750ms
+    hint: damage
+    cost: 8
+
+    damage 15 [PHYSICAL: 50]
+}
+
+ability HarshLesson {
+    target: self
+    cooldown: 4s
+    hint: damage
+    cost: 6
+
+    damage 5 in circle(2.5) [PHYSICAL: 50]
+    dash to_target
+}
+
+ability TestofSpirit {
+    target: direction, range: 8.0
+    cooldown: 16s, cast: 250ms
+    hint: damage
+    cost: 7
+
+    deliver tether { max_range: 6.0 } {
+        on_complete {
+        }
+    }
+    summon "minion"
+}
+
+ability LeapofFaith {
+    target: direction, range: 4.5
+    cooldown: 23900ms, cast: 500ms
+    hint: damage
+    cost: 20
+
+    damage 37 in circle(5.0) [PHYSICAL: 50]
+    dash to_target
+    summon "minion"
+}
+
+passive ProphetofanElderGod {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+    damage 10 [PHYSICAL: 50]
+}

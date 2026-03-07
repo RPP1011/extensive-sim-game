@@ -1,0 +1,42 @@
+// Tryndamere abilities
+
+ability Bloodlust {
+    target: self
+    cooldown: 12s
+    hint: damage
+    cost: 20
+
+    damage 1 [PHYSICAL: 50]
+}
+
+ability MockingShout {
+    target: self
+    cooldown: 14s, cast: 300ms
+    hint: damage
+
+    slow 0.3 for 2s in circle(8.0)
+}
+
+ability SpinningSlash {
+    target: ground, range: 6.6
+    cooldown: 12s
+    hint: damage
+
+    damage 18 [PHYSICAL: 50]
+    dash to_target
+}
+
+ability UndyingRage {
+    target: self
+    cooldown: 23900ms
+    hint: damage
+
+    damage 15 [PHYSICAL: 50]
+}
+
+passive BattleFury {
+    trigger: on_kill
+    cooldown: 5s
+
+    heal 10
+}

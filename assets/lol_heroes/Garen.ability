@@ -1,0 +1,45 @@
+// Garen abilities
+
+ability DecisiveStrike {
+    target: self
+    cooldown: 8s
+    hint: damage
+
+    damage 7 in circle(2.5) [PHYSICAL: 50]
+    silence 1500ms
+    slow 0.3 for 2s
+    buff move_speed 0.3 for 3s
+}
+
+ability Courage {
+    target: self
+    cooldown: 22s
+    hint: defense
+
+    shield 10 for 3s
+}
+
+ability Judgment {
+    target: self
+    cooldown: 9s
+    hint: buff
+    recast: 6
+    recast_window: 10s
+
+    buff attack_speed 0.3 for 5s
+}
+
+ability DemacianJustice {
+    target: enemy, range: 4.0
+    cooldown: 23900ms, cast: 435ms
+    hint: damage
+
+    damage 37 [TRUE: 50]
+}
+
+passive Perseverance {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+}

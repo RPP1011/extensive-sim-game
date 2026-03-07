@@ -1,0 +1,51 @@
+// Katarina abilities
+
+ability BouncingBlade {
+    target: enemy, range: 6.2
+    cooldown: 11s, cast: 250ms
+    hint: damage
+
+    deliver chain { bounces: 3, range: 4.0 } {
+        on_hit {
+            damage 20 in circle(4.5) [MAGIC: 50]
+        }
+    }
+}
+
+ability Preparation {
+    target: self
+    cooldown: 15s
+    hint: buff
+
+    buff move_speed 0.3 for 3s
+}
+
+ability Shunpo {
+    target: ground, range: 7.2
+    cooldown: 14s
+    hint: damage
+
+    damage 5 in circle(2.5) [MAGIC: 50]
+    dash to_target
+}
+
+ability DeathLotus {
+    target: self
+    cooldown: 20600ms
+    hint: damage
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            damage 6 in circle(5.5) [MAGIC: 50]
+        }
+    }
+    buff attack_speed 0.3 for 5s
+    lifesteal 0.16 for 5s
+}
+
+passive Voracity {
+    trigger: on_damage_taken
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+}

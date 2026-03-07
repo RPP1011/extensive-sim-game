@@ -1,0 +1,64 @@
+// K'Sante abilities
+
+ability NtofoStrikes {
+    target: direction, range: 4.5
+    cooldown: 3s, cast: 450ms
+    hint: damage
+    cost: 4
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 20 [PHYSICAL: 50]
+            slow 0.3 for 6s
+        }
+    }
+}
+
+ability PathMaker {
+    target: direction, range: 6.0
+    cooldown: 14s
+    hint: crowd_control
+    cost: 8
+    recast: 1
+    recast_window: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            stun 1s
+            knockback 2.0
+        }
+    }
+    dash to_target
+}
+
+ability Footwork {
+    target: ground, range: 5.2
+    cooldown: 10s
+    hint: utility
+    cost: 9
+
+    shield 20 for 2s
+    dash to_target
+}
+
+ability AllOut {
+    target: enemy, range: 3.0
+    cooldown: 23900ms, cast: 400ms
+    hint: damage
+    cost: 20
+
+    damage 20 [PHYSICAL: 50]
+    heal 7
+    stun 1s
+    root 1s
+    knockback 2.0
+    dash to_target
+}
+
+passive DauntlessInstinct {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    heal 10
+    damage 10 [PHYSICAL: 50]
+}

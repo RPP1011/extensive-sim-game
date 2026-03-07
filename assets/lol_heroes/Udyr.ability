@@ -1,0 +1,51 @@
+// Udyr abilities
+
+ability WildingClaw {
+    target: self
+    cooldown: 6s
+    hint: buff
+    cost: 4
+
+    deliver projectile { speed: 10.0 } {
+    }
+    buff attack_speed 0.3 for 5s
+}
+
+ability IronMantle {
+    target: self
+    cooldown: 6s
+    hint: defense
+    cost: 8
+
+    shield 3 for 4s
+    lifesteal 0.08 for 5s
+}
+
+ability BlazingStampede {
+    target: self
+    cooldown: 6s
+    hint: crowd_control
+    cost: 8
+
+    root 1s
+    dash to_target
+    buff move_speed 0.3 for 4s
+}
+
+ability WingborneStorm {
+    target: self
+    cooldown: 6s
+    hint: damage
+    cost: 8
+
+    damage 2 in circle(3.7) [MAGIC: 50]
+    slow 0.3 for 2s
+    summon "minion"
+}
+
+passive BridgeBetween {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    buff attack_speed 0.2 for 5s
+}

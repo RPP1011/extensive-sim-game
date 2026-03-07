@@ -1,0 +1,53 @@
+// Singed abilities
+
+ability PoisonTrail {
+    target: self
+    cooldown: 8s
+    hint: damage
+    cost: 2
+
+    damage 1 [MAGIC: 50]
+}
+
+ability MegaAdhesive {
+    target: ground, range: 8.0
+    cooldown: 17s, cast: 250ms
+    hint: crowd_control
+    cost: 12
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            grounded 2s
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability Fling {
+    target: enemy, range: 1.2
+    cooldown: 10s, cast: 250ms
+    hint: damage
+    cost: 12
+
+    damage 12 [MAGIC: 50]
+    root 1s
+    knockback 2.0
+}
+
+ability InsanityPotion {
+    target: self
+    cooldown: 21700ms
+    hint: buff
+    cost: 20
+
+    heal 7
+    buff move_speed 0.3 for 25s
+}
+
+passive NoxiousSlipstream {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    buff move_speed 0.15 for 3s
+    apply_stacks "singed" 1 max 4
+}

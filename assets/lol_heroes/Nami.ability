@@ -1,0 +1,60 @@
+// Nami abilities
+
+ability AquaPrison {
+    target: ground, range: 8.0
+    cooldown: 12s, cast: 250ms
+    hint: damage
+    cost: 12
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 22 in circle(2.0) [MAGIC: 50]
+            stun 1s
+        }
+    }
+}
+
+ability EbbandFlow {
+    target: ally, range: 7.2
+    cooldown: 10s, cast: 250ms
+    hint: damage
+    cost: 14
+
+    deliver chain { bounces: 3, range: 4.0 } {
+        on_hit {
+            damage 15 in circle(8.0) [MAGIC: 50]
+            heal 13
+        }
+    }
+}
+
+ability TidecallersBlessing {
+    target: ally, range: 8.0
+    cooldown: 11s
+    hint: damage
+    cost: 11
+
+    damage 5 [MAGIC: 50]
+}
+
+ability TidalWave {
+    target: direction, range: 8.0
+    cooldown: 23900ms, cast: 500ms
+    hint: damage
+    cost: 20
+
+    deliver projectile { speed: 8.5 } {
+        on_hit {
+            damage 37 in circle(7.5) [MAGIC: 50]
+            slow 0.3 for 2s
+            knockback 2.0
+        }
+    }
+}
+
+passive SurgingTides {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    buff move_speed 0.15 for 3s
+}

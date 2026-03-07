@@ -1,0 +1,61 @@
+// Camille abilities
+
+ability PrecisionProtocol {
+    target: self
+    cooldown: 9s
+    hint: buff
+    cost: 5
+    recast: 1
+    recast_window: 4s
+
+    buff move_speed 0.3 for 1s
+}
+
+ability TacticalSweep {
+    target: direction, range: 6.1
+    cooldown: 17s
+    hint: damage
+    cost: 10
+
+    damage 6 in cone(4.0, 60.0) [PHYSICAL: 50]
+    heal 12
+    slow 0.3 for 2s
+}
+
+ability Hookshot {
+    target: direction, range: 8.0
+    cooldown: 16s
+    hint: crowd_control
+    cost: 14
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            root 1s
+            knockback 2.0
+        }
+    }
+    dash to_target
+}
+
+ability TheHextechUltimatum {
+    target: enemy, range: 4.8
+    cooldown: 26100ms
+    hint: crowd_control
+    cost: 20
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            knockback 2.0 in circle(4.25)
+        }
+    }
+    dash to_target
+}
+
+passive AdaptiveDefenses {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+    shield 20 for 3s
+    damage 10 [PHYSICAL: 50]
+}

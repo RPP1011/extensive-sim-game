@@ -1,0 +1,57 @@
+// Zac abilities
+
+ability StretchingStrikes {
+    target: direction, range: 8.0
+    cooldown: 14s, cast: 250ms
+    hint: damage
+    cost: 1
+
+    deliver tether { max_range: 6.0 } {
+        on_complete {
+            damage 10 [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability UnstableMatter {
+    target: self
+    cooldown: 5s
+    hint: damage
+
+    damage 10 in circle(2.5) [MAGIC: 50]
+}
+
+ability ElasticSlingshot {
+    target: direction, range: 8.0
+    cooldown: 22s
+    hint: damage
+    charges: 2
+    recharge: 10s
+    recast: 1
+    recast_window: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            damage 15 [MAGIC: 50]
+        }
+    }
+}
+
+ability LetsBounce {
+    target: self
+    cooldown: 23900ms, cast: 300ms
+    hint: damage
+
+    damage 11 [MAGIC: 50]
+    slow 0.3 for 2s
+    knockback 2.0
+    buff move_speed 0.3 for 3s
+}
+
+passive CellDivision {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    heal 10
+}

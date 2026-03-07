@@ -1,0 +1,57 @@
+// Draven abilities
+
+ability SpinningAxe {
+    target: self
+    cooldown: 12s
+    hint: damage
+    cost: 9
+
+    damage 10 [PHYSICAL: 50]
+}
+
+ability BloodRush {
+    target: self
+    cooldown: 12s
+    hint: buff
+    cost: 8
+
+    buff move_speed 0.3 for 3s
+    buff attack_speed 0.3 for 5s
+}
+
+ability StandAside {
+    target: direction, range: 8.0
+    cooldown: 18s, cast: 250ms
+    hint: damage
+    cost: 14
+
+    deliver projectile { speed: 14.0 } {
+        on_hit {
+            damage 18 in line(6.0, 2.6) [PHYSICAL: 50]
+            slow 0.3 for 2s
+            knockback 2.0
+        }
+    }
+}
+
+ability WhirlingDeath {
+    target: direction
+    cooldown: 21700ms, cast: 500ms
+    hint: damage
+    cost: 20
+    recast: 1
+    recast_window: 10s
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 43 in circle(2.5) [PHYSICAL: 50]
+        }
+    }
+}
+
+passive LeagueofDraven {
+    trigger: on_kill
+    cooldown: 5s
+
+    apply_stacks "draven" 1 max 4
+}

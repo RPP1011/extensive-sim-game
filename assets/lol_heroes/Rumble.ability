@@ -1,0 +1,51 @@
+// Rumble abilities
+
+ability Flamespitter {
+    target: self
+    cooldown: 10s
+    hint: damage
+
+    damage 15 [MAGIC: 50]
+}
+
+ability ScrapShield {
+    target: self
+    cooldown: 6s
+    hint: buff
+
+    shield 6 for 3s
+    buff move_speed 0.3 for 3s
+}
+
+ability ElectroHarpoon {
+    target: direction, range: 8.0
+    cooldown: 8s, cast: 250ms
+    hint: damage
+    charges: 2
+    recharge: 6s
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 13 [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+    buff move_speed 0.3 for 4s
+}
+
+ability TheEqualizer {
+    target: direction, range: 8.0
+    cooldown: 25s, cast: 583ms
+    hint: damage
+
+    damage 17 in line(6.0, 3.0) [MAGIC: 50]
+    slow 0.3 for 2s
+}
+
+passive JunkyardTitan {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+    buff attack_speed 0.2 for 5s
+}

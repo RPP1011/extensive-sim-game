@@ -1,0 +1,60 @@
+// Twisted Fate abilities
+
+ability WildCards {
+    target: direction, range: 8.0
+    cooldown: 6s, cast: 250ms
+    hint: damage
+    cost: 12
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 15 in cone(4.0, 60.0) [MAGIC: 50]
+        }
+    }
+}
+
+ability PickaCard {
+    target: self
+    cooldown: 6s
+    hint: damage
+    cost: 10
+    recast: 1
+    recast_window: 6s
+
+    deliver projectile { speed: 15.0 } {
+        on_hit {
+            damage 15 [MAGIC: 50]
+        }
+    }
+}
+
+ability StackedDeck {
+    target: self
+    cooldown: 8s
+    hint: damage
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 16 [MAGIC: 50]
+        }
+    }
+    buff attack_speed 0.3 for 5s
+}
+
+ability Destiny {
+    target: enemy, range: 8.0
+    cooldown: 30s
+    hint: utility
+    cost: 20
+    recast: 1
+    recast_window: 10s
+
+    dash to_target
+}
+
+passive LoadedDice {
+    trigger: on_kill
+    cooldown: 5s
+
+    heal 10
+}

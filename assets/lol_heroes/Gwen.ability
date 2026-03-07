@@ -1,0 +1,56 @@
+// Gwen abilities
+
+ability SnipSnip {
+    target: enemy
+    cooldown: 6s, cast: 500ms
+    hint: damage
+    cost: 8
+    charges: 2
+    recharge: 10s
+
+    damage 15 [TRUE: 50]
+}
+
+ability HallowedMist {
+    target: self
+    cooldown: 22s
+    hint: damage
+    cost: 12
+    recast: 1
+    recast_window: 10s
+
+    summon "minion"
+}
+
+ability SkipnSlash {
+    target: ground, range: 3.5
+    cooldown: 13s
+    hint: buff
+    cost: 7
+
+    dash to_target
+    buff attack_speed 0.3 for 5s
+}
+
+ability Needlework {
+    target: direction, range: 8.0
+    cooldown: 23900ms, cast: 250ms
+    hint: damage
+    cost: 20
+    recast: 1
+    recast_window: 6s
+
+    deliver projectile { speed: 18.0 } {
+        on_hit {
+            slow 0.3 for 6s
+        }
+    }
+}
+
+passive AThousandCuts {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    heal 10
+    damage 10 [PHYSICAL: 50]
+}

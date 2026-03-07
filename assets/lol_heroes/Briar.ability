@@ -1,0 +1,66 @@
+// Briar abilities
+
+ability HeadRush {
+    target: enemy, range: 4.8
+    cooldown: 13s
+    hint: damage
+
+    damage 15 [PHYSICAL: 50]
+    stun 1s
+    dash to_target
+}
+
+ability BloodFrenzySnackAttack {
+    target: enemy, range: 3.5
+    cooldown: 14s
+    hint: buff
+
+    heal 7
+    dash to_target
+    buff move_speed 0.3 for 3s
+    buff attack_speed 0.3 for 5s
+}
+
+ability ChillingScream {
+    target: direction, range: 4.0
+    cooldown: 16s
+    hint: crowd_control
+    cost: 1
+    recast: 1
+    recast_window: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            heal 2
+            stun 1s
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability CertainDeath {
+    target: direction, range: 8.0
+    cooldown: 23900ms, cast: 1250ms
+    hint: damage
+    cost: 1
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            damage 37 in circle(8.0) [MAGIC: 50]
+            fear 1500ms
+            slow 0.3 for 2s
+        }
+    }
+    dash to_target
+    buff move_speed 0.3 for 3s
+    lifesteal 0.35 for 5s
+}
+
+passive CrimsonCurse {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+    damage 10 [PHYSICAL: 50]
+    apply_stacks "bonus" 1 max 4
+}

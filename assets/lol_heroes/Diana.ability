@@ -1,0 +1,58 @@
+// Diana abilities
+
+ability CrescentStrike {
+    target: ground, range: 8.0
+    cooldown: 8s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 19.0 } {
+        on_hit {
+            damage 17 in circle(2.5) [MAGIC: 50]
+        }
+    }
+    stealth for 3s break_on_damage
+}
+
+ability PaleCascade {
+    target: self
+    cooldown: 15s
+    hint: damage
+    cost: 8
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 5 in circle(2.0) [MAGIC: 50]
+        }
+    }
+    shield 11 for 3s
+}
+
+ability LunarRush {
+    target: enemy, range: 8.0
+    cooldown: 22s
+    hint: damage
+    cost: 8
+
+    damage 12 [MAGIC: 50]
+    dash to_target
+}
+
+ability Moonfall {
+    target: self
+    cooldown: 21700ms, cast: 250ms
+    hint: damage
+    cost: 20
+
+    damage 50 in circle(4.75) [MAGIC: 50]
+    slow 0.3 for 2s
+    knockback 2.0
+}
+
+passive MoonsilverBlade {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+    buff attack_speed 0.2 for 5s
+}

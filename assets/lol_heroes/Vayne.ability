@@ -1,0 +1,55 @@
+// Vayne abilities
+
+ability Tumble {
+    target: direction, range: 3.0
+    cooldown: 6s
+    hint: utility
+    cost: 6
+
+    dash to_target
+}
+
+ability SilverBolts {
+    target: self
+    cooldown: 8s
+    hint: damage
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 12 [TRUE: 50]
+        }
+    }
+}
+
+ability Condemn {
+    target: enemy, range: 5.5
+    cooldown: 20s, cast: 250ms
+    hint: damage
+    cost: 18
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 12 [PHYSICAL: 50]
+            stun 1s
+            knockback 2.0
+        }
+    }
+}
+
+ability FinalHour {
+    target: self
+    cooldown: 21700ms
+    hint: damage
+    cost: 16
+
+    damage 6 [PHYSICAL: 50]
+    buff move_speed 0.3 for 1s
+    stealth for 3s break_on_damage
+}
+
+passive NightHunter {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    buff move_speed 0.15 for 3s
+}

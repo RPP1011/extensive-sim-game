@@ -1,0 +1,54 @@
+// Rell abilities
+
+ability ShatteringStrike {
+    target: direction, range: 6.0
+    cooldown: 11s, cast: 400ms
+    hint: damage
+    cost: 10
+
+    damage 15 in line(6.0, 1.5) [MAGIC: 50]
+    shield 15 for 3s
+    stun 1s
+}
+
+ability FerromancyCrashDown {
+    target: ground, range: 4.0
+    cooldown: 11s, cast: 625ms
+    hint: damage
+    cost: 8
+
+    damage 15 in circle(1.8) [MAGIC: 50]
+    shield 3 for 1s
+    slow 0.3 for 2s
+    knockback 2.0
+    dash to_target
+    buff attack_speed 0.3 for 5s
+}
+
+ability FullTilt {
+    target: enemy, range: 8.0
+    cooldown: 15s
+    hint: buff
+    cost: 8
+
+    buff move_speed 0.3 for 3s
+}
+
+ability MagnetStorm {
+    target: self
+    cooldown: 23900ms, cast: 250ms
+    hint: damage
+    cost: 20
+
+    damage 30 in circle(2.5) [MAGIC: 50]
+    knockback 2.0
+    pull 3.0
+}
+
+passive BreaktheMold {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+    apply_stacks "passive_stacks" 1 max 4
+}

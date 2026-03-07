@@ -1,0 +1,53 @@
+// Darius abilities
+
+ability Decimate {
+    target: self
+    cooldown: 9s
+    hint: damage
+    cost: 5
+
+    damage 12 in circle(2.4) [PHYSICAL: 50]
+    heal 12
+}
+
+ability CripplingStrike {
+    target: self
+    cooldown: 5s
+    hint: buff
+    cost: 8
+
+    slow 0.3 for 1s
+    buff move_speed 0.3 for 1s
+}
+
+ability Apprehend {
+    target: direction, range: 5.3
+    cooldown: 24s, cast: 250ms
+    hint: crowd_control
+    cost: 14
+
+    slow 0.3 for 1s
+    knockback 2.0
+}
+
+ability NoxianGuillotine {
+    target: enemy, range: 4.8
+    cooldown: 23900ms, cast: 366ms
+    hint: damage
+    cost: 20
+    recast: 1
+    recast_window: 20s
+
+    damage 10 in circle(2.5) [TRUE: 50]
+    fear 1500ms
+    slow 0.3 for 20s
+    dash to_target
+}
+
+passive Hemorrhage {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+    apply_stacks "hemorrhage" 1 max 4
+}

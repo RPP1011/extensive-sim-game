@@ -1,0 +1,61 @@
+// Aurora abilities
+
+ability TwofoldHex {
+    target: direction, range: 8.0
+    cooldown: 8s, cast: 250ms
+    hint: damage
+    cost: 12
+    recast: 1
+    recast_window: 10s
+
+    deliver projectile { speed: 16.0 } {
+        on_hit {
+            damage 15 [MAGIC: 50]
+        }
+    }
+}
+
+ability AcrosstheVeil {
+    target: direction, range: 7.0
+    cooldown: 22s
+    hint: utility
+    cost: 16
+
+    dash to_target
+    buff move_speed 0.3 for 4s
+    stealth for 3s break_on_damage
+}
+
+ability TheWeirding {
+    target: direction, range: 8.0
+    cooldown: 15s, cast: 350ms
+    hint: damage
+    cost: 16
+
+    damage 17 in line(6.0, 1.75) [MAGIC: 50]
+    slow 0.3 for 1s
+    dash to_target
+}
+
+ability BetweenWorlds {
+    target: direction, range: 2.5
+    cooldown: 26100ms
+    hint: damage
+    cost: 20
+
+    deliver zone { duration: 4s, tick: 1s } {
+        on_hit {
+            damage 10 in circle(7.0) [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+    dash to_target
+    buff move_speed 0.3 for 4s
+}
+
+passive SpiritAbjuration {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    heal 10
+}

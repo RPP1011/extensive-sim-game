@@ -1,0 +1,52 @@
+// Veigar abilities
+
+ability BalefulStrike {
+    target: direction, range: 8.0
+    cooldown: 6s, cast: 250ms
+    hint: damage
+    cost: 6
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 20 [MAGIC: 50]
+        }
+    }
+}
+
+ability DarkMatter {
+    target: ground, range: 8.0
+    cooldown: 20s, cast: 250ms
+    hint: damage
+    cost: 12
+
+    damage 21 [MAGIC: 50]
+}
+
+ability EventHorizon {
+    target: ground, range: 7.2
+    cooldown: 20s, cast: 250ms
+    hint: crowd_control
+    cost: 14
+
+    stun 1s
+}
+
+ability PrimordialBurst {
+    target: enemy, range: 6.5
+    cooldown: 21700ms, cast: 250ms
+    hint: damage
+    cost: 20
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 43 [MAGIC: 50]
+        }
+    }
+}
+
+passive PhenomenalEvilPower {
+    trigger: on_damage_taken
+    cooldown: 5s
+
+    apply_stacks "veigar" 1 max 4
+}

@@ -1,0 +1,46 @@
+// Riven abilities
+
+ability BrokenWings {
+    target: enemy, range: 2.8
+    cooldown: 13s
+    hint: damage
+    recast: 1
+    recast_window: 4s
+
+    damage 11 in circle(1.5) [PHYSICAL: 50]
+    knockback 2.0
+}
+
+ability KiBurst {
+    target: self
+    cooldown: 11s, cast: 250ms
+    hint: damage
+
+    damage 16 in circle(3.0) [PHYSICAL: 50]
+    stun 1s
+}
+
+ability Valor {
+    target: direction, range: 2.5
+    cooldown: 10s
+    hint: utility
+
+    shield 20 for 3s
+    dash to_target
+}
+
+ability BladeoftheExile {
+    target: self
+    cooldown: 23900ms, cast: 250ms
+    hint: damage
+
+    damage 15 [PHYSICAL: 50]
+}
+
+passive RunicBlade {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+    apply_stacks "charge" 1 max 4
+}

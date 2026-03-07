@@ -1,0 +1,59 @@
+// Kog'Maw abilities
+
+ability CausticSpittle {
+    target: direction, range: 8.0
+    cooldown: 7s
+    hint: damage
+    cost: 8
+
+    deliver projectile { speed: 16.5 } {
+        on_hit {
+            damage 22 [MAGIC: 50]
+        }
+    }
+    buff attack_speed 0.3 for 5s
+}
+
+ability BioArcaneBarrage {
+    target: self
+    cooldown: 17s
+    hint: damage
+    cost: 8
+
+    damage 15 [PHYSICAL: 50]
+}
+
+ability VoidOoze {
+    target: direction, range: 8.0
+    cooldown: 12s, cast: 250ms
+    hint: damage
+    cost: 8
+
+    deliver projectile { speed: 14.0 } {
+        on_hit {
+            damage 18 [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability LivingArtillery {
+    target: ground, range: 8.0
+    cooldown: 2s, cast: 250ms
+    hint: damage
+    cost: 8
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 25 in circle(2.4) [MAGIC: 50]
+        }
+    }
+    stealth for 3s break_on_damage
+}
+
+passive IcathianSurprise {
+    trigger: on_death
+    cooldown: 5s
+
+    buff move_speed 0.15 for 3s
+}

@@ -1,0 +1,69 @@
+// Sion abilities
+
+ability DecimatingSmash {
+    target: direction, range: 8.0
+    cooldown: 10s
+    hint: crowd_control
+    cost: 9
+    recast: 1
+    recast_window: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            stun 1s in circle(2.5)
+            knockback 2.0
+        }
+    }
+}
+
+ability SoulFurnace {
+    target: self
+    cooldown: 15s
+    hint: defense
+    cost: 13
+    recast: 1
+    recast_window: 10s
+
+    shield 15 for 3s
+}
+
+ability RoaroftheSlayer {
+    target: direction, range: 8.0
+    cooldown: 12s, cast: 250ms
+    hint: damage
+    cost: 7
+
+    deliver projectile { speed: 18.0 } {
+        on_hit {
+            damage 16 [MAGIC: 50]
+            stun 1s
+            slow 0.3 for 4s
+            knockback 2.0
+        }
+    }
+}
+
+ability UnstoppableOnslaught {
+    target: enemy, range: 8.0
+    cooldown: 26100ms
+    hint: damage
+    cost: 20
+    charges: 2
+    recharge: 10s
+    recast: 1
+    recast_window: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            damage 15 [PHYSICAL: 50]
+        }
+    }
+}
+
+passive GloryinDeath {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+    damage 10 [PHYSICAL: 50]
+}

@@ -1,0 +1,50 @@
+// Sett abilities
+
+ability KnuckleDown {
+    target: self
+    cooldown: 9s
+    hint: damage
+
+    damage 2 [PHYSICAL: 50]
+    buff move_speed 0.3 for 3s
+}
+
+ability Haymaker {
+    target: direction, range: 8.0
+    cooldown: 18s, cast: 750ms
+    hint: defense
+    cost: 20
+    charges: 2
+    recharge: 10s
+
+    shield 10 for 3s
+}
+
+ability Facebreaker {
+    target: direction, range: 4.9
+    cooldown: 16s, cast: 250ms
+    hint: damage
+
+    damage 12 [PHYSICAL: 50]
+    stun 1s
+    slow 0.3 for 1s
+    knockback 2.0
+}
+
+ability TheShowStopper {
+    target: enemy, range: 4.0
+    cooldown: 23900ms
+    hint: damage
+
+    damage 50 [PHYSICAL: 50]
+    suppress 1500ms
+    slow 0.3 for 1s
+    dash to_target
+}
+
+passive PitGrit {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+}

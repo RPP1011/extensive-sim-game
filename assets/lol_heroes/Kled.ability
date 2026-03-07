@@ -1,0 +1,53 @@
+// Kled abilities
+
+ability BearTraponaRope {
+    target: direction, range: 8.0
+    cooldown: 11s, cast: 250ms
+    hint: damage
+
+    deliver tether { max_range: 6.0 } {
+        on_complete {
+            damage 1 [PHYSICAL: 50]
+            slow 0.3 for 2s
+            knockback 2.0
+        }
+    }
+}
+
+ability ViolentTendencies {
+    target: self
+    cooldown: 11s
+    hint: damage
+
+    damage 5 [PHYSICAL: 50]
+    buff attack_speed 0.3 for 5s
+}
+
+ability Jousting {
+    target: direction, range: 5.5
+    cooldown: 13s
+    hint: damage
+    recast: 1
+    recast_window: 10s
+
+    damage 8 [PHYSICAL: 50]
+    knockback 2.0
+    dash to_target
+    buff move_speed 0.3 for 3s
+}
+
+ability Chaaaaaaaarge {
+    target: ground, range: 8.0
+    cooldown: 26100ms
+    hint: buff
+
+    shield 5 for 2s
+    buff move_speed 0.3 for 3s
+}
+
+passive SkaarltheCowardlyLizard {
+    trigger: on_damage_taken
+    cooldown: 5s
+
+    heal 10
+}

@@ -1,0 +1,56 @@
+// Heimerdinger abilities
+
+ability H28GEvolutionTurret {
+    target: enemy, range: 3.5
+    cooldown: 1s
+    hint: damage
+    cost: 4
+
+    damage 15 [PHYSICAL: 50]
+}
+
+ability HextechMicroRockets {
+    target: ground, range: 8.0
+    cooldown: 11s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 15 [MAGIC: 50]
+        }
+    }
+}
+
+ability CH2ElectronStormGrenade {
+    target: ground, range: 8.0
+    cooldown: 11s, cast: 250ms
+    hint: damage
+    cost: 17
+
+    deliver projectile { speed: 12.0 } {
+        on_hit {
+            damage 15 in circle(2.5) [MAGIC: 50]
+            stun 1s
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability UPGRADE {
+    target: self
+    cooldown: 21700ms
+    hint: damage
+    cost: 20
+    recast: 1
+    recast_window: 10s
+
+    damage 15 [PHYSICAL: 50]
+}
+
+passive HextechAffinity {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    buff move_speed 0.15 for 3s
+}

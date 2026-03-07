@@ -1,0 +1,49 @@
+// Yunara abilities
+
+ability CultivationofSpirit {
+    target: enemy
+    cooldown: 8s
+    hint: buff
+    cost: 6
+
+    buff attack_speed 0.3 for 5s
+}
+
+ability ArcofJudgmentArcofRuin {
+    target: enemy, range: 8.0
+    cooldown: 10s
+    hint: damage
+    cost: 12
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability KanmeisStepsUntouchableShadow {
+    target: enemy
+    cooldown: 9s
+    hint: buff
+    cost: 8
+
+    dash to_target
+    buff move_speed 0.3 for 3s
+}
+
+ability TranscendOnesSelf {
+    target: enemy
+    cooldown: 21700ms
+    hint: damage
+    cost: 20
+
+    damage 15 [PHYSICAL: 50]
+}
+
+passive VowoftheFirstLands {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+}

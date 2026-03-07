@@ -1,0 +1,47 @@
+// Mordekaiser abilities
+
+ability Obliterate {
+    target: direction, range: 6.8
+    cooldown: 8s, cast: 500ms
+    hint: damage
+
+    damage 15 [MAGIC: 50]
+}
+
+ability Indestructible {
+    target: enemy
+    cooldown: 12s
+    hint: defense
+    recast: 1
+    recast_window: 10s
+
+    shield 10 for 1s
+}
+
+ability DeathsGrasp {
+    target: ground, range: 7.0
+    cooldown: 18s, cast: 250ms
+    hint: damage
+
+    damage 17 in circle(2.5) [MAGIC: 50]
+    knockback 2.0
+    pull 3.0
+}
+
+ability RealmofDeath {
+    target: enemy, range: 6.5
+    cooldown: 26100ms, cast: 500ms
+    hint: crowd_control
+
+    heal 7
+    slow 0.3 for 7s
+    pull 3.0
+}
+
+passive DarknessRise {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+    buff move_speed 0.15 for 3s
+}

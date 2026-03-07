@@ -1,0 +1,58 @@
+// Talon abilities
+
+ability NoxianDiplomacy {
+    target: enemy, range: 5.8
+    cooldown: 8s
+    hint: damage
+    cost: 8
+
+    damage 16 [PHYSICAL: 50]
+    heal 16
+    dash to_target
+}
+
+ability Rake {
+    target: direction, range: 6.5
+    cooldown: 9s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 12 in cone(4.0, 60.0) [PHYSICAL: 50]
+            slow 0.3 for 1s
+        }
+    }
+}
+
+ability AssassinsPath {
+    target: direction, range: 7.2
+    cooldown: 2s
+    hint: utility
+
+    dash to_target
+}
+
+ability ShadowAssault {
+    target: self
+    cooldown: 21700ms
+    hint: damage
+    cost: 20
+    recast: 1
+    recast_window: 10s
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 22 in circle(5.5) [PHYSICAL: 50]
+        }
+    }
+    buff move_speed 0.3 for 3s
+    stealth for 3s break_on_damage
+}
+
+passive BladesEnd {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    apply_stacks "wound" 1 max 4
+}

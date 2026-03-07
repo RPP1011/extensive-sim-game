@@ -1,0 +1,46 @@
+// Rek'Sai abilities
+
+ability QueensWrathPreySeeker {
+    target: enemy, range: 3.2
+    cooldown: 4s
+    hint: damage
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 15 [PHYSICAL: 50]
+        }
+    }
+}
+
+ability BurrowUnburrow {
+    target: enemy, range: 8.0
+    cooldown: 4s
+    hint: buff
+
+    buff move_speed 0.3 for 3s
+}
+
+ability FuriousBiteTunnel {
+    target: enemy, range: 2.5
+    cooldown: 6s
+    hint: damage
+
+    damage 15 [PHYSICAL: 50]
+}
+
+ability VoidRush {
+    target: enemy, range: 8.0
+    cooldown: 21700ms, cast: 250ms
+    hint: damage
+
+    damage 37 [PHYSICAL: 50]
+    dash to_target
+    stealth for 3s break_on_damage
+}
+
+passive FuryoftheXerSai {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+}

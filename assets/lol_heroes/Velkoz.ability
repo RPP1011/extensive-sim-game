@@ -1,0 +1,65 @@
+// Vel'Koz abilities
+
+ability PlasmaFission {
+    target: direction, range: 8.0
+    cooldown: 7s, cast: 250ms
+    hint: damage
+    cost: 8
+    recast: 1
+    recast_window: 10s
+
+    deliver projectile { speed: 13.0 } {
+        on_hit {
+            damage 20 [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability VoidRift {
+    target: direction, range: 8.0
+    cooldown: 1s
+    hint: damage
+    cost: 10
+    charges: 2
+    recharge: 19s
+
+    damage 7 in circle(2.5) [MAGIC: 50]
+}
+
+ability TectonicDisruption {
+    target: ground, range: 8.0
+    cooldown: 16s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 17 in circle(2.25) [MAGIC: 50]
+            stun 1s
+            knockback 2.0
+        }
+    }
+}
+
+ability LifeFormDisintegrationRay {
+    target: direction, range: 8.0
+    cooldown: 23900ms
+    hint: damage
+    cost: 20
+    recast: 1
+    recast_window: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            damage 15 [TRUE: 50]
+        }
+    }
+}
+
+passive OrganicDeconstruction {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    apply_stacks "deconstruction" 1 max 4
+}

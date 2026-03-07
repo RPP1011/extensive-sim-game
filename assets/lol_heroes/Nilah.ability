@@ -1,0 +1,54 @@
+// Nilah abilities
+
+ability FormlessBlade {
+    target: direction, range: 6.0
+    cooldown: 4s, cast: 3s
+    hint: damage
+    cost: 6
+
+    damage 1 in line(6.0, 1.5) [PHYSICAL: 50]
+    shield 1 for 6s
+    lifesteal 0.0033 for 5s
+}
+
+ability JubilantVeil {
+    target: self
+    cooldown: 26s
+    hint: buff
+    cost: 12
+
+    buff move_speed 0.3 for 3s
+}
+
+ability Slipstream {
+    target: enemy, range: 5.5
+    cooldown: 8s
+    hint: damage
+    cost: 6
+    charges: 2
+    recharge: 26s
+
+    damage 15 [PHYSICAL: 50]
+    dash to_target
+}
+
+ability Apotheosis {
+    target: self
+    cooldown: 22800ms
+    hint: damage
+    cost: 16
+
+    damage 3 in circle(4.5) [PHYSICAL: 50]
+    heal 3
+    shield 3 for 6s
+    slow 0.3 for 3s
+    knockback 2.0
+}
+
+passive JoyUnending {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    heal 10
+    shield 20 for 3s
+}

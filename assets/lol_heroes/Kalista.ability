@@ -1,0 +1,59 @@
+// Kalista abilities
+
+ability Pierce {
+    target: direction, range: 8.0
+    cooldown: 8s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 5 [PHYSICAL: 50]
+        }
+    }
+}
+
+ability Sentinel {
+    target: direction, range: 8.0
+    cooldown: 30s, cast: 500ms
+    hint: damage
+    charges: 2
+    recharge: 90s
+
+    deliver tether { max_range: 6.0 } {
+        on_complete {
+            damage 25 in circle(2.5) [MAGIC: 50]
+        }
+    }
+}
+
+ability Rend {
+    target: self
+    cooldown: 10s, cast: 250ms
+    hint: damage
+    cost: 6
+
+    damage 2 [PHYSICAL: 50]
+    slow 0.3 for 2s
+}
+
+ability FatesCall {
+    target: self
+    cooldown: 28300ms
+    hint: utility
+    cost: 20
+
+    deliver tether { max_range: 6.0 } {
+        on_complete {
+        }
+    }
+    dash to_target
+    stealth for 3s break_on_damage
+}
+
+passive MartialPoise {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    heal 10
+}

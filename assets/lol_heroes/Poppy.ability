@@ -1,0 +1,64 @@
+// Poppy abilities
+
+ability HammerShock {
+    target: direction, range: 4.3
+    cooldown: 8s, cast: 250ms
+    hint: damage
+    cost: 7
+
+    damage 10 in circle(2.5) [PHYSICAL: 50]
+    slow 0.3 for 2s
+}
+
+ability SteadfastPresence {
+    target: self
+    cooldown: 20s
+    hint: damage
+    cost: 10
+
+    damage 17 in circle(4.0) [MAGIC: 50]
+    grounded 2s
+    slow 0.3 for 2s
+    knockback 2.0
+    dash to_target
+    buff move_speed 0.3 for 2s
+}
+
+ability HeroicCharge {
+    target: enemy, range: 4.8
+    cooldown: 14s
+    hint: damage
+    cost: 14
+
+    damage 15 [PHYSICAL: 50]
+    stun 1s
+    knockback 2.0
+    dash to_target
+}
+
+ability KeepersVerdict {
+    target: enemy, range: 5.0
+    cooldown: 26100ms, cast: 250ms
+    hint: damage
+    cost: 20
+    charges: 2
+    recharge: 10s
+    recast: 1
+    recast_window: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            damage 25 [PHYSICAL: 50]
+            slow 0.3 for 4s
+            knockback 2.0
+        }
+    }
+}
+
+passive IronAmbassador {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    shield 20 for 3s
+    damage 10 [PHYSICAL: 50]
+}

@@ -1,0 +1,52 @@
+// Taric abilities
+
+ability StarlightsTouch {
+    target: self
+    cooldown: 3s, cast: 250ms
+    hint: heal
+    cost: 12
+    charges: 2
+    recharge: 15s
+
+    heal 1
+}
+
+ability Bastion {
+    target: ally, range: 8.0
+    cooldown: 15s, cast: 250ms
+    hint: defense
+    cost: 12
+
+    deliver tether { max_range: 6.0 } {
+        on_complete {
+        }
+    }
+    shield 1 for 3s
+}
+
+ability Dazzle {
+    target: direction, range: 6.1
+    cooldown: 16s
+    hint: damage
+    cost: 8
+
+    damage 22 in circle(2.5) [MAGIC: 50]
+    stun 1s
+}
+
+ability CosmicRadiance {
+    target: self
+    cooldown: 30s, cast: 250ms
+    hint: damage
+    cost: 20
+
+    damage 15 [PHYSICAL: 50]
+}
+
+passive Bravado {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+    buff attack_speed 0.2 for 5s
+}

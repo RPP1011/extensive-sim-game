@@ -1,0 +1,54 @@
+// Dr. Mundo abilities
+
+ability InfectedBonesaw {
+    target: direction, range: 8.0
+    cooldown: 4s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 20 [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability HeartZapper {
+    target: self
+    cooldown: 17s
+    hint: damage
+    cost: 1
+    charges: 2
+    recharge: 10s
+    recast: 1
+    recast_window: 10s
+
+    damage 1 in circle(3.25) [MAGIC: 50]
+    heal 1
+}
+
+ability BluntForceTrauma {
+    target: self
+    cooldown: 9s
+    hint: damage
+    cost: 2
+
+    damage 1 [PHYSICAL: 50]
+}
+
+ability MaximumDosage {
+    target: self
+    cooldown: 23900ms
+    hint: buff
+
+    heal 3
+    buff move_speed 0.3 for 10s
+}
+
+passive GoesWhereHePleases {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+}

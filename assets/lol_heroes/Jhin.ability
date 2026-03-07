@@ -1,0 +1,59 @@
+// Jhin abilities
+
+ability DancingGrenade {
+    target: enemy, range: 5.5
+    cooldown: 7s, cast: 250ms
+    hint: damage
+    cost: 8
+
+    deliver projectile { speed: 18.0 } {
+        on_hit {
+            damage 11 in circle(4.5) [PHYSICAL: 50]
+        }
+    }
+}
+
+ability DeadlyFlourish {
+    target: direction, range: 8.0
+    cooldown: 12s, cast: 750ms
+    hint: damage
+    cost: 10
+
+    damage 15 [PHYSICAL: 50]
+    root 1s
+}
+
+ability CaptiveAudience {
+    target: ground, range: 7.5
+    cooldown: 2s, cast: 250ms
+    hint: utility
+    cost: 6
+    charges: 2
+    recharge: 24s
+
+    slow 0.3 for 2s in circle(2.6)
+    stealth for 3s break_on_damage
+    summon "minion"
+}
+
+ability CurtainCall {
+    target: direction, range: 8.0
+    cooldown: 23900ms, cast: 250ms
+    hint: damage
+    cost: 20
+    recast: 4
+    recast_window: 10s
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            slow 0.3 for 2s
+        }
+    }
+}
+
+passive Whisper {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    buff move_speed 0.15 for 3s
+}

@@ -1,0 +1,54 @@
+// Teemo abilities
+
+ability BlindingDart {
+    target: enemy, range: 6.8
+    cooldown: 7s, cast: 250ms
+    hint: damage
+    cost: 14
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 20 [MAGIC: 50]
+        }
+    }
+}
+
+ability MoveQuick {
+    target: self
+    cooldown: 14s
+    hint: buff
+    cost: 8
+
+    buff move_speed 0.3 for 3s
+}
+
+ability ToxicShot {
+    target: self
+    cooldown: 8s
+    hint: damage
+
+    damage 1 [MAGIC: 50]
+}
+
+ability NoxiousTrap {
+    target: ground, range: 6.0
+    cooldown: 8s, cast: 250ms
+    hint: utility
+    cost: 15
+    charges: 2
+    recharge: 35s
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            slow 0.3 for 2s in circle(4.5)
+        }
+    }
+    stealth for 3s break_on_damage
+}
+
+passive GuerrillaWarfare {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    buff attack_speed 0.2 for 5s
+}

@@ -1,0 +1,51 @@
+// Shen abilities
+
+ability TwilightAssault {
+    target: self
+    cooldown: 8s
+    hint: damage
+    cost: 28
+
+    slow 0.3 for 2s
+}
+
+ability SpiritsRefuge {
+    target: self
+    cooldown: 18s
+    hint: damage
+    cost: 8
+
+    damage 15 [PHYSICAL: 50]
+}
+
+ability ShadowDash {
+    target: ground, range: 6.0
+    cooldown: 18s
+    hint: damage
+    cost: 30
+
+    damage 15 [PHYSICAL: 50]
+    taunt 1500ms
+    dash to_target
+}
+
+ability StandUnited {
+    target: ally
+    cooldown: 200ms
+    hint: utility
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+        }
+    }
+    shield 32 for 5s
+    dash to_target
+}
+
+passive KiBarrier {
+    trigger: on_ability_used
+    cooldown: 5s
+
+    heal 10
+    shield 20 for 3s
+}

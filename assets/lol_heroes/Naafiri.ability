@@ -1,0 +1,60 @@
+// Naafiri abilities
+
+ability DarkinDaggers {
+    target: direction, range: 8.0
+    cooldown: 9s, cast: 250ms
+    hint: damage
+    cost: 11
+    recast: 1
+    recast_window: 4s
+
+    deliver projectile { speed: 17.0 } {
+        on_hit {
+            damage 1 [PHYSICAL: 50]
+        }
+    }
+    heal 8
+}
+
+ability TheCallofthePack {
+    target: self
+    cooldown: 23900ms, cast: 750ms
+    hint: buff
+    cost: 12
+
+    buff move_speed 0.3 for 4s
+}
+
+ability Eviscerate {
+    target: direction, range: 3.5
+    cooldown: 10s
+    hint: damage
+    cost: 7
+
+    damage 8 in circle(2.3) [PHYSICAL: 50]
+    heal 8
+    dash to_target
+    stealth for 3s break_on_damage
+}
+
+ability HoundsPursuit {
+    target: enemy, range: 8.0
+    cooldown: 22s
+    hint: utility
+    cost: 14
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            slow 0.3 for 2s in circle(2.5)
+        }
+    }
+    shield 10 for 3s
+    dash to_target
+}
+
+passive WeAreMore {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+}

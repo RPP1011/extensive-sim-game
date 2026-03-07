@@ -1,0 +1,52 @@
+// Cho'Gath abilities
+
+ability Rupture {
+    target: ground, range: 8.0
+    cooldown: 6s, cast: 500ms
+    hint: damage
+    cost: 10
+
+    damage 20 in circle(2.5) [MAGIC: 50]
+    slow 0.3 for 2s
+    knockback 2.0
+}
+
+ability FeralScream {
+    target: direction, range: 6.5
+    cooldown: 11s, cast: 500ms
+    hint: damage
+    cost: 14
+
+    damage 20 in cone(4.0, 60.0) [MAGIC: 50]
+    silence 1500ms
+}
+
+ability VorpalSpikes {
+    target: self
+    cooldown: 8s
+    hint: damage
+    cost: 6
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 5 [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability Feast {
+    target: enemy, range: 1.8
+    cooldown: 19500ms, cast: 250ms
+    hint: damage
+    cost: 20
+
+    damage 75 [TRUE: 50]
+}
+
+passive Carnivore {
+    trigger: on_kill
+    cooldown: 5s
+
+    heal 10
+}

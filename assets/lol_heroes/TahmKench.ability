@@ -1,0 +1,60 @@
+// Tahm Kench abilities
+
+ability TongueLash {
+    target: direction, range: 8.0
+    cooldown: 7s, cast: 250ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 20 [MAGIC: 50]
+            stun 1s
+            slow 0.3 for 2s
+        }
+    }
+    heal 20
+}
+
+ability AbyssalDive {
+    target: ground, range: 8.0
+    cooldown: 21s
+    hint: damage
+    cost: 12
+
+    deliver channel { duration: 2s, tick: 500ms } {
+        on_hit {
+            damage 25 in circle(2.75) [MAGIC: 50]
+            knockback 2.0
+        }
+    }
+    dash to_target
+}
+
+ability ThickSkin {
+    target: self
+    cooldown: 3s, cast: 250ms
+    hint: defense
+
+    heal 3
+    shield 10 for 3s
+}
+
+ability Devour {
+    target: ally, range: 2.5
+    cooldown: 23900ms, cast: 250ms
+    hint: buff
+    cost: 20
+
+    shield 162 for 3s
+    buff move_speed 0.3 for 3s
+}
+
+passive AnAcquiredTaste {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+    damage 10 [PHYSICAL: 50]
+    apply_stacks "bonus" 1 max 4
+}

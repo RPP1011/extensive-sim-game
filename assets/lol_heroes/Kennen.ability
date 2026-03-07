@@ -1,0 +1,51 @@
+// Kennen abilities
+
+ability ThunderingShuriken {
+    target: direction, range: 8.0
+    cooldown: 7s, cast: 175ms
+    hint: damage
+    cost: 12
+
+    deliver projectile { speed: 17.0 } {
+        on_hit {
+            damage 18 [MAGIC: 50]
+        }
+    }
+}
+
+ability ElectricalSurge {
+    target: self
+    cooldown: 13s, cast: 250ms
+    hint: damage
+    cost: 8
+
+    damage 8 [MAGIC: 50]
+}
+
+ability LightningRush {
+    target: self
+    cooldown: 10s
+    hint: damage
+    cost: 16
+    recast: 1
+    recast_window: 10s
+
+    damage 20 [MAGIC: 50]
+    buff move_speed 0.3 for 2s
+    buff attack_speed 0.3 for 5s
+}
+
+ability SlicingMaelstrom {
+    target: self
+    cooldown: 23900ms, cast: 250ms
+    hint: damage
+
+    damage 15 [MAGIC: 50]
+}
+
+passive MarkoftheStorm {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    apply_stacks "mark_of_the_storm" 1 max 4
+}

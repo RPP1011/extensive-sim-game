@@ -1,0 +1,49 @@
+// Yasuo abilities
+
+ability SteelTempest {
+    target: direction, range: 4.8
+    cooldown: 4s, cast: 3s
+    hint: damage
+
+    deliver projectile { speed: 12.0 } {
+        on_hit {
+            damage 5 in line(6.0, 0.8) [PHYSICAL: 50]
+            knockback 2.0
+        }
+    }
+}
+
+ability WindWall {
+    target: direction, range: 4.0
+    cooldown: 25s, cast: 13ms
+    hint: damage
+
+    summon "minion"
+}
+
+ability SweepingBlade {
+    target: enemy, range: 4.8
+    cooldown: 8s
+    hint: damage
+
+    damage 17 [MAGIC: 50]
+    dash to_target
+}
+
+ability LastBreath {
+    target: self
+    cooldown: 18400ms
+    hint: damage
+
+    damage 50 in circle(4.0) [PHYSICAL: 50]
+    knockback 2.0
+    dash to_target
+}
+
+passive WayoftheWanderer {
+    trigger: on_damage_taken
+    cooldown: 5s
+
+    shield 20 for 3s
+    damage 10 [PHYSICAL: 50]
+}

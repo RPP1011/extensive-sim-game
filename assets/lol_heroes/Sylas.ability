@@ -1,0 +1,55 @@
+// Sylas abilities
+
+ability ChainLash {
+    target: ground, range: 0.5
+    cooldown: 10s, cast: 400ms
+    hint: damage
+    cost: 11
+
+    damage 10 [MAGIC: 50]
+    slow 0.3 for 2s
+}
+
+ability Kingslayer {
+    target: enemy, range: 4.0
+    cooldown: 12s
+    hint: damage
+    cost: 10
+
+    damage 18 [MAGIC: 50]
+    heal 18
+    dash to_target
+}
+
+ability AbscondAbduct {
+    target: enemy, range: 4.0
+    cooldown: 13s
+    hint: utility
+    cost: 13
+
+    dash to_target
+}
+
+ability Hijack {
+    target: enemy, range: 8.0
+    cooldown: 19500ms, cast: 250ms
+    hint: damage
+    cost: 15
+    recast: 1
+    recast_window: 10s
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 15 [TRUE: 50]
+        }
+    }
+}
+
+passive PetriciteBurst {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+    buff attack_speed 0.2 for 5s
+    apply_stacks "sylas" 1 max 4
+}

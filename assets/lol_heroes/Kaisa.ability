@@ -1,0 +1,57 @@
+// Kai'Sa abilities
+
+ability IcathianRain {
+    target: self
+    cooldown: 10s
+    hint: damage
+    cost: 11
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 15 [PHYSICAL: 50]
+        }
+    }
+}
+
+ability VoidSeeker {
+    target: direction, range: 8.0
+    cooldown: 22s, cast: 400ms
+    hint: damage
+    cost: 11
+
+    deliver projectile { speed: 17.5 } {
+        on_hit {
+            damage 7 in circle(2.5) [MAGIC: 50]
+        }
+    }
+}
+
+ability Supercharge {
+    target: self
+    cooldown: 16s, cast: 1200ms
+    hint: buff
+    cost: 6
+    charges: 2
+    recharge: 10s
+
+    buff move_speed 0.3 for 4s
+    buff attack_speed 0.3 for 5s
+}
+
+ability KillerInstinct {
+    target: ground, range: 8.0
+    cooldown: 25s
+    hint: utility
+    cost: 20
+
+    shield 17 for 2s
+    dash to_target
+}
+
+passive SecondSkin {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+    apply_stacks "passive_stacks" 1 max 4
+}

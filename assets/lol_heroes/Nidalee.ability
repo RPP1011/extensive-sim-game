@@ -1,0 +1,51 @@
+// Nidalee abilities
+
+ability JavelinTossTakedown {
+    target: enemy, range: 8.0
+    cooldown: 6s
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 15 [PHYSICAL: 50]
+        }
+    }
+}
+
+ability BushwhackPounce {
+    target: enemy, range: 8.0
+    cooldown: 13s
+    hint: damage
+    cost: 6
+
+    deliver trap { duration: 60s, trigger_radius: 1.5 } {
+        on_hit {
+            damage 15 [PHYSICAL: 50]
+        }
+    }
+}
+
+ability PrimalSurgeSwipe {
+    target: enemy, range: 8.0
+    cooldown: 12s
+    hint: damage
+    cost: 10
+
+    damage 15 [PHYSICAL: 50]
+}
+
+ability AspectOfTheCougar {
+    target: enemy, range: 8.0
+    cooldown: 3s
+    hint: damage
+
+    damage 15 [PHYSICAL: 50]
+}
+
+passive Prowl {
+    trigger: on_kill
+    cooldown: 5s
+
+    buff move_speed 0.15 for 3s
+}

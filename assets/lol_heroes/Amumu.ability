@@ -1,0 +1,53 @@
+// Amumu abilities
+
+ability BandageToss {
+    target: direction, range: 8.0
+    cooldown: 3s, cast: 250ms
+    hint: damage
+    cost: 9
+    charges: 2
+    recharge: 16s
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 17 [MAGIC: 50]
+            stun 1s
+        }
+    }
+    dash to_target
+}
+
+ability Despair {
+    target: self
+    cooldown: 1s, cast: 1s
+    hint: damage
+    cost: 1
+
+    damage 15 [MAGIC: 50]
+}
+
+ability Tantrum {
+    target: self
+    cooldown: 9s, cast: 250ms
+    hint: damage
+    cost: 7
+
+    damage 16 in circle(3.5) [MAGIC: 50]
+}
+
+ability CurseoftheSadMummy {
+    target: self
+    cooldown: 27200ms, cast: 250ms
+    hint: damage
+    cost: 20
+
+    damage 50 in circle(5.5) [MAGIC: 50]
+    stun 1s
+}
+
+passive CursedTouch {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+}

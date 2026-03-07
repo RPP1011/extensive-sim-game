@@ -1,0 +1,46 @@
+// Lee Sin abilities
+
+ability SonicWaveResonatingStrike {
+    target: enemy, range: 8.0
+    cooldown: 10s
+    hint: utility
+    cost: 10
+
+    dash to_target
+}
+
+ability SafeguardIronWill {
+    target: enemy, range: 7.0
+    cooldown: 12s
+    hint: defense
+    cost: 10
+
+    shield 10 for 3s
+    lifesteal 0.2 for 5s
+}
+
+ability TempestCripple {
+    target: enemy, range: 4.5
+    cooldown: 8s
+    hint: damage
+    cost: 10
+
+    damage 15 [PHYSICAL: 50]
+}
+
+ability DragonsRage {
+    target: enemy, range: 3.8
+    cooldown: 22800ms, cast: 250ms
+    hint: damage
+
+    damage 43 [PHYSICAL: 50]
+    root 1s
+    knockback 2.0
+}
+
+passive Flurry {
+    trigger: on_auto_attack
+    cooldown: 5s
+
+    buff attack_speed 0.2 for 5s
+}

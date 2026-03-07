@@ -1,0 +1,54 @@
+// Xin Zhao abilities
+
+ability ThreeTalonStrike {
+    target: self
+    cooldown: 7s
+    hint: damage
+    cost: 6
+
+    damage 4 [PHYSICAL: 50]
+    knockback 2.0
+}
+
+ability WindBecomesLightning {
+    target: direction, range: 8.0
+    cooldown: 12s, cast: 500ms
+    hint: damage
+    cost: 12
+
+    damage 7 in line(6.0, 0.8) [PHYSICAL: 50]
+    slow 0.3 for 3s
+    buff attack_speed 0.3 for 5s
+}
+
+ability AudaciousCharge {
+    target: enemy, range: 6.5
+    cooldown: 11s
+    hint: damage
+    cost: 10
+
+    damage 12 in circle(2.5) [MAGIC: 50]
+    slow 0.3 for 5s
+    dash to_target
+    buff attack_speed 0.3 for 5s
+}
+
+ability CrescentGuard {
+    target: self
+    cooldown: 23900ms, cast: 350ms
+    hint: damage
+    cost: 20
+
+    damage 6 in circle(5.0) [PHYSICAL: 50]
+    stun 1s
+    knockback 2.0
+}
+
+passive Determination {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 10
+    damage 10 [PHYSICAL: 50]
+    apply_stacks "determination" 1 max 4
+}

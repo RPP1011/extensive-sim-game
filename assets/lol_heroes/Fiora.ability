@@ -1,0 +1,55 @@
+// Fiora abilities
+
+ability Lunge {
+    target: ground, range: 0.5
+    cooldown: 13s
+    hint: damage
+    cost: 4
+
+    damage 17 in circle(2.5) [PHYSICAL: 50]
+    dash to_target
+}
+
+ability Riposte {
+    target: direction, range: 8.0
+    cooldown: 24s
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 20.0 } {
+        on_hit {
+            damage 27 [MAGIC: 50]
+            stun 1s
+            root 1s
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability Bladework {
+    target: self
+    cooldown: 11s
+    hint: damage
+    cost: 8
+
+    damage 40 [PHYSICAL: 50]
+    slow 0.3 for 1s
+    buff attack_speed 0.3 for 5s
+}
+
+ability GrandChallenge {
+    target: enemy, range: 5.0
+    cooldown: 22800ms
+    hint: buff
+    cost: 20
+
+    buff move_speed 0.3 for 8s
+}
+
+passive DuelistsDance {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    heal 10
+    buff move_speed 0.15 for 3s
+}

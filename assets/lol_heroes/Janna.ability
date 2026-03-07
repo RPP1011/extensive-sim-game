@@ -1,0 +1,62 @@
+// Janna abilities
+
+ability HowlingGale {
+    target: enemy, range: 8.0
+    cooldown: 14s
+    hint: damage
+    cost: 18
+    charges: 2
+    recharge: 10s
+    recast: 1
+    recast_window: 10s
+
+    deliver projectile { speed: 8.8 } {
+        on_hit {
+            damage 4 [MAGIC: 50]
+            knockback 2.0
+        }
+    }
+}
+
+ability Zephyr {
+    target: enemy, range: 5.5
+    cooldown: 8s, cast: 245ms
+    hint: damage
+    cost: 10
+
+    deliver projectile { speed: 16.0 } {
+        on_hit {
+            damage 13 [MAGIC: 50]
+            slow 0.3 for 2s
+        }
+    }
+    buff move_speed 0.3 for 2s
+}
+
+ability EyeOfTheStorm {
+    target: enemy, range: 8.0
+    cooldown: 16s
+    hint: defense
+    cost: 14
+
+    shield 10 for 3s
+    summon "minion"
+}
+
+ability Monsoon {
+    target: self
+    cooldown: 25s
+    hint: crowd_control
+    cost: 20
+
+    heal 75
+    knockback 2.0 in circle(7.0)
+}
+
+passive Tailwind {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    damage 10 [PHYSICAL: 50]
+    buff move_speed 0.15 for 3s
+}
