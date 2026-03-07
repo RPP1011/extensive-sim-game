@@ -5,9 +5,346 @@
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use proptest::prelude::*;
 
+    use crate::ai::effects::defs::{AbilityDef, AbilityTargeting, PassiveDef};
     use crate::ai::effects::dsl::parse_abilities;
+    use crate::ai::effects::effect_enum::Effect;
+    use crate::ai::effects::types::*;
+
+    // -----------------------------------------------------------------------
+    // Coverage tracker
+    // -----------------------------------------------------------------------
+
+    #[derive(Default)]
+    struct Coverage {
+        effects: BTreeSet<&'static str>,
+        deliveries: BTreeSet<&'static str>,
+        areas: BTreeSet<&'static str>,
+        conditions: BTreeSet<&'static str>,
+        triggers: BTreeSet<&'static str>,
+        targetings: BTreeSet<&'static str>,
+        // ability-level features
+        has_charges: bool,
+        has_recast: bool,
+        has_cost: bool,
+        has_toggle: bool,
+        has_unstoppable: bool,
+        has_form: bool,
+        has_tags: bool,
+        has_scaling: bool,
+    }
+
+    impl Coverage {
+        fn record_abilities(&mut self, abilities: &[AbilityDef], passives: &[PassiveDef]) {
+            for ab in abilities {
+                self.record_targeting(&ab.targeting);
+                if let Some(ref d) = ab.delivery {
+                    self.record_delivery(d);
+                }
+                for eff in &ab.effects {
+                    self.record_effect_tree(eff);
+                }
+                if ab.max_charges > 0 { self.has_charges = true; }
+                if ab.recast_count > 0 { self.has_recast = true; }
+                if ab.resource_cost > 0 { self.has_cost = true; }
+                if ab.is_toggle { self.has_toggle = true; }
+                if ab.unstoppable { self.has_unstoppable = true; }
+                if ab.form.is_some() || ab.swap_form.is_some() { self.has_form = true; }
+            }
+            for p in passives {
+                self.record_trigger(&p.trigger);
+                for eff in &p.effects {
+                    self.record_effect_tree(eff);
+                }
+            }
+        }
+
+        fn record_effect_tree(&mut self, ce: &ConditionalEffect) {
+            self.record_effect(&ce.effect);
+            if let Some(ref area) = ce.area {
+                self.record_area(area);
+            }
+            if let Some(ref cond) = ce.condition {
+                self.record_condition(cond);
+            }
+            if !ce.tags.is_empty() { self.has_tags = true; }
+            for else_eff in &ce.else_effects {
+                self.record_effect_tree(else_eff);
+            }
+        }
+
+        fn record_effect(&mut self, eff: &Effect) {
+            let name = match eff {
+                Effect::Damage { bonus, .. } => {
+                    if !bonus.is_empty() { self.has_scaling = true; }
+                    "Damage"
+                }
+                Effect::Heal { bonus, .. } => {
+                    if !bonus.is_empty() { self.has_scaling = true; }
+                    "Heal"
+                }
+                Effect::Shield { .. } => "Shield",
+                Effect::Stun { .. } => "Stun",
+                Effect::Slow { .. } => "Slow",
+                Effect::Knockback { .. } => "Knockback",
+                Effect::Dash { is_blink: true, .. } => { self.effects.insert("Blink"); "Dash" }
+                Effect::Dash { .. } => "Dash",
+                Effect::Buff { .. } => "Buff",
+                Effect::Debuff { .. } => "Debuff",
+                Effect::Duel { .. } => "Duel",
+                Effect::Summon { .. } => "Summon",
+                Effect::CommandSummons { .. } => "CommandSummons",
+                Effect::Dispel { .. } => "Dispel",
+                Effect::Root { .. } => "Root",
+                Effect::Silence { .. } => "Silence",
+                Effect::Fear { .. } => "Fear",
+                Effect::Taunt { .. } => "Taunt",
+                Effect::Pull { .. } => "Pull",
+                Effect::Swap => "Swap",
+                Effect::Reflect { .. } => "Reflect",
+                Effect::Lifesteal { .. } => "Lifesteal",
+                Effect::DamageModify { .. } => "DamageModify",
+                Effect::SelfDamage { .. } => "SelfDamage",
+                Effect::Execute { .. } => "Execute",
+                Effect::Blind { .. } => "Blind",
+                Effect::OnHitBuff { .. } => "OnHitBuff",
+                Effect::Resurrect { .. } => "Resurrect",
+                Effect::OverhealShield { .. } => "OverhealShield",
+                Effect::AbsorbToHeal { .. } => "AbsorbToHeal",
+                Effect::ShieldSteal { .. } => "ShieldSteal",
+                Effect::StatusClone { .. } => "StatusClone",
+                Effect::Immunity { .. } => "Immunity",
+                Effect::Detonate { .. } => "Detonate",
+                Effect::StatusTransfer { .. } => "StatusTransfer",
+                Effect::DeathMark { .. } => "DeathMark",
+                Effect::Polymorph { .. } => "Polymorph",
+                Effect::Banish { .. } => "Banish",
+                Effect::Confuse { .. } => "Confuse",
+                Effect::Charm { .. } => "Charm",
+                Effect::Stealth { .. } => "Stealth",
+                Effect::Leash { .. } => "Leash",
+                Effect::Link { .. } => "Link",
+                Effect::Redirect { .. } => "Redirect",
+                Effect::Rewind { .. } => "Rewind",
+                Effect::CooldownModify { .. } => "CooldownModify",
+                Effect::ApplyStacks { .. } => "ApplyStacks",
+                Effect::Obstacle { .. } => "Obstacle",
+                Effect::Suppress { .. } => "Suppress",
+                Effect::Grounded { .. } => "Grounded",
+                Effect::ProjectileBlock { .. } => "ProjectileBlock",
+                Effect::Attach { .. } => "Attach",
+                Effect::EvolveAbility { .. } => "EvolveAbility",
+            };
+            self.effects.insert(name);
+        }
+
+        fn record_delivery(&mut self, d: &Delivery) {
+            let name = match d {
+                Delivery::Instant => "Instant",
+                Delivery::Projectile { on_hit, on_arrival, .. } => {
+                    for eff in on_hit { self.record_effect_tree(eff); }
+                    for eff in on_arrival { self.record_effect_tree(eff); }
+                    "Projectile"
+                }
+                Delivery::Channel { .. } => "Channel",
+                Delivery::Zone { .. } => "Zone",
+                Delivery::Tether { on_complete, .. } => {
+                    for eff in on_complete { self.record_effect_tree(eff); }
+                    "Tether"
+                }
+                Delivery::Trap { .. } => "Trap",
+                Delivery::Chain { on_hit, .. } => {
+                    for eff in on_hit { self.record_effect_tree(eff); }
+                    "Chain"
+                }
+            };
+            self.deliveries.insert(name);
+        }
+
+        fn record_area(&mut self, a: &Area) {
+            self.areas.insert(match a {
+                Area::SingleTarget => "SingleTarget",
+                Area::Circle { .. } => "Circle",
+                Area::Cone { .. } => "Cone",
+                Area::Line { .. } => "Line",
+                Area::Ring { .. } => "Ring",
+                Area::SelfOnly => "SelfOnly",
+                Area::Spread { .. } => "Spread",
+            });
+        }
+
+        fn record_condition(&mut self, c: &Condition) {
+            // Collect children first to avoid borrow issues
+            let mut children: Vec<&Condition> = Vec::new();
+            let name = match c {
+                Condition::Always => "Always",
+                Condition::TargetHpBelow { .. } => "TargetHpBelow",
+                Condition::TargetHpAbove { .. } => "TargetHpAbove",
+                Condition::TargetIsStunned => "TargetIsStunned",
+                Condition::TargetIsSlowed => "TargetIsSlowed",
+                Condition::CasterHpBelow { .. } => "CasterHpBelow",
+                Condition::CasterHpAbove { .. } => "CasterHpAbove",
+                Condition::HitCountAbove { .. } => "HitCountAbove",
+                Condition::TargetHasTag { .. } => "TargetHasTag",
+                Condition::TargetIsRooted => "TargetIsRooted",
+                Condition::TargetIsSilenced => "TargetIsSilenced",
+                Condition::TargetIsFeared => "TargetIsFeared",
+                Condition::TargetIsTaunted => "TargetIsTaunted",
+                Condition::TargetIsBanished => "TargetIsBanished",
+                Condition::TargetIsStealthed => "TargetIsStealthed",
+                Condition::TargetIsCharmed => "TargetIsCharmed",
+                Condition::TargetIsPolymorphed => "TargetIsPolymorphed",
+                Condition::CasterHasStatus { .. } => "CasterHasStatus",
+                Condition::TargetHasStatus { .. } => "TargetHasStatus",
+                Condition::TargetDebuffCount { .. } => "TargetDebuffCount",
+                Condition::CasterBuffCount { .. } => "CasterBuffCount",
+                Condition::AllyCountBelow { .. } => "AllyCountBelow",
+                Condition::EnemyCountBelow { .. } => "EnemyCountBelow",
+                Condition::TargetStackCount { .. } => "TargetStackCount",
+                Condition::And { conditions } => {
+                    children.extend(conditions.iter());
+                    "And"
+                }
+                Condition::Or { conditions } => {
+                    children.extend(conditions.iter());
+                    "Or"
+                }
+                Condition::Not { condition } => {
+                    children.push(condition);
+                    "Not"
+                }
+                Condition::TargetDistanceBelow { .. } => "TargetDistanceBelow",
+                Condition::TargetDistanceAbove { .. } => "TargetDistanceAbove",
+                Condition::CasterResourceBelow { .. } => "CasterResourceBelow",
+                Condition::CasterResourceAbove { .. } => "CasterResourceAbove",
+            };
+            self.conditions.insert(name);
+            for child in children {
+                self.record_condition(child);
+            }
+        }
+
+        fn record_trigger(&mut self, t: &Trigger) {
+            self.triggers.insert(match t {
+                Trigger::OnDamageDealt => "OnDamageDealt",
+                Trigger::OnDamageTaken => "OnDamageTaken",
+                Trigger::OnKill => "OnKill",
+                Trigger::OnAllyDamaged { .. } => "OnAllyDamaged",
+                Trigger::OnDeath => "OnDeath",
+                Trigger::OnAbilityUsed => "OnAbilityUsed",
+                Trigger::OnHpBelow { .. } => "OnHpBelow",
+                Trigger::OnHpAbove { .. } => "OnHpAbove",
+                Trigger::OnShieldBroken => "OnShieldBroken",
+                Trigger::OnStunExpire => "OnStunExpire",
+                Trigger::Periodic { .. } => "Periodic",
+                Trigger::OnHealReceived => "OnHealReceived",
+                Trigger::OnStatusApplied => "OnStatusApplied",
+                Trigger::OnStatusExpired => "OnStatusExpired",
+                Trigger::OnResurrect => "OnResurrect",
+                Trigger::OnDodge => "OnDodge",
+                Trigger::OnReflect => "OnReflect",
+                Trigger::OnAllyKilled { .. } => "OnAllyKilled",
+                Trigger::OnAutoAttack => "OnAutoAttack",
+                Trigger::OnStackReached { .. } => "OnStackReached",
+            });
+        }
+
+        fn record_targeting(&mut self, t: &AbilityTargeting) {
+            self.targetings.insert(match t {
+                AbilityTargeting::TargetEnemy => "TargetEnemy",
+                AbilityTargeting::TargetAlly => "TargetAlly",
+                AbilityTargeting::SelfCast => "SelfCast",
+                AbilityTargeting::SelfAoe => "SelfAoe",
+                AbilityTargeting::GroundTarget => "GroundTarget",
+                AbilityTargeting::Direction => "Direction",
+                AbilityTargeting::Vector => "Vector",
+                AbilityTargeting::Global => "Global",
+            });
+        }
+
+        fn report(&self) -> String {
+            // Known universe of DSL-reachable features
+            let all_effects: BTreeSet<&str> = [
+                "Damage", "Heal", "Shield", "Stun", "Slow", "Knockback", "Dash", "Blink",
+                "Buff", "Debuff", "Summon", "Root", "Silence", "Fear", "Taunt", "Pull",
+                "Swap", "Reflect", "Lifesteal", "DamageModify", "SelfDamage", "Execute",
+                "Blind", "Stealth", "ApplyStacks", "Charm", "Polymorph", "Banish",
+                "Confuse", "Suppress", "Grounded", "Resurrect",
+            ].into_iter().collect();
+            let all_deliveries: BTreeSet<&str> = [
+                "Projectile", "Chain", "Zone", "Channel", "Tether", "Trap",
+            ].into_iter().collect();
+            let all_areas: BTreeSet<&str> = [
+                "Circle", "Cone", "Line", "Ring", "Spread",
+            ].into_iter().collect();
+            let all_conditions: BTreeSet<&str> = [
+                "TargetHpBelow", "TargetHpAbove", "CasterHpBelow", "CasterHpAbove",
+                "TargetIsStunned", "TargetIsSlowed", "TargetIsRooted", "TargetIsSilenced",
+                "TargetIsFeared", "HitCountAbove",
+            ].into_iter().collect();
+            let all_triggers: BTreeSet<&str> = [
+                "OnDamageDealt", "OnDamageTaken", "OnKill", "OnDeath", "OnAbilityUsed",
+                "OnAutoAttack", "OnShieldBroken", "OnHealReceived", "OnDodge", "OnReflect",
+                "OnHpBelow", "OnHpAbove", "Periodic",
+            ].into_iter().collect();
+            let all_targetings: BTreeSet<&str> = [
+                "TargetEnemy", "TargetAlly", "SelfCast", "SelfAoe", "GroundTarget",
+                "Direction", "Vector", "Global",
+            ].into_iter().collect();
+            let all_features: BTreeSet<&str> = [
+                "charges", "recast", "cost", "tags", "scaling",
+            ].into_iter().collect();
+
+            fn section(name: &str, hit: &BTreeSet<&str>, all: &BTreeSet<&str>) -> String {
+                let covered: BTreeSet<&&str> = hit.intersection(all).collect();
+                let missing: BTreeSet<&&str> = all.difference(hit).collect();
+                let pct = if all.is_empty() { 100.0 } else { covered.len() as f64 / all.len() as f64 * 100.0 };
+                let mut s = format!("  {name}: {}/{} ({pct:.0}%)", covered.len(), all.len());
+                if !missing.is_empty() {
+                    s.push_str(&format!("  missing: {:?}", missing));
+                }
+                s
+            }
+
+            let mut hit_features = BTreeSet::new();
+            if self.has_charges { hit_features.insert("charges"); }
+            if self.has_recast { hit_features.insert("recast"); }
+            if self.has_cost { hit_features.insert("cost"); }
+            if self.has_tags { hit_features.insert("tags"); }
+            if self.has_scaling { hit_features.insert("scaling"); }
+
+            let sections = [
+                section("Effects", &self.effects, &all_effects),
+                section("Deliveries", &self.deliveries, &all_deliveries),
+                section("Areas", &self.areas, &all_areas),
+                section("Conditions", &self.conditions, &all_conditions),
+                section("Triggers", &self.triggers, &all_triggers),
+                section("Targeting", &self.targetings, &all_targetings),
+                section("Features", &hit_features, &all_features),
+            ];
+
+            let total_all = all_effects.len() + all_deliveries.len() + all_areas.len()
+                + all_conditions.len() + all_triggers.len() + all_targetings.len()
+                + all_features.len();
+            let total_hit = self.effects.intersection(&all_effects).count()
+                + self.deliveries.intersection(&all_deliveries).count()
+                + self.areas.intersection(&all_areas).count()
+                + self.conditions.intersection(&all_conditions).count()
+                + self.triggers.intersection(&all_triggers).count()
+                + self.targetings.intersection(&all_targetings).count()
+                + hit_features.intersection(&all_features).count();
+
+            let overall = total_hit as f64 / total_all as f64 * 100.0;
+
+            format!(
+                "DSL Feature Coverage: {total_hit}/{total_all} ({overall:.0}%)\n{}",
+                sections.join("\n")
+            )
+        }
+    }
 
     // -----------------------------------------------------------------------
     // Building blocks — strategies that produce DSL string fragments
@@ -277,6 +614,9 @@ mod tests {
             1 => self_damage_effect(),
             1 => execute_effect(),
             1 => resurrect_effect(),
+            2 => conditional_damage(),
+            2 => conditional_heal(),
+            2 => damage_with_scaling(),
         ]
     }
 
@@ -672,29 +1012,54 @@ mod tests {
         }
     }
 
-    /// Single deterministic test: generate 1000 unique abilities in one file.
+    /// Generate 1000 abilities + 200 passives and report feature coverage.
     #[test]
-    fn bulk_1000_abilities() {
+    fn bulk_coverage_report() {
         use proptest::test_runner::{TestRunner, Config};
         use proptest::strategy::ValueTree;
 
         let config = Config { cases: 1, .. Config::default() };
         let mut runner = TestRunner::new(config);
 
-        let strat = proptest::collection::vec(ability_block(), 1000..=1000);
-        let tree = strat.new_tree(&mut runner).unwrap();
-        let abilities_vec = tree.current();
+        let ab_strat = proptest::collection::vec(ability_block(), 1000..=1000);
+        let pa_strat = proptest::collection::vec(passive_block(), 200..=200);
 
-        let input = abilities_vec.join("\n\n");
-        let result = parse_abilities(&input);
+        let ab_tree = ab_strat.new_tree(&mut runner).unwrap();
+        let pa_tree = pa_strat.new_tree(&mut runner).unwrap();
 
-        match &result {
-            Ok((abs, _)) => {
-                assert_eq!(abs.len(), 1000, "expected 1000 abilities, got {}", abs.len());
-                eprintln!("Successfully parsed and lowered 1000 generated abilities ({} bytes)", input.len());
-            }
-            Err(e) => panic!("Failed to parse 1000 abilities:\n{e}"),
-        }
+        let mut parts: Vec<String> = ab_tree.current();
+        parts.extend(pa_tree.current());
+        let input = parts.join("\n\n");
+
+        let (abilities, passives) = parse_abilities(&input)
+            .unwrap_or_else(|e| panic!("Failed to parse bulk generation:\n{e}"));
+
+        assert_eq!(abilities.len(), 1000);
+        assert_eq!(passives.len(), 200);
+
+        let mut cov = Coverage::default();
+        cov.record_abilities(&abilities, &passives);
+
+        let report = cov.report();
+        eprintln!("\n{report}\n");
+
+        // Assert minimum coverage thresholds
+        let effect_count = cov.effects.len();
+        let delivery_count = cov.deliveries.len();
+        let area_count = cov.areas.len();
+        let trigger_count = cov.triggers.len();
+        let targeting_count = cov.targetings.len();
+
+        assert!(effect_count >= 25,
+            "expected ≥25 effect types covered, got {effect_count}. Report:\n{report}");
+        assert!(delivery_count >= 6,
+            "expected all 6 delivery types covered, got {delivery_count}. Report:\n{report}");
+        assert!(area_count >= 5,
+            "expected all 5 area types covered, got {area_count}. Report:\n{report}");
+        assert!(trigger_count >= 10,
+            "expected ≥10 trigger types covered, got {trigger_count}. Report:\n{report}");
+        assert!(targeting_count >= 8,
+            "expected all 8 targeting types covered, got {targeting_count}. Report:\n{report}");
     }
 
     // Extra: targeted regression-style tests for edge cases
