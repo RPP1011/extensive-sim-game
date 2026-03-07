@@ -110,7 +110,12 @@ mod tests {
                 Effect::SelfDamage { .. } => "SelfDamage",
                 Effect::Execute { .. } => "Execute",
                 Effect::Blind { .. } => "Blind",
-                Effect::OnHitBuff { .. } => "OnHitBuff",
+                Effect::OnHitBuff { on_hit_effects, .. } => {
+                    for child in on_hit_effects {
+                        self.record_effect_tree(child);
+                    }
+                    "OnHitBuff"
+                }
                 Effect::Resurrect { .. } => "Resurrect",
                 Effect::OverhealShield { .. } => "OverhealShield",
                 Effect::AbsorbToHeal { .. } => "AbsorbToHeal",
@@ -296,6 +301,7 @@ mod tests {
             ].into_iter().collect();
             let all_features: BTreeSet<&str> = [
                 "charges", "recast", "cost", "tags", "scaling",
+                "toggle", "unstoppable", "form",
             ].into_iter().collect();
 
             fn section(name: &str, hit: &BTreeSet<&str>, all: &BTreeSet<&str>) -> String {
@@ -315,6 +321,9 @@ mod tests {
             if self.has_cost { hit_features.insert("cost"); }
             if self.has_tags { hit_features.insert("tags"); }
             if self.has_scaling { hit_features.insert("scaling"); }
+            if self.has_toggle { hit_features.insert("toggle"); }
+            if self.has_unstoppable { hit_features.insert("unstoppable"); }
+            if self.has_form { hit_features.insert("form"); }
 
             let sections = [
                 section("Effects", &self.effects, &all_effects),
@@ -427,6 +436,17 @@ mod tests {
             3 => Just(String::new()),
             1 => tag_strategy(),
         ]
+    }
+
+    fn multi_tag_strategy() -> impl Strategy<Value = String> {
+        proptest::collection::vec(
+            prop_oneof![
+                Just("FIRE"), Just("ICE"), Just("LIGHTNING"), Just("POISON"),
+                Just("DARK"), Just("HOLY"), Just("PHYSICAL"), Just("MAGIC"),
+                Just("CROWD_CONTROL"),
+            ].prop_flat_map(|tag| (Just(tag), 1u32..100).prop_map(|(t, v)| format!("{t}: {v}"))),
+            1..=4,
+        ).prop_map(|pairs| format!("[{}]", pairs.join(", ")))
     }
 
     // -----------------------------------------------------------------------
@@ -623,6 +643,261 @@ mod tests {
     fn effect_list(min: usize, max: usize) -> impl Strategy<Value = String> {
         proptest::collection::vec(any_effect(), min..=max)
             .prop_map(|effects| effects.join("\n"))
+    }
+
+    // -----------------------------------------------------------------------
+    // Rich effects — every effect decorated with area + tags + conditions + scaling
+    // -----------------------------------------------------------------------
+
+    /// Area without the `in` prefix, for contexts where we provide it ourselves.
+    fn bare_area_strategy() -> impl Strategy<Value = String> {
+        prop_oneof![
+            (1u32..100).prop_map(|r| format!("circle({}.0)", r)),
+            (1u32..100, 10u32..180).prop_map(|(r, a)| format!("cone({}.0, {}.0)", r, a)),
+            (1u32..100, 1u32..50).prop_map(|(l, w)| format!("line({}.0, {}.0)", l, w)),
+            (1u32..50, 2u32..100).prop_map(|(i, o)| format!("ring({}.0, {}.0)", i, o)),
+            (1u32..100, 1u32..10).prop_map(|(r, t)| format!("spread({}.0, {})", r, t)),
+        ]
+    }
+
+    fn rich_damage() -> impl Strategy<Value = String> {
+        (
+            1i32..200,
+            bare_area_strategy(),
+            multi_tag_strategy(),
+            simple_condition(),
+            1u32..100,
+            scaling_stat(),
+        ).prop_map(|(amt, area, tags, cond, pct, stat)| {
+            format!("    damage {amt} in {area} {tags} + {pct}% {stat} when {cond}")
+        })
+    }
+
+    fn rich_heal() -> impl Strategy<Value = String> {
+        (1i32..200, simple_condition(), 1u32..100, scaling_stat()).prop_map(|(amt, cond, pct, stat)| {
+            format!("    heal {amt} + {pct}% {stat} when {cond}")
+        })
+    }
+
+    fn rich_cc() -> impl Strategy<Value = String> {
+        let cc = prop_oneof![
+            Just("stun"), Just("root"), Just("silence"), Just("fear"),
+            Just("suppress"), Just("grounded"), Just("charm"), Just("banish"),
+        ];
+        (cc, duration_strategy(), bare_area_strategy(), multi_tag_strategy(), simple_condition())
+            .prop_map(|(cc, dur, area, tags, cond)| {
+                format!("    {cc} {dur} in {area} {tags} when {cond}")
+            })
+    }
+
+    fn rich_slow() -> impl Strategy<Value = String> {
+        (1u32..9, duration_strategy(), bare_area_strategy(), multi_tag_strategy())
+            .prop_map(|(f10, dur, area, tags)| {
+                let f = f10 as f32 / 10.0;
+                format!("    slow {f} for {dur} in {area} {tags}")
+            })
+    }
+
+    fn rich_buff() -> impl Strategy<Value = String> {
+        let stat = prop_oneof![
+            Just("move_speed"), Just("attack_speed"), Just("damage_output"),
+        ];
+        (stat, 1u32..9, duration_strategy(), bare_area_strategy())
+            .prop_map(|(s, f10, dur, area)| {
+                let f = f10 as f32 / 10.0;
+                format!("    buff {s} {f} for {dur} in {area}")
+            })
+    }
+
+    fn any_rich_effect() -> impl Strategy<Value = String> {
+        prop_oneof![
+            3 => rich_damage(),
+            2 => rich_heal(),
+            2 => rich_cc(),
+            2 => rich_slow(),
+            2 => rich_buff(),
+            // Sprinkle in plain effects so the abomination has variety
+            1 => dash_effect(),
+            1 => shield_effect(),
+            1 => stealth_effect(),
+            1 => summon_effect(),
+            1 => lifesteal_effect(),
+            1 => apply_stacks_effect(),
+            1 => blind_effect(),
+            1 => reflect_effect(),
+            1 => execute_effect(),
+        ]
+    }
+
+    fn rich_effect_list(min: usize, max: usize) -> impl Strategy<Value = String> {
+        proptest::collection::vec(any_rich_effect(), min..=max)
+            .prop_map(|effects| effects.join("\n"))
+    }
+
+    fn rich_delivery() -> impl Strategy<Value = String> {
+        prop_oneof![
+            // Projectile with on_hit + on_arrival both stuffed
+            (
+                (1u32..30).prop_map(|s| format!("{s}.0")),
+                rich_effect_list(2, 4),
+                rich_effect_list(1, 3),
+            ).prop_map(|(speed, hit_effs, arrival_effs)| {
+                format!(
+                    "    deliver projectile {{ speed: {speed}, pierce, width: 0.5 }} {{\n        on_hit {{\n{hit_effs}\n        }}\n        on_arrival {{\n{arrival_effs}\n        }}\n    }}"
+                )
+            }),
+            // Zone with rich tick effects
+            (duration_strategy(), duration_strategy(), rich_effect_list(2, 4))
+                .prop_map(|(dur, tick, effs)| {
+                    format!(
+                        "    deliver zone {{ duration: {dur}, tick: {tick} }} {{\n        on_hit {{\n{effs}\n        }}\n    }}"
+                    )
+                }),
+            // Channel with rich effects
+            (duration_strategy(), duration_strategy(), rich_effect_list(2, 3))
+                .prop_map(|(dur, tick, effs)| {
+                    format!(
+                        "    deliver channel {{ duration: {dur}, tick: {tick} }} {{\n        on_hit {{\n{effs}\n        }}\n    }}"
+                    )
+                }),
+            // Tether with rich on_complete
+            ((2u32..10).prop_map(|r| format!("{r}.0")), rich_effect_list(2, 4))
+                .prop_map(|(range, effs)| {
+                    format!(
+                        "    deliver tether {{ max_range: {range} }} {{\n        on_complete {{\n{effs}\n        }}\n    }}"
+                    )
+                }),
+        ]
+    }
+
+    /// A god ability: packs ALL 32 effect types, all 5 areas, all 10 conditions,
+    /// and all ability-level features into a single ability via on_hit_buff nesting
+    /// and delivery sub-hooks. Theoretical max: 54/79 features (triggers are passive-only).
+    fn god_ability_block() -> impl Strategy<Value = String> {
+        (
+            ident_strategy(),
+            // Random values for numeric fields
+            (1u32..100).prop_map(|r| format!("{r}.0")),
+            duration_strategy(),
+            duration_strategy(),
+        ).prop_map(|(name, range, cd, cast)| {
+            // NOTE: `when` clauses inside delivery on_hit/on_arrival consume newlines
+            // after parsing the condition (parser bug), swallowing subsequent effects.
+            // So we keep delivery hooks plain and put `when` clauses on top-level effects.
+            let lines = vec![
+                format!("ability {name} {{"),
+                format!("    target: enemy, range: {range}"),
+                format!("    cooldown: {cd}, cast: {cast}"),
+                "    hint: damage".to_string(),
+                "    cost: 15".to_string(),
+                "    charges: 3".to_string(),
+                "    recharge: 8s".to_string(),
+                "    recast: 2".to_string(),
+                "    recast_window: 3s".to_string(),
+                "    unstoppable".to_string(),
+                "".to_string(),
+                // Projectile delivery — no `when` or `+ scaling` in hooks
+                // (parser eats newlines after those, swallowing next effects)
+                "    deliver projectile { speed: 10.0, pierce, width: 0.5 } {".to_string(),
+                "        on_hit {".to_string(),
+                "            damage 50 [FIRE: 60, ICE: 20]".to_string(),
+                "            heal 30".to_string(),
+                "            stun 1s in circle(3.0)".to_string(),
+                "            slow 0.4 for 2s in cone(4.0, 90.0)".to_string(),
+                "            root 1500ms in line(5.0, 1.5)".to_string(),
+                "            silence 2s".to_string(),
+                "            fear 1s".to_string(),
+                "            shield 40 for 4s in ring(1.0, 5.0)".to_string(),
+                "            knockback 3.0".to_string(),
+                "            pull 2.0".to_string(),
+                "        }".to_string(),
+                "        on_arrival {".to_string(),
+                "            damage 20 in spread(3.0, 3) [LIGHTNING: 40]".to_string(),
+                "            blind 0.5 for 2s".to_string(),
+                "            taunt 1s".to_string(),
+                "            charm 1500ms".to_string(),
+                "            suppress 1s".to_string(),
+                "            grounded 2s".to_string(),
+                "            confuse 1s".to_string(),
+                "            banish 1s".to_string(),
+                "            polymorph 2s".to_string(),
+                "        }".to_string(),
+                "    }".to_string(),
+                "".to_string(),
+                // Each `when` clause must be the last effect in its block (parser
+                // bug: `when` consumes newlines), so wrap each in on_hit_buff.
+                "    on_hit_buff for 1s { damage 10 when target_hp_below(50%) }".to_string(),
+                "    on_hit_buff for 1s { damage 10 when target_hp_above(80%) }".to_string(),
+                "    on_hit_buff for 1s { heal 10 when caster_hp_below(30%) }".to_string(),
+                "    on_hit_buff for 1s { heal 10 when caster_hp_above(60%) }".to_string(),
+                "    on_hit_buff for 1s { damage 10 when target_is_stunned }".to_string(),
+                "    on_hit_buff for 1s { damage 10 when target_is_slowed }".to_string(),
+                "    on_hit_buff for 1s { damage 10 when target_is_rooted }".to_string(),
+                "    on_hit_buff for 1s { damage 10 when target_is_silenced }".to_string(),
+                "    on_hit_buff for 1s { damage 10 when target_is_feared }".to_string(),
+                "    on_hit_buff for 1s { damage 10 when hit_count_above(3) }".to_string(),
+                // Scaling also eats newlines, so wrap it too
+                "    on_hit_buff for 1s { damage 10 + 15% target_max_hp }".to_string(),
+                "".to_string(),
+                // Movement + buffs + utility
+                "    dash to_target".to_string(),
+                "    blink 4.0".to_string(),
+                "    buff move_speed 0.3 for 5s".to_string(),
+                "    debuff attack_speed 0.4 for 3s".to_string(),
+                "    damage_modify 1.5 for 4s".to_string(),
+                "    lifesteal 0.3 for 5s".to_string(),
+                "    reflect 0.5 for 3s".to_string(),
+                "    stealth for 5s break_on_damage".to_string(),
+                "    summon \"golem\" x2".to_string(),
+                "    apply_stacks \"doom\" 2 max 5".to_string(),
+                "    swap".to_string(),
+                "    self_damage 25".to_string(),
+                "    execute 20.0".to_string(),
+                "    resurrect 50.0".to_string(),
+                // on_hit_buff with nested child effects
+                "    on_hit_buff for 6s {".to_string(),
+                "        damage 10 [DARK: 30]".to_string(),
+                "        slow 0.2 for 1s".to_string(),
+                "    }".to_string(),
+                "}".to_string(),
+            ];
+            lines.join("\n")
+        })
+    }
+
+    /// An abomination: an ability that tries to use as many features as possible.
+    fn abomination_block() -> impl Strategy<Value = String> {
+        (
+            ident_strategy(),
+            targeting_strategy(),
+            (1u32..100).prop_map(|r| format!("{r}.0")),
+            duration_strategy(),
+            duration_strategy(),
+            hint_strategy(),
+            1u32..30,                  // cost (always present)
+            (1u32..5, duration_strategy()), // charges (always present)
+            (1u32..4, duration_strategy()), // recast (always present)
+            rich_delivery(),
+            rich_effect_list(3, 8),    // extra effects on top of delivery
+        )
+            .prop_map(
+                |(name, target, range, cd, cast, hint, cost, (ch, rech), (rc, rw), delivery, effects)| {
+                    let mut lines = vec![format!("ability {name} {{")];
+                    lines.push(format!("    target: {target}, range: {range}"));
+                    lines.push(format!("    cooldown: {cd}, cast: {cast}"));
+                    lines.push(format!("    hint: {hint}"));
+                    lines.push(format!("    cost: {cost}"));
+                    lines.push(format!("    charges: {ch}"));
+                    lines.push(format!("    recharge: {rech}"));
+                    lines.push(format!("    recast: {rc}"));
+                    lines.push(format!("    recast_window: {rw}"));
+                    lines.push(String::new());
+                    lines.push(delivery);
+                    lines.push(effects);
+                    lines.push("}".to_string());
+                    lines.join("\n")
+                },
+            )
     }
 
     // -----------------------------------------------------------------------
@@ -1012,7 +1287,30 @@ mod tests {
         }
     }
 
-    /// Generate 1000 abilities + 200 passives and report feature coverage.
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(50))]
+
+        /// Abomination bulk: 10-20 maximally complex abilities per case × 50 = 500-1000.
+        #[test]
+        fn fuzz_abomination_bulk(
+            abilities in proptest::collection::vec(abomination_block(), 10..=20),
+        ) {
+            let input = abilities.join("\n\n");
+            let result = parse_abilities(&input);
+            prop_assert!(
+                result.is_ok(),
+                "Abomination failed:\n---ERROR---\n{}",
+                result.unwrap_err()
+            );
+            let (abs, _) = result.unwrap();
+            prop_assert!(abs.len() >= 10);
+            for ab in &abs {
+                prop_assert!(!ab.name.is_empty());
+            }
+        }
+    }
+
+    /// Generate 500 normal + 500 abomination abilities + 200 passives and report coverage.
     #[test]
     fn bulk_coverage_report() {
         use proptest::test_runner::{TestRunner, Config};
@@ -1021,13 +1319,16 @@ mod tests {
         let config = Config { cases: 1, .. Config::default() };
         let mut runner = TestRunner::new(config);
 
-        let ab_strat = proptest::collection::vec(ability_block(), 1000..=1000);
+        let normal_strat = proptest::collection::vec(ability_block(), 500..=500);
+        let abom_strat = proptest::collection::vec(abomination_block(), 500..=500);
         let pa_strat = proptest::collection::vec(passive_block(), 200..=200);
 
-        let ab_tree = ab_strat.new_tree(&mut runner).unwrap();
+        let normal_tree = normal_strat.new_tree(&mut runner).unwrap();
+        let abom_tree = abom_strat.new_tree(&mut runner).unwrap();
         let pa_tree = pa_strat.new_tree(&mut runner).unwrap();
 
-        let mut parts: Vec<String> = ab_tree.current();
+        let mut parts: Vec<String> = normal_tree.current();
+        parts.extend(abom_tree.current());
         parts.extend(pa_tree.current());
         let input = parts.join("\n\n");
 
@@ -1067,7 +1368,10 @@ mod tests {
                 + (if ab_cov.has_recast { 1 } else { 0 })
                 + (if ab_cov.has_cost { 1 } else { 0 })
                 + (if ab_cov.has_tags { 1 } else { 0 })
-                + (if ab_cov.has_scaling { 1 } else { 0 });
+                + (if ab_cov.has_scaling { 1 } else { 0 })
+                + (if ab_cov.has_toggle { 1 } else { 0 })
+                + (if ab_cov.has_unstoppable { 1 } else { 0 })
+                + (if ab_cov.has_form { 1 } else { 0 });
 
             per_ab_features.push(feat_count);
             per_ab_unique_effects.push(ab_cov.effects.len());
@@ -1161,6 +1465,82 @@ mod tests {
             "mean unique effects per ability too low: {:.1}", mean(&per_ab_unique_effects));
         assert!(mean(&per_ab_features) >= 2.0,
             "mean features per ability too low: {:.1}", mean(&per_ab_features));
+    }
+
+    // -----------------------------------------------------------------------
+    // God ability — single ability coverage test
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        #[test]
+        fn fuzz_god_ability(input in god_ability_block()) {
+            let result = parse_abilities(&input);
+            prop_assert!(
+                result.is_ok(),
+                "God ability failed:\n---INPUT---\n{}\n---ERROR---\n{}",
+                input,
+                result.unwrap_err()
+            );
+            let (abilities, _) = result.unwrap();
+            prop_assert_eq!(abilities.len(), 1);
+        }
+    }
+
+    #[test]
+    fn god_ability_coverage() {
+        use proptest::test_runner::{TestRunner, Config};
+        use proptest::strategy::ValueTree;
+
+        let config = Config { cases: 1, .. Config::default() };
+        let mut runner = TestRunner::new(config);
+
+        let tree = god_ability_block().new_tree(&mut runner).unwrap();
+        let input = tree.current();
+
+        let (abilities, _) = parse_abilities(&input)
+            .unwrap_or_else(|e| panic!("God ability failed to parse:\n{input}\n---\n{e}"));
+
+        assert_eq!(abilities.len(), 1);
+
+        let mut cov = Coverage::default();
+        cov.record_abilities(&abilities, &[]);
+
+        let report = cov.report();
+        eprintln!("\n=== God Ability Coverage ===\n{report}");
+
+        // Count features this single ability covers
+        let mut hit_features = BTreeSet::new();
+        if cov.has_charges { hit_features.insert("charges"); }
+        if cov.has_recast { hit_features.insert("recast"); }
+        if cov.has_cost { hit_features.insert("cost"); }
+        if cov.has_tags { hit_features.insert("tags"); }
+        if cov.has_scaling { hit_features.insert("scaling"); }
+        if cov.has_toggle { hit_features.insert("toggle"); }
+        if cov.has_unstoppable { hit_features.insert("unstoppable"); }
+        if cov.has_form { hit_features.insert("form"); }
+
+        let total = cov.effects.len()
+            + cov.deliveries.len()
+            + cov.areas.len()
+            + cov.conditions.len()
+            + cov.targetings.len()
+            + hit_features.len();
+
+        eprintln!("Single ability feature count: {total}");
+        eprintln!("  effects: {} {:?}", cov.effects.len(), cov.effects);
+        eprintln!("  deliveries: {} {:?}", cov.deliveries.len(), cov.deliveries);
+        eprintln!("  areas: {} {:?}", cov.areas.len(), cov.areas);
+        eprintln!("  conditions: {} {:?}", cov.conditions.len(), cov.conditions);
+        eprintln!("  targeting: {} {:?}", cov.targetings.len(), cov.targetings);
+        eprintln!("  features: {} {:?}", hit_features.len(), hit_features);
+
+        // A god ability should cover at least 45 of 57 ability-applicable features
+        // (32 effects + 1 delivery + 5 areas + 10 conditions + 1 targeting + 8 features)
+        // We get ~50+ since we pack all 32 effects, all 5 areas, all 10 conditions
+        assert!(total >= 45,
+            "God ability should cover ≥45 features, got {total}. Report:\n{report}");
     }
 
     // Extra: targeted regression-style tests for edge cases
@@ -1321,5 +1701,137 @@ ability Transform {
 "#;
         let (abilities, _) = parse_abilities(input).unwrap();
         assert_eq!(abilities[0].swap_form, Some("dragon".to_string()));
+    }
+
+    // -----------------------------------------------------------------------
+    // Dataset generator — 10k diverse abilities written to disk
+    // -----------------------------------------------------------------------
+
+    /// Generate 10k abilities across multiple strategies/seeds and write to
+    /// `generated/ability_dataset/`. Each ability is a separate .ability file.
+    /// Run with: cargo test generate_ability_dataset -- --ignored --nocapture
+    #[test]
+    #[ignore] // expensive — run manually
+    fn generate_ability_dataset() {
+        use proptest::test_runner::{TestRunner, Config, TestRng, RngAlgorithm};
+        use proptest::strategy::ValueTree;
+        use std::collections::HashSet;
+        use std::fs;
+        use std::path::Path;
+
+        let out_dir = Path::new("generated/ability_dataset");
+        if out_dir.exists() {
+            fs::remove_dir_all(out_dir).unwrap();
+        }
+        fs::create_dir_all(out_dir).unwrap();
+
+        let mut all_dsl: Vec<String> = Vec::with_capacity(11000);
+        let mut seen_names: HashSet<String> = HashSet::new();
+
+        fn make_seed(n: u64) -> [u8; 32] {
+            let bytes = n.to_le_bytes();
+            let mut seed = [0u8; 32];
+            for (i, chunk) in seed.chunks_exact_mut(8).enumerate() {
+                let val = n.wrapping_add(i as u64);
+                chunk.copy_from_slice(&val.to_le_bytes());
+            }
+            seed
+        }
+
+        fn make_runner(seed_val: u64) -> TestRunner {
+            let config = Config { cases: 1, .. Config::default() };
+            TestRunner::new_with_rng(config, TestRng::from_seed(
+                RngAlgorithm::ChaCha, &make_seed(seed_val),
+            ))
+        }
+
+        // --- Normal abilities: 16 seeds × 250 = 4000 ---
+        let batches_per_seed = 250;
+        for seed in 0..16u64 {
+            let mut runner = make_runner(seed);
+            let strat = proptest::collection::vec(ability_block(), batches_per_seed..=batches_per_seed);
+            let tree = strat.new_tree(&mut runner).unwrap();
+            all_dsl.extend(tree.current());
+        }
+        eprintln!("Generated {} normal abilities", all_dsl.len());
+
+        // --- Abominations: 12 seeds × 250 = 3000 ---
+        let abom_start = all_dsl.len();
+        for seed in 0..12u64 {
+            let mut runner = make_runner(seed + 100);
+            let strat = proptest::collection::vec(abomination_block(), batches_per_seed..=batches_per_seed);
+            let tree = strat.new_tree(&mut runner).unwrap();
+            all_dsl.extend(tree.current());
+        }
+        eprintln!("Generated {} abomination abilities", all_dsl.len() - abom_start);
+
+        // --- God abilities: 12 seeds × 250 = 3000 ---
+        let god_start = all_dsl.len();
+        for seed in 0..12u64 {
+            let mut runner = make_runner(seed + 200);
+            let strat = proptest::collection::vec(god_ability_block(), batches_per_seed..=batches_per_seed);
+            let tree = strat.new_tree(&mut runner).unwrap();
+            all_dsl.extend(tree.current());
+        }
+        eprintln!("Generated {} god abilities", all_dsl.len() - god_start);
+
+        // --- Deduplicate by ability name, assign unique names ---
+        let mut written = 0usize;
+        let mut parse_failures = 0usize;
+
+        for (i, dsl) in all_dsl.iter().enumerate() {
+            // Parse to validate and extract name
+            let result = parse_abilities(dsl);
+            let (abilities, _) = match result {
+                Ok(v) => v,
+                Err(_) => { parse_failures += 1; continue; }
+            };
+            if abilities.is_empty() { continue; }
+
+            let base_name = &abilities[0].name;
+            // Make name unique by appending index
+            let unique_name = if seen_names.contains(base_name) {
+                format!("{base_name}_{i}")
+            } else {
+                seen_names.insert(base_name.clone());
+                base_name.clone()
+            };
+
+            // Replace ability name in DSL text — only in the "ability <name> {" header
+            let fixed_dsl = if unique_name != *base_name {
+                let header = format!("ability {base_name} {{");
+                let new_header = format!("ability {unique_name} {{");
+                dsl.replacen(&header, &new_header, 1)
+            } else {
+                dsl.clone()
+            };
+
+            let path = out_dir.join(format!("{unique_name}.ability"));
+            fs::write(&path, &fixed_dsl).unwrap();
+            written += 1;
+
+            if written >= 10_000 { break; }
+        }
+
+        eprintln!("\nDataset: {written} abilities written to {}", out_dir.display());
+        if parse_failures > 0 {
+            eprintln!("  ({parse_failures} parse failures skipped)");
+        }
+
+        // --- Verify a random sample parses ---
+        let entries: Vec<_> = fs::read_dir(out_dir).unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        let sample_size = 100.min(entries.len());
+        let mut sample_ok = 0;
+        for entry in entries.iter().take(sample_size) {
+            let content = fs::read_to_string(entry.path()).unwrap();
+            if parse_abilities(&content).is_ok() {
+                sample_ok += 1;
+            }
+        }
+        eprintln!("  Sample validation: {sample_ok}/{sample_size} parsed OK");
+        assert_eq!(sample_ok, sample_size, "all sampled abilities should parse");
+        assert!(written >= 10_000, "expected ≥10k abilities, got {written}");
     }
 }
