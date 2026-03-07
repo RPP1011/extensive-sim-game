@@ -1037,11 +1037,106 @@ mod tests {
         assert_eq!(abilities.len(), 1000);
         assert_eq!(passives.len(), 200);
 
+        // --- Global coverage ---
         let mut cov = Coverage::default();
         cov.record_abilities(&abilities, &passives);
 
         let report = cov.report();
-        eprintln!("\n{report}\n");
+        eprintln!("\n{report}");
+
+        // --- Per-ability feature depth ---
+        let mut per_ab_features: Vec<usize> = Vec::new();
+        let mut per_ab_unique_effects: Vec<usize> = Vec::new();
+        let mut per_ab_effect_counts: Vec<usize> = Vec::new();
+        let mut abilities_with_delivery = 0usize;
+        let mut abilities_with_condition = 0usize;
+        let mut abilities_with_area = 0usize;
+        let mut abilities_with_tags = 0usize;
+        let mut abilities_with_scaling = 0usize;
+
+        for ab in &abilities {
+            let mut ab_cov = Coverage::default();
+            ab_cov.record_abilities(std::slice::from_ref(ab), &[]);
+
+            // Count distinct features this ability touches
+            let feat_count = ab_cov.effects.len()
+                + ab_cov.deliveries.len()
+                + ab_cov.areas.len()
+                + ab_cov.conditions.len()
+                + (if ab_cov.has_charges { 1 } else { 0 })
+                + (if ab_cov.has_recast { 1 } else { 0 })
+                + (if ab_cov.has_cost { 1 } else { 0 })
+                + (if ab_cov.has_tags { 1 } else { 0 })
+                + (if ab_cov.has_scaling { 1 } else { 0 });
+
+            per_ab_features.push(feat_count);
+            per_ab_unique_effects.push(ab_cov.effects.len());
+
+            // Total effect count (including delivery sub-effects)
+            let mut total_effects = ab.effects.len();
+            if let Some(ref d) = ab.delivery {
+                match d {
+                    Delivery::Projectile { on_hit, on_arrival, .. } => {
+                        total_effects += on_hit.len() + on_arrival.len();
+                    }
+                    Delivery::Chain { on_hit, .. } => total_effects += on_hit.len(),
+                    Delivery::Tether { on_complete, .. } => total_effects += on_complete.len(),
+                    _ => {}
+                }
+            }
+            per_ab_effect_counts.push(total_effects);
+
+            if ab.delivery.is_some() { abilities_with_delivery += 1; }
+            if ab_cov.has_tags { abilities_with_tags += 1; }
+            if ab_cov.has_scaling { abilities_with_scaling += 1; }
+            if !ab_cov.conditions.is_empty() { abilities_with_condition += 1; }
+            if !ab_cov.areas.is_empty() { abilities_with_area += 1; }
+        }
+
+        per_ab_features.sort();
+        per_ab_unique_effects.sort();
+        per_ab_effect_counts.sort();
+
+        let mean = |v: &[usize]| v.iter().sum::<usize>() as f64 / v.len() as f64;
+        let percentile = |v: &[usize], p: usize| v[v.len() * p / 100];
+
+        eprintln!("\nPer-ability stats (n=1000):");
+        eprintln!("  Distinct features per ability:");
+        eprintln!("    mean={:.1}  p5={}  p25={}  p50={}  p75={}  p95={}  max={}",
+            mean(&per_ab_features),
+            percentile(&per_ab_features, 5),
+            percentile(&per_ab_features, 25),
+            percentile(&per_ab_features, 50),
+            percentile(&per_ab_features, 75),
+            percentile(&per_ab_features, 95),
+            per_ab_features.last().unwrap(),
+        );
+        eprintln!("  Unique effect types per ability:");
+        eprintln!("    mean={:.1}  p5={}  p25={}  p50={}  p75={}  p95={}  max={}",
+            mean(&per_ab_unique_effects),
+            percentile(&per_ab_unique_effects, 5),
+            percentile(&per_ab_unique_effects, 25),
+            percentile(&per_ab_unique_effects, 50),
+            percentile(&per_ab_unique_effects, 75),
+            percentile(&per_ab_unique_effects, 95),
+            per_ab_unique_effects.last().unwrap(),
+        );
+        eprintln!("  Total effects per ability:");
+        eprintln!("    mean={:.1}  p5={}  p25={}  p50={}  p75={}  p95={}  max={}",
+            mean(&per_ab_effect_counts),
+            percentile(&per_ab_effect_counts, 5),
+            percentile(&per_ab_effect_counts, 25),
+            percentile(&per_ab_effect_counts, 50),
+            percentile(&per_ab_effect_counts, 75),
+            percentile(&per_ab_effect_counts, 95),
+            per_ab_effect_counts.last().unwrap(),
+        );
+        eprintln!("  Abilities with delivery:  {:>4} ({:.0}%)", abilities_with_delivery, abilities_with_delivery as f64 / 10.0);
+        eprintln!("  Abilities with area:      {:>4} ({:.0}%)", abilities_with_area, abilities_with_area as f64 / 10.0);
+        eprintln!("  Abilities with tags:      {:>4} ({:.0}%)", abilities_with_tags, abilities_with_tags as f64 / 10.0);
+        eprintln!("  Abilities with condition: {:>4} ({:.0}%)", abilities_with_condition, abilities_with_condition as f64 / 10.0);
+        eprintln!("  Abilities with scaling:   {:>4} ({:.0}%)", abilities_with_scaling, abilities_with_scaling as f64 / 10.0);
+        eprintln!();
 
         // Assert minimum coverage thresholds
         let effect_count = cov.effects.len();
@@ -1060,6 +1155,12 @@ mod tests {
             "expected ≥10 trigger types covered, got {trigger_count}. Report:\n{report}");
         assert!(targeting_count >= 8,
             "expected all 8 targeting types covered, got {targeting_count}. Report:\n{report}");
+
+        // Assert per-ability diversity minimums
+        assert!(mean(&per_ab_unique_effects) >= 1.5,
+            "mean unique effects per ability too low: {:.1}", mean(&per_ab_unique_effects));
+        assert!(mean(&per_ab_features) >= 2.0,
+            "mean features per ability too low: {:.1}", mean(&per_ab_features));
     }
 
     // Extra: targeted regression-style tests for edge cases
