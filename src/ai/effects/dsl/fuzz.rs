@@ -630,6 +630,73 @@ mod tests {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Bulk generation — random walk producing thousands of abilities
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(50))]
+
+        /// Each case generates a file with 20-50 abilities + 5-15 passives,
+        /// run 50 times = 1000-2500 abilities total per test run.
+        #[test]
+        fn fuzz_bulk_generation(
+            abilities in proptest::collection::vec(ability_block(), 20..=50),
+            passives in proptest::collection::vec(passive_block(), 5..=15),
+        ) {
+            let mut parts: Vec<String> = abilities;
+            parts.extend(passives);
+            let input = parts.join("\n\n");
+
+            let result = parse_abilities(&input);
+            prop_assert!(
+                result.is_ok(),
+                "Bulk generation failed on file with {} blocks:\n---ERROR---\n{}",
+                parts.len(),
+                result.unwrap_err()
+            );
+
+            let (abs, pas) = result.unwrap();
+            prop_assert!(abs.len() >= 20);
+            prop_assert!(pas.len() >= 5);
+
+            // Spot-check every ability lowered with sane fields
+            for ab in &abs {
+                prop_assert!(!ab.name.is_empty());
+                prop_assert!(ab.cooldown_ms > 0);
+            }
+            for p in &pas {
+                prop_assert!(!p.name.is_empty());
+                prop_assert!(!p.effects.is_empty());
+            }
+        }
+    }
+
+    /// Single deterministic test: generate 1000 unique abilities in one file.
+    #[test]
+    fn bulk_1000_abilities() {
+        use proptest::test_runner::{TestRunner, Config};
+        use proptest::strategy::ValueTree;
+
+        let config = Config { cases: 1, .. Config::default() };
+        let mut runner = TestRunner::new(config);
+
+        let strat = proptest::collection::vec(ability_block(), 1000..=1000);
+        let tree = strat.new_tree(&mut runner).unwrap();
+        let abilities_vec = tree.current();
+
+        let input = abilities_vec.join("\n\n");
+        let result = parse_abilities(&input);
+
+        match &result {
+            Ok((abs, _)) => {
+                assert_eq!(abs.len(), 1000, "expected 1000 abilities, got {}", abs.len());
+                eprintln!("Successfully parsed and lowered 1000 generated abilities ({} bytes)", input.len());
+            }
+            Err(e) => panic!("Failed to parse 1000 abilities:\n{e}"),
+        }
+    }
+
     // Extra: targeted regression-style tests for edge cases
 
     #[test]
