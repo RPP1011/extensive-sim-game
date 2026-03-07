@@ -5,7 +5,7 @@ use crate::ai::effects::{
 use super::super::types::*;
 use super::super::events::SimEvent;
 use super::super::helpers::{find_unit_idx, check_tags_resisted};
-use super::super::conditions::evaluate_condition_tracked;
+use super::super::conditions::{evaluate_condition_tracked, check_chance};
 use super::super::targeting::resolve_targets;
 use super::super::apply_effect::apply_effect;
 use super::super::damage::resolve_chain_delivery;
@@ -292,34 +292,17 @@ pub fn resolve_hero_ability(
     // Dispatch instant effects
     for ce in &active_effects {
         if !evaluate_condition_tracked(&ce.condition, caster_idx, target, state, tick, events) {
+            // Condition failed — dispatch else_effects if any
+            dispatch_effects(&ce.else_effects, caster_idx, target, caster_team, tick, state, events);
             continue;
         }
 
-        let targets = resolve_targets(
-            ce.area.as_ref(),
-            caster_idx,
-            target,
-            caster_team,
-            &ce.effect,
-            state,
-        );
-
-        for &tid in &targets {
-            if !ce.tags.is_empty() {
-                if let Some(tidx) = find_unit_idx(state, tid) {
-                    if check_tags_resisted(&ce.tags, &state.units[tidx].resistance_tags) {
-                        events.push(SimEvent::EffectResisted {
-                            tick,
-                            unit_id: tid,
-                            resisted_tag: ce.tags.keys().next().cloned().unwrap_or_default(),
-                        });
-                        continue;
-                    }
-                }
-            }
-
-            apply_effect(&ce.effect, caster_idx, tid, target, tick, &ce.tags, ce.stacking, state, events);
+        // Chance roll (0.0 = always fires)
+        if ce.chance > 0.0 && !check_chance(ce.chance, state) {
+            continue;
         }
+
+        dispatch_effect(ce, caster_idx, target, caster_team, tick, state, events);
     }
 
     apply_morph(caster_idx, ability_index, &slot, state);
@@ -327,5 +310,63 @@ pub fn resolve_hero_ability(
     // Form swap: if this ability has swap_form, morph all abilities with matching form tag
     if let Some(ref form_tag) = slot.def.swap_form {
         apply_form_swap(caster_idx, form_tag, state);
+    }
+}
+
+/// Dispatch a single ConditionalEffect (resolve targets, check tags, apply).
+fn dispatch_effect(
+    ce: &ConditionalEffect,
+    caster_idx: usize,
+    target: AbilityTarget,
+    caster_team: Team,
+    tick: u64,
+    state: &mut SimState,
+    events: &mut Vec<SimEvent>,
+) {
+    let targets = resolve_targets(
+        ce.area.as_ref(),
+        caster_idx,
+        target,
+        caster_team,
+        &ce.effect,
+        state,
+    );
+
+    for &tid in &targets {
+        if !ce.tags.is_empty() {
+            if let Some(tidx) = find_unit_idx(state, tid) {
+                if check_tags_resisted(&ce.tags, &state.units[tidx].resistance_tags) {
+                    events.push(SimEvent::EffectResisted {
+                        tick,
+                        unit_id: tid,
+                        resisted_tag: ce.tags.keys().next().cloned().unwrap_or_default(),
+                    });
+                    continue;
+                }
+            }
+        }
+
+        apply_effect(&ce.effect, caster_idx, tid, target, tick, &ce.tags, ce.stacking, state, events);
+    }
+}
+
+/// Dispatch a list of ConditionalEffects (used for else_effects branches).
+fn dispatch_effects(
+    effects: &[ConditionalEffect],
+    caster_idx: usize,
+    target: AbilityTarget,
+    caster_team: Team,
+    tick: u64,
+    state: &mut SimState,
+    events: &mut Vec<SimEvent>,
+) {
+    for ce in effects {
+        if !evaluate_condition_tracked(&ce.condition, caster_idx, target, state, tick, events) {
+            continue;
+        }
+        if ce.chance > 0.0 && !check_chance(ce.chance, state) {
+            continue;
+        }
+        dispatch_effect(ce, caster_idx, target, caster_team, tick, state, events);
     }
 }

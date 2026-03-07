@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::types::{ConditionalEffect, DamageType};
+use super::types::{ConditionalEffect, DamageType, ScalingTerm};
 
 // ---------------------------------------------------------------------------
 // WHAT — Effect types (52 total)
@@ -21,12 +21,16 @@ pub enum Effect {
         duration_ms: u32,
         #[serde(default)]
         tick_interval_ms: u32,
+        /// Legacy single-stat scaling (still supported, prefer `bonus` for new abilities).
         #[serde(default)]
         scaling_stat: Option<String>,
         #[serde(default)]
         scaling_percent: f32,
         #[serde(default)]
         damage_type: DamageType,
+        /// Composable scaling terms: total = amount + sum(stat_i * percent_i / 100).
+        #[serde(default)]
+        bonus: Vec<ScalingTerm>,
     },
     Heal {
         #[serde(default)]
@@ -37,10 +41,14 @@ pub enum Effect {
         duration_ms: u32,
         #[serde(default)]
         tick_interval_ms: u32,
+        /// Legacy single-stat scaling (still supported, prefer `bonus` for new abilities).
         #[serde(default)]
         scaling_stat: Option<String>,
         #[serde(default)]
         scaling_percent: f32,
+        /// Composable scaling terms: total = amount + sum(stat_i * percent_i / 100).
+        #[serde(default)]
+        bonus: Vec<ScalingTerm>,
     },
     Shield {
         amount: i32,
@@ -279,6 +287,7 @@ pub enum Effect {
     EvolveAbility {
         ability_index: usize,
     },
+
 }
 
 fn default_summon_count() -> u32 {

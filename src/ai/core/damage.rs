@@ -438,7 +438,7 @@ pub fn resolve_chain_delivery(
 
 pub fn scale_effect(effect: &Effect, scale: f32) -> Effect {
     match effect {
-        Effect::Damage { amount, amount_per_tick, duration_ms, tick_interval_ms, scaling_stat, scaling_percent, damage_type } => {
+        Effect::Damage { amount, amount_per_tick, duration_ms, tick_interval_ms, scaling_stat, scaling_percent, damage_type, ref bonus } => {
             Effect::Damage {
                 amount: ((*amount as f32) * scale) as i32,
                 amount_per_tick: ((*amount_per_tick as f32) * scale) as i32,
@@ -447,9 +447,10 @@ pub fn scale_effect(effect: &Effect, scale: f32) -> Effect {
                 scaling_stat: scaling_stat.clone(),
                 scaling_percent: *scaling_percent,
                 damage_type: *damage_type,
+                bonus: bonus.clone(),
             }
         }
-        Effect::Heal { amount, amount_per_tick, duration_ms, tick_interval_ms, scaling_stat, scaling_percent } => {
+        Effect::Heal { amount, amount_per_tick, duration_ms, tick_interval_ms, scaling_stat, scaling_percent, ref bonus } => {
             Effect::Heal {
                 amount: ((*amount as f32) * scale) as i32,
                 amount_per_tick: ((*amount_per_tick as f32) * scale) as i32,
@@ -457,6 +458,7 @@ pub fn scale_effect(effect: &Effect, scale: f32) -> Effect {
                 tick_interval_ms: *tick_interval_ms,
                 scaling_stat: scaling_stat.clone(),
                 scaling_percent: *scaling_percent,
+                bonus: bonus.clone(),
             }
         }
         Effect::Stun { duration_ms } => Effect::Stun {

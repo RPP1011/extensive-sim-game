@@ -7,8 +7,8 @@ fn hero_ability_use_ability_intent() {
         name: "Test Strike".into(), targeting: AbilityTargeting::TargetEnemy,
         range: 5.0, cooldown_ms: 3000, cast_time_ms: 0, ai_hint: "damage".into(),
         effects: vec![ConditionalEffect {
-            effect: Effect::Damage { amount: 30, amount_per_tick: 0, duration_ms: 0, tick_interval_ms: 0, scaling_stat: None, scaling_percent: 0.0, damage_type: DamageType::Physical },
-            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::Refresh,
+            effect: Effect::Damage { amount: 30, amount_per_tick: 0, duration_ms: 0, tick_interval_ms: 0, scaling_stat: None, scaling_percent: 0.0, damage_type: DamageType::Physical, bonus: vec![] },
+            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::Refresh, chance: 0.0, else_effects: vec![],
         }],
         delivery: None, resource_cost: 0, morph_into: None, morph_duration_ms: 0, zone_tag: None, ..Default::default()
     }));
@@ -27,8 +27,8 @@ fn hero_ability_cooldown_applied() {
         name: "Test Strike".into(), targeting: AbilityTargeting::TargetEnemy,
         range: 5.0, cooldown_ms: 3000, cast_time_ms: 0, ai_hint: "damage".into(),
         effects: vec![ConditionalEffect {
-            effect: Effect::Damage { amount: 30, amount_per_tick: 0, duration_ms: 0, tick_interval_ms: 0, scaling_stat: None, scaling_percent: 0.0, damage_type: DamageType::Physical },
-            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::Refresh,
+            effect: Effect::Damage { amount: 30, amount_per_tick: 0, duration_ms: 0, tick_interval_ms: 0, scaling_stat: None, scaling_percent: 0.0, damage_type: DamageType::Physical, bonus: vec![] },
+            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::Refresh, chance: 0.0, else_effects: vec![],
         }],
         delivery: None, resource_cost: 0, morph_into: None, morph_duration_ms: 0, zone_tag: None, ..Default::default()
     }));
@@ -72,11 +72,12 @@ fn arcanist_zone_ability(name: &str, tag: &str) -> AbilitySlot {
                 amount: 10, amount_per_tick: 0, tick_interval_ms: 0,
                 duration_ms: 0, scaling_stat: None, scaling_percent: 0.0,
                 damage_type: DamageType::Physical,
+                bonus: vec![],
             },
             condition: None,
             area: Some(Area::Circle { radius: 2.5 }),
             tags: HashMap::new(),
-            stacking: Stacking::default(),
+            stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
         }],
         delivery: Some(Delivery::Zone { duration_ms: 5000, tick_interval_ms: 500 }),
         resource_cost: 0,

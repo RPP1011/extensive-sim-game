@@ -43,7 +43,7 @@ mod tests_stress {
                     effects: vec![ConditionalEffect {
                         effect: Effect::ApplyStacks { name: "Venom".into(), count: 1, max_stacks: 4, duration_ms: 5000 },
                         condition: None, area: Some(Area::Circle { radius: 2.0 }),
-                        tags: HashMap::new(), stacking: Stacking::default(),
+                        tags: HashMap::new(), stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
                     }],
                     delivery: Some(Delivery::Zone { duration_ms: 3000, tick_interval_ms: 500 }),
                     resource_cost: 20, morph_into: None, morph_duration_ms: 0, zone_tag: None, ..Default::default()
@@ -53,8 +53,8 @@ mod tests_stress {
                     trigger: Trigger::OnStackReached { name: "Venom".into(), count: 3 },
                     cooldown_ms: 0,
                     effects: vec![ConditionalEffect {
-                        effect: Effect::Damage { amount: 30, amount_per_tick: 0, tick_interval_ms: 0, duration_ms: 0, scaling_stat: None, scaling_percent: 0.0, damage_type: DamageType::Physical },
-                        condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(),
+                        effect: Effect::Damage { amount: 30, amount_per_tick: 0, tick_interval_ms: 0, duration_ms: 0, scaling_stat: None, scaling_percent: 0.0, damage_type: DamageType::Physical, bonus: vec![] },
+                        condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
                     }],
                     range: 0.0,
                 }));
@@ -65,8 +65,8 @@ mod tests_stress {
                     name: "Tranquility".into(), targeting: AbilityTargeting::TargetAlly,
                     range: 5.0, cooldown_ms: 6000, cast_time_ms: 0, ai_hint: "heal".into(),
                     effects: vec![ConditionalEffect {
-                        effect: Effect::Heal { amount: 15, amount_per_tick: 0, tick_interval_ms: 0, duration_ms: 0, scaling_stat: None, scaling_percent: 0.0 },
-                        condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(),
+                        effect: Effect::Heal { amount: 15, amount_per_tick: 0, tick_interval_ms: 0, duration_ms: 0, scaling_stat: None, scaling_percent: 0.0, bonus: vec![] },
+                        condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
                     }],
                     delivery: Some(Delivery::Channel { duration_ms: 2000, tick_interval_ms: 500 }),
                     resource_cost: 30, morph_into: None, morph_duration_ms: 0, zone_tag: None, ..Default::default()
@@ -76,7 +76,7 @@ mod tests_stress {
                     range: 1.5, cooldown_ms: 5000, cast_time_ms: 200, ai_hint: "crowd_control".into(),
                     effects: vec![ConditionalEffect {
                         effect: Effect::Stun { duration_ms: 800 },
-                        condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(),
+                        condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
                     }],
                     delivery: None, resource_cost: 0, morph_into: None, morph_duration_ms: 0, zone_tag: None, ..Default::default()
                 }));
@@ -89,8 +89,8 @@ mod tests_stress {
                     delivery: Some(Delivery::Projectile {
                         speed: 10.0, pierce: true, width: 0.4,
                         on_hit: vec![ConditionalEffect {
-                            effect: Effect::Damage { amount: 25, amount_per_tick: 0, tick_interval_ms: 0, duration_ms: 0, scaling_stat: None, scaling_percent: 0.0, damage_type: DamageType::Physical },
-                            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(),
+                            effect: Effect::Damage { amount: 25, amount_per_tick: 0, tick_interval_ms: 0, duration_ms: 0, scaling_stat: None, scaling_percent: 0.0, damage_type: DamageType::Physical, bonus: vec![] },
+                            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
                         }],
                         on_arrival: vec![],
                     }),
@@ -101,13 +101,13 @@ mod tests_stress {
                     range: 4.0, cooldown_ms: 8000, cast_time_ms: 200, ai_hint: "crowd_control".into(),
                     effects: vec![ConditionalEffect {
                         effect: Effect::Slow { factor: 0.4, duration_ms: 1500 },
-                        condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(),
+                        condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
                     }],
                     delivery: Some(Delivery::Tether {
                         max_range: 5.0, tick_interval_ms: 500,
                         on_complete: vec![ConditionalEffect {
                             effect: Effect::Stun { duration_ms: 1000 },
-                            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(),
+                            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
                         }],
                     }),
                     resource_cost: 25, morph_into: None, morph_duration_ms: 0, zone_tag: None, ..Default::default()
@@ -119,12 +119,12 @@ mod tests_stress {
                     range: 1.5, cooldown_ms: 2000, cast_time_ms: 100, ai_hint: "damage".into(),
                     effects: vec![
                         ConditionalEffect {
-                            effect: Effect::Damage { amount: 20, amount_per_tick: 0, tick_interval_ms: 0, duration_ms: 0, scaling_stat: None, scaling_percent: 0.0, damage_type: DamageType::Physical },
-                            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(),
+                            effect: Effect::Damage { amount: 20, amount_per_tick: 0, tick_interval_ms: 0, duration_ms: 0, scaling_stat: None, scaling_percent: 0.0, damage_type: DamageType::Physical, bonus: vec![] },
+                            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
                         },
                         ConditionalEffect {
                             effect: Effect::Dash { to_target: true, distance: 2.0, to_position: false, is_blink: false },
-                            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(),
+                            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
                         },
                     ],
                     delivery: None, resource_cost: 10,
@@ -132,8 +132,8 @@ mod tests_stress {
                         name: "PowerStrike".into(), targeting: AbilityTargeting::TargetEnemy,
                         range: 1.5, cooldown_ms: 1000, cast_time_ms: 100, ai_hint: "damage".into(),
                         effects: vec![ConditionalEffect {
-                            effect: Effect::Damage { amount: 40, amount_per_tick: 0, tick_interval_ms: 0, duration_ms: 0, scaling_stat: None, scaling_percent: 0.0, damage_type: DamageType::Physical },
-                            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(),
+                            effect: Effect::Damage { amount: 40, amount_per_tick: 0, tick_interval_ms: 0, duration_ms: 0, scaling_stat: None, scaling_percent: 0.0, damage_type: DamageType::Physical, bonus: vec![] },
+                            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
                         }],
                         delivery: None, resource_cost: 10, morph_into: None, morph_duration_ms: 0, zone_tag: None, ..Default::default()
                     })),
@@ -143,10 +143,10 @@ mod tests_stress {
                     name: "BearTrap".into(), targeting: AbilityTargeting::GroundTarget,
                     range: 3.0, cooldown_ms: 10000, cast_time_ms: 200, ai_hint: "crowd_control".into(),
                     effects: vec![
-                        ConditionalEffect { effect: Effect::Stun { duration_ms: 1200 }, condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default() },
+                        ConditionalEffect { effect: Effect::Stun { duration_ms: 1200 }, condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(), chance: 0.0, else_effects: vec![] },
                         ConditionalEffect {
-                            effect: Effect::Damage { amount: 35, amount_per_tick: 0, tick_interval_ms: 0, duration_ms: 0, scaling_stat: None, scaling_percent: 0.0, damage_type: DamageType::Physical },
-                            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(),
+                            effect: Effect::Damage { amount: 35, amount_per_tick: 0, tick_interval_ms: 0, duration_ms: 0, scaling_stat: None, scaling_percent: 0.0, damage_type: DamageType::Physical, bonus: vec![] },
+                            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
                         },
                     ],
                     delivery: Some(Delivery::Trap { duration_ms: 15000, trigger_radius: 1.5, arm_time_ms: 500 }),

@@ -12,6 +12,41 @@ use std::collections::HashMap;
 pub use super::effect_enum::Effect;
 
 // ---------------------------------------------------------------------------
+// ScalingTerm — composable value expressions for effect amounts
+// ---------------------------------------------------------------------------
+
+/// A stat reference that can be resolved at runtime against the sim state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StatRef {
+    TargetMaxHp,
+    TargetCurrentHp,
+    TargetMissingHp,
+    CasterMaxHp,
+    CasterCurrentHp,
+    CasterMissingHp,
+    CasterAttackDamage,
+    /// Number of stacks with the given name on the target.
+    TargetStacks { name: String },
+    /// Number of stacks with the given name on the caster.
+    CasterStacks { name: String },
+}
+
+/// One additive scaling term: contributes `percent`% of `stat` to an effect's amount.
+/// Multiple terms stack additively: total = base_amount + sum(stat_i * percent_i / 100).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScalingTerm {
+    pub stat: StatRef,
+    pub percent: f32,
+    /// Hard cap on this term's contribution (0 = uncapped).
+    #[serde(default)]
+    pub max: i32,
+    /// If true, consume (remove) the referenced stacks after reading.
+    #[serde(default)]
+    pub consume: bool,
+}
+
+// ---------------------------------------------------------------------------
 // Tags — arbitrary named resistance/power levels
 // ---------------------------------------------------------------------------
 
@@ -182,6 +217,24 @@ pub enum Condition {
     AllyCountBelow { count: u32 },
     EnemyCountBelow { count: u32 },
     TargetStackCount { name: String, min_count: u32 },
+
+    // --- Compound Conditions ---
+    /// All sub-conditions must be true.
+    And { conditions: Vec<Condition> },
+    /// At least one sub-condition must be true.
+    Or { conditions: Vec<Condition> },
+    /// Inverts the inner condition.
+    Not { condition: Box<Condition> },
+
+    // --- Spatial & Resource Conditions ---
+    /// True if caster-to-target distance is below `range` units.
+    TargetDistanceBelow { range: f32 },
+    /// True if caster-to-target distance is above `range` units.
+    TargetDistanceAbove { range: f32 },
+    /// True if caster's resource is below `percent`% of max.
+    CasterResourceBelow { percent: f32 },
+    /// True if caster's resource is above `percent`% of max.
+    CasterResourceAbove { percent: f32 },
 }
 
 impl Default for Condition {
@@ -245,4 +298,11 @@ pub struct ConditionalEffect {
     pub tags: Tags,
     #[serde(default)]
     pub stacking: Stacking,
+    /// Probability (0.0–1.0) that this effect fires when its condition passes.
+    /// 0.0 = default = always fires (treated as 1.0).
+    #[serde(default)]
+    pub chance: f32,
+    /// Effects to apply instead when the condition evaluates to false.
+    #[serde(default)]
+    pub else_effects: Vec<ConditionalEffect>,
 }
