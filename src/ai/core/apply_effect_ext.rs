@@ -448,6 +448,26 @@ pub fn apply_effect_extended(
             }
         }
 
+        Effect::DamagePerStack { base, per_stack, ref stack_name, damage_type, consume } => {
+            if let Some(tidx) = find_unit_idx(state, target_id) {
+                let stack_count = state.units[tidx].status_effects.iter()
+                    .find_map(|s| match &s.kind {
+                        StatusKind::Stacks { name, count, .. } if name == stack_name => Some(*count),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+                let dmg = *base + *per_stack * stack_count as i32;
+                if dmg > 0 {
+                    super::damage::apply_typed_damage(caster_idx, target_id, dmg, *damage_type, tick, state, events);
+                }
+                if *consume {
+                    state.units[tidx].status_effects.retain(|s| {
+                        !matches!(&s.kind, StatusKind::Stacks { name, .. } if name == stack_name)
+                    });
+                }
+            }
+        }
+
         // Effects already handled by apply_effect_primary
         _ => {}
     }

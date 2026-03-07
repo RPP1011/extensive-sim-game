@@ -3,6 +3,7 @@ use crate::ai::effects::{AbilityTarget, Condition, StatusKind};
 use super::events::SimEvent;
 use super::types::*;
 use super::helpers::unit_has_status;
+use super::math::distance;
 
 /// Evaluate condition and emit a `ConditionalEffectApplied` event when a real
 /// condition (not `None` / `Always`) evaluates to true.
@@ -159,7 +160,52 @@ pub fn evaluate_condition(
         Condition::Not { ref condition } => {
             !evaluate_condition(&Some(*condition.clone()), caster_idx, target, state)
         }
+        // --- Spatial & Resource Conditions ---
+        Condition::TargetDistanceBelow { range } => {
+            if let AbilityTarget::Unit(tid) = target {
+                if let Some(t) = state.units.iter().find(|u| u.id == tid) {
+                    return distance(state.units[caster_idx].position, t.position) < *range;
+                }
+            }
+            false
+        }
+        Condition::TargetDistanceAbove { range } => {
+            if let AbilityTarget::Unit(tid) = target {
+                if let Some(t) = state.units.iter().find(|u| u.id == tid) {
+                    return distance(state.units[caster_idx].position, t.position) > *range;
+                }
+            }
+            false
+        }
+        Condition::CasterResourceBelow { percent } => {
+            let c = &state.units[caster_idx];
+            if c.max_resource > 0 {
+                (c.resource as f32 / c.max_resource as f32) * 100.0 < *percent
+            } else {
+                false
+            }
+        }
+        Condition::CasterResourceAbove { percent } => {
+            let c = &state.units[caster_idx];
+            if c.max_resource > 0 {
+                (c.resource as f32 / c.max_resource as f32) * 100.0 > *percent
+            } else {
+                false
+            }
+        }
     }
+}
+
+/// Check if a chance roll passes. `chance` of 0.0 (default) means "always fires".
+/// Uses the sim's deterministic RNG.
+pub fn check_chance(chance: f32, state: &mut SimState) -> bool {
+    // 0.0 = default = always fires; >= 1.0 = always fires
+    if chance <= 0.0 || chance >= 1.0 {
+        return true;
+    }
+    let roll = super::helpers::next_rand_u32(state);
+    let threshold = (chance * u32::MAX as f32) as u32;
+    roll < threshold
 }
 
 fn target_has_status_kind(target: AbilityTarget, state: &SimState, kind_name: &str) -> bool {

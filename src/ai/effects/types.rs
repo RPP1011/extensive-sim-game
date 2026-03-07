@@ -190,6 +190,16 @@ pub enum Condition {
     Or { conditions: Vec<Condition> },
     /// Inverts the inner condition.
     Not { condition: Box<Condition> },
+
+    // --- Spatial & Resource Conditions ---
+    /// True if caster-to-target distance is below `range` units.
+    TargetDistanceBelow { range: f32 },
+    /// True if caster-to-target distance is above `range` units.
+    TargetDistanceAbove { range: f32 },
+    /// True if caster's resource is below `percent`% of max.
+    CasterResourceBelow { percent: f32 },
+    /// True if caster's resource is above `percent`% of max.
+    CasterResourceAbove { percent: f32 },
 }
 
 impl Default for Condition {
@@ -253,4 +263,11 @@ pub struct ConditionalEffect {
     pub tags: Tags,
     #[serde(default)]
     pub stacking: Stacking,
+    /// Probability (0.0–1.0) that this effect fires when its condition passes.
+    /// 0.0 = default = always fires (treated as 1.0).
+    #[serde(default)]
+    pub chance: f32,
+    /// Effects to apply instead when the condition evaluates to false.
+    #[serde(default)]
+    pub else_effects: Vec<ConditionalEffect>,
 }

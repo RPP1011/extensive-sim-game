@@ -298,6 +298,19 @@ pub enum Effect {
     PercentMaxHpHeal {
         percent: f32,
     },
+
+    /// Deal `base + per_stack * N` damage, where N = stack count of `stack_name` on target.
+    DamagePerStack {
+        #[serde(default)]
+        base: i32,
+        per_stack: i32,
+        stack_name: String,
+        #[serde(default)]
+        damage_type: DamageType,
+        /// If true, consume (remove) the stacks after dealing damage.
+        #[serde(default)]
+        consume: bool,
+    },
 }
 
 fn default_summon_count() -> u32 {

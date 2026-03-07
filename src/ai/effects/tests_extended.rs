@@ -382,3 +382,130 @@ percent = 15.0
         _ => panic!("expected PercentMaxHpHeal"),
     }
 }
+
+// --- Distance & Resource Condition Tests ---
+
+#[test]
+fn parse_condition_target_distance_below() {
+    let toml_str = r#"
+type = "target_distance_below"
+range = 3.0
+"#;
+    let cond: Condition = toml::from_str(toml_str).unwrap();
+    match cond {
+        Condition::TargetDistanceBelow { range } => assert!((range - 3.0).abs() < 0.01),
+        _ => panic!("expected TargetDistanceBelow"),
+    }
+}
+
+#[test]
+fn parse_condition_target_distance_above() {
+    let toml_str = r#"
+type = "target_distance_above"
+range = 5.0
+"#;
+    let cond: Condition = toml::from_str(toml_str).unwrap();
+    match cond {
+        Condition::TargetDistanceAbove { range } => assert!((range - 5.0).abs() < 0.01),
+        _ => panic!("expected TargetDistanceAbove"),
+    }
+}
+
+#[test]
+fn parse_condition_caster_resource_below() {
+    let toml_str = r#"
+type = "caster_resource_below"
+percent = 20.0
+"#;
+    let cond: Condition = toml::from_str(toml_str).unwrap();
+    match cond {
+        Condition::CasterResourceBelow { percent } => assert!((percent - 20.0).abs() < 0.01),
+        _ => panic!("expected CasterResourceBelow"),
+    }
+}
+
+#[test]
+fn parse_condition_caster_resource_above() {
+    let toml_str = r#"
+type = "caster_resource_above"
+percent = 80.0
+"#;
+    let cond: Condition = toml::from_str(toml_str).unwrap();
+    match cond {
+        Condition::CasterResourceAbove { percent } => assert!((percent - 80.0).abs() < 0.01),
+        _ => panic!("expected CasterResourceAbove"),
+    }
+}
+
+// --- DamagePerStack Effect Test ---
+
+#[test]
+fn parse_damage_per_stack() {
+    let toml_str = r#"
+type = "damage_per_stack"
+base = 20
+per_stack = 15
+stack_name = "venom"
+damage_type = "magic"
+consume = true
+"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::DamagePerStack { base, per_stack, stack_name, damage_type, consume } => {
+            assert_eq!(base, 20);
+            assert_eq!(per_stack, 15);
+            assert_eq!(stack_name, "venom");
+            assert!(matches!(damage_type, DamageType::Magic));
+            assert!(consume);
+        }
+        _ => panic!("expected DamagePerStack"),
+    }
+}
+
+// --- ConditionalEffect chance & else_effects Tests ---
+
+#[test]
+fn parse_conditional_effect_with_chance() {
+    let toml_str = r#"
+type = "stun"
+duration_ms = 1500
+chance = 0.3
+"#;
+    let ce: ConditionalEffect = toml::from_str(toml_str).unwrap();
+    assert!((ce.chance - 0.3).abs() < 0.01);
+    assert!(matches!(ce.effect, Effect::Stun { duration_ms: 1500 }));
+}
+
+#[test]
+fn parse_conditional_effect_with_else_effects() {
+    let toml_str = r#"
+type = "damage"
+amount = 60
+
+[condition]
+type = "target_hp_below"
+percent = 30.0
+
+[[else_effects]]
+type = "damage"
+amount = 25
+"#;
+    let ce: ConditionalEffect = toml::from_str(toml_str).unwrap();
+    assert!(ce.condition.is_some());
+    assert_eq!(ce.else_effects.len(), 1);
+    match &ce.else_effects[0].effect {
+        Effect::Damage { amount, .. } => assert_eq!(*amount, 25),
+        _ => panic!("expected Damage in else_effects"),
+    }
+}
+
+#[test]
+fn parse_conditional_effect_default_chance_is_zero() {
+    let toml_str = r#"
+type = "damage"
+amount = 10
+"#;
+    let ce: ConditionalEffect = toml::from_str(toml_str).unwrap();
+    assert!((ce.chance - 0.0).abs() < 0.001);
+    assert!(ce.else_effects.is_empty());
+}
