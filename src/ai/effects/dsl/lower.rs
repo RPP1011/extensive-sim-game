@@ -773,6 +773,8 @@ fn lower_area(node: &AreaNode) -> Result<Area, String> {
             let max_targets = node.args.get(1).map(|n| *n as u32).unwrap_or(0);
             Ok(Area::Spread { radius, max_targets })
         }
+        "single_target" => Ok(Area::SingleTarget),
+        "self" | "self_only" => Ok(Area::SelfOnly),
         other => Err(format!("unknown area shape: {other}")),
     }
 }

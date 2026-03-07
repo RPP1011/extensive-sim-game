@@ -163,9 +163,9 @@ method = "chain"            — bounces (u32), bounce_range (f32), falloff (f32)
 "target_ally"     — single allied unit
 "self_cast"       — caster only, no target needed
 "self_aoe"        — AoE centered on caster
-"target_position" — ground-targeted (use with area)
+"ground_target"   — ground-targeted (use with area)
 "direction"       — fire toward a position for full range (skillshots)
-                    AI resolves this the same as target_position
+                    AI resolves this the same as ground_target
 ```
 
 ### Conditions (`[*.condition]` section)

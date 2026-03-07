@@ -1,0 +1,88 @@
+// Necromancer abilities
+
+ability SoulDrain {
+    target: enemy, range: 4.0
+    cooldown: 4s, cast: 300ms
+    hint: damage
+
+    damage 40 [DARK: 55]
+    heal 20
+}
+
+ability RaiseSkeleton {
+    target: self
+    cooldown: 18s, cast: 500ms
+    hint: utility
+
+    summon "skeleton" x2
+}
+
+ability DeathCoil {
+    target: enemy, range: 5.0
+    cooldown: 5s, cast: 300ms
+    hint: damage
+
+    deliver projectile { speed: 7.0, width: 0.3 } {
+        on_hit {
+            damage 50 [DARK: 60]
+        }
+    }
+}
+
+ability PlagueCloud {
+    target: ground, range: 5.0
+    cooldown: 12s, cast: 400ms
+    hint: damage
+
+    deliver zone { duration: 4s, tick: 500ms } {
+        on_hit {
+            damage 10 in circle(2.5) [POISON: 55, DARK: 45]
+        }
+    }
+}
+
+ability BonePrison {
+    target: enemy, range: 4.0
+    cooldown: 10s, cast: 300ms
+    hint: crowd_control
+
+    stun 2500ms [DARK: 50, CROWD_CONTROL: 60]
+}
+
+ability DarkEmpowerment {
+    target: self
+    cooldown: 15s, cast: 300ms
+    hint: utility
+
+    buff damage_output 0.3 for 6s
+}
+
+ability CorpseExplosion {
+    target: self_aoe
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 55 in circle(3.0) [DARK: 55]
+}
+
+ability Wither {
+    target: enemy, range: 4.5
+    cooldown: 8s, cast: 300ms
+    hint: utility
+
+    debuff damage_output 0.75 for 5s [DARK: 45]
+}
+
+passive SoulHarvest {
+    trigger: on_kill
+    cooldown: 0ms
+
+    heal 25
+}
+
+passive UndyingWill {
+    trigger: on_hp_below(25%)
+    cooldown: 30s
+
+    shield 50 for 4s
+}

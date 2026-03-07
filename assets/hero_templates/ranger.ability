@@ -1,0 +1,102 @@
+// Ranger abilities
+
+ability PowerShot {
+    target: enemy, range: 8.0
+    cooldown: 3500ms, cast: 300ms
+    hint: damage
+
+    deliver projectile { speed: 12.0, pierce, width: 0.3 } {
+        on_hit {
+            damage 45 [PHYSICAL: 40]
+            knockback 2.0
+        }
+        on_arrival {
+            damage 25 in circle(2.0)
+        }
+    }
+}
+
+ability RainOfArrows {
+    target: enemy, range: 6.0
+    cooldown: 8s, cast: 300ms
+    hint: crowd_control
+
+    damage 30 in circle(3.0)
+    slow 0.3 for 2s in circle(3.0) [ICE: 30]
+}
+
+ability MultiShot {
+    target: enemy, range: 6.0
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    damage 30 in spread(4.0, 3) [PHYSICAL: 40]
+}
+
+ability BearTrap {
+    target: ground, range: 5.0
+    cooldown: 10s, cast: 200ms
+    hint: crowd_control
+
+    deliver trap { duration: 15s, trigger_radius: 1.5, arm_time: 500ms } {
+        on_hit {
+            damage 25 [PHYSICAL: 40]
+            root 2s [CROWD_CONTROL: 50]
+        }
+    }
+}
+
+ability Disengage {
+    target: self
+    cooldown: 8s, cast: 0ms
+    hint: utility
+
+    dash 3.0
+    slow 0.4 for 2s in circle(2.0)
+}
+
+ability HuntersMark {
+    target: enemy, range: 6.0
+    cooldown: 10s, cast: 200ms
+    hint: utility
+
+    damage_modify 1.25 for 5s
+}
+
+ability ExplosiveArrow {
+    target: enemy, range: 7.0
+    cooldown: 6s, cast: 300ms
+    hint: damage
+
+    deliver projectile { speed: 10.0, width: 0.3 } {
+        on_hit {
+            damage 40 [PHYSICAL: 40, FIRE: 30]
+        }
+        on_arrival {
+            damage 20 in circle(2.0)
+        }
+    }
+}
+
+ability NaturesGrasp {
+    target: enemy, range: 5.0
+    cooldown: 9s, cast: 300ms
+    hint: crowd_control
+
+    root 2500ms [CROWD_CONTROL: 50]
+    damage 15
+}
+
+passive KitingInstinct {
+    trigger: on_damage_taken
+    cooldown: 8s
+
+    buff move_speed 0.3 for 2s
+}
+
+passive Predator {
+    trigger: on_kill
+    cooldown: 5s
+
+    buff damage_output 0.2 for 4s
+}

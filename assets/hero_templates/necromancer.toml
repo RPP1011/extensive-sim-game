@@ -82,7 +82,7 @@ DARK = 60.0
 # --- Ability 4: Plague Cloud ---
 [[abilities]]
 name = "PlagueCloud"
-targeting = "target_position"
+targeting = "ground_target"
 range = 5.0
 cooldown_ms = 12000
 cast_time_ms = 400

@@ -331,3 +331,157 @@ fn roundtrip_mage_matches_toml() {
             "ability {} ({}) delivery presence mismatch", i, toml_ab.name);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Multi-hero porting tests
+// ---------------------------------------------------------------------------
+
+/// Helper to compare key fields between TOML and DSL parsed abilities.
+fn assert_roundtrip(toml_file: &str, dsl_file: &str, hero_name: &str) {
+    let toml_hero: crate::ai::effects::defs::HeroToml =
+        toml::from_str(toml_file).unwrap_or_else(|e| panic!("{hero_name} TOML parse failed: {e}"));
+    let (dsl_abilities, dsl_passives) =
+        parse_abilities(dsl_file).unwrap_or_else(|e| panic!("{hero_name} DSL parse failed: {e}"));
+
+    assert_eq!(toml_hero.abilities.len(), dsl_abilities.len(),
+        "{hero_name}: ability count mismatch");
+    assert_eq!(toml_hero.passives.len(), dsl_passives.len(),
+        "{hero_name}: passive count mismatch");
+
+    for (i, (t, d)) in toml_hero.abilities.iter().zip(&dsl_abilities).enumerate() {
+        assert_eq!(t.name, d.name, "{hero_name} ability {i} name");
+        assert_eq!(t.cooldown_ms, d.cooldown_ms, "{hero_name} {} cooldown", t.name);
+        assert_eq!(t.cast_time_ms, d.cast_time_ms, "{hero_name} {} cast_time", t.name);
+        assert_eq!(t.range, d.range, "{hero_name} {} range", t.name);
+        assert_eq!(t.ai_hint, d.ai_hint, "{hero_name} {} hint", t.name);
+        assert_eq!(t.delivery.is_some(), d.delivery.is_some(),
+            "{hero_name} {} delivery presence", t.name);
+    }
+
+    for (i, (t, d)) in toml_hero.passives.iter().zip(&dsl_passives).enumerate() {
+        assert_eq!(t.name, d.name, "{hero_name} passive {i} name");
+        assert_eq!(t.cooldown_ms, d.cooldown_ms, "{hero_name} {} cooldown", t.name);
+    }
+}
+
+#[test]
+fn roundtrip_warrior() {
+    assert_roundtrip(
+        include_str!("../../../../assets/hero_templates/warrior.toml"),
+        include_str!("../../../../assets/hero_templates/warrior.ability"),
+        "Warrior",
+    );
+}
+
+#[test]
+fn roundtrip_ranger() {
+    assert_roundtrip(
+        include_str!("../../../../assets/hero_templates/ranger.toml"),
+        include_str!("../../../../assets/hero_templates/ranger.ability"),
+        "Ranger",
+    );
+}
+
+#[test]
+fn roundtrip_necromancer() {
+    assert_roundtrip(
+        include_str!("../../../../assets/hero_templates/necromancer.toml"),
+        include_str!("../../../../assets/hero_templates/necromancer.ability"),
+        "Necromancer",
+    );
+}
+
+#[test]
+fn roundtrip_arcanist() {
+    assert_roundtrip(
+        include_str!("../../../../assets/hero_templates/arcanist.toml"),
+        include_str!("../../../../assets/hero_templates/arcanist.ability"),
+        "Arcanist",
+    );
+}
+
+#[test]
+fn parse_zone_tag_property() {
+    let input = r#"
+ability FireRing {
+    target: ground, range: 6.0
+    cooldown: 6s, cast: 300ms
+    hint: damage
+    zone_tag: "fire"
+
+    damage 15 in circle(2.5) [FIRE: 50]
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    assert_eq!(abilities[0].zone_tag, Some("fire".to_string()));
+}
+
+#[test]
+fn parse_trap_delivery() {
+    let input = r#"
+ability BearTrap {
+    target: ground, range: 5.0
+    cooldown: 10s, cast: 200ms
+    hint: crowd_control
+
+    deliver trap { duration: 15s, trigger_radius: 1.5, arm_time: 500ms } {
+        on_hit {
+            damage 25 [PHYSICAL: 40]
+            root 2s [CROWD_CONTROL: 50]
+        }
+    }
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    let trap = &abilities[0];
+    match &trap.delivery {
+        Some(crate::ai::effects::types::Delivery::Trap { duration_ms, trigger_radius, arm_time_ms }) => {
+            assert_eq!(*duration_ms, 15000);
+            assert_eq!(*trigger_radius, 1.5);
+            assert_eq!(*arm_time_ms, 500);
+        }
+        other => panic!("expected Trap delivery, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_summon_with_count() {
+    let input = r#"
+ability Raise {
+    target: self
+    cooldown: 18s, cast: 500ms
+    hint: utility
+
+    summon "skeleton" x2
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    match &abilities[0].effects[0].effect {
+        crate::ai::effects::Effect::Summon { template, count, .. } => {
+            assert_eq!(template, "skeleton");
+            assert_eq!(*count, 2);
+        }
+        other => panic!("expected Summon, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_spread_area() {
+    let input = r#"
+ability MultiShot {
+    target: enemy, range: 6.0
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    damage 30 in spread(4.0, 3) [PHYSICAL: 40]
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    match &abilities[0].effects[0].area {
+        Some(crate::ai::effects::types::Area::Spread { radius, max_targets }) => {
+            assert_eq!(*radius, 4.0);
+            assert_eq!(*max_targets, 3);
+        }
+        other => panic!("expected Spread area, got {other:?}"),
+    }
+}
