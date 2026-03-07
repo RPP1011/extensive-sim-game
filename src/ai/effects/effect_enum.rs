@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::types::{ConditionalEffect, DamageType};
+use super::types::{ConditionalEffect, DamageType, ScalingTerm};
 
 // ---------------------------------------------------------------------------
 // WHAT — Effect types (52 total)
@@ -21,12 +21,16 @@ pub enum Effect {
         duration_ms: u32,
         #[serde(default)]
         tick_interval_ms: u32,
+        /// Legacy single-stat scaling (still supported, prefer `bonus` for new abilities).
         #[serde(default)]
         scaling_stat: Option<String>,
         #[serde(default)]
         scaling_percent: f32,
         #[serde(default)]
         damage_type: DamageType,
+        /// Composable scaling terms: total = amount + sum(stat_i * percent_i / 100).
+        #[serde(default)]
+        bonus: Vec<ScalingTerm>,
     },
     Heal {
         #[serde(default)]
@@ -37,10 +41,14 @@ pub enum Effect {
         duration_ms: u32,
         #[serde(default)]
         tick_interval_ms: u32,
+        /// Legacy single-stat scaling (still supported, prefer `bonus` for new abilities).
         #[serde(default)]
         scaling_stat: Option<String>,
         #[serde(default)]
         scaling_percent: f32,
+        /// Composable scaling terms: total = amount + sum(stat_i * percent_i / 100).
+        #[serde(default)]
+        bonus: Vec<ScalingTerm>,
     },
     Shield {
         amount: i32,
@@ -280,37 +288,6 @@ pub enum Effect {
         ability_index: usize,
     },
 
-    // --- Expressiveness: Percent-Based HP Effects ---
-    /// Deal damage as a percentage of the target's max HP.
-    PercentHpDamage {
-        percent: f32,
-        #[serde(default)]
-        damage_type: DamageType,
-        /// Optional cap on the damage dealt (0 = uncapped).
-        #[serde(default)]
-        max_damage: i32,
-    },
-    /// Heal for a percentage of the target's missing HP.
-    PercentMissingHpHeal {
-        percent: f32,
-    },
-    /// Heal for a percentage of the target's max HP.
-    PercentMaxHpHeal {
-        percent: f32,
-    },
-
-    /// Deal `base + per_stack * N` damage, where N = stack count of `stack_name` on target.
-    DamagePerStack {
-        #[serde(default)]
-        base: i32,
-        per_stack: i32,
-        stack_name: String,
-        #[serde(default)]
-        damage_type: DamageType,
-        /// If true, consume (remove) the stacks after dealing damage.
-        #[serde(default)]
-        consume: bool,
-    },
 }
 
 fn default_summon_count() -> u32 {

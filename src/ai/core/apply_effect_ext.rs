@@ -422,52 +422,6 @@ pub fn apply_effect_extended(
             }
         }
 
-        // --- Expressiveness: Percent-Based HP Effects ---
-        Effect::PercentHpDamage { percent, damage_type, max_damage } => {
-            if let Some(tidx) = find_unit_idx(state, target_id) {
-                let max_hp = state.units[tidx].max_hp;
-                let mut dmg = (max_hp as f32 * percent / 100.0) as i32;
-                if *max_damage > 0 {
-                    dmg = dmg.min(*max_damage);
-                }
-                super::damage::apply_typed_damage(caster_idx, target_id, dmg, *damage_type, tick, state, events);
-            }
-        }
-        Effect::PercentMissingHpHeal { percent } => {
-            if let Some(tidx) = find_unit_idx(state, target_id) {
-                let missing_hp = state.units[tidx].max_hp - state.units[tidx].hp;
-                let heal = (missing_hp as f32 * percent / 100.0).max(0.0) as i32;
-                super::damage::apply_heal_to_unit(caster_idx, target_id, heal, tick, state, events);
-            }
-        }
-        Effect::PercentMaxHpHeal { percent } => {
-            if let Some(tidx) = find_unit_idx(state, target_id) {
-                let max_hp = state.units[tidx].max_hp;
-                let heal = (max_hp as f32 * percent / 100.0) as i32;
-                super::damage::apply_heal_to_unit(caster_idx, target_id, heal, tick, state, events);
-            }
-        }
-
-        Effect::DamagePerStack { base, per_stack, ref stack_name, damage_type, consume } => {
-            if let Some(tidx) = find_unit_idx(state, target_id) {
-                let stack_count = state.units[tidx].status_effects.iter()
-                    .find_map(|s| match &s.kind {
-                        StatusKind::Stacks { name, count, .. } if name == stack_name => Some(*count),
-                        _ => None,
-                    })
-                    .unwrap_or(0);
-                let dmg = *base + *per_stack * stack_count as i32;
-                if dmg > 0 {
-                    super::damage::apply_typed_damage(caster_idx, target_id, dmg, *damage_type, tick, state, events);
-                }
-                if *consume {
-                    state.units[tidx].status_effects.retain(|s| {
-                        !matches!(&s.kind, StatusKind::Stacks { name, .. } if name == stack_name)
-                    });
-                }
-            }
-        }
-
         // Effects already handled by apply_effect_primary
         _ => {}
     }

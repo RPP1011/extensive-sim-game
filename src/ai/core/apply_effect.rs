@@ -77,7 +77,7 @@ fn apply_effect_primary(
     events: &mut Vec<SimEvent>,
 ) -> bool {
     match effect {
-        Effect::Damage { amount, amount_per_tick, duration_ms, tick_interval_ms, scaling_stat, scaling_percent, damage_type } => {
+        Effect::Damage { amount, amount_per_tick, duration_ms, tick_interval_ms, scaling_stat, scaling_percent, damage_type, ref bonus } => {
             if *duration_ms > 0 && *amount_per_tick > 0 {
                 if let Some(tidx) = find_unit_idx(state, target_id) {
                     state.units[tidx].status_effects.push(ActiveStatusEffect {
@@ -97,12 +97,16 @@ fn apply_effect_primary(
                         effect_name: "DoT".to_string(),
                     });
                 }
-            } else if *amount > 0 {
+            } else {
                 let scaled = compute_scaling(*amount, scaling_stat.as_deref(), *scaling_percent, caster_idx, target_id, state);
-                apply_typed_damage(caster_idx, target_id, scaled, *damage_type, tick, state, events);
+                let bonus_amount = resolve_bonus(bonus, caster_idx, target_id, state);
+                let total = scaled + bonus_amount;
+                if total > 0 {
+                    apply_typed_damage(caster_idx, target_id, total, *damage_type, tick, state, events);
+                }
             }
         }
-        Effect::Heal { amount, amount_per_tick, duration_ms, tick_interval_ms, scaling_stat, scaling_percent } => {
+        Effect::Heal { amount, amount_per_tick, duration_ms, tick_interval_ms, scaling_stat, scaling_percent, ref bonus } => {
             if *duration_ms > 0 && *amount_per_tick > 0 {
                 if let Some(tidx) = find_unit_idx(state, target_id) {
                     state.units[tidx].status_effects.push(ActiveStatusEffect {
@@ -122,9 +126,13 @@ fn apply_effect_primary(
                         effect_name: "HoT".to_string(),
                     });
                 }
-            } else if *amount > 0 {
+            } else {
                 let scaled = compute_scaling(*amount, scaling_stat.as_deref(), *scaling_percent, caster_idx, target_id, state);
-                apply_heal_to_unit(caster_idx, target_id, scaled, tick, state, events);
+                let bonus_amount = resolve_bonus(bonus, caster_idx, target_id, state);
+                let total = scaled + bonus_amount;
+                if total > 0 {
+                    apply_heal_to_unit(caster_idx, target_id, total, tick, state, events);
+                }
             }
         }
         Effect::Shield { amount, duration_ms } => {

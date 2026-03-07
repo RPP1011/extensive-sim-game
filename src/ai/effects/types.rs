@@ -12,6 +12,41 @@ use std::collections::HashMap;
 pub use super::effect_enum::Effect;
 
 // ---------------------------------------------------------------------------
+// ScalingTerm — composable value expressions for effect amounts
+// ---------------------------------------------------------------------------
+
+/// A stat reference that can be resolved at runtime against the sim state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StatRef {
+    TargetMaxHp,
+    TargetCurrentHp,
+    TargetMissingHp,
+    CasterMaxHp,
+    CasterCurrentHp,
+    CasterMissingHp,
+    CasterAttackDamage,
+    /// Number of stacks with the given name on the target.
+    TargetStacks { name: String },
+    /// Number of stacks with the given name on the caster.
+    CasterStacks { name: String },
+}
+
+/// One additive scaling term: contributes `percent`% of `stat` to an effect's amount.
+/// Multiple terms stack additively: total = base_amount + sum(stat_i * percent_i / 100).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScalingTerm {
+    pub stat: StatRef,
+    pub percent: f32,
+    /// Hard cap on this term's contribution (0 = uncapped).
+    #[serde(default)]
+    pub max: i32,
+    /// If true, consume (remove) the referenced stacks after reading.
+    #[serde(default)]
+    pub consume: bool,
+}
+
+// ---------------------------------------------------------------------------
 // Tags — arbitrary named resistance/power levels
 // ---------------------------------------------------------------------------
 

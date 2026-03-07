@@ -332,54 +332,80 @@ type = "target_is_stunned"
     }
 }
 
-// --- Percent HP Effect Tests ---
+// --- ScalingTerm (bonus) Tests ---
 
 #[test]
-fn parse_percent_hp_damage() {
+fn parse_damage_with_bonus_scaling_terms() {
     let toml_str = r#"
-type = "percent_hp_damage"
+type = "damage"
+amount = 0
+
+[[bonus]]
+stat = "target_max_hp"
 percent = 10.0
-damage_type = "magic"
-max_damage = 200
-"#;
-    let effect: Effect = toml::from_str(toml_str).unwrap();
-    match effect {
-        Effect::PercentHpDamage { percent, damage_type, max_damage } => {
-            assert!((percent - 10.0).abs() < 0.01);
-            assert!(matches!(damage_type, DamageType::Magic));
-            assert_eq!(max_damage, 200);
-        }
-        _ => panic!("expected PercentHpDamage"),
-    }
-}
+max = 200
 
-#[test]
-fn parse_percent_missing_hp_heal() {
-    let toml_str = r#"
-type = "percent_missing_hp_heal"
+[[bonus]]
+stat = "caster_attack_damage"
 percent = 50.0
 "#;
     let effect: Effect = toml::from_str(toml_str).unwrap();
     match effect {
-        Effect::PercentMissingHpHeal { percent } => {
-            assert!((percent - 50.0).abs() < 0.01);
+        Effect::Damage { amount, ref bonus, .. } => {
+            assert_eq!(amount, 0);
+            assert_eq!(bonus.len(), 2);
+            assert!(matches!(bonus[0].stat, StatRef::TargetMaxHp));
+            assert!((bonus[0].percent - 10.0).abs() < 0.01);
+            assert_eq!(bonus[0].max, 200);
+            assert!(matches!(bonus[1].stat, StatRef::CasterAttackDamage));
+            assert!((bonus[1].percent - 50.0).abs() < 0.01);
         }
-        _ => panic!("expected PercentMissingHpHeal"),
+        _ => panic!("expected Damage"),
     }
 }
 
 #[test]
-fn parse_percent_max_hp_heal() {
+fn parse_heal_with_bonus_scaling_terms() {
     let toml_str = r#"
-type = "percent_max_hp_heal"
-percent = 15.0
+type = "heal"
+amount = 0
+
+[[bonus]]
+stat = "target_missing_hp"
+percent = 50.0
 "#;
     let effect: Effect = toml::from_str(toml_str).unwrap();
     match effect {
-        Effect::PercentMaxHpHeal { percent } => {
-            assert!((percent - 15.0).abs() < 0.01);
+        Effect::Heal { amount, ref bonus, .. } => {
+            assert_eq!(amount, 0);
+            assert_eq!(bonus.len(), 1);
+            assert!(matches!(bonus[0].stat, StatRef::TargetMissingHp));
+            assert!((bonus[0].percent - 50.0).abs() < 0.01);
         }
-        _ => panic!("expected PercentMaxHpHeal"),
+        _ => panic!("expected Heal"),
+    }
+}
+
+#[test]
+fn parse_damage_with_stack_scaling_and_consume() {
+    let toml_str = r#"
+type = "damage"
+amount = 20
+
+[[bonus]]
+stat.target_stacks = { name = "venom" }
+percent = 1500.0
+consume = true
+"#;
+    let effect: Effect = toml::from_str(toml_str).unwrap();
+    match effect {
+        Effect::Damage { amount, ref bonus, .. } => {
+            assert_eq!(amount, 20);
+            assert_eq!(bonus.len(), 1);
+            assert!(matches!(&bonus[0].stat, StatRef::TargetStacks { name } if name == "venom"));
+            assert!(bonus[0].consume);
+        }
+        _ => panic!("expected Damage"),
     }
 }
 
@@ -434,31 +460,6 @@ percent = 80.0
     match cond {
         Condition::CasterResourceAbove { percent } => assert!((percent - 80.0).abs() < 0.01),
         _ => panic!("expected CasterResourceAbove"),
-    }
-}
-
-// --- DamagePerStack Effect Test ---
-
-#[test]
-fn parse_damage_per_stack() {
-    let toml_str = r#"
-type = "damage_per_stack"
-base = 20
-per_stack = 15
-stack_name = "venom"
-damage_type = "magic"
-consume = true
-"#;
-    let effect: Effect = toml::from_str(toml_str).unwrap();
-    match effect {
-        Effect::DamagePerStack { base, per_stack, stack_name, damage_type, consume } => {
-            assert_eq!(base, 20);
-            assert_eq!(per_stack, 15);
-            assert_eq!(stack_name, "venom");
-            assert!(matches!(damage_type, DamageType::Magic));
-            assert!(consume);
-        }
-        _ => panic!("expected DamagePerStack"),
     }
 }
 

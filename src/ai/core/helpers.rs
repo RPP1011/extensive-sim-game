@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use crate::ai::effects::StatusKind;
+use crate::ai::effects::{ScalingTerm, StatRef, StatusKind};
 
 use super::types::*;
 use super::events::SimEvent;
@@ -185,4 +185,81 @@ pub fn compute_scaling(base: i32, stat: Option<&str>, pct: f32, caster_idx: usiz
         _ => 0.0,
     };
     base + (stat_val * pct / 100.0) as i32
+}
+
+/// Resolve composable scaling terms against the sim state.
+/// Returns the total bonus to add to a base amount.
+/// Each term contributes: stat_value * percent / 100, optionally capped by `max`.
+/// If `consume` is set on a term referencing stacks, those stacks are removed.
+pub fn resolve_bonus(terms: &[ScalingTerm], caster_idx: usize, target_id: u32, state: &mut SimState) -> i32 {
+    if terms.is_empty() {
+        return 0;
+    }
+    let mut total = 0i32;
+    for term in terms {
+        let stat_val = resolve_stat_ref(&term.stat, caster_idx, target_id, state);
+        let mut contribution = (stat_val * term.percent / 100.0) as i32;
+        if term.max > 0 {
+            contribution = contribution.min(term.max);
+        }
+        total += contribution;
+        if term.consume {
+            consume_stacks(&term.stat, caster_idx, target_id, state);
+        }
+    }
+    total
+}
+
+fn resolve_stat_ref(stat: &StatRef, caster_idx: usize, target_id: u32, state: &SimState) -> f32 {
+    match stat {
+        StatRef::CasterMaxHp => state.units[caster_idx].max_hp as f32,
+        StatRef::CasterCurrentHp => state.units[caster_idx].hp as f32,
+        StatRef::CasterMissingHp => (state.units[caster_idx].max_hp - state.units[caster_idx].hp) as f32,
+        StatRef::TargetMaxHp => {
+            find_unit_idx(state, target_id).map_or(0.0, |i| state.units[i].max_hp as f32)
+        }
+        StatRef::TargetCurrentHp => {
+            find_unit_idx(state, target_id).map_or(0.0, |i| state.units[i].hp as f32)
+        }
+        StatRef::TargetMissingHp => {
+            find_unit_idx(state, target_id).map_or(0.0, |i| (state.units[i].max_hp - state.units[i].hp) as f32)
+        }
+        StatRef::CasterAttackDamage => state.units[caster_idx].attack_damage as f32,
+        StatRef::TargetStacks { ref name } => {
+            find_unit_idx(state, target_id).map_or(0.0, |i| {
+                state.units[i].status_effects.iter()
+                    .find_map(|s| match &s.kind {
+                        StatusKind::Stacks { name: n, count, .. } if n == name => Some(*count as f32),
+                        _ => None,
+                    })
+                    .unwrap_or(0.0)
+            })
+        }
+        StatRef::CasterStacks { ref name } => {
+            state.units[caster_idx].status_effects.iter()
+                .find_map(|s| match &s.kind {
+                    StatusKind::Stacks { name: n, count, .. } if n == name => Some(*count as f32),
+                    _ => None,
+                })
+                .unwrap_or(0.0)
+        }
+    }
+}
+
+fn consume_stacks(stat: &StatRef, _caster_idx: usize, target_id: u32, state: &mut SimState) {
+    match stat {
+        StatRef::TargetStacks { ref name } => {
+            if let Some(i) = find_unit_idx(state, target_id) {
+                state.units[i].status_effects.retain(|s| {
+                    !matches!(&s.kind, StatusKind::Stacks { name: n, .. } if n == name)
+                });
+            }
+        }
+        StatRef::CasterStacks { ref name } => {
+            state.units[_caster_idx].status_effects.retain(|s| {
+                !matches!(&s.kind, StatusKind::Stacks { name: n, .. } if n == name)
+            });
+        }
+        _ => {} // Only stack refs can be consumed
+    }
 }
