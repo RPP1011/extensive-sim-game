@@ -7,6 +7,7 @@ edition = "2021"
 default = []
 gemini = ["dep:gemini-rust"]
 app = []
+burn-training = ["dep:burn"]
 
 [dependencies]
 base64 = "0.22"
@@ -25,6 +26,7 @@ hnsw_rs = "0.3.3"
 image = "0.25"
 rayon = "1.10"
 winnow = "0.7"
+burn = { version = "0.20", features = ["ndarray", "autodiff"], optional = true }
 
 [dev-dependencies]
 proptest = "1.6"
