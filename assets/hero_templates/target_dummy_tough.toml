@@ -1,0 +1,12 @@
+[hero]
+name = "TargetDummyTough"
+
+[stats]
+hp = 100
+move_speed = 0.5
+
+[attack]
+damage = 1
+range = 1.0
+cooldown = 2000
+cast_time = 300

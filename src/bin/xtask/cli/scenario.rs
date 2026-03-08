@@ -40,6 +40,9 @@ pub enum OracleSubcommand {
     SelfPlay(SelfPlayArgs),
     RawDataset(RawDatasetArgs),
     OutcomeDataset(OutcomeDatasetArgs),
+    NextstateDataset(NextstateDatasetArgs),
+    TransformerPlay(TransformerPlayArgs),
+    TransformerRl(TransformerRlArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -205,6 +208,22 @@ pub struct OutcomeDatasetArgs {
     /// Sample every N ticks (controls dataset size)
     #[arg(long, default_value_t = 5)]
     pub sample_interval: u64,
+    /// Use v2 format: variable-length entities + threats
+    #[arg(long)]
+    pub v2: bool,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Generate next-state prediction dataset for entity encoder pre-training")]
+pub struct NextstateDatasetArgs {
+    /// Path to a scenario .toml file, or a directory
+    pub path: PathBuf,
+    /// Output JSONL file
+    #[arg(long, default_value = "generated/nextstate_dataset.jsonl")]
+    pub output: PathBuf,
+    /// Sample every N ticks (1 = every tick for max pairing flexibility)
+    #[arg(long, default_value_t = 1)]
+    pub sample_interval: u64,
 }
 
 #[derive(Debug, Parser)]
@@ -216,6 +235,85 @@ pub struct AbilityEncoderExportArgs {
     /// Also include LoL heroes from assets/lol_heroes/
     #[arg(long, default_value_t = true)]
     pub include_lol: bool,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Play scenarios using ability transformer (DSL tokens + entity encoder)")]
+pub struct TransformerPlayArgs {
+    /// Path to scenario .toml file or directory
+    pub path: PathBuf,
+    /// Path to ability transformer decision weights JSON
+    #[arg(long)]
+    pub weights: PathBuf,
+    /// Urgency threshold for firing abilities (0.0-1.0)
+    #[arg(long, default_value_t = 0.4)]
+    pub urgency_threshold: f32,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Actor-critic RL with ability transformer")]
+pub struct TransformerRlArgs {
+    #[command(subcommand)]
+    pub sub: TransformerRlSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TransformerRlSubcommand {
+    Generate(TransformerRlGenerateArgs),
+    Eval(TransformerRlEvalArgs),
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Generate RL episodes using transformer policy")]
+pub struct TransformerRlGenerateArgs {
+    /// Path to scenario .toml file or directory
+    pub path: PathBuf,
+    /// Path to policy weights JSON (not required for --policy combined)
+    #[arg(long)]
+    pub weights: Option<PathBuf>,
+    /// Policy type: transformer (default) or combined (ability-eval + squad AI)
+    #[arg(long, default_value = "transformer")]
+    pub policy: String,
+    /// Path to ability eval weights JSON (for --policy combined)
+    #[arg(long)]
+    pub ability_eval: Option<PathBuf>,
+    /// Path to ability encoder weights JSON (for --policy combined)
+    #[arg(long)]
+    pub ability_encoder: Option<PathBuf>,
+    /// Path to combat student model JSON (for --policy combined)
+    #[arg(long)]
+    pub student_model: Option<PathBuf>,
+    /// Output JSONL file
+    #[arg(long, short, default_value = "generated/rl_episodes.jsonl")]
+    pub output: PathBuf,
+    /// Episodes per scenario
+    #[arg(long, default_value_t = 10)]
+    pub episodes: u32,
+    /// Sampling temperature (higher = more exploration)
+    #[arg(long, default_value_t = 1.0)]
+    pub temperature: f32,
+    /// Number of parallel threads (0 = all cores)
+    #[arg(short = 'j', long, default_value_t = 0)]
+    pub threads: usize,
+    /// Record steps every N ticks
+    #[arg(long, default_value_t = 3)]
+    pub step_interval: u64,
+    /// Override scenario max_ticks
+    #[arg(long)]
+    pub max_ticks: Option<u64>,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Evaluate transformer RL policy (greedy)")]
+pub struct TransformerRlEvalArgs {
+    /// Path to scenario .toml file or directory
+    pub path: PathBuf,
+    /// Path to ability transformer weights JSON
+    #[arg(long)]
+    pub weights: PathBuf,
+    /// Override scenario max_ticks
+    #[arg(long)]
+    pub max_ticks: Option<u64>,
 }
 
 #[derive(Debug, Parser)]
@@ -280,4 +378,7 @@ pub struct ScenarioBenchArgs {
     /// Number of parallel threads (0 = use all available cores)
     #[arg(short = 'j', long, default_value_t = 0)]
     pub threads: usize,
+    /// Profile per-phase timing breakdown (intent generation vs sim step)
+    #[arg(long)]
+    pub profile: bool,
 }

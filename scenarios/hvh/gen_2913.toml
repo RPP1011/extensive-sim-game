@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0051_4v4"
+seed = 1974
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["knight", "cleric", "warden", "engineer"]
+enemy_hero_templates = ["cleric", "arcanist", "pyromancer", "mage"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

@@ -1,0 +1,18 @@
+# Tutorial 13: Attack from max range only — concentric damage rings.
+# Inner ring (r=2.0) and outer ring (r=4.0) pulse damage constantly.
+# Only the ranger's max attack range (5.0) is safe. Stand too close = die.
+# Teaches: precise positioning, maintaining max attack range.
+[scenario]
+name = "Tutorial 13 — Max Range Positioning"
+seed = 112
+hero_count = 1
+enemy_count = 0
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["ranger"]
+enemy_hero_templates = ["ring_fortress"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Either"

@@ -2130,13 +2130,14 @@ ability Transform {
             ))
         }
 
-        // Mix: 60K coherent (80%) + 10K normal (13%) + 5K complex (7%)
-        // This gives the model mostly realistic abilities to learn from,
-        // with enough variety to cover the full grammar.
+        // Mix: 95% coherent + 5% grammar coverage (normal/complex/god)
+        // Coherent abilities have hint-aligned effects and realistic numerics,
+        // giving the transformer consistent semantic patterns to learn from.
+        // The 5% unrestricted tier ensures full grammar coverage.
 
-        // --- Coherent abilities: 240 seeds × 250 = 60,000 ---
+        // --- Coherent abilities: 288 seeds × 250 = 72,000 ---
         let batch = 250;
-        for seed in 0..240u64 {
+        for seed in 0..288u64 {
             let mut runner = make_runner(seed);
             let strat = proptest::collection::vec(coherent_ability(), batch..=batch);
             let tree = strat.new_tree(&mut runner).unwrap();
@@ -2144,9 +2145,9 @@ ability Transform {
         }
         eprintln!("Generated {} coherent abilities", all_dsl.len());
 
-        // --- Normal abilities (unrestricted params): 40 seeds × 250 = 10,000 ---
+        // --- Normal abilities (unrestricted params): 6 seeds × 250 = 1,500 ---
         let normal_start = all_dsl.len();
-        for seed in 0..40u64 {
+        for seed in 0..6u64 {
             let mut runner = make_runner(seed + 1000);
             let strat = proptest::collection::vec(ability_block(), batch..=batch);
             let tree = strat.new_tree(&mut runner).unwrap();
@@ -2154,9 +2155,9 @@ ability Transform {
         }
         eprintln!("Generated {} normal abilities", all_dsl.len() - normal_start);
 
-        // --- Complex (abominations): 12 seeds × 250 = 3,000 ---
+        // --- Complex (abominations): 4 seeds × 250 = 1,000 ---
         let abom_start = all_dsl.len();
-        for seed in 0..12u64 {
+        for seed in 0..4u64 {
             let mut runner = make_runner(seed + 2000);
             let strat = proptest::collection::vec(abomination_block(), batch..=batch);
             let tree = strat.new_tree(&mut runner).unwrap();
@@ -2164,9 +2165,9 @@ ability Transform {
         }
         eprintln!("Generated {} abomination abilities", all_dsl.len() - abom_start);
 
-        // --- God abilities: 8 seeds × 250 = 2,000 ---
+        // --- God abilities: 2 seeds × 250 = 500 ---
         let god_start = all_dsl.len();
-        for seed in 0..8u64 {
+        for seed in 0..2u64 {
             let mut runner = make_runner(seed + 3000);
             let strat = proptest::collection::vec(god_ability_block(), batch..=batch);
             let tree = strat.new_tree(&mut runner).unwrap();

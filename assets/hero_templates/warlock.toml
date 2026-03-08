@@ -21,7 +21,7 @@ name = "ShadowBolt"
 targeting = "target_enemy"
 range = 5.0
 cooldown_ms = 4000
-cast_time_ms = 300
+cast_time_ms = 500
 ai_hint = "damage"
 
 [abilities.delivery]

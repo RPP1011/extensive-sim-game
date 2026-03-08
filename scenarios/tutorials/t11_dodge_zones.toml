@@ -1,0 +1,16 @@
+# Tutorial 11: Dodge persistent damage zones.
+# Enemy drops fire zones and slow fields — hero must avoid standing in them.
+# Teaches: zone awareness, repositioning, fighting while dodging AoE.
+[scenario]
+name = "Tutorial 11 — Dodge the Danger Zones"
+seed = 110
+hero_count = 1
+enemy_count = 0
+difficulty = 1
+max_ticks = 6000
+room_type = "Entry"
+hero_templates = ["warrior"]
+enemy_hero_templates = ["zone_caster"]
+
+[assert]
+outcome = "Either"

@@ -1,0 +1,13 @@
+# Slow-moving enemy that fights back weakly — teaches "attack while staying alive"
+[hero]
+name = "PunchingBag"
+
+[stats]
+hp = 60
+move_speed = 1.0
+
+[attack]
+damage = 5
+range = 1.5
+cooldown = 1500
+cast_time = 300

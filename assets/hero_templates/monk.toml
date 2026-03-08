@@ -137,7 +137,7 @@ name = "SpinningCraneKick"
 targeting = "self_aoe"
 range = 0.0
 cooldown_ms = 6000
-cast_time_ms = 200
+cast_time_ms = 300
 ai_hint = "damage"
 
 [[abilities.effects]]

@@ -1,0 +1,16 @@
+# Tutorial 6: 2 heroes kill 3 dummies — first multi-unit coordination.
+# Teaches: splitting targets, team coordination basics.
+[scenario]
+name = "Tutorial 06 — Team Kill Dummies"
+seed = 105
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 600
+room_type = "Entry"
+hero_templates = ["warrior", "ranger"]
+enemy_hero_templates = ["target_dummy", "target_dummy", "target_dummy"]
+
+[assert]
+outcome = "Victory"
+max_ticks_to_win = 400

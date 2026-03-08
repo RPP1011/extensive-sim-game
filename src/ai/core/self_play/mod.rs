@@ -62,7 +62,7 @@ pub const NUM_ACTIONS: usize = 14;
 #[allow(unused_imports)]
 pub use features::{extract_features, extract_features_encoded};
 #[allow(unused_imports)]
-pub use actions::{action_mask, action_to_intent, action_to_intent_with_focus};
+pub use actions::{action_mask, action_to_intent, action_to_intent_with_focus, intent_to_action};
 #[allow(unused_imports)]
 pub use policy::{PolicyWeights, LayerWeights, masked_softmax, lcg_f32, Step, Episode};
 #[allow(unused_imports)]

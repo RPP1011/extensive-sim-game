@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0114_5v5_s1"
+seed = 12037
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["knight", "alchemist", "warden", "cleric", "rogue"]
+enemy_hero_templates = ["Rengar", "Qiyana", "Olaf", "Hecarim", "Sivir"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

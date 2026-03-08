@@ -1,0 +1,16 @@
+# Tutorial 5: Kite a slow hard-hitting brute.
+# Teaches: move away from danger, dodge attacks, use range advantage.
+[scenario]
+name = "Tutorial 05 — Kite the Brute"
+seed = 104
+hero_count = 1
+enemy_count = 0
+difficulty = 1
+max_ticks = 1000
+room_type = "Entry"
+hero_templates = ["ranger"]
+enemy_hero_templates = ["slow_brute"]
+
+[assert]
+outcome = "Victory"
+min_heroes_alive = 1

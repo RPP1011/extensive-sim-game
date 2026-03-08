@@ -1,0 +1,16 @@
+# Tutorial 1: Walk to a stationary target and kill it.
+# Teaches: move toward enemy, basic attack.
+[scenario]
+name = "Tutorial 01 — Kill Target Dummy"
+seed = 100
+hero_count = 1
+enemy_count = 0
+difficulty = 1
+max_ticks = 500
+room_type = "Entry"
+hero_templates = ["warrior"]
+enemy_hero_templates = ["target_dummy"]
+
+[assert]
+outcome = "Victory"
+max_ticks_to_win = 400

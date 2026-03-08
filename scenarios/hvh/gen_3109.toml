@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0116_4v4_s1"
+seed = 12039
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["warrior", "templar", "Shaco", "Akshan"]
+enemy_hero_templates = ["Khazix", "Xerath", "pyromancer", "Yorick"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

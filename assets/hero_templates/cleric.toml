@@ -78,7 +78,7 @@ name = "Smite"
 targeting = "target_enemy"
 range = 4.0
 cooldown_ms = 4000
-cast_time_ms = 300
+cast_time_ms = 400
 ai_hint = "damage"
 
 [[abilities.effects]]

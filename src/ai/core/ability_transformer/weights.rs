@@ -7,6 +7,34 @@
 use serde::Deserialize;
 
 // ---------------------------------------------------------------------------
+// SIMD-friendly dot product — auto-vectorized by LLVM
+// ---------------------------------------------------------------------------
+
+#[inline]
+fn dot_product(a: &[f32], b: &[f32]) -> f32 {
+    debug_assert_eq!(a.len(), b.len());
+    // Process in chunks of 8 for autovectorization
+    let n = a.len();
+    let chunks = n / 8;
+    let mut sum0 = 0.0f32;
+    let mut sum1 = 0.0f32;
+    let mut sum2 = 0.0f32;
+    let mut sum3 = 0.0f32;
+    for c in 0..chunks {
+        let base = c * 8;
+        sum0 += a[base] * b[base] + a[base + 1] * b[base + 1];
+        sum1 += a[base + 2] * b[base + 2] + a[base + 3] * b[base + 3];
+        sum2 += a[base + 4] * b[base + 4] + a[base + 5] * b[base + 5];
+        sum3 += a[base + 6] * b[base + 6] + a[base + 7] * b[base + 7];
+    }
+    let mut sum = sum0 + sum1 + sum2 + sum3;
+    for i in (chunks * 8)..n {
+        sum += a[i] * b[i];
+    }
+    sum
+}
+
+// ---------------------------------------------------------------------------
 // JSON schema (matches training/export_weights.py output)
 // ---------------------------------------------------------------------------
 
@@ -120,14 +148,11 @@ impl FlatLinear {
     }
 
     /// y = Wx + b
+    #[inline]
     fn forward(&self, input: &[f32], output: &mut [f32]) {
         for i in 0..self.out_dim {
-            let mut sum = self.b[i];
-            let row_start = i * self.in_dim;
-            for j in 0..self.in_dim {
-                sum += self.w[row_start + j] * input[j];
-            }
-            output[i] = sum;
+            let row = &self.w[i * self.in_dim..(i + 1) * self.in_dim];
+            output[i] = self.b[i] + dot_product(row, input);
         }
     }
 
@@ -209,60 +234,54 @@ impl TransformerLayer {
     /// Forward pass for one transformer layer (pre-norm style).
     /// `seq` is [seq_len × d_model] in row-major.
     /// `mask` has `true` for positions to attend, `false` for padding.
-    fn forward(&self, seq: &mut [f32], seq_len: usize, mask: &[bool]) {
+    /// `scratch` is a reusable buffer to avoid per-call allocations.
+    fn forward(&self, seq: &mut [f32], seq_len: usize, mask: &[bool], scratch: &mut TransformerScratch) {
         let d = self.d_model;
-
-        // Allocate temporaries
-        let mut normed = vec![0.0f32; seq_len * d];
-        let mut qkv = vec![0.0f32; seq_len * 3 * d];
-        let mut attn_out = vec![0.0f32; seq_len * d];
+        scratch.ensure(seq_len, d, self.ff1.out_dim);
 
         // --- Pre-norm self-attention ---
         // 1. Layer norm
         for t in 0..seq_len {
-            normed[t * d..(t + 1) * d].copy_from_slice(&seq[t * d..(t + 1) * d]);
-            self.norm1.forward(&mut normed[t * d..(t + 1) * d]);
+            scratch.normed[t * d..(t + 1) * d].copy_from_slice(&seq[t * d..(t + 1) * d]);
+            self.norm1.forward(&mut scratch.normed[t * d..(t + 1) * d]);
         }
 
         // 2. QKV projection
         for t in 0..seq_len {
             self.attn_in_proj.forward(
-                &normed[t * d..(t + 1) * d],
-                &mut qkv[t * 3 * d..(t + 1) * 3 * d],
+                &scratch.normed[t * d..(t + 1) * d],
+                &mut scratch.qkv[t * 3 * d..(t + 1) * 3 * d],
             );
         }
 
         // 3. Multi-head attention
-        self.multi_head_attention(&qkv, &mut attn_out, seq_len, mask);
+        for v in scratch.attn_out[..seq_len * d].iter_mut() { *v = 0.0; }
+        self.multi_head_attention(&scratch.qkv, &mut scratch.attn_out, seq_len, mask);
 
         // 4. Output projection + residual
-        let mut proj_out = vec![0.0f32; d];
         for t in 0..seq_len {
             self.attn_out_proj.forward(
-                &attn_out[t * d..(t + 1) * d],
-                &mut proj_out,
+                &scratch.attn_out[t * d..(t + 1) * d],
+                &mut scratch.proj_out[..d],
             );
             for i in 0..d {
-                seq[t * d + i] += proj_out[i];
+                seq[t * d + i] += scratch.proj_out[i];
             }
         }
 
         // --- Pre-norm feed-forward ---
         // 1. Layer norm
         for t in 0..seq_len {
-            normed[t * d..(t + 1) * d].copy_from_slice(&seq[t * d..(t + 1) * d]);
-            self.norm2.forward(&mut normed[t * d..(t + 1) * d]);
+            scratch.normed[t * d..(t + 1) * d].copy_from_slice(&seq[t * d..(t + 1) * d]);
+            self.norm2.forward(&mut scratch.normed[t * d..(t + 1) * d]);
         }
 
         // 2. FFN: GELU(x W1 + b1) W2 + b2
-        let d_ff = self.ff1.out_dim;
-        let mut ff_hidden = vec![0.0f32; d_ff];
-        let mut ff_out = vec![0.0f32; d];
         for t in 0..seq_len {
-            self.ff1.forward_gelu(&normed[t * d..(t + 1) * d], &mut ff_hidden);
-            self.ff2.forward(&ff_hidden, &mut ff_out);
+            self.ff1.forward_gelu(&scratch.normed[t * d..(t + 1) * d], &mut scratch.ff_hidden);
+            self.ff2.forward(&scratch.ff_hidden, &mut scratch.ff_out[..d]);
             for i in 0..d {
-                seq[t * d + i] += ff_out[i];
+                seq[t * d + i] += scratch.ff_out[i];
             }
         }
     }
@@ -313,6 +332,45 @@ impl TransformerLayer {
                     output[qi * d + offset + f] = sum;
                 }
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reusable scratch buffers (avoid per-layer per-tick allocations)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+struct TransformerScratch {
+    normed: Vec<f32>,
+    qkv: Vec<f32>,
+    attn_out: Vec<f32>,
+    proj_out: Vec<f32>,
+    ff_hidden: Vec<f32>,
+    ff_out: Vec<f32>,
+}
+
+impl TransformerScratch {
+    fn ensure(&mut self, seq_len: usize, d_model: usize, d_ff: usize) {
+        let n = seq_len * d_model;
+        if self.normed.len() < n {
+            self.normed.resize(n, 0.0);
+        }
+        let qkv_n = seq_len * 3 * d_model;
+        if self.qkv.len() < qkv_n {
+            self.qkv.resize(qkv_n, 0.0);
+        }
+        if self.attn_out.len() < n {
+            self.attn_out.resize(n, 0.0);
+        }
+        if self.proj_out.len() < d_model {
+            self.proj_out.resize(d_model, 0.0);
+        }
+        if self.ff_hidden.len() < d_ff {
+            self.ff_hidden.resize(d_ff, 0.0);
+        }
+        if self.ff_out.len() < d_model {
+            self.ff_out.resize(d_model, 0.0);
         }
     }
 }
@@ -383,8 +441,9 @@ impl FlatEntityEncoder {
         }
 
         // Self-attention over entities (from pre-training)
+        let mut scratch = TransformerScratch::default();
         for layer in &self.self_attn_layers {
-            layer.forward(&mut tokens, NUM_ENTITIES, &mask);
+            layer.forward(&mut tokens, NUM_ENTITIES, &mask, &mut scratch);
         }
 
         // Output norm per entity
@@ -645,8 +704,9 @@ impl AbilityTransformerWeights {
             }
         }
 
+        let mut scratch = TransformerScratch::default();
         for layer in &self.layers {
-            layer.forward(&mut seq, seq_len, &mask);
+            layer.forward(&mut seq, seq_len, &mask, &mut scratch);
         }
 
         let mut cls = vec![0.0f32; d];
@@ -819,6 +879,957 @@ fn softmax_inplace(x: &mut [f32]) {
 }
 
 // ---------------------------------------------------------------------------
+// Actor-critic inference (full 14-action policy)
+// ---------------------------------------------------------------------------
+
+const NUM_BASE_ACTIONS: usize = 6;
+const AC_MAX_ABILITIES: usize = 8;
+/// Total actions: 3 attack + 8 ability + 2 move + 1 hold = 14
+pub const AC_NUM_ACTIONS: usize = 14;
+
+#[derive(Debug, Deserialize)]
+struct HeadJson {
+    linear1: LinearWeights,
+    linear2: LinearWeights,
+}
+
+#[derive(Debug, Deserialize)]
+struct ActorCriticFileJson {
+    #[allow(dead_code)]
+    format: Option<String>,
+    architecture: ActorCriticArchJson,
+    token_embedding: Vec<Vec<f32>>,
+    position_embedding: Vec<Vec<f32>>,
+    output_norm: LayerNormWeights,
+    layers: Vec<TransformerLayerJson>,
+    entity_encoder: EntityEncoderJson,
+    cross_attn: CrossAttnJson,
+    base_head: HeadJson,
+    ability_proj: HeadJson,
+}
+
+#[derive(Debug, Deserialize)]
+struct ActorCriticArchJson {
+    vocab_size: usize,
+    d_model: usize,
+    n_heads: usize,
+    n_layers: usize,
+    d_ff: usize,
+    max_seq_len: usize,
+    #[allow(dead_code)]
+    game_state_dim: usize,
+    num_base_actions: usize,
+    pad_id: usize,
+    #[allow(dead_code)]
+    cls_id: usize,
+}
+
+/// Frozen actor-critic weights for 14-action policy inference.
+#[derive(Debug, Clone)]
+pub struct ActorCriticWeights {
+    d_model: usize,
+    max_seq_len: usize,
+    pad_id: usize,
+    vocab_size: usize,
+
+    token_emb: Vec<f32>,
+    pos_emb: Vec<f32>,
+    out_norm: FlatLayerNorm,
+    layers: Vec<TransformerLayer>,
+
+    entity_encoder: FlatEntityEncoder,
+    cross_attn: FlatCrossAttention,
+
+    // Base head: pooled entity state → 6 logits
+    base_l1: FlatLinear,
+    base_l2: FlatLinear,
+    // Ability projection: cross-attended CLS → 1 logit
+    ability_l1: FlatLinear,
+    ability_l2: FlatLinear,
+}
+
+impl ActorCriticWeights {
+    /// Load from JSON string exported by `training/export_actor_critic.py`.
+    pub fn from_json(json_str: &str) -> Result<Self, String> {
+        let file: ActorCriticFileJson =
+            serde_json::from_str(json_str).map_err(|e| format!("JSON parse error: {e}"))?;
+
+        let arch = &file.architecture;
+
+        let token_emb: Vec<f32> = file.token_embedding.iter()
+            .flat_map(|row| row.iter().copied()).collect();
+        let pos_emb: Vec<f32> = file.position_embedding.iter()
+            .flat_map(|row| row.iter().copied()).collect();
+
+        if token_emb.len() != arch.vocab_size * arch.d_model {
+            return Err(format!("token_emb size mismatch"));
+        }
+
+        let layers: Vec<TransformerLayer> = file.layers.iter()
+            .map(|lj| TransformerLayer::from_json(lj, arch.d_model, arch.n_heads))
+            .collect();
+
+        let entity_encoder = FlatEntityEncoder::from_json(
+            &file.entity_encoder, arch.d_model, arch.n_heads,
+        );
+        let cross_attn = FlatCrossAttention::from_json(
+            &file.cross_attn, arch.d_model, arch.n_heads,
+        );
+
+        if arch.num_base_actions != NUM_BASE_ACTIONS {
+            return Err(format!(
+                "num_base_actions mismatch: {} vs {}",
+                arch.num_base_actions, NUM_BASE_ACTIONS
+            ));
+        }
+
+        Ok(Self {
+            d_model: arch.d_model,
+            max_seq_len: arch.max_seq_len,
+            pad_id: arch.pad_id,
+            vocab_size: arch.vocab_size,
+            token_emb,
+            pos_emb,
+            out_norm: FlatLayerNorm::from_json(&file.output_norm),
+            layers,
+            entity_encoder,
+            cross_attn,
+            base_l1: FlatLinear::from_json(&file.base_head.linear1),
+            base_l2: FlatLinear::from_json(&file.base_head.linear2),
+            ability_l1: FlatLinear::from_json(&file.ability_proj.linear1),
+            ability_l2: FlatLinear::from_json(&file.ability_proj.linear2),
+        })
+    }
+
+    /// Encode ability tokens → [CLS] embedding. Cache at fight start.
+    pub fn encode_cls(&self, token_ids: &[u32]) -> Vec<f32> {
+        let d = self.d_model;
+        let seq_len = token_ids.len().min(self.max_seq_len);
+
+        let mut seq = vec![0.0f32; seq_len * d];
+        let mut mask = vec![false; seq_len];
+
+        for (t, &tid) in token_ids.iter().take(seq_len).enumerate() {
+            let id = (tid as usize).min(self.vocab_size - 1);
+            mask[t] = id != self.pad_id;
+            for i in 0..d {
+                seq[t * d + i] = self.token_emb[id * d + i] + self.pos_emb[t * d + i];
+            }
+        }
+
+        let mut scratch = TransformerScratch::default();
+        for layer in &self.layers {
+            layer.forward(&mut seq, seq_len, &mask, &mut scratch);
+        }
+
+        let mut cls = vec![0.0f32; d];
+        cls.copy_from_slice(&seq[0..d]);
+        self.out_norm.forward(&mut cls);
+        cls
+    }
+
+    /// Encode game state → entity tokens + mask + mean-pooled state.
+    pub fn encode_entities(&self, game_state: &[f32]) -> EntityState {
+        let d = self.d_model;
+        let (tokens, mask) = self.entity_encoder.forward(game_state);
+
+        // Mean pool over existing entities
+        let mut pooled = vec![0.0f32; d];
+        let mut count = 0.0f32;
+        for ent in 0..NUM_ENTITIES {
+            if mask[ent] {
+                count += 1.0;
+                for i in 0..d {
+                    pooled[i] += tokens[ent * d + i];
+                }
+            }
+        }
+        if count > 0.0 {
+            for v in &mut pooled { *v /= count; }
+        }
+
+        EntityState { tokens, mask, pooled }
+    }
+
+    /// Compute 14-action logits.
+    ///
+    /// * `entity_state` — precomputed entity encoding for this tick
+    /// * `ability_cls` — list of cached [CLS] embeddings per ability slot (None if slot empty)
+    pub fn action_logits(
+        &self,
+        entity_state: &EntityState,
+        ability_cls: &[Option<&[f32]>],
+    ) -> [f32; AC_NUM_ACTIONS] {
+        let d = self.d_model;
+        let mut logits = [f32::NEG_INFINITY; AC_NUM_ACTIONS];
+
+        // Base action logits from pooled entity state
+        let mut base_hidden = vec![0.0f32; self.base_l1.out_dim];
+        self.base_l1.forward_gelu(&entity_state.pooled, &mut base_hidden);
+        let mut base_out = vec![0.0f32; NUM_BASE_ACTIONS];
+        self.base_l2.forward(&base_hidden, &mut base_out);
+
+        // Map base actions: [attack_near, attack_weak, attack_focus, move_toward, move_away, hold]
+        // → action indices [0, 1, 2, 11, 12, 13]
+        logits[0] = base_out[0];   // attack nearest
+        logits[1] = base_out[1];   // attack weakest
+        logits[2] = base_out[2];   // attack focus
+        logits[11] = base_out[3];  // move toward
+        logits[12] = base_out[4];  // move away
+        logits[13] = base_out[5];  // hold
+
+        // Ability logits: cross-attend each ability [CLS] with entity tokens
+        let mut ability_hidden = vec![0.0f32; self.ability_l1.out_dim];
+        let mut ability_out = vec![0.0f32; 1];
+
+        for (idx, cls_opt) in ability_cls.iter().enumerate().take(AC_MAX_ABILITIES) {
+            if let Some(cls) = cls_opt {
+                let cross_emb = self.cross_attn.forward(
+                    cls, &entity_state.tokens, &entity_state.mask, NUM_ENTITIES,
+                );
+                self.ability_l1.forward_gelu(&cross_emb, &mut ability_hidden);
+                self.ability_l2.forward(&ability_hidden, &mut ability_out);
+                logits[3 + idx] = ability_out[0];
+            }
+        }
+
+        logits
+    }
+}
+
+/// Pre-computed entity state for a single tick.
+#[derive(Debug, Clone)]
+pub struct EntityState {
+    pub tokens: Vec<f32>,
+    pub mask: Vec<bool>,
+    pub pooled: Vec<f32>,
+}
+
+// ---------------------------------------------------------------------------
+// V2 entity encoder: variable-length entities + threats
+// ---------------------------------------------------------------------------
+
+const THREAT_DIM: usize = 8;
+const NUM_ENTITY_TYPES_V2: usize = 4; // self=0, enemy=1, ally=2, threat=3
+
+#[derive(Debug, Deserialize)]
+struct EntityEncoderV2Json {
+    entity_proj: LinearWeights,
+    threat_proj: LinearWeights,
+    type_emb: Vec<Vec<f32>>,  // [4 × d_model]
+    input_norm: LayerNormWeights,
+    #[serde(default)]
+    self_attn_layers: Vec<TransformerLayerJson>,
+    out_norm: LayerNormWeights,
+}
+
+#[derive(Debug, Clone)]
+struct FlatEntityEncoderV2 {
+    entity_proj: FlatLinear,   // (30 → d_model)
+    threat_proj: FlatLinear,   // (8 → d_model)
+    type_emb: Vec<f32>,        // [4 × d_model]
+    input_norm: FlatLayerNorm,
+    self_attn_layers: Vec<TransformerLayer>,
+    out_norm: FlatLayerNorm,
+    d_model: usize,
+}
+
+impl FlatEntityEncoderV2 {
+    fn from_json(ej: &EntityEncoderV2Json, d_model: usize, n_heads: usize) -> Self {
+        let type_emb: Vec<f32> = ej.type_emb.iter()
+            .flat_map(|row| row.iter().copied())
+            .collect();
+        let self_attn_layers: Vec<TransformerLayer> = ej.self_attn_layers.iter()
+            .map(|lj| TransformerLayer::from_json(lj, d_model, n_heads))
+            .collect();
+        Self {
+            entity_proj: FlatLinear::from_json(&ej.entity_proj),
+            threat_proj: FlatLinear::from_json(&ej.threat_proj),
+            type_emb,
+            input_norm: FlatLayerNorm::from_json(&ej.input_norm),
+            self_attn_layers,
+            out_norm: FlatLayerNorm::from_json(&ej.out_norm),
+            d_model,
+        }
+    }
+
+    /// Encode variable-length entities + threats into tokens.
+    /// Returns (tokens [n_total × d_model], mask [n_total], n_total).
+    fn forward(
+        &self,
+        entities: &[&[f32]],     // each 30-dim
+        entity_types: &[usize],  // 0/1/2 per entity
+        threats: &[&[f32]],      // each 8-dim
+    ) -> (Vec<f32>, Vec<bool>, usize) {
+        let d = self.d_model;
+        let n_ents = entities.len();
+        let n_threats = threats.len();
+        let n_total = n_ents + n_threats;
+
+        let mut tokens = vec![0.0f32; n_total * d];
+        let mut mask = vec![true; n_total]; // true = attend
+
+        // Project entities
+        for (i, (feats, &type_id)) in entities.iter().zip(entity_types).enumerate() {
+            let exists = feats.len() >= 30 && feats[29] > 0.5;
+            mask[i] = exists;
+
+            self.entity_proj.forward(feats, &mut tokens[i * d..(i + 1) * d]);
+
+            let tid = type_id.min(NUM_ENTITY_TYPES_V2 - 1);
+            for j in 0..d {
+                tokens[i * d + j] += self.type_emb[tid * d + j];
+            }
+            self.input_norm.forward(&mut tokens[i * d..(i + 1) * d]);
+        }
+
+        // Project threats (type_id = 3)
+        for (ti, feats) in threats.iter().enumerate() {
+            let i = n_ents + ti;
+            let exists = feats.len() >= 8 && feats[7] > 0.5;
+            mask[i] = exists;
+
+            self.threat_proj.forward(feats, &mut tokens[i * d..(i + 1) * d]);
+
+            for j in 0..d {
+                tokens[i * d + j] += self.type_emb[3 * d + j]; // threat type
+            }
+            self.input_norm.forward(&mut tokens[i * d..(i + 1) * d]);
+        }
+
+        // Self-attention with reused scratch buffer
+        let mut scratch = TransformerScratch::default();
+        for layer in &self.self_attn_layers {
+            layer.forward(&mut tokens, n_total, &mask, &mut scratch);
+        }
+
+        // Output norm
+        for i in 0..n_total {
+            self.out_norm.forward(&mut tokens[i * d..(i + 1) * d]);
+        }
+
+        (tokens, mask, n_total)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// V2 actor-critic inference
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct ActorCriticV2FileJson {
+    #[allow(dead_code)]
+    format: Option<String>,
+    architecture: ActorCriticArchJson,
+    token_embedding: Vec<Vec<f32>>,
+    position_embedding: Vec<Vec<f32>>,
+    output_norm: LayerNormWeights,
+    layers: Vec<TransformerLayerJson>,
+    entity_encoder_v2: EntityEncoderV2Json,
+    cross_attn: CrossAttnJson,
+    base_head: HeadJson,
+    ability_proj: HeadJson,
+}
+
+/// V2 actor-critic weights with variable-length entity encoder.
+#[derive(Debug, Clone)]
+pub struct ActorCriticWeightsV2 {
+    d_model: usize,
+    max_seq_len: usize,
+    pad_id: usize,
+    vocab_size: usize,
+
+    token_emb: Vec<f32>,
+    pos_emb: Vec<f32>,
+    out_norm: FlatLayerNorm,
+    layers: Vec<TransformerLayer>,
+
+    entity_encoder: FlatEntityEncoderV2,
+    cross_attn: FlatCrossAttention,
+
+    base_l1: FlatLinear,
+    base_l2: FlatLinear,
+    ability_l1: FlatLinear,
+    ability_l2: FlatLinear,
+}
+
+impl ActorCriticWeightsV2 {
+    pub fn from_json(json_str: &str) -> Result<Self, String> {
+        let file: ActorCriticV2FileJson =
+            serde_json::from_str(json_str).map_err(|e| format!("JSON parse error: {e}"))?;
+
+        let arch = &file.architecture;
+
+        let token_emb: Vec<f32> = file.token_embedding.iter()
+            .flat_map(|row| row.iter().copied()).collect();
+        let pos_emb: Vec<f32> = file.position_embedding.iter()
+            .flat_map(|row| row.iter().copied()).collect();
+
+        if token_emb.len() != arch.vocab_size * arch.d_model {
+            return Err("token_emb size mismatch".to_string());
+        }
+
+        let layers: Vec<TransformerLayer> = file.layers.iter()
+            .map(|lj| TransformerLayer::from_json(lj, arch.d_model, arch.n_heads))
+            .collect();
+
+        let entity_encoder = FlatEntityEncoderV2::from_json(
+            &file.entity_encoder_v2, arch.d_model, arch.n_heads,
+        );
+        let cross_attn = FlatCrossAttention::from_json(
+            &file.cross_attn, arch.d_model, arch.n_heads,
+        );
+
+        if arch.num_base_actions != NUM_BASE_ACTIONS {
+            return Err(format!(
+                "num_base_actions mismatch: {} vs {}",
+                arch.num_base_actions, NUM_BASE_ACTIONS
+            ));
+        }
+
+        Ok(Self {
+            d_model: arch.d_model,
+            max_seq_len: arch.max_seq_len,
+            pad_id: arch.pad_id,
+            vocab_size: arch.vocab_size,
+            token_emb,
+            pos_emb,
+            out_norm: FlatLayerNorm::from_json(&file.output_norm),
+            layers,
+            entity_encoder,
+            cross_attn,
+            base_l1: FlatLinear::from_json(&file.base_head.linear1),
+            base_l2: FlatLinear::from_json(&file.base_head.linear2),
+            ability_l1: FlatLinear::from_json(&file.ability_proj.linear1),
+            ability_l2: FlatLinear::from_json(&file.ability_proj.linear2),
+        })
+    }
+
+    pub fn encode_cls(&self, token_ids: &[u32]) -> Vec<f32> {
+        let d = self.d_model;
+        let seq_len = token_ids.len().min(self.max_seq_len);
+
+        let mut seq = vec![0.0f32; seq_len * d];
+        let mut mask = vec![false; seq_len];
+
+        for (t, &tid) in token_ids.iter().take(seq_len).enumerate() {
+            let id = (tid as usize).min(self.vocab_size - 1);
+            mask[t] = id != self.pad_id;
+            for i in 0..d {
+                seq[t * d + i] = self.token_emb[id * d + i] + self.pos_emb[t * d + i];
+            }
+        }
+
+        let mut scratch = TransformerScratch::default();
+        for layer in &self.layers {
+            layer.forward(&mut seq, seq_len, &mask, &mut scratch);
+        }
+
+        let mut cls = vec![0.0f32; d];
+        cls.copy_from_slice(&seq[0..d]);
+        self.out_norm.forward(&mut cls);
+        cls
+    }
+
+    /// Encode v2 game state → entity state with variable-length tokens.
+    pub fn encode_entities_v2(
+        &self,
+        entities: &[&[f32]],
+        entity_types: &[usize],
+        threats: &[&[f32]],
+    ) -> EntityState {
+        let d = self.d_model;
+        let (tokens, mask, n_total) = self.entity_encoder.forward(
+            entities, entity_types, threats,
+        );
+
+        let mut pooled = vec![0.0f32; d];
+        let mut count = 0.0f32;
+        for i in 0..n_total {
+            if mask[i] {
+                count += 1.0;
+                for j in 0..d {
+                    pooled[j] += tokens[i * d + j];
+                }
+            }
+        }
+        if count > 0.0 {
+            for v in &mut pooled { *v /= count; }
+        }
+
+        EntityState { tokens, mask, pooled }
+    }
+
+    /// Compute 14-action logits using v2 entity state.
+    pub fn action_logits(
+        &self,
+        entity_state: &EntityState,
+        ability_cls: &[Option<&[f32]>],
+    ) -> [f32; AC_NUM_ACTIONS] {
+        let _d = self.d_model;
+        let n_entities = entity_state.mask.len();
+        let mut logits = [f32::NEG_INFINITY; AC_NUM_ACTIONS];
+
+        let mut base_hidden = vec![0.0f32; self.base_l1.out_dim];
+        self.base_l1.forward_gelu(&entity_state.pooled, &mut base_hidden);
+        let mut base_out = vec![0.0f32; NUM_BASE_ACTIONS];
+        self.base_l2.forward(&base_hidden, &mut base_out);
+
+        logits[0] = base_out[0];
+        logits[1] = base_out[1];
+        logits[2] = base_out[2];
+        logits[11] = base_out[3];
+        logits[12] = base_out[4];
+        logits[13] = base_out[5];
+
+        let mut ability_hidden = vec![0.0f32; self.ability_l1.out_dim];
+        let mut ability_out = vec![0.0f32; 1];
+
+        for (idx, cls_opt) in ability_cls.iter().enumerate().take(AC_MAX_ABILITIES) {
+            if let Some(cls) = cls_opt {
+                let cross_emb = self.cross_attn.forward(
+                    cls, &entity_state.tokens, &entity_state.mask, n_entities,
+                );
+                self.ability_l1.forward_gelu(&cross_emb, &mut ability_hidden);
+                self.ability_l2.forward(&ability_hidden, &mut ability_out);
+                logits[3 + idx] = ability_out[0];
+            }
+        }
+
+        logits
+    }
+}
+
+// ---------------------------------------------------------------------------
+// V3: Pointer-based action space with position tokens
+// ---------------------------------------------------------------------------
+
+const POSITION_DIM: usize = 8;
+const NUM_ENTITY_TYPES_V3: usize = 5; // self=0, enemy=1, ally=2, threat=3, position=4
+const NUM_ACTION_TYPES: usize = 11; // attack=0, move=1, hold=2, ability_0..7=3..10
+
+#[derive(Debug, Deserialize)]
+struct EntityEncoderV3Json {
+    entity_proj: LinearWeights,
+    threat_proj: LinearWeights,
+    position_proj: LinearWeights,
+    type_emb: Vec<Vec<f32>>,  // [5 × d_model]
+    input_norm: LayerNormWeights,
+    #[serde(default)]
+    self_attn_layers: Vec<TransformerLayerJson>,
+    out_norm: LayerNormWeights,
+}
+
+#[derive(Debug, Clone)]
+struct FlatEntityEncoderV3 {
+    entity_proj: FlatLinear,     // (30 → d_model)
+    threat_proj: FlatLinear,     // (8 → d_model)
+    position_proj: FlatLinear,   // (8 → d_model)
+    type_emb: Vec<f32>,          // [5 × d_model]
+    input_norm: FlatLayerNorm,
+    self_attn_layers: Vec<TransformerLayer>,
+    out_norm: FlatLayerNorm,
+    d_model: usize,
+}
+
+impl FlatEntityEncoderV3 {
+    fn from_json(ej: &EntityEncoderV3Json, d_model: usize, n_heads: usize) -> Self {
+        let type_emb: Vec<f32> = ej.type_emb.iter()
+            .flat_map(|row| row.iter().copied())
+            .collect();
+        let self_attn_layers: Vec<TransformerLayer> = ej.self_attn_layers.iter()
+            .map(|lj| TransformerLayer::from_json(lj, d_model, n_heads))
+            .collect();
+        Self {
+            entity_proj: FlatLinear::from_json(&ej.entity_proj),
+            threat_proj: FlatLinear::from_json(&ej.threat_proj),
+            position_proj: FlatLinear::from_json(&ej.position_proj),
+            type_emb,
+            input_norm: FlatLayerNorm::from_json(&ej.input_norm),
+            self_attn_layers,
+            out_norm: FlatLayerNorm::from_json(&ej.out_norm),
+            d_model,
+        }
+    }
+
+    /// Encode variable-length entities + threats + positions into tokens.
+    /// Returns (tokens [n_total × d_model], mask [n_total], n_total, entity_type_ids [n_total]).
+    fn forward(
+        &self,
+        entities: &[&[f32]],     // each 30-dim
+        entity_types: &[usize],  // 0/1/2 per entity
+        threats: &[&[f32]],      // each 8-dim
+        positions: &[&[f32]],    // each 8-dim
+    ) -> (Vec<f32>, Vec<bool>, usize, Vec<usize>) {
+        let d = self.d_model;
+        let n_ents = entities.len();
+        let n_threats = threats.len();
+        let n_positions = positions.len();
+        let n_total = n_ents + n_threats + n_positions;
+
+        let mut tokens = vec![0.0f32; n_total * d];
+        let mut mask = vec![true; n_total]; // true = attend
+        let mut full_type_ids = vec![0usize; n_total];
+
+        // Project entities
+        for (i, (feats, &type_id)) in entities.iter().zip(entity_types).enumerate() {
+            let exists = feats.len() >= 30 && feats[29] > 0.5;
+            mask[i] = exists;
+            full_type_ids[i] = type_id;
+
+            self.entity_proj.forward(feats, &mut tokens[i * d..(i + 1) * d]);
+            let tid = type_id.min(NUM_ENTITY_TYPES_V3 - 1);
+            for j in 0..d {
+                tokens[i * d + j] += self.type_emb[tid * d + j];
+            }
+            self.input_norm.forward(&mut tokens[i * d..(i + 1) * d]);
+        }
+
+        // Project threats (type_id = 3)
+        for (ti, feats) in threats.iter().enumerate() {
+            let i = n_ents + ti;
+            let exists = feats.len() >= THREAT_DIM && feats[7] > 0.5;
+            mask[i] = exists;
+            full_type_ids[i] = 3;
+
+            self.threat_proj.forward(feats, &mut tokens[i * d..(i + 1) * d]);
+            for j in 0..d {
+                tokens[i * d + j] += self.type_emb[3 * d + j];
+            }
+            self.input_norm.forward(&mut tokens[i * d..(i + 1) * d]);
+        }
+
+        // Project positions (type_id = 4)
+        for (pi, feats) in positions.iter().enumerate() {
+            let i = n_ents + n_threats + pi;
+            mask[i] = true; // positions always exist (no padding in this direction)
+            full_type_ids[i] = 4;
+
+            self.position_proj.forward(feats, &mut tokens[i * d..(i + 1) * d]);
+            for j in 0..d {
+                tokens[i * d + j] += self.type_emb[4 * d + j];
+            }
+            self.input_norm.forward(&mut tokens[i * d..(i + 1) * d]);
+        }
+
+        // Self-attention
+        let mut scratch = TransformerScratch::default();
+        for layer in &self.self_attn_layers {
+            layer.forward(&mut tokens, n_total, &mask, &mut scratch);
+        }
+
+        // Output norm
+        for i in 0..n_total {
+            self.out_norm.forward(&mut tokens[i * d..(i + 1) * d]);
+        }
+
+        (tokens, mask, n_total, full_type_ids)
+    }
+}
+
+/// Pointer output from V3 action head.
+#[derive(Debug)]
+pub struct PointerOutput {
+    /// Action type logits (11 elements).
+    pub type_logits: Vec<f32>,
+    /// Attack pointer logits over all tokens.
+    pub attack_ptr: Vec<f32>,
+    /// Move pointer logits over all tokens.
+    pub move_ptr: Vec<f32>,
+    /// Per-ability pointer logits (None if ability slot empty).
+    pub ability_ptrs: Vec<Option<Vec<f32>>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PointerHeadJson {
+    action_type_head: HeadJson,
+    pointer_key: LinearWeights,
+    attack_query: LinearWeights,
+    move_query: LinearWeights,
+    ability_queries: Vec<LinearWeights>,
+}
+
+#[derive(Debug, Clone)]
+struct FlatPointerHead {
+    action_type_l1: FlatLinear,
+    action_type_l2: FlatLinear,
+    pointer_key: FlatLinear,
+    attack_query: FlatLinear,
+    move_query: FlatLinear,
+    ability_queries: Vec<FlatLinear>,
+    d_model: usize,
+    scale: f32,
+}
+
+impl FlatPointerHead {
+    fn from_json(pj: &PointerHeadJson, d_model: usize) -> Self {
+        Self {
+            action_type_l1: FlatLinear::from_json(&pj.action_type_head.linear1),
+            action_type_l2: FlatLinear::from_json(&pj.action_type_head.linear2),
+            pointer_key: FlatLinear::from_json(&pj.pointer_key),
+            attack_query: FlatLinear::from_json(&pj.attack_query),
+            move_query: FlatLinear::from_json(&pj.move_query),
+            ability_queries: pj.ability_queries.iter()
+                .map(|q| FlatLinear::from_json(q))
+                .collect(),
+            d_model,
+            scale: (d_model as f32).powf(-0.5),
+        }
+    }
+
+    fn forward(
+        &self,
+        pooled: &[f32],
+        tokens: &[f32],
+        mask: &[bool],
+        n_total: usize,
+        type_ids: &[usize],
+        ability_cross_embs: &[Option<Vec<f32>>],
+    ) -> PointerOutput {
+        let d = self.d_model;
+
+        // Action type logits
+        let mut type_hidden = vec![0.0f32; self.action_type_l1.out_dim];
+        self.action_type_l1.forward_gelu(pooled, &mut type_hidden);
+        let mut type_logits = vec![0.0f32; NUM_ACTION_TYPES];
+        self.action_type_l2.forward(&type_hidden, &mut type_logits);
+
+        // Compute keys for all tokens
+        let mut keys = vec![0.0f32; n_total * d];
+        for i in 0..n_total {
+            self.pointer_key.forward(
+                &tokens[i * d..(i + 1) * d],
+                &mut keys[i * d..(i + 1) * d],
+            );
+        }
+
+        // Attack pointer: Q·K^T, masked to enemies only
+        let mut atk_query = vec![0.0f32; d];
+        self.attack_query.forward(pooled, &mut atk_query);
+        let mut attack_ptr = vec![f32::NEG_INFINITY; n_total];
+        for i in 0..n_total {
+            if mask[i] && type_ids[i] == 1 {
+                attack_ptr[i] = dot_product(&atk_query, &keys[i * d..(i + 1) * d]) * self.scale;
+            }
+        }
+
+        // Move pointer: Q·K^T, masked to non-self tokens
+        let mut mv_query = vec![0.0f32; d];
+        self.move_query.forward(pooled, &mut mv_query);
+        let mut move_ptr = vec![f32::NEG_INFINITY; n_total];
+        for i in 0..n_total {
+            if mask[i] && type_ids[i] != 0 {
+                move_ptr[i] = dot_product(&mv_query, &keys[i * d..(i + 1) * d]) * self.scale;
+            }
+        }
+
+        // Ability pointers
+        let mut ability_ptrs = Vec::with_capacity(AC_MAX_ABILITIES);
+        for (idx, cross_emb_opt) in ability_cross_embs.iter().enumerate().take(AC_MAX_ABILITIES) {
+            if let Some(cross_emb) = cross_emb_opt {
+                if idx < self.ability_queries.len() {
+                    let mut ab_query = vec![0.0f32; d];
+                    self.ability_queries[idx].forward(cross_emb, &mut ab_query);
+                    let mut ab_ptr = vec![f32::NEG_INFINITY; n_total];
+                    for i in 0..n_total {
+                        if mask[i] {
+                            ab_ptr[i] = dot_product(&ab_query, &keys[i * d..(i + 1) * d]) * self.scale;
+                        }
+                    }
+                    ability_ptrs.push(Some(ab_ptr));
+                } else {
+                    ability_ptrs.push(None);
+                }
+            } else {
+                ability_ptrs.push(None);
+            }
+        }
+
+        PointerOutput { type_logits, attack_ptr, move_ptr, ability_ptrs }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// V3 actor-critic JSON schema
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct ActorCriticV3FileJson {
+    #[allow(dead_code)]
+    format: Option<String>,
+    architecture: ActorCriticArchJson,
+    token_embedding: Vec<Vec<f32>>,
+    position_embedding: Vec<Vec<f32>>,
+    output_norm: LayerNormWeights,
+    layers: Vec<TransformerLayerJson>,
+    entity_encoder_v3: EntityEncoderV3Json,
+    cross_attn: CrossAttnJson,
+    pointer_head: PointerHeadJson,
+}
+
+/// V3 actor-critic weights with pointer-based action space.
+#[derive(Debug, Clone)]
+pub struct ActorCriticWeightsV3 {
+    d_model: usize,
+    max_seq_len: usize,
+    pad_id: usize,
+    vocab_size: usize,
+
+    token_emb: Vec<f32>,
+    pos_emb: Vec<f32>,
+    out_norm: FlatLayerNorm,
+    layers: Vec<TransformerLayer>,
+
+    entity_encoder: FlatEntityEncoderV3,
+    cross_attn: FlatCrossAttention,
+    pointer_head: FlatPointerHead,
+}
+
+impl ActorCriticWeightsV3 {
+    pub fn from_json(json_str: &str) -> Result<Self, String> {
+        let file: ActorCriticV3FileJson =
+            serde_json::from_str(json_str).map_err(|e| format!("JSON parse error: {e}"))?;
+
+        let arch = &file.architecture;
+
+        let token_emb: Vec<f32> = file.token_embedding.iter()
+            .flat_map(|row| row.iter().copied()).collect();
+        let pos_emb: Vec<f32> = file.position_embedding.iter()
+            .flat_map(|row| row.iter().copied()).collect();
+
+        if token_emb.len() != arch.vocab_size * arch.d_model {
+            return Err("token_emb size mismatch".to_string());
+        }
+
+        let layers: Vec<TransformerLayer> = file.layers.iter()
+            .map(|lj| TransformerLayer::from_json(lj, arch.d_model, arch.n_heads))
+            .collect();
+
+        let entity_encoder = FlatEntityEncoderV3::from_json(
+            &file.entity_encoder_v3, arch.d_model, arch.n_heads,
+        );
+        let cross_attn = FlatCrossAttention::from_json(
+            &file.cross_attn, arch.d_model, arch.n_heads,
+        );
+        let pointer_head = FlatPointerHead::from_json(
+            &file.pointer_head, arch.d_model,
+        );
+
+        Ok(Self {
+            d_model: arch.d_model,
+            max_seq_len: arch.max_seq_len,
+            pad_id: arch.pad_id,
+            vocab_size: arch.vocab_size,
+            token_emb,
+            pos_emb,
+            out_norm: FlatLayerNorm::from_json(&file.output_norm),
+            layers,
+            entity_encoder,
+            cross_attn,
+            pointer_head,
+        })
+    }
+
+    /// Encode ability token IDs to [CLS] embedding.
+    pub fn encode_cls(&self, token_ids: &[u32]) -> Vec<f32> {
+        let d = self.d_model;
+        let seq_len = token_ids.len().min(self.max_seq_len);
+
+        let mut seq = vec![0.0f32; seq_len * d];
+        let mut mask = vec![false; seq_len];
+
+        for (t, &tid) in token_ids.iter().take(seq_len).enumerate() {
+            let id = (tid as usize).min(self.vocab_size - 1);
+            mask[t] = id != self.pad_id;
+            for i in 0..d {
+                seq[t * d + i] = self.token_emb[id * d + i] + self.pos_emb[t * d + i];
+            }
+        }
+
+        let mut scratch = TransformerScratch::default();
+        for layer in &self.layers {
+            layer.forward(&mut seq, seq_len, &mask, &mut scratch);
+        }
+
+        let mut cls = vec![0.0f32; d];
+        cls.copy_from_slice(&seq[0..d]);
+        self.out_norm.forward(&mut cls);
+        cls
+    }
+
+    /// Encode v3 game state → entity state with variable-length tokens + positions.
+    pub fn encode_entities_v3(
+        &self,
+        entities: &[&[f32]],
+        entity_types: &[usize],
+        threats: &[&[f32]],
+        positions: &[&[f32]],
+    ) -> EntityStateV3 {
+        let d = self.d_model;
+        let (tokens, mask, n_total, type_ids) = self.entity_encoder.forward(
+            entities, entity_types, threats, positions,
+        );
+
+        let mut pooled = vec![0.0f32; d];
+        let mut count = 0.0f32;
+        for i in 0..n_total {
+            if mask[i] {
+                count += 1.0;
+                for j in 0..d {
+                    pooled[j] += tokens[i * d + j];
+                }
+            }
+        }
+        if count > 0.0 {
+            for v in &mut pooled { *v /= count; }
+        }
+
+        EntityStateV3 { tokens, mask, pooled, type_ids, n_total }
+    }
+
+    /// Compute pointer action logits using v3 entity state.
+    pub fn pointer_logits(
+        &self,
+        entity_state: &EntityStateV3,
+        ability_cls: &[Option<&[f32]>],
+    ) -> PointerOutput {
+        let n_total = entity_state.n_total;
+
+        // Cross-attend each ability CLS to entity tokens
+        let mut ability_cross_embs: Vec<Option<Vec<f32>>> = Vec::with_capacity(AC_MAX_ABILITIES);
+        for cls_opt in ability_cls.iter().take(AC_MAX_ABILITIES) {
+            if let Some(cls) = cls_opt {
+                let cross_emb = self.cross_attn.forward(
+                    cls, &entity_state.tokens, &entity_state.mask, n_total,
+                );
+                ability_cross_embs.push(Some(cross_emb));
+            } else {
+                ability_cross_embs.push(None);
+            }
+        }
+
+        self.pointer_head.forward(
+            &entity_state.pooled,
+            &entity_state.tokens,
+            &entity_state.mask,
+            n_total,
+            &entity_state.type_ids,
+            &ability_cross_embs,
+        )
+    }
+}
+
+/// V3 entity state: tokens + mask + pooled + type IDs.
+#[derive(Debug)]
+pub struct EntityStateV3 {
+    pub tokens: Vec<f32>,
+    pub mask: Vec<bool>,
+    pub pooled: Vec<f32>,
+    pub type_ids: Vec<usize>,
+    pub n_total: usize,
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -975,5 +1986,55 @@ mod tests {
         fl.forward(&[3.0, 5.0], &mut out);
         assert!((out[0] - 3.0).abs() < 1e-6);
         assert!((out[1] - 5.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_load_v3_weights() {
+        let json_path = "/tmp/test_v3_weights.json";
+        if !std::path::Path::new(json_path).exists() {
+            eprintln!("Skipping: {json_path} not found (run export_actor_critic_v3.py first)");
+            return;
+        }
+        let json_str = std::fs::read_to_string(json_path).unwrap();
+        let model = ActorCriticWeightsV3::from_json(&json_str).unwrap();
+
+        // Test entity encoding with positions
+        let self_ent = vec![1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                            0.0, 0.0, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 1.0];
+        let enemy = vec![0.8, 0.0, 1.0, 0.0, 0.0, 0.25, 0.0, 0.5, 0.0, 0.0,
+                         0.0, 0.0, 0.4, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0, 1.0];
+        let pos = vec![0.1, 0.0, 0.15, 0.2, 0.33, 0.6, 0.0, 0.0];
+
+        let entities: Vec<&[f32]> = vec![&self_ent, &enemy];
+        let entity_types = vec![0, 1];
+        let threats: Vec<&[f32]> = Vec::new();
+        let positions: Vec<&[f32]> = vec![&pos];
+
+        let state = model.encode_entities_v3(&entities, &entity_types, &threats, &positions);
+        assert_eq!(state.n_total, 3); // 2 entities + 0 threats + 1 position
+        assert_eq!(state.type_ids, vec![0, 1, 4]);
+
+        // Test pointer logits
+        let ability_cls: Vec<Option<&[f32]>> = vec![None; 8];
+        let ptr_out = model.pointer_logits(&state, &ability_cls);
+        assert_eq!(ptr_out.type_logits.len(), NUM_ACTION_TYPES);
+        assert_eq!(ptr_out.attack_ptr.len(), 3);
+        assert_eq!(ptr_out.move_ptr.len(), 3);
+
+        // Attack mask: only enemy (index 1) should be valid
+        assert!(ptr_out.attack_ptr[0] < -1e8, "self should be masked");
+        assert!(ptr_out.attack_ptr[1] > -1e8, "enemy should be unmasked");
+        assert!(ptr_out.attack_ptr[2] < -1e8, "position should be masked for attack");
+
+        // Move mask: self (index 0) should be masked, rest valid
+        assert!(ptr_out.move_ptr[0] < -1e8, "self should be masked for move");
+        assert!(ptr_out.move_ptr[1] > -1e8, "enemy should be valid move target");
+        assert!(ptr_out.move_ptr[2] > -1e8, "position should be valid move target");
+
+        println!("V3 type_logits: {:?}", ptr_out.type_logits);
+        println!("V3 attack_ptr: {:?}", ptr_out.attack_ptr);
+        println!("V3 move_ptr: {:?}", ptr_out.move_ptr);
     }
 }

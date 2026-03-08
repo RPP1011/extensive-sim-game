@@ -1,0 +1,16 @@
+# Tutorial 8: Paladin vs 3 punching bags — must survive and kill all.
+# Teaches: use healing/defensive abilities while fighting.
+[scenario]
+name = "Tutorial 08 — Heal Under Pressure"
+seed = 107
+hero_count = 1
+enemy_count = 0
+difficulty = 1
+max_ticks = 1200
+room_type = "Entry"
+hero_templates = ["paladin"]
+enemy_hero_templates = ["punching_bag", "punching_bag", "punching_bag"]
+
+[assert]
+outcome = "Victory"
+min_heroes_alive = 1

@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0177_3v3"
+seed = 2100
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["arcanist", "druid", "elementalist"]
+enemy_hero_templates = ["Alistar", "Senna", "Corki"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

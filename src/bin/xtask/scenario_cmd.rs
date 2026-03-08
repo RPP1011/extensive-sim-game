@@ -260,6 +260,10 @@ fn run_scenario_bench(args: ScenarioBenchArgs) -> ExitCode {
     use rayon::prelude::*;
     use std::time::Instant;
 
+    if args.profile {
+        return run_scenario_profile(args);
+    }
+
     let scenario_file = match load_scenario_file(&args.path) {
         Ok(f) => f,
         Err(err) => {
@@ -339,6 +343,115 @@ fn run_scenario_bench(args: ScenarioBenchArgs) -> ExitCode {
     println!("  Throughput:    {per_minute_par}/min");
     println!("  Avg ticks:     {avg_ticks_par}");
     println!("  Speedup:       {speedup:.2}x vs sequential");
+
+    ExitCode::SUCCESS
+}
+
+fn run_scenario_profile(args: ScenarioBenchArgs) -> ExitCode {
+    use bevy_game::ai::core::{step, FIXED_TICK_MS};
+    use bevy_game::scenario::{load_scenario_file, run_scenario_to_state};
+    use std::time::Instant;
+
+    let scenario_file = match load_scenario_file(&args.path) {
+        Ok(f) => f,
+        Err(err) => {
+            eprintln!("{err}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let cfg = &scenario_file.scenario;
+    let n = args.iterations;
+    println!(
+        "Profiling: {} ({} heroes + {} enemies, {} ticks max)",
+        cfg.name, cfg.hero_count, cfg.enemy_count, cfg.max_ticks
+    );
+    println!("Iterations: {n}\n");
+
+    let mut total_intent_us = 0u64;
+    let mut total_step_us = 0u64;
+    let mut total_events_us = 0u64;
+    let mut total_ticks = 0u64;
+    let mut total_scenarios = 0u64;
+
+    for _ in 0..n {
+        let (mut sim, mut squad_state) = run_scenario_to_state(cfg);
+
+        let mut iter_intent_us = 0u64;
+        let mut iter_step_us = 0u64;
+        let mut iter_events_us = 0u64;
+        let mut ticks_run = 0u64;
+
+        for _ in 0..cfg.max_ticks {
+            // Phase 1: Intent generation (AI decisions)
+            let t0 = Instant::now();
+            let all_intents =
+                bevy_game::ai::squad::generate_intents(&sim, &mut squad_state, FIXED_TICK_MS);
+            iter_intent_us += t0.elapsed().as_micros() as u64;
+
+            // Phase 2: Simulation step (physics + effects)
+            let t1 = Instant::now();
+            let (new_sim, events) = step(sim, &all_intents, FIXED_TICK_MS);
+            iter_step_us += t1.elapsed().as_micros() as u64;
+
+            // Phase 3: Event processing (stats bookkeeping)
+            let t2 = Instant::now();
+            let hero_dead = new_sim.units.iter().any(|u| {
+                u.team == bevy_game::ai::core::Team::Hero && u.hp <= 0
+            });
+            let enemy_alive = new_sim.units.iter().any(|u| {
+                u.team == bevy_game::ai::core::Team::Enemy && u.hp > 0
+            });
+            iter_events_us += t2.elapsed().as_micros() as u64;
+
+            sim = new_sim;
+            ticks_run += 1;
+
+            // Check for end conditions
+            let all_heroes_dead = !sim.units.iter().any(|u| {
+                u.team == bevy_game::ai::core::Team::Hero && u.hp > 0
+            });
+            let all_enemies_dead = !sim.units.iter().any(|u| {
+                u.team == bevy_game::ai::core::Team::Enemy && u.hp > 0
+            });
+            if all_heroes_dead || all_enemies_dead {
+                break;
+            }
+        }
+
+        total_intent_us += iter_intent_us;
+        total_step_us += iter_step_us;
+        total_events_us += iter_events_us;
+        total_ticks += ticks_run;
+        total_scenarios += 1;
+    }
+
+    let total_us = total_intent_us + total_step_us + total_events_us;
+    let avg_ticks = total_ticks / total_scenarios;
+
+    println!("Phase breakdown ({total_scenarios} runs, avg {avg_ticks} ticks):\n");
+    println!("  {:<25} {:>10} µs  {:>5.1}%",
+        "Intent generation (AI)",
+        total_intent_us,
+        total_intent_us as f64 / total_us as f64 * 100.0);
+    println!("  {:<25} {:>10} µs  {:>5.1}%",
+        "Sim step (physics)",
+        total_step_us,
+        total_step_us as f64 / total_us as f64 * 100.0);
+    println!("  {:<25} {:>10} µs  {:>5.1}%",
+        "Event processing",
+        total_events_us,
+        total_events_us as f64 / total_us as f64 * 100.0);
+    println!("  {:<25} {:>10} µs  100.0%", "TOTAL", total_us);
+    println!();
+
+    let per_tick_us = total_us as f64 / total_ticks as f64;
+    let intent_per_tick = total_intent_us as f64 / total_ticks as f64;
+    let step_per_tick = total_step_us as f64 / total_ticks as f64;
+    println!("Per tick:");
+    println!("  Total:   {per_tick_us:.1} µs/tick");
+    println!("  Intent:  {intent_per_tick:.1} µs/tick");
+    println!("  Step:    {step_per_tick:.1} µs/tick");
 
     ExitCode::SUCCESS
 }

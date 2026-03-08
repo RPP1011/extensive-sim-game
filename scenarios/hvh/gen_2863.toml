@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0034_2v2_s1"
+seed = 11957
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["Chogath", "Shaco"]
+enemy_hero_templates = ["Akali", "Alistar"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

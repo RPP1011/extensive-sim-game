@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0082_3v3"
+seed = 2005
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Setpiece"
+hero_templates = ["Yuumi", "Pantheon", "Zilean"]
+enemy_hero_templates = ["JarvanIV", "shaman", "Karma"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

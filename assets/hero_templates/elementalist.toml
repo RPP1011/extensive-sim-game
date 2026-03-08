@@ -21,7 +21,7 @@ name = "LightningBolt"
 targeting = "target_enemy"
 range = 5.0
 cooldown_ms = 4000
-cast_time_ms = 300
+cast_time_ms = 500
 ai_hint = "damage"
 
 [abilities.delivery]
@@ -43,7 +43,7 @@ name = "FlameBurst"
 targeting = "ground_target"
 range = 5.0
 cooldown_ms = 6000
-cast_time_ms = 300
+cast_time_ms = 400
 ai_hint = "damage"
 
 [[abilities.effects]]
@@ -173,7 +173,7 @@ name = "MeteorStrike"
 targeting = "ground_target"
 range = 5.0
 cooldown_ms = 20000
-cast_time_ms = 600
+cast_time_ms = 700
 ai_hint = "damage"
 
 [[abilities.effects]]

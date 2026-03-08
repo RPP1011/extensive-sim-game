@@ -13,4 +13,4 @@ test-results/
 
 /target/
 .env
-generated/**/*.jsonl
+generated/

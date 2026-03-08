@@ -1,0 +1,16 @@
+# Tutorial 7: Mage vs 2 tough dummies — must use AoE abilities to win in time.
+# Teaches: AoE ability usage, ability timing.
+[scenario]
+name = "Tutorial 07 — Ability Burst"
+seed = 106
+hero_count = 1
+enemy_count = 0
+difficulty = 1
+max_ticks = 600
+room_type = "Entry"
+hero_templates = ["mage"]
+enemy_hero_templates = ["target_dummy_tough", "target_dummy_tough"]
+
+[assert]
+outcome = "Victory"
+max_ticks_to_win = 500

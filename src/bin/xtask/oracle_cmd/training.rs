@@ -151,12 +151,12 @@ pub fn run_oracle_student(args: crate::cli::OracleStudentArgs) -> ExitCode {
 /// JSON format: { "layers": [ {"w": [[...]], "b": [...]}, ... ] }
 /// Also supports legacy 3-layer format with w1/b1/w2/b2/w3/b3.
 #[derive(Debug)]
-struct StudentWeights {
+pub(super) struct StudentWeights {
     layers: Vec<(Vec<Vec<f32>>, Vec<f32>)>, // (weight, bias) per layer
 }
 
 impl StudentWeights {
-    fn from_json(v: &serde_json::Value) -> Self {
+    pub(super) fn from_json(v: &serde_json::Value) -> Self {
         if let Some(layers_arr) = v.get("layers").and_then(|l| l.as_array()) {
             let layers = layers_arr.iter().map(|layer| {
                 let w: Vec<Vec<f32>> = serde_json::from_value(layer["w"].clone()).unwrap();
@@ -177,7 +177,7 @@ impl StudentWeights {
     }
 }
 
-fn student_predict_combat(w: &StudentWeights, features: &[f32]) -> bevy_game::ai::core::dataset::CombatActionClass {
+pub(super) fn student_predict_combat(w: &StudentWeights, features: &[f32]) -> bevy_game::ai::core::dataset::CombatActionClass {
     let mut activations: Vec<f32> = features.to_vec();
 
     for (layer_idx, (weights, biases)) in w.layers.iter().enumerate() {
@@ -197,7 +197,7 @@ fn student_predict_combat(w: &StudentWeights, features: &[f32]) -> bevy_game::ai
     bevy_game::ai::core::dataset::CombatActionClass::from_index(argmax)
 }
 
-fn combat_class_to_intent(
+pub(super) fn combat_class_to_intent(
     class: bevy_game::ai::core::dataset::CombatActionClass,
     unit_id: u32,
     state: &bevy_game::ai::core::SimState,

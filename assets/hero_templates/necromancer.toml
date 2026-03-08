@@ -20,7 +20,7 @@ name = "SoulDrain"
 targeting = "target_enemy"
 range = 4.0
 cooldown_ms = 4000
-cast_time_ms = 300
+cast_time_ms = 400
 ai_hint = "damage"
 
 [[abilities.effects]]
@@ -63,7 +63,7 @@ name = "DeathCoil"
 targeting = "target_enemy"
 range = 5.0
 cooldown_ms = 5000
-cast_time_ms = 300
+cast_time_ms = 500
 ai_hint = "damage"
 
 [abilities.delivery]
@@ -151,7 +151,7 @@ name = "CorpseExplosion"
 targeting = "self_aoe"
 range = 0.0
 cooldown_ms = 8000
-cast_time_ms = 300
+cast_time_ms = 500
 ai_hint = "damage"
 
 [[abilities.effects]]

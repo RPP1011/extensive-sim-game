@@ -73,7 +73,7 @@ name = "Cleave"
 targeting = "self_aoe"
 range = 0.0
 cooldown_ms = 5000
-cast_time_ms = 200
+cast_time_ms = 500
 ai_hint = "damage"
 
 [[abilities.effects]]
@@ -144,7 +144,7 @@ name = "BrutalStrike"
 targeting = "target_enemy"
 range = 1.5
 cooldown_ms = 4000
-cast_time_ms = 200
+cast_time_ms = 600
 ai_hint = "damage"
 
 [[abilities.effects]]

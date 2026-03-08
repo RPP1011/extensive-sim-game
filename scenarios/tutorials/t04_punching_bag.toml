@@ -1,0 +1,17 @@
+# Tutorial 4: Fight an enemy that hits back weakly.
+# Teaches: attack while taking damage, basic combat.
+[scenario]
+name = "Tutorial 04 — Fight Punching Bag"
+seed = 103
+hero_count = 1
+enemy_count = 0
+difficulty = 1
+max_ticks = 600
+room_type = "Entry"
+hero_templates = ["warrior"]
+enemy_hero_templates = ["punching_bag"]
+
+[assert]
+outcome = "Victory"
+max_ticks_to_win = 400
+min_heroes_alive = 1

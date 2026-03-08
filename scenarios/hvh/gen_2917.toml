@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0052_5v5_s1"
+seed = 11975
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Climax"
+hero_templates = ["ranger", "rogue", "druid", "cleric", "elementalist"]
+enemy_hero_templates = ["knight", "engineer", "alchemist", "bard", "elementalist"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

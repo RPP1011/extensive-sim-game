@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0097_4v4_s1"
+seed = 12020
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["Yuumi", "ranger", "templar", "Ashe"]
+enemy_hero_templates = ["warrior", "pyromancer", "paladin", "templar"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

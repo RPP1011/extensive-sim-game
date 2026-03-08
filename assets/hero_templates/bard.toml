@@ -157,7 +157,7 @@ name = "PowerChord"
 targeting = "target_enemy"
 range = 4.0
 cooldown_ms = 3500
-cast_time_ms = 300
+cast_time_ms = 500
 ai_hint = "damage"
 
 [[abilities.effects]]

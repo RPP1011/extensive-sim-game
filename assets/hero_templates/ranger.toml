@@ -15,7 +15,7 @@ name = "PowerShot"
 targeting = "target_enemy"
 range = 8.0
 cooldown_ms = 3500
-cast_time_ms = 300
+cast_time_ms = 500
 ai_hint = "damage"
 
 [abilities.delivery]
@@ -165,7 +165,7 @@ name = "ExplosiveArrow"
 targeting = "target_enemy"
 range = 7.0
 cooldown_ms = 6000
-cast_time_ms = 300
+cast_time_ms = 400
 ai_hint = "damage"
 
 [abilities.delivery]

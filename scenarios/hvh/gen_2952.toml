@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0064_3v3"
+seed = 1987
+hero_count = 3
+enemy_count = 3
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["shaman", "arcanist", "Janna"]
+enemy_hero_templates = ["Ahri", "Pantheon", "Warwick"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

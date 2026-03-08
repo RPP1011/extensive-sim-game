@@ -1,0 +1,16 @@
+# Tutorial 3: Kill a tougher dummy — requires using abilities to kill faster.
+# Teaches: ability usage (DPS rotation on a non-threatening target).
+[scenario]
+name = "Tutorial 03 — Use Abilities on Tough Dummy"
+seed = 102
+hero_count = 1
+enemy_count = 0
+difficulty = 1
+max_ticks = 600
+room_type = "Entry"
+hero_templates = ["warrior"]
+enemy_hero_templates = ["target_dummy_tough"]
+
+[assert]
+outcome = "Victory"
+max_ticks_to_win = 400

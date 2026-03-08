@@ -1,0 +1,15 @@
+# Tutorial 12: Ranged hero vs zone caster — use range to dodge more easily.
+# Teaches: kiting + zone avoidance with a ranged attacker.
+[scenario]
+name = "Tutorial 12 — Ranged Zone Dodge"
+seed = 111
+hero_count = 1
+enemy_count = 0
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["ranger"]
+enemy_hero_templates = ["zone_caster"]
+
+[assert]
+outcome = "Either"

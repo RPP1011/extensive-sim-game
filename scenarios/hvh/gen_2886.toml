@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0042_5v5"
+seed = 1965
+hero_count = 5
+enemy_count = 5
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["Alistar", "Kaisa", "Aatrox", "Ezreal", "Bard"]
+enemy_hero_templates = ["MissFortune", "Vex", "XinZhao", "Aphelios", "Ahri"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

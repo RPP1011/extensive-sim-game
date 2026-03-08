@@ -21,7 +21,7 @@ name = "Iaijutsu"
 targeting = "target_enemy"
 range = 1.5
 cooldown_ms = 3500
-cast_time_ms = 100
+cast_time_ms = 600
 ai_hint = "damage"
 
 [[abilities.effects]]
@@ -40,7 +40,7 @@ name = "Crescent Slash"
 targeting = "self_aoe"
 range = 0.0
 cooldown_ms = 5000
-cast_time_ms = 200
+cast_time_ms = 400
 ai_hint = "damage"
 
 [[abilities.effects]]
@@ -78,7 +78,7 @@ name = "Focused Strike"
 targeting = "target_enemy"
 range = 1.5
 cooldown_ms = 6000
-cast_time_ms = 300
+cast_time_ms = 500
 ai_hint = "crowd_control"
 
 [[abilities.effects]]
@@ -107,7 +107,7 @@ name = "Blade Storm"
 targeting = "self_aoe"
 range = 0.0
 cooldown_ms = 12000
-cast_time_ms = 300
+cast_time_ms = 500
 ai_hint = "damage"
 
 [[abilities.effects]]
@@ -127,7 +127,7 @@ name = "Piercing Thrust"
 targeting = "target_enemy"
 range = 1.8
 cooldown_ms = 5000
-cast_time_ms = 200
+cast_time_ms = 500
 ai_hint = "damage"
 
 [[abilities.effects]]

@@ -192,9 +192,6 @@ pub fn run_ability_dataset(args: crate::cli::AbilityDatasetArgs) -> ExitCode {
 }
 
 pub fn run_outcome_dataset(args: crate::cli::OutcomeDatasetArgs) -> ExitCode {
-    use bevy_game::ai::core::ability_eval::{
-        generate_outcome_dataset, write_outcome_dataset,
-    };
     use bevy_game::scenario::{load_scenario_file, run_scenario_to_state};
 
     let paths = collect_toml_paths(&args.path);
@@ -202,6 +199,14 @@ pub fn run_outcome_dataset(args: crate::cli::OutcomeDatasetArgs) -> ExitCode {
         eprintln!("No *.toml files found in {}.", args.path.display());
         return ExitCode::from(1);
     }
+
+    if args.v2 {
+        return run_outcome_dataset_v2(&paths, &args);
+    }
+
+    use bevy_game::ai::core::ability_eval::{
+        generate_outcome_dataset, write_outcome_dataset,
+    };
 
     let mut all_samples = Vec::new();
     let mut wins = 0;
@@ -235,6 +240,147 @@ pub fn run_outcome_dataset(args: crate::cli::OutcomeDatasetArgs) -> ExitCode {
 
     eprintln!("\nTotal: {} samples from {} scenarios ({} wins, {} losses)",
         all_samples.len(), paths.len(), wins, losses);
+    eprintln!("Written to: {}", args.output.display());
+
+    ExitCode::SUCCESS
+}
+
+fn run_outcome_dataset_v2(
+    paths: &[std::path::PathBuf],
+    args: &crate::cli::OutcomeDatasetArgs,
+) -> ExitCode {
+    use bevy_game::ai::core::ability_eval::{
+        generate_outcome_dataset_v2, write_outcome_dataset_v2, OutcomeSampleV2,
+    };
+    use bevy_game::scenario::{load_scenario_file, run_scenario_to_state_with_room};
+    use rayon::prelude::*;
+
+    let scenarios: Vec<_> = paths.iter().filter_map(|p| {
+        match load_scenario_file(p) {
+            Ok(f) => Some(f),
+            Err(err) => { eprintln!("{err}"); None }
+        }
+    }).collect();
+
+    let n_scenarios = scenarios.len();
+    eprintln!("Generating v2 outcome dataset from {} scenarios (parallel)...", n_scenarios);
+
+    if let Some(parent) = args.output.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let file = std::fs::File::create(&args.output).expect("Failed to create output file");
+    let writer = std::sync::Mutex::new(std::io::BufWriter::new(file));
+
+    let sample_interval = args.sample_interval;
+    let done = std::sync::atomic::AtomicUsize::new(0);
+    let total_samples = std::sync::atomic::AtomicUsize::new(0);
+    let wins = std::sync::atomic::AtomicUsize::new(0);
+    let losses = std::sync::atomic::AtomicUsize::new(0);
+
+    scenarios.par_iter().for_each(|scenario_file| {
+        let cfg = &scenario_file.scenario;
+        let (mut sim, squad_ai, grid_nav) = run_scenario_to_state_with_room(cfg);
+        sim.grid_nav = Some(grid_nav);
+        let samples = generate_outcome_dataset_v2(
+            sim, squad_ai, &cfg.name, cfg.max_ticks, sample_interval,
+        );
+
+        if let Some(s) = samples.first() {
+            if s.hero_wins > 0.5 {
+                wins.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            } else {
+                losses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        let n_samples = samples.len();
+        total_samples.fetch_add(n_samples, std::sync::atomic::Ordering::Relaxed);
+
+        // Write immediately, don't buffer in memory
+        {
+            use std::io::Write;
+            let mut w = writer.lock().unwrap();
+            for sample in &samples {
+                serde_json::to_writer(&mut *w, sample).unwrap();
+                writeln!(&mut *w).unwrap();
+            }
+        }
+        // Drop samples here to free memory
+
+        let completed = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        if completed % 100 == 0 || completed == n_scenarios {
+            eprintln!("  [{completed}/{n_scenarios}] {} — {} samples",
+                cfg.name, n_samples);
+        }
+    });
+
+    let w = wins.load(std::sync::atomic::Ordering::Relaxed);
+    let l = losses.load(std::sync::atomic::Ordering::Relaxed);
+    let t = total_samples.load(std::sync::atomic::Ordering::Relaxed);
+    eprintln!("\nTotal: {} samples (v2) from {} scenarios ({} wins, {} losses)",
+        t, n_scenarios, w, l);
+    eprintln!("Written to: {}", args.output.display());
+
+    ExitCode::SUCCESS
+}
+
+pub fn run_nextstate_dataset(args: crate::cli::NextstateDatasetArgs) -> ExitCode {
+    use bevy_game::ai::core::ability_eval::generate_nextstate_dataset_streaming;
+    use bevy_game::scenario::{load_scenario_file, run_scenario_to_state_with_room};
+    use rayon::prelude::*;
+
+    let paths = collect_toml_paths(&args.path);
+    if paths.is_empty() {
+        eprintln!("No *.toml files found in {}.", args.path.display());
+        return ExitCode::from(1);
+    }
+
+    let scenarios: Vec<_> = paths.iter().filter_map(|p| {
+        match load_scenario_file(p) {
+            Ok(f) => Some(f),
+            Err(err) => { eprintln!("{err}"); None }
+        }
+    }).collect();
+
+    let n_scenarios = scenarios.len();
+    eprintln!("Generating next-state dataset from {} scenarios (parallel, interval={})...",
+        n_scenarios, args.sample_interval);
+
+    if let Some(parent) = args.output.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let file = std::fs::File::create(&args.output).expect("Failed to create output file");
+    let writer = std::sync::Mutex::new(std::io::BufWriter::new(file));
+
+    let sample_interval = args.sample_interval;
+    let done = std::sync::atomic::AtomicUsize::new(0);
+    let total_samples = std::sync::atomic::AtomicUsize::new(0);
+
+    scenarios.par_iter().for_each(|scenario_file| {
+        let cfg = &scenario_file.scenario;
+        let (mut sim, squad_ai, grid_nav) = run_scenario_to_state_with_room(cfg);
+        sim.grid_nav = Some(grid_nav);
+
+        let n_samples = generate_nextstate_dataset_streaming(
+            sim, squad_ai, &cfg.name, cfg.max_ticks, sample_interval,
+            |sample| {
+                use std::io::Write;
+                let mut w = writer.lock().unwrap();
+                serde_json::to_writer(&mut *w, &sample).unwrap();
+                writeln!(&mut *w).unwrap();
+            },
+        );
+
+        total_samples.fetch_add(n_samples, std::sync::atomic::Ordering::Relaxed);
+
+        let completed = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        if completed % 100 == 0 || completed == n_scenarios {
+            eprintln!("  [{completed}/{n_scenarios}] {} — {} samples",
+                cfg.name, n_samples);
+        }
+    });
+
+    let t = total_samples.load(std::sync::atomic::Ordering::Relaxed);
+    eprintln!("\nTotal: {} samples from {} scenarios", t, n_scenarios);
     eprintln!("Written to: {}", args.output.display());
 
     ExitCode::SUCCESS

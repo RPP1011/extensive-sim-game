@@ -90,7 +90,7 @@ name = "NaturesWrath"
 targeting = "target_enemy"
 range = 5.0
 cooldown_ms = 5000
-cast_time_ms = 300
+cast_time_ms = 500
 ai_hint = "damage"
 
 [abilities.delivery]

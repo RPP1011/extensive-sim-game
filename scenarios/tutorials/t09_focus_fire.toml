@@ -1,0 +1,16 @@
+# Tutorial 9: 2 heroes vs 1 punching bag + 1 brute — learn to focus the right target.
+# Teaches: focus fire priority (kill the dangerous one first, or the weak one fast).
+[scenario]
+name = "Tutorial 09 — Focus Fire"
+seed = 108
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 800
+room_type = "Entry"
+hero_templates = ["warrior", "ranger"]
+enemy_hero_templates = ["slow_brute", "punching_bag"]
+
+[assert]
+outcome = "Victory"
+min_heroes_alive = 1

@@ -1,0 +1,16 @@
+# Tutorial 10: 2v1 against a single real enemy hero — bridge to real combat.
+# Teaches: fighting a real unit with abilities, advantage scenario.
+[scenario]
+name = "Tutorial 10 — First Real Fight (2v1)"
+seed = 109
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 1000
+room_type = "Entry"
+hero_templates = ["warrior", "cleric"]
+enemy_hero_templates = ["berserker"]
+
+[assert]
+outcome = "Victory"
+min_heroes_alive = 1

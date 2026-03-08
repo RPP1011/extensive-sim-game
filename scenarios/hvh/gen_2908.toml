@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0049_4v4_s1"
+seed = 11972
+hero_count = 4
+enemy_count = 4
+difficulty = 1
+max_ticks = 8000
+room_type = "Pressure"
+hero_templates = ["Gangplank", "Rengar", "Caitlyn", "Zyra"]
+enemy_hero_templates = ["samurai", "Gnar", "cleric", "bard"]
+hp_multiplier = 2.0
+
+[assert]
+outcome = "Any"

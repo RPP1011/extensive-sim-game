@@ -116,7 +116,7 @@ name = "ArcaneBolt"
 targeting = "target_enemy"
 range = 5.0
 cooldown_ms = 3000
-cast_time_ms = 200
+cast_time_ms = 400
 ai_hint = "damage"
 
 [[abilities.effects]]

@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0165_2v2_s2"
+seed = 22088
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Entry"
+hero_templates = ["Irelia", "Cassiopeia"]
+enemy_hero_templates = ["Mordekaiser", "druid"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

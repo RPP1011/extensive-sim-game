@@ -179,7 +179,7 @@ name = "DivineSmite"
 targeting = "target_enemy"
 range = 1.8
 cooldown_ms = 6000
-cast_time_ms = 200
+cast_time_ms = 500
 ai_hint = "damage"
 
 [[abilities.effects]]

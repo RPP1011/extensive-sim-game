@@ -1,0 +1,16 @@
+# Tutorial 2: Kill 3 spread-out stationary dummies.
+# Teaches: target selection, navigating between enemies.
+[scenario]
+name = "Tutorial 02 — Kill 3 Dummies"
+seed = 101
+hero_count = 1
+enemy_count = 0
+difficulty = 1
+max_ticks = 800
+room_type = "Entry"
+hero_templates = ["warrior"]
+enemy_hero_templates = ["target_dummy", "target_dummy", "target_dummy"]
+
+[assert]
+outcome = "Victory"
+max_ticks_to_win = 600

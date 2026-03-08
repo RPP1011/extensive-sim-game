@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0095_2v2_s1"
+seed = 12018
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Pivot"
+hero_templates = ["Hwei", "Fizz"]
+enemy_hero_templates = ["Naafiri", "Fizz"]
+hp_multiplier = 1.0
+
+[assert]
+outcome = "Any"

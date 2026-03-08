@@ -2,6 +2,8 @@ mod eval;
 mod dataset;
 mod training;
 mod selfplay;
+mod transformer_play;
+mod transformer_rl;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -20,6 +22,9 @@ pub fn run_oracle_cmd(args: OracleArgs) -> ExitCode {
         OracleSubcommand::SelfPlay(args) => selfplay::run_self_play(args),
         OracleSubcommand::RawDataset(args) => selfplay::run_raw_dataset(args),
         OracleSubcommand::OutcomeDataset(args) => dataset::run_outcome_dataset(args),
+        OracleSubcommand::NextstateDataset(args) => dataset::run_nextstate_dataset(args),
+        OracleSubcommand::TransformerPlay(args) => transformer_play::run_transformer_play(args),
+        OracleSubcommand::TransformerRl(args) => transformer_rl::run_transformer_rl(args),
     }
 }
 

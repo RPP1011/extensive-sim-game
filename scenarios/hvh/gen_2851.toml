@@ -1,0 +1,14 @@
+[scenario]
+name = "hvh_0030_2v2_s1"
+seed = 11953
+hero_count = 2
+enemy_count = 2
+difficulty = 1
+max_ticks = 8000
+room_type = "Recovery"
+hero_templates = ["Lucian", "Soraka"]
+enemy_hero_templates = ["Olaf", "Yone"]
+hp_multiplier = 3.0
+
+[assert]
+outcome = "Any"

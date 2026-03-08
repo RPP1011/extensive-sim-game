@@ -7,5 +7,8 @@
 //! [CLS] pooling → decision head (urgency + target).
 
 mod weights;
+pub mod tokenizer;
 
 pub use weights::AbilityTransformerWeights;
+pub use weights::{ActorCriticWeights, ActorCriticWeightsV2, EntityState, AC_NUM_ACTIONS};
+pub use weights::{ActorCriticWeightsV3, EntityStateV3, PointerOutput};

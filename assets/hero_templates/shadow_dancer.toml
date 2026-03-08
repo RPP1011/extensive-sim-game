@@ -40,7 +40,7 @@ name = "UmbralBolt"
 targeting = "target_enemy"
 range = 5.0
 cooldown_ms = 4000
-cast_time_ms = 300
+cast_time_ms = 400
 ai_hint = "damage"
 
 [abilities.delivery]
@@ -82,7 +82,7 @@ name = "ShadowFlare"
 targeting = "self_aoe"
 range = 0.0
 cooldown_ms = 8000
-cast_time_ms = 200
+cast_time_ms = 300
 ai_hint = "damage"
 
 [[abilities.effects]]
@@ -114,7 +114,7 @@ name = "TwilightStrike"
 targeting = "target_enemy"
 range = 1.5
 cooldown_ms = 8000
-cast_time_ms = 200
+cast_time_ms = 500
 ai_hint = "crowd_control"
 
 [[abilities.effects]]
@@ -192,7 +192,7 @@ name = "Eclipse"
 targeting = "self_aoe"
 range = 0.0
 cooldown_ms = 15000
-cast_time_ms = 400
+cast_time_ms = 500
 ai_hint = "damage"
 
 [[abilities.effects]]
