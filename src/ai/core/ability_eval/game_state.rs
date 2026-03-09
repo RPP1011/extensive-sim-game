@@ -1085,12 +1085,12 @@ pub struct NextStateSample {
     pub tick: u64,
 }
 
-/// Per-unit ability properties, emitted once per scenario.
-/// Maps unit_id → list of 80-dim ability property vectors.
+/// Per-unit ability DSL text, emitted once per scenario.
+/// Maps unit_id → list of DSL strings (input to ability transformer).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AbilityRegistryEntry {
     pub unit_id: u32,
-    pub abilities: Vec<Vec<f32>>,  // each inner vec is 80-dim
+    pub abilities: Vec<String>,  // DSL text per ability
 }
 
 /// Full ability registry for a scenario, emitted before tick data.
@@ -1175,7 +1175,6 @@ pub fn generate_nextstate_dataset_streaming(
     mut emit_registry: impl FnMut(AbilityRegistry),
 ) -> usize {
     use crate::ai::core::{step, FIXED_TICK_MS};
-    use crate::ai::core::ability_encoding::extract_ability_properties;
     use crate::ai::squad::generate_intents;
 
     let mut sim = initial_sim;
@@ -1183,9 +1182,10 @@ pub fn generate_nextstate_dataset_streaming(
     let mut count = 0usize;
 
     // Emit ability registry once before tick loop
+    use crate::ai::effects::dsl::emit::emit_ability_dsl;
     let entries: Vec<AbilityRegistryEntry> = sim.units.iter().map(|u| {
         let abilities = u.abilities.iter().map(|slot| {
-            extract_ability_properties(&slot.def).to_vec()
+            emit_ability_dsl(&slot.def)
         }).collect();
         AbilityRegistryEntry { unit_id: u.id, abilities }
     }).collect();

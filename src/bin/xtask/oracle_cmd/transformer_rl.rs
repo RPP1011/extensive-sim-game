@@ -281,7 +281,7 @@ fn run_rl_episode(
             // Replicate the 93% win rate system: ability eval interrupt + student fallthrough.
             // This overrides the squad AI's default decisions for heroes.
             if let Some(ref sw) = *student_weights {
-                use bevy_game::ai::core::ability_eval::evaluate_abilities_with_encoder;
+                use bevy_game::ai::core::ability_eval::evaluate_abilities;
 
                 for &uid in &hero_ids {
                     if !sim.units.iter().any(|u| u.id == uid && is_alive(u)) { continue; }
@@ -291,8 +291,8 @@ fn run_rl_episode(
 
                     // Phase 1: ability eval interrupt
                     if let Some(ref ab_weights) = squad_ai.ability_eval_weights {
-                        if let Some((action, _urgency)) = evaluate_abilities_with_encoder(
-                            &sim, &squad_ai, uid, ab_weights, squad_ai.ability_encoder.as_ref()) {
+                        if let Some((action, _urgency)) = evaluate_abilities(
+                            &sim, &squad_ai, uid, ab_weights) {
                             intents.retain(|i| i.unit_id != uid);
                             intents.push(UnitIntent { unit_id: uid, action });
                             continue;
@@ -668,19 +668,6 @@ fn run_generate(args: crate::cli::TransformerRlGenerateArgs) -> ExitCode {
         None
     };
 
-    let ability_encoder = if let Some(ref path) = args.ability_encoder {
-        let json_str = match std::fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(e) => { eprintln!("Failed to read ability encoder: {e}"); return ExitCode::from(1); }
-        };
-        match bevy_game::ai::core::ability_encoding::load_autoencoder(&json_str) {
-            Ok((enc, _dec)) => Some(std::sync::Arc::new(enc)),
-            Err(e) => { eprintln!("Failed to parse ability encoder: {e}"); return ExitCode::from(1); }
-        }
-    } else {
-        None
-    };
-
     // Load combat student model for Combined policy
     let student_weights = if let Some(ref path) = args.student_model {
         let json_str = match std::fs::read_to_string(path) {
@@ -748,7 +735,6 @@ fn run_generate(args: crate::cli::TransformerRlGenerateArgs) -> ExitCode {
     let policy_ref = &policy;
     let tokenizer_ref = &tokenizer;
     let ability_eval_ref = &ability_eval_weights;
-    let ability_encoder_ref = &ability_encoder;
     let student_ref = &student_weights;
     let step_interval = args.step_interval;
     let temperature = args.temperature;
@@ -777,9 +763,6 @@ fn run_generate(args: crate::cli::TransformerRlGenerateArgs) -> ExitCode {
             if matches!(policy_ref, Policy::Combined) {
                 if let Some(ref w) = *ability_eval_ref {
                     squad_ai.ability_eval_weights = Some((**w).clone());
-                }
-                if let Some(ref e) = *ability_encoder_ref {
-                    squad_ai.ability_encoder = Some((**e).clone());
                 }
             }
 

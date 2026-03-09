@@ -14,12 +14,6 @@ use super::effects::{collect_all_effects, summarize_effects};
 /// Raw property features per ability.
 pub const ABILITY_PROP_DIM: usize = 80;
 
-/// Embedding size output by the frozen encoder.
-pub const ABILITY_EMBED_DIM: usize = 32;
-
-/// Per-slot features: embedding + runtime state.
-pub const ABILITY_SLOT_DIM: usize = ABILITY_EMBED_DIM + 2; // embed + is_ready + cd_frac
-
 // ---------------------------------------------------------------------------
 // Raw property extraction
 // ---------------------------------------------------------------------------

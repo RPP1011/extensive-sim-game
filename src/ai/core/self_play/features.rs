@@ -1,12 +1,10 @@
-//! Feature extraction: encode_unit, extract_features, extract_features_encoded.
+//! Feature extraction: encode_unit, extract_features.
 
 use super::{
     UNIT_FEATURES, MAX_ABILITIES, ABILITY_FEATURES_LEGACY, NUM_ENEMIES, NUM_ALLIES,
-    GLOBAL_FEATURES, TERRAIN_RAYS, TERRAIN_RAY_MAX, FEATURE_DIM, FEATURE_DIM_ENCODED,
-    ABILITY_SLOT_DIM,
+    GLOBAL_FEATURES, TERRAIN_RAYS, TERRAIN_RAY_MAX, FEATURE_DIM,
 };
 use crate::ai::core::{distance, is_alive, SimState, SimVec2};
-use crate::ai::core::ability_encoding::AbilityEncoder;
 use crate::ai::pathing::raycast_distances;
 
 /// Encode a single unit's raw state into a fixed-size slice.
@@ -132,91 +130,6 @@ pub fn extract_features(state: &SimState, unit_id: u32) -> [f32; FEATURE_DIM] {
         }
     } else {
         // No terrain: all rays at max distance
-        for i in 0..TERRAIN_RAYS {
-            f[offset + i] = TERRAIN_RAY_MAX;
-        }
-    }
-
-    f
-}
-
-/// Extract features using the ability encoder for rich ability embeddings.
-/// Output dimension: FEATURE_DIM_ENCODED.
-pub fn extract_features_encoded(
-    state: &SimState,
-    unit_id: u32,
-    encoder: &AbilityEncoder,
-) -> Vec<f32> {
-    let mut f = vec![0.0f32; FEATURE_DIM_ENCODED];
-    let unit = match state.units.iter().find(|u| u.id == unit_id) {
-        Some(u) => u,
-        None => return f,
-    };
-    let ref_pos = unit.position;
-
-    // Self
-    let self_enc = encode_unit(unit, ref_pos);
-    f[..UNIT_FEATURES].copy_from_slice(&self_enc);
-    let mut offset = UNIT_FEATURES;
-
-    // Enemies by distance
-    let mut enemies: Vec<&crate::ai::core::UnitState> = state.units.iter()
-        .filter(|u| u.team != unit.team && is_alive(u))
-        .collect();
-    enemies.sort_by(|a, b| {
-        distance(ref_pos, a.position)
-            .partial_cmp(&distance(ref_pos, b.position))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    for i in 0..NUM_ENEMIES {
-        if let Some(e) = enemies.get(i) {
-            let enc = encode_unit(e, ref_pos);
-            f[offset..offset + UNIT_FEATURES].copy_from_slice(&enc);
-        }
-        offset += UNIT_FEATURES;
-    }
-
-    // Allies by distance
-    let mut allies: Vec<&crate::ai::core::UnitState> = state.units.iter()
-        .filter(|u| u.team == unit.team && is_alive(u) && u.id != unit_id)
-        .collect();
-    allies.sort_by(|a, b| {
-        distance(ref_pos, a.position)
-            .partial_cmp(&distance(ref_pos, b.position))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    for i in 0..NUM_ALLIES {
-        if let Some(a) = allies.get(i) {
-            let enc = encode_unit(a, ref_pos);
-            f[offset..offset + UNIT_FEATURES].copy_from_slice(&enc);
-        }
-        offset += UNIT_FEATURES;
-    }
-
-    // Ability slots — encoded via frozen encoder
-    for i in 0..MAX_ABILITIES {
-        if let Some(slot) = unit.abilities.get(i) {
-            let enc = encoder.encode_slot(slot, unit.resource);
-            f[offset..offset + ABILITY_SLOT_DIM].copy_from_slice(&enc);
-        }
-        offset += ABILITY_SLOT_DIM;
-    }
-
-    // Global
-    f[offset] = state.tick as f32;
-    f[offset + 1] = enemies.len() as f32;
-    f[offset + 2] = allies.len() as f32 + 1.0;
-    f[offset + 3] = (allies.len() as f32 + 1.0) - enemies.len() as f32;
-    f[offset + 4] = state.zones.len() as f32;
-    offset += GLOBAL_FEATURES;
-
-    // Terrain raycasts
-    if let Some(ref nav) = state.grid_nav {
-        let rays = raycast_distances(nav, ref_pos, TERRAIN_RAYS, TERRAIN_RAY_MAX);
-        for (i, &d) in rays.iter().enumerate() {
-            f[offset + i] = d;
-        }
-    } else {
         for i in 0..TERRAIN_RAYS {
             f[offset + i] = TERRAIN_RAY_MAX;
         }

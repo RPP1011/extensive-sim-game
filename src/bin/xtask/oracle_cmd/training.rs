@@ -4,8 +4,7 @@ use super::collect_toml_paths;
 pub fn run_oracle_student(args: crate::cli::OracleStudentArgs) -> ExitCode {
     use bevy_game::ai::core::dataset::extract_unit_features;
     use bevy_game::ai::core::{step, is_alive, Team, FIXED_TICK_MS, UnitIntent};
-    use bevy_game::ai::core::ability_eval::{AbilityEvalWeights, evaluate_abilities_with_encoder};
-    use bevy_game::ai::core::ability_encoding::AbilityEncoder;
+    use bevy_game::ai::core::ability_eval::{AbilityEvalWeights, evaluate_abilities};
     use bevy_game::ai::squad::generate_intents;
     use bevy_game::scenario::{load_scenario_file, run_scenario_to_state};
 
@@ -33,14 +32,6 @@ pub fn run_oracle_student(args: crate::cli::OracleStudentArgs) -> ExitCode {
         AbilityEvalWeights::from_json(&json)
     });
 
-    // Load optional frozen ability encoder for embedding-enriched evaluation
-    let ability_encoder = args.ability_encoder.as_ref().map(|path| {
-        let data = std::fs::read_to_string(path)
-            .unwrap_or_else(|e| { eprintln!("Failed to read ability encoder: {e}"); std::process::exit(1); });
-        AbilityEncoder::from_json(&data)
-            .unwrap_or_else(|e| { eprintln!("Failed to parse ability encoder: {e}"); std::process::exit(1); })
-    });
-
     if is_combat_model {
         eprintln!("Student model: 5-class combat-only ({}→{})", weights.layers[0].0.len(), output_dim);
     } else {
@@ -49,10 +40,6 @@ pub fn run_oracle_student(args: crate::cli::OracleStudentArgs) -> ExitCode {
     if ability_weights.is_some() {
         eprintln!("Ability evaluators: loaded (frozen interrupt layer)");
     }
-    if ability_encoder.is_some() {
-        eprintln!("Ability encoder: loaded (32-dim embeddings)");
-    }
-
     let paths = collect_toml_paths(&args.path);
     if paths.is_empty() {
         eprintln!("No *.toml files found.");
@@ -87,8 +74,8 @@ pub fn run_oracle_student(args: crate::cli::OracleStudentArgs) -> ExitCode {
 
                 // Phase 1: Check frozen ability evaluators (interrupt layer)
                 if let Some(ref ab_weights) = ability_weights {
-                    if let Some((action, _urgency)) = evaluate_abilities_with_encoder(
-                        &sim, &squad_ai, uid, ab_weights, ability_encoder.as_ref()) {
+                    if let Some((action, _urgency)) = evaluate_abilities(
+                        &sim, &squad_ai, uid, ab_weights) {
                         intents.retain(|i| i.unit_id != uid);
                         intents.push(UnitIntent { unit_id: uid, action });
                         ability_fires += 1;
@@ -358,143 +345,3 @@ fn action_class_to_intent(
     }
 }
 
-pub fn run_ability_encoder_export(args: crate::cli::AbilityEncoderExportArgs) -> ExitCode {
-    use std::path::PathBuf;
-    use bevy_game::ai::core::ability_encoding::{
-        extract_ability_properties, ability_category_label, ABILITY_PROP_DIM,
-    };
-    use bevy_game::ai::effects::AbilityTargeting;
-    use bevy_game::mission::hero_templates::parse_hero_toml;
-    use serde::Serialize;
-
-    #[derive(Serialize)]
-    struct ExportRow {
-        hero_name: String,
-        ability_name: String,
-        category: String,
-        category_index: usize,
-        targeting_index: usize,
-        properties: Vec<f32>,
-    }
-
-    #[derive(Serialize)]
-    struct ExportData {
-        prop_dim: usize,
-        num_categories: usize,
-        num_targeting: usize,
-        abilities: Vec<ExportRow>,
-    }
-
-    let mut rows = Vec::new();
-
-    // Load hero_templates
-    let hero_dir = PathBuf::from("assets/hero_templates");
-    if hero_dir.is_dir() {
-        let paths = collect_toml_paths(&hero_dir);
-        for path in &paths {
-            let content = match std::fs::read_to_string(path) {
-                Ok(c) => c,
-                Err(e) => { eprintln!("  skip {}: {e}", path.display()); continue; }
-            };
-            let toml = match parse_hero_toml(&content) {
-                Ok(t) => t,
-                Err(e) => { eprintln!("  skip {}: {e}", path.display()); continue; }
-            };
-            for def in &toml.abilities {
-                let cat = ability_category_label(def);
-                let props = extract_ability_properties(def);
-                let tgt_idx = match def.targeting {
-                    AbilityTargeting::TargetEnemy => 0,
-                    AbilityTargeting::TargetAlly => 1,
-                    AbilityTargeting::SelfCast => 2,
-                    AbilityTargeting::SelfAoe => 3,
-                    AbilityTargeting::GroundTarget => 4,
-                    AbilityTargeting::Direction => 5,
-                    AbilityTargeting::Vector => 6,
-                    AbilityTargeting::Global => 7,
-                };
-                rows.push(ExportRow {
-                    hero_name: toml.hero.name.clone(),
-                    ability_name: def.name.clone(),
-                    category: cat.name().to_string(),
-                    category_index: cat as usize,
-                    targeting_index: tgt_idx,
-                    properties: props.to_vec(),
-                });
-            }
-        }
-    }
-
-    // Load lol_heroes
-    if args.include_lol {
-        let lol_dir = PathBuf::from("assets/lol_heroes");
-        if lol_dir.is_dir() {
-            let paths = collect_toml_paths(&lol_dir);
-            for path in &paths {
-                let content = match std::fs::read_to_string(path) {
-                    Ok(c) => c,
-                    Err(e) => { eprintln!("  skip {}: {e}", path.display()); continue; }
-                };
-                let toml = match parse_hero_toml(&content) {
-                    Ok(t) => t,
-                    Err(e) => { eprintln!("  skip {}: {e}", path.display()); continue; }
-                };
-                for def in &toml.abilities {
-                    let cat = ability_category_label(def);
-                    let props = extract_ability_properties(def);
-                    let tgt_idx = match def.targeting {
-                        AbilityTargeting::TargetEnemy => 0,
-                        AbilityTargeting::TargetAlly => 1,
-                        AbilityTargeting::SelfCast => 2,
-                        AbilityTargeting::SelfAoe => 3,
-                        AbilityTargeting::GroundTarget => 4,
-                        AbilityTargeting::Direction => 5,
-                        AbilityTargeting::Vector => 6,
-                        AbilityTargeting::Global => 7,
-                    };
-                    rows.push(ExportRow {
-                        hero_name: toml.hero.name.clone(),
-                        ability_name: def.name.clone(),
-                        category: cat.name().to_string(),
-                        category_index: cat as usize,
-                        targeting_index: tgt_idx,
-                        properties: props.to_vec(),
-                    });
-                }
-            }
-        }
-    }
-
-    let data = ExportData {
-        prop_dim: ABILITY_PROP_DIM,
-        num_categories: 9,
-        num_targeting: 8,
-        abilities: rows,
-    };
-
-    if let Some(parent) = args.output.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
-
-    let json = serde_json::to_string_pretty(&data).expect("serialize");
-    std::fs::write(&args.output, &json).expect("write");
-
-    eprintln!("Exported {} abilities ({} features each) to {}",
-        data.abilities.len(), ABILITY_PROP_DIM, args.output.display());
-
-    // Category distribution
-    let mut cat_counts = [0u32; 9];
-    for r in &data.abilities {
-        cat_counts[r.category_index] += 1;
-    }
-    let cat_names = [
-        "damage_unit", "damage_aoe", "cc_unit", "heal_unit", "heal_aoe",
-        "defense", "utility", "summon", "obstacle",
-    ];
-    eprintln!("\nCategory distribution:");
-    for (i, name) in cat_names.iter().enumerate() {
-        eprintln!("  {:<15} {:>4}", name, cat_counts[i]);
-    }
-
-    ExitCode::SUCCESS
-}

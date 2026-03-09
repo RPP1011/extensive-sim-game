@@ -8,8 +8,6 @@ pub mod actions;
 pub mod policy;
 pub mod episode;
 
-use crate::ai::core::ability_encoding::ABILITY_SLOT_DIM;
-
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -18,7 +16,7 @@ use crate::ai::core::ability_encoding::ABILITY_SLOT_DIM;
 const UNIT_FEATURES: usize = 30;
 /// Max ability slots encoded.
 const MAX_ABILITIES: usize = 8;
-/// Features per ability slot (legacy: 4, with encoder: ABILITY_SLOT_DIM).
+/// Features per ability slot (legacy: 4 features).
 const ABILITY_FEATURES_LEGACY: usize = 4;
 /// Number of nearest enemies encoded.
 const NUM_ENEMIES: usize = 3;
@@ -31,7 +29,7 @@ const TERRAIN_RAYS: usize = 64;
 /// Max raycast distance.
 const TERRAIN_RAY_MAX: f32 = 15.0;
 
-/// Legacy feature dimension (no encoder).
+/// Feature dimension.
 pub const FEATURE_DIM: usize =
     UNIT_FEATURES                           // self
     + NUM_ENEMIES * UNIT_FEATURES           // enemies
@@ -39,15 +37,6 @@ pub const FEATURE_DIM: usize =
     + MAX_ABILITIES * ABILITY_FEATURES_LEGACY // ability slots
     + GLOBAL_FEATURES                       // global
     + TERRAIN_RAYS;                         // terrain raycasts
-
-/// Feature dimension with ability encoder.
-pub const FEATURE_DIM_ENCODED: usize =
-    UNIT_FEATURES
-    + NUM_ENEMIES * UNIT_FEATURES
-    + NUM_ALLIES * UNIT_FEATURES
-    + MAX_ABILITIES * ABILITY_SLOT_DIM       // embedded ability slots
-    + GLOBAL_FEATURES
-    + TERRAIN_RAYS;
 
 /// Number of discrete actions.
 /// 0: attack nearest, 1: attack weakest, 2: attack focus
@@ -60,7 +49,7 @@ pub const NUM_ACTIONS: usize = 14;
 // ---------------------------------------------------------------------------
 
 #[allow(unused_imports)]
-pub use features::{extract_features, extract_features_encoded};
+pub use features::extract_features;
 #[allow(unused_imports)]
 pub use actions::{action_mask, action_to_intent, action_to_intent_with_focus, intent_to_action};
 #[allow(unused_imports)]

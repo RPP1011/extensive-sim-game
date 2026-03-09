@@ -14,20 +14,9 @@ use super::weights::AbilityEvalWeights;
 /// Evaluate all ready abilities for a unit and return the best one above threshold.
 pub fn evaluate_abilities(
     state: &SimState,
-    squad_ai: &SquadAiState,
-    unit_id: u32,
-    weights: &AbilityEvalWeights,
-) -> Option<(IntentAction, f32)> {
-    evaluate_abilities_with_encoder(state, squad_ai, unit_id, weights, None)
-}
-
-/// Evaluate abilities with an optional encoder for embedding-enriched features.
-pub fn evaluate_abilities_with_encoder(
-    state: &SimState,
     _squad_ai: &SquadAiState,
     unit_id: u32,
     weights: &AbilityEvalWeights,
-    encoder: Option<&crate::ai::core::ability_encoding::AbilityEncoder>,
 ) -> Option<(IntentAction, f32)> {
     let unit = state.units.iter().find(|u| u.id == unit_id)?;
 
@@ -55,14 +44,10 @@ pub fn evaluate_abilities_with_encoder(
             None => continue,
         };
 
-        // Optionally compute ability embedding
-        let embedding: Option<[f32; 32]> = encoder.map(|enc| enc.encode_def(&slot.def));
-
         // Extract features and predict
         let (urgency, action) = match category {
             AbilityCategory::DamageUnit => {
-                let (mut features, target_ids) = extract_damage_unit_features(state, unit, idx);
-                if let Some(ref emb) = embedding { features.extend_from_slice(emb); }
+                let (features, target_ids) = extract_damage_unit_features(state, unit, idx);
                 let output = eval_weights.predict(&features);
                 let urgency = sigmoid(output[0]);
                 let target_idx = output[1..].iter().enumerate()
@@ -77,8 +62,7 @@ pub fn evaluate_abilities_with_encoder(
                 })
             }
             AbilityCategory::CcUnit => {
-                let (mut features, target_ids) = extract_cc_unit_features(state, unit, idx);
-                if let Some(ref emb) = embedding { features.extend_from_slice(emb); }
+                let (features, target_ids) = extract_cc_unit_features(state, unit, idx);
                 let output = eval_weights.predict(&features);
                 let urgency = sigmoid(output[0]);
                 let target_idx = output[1..].iter().enumerate()
@@ -93,8 +77,7 @@ pub fn evaluate_abilities_with_encoder(
                 })
             }
             AbilityCategory::HealUnit => {
-                let (mut features, target_ids) = extract_heal_unit_features(state, unit, idx);
-                if let Some(ref emb) = embedding { features.extend_from_slice(emb); }
+                let (features, target_ids) = extract_heal_unit_features(state, unit, idx);
                 let output = eval_weights.predict(&features);
                 let urgency = sigmoid(output[0]);
                 let target_idx = output[1..].iter().enumerate()
@@ -109,8 +92,7 @@ pub fn evaluate_abilities_with_encoder(
                 })
             }
             AbilityCategory::DamageAoe => {
-                let (mut features, positions) = extract_damage_aoe_features(state, unit, idx);
-                if let Some(ref emb) = embedding { features.extend_from_slice(emb); }
+                let (features, positions) = extract_damage_aoe_features(state, unit, idx);
                 let output = eval_weights.predict(&features);
                 let urgency = sigmoid(output[0]);
                 let pos_idx = if output.len() > 1 {
@@ -132,8 +114,7 @@ pub fn evaluate_abilities_with_encoder(
                 })
             }
             AbilityCategory::Obstacle => {
-                let (mut features, positions) = extract_obstacle_features(state, unit, idx);
-                if let Some(ref emb) = embedding { features.extend_from_slice(emb); }
+                let (features, positions) = extract_obstacle_features(state, unit, idx);
                 let output = eval_weights.predict(&features);
                 let urgency = sigmoid(output[0]);
                 // Pick best wall placement position
@@ -154,8 +135,7 @@ pub fn evaluate_abilities_with_encoder(
                 })
             }
             AbilityCategory::Summon => {
-                let mut features = extract_summon_features(state, unit, idx);
-                if let Some(ref emb) = embedding { features.extend_from_slice(emb); }
+                let features = extract_summon_features(state, unit, idx);
                 let output = eval_weights.predict(&features);
                 let urgency = sigmoid(output[0]);
                 // Summons are typically self-cast or ground-targeted
@@ -182,8 +162,7 @@ pub fn evaluate_abilities_with_encoder(
                 })
             }
             AbilityCategory::HealAoe | AbilityCategory::Defense | AbilityCategory::Utility => {
-                let mut features = extract_simple_features(state, unit, idx);
-                if let Some(ref emb) = embedding { features.extend_from_slice(emb); }
+                let features = extract_simple_features(state, unit, idx);
                 let output = eval_weights.predict(&features);
                 let urgency = sigmoid(output[0]);
                 let target = match slot.def.targeting {

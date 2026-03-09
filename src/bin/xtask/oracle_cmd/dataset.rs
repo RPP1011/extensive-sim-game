@@ -111,9 +111,8 @@ pub fn run_combat_dataset(args: crate::cli::CombatDatasetArgs) -> ExitCode {
 
 pub fn run_ability_dataset(args: crate::cli::AbilityDatasetArgs) -> ExitCode {
     use bevy_game::ai::core::ability_eval::{
-        generate_ability_eval_dataset_with_encoder, write_ability_eval_dataset,
+        generate_ability_eval_dataset, write_ability_eval_dataset,
     };
-    use bevy_game::ai::core::ability_encoding::AbilityEncoder;
     use bevy_game::scenario::{load_scenario_file, run_scenario_to_state};
 
     let paths = collect_toml_paths(&args.path);
@@ -121,16 +120,6 @@ pub fn run_ability_dataset(args: crate::cli::AbilityDatasetArgs) -> ExitCode {
         eprintln!("No *.toml files found in {}.", args.path.display());
         return ExitCode::from(1);
     }
-
-    // Load optional ability encoder
-    let encoder = args.ability_encoder.as_ref().map(|p| {
-        let data = std::fs::read_to_string(p)
-            .unwrap_or_else(|e| panic!("Failed to read encoder {}: {e}", p.display()));
-        let enc = AbilityEncoder::from_json(&data)
-            .unwrap_or_else(|e| panic!("Failed to parse encoder: {e}"));
-        eprintln!("Ability encoder loaded from {}", p.display());
-        enc
-    });
 
     let mut all_samples = Vec::new();
 
@@ -150,13 +139,12 @@ pub fn run_ability_dataset(args: crate::cli::AbilityDatasetArgs) -> ExitCode {
 
         let cfg = &scenario_file.scenario;
         let (sim, squad_ai) = run_scenario_to_state(cfg);
-        let samples = generate_ability_eval_dataset_with_encoder(
+        let samples = generate_ability_eval_dataset(
             sim,
             squad_ai,
             &cfg.name,
             cfg.max_ticks,
             args.depth,
-            encoder.as_ref(),
         );
 
         eprintln!("  {} samples", samples.len());

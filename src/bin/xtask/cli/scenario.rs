@@ -36,7 +36,6 @@ pub enum OracleSubcommand {
     CombatDataset(CombatDatasetArgs),
     Student(OracleStudentArgs),
     AbilityDataset(AbilityDatasetArgs),
-    AbilityEncoderExport(AbilityEncoderExportArgs),
     SelfPlay(SelfPlayArgs),
     RawDataset(RawDatasetArgs),
     OutcomeDataset(OutcomeDatasetArgs),
@@ -118,9 +117,6 @@ pub struct OracleStudentArgs {
     /// Path to frozen ability evaluator weights JSON (composes with student model)
     #[arg(long)]
     pub ability_eval: Option<PathBuf>,
-    /// Path to frozen ability encoder JSON (enriches ability eval with 32-dim embeddings)
-    #[arg(long)]
-    pub ability_encoder: Option<PathBuf>,
 }
 
 #[derive(Debug, Parser)]
@@ -192,9 +188,6 @@ pub struct AbilityDatasetArgs {
     /// Rollout depth in ticks (default 10)
     #[arg(long, default_value_t = 10)]
     pub depth: u64,
-    /// Path to frozen ability encoder JSON (appends 32-dim embeddings to features)
-    #[arg(long)]
-    pub ability_encoder: Option<PathBuf>,
 }
 
 #[derive(Debug, Parser)]
@@ -224,17 +217,6 @@ pub struct NextstateDatasetArgs {
     /// Sample every N ticks (1 = every tick for max pairing flexibility)
     #[arg(long, default_value_t = 1)]
     pub sample_interval: u64,
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Export ability properties + labels for encoder training")]
-pub struct AbilityEncoderExportArgs {
-    /// Output JSON file
-    #[arg(long, default_value = "generated/ability_encoder_data.json")]
-    pub output: PathBuf,
-    /// Also include LoL heroes from assets/lol_heroes/
-    #[arg(long, default_value_t = true)]
-    pub include_lol: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -277,9 +259,6 @@ pub struct TransformerRlGenerateArgs {
     /// Path to ability eval weights JSON (for --policy combined)
     #[arg(long)]
     pub ability_eval: Option<PathBuf>,
-    /// Path to ability encoder weights JSON (for --policy combined)
-    #[arg(long)]
-    pub ability_encoder: Option<PathBuf>,
     /// Path to combat student model JSON (for --policy combined)
     #[arg(long)]
     pub student_model: Option<PathBuf>,

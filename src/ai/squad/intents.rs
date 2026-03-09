@@ -76,8 +76,8 @@ pub fn generate_intents_with_terrain(state: &SimState, ai: &mut SquadAiState, dt
             if let Some(ref weights) = ai.ability_eval_weights {
                 if unit.casting.is_none() && unit.control_remaining_ms == 0 {
                     if let Some((action, _urgency)) =
-                        crate::ai::core::ability_eval::evaluate_abilities_with_encoder(
-                            state, ai, unit_id, weights, ai.ability_encoder.as_ref())
+                        crate::ai::core::ability_eval::evaluate_abilities(
+                            state, ai, unit_id, weights)
                     {
                         intents.push(UnitIntent { unit_id, action });
                         continue;

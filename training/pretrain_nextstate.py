@@ -49,7 +49,9 @@ ENTITY_DIM = 30       # raw features per entity in npz
 ENTITY_INPUT_DIM = 32  # +2 relative position features (dx_from_self, dy_from_self)
 THREAT_DIM = 8
 POSITION_DIM = 8
-NUM_TYPES = 5  # self=0, enemy=1, ally=2, threat=3, position=4
+ABILITY_EMB_DIM = 32  # frozen ability transformer [CLS] embedding dimension
+MAX_ABILITIES = 9     # max abilities per entity
+NUM_TYPES = 6  # self=0, enemy=1, ally=2, threat=3, position=4, ability=5
 
 # Dynamic feature groups: name → list of feature indices
 # exists uses BCE (Bernoulli), all others use beta-NLL (Gaussian)
@@ -148,15 +150,19 @@ class EntityEncoderDecomposed(nn.Module):
     independent beta-NLL loss and learned task weight.
     """
 
-    def __init__(self, d_model: int = 32, n_heads: int = 4, n_layers: int = 4):
+    def __init__(self, d_model: int = 32, n_heads: int = 4, n_layers: int = 4,
+                 use_abilities: bool = False):
         super().__init__()
         self.d_model = d_model
+        self.use_abilities = use_abilities
 
         # Entity/threat/position projections (match EntityEncoderV3)
         self.encoder = nn.Module()
         self.encoder.entity_proj = nn.Linear(ENTITY_INPUT_DIM, d_model)
         self.encoder.threat_proj = nn.Linear(THREAT_DIM, d_model)
         self.encoder.position_proj = nn.Linear(POSITION_DIM, d_model)
+        if use_abilities:
+            self.encoder.ability_proj = nn.Linear(ABILITY_EMB_DIM, d_model)
         self.encoder.type_emb = nn.Embedding(NUM_TYPES, d_model)
         self.encoder.input_norm = nn.LayerNorm(d_model)
 
@@ -204,10 +210,12 @@ class EntityEncoderDecomposed(nn.Module):
         threat_mask: torch.Tensor,
         position_features: torch.Tensor | None = None,
         position_mask: torch.Tensor | None = None,
+        ability_features: torch.Tensor | None = None,
+        ability_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Encode entities + threats + positions.
+        """Encode entities + threats + positions [+ abilities].
 
-        Returns tokens (B, S, d_model) where S = n_entities + n_threats [+ n_positions].
+        Returns tokens (B, S, d_model) where S = n_entities + n_threats [+ n_positions] [+ n_abilities].
         """
         B = entity_features.shape[0]
         device = entity_features.device
@@ -237,6 +245,16 @@ class EntityEncoderDecomposed(nn.Module):
             tokens = torch.cat([tokens, pos_tokens], dim=1)
             full_mask = torch.cat([full_mask, position_mask], dim=1)
 
+        if self.use_abilities and ability_features is not None and ability_mask is not None:
+            abl_tokens = self.encoder.ability_proj(ability_features)
+            abl_type = torch.full(
+                (B, ability_features.shape[1]), 5, dtype=torch.long, device=device,
+            )
+            abl_tokens = abl_tokens + self.encoder.type_emb(abl_type)
+            abl_tokens = self.encoder.input_norm(abl_tokens)
+            tokens = torch.cat([tokens, abl_tokens], dim=1)
+            full_mask = torch.cat([full_mask, ability_mask], dim=1)
+
         tokens = self.encoder.encoder(tokens, src_key_padding_mask=full_mask)
         tokens = self.encoder.out_norm(tokens)
 
@@ -252,6 +270,8 @@ class EntityEncoderDecomposed(nn.Module):
         delta_normalized: torch.Tensor,
         position_features: torch.Tensor | None = None,
         position_mask: torch.Tensor | None = None,
+        ability_features: torch.Tensor | None = None,
+        ability_mask: torch.Tensor | None = None,
     ) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
         """Predict per-group (mean, log_var) for each dynamic feature group.
 
@@ -261,6 +281,7 @@ class EntityEncoderDecomposed(nn.Module):
         tokens = self.encode(
             entity_features, entity_type_ids, threat_features,
             entity_mask, threat_mask, position_features, position_mask,
+            ability_features, ability_mask,
         )
 
         n_entities = entity_features.shape[1]
@@ -316,6 +337,18 @@ class NextStateDataset:
         self.ticks = data["ticks"]
         self.scenario_ids = data["scenario_ids"]
 
+        # Ability LUT (optional — may not exist in older datasets)
+        if "abl_lut" in data:
+            self.abl_lut = data["abl_lut"]          # (n_entries, MAX_ABILITIES, D_MODEL)
+            self.abl_lut_counts = data["abl_lut_counts"]  # (n_entries,)
+            self.abl_ent_idx = data["abl_ent_idx"]   # (n_samples, MAX_ENTS)
+            self.has_abilities = True
+            n_with = (self.abl_ent_idx >= 0).any(axis=1).sum()
+            print(f"  Ability LUT: {len(self.abl_lut)} entries, "
+                  f"{n_with}/{len(self.ticks)} samples have ability data")
+        else:
+            self.has_abilities = False
+
         if max_samples > 0 and max_samples < len(self.ticks):
             idx = np.random.choice(len(self.ticks), max_samples, replace=False)
             idx.sort()
@@ -341,6 +374,8 @@ class NextStateDataset:
         self.pos_mask = self.pos_mask[idx]
         self.ticks = self.ticks[idx]
         self.scenario_ids = self.scenario_ids[idx]
+        if self.has_abilities:
+            self.abl_ent_idx = self.abl_ent_idx[idx]
 
     def _build_scenario_index(self):
         self._scenario_groups: dict[int, np.ndarray] = {}
@@ -360,9 +395,30 @@ class NextStateDataset:
 
     def split(self, val_frac: float = 0.15) -> tuple["NextStateDataset", "NextStateDataset"]:
         scenario_ids_list = list(self._scenario_groups.keys())
-        random.shuffle(scenario_ids_list)
-        n_val = max(1, int(len(scenario_ids_list) * val_frac))
-        val_set = set(scenario_ids_list[:n_val])
+
+        # Stratified split: ensure val set has ability-bearing scenarios if available
+        if self.has_abilities:
+            abl_scenarios = set()
+            no_abl_scenarios = set()
+            for sc_id, group in self._scenario_groups.items():
+                if (self.abl_ent_idx[group] >= 0).any():
+                    abl_scenarios.add(sc_id)
+                else:
+                    no_abl_scenarios.add(sc_id)
+            abl_list = list(abl_scenarios)
+            no_abl_list = list(no_abl_scenarios)
+            random.shuffle(abl_list)
+            random.shuffle(no_abl_list)
+            n_val = max(1, int(len(scenario_ids_list) * val_frac))
+            # Take at least 1 from each stratum if possible
+            n_val_abl = max(1, int(n_val * len(abl_list) / len(scenario_ids_list))) if abl_list else 0
+            n_val_no = n_val - n_val_abl
+            val_set = set(abl_list[:n_val_abl]) | set(no_abl_list[:n_val_no])
+            print(f"Stratified val split: {n_val_abl} with abilities, {n_val_no} without")
+        else:
+            random.shuffle(scenario_ids_list)
+            n_val = max(1, int(len(scenario_ids_list) * val_frac))
+            val_set = set(scenario_ids_list[:n_val])
 
         val_idx = np.concatenate([self._scenario_groups[s] for s in val_set])
         train_ids = [s for s in scenario_ids_list if s not in val_set]
@@ -380,6 +436,11 @@ class NextStateDataset:
             ds.pos_mask = parent.pos_mask
             ds.ticks = parent.ticks
             ds.scenario_ids = parent.scenario_ids
+            ds.has_abilities = parent.has_abilities
+            if parent.has_abilities:
+                ds.abl_lut = parent.abl_lut
+                ds.abl_lut_counts = parent.abl_lut_counts
+                ds.abl_ent_idx = parent.abl_ent_idx
             ds._scenario_groups = {}
             for sc_id in np.unique(parent.scenario_ids[idx]):
                 sc_idx = idx[parent.scenario_ids[idx] == sc_id]
@@ -463,13 +524,81 @@ class NextStateDataset:
             raw[:, :, 6:7] - self_y,
         ], axis=-1)
 
+    def _expand_abilities(self, now_indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Expand LUT indices to ability features/mask for a batch.
+
+        Returns:
+          abl_feat: (B, total_slots, D_MODEL) — flattened abilities across all entities
+          abl_mask: (B, total_slots) — True = padding
+        """
+        B = len(now_indices)
+        MAX_ENTS = self.ent_feat.shape[1]
+        # Each entity can have up to MAX_ABILITIES, total = MAX_ENTS * MAX_ABILITIES
+        total_slots = MAX_ENTS * MAX_ABILITIES
+
+        abl_feat = np.zeros((B, total_slots, self.abl_lut.shape[2]), dtype=np.float32)
+        abl_mask = np.ones((B, total_slots), dtype=np.bool_)
+
+        ent_idx_batch = self.abl_ent_idx[now_indices]  # (B, MAX_ENTS)
+
+        for b in range(B):
+            slot = 0
+            for e in range(MAX_ENTS):
+                lut_idx = ent_idx_batch[b, e]
+                if lut_idx >= 0:
+                    na = int(self.abl_lut_counts[lut_idx])
+                    for a in range(na):
+                        if slot < total_slots:
+                            abl_feat[b, slot] = self.abl_lut[lut_idx, a]
+                            abl_mask[b, slot] = False
+                            slot += 1
+        return abl_feat, abl_mask
+
+    def _expand_abilities_fast(self, now_indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Vectorized ability expansion — no Python loops over batch."""
+        B = len(now_indices)
+        MAX_ENTS = self.ent_feat.shape[1]
+        total_slots = MAX_ENTS * MAX_ABILITIES
+        d = self.abl_lut.shape[2]
+
+        abl_feat = np.zeros((B, total_slots, d), dtype=np.float32)
+        abl_mask = np.ones((B, total_slots), dtype=np.bool_)
+
+        ent_idx = self.abl_ent_idx[now_indices]  # (B, MAX_ENTS)
+
+        # For each entity slot, expand its abilities into consecutive ability slots
+        for e in range(MAX_ENTS):
+            lut_indices = ent_idx[:, e]  # (B,)
+            has_ability = lut_indices >= 0  # (B,)
+            if not has_ability.any():
+                continue
+
+            valid_lut = lut_indices[has_ability]
+            counts = self.abl_lut_counts[valid_lut]  # (n_valid,)
+            embs = self.abl_lut[valid_lut]  # (n_valid, MAX_ABILITIES, d)
+
+            for a in range(MAX_ABILITIES):
+                slot = e * MAX_ABILITIES + a
+                if slot >= total_slots:
+                    break
+                # Entities with this many abilities
+                has_a = counts > a
+                if not has_a.any():
+                    break
+                # Map back to batch indices
+                batch_idx = np.where(has_ability)[0][has_a]
+                abl_feat[batch_idx, slot] = embs[has_a, a]
+                abl_mask[batch_idx, slot] = False
+
+        return abl_feat, abl_mask
+
     def sample_batch(
         self, batch_size: int, min_delta: int = 1, max_delta: int = 5,
     ) -> dict[str, torch.Tensor] | None:
         idx = np.random.randint(0, len(self._pre_now), size=batch_size)
         now_indices = self._pre_now[idx]
 
-        return {
+        result = {
             "entity_features": torch.tensor(
                 self._augment_ent(self.ent_feat[now_indices]),
                 dtype=torch.float, device=DEVICE),
@@ -491,6 +620,14 @@ class NextStateDataset:
                 self._pre_deltas[idx], device=DEVICE),
         }
 
+        if self.has_abilities:
+            abl_feat, abl_mask = self._expand_abilities_fast(now_indices)
+            result["ability_features"] = torch.tensor(
+                abl_feat, dtype=torch.float, device=DEVICE)
+            result["ability_mask"] = torch.tensor(abl_mask, device=DEVICE)
+
+        return result
+
     def iter_batches(
         self, batch_size: int, min_delta: int = 1, max_delta: int = 5,
     ):
@@ -501,7 +638,7 @@ class NextStateDataset:
             if len(idx) < 2:
                 continue
             now_indices = self._pre_now[idx]
-            yield {
+            result = {
                 "entity_features": torch.tensor(
                     self._augment_ent(self.ent_feat[now_indices]),
                     dtype=torch.float, device=DEVICE),
@@ -522,6 +659,12 @@ class NextStateDataset:
                 "delta_normalized": torch.tensor(
                     self._pre_deltas[idx], device=DEVICE),
             }
+            if self.has_abilities:
+                abl_feat, abl_mask = self._expand_abilities_fast(now_indices)
+                result["ability_features"] = torch.tensor(
+                    abl_feat, dtype=torch.float, device=DEVICE)
+                result["ability_mask"] = torch.tensor(abl_mask, device=DEVICE)
+            yield result
 
 
 # ---------------------------------------------------------------------------
@@ -541,10 +684,15 @@ def train(args: argparse.Namespace):
     train_ds.precompute_pairs(args.min_delta, args.max_delta)
     val_ds.precompute_pairs(args.min_delta, args.max_delta)
 
+    use_abilities = args.use_abilities and train_ds.has_abilities
+    if args.use_abilities and not train_ds.has_abilities:
+        print("WARNING: --use-abilities requested but dataset has no ability data")
+
     model = EntityEncoderDecomposed(
         d_model=args.d_model,
         n_heads=args.n_heads,
         n_layers=args.n_layers,
+        use_abilities=use_abilities,
     ).to(DEVICE)
 
     # Warm-start encoder from Phase 1 checkpoint if provided
@@ -612,6 +760,7 @@ def train(args: argparse.Namespace):
         print(f"  {name}: indices {indices}")
     print(f"Delta range: [{args.min_delta}, {args.max_delta}] ticks (fixed)")
     print(f"Beta-NLL beta={beta}, Weight decay={args.weight_decay}, lr={args.lr}")
+    print(f"Ability tokens: {'enabled' if use_abilities else 'disabled'}")
     print(f"Device: {DEVICE}\n")
 
     for step in range(1, args.max_steps + 1):
@@ -628,6 +777,7 @@ def train(args: argparse.Namespace):
             batch["threat_features"], batch["entity_mask"], batch["threat_mask"],
             batch["delta_normalized"],
             batch["position_features"], batch["position_mask"],
+            batch.get("ability_features"), batch.get("ability_mask"),
         )
 
         valid = ~batch["entity_mask"]  # (B, E)
@@ -696,6 +846,7 @@ def train(args: argparse.Namespace):
                         vb["threat_features"], vb["entity_mask"], vb["threat_mask"],
                         vb["delta_normalized"],
                         vb["position_features"], vb["position_mask"],
+                        vb.get("ability_features"), vb.get("ability_mask"),
                     )
 
                 vvalid = ~vb["entity_mask"]  # (B, E)
@@ -827,6 +978,9 @@ def main():
 
     p.add_argument("--grokfast-alpha", type=float, default=0.98)
     p.add_argument("--grokfast-lamb", type=float, default=2.0)
+
+    p.add_argument("--use-abilities", action="store_true",
+                    help="Include frozen ability transformer embeddings as type=5 context tokens")
 
     p.add_argument("--seed", type=int, default=42)
 

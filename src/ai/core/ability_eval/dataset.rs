@@ -45,27 +45,12 @@ pub struct AbilityEvalSample {
 /// 1. Get baseline score (Hold action rollout)
 /// 2. Score each ready ability via oracle rollout
 /// 3. Extract per-category features + urgency label
-/// If an encoder is provided, the 32-dim ability embedding is appended to each feature vector.
 pub fn generate_ability_eval_dataset(
     initial_sim: SimState,
     initial_squad_ai: SquadAiState,
     scenario_name: &str,
     max_ticks: u64,
     rollout_ticks: u64,
-) -> Vec<AbilityEvalSample> {
-    generate_ability_eval_dataset_with_encoder(
-        initial_sim, initial_squad_ai, scenario_name, max_ticks, rollout_ticks, None,
-    )
-}
-
-/// Generate ability eval dataset, optionally enriching features with ability embeddings.
-pub fn generate_ability_eval_dataset_with_encoder(
-    initial_sim: SimState,
-    initial_squad_ai: SquadAiState,
-    scenario_name: &str,
-    max_ticks: u64,
-    rollout_ticks: u64,
-    encoder: Option<&crate::ai::core::ability_encoding::AbilityEncoder>,
 ) -> Vec<AbilityEvalSample> {
     let mut sim = initial_sim;
     let mut squad_ai = initial_squad_ai;
@@ -123,12 +108,8 @@ pub fn generate_ability_eval_dataset_with_encoder(
                     None => continue,
                 };
 
-                // Optionally compute ability embedding for feature enrichment
-                let embedding: Option<[f32; 32]> = encoder
-                    .map(|enc| enc.encode_def(&slot.def));
-
                 // Extract category-specific features and determine target_idx
-                let (mut features, target_idx) = match category {
+                let (features, target_idx) = match category {
                     AbilityCategory::DamageUnit => {
                         let (feats, target_ids) = extract_damage_unit_features(&sim, unit, idx);
                         let tidx = match &best_action {
@@ -176,11 +157,6 @@ pub fn generate_ability_eval_dataset_with_encoder(
                         (feats, 0u8)
                     }
                 };
-
-                // Append ability embedding if encoder provided
-                if let Some(ref emb) = embedding {
-                    features.extend_from_slice(emb);
-                }
 
                 samples.push(AbilityEvalSample {
                     category: category.name().to_string(),
