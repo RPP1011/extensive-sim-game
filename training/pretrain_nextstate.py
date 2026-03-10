@@ -140,6 +140,39 @@ class BinaryHead(nn.Module):
         return self.net(x)  # logits, not sigmoid
 
 
+class AbilityPooler(nn.Module):
+    """Attention-weighted pooling of per-entity abilities into a single vector.
+
+    Takes (B, E, A, d_ability) per-entity ability embeddings and produces
+    (B, E, d_out) pooled representations. Learned attention weights let the
+    model prioritize defining abilities (e.g. sniper > sprint).
+
+    Designed to be computed once per scenario and cached — abilities are static.
+    """
+
+    def __init__(self, d_ability: int, d_out: int):
+        super().__init__()
+        self.attn_score = nn.Linear(d_ability, 1)
+        self.proj = nn.Linear(d_ability, d_out)
+
+    def forward(
+        self,
+        ability_features: torch.Tensor,   # (B, E, A, d_ability)
+        ability_mask: torch.Tensor,        # (B, E, A) — True = padding
+    ) -> torch.Tensor:
+        """Returns (B, E, d_out) pooled ability representation."""
+        # Attention scores: (B, E, A, 1)
+        scores = self.attn_score(ability_features)
+        # Mask out padding with -inf before softmax
+        scores = scores.masked_fill(ability_mask.unsqueeze(-1), float('-inf'))
+        weights = torch.softmax(scores, dim=2)  # (B, E, A, 1)
+        # Handle entities with no abilities (all masked → NaN from softmax)
+        weights = weights.nan_to_num(0.0)
+        # Weighted sum: (B, E, d_ability)
+        pooled = (weights * ability_features).sum(dim=2)
+        return self.proj(pooled)  # (B, E, d_out)
+
+
 class EntityEncoderDecomposed(nn.Module):
     """EntityEncoderV3 + per-group decomposed prediction heads.
 
@@ -148,6 +181,9 @@ class EntityEncoderDecomposed(nn.Module):
 
     Each dynamic feature group gets its own small prediction head with
     independent beta-NLL loss and learned task weight.
+
+    Abilities are pooled per-entity before the transformer (32 tokens,
+    not 176), making training ~5x faster.
     """
 
     def __init__(self, d_model: int = 32, n_heads: int = 4, n_layers: int = 4,
@@ -162,7 +198,7 @@ class EntityEncoderDecomposed(nn.Module):
         self.encoder.threat_proj = nn.Linear(THREAT_DIM, d_model)
         self.encoder.position_proj = nn.Linear(POSITION_DIM, d_model)
         if use_abilities:
-            self.encoder.ability_proj = nn.Linear(ABILITY_EMB_DIM, d_model)
+            self.ability_pooler = AbilityPooler(ABILITY_EMB_DIM, d_model)
         self.encoder.type_emb = nn.Embedding(NUM_TYPES, d_model)
         self.encoder.input_norm = nn.LayerNorm(d_model)
 
@@ -213,9 +249,13 @@ class EntityEncoderDecomposed(nn.Module):
         ability_features: torch.Tensor | None = None,
         ability_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Encode entities + threats + positions [+ abilities].
+        """Encode entities + threats + positions, with abilities pooled into entity tokens.
 
-        Returns tokens (B, S, d_model) where S = n_entities + n_threats [+ n_positions] [+ n_abilities].
+        Abilities are attention-pooled per entity and added to entity representations
+        before the transformer. Only 32 tokens enter self-attention (16E + 8T + 8P),
+        not 176.
+
+        Returns tokens (B, S, d_model) where S = n_entities + n_threats + n_positions.
         """
         B = entity_features.shape[0]
         device = entity_features.device
@@ -223,6 +263,13 @@ class EntityEncoderDecomposed(nn.Module):
         ent_tokens = self.encoder.entity_proj(entity_features)
         ent_type_embs = self.encoder.type_emb(entity_type_ids)
         ent_tokens = ent_tokens + ent_type_embs
+
+        # Pool abilities into entity tokens (before transformer)
+        if self.use_abilities and ability_features is not None and ability_mask is not None:
+            # ability_features: (B, E, A, d_ability), ability_mask: (B, E, A)
+            abl_pooled = self.ability_pooler(ability_features, ability_mask)  # (B, E, d_model)
+            ent_tokens = ent_tokens + abl_pooled
+
         ent_tokens = self.encoder.input_norm(ent_tokens)
 
         thr_tokens = self.encoder.threat_proj(threat_features)
@@ -244,16 +291,6 @@ class EntityEncoderDecomposed(nn.Module):
             pos_tokens = self.encoder.input_norm(pos_tokens)
             tokens = torch.cat([tokens, pos_tokens], dim=1)
             full_mask = torch.cat([full_mask, position_mask], dim=1)
-
-        if self.use_abilities and ability_features is not None and ability_mask is not None:
-            abl_tokens = self.encoder.ability_proj(ability_features)
-            abl_type = torch.full(
-                (B, ability_features.shape[1]), 5, dtype=torch.long, device=device,
-            )
-            abl_tokens = abl_tokens + self.encoder.type_emb(abl_type)
-            abl_tokens = self.encoder.input_norm(abl_tokens)
-            tokens = torch.cat([tokens, abl_tokens], dim=1)
-            full_mask = torch.cat([full_mask, ability_mask], dim=1)
 
         tokens = self.encoder.encoder(tokens, src_key_padding_mask=full_mask)
         tokens = self.encoder.out_norm(tokens)
@@ -513,6 +550,74 @@ class NextStateDataset:
         n = len(self._pre_now)
         print(f"Precomputed {n} pairs ({n / len(self._flat_index):.1f}x snapshots)")
 
+    def move_to_gpu(self):
+        """Pre-compute all per-sample tensors and move to GPU.
+
+        After this, sample_batch/iter_batches do pure GPU indexing — no CPU work.
+        Falls back gracefully if GPU memory is insufficient.
+        """
+        if DEVICE.type != "cuda":
+            print("No CUDA device, skipping GPU preload")
+            return
+
+        now = self._pre_now  # indices into the snapshot arrays
+
+        # Estimate memory needed (rough: 500 bytes per sample)
+        est_gb = len(now) * 500 / 1e9
+        free_gb = torch.cuda.mem_get_info()[0] / 1e9
+        print(f"Moving {len(now)} samples to GPU (est {est_gb:.1f} GB, free {free_gb:.1f} GB)...")
+
+        if est_gb > free_gb * 0.8:
+            print(f"  Not enough GPU memory ({est_gb:.1f} GB needed, {free_gb:.1f} GB free). Using CPU path.")
+            return
+
+        try:
+            # Augment entity features (add dx/dy from self)
+            ent_aug = self._augment_ent(self.ent_feat[now])  # (N, E, 32)
+
+            self._gpu_ent_feat = torch.tensor(ent_aug, dtype=torch.float, device=DEVICE)
+            self._gpu_ent_types = torch.tensor(self.ent_types[now], dtype=torch.long, device=DEVICE)
+            self._gpu_ent_mask = torch.tensor(self.ent_mask[now], device=DEVICE)
+            self._gpu_thr_feat = torch.tensor(self.thr_feat[now], dtype=torch.float, device=DEVICE)
+            self._gpu_thr_mask = torch.tensor(self.thr_mask[now], device=DEVICE)
+            self._gpu_pos_feat = torch.tensor(self.pos_feat[now], dtype=torch.float, device=DEVICE)
+            self._gpu_pos_mask = torch.tensor(self.pos_mask[now], device=DEVICE)
+            self._gpu_targets = torch.tensor(self._pre_targets, dtype=torch.float, device=DEVICE)
+            self._gpu_deltas = torch.tensor(self._pre_deltas, device=DEVICE)
+
+            if self.has_abilities:
+                # Store compact LUT + per-sample indices on GPU (~250 MB)
+                # Abilities expanded per-batch via _expand_abilities_gpu()
+                self._gpu_abl_lut = torch.tensor(self.abl_lut, dtype=torch.float, device=DEVICE)
+                self._gpu_abl_lut_counts = torch.tensor(self.abl_lut_counts, dtype=torch.long, device=DEVICE)
+                self._gpu_abl_ent_idx = torch.tensor(self.abl_ent_idx[now], dtype=torch.long, device=DEVICE)
+            else:
+                self._gpu_abl_lut = None
+
+            # Free CPU arrays we no longer need
+            del self._pre_targets, self._pre_deltas
+            gb = sum(t.nbytes for t in [
+                self._gpu_ent_feat, self._gpu_ent_types, self._gpu_ent_mask,
+                self._gpu_thr_feat, self._gpu_thr_mask, self._gpu_pos_feat,
+                self._gpu_pos_mask, self._gpu_targets, self._gpu_deltas,
+            ]) / 1e9
+            if self._gpu_abl_lut is not None:
+                gb += (self._gpu_abl_lut.nbytes + self._gpu_abl_lut_counts.nbytes +
+                       self._gpu_abl_ent_idx.nbytes) / 1e9
+            print(f"  GPU memory: {gb:.2f} GB for {len(now)} samples")
+            self._on_gpu = True
+
+        except torch.cuda.OutOfMemoryError:
+            # Clean up any partially allocated tensors
+            for attr in ['_gpu_ent_feat', '_gpu_ent_types', '_gpu_ent_mask',
+                         '_gpu_thr_feat', '_gpu_thr_mask', '_gpu_pos_feat',
+                         '_gpu_pos_mask', '_gpu_targets', '_gpu_deltas',
+                         '_gpu_abl_lut', '_gpu_abl_lut_counts', '_gpu_abl_ent_idx']:
+                if hasattr(self, attr):
+                    delattr(self, attr)
+            torch.cuda.empty_cache()
+            print(f"  CUDA OOM — falling back to CPU data pipeline")
+
     @staticmethod
     def _augment_ent(raw: np.ndarray) -> np.ndarray:
         """Add relative position features (dx, dy from self) per batch."""
@@ -524,52 +629,25 @@ class NextStateDataset:
             raw[:, :, 6:7] - self_y,
         ], axis=-1)
 
-    def _expand_abilities(self, now_indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Expand LUT indices to ability features/mask for a batch.
+    def _expand_abilities_fast(self, now_indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Vectorized ability expansion into per-entity shape.
 
         Returns:
-          abl_feat: (B, total_slots, D_MODEL) — flattened abilities across all entities
-          abl_mask: (B, total_slots) — True = padding
+          abl_feat: (B, E, A, d) — per-entity ability embeddings
+          abl_mask: (B, E, A) — True = padding
         """
         B = len(now_indices)
         MAX_ENTS = self.ent_feat.shape[1]
-        # Each entity can have up to MAX_ABILITIES, total = MAX_ENTS * MAX_ABILITIES
-        total_slots = MAX_ENTS * MAX_ABILITIES
-
-        abl_feat = np.zeros((B, total_slots, self.abl_lut.shape[2]), dtype=np.float32)
-        abl_mask = np.ones((B, total_slots), dtype=np.bool_)
-
-        ent_idx_batch = self.abl_ent_idx[now_indices]  # (B, MAX_ENTS)
-
-        for b in range(B):
-            slot = 0
-            for e in range(MAX_ENTS):
-                lut_idx = ent_idx_batch[b, e]
-                if lut_idx >= 0:
-                    na = int(self.abl_lut_counts[lut_idx])
-                    for a in range(na):
-                        if slot < total_slots:
-                            abl_feat[b, slot] = self.abl_lut[lut_idx, a]
-                            abl_mask[b, slot] = False
-                            slot += 1
-        return abl_feat, abl_mask
-
-    def _expand_abilities_fast(self, now_indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Vectorized ability expansion — no Python loops over batch."""
-        B = len(now_indices)
-        MAX_ENTS = self.ent_feat.shape[1]
-        total_slots = MAX_ENTS * MAX_ABILITIES
         d = self.abl_lut.shape[2]
 
-        abl_feat = np.zeros((B, total_slots, d), dtype=np.float32)
-        abl_mask = np.ones((B, total_slots), dtype=np.bool_)
+        abl_feat = np.zeros((B, MAX_ENTS, MAX_ABILITIES, d), dtype=np.float32)
+        abl_mask = np.ones((B, MAX_ENTS, MAX_ABILITIES), dtype=np.bool_)
 
         ent_idx = self.abl_ent_idx[now_indices]  # (B, MAX_ENTS)
 
-        # For each entity slot, expand its abilities into consecutive ability slots
         for e in range(MAX_ENTS):
             lut_indices = ent_idx[:, e]  # (B,)
-            has_ability = lut_indices >= 0  # (B,)
+            has_ability = lut_indices >= 0
             if not has_ability.any():
                 continue
 
@@ -578,23 +656,73 @@ class NextStateDataset:
             embs = self.abl_lut[valid_lut]  # (n_valid, MAX_ABILITIES, d)
 
             for a in range(MAX_ABILITIES):
-                slot = e * MAX_ABILITIES + a
-                if slot >= total_slots:
-                    break
-                # Entities with this many abilities
                 has_a = counts > a
                 if not has_a.any():
                     break
-                # Map back to batch indices
                 batch_idx = np.where(has_ability)[0][has_a]
-                abl_feat[batch_idx, slot] = embs[has_a, a]
-                abl_mask[batch_idx, slot] = False
+                abl_feat[batch_idx, e, a] = embs[has_a, a]
+                abl_mask[batch_idx, e, a] = False
+
+        return abl_feat, abl_mask
+
+    def _gpu_batch(self, idx: torch.Tensor) -> dict[str, torch.Tensor]:
+        """Index into pre-computed GPU tensors. Zero CPU work."""
+        result = {
+            "entity_features": self._gpu_ent_feat[idx],
+            "entity_type_ids": self._gpu_ent_types[idx],
+            "threat_features": self._gpu_thr_feat[idx],
+            "entity_mask": self._gpu_ent_mask[idx],
+            "threat_mask": self._gpu_thr_mask[idx],
+            "position_features": self._gpu_pos_feat[idx],
+            "position_mask": self._gpu_pos_mask[idx],
+            "target_features": self._gpu_targets[idx],
+            "delta_normalized": self._gpu_deltas[idx],
+        }
+        if self._gpu_abl_lut is not None:
+            result["ability_features"], result["ability_mask"] = \
+                self._expand_abilities_gpu(idx)
+        return result
+
+    def _expand_abilities_gpu(self, idx: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Expand LUT indices to per-entity ability features on GPU. Fully vectorized.
+
+        Returns:
+          ability_features: (B, E, A, d) — per-entity ability embeddings
+          ability_mask: (B, E, A) — True = padding
+        """
+        B = len(idx)
+        MAX_ENTS = self._gpu_ent_feat.shape[1]
+        MAX_ABL = self._gpu_abl_lut.shape[1]  # 9
+        d = self._gpu_abl_lut.shape[2]  # 32
+
+        ent_idx = self._gpu_abl_ent_idx[idx]  # (B, MAX_ENTS)
+
+        # Clamp -1 → 0 for safe indexing, track valid entries separately
+        safe_idx = ent_idx.clamp(min=0)  # (B, MAX_ENTS)
+        has_entry = ent_idx >= 0  # (B, MAX_ENTS)
+
+        # Gather all LUT entries: (B, MAX_ENTS, MAX_ABL, d)
+        all_embs = self._gpu_abl_lut[safe_idx.reshape(-1)].reshape(B, MAX_ENTS, MAX_ABL, d)
+        all_counts = self._gpu_abl_lut_counts[safe_idx.reshape(-1)].reshape(B, MAX_ENTS)
+
+        # Build ability validity mask: (B, MAX_ENTS, MAX_ABL)
+        abl_range = torch.arange(MAX_ABL, device=DEVICE).unsqueeze(0).unsqueeze(0)  # (1, 1, MAX_ABL)
+        valid = has_entry.unsqueeze(2) & (abl_range < all_counts.unsqueeze(2))  # (B, E, A)
+
+        # Zero out padding embeddings, return structured (B, E, A, d)
+        abl_feat = all_embs * valid.unsqueeze(-1).float()
+        abl_mask = ~valid  # (B, E, A)
 
         return abl_feat, abl_mask
 
     def sample_batch(
         self, batch_size: int, min_delta: int = 1, max_delta: int = 5,
     ) -> dict[str, torch.Tensor] | None:
+        if hasattr(self, '_on_gpu') and self._on_gpu:
+            idx = torch.randint(0, len(self._pre_now), (batch_size,), device=DEVICE)
+            return self._gpu_batch(idx)
+
+        # Fallback: CPU path (legacy)
         idx = np.random.randint(0, len(self._pre_now), size=batch_size)
         now_indices = self._pre_now[idx]
 
@@ -632,8 +760,20 @@ class NextStateDataset:
         self, batch_size: int, min_delta: int = 1, max_delta: int = 5,
     ):
         """Iterate all precomputed pairs in shuffled order."""
-        indices = np.random.permutation(len(self._pre_now))
-        for start in range(0, len(indices), batch_size):
+        n = len(self._pre_now)
+
+        if hasattr(self, '_on_gpu') and self._on_gpu:
+            perm = torch.randperm(n, device=DEVICE)
+            for start in range(0, n, batch_size):
+                idx = perm[start:start + batch_size]
+                if len(idx) < 2:
+                    continue
+                yield self._gpu_batch(idx)
+            return
+
+        # Fallback: CPU path (legacy)
+        indices = np.random.permutation(n)
+        for start in range(0, n, batch_size):
             idx = indices[start:start + batch_size]
             if len(idx) < 2:
                 continue
@@ -684,6 +824,18 @@ def train(args: argparse.Namespace):
     train_ds.precompute_pairs(args.min_delta, args.max_delta)
     val_ds.precompute_pairs(args.min_delta, args.max_delta)
 
+    # Cap val pairs to fit on GPU alongside training data
+    max_val = args.max_val_pairs
+    if max_val and len(val_ds._pre_now) > max_val:
+        print(f"  Capping val pairs: {len(val_ds._pre_now)} → {max_val}")
+        val_ds._pre_now = val_ds._pre_now[:max_val]
+        val_ds._pre_targets = val_ds._pre_targets[:max_val]
+        val_ds._pre_deltas = val_ds._pre_deltas[:max_val]
+
+    # Move both to GPU
+    train_ds.move_to_gpu()
+    val_ds.move_to_gpu()
+
     use_abilities = args.use_abilities and train_ds.has_abilities
     if args.use_abilities and not train_ds.has_abilities:
         print("WARNING: --use-abilities requested but dataset has no ability data")
@@ -700,13 +852,17 @@ def train(args: argparse.Namespace):
         state = torch.load(args.warm_start, map_location=DEVICE, weights_only=True)
         model_state = model.state_dict()
         loaded = 0
+        skipped = []
         for k, v in state.items():
-            # Only load encoder weights (not old state_head)
-            if k.startswith("encoder.") and k in model_state and model_state[k].shape == v.shape:
+            if k in model_state and model_state[k].shape == v.shape:
                 model_state[k] = v
                 loaded += 1
+            elif k in model_state:
+                skipped.append(f"{k} (shape {v.shape} vs {model_state[k].shape})")
         model.load_state_dict(model_state)
-        print(f"Warm-started encoder from {args.warm_start} ({loaded} params loaded)")
+        print(f"Warm-started from {args.warm_start} ({loaded} params loaded)")
+        if skipped:
+            print(f"  Skipped (shape mismatch): {skipped}")
 
     n_params = sum(p.numel() for p in model.parameters())
     n_encoder = sum(p.numel() for p in model.encoder.parameters())
@@ -715,6 +871,10 @@ def train(args: argparse.Namespace):
     for name, head in model.heads.items():
         hp = sum(p.numel() for p in head.parameters())
         print(f"  {name}: {hp} params ({len(DYNAMIC_GROUPS[name])} features)")
+
+    if not args.no_compile:
+        print("Compiling model with torch.compile...")
+        model = torch.compile(model)
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -761,9 +921,18 @@ def train(args: argparse.Namespace):
     print(f"Delta range: [{args.min_delta}, {args.max_delta}] ticks (fixed)")
     print(f"Beta-NLL beta={beta}, Weight decay={args.weight_decay}, lr={args.lr}")
     print(f"Ability tokens: {'enabled' if use_abilities else 'disabled'}")
+    print(f"AMP: bfloat16 (no scaler needed)")
     print(f"Device: {DEVICE}\n")
 
+    torch.set_float32_matmul_precision('high')
+
+    import time as _time
+    _t0 = _time.time()
+
     for step in range(1, args.max_steps + 1):
+        if step % 10000 == 0:
+            elapsed = _time.time() - _t0
+            print(f"  [progress] step {step}, {elapsed:.0f}s elapsed, {step/elapsed:.0f} steps/s")
         cur_min, cur_max = get_delta_range(step)
         batch = train_ds.sample_batch(
             batch_size, min_delta=cur_min, max_delta=cur_max,
@@ -772,24 +941,23 @@ def train(args: argparse.Namespace):
             print("WARNING: Failed to sample batch, skipping step")
             continue
 
-        predictions = model(
-            batch["entity_features"], batch["entity_type_ids"],
-            batch["threat_features"], batch["entity_mask"], batch["threat_mask"],
-            batch["delta_normalized"],
-            batch["position_features"], batch["position_mask"],
-            batch.get("ability_features"), batch.get("ability_mask"),
-        )
+        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+            predictions = model(
+                batch["entity_features"], batch["entity_type_ids"],
+                batch["threat_features"], batch["entity_mask"], batch["threat_mask"],
+                batch["delta_normalized"],
+                batch["position_features"], batch["position_mask"],
+                batch.get("ability_features"), batch.get("ability_mask"),
+            )
 
+        # Loss in fp32 (keep precision for beta-NLL)
         valid = ~batch["entity_mask"]  # (B, E)
 
-        # Per-group losses
         group_losses = {}
-        # Get exists target for hp masking (only train hp where target is alive)
         target_exists = batch["target_features"][:, :, 29]  # (B, E)
         for i, (name, indices) in enumerate(DYNAMIC_GROUPS.items()):
             if name in BCE_GROUPS:
-                # BCE loss for binary features
-                logits = predictions[name]
+                logits = predictions[name].float()
                 target_bin = batch["target_features"][:, :, indices]
                 valid_exp = valid.unsqueeze(-1).expand_as(logits)
                 group_losses[name] = F.binary_cross_entropy_with_logits(
@@ -797,12 +965,11 @@ def train(args: argparse.Namespace):
                 )
             else:
                 mean, log_var = predictions[name]
+                mean, log_var = mean.float(), log_var.float()
                 target = symlog(batch["target_features"][:, :, indices])
 
-                # For hp group: mask out entities that die (target exists=0)
-                # — predicting hp of dead entities is meaningless noise
                 if name == "hp":
-                    alive_mask = valid & (target_exists > 0.5)  # (B, E)
+                    alive_mask = valid & (target_exists > 0.5)
                     valid_exp = alive_mask.unsqueeze(-1).expand_as(mean)
                 else:
                     valid_exp = valid.unsqueeze(-1).expand_as(mean)
@@ -814,7 +981,6 @@ def train(args: argparse.Namespace):
                 else:
                     group_losses[name] = torch.tensor(0.0, device=mean.device)
 
-        # Fixed per-group loss weights (cd too noisy, state low signal)
         GROUP_LOSS_WEIGHTS = {"hp": 0.0, "pos": 1.0, "cd": 0.0, "state": 0.1, "exists": 1.0}
         loss = sum(
             GROUP_LOSS_WEIGHTS[name] * group_losses[name]
@@ -917,7 +1083,9 @@ def train(args: argparse.Namespace):
             marker = ""
             if val_mae_all < best_metric:
                 best_metric = val_mae_all
-                torch.save(model.state_dict(), args.output)
+                # torch.compile wraps model; save unwrapped state_dict
+                raw = model._orig_mod if hasattr(model, '_orig_mod') else model
+                torch.save(raw.state_dict(), args.output)
                 marker = " *"
 
             # Per-group improvement summary
@@ -955,20 +1123,22 @@ def main():
 
     p.add_argument("--max-samples", type=int, default=0)
 
-    p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--weight-decay", type=float, default=1.0)
     p.add_argument("--max-steps", type=int, default=50_000)
     p.add_argument("--eval-every", type=int, default=500)
-    p.add_argument("--batch-size", type=int, default=256)
+    p.add_argument("--batch-size", type=int, default=1024)
     p.add_argument("--val-frac", type=float, default=0.15)
+    p.add_argument("--max-val-pairs", type=int, default=100_000,
+                   help="Cap val pairs to fit on GPU (0=unlimited)")
 
     p.add_argument("--min-delta", type=int, default=1,
                     help="Min prediction horizon in ticks (default: 1)")
     p.add_argument("--max-delta", type=int, default=10,
                     help="Max prediction horizon in ticks (default: 10)")
 
-    p.add_argument("--d-model", type=int, default=32)
-    p.add_argument("--n-heads", type=int, default=4)
+    p.add_argument("--d-model", type=int, default=128)
+    p.add_argument("--n-heads", type=int, default=8)
     p.add_argument("--n-layers", type=int, default=4)
 
     p.add_argument("--beta-nll", type=float, default=0.5)
@@ -983,6 +1153,8 @@ def main():
                     help="Include frozen ability transformer embeddings as type=5 context tokens")
 
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--no-compile", action="store_true",
+                    help="Disable torch.compile (for debugging)")
 
     args = p.parse_args()
     train(args)
