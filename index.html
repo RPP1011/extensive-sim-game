@@ -299,7 +299,7 @@ svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
 
 <header>
   <h1>Teaching a Neural Network to Fight</h1>
-  <p class="subtitle">How a 113K-parameter actor-critic learns to command squads of heroes with 943 unique abilities &mdash; and how a 4-byte bug hid for weeks inside a shared-memory inference server.</p>
+  <p class="subtitle">How a 113K-parameter actor-critic learns to command squads of heroes with 943 unique abilities &mdash; and how a 4-byte bug hid inside a shared-memory inference server.</p>
   <div class="stats">
     <div class="stat"><div class="value">113K</div><div class="label">Parameters</div></div>
     <div class="stat"><div class="value">943</div><div class="label">Unique Abilities</div></div>
@@ -462,7 +462,7 @@ svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
 
 <h2>The Bug: 64 Bytes of Chaos</h2>
 
-<p>After weeks of experiments, every run showed the same pattern: KL divergence between the behavior policy and current policy would grow monotonically until the importance ratios became meaningless, typically reaching 10&ndash;22 within 10&ndash;15 iterations. We attributed this to fundamental V-trace instability and tried everything &mdash; learning rate reduction, entropy penalties, PPO clipping, advantage normalization, value head warmup. <strong>Nothing worked.</strong></p>
+<p>After numerous experiments, every run showed the same pattern: KL divergence between the behavior policy and current policy would grow monotonically until the importance ratios became meaningless, typically reaching 10&ndash;22 within 10&ndash;15 iterations. We attributed this to fundamental V-trace instability and tried everything &mdash; learning rate reduction, entropy penalties, PPO clipping, advantage normalization, value head warmup. <strong>Nothing worked.</strong></p>
 
 <div class="callout bug">
 <p>Then, while implementing a &ldquo;policy resync&rdquo; feature, we noticed error messages in the logs that had been there all along:</p>
@@ -525,7 +525,7 @@ OFF_RELOAD_ACK  = 0x184    # was 0xC4</code></pre>
 <h2>What We Learned</h2>
 
 <div class="callout">
-<p><strong>1. Off-policy RL is fragile in ways that look like algorithmic failures.</strong> We spent weeks trying regularization techniques, learning rate schedules, and architectural changes to fix &ldquo;V-trace instability&rdquo; that was actually a plumbing bug. The symptoms (KL drift, value collapse, entropy oscillation) perfectly mimicked known failure modes of off-policy methods.</p>
+<p><strong>1. Off-policy RL is fragile in ways that look like algorithmic failures.</strong> We spent days trying regularization techniques, learning rate schedules, and architectural changes to fix &ldquo;V-trace instability&rdquo; that was actually a plumbing bug. The symptoms (KL drift, value collapse, entropy oscillation) perfectly mimicked known failure modes of off-policy methods.</p>
 </div>
 
 <div class="callout">
