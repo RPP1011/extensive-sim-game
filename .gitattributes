@@ -3,3 +3,4 @@
 *.jpg filter=lfs diff=lfs merge=lfs -text
 *.png filter=lfs diff=lfs merge=lfs -text
 .ralph/runs/*.log filter=lfs diff=lfs merge=lfs -text
+generated/**/*.json filter=lfs diff=lfs merge=lfs -text

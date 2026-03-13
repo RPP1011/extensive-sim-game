@@ -580,7 +580,7 @@ Phase 2 notes: Starts at 1.2%, jumps to ~25% at iter 3 (same sudden-jump pattern
 
 Phase 3 notes: GPU inference server died on iters 2-5 (0 episodes generated, training on stale data from iter 1). Recovered at iter 6 with fresh episodes. But entropy collapsed from 3.4→1.3 in 5 iters — the lr=1e-4 drift problem. KL reached 10.4 by iter 10. Win rate plateaued at ~21%, policy fully degenerate. Uses OLD reward normalization (total_hp_start), not the new avg_unit_hp. HvH eval: 23.5%.
 
-#### Phase 4 (all, 474 scenarios, 10 iters) — RUNNING
+#### Phase 4 (all, 474 scenarios, 10 iters) — COMPLETE
 
 | Iter | Win% | Entropy | KL | Value Loss | Notes |
 |------|------|---------|-----|------------|-------|
@@ -593,13 +593,13 @@ Phase 3 notes: GPU inference server died on iters 2-5 (0 episodes generated, tra
 | 7 | 27.3% | 1.548 | 8.50 | 0.0002 | |
 | 8 | 28.6% | 1.353 | 10.91 | 0.0001 | KL>10 again |
 | 9 | 28.6% | 1.087 | 12.50 | 0.0000 | ent=1.1, KL=12.5 |
-| 10 | 27.8% | — | — | — | Best: 30.3% |
+| 10 | 27.8% | 0.616 | 14.30 | 0.0000 | **Eval: 0.0%** (0W/103L/101T) |
 
-Phase 4 notes: Inherited degenerate policy from P3 (KL=10→5.7). Entropy collapsed further (3.0→1.1). KL exploded to 12.5 by iter 9. pg_loss at -3.4. Win rate stuck 25-30%, HvH eval 25%. Best checkpoint: 30.3% (iter 5).
+Phase 4 notes: Inherited degenerate policy from P3 (KL=10→5.7). Entropy collapsed further (3.0→0.6). KL exploded to 14.3 by iter 10. pg_loss at -2.4. Win rate stuck 25-30%, HvH eval 0% (fully collapsed — 101 timeouts). Best checkpoint: 30.3% (iter 5).
 
 **EC1b final: Dead.** lr=1e-4 + old reward normalization = catastrophic drift every phase. Best eval: 36.8% HvH (P1i5, still riding BC init). Curriculum completed Thu Mar 12 18:57.
 
-**EC1b conclusion:** lr=1e-4 causes catastrophic KL drift in every phase (P1: oscillating, P2: plateau at ~25%, P3: KL=10 collapse, P4: inherited degenerate). The old reward normalization (total_hp_start) also gave vanishingly small signal (0.0001-0.0004).
+**EC1b conclusion:** lr=1e-4 causes catastrophic KL drift in every phase (P1: oscillating, P2: plateau at ~25%, P3: KL=10 collapse, P4: KL=14, entropy=0.6, 0% eval). The old reward normalization (total_hp_start) also gave vanishingly small signal (0.0001-0.0004). **Note: SHM reload bug was also active during EC1b — weights never reloaded.**
 
 ---
 
@@ -806,10 +806,22 @@ Phase 1 notes:
 - **Reward plateaued at 0.022** — the policy extracted maximum dense reward from tier1 scenarios.
 - **pg_loss near zero** throughout (±0.01). V-trace corrections are minimal because behavior ≈ current policy. Compare EC2 where pg_loss reached -1.9.
 
-#### Phase 2 (tier1+2, 148 scenarios, 20 iters) — RUNNING (iter 1)
+#### Phase 2 (tier1+2, 148 scenarios, 20 iters) — RUNNING (iter 6/20)
 
 | Iter | Win% | Entropy | KL | Value Loss | Reward | Notes |
 |------|------|---------|-----|------------|--------|-------|
-| 1 | 39.7% | — | — | — | — | Generating |
+| 1 | 39.7% | 2.726 | 0.282 | 0.0051 | 0.0207 | Strong transfer from P1 |
+| 2 | 38.1% | 2.644 | 0.453 | 0.0050 | 0.0213 | |
+| 3 | 38.1% | 2.493 | 0.413 | 0.0052 | 0.0216 | |
+| 4 | 37.2% | 2.330 | 0.245 | 0.0060 | 0.0217 | KL dropping |
+| 5 | 34.7% | 2.228 | 0.157 | 0.0064 | 0.0218 | **Eval: 48.0%** (71W/48L/29T) |
+| 6 | 34.2% | 2.220 | 0.116 | 0.0070 | 0.0217 | vl increasing! |
 
-Phase 2 notes: Starts at 39.7% training win rate on 148 scenarios — much stronger than EC2's 34.2% start. The P1 checkpoint at 49% eval should transfer well.
+Phase 2 notes:
+- **Eval: 48.0% on 148 scenarios at iter 5** — near P1's peak (49.1%) despite 37% more scenarios.
+- **KL STILL DECREASING: 0.28→0.12.** Continuation of healthy convergence from P1.
+- **Value loss INCREASING: 0.005→0.007.** The value head is learning harder scenarios — opposite of collapse.
+- **Training win rate declining (39.7→34.2%)** as policy becomes more peaked (entropy 2.7→2.2), same pattern as P1.
+- **Reward plateaued at 0.022** — same ceiling as P1, dense reward saturated.
+- **GPU reload confirmed working** (`[gpu] Reloaded weights` in log).
+- Compare EC2 P2: 0% eval collapse by iter 20. EC3 P2 has fundamentally different dynamics.
