@@ -299,7 +299,7 @@ svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
 
 <header>
   <h1>IMPALA V4: Behavioral Embeddings, V-Trace, and a SHM Bug</h1>
-  <p class="subtitle">How a 113K-parameter actor-critic learns to command squads of heroes with 943 unique abilities &mdash; and how a 4-byte bug hid inside a shared-memory inference server.</p>
+  <p class="subtitle">How a 113K-parameter actor-critic learns to command squads of heroes with arbitrary abilities &mdash; and how a 4-byte bug hid inside a shared-memory inference server.</p>
   <div class="stats">
     <div class="stat"><div class="value">113K</div><div class="label">Parameters</div></div>
     <div class="stat"><div class="value">943</div><div class="label">Unique Abilities</div></div>
@@ -310,7 +310,7 @@ svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
 
 <h2>The Problem</h2>
 
-<p>We have a deterministic tactical combat simulator. Two teams of heroes fight on a grid. Each hero has up to 8 abilities drawn from a pool of <strong>943 unique abilities</strong> &mdash; heals, stuns, dashes, AoE damage, shields, channeled beams, traps, you name it. Every ability is defined in a custom DSL:</p>
+<p>We have a deterministic tactical combat simulator. Two teams of heroes fight on a grid. Each hero has up to 8 abilities drawn from an arbitrary pool of abilities &mdash; heals, stuns, dashes, AoE damage, shields, channeled beams, traps, you name it. Every ability is defined in a custom DSL:</p>
 
 <pre><code class="dsl"><span class="keyword">ability</span> <span class="name">Fireball</span> {
     <span class="prop">target</span>: <span class="type">enemy</span>, <span class="prop">range</span>: <span class="value">5.0</span>
@@ -336,7 +336,7 @@ svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
 
 <h2>Architecture</h2>
 
-<p>The core challenge is representing 943 abilities in a way that generalizes. We can&rsquo;t use a flat one-hot &mdash; the action space would be enormous and sparse. Instead, we decompose the problem into <strong>pretrained components</strong> and a <strong>lightweight policy head</strong>:</p>
+<p>The core challenge is representing arbitrary abilities in a way that generalizes. We can&rsquo;t use a flat one-hot &mdash; the action space would be enormous and sparse. Instead, we decompose the problem into <strong>pretrained components</strong> and a <strong>lightweight policy head</strong>:</p>
 
 <figure class="wide">
   <div class="fig-container" id="fig-architecture"></div>
@@ -537,7 +537,7 @@ OFF_RELOAD_ACK  = 0x184    # was 0xC4</code></pre>
 </div>
 
 <div class="callout">
-<p><strong>4. Behavioral embeddings bridge the sim-to-policy gap.</strong> The pretrained 128d ability embeddings let a 113K-param policy network handle 943 unique abilities without ever seeing most of them during training. The curriculum (MLM &rarr; behavioral prediction) is critical &mdash; joint training destroys both objectives.</p>
+<p><strong>4. Behavioral embeddings bridge the sim-to-policy gap.</strong> The pretrained 128d ability embeddings let a 113K-param policy network handle arbitrary abilities without ever seeing most of them during training. The curriculum (MLM &rarr; behavioral prediction) is critical &mdash; joint training destroys both objectives.</p>
 </div>
 
 <div class="callout">
@@ -548,7 +548,7 @@ OFF_RELOAD_ACK  = 0x184    # was 0xC4</code></pre>
 
 <h2>What&rsquo;s Next: League Training</h2>
 
-<p>With EC3, the core concept is proved: a 113K-parameter model trained via IMPALA with behavioral embeddings can learn tactical combat decisions across 943 unique abilities. KL decreases over training, the value head sustains learning, and win rate climbs above the BC baseline. The gap between &ldquo;it works on paper&rdquo; and &ldquo;it works in practice&rdquo; turned out to be four bytes in a shared memory flag.</p>
+<p>With EC3, the core concept is proved: a 113K-parameter model trained via IMPALA with behavioral embeddings can learn tactical combat decisions across arbitrary abilities. KL decreases over training, the value head sustains learning, and win rate climbs above the BC baseline. The gap between &ldquo;it works on paper&rdquo; and &ldquo;it works in practice&rdquo; turned out to be four bytes in a shared memory flag.</p>
 
 <p>The next step is <strong>league training</strong>. Instead of training a single policy against a fixed opponent, we&rsquo;ll maintain a population of agents that play against each other &mdash; similar to AlphaStar&rsquo;s league. Agents that exploit a specific weakness get countered by new agents trained specifically against that exploit. The result is a policy that generalizes rather than overfits to one opponent&rsquo;s tendencies. The IMPALA infrastructure &mdash; 4,096 parallel sims, SHM GPU inference, behavioral embeddings &mdash; transfers directly; the main addition is matchmaking and population management.</p>
 
