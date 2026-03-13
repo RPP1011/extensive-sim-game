@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier3_bulwark_caster_vs_tier6_plague_doctor_amplifier"
+seed = 20236
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["bulwark", "caster"]
+enemy_hero_templates = ["plague_doctor", "amplifier"]

@@ -1,0 +1,26 @@
+[hero]
+name = "Zapper"
+
+[stats]
+hp = 750
+move_speed = 3.0
+
+[attack]
+damage = 12
+range = 5.0
+
+# Single ranged damage
+[[abilities]]
+name = "Zap"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 4000
+cast_time_ms = 200
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 35
+
+[abilities.effects.tags]
+MAGIC = 45.0

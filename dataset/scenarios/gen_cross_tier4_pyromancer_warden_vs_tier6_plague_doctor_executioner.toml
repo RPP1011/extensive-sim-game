@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier4_pyromancer_warden_vs_tier6_plague_doctor_executioner"
+seed = 20198
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["pyromancer", "warden"]
+enemy_hero_templates = ["plague_doctor", "executioner"]

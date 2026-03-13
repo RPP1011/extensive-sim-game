@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier3_drainer_skirmisher_vs_tier5_archmage_deathknight"
+seed = 20190
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["drainer", "skirmisher"]
+enemy_hero_templates = ["archmage", "deathknight"]

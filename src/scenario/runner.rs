@@ -1,9 +1,10 @@
 use crate::ai::core::{sim_vec2, SimState, SimVec2, Team};
 use crate::ai::effects::HeroToml;
+use crate::ai::effects::manifest::AbilityManifest;
 use crate::ai::pathing::GridNav;
 use crate::game_core::RoomType;
 use crate::mission::enemy_templates::default_enemy_wave;
-use crate::mission::hero_templates::{load_embedded_templates, hero_toml_to_unit, HeroTemplate};
+use crate::mission::hero_templates::{load_embedded_templates, hero_toml_to_unit, parse_hero_toml_with_dsl, HeroTemplate};
 use crate::mission::room_gen::{generate_room, NavGrid};
 use crate::mission::sim_bridge::{build_sim_with_hero_templates, build_sim_with_templates, scale_enemy_stats};
 
@@ -26,7 +27,10 @@ pub(crate) fn build_unified_ai(
 // ---------------------------------------------------------------------------
 
 /// Resolve hero template names into HeroToml structs.
-pub(crate) fn resolve_hero_templates(names: &[String]) -> Vec<HeroToml> {
+pub(crate) fn resolve_hero_templates(
+    names: &[String],
+    manifest: Option<&AbilityManifest>,
+) -> Vec<HeroToml> {
     let embedded = load_embedded_templates();
     names
         .iter()
@@ -37,16 +41,88 @@ pub(crate) fn resolve_hero_templates(names: &[String]) -> Vec<HeroToml> {
             if let Some(t) = from_enum {
                 return embedded.get(t).cloned();
             }
-            // Try assets/hero_templates/ first, then assets/lol_heroes/
-            let path = format!("assets/hero_templates/{}.toml", name.to_lowercase());
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                return toml::from_str::<HeroToml>(&content).ok();
+
+            // If name is a path (contains / or \), try it directly
+            let mut search_paths: Vec<String> = Vec::new();
+            if name.contains('/') || name.contains('\\') {
+                search_paths.push(name.clone());
+                if !name.ends_with(".toml") {
+                    search_paths.push(format!("{}.toml", name));
+                }
+            } else {
+                search_paths.push(format!("assets/hero_templates/{}.toml", name.to_lowercase()));
+                search_paths.push(format!("assets/lol_heroes/{}.toml", name));
+                // Search dataset/heroes/ subdirectories
+                if let Ok(entries) = std::fs::read_dir("dataset/heroes") {
+                    let lower_name = name.to_lowercase();
+                    for entry in entries.flatten() {
+                        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                            search_paths.push(format!(
+                                "{}/{}.toml",
+                                entry.path().display(),
+                                lower_name,
+                            ));
+                        }
+                    }
+                }
             }
-            let lol_path = format!("assets/lol_heroes/{}.toml", name);
-            let content = std::fs::read_to_string(&lol_path).ok()?;
-            toml::from_str::<HeroToml>(&content).ok()
+
+            let mut toml: Option<HeroToml> = None;
+            for path in &search_paths {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    // Check for .ability DSL file
+                    let dsl_content = std::path::Path::new(path)
+                        .with_extension("ability")
+                        .to_str()
+                        .and_then(|p| std::fs::read_to_string(p).ok());
+                    toml = parse_hero_toml_with_dsl(&content, dsl_content.as_deref()).ok();
+                    if toml.is_some() {
+                        break;
+                    }
+                }
+            }
+
+            // Resolve ability_refs and passive_refs from manifest
+            if let (Some(ref mut t), Some(m)) = (&mut toml, manifest) {
+                for ref_name in &t.ability_refs.clone() {
+                    if let Some(def) = m.get_ability(ref_name) {
+                        t.abilities.push(def.clone());
+                    } else {
+                        eprintln!("Warning: ability ref '{}' not found in manifest", ref_name);
+                    }
+                }
+                for ref_name in &t.passive_refs.clone() {
+                    if let Some(def) = m.get_passive(ref_name) {
+                        t.passives.push(def.clone());
+                    } else {
+                        eprintln!("Warning: passive ref '{}' not found in manifest", ref_name);
+                    }
+                }
+            }
+
+            toml
         })
         .collect()
+}
+
+/// Try to load an AbilityManifest from the given path or default location.
+pub(crate) fn load_manifest(manifest_path: Option<&str>) -> Option<AbilityManifest> {
+    let path = manifest_path.unwrap_or("dataset/manifest.toml");
+    let manifest_path = std::path::Path::new(path);
+    if !manifest_path.exists() {
+        return None;
+    }
+    let base_dir = manifest_path.parent().unwrap_or(std::path::Path::new("."));
+    match AbilityManifest::load(manifest_path, base_dir) {
+        Ok(m) => {
+            eprintln!("Loaded ability manifest: {} entries from {}", m.len(), path);
+            Some(m)
+        }
+        Err(e) => {
+            eprintln!("Warning: failed to load manifest {}: {}", path, e);
+            None
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -99,10 +175,13 @@ pub fn run_scenario_to_state(
     SimState,
     crate::ai::squad::SquadAiState,
 ) {
+    let manifest = load_manifest(cfg.manifest_path.as_deref());
+    let manifest_ref = manifest.as_ref();
+
     let mut sim = if !cfg.enemy_hero_templates.is_empty() {
         // Hero vs Hero mode
-        let hero_tomls = resolve_hero_templates(&cfg.hero_templates);
-        let enemy_tomls = resolve_hero_templates(&cfg.enemy_hero_templates);
+        let hero_tomls = resolve_hero_templates(&cfg.hero_templates, manifest_ref);
+        let enemy_tomls = resolve_hero_templates(&cfg.enemy_hero_templates, manifest_ref);
         build_hero_vs_hero(&hero_tomls, &enemy_tomls, cfg.seed)
     } else {
         let enemy_x_step = if cfg.enemy_count > 1 {
@@ -120,7 +199,7 @@ pub fn run_scenario_to_state(
         let enemy_wave = default_enemy_wave(cfg.enemy_count, cfg.seed, &spawn_positions);
 
         if !cfg.hero_templates.is_empty() {
-            let hero_tomls = resolve_hero_templates(&cfg.hero_templates);
+            let hero_tomls = resolve_hero_templates(&cfg.hero_templates, manifest_ref);
             build_sim_with_hero_templates(&hero_tomls, enemy_wave, cfg.seed)
         } else {
             build_sim_with_templates(cfg.hero_count, enemy_wave, cfg.seed)
@@ -164,9 +243,12 @@ pub fn run_scenario_to_state_with_room(
     let room_type = RoomType::from_str(&cfg.room_type).unwrap_or(RoomType::Entry);
     let layout = generate_room(cfg.seed, room_type);
 
+    let manifest = load_manifest(cfg.manifest_path.as_deref());
+    let manifest_ref = manifest.as_ref();
+
     let mut sim = if !cfg.enemy_hero_templates.is_empty() {
-        let hero_tomls = resolve_hero_templates(&cfg.hero_templates);
-        let enemy_tomls = resolve_hero_templates(&cfg.enemy_hero_templates);
+        let hero_tomls = resolve_hero_templates(&cfg.hero_templates, manifest_ref);
+        let enemy_tomls = resolve_hero_templates(&cfg.enemy_hero_templates, manifest_ref);
         build_hero_vs_hero(&hero_tomls, &enemy_tomls, cfg.seed)
     } else {
         let enemy_spawns = &layout.enemy_spawn.positions;
@@ -183,7 +265,7 @@ pub fn run_scenario_to_state_with_room(
         let enemy_wave = default_enemy_wave(cfg.enemy_count, cfg.seed, &spawn_positions);
 
         if !cfg.hero_templates.is_empty() {
-            let hero_tomls = resolve_hero_templates(&cfg.hero_templates);
+            let hero_tomls = resolve_hero_templates(&cfg.hero_templates, manifest_ref);
             build_sim_with_hero_templates(&hero_tomls, enemy_wave, cfg.seed)
         } else {
             build_sim_with_templates(cfg.hero_count, enemy_wave, cfg.seed)

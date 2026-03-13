@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier2_healer_slower_vs_tier4_pyromancer_priest"
+seed = 20171
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["healer", "slower"]
+enemy_hero_templates = ["pyromancer", "priest"]

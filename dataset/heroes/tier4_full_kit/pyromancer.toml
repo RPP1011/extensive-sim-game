@@ -1,0 +1,94 @@
+[hero]
+name = "Pyromancer"
+
+[stats]
+hp = 80
+move_speed = 2.8
+
+[stats.tags]
+FIRE = 30.0
+
+[attack]
+damage = 12
+range = 5.0
+
+# Instant damage
+[[abilities]]
+name = "Sear"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 4000
+cast_time_ms = 200
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 45
+
+[abilities.effects.tags]
+FIRE = 55.0
+
+# DoT
+[[abilities]]
+name = "Ignite"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 6000
+cast_time_ms = 200
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount_per_tick = 10
+tick_interval_ms = 1000
+duration_ms = 3000
+
+[abilities.effects.tags]
+FIRE = 50.0
+
+# AoE
+[[abilities]]
+name = "FireBlast"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 10000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 35
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+[abilities.effects.tags]
+FIRE = 55.0
+
+# Escape
+[[abilities]]
+name = "FlameStep"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 10000
+cast_time_ms = 0
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "dash"
+distance = 3.0
+
+[[passives]]
+name = "Combustion"
+cooldown_ms = 8000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_dealt"
+
+[[passives.effects]]
+type = "buff"
+stat = "damage_output"
+factor = 0.15
+duration_ms = 3000

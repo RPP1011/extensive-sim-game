@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier3_fighter_skirmisher_vs_tier5_templar_archmage"
+seed = 20197
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["fighter", "skirmisher"]
+enemy_hero_templates = ["templar", "archmage"]

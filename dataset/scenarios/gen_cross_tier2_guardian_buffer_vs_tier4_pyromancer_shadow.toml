@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier2_guardian_buffer_vs_tier4_pyromancer_shadow"
+seed = 20170
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["guardian", "buffer"]
+enemy_hero_templates = ["pyromancer", "shadow"]

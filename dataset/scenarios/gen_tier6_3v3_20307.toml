@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier6_3v3_20307"
+seed = 20307
+hero_count = 3
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["plague_doctor", "shatter_mage", "executioner"]
+enemy_hero_templates = ["executioner", "shatter_mage", "protector"]

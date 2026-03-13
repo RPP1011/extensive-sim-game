@@ -107,6 +107,7 @@ fn build_custom_nav(s: &CustomScenario) -> GridNav {
             zone.slope_cost_multiplier,
         );
     }
+    nav.precompute_wall_proximity();
     nav
 }
 

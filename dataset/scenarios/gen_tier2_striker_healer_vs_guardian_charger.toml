@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier2_striker_healer_vs_guardian_charger"
+seed = 20027
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["striker", "healer"]
+enemy_hero_templates = ["guardian", "charger"]

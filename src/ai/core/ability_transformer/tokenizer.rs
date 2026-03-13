@@ -133,6 +133,7 @@ fn bucket_duration_ms(ms: f64) -> &'static str {
 /// Ability DSL tokenizer with a fixed 252-token vocabulary.
 ///
 /// Token IDs are compatible with the Python `training/tokenizer.py`.
+#[derive(Clone)]
 pub struct AbilityTokenizer {
     tok2id: HashMap<String, u32>,
 }

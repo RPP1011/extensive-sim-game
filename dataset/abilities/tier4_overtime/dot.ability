@@ -1,0 +1,41 @@
+// Tier 4: Damage over time — varying tick rates, durations, elements
+
+ability Ignite {
+    target: enemy, range: 4.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 8/1s for 3s [FIRE: 50]
+}
+
+ability Poison {
+    target: enemy, range: 3.0
+    cooldown: 5s, cast: 100ms
+    hint: damage
+
+    damage 6/1s for 5s [POISON: 50]
+}
+
+ability Corruption {
+    target: enemy, range: 4.0
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 10/1s for 4s [DARK: 55]
+}
+
+ability DeepBurn {
+    target: enemy, range: 4.0
+    cooldown: 10s, cast: 300ms
+    hint: damage
+
+    damage 5/500ms for 3s [FIRE: 55]
+}
+
+ability Bleed {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 100ms
+    hint: damage
+
+    damage 7/1s for 4s [BLEED: 45]
+}

@@ -1,0 +1,43 @@
+[hero]
+name = "Skirmisher"
+
+[stats]
+hp = 85
+move_speed = 3.5
+
+[attack]
+damage = 20
+range = 1.5
+
+# Dash + damage
+[[abilities]]
+name = "ChargeStrike"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 6000
+cast_time_ms = 0
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+[[abilities.effects]]
+type = "damage"
+amount = 35
+
+[abilities.effects.tags]
+PHYSICAL = 45.0
+
+# Escape dash
+[[abilities]]
+name = "Retreat"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 8000
+cast_time_ms = 0
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "dash"
+distance = 3.0

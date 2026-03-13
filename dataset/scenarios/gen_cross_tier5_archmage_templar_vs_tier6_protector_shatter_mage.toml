@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier5_archmage_templar_vs_tier6_protector_shatter_mage"
+seed = 20253
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["archmage", "templar"]
+enemy_hero_templates = ["protector", "shatter_mage"]

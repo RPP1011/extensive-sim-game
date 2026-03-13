@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier3_caster_skirmisher_vs_tier4_warden_shadow"
+seed = 20147
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["caster", "skirmisher"]
+enemy_hero_templates = ["warden", "shadow"]

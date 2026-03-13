@@ -1,0 +1,10 @@
+[scenario]
+name = "cross_mixed_5v5"
+seed = 7005
+hero_count = 5
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["brawler", "striker", "fighter", "shadow", "archmage"]
+enemy_hero_templates = ["sniper", "stunner", "medic", "paladin", "templar"]

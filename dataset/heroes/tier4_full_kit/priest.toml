@@ -1,0 +1,96 @@
+[hero]
+name = "Priest"
+
+[stats]
+hp = 85
+move_speed = 2.8
+
+[stats.tags]
+HOLY = 35.0
+
+[attack]
+damage = 10
+range = 4.0
+
+# Single target heal
+[[abilities]]
+name = "Heal"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 3000
+cast_time_ms = 300
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount = 35
+
+[abilities.effects.tags]
+HOLY = 30.0
+
+# HoT
+[[abilities]]
+name = "Renew"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 5000
+cast_time_ms = 200
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount_per_tick = 10
+tick_interval_ms = 1000
+duration_ms = 4000
+
+[abilities.effects.tags]
+HOLY = 30.0
+
+# AoE heal
+[[abilities]]
+name = "PrayerOfHealing"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 14000
+cast_time_ms = 400
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount = 25
+
+[abilities.effects.area]
+shape = "circle"
+radius = 4.0
+
+[abilities.effects.tags]
+HOLY = 35.0
+
+# Damage
+[[abilities]]
+name = "HolySmite"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 4000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 30
+
+[abilities.effects.tags]
+HOLY = 45.0
+
+[[passives]]
+name = "BlessedAura"
+cooldown_ms = 0
+range = 3.0
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 3000
+
+[[passives.effects]]
+type = "heal"
+amount = 5

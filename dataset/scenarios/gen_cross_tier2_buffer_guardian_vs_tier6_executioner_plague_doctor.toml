@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier2_buffer_guardian_vs_tier6_executioner_plague_doctor"
+seed = 20215
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["buffer", "guardian"]
+enemy_hero_templates = ["executioner", "plague_doctor"]

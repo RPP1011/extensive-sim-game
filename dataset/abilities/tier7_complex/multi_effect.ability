@@ -1,0 +1,105 @@
+// Tier 7: Complex multi-effect abilities (3+ effects)
+
+ability HeroicCharge {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 0ms
+    hint: crowd_control
+
+    dash to_target
+    damage 35 [PHYSICAL: 50]
+    stun 1500ms [CROWD_CONTROL: 70]
+}
+
+ability FrostNova {
+    target: self_aoe
+    cooldown: 10s, cast: 300ms
+    hint: crowd_control
+
+    damage 20 in circle(3.0)
+    stun 2s in circle(3.0) [CROWD_CONTROL: 80, ICE: 60]
+}
+
+ability SmokeBomb {
+    target: self_aoe
+    cooldown: 12s, cast: 100ms
+    hint: crowd_control
+
+    damage 20 in circle(2.5) [PHYSICAL: 35]
+    slow 0.5 for 2500ms in circle(2.5) [CROWD_CONTROL: 50]
+    blind 0.5 for 2s in circle(2.5)
+}
+
+ability DivineStrike {
+    target: enemy, range: 1.5
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 45 [HOLY: 55]
+    heal 20 in self
+    damage_modify 1.2 for 3s
+}
+
+ability Garrote {
+    target: enemy, range: 1.3
+    cooldown: 10s, cast: 300ms
+    hint: crowd_control
+
+    stun 2s [CROWD_CONTROL: 60]
+    damage 8/1s for 2s [PHYSICAL: 40]
+    silence 1s [CROWD_CONTROL: 45]
+}
+
+ability ArcaneBurst {
+    target: self_aoe
+    cooldown: 15s, cast: 400ms
+    hint: damage
+
+    damage 50 in circle(3.0) [MAGIC: 55]
+    slow 0.3 for 2s in circle(3.0) [SLOW: 40]
+    buff damage_output 0.2 for 4s
+}
+
+ability LifeSwap {
+    target: enemy, range: 4.0
+    cooldown: 12s, cast: 300ms
+    hint: damage
+
+    damage 40 [DARK: 55]
+    heal 30
+    debuff move_speed 0.3 for 3s [DARK: 40]
+}
+
+ability Whirlwind {
+    target: self_aoe
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 40 in circle(2.5) [PHYSICAL: 50]
+    damage 10 in circle(2.5) when hit_count_above(2) [PHYSICAL: 50]
+}
+
+ability ChainStun {
+    target: enemy, range: 4.0
+    cooldown: 14s, cast: 300ms
+    hint: crowd_control
+
+    damage 25 [MAGIC: 45]
+    stun 1500ms [CROWD_CONTROL: 55]
+
+    deliver chain { bounces: 2, range: 3.0, falloff: 0.2 } {
+        on_hit {
+            damage 15 [MAGIC: 40]
+            stun 1s [CROWD_CONTROL: 45]
+        }
+    }
+}
+
+ability Sanctuary {
+    target: self_aoe
+    cooldown: 14s, cast: 300ms
+    hint: heal
+
+    heal 20 in circle(4.0) [HOLY: 30]
+    heal 8/1s for 4s in circle(4.0) [HOLY: 30]
+    shield 15 for 4s in circle(4.0)
+}

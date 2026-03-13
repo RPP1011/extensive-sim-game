@@ -35,6 +35,7 @@ fn build_scenario(
             hero_templates: heroes,
             enemy_hero_templates: Vec::new(),
             hp_multiplier: hp_mult,
+            manifest_path: None,
         },
         assert: Some(ScenarioAssert {
             outcome: Some("Any".to_string()),
@@ -66,6 +67,7 @@ fn build_hvh_scenario(
             hero_templates: heroes,
             enemy_hero_templates: enemy_heroes,
             hp_multiplier: hp_mult,
+            manifest_path: None,
         },
         assert: Some(ScenarioAssert {
             outcome: Some("Any".to_string()),

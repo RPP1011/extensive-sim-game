@@ -1,0 +1,10 @@
+[hero]
+name = "Archer"
+
+[stats]
+hp = 700
+move_speed = 3.0
+
+[attack]
+damage = 14
+range = 5.0

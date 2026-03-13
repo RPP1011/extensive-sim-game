@@ -8,7 +8,10 @@
 
 mod weights;
 pub mod tokenizer;
+pub mod gpu_client;
 
 pub use weights::AbilityTransformerWeights;
 pub use weights::{ActorCriticWeights, ActorCriticWeightsV2, EntityState, AC_NUM_ACTIONS};
 pub use weights::{ActorCriticWeightsV3, EntityStateV3, PointerOutput};
+pub use weights::{ActorCriticWeightsV4, DualHeadOutput};
+pub use weights::EmbeddingRegistry;

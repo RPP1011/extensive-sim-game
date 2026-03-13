@@ -1,0 +1,10 @@
+[scenario]
+name = "cross_t2_vs_t3"
+seed = 7002
+hero_count = 3
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["striker", "stunner", "healer"]
+enemy_hero_templates = ["fighter", "medic", "caster"]

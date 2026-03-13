@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier2_guardian_striker_vs_tier6_protector_shatter_mage"
+seed = 20225
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["guardian", "striker"]
+enemy_hero_templates = ["protector", "shatter_mage"]

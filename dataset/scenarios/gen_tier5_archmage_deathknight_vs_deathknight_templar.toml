@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier5_archmage_deathknight_vs_deathknight_templar"
+seed = 20091
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["archmage", "deathknight"]
+enemy_hero_templates = ["deathknight", "templar"]

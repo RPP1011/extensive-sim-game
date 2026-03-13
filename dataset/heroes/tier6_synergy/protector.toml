@@ -1,0 +1,134 @@
+[hero]
+name = "Protector"
+
+[stats]
+hp = 190
+move_speed = 2.5
+
+[stats.tags]
+HOLY = 25.0
+
+[attack]
+damage = 10
+range = 1.5
+
+# Redirect attacks to self — enables squishy allies
+[[abilities]]
+name = "Intercept"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 12000
+cast_time_ms = 100
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "redirect"
+duration_ms = 4000
+charges = 5
+
+# Link damage — split incoming damage with ally
+[[abilities]]
+name = "SoulLink"
+targeting = "target_ally"
+range = 5.0
+cooldown_ms = 15000
+cast_time_ms = 200
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "link"
+duration_ms = 6000
+share_percent = 50.0
+
+# AoE taunt — pulls aggro so allies can cast freely
+[[abilities]]
+name = "MassProvoke"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 14000
+cast_time_ms = 200
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "taunt"
+duration_ms = 2500
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+[abilities.effects.tags]
+CROWD_CONTROL = 55.0
+
+# AoE shield for allies
+[[abilities]]
+name = "RallyingShield"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 14000
+cast_time_ms = 300
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 35
+duration_ms = 4000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.5
+
+# Stun to set up ally burst
+[[abilities]]
+name = "StaggeringBlow"
+targeting = "target_enemy"
+range = 1.5
+cooldown_ms = 10000
+cast_time_ms = 200
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+
+[abilities.effects.tags]
+PHYSICAL = 35.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 2000
+
+[abilities.effects.tags]
+CROWD_CONTROL = 60.0
+
+[[passives]]
+name = "GuardianInstinct"
+cooldown_ms = 6000
+range = 3.0
+
+[passives.trigger]
+type = "on_ally_damaged"
+range = 3.0
+
+[[passives.effects]]
+type = "shield"
+amount = 15
+duration_ms = 3000
+
+[[passives]]
+name = "Unbreakable"
+cooldown_ms = 30000
+range = 0.0
+
+[passives.trigger]
+type = "on_hp_below"
+percent = 20.0
+
+[[passives.effects]]
+type = "heal"
+amount = 40
+
+[[passives.effects]]
+type = "shield"
+amount = 40
+duration_ms = 4000

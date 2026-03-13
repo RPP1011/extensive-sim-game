@@ -1,0 +1,65 @@
+// Tier 1: Single instant damage — varying amounts, ranges, elements
+
+ability Strike {
+    target: enemy, range: 1.5
+    cooldown: 3s, cast: 200ms
+    hint: damage
+
+    damage 20 [PHYSICAL: 40]
+}
+
+ability HeavyStrike {
+    target: enemy, range: 1.5
+    cooldown: 5s, cast: 300ms
+    hint: damage
+
+    damage 45 [PHYSICAL: 50]
+}
+
+ability Crush {
+    target: enemy, range: 1.5
+    cooldown: 8s, cast: 400ms
+    hint: damage
+
+    damage 70 [PHYSICAL: 55]
+}
+
+ability Zap {
+    target: enemy, range: 5.0
+    cooldown: 4s, cast: 200ms
+    hint: damage
+
+    damage 35 [MAGIC: 45]
+}
+
+ability Sear {
+    target: enemy, range: 5.0
+    cooldown: 6s, cast: 300ms
+    hint: damage
+
+    damage 55 [FIRE: 55]
+}
+
+ability FrostBolt {
+    target: enemy, range: 5.0
+    cooldown: 3s, cast: 200ms
+    hint: damage
+
+    damage 25 [ICE: 40]
+}
+
+ability ShadowBolt {
+    target: enemy, range: 5.0
+    cooldown: 5s, cast: 300ms
+    hint: damage
+
+    damage 50 [DARK: 50]
+}
+
+ability HolySmite {
+    target: enemy, range: 4.0
+    cooldown: 4s, cast: 300ms
+    hint: damage
+
+    damage 30 [HOLY: 45]
+}

@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_t1v1_scout_sniper_vs_sentinel_duelist"
+seed = 8080
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["scout", "sniper"]
+enemy_hero_templates = ["sentinel", "duelist"]

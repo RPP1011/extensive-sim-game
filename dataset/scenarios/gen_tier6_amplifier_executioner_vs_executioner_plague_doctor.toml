@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier6_amplifier_executioner_vs_executioner_plague_doctor"
+seed = 20096
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["amplifier", "executioner"]
+enemy_hero_templates = ["executioner", "plague_doctor"]

@@ -1,0 +1,41 @@
+// Tier 6: Chain delivery
+
+ability ChainLightning {
+    target: enemy, range: 5.0
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 30 [MAGIC: 55]
+
+    deliver chain { bounces: 3, range: 3.0, falloff: 0.15 } {
+        on_hit {
+            damage 30 [MAGIC: 55]
+        }
+    }
+}
+
+ability ChainHeal {
+    target: ally, range: 5.0
+    cooldown: 8s, cast: 300ms
+    hint: heal
+
+    heal 40 [HOLY: 35]
+
+    deliver chain { bounces: 2, range: 4.0, falloff: 0.2 } {
+        on_hit {
+            heal 30 [HOLY: 30]
+        }
+    }
+}
+
+ability BounceShock {
+    target: enemy, range: 5.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    deliver chain { bounces: 4, range: 3.5, falloff: 0.1 } {
+        on_hit {
+            damage 20 [MAGIC: 45]
+        }
+    }
+}

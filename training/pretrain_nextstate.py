@@ -214,8 +214,15 @@ class EntityEncoderDecomposed(nn.Module):
         self.encoder.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
         self.encoder.out_norm = nn.LayerNorm(d_model)
 
-        # Per-group prediction heads (input: d_model + 1 for delta)
-        d_in = d_model + 1
+        # Delta conditioning: project scalar → d_model, additive (like positional encoding)
+        self.delta_proj = nn.Sequential(
+            nn.Linear(1, d_model),
+            nn.GELU(),
+            nn.Linear(d_model, d_model),
+        )
+
+        # Per-group prediction heads (input: d_model, delta is additive)
+        d_in = d_model
         d_hidden = d_model * 2
         self.heads = nn.ModuleDict()
         for name, indices in DYNAMIC_GROUPS.items():
@@ -324,11 +331,9 @@ class EntityEncoderDecomposed(nn.Module):
         n_entities = entity_features.shape[1]
         entity_tokens = tokens[:, :n_entities]  # (B, E, d_model)
 
-        # Broadcast delta
-        delta_feat = delta_normalized.unsqueeze(-1).unsqueeze(-1).expand(
-            -1, n_entities, 1,
-        )
-        conditioned = torch.cat([entity_tokens, delta_feat], dim=-1)  # (B, E, d_model+1)
+        # Additive delta conditioning: scalar → d_model, broadcast to all entities
+        delta_emb = self.delta_proj(delta_normalized.unsqueeze(-1))  # (B, d_model)
+        conditioned = entity_tokens + delta_emb.unsqueeze(1)  # (B, E, d_model)
 
         results = {}
         for name, indices in DYNAMIC_GROUPS.items():

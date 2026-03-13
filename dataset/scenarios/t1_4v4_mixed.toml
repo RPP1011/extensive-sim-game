@@ -1,0 +1,10 @@
+[scenario]
+name = "t1_4v4_mixed"
+seed = 1004
+hero_count = 4
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["brawler", "archer", "sentinel", "scout"]
+enemy_hero_templates = ["brute", "sniper", "duelist", "slinger"]

@@ -1,0 +1,10 @@
+[hero]
+name = "Brute"
+
+[stats]
+hp = 1600
+move_speed = 2.5
+
+[attack]
+damage = 22
+range = 1.5

@@ -1,0 +1,472 @@
+# Ability Dataset Manifest
+# Tags allow querying abilities by functionality.
+#
+# Tag vocabulary:
+#   Effect:    damage, heal, shield, dot, hot
+#   CC:        stun, slow, root, silence, fear, taunt, knockback, pull, blind
+#   Mobility:  dash, knockback, pull
+#   Buff:      buff, debuff, damage_modify
+#   Targeting: single_target, aoe, self_cast, ground_target
+#   Area:      circle, cone, line, spread, ring
+#   Delivery:  projectile, chain, zone, trap
+#   Condition: conditional, hp_threshold, status_trigger, hit_count
+#   Special:   execute, self_damage, lifesteal
+#   Tier:      tier1, tier2, tier3, tier4, tier5, tier6, tier7
+
+# ─── Tier 1: Single instant effect, no conditions ────────────────────────────
+
+[abilities.Strike]
+file = "abilities/tier1_instant/damage.ability"
+tags = ["damage", "single_target", "tier1"]
+
+[abilities.HeavyStrike]
+file = "abilities/tier1_instant/damage.ability"
+tags = ["damage", "single_target", "tier1"]
+
+[abilities.Crush]
+file = "abilities/tier1_instant/damage.ability"
+tags = ["damage", "single_target", "tier1"]
+
+[abilities.Zap]
+file = "abilities/tier1_instant/damage.ability"
+tags = ["damage", "single_target", "tier1"]
+
+[abilities.Sear]
+file = "abilities/tier1_instant/damage.ability"
+tags = ["damage", "single_target", "tier1"]
+
+[abilities.FrostBolt]
+file = "abilities/tier1_instant/damage.ability"
+tags = ["damage", "single_target", "tier1"]
+
+[abilities.ShadowBolt]
+file = "abilities/tier1_instant/damage.ability"
+tags = ["damage", "single_target", "tier1"]
+
+[abilities.HolySmite]
+file = "abilities/tier1_instant/damage.ability"
+tags = ["damage", "single_target", "tier1"]
+
+[abilities.Mend]
+file = "abilities/tier1_instant/heal.ability"
+tags = ["heal", "single_target", "tier1"]
+
+[abilities.Restore]
+file = "abilities/tier1_instant/heal.ability"
+tags = ["heal", "single_target", "tier1"]
+
+[abilities.GreaterHeal]
+file = "abilities/tier1_instant/heal.ability"
+tags = ["heal", "single_target", "tier1"]
+
+[abilities.NaturesTouch]
+file = "abilities/tier1_instant/heal.ability"
+tags = ["heal", "single_target", "tier1"]
+
+[abilities.SelfHeal]
+file = "abilities/tier1_instant/heal.ability"
+tags = ["heal", "self_cast", "tier1"]
+
+[abilities.Ward]
+file = "abilities/tier1_instant/shield.ability"
+tags = ["shield", "single_target", "tier1"]
+
+[abilities.Barrier]
+file = "abilities/tier1_instant/shield.ability"
+tags = ["shield", "self_cast", "tier1"]
+
+[abilities.IronShield]
+file = "abilities/tier1_instant/shield.ability"
+tags = ["shield", "single_target", "tier1"]
+
+[abilities.Bash]
+file = "abilities/tier1_instant/cc.ability"
+tags = ["stun", "single_target", "tier1"]
+
+[abilities.Concuss]
+file = "abilities/tier1_instant/cc.ability"
+tags = ["stun", "single_target", "tier1"]
+
+[abilities.Hamstring]
+file = "abilities/tier1_instant/cc.ability"
+tags = ["slow", "single_target", "tier1"]
+
+[abilities.Cripple]
+file = "abilities/tier1_instant/cc.ability"
+tags = ["slow", "single_target", "tier1"]
+
+[abilities.Pin]
+file = "abilities/tier1_instant/cc.ability"
+tags = ["root", "single_target", "tier1"]
+
+[abilities.Silence]
+file = "abilities/tier1_instant/cc.ability"
+tags = ["silence", "single_target", "tier1"]
+
+[abilities.Terrify]
+file = "abilities/tier1_instant/cc.ability"
+tags = ["fear", "single_target", "tier1"]
+
+[abilities.Taunt]
+file = "abilities/tier1_instant/cc.ability"
+tags = ["taunt", "single_target", "tier1"]
+
+[abilities.Lunge]
+file = "abilities/tier1_instant/mobility.ability"
+tags = ["dash", "single_target", "tier1"]
+
+[abilities.Retreat]
+file = "abilities/tier1_instant/mobility.ability"
+tags = ["dash", "self_cast", "tier1"]
+
+[abilities.ShortDash]
+file = "abilities/tier1_instant/mobility.ability"
+tags = ["dash", "self_cast", "tier1"]
+
+[abilities.Shove]
+file = "abilities/tier1_instant/mobility.ability"
+tags = ["knockback", "single_target", "tier1"]
+
+[abilities.HeavyKnockback]
+file = "abilities/tier1_instant/mobility.ability"
+tags = ["knockback", "single_target", "tier1"]
+
+[abilities.Grapple]
+file = "abilities/tier1_instant/mobility.ability"
+tags = ["pull", "single_target", "tier1"]
+
+[abilities.Empower]
+file = "abilities/tier1_instant/buff_debuff.ability"
+tags = ["buff", "single_target", "tier1"]
+
+[abilities.Haste]
+file = "abilities/tier1_instant/buff_debuff.ability"
+tags = ["buff", "single_target", "tier1"]
+
+[abilities.Quicken]
+file = "abilities/tier1_instant/buff_debuff.ability"
+tags = ["buff", "self_cast", "tier1"]
+
+[abilities.Weaken]
+file = "abilities/tier1_instant/buff_debuff.ability"
+tags = ["debuff", "single_target", "tier1"]
+
+[abilities.Enfeeble]
+file = "abilities/tier1_instant/buff_debuff.ability"
+tags = ["debuff", "single_target", "tier1"]
+
+[abilities.HuntersMark]
+file = "abilities/tier1_instant/buff_debuff.ability"
+tags = ["damage_modify", "single_target", "tier1"]
+
+# ─── Tier 2: Single effect with AoE ──────────────────────────────────────────
+
+[abilities.Cleave]
+file = "abilities/tier2_aoe/damage_aoe.ability"
+tags = ["damage", "aoe", "circle", "tier2"]
+
+[abilities.Earthquake]
+file = "abilities/tier2_aoe/damage_aoe.ability"
+tags = ["damage", "aoe", "circle", "tier2"]
+
+[abilities.BreathOfFire]
+file = "abilities/tier2_aoe/damage_aoe.ability"
+tags = ["damage", "aoe", "cone", "tier2"]
+
+[abilities.ShockWave]
+file = "abilities/tier2_aoe/damage_aoe.ability"
+tags = ["damage", "aoe", "line", "tier2"]
+
+[abilities.Volley]
+file = "abilities/tier2_aoe/damage_aoe.ability"
+tags = ["damage", "aoe", "spread", "tier2"]
+
+[abilities.RingOfFire]
+file = "abilities/tier2_aoe/damage_aoe.ability"
+tags = ["damage", "aoe", "ring", "tier2"]
+
+[abilities.Meteor]
+file = "abilities/tier2_aoe/damage_aoe.ability"
+tags = ["damage", "aoe", "circle", "ground_target", "tier2"]
+
+[abilities.HealingCircle]
+file = "abilities/tier2_aoe/heal_aoe.ability"
+tags = ["heal", "aoe", "circle", "tier2"]
+
+[abilities.MassHeal]
+file = "abilities/tier2_aoe/heal_aoe.ability"
+tags = ["heal", "aoe", "circle", "tier2"]
+
+[abilities.MassShield]
+file = "abilities/tier2_aoe/heal_aoe.ability"
+tags = ["shield", "aoe", "circle", "tier2"]
+
+[abilities.ThunderClap]
+file = "abilities/tier2_aoe/cc_aoe.ability"
+tags = ["stun", "aoe", "circle", "tier2"]
+
+[abilities.FrostPulse]
+file = "abilities/tier2_aoe/cc_aoe.ability"
+tags = ["slow", "aoe", "circle", "tier2"]
+
+[abilities.Entangle]
+file = "abilities/tier2_aoe/cc_aoe.ability"
+tags = ["root", "aoe", "circle", "ground_target", "tier2"]
+
+[abilities.MassTerrify]
+file = "abilities/tier2_aoe/cc_aoe.ability"
+tags = ["fear", "aoe", "circle", "tier2"]
+
+[abilities.IntimidatingShout]
+file = "abilities/tier2_aoe/cc_aoe.ability"
+tags = ["slow", "aoe", "cone", "tier2"]
+
+# ─── Tier 3: Two instant effects ─────────────────────────────────────────────
+
+[abilities.StunStrike]
+file = "abilities/tier3_combo/damage_cc.ability"
+tags = ["damage", "stun", "single_target", "tier3"]
+
+[abilities.FrostSlash]
+file = "abilities/tier3_combo/damage_cc.ability"
+tags = ["damage", "slow", "single_target", "tier3"]
+
+[abilities.ShieldBash]
+file = "abilities/tier3_combo/damage_cc.ability"
+tags = ["damage", "knockback", "single_target", "tier3"]
+
+[abilities.RootBlast]
+file = "abilities/tier3_combo/damage_cc.ability"
+tags = ["damage", "root", "single_target", "tier3"]
+
+[abilities.SilencingStrike]
+file = "abilities/tier3_combo/damage_cc.ability"
+tags = ["damage", "silence", "single_target", "tier3"]
+
+[abilities.ChargeStrike]
+file = "abilities/tier3_combo/damage_mobility.ability"
+tags = ["damage", "dash", "single_target", "tier3"]
+
+[abilities.ShadowStrike]
+file = "abilities/tier3_combo/damage_mobility.ability"
+tags = ["damage", "dash", "single_target", "tier3"]
+
+[abilities.KickBack]
+file = "abilities/tier3_combo/damage_mobility.ability"
+tags = ["damage", "knockback", "single_target", "tier3"]
+
+[abilities.PullSmash]
+file = "abilities/tier3_combo/damage_mobility.ability"
+tags = ["damage", "pull", "single_target", "tier3"]
+
+[abilities.SoulDrain]
+file = "abilities/tier3_combo/damage_heal.ability"
+tags = ["damage", "heal", "single_target", "tier3"]
+
+[abilities.VampiricStrike]
+file = "abilities/tier3_combo/damage_heal.ability"
+tags = ["damage", "heal", "single_target", "tier3"]
+
+[abilities.HealAndShield]
+file = "abilities/tier3_combo/damage_heal.ability"
+tags = ["heal", "shield", "single_target", "tier3"]
+
+[abilities.Smite]
+file = "abilities/tier3_combo/damage_heal.ability"
+tags = ["damage", "heal", "single_target", "tier3"]
+
+[abilities.RallyingCry]
+file = "abilities/tier3_combo/buff_combo.ability"
+tags = ["buff", "aoe", "circle", "tier3"]
+
+[abilities.CurseOfWeakness]
+file = "abilities/tier3_combo/buff_combo.ability"
+tags = ["debuff", "slow", "single_target", "tier3"]
+
+[abilities.SelfBuff]
+file = "abilities/tier3_combo/buff_combo.ability"
+tags = ["buff", "self_cast", "tier3"]
+
+[abilities.BloodPact]
+file = "abilities/tier3_combo/buff_combo.ability"
+tags = ["buff", "self_damage", "self_cast", "tier3"]
+
+# ─── Tier 4: Over-time effects ───────────────────────────────────────────────
+
+[abilities.Ignite]
+file = "abilities/tier4_overtime/dot.ability"
+tags = ["dot", "single_target", "tier4"]
+
+[abilities.Poison]
+file = "abilities/tier4_overtime/dot.ability"
+tags = ["dot", "single_target", "tier4"]
+
+[abilities.Corruption]
+file = "abilities/tier4_overtime/dot.ability"
+tags = ["dot", "single_target", "tier4"]
+
+[abilities.DeepBurn]
+file = "abilities/tier4_overtime/dot.ability"
+tags = ["dot", "single_target", "tier4"]
+
+[abilities.Bleed]
+file = "abilities/tier4_overtime/dot.ability"
+tags = ["dot", "single_target", "tier4"]
+
+[abilities.Rejuvenation]
+file = "abilities/tier4_overtime/hot.ability"
+tags = ["hot", "single_target", "tier4"]
+
+[abilities.Regenerate]
+file = "abilities/tier4_overtime/hot.ability"
+tags = ["hot", "single_target", "tier4"]
+
+[abilities.SelfRegen]
+file = "abilities/tier4_overtime/hot.ability"
+tags = ["hot", "self_cast", "tier4"]
+
+[abilities.HolyFire]
+file = "abilities/tier4_overtime/dot_with_instant.ability"
+tags = ["damage", "dot", "single_target", "tier4"]
+
+[abilities.PoisonBlade]
+file = "abilities/tier4_overtime/dot_with_instant.ability"
+tags = ["damage", "dot", "single_target", "tier4"]
+
+[abilities.ScorchingRay]
+file = "abilities/tier4_overtime/dot_with_instant.ability"
+tags = ["damage", "dot", "single_target", "tier4"]
+
+# ─── Tier 5: Conditional effects ─────────────────────────────────────────────
+
+[abilities.ExecuteStrike]
+file = "abilities/tier5_conditional/hp_threshold.ability"
+tags = ["damage", "conditional", "hp_threshold", "single_target", "tier5"]
+
+[abilities.DesperateHeal]
+file = "abilities/tier5_conditional/hp_threshold.ability"
+tags = ["heal", "conditional", "hp_threshold", "single_target", "tier5"]
+
+[abilities.FinishingBlow]
+file = "abilities/tier5_conditional/hp_threshold.ability"
+tags = ["execute", "single_target", "tier5"]
+
+[abilities.LastResort]
+file = "abilities/tier5_conditional/hp_threshold.ability"
+tags = ["shield", "conditional", "hp_threshold", "self_cast", "tier5"]
+
+[abilities.Frenzy]
+file = "abilities/tier5_conditional/hp_threshold.ability"
+tags = ["buff", "conditional", "hp_threshold", "self_cast", "tier5"]
+
+[abilities.Shatter]
+file = "abilities/tier5_conditional/status_conditional.ability"
+tags = ["damage", "conditional", "status_trigger", "single_target", "tier5"]
+
+[abilities.Overpower]
+file = "abilities/tier5_conditional/status_conditional.ability"
+tags = ["damage", "conditional", "status_trigger", "single_target", "tier5"]
+
+[abilities.IceLance]
+file = "abilities/tier5_conditional/status_conditional.ability"
+tags = ["damage", "conditional", "status_trigger", "single_target", "tier5"]
+
+[abilities.BonusCleave]
+file = "abilities/tier5_conditional/status_conditional.ability"
+tags = ["damage", "conditional", "hit_count", "aoe", "circle", "tier5"]
+
+# ─── Tier 6: Delivery methods ────────────────────────────────────────────────
+
+[abilities.Fireball]
+file = "abilities/tier6_delivery/projectile.ability"
+tags = ["damage", "projectile", "aoe", "circle", "tier6"]
+
+[abilities.IceShard]
+file = "abilities/tier6_delivery/projectile.ability"
+tags = ["damage", "slow", "projectile", "tier6"]
+
+[abilities.PiercingArrow]
+file = "abilities/tier6_delivery/projectile.ability"
+tags = ["damage", "projectile", "tier6"]
+
+[abilities.DeathCoil]
+file = "abilities/tier6_delivery/projectile.ability"
+tags = ["damage", "projectile", "tier6"]
+
+[abilities.ChainLightning]
+file = "abilities/tier6_delivery/chain.ability"
+tags = ["damage", "chain", "tier6"]
+
+[abilities.ChainHeal]
+file = "abilities/tier6_delivery/chain.ability"
+tags = ["heal", "chain", "tier6"]
+
+[abilities.BounceShock]
+file = "abilities/tier6_delivery/chain.ability"
+tags = ["damage", "chain", "tier6"]
+
+[abilities.Blizzard]
+file = "abilities/tier6_delivery/zone.ability"
+tags = ["damage", "slow", "zone", "aoe", "circle", "tier6"]
+
+[abilities.HealingRain]
+file = "abilities/tier6_delivery/zone.ability"
+tags = ["heal", "zone", "aoe", "circle", "tier6"]
+
+[abilities.PlagueCloud]
+file = "abilities/tier6_delivery/zone.ability"
+tags = ["damage", "zone", "aoe", "circle", "tier6"]
+
+[abilities.ConsecratedGround]
+file = "abilities/tier6_delivery/zone.ability"
+tags = ["damage", "heal", "zone", "aoe", "circle", "tier6"]
+
+[abilities.BearTrap]
+file = "abilities/tier6_delivery/trap.ability"
+tags = ["damage", "root", "trap", "ground_target", "tier6"]
+
+[abilities.FrostMine]
+file = "abilities/tier6_delivery/trap.ability"
+tags = ["damage", "slow", "trap", "aoe", "circle", "ground_target", "tier6"]
+
+# ─── Tier 7: Complex multi-effect ────────────────────────────────────────────
+
+[abilities.HeroicCharge]
+file = "abilities/tier7_complex/multi_effect.ability"
+tags = ["damage", "dash", "stun", "single_target", "tier7"]
+
+[abilities.FrostNova]
+file = "abilities/tier7_complex/multi_effect.ability"
+tags = ["damage", "stun", "aoe", "circle", "tier7"]
+
+[abilities.SmokeBomb]
+file = "abilities/tier7_complex/multi_effect.ability"
+tags = ["damage", "slow", "blind", "aoe", "circle", "tier7"]
+
+[abilities.DivineStrike]
+file = "abilities/tier7_complex/multi_effect.ability"
+tags = ["damage", "heal", "damage_modify", "single_target", "tier7"]
+
+[abilities.Garrote]
+file = "abilities/tier7_complex/multi_effect.ability"
+tags = ["stun", "dot", "silence", "single_target", "tier7"]
+
+[abilities.ArcaneBurst]
+file = "abilities/tier7_complex/multi_effect.ability"
+tags = ["damage", "slow", "buff", "aoe", "circle", "tier7"]
+
+[abilities.LifeSwap]
+file = "abilities/tier7_complex/multi_effect.ability"
+tags = ["damage", "heal", "debuff", "single_target", "tier7"]
+
+[abilities.Whirlwind]
+file = "abilities/tier7_complex/multi_effect.ability"
+tags = ["damage", "conditional", "hit_count", "aoe", "circle", "tier7"]
+
+[abilities.ChainStun]
+file = "abilities/tier7_complex/multi_effect.ability"
+tags = ["damage", "stun", "chain", "tier7"]
+
+[abilities.Sanctuary]
+file = "abilities/tier7_complex/multi_effect.ability"
+tags = ["heal", "hot", "shield", "aoe", "circle", "tier7"]

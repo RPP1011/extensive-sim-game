@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier2_zapper_healer_vs_zapper_buffer"
+seed = 20001
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["zapper", "healer"]
+enemy_hero_templates = ["zapper", "buffer"]

@@ -50,6 +50,67 @@ def export_layer_norm(state_dict: dict, prefix: str) -> dict:
     return {"gamma": gamma, "beta": beta}
 
 
+def export_phase1(checkpoint_path: str, output_path: str, args):
+    """Export Phase 1 transformer encoder only (no cross-attention or decision head)."""
+    from model import AbilityTransformerMLM
+
+    tokenizer = AbilityTokenizer(max_length=args.max_seq_len)
+    vocab_size = args.vocab_size or tokenizer.vocab_size
+
+    model = AbilityTransformerMLM(
+        vocab_size=vocab_size,
+        d_model=args.d_model,
+        n_heads=args.n_heads,
+        n_layers=args.n_layers,
+        d_ff=args.d_ff,
+        max_seq_len=args.max_seq_len,
+    )
+
+    state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    # Filter to model keys only (exclude hint_head/recon_decoder)
+    model_keys = {k: v for k, v in state.items() if not k.startswith(("hint_head.", "recon_decoder."))}
+    model.load_state_dict(model_keys, strict=False)
+    sd = model.state_dict()
+
+    export = {
+        "architecture": {
+            "vocab_size": vocab_size,
+            "d_model": args.d_model,
+            "n_heads": args.n_heads,
+            "n_layers": args.n_layers,
+            "d_ff": args.d_ff,
+            "max_seq_len": args.max_seq_len,
+            "pad_id": tokenizer.pad_id,
+            "cls_id": tokenizer.cls_id,
+        },
+        "token_embedding": sd["transformer.token_emb.weight"].cpu().numpy().tolist(),
+        "position_embedding": sd["transformer.pos_emb.weight"].cpu().numpy().tolist(),
+        "output_norm": export_layer_norm(sd, "transformer.out_norm"),
+        "layers": [],
+    }
+
+    for i in range(args.n_layers):
+        prefix = f"transformer.encoder.layers.{i}"
+        layer = {
+            "self_attn_in_proj": export_in_proj(sd, f"{prefix}.self_attn"),
+            "self_attn_out_proj": export_linear(sd, f"{prefix}.self_attn.out_proj"),
+            "ff_linear1": export_linear(sd, f"{prefix}.linear1"),
+            "ff_linear2": export_linear(sd, f"{prefix}.linear2"),
+            "norm1": export_layer_norm(sd, f"{prefix}.norm1"),
+            "norm2": export_layer_norm(sd, f"{prefix}.norm2"),
+        }
+        export["layers"].append(layer)
+
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w") as f:
+        json.dump(export, f)
+
+    size_kb = out.stat().st_size / 1024
+    n_params = sum(p.numel() for p in model.transformer.parameters())
+    print(f"Exported Phase 1 encoder: {n_params:,} params to {out} ({size_kb:.0f} KB)")
+
+
 def export_transformer(checkpoint_path: str, output_path: str, args):
     tokenizer = AbilityTokenizer(max_length=args.max_seq_len)
 
@@ -164,6 +225,7 @@ def main():
     p.add_argument("checkpoint", help="PyTorch checkpoint (.pt)")
     p.add_argument("-o", "--output", default="generated/ability_transformer_weights.json")
 
+    p.add_argument("--phase1", action="store_true", help="Export Phase 1 encoder only (no decision head)")
     p.add_argument("--vocab-size", type=int, default=None)
     p.add_argument("--game-state-dim", type=int, default=0)
     p.add_argument("--n-targets", type=int, default=3)
@@ -174,7 +236,10 @@ def main():
     p.add_argument("--max-seq-len", type=int, default=256)
 
     args = p.parse_args()
-    export_transformer(args.checkpoint, args.output, args)
+    if args.phase1:
+        export_phase1(args.checkpoint, args.output, args)
+    else:
+        export_transformer(args.checkpoint, args.output, args)
 
 
 if __name__ == "__main__":

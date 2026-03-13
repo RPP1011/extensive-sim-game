@@ -73,6 +73,8 @@ pub enum Arg {
     Duration(u32),
     Ident(String),
     StringLit(String),
+    /// `X/tick` or `X/Ns` — periodic amount with optional explicit interval.
+    PerTick { amount: i32, interval_ms: u32 },
 }
 
 impl Arg {

@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier2_slower_charger_vs_healer_buffer"
+seed = 20004
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["slower", "charger"]
+enemy_hero_templates = ["healer", "buffer"]

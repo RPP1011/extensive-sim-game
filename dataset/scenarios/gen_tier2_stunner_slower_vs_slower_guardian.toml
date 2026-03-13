@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier2_stunner_slower_vs_slower_guardian"
+seed = 20025
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["stunner", "slower"]
+enemy_hero_templates = ["slower", "guardian"]

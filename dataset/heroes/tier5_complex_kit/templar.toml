@@ -1,0 +1,191 @@
+[hero]
+name = "Templar"
+
+[stats]
+hp = 130
+move_speed = 3.0
+
+[stats.tags]
+HOLY = 40.0
+
+[attack]
+damage = 16
+range = 1.5
+
+# Dash + damage + stun
+[[abilities]]
+name = "HolyCharge"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 10000
+cast_time_ms = 0
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+[[abilities.effects]]
+type = "damage"
+amount = 30
+
+[abilities.effects.tags]
+HOLY = 50.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1500
+
+[abilities.effects.tags]
+CROWD_CONTROL = 60.0
+
+# Damage + heal
+[[abilities]]
+name = "DivineStrike"
+targeting = "target_enemy"
+range = 1.5
+cooldown_ms = 5000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 40
+
+[abilities.effects.tags]
+HOLY = 55.0
+
+[[abilities.effects]]
+type = "heal"
+amount = 15
+
+[abilities.effects.area]
+shape = "self"
+
+# Targeted heal + shield
+[[abilities]]
+name = "BlessingOfLight"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 8000
+cast_time_ms = 300
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount = 35
+
+[abilities.effects.tags]
+HOLY = 35.0
+
+[[abilities.effects]]
+type = "shield"
+amount = 20
+duration_ms = 3000
+
+# AoE heal + HoT
+[[abilities]]
+name = "Consecration"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 14000
+cast_time_ms = 300
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount = 15
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.5
+
+[abilities.effects.tags]
+HOLY = 30.0
+
+[[abilities.effects]]
+type = "heal"
+amount_per_tick = 8
+tick_interval_ms = 1000
+duration_ms = 4000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.5
+
+[abilities.effects.tags]
+HOLY = 30.0
+
+# AoE knockback
+[[abilities]]
+name = "HolyRepulse"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 12000
+cast_time_ms = 200
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "damage"
+amount = 20
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+HOLY = 45.0
+
+[[abilities.effects]]
+type = "knockback"
+distance = 3.0
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+KNOCKBACK = 50.0
+
+# Damage amplify on enemy
+[[abilities]]
+name = "MarkOfJudgment"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 10000
+cast_time_ms = 200
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "damage_modify"
+factor = 1.3
+duration_ms = 5000
+
+[[passives]]
+name = "DivineProtection"
+cooldown_ms = 30000
+range = 0.0
+
+[passives.trigger]
+type = "on_hp_below"
+percent = 30.0
+
+[[passives.effects]]
+type = "shield"
+amount = 50
+duration_ms = 4000
+
+[[passives]]
+name = "Vengeance"
+cooldown_ms = 10000
+range = 4.0
+
+[passives.trigger]
+type = "on_ally_killed"
+range = 4.0
+
+[[passives.effects]]
+type = "buff"
+stat = "damage"
+factor = 0.35
+duration_ms = 6000

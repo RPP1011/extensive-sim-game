@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_t2v2_3v3_healer_guardian_stunner_vs_charger_striker_slower"
+seed = 8142
+hero_count = 3
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["healer", "guardian", "stunner"]
+enemy_hero_templates = ["charger", "striker", "slower"]

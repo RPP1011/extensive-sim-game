@@ -1,0 +1,25 @@
+// Tier 4: Heal over time
+
+ability Rejuvenation {
+    target: ally, range: 4.0
+    cooldown: 5s, cast: 200ms
+    hint: heal
+
+    heal 8/1s for 4s [HOLY: 30]
+}
+
+ability Regenerate {
+    target: ally, range: 4.0
+    cooldown: 8s, cast: 300ms
+    hint: heal
+
+    heal 10/1s for 5s [HOLY: 35]
+}
+
+ability SelfRegen {
+    target: self
+    cooldown: 10s, cast: 200ms
+    hint: heal
+
+    heal 12/1s for 4s
+}

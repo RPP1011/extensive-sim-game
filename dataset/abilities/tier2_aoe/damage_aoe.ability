@@ -1,0 +1,57 @@
+// Tier 2: AoE damage — circle, cone, line, spread, ring
+
+ability Cleave {
+    target: self_aoe
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 25 in circle(2.5) [PHYSICAL: 45]
+}
+
+ability Earthquake {
+    target: self_aoe
+    cooldown: 12s, cast: 400ms
+    hint: damage
+
+    damage 40 in circle(3.5) [PHYSICAL: 55]
+}
+
+ability BreathOfFire {
+    target: self_aoe
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 35 in cone(3.0, 60) [FIRE: 55]
+}
+
+ability ShockWave {
+    target: self_aoe
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 30 in line(5.0, 1.0) [MAGIC: 45]
+}
+
+ability Volley {
+    target: enemy, range: 6.0
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    damage 25 in spread(4.0, 3) [PHYSICAL: 40]
+}
+
+ability RingOfFire {
+    target: self_aoe
+    cooldown: 10s, cast: 300ms
+    hint: damage
+
+    damage 30 in ring(1.5, 3.5) [FIRE: 50]
+}
+
+ability Meteor {
+    target: ground, range: 6.0
+    cooldown: 18s, cast: 500ms
+    hint: damage
+
+    damage 80 in circle(2.5) [FIRE: 70]
+}

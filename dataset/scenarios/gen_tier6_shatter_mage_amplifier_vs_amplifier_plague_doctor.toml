@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier6_shatter_mage_amplifier_vs_amplifier_plague_doctor"
+seed = 20116
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["shatter_mage", "amplifier"]
+enemy_hero_templates = ["amplifier", "plague_doctor"]

@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier2_3v3_20262"
+seed = 20262
+hero_count = 3
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["stunner", "striker", "slower"]
+enemy_hero_templates = ["guardian", "healer", "stunner"]

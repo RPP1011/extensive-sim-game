@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier4_pyromancer_paladin_vs_tier5_archmage_templar"
+seed = 20160
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["pyromancer", "paladin"]
+enemy_hero_templates = ["archmage", "templar"]

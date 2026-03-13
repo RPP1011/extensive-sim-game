@@ -1,0 +1,11 @@
+[hero]
+name = "Slinger"
+
+[stats]
+hp = 750
+move_speed = 3.2
+
+[attack]
+damage = 12
+range = 4.0
+cooldown = 600

@@ -241,6 +241,99 @@ class HintClassificationHead(nn.Module):
         return self.head(cls_emb)
 
 
+class BehavioralHead(nn.Module):
+    """Predict sim outcome from [CLS] embedding + condition vector.
+
+    Conditions: (hp_pct, distance, n_targets, armor) — 4 dims.
+    Outcome: 119-dim (4 targets × 23 + caster × 23 + 4 aggregates).
+    """
+
+    CONDITION_DIM = 4
+    OUTCOME_DIM = 119
+
+    def __init__(self, d_model: int, hidden_dim: int = 256):
+        super().__init__()
+        self.context_enc = nn.Sequential(
+            nn.Linear(self.CONDITION_DIM, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, d_model),
+        )
+        self.predictor = nn.Sequential(
+            nn.Linear(d_model * 2, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, self.OUTCOME_DIM),
+        )
+
+    def forward(self, cls_emb: torch.Tensor, conditions: torch.Tensor) -> torch.Tensor:
+        """Predict outcome from [CLS] + condition.
+
+        Parameters
+        ----------
+        cls_emb : (batch, d_model)
+        conditions : (batch, 4)
+
+        Returns
+        -------
+        outcome : (batch, 119)
+        """
+        ctx = self.context_enc(conditions)
+        return self.predictor(torch.cat([cls_emb, ctx], dim=-1))
+
+
+class ReconstructionDecoder(nn.Module):
+    """Reconstruct full DSL token sequence from [CLS] embedding alone.
+
+    Non-autoregressive: CLS broadcast + learned position embeddings → parallel
+    token prediction. The decoder is intentionally weak (2 layers) so that the
+    CLS must carry the information.
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        vocab_size: int,
+        max_seq_len: int = 256,
+        n_layers: int = 2,
+        n_heads: int = 4,
+        d_ff: int = 128,
+    ):
+        super().__init__()
+        self.pos_emb = nn.Embedding(max_seq_len, d_model)
+        layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=n_heads,
+            dim_feedforward=d_ff,
+            dropout=0.0,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.decoder = nn.TransformerEncoder(layer, num_layers=n_layers)
+        self.out_norm = nn.LayerNorm(d_model)
+        self.proj = nn.Linear(d_model, vocab_size)
+
+    def forward(self, cls_emb: torch.Tensor, seq_len: int) -> torch.Tensor:
+        """Predict token logits at every position from CLS alone.
+
+        Parameters
+        ----------
+        cls_emb : (batch, d_model) — [CLS] embedding
+        seq_len : int — target sequence length
+
+        Returns
+        -------
+        logits : (batch, seq_len, vocab_size)
+        """
+        B = cls_emb.shape[0]
+        positions = torch.arange(seq_len, device=cls_emb.device).unsqueeze(0).expand(B, -1)
+        x = cls_emb.unsqueeze(1).expand(-1, seq_len, -1) + self.pos_emb(positions)
+        x = self.decoder(x)
+        x = self.out_norm(x)
+        return self.proj(x)
+
+
 class AbilityTransformerMLM(nn.Module):
     """Pre-training model: transformer + MLM head."""
 
@@ -536,12 +629,18 @@ class AbilityActorCritic(nn.Module):
         self,
         vocab_size: int,
         game_state_dim: int = 210,
+        external_cls_dim: int = 0,
         **kwargs,
     ):
         super().__init__()
         self.transformer = AbilityTransformer(vocab_size=vocab_size, **kwargs)
         d = self.transformer.d_model
         self.d_model = d
+
+        # Optional projection for external CLS embeddings (e.g. 128-dim behavioral → d_model)
+        self.external_cls_proj: nn.Module | None = None
+        if external_cls_dim > 0 and external_cls_dim != d:
+            self.external_cls_proj = nn.Linear(external_cls_dim, d)
 
         n_heads = kwargs.get("n_heads", 4)
         n_layers = kwargs.get("n_layers", 2)
@@ -577,6 +676,12 @@ class AbilityActorCritic(nn.Module):
         pooled = (entity_tokens * exists).sum(1) / exists.sum(1).clamp(min=1)
         return entity_tokens, entity_mask, pooled
 
+    def project_cls(self, cls: torch.Tensor) -> torch.Tensor:
+        """Project external CLS embeddings to model d_model if needed."""
+        if self.external_cls_proj is not None:
+            return self.external_cls_proj(cls)
+        return cls
+
     def forward_policy(
         self,
         game_state: torch.Tensor,
@@ -606,7 +711,8 @@ class AbilityActorCritic(nn.Module):
         ability_logits = torch.full((B, MAX_ABILITIES), -1e9, device=device)
         for i in range(MAX_ABILITIES):
             if ability_cls[i] is not None:
-                cross_emb = self.cross_attn(ability_cls[i], entity_tokens, entity_mask)
+                cls_proj = self.project_cls(ability_cls[i])
+                cross_emb = self.cross_attn(cls_proj, entity_tokens, entity_mask)
                 ability_logits[:, i] = self.ability_proj(cross_emb).squeeze(-1)
 
         # Combine: [attack×3, ability×8, move×2, hold]
@@ -645,7 +751,8 @@ class AbilityActorCritic(nn.Module):
         ability_logits = torch.full((B, MAX_ABILITIES), -1e9, device=game_state.device)
         for i in range(MAX_ABILITIES):
             if ability_cls[i] is not None:
-                cross_emb = self.cross_attn(ability_cls[i], entity_tokens, entity_mask)
+                cls_proj = self.project_cls(ability_cls[i])
+                cross_emb = self.cross_attn(cls_proj, entity_tokens, entity_mask)
                 ability_logits[:, i] = self.ability_proj(cross_emb).squeeze(-1)
 
         logits = torch.cat([
@@ -987,12 +1094,18 @@ class AbilityActorCriticV3(nn.Module):
         self,
         vocab_size: int,
         entity_encoder_layers: int = 4,
+        external_cls_dim: int = 0,
         **kwargs,
     ):
         super().__init__()
         self.transformer = AbilityTransformer(vocab_size=vocab_size, **kwargs)
         d = self.transformer.d_model
         self.d_model = d
+
+        # Optional projection for external CLS embeddings (e.g. 128-dim behavioral → d_model)
+        self.external_cls_proj: nn.Module | None = None
+        if external_cls_dim > 0 and external_cls_dim != d:
+            self.external_cls_proj = nn.Linear(external_cls_dim, d)
 
         n_heads = kwargs.get("n_heads", 4)
         self.entity_encoder = EntityEncoderV3(
@@ -1006,6 +1119,12 @@ class AbilityActorCriticV3(nn.Module):
             nn.GELU(),
             nn.Linear(d, 1),
         )
+
+    def project_cls(self, cls: torch.Tensor) -> torch.Tensor:
+        """Project external CLS embeddings to model d_model if needed."""
+        if self.external_cls_proj is not None:
+            return self.external_cls_proj(cls)
+        return cls
 
     def encode_entities(
         self,
@@ -1085,7 +1204,8 @@ class AbilityActorCriticV3(nn.Module):
         ability_cross_embs = []
         for i in range(MAX_ABILITIES):
             if ability_cls[i] is not None:
-                cross_emb = self.cross_attn(ability_cls[i], tokens, full_mask)
+                cls_i = self.project_cls(ability_cls[i])
+                cross_emb = self.cross_attn(cls_i, tokens, full_mask)
                 ability_cross_embs.append(cross_emb)
             else:
                 ability_cross_embs.append(None)
@@ -1103,3 +1223,233 @@ class AbilityActorCriticV3(nn.Module):
 
         value = self.value_head(pooled)
         return pointer_out, value
+
+
+# ---------------------------------------------------------------------------
+# V4: Dual-head — directional movement + combat pointer
+# ---------------------------------------------------------------------------
+
+# Movement directions: 8 cardinal + stay (no pointer needed)
+NUM_MOVE_DIRS = 9  # N, NE, E, SE, S, SW, W, NW, stay
+# Combat types: attack(0), hold(1), ability_0..7(2..9)
+NUM_COMBAT_TYPES = 2 + MAX_ABILITIES  # 10
+
+
+class CombatPointerHead(nn.Module):
+    """Combat head: action type (attack/hold/ability) + pointer for targeting.
+
+    Unlike V3's PointerHead, this has no move action type — movement is
+    handled separately by the move direction head.
+    """
+
+    def __init__(self, d_model: int):
+        super().__init__()
+        self.d_model = d_model
+
+        # Combat type: attack(0), hold(1), ability_0..7(2..9)
+        self.combat_type_head = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.GELU(),
+            nn.Linear(d_model, NUM_COMBAT_TYPES),
+        )
+
+        # Shared key projection for pointer queries
+        self.pointer_key = nn.Linear(d_model, d_model)
+
+        # Attack query
+        self.attack_query = nn.Linear(d_model, d_model)
+
+        # Per-ability query projections
+        self.ability_queries = nn.ModuleList([
+            nn.Linear(d_model, d_model) for _ in range(MAX_ABILITIES)
+        ])
+
+        self.scale = d_model ** -0.5
+
+    def forward(
+        self,
+        pooled: torch.Tensor,
+        entity_tokens: torch.Tensor,
+        entity_mask: torch.Tensor,
+        ability_cross_embs: list[torch.Tensor | None],
+        entity_type_ids_full: torch.Tensor,
+    ) -> dict:
+        """Compute combat type logits and pointer distributions.
+
+        Returns dict with:
+            combat_logits: (B, 10)
+            attack_ptr: (B, N) — logits for attack target
+            ability_ptrs: list of (B, N) or None per ability
+        """
+        B, N, D = entity_tokens.shape
+
+        combat_logits = self.combat_type_head(pooled)
+        keys = self.pointer_key(entity_tokens)  # (B, N, D)
+
+        # Attack pointer: only enemies (type=1) are valid
+        atk_q = self.attack_query(pooled).unsqueeze(1)  # (B, 1, D)
+        atk_ptr = (atk_q @ keys.transpose(-1, -2)).squeeze(1) * self.scale
+        atk_mask = (entity_type_ids_full != 1) | entity_mask
+        atk_ptr = atk_ptr.masked_fill(atk_mask, -1e9)
+
+        # Ability pointers
+        ability_ptrs = []
+        for i in range(MAX_ABILITIES):
+            if ability_cross_embs[i] is not None:
+                ab_q = self.ability_queries[i](ability_cross_embs[i]).unsqueeze(1)
+                ab_ptr = (ab_q @ keys.transpose(-1, -2)).squeeze(1) * self.scale
+                ab_ptr = ab_ptr.masked_fill(entity_mask, -1e9)
+                ability_ptrs.append(ab_ptr)
+            else:
+                ability_ptrs.append(None)
+
+        return {
+            "combat_logits": combat_logits,
+            "attack_ptr": atk_ptr,
+            "ability_ptrs": ability_ptrs,
+        }
+
+
+class AbilityActorCriticV4(nn.Module):
+    """Actor-critic with dual-head action space:
+      - Move direction: 9-way classification (8 cardinal + stay)
+      - Combat action: attack/hold/ability + pointer for targeting
+
+    Both heads output every tick. The sim combines them:
+    movement direction → position change, combat → attack/ability/hold.
+    """
+
+    def __init__(
+        self,
+        vocab_size: int,
+        entity_encoder_layers: int = 4,
+        external_cls_dim: int = 0,
+        **kwargs,
+    ):
+        super().__init__()
+        self.transformer = AbilityTransformer(vocab_size=vocab_size, **kwargs)
+        d = self.transformer.d_model
+        self.d_model = d
+
+        # Optional projection for external CLS embeddings
+        self.external_cls_proj: nn.Module | None = None
+        if external_cls_dim > 0 and external_cls_dim != d:
+            self.external_cls_proj = nn.Linear(external_cls_dim, d)
+
+        n_heads = kwargs.get("n_heads", 4)
+        self.entity_encoder = EntityEncoderV3(
+            d_model=d, n_heads=n_heads, n_layers=entity_encoder_layers,
+        )
+        self.cross_attn = CrossAttentionBlock(d, n_heads=n_heads)
+
+        # Move direction head: pooled → 9 logits
+        self.move_head = nn.Sequential(
+            nn.Linear(d, d),
+            nn.GELU(),
+            nn.Linear(d, NUM_MOVE_DIRS),
+        )
+
+        # Combat pointer head
+        self.combat_head = CombatPointerHead(d)
+
+        # Value head
+        self.value_head = nn.Sequential(
+            nn.Linear(d, d),
+            nn.GELU(),
+            nn.Linear(d, 1),
+        )
+
+    def project_cls(self, cls: torch.Tensor) -> torch.Tensor:
+        if self.external_cls_proj is not None:
+            return self.external_cls_proj(cls)
+        return cls
+
+    def encode_entities(
+        self,
+        entity_features: torch.Tensor,
+        entity_type_ids: torch.Tensor,
+        threat_features: torch.Tensor,
+        entity_mask: torch.Tensor,
+        threat_mask: torch.Tensor,
+        position_features: torch.Tensor | None = None,
+        position_mask: torch.Tensor | None = None,
+    ):
+        tokens, full_mask = self.entity_encoder(
+            entity_features, entity_type_ids, threat_features,
+            entity_mask, threat_mask, position_features, position_mask,
+        )
+        exist = (~full_mask).float().unsqueeze(-1)
+        pooled = (tokens * exist).sum(1) / exist.sum(1).clamp(min=1)
+        return tokens, full_mask, pooled
+
+    def _build_full_type_ids(
+        self,
+        entity_type_ids: torch.Tensor,
+        n_threats: int,
+        n_positions: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        B = entity_type_ids.shape[0]
+        threat_types = torch.full((B, n_threats), 3, device=device, dtype=torch.long)
+        parts = [entity_type_ids, threat_types]
+        if n_positions > 0:
+            pos_types = torch.full((B, n_positions), 4, device=device, dtype=torch.long)
+            parts.append(pos_types)
+        return torch.cat(parts, dim=1)
+
+    def forward(
+        self,
+        entity_features: torch.Tensor,
+        entity_type_ids: torch.Tensor,
+        threat_features: torch.Tensor,
+        entity_mask: torch.Tensor,
+        threat_mask: torch.Tensor,
+        ability_cls: list[torch.Tensor | None],
+        position_features: torch.Tensor | None = None,
+        position_mask: torch.Tensor | None = None,
+    ) -> tuple[dict, torch.Tensor]:
+        """Returns (output_dict, state_value).
+
+        output_dict has keys:
+            move_logits: (B, 9) — directional movement
+            combat_logits: (B, 10) — combat action type
+            attack_ptr: (B, N) — attack target pointer
+            ability_ptrs: list of (B, N) or None
+        """
+        B = entity_features.shape[0]
+        device = entity_features.device
+        tokens, full_mask, pooled = self.encode_entities(
+            entity_features, entity_type_ids, threat_features,
+            entity_mask, threat_mask, position_features, position_mask,
+        )
+
+        # Cross-attend each ability CLS
+        ability_cross_embs = []
+        for i in range(MAX_ABILITIES):
+            if ability_cls[i] is not None:
+                cls_i = self.project_cls(ability_cls[i])
+                cross_emb = self.cross_attn(cls_i, tokens, full_mask)
+                ability_cross_embs.append(cross_emb)
+            else:
+                ability_cross_embs.append(None)
+
+        n_threats = threat_features.shape[1]
+        n_positions = position_features.shape[1] if position_features is not None else 0
+        full_type_ids = self._build_full_type_ids(
+            entity_type_ids, n_threats, n_positions, device,
+        )
+
+        # Move direction head
+        move_logits = self.move_head(pooled)
+
+        # Combat pointer head
+        combat_out = self.combat_head(
+            pooled, tokens, full_mask, ability_cross_embs, full_type_ids,
+        )
+
+        value = self.value_head(pooled)
+
+        return {
+            "move_logits": move_logits,
+            **combat_out,
+        }, value

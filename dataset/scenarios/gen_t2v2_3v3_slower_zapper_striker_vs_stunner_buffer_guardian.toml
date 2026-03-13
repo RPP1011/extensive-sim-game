@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_t2v2_3v3_slower_zapper_striker_vs_stunner_buffer_guardian"
+seed = 8143
+hero_count = 3
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["slower", "zapper", "striker"]
+enemy_hero_templates = ["stunner", "buffer", "guardian"]

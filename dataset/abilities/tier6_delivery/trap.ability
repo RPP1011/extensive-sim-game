@@ -1,0 +1,27 @@
+// Tier 6: Trap delivery
+
+ability BearTrap {
+    target: ground, range: 5.0
+    cooldown: 10s, cast: 200ms
+    hint: crowd_control
+
+    deliver trap { duration: 15s, trigger_radius: 1.5, arm_time: 500ms } {
+        on_hit {
+            damage 25 [PHYSICAL: 40]
+            root 2s [CROWD_CONTROL: 50]
+        }
+    }
+}
+
+ability FrostMine {
+    target: ground, range: 4.0
+    cooldown: 12s, cast: 200ms
+    hint: crowd_control
+
+    deliver trap { duration: 20s, trigger_radius: 2.0, arm_time: 1s } {
+        on_hit {
+            damage 30 in circle(2.0) [ICE: 50]
+            slow 0.5 for 3s in circle(2.0) [SLOW: 45]
+        }
+    }
+}

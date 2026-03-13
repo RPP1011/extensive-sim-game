@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier5_deathknight_templar_vs_tier6_plague_doctor_protector"
+seed = 20249
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["deathknight", "templar"]
+enemy_hero_templates = ["plague_doctor", "protector"]

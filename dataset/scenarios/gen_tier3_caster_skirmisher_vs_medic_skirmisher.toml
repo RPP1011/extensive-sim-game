@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier3_caster_skirmisher_vs_medic_skirmisher"
+seed = 20057
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["caster", "skirmisher"]
+enemy_hero_templates = ["medic", "skirmisher"]

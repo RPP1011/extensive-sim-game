@@ -1,0 +1,10 @@
+[scenario]
+name = "t6_plague_vs_protector"
+seed = 6002
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["plague_doctor", "executioner"]
+enemy_hero_templates = ["protector", "amplifier"]

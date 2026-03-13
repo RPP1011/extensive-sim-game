@@ -97,12 +97,27 @@ fn percent(input: &mut &str) -> ModalResult<f64> {
 }
 
 /// Parse a duration or number argument value.
+/// Also handles `X/tick` and `X/Ns` for periodic (DoT/HoT) amounts.
 fn duration_or_number(input: &mut &str) -> ModalResult<Arg> {
     let n: f64 = number.parse_next(input)?;
-    // Check for duration suffix
+    // Check for per-tick syntax: X/tick or X/500ms or X/1s
+    if input.starts_with('/') {
+        let _: char = '/'.parse_next(input)?;
+        if input.starts_with("tick") {
+            let _: &str = "tick".parse_next(input)?;
+            return Ok(Arg::PerTick { amount: n as i32, interval_ms: 1000 });
+        }
+        // Parse interval duration: /500ms or /1s
+        let interval = duration.parse_next(input)?;
+        return Ok(Arg::PerTick { amount: n as i32, interval_ms: interval });
+    }
+    // Check for duration suffix or percent
     if input.starts_with("ms") {
         let _: &str = "ms".parse_next(input)?;
         Ok(Arg::Duration(n as u32))
+    } else if input.starts_with('%') {
+        let _: char = '%'.parse_next(input)?;
+        Ok(Arg::Number(n))
     } else if input.starts_with('s') && (input.len() == 1 || !input[1..].starts_with(|c: char| c.is_ascii_alphabetic())) {
         let _: char = 's'.parse_next(input)?;
         Ok(Arg::Duration((n * 1000.0) as u32))
@@ -141,6 +156,10 @@ fn area_modifier(input: &mut &str) -> ModalResult<AreaNode> {
     let _: &str = "in".parse_next(input)?;
     multispace1.parse_next(input)?;
     let shape: String = ident.parse_next(input)?;
+    // "in self" means apply to caster (no parenthesized args)
+    if shape == "self" {
+        return Ok(AreaNode { shape, args: vec![] });
+    }
     let _: char = '('.parse_next(input)?;
     let args: Vec<f64> = separated(0.., (ws, number).map(|(_, n)| n), (ws, ',')).parse_next(input)?;
     ws.parse_next(input)?;

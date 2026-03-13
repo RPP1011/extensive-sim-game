@@ -1,0 +1,27 @@
+[hero]
+name = "Slower"
+
+[stats]
+hp = 900
+move_speed = 3.0
+
+[attack]
+damage = 14
+range = 4.0
+
+# Single slow
+[[abilities]]
+name = "Cripple"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 6000
+cast_time_ms = 200
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.5
+duration_ms = 3000
+
+[abilities.effects.tags]
+SLOW = 45.0

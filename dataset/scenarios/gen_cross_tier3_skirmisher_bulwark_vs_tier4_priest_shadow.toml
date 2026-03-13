@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier3_skirmisher_bulwark_vs_tier4_priest_shadow"
+seed = 20141
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["skirmisher", "bulwark"]
+enemy_hero_templates = ["priest", "shadow"]

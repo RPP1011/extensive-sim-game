@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier3_fighter_medic_vs_bulwark_drainer"
+seed = 20037
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["fighter", "medic"]
+enemy_hero_templates = ["bulwark", "drainer"]

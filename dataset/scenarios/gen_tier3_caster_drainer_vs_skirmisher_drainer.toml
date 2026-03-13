@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier3_caster_drainer_vs_skirmisher_drainer"
+seed = 20038
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["caster", "drainer"]
+enemy_hero_templates = ["skirmisher", "drainer"]

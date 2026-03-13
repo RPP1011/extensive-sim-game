@@ -1,0 +1,26 @@
+[hero]
+name = "Healer"
+
+[stats]
+hp = 900
+move_speed = 2.8
+
+[attack]
+damage = 10
+range = 4.0
+
+# Single instant heal
+[[abilities]]
+name = "Restore"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 5000
+cast_time_ms = 300
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount = 40
+
+[abilities.effects.tags]
+HOLY = 35.0

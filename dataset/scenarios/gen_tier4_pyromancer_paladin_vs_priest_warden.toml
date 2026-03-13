@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier4_pyromancer_paladin_vs_priest_warden"
+seed = 20066
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["pyromancer", "paladin"]
+enemy_hero_templates = ["priest", "warden"]

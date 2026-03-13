@@ -1,0 +1,46 @@
+[hero]
+name = "Medic"
+
+[stats]
+hp = 90
+move_speed = 2.8
+
+[attack]
+damage = 10
+range = 4.0
+
+# Single target heal
+[[abilities]]
+name = "Restore"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 4000
+cast_time_ms = 300
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount = 35
+
+[abilities.effects.tags]
+HOLY = 35.0
+
+# AoE heal
+[[abilities]]
+name = "HealingCircle"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 12000
+cast_time_ms = 300
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount = 20
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+[abilities.effects.tags]
+HOLY = 30.0

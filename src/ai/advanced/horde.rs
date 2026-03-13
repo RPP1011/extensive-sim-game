@@ -14,6 +14,7 @@ pub(crate) fn horde_chokepoint_nav() -> GridNav {
     let mut nav = GridNav::new(-20.0, 20.0, -10.0, 10.0, 0.7);
     nav.add_block_rect(-0.8, 0.8, -9.5, 9.5);
     nav.carve_rect(-1.2, 1.2, -1.4, 1.4);
+    nav.precompute_wall_proximity();
     nav
 }
 

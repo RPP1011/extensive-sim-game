@@ -53,6 +53,8 @@ def main():
     p.add_argument("--n-heads", type=int, default=4)
     p.add_argument("--entity-encoder-layers", type=int, default=4)
     p.add_argument("--max-seq-len", type=int, default=256)
+    p.add_argument("--external-cls-dim", type=int, default=0,
+                   help="External CLS dimension (e.g. 128 for behavioral embeddings)")
     args = p.parse_args()
 
     tok = AbilityTokenizer(max_length=args.max_seq_len)
@@ -60,6 +62,7 @@ def main():
     model = AbilityActorCriticV3(
         vocab_size=tok.vocab_size,
         entity_encoder_layers=args.entity_encoder_layers,
+        external_cls_dim=args.external_cls_dim,
         d_model=args.d_model,
         d_ff=args.d_ff,
         n_layers=args.n_layers,
@@ -134,6 +137,10 @@ def main():
         "ff_linear2": export_linear(sd, "cross_attn.ff.2"),
         "norm_ff": export_layer_norm(sd, "cross_attn.norm_ff"),
     }
+
+    # External CLS projection (behavioral embeddings 128→d_model)
+    if model.external_cls_proj is not None:
+        export["external_cls_proj"] = export_linear(sd, "external_cls_proj")
 
     # Pointer head
     export["pointer_head"] = {

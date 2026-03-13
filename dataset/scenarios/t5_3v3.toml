@@ -1,0 +1,10 @@
+[scenario]
+name = "t5_3v3"
+seed = 5002
+hero_count = 3
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["archmage", "deathknight", "templar"]
+enemy_hero_templates = ["templar", "archmage", "deathknight"]

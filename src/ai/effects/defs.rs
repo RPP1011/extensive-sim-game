@@ -321,6 +321,13 @@ pub struct HeroToml {
     /// When set, abilities and passives are loaded from this file instead of inline TOML.
     #[serde(default)]
     pub abilities_file: Option<String>,
+    /// References to abilities defined in an AbilityManifest.
+    /// These are resolved and appended to the abilities list.
+    #[serde(default)]
+    pub ability_refs: Vec<String>,
+    /// References to passives defined in an AbilityManifest.
+    #[serde(default)]
+    pub passive_refs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

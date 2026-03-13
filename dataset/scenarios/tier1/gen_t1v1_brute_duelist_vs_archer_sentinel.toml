@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_t1v1_brute_duelist_vs_archer_sentinel"
+seed = 8054
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["brute", "duelist"]
+enemy_hero_templates = ["archer", "sentinel"]

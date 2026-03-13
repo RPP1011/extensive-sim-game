@@ -1,0 +1,46 @@
+// Tier 3: Two instant effects — damage + CC combos
+
+ability StunStrike {
+    target: enemy, range: 1.5
+    cooldown: 8s, cast: 200ms
+    hint: damage
+
+    damage 30 [PHYSICAL: 45]
+    stun 1s [CROWD_CONTROL: 50]
+}
+
+ability FrostSlash {
+    target: enemy, range: 1.5
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    damage 25 [ICE: 40]
+    slow 0.4 for 2s [SLOW: 40]
+}
+
+ability ShieldBash {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 200ms
+    hint: crowd_control
+
+    damage 15 [PHYSICAL: 35]
+    knockback 2.5 [KNOCKBACK: 45]
+}
+
+ability RootBlast {
+    target: enemy, range: 4.0
+    cooldown: 8s, cast: 300ms
+    hint: crowd_control
+
+    damage 20 [MAGIC: 40]
+    root 2s [CROWD_CONTROL: 50]
+}
+
+ability SilencingStrike {
+    target: enemy, range: 4.0
+    cooldown: 10s, cast: 200ms
+    hint: crowd_control
+
+    damage 25 [DARK: 45]
+    silence 2s [CROWD_CONTROL: 55]
+}

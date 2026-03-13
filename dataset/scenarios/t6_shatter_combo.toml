@@ -1,0 +1,10 @@
+[scenario]
+name = "t6_shatter_combo"
+seed = 6001
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["shatter_mage", "amplifier"]
+enemy_hero_templates = ["protector", "executioner"]

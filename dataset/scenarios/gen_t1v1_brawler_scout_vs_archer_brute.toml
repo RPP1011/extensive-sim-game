@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_t1v1_brawler_scout_vs_archer_brute"
+seed = 8014
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["brawler", "scout"]
+enemy_hero_templates = ["archer", "brute"]

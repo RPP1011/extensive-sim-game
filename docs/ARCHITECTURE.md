@@ -581,4 +581,160 @@ Build and development task runner (clap CLI).
 - **`capture.rs`** — `run_capture_windows`, `run_capture_dedupe` screenshot utilities
 - **`ralph.rs`** — `run_ralph_status` PRD quality gate checker
 - **`scenario_cmd.rs`** — `run_scenario_run`, `run_scenario_bench`, `run_scenario_generate`, balance testing commands
-- **`oracle_cmd/`** — Oracle/training subcommands: `eval.rs` (eval/play), `dataset.rs` (dataset gen), `training.rs` (student model, encoder export), `selfplay.rs` (self-play episodes, raw dataset)
+- **`oracle_cmd/`** — Oracle/training subcommands: `eval.rs` (eval/play), `dataset.rs` (dataset gen), `training.rs` (student model, encoder export), `selfplay.rs` (self-play episodes, raw dataset), `transformer_rl.rs` (V3/V4 RL episode generation and eval), `ability_profile.rs` (behavioral profiling), `operator_dataset.rs` (operator dataset gen)
+
+---
+
+## ML Training Pipeline
+
+End-to-end pipeline for training combat AI models. Three pretrained components feed into a V4 actor-critic policy trained via IMPALA RL.
+
+### Architecture Overview
+
+```
+                        ┌─────────────────────────┐
+                        │  Ability DSL Text        │
+                        │  "ability fireball {     │
+                        │    damage 50 fire ..."   │
+                        └────────┬────────────────┘
+                                 │
+                    ┌────────────▼────────────────┐
+                    │  Ability Transformer (d=128) │  ← Pretrained (MLM + behavioral)
+                    │  4-layer, 4-head encoder     │
+                    │  252-token vocab             │
+                    └────────────┬────────────────┘
+                                 │
+                         [CLS] embedding (128d)
+                                 │
+              ┌──────────────────┼──────────────────┐
+              │                  │                   │
+              ▼                  ▼                   │
+   ┌──────────────────┐  ┌──────────────┐           │
+   │ Embedding        │  │ Behavioral   │           │
+   │ Registry         │  │ Head         │           │
+   │ (943 abilities   │  │ (119-dim     │           │
+   │  × 128d, cached) │  │  sim outcome │           │
+   └────────┬─────────┘  │  prediction) │           │
+            │             └──────────────┘           │
+            │                                        │
+            ▼                                        │
+   ┌────────────────┐                                │
+   │ external_cls_  │                                │
+   │ proj (128→32)  │  ← Learned during RL           │
+   └────────┬───────┘                                │
+            │                                        │
+            ▼          ┌─────────────────────┐       │
+   ┌────────────────┐  │ Entity Encoder (d=32)│      │
+   │ Cross-Attention│◄─┤ 4-layer, 4-head     │      │
+   │ Block          │  │ 7 entity slots ×    │      │
+   │ (ability ×     │  │ 30 features each    │      │
+   │  game state)   │  └─────────────────────┘      │
+   └───┬────────┬───┘                                │
+       │        │                                    │
+       ▼        ▼                                    │
+  ┌─────────┐ ┌──────────────┐                      │
+  │ Move    │ │ Combat       │                      │
+  │ Head    │ │ Pointer Head │                      │
+  │ (9-way) │ │ (type+target)│                      │
+  └─────────┘ └──────────────┘                      │
+                                                     │
+  ┌─────────┐                                        │
+  │ Value   │  ← Used during training only           │
+  │ Head    │                                        │
+  └─────────┘
+```
+
+### Component 1: Ability Transformer (Pretrained, d=128)
+
+Encodes ability DSL text into semantic embeddings that capture what each ability *does* in simulation.
+
+**Training (two-phase curriculum):**
+1. **Phase 1 — MLM**: Masked language modeling on 75K ability DSL texts. Learns syntax and token relationships. Checkpoint: `generated/ability_transformer_pretrained_v6_base.pt`
+2. **Phase 2 — Behavioral finetuning**: Encoder frozen. A behavioral head learns to predict 119-dim sim outcome vectors (damage dealt, healing done, CC applied, etc.) from [CLS] tokens. Z-normalized targets + Huber loss. Checkpoint: `generated/ability_transformer_pretrained_v6.pt`
+
+**Key insight:** Joint MLM+behavioral training destroys MLM performance. Unfreezing the encoder causes catastrophic forgetting (97.5% → 46% MLM accuracy). The curriculum with frozen encoder is essential.
+
+| File | Role |
+|------|------|
+| `training/pretrain.py` | MLM pretraining + behavioral finetuning |
+| `training/tokenizer.py` | 252-token DSL tokenizer |
+| `training/model.py` → `AbilityTransformerMLM` | Model definition |
+| `src/ai/core/ability_transformer/tokenizer.rs` | Rust port of tokenizer |
+| `src/ai/core/ability_transformer/mod.rs` | Rust transformer inference |
+
+### Component 2: Behavioral Embedding Registry
+
+Pre-computed 128-dim [CLS] embeddings for all 943 known abilities, extracted from the pretrained ability transformer.
+
+**Why pre-compute?** The d=128 ability transformer is too large to run per-tick at inference time. Instead, all known abilities are encoded once and stored in a JSON registry. At runtime, Rust looks up each ability by name — no transformer forward pass needed. Only the lightweight `external_cls_proj` (128→32 linear) runs per tick.
+
+**For unknown abilities:** The full transformer can be run as fallback, but in practice all abilities in the game are in the registry.
+
+**Behavioral profiling data** (used to train the behavioral head):
+- `src/bin/xtask/oracle_cmd/ability_profile.rs` — Controlled sim experiments: 1 caster + N targets across 144 condition combinations (HP × distance × targets × armor)
+- Output: `dataset/ability_profiles.npz` (135,792 samples, 943 abilities, 119-dim outcome vectors)
+
+| File | Role |
+|------|------|
+| `training/export_embedding_registry.py` | Extract CLS embeddings from pretrained transformer |
+| `generated/ability_embedding_registry.json` | Registry (943 × 128d, 2.5 MB, includes model hash) |
+| `src/ai/core/ability_transformer/weights.rs` → `EmbeddingRegistry` | Rust loading and lookup |
+
+### Component 3: Entity Encoder (d=32, trained with RL)
+
+Encodes game state (7 entity slots × 30 features each) into d=32 tokens for cross-attention with ability embeddings.
+
+**Entity features (30 per slot):** vitals (5), position/terrain (7), combat stats (3), ability readiness (3), healing state (3), CC state (3), unit state flags (4), cumulative stats (2).
+
+**Entity slots:** Actor (self), up to 3 allies, up to 3 enemies. Missing slots are zero-masked.
+
+| File | Role |
+|------|------|
+| `training/model.py` → `EntityEncoderV3` | Python model (self-attention over entity tokens) |
+| `src/ai/core/ability_eval/game_state.rs` | Rust feature extraction from `SimState` |
+| `src/ai/core/ability_transformer/weights.rs` → `FlatEntityEncoderV3` | Rust inference |
+
+### Component 4: V4 Actor-Critic (113K params)
+
+Dual-head policy for IMPALA RL training. Combines all pretrained components.
+
+**Action space:**
+- **Move head:** 9-way directional (8 cardinal + stay) — every tick
+- **Combat pointer head:** action type (attack/hold + up to 8 abilities) + target pointer via scaled dot-product attention over entity tokens — every tick
+
+**Training:** IMPALA (Importance Weighted Actor-Learner Architecture) with V-trace off-policy correction. Rust generates episodes in parallel using shared-memory GPU inference, Python trains on batches.
+
+| File | Role |
+|------|------|
+| `training/model.py` → `AbilityActorCriticV4` | Full model definition |
+| `training/impala_learner.py` | IMPALA training loop |
+| `training/gpu_inference_server.py` | GPU shared-memory inference server |
+| `training/export_actor_critic_v4.py` | Export to JSON for Rust |
+| `src/bin/xtask/oracle_cmd/transformer_rl.rs` | Rust episode generation + eval |
+| `src/ai/core/ability_transformer/weights.rs` → `ActorCriticWeightsV4` | Rust inference |
+| `scripts/impala_curriculum.sh` | Curriculum training script |
+
+### Training Data
+
+| Dataset | Source | File |
+|---------|--------|------|
+| Ability DSL texts | All `.ability` files + hero templates | `generated/ability_dataset_curated.npz` |
+| Behavioral profiles | Controlled sim experiments | `dataset/ability_profiles.npz` |
+| Hero scenarios (HvH) | Generated compositions | `dataset/scenarios/` (~474 TOML files) |
+| Tier 1 heroes | Autoattack-only, 10× HP | `dataset/heroes/tier1_autoattack/` |
+| Tier 2 heroes | One ability each, 10× HP | `dataset/heroes/tier2_one_ability/` |
+
+### Episode Generation (Rust → Python)
+
+```
+cargo run -p xtask -- scenario oracle transformer-rl generate \
+    dataset/scenarios/ \
+    --weights generated/actor_critic_v4.pt \
+    --embedding-registry generated/ability_embedding_registry.json \
+    --gpu-shm /dev/shm/impala_inf \
+    --threads 64 --sims-per-thread 64 \
+    --episodes 5 --temperature 1.0 \
+    -o generated/rl_episodes.jsonl
+```
+
+64 threads × 64 concurrent sims = 4,096 parallel episodes. GPU inference server handles batched forward passes via shared memory (`/dev/shm/impala_inf`). Episodes are written as JSONL with per-step observations, actions, rewards, and log probabilities.

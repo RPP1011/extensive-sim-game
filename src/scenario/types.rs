@@ -24,6 +24,9 @@ pub struct ScenarioCfg {
     /// Multiply all unit HP/max_hp to increase time-to-kill (default 1.0).
     #[serde(default = "default_hp_multiplier")]
     pub hp_multiplier: f32,
+    /// Optional path to an ability manifest TOML for resolving ability_refs in hero templates.
+    #[serde(default)]
+    pub manifest_path: Option<String>,
 }
 
 fn default_hp_multiplier() -> f32 {

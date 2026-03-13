@@ -1,0 +1,28 @@
+// Tier 4: Instant damage + DoT combo
+
+ability HolyFire {
+    target: enemy, range: 4.0
+    cooldown: 6s, cast: 300ms
+    hint: damage
+
+    damage 25 [HOLY: 50]
+    damage 6/1s for 3s [HOLY: 40]
+}
+
+ability PoisonBlade {
+    target: enemy, range: 1.3
+    cooldown: 6s, cast: 100ms
+    hint: damage
+
+    damage 15 [POISON: 45]
+    damage 10/1s for 4s [POISON: 50]
+}
+
+ability ScorchingRay {
+    target: enemy, range: 5.0
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 30 [FIRE: 50]
+    damage 8/1s for 3s [FIRE: 45]
+}

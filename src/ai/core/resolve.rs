@@ -126,6 +126,7 @@ pub fn resolve_cast(
         return;
     }
     if kind == CastKind::Control {
+        if !is_alive(&state.units[target_idx]) { return; }
         let duration_ms = state.units[attacker_idx].control_duration_ms;
         state.units[target_idx].control_remaining_ms = state.units[target_idx]
             .control_remaining_ms.max(duration_ms);

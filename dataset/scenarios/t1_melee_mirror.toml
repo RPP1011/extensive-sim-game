@@ -1,0 +1,10 @@
+[scenario]
+name = "t1_melee_mirror"
+seed = 1001
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["brawler", "duelist"]
+enemy_hero_templates = ["brawler", "duelist"]

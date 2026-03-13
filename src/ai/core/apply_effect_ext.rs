@@ -335,15 +335,18 @@ pub fn apply_effect_extended(
         // --- LoL Coverage: New Effects ---
         Effect::Suppress { duration_ms } => {
             if let Some(tidx) = find_unit_idx(state, target_id) {
-                state.units[tidx].control_remaining_ms =
-                    state.units[tidx].control_remaining_ms.max(*duration_ms);
-                state.units[tidx].casting = None;
-                state.units[tidx].channeling = None;
-                state.units[tidx].status_effects.push(ActiveStatusEffect {
-                    kind: StatusKind::Suppress,
-                    source_id: caster_id, remaining_ms: *duration_ms, tags: tags.clone(), stacking,
-                });
-                events.push(SimEvent::ControlApplied { tick, source_id: caster_id, target_id, duration_ms: *duration_ms });
+                if !is_alive(&state.units[tidx]) { /* skip suppress on dead unit */ }
+                else {
+                    state.units[tidx].control_remaining_ms =
+                        state.units[tidx].control_remaining_ms.max(*duration_ms);
+                    state.units[tidx].casting = None;
+                    state.units[tidx].channeling = None;
+                    state.units[tidx].status_effects.push(ActiveStatusEffect {
+                        kind: StatusKind::Suppress,
+                        source_id: caster_id, remaining_ms: *duration_ms, tags: tags.clone(), stacking,
+                    });
+                    events.push(SimEvent::ControlApplied { tick, source_id: caster_id, target_id, duration_ms: *duration_ms });
+                }
             }
         }
         Effect::Grounded { duration_ms } => {

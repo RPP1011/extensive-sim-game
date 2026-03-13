@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier4_shadow_warden_vs_pyromancer_warden"
+seed = 20082
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["shadow", "warden"]
+enemy_hero_templates = ["pyromancer", "warden"]

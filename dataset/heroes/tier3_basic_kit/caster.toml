@@ -1,0 +1,67 @@
+[hero]
+name = "Caster"
+
+[stats]
+hp = 75
+move_speed = 2.8
+
+[attack]
+damage = 10
+range = 5.0
+
+# Ranged damage
+[[abilities]]
+name = "Sear"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 4000
+cast_time_ms = 200
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 45
+
+[abilities.effects.tags]
+FIRE = 50.0
+
+# AoE damage
+[[abilities]]
+name = "Cleave"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 8000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 30
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+FIRE = 45.0
+
+# CC
+[[abilities]]
+name = "FrostPulse"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 10000
+cast_time_ms = 200
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.4
+duration_ms = 2500
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+[abilities.effects.tags]
+ICE = 45.0

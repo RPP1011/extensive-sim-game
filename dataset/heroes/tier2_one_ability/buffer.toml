@@ -1,0 +1,25 @@
+[hero]
+name = "Buffer"
+
+[stats]
+hp = 850
+move_speed = 3.0
+
+[attack]
+damage = 12
+range = 4.0
+
+# Single buff
+[[abilities]]
+name = "Empower"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 10000
+cast_time_ms = 200
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "buff"
+stat = "damage_output"
+factor = 0.25
+duration_ms = 5000

@@ -128,6 +128,7 @@ impl NavGrid {
                 }
             }
         }
+        grid.precompute_wall_proximity();
         grid
     }
 

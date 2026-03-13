@@ -1,0 +1,10 @@
+[scenario]
+name = "t4_5v5_full"
+seed = 4003
+hero_count = 5
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["shadow", "pyromancer", "paladin", "priest", "warden"]
+enemy_hero_templates = ["paladin", "shadow", "warden", "pyromancer", "priest"]

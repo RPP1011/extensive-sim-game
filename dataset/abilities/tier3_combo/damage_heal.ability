@@ -1,0 +1,37 @@
+// Tier 3: Damage + self-heal / heal + shield combos
+
+ability SoulDrain {
+    target: enemy, range: 4.0
+    cooldown: 5s, cast: 300ms
+    hint: damage
+
+    damage 35 [DARK: 50]
+    heal 15
+}
+
+ability VampiricStrike {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 40 [DARK: 45]
+    heal 20
+}
+
+ability HealAndShield {
+    target: ally, range: 4.0
+    cooldown: 8s, cast: 300ms
+    hint: heal
+
+    heal 30 [HOLY: 35]
+    shield 20 for 3s
+}
+
+ability Smite {
+    target: enemy, range: 4.0
+    cooldown: 5s, cast: 300ms
+    hint: damage
+
+    damage 40 [HOLY: 50]
+    heal 15 in self
+}

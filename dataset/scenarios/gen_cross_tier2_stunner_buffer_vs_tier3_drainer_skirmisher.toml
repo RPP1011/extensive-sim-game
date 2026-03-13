@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier2_stunner_buffer_vs_tier3_drainer_skirmisher"
+seed = 20126
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["stunner", "buffer"]
+enemy_hero_templates = ["drainer", "skirmisher"]

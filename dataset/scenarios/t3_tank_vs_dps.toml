@@ -1,0 +1,10 @@
+[scenario]
+name = "t3_tank_vs_dps"
+seed = 3002
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["bulwark", "medic"]
+enemy_hero_templates = ["fighter", "caster"]

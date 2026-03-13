@@ -1,0 +1,65 @@
+// Tier 1: Single instant CC — one CC type per ability
+
+ability Bash {
+    target: enemy, range: 1.5
+    cooldown: 8s, cast: 200ms
+    hint: crowd_control
+
+    stun 1s [CROWD_CONTROL: 50]
+}
+
+ability Concuss {
+    target: enemy, range: 1.5
+    cooldown: 12s, cast: 300ms
+    hint: crowd_control
+
+    stun 2s [CROWD_CONTROL: 60]
+}
+
+ability Hamstring {
+    target: enemy, range: 1.5
+    cooldown: 5s, cast: 100ms
+    hint: crowd_control
+
+    slow 0.3 for 2s [SLOW: 40]
+}
+
+ability Cripple {
+    target: enemy, range: 1.5
+    cooldown: 8s, cast: 200ms
+    hint: crowd_control
+
+    slow 0.6 for 3s [SLOW: 50]
+}
+
+ability Pin {
+    target: enemy, range: 4.0
+    cooldown: 8s, cast: 200ms
+    hint: crowd_control
+
+    root 1500ms [CROWD_CONTROL: 50]
+}
+
+ability Silence {
+    target: enemy, range: 4.0
+    cooldown: 10s, cast: 200ms
+    hint: crowd_control
+
+    silence 2s [CROWD_CONTROL: 55]
+}
+
+ability Terrify {
+    target: enemy, range: 3.0
+    cooldown: 14s, cast: 300ms
+    hint: crowd_control
+
+    fear 2s [FEAR: 55, CROWD_CONTROL: 50]
+}
+
+ability Taunt {
+    target: enemy, range: 3.0
+    cooldown: 10s, cast: 100ms
+    hint: crowd_control
+
+    taunt 2s [CROWD_CONTROL: 45]
+}

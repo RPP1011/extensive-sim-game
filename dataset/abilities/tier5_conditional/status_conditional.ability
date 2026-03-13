@@ -1,0 +1,37 @@
+// Tier 5: Conditional effects — target status triggers
+
+ability Shatter {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 35 [PHYSICAL: 45]
+    damage 25 when target_is_stunned [PHYSICAL: 50]
+}
+
+ability Overpower {
+    target: enemy, range: 1.5
+    cooldown: 7s, cast: 200ms
+    hint: damage
+
+    damage 40 [PHYSICAL: 45]
+    damage 30 when target_is_rooted [PHYSICAL: 50]
+}
+
+ability IceLance {
+    target: enemy, range: 5.0
+    cooldown: 4s, cast: 200ms
+    hint: damage
+
+    damage 25 [ICE: 40]
+    damage 35 when target_is_slowed [ICE: 55]
+}
+
+ability BonusCleave {
+    target: self_aoe
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 20 in circle(2.5) [PHYSICAL: 40]
+    damage 15 in circle(2.5) when hit_count_above(2) [PHYSICAL: 40]
+}

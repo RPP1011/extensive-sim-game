@@ -1,0 +1,43 @@
+// Tier 5: Conditional effects — HP threshold triggers
+
+ability ExecuteStrike {
+    target: enemy, range: 1.5
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 30 [PHYSICAL: 45]
+    damage 40 when target_hp_below(25%) [PHYSICAL: 50]
+}
+
+ability DesperateHeal {
+    target: ally, range: 4.0
+    cooldown: 5s, cast: 300ms
+    hint: heal
+
+    heal 25 [HOLY: 30]
+    heal 20 when target_hp_below(30%) [HOLY: 35]
+}
+
+ability FinishingBlow {
+    target: enemy, range: 1.5
+    cooldown: 10s, cast: 200ms
+    hint: damage
+
+    execute 15%
+}
+
+ability LastResort {
+    target: self
+    cooldown: 20s, cast: 200ms
+    hint: defense
+
+    shield 60 for 4s when caster_hp_below(25%)
+}
+
+ability Frenzy {
+    target: self
+    cooldown: 15s, cast: 100ms
+    hint: utility
+
+    buff damage_output 0.4 for 5s when caster_hp_below(50%)
+}

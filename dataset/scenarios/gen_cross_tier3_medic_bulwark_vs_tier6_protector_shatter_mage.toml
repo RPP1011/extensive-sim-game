@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier3_medic_bulwark_vs_tier6_protector_shatter_mage"
+seed = 20229
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["medic", "bulwark"]
+enemy_hero_templates = ["protector", "shatter_mage"]

@@ -1,0 +1,24 @@
+[hero]
+name = "Guardian"
+
+[stats]
+hp = 1500
+move_speed = 2.5
+
+[attack]
+damage = 12
+range = 1.5
+
+# Single shield
+[[abilities]]
+name = "Ward"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 8000
+cast_time_ms = 200
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 40
+duration_ms = 4000

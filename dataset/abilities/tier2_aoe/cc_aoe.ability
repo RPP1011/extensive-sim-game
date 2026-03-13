@@ -1,0 +1,41 @@
+// Tier 2: AoE CC — single CC type, area targeting
+
+ability ThunderClap {
+    target: self_aoe
+    cooldown: 10s, cast: 300ms
+    hint: crowd_control
+
+    stun 1500ms in circle(2.5) [CROWD_CONTROL: 55]
+}
+
+ability FrostPulse {
+    target: self_aoe
+    cooldown: 8s, cast: 200ms
+    hint: crowd_control
+
+    slow 0.4 for 2500ms in circle(3.0) [ICE: 45, SLOW: 40]
+}
+
+ability Entangle {
+    target: ground, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: crowd_control
+
+    root 2s in circle(2.5) [CROWD_CONTROL: 50]
+}
+
+ability MassTerrify {
+    target: self_aoe
+    cooldown: 18s, cast: 400ms
+    hint: crowd_control
+
+    fear 2s in circle(3.0) [FEAR: 55, CROWD_CONTROL: 50]
+}
+
+ability IntimidatingShout {
+    target: self_aoe
+    cooldown: 15s, cast: 300ms
+    hint: crowd_control
+
+    slow 0.5 for 3s in cone(3.5, 90) [CROWD_CONTROL: 45]
+}

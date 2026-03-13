@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier2_striker_slower_vs_stunner_buffer"
+seed = 20005
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["striker", "slower"]
+enemy_hero_templates = ["stunner", "buffer"]

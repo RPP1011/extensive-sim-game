@@ -1,0 +1,10 @@
+[scenario]
+name = "t4_warden_vs_pyro"
+seed = 4002
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["warden", "priest"]
+enemy_hero_templates = ["pyromancer", "shadow"]

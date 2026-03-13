@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier4_3v3_20278"
+seed = 20278
+hero_count = 3
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["priest", "shadow", "warden"]
+enemy_hero_templates = ["shadow", "warden", "pyromancer"]

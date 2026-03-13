@@ -1,0 +1,10 @@
+[hero]
+name = "Sentinel"
+
+[stats]
+hp = 2000
+move_speed = 2.2
+
+[attack]
+damage = 10
+range = 1.5

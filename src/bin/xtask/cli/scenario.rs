@@ -42,6 +42,8 @@ pub enum OracleSubcommand {
     NextstateDataset(NextstateDatasetArgs),
     TransformerPlay(TransformerPlayArgs),
     TransformerRl(TransformerRlArgs),
+    OperatorDataset(OperatorDatasetArgs),
+    AbilityProfile(AbilityProfileArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -248,8 +250,8 @@ pub enum TransformerRlSubcommand {
 #[derive(Debug, Parser)]
 #[command(about = "Generate RL episodes using transformer policy")]
 pub struct TransformerRlGenerateArgs {
-    /// Path to scenario .toml file or directory
-    pub path: PathBuf,
+    /// Path(s) to scenario .toml file(s) or directory(ies)
+    pub path: Vec<PathBuf>,
     /// Path to policy weights JSON (not required for --policy combined)
     #[arg(long)]
     pub weights: Option<PathBuf>,
@@ -280,6 +282,24 @@ pub struct TransformerRlGenerateArgs {
     /// Override scenario max_ticks
     #[arg(long)]
     pub max_ticks: Option<u64>,
+    /// Pre-computed CLS embedding registry JSON (behavioral embeddings)
+    #[arg(long)]
+    pub embedding_registry: Option<PathBuf>,
+    /// Enemy policy weights JSON (for self-play; omit to use default AI)
+    #[arg(long)]
+    pub enemy_weights: Option<PathBuf>,
+    /// Enemy embedding registry JSON (for self-play)
+    #[arg(long)]
+    pub enemy_registry: Option<PathBuf>,
+    /// GPU shared memory path (e.g. /dev/shm/impala_inf) — uses mmap batched inference
+    #[arg(long)]
+    pub gpu_shm: Option<String>,
+    /// Concurrent sims per thread for GPU pipelining (default 1 = blocking)
+    #[arg(long, default_value_t = 1)]
+    pub sims_per_thread: usize,
+    /// Use purely random actions (no model inference) for baseline measurement
+    #[arg(long)]
+    pub random_policy: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -293,6 +313,42 @@ pub struct TransformerRlEvalArgs {
     /// Override scenario max_ticks
     #[arg(long)]
     pub max_ticks: Option<u64>,
+    /// Pre-computed CLS embedding registry JSON (behavioral embeddings)
+    #[arg(long)]
+    pub embedding_registry: Option<PathBuf>,
+    /// Enemy policy weights JSON (for self-play; omit to use default AI)
+    #[arg(long)]
+    pub enemy_weights: Option<PathBuf>,
+    /// Enemy embedding registry JSON (for self-play)
+    #[arg(long)]
+    pub enemy_registry: Option<PathBuf>,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Generate ability operator training dataset from scenario replays")]
+pub struct OperatorDatasetArgs {
+    /// Path to a scenario .toml file, or a directory
+    pub path: PathBuf,
+    /// Output npz file
+    #[arg(long, default_value = "generated/operator_dataset.npz")]
+    pub output: PathBuf,
+    /// Number of parallel threads (0 = all cores)
+    #[arg(short = 'j', long, default_value_t = 0)]
+    pub threads: usize,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Profile abilities via controlled sim experiments for behavioral embeddings")]
+pub struct AbilityProfileArgs {
+    /// Output npz file
+    #[arg(long, default_value = "dataset/ability_profiles.npz")]
+    pub output: PathBuf,
+    /// Samples per ability (across all condition combinations)
+    #[arg(long, default_value_t = 1000)]
+    pub samples_per_ability: usize,
+    /// Number of parallel threads (0 = all cores)
+    #[arg(short = 'j', long, default_value_t = 0)]
+    pub threads: usize,
 }
 
 #[derive(Debug, Parser)]

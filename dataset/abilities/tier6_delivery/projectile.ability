@@ -1,0 +1,53 @@
+// Tier 6: Projectile delivery
+
+ability Fireball {
+    target: enemy, range: 5.0
+    cooldown: 5s, cast: 300ms
+    hint: damage
+
+    deliver projectile { speed: 8.0, width: 0.3 } {
+        on_hit {
+            damage 55 [FIRE: 60]
+        }
+        on_arrival {
+            damage 15 in circle(2.0)
+        }
+    }
+}
+
+ability IceShard {
+    target: enemy, range: 5.0
+    cooldown: 4s, cast: 200ms
+    hint: damage
+
+    deliver projectile { speed: 10.0, width: 0.3 } {
+        on_hit {
+            damage 35 [ICE: 50]
+            slow 0.3 for 2s [SLOW: 35]
+        }
+    }
+}
+
+ability PiercingArrow {
+    target: enemy, range: 8.0
+    cooldown: 6s, cast: 300ms
+    hint: damage
+
+    deliver projectile { speed: 12.0, pierce, width: 0.3 } {
+        on_hit {
+            damage 40 [PHYSICAL: 45]
+        }
+    }
+}
+
+ability DeathCoil {
+    target: enemy, range: 5.0
+    cooldown: 5s, cast: 300ms
+    hint: damage
+
+    deliver projectile { speed: 7.0, width: 0.3 } {
+        on_hit {
+            damage 50 [DARK: 60]
+        }
+    }
+}

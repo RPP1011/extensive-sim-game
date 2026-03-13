@@ -1,0 +1,26 @@
+[hero]
+name = "Striker"
+
+[stats]
+hp = 1000
+move_speed = 3.0
+
+[attack]
+damage = 16
+range = 1.5
+
+# Single instant damage
+[[abilities]]
+name = "HeavyStrike"
+targeting = "target_enemy"
+range = 1.5
+cooldown_ms = 5000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 45
+
+[abilities.effects.tags]
+PHYSICAL = 50.0

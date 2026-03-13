@@ -1,0 +1,26 @@
+[hero]
+name = "Stunner"
+
+[stats]
+hp = 1100
+move_speed = 3.0
+
+[attack]
+damage = 14
+range = 1.5
+
+# Single stun
+[[abilities]]
+name = "Bash"
+targeting = "target_enemy"
+range = 1.5
+cooldown_ms = 8000
+cast_time_ms = 200
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1500
+
+[abilities.effects.tags]
+CROWD_CONTROL = 50.0

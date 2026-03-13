@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier2_stunner_healer_vs_slower_healer"
+seed = 20012
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["stunner", "healer"]
+enemy_hero_templates = ["slower", "healer"]

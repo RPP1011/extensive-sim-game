@@ -1,0 +1,141 @@
+[hero]
+name = "PlagueDoctor"
+
+[stats]
+hp = 80
+move_speed = 3.0
+
+[stats.tags]
+POISON = 35.0
+
+[attack]
+damage = 10
+range = 4.0
+
+# Stack DoTs — sets up for Shatter Mage's Detonate or own Rupture
+[[abilities]]
+name = "Plague"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 4000
+cast_time_ms = 200
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount_per_tick = 6
+tick_interval_ms = 1000
+duration_ms = 6000
+
+[abilities.effects.tags]
+POISON = 50.0
+
+# Second DoT — different element to stack
+[[abilities]]
+name = "Venom"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 5000
+cast_time_ms = 200
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 10
+
+[abilities.effects.tags]
+POISON = 40.0
+
+[[abilities.effects]]
+type = "damage"
+amount_per_tick = 8
+tick_interval_ms = 1000
+duration_ms = 4000
+
+[abilities.effects.tags]
+POISON = 50.0
+
+# AoE DoT zone — forces enemies into kill zones
+[[abilities]]
+name = "MiasmaCloud"
+targeting = "ground_target"
+range = 5.0
+cooldown_ms = 12000
+cast_time_ms = 400
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "zone"
+duration_ms = 5000
+tick_interval_ms = 1000
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 8
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.delivery.on_hit.tags]
+POISON = 50.0
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.2
+duration_ms = 1500
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 2.5
+
+# Debuff to amplify team damage
+[[abilities]]
+name = "CorrosiveCoating"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 10000
+cast_time_ms = 200
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "damage_modify"
+factor = 1.25
+duration_ms = 5000
+
+[[abilities.effects]]
+type = "debuff"
+stat = "move_speed"
+factor = 0.2
+duration_ms = 5000
+
+# Heal ally — keeps the team alive while DoTs work
+[[abilities]]
+name = "Antidote"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 6000
+cast_time_ms = 200
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount = 30
+
+[[abilities.effects]]
+type = "dispel"
+target_tags = ["POISON", "SLOW"]
+
+[[passives]]
+name = "ToxicExposure"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_dealt"
+
+[[passives.effects]]
+type = "debuff"
+stat = "damage_output"
+factor = 0.9
+duration_ms = 3000

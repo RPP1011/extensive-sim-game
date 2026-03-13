@@ -47,6 +47,18 @@ THREAT_DIM = 8
 # ---------------------------------------------------------------------------
 
 
+def load_embedding_registry(path: str, device: str = DEVICE) -> dict:
+    """Load pre-computed CLS embeddings from registry JSON."""
+    data = json.load(open(path))
+    embs = {}
+    for name, vec in data["embeddings"].items():
+        embs[name] = torch.tensor(vec, dtype=torch.float32, device=device)
+    d_model = data["d_model"]
+    print(f"Loaded embedding registry: {len(embs)} abilities, d={d_model}, "
+          f"hash={data['model_hash']}")
+    return {"embeddings": embs, "d_model": d_model}
+
+
 def load_episodes(path: Path) -> list[dict]:
     episodes = []
     with open(path) as f:
@@ -57,9 +69,35 @@ def load_episodes(path: Path) -> list[dict]:
     return episodes
 
 
-def flatten_steps(episodes: list[dict]) -> list[dict]:
+def apply_reward_shaping(episodes: list[dict], scale: float = 0.1) -> None:
+    """Compute dense step rewards from HP differentials.
+
+    For each step, step_reward = scale * delta(ally_hp_sum - enemy_hp_sum).
+    Modifies episodes in-place.
+    """
+    for ep in episodes:
+        steps = ep["steps"]
+        prev_advantage = None
+        for step in steps:
+            entities = step["entities"]
+            entity_types = step["entity_types"]
+            ally_hp = sum(
+                ent[0] for ent, et in zip(entities, entity_types) if et < 2
+            )
+            enemy_hp = sum(
+                ent[0] for ent, et in zip(entities, entity_types) if et == 2
+            )
+            advantage = ally_hp - enemy_hp
+            if prev_advantage is not None:
+                step["step_reward"] = scale * (advantage - prev_advantage)
+            prev_advantage = advantage
+
+
+def flatten_steps(episodes: list[dict], wins_only: bool = False) -> list[dict]:
     steps = []
     for ep in episodes:
+        if wins_only and ep.get("outcome") != "Victory":
+            continue
         for step in ep["steps"]:
             step["_episode_reward"] = ep["reward"]
             steps.append(step)
@@ -160,6 +198,21 @@ def compute_hierarchical_log_prob(
     target_lp = torch.zeros(B, device=type_logits.device)
     target_entropy = torch.zeros(B, device=type_logits.device)
 
+    def _target_lp_for_ptr(ptr_logits, sel, target_indices):
+        """Compute target log probs, clamping out-of-range indices."""
+        ptr_mask = ptr_logits > -1e8  # valid tokens
+        ptr_logits_masked = ptr_logits.masked_fill(~ptr_mask, -1e9)
+        ptr_lp = F.log_softmax(ptr_logits_masked, dim=-1)
+        N = ptr_logits.shape[1]
+        sel_targets_raw = target_indices[sel]
+        sel_targets = sel_targets_raw.clamp(0, N - 1)
+        sel_lp = ptr_lp[sel].gather(1, sel_targets.unsqueeze(1)).squeeze(1)
+        # Clamp log_prob floor to -10 to prevent KL explosion from OOB targets
+        sel_lp = sel_lp.clamp(min=-10.0)
+        ptr_probs = F.softmax(ptr_logits_masked[sel], dim=-1)
+        sel_ent = -(ptr_probs * ptr_lp[sel]).sum(-1)
+        return sel_lp, sel_ent
+
     for at_val, ptr_key in [
         (0, "attack_ptr"),
         (1, "move_ptr"),
@@ -168,14 +221,9 @@ def compute_hierarchical_log_prob(
         if not sel.any():
             continue
         ptr_logits = pointer_output[ptr_key]  # [B, N]
-        ptr_mask = ptr_logits > -1e8  # valid tokens
-        ptr_logits_masked = ptr_logits.masked_fill(~ptr_mask, -1e9)
-        ptr_lp = F.log_softmax(ptr_logits_masked, dim=-1)
-        sel_targets = target_indices[sel]
-        sel_lp = ptr_lp[sel].gather(1, sel_targets.unsqueeze(1)).squeeze(1)
+        sel_lp, sel_ent = _target_lp_for_ptr(ptr_logits, sel, target_indices)
         target_lp[sel] = sel_lp
-        ptr_probs = F.softmax(ptr_logits_masked[sel], dim=-1)
-        target_entropy[sel] = -(ptr_probs * ptr_lp[sel]).sum(-1)
+        target_entropy[sel] = sel_ent
 
     # Ability pointers (3..10)
     for ab_idx in range(MAX_ABILITIES):
@@ -186,14 +234,9 @@ def compute_hierarchical_log_prob(
         ab_ptrs = pointer_output["ability_ptrs"]  # list of [B, N] or None
         if ab_idx < len(ab_ptrs) and ab_ptrs[ab_idx] is not None:
             ptr_logits = ab_ptrs[ab_idx]  # [B, N]
-            ptr_mask = ptr_logits > -1e8
-            ptr_logits_masked = ptr_logits.masked_fill(~ptr_mask, -1e9)
-            ptr_lp = F.log_softmax(ptr_logits_masked, dim=-1)
-            sel_targets = target_indices[sel]
-            sel_lp = ptr_lp[sel].gather(1, sel_targets.unsqueeze(1)).squeeze(1)
+            sel_lp, sel_ent = _target_lp_for_ptr(ptr_logits, sel, target_indices)
             target_lp[sel] = sel_lp
-            ptr_probs = F.softmax(ptr_logits_masked[sel], dim=-1)
-            target_entropy[sel] = -(ptr_probs * ptr_lp[sel]).sum(-1)
+            target_entropy[sel] = sel_ent
 
     # Hold (type=2): no pointer, target_lp stays 0
     composite_lp = type_lp + target_lp
@@ -286,23 +329,51 @@ def compute_gae(
 def build_ability_cls_cache(
     model: AbilityActorCriticV3,
     episodes: list[dict],
+    embedding_registry: dict | None = None,
 ) -> tuple[dict[int, list[list[int]]], dict[tuple[int, int], torch.Tensor]]:
-    """Pre-compute frozen CLS embeddings for all unit abilities."""
+    """Pre-compute frozen CLS embeddings for all unit abilities.
+
+    If embedding_registry is provided, looks up CLS by ability name first,
+    falling back to transformer forward pass for unknown abilities.
+    """
     unit_ability_tokens: dict[int, list[list[int]]] = {}
+    unit_ability_names: dict[int, list[str]] = {}
     for ep in episodes:
         for uid_str, tokens_list in ep.get("unit_abilities", {}).items():
             uid = int(uid_str)
             if uid not in unit_ability_tokens:
                 unit_ability_tokens[uid] = tokens_list
+        for uid_str, names_list in ep.get("unit_ability_names", {}).items():
+            uid = int(uid_str)
+            if uid not in unit_ability_names:
+                unit_ability_names[uid] = names_list
 
     cls_cache: dict[tuple[int, int], torch.Tensor] = {}
+    reg_hits = 0
+
+    # Try registry lookup first
+    if embedding_registry is not None:
+        reg_embs = embedding_registry["embeddings"]
+        for uid, names in unit_ability_names.items():
+            for aidx, name in enumerate(names):
+                key = name.replace(" ", "_")
+                if key in reg_embs:
+                    cls_cache[(uid, aidx)] = reg_embs[key]
+                    reg_hits += 1
+
+    # Fall back to transformer for abilities not in registry
     for uid, tokens_list in unit_ability_tokens.items():
         for aidx, tokens in enumerate(tokens_list):
-            ids = torch.tensor([tokens], dtype=torch.long, device=DEVICE)
-            amask = (ids != 0).float()
-            with torch.no_grad():
-                cls_emb = model.transformer.cls_embedding(ids, amask)
-            cls_cache[(uid, aidx)] = cls_emb.squeeze(0)
+            if (uid, aidx) not in cls_cache:
+                ids = torch.tensor([tokens], dtype=torch.long, device=DEVICE)
+                amask = (ids != 0).float()
+                with torch.no_grad():
+                    cls_emb = model.transformer.cls_embedding(ids, amask)
+                cls_cache[(uid, aidx)] = cls_emb.squeeze(0)
+
+    if embedding_registry is not None:
+        print(f"  CLS cache: {reg_hits} from registry, "
+              f"{len(cls_cache) - reg_hits} from transformer")
 
     return unit_ability_tokens, cls_cache
 
@@ -385,6 +456,7 @@ def warmup_critic(
     lr: float = 3e-4,
     epochs: int = 5,
     batch_size: int = 256,
+    cls_dim: int = 0,
 ) -> float:
     """Pre-train the value head on GAE returns before PPO."""
     critic_params = [p for n, p in model.named_parameters()
@@ -410,7 +482,7 @@ def warmup_critic(
             batch_ret = ret_tensor[idx]
 
             ability_cls_batch = build_ability_cls_batch(
-                steps, idx, unit_ability_tokens, cls_cache, model.d_model)
+                steps, idx, unit_ability_tokens, cls_cache, cls_dim or model.d_model)
 
             _, values = model(
                 state["entity_features"], state["entity_type_ids"],
@@ -453,6 +525,7 @@ def ppo_update(
     ppo_epochs: int = 4,
     batch_size: int = 256,
     max_grad_norm: float = 0.5,
+    cls_dim: int = 0,
 ) -> dict:
     n = len(steps)
     if n == 0:
@@ -495,7 +568,7 @@ def ppo_update(
             type_masks = build_type_masks(steps, idx)
 
             ability_cls_batch = build_ability_cls_batch(
-                steps, idx, unit_ability_tokens, cls_cache, model.d_model)
+                steps, idx, unit_ability_tokens, cls_cache, cls_dim or model.d_model)
 
             # Forward pass
             pointer_output, values = model(
@@ -588,6 +661,18 @@ def main():
     p.add_argument("--unfreeze-transformer", action="store_true")
     p.add_argument("--unfreeze-encoder", action="store_true")
 
+    p.add_argument("--bc-epochs", type=int, default=0,
+                   help="Behavioral cloning epochs (supervised on oracle actions)")
+    p.add_argument("--bc-wins-only", action="store_true",
+                   help="Only train BC on winning episodes")
+    p.add_argument("--reinforce-epochs", type=int, default=0,
+                   help="REINFORCE epochs: reward-weighted policy gradient (no value function)")
+    p.add_argument("--reward-shaping", type=float, default=0.0,
+                   help="Dense reward scale from HP differential (0 = disabled)")
+    p.add_argument("--embedding-registry", help="Pre-computed CLS embedding registry JSON")
+    p.add_argument("--external-cls-dim", type=int, default=0,
+                   help="External CLS dimension (e.g. 128 for behavioral embeddings)")
+
     args = p.parse_args()
 
     tok = AbilityTokenizer()
@@ -596,6 +681,7 @@ def main():
     model = AbilityActorCriticV3(
         vocab_size=tok.vocab_size,
         entity_encoder_layers=args.entity_encoder_layers,
+        external_cls_dim=args.external_cls_dim,
         d_model=args.d_model,
         d_ff=args.d_ff,
         n_layers=args.n_layers,
@@ -638,7 +724,7 @@ def main():
         print(f"Froze ability transformer ({n_frozen:,} params)")
 
     # Freeze entity encoder
-    freeze_encoder = has_entity_encoder or (args.entity_encoder and not args.unfreeze_encoder)
+    freeze_encoder = (has_entity_encoder or args.entity_encoder) and not args.unfreeze_encoder
     if freeze_encoder:
         for param in model.entity_encoder.parameters():
             param.requires_grad = False
@@ -678,11 +764,26 @@ def main():
     if not args.no_grokfast:
         grokfast = GrokfastEMA(model, alpha=args.grokfast_alpha, lamb=args.grokfast_lamb)
 
+    # Load embedding registry
+    embedding_registry = None
+    if args.embedding_registry:
+        embedding_registry = load_embedding_registry(args.embedding_registry)
+
     # Load episodes
     print(f"\nLoading episodes from {args.episodes}...")
     episodes = load_episodes(Path(args.episodes))
-    all_steps = flatten_steps(episodes)
-    print(f"  {len(episodes)} episodes, {len(all_steps)} steps")
+
+    # Apply dense reward shaping
+    if args.reward_shaping > 0:
+        apply_reward_shaping(episodes, scale=args.reward_shaping)
+        print(f"  Applied HP-differential reward shaping (scale={args.reward_shaping})")
+
+    use_wins_only = args.bc_wins_only and args.bc_epochs > 0
+    all_steps = flatten_steps(episodes, wins_only=use_wins_only)
+    if use_wins_only:
+        print(f"  {len(episodes)} episodes, {len(all_steps)} steps (wins only)")
+    else:
+        print(f"  {len(episodes)} episodes, {len(all_steps)} steps")
 
     # Verify v3 fields
     has_v3 = all(
@@ -698,33 +799,238 @@ def main():
     print(f"  Win rate in data: {wins}/{len(episodes)} ({wins/max(len(episodes),1)*100:.1f}%)")
 
     # Build ability CLS cache
-    unit_ability_tokens, cls_cache = build_ability_cls_cache(model, episodes)
+    unit_ability_tokens, cls_cache = build_ability_cls_cache(
+        model, episodes, embedding_registry)
 
-    # Critic warmup
-    if args.critic_warmup_epochs > 0:
-        print(f"\nWarming up critic ({args.critic_warmup_epochs} epochs)...")
-        _, warmup_returns, _ = compute_gae(
+    # Behavioral cloning: supervised on oracle (action_type, target_idx)
+    if args.bc_epochs > 0:
+        print(f"\nBC training ({args.bc_epochs} epochs)...")
+        bc_t0 = time.time()
+
+        all_action_types_bc = torch.tensor(
+            [s["action_type"] for s in all_steps], dtype=torch.long, device=DEVICE)
+        all_target_indices_bc = torch.tensor(
+            [s["target_idx"] for s in all_steps], dtype=torch.long, device=DEVICE)
+
+        cls_dim_bc = (embedding_registry["d_model"]
+                      if embedding_registry is not None else model.d_model)
+        n_bc = len(all_steps)
+        model.train()
+
+        for bc_ep in range(args.bc_epochs):
+            bc_indices = np.random.permutation(n_bc)
+            epoch_loss = 0.0
+            epoch_type_acc = 0.0
+            epoch_target_acc = 0.0
+            n_batches_bc = 0
+
+            for start in range(0, n_bc, args.batch_size):
+                end = min(start + args.batch_size, n_bc)
+                idx = bc_indices[start:end]
+                B_bc = len(idx)
+
+                state = collate_v3_states(all_steps, idx)
+                batch_action_types = all_action_types_bc[idx]
+                batch_target_indices = all_target_indices_bc[idx]
+
+                type_masks = build_type_masks(all_steps, idx)
+
+                ability_cls_batch = build_ability_cls_batch(
+                    all_steps, idx, unit_ability_tokens, cls_cache, cls_dim_bc)
+
+                pointer_output, _ = model(
+                    state["entity_features"], state["entity_type_ids"],
+                    state["threat_features"], state["entity_mask"], state["threat_mask"],
+                    ability_cls_batch,
+                    state["position_features"], state["position_mask"],
+                )
+
+                # Action type CE loss
+                type_logits = pointer_output["type_logits"]
+                type_logits = type_logits.masked_fill(~type_masks, -1e9)
+                type_loss = F.cross_entropy(type_logits, batch_action_types)
+
+                # Target pointer CE loss (per action type)
+                target_loss = torch.tensor(0.0, device=DEVICE)
+                n_target = 0
+                for at_val, ptr_key in [(0, "attack_ptr"), (1, "move_ptr")]:
+                    sel = batch_action_types == at_val
+                    if not sel.any():
+                        continue
+                    ptr_logits = pointer_output[ptr_key]
+                    ptr_mask = ptr_logits > -1e8
+                    ptr_logits = ptr_logits.masked_fill(~ptr_mask, -1e9)
+                    target_loss = target_loss + F.cross_entropy(
+                        ptr_logits[sel], batch_target_indices[sel])
+                    n_target += 1
+
+                for ab_idx in range(MAX_ABILITIES):
+                    at_val = 3 + ab_idx
+                    sel = batch_action_types == at_val
+                    if not sel.any():
+                        continue
+                    ab_ptrs = pointer_output["ability_ptrs"]
+                    if ab_idx < len(ab_ptrs) and ab_ptrs[ab_idx] is not None:
+                        ptr_logits = ab_ptrs[ab_idx]
+                        ptr_mask = ptr_logits > -1e8
+                        ptr_logits = ptr_logits.masked_fill(~ptr_mask, -1e9)
+                        target_loss = target_loss + F.cross_entropy(
+                            ptr_logits[sel], batch_target_indices[sel])
+                        n_target += 1
+
+                if n_target > 0:
+                    target_loss = target_loss / n_target
+
+                loss = type_loss + target_loss
+
+                optimizer.zero_grad()
+                loss.backward()
+                if grokfast is not None:
+                    grokfast.step()
+                nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                optimizer.step()
+
+                # Accuracy tracking
+                with torch.no_grad():
+                    type_pred = type_logits.argmax(-1)
+                    type_acc = (type_pred == batch_action_types).float().mean().item()
+                    epoch_type_acc += type_acc
+
+                epoch_loss += loss.item()
+                n_batches_bc += 1
+
+            avg_loss = epoch_loss / max(n_batches_bc, 1)
+            avg_type_acc = epoch_type_acc / max(n_batches_bc, 1) * 100
+            print(f"  BC epoch {bc_ep+1}/{args.bc_epochs}: "
+                  f"loss={avg_loss:.4f}, type_acc={avg_type_acc:.1f}%")
+
+        bc_elapsed = time.time() - bc_t0
+        print(f"  BC done in {bc_elapsed:.1f}s")
+
+    # REINFORCE: reward-weighted policy gradient (no value function needed)
+    if args.reinforce_epochs > 0:
+        print(f"\nREINFORCE training ({args.reinforce_epochs} epochs)...")
+        rf_t0 = time.time()
+
+        all_action_types = torch.tensor(
+            [s["action_type"] for s in all_steps], dtype=torch.long, device=DEVICE)
+        all_target_indices = torch.tensor(
+            [s["target_idx"] for s in all_steps], dtype=torch.long, device=DEVICE)
+        # Compute discounted returns per episode (γ-weighted future rewards)
+        gamma_rf = args.gamma
+        all_returns = []
+        ep_start = 0
+        for ep in episodes:
+            n_steps_ep = len(ep["steps"])
+            ep_end = ep_start + n_steps_ep
+            # Terminal reward from episode outcome
+            terminal_reward = ep["reward"]
+            # Compute discounted returns backwards through episode steps
+            returns = [0.0] * n_steps_ep
+            running_return = terminal_reward
+            for t in reversed(range(n_steps_ep)):
+                step_r = all_steps[ep_start + t].get("step_reward", 0.0)
+                running_return = step_r + gamma_rf * running_return
+                returns[t] = running_return
+            all_returns.extend(returns)
+            ep_start = ep_end
+        all_advantages_rf = torch.tensor(all_returns, dtype=torch.float32, device=DEVICE)
+        # Normalize advantages (zero mean, unit variance) for stable gradients
+        adv_mean = all_advantages_rf.mean()
+        adv_std = all_advantages_rf.std().clamp(min=1e-8)
+        all_advantages_rf = (all_advantages_rf - adv_mean) / adv_std
+        print(f"  Advantages: mean={adv_mean:.4f}, std={adv_std:.4f}")
+
+        cls_dim_rf = (embedding_registry["d_model"]
+                      if embedding_registry is not None else model.d_model)
+        n_rf = len(all_steps)
+        model.train()
+
+        for rf_ep in range(args.reinforce_epochs):
+            rf_indices = np.random.permutation(n_rf)
+            epoch_pg_loss = 0.0
+            epoch_ent = 0.0
+            n_batches_rf = 0
+
+            for start in range(0, n_rf, args.batch_size):
+                end = min(start + args.batch_size, n_rf)
+                idx = rf_indices[start:end]
+                B_rf = len(idx)
+
+                state = collate_v3_states(all_steps, idx)
+                batch_action_types = all_action_types[idx]
+                batch_target_indices = all_target_indices[idx]
+                batch_adv = all_advantages_rf[idx]
+
+                type_masks = build_type_masks(all_steps, idx)
+
+                ability_cls_batch = build_ability_cls_batch(
+                    all_steps, idx, unit_ability_tokens, cls_cache, cls_dim_rf)
+
+                pointer_output, _ = model(
+                    state["entity_features"], state["entity_type_ids"],
+                    state["threat_features"], state["entity_mask"], state["threat_mask"],
+                    ability_cls_batch,
+                    state["position_features"], state["position_mask"],
+                )
+
+                action_log_probs, entropy_per_sample = compute_hierarchical_log_prob(
+                    pointer_output, batch_action_types, batch_target_indices, type_masks,
+                )
+                entropy = entropy_per_sample.mean()
+
+                pg_loss = -(batch_adv * action_log_probs).mean()
+                loss = pg_loss - args.entropy_coeff * entropy
+
+                optimizer.zero_grad()
+                loss.backward()
+                if grokfast is not None:
+                    grokfast.step()
+                nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                optimizer.step()
+
+                epoch_pg_loss += pg_loss.item()
+                epoch_ent += entropy.item()
+                n_batches_rf += 1
+
+            avg_pg = epoch_pg_loss / max(n_batches_rf, 1)
+            avg_ent = epoch_ent / max(n_batches_rf, 1)
+            print(f"  REINFORCE epoch {rf_ep+1}/{args.reinforce_epochs}: "
+                  f"pg_loss={avg_pg:.4f}, entropy={avg_ent:.4f}")
+
+        rf_elapsed = time.time() - rf_t0
+        print(f"  REINFORCE done in {rf_elapsed:.1f}s")
+
+    advantages, returns = None, None
+    if args.ppo_epochs > 0:
+        # Critic warmup
+        if args.critic_warmup_epochs > 0:
+            print(f"\nWarming up critic ({args.critic_warmup_epochs} epochs)...")
+            _, warmup_returns, _ = compute_gae(
+                episodes, model.forward_value,
+                gamma=args.gamma, lam=args.gae_lambda,
+                chunk_size=args.chunk_size,
+            )
+            cls_dim_ppo = (embedding_registry["d_model"]
+                           if embedding_registry is not None else model.d_model)
+            warmup_loss = warmup_critic(
+                model, all_steps, warmup_returns, episodes,
+                unit_ability_tokens, cls_cache,
+                lr=args.lr, epochs=args.critic_warmup_epochs,
+                batch_size=args.batch_size,
+                cls_dim=cls_dim_ppo,
+            )
+            print(f"  Critic warmup loss: {warmup_loss:.4f}")
+
+        # GAE
+        chunk_msg = f", chunk_size={args.chunk_size}" if args.chunk_size > 0 else " (full episode)"
+        print(f"Computing GAE advantages{chunk_msg}...")
+        advantages, returns, _ = compute_gae(
             episodes, model.forward_value,
             gamma=args.gamma, lam=args.gae_lambda,
             chunk_size=args.chunk_size,
         )
-        warmup_loss = warmup_critic(
-            model, all_steps, warmup_returns, episodes,
-            unit_ability_tokens, cls_cache,
-            lr=args.lr, epochs=args.critic_warmup_epochs,
-            batch_size=args.batch_size,
-        )
-        print(f"  Critic warmup loss: {warmup_loss:.4f}")
-
-    # GAE
-    chunk_msg = f", chunk_size={args.chunk_size}" if args.chunk_size > 0 else " (full episode)"
-    print(f"Computing GAE advantages{chunk_msg}...")
-    advantages, returns, _ = compute_gae(
-        episodes, model.forward_value,
-        gamma=args.gamma, lam=args.gae_lambda,
-        chunk_size=args.chunk_size,
-    )
-    print(f"  Advantages: mean={advantages.mean():.4f}, std={advantages.std():.4f}")
+        print(f"  Advantages: mean={advantages.mean():.4f}, std={advantages.std():.4f}")
 
     # CSV logging
     log_path = Path(args.log)
@@ -735,34 +1041,38 @@ def main():
         "approx_kl", "clip_frac", "elapsed_s",
     ])
 
-    t0 = time.time()
-    print(f"\nStarting PPO training ({args.ppo_epochs} epochs)...")
+    if args.ppo_epochs > 0:
+        t0 = time.time()
+        print(f"\nStarting PPO training ({args.ppo_epochs} epochs)...")
 
-    metrics = ppo_update(
-        model, optimizer, grokfast,
-        all_steps, advantages, returns, episodes, tok,
-        unit_ability_tokens, cls_cache,
-        clip_eps=args.clip_eps,
-        value_coeff=args.value_coeff,
-        entropy_coeff=args.entropy_coeff,
-        ppo_epochs=args.ppo_epochs,
-        batch_size=args.batch_size,
-        max_grad_norm=args.max_grad_norm,
-    )
+        cls_dim_ppo = (embedding_registry["d_model"]
+                       if embedding_registry is not None else model.d_model)
+        metrics = ppo_update(
+            model, optimizer, grokfast,
+            all_steps, advantages, returns, episodes, tok,
+            unit_ability_tokens, cls_cache,
+            clip_eps=args.clip_eps,
+            value_coeff=args.value_coeff,
+            entropy_coeff=args.entropy_coeff,
+            ppo_epochs=args.ppo_epochs,
+            batch_size=args.batch_size,
+            max_grad_norm=args.max_grad_norm,
+            cls_dim=cls_dim_ppo,
+        )
 
-    elapsed = time.time() - t0
-    print(f"\nPPO update complete in {elapsed:.1f}s")
-    print(f"  Policy loss:  {metrics['policy_loss']:.4f}")
-    print(f"  Value loss:   {metrics['value_loss']:.4f}")
-    print(f"  Entropy:      {metrics['entropy']:.4f}")
-    print(f"  Approx KL:    {metrics['approx_kl']:.4f}")
-    print(f"  Clip fraction: {metrics['clip_frac']:.3f}")
+        elapsed = time.time() - t0
+        print(f"\nPPO update complete in {elapsed:.1f}s")
+        print(f"  Policy loss:  {metrics['policy_loss']:.4f}")
+        print(f"  Value loss:   {metrics['value_loss']:.4f}")
+        print(f"  Entropy:      {metrics['entropy']:.4f}")
+        print(f"  Approx KL:    {metrics['approx_kl']:.4f}")
+        print(f"  Clip fraction: {metrics['clip_frac']:.3f}")
 
-    writer.writerow([
-        1, metrics["policy_loss"], metrics["value_loss"],
-        metrics["entropy"], metrics["approx_kl"], metrics["clip_frac"],
-        f"{elapsed:.1f}",
-    ])
+        writer.writerow([
+            1, metrics["policy_loss"], metrics["value_loss"],
+            metrics["entropy"], metrics["approx_kl"], metrics["clip_frac"],
+            f"{elapsed:.1f}",
+        ])
     log_file.close()
 
     torch.save(model.state_dict(), args.output)

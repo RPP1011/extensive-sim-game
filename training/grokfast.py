@@ -56,5 +56,8 @@ class GrokfastEMA:
 
         for n, p in self.model.named_parameters():
             if p.requires_grad and p.grad is not None:
-                self.grads[n] = self.grads[n] * self.alpha + p.grad.data.detach() * (1 - self.alpha)
+                if n not in self.grads:
+                    self.grads[n] = p.grad.data.detach().clone()
+                else:
+                    self.grads[n] = self.grads[n] * self.alpha + p.grad.data.detach() * (1 - self.alpha)
                 p.grad.data = p.grad.data + self.grads[n] * self.lamb

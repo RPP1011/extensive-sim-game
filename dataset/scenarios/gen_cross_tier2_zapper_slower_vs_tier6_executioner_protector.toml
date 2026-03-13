@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier2_zapper_slower_vs_tier6_executioner_protector"
+seed = 20220
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["zapper", "slower"]
+enemy_hero_templates = ["executioner", "protector"]

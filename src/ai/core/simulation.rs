@@ -39,7 +39,14 @@ pub fn step(mut state: SimState, intents: &[UnitIntent], dt_ms: u32) -> (SimStat
         }
     }
 
-    for idx in 0..state.units.len() {
+    // Shuffle unit processing order to avoid first-mover advantage
+    let mut unit_order: Vec<usize> = (0..state.units.len()).collect();
+    for i in (1..unit_order.len()).rev() {
+        let j = (next_rand_u32(&mut state) as usize) % (i + 1);
+        unit_order.swap(i, j);
+    }
+
+    for &idx in &unit_order {
         if !is_alive(&state.units[idx]) {
             continue;
         }

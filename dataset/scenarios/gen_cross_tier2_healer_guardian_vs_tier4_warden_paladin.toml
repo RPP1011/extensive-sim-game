@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier2_healer_guardian_vs_tier4_warden_paladin"
+seed = 20180
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["healer", "guardian"]
+enemy_hero_templates = ["warden", "paladin"]

@@ -1,0 +1,49 @@
+// Tier 1: Single instant mobility — dash/knockback/pull
+
+ability Lunge {
+    target: enemy, range: 5.0
+    cooldown: 6s, cast: 0ms
+    hint: utility
+
+    dash to_target
+}
+
+ability Retreat {
+    target: self
+    cooldown: 8s, cast: 0ms
+    hint: utility
+
+    dash 3.0
+}
+
+ability ShortDash {
+    target: self
+    cooldown: 5s, cast: 0ms
+    hint: utility
+
+    dash 2.0
+}
+
+ability Shove {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 200ms
+    hint: crowd_control
+
+    knockback 3.0 [KNOCKBACK: 45]
+}
+
+ability HeavyKnockback {
+    target: enemy, range: 1.5
+    cooldown: 10s, cast: 300ms
+    hint: crowd_control
+
+    knockback 5.0 [KNOCKBACK: 55]
+}
+
+ability Grapple {
+    target: enemy, range: 4.0
+    cooldown: 8s, cast: 200ms
+    hint: crowd_control
+
+    pull 3.0
+}

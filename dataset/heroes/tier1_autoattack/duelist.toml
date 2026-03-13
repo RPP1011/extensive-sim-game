@@ -1,0 +1,10 @@
+[hero]
+name = "Duelist"
+
+[stats]
+hp = 950
+move_speed = 3.5
+
+[attack]
+damage = 20
+range = 1.5

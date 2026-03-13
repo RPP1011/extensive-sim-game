@@ -1,0 +1,10 @@
+[hero]
+name = "Brawler"
+
+[stats]
+hp = 1200
+move_speed = 3.0
+
+[attack]
+damage = 18
+range = 1.5

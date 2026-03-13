@@ -52,6 +52,8 @@ def main():
     p.add_argument("--n-layers", type=int, default=4)
     p.add_argument("--n-heads", type=int, default=4)
     p.add_argument("--max-seq-len", type=int, default=256)
+    p.add_argument("--external-cls-dim", type=int, default=0,
+                   help="External CLS embedding dim (e.g. 128 for behavioral registry)")
     args = p.parse_args()
 
     tok = AbilityTokenizer(max_length=args.max_seq_len)
@@ -59,6 +61,7 @@ def main():
     model = AbilityActorCritic(
         vocab_size=tok.vocab_size,
         game_state_dim=210,
+        external_cls_dim=args.external_cls_dim,
         d_model=args.d_model,
         d_ff=args.d_ff,
         n_layers=args.n_layers,
@@ -66,7 +69,7 @@ def main():
     )
 
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-    model.load_state_dict(state)
+    model.load_state_dict(state, strict=False)
     sd = model.state_dict()
 
     export = {
@@ -142,6 +145,12 @@ def main():
         "linear1": export_linear(sd, "ability_proj.0"),
         "linear2": export_linear(sd, "ability_proj.2"),
     }
+
+    # External CLS projection (behavioral embeddings → d_model)
+    if model.external_cls_proj is not None:
+        export["external_cls_proj"] = export_linear(sd, "external_cls_proj")
+        export["architecture"]["external_cls_dim"] = args.external_cls_dim
+        print(f"  Exported external_cls_proj: {args.external_cls_dim} → {args.d_model}")
 
     # Write
     out = Path(args.output)

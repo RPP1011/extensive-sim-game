@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_cross_tier5_deathknight_archmage_vs_tier6_executioner_plague_doctor"
+seed = 20256
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["deathknight", "archmage"]
+enemy_hero_templates = ["executioner", "plague_doctor"]

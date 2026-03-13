@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_t1v1_slinger_sniper_vs_brute_duelist"
+seed = 8082
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["slinger", "sniper"]
+enemy_hero_templates = ["brute", "duelist"]

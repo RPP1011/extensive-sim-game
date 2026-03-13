@@ -1,0 +1,23 @@
+[hero]
+name = "Charger"
+
+[stats]
+hp = 1000
+move_speed = 3.2
+
+[attack]
+damage = 16
+range = 1.5
+
+# Single dash
+[[abilities]]
+name = "Lunge"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 6000
+cast_time_ms = 0
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "dash"
+to_target = true

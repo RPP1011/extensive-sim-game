@@ -38,9 +38,87 @@ import torch.nn.functional as F
 
 # Add training/ to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
-from model import AbilityTransformerMLM, HintClassificationHead
+from model import AbilityTransformerMLM, HintClassificationHead, ReconstructionDecoder, BehavioralHead
 from tokenizer import AbilityTokenizer, MASK, PAD, KEYWORDS, PUNCTUATION, NUM_TOKENS, DUR_TOKENS, SPECIAL_TOKENS
 from grokfast import GrokfastEMA
+
+# ---------------------------------------------------------------------------
+# Behavioral profiles dataset
+# ---------------------------------------------------------------------------
+
+class BehavioralProfiles:
+    """Loads ability_profiles.npz as flat GPU tensors for fast batched sampling.
+
+    Pre-builds a per-ability index so we can map MLM dataset indices → random
+    behavioral (condition, outcome) pairs entirely on GPU.
+    """
+
+    def __init__(self, npz_path: str, device: torch.device):
+        data = np.load(npz_path, allow_pickle=True)
+        ability_ids = data["ability_id"]  # (N,)
+
+        # All data on GPU
+        self.conditions = torch.tensor(data["condition"], dtype=torch.float32, device=device)  # (N, 4)
+        self.outcomes = torch.tensor(data["outcome"], dtype=torch.float32, device=device)      # (N, 119)
+
+        # Decode ability names
+        names_bytes = data["ability_names"].tobytes()
+        self.ability_names = names_bytes.decode("utf-8").split("\n")
+        self.name_to_id = {n: i for i, n in enumerate(self.ability_names)}
+
+        # Per-ability sample ranges: for each ability_id, store (start, count) into sorted arrays
+        # Sort by ability_id for contiguous ranges
+        order = np.argsort(ability_ids)
+        self.conditions = self.conditions[order]
+        self.outcomes = self.outcomes[order]
+        sorted_ids = ability_ids[order]
+
+        n_abilities = len(self.ability_names)
+        self.offsets = torch.zeros(n_abilities, dtype=torch.long, device=device)
+        self.counts = torch.zeros(n_abilities, dtype=torch.long, device=device)
+        for aid in range(n_abilities):
+            mask = sorted_ids == aid
+            indices = np.where(mask)[0]
+            if len(indices) > 0:
+                self.offsets[aid] = int(indices[0])
+                self.counts[aid] = len(indices)
+
+        # Z-score normalize outcomes per dimension
+        self.outcome_mean = self.outcomes.mean(dim=0)  # (119,)
+        self.outcome_std = self.outcomes.std(dim=0).clamp(min=1e-6)  # (119,)
+        self.outcomes = (self.outcomes - self.outcome_mean) / self.outcome_std
+
+        print(f"BehavioralProfiles: {n_abilities} abilities, "
+              f"{len(self.conditions)} samples on {device} (z-normed)")
+
+    def sample_batch(self, ability_ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Sample random (condition, outcome) for each ability_id in batch.
+
+        Returns (conditions, outcomes, valid_mask) all on GPU.
+        ability_ids: (B,) long tensor of behavioral profile ability IDs (-1 = no match).
+        """
+        B = ability_ids.shape[0]
+        valid = (ability_ids >= 0) & (ability_ids < len(self.counts))
+        safe_ids = ability_ids.clamp(0)  # clamp for indexing, masked out later
+
+        offsets = self.offsets[safe_ids]   # (B,)
+        counts = self.counts[safe_ids]     # (B,)
+
+        # Random offset within each ability's range
+        rand_off = (torch.rand(B, device=ability_ids.device) * counts.float()).long()
+        rand_off = rand_off.clamp(max=counts.clamp(min=1) - 1)
+        sample_idx = offsets + rand_off
+
+        conditions = self.conditions[sample_idx]  # (B, 4)
+        outcomes = self.outcomes[sample_idx]       # (B, 119)
+
+        # Zero out invalid entries
+        valid = valid & (counts > 0)
+        conditions = conditions * valid.unsqueeze(1).float()
+        outcomes = outcomes * valid.unsqueeze(1).float()
+
+        return conditions, outcomes, valid
+
 
 # Token type classification for per-type accuracy breakdown
 _STRUCTURAL_TOKENS: set[str] = set(PUNCTUATION) | {"ability", "passive", "deliver", "in", "on_hit",
@@ -114,6 +192,17 @@ def augment_ability_text(text: str) -> str:
     return text
 
 
+def _extract_ability_name(text: str) -> str | None:
+    """Extract ability/passive name from DSL text."""
+    for line in text.split("\n"):
+        line = line.strip()
+        if line.startswith("ability ") or line.startswith("passive "):
+            parts = line.split()
+            if len(parts) >= 2:
+                return parts[1].rstrip("{").strip()
+    return None
+
+
 def _extract_hint(text: str) -> int:
     """Extract hint category index from ability text. Returns -1 if not found."""
     for line in text.split("\n"):
@@ -122,6 +211,146 @@ def _extract_hint(text: str) -> int:
             hint = line.split(":", 1)[1].strip().split()[0].split(",")[0]
             return HINT_TO_IDX.get(hint, -1)
     return -1
+
+
+class NpzMLMDataset:
+    """Fast dataset from pre-tokenized npz file. All tensors on GPU."""
+
+    def __init__(
+        self,
+        npz_path: Path,
+        tokenizer: AbilityTokenizer,
+        mask_prob: float = 0.15,
+        augment: bool = True,
+    ):
+        self.tokenizer = tokenizer
+        self.mask_prob = mask_prob
+        self.augment = augment
+
+        data = np.load(npz_path, allow_pickle=True)
+        self.token_ids = torch.tensor(data["token_ids"], dtype=torch.long, device=DEVICE)
+        self.lengths = torch.tensor(data["lengths"], dtype=torch.long, device=DEVICE)
+        self.hints = torch.tensor(data["hints"], dtype=torch.long, device=DEVICE)
+        self.texts = list(data["texts"]) if "texts" in data else []
+        self.n = self.token_ids.shape[0]
+        self.max_len = self.token_ids.shape[1]
+
+        # Behavioral profile IDs: maps each dataset entry → ability_id in profiles (-1 = no match)
+        self.behavioral_ids: torch.Tensor | None = None
+
+        n_with_hint = (self.hints >= 0).sum().item()
+        print(f"NpzMLMDataset: {self.n} abilities, max_len={self.max_len}, hints={n_with_hint}/{self.n}")
+
+    def build_behavioral_ids(self, profiles: BehavioralProfiles):
+        """Map each ability text to its behavioral profile ID."""
+        ids = []
+        for text in self.texts:
+            name = _extract_ability_name(text)
+            aid = profiles.name_to_id.get(name, -1) if name else -1
+            ids.append(aid)
+        # If no texts (val set with augment=False), use stored ability names from token patterns
+        if not ids:
+            ids = [-1] * self.n
+        self.behavioral_ids = torch.tensor(ids, dtype=torch.long, device=DEVICE)
+        matched = (self.behavioral_ids >= 0).sum().item()
+        print(f"  Behavioral mapping: {matched}/{len(ids)} abilities matched")
+
+    def __len__(self) -> int:
+        return self.n
+
+    def sample_batch(self, batch_size: int) -> dict[str, torch.Tensor]:
+        indices = torch.randint(self.n, (batch_size,), device=DEVICE)
+
+        if self.augment and self.texts:
+            # Re-tokenize augmented text for ~50% of samples
+            seqs = []
+            idx_list = indices.tolist()
+            for i in idx_list:
+                if random.random() < 0.5:
+                    augmented = augment_ability_text(self.texts[i])
+                    seqs.append(self.tokenizer.encode(augmented, add_cls=True))
+                else:
+                    row = self.token_ids[i]
+                    length = self.lengths[i].item()
+                    seqs.append(row[:length].tolist())
+            # Variable length — pad to max in batch
+            max_len = max(len(s) for s in seqs)
+            pad_id = self.tokenizer.pad_id
+            padded = torch.full((batch_size, max_len), pad_id, dtype=torch.long, device=DEVICE)
+            for j, s in enumerate(seqs):
+                padded[j, :len(s)] = torch.tensor(s, dtype=torch.long, device=DEVICE)
+            recon_targets = padded.clone()
+        else:
+            recon_targets = self.token_ids[indices]
+            padded = recon_targets.clone()
+            max_len = self.max_len
+
+        # Build attention mask
+        attention_mask = (padded != self.tokenizer.pad_id).float()
+
+        # Apply masking on GPU
+        mask_id = self.tokenizer.mask_id
+        vocab_size = self.tokenizer.vocab_size
+
+        # Random mask: skip position 0 ([CLS]) and padding
+        rand = torch.rand_like(padded, dtype=torch.float)
+        maskable = (torch.arange(max_len, device=DEVICE).unsqueeze(0) > 0) & (padded != self.tokenizer.pad_id)
+        to_mask = (rand < self.mask_prob) & maskable
+
+        labels = torch.full_like(padded, -100)
+        labels[to_mask] = padded[to_mask]
+
+        # 80% [MASK], 10% random, 10% keep
+        r = torch.rand_like(padded, dtype=torch.float)
+        input_ids = padded.clone()
+        input_ids[to_mask & (r < 0.8)] = mask_id
+        random_tokens = torch.randint(vocab_size, padded.shape, device=DEVICE)
+        input_ids[to_mask & (r >= 0.8) & (r < 0.9)] = random_tokens[to_mask & (r >= 0.8) & (r < 0.9)]
+
+        hint_labels = self.hints[indices]
+
+        result = {
+            "input_ids": input_ids,
+            "labels": labels,
+            "attention_mask": attention_mask,
+            "recon_targets": recon_targets,
+            "hint_labels": hint_labels,
+        }
+        if self.behavioral_ids is not None:
+            result["behavioral_ids"] = self.behavioral_ids[indices]
+        return result
+
+    def split(self, val_frac: float = 0.15) -> tuple["NpzMLMDataset", "NpzMLMDataset"]:
+        n_val = max(1, int(self.n * val_frac))
+        perm = torch.randperm(self.n)
+        val_idx, train_idx = perm[:n_val], perm[n_val:]
+
+        val_ds = NpzMLMDataset.__new__(NpzMLMDataset)
+        val_ds.tokenizer = self.tokenizer
+        val_ds.mask_prob = self.mask_prob
+        val_ds.augment = False
+        val_ds.token_ids = self.token_ids[val_idx]
+        val_ds.lengths = self.lengths[val_idx]
+        val_ds.hints = self.hints[val_idx]
+        val_ds.texts = []
+        val_ds.behavioral_ids = self.behavioral_ids[val_idx] if self.behavioral_ids is not None else None
+        val_ds.n = len(val_idx)
+        val_ds.max_len = self.max_len
+
+        train_ds = NpzMLMDataset.__new__(NpzMLMDataset)
+        train_ds.tokenizer = self.tokenizer
+        train_ds.mask_prob = self.mask_prob
+        train_ds.augment = self.augment
+        train_ds.token_ids = self.token_ids[train_idx]
+        train_ds.lengths = self.lengths[train_idx]
+        train_ds.hints = self.hints[train_idx]
+        train_ds.texts = [self.texts[i] for i in train_idx.tolist()] if self.augment else []
+        train_ds.behavioral_ids = self.behavioral_ids[train_idx] if self.behavioral_ids is not None else None
+        train_ds.n = len(train_idx)
+        train_ds.max_len = self.max_len
+
+        print(f"Split: {train_ds.n} train, {val_ds.n} val")
+        return train_ds, val_ds
 
 
 class AbilityMLMDataset:
@@ -179,6 +408,49 @@ class AbilityMLMDataset:
         print(f"Tokenized {len(self.encoded)} abilities (skipped {len(self.texts) - len(self.encoded)} too short)")
         print(f"Hint labels: {n_with_hint}/{len(self.encoded)} ({100*n_with_hint/max(len(self.encoded),1):.0f}%)")
 
+    @classmethod
+    def from_texts(
+        cls,
+        texts: list[str],
+        tokenizer: AbilityTokenizer,
+        mask_prob: float = 0.15,
+        augment: bool = True,
+    ) -> "AbilityMLMDataset":
+        """Create dataset from a list of DSL text strings."""
+        ds = cls.__new__(cls)
+        ds.tokenizer = tokenizer
+        ds.mask_prob = mask_prob
+        ds.augment = augment
+        ds.span_masking = False
+        ds.mean_span_len = 3.0
+        ds.no_mask_numeric = False
+        ds._numeric_ids = set()
+        ds.behavioral_ids = None
+
+        ds.texts = texts
+        ds.encoded = []
+        ds.hints = []
+        for text in texts:
+            ids = tokenizer.encode(text, add_cls=True)
+            if len(ids) > 3:
+                ds.encoded.append(ids)
+                ds.hints.append(_extract_hint(text))
+
+        n_with_hint = sum(1 for h in ds.hints if h >= 0)
+        print(f"Tokenized {len(ds.encoded)} abilities ({n_with_hint} with hints)")
+        return ds
+
+    def build_behavioral_ids(self, profiles: BehavioralProfiles):
+        """Map each ability text to its behavioral profile ID."""
+        ids = []
+        for text in self.texts:
+            name = _extract_ability_name(text)
+            aid = profiles.name_to_id.get(name, -1) if name else -1
+            ids.append(aid)
+        self.behavioral_ids = ids
+        matched = sum(1 for x in ids if x >= 0)
+        print(f"  Behavioral mapping: {matched}/{len(ids)} abilities matched")
+
     def __len__(self) -> int:
         return len(self.encoded)
 
@@ -201,6 +473,10 @@ class AbilityMLMDataset:
         batch["hint_labels"] = torch.tensor(
             [self.hints[i] for i in indices], dtype=torch.long, device=DEVICE
         )
+        if self.behavioral_ids is not None:
+            batch["behavioral_ids"] = torch.tensor(
+                [self.behavioral_ids[i] for i in indices], dtype=torch.long, device=DEVICE
+            )
         return batch
 
     def _make_batch(self, sequences: list[list[int]]) -> dict[str, torch.Tensor]:
@@ -247,11 +523,21 @@ class AbilityMLMDataset:
             labels.append(label)
             attention_masks.append(attn)
 
-        return {
+        result = {
             "input_ids": torch.tensor(input_ids, dtype=torch.long, device=DEVICE),
             "labels": torch.tensor(labels, dtype=torch.long, device=DEVICE),
             "attention_mask": torch.tensor(attention_masks, dtype=torch.float, device=DEVICE),
         }
+
+        # Reconstruction targets: original (unmasked) tokens, padded to max_len
+        recon_targets = []
+        for seq in sequences:
+            seq = seq[:max_len]
+            pad_len = max_len - len(seq)
+            recon_targets.append(list(seq) + [self.tokenizer.pad_id] * pad_len)
+        result["recon_targets"] = torch.tensor(recon_targets, dtype=torch.long, device=DEVICE)
+
+        return result
 
     def _apply_span_mask(
         self,
@@ -309,6 +595,7 @@ class AbilityMLMDataset:
         val_ds.texts = [self.texts[i] for i in indices[:n_val]]
         val_ds.encoded = [self.encoded[i] for i in indices[:n_val]]
         val_ds.hints = [self.hints[i] for i in indices[:n_val]]
+        val_ds.behavioral_ids = [self.behavioral_ids[i] for i in indices[:n_val]] if self.behavioral_ids else None
 
         train_ds = AbilityMLMDataset.__new__(AbilityMLMDataset)
         train_ds.tokenizer = self.tokenizer
@@ -321,6 +608,7 @@ class AbilityMLMDataset:
         train_ds.texts = [self.texts[i] for i in indices[n_val:]]
         train_ds.encoded = [self.encoded[i] for i in indices[n_val:]]
         train_ds.hints = [self.hints[i] for i in indices[n_val:]]
+        train_ds.behavioral_ids = [self.behavioral_ids[i] for i in indices[n_val:]] if self.behavioral_ids else None
 
         print(f"Split: {len(train_ds)} train, {len(val_ds)} val")
         return train_ds, val_ds
@@ -360,11 +648,19 @@ def evaluate(
     batch_size: int = 256,
     n_batches: int = 10,
     hint_head: nn.Module | None = None,
+    recon_decoder: nn.Module | None = None,
+    cls_proj: nn.Module | None = None,
+    pad_id: int = 0,
 ) -> dict[str, float]:
     """Evaluate masked token accuracy and loss on validation set."""
     model.eval()
     if hint_head is not None:
         hint_head.eval()
+    if recon_decoder is not None:
+        recon_decoder.eval()
+    if cls_proj is not None:
+        cls_proj.eval()
+
     total_loss = 0.0
     total_correct = 0
     total_masked = 0
@@ -377,6 +673,10 @@ def evaluate(
     # Hint classification tracking
     hint_correct = 0
     hint_total = 0
+
+    # Reconstruction tracking
+    recon_correct = 0
+    recon_total = 0
 
     for _ in range(n_batches):
         batch = dataset.sample_batch(min(batch_size, len(dataset)))
@@ -420,9 +720,24 @@ def evaluate(
                 hint_correct += (hint_preds[valid] == hint_labels[valid]).sum().item()
                 hint_total += valid.sum().item()
 
+        # Reconstruction accuracy
+        if recon_decoder is not None and "recon_targets" in batch:
+            recon_targets = batch["recon_targets"]
+            cls_emb = model.transformer.cls_embedding(batch["input_ids"], batch["attention_mask"])
+            recon_cls = cls_proj(cls_emb) if cls_proj is not None else cls_emb
+            recon_logits = recon_decoder(recon_cls, seq_len=recon_targets.shape[1])
+            recon_preds = recon_logits.argmax(dim=-1)
+            non_pad = recon_targets != pad_id
+            recon_correct += (recon_preds[non_pad] == recon_targets[non_pad]).sum().item()
+            recon_total += non_pad.sum().item()
+
     model.train()
     if hint_head is not None:
         hint_head.train()
+    if recon_decoder is not None:
+        recon_decoder.train()
+    if cls_proj is not None:
+        cls_proj.train()
 
     acc = total_correct / total_masked if total_masked > 0 else 0.0
     result = {
@@ -439,6 +754,9 @@ def evaluate(
 
     if hint_total > 0:
         result["hint_acc"] = hint_correct / hint_total
+
+    if recon_total > 0:
+        result["recon_acc"] = recon_correct / recon_total
 
     return result
 
@@ -520,22 +838,53 @@ def train(args: argparse.Namespace):
     tokenizer = AbilityTokenizer(max_length=args.max_seq_len)
     print(f"Vocabulary size: {tokenizer.vocab_size}")
 
-    # Load holdout hashes if provided
-    holdout = None
-    if args.holdout_hashes and Path(args.holdout_hashes).exists():
-        holdout = set(Path(args.holdout_hashes).read_text().strip().split("\n"))
-        print(f"Loaded {len(holdout)} holdout hashes")
+    # Load behavioral profiles early (needed for dataset mapping)
+    _behavioral_profiles: BehavioralProfiles | None = None
+    if args.behavioral_data:
+        _behavioral_profiles = BehavioralProfiles(args.behavioral_data, DEVICE)
 
-    # Load dataset
-    dataset = AbilityMLMDataset(
-        Path(args.ability_dir), tokenizer,
-        mask_prob=args.mask_prob, holdout_hashes=holdout,
-        augment=not args.no_augment,
-        span_masking=args.span_masking,
-        mean_span_len=args.mean_span_len,
-        no_mask_numeric=args.no_mask_numeric,
-    )
-    train_ds, val_ds = dataset.split(val_frac=args.val_frac)
+    # Load dataset — npz (pre-tokenized), profiles npz (has dsl_texts), or directory
+    ability_path = Path(args.ability_dir)
+    if ability_path.suffix == ".npz":
+        # Check if this is a profiles npz (has dsl_texts) vs pre-tokenized MLM npz (has token_ids)
+        _probe = np.load(ability_path, allow_pickle=True)
+        has_token_ids = "token_ids" in _probe.files
+        has_dsl_texts = "dsl_texts" in _probe.files
+        del _probe
+
+        if has_token_ids:
+            dataset = NpzMLMDataset(
+                ability_path, tokenizer,
+                mask_prob=args.mask_prob,
+                augment=not args.no_augment,
+            )
+        elif has_dsl_texts:
+            # Profiles npz — extract DSL texts and build dataset
+            _data = np.load(ability_path, allow_pickle=True)
+            dsl_blob = _data["dsl_texts"].tobytes().decode("utf-8")
+            texts = [t.strip() for t in dsl_blob.split("---SEPARATOR---") if t.strip()]
+            del _data
+            print(f"Loaded {len(texts)} abilities from profiles npz")
+            dataset = AbilityMLMDataset.from_texts(
+                texts, tokenizer,
+                mask_prob=args.mask_prob,
+                augment=not args.no_augment,
+            )
+        else:
+            raise ValueError(f"Unrecognized npz format: {ability_path}")
+
+        if _behavioral_profiles is not None:
+            dataset.build_behavioral_ids(_behavioral_profiles)
+        train_ds, val_ds = dataset.split(val_frac=args.val_frac)
+    else:
+        dataset = AbilityMLMDataset(
+            ability_path, tokenizer,
+            mask_prob=args.mask_prob,
+            augment=not args.no_augment,
+        )
+        if _behavioral_profiles is not None:
+            dataset.build_behavioral_ids(_behavioral_profiles)
+        train_ds, val_ds = dataset.split(val_frac=args.val_frac)
 
     # Model
     model = AbilityTransformerMLM(
@@ -560,10 +909,76 @@ def train(args: argparse.Namespace):
         print(f"Hint head parameters: {hint_params:,}")
         print(f"Hint loss weight: {args.hint_loss_weight}")
 
+    # CLS projection (optional): encoder d_model → wider CLS before recon decoder
+    cls_proj: nn.Module | None = None
+    recon_d = args.d_model
+    if args.cls_proj_dim > 0:
+        recon_d = args.cls_proj_dim
+        if args.cls_proj_mlp:
+            cls_proj = nn.Sequential(
+                nn.Linear(args.d_model, recon_d),
+                nn.GELU(),
+                nn.Linear(recon_d, recon_d),
+            ).to(DEVICE)
+            proj_params = sum(p.numel() for p in cls_proj.parameters())
+            print(f"CLS MLP projection: {args.d_model} → {recon_d} ({proj_params:,} params)")
+        else:
+            cls_proj = nn.Linear(args.d_model, recon_d).to(DEVICE)
+            proj_params = sum(p.numel() for p in cls_proj.parameters())
+            print(f"CLS linear projection: {args.d_model} → {recon_d} ({proj_params:,} params)")
+
+    # Reconstruction decoder for CLS bottleneck
+    recon_decoder: ReconstructionDecoder | None = None
+    if not args.no_recon:
+        recon_decoder = ReconstructionDecoder(
+            d_model=recon_d,
+            vocab_size=tokenizer.vocab_size,
+            max_seq_len=args.max_seq_len,
+            n_layers=args.recon_layers,
+            n_heads=args.n_heads,
+            d_ff=args.d_ff,
+        ).to(DEVICE)
+        recon_params = sum(p.numel() for p in recon_decoder.parameters())
+        print(f"Reconstruction decoder parameters: {recon_params:,} (d={recon_d})")
+        print(f"Reconstruction loss weight: {args.recon_weight}")
+
+    # Behavioral outcome prediction head
+    behavioral_head: BehavioralHead | None = None
+    behavioral_profiles = _behavioral_profiles
+    if behavioral_profiles is not None:
+        behavioral_head = BehavioralHead(
+            d_model=args.d_model, hidden_dim=args.behavioral_hidden,
+        ).to(DEVICE)
+        beh_params = sum(p.numel() for p in behavioral_head.parameters())
+        print(f"Behavioral head parameters: {beh_params:,}")
+        print(f"Behavioral loss weight: {args.behavioral_weight}")
+
+    # Freeze encoder if requested (for behavioral finetuning on frozen CLS)
+    if args.freeze_encoder:
+        for p in model.parameters():
+            p.requires_grad = False
+        if hint_head is not None:
+            for p in hint_head.parameters():
+                p.requires_grad = False
+        if recon_decoder is not None:
+            for p in recon_decoder.parameters():
+                p.requires_grad = False
+        if cls_proj is not None:
+            for p in cls_proj.parameters():
+                p.requires_grad = False
+        frozen = sum(p.numel() for p in model.parameters())
+        print(f"Encoder frozen: {frozen:,} params")
+
     # Optimizer — grokking plan §2.1
-    all_params = list(model.parameters())
+    all_params = [p for p in model.parameters() if p.requires_grad]
     if hint_head is not None:
-        all_params += list(hint_head.parameters())
+        all_params += [p for p in hint_head.parameters() if p.requires_grad]
+    if cls_proj is not None:
+        all_params += [p for p in cls_proj.parameters() if p.requires_grad]
+    if recon_decoder is not None:
+        all_params += [p for p in recon_decoder.parameters() if p.requires_grad]
+    if behavioral_head is not None:
+        all_params += [p for p in behavioral_head.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(
         all_params,
         lr=args.lr,
@@ -587,7 +1002,29 @@ def train(args: argparse.Namespace):
         if resume_path.exists():
             print(f"Resuming from {resume_path}")
             state = torch.load(resume_path, map_location=DEVICE, weights_only=True)
-            model.load_state_dict(state)
+            # Load model (strict=False to allow missing recon_decoder keys from older checkpoints)
+            model.load_state_dict(
+                {k: v for k, v in state.items() if k.startswith(("transformer.", "mlm_head."))},
+                strict=False,
+            )
+            # Load reconstruction decoder if keys present
+            if recon_decoder is not None:
+                recon_keys = {k.removeprefix("recon_decoder."): v for k, v in state.items() if k.startswith("recon_decoder.")}
+                if recon_keys:
+                    recon_decoder.load_state_dict(recon_keys)
+                    print("  Loaded reconstruction decoder state")
+            # Load hint head if keys present
+            if hint_head is not None:
+                hint_keys = {k.removeprefix("hint_head."): v for k, v in state.items() if k.startswith("hint_head.")}
+                if hint_keys:
+                    hint_head.load_state_dict(hint_keys)
+                    print("  Loaded hint head state")
+            # Load behavioral head if keys present
+            if behavioral_head is not None:
+                beh_keys = {k.removeprefix("behavioral_head."): v for k, v in state.items() if k.startswith("behavioral_head.")}
+                if beh_keys:
+                    behavioral_head.load_state_dict(beh_keys)
+                    print("  Loaded behavioral head state")
             # Infer step from CSV log
             csv_path = Path(args.output).with_suffix(".csv")
             if csv_path.exists():
@@ -601,14 +1038,20 @@ def train(args: argparse.Namespace):
             print(f"  Resuming from step {start_step}")
 
     # Grokfast EMA gradient filter (Lee et al., 2405.20233)
-    # Wrap both model and hint head in a single module list for Grokfast
+    # Wrap model + aux heads in a single module for Grokfast
     class _CombinedForGrokfast(nn.Module):
-        def __init__(self, main, aux):
+        def __init__(self, main, aux, recon, proj, beh=None):
             super().__init__()
             self.main = main
             if aux is not None:
                 self.aux = aux
-    combined = _CombinedForGrokfast(model, hint_head).to(DEVICE)
+            if recon is not None:
+                self.recon = recon
+            if beh is not None:
+                self.beh = beh
+            if proj is not None:
+                self.proj = proj
+    combined = _CombinedForGrokfast(model, hint_head, recon_decoder, cls_proj, behavioral_head).to(DEVICE)
     gf = GrokfastEMA(combined, alpha=args.grokfast_alpha, lamb=args.grokfast_lamb)
     print(f"Grokfast EMA: alpha={args.grokfast_alpha}, lamb={args.grokfast_lamb}")
 
@@ -623,6 +1066,7 @@ def train(args: argparse.Namespace):
         log_writer.writerow([
             "step", "train_loss", "val_loss", "masked_token_acc",
             "acc_structural", "acc_numeric", "acc_effect", "acc_keyword", "hint_acc",
+            "recon_acc", "beh_mse",
             "weight_norm", "grad_norm", "lr", "max_eigenvalue", "elapsed_s",
         ])
 
@@ -638,12 +1082,17 @@ def train(args: argparse.Namespace):
 
     for step in range(start_step + 1, args.max_steps + 1):
         batch = train_ds.sample_batch(batch_size)
-        logits = model(batch["input_ids"], batch["attention_mask"])
+
+        # Single encoder pass — reuse hidden states for MLM, hint, and recon
+        hidden = model.transformer(batch["input_ids"], batch["attention_mask"])
+        logits = model.mlm_head(hidden)
         mlm_loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
             batch["labels"].view(-1),
             ignore_index=-100,
         )
+
+        cls_emb = hidden[:, 0, :]  # [CLS] at position 0
 
         # Auxiliary hint classification loss
         loss = mlm_loss
@@ -651,10 +1100,32 @@ def train(args: argparse.Namespace):
             hint_labels = batch["hint_labels"]
             valid = hint_labels >= 0
             if valid.any():
-                cls_emb = model.transformer.cls_embedding(batch["input_ids"], batch["attention_mask"])
                 hint_logits = hint_head(cls_emb[valid])
                 hint_loss = F.cross_entropy(hint_logits, hint_labels[valid])
                 loss = mlm_loss + args.hint_loss_weight * hint_loss
+
+        # Reconstruction loss from CLS
+        if recon_decoder is not None:
+            recon_targets = batch["recon_targets"]
+            recon_cls = cls_proj(cls_emb) if cls_proj is not None else cls_emb
+            recon_logits = recon_decoder(recon_cls, seq_len=recon_targets.shape[1])
+            recon_loss = F.cross_entropy(
+                recon_logits.view(-1, recon_logits.size(-1)),
+                recon_targets.view(-1),
+                ignore_index=tokenizer.pad_id,
+            )
+            loss = loss + args.recon_weight * recon_loss
+
+        # Behavioral outcome prediction loss from CLS
+        beh_loss_val = 0.0
+        if behavioral_head is not None and behavioral_profiles is not None and "behavioral_ids" in batch:
+            beh_ids = batch["behavioral_ids"]  # (B,)
+            beh_conds, beh_outs, beh_valid = behavioral_profiles.sample_batch(beh_ids)
+            if beh_valid.any():
+                beh_pred = behavioral_head(cls_emb[beh_valid], beh_conds[beh_valid])
+                beh_loss = F.smooth_l1_loss(beh_pred, beh_outs[beh_valid])
+                loss = loss + args.behavioral_weight * beh_loss
+                beh_loss_val = beh_loss.item()
 
         optimizer.zero_grad()
         loss.backward()
@@ -671,7 +1142,9 @@ def train(args: argparse.Namespace):
 
         # Evaluation
         if step % args.eval_every == 0:
-            metrics = evaluate(model, val_ds, batch_size=batch_size, hint_head=hint_head)
+            metrics = evaluate(model, val_ds, batch_size=batch_size, hint_head=hint_head,
+                              recon_decoder=recon_decoder, cls_proj=cls_proj,
+                              pad_id=tokenizer.pad_id)
 
             # Weight norm (diagnostic — grokking plan §4.4)
             weight_norm = sum(
@@ -700,6 +1173,8 @@ def train(args: argparse.Namespace):
                 f"{metrics.get('acc_effect', 0):.4f}",
                 f"{metrics.get('acc_keyword', 0):.4f}",
                 f"{metrics.get('hint_acc', 0):.4f}",
+                f"{metrics.get('recon_acc', 0):.4f}",
+                f"{beh_loss_val:.6f}",
                 f"{weight_norm:.4f}", f"{grad_norm:.4f}", f"{lr:.6f}",
                 f"{max_eig:.4f}", f"{elapsed:.1f}",
             ])
@@ -709,10 +1184,26 @@ def train(args: argparse.Namespace):
             marker = ""
             if acc > best_acc:
                 best_acc = acc
-                torch.save(model.state_dict(), args.output)
+                # Save model + all aux heads in a single state dict
+                save_state = dict(model.state_dict())
+                if hint_head is not None:
+                    for k, v in hint_head.state_dict().items():
+                        save_state[f"hint_head.{k}"] = v
+                if cls_proj is not None:
+                    for k, v in cls_proj.state_dict().items():
+                        save_state[f"cls_proj.{k}"] = v
+                if recon_decoder is not None:
+                    for k, v in recon_decoder.state_dict().items():
+                        save_state[f"recon_decoder.{k}"] = v
+                if behavioral_head is not None:
+                    for k, v in behavioral_head.state_dict().items():
+                        save_state[f"behavioral_head.{k}"] = v
+                torch.save(save_state, args.output)
                 marker = " *"
 
             hint_str = f" | hint {metrics.get('hint_acc', 0):.3f}" if hint_head else ""
+            recon_str = f" | recon {metrics.get('recon_acc', 0):.3f}" if recon_decoder else ""
+            beh_str = f" | beh {beh_loss_val:.4f}" if behavioral_head else ""
             print(
                 f"step {step:>7d} | "
                 f"train {mlm_loss.item():.4f} | "
@@ -722,7 +1213,7 @@ def train(args: argparse.Namespace):
                 f"N:{metrics.get('acc_numeric',0):.2f} "
                 f"E:{metrics.get('acc_effect',0):.2f} "
                 f"K:{metrics.get('acc_keyword',0):.2f}]"
-                f"{hint_str} | "
+                f"{hint_str}{recon_str}{beh_str} | "
                 f"w {weight_norm:.1f} | "
                 f"eig {max_eig:.2f}"
                 f"{marker}"
@@ -780,6 +1271,25 @@ def main():
     # Auxiliary hint classification loss
     p.add_argument("--no-hint-loss", action="store_true", help="Disable auxiliary hint classification loss")
     p.add_argument("--hint-loss-weight", type=float, default=0.5, help="Weight for hint classification loss")
+
+    # Reconstruction loss (CLS bottleneck)
+    p.add_argument("--no-recon", action="store_true", help="Disable reconstruction loss")
+    p.add_argument("--recon-weight", type=float, default=1.0, help="Weight for reconstruction loss")
+    p.add_argument("--recon-layers", type=int, default=2, help="Number of decoder layers for reconstruction")
+
+    # CLS projection (widen CLS before recon decoder)
+    p.add_argument("--cls-proj-dim", type=int, default=0, help="Project CLS to this dim before recon (0=disabled)")
+    p.add_argument("--cls-proj-mlp", action="store_true", help="Use 2-layer MLP instead of linear for CLS projection")
+
+    # Behavioral outcome prediction from CLS
+    p.add_argument("--behavioral-data", type=str, default=None,
+                   help="Path to ability_profiles.npz for behavioral outcome prediction")
+    p.add_argument("--behavioral-weight", type=float, default=1.0,
+                   help="Weight for behavioral outcome MSE loss")
+    p.add_argument("--behavioral-hidden", type=int, default=256,
+                   help="Hidden dim for behavioral prediction head")
+    p.add_argument("--freeze-encoder", action="store_true",
+                   help="Freeze transformer encoder (train only aux heads)")
 
     # Resume
     p.add_argument("--resume", help="Resume from checkpoint (.pt)")

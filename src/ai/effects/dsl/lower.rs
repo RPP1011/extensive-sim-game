@@ -268,31 +268,60 @@ fn lower_effect(node: &EffectNode) -> Result<ConditionalEffect, String> {
 fn lower_effect_type(node: &EffectNode) -> Result<Effect, String> {
     match node.effect_type.as_str() {
         "damage" => {
-            let amount = node.args.first().and_then(|a| a.as_i32()).unwrap_or(0);
             let bonus = lower_scaling(&node.scaling);
-            Ok(Effect::Damage {
-                amount,
-                amount_per_tick: 0,
-                duration_ms: 0,
-                tick_interval_ms: 0,
-                scaling_stat: None,
-                scaling_percent: 0.0,
-                damage_type: DamageType::Physical,
-                bonus,
-            })
+            // Check for per-tick (DoT) syntax: damage X/tick for Ys
+            if let Some(Arg::PerTick { amount, interval_ms }) = node.args.first() {
+                let dur = node.duration.unwrap_or(0);
+                Ok(Effect::Damage {
+                    amount: 0,
+                    amount_per_tick: *amount,
+                    duration_ms: dur,
+                    tick_interval_ms: *interval_ms,
+                    scaling_stat: None,
+                    scaling_percent: 0.0,
+                    damage_type: DamageType::Physical,
+                    bonus,
+                })
+            } else {
+                let amount = node.args.first().and_then(|a| a.as_i32()).unwrap_or(0);
+                Ok(Effect::Damage {
+                    amount,
+                    amount_per_tick: 0,
+                    duration_ms: 0,
+                    tick_interval_ms: 0,
+                    scaling_stat: None,
+                    scaling_percent: 0.0,
+                    damage_type: DamageType::Physical,
+                    bonus,
+                })
+            }
         }
         "heal" => {
-            let amount = node.args.first().and_then(|a| a.as_i32()).unwrap_or(0);
             let bonus = lower_scaling(&node.scaling);
-            Ok(Effect::Heal {
-                amount,
-                amount_per_tick: 0,
-                duration_ms: 0,
-                tick_interval_ms: 0,
-                scaling_stat: None,
-                scaling_percent: 0.0,
-                bonus,
-            })
+            // Check for per-tick (HoT) syntax: heal X/tick for Ys
+            if let Some(Arg::PerTick { amount, interval_ms }) = node.args.first() {
+                let dur = node.duration.unwrap_or(0);
+                Ok(Effect::Heal {
+                    amount: 0,
+                    amount_per_tick: *amount,
+                    duration_ms: dur,
+                    tick_interval_ms: *interval_ms,
+                    scaling_stat: None,
+                    scaling_percent: 0.0,
+                    bonus,
+                })
+            } else {
+                let amount = node.args.first().and_then(|a| a.as_i32()).unwrap_or(0);
+                Ok(Effect::Heal {
+                    amount,
+                    amount_per_tick: 0,
+                    duration_ms: 0,
+                    tick_interval_ms: 0,
+                    scaling_stat: None,
+                    scaling_percent: 0.0,
+                    bonus,
+                })
+            }
         }
         "shield" => {
             let amount = node.args.first().and_then(|a| a.as_i32()).unwrap_or(0);

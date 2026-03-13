@@ -1,0 +1,106 @@
+[hero]
+name = "Paladin"
+
+[stats]
+hp = 140
+move_speed = 2.8
+
+[stats.tags]
+HOLY = 35.0
+
+[attack]
+damage = 16
+range = 1.5
+
+# Damage + self-heal
+[[abilities]]
+name = "Smite"
+targeting = "target_enemy"
+range = 1.5
+cooldown_ms = 5000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 35
+
+[abilities.effects.tags]
+HOLY = 50.0
+
+[[abilities.effects]]
+type = "heal"
+amount = 15
+
+[abilities.effects.area]
+shape = "self"
+
+# Heal ally
+[[abilities]]
+name = "LayOnHands"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 6000
+cast_time_ms = 300
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount = 45
+
+[abilities.effects.tags]
+HOLY = 40.0
+
+# AoE shield
+[[abilities]]
+name = "DivineShield"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 14000
+cast_time_ms = 300
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 30
+duration_ms = 4000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+# Stun
+[[abilities]]
+name = "HammerOfJustice"
+targeting = "target_enemy"
+range = 1.5
+cooldown_ms = 10000
+cast_time_ms = 200
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "damage"
+amount = 20
+
+[abilities.effects.tags]
+HOLY = 45.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1500
+
+[abilities.effects.tags]
+CROWD_CONTROL = 55.0
+
+[[passives]]
+name = "Retribution"
+cooldown_ms = 5000
+range = 3.0
+
+[passives.trigger]
+type = "on_ally_damaged"
+range = 3.0
+
+[[passives.effects]]
+type = "damage"
+amount = 12

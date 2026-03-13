@@ -1,0 +1,25 @@
+// Tier 2: AoE heal/shield
+
+ability HealingCircle {
+    target: self_aoe
+    cooldown: 10s, cast: 300ms
+    hint: heal
+
+    heal 25 in circle(3.0) [HOLY: 30]
+}
+
+ability MassHeal {
+    target: self_aoe
+    cooldown: 14s, cast: 400ms
+    hint: heal
+
+    heal 40 in circle(4.0) [HOLY: 35]
+}
+
+ability MassShield {
+    target: self_aoe
+    cooldown: 14s, cast: 300ms
+    hint: defense
+
+    shield 30 for 4s in circle(3.5)
+}

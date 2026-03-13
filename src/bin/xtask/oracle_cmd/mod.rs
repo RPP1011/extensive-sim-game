@@ -4,6 +4,8 @@ mod training;
 mod selfplay;
 mod transformer_play;
 mod transformer_rl;
+mod operator_dataset;
+mod ability_profile;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -24,6 +26,8 @@ pub fn run_oracle_cmd(args: OracleArgs) -> ExitCode {
         OracleSubcommand::NextstateDataset(args) => dataset::run_nextstate_dataset(args),
         OracleSubcommand::TransformerPlay(args) => transformer_play::run_transformer_play(args),
         OracleSubcommand::TransformerRl(args) => transformer_rl::run_transformer_rl(args),
+        OracleSubcommand::OperatorDataset(args) => operator_dataset::run_operator_dataset(args),
+        OracleSubcommand::AbilityProfile(args) => ability_profile::run_ability_profile(args),
     }
 }
 

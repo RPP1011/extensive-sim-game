@@ -1,0 +1,49 @@
+// Tier 1: Single instant buff or debuff
+
+ability Empower {
+    target: ally, range: 4.0
+    cooldown: 10s, cast: 200ms
+    hint: utility
+
+    buff damage_output 0.25 for 5s
+}
+
+ability Haste {
+    target: ally, range: 4.0
+    cooldown: 10s, cast: 200ms
+    hint: utility
+
+    buff move_speed 0.3 for 4s
+}
+
+ability Quicken {
+    target: self
+    cooldown: 12s, cast: 100ms
+    hint: utility
+
+    buff attack_speed 0.3 for 5s
+}
+
+ability Weaken {
+    target: enemy, range: 4.0
+    cooldown: 8s, cast: 200ms
+    hint: utility
+
+    debuff damage_output 0.75 for 4s [DARK: 40]
+}
+
+ability Enfeeble {
+    target: enemy, range: 4.0
+    cooldown: 10s, cast: 200ms
+    hint: utility
+
+    debuff move_speed 0.3 for 4s
+}
+
+ability HuntersMark {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 200ms
+    hint: utility
+
+    damage_modify 1.25 for 5s
+}

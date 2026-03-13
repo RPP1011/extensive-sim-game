@@ -1,0 +1,10 @@
+[hero]
+name = "Scout"
+
+[stats]
+hp = 800
+move_speed = 4.0
+
+[attack]
+damage = 15
+range = 1.5

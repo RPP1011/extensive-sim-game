@@ -1,0 +1,51 @@
+[hero]
+name = "Drainer"
+
+[stats]
+hp = 95
+move_speed = 3.0
+
+[attack]
+damage = 14
+range = 4.0
+
+# Damage + self-heal
+[[abilities]]
+name = "SoulDrain"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 5000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 35
+
+[abilities.effects.tags]
+DARK = 50.0
+
+[[abilities.effects]]
+type = "heal"
+amount = 15
+
+[abilities.effects.area]
+shape = "self"
+
+# Debuff
+[[abilities]]
+name = "Weaken"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 10000
+cast_time_ms = 200
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "debuff"
+stat = "damage_output"
+factor = 0.75
+duration_ms = 4000
+
+[abilities.effects.tags]
+DARK = 40.0

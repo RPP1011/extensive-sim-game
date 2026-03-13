@@ -1,0 +1,47 @@
+[hero]
+name = "Fighter"
+
+[stats]
+hp = 130
+move_speed = 3.0
+
+[attack]
+damage = 18
+range = 1.5
+
+# Damage + stun combo
+[[abilities]]
+name = "StunStrike"
+targeting = "target_enemy"
+range = 1.5
+cooldown_ms = 8000
+cast_time_ms = 200
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 30
+
+[abilities.effects.tags]
+PHYSICAL = 45.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+[abilities.effects.tags]
+CROWD_CONTROL = 50.0
+
+# Self shield
+[[abilities]]
+name = "Brace"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 12000
+cast_time_ms = 200
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 45
+duration_ms = 4000

@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "crates/ability_operator"]
+
 [package]
 name = "bevy_game"
 version = "0.1.0"
@@ -24,7 +27,11 @@ toml = "0.8"
 hnsw_rs = "0.3.3"
 image = "0.25"
 rayon = "1.10"
+crossbeam-channel = "0.5"
 winnow = "0.7"
+ndarray = "0.16"
+ndarray-npy = { version = "0.9", features = ["npz"] }
+memmap2 = "0.9"
 
 [dev-dependencies]
 proptest = "1.6"

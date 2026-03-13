@@ -1,0 +1,37 @@
+// Tier 3: Buff/debuff + another effect
+
+ability RallyingCry {
+    target: self_aoe
+    cooldown: 15s, cast: 300ms
+    hint: utility
+
+    buff damage_output 0.2 for 5s in circle(4.0)
+    buff attack_speed 0.15 for 5s in circle(4.0)
+}
+
+ability CurseOfWeakness {
+    target: enemy, range: 4.0
+    cooldown: 10s, cast: 200ms
+    hint: utility
+
+    debuff damage_output 0.75 for 4s [DARK: 45]
+    slow 0.3 for 4s [SLOW: 35]
+}
+
+ability SelfBuff {
+    target: self
+    cooldown: 12s, cast: 200ms
+    hint: utility
+
+    buff damage_output 0.3 for 6s
+    buff move_speed 0.2 for 6s
+}
+
+ability BloodPact {
+    target: self
+    cooldown: 15s, cast: 300ms
+    hint: utility
+
+    self_damage 30
+    buff damage 0.35 for 6s
+}

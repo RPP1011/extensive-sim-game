@@ -1,0 +1,37 @@
+// Tier 3: Dash + damage combos
+
+ability ChargeStrike {
+    target: enemy, range: 5.0
+    cooldown: 6s, cast: 0ms
+    hint: damage
+
+    dash to_target
+    damage 35 [PHYSICAL: 45]
+}
+
+ability ShadowStrike {
+    target: enemy, range: 5.0
+    cooldown: 8s, cast: 0ms
+    hint: damage
+
+    dash to_target
+    damage 55 [DARK: 50]
+}
+
+ability KickBack {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 100ms
+    hint: damage
+
+    damage 20 [PHYSICAL: 35]
+    knockback 3.5 [KNOCKBACK: 45]
+}
+
+ability PullSmash {
+    target: enemy, range: 4.0
+    cooldown: 10s, cast: 200ms
+    hint: damage
+
+    pull 3.0
+    damage 30 [PHYSICAL: 45]
+}

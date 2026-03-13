@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier5_3v3_20290"
+seed = 20290
+hero_count = 3
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["archmage", "deathknight", "templar"]
+enemy_hero_templates = ["archmage", "deathknight", "templar"]

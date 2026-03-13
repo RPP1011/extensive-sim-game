@@ -39,6 +39,21 @@ from grokfast import GrokfastEMA
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+
+def load_embedding_registry(path: str, device: str = DEVICE) -> dict:
+    """Load pre-computed CLS embeddings from registry JSON.
+
+    Returns dict with 'embeddings' mapping ability_name → Tensor(d,).
+    """
+    data = json.load(open(path))
+    embs = {}
+    for name, vec in data["embeddings"].items():
+        embs[name] = torch.tensor(vec, dtype=torch.float32, device=device)
+    d_model = data["d_model"]
+    print(f"Loaded embedding registry: {len(embs)} abilities, d={d_model}, "
+          f"hash={data['model_hash']}")
+    return {"embeddings": embs, "d_model": d_model}
+
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
@@ -54,15 +69,49 @@ def load_episodes(path: Path) -> list[dict]:
     return episodes
 
 
+def apply_reward_shaping(episodes: list[dict], scale: float = 0.1) -> None:
+    """Compute dense step rewards from HP differentials.
+
+    For each step, step_reward = scale * Δ(ally_hp_sum - enemy_hp_sum).
+    Modifies episodes in-place.
+    """
+    for ep in episodes:
+        steps = ep["steps"]
+        prev_advantage = None
+        for step in steps:
+            entities = step["entities"]
+            entity_types = step["entity_types"]
+            ally_hp = sum(
+                ent[0] for ent, et in zip(entities, entity_types) if et < 2
+            )
+            enemy_hp = sum(
+                ent[0] for ent, et in zip(entities, entity_types) if et == 2
+            )
+            advantage = ally_hp - enemy_hp
+            if prev_advantage is not None:
+                step["step_reward"] = scale * (advantage - prev_advantage)
+            prev_advantage = advantage
+
+
 def flatten_steps(episodes: list[dict]) -> tuple[list[dict], list[int]]:
-    """Flatten episodes into individual steps with episode indices."""
+    """Flatten episodes into individual steps with episode indices.
+
+    Filters out steps where the recorded action is masked (invalid for actor-critic).
+    """
     steps = []
     ep_indices = []
+    skipped = 0
     for ei, ep in enumerate(episodes):
         for step in ep["steps"]:
+            # Skip steps where the action is masked (from off-policy bootstrap)
+            if not step["mask"][step["action"]]:
+                skipped += 1
+                continue
             step["_episode_reward"] = ep["reward"]
             steps.append(step)
             ep_indices.append(ei)
+    if skipped > 0:
+        print(f"  Filtered {skipped} steps with masked actions")
     return steps, ep_indices
 
 
@@ -152,6 +201,8 @@ def ppo_update(
     ppo_epochs: int = 4,
     batch_size: int = 256,
     max_grad_norm: float = 0.5,
+    embedding_registry: dict | None = None,
+    recompute_log_probs: bool = False,
 ) -> dict:
     """Run PPO update epochs on collected data."""
     n = len(steps)
@@ -174,26 +225,110 @@ def ppo_update(
     adv_tensor = (adv_tensor - adv_tensor.mean()) / (adv_tensor.std() + 1e-8)
 
     # Pre-compute ability CLS embeddings for each step
-    # Build unit_id → ability tokens mapping from episodes
+    # Build unit_id → ability tokens/names mapping from episodes
     unit_ability_tokens: dict[int, list[list[int]]] = {}
+    unit_ability_names: dict[int, list[str]] = {}
     for ep in episodes:
         for uid_str, tokens_list in ep.get("unit_abilities", {}).items():
             uid = int(uid_str)
             if uid not in unit_ability_tokens:
                 unit_ability_tokens[uid] = tokens_list
+        for uid_str, names_list in ep.get("unit_ability_names", {}).items():
+            uid = int(uid_str)
+            if uid not in unit_ability_names:
+                unit_ability_names[uid] = names_list
 
-    # For each step, we need the ability CLS embeddings
     # Cache CLS per (unit_id, ability_idx)
     cls_cache: dict[tuple[int, int], torch.Tensor] = {}
 
     model.train()
-    for uid, tokens_list in unit_ability_tokens.items():
-        for aidx, tokens in enumerate(tokens_list):
-            ids = torch.tensor([tokens], dtype=torch.long, device=DEVICE)
-            amask = (ids != 0).float()
-            with torch.no_grad():
-                cls_emb = model.transformer.cls_embedding(ids, amask)
-            cls_cache[(uid, aidx)] = cls_emb.squeeze(0)  # (d_model,)
+    if embedding_registry is not None:
+        # Use pre-computed behavioral embeddings from registry
+        reg_embs = embedding_registry["embeddings"]
+        matched = 0
+        total = 0
+        for uid, names in unit_ability_names.items():
+            for aidx, name in enumerate(names):
+                total += 1
+                # Normalize: DSL uses underscore-joined names
+                key = name.replace(" ", "_")
+                if key in reg_embs:
+                    cls_cache[(uid, aidx)] = reg_embs[key]
+                    matched += 1
+        print(f"  Registry CLS: {matched}/{total} abilities matched")
+        # Fall back to transformer for unmatched
+        for uid, tokens_list in unit_ability_tokens.items():
+            for aidx, tokens in enumerate(tokens_list):
+                if (uid, aidx) not in cls_cache:
+                    ids = torch.tensor([tokens], dtype=torch.long, device=DEVICE)
+                    amask = (ids != 0).float()
+                    with torch.no_grad():
+                        cls_emb = model.transformer.cls_embedding(ids, amask)
+                    cls_cache[(uid, aidx)] = cls_emb.squeeze(0)
+    else:
+        # Standard: encode with transformer
+        for uid, tokens_list in unit_ability_tokens.items():
+            for aidx, tokens in enumerate(tokens_list):
+                ids = torch.tensor([tokens], dtype=torch.long, device=DEVICE)
+                amask = (ids != 0).float()
+                with torch.no_grad():
+                    cls_emb = model.transformer.cls_embedding(ids, amask)
+                cls_cache[(uid, aidx)] = cls_emb.squeeze(0)  # (d_model,)
+
+    # Recompute old_log_probs from current model (for off-policy bootstrap data)
+    if recompute_log_probs:
+        print("  Recomputing log probs from current model...")
+        model.eval()
+        with torch.no_grad():
+            for start in range(0, n, batch_size):
+                end = min(start + batch_size, n)
+                batch_gs = game_states[start:end]
+                batch_masks_b = masks[start:end]
+                batch_actions_b = actions[start:end]
+                B_r = end - start
+
+                # Build ability CLS for this batch
+                cls_dim = embedding_registry["d_model"] if embedding_registry is not None else model.d_model
+                ability_cls_batch_r: list[torch.Tensor | None] = [None] * MAX_ABILITIES
+                per_step_cls_r = []
+                for ii in range(start, end):
+                    step = steps[ii]
+                    uid = step["unit_id"]
+                    slot_cls = []
+                    if uid in unit_ability_tokens:
+                        for aidx in range(MAX_ABILITIES):
+                            key = (uid, aidx)
+                            if key in cls_cache:
+                                slot_cls.append(cls_cache[key])
+                            else:
+                                slot_cls.append(None)
+                    else:
+                        slot_cls = [None] * MAX_ABILITIES
+                    per_step_cls_r.append(slot_cls)
+
+                for aidx in range(MAX_ABILITIES):
+                    valid = []
+                    valid_indices = []
+                    for bi, step_cls in enumerate(per_step_cls_r):
+                        if step_cls[aidx] is not None:
+                            valid.append(step_cls[aidx])
+                            valid_indices.append(bi)
+                    if valid:
+                        stacked = torch.stack(valid)
+                        full = torch.zeros(B_r, cls_dim, device=DEVICE)
+                        for vi, bi in enumerate(valid_indices):
+                            full[bi] = stacked[vi]
+                        ability_cls_batch_r[aidx] = full
+
+                logits_r, _ = model(batch_gs, ability_cls_batch_r)
+                logits_r = logits_r.masked_fill(~batch_masks_b, -1e9)
+                log_probs_r = F.log_softmax(logits_r, dim=-1)
+                action_lp = log_probs_r.gather(1, batch_actions_b.unsqueeze(1)).squeeze(1)
+                # Clamp to avoid -inf from masked actions
+                action_lp = action_lp.clamp(min=-20.0)
+                old_log_probs[start:end] = action_lp
+        model.train()
+        print(f"  Recomputed log probs: mean={old_log_probs.mean().item():.4f}")
 
     metrics = {
         "policy_loss": 0.0,
@@ -244,6 +379,8 @@ def ppo_update(
                 per_step_cls.append(slot_cls)
 
             # Stack ability CLS into batch tensors
+            # CLS dim may differ from model.d_model when using external registry
+            cls_dim = embedding_registry["d_model"] if embedding_registry is not None else model.d_model
             ability_cls_batch: list[torch.Tensor | None] = [None] * MAX_ABILITIES
             for aidx in range(MAX_ABILITIES):
                 valid = []
@@ -254,9 +391,8 @@ def ppo_update(
                         valid_indices.append(bi)
 
                 if valid:
-                    stacked = torch.stack(valid)  # (n_valid, d_model)
-                    # Expand to full batch with zeros for missing
-                    full = torch.zeros(B, model.d_model, device=DEVICE)
+                    stacked = torch.stack(valid)  # (n_valid, cls_dim)
+                    full = torch.zeros(B, cls_dim, device=DEVICE)
                     for vi, bi in enumerate(valid_indices):
                         full[bi] = stacked[vi]
                     ability_cls_batch[aidx] = full
@@ -329,6 +465,7 @@ def main():
     p.add_argument("episodes", help="JSONL episode file from transformer-rl generate")
     p.add_argument("--pretrained", help="Phase 2 decision checkpoint (.pt)")
     p.add_argument("--entity-encoder", help="Pretrained entity encoder (.pt)")
+    p.add_argument("--embedding-registry", help="Pre-computed CLS registry JSON (128-dim behavioral embeddings)")
     p.add_argument("-o", "--output", default="generated/actor_critic.pt")
     p.add_argument("--log", default="generated/actor_critic.csv")
 
@@ -364,15 +501,35 @@ def main():
     )
     p.add_argument("--unfreeze-transformer", action="store_true")
 
+    # Off-policy bootstrap
+    p.add_argument("--recompute-log-probs", action="store_true",
+                   help="Recompute old_log_probs from current model (for off-policy bootstrap data)")
+    p.add_argument("--bc-epochs", type=int, default=0,
+                   help="Behavioral cloning warmup epochs before PPO (supervised imitation)")
+    p.add_argument("--reinforce-epochs", type=int, default=0,
+                   help="REINFORCE epochs: reward-weighted CE (no value function needed)")
+    p.add_argument("--reward-shaping", type=float, default=0.0,
+                   help="Dense reward shaping scale from HP differentials (0 = disabled)")
+    p.add_argument("--label-smoothing", type=float, default=0.0,
+                   help="Label smoothing for BC cross-entropy (0 = disabled)")
+
     args = p.parse_args()
 
     tok = AbilityTokenizer()
     print(f"Device: {DEVICE}")
 
+    # Load embedding registry if provided
+    embedding_registry = None
+    external_cls_dim = 0
+    if args.embedding_registry:
+        embedding_registry = load_embedding_registry(args.embedding_registry)
+        external_cls_dim = embedding_registry["d_model"]
+
     # Build model
     model = AbilityActorCritic(
         vocab_size=tok.vocab_size,
         game_state_dim=210,
+        external_cls_dim=external_cls_dim,
         d_model=args.d_model,
         d_ff=args.d_ff,
         n_layers=args.n_layers,
@@ -437,6 +594,10 @@ def main():
     wins = sum(1 for e in episodes if e["outcome"] == "Victory")
     print(f"  Win rate in data: {wins}/{len(episodes)} ({wins/max(len(episodes),1)*100:.1f}%)")
 
+    if args.reward_shaping > 0:
+        apply_reward_shaping(episodes, scale=args.reward_shaping)
+        print(f"  Applied reward shaping (scale={args.reward_shaping})")
+
     # Compute GAE
     print("Computing GAE advantages...")
     advantages, returns, old_values = compute_gae(
@@ -456,6 +617,255 @@ def main():
         "approx_kl", "clip_frac", "elapsed_s",
     ])
 
+    # Behavioral cloning warmup (supervised imitation of bootstrap data)
+    if args.bc_epochs > 0:
+        print(f"\nBehavioral cloning warmup ({args.bc_epochs} epochs)...")
+        bc_t0 = time.time()
+        all_gs = torch.tensor(
+            [s["game_state"] for s in steps_flat], dtype=torch.float32, device=DEVICE
+        )
+        all_actions = torch.tensor(
+            [s["action"] for s in steps_flat], dtype=torch.long, device=DEVICE
+        )
+        all_masks = torch.tensor(
+            [s["mask"] for s in steps_flat], dtype=torch.bool, device=DEVICE
+        )
+
+        # Build CLS cache for BC (same as PPO but we do it here)
+        bc_unit_tokens: dict[int, list[list[int]]] = {}
+        bc_unit_names: dict[int, list[str]] = {}
+        for ep in episodes:
+            for uid_str, tokens_list in ep.get("unit_abilities", {}).items():
+                uid = int(uid_str)
+                if uid not in bc_unit_tokens:
+                    bc_unit_tokens[uid] = tokens_list
+            for uid_str, names_list in ep.get("unit_ability_names", {}).items():
+                uid = int(uid_str)
+                if uid not in bc_unit_names:
+                    bc_unit_names[uid] = names_list
+
+        bc_cls_cache: dict[tuple[int, int], torch.Tensor] = {}
+        if embedding_registry is not None:
+            reg_embs = embedding_registry["embeddings"]
+            for uid, names in bc_unit_names.items():
+                for aidx, name in enumerate(names):
+                    key = name.replace(" ", "_")
+                    if key in reg_embs:
+                        bc_cls_cache[(uid, aidx)] = reg_embs[key]
+        for uid, tokens_list in bc_unit_tokens.items():
+            for aidx, tokens in enumerate(tokens_list):
+                if (uid, aidx) not in bc_cls_cache:
+                    ids = torch.tensor([tokens], dtype=torch.long, device=DEVICE)
+                    amask = (ids != 0).float()
+                    with torch.no_grad():
+                        cls_emb = model.transformer.cls_embedding(ids, amask)
+                    bc_cls_cache[(uid, aidx)] = cls_emb.squeeze(0)
+
+        cls_dim = embedding_registry["d_model"] if embedding_registry is not None else model.d_model
+        n_bc = len(steps_flat)
+        model.train()
+
+        for bc_ep in range(args.bc_epochs):
+            bc_indices = np.random.permutation(n_bc)
+            epoch_loss = 0.0
+            epoch_acc = 0.0
+            n_batches = 0
+
+            for start in range(0, n_bc, args.batch_size):
+                end = min(start + args.batch_size, n_bc)
+                idx = bc_indices[start:end]
+                B_bc = len(idx)
+
+                batch_gs = all_gs[idx]
+                batch_acts = all_actions[idx]
+                batch_masks = all_masks[idx]
+
+                # Build ability CLS batch
+                per_step_cls_bc = []
+                for ii in idx:
+                    step = steps_flat[ii]
+                    uid = step["unit_id"]
+                    slot_cls = []
+                    if uid in bc_unit_tokens:
+                        for aidx in range(MAX_ABILITIES):
+                            k = (uid, aidx)
+                            slot_cls.append(bc_cls_cache.get(k))
+                    else:
+                        slot_cls = [None] * MAX_ABILITIES
+                    per_step_cls_bc.append(slot_cls)
+
+                ability_cls_bc: list[torch.Tensor | None] = [None] * MAX_ABILITIES
+                for aidx in range(MAX_ABILITIES):
+                    valid = [(bi, sc[aidx]) for bi, sc in enumerate(per_step_cls_bc) if sc[aidx] is not None]
+                    if valid:
+                        full = torch.zeros(B_bc, cls_dim, device=DEVICE)
+                        for bi, v in valid:
+                            full[bi] = v
+                        ability_cls_bc[aidx] = full
+
+                logits_bc, values_bc = model(batch_gs, ability_cls_bc)
+                logits_bc = logits_bc.masked_fill(~batch_masks, -1e9)
+
+                # Cross-entropy loss (imitation) + value loss
+                bc_loss = F.cross_entropy(logits_bc, batch_acts, label_smoothing=args.label_smoothing)
+                # Also train value head on returns
+                value_targets = torch.tensor(
+                    returns[idx], dtype=torch.float32, device=DEVICE
+                )
+                v_loss = F.mse_loss(values_bc.squeeze(-1), value_targets)
+                loss = bc_loss + 0.5 * v_loss
+
+                optimizer.zero_grad()
+                loss.backward()
+                if grokfast is not None:
+                    grokfast.step()
+                nn.utils.clip_grad_norm_(model.parameters(), 0.5)
+                optimizer.step()
+
+                # Track accuracy
+                with torch.no_grad():
+                    preds = logits_bc.argmax(dim=-1)
+                    acc = (preds == batch_acts).float().mean().item()
+                    epoch_loss += bc_loss.item()
+                    epoch_acc += acc
+                    n_batches += 1
+
+            avg_loss = epoch_loss / max(n_batches, 1)
+            avg_acc = epoch_acc / max(n_batches, 1)
+            print(f"  BC epoch {bc_ep+1}/{args.bc_epochs}: loss={avg_loss:.4f}, acc={avg_acc:.3f}")
+
+        bc_elapsed = time.time() - bc_t0
+        print(f"  BC warmup done in {bc_elapsed:.1f}s")
+
+    # REINFORCE: reward-weighted cross-entropy (no value function needed)
+    if args.reinforce_epochs > 0:
+        print(f"\nREINFORCE training ({args.reinforce_epochs} epochs)...")
+        rf_t0 = time.time()
+
+        all_gs_rf = torch.tensor(
+            [s["game_state"] for s in steps_flat], dtype=torch.float32, device=DEVICE
+        )
+        all_actions_rf = torch.tensor(
+            [s["action"] for s in steps_flat], dtype=torch.long, device=DEVICE
+        )
+        all_masks_rf = torch.tensor(
+            [s["mask"] for s in steps_flat], dtype=torch.bool, device=DEVICE
+        )
+        # Episode reward per step (already stored in flatten_steps)
+        all_rewards_rf = torch.tensor(
+            [s["_episode_reward"] for s in steps_flat], dtype=torch.float32, device=DEVICE
+        )
+        # Normalize rewards to [-1, 1] range (already there for most episodes)
+        # Subtract baseline (mean reward) for variance reduction
+        reward_baseline = all_rewards_rf.mean()
+        all_advantages_rf = all_rewards_rf - reward_baseline
+
+        # Build CLS cache (reuse BC cache if available, otherwise build new)
+        rf_unit_tokens: dict[int, list[list[int]]] = {}
+        rf_unit_names: dict[int, list[str]] = {}
+        for ep in episodes:
+            for uid_str, tokens_list in ep.get("unit_abilities", {}).items():
+                uid = int(uid_str)
+                if uid not in rf_unit_tokens:
+                    rf_unit_tokens[uid] = tokens_list
+            for uid_str, names_list in ep.get("unit_ability_names", {}).items():
+                uid = int(uid_str)
+                if uid not in rf_unit_names:
+                    rf_unit_names[uid] = names_list
+
+        rf_cls_cache: dict[tuple[int, int], torch.Tensor] = {}
+        if embedding_registry is not None:
+            reg_embs = embedding_registry["embeddings"]
+            for uid, names in rf_unit_names.items():
+                for aidx, name in enumerate(names):
+                    key = name.replace(" ", "_")
+                    if key in reg_embs:
+                        rf_cls_cache[(uid, aidx)] = reg_embs[key]
+        for uid, tokens_list in rf_unit_tokens.items():
+            for aidx, tokens in enumerate(tokens_list):
+                if (uid, aidx) not in rf_cls_cache:
+                    ids = torch.tensor([tokens], dtype=torch.long, device=DEVICE)
+                    amask = (ids != 0).float()
+                    with torch.no_grad():
+                        cls_emb = model.transformer.cls_embedding(ids, amask)
+                    rf_cls_cache[(uid, aidx)] = cls_emb.squeeze(0)
+
+        cls_dim_rf = embedding_registry["d_model"] if embedding_registry is not None else model.d_model
+        n_rf = len(steps_flat)
+        model.train()
+
+        for rf_ep in range(args.reinforce_epochs):
+            rf_indices = np.random.permutation(n_rf)
+            epoch_pg_loss = 0.0
+            epoch_ent = 0.0
+            n_batches_rf = 0
+
+            for start in range(0, n_rf, args.batch_size):
+                end = min(start + args.batch_size, n_rf)
+                idx = rf_indices[start:end]
+                B_rf = len(idx)
+
+                batch_gs = all_gs_rf[idx]
+                batch_acts = all_actions_rf[idx]
+                batch_masks = all_masks_rf[idx]
+                batch_adv = all_advantages_rf[idx]
+
+                # Build ability CLS batch
+                per_step_cls_rf = []
+                for ii in idx:
+                    step = steps_flat[ii]
+                    uid = step["unit_id"]
+                    slot_cls = []
+                    if uid in rf_unit_tokens:
+                        for aidx in range(MAX_ABILITIES):
+                            k = (uid, aidx)
+                            slot_cls.append(rf_cls_cache.get(k))
+                    else:
+                        slot_cls = [None] * MAX_ABILITIES
+                    per_step_cls_rf.append(slot_cls)
+
+                ability_cls_rf: list[torch.Tensor | None] = [None] * MAX_ABILITIES
+                for aidx in range(MAX_ABILITIES):
+                    valid = [(bi, sc[aidx]) for bi, sc in enumerate(per_step_cls_rf) if sc[aidx] is not None]
+                    if valid:
+                        full = torch.zeros(B_rf, cls_dim_rf, device=DEVICE)
+                        for bi, v in valid:
+                            full[bi] = v
+                        ability_cls_rf[aidx] = full
+
+                logits_rf, _ = model(batch_gs, ability_cls_rf)
+                logits_rf = logits_rf.masked_fill(~batch_masks, -1e9)
+
+                # Policy gradient loss: -advantage * log_prob(action)
+                log_probs_rf = F.log_softmax(logits_rf, dim=-1)
+                action_lp = log_probs_rf.gather(1, batch_acts.unsqueeze(1)).squeeze(1)
+                pg_loss = -(batch_adv * action_lp).mean()
+
+                # Entropy bonus
+                probs_rf = F.softmax(logits_rf, dim=-1)
+                entropy_rf = -(probs_rf * log_probs_rf).sum(-1).mean()
+
+                loss = pg_loss - args.entropy_coeff * entropy_rf
+
+                optimizer.zero_grad()
+                loss.backward()
+                if grokfast is not None:
+                    grokfast.step()
+                nn.utils.clip_grad_norm_(model.parameters(), 0.5)
+                optimizer.step()
+
+                epoch_pg_loss += pg_loss.item()
+                epoch_ent += entropy_rf.item()
+                n_batches_rf += 1
+
+            avg_pg = epoch_pg_loss / max(n_batches_rf, 1)
+            avg_ent = epoch_ent / max(n_batches_rf, 1)
+            print(f"  REINFORCE epoch {rf_ep+1}/{args.reinforce_epochs}: "
+                  f"pg_loss={avg_pg:.4f}, entropy={avg_ent:.4f}")
+
+        rf_elapsed = time.time() - rf_t0
+        print(f"  REINFORCE done in {rf_elapsed:.1f}s")
+
     # PPO training
     t0 = time.time()
     print(f"\nStarting PPO training ({args.ppo_epochs} epochs per batch)...")
@@ -469,6 +879,8 @@ def main():
         ppo_epochs=args.ppo_epochs,
         batch_size=args.batch_size,
         max_grad_norm=args.max_grad_norm,
+        embedding_registry=embedding_registry,
+        recompute_log_probs=args.recompute_log_probs,
     )
 
     elapsed = time.time() - t0

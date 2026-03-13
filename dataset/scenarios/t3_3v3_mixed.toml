@@ -1,0 +1,10 @@
+[scenario]
+name = "t3_3v3_mixed"
+seed = 3003
+hero_count = 3
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["fighter", "medic", "skirmisher"]
+enemy_hero_templates = ["bulwark", "caster", "drainer"]

@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_tier3_fighter_bulwark_vs_caster_bulwark"
+seed = 20049
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["fighter", "bulwark"]
+enemy_hero_templates = ["caster", "bulwark"]

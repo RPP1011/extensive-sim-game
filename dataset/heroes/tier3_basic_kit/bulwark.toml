@@ -1,0 +1,44 @@
+[hero]
+name = "Bulwark"
+
+[stats]
+hp = 180
+move_speed = 2.3
+
+[attack]
+damage = 12
+range = 1.5
+
+# Taunt
+[[abilities]]
+name = "Provoke"
+targeting = "target_enemy"
+range = 3.0
+cooldown_ms = 10000
+cast_time_ms = 100
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "taunt"
+duration_ms = 2000
+
+[abilities.effects.tags]
+CROWD_CONTROL = 50.0
+
+# AoE shield
+[[abilities]]
+name = "MassShield"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 14000
+cast_time_ms = 300
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 30
+duration_ms = 4000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.5

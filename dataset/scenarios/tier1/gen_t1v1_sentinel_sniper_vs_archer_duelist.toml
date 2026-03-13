@@ -1,0 +1,10 @@
+[scenario]
+name = "gen_t1v1_sentinel_sniper_vs_archer_duelist"
+seed = 8052
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 2000
+room_type = "Entry"
+hero_templates = ["sentinel", "sniper"]
+enemy_hero_templates = ["archer", "duelist"]

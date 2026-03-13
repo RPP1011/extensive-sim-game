@@ -1,0 +1,10 @@
+[scenario]
+name = "t5_archmage_vs_dk"
+seed = 5001
+hero_count = 2
+enemy_count = 0
+difficulty = 1
+max_ticks = 3000
+room_type = "Entry"
+hero_templates = ["archmage", "templar"]
+enemy_hero_templates = ["deathknight", "templar"]

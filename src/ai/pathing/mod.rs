@@ -16,6 +16,11 @@ pub struct GridNav {
     pub blocked: HashSet<(i32, i32)>,
     pub elevation_by_cell: HashMap<(i32, i32), f32>,
     pub slope_cost_by_cell: HashMap<(i32, i32), f32>,
+    /// Precomputed per-cell: minimum wall distance in 4 cardinal directions.
+    /// Computed once after terrain is finalized via `precompute_wall_proximity()`.
+    pub wall_proximity_by_cell: HashMap<(i32, i32), f32>,
+    /// Precomputed per-cell: number of blocked cardinal neighbors (0-4).
+    pub chokepoint_score_by_cell: HashMap<(i32, i32), u8>,
 }
 
 impl GridNav {
@@ -29,6 +34,8 @@ impl GridNav {
             blocked: HashSet::new(),
             elevation_by_cell: HashMap::new(),
             slope_cost_by_cell: HashMap::new(),
+            wall_proximity_by_cell: HashMap::new(),
+            chokepoint_score_by_cell: HashMap::new(),
         }
     }
 
@@ -143,6 +150,62 @@ impl GridNav {
     pub fn is_walkable_pos(&self, pos: SimVec2) -> bool {
         let c = self.cell_of(pos);
         self.walkable(c.0, c.1)
+    }
+
+    /// Precompute wall proximity and chokepoint scores for all walkable cells.
+    /// Call once after terrain is finalized (all blocks/carves done).
+    pub fn precompute_wall_proximity(&mut self) {
+        let cx0 = ((self.min_x) / self.cell_size).floor() as i32;
+        let cx1 = ((self.max_x) / self.cell_size).ceil() as i32;
+        let cy0 = ((self.min_y) / self.cell_size).floor() as i32;
+        let cy1 = ((self.max_y) / self.cell_size).ceil() as i32;
+        let max_steps = (5.0 / self.cell_size).ceil() as i32; // match raycast max_dist=5.0
+
+        self.wall_proximity_by_cell.clear();
+        self.chokepoint_score_by_cell.clear();
+
+        for x in cx0..=cx1 {
+            for y in cy0..=cy1 {
+                if self.blocked.contains(&(x, y)) {
+                    continue;
+                }
+
+                // Chokepoint: count blocked cardinal neighbors
+                let blocked_n = [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+                    .iter()
+                    .filter(|(ox, oy)| self.blocked.contains(&(x + ox, y + oy)))
+                    .count() as u8;
+                self.chokepoint_score_by_cell.insert((x, y), blocked_n);
+
+                // Wall proximity: min distance to nearest wall in 4 cardinal directions
+                let dirs: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+                let mut min_dist = 5.0f32; // max_dist cap
+                for (dx, dy) in &dirs {
+                    for s in 1..=max_steps {
+                        let nx = x + dx * s;
+                        let ny = y + dy * s;
+                        if self.blocked.contains(&(nx, ny)) || !self.in_bounds(nx, ny) {
+                            let d = s as f32 * self.cell_size;
+                            if d < min_dist {
+                                min_dist = d;
+                            }
+                            break;
+                        }
+                    }
+                }
+                self.wall_proximity_by_cell.insert((x, y), min_dist);
+            }
+        }
+    }
+
+    /// Get precomputed wall proximity for a position (falls back to 5.0 if not precomputed).
+    pub fn wall_proximity_at_pos(&self, pos: SimVec2) -> f32 {
+        self.wall_proximity_by_cell.get(&self.cell_of(pos)).copied().unwrap_or(5.0)
+    }
+
+    /// Get precomputed chokepoint score for a position (falls back to 0 if not precomputed).
+    pub fn chokepoint_at_pos(&self, pos: SimVec2) -> u8 {
+        self.chokepoint_score_by_cell.get(&self.cell_of(pos)).copied().unwrap_or(0)
     }
 
     /// Returns all grid cells covered by a rectangle centered at `center`
