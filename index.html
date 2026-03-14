@@ -292,6 +292,50 @@ svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
   .fig-container { padding: 1rem; }
   .response-fmt { flex-wrap: wrap; }
 }
+
+.concept-link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--accent-dim);
+  cursor: help;
+}
+.concept-link:hover { border-bottom-style: solid; }
+
+.concept-popup {
+  position: absolute;
+  z-index: 100;
+  max-width: 470px;
+  background: var(--surface);
+  border: 1px solid var(--border-bright);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+.concept-popup.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.concept-popup iframe {
+  width: 470px;
+  height: 420px;
+  border: none;
+  background: var(--surface);
+}
+.concept-popup .popup-footer {
+  padding: 0.4rem 0.8rem;
+  border-top: 1px solid var(--border);
+  text-align: right;
+}
+.concept-popup .popup-footer a {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.78rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+.concept-popup .popup-footer a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -336,18 +380,18 @@ svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
 
 <h2>Architecture</h2>
 
-<p>The core challenge is representing arbitrary abilities in a way that generalizes. We can&rsquo;t use a flat one-hot &mdash; the action space would be enormous and sparse. Instead, we decompose the problem into <strong>pretrained components</strong> and a <strong>lightweight policy head</strong>:</p>
+<p>The core challenge is representing arbitrary abilities in a way that generalizes. We can&rsquo;t use a flat one-hot &mdash; the action space would be enormous and sparse. Instead, we decompose the problem into <strong>pretrained components</strong> and a <strong>lightweight policy head</strong>, connected by <a class="concept-link" data-concept="attention">attention</a>:</p>
 
 <figure class="wide">
   <div class="fig-container" id="fig-architecture"></div>
   <figcaption><strong>Figure 1.</strong> Full architecture. The pretrained ability transformer (top, purple) runs once per fight to produce 128d ability embeddings. The learned policy network (bottom, blue) runs every tick &mdash; 113K parameters total.</figcaption>
 </figure>
 
-<p><strong>Why this decomposition?</strong> The ability transformer is expensive (~2.8M params, 4-layer encoder over token sequences). But abilities don&rsquo;t change mid-fight &mdash; a unit&rsquo;s kit is fixed at spawn. So we <strong>pre-compute</strong> a summary embedding for every ability once at fight start, cache them in a registry, and only the lightweight 113K-param policy runs per tick.</p>
+<p><strong>Why this decomposition?</strong> The ability transformer is expensive (~2.8M params, 4-layer encoder over token sequences). But abilities don&rsquo;t change mid-fight &mdash; a unit&rsquo;s kit is fixed at spawn. So we <strong>pre-compute</strong> a summary embedding for every ability once at fight start, cache them in a registry, and only the lightweight 113K-param policy runs per tick. A <a class="concept-link" data-concept="cross-attention">cross-attention</a> layer bridges the two: each ability embedding queries the entity state to decide relevance.</p>
 
 <h3>Entity Representation</h3>
 
-<p>Each game tick, we extract a fixed-size state vector from the simulator. Seven entity slots &mdash; self, three enemies, three allies &mdash; each described by 30 features covering vitals, spatial position, combat stats, ability readiness, healing, crowd control, and cumulative damage.</p>
+<p>Each game tick, we extract a fixed-size state vector from the simulator. Seven entity slots &mdash; self, three enemies, three allies &mdash; each described by 30 features covering vitals, spatial position, combat stats, ability readiness, healing, crowd control, and cumulative damage. These pass through <a class="concept-link" data-concept="self-attention">self-attention</a> so each entity&rsquo;s representation can incorporate information about the others.</p>
 
 <figure class="wide">
   <div class="fig-container" id="fig-entity-encoder"></div>
@@ -356,7 +400,7 @@ svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
 
 <h3>Pointer-Based Target Selection</h3>
 
-<p>The combat head uses <strong>scaled dot-product attention</strong> as a pointer mechanism. A query vector derived from the pooled entity state is dotted against per-entity key vectors to produce logits over potential targets:</p>
+<p>The combat head uses <a class="concept-link" data-concept="scaled-dot-product">scaled dot-product attention</a> as a pointer mechanism. A query vector derived from the pooled entity state is dotted against per-entity key vectors to produce <a class="concept-link" data-concept="logits-softmax">logits</a> over potential targets:</p>
 
 <figure class="wide">
   <div class="fig-container" id="fig-attention"></div>
@@ -369,7 +413,7 @@ svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
 
 <h2>Behavioral Embeddings: Understanding Abilities from Source Code</h2>
 
-<p>The 128-dimensional ability embeddings aren&rsquo;t just MLM features &mdash; they encode <strong>behavioral semantics</strong>. We train them in a two-phase curriculum:</p>
+<p>The 128-dimensional ability embeddings aren&rsquo;t just <a class="concept-link" data-concept="masked-language-modeling">MLM</a> features &mdash; they encode <strong>behavioral semantics</strong>. We train them in a two-phase curriculum:</p>
 
 <figure class="wide">
   <div class="fig-container" id="fig-embeddings"></div>
@@ -1004,6 +1048,45 @@ function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);cons
       svg.append('path').attr('d',`M${sx+bW+5},${y+14} L${sx+bW+15},${y+14} L${sx+bW+15},${y+rH+14} L${sx+nW-5},${y+rH+14}`)
         .attr('stroke',C.border).attr('stroke-width',1.5).attr('fill','none').attr('stroke-dasharray','4,3');
     }
+  });
+})();
+
+// ═══ Gwern-style concept popups ═══
+(function(){
+  const popup = document.createElement('div');
+  popup.className = 'concept-popup';
+  popup.innerHTML = '<iframe></iframe><div class="popup-footer"><a href="">View full explanation &rarr;</a></div>';
+  document.body.appendChild(popup);
+
+  let showTimer, hideTimer;
+  const iframe = popup.querySelector('iframe');
+  const footerLink = popup.querySelector('.popup-footer a');
+
+  document.querySelectorAll('.concept-link').forEach(link => {
+    link.addEventListener('mouseenter', function(e) {
+      clearTimeout(hideTimer);
+      showTimer = setTimeout(() => {
+        const concept = this.dataset.concept;
+        iframe.src = 'concepts.html#' + concept;
+        footerLink.href = 'concepts.html#' + concept;
+
+        const rect = this.getBoundingClientRect();
+        const left = Math.min(rect.left, window.innerWidth - 490);
+        popup.style.left = Math.max(10, left) + 'px';
+        popup.style.top = (rect.bottom + window.scrollY + 8) + 'px';
+        popup.classList.add('visible');
+      }, 200);
+    });
+
+    link.addEventListener('mouseleave', function() {
+      clearTimeout(showTimer);
+      hideTimer = setTimeout(() => popup.classList.remove('visible'), 300);
+    });
+  });
+
+  popup.addEventListener('mouseenter', () => clearTimeout(hideTimer));
+  popup.addEventListener('mouseleave', () => {
+    hideTimer = setTimeout(() => popup.classList.remove('visible'), 300);
   });
 })();
 </script>
