@@ -1067,8 +1067,8 @@ function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);cons
       clearTimeout(hideTimer);
       showTimer = setTimeout(() => {
         const concept = this.dataset.concept;
-        iframe.src = 'concepts.html#' + concept;
-        footerLink.href = 'concepts.html#' + concept;
+        iframe.src = 'concepts_attention.html#' + concept;
+        footerLink.href = 'concepts_attention.html#' + concept;
 
         const rect = this.getBoundingClientRect();
         const left = Math.min(rect.left, window.innerWidth - 490);
