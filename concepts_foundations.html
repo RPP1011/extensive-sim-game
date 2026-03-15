@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ML Concepts: Visual Explanations</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --surface: #13161d;
+  --surface2: #1c2029;
+  --surface3: #252a36;
+  --border: #2a2f3e;
+  --border-bright: #3d4459;
+  --text: #b8c0cc;
+  --text-muted: #6b7280;
+  --heading: #e2e8f0;
+  --accent: #60a5fa;
+  --accent-dim: #2563eb;
+  --purple: #a78bfa;
+  --purple-dim: #7c3aed;
+  --green: #34d399;
+  --green-dim: #059669;
+  --red: #f87171;
+  --red-dim: #dc2626;
+  --orange: #fbbf24;
+  --orange-dim: #d97706;
+  --cyan: #22d3ee;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.78;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 3rem 1rem 6rem;
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+  margin-bottom: 0.6rem;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  font-size: 1rem;
+  color: var(--text-muted);
+  margin-bottom: 2rem;
+  line-height: 1.65;
+}
+
+nav.toc {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.2rem 1.6rem;
+  margin-bottom: 3rem;
+}
+
+nav.toc .toc-title {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.6rem;
+}
+
+nav.toc ul {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.5rem;
+}
+
+nav.toc a {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.92rem;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+nav.toc a:hover { border-bottom-color: var(--accent); }
+
+section {
+  margin-bottom: 4rem;
+  padding-top: 1rem;
+}
+
+h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--heading);
+  margin-bottom: 0.6rem;
+  letter-spacing: -0.02em;
+}
+
+.concept-desc {
+  font-size: 1.05rem;
+  margin-bottom: 1.4rem;
+  max-width: 750px;
+}
+
+.formula-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.8rem 1.2rem;
+  margin-bottom: 1.5rem;
+  display: inline-block;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.95rem;
+  color: var(--heading);
+}
+
+.formula-box .var { color: var(--accent); }
+.formula-box .op { color: var(--text-muted); }
+.formula-box .func { color: var(--purple); }
+.formula-box .num { color: var(--green); }
+
+.fig-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 2rem;
+  overflow-x: auto;
+}
+.fig-container svg { display: block; margin: 0 auto; }
+
+svg text { font-family: 'DM Sans', sans-serif; }
+svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
+
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0 0 3rem;
+}
+
+.back-link {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  display: inline-block;
+  margin-bottom: 1.5rem;
+}
+.back-link:hover { color: var(--accent); }
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+.slider-row input[type="range"] {
+  width: 200px;
+  accent-color: var(--accent);
+}
+.slider-row .val {
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--heading);
+  font-size: 0.85rem;
+  min-width: 3em;
+}
+
+@media (max-width: 720px) {
+  .article { padding: 2rem 0.75rem 4rem; }
+  h1 { font-size: 1.7rem; }
+  .fig-container { padding: 1rem; }
+  nav.toc ul { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+<div class="article">
+
+<a href="concepts.html" class="back-link">&larr; Back to concept map</a>
+
+<h1>ML Foundations</h1>
+<p class="subtitle">Neural networks, gradient descent, loss functions, and the fundamentals of training.</p>
+
+<nav class="toc">
+  <div class="toc-title">On this page</div>
+  <ul>
+    <li><a href="#neural-networks">Neural Networks</a></li>
+    <li><a href="#gradient-descent">Gradient Descent</a></li>
+    <li><a href="#loss-functions">Loss Functions</a></li>
+    <li><a href="#batch-epoch-lr">Batch, Epoch &amp; Learning Rate</a></li>
+    <li><a href="#overfitting">Overfitting &amp; Generalization</a></li>
+    <li><a href="#normalization">Normalization</a></li>
+  </ul>
+</nav>
+
+<section id="neural-networks">
+<h2>Neural Networks</h2>
+<p class="concept-desc">A neural network is a function built from simple building blocks: <strong>layers</strong> of numbers (neurons), connected by <strong>weights</strong>. Each layer takes a vector of numbers, multiplies by a weight matrix, adds a bias, and passes the result through a nonlinear <strong>activation function</strong>. Stacking layers lets the network learn arbitrarily complex patterns.</p>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Neuron</strong> &mdash; A single number in a layer. Computes: output = activation(w&middot;x + b).</li>
+  <li><strong>Weight (w)</strong> &mdash; A learnable number that scales an input. The network &ldquo;learns&rdquo; by adjusting weights.</li>
+  <li><strong>Bias (b)</strong> &mdash; A learnable offset added after multiplication. Lets the neuron shift its output.</li>
+  <li><strong>Linear layer (Dense/Fully-connected)</strong> &mdash; y = Wx + b. Every input connects to every output. The workhorse of neural nets.</li>
+  <li><strong>Activation function</strong> &mdash; A nonlinear function applied after the linear transform. Without it, stacking layers would just be one big matrix multiply. Common: ReLU (max(0,x)), tanh, sigmoid.</li>
+  <li><strong>ReLU</strong> &mdash; Rectified Linear Unit: f(x) = max(0, x). Dead simple, works great. Negative values become 0, positive pass through.</li>
+  <li><strong>Parameters</strong> &mdash; All the weights and biases combined. &ldquo;A 113K-parameter model&rdquo; means 113,000 learnable numbers.</li>
+  <li><strong>Forward pass</strong> &mdash; Running an input through the network to get an output. No learning happens here &mdash; just computation.</li>
+</ul>
+
+<div class="fig-container" id="fig-neural-net"></div>
+</section>
+
+<hr>
+
+
+<section id="gradient-descent">
+<h2>Gradient Descent</h2>
+<p class="concept-desc">Gradient descent is how neural networks learn. The <strong>gradient</strong> of the loss tells you which direction to adjust each weight to reduce error. Take a small step in that direction. Repeat thousands of times. The network &ldquo;rolls downhill&rdquo; on the loss landscape until it finds a good solution.</p>
+
+<div class="formula-box">
+  <span class="var">&theta;</span> <span class="op">&larr;</span> <span class="var">&theta;</span> <span class="op">&minus;</span> <span class="var">&alpha;</span> <span class="op">&middot;</span> <span class="func">&nabla;</span>L(<span class="var">&theta;</span>)
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Gradient (&nabla;L)</strong> &mdash; A vector of partial derivatives. Points in the direction of <em>steepest increase</em> of the loss. We go the opposite way.</li>
+  <li><strong>Learning rate (&alpha;)</strong> &mdash; Step size. Too big = overshoot and diverge. Too small = takes forever. Typical: 0.001&ndash;0.0001.</li>
+  <li><strong>Backpropagation</strong> &mdash; The algorithm that efficiently computes gradients by working backwards through the network, applying the chain rule layer by layer.</li>
+  <li><strong>Chain rule</strong> &mdash; If y = f(g(x)), then dy/dx = f'(g(x)) &middot; g'(x). This is how gradients flow through stacked layers.</li>
+  <li><strong>SGD (Stochastic Gradient Descent)</strong> &mdash; Compute the gradient on a random <em>batch</em> instead of the entire dataset. Noisy but fast.</li>
+  <li><strong>Adam / AdamW</strong> &mdash; Optimizers that adapt the learning rate per-weight using momentum and variance estimates. AdamW adds weight decay (regularization).</li>
+  <li><strong>Convergence</strong> &mdash; When the loss stops decreasing meaningfully. The model has &ldquo;learned&rdquo; what it can.</li>
+</ul>
+
+<div class="fig-container" id="fig-gradient-descent"></div>
+
+<div class="slider-row" style="margin-top: 1rem;">
+  <span style="font-family:'DM Sans',sans-serif;font-size:0.85rem;color:var(--text-muted);">Learning rate &alpha;:</span>
+  <input type="range" id="gd-lr-slider" min="0.01" max="0.5" step="0.01" value="0.1">
+  <span class="val" id="gd-lr-val">0.10</span>
+</div>
+</section>
+
+<hr>
+
+
+<section id="loss-functions">
+<h2>Loss Functions</h2>
+<p class="concept-desc">A <strong>loss function</strong> measures how wrong the model's prediction is. The entire point of training is to minimize this number. Different tasks need different losses: regression uses MSE, classification uses cross-entropy. The loss is the signal that gradient descent follows downhill.</p>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>MSE (Mean Squared Error)</strong> &mdash; Average of (prediction &minus; target)&sup2;. Used for continuous values (HP prediction, position). Penalizes big errors heavily.</li>
+  <li><strong>Cross-Entropy</strong> &mdash; &minus;&sum; y&middot;log(p). Used for classification (which action to take). Measures how surprised the model is by the correct answer.</li>
+  <li><strong>L1 / MAE</strong> &mdash; Average of |prediction &minus; target|. More robust to outliers than MSE.</li>
+  <li><strong>Regularization</strong> &mdash; Extra penalty added to the loss to prevent overfitting. L2 (weight decay): penalizes large weights. Keeps the model simple.</li>
+  <li><strong>Training loss vs Validation loss</strong> &mdash; Training loss is on data the model learns from. Validation loss is on held-out data. When they diverge, the model is overfitting.</li>
+</ul>
+
+<div class="fig-container" id="fig-loss-functions"></div>
+
+<div class="slider-row" style="margin-top: 1rem;">
+  <span style="font-family:'DM Sans',sans-serif;font-size:0.85rem;color:var(--text-muted);">Prediction:</span>
+  <input type="range" id="loss-pred-slider" min="0" max="1" step="0.01" value="0.7">
+  <span class="val" id="loss-pred-val">0.70</span>
+  &nbsp;&nbsp;
+  <span style="font-family:'DM Sans',sans-serif;font-size:0.85rem;color:var(--text-muted);">Target:</span>
+  <input type="range" id="loss-target-slider" min="0" max="1" step="0.01" value="1.0">
+  <span class="val" id="loss-target-val">1.00</span>
+</div>
+</section>
+
+<hr>
+
+
+<section id="batch-epoch-lr">
+<h2>Batch, Epoch &amp; Learning Rate</h2>
+<p class="concept-desc">Training a neural network means showing it data in <strong>batches</strong>, updating weights after each batch. One full pass through the dataset is an <strong>epoch</strong>. The <strong>learning rate</strong> controls how aggressively the model updates. These three knobs control the training loop.</p>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Batch</strong> &mdash; A subset of the training data processed together. Batch size 512 means 512 examples per gradient step. Larger batches = smoother gradients but more memory.</li>
+  <li><strong>Epoch</strong> &mdash; One complete pass through the entire training dataset. Training typically runs for many epochs (10&ndash;1000+).</li>
+  <li><strong>Iteration / Step</strong> &mdash; One weight update. Steps per epoch = dataset_size / batch_size.</li>
+  <li><strong>Learning rate schedule</strong> &mdash; Changing the learning rate during training. Common: start high (explore), decay over time (fine-tune). Warmup: start low, ramp up.</li>
+  <li><strong>Convergence</strong> &mdash; When loss plateaus. More epochs won't help &mdash; the model has learned what it can from this data with this architecture.</li>
+</ul>
+
+<div class="fig-container" id="fig-batch-epoch"></div>
+</section>
+
+<hr>
+
+
+<section id="overfitting">
+<h2>Overfitting &amp; Generalization</h2>
+<p class="concept-desc"><strong>Overfitting</strong> is when a model memorizes the training data instead of learning general patterns. It gets a perfect score on data it has seen, but fails on new data. <strong>Generalization</strong> is the goal: a model that performs well on <em>unseen</em> data. The tension between the two is the central challenge of machine learning.</p>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Training set</strong> &mdash; Data the model learns from. It sees this data repeatedly.</li>
+  <li><strong>Validation set</strong> &mdash; Held-out data used to check generalization <em>during</em> training. Never trained on.</li>
+  <li><strong>Test set</strong> &mdash; Final evaluation data. Used once to report results.</li>
+  <li><strong>Underfitting</strong> &mdash; Model is too simple to capture the pattern. Both train and val loss are high.</li>
+  <li><strong>Overfitting</strong> &mdash; Model is too complex for the data. Train loss is low, val loss rises.</li>
+  <li><strong>Dropout</strong> &mdash; Randomly zero out neurons during training. Forces the network to not rely on any single neuron. A form of regularization.</li>
+  <li><strong>Early stopping</strong> &mdash; Stop training when validation loss starts rising, even if training loss is still falling.</li>
+  <li><strong>Model capacity</strong> &mdash; How many parameters / how complex the model is. More capacity = more risk of overfitting, but can learn harder patterns.</li>
+</ul>
+
+<div class="fig-container" id="fig-overfitting"></div>
+
+<div class="slider-row" style="margin-top: 1rem;">
+  <span style="font-family:'DM Sans',sans-serif;font-size:0.85rem;color:var(--text-muted);">Model complexity:</span>
+  <input type="range" id="overfit-complexity-slider" min="1" max="10" step="1" value="3">
+  <span class="val" id="overfit-complexity-val">3</span>
+</div>
+</section>
+
+<hr>
+
+
+<section id="normalization">
+<h2>Normalization</h2>
+<p class="concept-desc"><strong>Normalization</strong> rescales data or activations to a standard range. Without it, different features with wildly different scales (HP: 0&ndash;5000, position: 0&ndash;30) would make training unstable. Inside networks, normalization between layers keeps the signal from exploding or vanishing as it flows through.</p>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Layer Normalization (LayerNorm)</strong> &mdash; Normalizes across features within a single example. Used in transformers. Makes each layer's input have mean=0, std=1.</li>
+  <li><strong>Batch Normalization (BatchNorm)</strong> &mdash; Normalizes across the batch dimension. Popular in CNNs. Depends on batch statistics, so behaves differently at train vs test time.</li>
+  <li><strong>L2 Normalization</strong> &mdash; Scales a vector so its length (L2 norm) = 1. Used for embeddings so similarity = dot product = cosine similarity.</li>
+  <li><strong>Feature scaling</strong> &mdash; Rescaling input features to [0,1] or mean=0/std=1 before feeding to the network. Critical for stable training.</li>
+  <li><strong>Pre-norm vs Post-norm</strong> &mdash; Whether normalization happens before or after the attention/FF block. Pre-norm (used in our model) trains more stably.</li>
+</ul>
+
+<div class="fig-container" id="fig-normalization"></div>
+</section>
+
+</div>
+
+<script>
+const C = {
+  bg:'#13161d', surface:'#1c2029', surface2:'#252a36', surface3:'#252a36',
+  border:'#2a2f3e', borderBright:'#3d4459',
+  text:'#b8c0cc', muted:'#6b7280', heading:'#e2e8f0',
+  blue:'#60a5fa', blueDim:'#2563eb', blueFaint:'rgba(96,165,250,0.08)',
+  purple:'#a78bfa', purpleDim:'#7c3aed', purpleFaint:'rgba(167,139,250,0.08)',
+  green:'#34d399', greenDim:'#059669',
+  red:'#f87171', redDim:'#dc2626',
+  orange:'#fbbf24', orangeDim:'#d97706',
+  cyan:'#22d3ee',
+};
+
+function box(g,x,y,w,h,fill,stroke,rx=6){return g.append('rect').attr('x',x).attr('y',y).attr('width',w).attr('height',h).attr('rx',rx).attr('fill',fill).attr('stroke',stroke).attr('stroke-width',1)}
+function txt(g,x,y,t,o={}){const e=g.append('text').attr('x',x).attr('y',y).text(t).attr('text-anchor',o.anchor||'middle').attr('fill',o.fill||C.text).attr('font-size',o.size||12).attr('font-weight',o.weight||400);if(o.mono)e.attr('class','label-mono');return e}
+function addArrow(svg,color){const id='a-'+color.replace(/[^a-z0-9]/gi,'');if(svg.select('#'+id).empty()){svg.append('defs').append('marker').attr('id',id).attr('viewBox','0 0 10 8').attr('refX',9).attr('refY',4).attr('markerWidth',8).attr('markerHeight',6).attr('orient','auto-start-reverse').append('path').attr('d','M0,0 L10,4 L0,8 Z').attr('fill',color)}return id}
+function arrow(g,svg,x1,y1,x2,y2,color=C.muted){const id=addArrow(svg,color);g.append('line').attr('x1',x1).attr('y1',y1).attr('x2',x2).attr('y2',y2).attr('stroke',color).attr('stroke-width',1.5).attr('marker-end','url(#'+id+')')}
+function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);const p=g.append('path').attr('d',d).attr('stroke',color).attr('stroke-width',1.5).attr('fill','none').attr('marker-end','url(#'+id+')');if(dash)p.attr('stroke-dasharray',dash);return p}
+
+// ═══ NEURAL NETWORKS ═══
+(function(){
+  const W=820,H=380;
+  const svg=d3.select('#fig-neural-net').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  const layers=[
+    {name:'Input',n:4,labels:['HP%','pos_x','pos_y','threat'],color:C.cyan},
+    {name:'Hidden 1',n:5,labels:null,color:C.purple},
+    {name:'Hidden 2',n:4,labels:null,color:C.purple},
+    {name:'Output',n:3,labels:['attack','hold','ability'],color:C.green},
+  ];
+
+  const layerGap=180,nodeR=18,nodeGap=50;
+  const startX=80;
+
+  // Draw connections first (behind nodes)
+  let seed2=17;
+  function pr(){seed2=(seed2*1103515245+12345)&0x7fffffff;return seed2/0x7fffffff;}
+
+  layers.forEach((layer,li)=>{
+    if(li===0) return;
+    const prevLayer=layers[li-1];
+    const px=startX+(li-1)*layerGap;
+    const cx2=startX+li*layerGap;
+    const pStartY=(H-prevLayer.n*nodeGap)/2+nodeR;
+    const cStartY=(H-layer.n*nodeGap)/2+nodeR;
+
+    for(let j=0;j<prevLayer.n;j++){
+      for(let k=0;k<layer.n;k++){
+        const w=pr()*2-1; // random weight -1 to 1
+        const opacity=Math.abs(w)*0.4+0.05;
+        const col=w>0?C.blue:C.red;
+        svg.append('line')
+          .attr('x1',px+nodeR).attr('y1',pStartY+j*nodeGap)
+          .attr('x2',cx2-nodeR).attr('y2',cStartY+k*nodeGap)
+          .attr('stroke',col).attr('stroke-width',Math.abs(w)*2+0.3).attr('opacity',opacity);
+      }
+    }
+  });
+
+  // Draw nodes
+  layers.forEach((layer,li)=>{
+    const lx=startX+li*layerGap;
+    const startY=(H-layer.n*nodeGap)/2+nodeR;
+
+    // Layer label
+    txt(svg,lx,15,layer.name,{fill:C.heading,size:11,weight:600});
+
+    for(let i=0;i<layer.n;i++){
+      const ny=startY+i*nodeGap;
+      svg.append('circle').attr('cx',lx).attr('cy',ny).attr('r',nodeR)
+        .attr('fill',C.surface).attr('stroke',layer.color).attr('stroke-width',2);
+
+      if(layer.labels){
+        txt(svg,lx,ny+4,layer.labels[i],{fill:layer.color,size:7,weight:500,mono:true});
+      } else {
+        // Show activation function symbol
+        txt(svg,lx,ny+4,'ReLU',{fill:C.muted,size:7,mono:true});
+      }
+    }
+  });
+
+  // Annotations
+  const annY=H-30;
+  box(svg,60,annY,300,22,C.surface2,C.border,4);
+  txt(svg,210,annY+14,'Lines = weights (blue=positive, red=negative, thick=strong)',{fill:C.muted,size:8});
+
+  box(svg,400,annY,380,22,C.surface2,C.border,4);
+  txt(svg,590,annY+14,'Each node: output = ReLU(w\u00b7input + bias)  |  ReLU(x) = max(0,x)',{fill:C.muted,size:8});
+
+  // Parameter count
+  txt(svg,W/2,annY-15,'Parameters: (4\u00d75 + 5) + (5\u00d74 + 4) + (4\u00d73 + 3) = 60 weights + biases',{fill:C.orange,size:9,weight:500});
+})();
+
+// ═══ GRADIENT DESCENT ═══
+(function(){
+  const W=820,H=400;
+  const container=d3.select('#fig-gradient-descent');
+  const svg=container.append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  function drawGD(lr){
+    svg.selectAll('*').remove();
+
+    // 2D loss landscape (contour-like)
+    const plotX=40,plotY=30,plotW=380,plotH=330;
+    const rightX=460;
+
+    txt(svg,plotX+plotW/2,20,'Loss Landscape (2 weights)',{fill:C.heading,size:13,weight:600});
+
+    // Draw contour-like ellipses centered at the minimum
+    const minX=plotX+plotW*0.6, minY=plotY+plotH*0.55;
+    const contours=[120,95,70,50,32,18,8];
+    const cScale=d3.scaleSequential(d3.interpolateRgbBasis([C.surface,'#1a2a3c','#2a3a5c'])).domain([0,contours.length]);
+
+    contours.forEach((r,i)=>{
+      svg.append('ellipse').attr('cx',minX).attr('cy',minY)
+        .attr('rx',r*1.3).attr('ry',r).attr('fill','none')
+        .attr('stroke',cScale(i)).attr('stroke-width',1.5).attr('opacity',0.6);
+    });
+
+    // Min marker
+    svg.append('circle').attr('cx',minX).attr('cy',minY).attr('r',4).attr('fill',C.green);
+    txt(svg,minX+10,minY+4,'minimum',{fill:C.green,size:8,anchor:'start'});
+
+    // Gradient descent path
+    let px2=plotX+plotW*0.15, py2=plotY+plotH*0.2;
+    const steps=[];
+    steps.push({x:px2,y:py2});
+
+    for(let i=0;i<12;i++){
+      const dx=(minX-px2)*lr*0.5;
+      const dy=(minY-py2)*lr*0.5;
+      // Add some curvature
+      const perpX=-dy*0.3;
+      const perpY=dx*0.3;
+      px2+=dx+perpX*(1-i/12);
+      py2+=dy+perpY*(1-i/12);
+      // Overshoot for high LR
+      if(lr>0.35){
+        px2+=dx*(lr-0.3)*2*(Math.sin(i*2));
+        py2+=dy*(lr-0.3)*2*(Math.cos(i*2));
+      }
+      steps.push({x:px2,y:py2});
+    }
+
+    // Draw path
+    for(let i=1;i<steps.length;i++){
+      const prev=steps[i-1],curr=steps[i];
+      svg.append('line').attr('x1',prev.x).attr('y1',prev.y)
+        .attr('x2',curr.x).attr('y2',curr.y)
+        .attr('stroke',C.orange).attr('stroke-width',2).attr('opacity',0.8);
+      svg.append('circle').attr('cx',curr.x).attr('cy',curr.y).attr('r',3)
+        .attr('fill',C.orange);
+    }
+    svg.append('circle').attr('cx',steps[0].x).attr('cy',steps[0].y).attr('r',5)
+      .attr('fill',C.red).attr('stroke',C.heading).attr('stroke-width',1);
+    txt(svg,steps[0].x-5,steps[0].y-10,'start',{fill:C.red,size:8,anchor:'end'});
+
+    // Axis labels
+    txt(svg,plotX+plotW/2,plotY+plotH+18,'weight \u03b8\u2081',{fill:C.text,size:10});
+    txt(svg,plotX-18,plotY+plotH/2,'weight \u03b8\u2082',{fill:C.text,size:10});
+
+    // Right panel: step-by-step
+    box(svg,rightX,plotY,340,plotH,C.surface,C.border,8);
+    txt(svg,rightX+170,plotY+25,'How It Works',{fill:C.heading,size:13,weight:600});
+
+    const info = lr < 0.1 ? {
+      status:'Too slow',statusCol:C.orange,
+      lines:['Small steps, barely moving.','Will eventually converge','but wastes compute time.','','Many iterations needed','to reach the minimum.']
+    } : lr < 0.25 ? {
+      status:'Good learning rate',statusCol:C.green,
+      lines:['Steady progress toward','the minimum.','','Not too aggressive,','not too cautious.','Converges reliably.']
+    } : lr < 0.4 ? {
+      status:'Getting aggressive',statusCol:C.orange,
+      lines:['Large steps, some','overshooting.','','Might oscillate around','the minimum instead of','settling into it.']
+    } : {
+      status:'Diverging!',statusCol:C.red,
+      lines:['Steps are too large.','Overshoots the minimum','and bounces wildly.','','Loss increases instead','of decreasing. Training fails.']
+    };
+
+    txt(svg,rightX+170,plotY+55,info.status,{fill:info.statusCol,size:14,weight:700});
+    txt(svg,rightX+170,plotY+75,'\u03b1 = '+lr.toFixed(2),{fill:C.heading,size:12,weight:600,mono:true});
+
+    info.lines.forEach((line,i)=>{
+      txt(svg,rightX+170,plotY+105+i*18,line,{fill:C.text,size:10});
+    });
+
+    // Formula reminder
+    box(svg,rightX+20,plotY+plotH-70,300,55,C.surface2,C.border,5);
+    txt(svg,rightX+170,plotY+plotH-52,'Each step:',{fill:C.heading,size:10,weight:600});
+    txt(svg,rightX+170,plotY+plotH-35,'\u03b8 \u2190 \u03b8 \u2212 \u03b1 \u00b7 \u2207L(\u03b8)',{fill:C.accent,size:12,weight:600,mono:true});
+    txt(svg,rightX+170,plotY+plotH-20,'Move opposite to the gradient (downhill)',{fill:C.muted,size:9});
+  }
+
+  drawGD(0.1);
+
+  d3.select('#gd-lr-slider').on('input',function(){
+    const lr=+this.value;
+    d3.select('#gd-lr-val').text(lr.toFixed(2));
+    drawGD(lr);
+  });
+})();
+
+// ═══ LOSS FUNCTIONS ═══
+(function(){
+  const W=820,H=340;
+  const container=d3.select('#fig-loss-functions');
+  const svg=container.append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  function drawLoss(pred,target){
+    svg.selectAll('*').remove();
+
+    const mse=Math.pow(pred-target,2);
+    const mae=Math.abs(pred-target);
+    const ce=target>0.5 ? -Math.log(Math.max(pred,0.001)) : -Math.log(Math.max(1-pred,0.001));
+
+    // Three panels side by side
+    const panelW=240,panelH=280,panelGap=20;
+    const startX=(W-3*(panelW+panelGap)+panelGap)/2;
+
+    const losses=[
+      {name:'MSE (Mean Squared Error)',formula:'(pred \u2212 target)\u00b2',value:mse,color:C.blue,
+       desc:mse<0.01?'Nearly perfect!':mse<0.1?'Close prediction':'Large error \u2192 big penalty'},
+      {name:'MAE / L1 Loss',formula:'|pred \u2212 target|',value:mae,color:C.green,
+       desc:mae<0.05?'Nearly perfect!':mae<0.3?'Moderate error':'Linear penalty (no squaring)'},
+      {name:'Cross-Entropy',formula:'\u2212target\u00b7log(pred)',value:ce,color:C.purple,
+       desc:ce<0.1?'Confident & correct':ce<1?'Somewhat uncertain':'Very wrong \u2192 huge loss'},
+    ];
+
+    losses.forEach((loss,i)=>{
+      const px=startX+i*(panelW+panelGap);
+      box(svg,px,10,panelW,panelH,C.surface,loss.color+'60',8);
+      txt(svg,px+panelW/2,35,loss.name,{fill:loss.color,size:11,weight:600});
+      txt(svg,px+panelW/2,55,loss.formula,{fill:C.muted,size:10,mono:true});
+
+      // Value display
+      const valY=75;
+      txt(svg,px+panelW/2,valY+15,'= '+loss.value.toFixed(4),{fill:C.heading,size:18,weight:700,mono:true});
+      txt(svg,px+panelW/2,valY+35,loss.desc,{fill:loss.color,size:9,weight:500});
+
+      // Bar visualization
+      const barY=valY+55,barH=30,maxBar=panelW-40;
+      const barVal=Math.min(loss.value/2,1); // scale to max=2
+      svg.append('rect').attr('x',px+20).attr('y',barY).attr('width',maxBar).attr('height',barH).attr('rx',4)
+        .attr('fill',C.surface2).attr('stroke',C.border);
+      svg.append('rect').attr('x',px+20).attr('y',barY).attr('width',maxBar*barVal).attr('height',barH).attr('rx',4)
+        .attr('fill',loss.color).attr('opacity',0.5);
+
+      // Scale labels
+      txt(svg,px+20,barY+barH+14,'0',{fill:C.muted,size:8,mono:true,anchor:'start'});
+      txt(svg,px+20+maxBar,barY+barH+14,'2.0',{fill:C.muted,size:8,mono:true,anchor:'end'});
+
+      // Prediction vs target visualization
+      const vizY=barY+barH+30;
+      txt(svg,px+panelW/2,vizY,'pred vs target:',{fill:C.muted,size:9});
+      const lineY=vizY+18;
+      svg.append('line').attr('x1',px+30).attr('y1',lineY).attr('x2',px+panelW-30).attr('y2',lineY)
+        .attr('stroke',C.border).attr('stroke-width',1);
+      // Target marker
+      const tPos=px+30+target*(panelW-60);
+      svg.append('line').attr('x1',tPos).attr('y1',lineY-10).attr('x2',tPos).attr('y2',lineY+10)
+        .attr('stroke',C.heading).attr('stroke-width',2);
+      txt(svg,tPos,lineY+22,'target',{fill:C.heading,size:7});
+      // Pred marker
+      const pPos=px+30+pred*(panelW-60);
+      svg.append('circle').attr('cx',pPos).attr('cy',lineY).attr('r',5)
+        .attr('fill',loss.color);
+      txt(svg,pPos,lineY-16,'pred',{fill:loss.color,size:7,weight:600});
+      // Error bracket
+      if(Math.abs(pPos-tPos)>5){
+        svg.append('line').attr('x1',Math.min(pPos,tPos)+3).attr('y1',lineY+8).attr('x2',Math.max(pPos,tPos)-3).attr('y2',lineY+8)
+          .attr('stroke',C.red).attr('stroke-width',1.5).attr('stroke-dasharray','3,2');
+      }
+    });
+  }
+
+  drawLoss(0.7,1.0);
+
+  d3.select('#loss-pred-slider').on('input',function(){
+    const v=+this.value;
+    d3.select('#loss-pred-val').text(v.toFixed(2));
+    drawLoss(v,+d3.select('#loss-target-slider').node().value);
+  });
+  d3.select('#loss-target-slider').on('input',function(){
+    const v=+this.value;
+    d3.select('#loss-target-val').text(v.toFixed(2));
+    drawLoss(+d3.select('#loss-pred-slider').node().value,v);
+  });
+})();
+
+// ═══ BATCH, EPOCH & LEARNING RATE ═══
+(function(){
+  const W=820,H=360;
+  const svg=d3.select('#fig-batch-epoch').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  // Dataset visualization
+  const dsX=30,dsY=30,dsW=200,dsH=280;
+  box(svg,dsX,dsY,dsW,dsH,C.surface,C.border,8);
+  txt(svg,dsX+dsW/2,dsY+20,'Dataset (10,000 samples)',{fill:C.heading,size:11,weight:600});
+
+  // Show batches as colored rows
+  const batchColors=[C.blue,C.purple,C.green,C.orange,C.cyan,C.red];
+  const batchH=30,batchGap=4,batchStartY=dsY+35;
+  const numBatches=6;
+
+  for(let i=0;i<numBatches;i++){
+    const by=batchStartY+i*(batchH+batchGap);
+    box(svg,dsX+10,by,dsW-20,batchH,batchColors[i]+'15',batchColors[i]+'50',4);
+    txt(svg,dsX+dsW/2,by+13,'Batch '+(i+1),{fill:batchColors[i],size:10,weight:600});
+    txt(svg,dsX+dsW/2,by+26,'512 samples',{fill:C.muted,size:8,mono:true});
+  }
+  txt(svg,dsX+dsW/2,batchStartY+numBatches*(batchH+batchGap)+8,'... \u00d7 ~20 batches per epoch',{fill:C.muted,size:9});
+
+  // Training loop
+  const loopX=280,loopY=30;
+  box(svg,loopX,loopY,510,dsH,C.surface,C.border,8);
+  txt(svg,loopX+255,loopY+20,'Training Loop',{fill:C.heading,size:13,weight:600});
+
+  // Epoch timeline
+  const tlX=loopX+20,tlY=loopY+45,tlW=470;
+  for(let e=0;e<3;e++){
+    const ey=tlY+e*85;
+    box(svg,tlX,ey,tlW,70,C.surface2,e===0?C.accent+'60':C.border,6);
+    txt(svg,tlX+10,ey+15,'Epoch '+(e+1),{fill:e===0?C.accent:C.heading,size:11,weight:600,anchor:'start'});
+
+    // Batch steps within epoch
+    const stepW=55,stepGap2=6;
+    for(let b=0;b<6;b++){
+      const bx=tlX+70+b*(stepW+stepGap2);
+      const col=batchColors[b];
+      box(svg,bx,ey+8,stepW,24,col+'15',col+'40',3);
+      txt(svg,bx+stepW/2,ey+23,'B'+(b+1),{fill:col,size:8,weight:500});
+    }
+    // Each batch step
+    txt(svg,tlX+70,ey+45,'Each batch: forward \u2192 loss \u2192 backward \u2192 \u03b8 update',{fill:C.muted,size:8,anchor:'start'});
+    txt(svg,tlX+tlW-10,ey+45,'~20 updates',{fill:C.orange,size:8,anchor:'end',mono:true});
+    if(e<2){
+      txt(svg,tlX+tlW/2,ey+62,'shuffle data, repeat \u2193',{fill:C.muted,size:8});
+    }
+  }
+
+  // Bottom summary
+  const sumY=dsY+dsH+10;
+  box(svg,30,sumY,W-60,40,C.surface2,C.border,5);
+  txt(svg,W/2,sumY+15,'1 epoch = 10,000 / 512 \u2248 20 gradient steps     |     100 epochs = 2,000 weight updates total',{fill:C.heading,size:10,weight:500,mono:true});
+  txt(svg,W/2,sumY+32,'More epochs \u2192 more training     |     Bigger batch \u2192 fewer steps per epoch but smoother gradients',{fill:C.muted,size:9});
+})();
+
+// ═══ OVERFITTING ═══
+(function(){
+  const W=820,H=380;
+  const container=d3.select('#fig-overfitting');
+  const svg=container.append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  function drawOverfit(complexity){
+    svg.selectAll('*').remove();
+
+    // Loss curve plot
+    const plotX=60,plotY=30,plotW=400,plotH=280;
+    txt(svg,plotX+plotW/2,20,'Training vs Validation Loss',{fill:C.heading,size:13,weight:600});
+
+    // Axes
+    svg.append('line').attr('x1',plotX).attr('y1',plotY+plotH).attr('x2',plotX+plotW).attr('y2',plotY+plotH).attr('stroke',C.border);
+    svg.append('line').attr('x1',plotX).attr('y1',plotY).attr('x2',plotX).attr('y2',plotY+plotH).attr('stroke',C.border);
+    txt(svg,plotX+plotW/2,plotY+plotH+20,'Epochs \u2192',{fill:C.text,size:10});
+    txt(svg,plotX-25,plotY+plotH/2,'Loss',{fill:C.text,size:10});
+
+    const nPts=50;
+    const trainLine=d3.line().x(d=>d[0]).y(d=>d[1]).curve(d3.curveBasis);
+
+    const trainData=[],valData=[];
+    for(let i=0;i<=nPts;i++){
+      const t=i/nPts;
+      const x=plotX+t*plotW;
+
+      // Train loss always decreases, faster with more complexity
+      const trainLoss=1.0*Math.exp(-t*complexity*1.2)+0.02*complexity*0.05;
+
+      // Val loss: decreases then increases with high complexity
+      const valMin=0.15+0.05*(10-complexity);
+      const valBest=0.3+0.02*(10-complexity);
+      let valLoss;
+      if(complexity<=3){
+        // Underfitting: both stay high
+        valLoss=0.8*Math.exp(-t*complexity*0.8)+0.3/complexity;
+      } else if(complexity<=6){
+        // Good fit: val follows train closely
+        valLoss=0.9*Math.exp(-t*complexity*0.6)+valMin;
+      } else {
+        // Overfitting: val goes up after initial drop
+        const drop=0.9*Math.exp(-t*complexity*0.8);
+        const rise=Math.max(0,t-0.3)*complexity*0.15;
+        valLoss=drop+valMin+rise;
+      }
+
+      const yScale=d3.scaleLinear().domain([0,1.2]).range([plotY+plotH,plotY]);
+      trainData.push([x,yScale(Math.max(0.01,trainLoss))]);
+      valData.push([x,yScale(Math.max(0.01,Math.min(1.2,valLoss)))]);
+    }
+
+    // Draw curves
+    svg.append('path').attr('d',trainLine(trainData)).attr('stroke',C.blue).attr('stroke-width',2.5).attr('fill','none');
+    svg.append('path').attr('d',trainLine(valData)).attr('stroke',C.orange).attr('stroke-width',2.5).attr('fill','none');
+
+    // Legend
+    svg.append('line').attr('x1',plotX+10).attr('y1',plotY+15).attr('x2',plotX+30).attr('y2',plotY+15).attr('stroke',C.blue).attr('stroke-width',2.5);
+    txt(svg,plotX+35,plotY+19,'Training loss',{fill:C.blue,size:9,anchor:'start'});
+    svg.append('line').attr('x1',plotX+10).attr('y1',plotY+32).attr('x2',plotX+30).attr('y2',plotY+32).attr('stroke',C.orange).attr('stroke-width',2.5);
+    txt(svg,plotX+35,plotY+36,'Validation loss',{fill:C.orange,size:9,anchor:'start'});
+
+    // Right panel: diagnosis
+    const rX=500,rY=plotY;
+    box(svg,rX,rY,290,plotH,C.surface,C.border,8);
+
+    let status,statusCol,lines;
+    if(complexity<=3){
+      status='Underfitting';statusCol=C.orange;
+      lines=['Model too simple ('+complexity+' params).','','Both train and val loss are high.','The model can\'t capture the pattern.','','Fix: increase model capacity,','add more layers/neurons,','train longer.'];
+    } else if(complexity<=6){
+      status='Good Fit';statusCol=C.green;
+      lines=['Balanced complexity ('+complexity+' params).','','Train and val loss track closely.','Model generalizes well to','unseen data.','','This is the sweet spot.',''];
+    } else {
+      status='Overfitting';statusCol=C.red;
+      lines=['Model too complex ('+complexity+' params).','','Train loss keeps falling but','val loss rises \u2014 the model is','memorizing training data.','','Fix: reduce capacity, add','dropout, get more data.'];
+    }
+
+    txt(svg,rX+145,rY+30,status,{fill:statusCol,size:16,weight:700});
+    txt(svg,rX+145,rY+50,'Complexity: '+complexity+'/10',{fill:C.heading,size:11,mono:true});
+    lines.forEach((l,i)=>txt(svg,rX+145,rY+80+i*18,l,{fill:C.text,size:10}));
+
+    // Gap annotation
+    if(complexity>6){
+      const gapX=plotX+plotW*0.8;
+      const yScale=d3.scaleLinear().domain([0,1.2]).range([plotY+plotH,plotY]);
+      const tLoss=1.0*Math.exp(-0.8*complexity*1.2)+0.02*complexity*0.05;
+      const vLoss=0.9*Math.exp(-0.8*complexity*0.8)+0.15+0.05*(10-complexity)+Math.max(0,0.5)*complexity*0.15;
+      svg.append('line').attr('x1',gapX+20).attr('y1',yScale(tLoss)).attr('x2',gapX+20).attr('y2',yScale(Math.min(1.2,vLoss)))
+        .attr('stroke',C.red).attr('stroke-width',1.5).attr('stroke-dasharray','4,3');
+      txt(svg,gapX+28,(yScale(tLoss)+yScale(Math.min(1.2,vLoss)))/2+4,'gap',{fill:C.red,size:9,weight:600,anchor:'start'});
+    }
+  }
+
+  drawOverfit(3);
+  d3.select('#overfit-complexity-slider').on('input',function(){
+    const v=+this.value;
+    d3.select('#overfit-complexity-val').text(v);
+    drawOverfit(v);
+  });
+})();
+
+// ═══ NORMALIZATION ═══
+(function(){
+  const W=820,H=320;
+  const svg=d3.select('#fig-normalization').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  // Before normalization
+  const bx=40,by=30,pw=340,ph=240;
+  box(svg,bx,by,pw,ph,C.surface,C.border,8);
+  txt(svg,bx+pw/2,by+20,'Before Normalization',{fill:C.heading,size:12,weight:600});
+
+  const features=[
+    {name:'HP',min:0,max:5000,val:2340,color:C.red},
+    {name:'pos_x',min:0,max:30,val:14.2,color:C.blue},
+    {name:'pos_y',min:0,max:30,val:8.7,color:C.blue},
+    {name:'damage',min:0,max:400,val:156,color:C.orange},
+    {name:'speed',min:0,max:10,val:3.5,color:C.green},
+  ];
+
+  const barH2=28,barGap2=8,barStartY=by+40;
+  const maxVal=5000;
+
+  features.forEach((f,i)=>{
+    const y=barStartY+i*(barH2+barGap2);
+    txt(svg,bx+60,y+18,f.name,{fill:C.muted,size:9,anchor:'end',mono:true});
+    svg.append('rect').attr('x',bx+70).attr('y',y).attr('width',pw-90).attr('height',barH2).attr('rx',4).attr('fill',C.surface2).attr('stroke',C.border);
+    const barW3=(f.val/maxVal)*(pw-90);
+    svg.append('rect').attr('x',bx+70).attr('y',y).attr('width',barW3).attr('height',barH2).attr('rx',4).attr('fill',f.color).attr('opacity',0.5);
+    txt(svg,bx+70+barW3+5,y+18,f.val.toString(),{fill:f.color,size:9,mono:true,anchor:'start'});
+  });
+
+  txt(svg,bx+pw/2,barStartY+features.length*(barH2+barGap2)+15,'Wildly different scales!',{fill:C.red,size:10,weight:600});
+  txt(svg,bx+pw/2,barStartY+features.length*(barH2+barGap2)+30,'HP dominates, speed is invisible',{fill:C.muted,size:9});
+
+  // Arrow
+  arrow(svg,svg,bx+pw+5,by+ph/2,bx+pw+35,by+ph/2,C.accent);
+
+  // After normalization
+  const ax=bx+pw+40;
+  box(svg,ax,by,pw,ph,C.surface,C.greenDim+'40',8);
+  txt(svg,ax+pw/2,by+20,'After Normalization (mean=0, std=1)',{fill:C.heading,size:12,weight:600});
+
+  const normalized=[
+    {name:'HP',val:0.42,color:C.red},
+    {name:'pos_x',val:-0.15,color:C.blue},
+    {name:'pos_y',val:-0.63,color:C.blue},
+    {name:'damage',val:0.28,color:C.orange},
+    {name:'speed',val:-0.35,color:C.green},
+  ];
+
+  const normCenter=ax+pw/2+10;
+  normalized.forEach((f,i)=>{
+    const y=barStartY+i*(barH2+barGap2);
+    txt(svg,ax+60,y+18,f.name,{fill:C.muted,size:9,anchor:'end',mono:true});
+    // Zero line
+    svg.append('line').attr('x1',normCenter).attr('y1',y).attr('x2',normCenter).attr('y2',y+barH2).attr('stroke',C.border).attr('stroke-width',1);
+    const barW3=Math.abs(f.val)*100;
+    const barX2=f.val>=0?normCenter:normCenter-barW3;
+    svg.append('rect').attr('x',barX2).attr('y',y+2).attr('width',barW3).attr('height',barH2-4).attr('rx',3).attr('fill',f.color).attr('opacity',0.5);
+    txt(svg,f.val>=0?normCenter+barW3+5:normCenter-barW3-5,y+18,(f.val>=0?'+':'')+f.val.toFixed(2),{fill:f.color,size:9,mono:true,anchor:f.val>=0?'start':'end'});
+  });
+
+  txt(svg,ax+pw/2,barStartY+features.length*(barH2+barGap2)+15,'All features on same scale',{fill:C.green,size:10,weight:600});
+  txt(svg,ax+pw/2,barStartY+features.length*(barH2+barGap2)+30,'Network can learn from all equally',{fill:C.muted,size:9});
+
+  // Bottom note
+  box(svg,40,H-35,W-80,28,C.surface2,C.border,5);
+  txt(svg,W/2,H-17,'LayerNorm: normalize within each sample (transformer)  |  BatchNorm: normalize across the batch (CNN)  |  L2 Norm: unit vector',{fill:C.muted,size:9});
+})();
+
+// ═══ Iframe isolation: show only targeted concept when embedded ═══
+(function(){
+  const isIframe = window.self !== window.top;
+  if (!isIframe) return;
+
+  const hash = window.location.hash.replace('#','');
+  if (!hash) return;
+
+  // Lock page — no scrolling, no extra content
+  document.body.style.overflow = 'hidden';
+  document.documentElement.style.overflow = 'hidden';
+
+  const article = document.querySelector('.article');
+  article.style.padding = '0.8rem 1rem 0';
+  article.style.maxWidth = '100%';
+
+  // Remove everything except the targeted section
+  const hdr = document.querySelector('header'); if (hdr) hdr.remove();
+  document.querySelector('.toc').remove();
+  document.querySelectorAll('hr').forEach(hr => hr.remove());
+
+  document.querySelectorAll('section').forEach(s => {
+    if (s.id === hash) {
+      s.style.marginTop = '0';
+      s.style.paddingTop = '0';
+      // Shrink the h3 a bit for popup context
+      const h3 = s.querySelector('h3');
+      if (h3) { h3.style.fontSize = '1.1rem'; h3.style.marginBottom = '0.3rem'; }
+      // Tighten paragraph spacing
+      s.querySelectorAll('p').forEach(p => { p.style.marginBottom = '0.4rem'; p.style.fontSize = '14px'; });
+    } else {
+      s.remove();
+    }
+  });
+})();
+</script>
+</body>
+</html>

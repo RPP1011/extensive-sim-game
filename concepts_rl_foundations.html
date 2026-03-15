@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ML Concepts: Visual Explanations</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --surface: #13161d;
+  --surface2: #1c2029;
+  --surface3: #252a36;
+  --border: #2a2f3e;
+  --border-bright: #3d4459;
+  --text: #b8c0cc;
+  --text-muted: #6b7280;
+  --heading: #e2e8f0;
+  --accent: #60a5fa;
+  --accent-dim: #2563eb;
+  --purple: #a78bfa;
+  --purple-dim: #7c3aed;
+  --green: #34d399;
+  --green-dim: #059669;
+  --red: #f87171;
+  --red-dim: #dc2626;
+  --orange: #fbbf24;
+  --orange-dim: #d97706;
+  --cyan: #22d3ee;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.78;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 3rem 1rem 6rem;
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+  margin-bottom: 0.6rem;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  font-size: 1rem;
+  color: var(--text-muted);
+  margin-bottom: 2rem;
+  line-height: 1.65;
+}
+
+nav.toc {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.2rem 1.6rem;
+  margin-bottom: 3rem;
+}
+
+nav.toc .toc-title {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.6rem;
+}
+
+nav.toc ul {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.5rem;
+}
+
+nav.toc a {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.92rem;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+nav.toc a:hover { border-bottom-color: var(--accent); }
+
+section {
+  margin-bottom: 4rem;
+  padding-top: 1rem;
+}
+
+h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--heading);
+  margin-bottom: 0.6rem;
+  letter-spacing: -0.02em;
+}
+
+.concept-desc {
+  font-size: 1.05rem;
+  margin-bottom: 1.4rem;
+  max-width: 750px;
+}
+
+.formula-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.8rem 1.2rem;
+  margin-bottom: 1.5rem;
+  display: inline-block;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.95rem;
+  color: var(--heading);
+}
+
+.formula-box .var { color: var(--accent); }
+.formula-box .op { color: var(--text-muted); }
+.formula-box .func { color: var(--purple); }
+.formula-box .num { color: var(--green); }
+
+.fig-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 2rem;
+  overflow-x: auto;
+}
+.fig-container svg { display: block; margin: 0 auto; }
+
+svg text { font-family: 'DM Sans', sans-serif; }
+svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
+
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0 0 3rem;
+}
+
+.back-link {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  display: inline-block;
+  margin-bottom: 1.5rem;
+}
+.back-link:hover { color: var(--accent); }
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+.slider-row input[type="range"] {
+  width: 200px;
+  accent-color: var(--accent);
+}
+.slider-row .val {
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--heading);
+  font-size: 0.85rem;
+  min-width: 3em;
+}
+
+@media (max-width: 720px) {
+  .article { padding: 2rem 0.75rem 4rem; }
+  h1 { font-size: 1.7rem; }
+  .fig-container { padding: 1rem; }
+  nav.toc ul { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+<div class="article">
+
+<a href="concepts.html" class="back-link">&larr; Back to concept map</a>
+
+<h1>RL Foundations</h1>
+<p class="subtitle">Actor-critic, value functions, on/off-policy, reward shaping, and replay buffers.</p>
+
+<nav class="toc">
+  <div class="toc-title">On this page</div>
+  <ul>
+    <li><a href="#actor-critic">Actor-Critic</a></li>
+    <li><a href="#value-q-functions">Value &amp; Q-Functions</a></li>
+    <li><a href="#on-off-policy">On-Policy vs Off-Policy</a></li>
+    <li><a href="#reward-shaping">Reward Shaping</a></li>
+    <li><a href="#replay-buffer">Replay Buffer</a></li>
+  </ul>
+</nav>
+
+<section id="actor-critic">
+<h2>Actor-Critic</h2>
+<p class="concept-desc"><strong>Actor-Critic</strong> splits the RL agent into two networks: the <strong>actor</strong> decides what to do (policy), and the <strong>critic</strong> evaluates how good the situation is (value function). The critic's feedback replaces the noisy episode returns of REINFORCE, giving the actor a stable learning signal at every timestep.</p>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Actor (&pi;)</strong> &mdash; The policy network. Takes a state, outputs action probabilities. This is what runs in the game.</li>
+  <li><strong>Critic (V or Q)</strong> &mdash; The value network. Takes a state (or state+action), outputs a scalar &ldquo;how good is this?&rdquo; score.</li>
+  <li><strong>Advantage (A)</strong> &mdash; A = Q(s,a) &minus; V(s). How much better this action is compared to the average. Positive = better than expected.</li>
+  <li><strong>TD error (&delta;)</strong> &mdash; &delta; = r + &gamma;V(s') &minus; V(s). The critic's &ldquo;surprise&rdquo; signal. Used to update both actor and critic.</li>
+  <li><strong>Shared backbone</strong> &mdash; Actor and critic often share early layers (entity encoder) and split at the end. Saves parameters and computation.</li>
+  <li><strong>Baseline</strong> &mdash; The critic serves as a baseline for the actor's gradient. Reduces variance compared to pure REINFORCE.</li>
+</ul>
+
+<div class="fig-container" id="fig-actor-critic"></div>
+</section>
+
+<hr>
+
+
+<section id="value-q-functions">
+<h2>Value &amp; Q-Functions</h2>
+<p class="concept-desc">A <strong>value function V(s)</strong> answers &ldquo;how good is this state?&rdquo; &mdash; the expected total future reward from state s. A <strong>Q-function Q(s,a)</strong> answers &ldquo;how good is taking action a in state s?&rdquo; Together, they let the agent evaluate situations and compare actions without running full simulations.</p>
+
+<div class="formula-box">
+  <span class="var">V</span>(s) <span class="op">=</span> <span class="func">E</span>[<span class="op">&sum;</span><sub>t</sub> <span class="var">&gamma;</span><sup>t</sup> <span class="var">r<sub>t</sub></span> | s<sub>0</sub>=s]
+  &nbsp;&nbsp;&nbsp;
+  <span class="var">Q</span>(s,a) <span class="op">=</span> <span class="func">E</span>[<span class="op">&sum;</span><sub>t</sub> <span class="var">&gamma;</span><sup>t</sup> <span class="var">r<sub>t</sub></span> | s<sub>0</sub>=s, a<sub>0</sub>=a]
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>V(s) &mdash; State value</strong> &mdash; Expected return from state s, following the current policy. High V = good situation regardless of what you do next.</li>
+  <li><strong>Q(s,a) &mdash; Action value</strong> &mdash; Expected return from taking action a in state s, then following policy. Lets you compare actions directly.</li>
+  <li><strong>Advantage A(s,a) = Q(s,a) &minus; V(s)</strong> &mdash; How much better action a is than average. The actor uses this to learn which actions are above-average.</li>
+  <li><strong>Bellman equation</strong> &mdash; V(s) = r + &gamma;V(s'). The value of a state equals the immediate reward plus the discounted value of the next state. The foundation of all value-based RL.</li>
+  <li><strong>TD learning</strong> &mdash; Update V(s) toward r + &gamma;V(s') after each step. Don't wait for the episode to end &mdash; bootstrap from the current estimate.</li>
+  <li><strong>Target network</strong> &mdash; A frozen copy of the Q-network used in the Bellman target. Updated slowly to prevent oscillation.</li>
+</ul>
+
+<div class="fig-container" id="fig-value-q"></div>
+</section>
+
+<hr>
+
+
+<section id="on-off-policy">
+<h2>On-Policy vs Off-Policy</h2>
+<p class="concept-desc"><strong>On-policy</strong> algorithms learn from data collected by the <em>current</em> policy. When the policy changes, old data is thrown away. <strong>Off-policy</strong> algorithms can learn from data collected by <em>any</em> policy, including old versions. Off-policy is more sample efficient but requires corrections for the distribution mismatch.</p>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>On-policy</strong> &mdash; Data must come from the current policy &pi;. After each update, old data is stale. Examples: REINFORCE, PPO, A3C.</li>
+  <li><strong>Off-policy</strong> &mdash; Data can come from any policy &mu;. Old experiences remain useful. Examples: SAC, DQN, IMPALA.</li>
+  <li><strong>Sample efficiency</strong> &mdash; How many environment interactions are needed to learn. Off-policy methods reuse data, so they need fewer interactions.</li>
+  <li><strong>Distribution mismatch</strong> &mdash; The data was collected under &mu; but we're learning &pi;. If &pi; and &mu; differ too much, learning is unstable.</li>
+  <li><strong>Importance sampling</strong> &mdash; Corrects for distribution mismatch by weighting samples by &pi;(a|s)/&mu;(a|s). V-Trace uses truncated importance weights.</li>
+  <li><strong>Replay buffer</strong> &mdash; Stores past transitions for reuse. The key data structure enabling off-policy learning.</li>
+</ul>
+
+<div class="fig-container" id="fig-on-off-policy"></div>
+</section>
+
+<hr>
+
+
+<section id="reward-shaping">
+<h2>Reward Shaping</h2>
+<p class="concept-desc">In RL, the agent learns from <strong>rewards</strong>. A <strong>sparse reward</strong> (win/lose at the end) gives almost no signal for thousands of intermediate actions. <strong>Reward shaping</strong> adds <strong>dense</strong> intermediate rewards that guide the agent toward good behavior, without changing the optimal policy.</p>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Sparse reward</strong> &mdash; Signal only at the end: +1 for win, &minus;1 for loss. Hard to learn from: which of 500 actions caused the win?</li>
+  <li><strong>Dense reward</strong> &mdash; Signal every timestep: +0.1 for dealing damage, &minus;0.05 for taking damage. Easier to learn but harder to design correctly.</li>
+  <li><strong>Potential-based shaping</strong> &mdash; F(s,s') = &gamma;&Phi;(s') &minus; &Phi;(s). Provably doesn't change the optimal policy &mdash; just speeds up learning.</li>
+  <li><strong>Reward hacking</strong> &mdash; The agent finds a way to get high reward without doing what you intended. A common failure of poorly designed dense rewards.</li>
+  <li><strong>Credit assignment</strong> &mdash; The fundamental RL problem: which past action caused this reward? Sparse rewards make this extremely hard.</li>
+  <li><strong>Discount factor (&gamma;)</strong> &mdash; How much to value future rewards vs immediate ones. &gamma;=0.99 means a reward 100 steps from now is worth 0.99&sup1;&sup0;&sup0; &asymp; 0.37 of its face value.</li>
+</ul>
+
+<div class="fig-container" id="fig-reward-shaping"></div>
+</section>
+
+<hr>
+
+
+<section id="replay-buffer">
+<h2>Replay Buffer</h2>
+<p class="concept-desc">A <strong>replay buffer</strong> (experience replay) stores past transitions (state, action, reward, next_state) so the agent can learn from them multiple times. Instead of learning from whatever just happened, the agent samples random mini-batches from the buffer. This breaks temporal correlations and dramatically improves stability.</p>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Transition (s, a, r, s')</strong> &mdash; One step of experience: state, action taken, reward received, next state.</li>
+  <li><strong>Buffer capacity</strong> &mdash; Maximum number of transitions stored. Typical: 100K&ndash;1M. When full, oldest transitions are overwritten.</li>
+  <li><strong>Uniform sampling</strong> &mdash; Each stored transition has equal probability of being sampled. Simple and effective.</li>
+  <li><strong>Prioritized replay</strong> &mdash; Sample transitions with high TD error more often &mdash; focus on &ldquo;surprising&rdquo; experiences the model hasn't learned yet.</li>
+  <li><strong>Decorrelation</strong> &mdash; Consecutive transitions are highly correlated (same episode). Random sampling breaks this correlation, which prevents the network from overfitting to recent trajectories.</li>
+  <li><strong>Staleness</strong> &mdash; Old transitions were collected under a different policy. The further back, the less relevant. This is why off-policy corrections (importance sampling) matter.</li>
+</ul>
+
+<div class="fig-container" id="fig-replay-buffer"></div>
+</section>
+
+</div>
+
+<script>
+const C = {
+  bg:'#13161d', surface:'#1c2029', surface2:'#252a36', surface3:'#252a36',
+  border:'#2a2f3e', borderBright:'#3d4459',
+  text:'#b8c0cc', muted:'#6b7280', heading:'#e2e8f0',
+  blue:'#60a5fa', blueDim:'#2563eb', blueFaint:'rgba(96,165,250,0.08)',
+  purple:'#a78bfa', purpleDim:'#7c3aed', purpleFaint:'rgba(167,139,250,0.08)',
+  green:'#34d399', greenDim:'#059669',
+  red:'#f87171', redDim:'#dc2626',
+  orange:'#fbbf24', orangeDim:'#d97706',
+  cyan:'#22d3ee',
+};
+
+function box(g,x,y,w,h,fill,stroke,rx=6){return g.append('rect').attr('x',x).attr('y',y).attr('width',w).attr('height',h).attr('rx',rx).attr('fill',fill).attr('stroke',stroke).attr('stroke-width',1)}
+function txt(g,x,y,t,o={}){const e=g.append('text').attr('x',x).attr('y',y).text(t).attr('text-anchor',o.anchor||'middle').attr('fill',o.fill||C.text).attr('font-size',o.size||12).attr('font-weight',o.weight||400);if(o.mono)e.attr('class','label-mono');return e}
+function addArrow(svg,color){const id='a-'+color.replace(/[^a-z0-9]/gi,'');if(svg.select('#'+id).empty()){svg.append('defs').append('marker').attr('id',id).attr('viewBox','0 0 10 8').attr('refX',9).attr('refY',4).attr('markerWidth',8).attr('markerHeight',6).attr('orient','auto-start-reverse').append('path').attr('d','M0,0 L10,4 L0,8 Z').attr('fill',color)}return id}
+function arrow(g,svg,x1,y1,x2,y2,color=C.muted){const id=addArrow(svg,color);g.append('line').attr('x1',x1).attr('y1',y1).attr('x2',x2).attr('y2',y2).attr('stroke',color).attr('stroke-width',1.5).attr('marker-end','url(#'+id+')')}
+function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);const p=g.append('path').attr('d',d).attr('stroke',color).attr('stroke-width',1.5).attr('fill','none').attr('marker-end','url(#'+id+')');if(dash)p.attr('stroke-dasharray',dash);return p}
+
+// ═══ ACTOR-CRITIC ═══
+(function(){
+  const W=820,H=420;
+  const svg=d3.select('#fig-actor-critic').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  txt(svg,W/2,20,'Actor-Critic Architecture',{fill:C.heading,size:14,weight:600});
+
+  // Shared backbone
+  const bbX=250,bbY=50,bbW=300,bbH=60;
+  box(svg,bbX,bbY,bbW,bbH,C.surface,C.accent+'60',8);
+  txt(svg,bbX+bbW/2,bbY+22,'Shared Backbone',{fill:C.accent,size:13,weight:600});
+  txt(svg,bbX+bbW/2,bbY+42,'Entity encoder (shared layers)',{fill:C.muted,size:9});
+
+  // State input
+  box(svg,bbX+70,bbY-40,160,30,C.surface2,C.cyan,5);
+  txt(svg,bbX+bbW/2,bbY-21,'State s (battlefield)',{fill:C.cyan,size:10,weight:500});
+  arrow(svg,svg,bbX+bbW/2,bbY-10,bbX+bbW/2,bbY-2,C.cyan);
+
+  // Split into two branches
+  const splitY=bbY+bbH+20;
+
+  // Actor branch (left)
+  const actX=130,actY=splitY+30;
+  pathArrow(svg,svg,`M${bbX+bbW*0.3},${bbY+bbH} L${bbX+bbW*0.3},${splitY} L${actX+100},${splitY} L${actX+100},${actY-3}`,C.purple);
+
+  box(svg,actX,actY,200,70,C.surface,C.purpleDim,8);
+  txt(svg,actX+100,actY+20,'Actor (\u03c0\u03b8)',{fill:C.purple,size:14,weight:700});
+  txt(svg,actX+100,actY+38,'Policy head',{fill:C.muted,size:9});
+  txt(svg,actX+100,actY+52,'outputs: P(action|state)',{fill:C.muted,size:8,mono:true});
+
+  // Actor output: action probabilities
+  const actOutY=actY+85;
+  arrow(svg,svg,actX+100,actY+70,actX+100,actOutY-3,C.purple);
+  const actions=['attack','hold','ability'];
+  const probs2=[0.6,0.15,0.25];
+  actions.forEach((a,i)=>{
+    const ax=actX+i*70;
+    box(svg,ax,actOutY,60,35,C.purpleDim+'20',C.purple+'50',4);
+    txt(svg,ax+30,actOutY+14,a,{fill:C.purple,size:8,weight:500,mono:true});
+    txt(svg,ax+30,actOutY+28,(probs2[i]*100)+'%',{fill:C.heading,size:10,weight:700,mono:true});
+  });
+
+  // Critic branch (right)
+  const critX=500,critY=splitY+30;
+  pathArrow(svg,svg,`M${bbX+bbW*0.7},${bbY+bbH} L${bbX+bbW*0.7},${splitY} L${critX+100},${splitY} L${critX+100},${critY-3}`,C.blue);
+
+  box(svg,critX,critY,200,70,C.surface,C.blueDim,8);
+  txt(svg,critX+100,critY+20,'Critic (V\u03b8)',{fill:C.blue,size:14,weight:700});
+  txt(svg,critX+100,critY+38,'Value head',{fill:C.muted,size:9});
+  txt(svg,critX+100,critY+52,'outputs: V(state)',{fill:C.muted,size:8,mono:true});
+
+  // Critic output: value estimate
+  const critOutY=critY+85;
+  arrow(svg,svg,critX+100,critY+70,critX+100,critOutY-3,C.blue);
+  box(svg,critX+40,critOutY,120,35,C.blueDim+'20',C.blue+'50',4);
+  txt(svg,critX+100,critOutY+14,'V(s) = 0.73',{fill:C.blue,size:11,weight:700,mono:true});
+  txt(svg,critX+100,critOutY+28,'"pretty good state"',{fill:C.muted,size:8});
+
+  // Advantage computation
+  const advY=actOutY+55;
+  box(svg,200,advY,400,50,C.surface,C.orangeDim,8);
+  txt(svg,400,advY+18,'Advantage = Q(s,a) \u2212 V(s)',{fill:C.orange,size:12,weight:600});
+  txt(svg,400,advY+36,'"attack was 0.15 better than average \u2192 reinforce it"',{fill:C.muted,size:9});
+
+  pathArrow(svg,svg,`M${actX+100},${actOutY+35} L${actX+100},${advY+25} L${198},${advY+25}`,C.purple,'4,3');
+  pathArrow(svg,svg,`M${critX+100},${critOutY+35} L${critX+100},${advY+25} L${602},${advY+25}`,C.blue,'4,3');
+
+  // Update arrow back
+  const updY=advY+60;
+  pathArrow(svg,svg,`M${400},${advY+50} L${400},${updY+10} L${200},${updY+10}`,C.red);
+  txt(svg,300,updY+5,'\u03b8 += \u03b1 \u00b7 advantage \u00b7 \u2207log\u03c0',{fill:C.red,size:9,weight:600});
+
+  // Bottom comparison
+  box(svg,60,H-40,300,32,C.surface2,C.border,5);
+  txt(svg,210,H-20,'REINFORCE: uses G\u209c (noisy, full episode)',{fill:C.muted,size:9});
+  box(svg,400,H-40,360,32,C.surface2,C.greenDim+'60',5);
+  txt(svg,580,H-20,'Actor-Critic: uses V(s) (smooth, per-step)',{fill:C.green,size:9,weight:500});
+})();
+
+// ═══ VALUE & Q-FUNCTIONS ═══
+(function(){
+  const W=820,H=400;
+  const svg=d3.select('#fig-value-q').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  // Grid world showing V(s) values
+  const gridX=40,gridY=40,cellSize=55,gridW=6,gridH=5;
+
+  txt(svg,gridX+gridW*cellSize/2,25,'V(s): State Values ("how good is being here?")',{fill:C.heading,size:12,weight:600});
+
+  // Value estimates for each cell (higher near goal)
+  const goalR=gridW-1,goalC=gridH-1;
+  const values=[];
+  for(let r=0;r<gridH;r++){
+    values[r]=[];
+    for(let c=0;c<gridW;c++){
+      const dist=Math.abs(r-goalC)+Math.abs(c-goalR);
+      values[r][c]=Math.max(0,1-dist*0.12+Math.random()*0.05);
+    }
+  }
+  values[goalC][goalR]=1.0;
+  // Add walls
+  const walls=[[1,2],[2,2],[3,2]];
+
+  const vScale=d3.scaleSequential(d3.interpolateRgbBasis([C.surface,'#1a3a2c','#2a6a3c',C.green])).domain([0,1]);
+
+  for(let r=0;r<gridH;r++){
+    for(let c=0;c<gridW;c++){
+      const x=gridX+c*cellSize,y=gridY+r*cellSize;
+      const isWall=walls.some(w=>w[0]===r&&w[1]===c);
+      const isGoal=r===goalC&&c===goalR;
+
+      box(svg,x,y,cellSize-2,cellSize-2,isWall?C.surface3:vScale(values[r][c]),isWall?C.muted:isGoal?C.green:C.border,3);
+
+      if(isWall){
+        txt(svg,x+cellSize/2-1,y+cellSize/2+3,'wall',{fill:C.muted,size:8,weight:500});
+      } else if(isGoal){
+        txt(svg,x+cellSize/2-1,y+cellSize/2-5,'GOAL',{fill:'#fff',size:9,weight:700});
+        txt(svg,x+cellSize/2-1,y+cellSize/2+10,'V=1.0',{fill:'#fff',size:8,weight:600,mono:true});
+      } else {
+        txt(svg,x+cellSize/2-1,y+cellSize/2+3,values[r][c].toFixed(2),{fill:values[r][c]>0.5?'#fff':C.heading,size:10,weight:600,mono:true});
+      }
+    }
+  }
+
+  // Agent marker
+  const agentR=1,agentC=0;
+  svg.append('circle').attr('cx',gridX+agentC*cellSize+cellSize/2-1).attr('cy',gridY+agentR*cellSize+cellSize/2-1).attr('r',8)
+    .attr('fill',C.cyan).attr('stroke','#fff').attr('stroke-width',2);
+
+  // Right panel: Q(s,a) for the agent's position
+  const qx=gridX+gridW*cellSize+30,qy=gridY;
+  box(svg,qx,qy,420,gridH*cellSize,C.surface,C.border,8);
+  txt(svg,qx+210,qy+22,'Q(s,a): Action Values for agent position',{fill:C.heading,size:12,weight:600});
+  txt(svg,qx+210,qy+40,'"how good is each action from here?"',{fill:C.muted,size:9});
+
+  const qActions=[
+    {name:'attack_nearest',q:0.65,col:C.red},
+    {name:'move_toward_goal',q:0.82,col:C.green},
+    {name:'hold_position',q:0.45,col:C.muted},
+    {name:'use_ability',q:0.71,col:C.purple},
+    {name:'retreat',q:0.30,col:C.orange},
+  ];
+
+  const qBarW=200,qBarH=30,qBarGap=8,qBarStartY=qy+60;
+  const maxQ=1;
+
+  qActions.forEach((a,i)=>{
+    const y=qBarStartY+i*(qBarH+qBarGap);
+    txt(svg,qx+130,y+20,a.name,{fill:a.col,size:10,weight:500,anchor:'end',mono:true});
+    svg.append('rect').attr('x',qx+140).attr('y',y+2).attr('width',qBarW).attr('height',qBarH-4).attr('rx',4).attr('fill',C.surface2).attr('stroke',C.border);
+    const bw=(a.q/maxQ)*qBarW;
+    svg.append('rect').attr('x',qx+140).attr('y',y+2).attr('width',bw).attr('height',qBarH-4).attr('rx',4).attr('fill',a.col).attr('opacity',0.5);
+    txt(svg,qx+140+bw+8,y+20,a.q.toFixed(2),{fill:a.col,size:11,weight:700,mono:true,anchor:'start'});
+
+    if(a.q===0.82){
+      txt(svg,qx+140+bw+45,y+20,'\u2190 best action!',{fill:C.green,size:9,weight:600,anchor:'start'});
+    }
+  });
+
+  // Advantage annotation
+  const advAnnY=qBarStartY+qActions.length*(qBarH+qBarGap)+10;
+  box(svg,qx+10,advAnnY,400,45,C.surface2,C.orangeDim,5);
+  txt(svg,qx+210,advAnnY+17,'V(s) = 0.59 (average value from this state)',{fill:C.text,size:9});
+  txt(svg,qx+210,advAnnY+34,'A(s, move_toward) = Q \u2212 V = 0.82 \u2212 0.59 = +0.23 (above average!)',{fill:C.orange,size:9,weight:500});
+
+  // Bottom: Bellman equation
+  box(svg,100,H-40,W-200,32,C.surface2,C.border,5);
+  txt(svg,W/2,H-20,'Bellman: V(s) = r + \u03b3V(s\')   |   Q(s,a) = r + \u03b3 max_a\' Q(s\',a\')   |   A(s,a) = Q(s,a) \u2212 V(s)',{fill:C.heading,size:9,weight:500,mono:true});
+})();
+
+// ═══ ON-POLICY VS OFF-POLICY ═══
+(function(){
+  const W=820,H=380;
+  const svg=d3.select('#fig-on-off-policy').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  // Two panels side by side
+  const pw=370,ph=300,gap=40;
+  const lx2=(W-2*pw-gap)/2;
+
+  // On-policy panel
+  box(svg,lx2,30,pw,ph,C.surface,C.blue+'60',8);
+  txt(svg,lx2+pw/2,55,'On-Policy',{fill:C.blue,size:16,weight:700});
+  txt(svg,lx2+pw/2,75,'(PPO, REINFORCE, A3C)',{fill:C.muted,size:10});
+
+  // Timeline: collect with π₁, update, discard, collect with π₂
+  const tlY2=95,stepH2=45;
+  const steps=[
+    {label:'Collect data with \u03c0\u2081',color:C.blue,icon:'play'},
+    {label:'Update \u03c0\u2081 \u2192 \u03c0\u2082',color:C.orange,icon:'update'},
+    {label:'Discard old data',color:C.red,icon:'trash'},
+    {label:'Collect data with \u03c0\u2082',color:C.blue,icon:'play'},
+  ];
+
+  steps.forEach((s,i)=>{
+    const y=tlY2+i*(stepH2+5);
+    box(svg,lx2+20,y,pw-40,stepH2,s.color+'15',s.color+'50',5);
+    txt(svg,lx2+pw/2,y+20,s.label,{fill:s.color,size:11,weight:600});
+    if(s.icon==='trash') txt(svg,lx2+pw/2,y+35,'old data is stale \u2192 throw away',{fill:C.muted,size:8});
+    if(i<steps.length-1) arrow(svg,svg,lx2+pw/2,y+stepH2,lx2+pw/2,y+stepH2+3,s.color);
+  });
+
+  txt(svg,lx2+pw/2,tlY2+4*(stepH2+5)+10,'Data efficiency: LOW',{fill:C.red,size:10,weight:600});
+  txt(svg,lx2+pw/2,tlY2+4*(stepH2+5)+25,'Each sample used once',{fill:C.muted,size:9});
+
+  // Off-policy panel
+  const rx3=lx2+pw+gap;
+  box(svg,rx3,30,pw,ph,C.surface,C.green+'60',8);
+  txt(svg,rx3+pw/2,55,'Off-Policy',{fill:C.green,size:16,weight:700});
+  txt(svg,rx3+pw/2,75,'(SAC, DQN, IMPALA)',{fill:C.muted,size:10});
+
+  const offSteps=[
+    {label:'Collect data with \u03c0\u2081',color:C.green,sub:''},
+    {label:'Store in replay buffer',color:C.orange,sub:'keeps old data!'},
+    {label:'Sample random batch',color:C.purple,sub:'from any policy version'},
+    {label:'Update \u03c0 \u2192 \u03c0\u2082',color:C.green,sub:'buffer data still valid'},
+  ];
+
+  offSteps.forEach((s,i)=>{
+    const y=tlY2+i*(stepH2+5);
+    box(svg,rx3+20,y,pw-40,stepH2,s.color+'15',s.color+'50',5);
+    txt(svg,rx3+pw/2,y+20,s.label,{fill:s.color,size:11,weight:600});
+    if(s.sub) txt(svg,rx3+pw/2,y+35,s.sub,{fill:C.muted,size:8});
+    if(i<offSteps.length-1) arrow(svg,svg,rx3+pw/2,y+stepH2,rx3+pw/2,y+stepH2+3,s.color);
+  });
+
+  // Circular arrow from step 4 back to step 2
+  pathArrow(svg,svg,`M${rx3+pw-25},${tlY2+3*(stepH2+5)+stepH2/2} Q${rx3+pw+5},${tlY2+1.5*(stepH2+5)} ${rx3+pw-25},${tlY2+(stepH2+5)+stepH2/2}`,C.green,'4,3');
+
+  txt(svg,rx3+pw/2,tlY2+4*(stepH2+5)+10,'Data efficiency: HIGH',{fill:C.green,size:10,weight:600});
+  txt(svg,rx3+pw/2,tlY2+4*(stepH2+5)+25,'Each sample reused many times',{fill:C.muted,size:9});
+
+  // Bottom tradeoff
+  box(svg,60,H-40,W-120,32,C.surface2,C.border,5);
+  txt(svg,W/2,H-20,'Tradeoff: on-policy is simpler but wasteful  |  off-policy reuses data but needs importance sampling corrections',{fill:C.text,size:9});
+})();
+
+// ═══ REWARD SHAPING ═══
+(function(){
+  const W=820,H=380;
+  const svg=d3.select('#fig-reward-shaping').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  // Top: sparse reward timeline
+  const tlX2=60,tlY3=50,tlW2=700,tlH2=100;
+  box(svg,tlX2-10,tlY3-15,tlW2+20,tlH2+20,C.surface,C.border,8);
+  txt(svg,tlX2+tlW2/2,tlY3-5,'Sparse Reward',{fill:C.heading,size:12,weight:600});
+
+  // Timeline
+  svg.append('line').attr('x1',tlX2).attr('y1',tlY3+40).attr('x2',tlX2+tlW2).attr('y2',tlY3+40).attr('stroke',C.border).attr('stroke-width',2);
+
+  const ticks2=10;
+  for(let i=0;i<=ticks2;i++){
+    const x=tlX2+i*(tlW2/ticks2);
+    svg.append('line').attr('x1',x).attr('y1',tlY3+35).attr('x2',x).attr('y2',tlY3+45).attr('stroke',C.muted).attr('stroke-width',1);
+    if(i%2===0) txt(svg,x,tlY3+58,'t='+i*50,{fill:C.muted,size:7,mono:true});
+  }
+
+  // Only reward at the end
+  for(let i=0;i<ticks2;i++){
+    const x=tlX2+i*(tlW2/ticks2)+tlW2/ticks2/2;
+    txt(svg,x,tlY3+30,'0',{fill:C.muted,size:10,mono:true});
+  }
+  // Final reward
+  const endX=tlX2+tlW2;
+  svg.append('circle').attr('cx',endX).attr('cy',tlY3+40).attr('r',8).attr('fill',C.green);
+  txt(svg,endX,tlY3+25,'+1',{fill:C.green,size:14,weight:700});
+  txt(svg,endX+5,tlY3+58,'WIN',{fill:C.green,size:8,weight:600});
+
+  txt(svg,tlX2+tlW2/2,tlY3+80,'500 actions, zero feedback until the end. Which action caused the win?',{fill:C.red,size:9,weight:500});
+
+  // Bottom: dense reward timeline
+  const dlY=tlY3+tlH2+40;
+  box(svg,tlX2-10,dlY-15,tlW2+20,tlH2+50,C.surface,C.greenDim+'30',8);
+  txt(svg,tlX2+tlW2/2,dlY-5,'Dense Reward (shaped)',{fill:C.heading,size:12,weight:600});
+
+  svg.append('line').attr('x1',tlX2).attr('y1',dlY+40).attr('x2',tlX2+tlW2).attr('y2',dlY+40).attr('stroke',C.border).attr('stroke-width',2);
+
+  const denseRewards=[0.1,-0.05,0.2,0.15,-0.1,0.3,0.1,-0.05,0.2,0.5];
+  const rewardLabels=['dmg','hit','kill','heal','hit','kill','dmg','hit','kill','WIN'];
+
+  denseRewards.forEach((r,i)=>{
+    const x=tlX2+i*(tlW2/ticks2)+tlW2/ticks2/2;
+    const barH3=Math.abs(r)*60;
+    const barY2=r>=0?dlY+40-barH3:dlY+40;
+    const col=r>=0?C.green:C.red;
+
+    svg.append('rect').attr('x',x-12).attr('y',barY2).attr('width',24).attr('height',barH3).attr('rx',3)
+      .attr('fill',col).attr('opacity',0.5);
+    txt(svg,x,r>=0?barY2-6:barY2+barH3+10,(r>=0?'+':'')+r.toFixed(1),{fill:col,size:8,weight:600,mono:true});
+    txt(svg,x,dlY+58,rewardLabels[i],{fill:C.muted,size:6,mono:true});
+
+    svg.append('line').attr('x1',tlX2+i*(tlW2/ticks2)).attr('y1',dlY+35).attr('x2',tlX2+i*(tlW2/ticks2)).attr('y2',dlY+45).attr('stroke',C.muted).attr('stroke-width',1);
+  });
+
+  txt(svg,tlX2+tlW2/2,dlY+80,'Every action gets feedback. Agent knows: "dealing damage is good, getting hit is bad"',{fill:C.green,size:9,weight:500});
+  txt(svg,tlX2+tlW2/2,dlY+95,'Risk: poorly designed dense rewards can cause reward hacking (agent games the metric)',{fill:C.orange,size:8});
+
+  // Bottom summary
+  box(svg,60,H-40,W-120,32,C.surface2,C.border,5);
+  txt(svg,W/2,H-20,'Our game: +damage dealt, \u2212damage taken, +kills, +healing, +win/lose  |  shaped with potential-based guarantees',{fill:C.text,size:9});
+})();
+
+// ═══ REPLAY BUFFER ═══
+(function(){
+  const W=820,H=420;
+  const svg=d3.select('#fig-replay-buffer').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  txt(svg,W/2,20,'Experience Replay Buffer',{fill:C.heading,size:14,weight:600});
+
+  // Circular buffer visualization
+  const cx2=220,cy2=190,r2=130;
+
+  // Ring
+  svg.append('circle').attr('cx',cx2).attr('cy',cy2).attr('r',r2).attr('fill','none').attr('stroke',C.border).attr('stroke-width',2);
+  svg.append('circle').attr('cx',cx2).attr('cy',cy2).attr('r',r2-30).attr('fill',C.surface).attr('stroke',C.border).attr('stroke-width',1);
+
+  // Segments
+  const nSegs=12;
+  const segColors=[C.cyan,C.cyan,C.blue,C.blue,C.blue,C.purple,C.purple,C.green,C.green,C.orange,C.orange,C.orange];
+  const segLabels=['new','new','\u03c0\u2083','\u03c0\u2083','\u03c0\u2083','\u03c0\u2082','\u03c0\u2082','\u03c0\u2081','\u03c0\u2081','old','old','old'];
+
+  for(let i=0;i<nSegs;i++){
+    const a1=(i/nSegs)*Math.PI*2-Math.PI/2;
+    const a2=((i+1)/nSegs)*Math.PI*2-Math.PI/2;
+    const midA=(a1+a2)/2;
+
+    const path=d3.arc()({innerRadius:r2-28,outerRadius:r2-2,startAngle:a1+Math.PI/2,endAngle:a2+Math.PI/2-0.02});
+    svg.append('path').attr('d',path).attr('transform',`translate(${cx2},${cy2})`)
+      .attr('fill',segColors[i]).attr('opacity',0.3).attr('stroke',C.surface).attr('stroke-width',1);
+
+    const labelR=r2-15;
+    const lx3=cx2+Math.cos(midA)*labelR;
+    const ly3=cy2+Math.sin(midA)*labelR;
+    txt(svg,lx3,ly3+3,segLabels[i],{fill:segColors[i],size:7,weight:500});
+  }
+
+  // Write pointer
+  const wpAngle=(1.5/nSegs)*Math.PI*2-Math.PI/2;
+  const wpX=cx2+Math.cos(wpAngle)*(r2+15);
+  const wpY=cy2+Math.sin(wpAngle)*(r2+15);
+  svg.append('circle').attr('cx',wpX).attr('cy',wpY).attr('r',6).attr('fill',C.red);
+  txt(svg,wpX+12,wpY+4,'write head',{fill:C.red,size:8,weight:600,anchor:'start'});
+
+  // Center label
+  txt(svg,cx2,cy2-8,'1M transitions',{fill:C.heading,size:11,weight:600});
+  txt(svg,cx2,cy2+8,'(s, a, r, s\')',{fill:C.muted,size:9,mono:true});
+  txt(svg,cx2,cy2+22,'FIFO',{fill:C.muted,size:8});
+
+  // Right side: how sampling works
+  const rsX=420,rsY=50;
+  box(svg,rsX,rsY,370,270,C.surface,C.border,8);
+  txt(svg,rsX+185,rsY+22,'Random Batch Sampling',{fill:C.heading,size:12,weight:600});
+
+  // Show random samples being pulled
+  const sampleY=rsY+45;
+  for(let i=0;i<4;i++){
+    const y=sampleY+i*55;
+    const ages=['500 steps ago','12K steps ago','3 steps ago','45K steps ago'];
+    const policies=['\u03c0\u2083','\u03c0\u2081','\u03c0\u2083','\u03c0\u2080'];
+    const cols=[C.blue,C.green,C.cyan,C.orange];
+
+    box(svg,rsX+15,y,340,42,cols[i]+'10',cols[i]+'40',4);
+    txt(svg,rsX+30,y+15,'Sample '+(i+1)+':',{fill:cols[i],size:9,weight:600,anchor:'start'});
+    txt(svg,rsX+30,y+32,ages[i]+' (collected by '+policies[i]+')',{fill:C.muted,size:8,anchor:'start',mono:true});
+    txt(svg,rsX+340,y+22,'(s, a, r, s\')',{fill:cols[i],size:8,mono:true,anchor:'end'});
+  }
+
+  // Benefits
+  const benY=sampleY+4*55+10;
+  txt(svg,rsX+185,benY,'Why random sampling?',{fill:C.heading,size:10,weight:600});
+  txt(svg,rsX+185,benY+16,'1. Breaks temporal correlation (consecutive steps are correlated)',{fill:C.text,size:8});
+  txt(svg,rsX+185,benY+30,'2. Each experience reused many times (sample efficient)',{fill:C.text,size:8});
+  txt(svg,rsX+185,benY+44,'3. Diverse batch = stable gradients',{fill:C.text,size:8});
+
+  // Bottom: connection to off-policy
+  box(svg,60,H-40,W-120,32,C.surface2,C.border,5);
+  txt(svg,W/2,H-20,'Replay buffer enables off-policy learning: old data from \u03c0_old can train \u03c0_new (with importance sampling correction)',{fill:C.text,size:9});
+})();
+
+// ═══ Iframe isolation: show only targeted concept when embedded ═══
+(function(){
+  const isIframe = window.self !== window.top;
+  if (!isIframe) return;
+
+  const hash = window.location.hash.replace('#','');
+  if (!hash) return;
+
+  // Lock page — no scrolling, no extra content
+  document.body.style.overflow = 'hidden';
+  document.documentElement.style.overflow = 'hidden';
+
+  const article = document.querySelector('.article');
+  article.style.padding = '0.8rem 1rem 0';
+  article.style.maxWidth = '100%';
+
+  // Remove everything except the targeted section
+  const hdr = document.querySelector('header'); if (hdr) hdr.remove();
+  document.querySelector('.toc').remove();
+  document.querySelectorAll('hr').forEach(hr => hr.remove());
+
+  document.querySelectorAll('section').forEach(s => {
+    if (s.id === hash) {
+      s.style.marginTop = '0';
+      s.style.paddingTop = '0';
+      // Shrink the h3 a bit for popup context
+      const h3 = s.querySelector('h3');
+      if (h3) { h3.style.fontSize = '1.1rem'; h3.style.marginBottom = '0.3rem'; }
+      // Tighten paragraph spacing
+      s.querySelectorAll('p').forEach(p => { p.style.marginBottom = '0.4rem'; p.style.fontSize = '14px'; });
+    } else {
+      s.remove();
+    }
+  });
+})();
+</script>
+</body>
+</html>

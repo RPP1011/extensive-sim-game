@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ML Concepts: Visual Explanations</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --surface: #13161d;
+  --surface2: #1c2029;
+  --surface3: #252a36;
+  --border: #2a2f3e;
+  --border-bright: #3d4459;
+  --text: #b8c0cc;
+  --text-muted: #6b7280;
+  --heading: #e2e8f0;
+  --accent: #60a5fa;
+  --accent-dim: #2563eb;
+  --purple: #a78bfa;
+  --purple-dim: #7c3aed;
+  --green: #34d399;
+  --green-dim: #059669;
+  --red: #f87171;
+  --red-dim: #dc2626;
+  --orange: #fbbf24;
+  --orange-dim: #d97706;
+  --cyan: #22d3ee;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.78;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 3rem 1rem 6rem;
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+  margin-bottom: 0.6rem;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  font-size: 1rem;
+  color: var(--text-muted);
+  margin-bottom: 2rem;
+  line-height: 1.65;
+}
+
+nav.toc {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.2rem 1.6rem;
+  margin-bottom: 3rem;
+}
+
+nav.toc .toc-title {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.6rem;
+}
+
+nav.toc ul {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.5rem;
+}
+
+nav.toc a {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.92rem;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+nav.toc a:hover { border-bottom-color: var(--accent); }
+
+section {
+  margin-bottom: 4rem;
+  padding-top: 1rem;
+}
+
+h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--heading);
+  margin-bottom: 0.6rem;
+  letter-spacing: -0.02em;
+}
+
+.concept-desc {
+  font-size: 1.05rem;
+  margin-bottom: 1.4rem;
+  max-width: 750px;
+}
+
+.formula-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.8rem 1.2rem;
+  margin-bottom: 1.5rem;
+  display: inline-block;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.95rem;
+  color: var(--heading);
+}
+
+.formula-box .var { color: var(--accent); }
+.formula-box .op { color: var(--text-muted); }
+.formula-box .func { color: var(--purple); }
+.formula-box .num { color: var(--green); }
+
+.fig-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 2rem;
+  overflow-x: auto;
+}
+.fig-container svg { display: block; margin: 0 auto; }
+
+svg text { font-family: 'DM Sans', sans-serif; }
+svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
+
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0 0 3rem;
+}
+
+.back-link {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  display: inline-block;
+  margin-bottom: 1.5rem;
+}
+.back-link:hover { color: var(--accent); }
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+.slider-row input[type="range"] {
+  width: 200px;
+  accent-color: var(--accent);
+}
+.slider-row .val {
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--heading);
+  font-size: 0.85rem;
+  min-width: 3em;
+}
+
+@media (max-width: 720px) {
+  .article { padding: 2rem 0.75rem 4rem; }
+  h1 { font-size: 1.7rem; }
+  .fig-container { padding: 1rem; }
+  nav.toc ul { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+<div class="article">
+
+<a href="concepts.html" class="back-link">&larr; Back to concept map</a>
+
+<h1>Math & Statistics</h1>
+<p class="subtitle">Probability, information theory, and linear algebra concepts used throughout ML.</p>
+
+<nav class="toc">
+  <div class="toc-title">On this page</div>
+  <ul>
+    <li><a href="#probability-distribution">Probability Distribution</a></li>
+    <li><a href="#expectation">Expectation (Expected Value)</a></li>
+    <li><a href="#log-probability">Log Probability</a></li>
+    <li><a href="#sampling">Sampling</a></li>
+    <li><a href="#entropy">Entropy</a></li>
+    <li><a href="#kl-divergence">KL Divergence</a></li>
+    <li><a href="#variance">Variance</a></li>
+    <li><a href="#bias-variance">Bias-Variance Tradeoff</a></li>
+    <li><a href="#dot-product">Dot Product</a></li>
+    <li><a href="#matrix-multiply">Matrix Multiplication</a></li>
+    <li><a href="#cosine-similarity">Cosine Similarity</a></li>
+    <li><a href="#ema">Exponential Moving Average (EMA)</a></li>
+  </ul>
+</nav>
+
+<section id="probability-distribution">
+<h2>Probability Distribution</h2>
+<p class="concept-desc">A <strong>probability distribution</strong> assigns a probability to every possible outcome. For discrete outcomes (like choosing an action), this is a <strong>PMF</strong> (Probability Mass Function) &mdash; a list of probabilities that must sum to 1. For continuous values, it's a <strong>PDF</strong> (Probability Density Function) that integrates to 1.</p>
+
+<div class="formula-box">
+  <span class="func">PMF</span>: <span class="op">&sum;</span><sub>i</sub> <span class="var">P</span>(x<sub>i</sub>) <span class="op">=</span> <span class="num">1</span>&ensp;&ensp;|&ensp;&ensp;
+  <span class="func">PDF</span>: <span class="op">&int;</span> <span class="var">p</span>(x) dx <span class="op">=</span> <span class="num">1</span>
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>PMF (Probability Mass Function)</strong> &mdash; Assigns a probability to each discrete outcome: P(attack)=0.4, P(heal)=0.3, etc.</li>
+  <li><strong>PDF (Probability Density Function)</strong> &mdash; For continuous variables; probability of an interval is the area under the curve.</li>
+  <li><strong>Uniform distribution</strong> &mdash; All outcomes equally likely. Maximum uncertainty &mdash; the agent has no preference.</li>
+  <li><strong>Peaked distribution</strong> &mdash; One action dominates. The agent is confident about what to do.</li>
+  <li><strong>Support</strong> &mdash; The set of outcomes with non-zero probability. A policy's support is all actions it might take.</li>
+</ul>
+
+<div class="fig-container" id="fig-probability-distribution"></div>
+</section>
+
+<hr>
+
+
+<section id="expectation">
+<h2>Expectation (Expected Value)</h2>
+<p class="concept-desc">The <strong>expected value</strong> E[X] is the weighted average of all possible outcomes, where each outcome is weighted by its probability. It appears everywhere in RL: expected return, expected gradient, expected advantage. It's the theoretical average you'd get over infinitely many samples.</p>
+
+<div class="formula-box">
+  <span class="func">E</span>[<span class="var">X</span>] <span class="op">=</span> <span class="op">&sum;</span><sub>i</sub> <span class="var">x<sub>i</sub></span> <span class="op">&middot;</span> <span class="var">P</span>(x<sub>i</sub>)
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>E[X]</strong> &mdash; Expected value of random variable X. The &ldquo;center of mass&rdquo; of a distribution.</li>
+  <li><strong>Weighted average</strong> &mdash; Unlike a plain average, each value is scaled by how likely it is.</li>
+  <li><strong>Linearity</strong> &mdash; E[aX + bY] = aE[X] + bE[Y]. This makes expectations easy to work with algebraically.</li>
+  <li><strong>Sample mean</strong> &mdash; The empirical estimate of E[X] from finite samples: (1/N)&sum;x<sub>i</sub>.</li>
+</ul>
+
+<div class="fig-container" id="fig-expectation"></div>
+</section>
+
+<hr>
+
+
+<section id="log-probability">
+<h2>Log Probability</h2>
+<p class="concept-desc"><strong>Log probabilities</strong> are fundamental to ML because they turn products into sums. When computing the probability of a sequence of independent events, you multiply probabilities &mdash; which quickly underflows to zero. Taking logs converts this to addition, keeping numbers in a stable range. The gradient of log &pi; is the <strong>score function</strong>, the backbone of policy gradient methods.</p>
+
+<div class="formula-box">
+  log <span class="var">P</span>(A,B) <span class="op">=</span> log <span class="var">P</span>(A) <span class="op">+</span> log <span class="var">P</span>(B)&ensp;&ensp;|&ensp;&ensp;
+  <span class="func">&nabla;</span> log <span class="var">&pi;</span> <span class="op">=</span> <span class="func">&nabla;</span><span class="var">&pi;</span> <span class="op">/</span> <span class="var">&pi;</span>
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>log P</strong> &mdash; Natural logarithm of probability. Always &le; 0 since 0 &le; P &le; 1. More negative = less likely.</li>
+  <li><strong>Numerical stability</strong> &mdash; P=0.001&times;0.002&times;0.003 underflows; log versions sum to manageable numbers.</li>
+  <li><strong>Score function</strong> &mdash; &nabla; log &pi;(&theta;) = &nabla;&pi;(&theta;)/&pi;(&theta;). The direction that increases the log probability of the chosen action.</li>
+  <li><strong>Log-likelihood</strong> &mdash; The sum of log probabilities over a dataset. Maximized during supervised training.</li>
+</ul>
+
+<div class="fig-container" id="fig-log-probability"></div>
+</section>
+
+<hr>
+
+
+<section id="sampling">
+<h2>Sampling</h2>
+<p class="concept-desc"><strong>Sampling</strong> is drawing random values from a probability distribution. In RL, the policy outputs a distribution over actions, and we <em>sample</em> from it to decide what to do. Stochastic sampling enables <strong>exploration</strong> (trying suboptimal actions to discover better strategies), while deterministic selection (argmax) is pure <strong>exploitation</strong>.</p>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Sample</strong> &mdash; A single draw from a distribution. Each draw is random but follows the distribution's shape.</li>
+  <li><strong>Stochastic policy</strong> &mdash; Samples actions randomly according to &pi;(a|s). Used during training for exploration.</li>
+  <li><strong>Deterministic (greedy)</strong> &mdash; Always picks the most likely action: argmax &pi;(a|s). Used at deployment.</li>
+  <li><strong>Exploration vs exploitation</strong> &mdash; Sampling explores; argmax exploits. Temperature controls the tradeoff.</li>
+  <li><strong>Histogram</strong> &mdash; As you collect more samples, their frequencies converge to the true distribution (law of large numbers).</li>
+</ul>
+
+<div class="fig-container" id="fig-sampling"></div>
+</section>
+
+<hr>
+
+
+<section id="entropy">
+<h2>Entropy</h2>
+<p class="concept-desc"><strong>Entropy</strong> measures the uncertainty or &ldquo;spread&rdquo; of a probability distribution. A uniform distribution (all actions equally likely) has maximum entropy &mdash; maximum uncertainty. A deterministic distribution (one action with probability 1) has zero entropy. SAC maximizes entropy alongside reward to encourage exploration.</p>
+
+<div class="formula-box">
+  <span class="func">H</span>(<span class="var">X</span>) <span class="op">=</span> <span class="op">&minus;</span><span class="op">&sum;</span><sub>i</sub> <span class="var">p<sub>i</sub></span> <span class="func">log</span>(<span class="var">p<sub>i</sub></span>)
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>H(X)</strong> &mdash; Entropy in nats (natural log) or bits (log base 2). Always &ge; 0.</li>
+  <li><strong>Max entropy</strong> &mdash; Achieved by the uniform distribution: H = log(N) for N outcomes.</li>
+  <li><strong>Min entropy</strong> &mdash; Zero, when one outcome has probability 1 (no uncertainty).</li>
+  <li><strong>Entropy bonus</strong> &mdash; Added to the RL objective to prevent premature convergence: J = E[r] + &alpha;H(&pi;).</li>
+  <li><strong>Information content</strong> &mdash; &minus;log(p) for a single outcome. Rare events carry more information.</li>
+</ul>
+
+<div class="fig-container" id="fig-entropy"></div>
+</section>
+
+<hr>
+
+
+<section id="kl-divergence">
+<h2>KL Divergence</h2>
+<p class="concept-desc"><strong>KL divergence</strong> measures how different one probability distribution is from another. It's the &ldquo;extra surprise&rdquo; you experience if you believe the distribution is Q but the true distribution is P. It's asymmetric: D<sub>KL</sub>(P||Q) &ne; D<sub>KL</sub>(Q||P). Used in PPO (implicit trust region) and V-Trace (importance weight clipping).</p>
+
+<div class="formula-box">
+  <span class="func">D<sub>KL</sub></span>(<span class="var">P</span> || <span class="var">Q</span>) <span class="op">=</span> <span class="op">&sum;</span><sub>i</sub> <span class="var">p<sub>i</sub></span> <span class="func">log</span>(<span class="var">p<sub>i</sub></span> <span class="op">/</span> <span class="var">q<sub>i</sub></span>)
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>D<sub>KL</sub>(P||Q)</strong> &mdash; KL divergence from Q to P. Always &ge; 0. Zero only when P = Q.</li>
+  <li><strong>Asymmetry</strong> &mdash; D<sub>KL</sub>(P||Q) &ne; D<sub>KL</sub>(Q||P). It's not a true distance metric.</li>
+  <li><strong>Forward KL</strong> &mdash; D<sub>KL</sub>(P||Q): penalizes Q for missing modes of P (mean-seeking).</li>
+  <li><strong>Reverse KL</strong> &mdash; D<sub>KL</sub>(Q||P): penalizes Q for placing mass where P doesn't (mode-seeking).</li>
+  <li><strong>Trust region</strong> &mdash; PPO implicitly constrains KL between old and new policy via clipping.</li>
+</ul>
+
+<div class="fig-container" id="fig-kl-divergence"></div>
+</section>
+
+<hr>
+
+
+<section id="variance">
+<h2>Variance</h2>
+<p class="concept-desc"><strong>Variance</strong> measures how spread out values are around their mean. In RL, high variance in gradient estimates means noisy updates that make training unstable. REINFORCE has notoriously high variance because it uses full episode returns. Baselines, critics, and GAE all exist to reduce variance.</p>
+
+<div class="formula-box">
+  <span class="func">Var</span>(<span class="var">X</span>) <span class="op">=</span> <span class="func">E</span>[(<span class="var">X</span> <span class="op">&minus;</span> <span class="var">&mu;</span>)<sup>2</sup>]&ensp;&ensp;|&ensp;&ensp;
+  <span class="var">&sigma;</span> <span class="op">=</span> <span class="func">&radic;</span><span class="func">Var</span>(<span class="var">X</span>)
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Var(X)</strong> &mdash; Expected squared deviation from the mean. Units are squared, so we often use &sigma; = &radic;Var.</li>
+  <li><strong>&sigma; (standard deviation)</strong> &mdash; Square root of variance. In the same units as the data.</li>
+  <li><strong>High variance gradients</strong> &mdash; REINFORCE multiplies log&pi; by episode return &mdash; returns vary wildly between episodes.</li>
+  <li><strong>Baseline subtraction</strong> &mdash; Subtract E[G] to center the advantage around zero. Reduces variance without changing bias.</li>
+  <li><strong>Critic (value function)</strong> &mdash; Learns V(s) to provide a low-variance baseline, giving us the advantage A = G &minus; V(s).</li>
+</ul>
+
+<div class="fig-container" id="fig-variance"></div>
+</section>
+
+<hr>
+
+
+<section id="bias-variance">
+<h2>Bias-Variance Tradeoff</h2>
+<p class="concept-desc">In RL, we face a fundamental tradeoff: <strong>TD learning</strong> (one-step bootstrap) has low variance but is <strong>biased</strong> because it relies on the value function estimate. <strong>Monte Carlo</strong> returns are unbiased but have <strong>high variance</strong> because they depend on the entire trajectory. GAE(&gamma;, &lambda;) smoothly interpolates between these extremes.</p>
+
+<div class="formula-box">
+  <span class="func">GAE</span>: <span class="var">A&#770;</span> <span class="op">=</span> <span class="op">&sum;</span><sub>l=0</sub><sup>&infin;</sup> (<span class="var">&gamma;&lambda;</span>)<sup>l</sup> <span class="var">&delta;<sub>t+l</sub></span>&ensp;&ensp;|&ensp;&ensp;
+  <span class="var">&lambda;</span><span class="op">=</span><span class="num">0</span> &rarr; TD&ensp;&ensp;
+  <span class="var">&lambda;</span><span class="op">=</span><span class="num">1</span> &rarr; MC
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Bias</strong> &mdash; Systematic error from using an approximation (the value function). TD is biased because V(s) isn't perfect.</li>
+  <li><strong>Variance</strong> &mdash; Random noise from sampling. MC has high variance because returns depend on many random actions.</li>
+  <li><strong>&lambda; (lambda)</strong> &mdash; GAE tradeoff parameter. &lambda;=0 is pure TD (low variance, some bias). &lambda;=1 is pure MC (no bias, high variance).</li>
+  <li><strong>&lambda;=0.95</strong> &mdash; Common default. Mostly Monte Carlo but with a touch of bootstrapping for stability.</li>
+  <li><strong>&delta;<sub>t</sub></strong> &mdash; TD error: r<sub>t</sub> + &gamma;V(s<sub>t+1</sub>) &minus; V(s<sub>t</sub>). The one-step advantage estimate.</li>
+</ul>
+
+<div class="fig-container" id="fig-bias-variance"></div>
+</section>
+
+<hr>
+
+
+<section id="dot-product">
+<h2>Dot Product</h2>
+<p class="concept-desc">The <strong>dot product</strong> a&middot;b = &sum; a<sub>i</sub>b<sub>i</sub> measures how aligned two vectors are. Positive means they point in the same direction, zero means orthogonal (unrelated), negative means opposite. It's the core operation in attention (Q&middot;K), similarity computation, and every neural network layer (w&middot;x).</p>
+
+<div class="formula-box">
+  <span class="var">a</span> <span class="op">&middot;</span> <span class="var">b</span> <span class="op">=</span> <span class="op">&sum;</span><sub>i</sub> <span class="var">a<sub>i</sub></span><span class="var">b<sub>i</sub></span> <span class="op">=</span> |<span class="var">a</span>| |<span class="var">b</span>| <span class="func">cos</span>(<span class="var">&theta;</span>)
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Algebraic form</strong> &mdash; Sum of element-wise products: a<sub>1</sub>b<sub>1</sub> + a<sub>2</sub>b<sub>2</sub> + &hellip;</li>
+  <li><strong>Geometric form</strong> &mdash; |a||b|cos(&theta;): product of magnitudes times cosine of the angle between them.</li>
+  <li><strong>Positive dot product</strong> &mdash; Vectors point in similar directions. In attention: high compatibility.</li>
+  <li><strong>Zero dot product</strong> &mdash; Orthogonal vectors. No relationship.</li>
+  <li><strong>Projection</strong> &mdash; (a&middot;b)/|b| gives the length of a's shadow onto b. This is how attention &ldquo;reads&rdquo; values.</li>
+</ul>
+
+<div class="fig-container" id="fig-dot-product"></div>
+</section>
+
+<hr>
+
+
+<section id="matrix-multiply">
+<h2>Matrix Multiplication</h2>
+<p class="concept-desc"><strong>Matrix multiplication</strong> Wx + b is the fundamental operation of neural networks. Each output neuron computes a dot product of one weight row with the entire input vector, then adds a bias. The matrix W defines a <strong>linear transformation</strong> &mdash; it rotates, scales, and shears the input space.</p>
+
+<div class="formula-box">
+  <span class="var">y<sub>i</sub></span> <span class="op">=</span> <span class="op">&sum;</span><sub>j</sub> <span class="var">W<sub>ij</sub></span> <span class="var">x<sub>j</sub></span> <span class="op">+</span> <span class="var">b<sub>i</sub></span>&ensp;&ensp;|&ensp;&ensp;
+  <span class="var">y</span> <span class="op">=</span> <span class="var">Wx</span> <span class="op">+</span> <span class="var">b</span>
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Linear layer</strong> &mdash; y = Wx + b. The basic building block. A (3&times;4) weight matrix transforms 4 inputs into 3 outputs.</li>
+  <li><strong>Each row is a detector</strong> &mdash; Row i of W defines what input pattern produces a high output y<sub>i</sub>.</li>
+  <li><strong>Bias (b)</strong> &mdash; Shifts the output. Without bias, the transformation always maps zero to zero.</li>
+  <li><strong>Parameters</strong> &mdash; An m&times;n matrix has m&times;n weights + m biases. A 32&times;30 layer has 990 learnable parameters.</li>
+  <li><strong>Linear transformation</strong> &mdash; Preserves addition and scaling. Non-linearity (ReLU, GELU) is needed between layers for the network to learn non-linear functions.</li>
+</ul>
+
+<div class="fig-container" id="fig-matrix-multiply"></div>
+</section>
+
+<hr>
+
+
+<section id="cosine-similarity">
+<h2>Cosine Similarity</h2>
+<p class="concept-desc"><strong>Cosine similarity</strong> is the dot product normalized by vector magnitudes: it measures the <em>angle</em> between two vectors, ignoring their lengths. Values range from &minus;1 (opposite) through 0 (orthogonal) to +1 (identical direction). Used to compare embeddings &mdash; e.g., &ldquo;is this ability similar to Fireball?&rdquo;</p>
+
+<div class="formula-box">
+  <span class="func">cos</span>(<span class="var">&theta;</span>) <span class="op">=</span> <span class="var">a</span> <span class="op">&middot;</span> <span class="var">b</span> <span class="op">/</span> (|<span class="var">a</span>| <span class="op">&middot;</span> |<span class="var">b</span>|)&ensp;&ensp;|&ensp;&ensp;
+  range: [<span class="num">&minus;1</span>, <span class="num">+1</span>]
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>cos(&theta;) = +1</strong> &mdash; Vectors point in the same direction. Embeddings are maximally similar.</li>
+  <li><strong>cos(&theta;) = 0</strong> &mdash; Orthogonal. The embeddings are unrelated.</li>
+  <li><strong>cos(&theta;) = &minus;1</strong> &mdash; Opposite directions. Maximally dissimilar.</li>
+  <li><strong>Length invariance</strong> &mdash; Unlike dot product, cosine similarity is unaffected by vector magnitudes. Only direction matters.</li>
+  <li><strong>L2 normalization</strong> &mdash; If vectors are unit-length (|a|=|b|=1), cosine similarity equals the dot product. Our ability encoder uses L2-normalized embeddings.</li>
+</ul>
+
+<div class="fig-container" id="fig-cosine-similarity"></div>
+</section>
+
+<hr>
+
+
+<section id="ema">
+<h2>Exponential Moving Average (EMA)</h2>
+<p class="concept-desc">An <strong>EMA</strong> smooths a noisy signal by blending each new value with the running average. It gives more weight to recent values (controlled by &alpha;) while retaining memory of the past. Used in target networks (soft update), Grokfast (gradient filtering), and optimizer momentum (Adam's &beta; parameters).</p>
+
+<div class="formula-box">
+  <span class="var">EMA<sub>t</sub></span> <span class="op">=</span> <span class="var">&alpha;</span> <span class="op">&middot;</span> <span class="var">x<sub>t</sub></span> <span class="op">+</span> (<span class="num">1</span> <span class="op">&minus;</span> <span class="var">&alpha;</span>) <span class="op">&middot;</span> <span class="var">EMA<sub>t&minus;1</sub></span>
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>&alpha; (smoothing factor)</strong> &mdash; Weight for the new value. &alpha;=1 means no smoothing (raw signal). &alpha;&rarr;0 means heavy smoothing (slow response).</li>
+  <li><strong>Target network</strong> &mdash; In DQN/SAC, a slowly-updated copy of the value network: &theta;<sub>target</sub> &larr; &tau;&theta; + (1&minus;&tau;)&theta;<sub>target</sub>.</li>
+  <li><strong>Grokfast</strong> &mdash; Filters gradients with EMA to amplify slow-varying components that drive generalization.</li>
+  <li><strong>Adam &beta;<sub>1</sub>, &beta;<sub>2</sub></strong> &mdash; EMA of gradients (momentum) and squared gradients (adaptive learning rate).</li>
+  <li><strong>Exponential decay</strong> &mdash; Past values contribute with exponentially decreasing weight: (1&minus;&alpha;)<sup>k</sup> for k steps ago.</li>
+</ul>
+
+<div class="fig-container" id="fig-ema"></div>
+</section>
+
+</div>
+
+<script>
+const C = {
+  bg:'#13161d', surface:'#1c2029', surface2:'#252a36', surface3:'#252a36',
+  border:'#2a2f3e', borderBright:'#3d4459',
+  text:'#b8c0cc', muted:'#6b7280', heading:'#e2e8f0',
+  blue:'#60a5fa', blueDim:'#2563eb', blueFaint:'rgba(96,165,250,0.08)',
+  purple:'#a78bfa', purpleDim:'#7c3aed', purpleFaint:'rgba(167,139,250,0.08)',
+  green:'#34d399', greenDim:'#059669',
+  red:'#f87171', redDim:'#dc2626',
+  orange:'#fbbf24', orangeDim:'#d97706',
+  cyan:'#22d3ee',
+};
+
+function box(g,x,y,w,h,fill,stroke,rx=6){return g.append('rect').attr('x',x).attr('y',y).attr('width',w).attr('height',h).attr('rx',rx).attr('fill',fill).attr('stroke',stroke).attr('stroke-width',1)}
+function txt(g,x,y,t,o={}){const e=g.append('text').attr('x',x).attr('y',y).text(t).attr('text-anchor',o.anchor||'middle').attr('fill',o.fill||C.text).attr('font-size',o.size||12).attr('font-weight',o.weight||400);if(o.mono)e.attr('class','label-mono');return e}
+function addArrow(svg,color){const id='a-'+color.replace(/[^a-z0-9]/gi,'');if(svg.select('#'+id).empty()){svg.append('defs').append('marker').attr('id',id).attr('viewBox','0 0 10 8').attr('refX',9).attr('refY',4).attr('markerWidth',8).attr('markerHeight',6).attr('orient','auto-start-reverse').append('path').attr('d','M0,0 L10,4 L0,8 Z').attr('fill',color)}return id}
+function arrow(g,svg,x1,y1,x2,y2,color=C.muted){const id=addArrow(svg,color);g.append('line').attr('x1',x1).attr('y1',y1).attr('x2',x2).attr('y2',y2).attr('stroke',color).attr('stroke-width',1.5).attr('marker-end','url(#'+id+')')}
+function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);const p=g.append('path').attr('d',d).attr('stroke',color).attr('stroke-width',1.5).attr('fill','none').attr('marker-end','url(#'+id+')');if(dash)p.attr('stroke-dasharray',dash);return p}
+
+// ═══ PROBABILITY DISTRIBUTION ═══
+(function(){
+  const W=820,H=320;
+  const svg=d3.select('#fig-probability-distribution').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  const actions=['Attack','Heal','Move','Defend','Ability'];
+  const uniformP=[0.2,0.2,0.2,0.2,0.2];
+  const peakedP=[0.05,0.6,0.1,0.05,0.2];
+
+  function drawDist(gx,gy,title,probs,color){
+    const bw=50,gap=12,maxH=180;
+    const totalW=actions.length*(bw+gap)-gap;
+    txt(svg,gx+totalW/2,gy-10,title,{fill:C.heading,size:13,weight:600});
+
+    // Sum label
+    const sum=probs.reduce((a,b)=>a+b,0).toFixed(1);
+    txt(svg,gx+totalW/2,gy+maxH+55,'\u03A3 = '+sum,{fill:C.green,size:12,weight:600,mono:true});
+
+    probs.forEach((p,i)=>{
+      const x=gx+i*(bw+gap);
+      const h=p*maxH;
+      const y=gy+maxH-h;
+      box(svg,x,y,bw,h,color+'30',color,4);
+      txt(svg,x+bw/2,gy+maxH+16,actions[i],{fill:C.text,size:9});
+      txt(svg,x+bw/2,y-8,p.toFixed(2),{fill:color,size:10,weight:600,mono:true});
+    });
+
+    // Baseline
+    svg.append('line').attr('x1',gx-5).attr('y1',gy+maxH).attr('x2',gx+totalW+5).attr('y2',gy+maxH)
+      .attr('stroke',C.border).attr('stroke-width',1);
+  }
+
+  drawDist(40,50,'Uniform Distribution',uniformP,C.blue);
+  drawDist(470,50,'Peaked Distribution',peakedP,C.purple);
+
+  txt(svg,W/2,H-10,'Left: maximum uncertainty (all actions equally likely). Right: the agent is confident about Heal.',{fill:C.muted,size:10});
+})();
+
+// ═══ EXPECTATION ═══
+(function(){
+  const W=820,H=350;
+  const svg=d3.select('#fig-expectation').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  const outcomes=[1,2,3,4,5,6];
+  const probs=[1/6,1/6,1/6,1/6,1/6,1/6];
+  const bw=60,gap=15,startX=80,startY=60,maxH=120;
+
+  txt(svg,W/2,30,'Fair Die: E[X] = \u03A3 x\u00B7P(x)',{fill:C.heading,size:14,weight:600});
+
+  // Draw bars and computation
+  let sumText='';
+  let expVal=0;
+  outcomes.forEach((x,i)=>{
+    const bx=startX+i*(bw+gap);
+    const h=probs[i]*maxH*6; // scale so 1/6 shows as reasonable bar
+    const y=startY+maxH-h;
+    box(svg,bx,y,bw,h,C.blue+'30',C.blue,4);
+
+    // Outcome label
+    txt(svg,bx+bw/2,startY+maxH+20,'x='+x,{fill:C.heading,size:11,weight:500});
+    // Probability
+    txt(svg,bx+bw/2,startY+maxH+38,'P=1/6',{fill:C.muted,size:9,mono:true});
+    // Product
+    const prod=(x*probs[i]);
+    expVal+=prod;
+    txt(svg,bx+bw/2,startY+maxH+56,x+'\u00D71/6',{fill:C.purple,size:9,mono:true});
+    txt(svg,bx+bw/2,startY+maxH+72,'= '+prod.toFixed(3),{fill:C.purple,size:9,mono:true});
+  });
+
+  // Weighted sum
+  const sumY=startY+maxH+100;
+  box(svg,startX-10,sumY,520,40,C.surface2,C.border,6);
+  txt(svg,startX+250,sumY+15,'E[X] = 1/6 + 2/6 + 3/6 + 4/6 + 5/6 + 6/6',{fill:C.text,size:11,mono:true});
+  txt(svg,startX+250,sumY+32,'= '+expVal.toFixed(2)+' (weighted average)',{fill:C.green,size:12,weight:600,mono:true});
+
+  // Visual marker for E[X] on x-axis
+  const exMark=startX+(expVal-1)/(6-1)*(5*(bw+gap))+bw/2;
+  svg.append('line').attr('x1',exMark).attr('y1',startY-5).attr('x2',exMark).attr('y2',startY+maxH+5)
+    .attr('stroke',C.green).attr('stroke-width',2).attr('stroke-dasharray','6,3');
+  txt(svg,exMark,startY-12,'E[X]=3.5',{fill:C.green,size:10,weight:600});
+
+  txt(svg,W/2,H-10,'Each outcome weighted by its probability. The expected value is the "center of mass" of the distribution.',{fill:C.muted,size:10});
+})();
+
+// ═══ LOG PROBABILITY ═══
+(function(){
+  const W=820,H=430;
+  const svg=d3.select('#fig-log-probability').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  const probVals=[0.9,0.5,0.1,0.01,0.001,0.0001];
+  const bw=80,gap=20,startX=90,startY=30;
+
+  // Probability bars (top half)
+  txt(svg,220,startY,'Probability (0 to 1)',{fill:C.heading,size:13,weight:600});
+  const probMaxH=100;
+  probVals.forEach((p,i)=>{
+    const x=startX+i*(bw+gap);
+    const h=p*probMaxH;
+    const y=startY+20+probMaxH-h;
+    box(svg,x,y,bw,Math.max(h,2),C.blue+'40',C.blue,3);
+    txt(svg,x+bw/2,startY+20+probMaxH+16,p.toString(),{fill:C.blue,size:9,weight:500,mono:true});
+  });
+
+  // Log probability bars (bottom half)
+  const logStartY=startY+probMaxH+55;
+  txt(svg,220,logStartY,'Log Probability (\u2212\u221E to 0)',{fill:C.heading,size:13,weight:600});
+  const logMaxH=130;
+  const minLog=Math.log(0.0001); // ~-9.2
+
+  probVals.forEach((p,i)=>{
+    const x=startX+i*(bw+gap);
+    const logP=Math.log(p);
+    const h=Math.abs(logP)/Math.abs(minLog)*logMaxH;
+    const y=logStartY+15;
+    box(svg,x,y,bw,Math.min(h,logMaxH),C.purple+'40',C.purple,3);
+    txt(svg,x+bw/2,y+Math.min(h,logMaxH)+16,logP.toFixed(2),{fill:C.purple,size:9,weight:500,mono:true});
+  });
+
+  // Annotations
+  const annY=logStartY+logMaxH+50;
+  box(svg,60,annY,W-120,50,C.surface2,C.border,6);
+  txt(svg,W/2,annY+15,'P=0.001 \u00D7 P=0.002 = 0.000002 (underflows!)',{fill:C.red,size:10,mono:true});
+  txt(svg,W/2,annY+35,'log(0.001) + log(0.002) = \u22126.91 + \u22126.21 = \u221213.12 (stable!)',{fill:C.green,size:10,mono:true});
+
+  txt(svg,W/2,H-8,'Tiny probabilities become manageable negative numbers in log space. Products become sums.',{fill:C.muted,size:10});
+})();
+
+// ═══ SAMPLING ═══
+(function(){
+  const W=820,H=380;
+  const svg=d3.select('#fig-sampling').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  const actions=['Attack','Heal','Move','Defend','Ability'];
+  const probs=[0.1,0.45,0.15,0.05,0.25];
+  const bw=60,gap=15,startX=60,maxH=160,distY=50;
+
+  // True distribution
+  txt(svg,startX+190,30,'True Distribution \u03C0(a|s)',{fill:C.heading,size:13,weight:600});
+
+  probs.forEach((p,i)=>{
+    const x=startX+i*(bw+gap);
+    const h=p*maxH;
+    const y=distY+maxH-h;
+    box(svg,x,y,bw,h,C.blue+'25',C.blue,4);
+    txt(svg,x+bw/2,distY+maxH+16,actions[i],{fill:C.text,size:9});
+    txt(svg,x+bw/2,y-8,p.toFixed(2),{fill:C.blue,size:10,mono:true});
+  });
+  svg.append('line').attr('x1',startX-5).attr('y1',distY+maxH).attr('x2',startX+5*(bw+gap)).attr('y2',distY+maxH)
+    .attr('stroke',C.border).attr('stroke-width',1);
+
+  // Histogram from sampling
+  const histX=470,histY=50;
+  txt(svg,histX+150,30,'After 100 Samples',{fill:C.heading,size:13,weight:600});
+
+  // Simulated sample counts (roughly matching distribution)
+  const counts=[11,43,16,4,26];
+  const maxCount=Math.max(...counts);
+
+  counts.forEach((c,i)=>{
+    const x=histX+i*(bw+gap);
+    const h=(c/maxCount)*maxH;
+    const y=histY+maxH-h;
+    box(svg,x,y,bw,h,C.green+'25',C.green,4);
+    txt(svg,x+bw/2,histY+maxH+16,actions[i],{fill:C.text,size:9});
+    txt(svg,x+bw/2,y-8,c.toString(),{fill:C.green,size:10,weight:600});
+  });
+  svg.append('line').attr('x1',histX-5).attr('y1',histY+maxH).attr('x2',histX+5*(bw+gap)).attr('y2',histY+maxH)
+    .attr('stroke',C.border).attr('stroke-width',1);
+
+  // Arrow between
+  arrow(svg,svg,420,distY+maxH/2,460,histY+maxH/2,C.orange);
+  txt(svg,440,distY+maxH/2-15,'sample',{fill:C.orange,size:10,weight:500});
+
+  // Bottom: exploration vs exploitation
+  const botY=distY+maxH+45;
+  box(svg,60,botY,330,80,C.surface2,C.border,6);
+  txt(svg,225,botY+15,'Stochastic (Training)',{fill:C.purple,size:11,weight:600});
+  txt(svg,225,botY+35,'Sample from distribution',{fill:C.text,size:10});
+  txt(svg,225,botY+52,'\u2192 explores suboptimal actions',{fill:C.muted,size:9});
+  txt(svg,225,botY+67,'\u2192 discovers better strategies',{fill:C.muted,size:9});
+
+  box(svg,430,botY,330,80,C.surface2,C.border,6);
+  txt(svg,595,botY+15,'Deterministic (Deployment)',{fill:C.green,size:11,weight:600});
+  txt(svg,595,botY+35,'argmax: always pick best action',{fill:C.text,size:10});
+  txt(svg,595,botY+52,'\u2192 pure exploitation',{fill:C.muted,size:9});
+  txt(svg,595,botY+67,'\u2192 no wasted actions',{fill:C.muted,size:9});
+
+  txt(svg,W/2,H-8,'Sampling from a distribution builds a histogram that converges to the true distribution (law of large numbers).',{fill:C.muted,size:10});
+})();
+
+// ═══ ENTROPY ═══
+(function(){
+  const W=820,H=400;
+  const svg=d3.select('#fig-entropy').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  const actions=['A','B','C','D','E'];
+  const bw=55,gap=10,maxH=160;
+
+  // Three example distributions
+  const dists=[
+    {title:'Min Entropy (H=0)',probs:[0,0,1,0,0],color:C.red,x:30},
+    {title:'Medium Entropy',probs:[0.1,0.15,0.4,0.25,0.1],color:C.orange,x:300},
+    {title:'Max Entropy (H=log5)',probs:[0.2,0.2,0.2,0.2,0.2],color:C.green,x:570},
+  ];
+
+  function calcEntropy(ps){
+    let h=0;
+    ps.forEach(p=>{if(p>0)h-=p*Math.log(p);});
+    return h;
+  }
+
+  dists.forEach(d=>{
+    const gy=60;
+    txt(svg,d.x+actions.length*(bw+gap)/2-gap/2,35,d.title,{fill:C.heading,size:12,weight:600});
+
+    d.probs.forEach((p,i)=>{
+      const x=d.x+i*(bw+gap);
+      const h=p*maxH;
+      const y=gy+maxH-h;
+      box(svg,x,gy+maxH-Math.max(h,2),bw,Math.max(h,2),d.color+'30',d.color,3);
+      txt(svg,x+bw/2,gy+maxH+16,actions[i],{fill:C.text,size:9});
+      if(p>0)txt(svg,x+bw/2,gy+maxH-Math.max(h,2)-8,p.toFixed(1),{fill:d.color,size:9,mono:true});
+    });
+
+    const ent=calcEntropy(d.probs);
+    txt(svg,d.x+actions.length*(bw+gap)/2-gap/2,gy+maxH+40,'H = '+ent.toFixed(3)+' nats',{fill:d.color,size:11,weight:600,mono:true});
+  });
+
+  // Entropy scale bar
+  const scaleY=310;
+  const scaleX=60,scaleW=700;
+  svg.append('line').attr('x1',scaleX).attr('y1',scaleY).attr('x2',scaleX+scaleW).attr('y2',scaleY)
+    .attr('stroke',C.border).attr('stroke-width',2);
+  // Gradient from red to green
+  for(let i=0;i<20;i++){
+    const frac=i/19;
+    const r=Math.round(248*(1-frac)+52*frac);
+    const g=Math.round(113*(1-frac)+211*frac);
+    const b=Math.round(113*(1-frac)+153*frac);
+    svg.append('rect').attr('x',scaleX+i*(scaleW/20)).attr('y',scaleY-4).attr('width',scaleW/20+1).attr('height',8)
+      .attr('fill',`rgb(${r},${g},${b})`).attr('opacity',0.6);
+  }
+  txt(svg,scaleX,scaleY+20,'0 (deterministic)',{fill:C.red,size:10,anchor:'start'});
+  txt(svg,scaleX+scaleW,scaleY+20,'log(N) (uniform)',{fill:C.green,size:10,anchor:'end'});
+  txt(svg,scaleX+scaleW/2,scaleY+20,'Entropy Scale',{fill:C.heading,size:10,weight:500});
+
+  // Formula reminder
+  box(svg,200,scaleY+40,420,35,C.surface2,C.border,6);
+  txt(svg,W/2,scaleY+62,'H(X) = \u2212\u03A3 p\u1D62 log(p\u1D62)   |   \u22120\u00B7log(0) defined as 0',{fill:C.text,size:10,mono:true});
+
+  txt(svg,W/2,H-8,'Entropy measures uncertainty. More spread out = more entropy = more exploration.',{fill:C.muted,size:10});
+})();
+
+// ═══ KL DIVERGENCE ═══
+(function(){
+  const W=820,H=450;
+  const svg=d3.select('#fig-kl-divergence').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  const actions=['A','B','C','D','E'];
+  const P=[0.1,0.5,0.15,0.05,0.2];
+  const Q_init=[0.2,0.3,0.2,0.1,0.2];
+
+  const bw=50,gap=12,maxH=150,distY=55;
+  const pX=40,qX=360,klX=40;
+
+  // Draw P distribution (fixed)
+  txt(svg,pX+150,30,'P (true)',{fill:C.heading,size:13,weight:600});
+  P.forEach((p,i)=>{
+    const x=pX+i*(bw+gap);
+    const h=p*maxH;
+    box(svg,x,distY+maxH-h,bw,h,C.blue+'30',C.blue,3);
+    txt(svg,x+bw/2,distY+maxH+16,actions[i],{fill:C.text,size:9});
+    txt(svg,x+bw/2,distY+maxH-h-10,p.toFixed(2),{fill:C.blue,size:9,mono:true});
+  });
+
+  // Draw Q distribution
+  txt(svg,qX+150,30,'Q (approximation)',{fill:C.heading,size:13,weight:600});
+  const qBars=[];
+  Q_init.forEach((q,i)=>{
+    const x=qX+i*(bw+gap);
+    const h=q*maxH;
+    const r=box(svg,x,distY+maxH-h,bw,h,C.purple+'30',C.purple,3);
+    qBars.push(r);
+    txt(svg,x+bw/2,distY+maxH+16,actions[i],{fill:C.text,size:9});
+    txt(svg,x+bw/2,distY+maxH-h-10,q.toFixed(2),{fill:C.purple,size:9,mono:true});
+  });
+
+  // Pointwise KL contributions
+  const klY=distY+maxH+50;
+  txt(svg,W/2,klY,'Pointwise KL: p\u1D62 \u00B7 log(p\u1D62/q\u1D62)',{fill:C.heading,size:12,weight:600});
+
+  const contribs=[];
+  let totalKL=0;
+  P.forEach((p,i)=>{
+    const q=Q_init[i];
+    const c=p>0&&q>0?p*Math.log(p/q):0;
+    contribs.push(c);
+    totalKL+=c;
+  });
+
+  const klBarY=klY+20,klMaxH=60;
+  const maxC=Math.max(...contribs.map(Math.abs),0.01);
+  contribs.forEach((c,i)=>{
+    const x=150+i*130;
+    const h=Math.abs(c)/maxC*klMaxH;
+    const col=c>=0?C.orange:C.green;
+    box(svg,x,klBarY+klMaxH-h,100,h,col+'30',col,3);
+    txt(svg,x+50,klBarY+klMaxH+16,actions[i]+': '+c.toFixed(4),{fill:col,size:9,mono:true});
+  });
+
+  // Total
+  box(svg,200,klBarY+klMaxH+35,420,35,C.surface2,C.border,6);
+  txt(svg,W/2,klBarY+klMaxH+57,'D_KL(P || Q) = '+totalKL.toFixed(4)+' nats   |   KL \u2265 0, equals 0 iff P = Q',{fill:C.green,size:11,weight:600,mono:true});
+
+  txt(svg,W/2,H-8,'KL divergence measures the "extra surprise" from using Q instead of P. It is asymmetric: D_KL(P||Q) \u2260 D_KL(Q||P).',{fill:C.muted,size:10});
+})();
+
+// ═══ VARIANCE ═══
+(function(){
+  const W=820,H=350;
+  const svg=d3.select('#fig-variance').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  // Two distributions with same mean but different variance
+  function drawGaussian(cx,cy,title,sigma,color){
+    const pts=[];
+    const w=300,steps=60;
+    for(let i=0;i<=steps;i++){
+      const x=(i/steps-0.5)*6;
+      const y=Math.exp(-x*x/(2*sigma*sigma))/(sigma*Math.sqrt(2*Math.PI));
+      pts.push({x:cx-w/2+i*(w/steps),y:cy-y*sigma*300});
+    }
+    // Fill area
+    let pathD='M'+pts[0].x+','+cy;
+    pts.forEach(p=>pathD+=' L'+p.x+','+p.y);
+    pathD+=' L'+pts[pts.length-1].x+','+cy+' Z';
+    svg.append('path').attr('d',pathD).attr('fill',color+'20').attr('stroke',color).attr('stroke-width',1.5);
+
+    // Labels
+    txt(svg,cx,cy-180/sigma-15,title,{fill:C.heading,size:12,weight:600});
+    txt(svg,cx,cy+25,'\u03C3 = '+sigma.toFixed(1)+', Var = '+((sigma*sigma).toFixed(1)),{fill:color,size:10,weight:500,mono:true});
+
+    // Mean line
+    svg.append('line').attr('x1',cx).attr('y1',cy-180/sigma).attr('x2',cx).attr('y2',cy)
+      .attr('stroke',color).attr('stroke-width',1).attr('stroke-dasharray','4,3');
+    txt(svg,cx,cy+40,'\u03BC = 0',{fill:C.muted,size:9});
+  }
+
+  drawGaussian(210,220,'Low Variance (stable gradients)',0.5,C.green);
+  drawGaussian(610,220,'High Variance (noisy gradients)',1.5,C.red);
+
+  // Baseline
+  svg.append('line').attr('x1',30).attr('y1',220).attr('x2',400).attr('y2',220)
+    .attr('stroke',C.border).attr('stroke-width',1);
+  svg.append('line').attr('x1',420).attr('y1',220).attr('x2',790).attr('y2',220)
+    .attr('stroke',C.border).attr('stroke-width',1);
+
+  // Bottom explanation
+  box(svg,100,280,620,45,C.surface2,C.border,6);
+  txt(svg,W/2,297,'REINFORCE: Var(gradient) \u221D Var(returns)',{fill:C.text,size:11});
+  txt(svg,W/2,315,'High return variance \u2192 noisy gradients \u2192 unstable training. Baselines + critics reduce this.',{fill:C.muted,size:9});
+})();
+
+// ═══ BIAS-VARIANCE TRADEOFF ═══
+(function(){
+  const W=820,H=380;
+  const svg=d3.select('#fig-bias-variance').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  const spectrumY=80,spectrumH=40,spectrumX=80,spectrumW=660;
+
+  txt(svg,W/2,30,'GAE \u03BB: The Bias-Variance Spectrum',{fill:C.heading,size:14,weight:600});
+
+  // Gradient bar from blue (TD) to red (MC)
+  for(let i=0;i<40;i++){
+    const frac=i/39;
+    const r=Math.round(96*(1-frac)+248*frac);
+    const g=Math.round(165*(1-frac)+113*frac);
+    const b=Math.round(250*(1-frac)+113*frac);
+    svg.append('rect').attr('x',spectrumX+i*(spectrumW/40)).attr('y',spectrumY)
+      .attr('width',spectrumW/40+1).attr('height',spectrumH)
+      .attr('fill',`rgb(${r},${g},${b})`).attr('opacity',0.5);
+  }
+  svg.append('rect').attr('x',spectrumX).attr('y',spectrumY).attr('width',spectrumW).attr('height',spectrumH)
+    .attr('rx',6).attr('fill','none').attr('stroke',C.border).attr('stroke-width',1);
+
+  // Lambda labels
+  txt(svg,spectrumX,spectrumY-12,'\u03BB = 0',{fill:C.blue,size:12,weight:700,anchor:'start',mono:true});
+  txt(svg,spectrumX+spectrumW,spectrumY-12,'\u03BB = 1',{fill:C.red,size:12,weight:700,anchor:'end',mono:true});
+  txt(svg,spectrumX+spectrumW*0.71,spectrumY-12,'\u03BB = 0.95',{fill:C.green,size:11,weight:600,mono:true});
+
+  // Marker for 0.95
+  const mark95=spectrumX+spectrumW*0.95;
+  svg.append('line').attr('x1',mark95).attr('y1',spectrumY-3).attr('x2',mark95).attr('y2',spectrumY+spectrumH+3)
+    .attr('stroke',C.green).attr('stroke-width',2);
+
+  // TD side
+  const tdY=spectrumY+spectrumH+30;
+  box(svg,spectrumX-20,tdY,300,100,C.blue+'10',C.blueDim,6);
+  txt(svg,spectrumX+130,tdY+18,'TD (one-step bootstrap)',{fill:C.blue,size:12,weight:600});
+  txt(svg,spectrumX+130,tdY+38,'A\u0302 = r + \u03B3V(s\') \u2212 V(s)',{fill:C.blue,size:10,mono:true});
+  txt(svg,spectrumX+130,tdY+58,'\u2713 Low variance',{fill:C.green,size:10});
+  txt(svg,spectrumX+130,tdY+78,'\u2717 Biased (depends on V accuracy)',{fill:C.red,size:10});
+
+  // MC side
+  box(svg,spectrumX+spectrumW-280,tdY,300,100,C.red+'10',C.redDim,6);
+  txt(svg,spectrumX+spectrumW-130,tdY+18,'Monte Carlo (full return)',{fill:C.red,size:12,weight:600});
+  txt(svg,spectrumX+spectrumW-130,tdY+38,'A\u0302 = G\u209C \u2212 V(s)',{fill:C.red,size:10,mono:true});
+  txt(svg,spectrumX+spectrumW-130,tdY+58,'\u2713 Unbiased',{fill:C.green,size:10});
+  txt(svg,spectrumX+spectrumW-130,tdY+78,'\u2717 High variance (noisy returns)',{fill:C.red,size:10});
+
+  // GAE formula
+  const gaeY=tdY+120;
+  box(svg,140,gaeY,540,45,C.surface2,C.border,6);
+  txt(svg,W/2,gaeY+17,'GAE(\u03B3, \u03BB): A\u0302 = \u03A3 (\u03B3\u03BB)\u02E1 \u03B4\u209C\u208A\u2097',{fill:C.heading,size:12,mono:true});
+  txt(svg,W/2,gaeY+37,'\u03BB blends between TD (\u03BB=0) and MC (\u03BB=1). Sweet spot: \u03BB=0.95.',{fill:C.muted,size:10});
+
+  txt(svg,W/2,H-8,'The fundamental tradeoff in RL: bias from bootstrapping vs variance from sampling.',{fill:C.muted,size:10});
+})();
+
+// ═══ DOT PRODUCT ═══
+(function(){
+  const W=820,H=380;
+  const svg=d3.select('#fig-dot-product').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  const cx=200,cy=200,scale=80;
+
+  // Grid
+  for(let i=-2;i<=2;i++){
+    svg.append('line').attr('x1',cx+i*scale).attr('y1',cy-2*scale).attr('x2',cx+i*scale).attr('y2',cy+2*scale)
+      .attr('stroke',C.border).attr('stroke-width',0.5).attr('opacity',0.3);
+    svg.append('line').attr('x1',cx-2*scale).attr('y1',cy+i*scale).attr('x2',cx+2*scale).attr('y2',cy+i*scale)
+      .attr('stroke',C.border).attr('stroke-width',0.5).attr('opacity',0.3);
+  }
+  // Axes
+  svg.append('line').attr('x1',cx-2*scale).attr('y1',cy).attr('x2',cx+2*scale).attr('y2',cy)
+    .attr('stroke',C.border).attr('stroke-width',1);
+  svg.append('line').attr('x1',cx).attr('y1',cy-2*scale).attr('x2',cx).attr('y2',cy+2*scale)
+    .attr('stroke',C.border).attr('stroke-width',1);
+
+  // Vector a
+  const ax=1.5,ay=-1.2;
+  arrow(svg,svg,cx,cy,cx+ax*scale,cy+ay*scale,C.blue);
+  txt(svg,cx+ax*scale+15,cy+ay*scale-5,'a = (1.5, 1.2)',{fill:C.blue,size:10,weight:600,anchor:'start'});
+
+  // Three cases for vector b
+  const cases=[
+    {bx:1.8,by:-0.5,label:'Same direction',dot:null,color:C.green},
+    {bx:-1.2,by:1.5,label:'Orthogonal',dot:null,color:C.orange},
+    {bx:-1.5,by:1.2,label:'Opposite',dot:null,color:C.red},
+  ];
+  cases.forEach(c=>{c.dot=ax*c.bx+(-ay)*(-c.by);});
+  // Actually compute correctly: a=(1.5,1.2), display y is inverted
+  cases[0].dot=1.5*1.8+1.2*0.5;
+  cases[1].dot=1.5*(-1.2)+1.2*(-1.5);
+  cases[2].dot=1.5*(-1.5)+1.2*(-1.2);
+
+  // Draw right panel with three examples
+  const panelX=440;
+  txt(svg,panelX+180,30,'Dot Product Examples',{fill:C.heading,size:13,weight:600});
+
+  cases.forEach((c,i)=>{
+    const py=70+i*105;
+    box(svg,panelX,py,350,90,c.color+'10',c.color+'40',6);
+
+    // Mini coordinate system
+    const mx=panelX+60,my=py+50,ms=25;
+    svg.append('line').attr('x1',mx-ms*2).attr('y1',my).attr('x2',mx+ms*2).attr('y2',my)
+      .attr('stroke',C.border).attr('stroke-width',0.5);
+    svg.append('line').attr('x1',mx).attr('y1',my-ms*2).attr('x2',mx).attr('y2',my+ms*2)
+      .attr('stroke',C.border).attr('stroke-width',0.5);
+
+    // Vector a (same everywhere)
+    arrow(svg,svg,mx,my,mx+ax*ms,my+ay*ms,C.blue);
+    // Vector b
+    arrow(svg,svg,mx,my,mx+c.bx*ms,my+c.by*ms,c.color);
+
+    txt(svg,panelX+200,py+18,c.label,{fill:c.color,size:11,weight:600});
+    txt(svg,panelX+200,py+38,'b = ('+c.bx.toFixed(1)+', '+(c.by<0?'':'')+(-c.by).toFixed(1)+')',{fill:c.color,size:9,mono:true});
+    txt(svg,panelX+200,py+56,'a \u00B7 b = '+c.dot.toFixed(2),{fill:C.heading,size:12,weight:700,mono:true});
+    const sign=c.dot>0.01?'> 0 \u2713':c.dot<-0.01?'< 0':'= 0';
+    txt(svg,panelX+200,py+74,sign,{fill:c.color,size:10,weight:600});
+  });
+
+  // Projection explanation
+  txt(svg,210,H-15,'Projection of a onto b: (a\u00B7b)/|b| = length of a\'s shadow on b',{fill:C.muted,size:10});
+})();
+
+// ═══ MATRIX MULTIPLICATION ═══
+(function(){
+  const W=960,H=380;
+  const svg=d3.select('#fig-matrix-multiply').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  // 3x4 matrix times 4-dim vector = 3-dim vector
+  const mat=[[0.3,-0.5,0.8,0.1],[0.6,0.2,-0.4,0.7],[-0.1,0.9,0.3,-0.2]];
+  const vec=[1.0,0.5,-0.3,0.8];
+  const bias=[0.1,-0.2,0.05];
+  const result=mat.map((row,i)=>{
+    let s=0;row.forEach((w,j)=>s+=w*vec[j]);
+    return s+bias[i];
+  });
+
+  const cellW=55,cellH=35;
+  const matX=60,matY=80;
+
+  txt(svg,W/2,25,'y = Wx + b : Linear Layer (3\u00D74 matrix \u00D7 4-dim input \u2192 3-dim output)',{fill:C.heading,size:14,weight:600});
+
+  // Draw W matrix
+  txt(svg,matX+2*cellW,matY-15,'W (weights)',{fill:C.purple,size:11,weight:600});
+  const rowColors=[C.blue,C.green,C.orange];
+  mat.forEach((row,i)=>{
+    row.forEach((w,j)=>{
+      box(svg,matX+j*cellW,matY+i*cellH,cellW-2,cellH-2,rowColors[i]+'15',rowColors[i]+'40',3);
+      txt(svg,matX+j*cellW+cellW/2-1,matY+i*cellH+cellH/2+4,w.toFixed(1),{fill:rowColors[i],size:10,mono:true});
+    });
+  });
+
+  // Multiply sign
+  txt(svg,matX+4*cellW+15,matY+1.5*cellH,'\u00D7',{fill:C.heading,size:20,weight:700});
+
+  // Draw x vector
+  const vecX=matX+4*cellW+40;
+  txt(svg,vecX+cellW/2,matY-15,'x',{fill:C.heading,size:11,weight:600});
+  vec.forEach((v,j)=>{
+    box(svg,vecX,matY+j*cellH,cellW-2,cellH-2,C.text+'15',C.border,3);
+    txt(svg,vecX+cellW/2-1,matY+j*cellH+cellH/2+4,v.toFixed(1),{fill:C.heading,size:10,mono:true});
+  });
+
+  // Plus sign
+  txt(svg,vecX+cellW+15,matY+1.5*cellH,'+',{fill:C.heading,size:20,weight:700});
+
+  // Draw bias
+  const biasX=vecX+cellW+35;
+  txt(svg,biasX+cellW/2,matY-15,'b',{fill:C.heading,size:11,weight:600});
+  bias.forEach((b,i)=>{
+    box(svg,biasX,matY+i*cellH,cellW-2,cellH-2,C.muted+'20',C.border,3);
+    txt(svg,biasX+cellW/2-1,matY+i*cellH+cellH/2+4,b.toFixed(2),{fill:C.muted,size:10,mono:true});
+  });
+
+  // Equals sign
+  txt(svg,biasX+cellW+15,matY+1.5*cellH,'=',{fill:C.heading,size:20,weight:700});
+
+  // Draw result vector
+  const resX=biasX+cellW+35;
+  txt(svg,resX+cellW/2,matY-15,'y',{fill:C.heading,size:11,weight:600});
+  result.forEach((r,i)=>{
+    box(svg,resX,matY+i*cellH,cellW-2,cellH-2,rowColors[i]+'25',rowColors[i],3);
+    txt(svg,resX+cellW/2-1,matY+i*cellH+cellH/2+4,r.toFixed(2),{fill:rowColors[i],size:10,weight:600,mono:true});
+  });
+
+  // Detailed computation for row 0
+  const detY=matY+3*cellH+40;
+  txt(svg,W/2,detY,'How row 0 produces y\u2080:',{fill:C.heading,size:12,weight:600});
+
+  const compParts=mat[0].map((w,j)=>`${w.toFixed(1)}\u00D7${vec[j].toFixed(1)}`);
+  const prodParts=mat[0].map((w,j)=>(w*vec[j]).toFixed(2));
+  txt(svg,W/2,detY+22,compParts.join(' + ')+' + '+bias[0].toFixed(2),{fill:C.blue,size:10,mono:true});
+  txt(svg,W/2,detY+40,'= '+prodParts.join(' + ')+' + '+bias[0].toFixed(2)+' = '+result[0].toFixed(2),{fill:C.blue,size:10,mono:true});
+
+  // Key insight
+  box(svg,150,detY+60,W-300,40,C.surface2,C.border,6);
+  txt(svg,W/2,detY+75,'Each output y\u1D62 is a dot product: row i of W \u00B7 x + b\u1D62',{fill:C.text,size:11});
+  txt(svg,W/2,detY+92,'Each row is a "detector" \u2014 it fires strongly when x aligns with that row\'s pattern',{fill:C.muted,size:9});
+
+  txt(svg,W/2,H-8,'Parameters: 3\u00D74 weights + 3 biases = 15 learnable values. This is one layer.',{fill:C.muted,size:10});
+})();
+
+// ═══ COSINE SIMILARITY ═══
+(function(){
+  const W=820,H=440;
+  const svg=d3.select('#fig-cosine-similarity').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  const cx=200,cy=200,scale=100;
+
+  // Grid
+  for(let i=-2;i<=2;i++){
+    svg.append('line').attr('x1',cx+i*scale).attr('y1',cy-2*scale).attr('x2',cx+i*scale).attr('y2',cy+2*scale)
+      .attr('stroke',C.border).attr('stroke-width',0.5).attr('opacity',0.2);
+    svg.append('line').attr('x1',cx-2*scale).attr('y1',cy+i*scale).attr('x2',cx+2*scale).attr('y2',cy+i*scale)
+      .attr('stroke',C.border).attr('stroke-width',0.5).attr('opacity',0.2);
+  }
+
+  // Axes
+  svg.append('line').attr('x1',cx-2*scale).attr('y1',cy).attr('x2',cx+2*scale).attr('y2',cy)
+    .attr('stroke',C.border).attr('stroke-width',1);
+  svg.append('line').attr('x1',cx).attr('y1',cy-2*scale).attr('x2',cx).attr('y2',cy+2*scale)
+    .attr('stroke',C.border).attr('stroke-width',1);
+
+  // Unit circle (faint)
+  svg.append('circle').attr('cx',cx).attr('cy',cy).attr('r',scale)
+    .attr('fill','none').attr('stroke',C.border).attr('stroke-width',1).attr('stroke-dasharray','4,3');
+
+  // Vector a (fixed)
+  const aAngle=30*Math.PI/180;
+  const ax=Math.cos(aAngle),ay=-Math.sin(aAngle);
+  arrow(svg,svg,cx,cy,cx+ax*scale*1.5,cy+ay*scale*1.5,C.blue);
+  txt(svg,cx+ax*scale*1.5+10,cy+ay*scale*1.5-10,'a',{fill:C.blue,size:14,weight:700,anchor:'start'});
+
+  // Show multiple b vectors with different angles
+  const angles=[30,60,90,120,180];
+  const panelX=440;
+
+  txt(svg,panelX+180,25,'Cosine Similarity at Different Angles',{fill:C.heading,size:13,weight:600});
+
+  angles.forEach((deg,i)=>{
+    const rad=deg*Math.PI/180;
+    const bx=Math.cos(rad),by=-Math.sin(rad);
+    const cosSim=Math.cos((deg-30)*Math.PI/180);
+    const angleBetween=Math.abs(deg-30);
+
+    // Color based on similarity
+    let color;
+    if(cosSim>0.5)color=C.green;
+    else if(cosSim>-0.5)color=C.orange;
+    else color=C.red;
+
+    // Draw vector on left panel
+    const vLen=scale*(0.8+i*0.15);
+    arrow(svg,svg,cx,cy,cx+bx*vLen,cy+by*vLen,color);
+
+    // Draw arc for angle
+    if(i<4){
+      const arcR=30+i*8;
+      const startA=-aAngle;
+      const endA=-rad;
+      const sweepFlag=endA<startA?0:1;
+      svg.append('path')
+        .attr('d',`M${cx+arcR*Math.cos(startA)},${cy+arcR*Math.sin(startA)} A${arcR},${arcR} 0 0,${sweepFlag} ${cx+arcR*Math.cos(endA)},${cy+arcR*Math.sin(endA)}`)
+        .attr('stroke',color).attr('stroke-width',1).attr('fill','none').attr('opacity',0.5);
+    }
+
+    // Panel entry
+    const py=55+i*63;
+    box(svg,panelX,py,360,55,color+'10',color+'40',5);
+    txt(svg,panelX+15,py+18,'\u03B8 = '+angleBetween+'\u00B0',{fill:color,size:11,weight:600,anchor:'start'});
+    txt(svg,panelX+15,py+38,'cos(\u03B8) = '+cosSim.toFixed(3),{fill:color,size:11,weight:600,anchor:'start',mono:true});
+
+    const meaning=cosSim>0.99?'identical':cosSim>0.5?'similar':cosSim>-0.01?'orthogonal':cosSim>-0.5?'dissimilar':'opposite';
+    txt(svg,panelX+345,py+28,meaning,{fill:color,size:10,weight:500,anchor:'end'});
+  });
+
+  // Bottom note
+  box(svg,120,H-45,580,35,C.surface2,C.border,6);
+  txt(svg,W/2,H-23,'Cosine similarity ignores magnitude \u2014 only direction matters. L2-normalized vectors: cos = dot product.',{fill:C.text,size:10});
+})();
+
+// ═══ EMA ═══
+(function(){
+  const W=820,H=380;
+  const svg=d3.select('#fig-ema').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  const N=60;
+  const seed=42;
+  // Generate noisy signal
+  const signal=[];
+  let v=5;
+  for(let i=0;i<N;i++){
+    v+=Math.sin(i*0.15)*0.3+(Math.sin(seed+i*3.7)*2-1)*0.8;
+    signal.push(v);
+  }
+
+  function computeEMA(data,alpha){
+    const ema=[data[0]];
+    for(let i=1;i<data.length;i++){
+      ema.push(alpha*data[i]+(1-alpha)*ema[i-1]);
+    }
+    return ema;
+  }
+
+  const chartX=80,chartY=40,chartW=660,chartH=220;
+  const minV=Math.min(...signal)-1,maxV=Math.max(...signal)+1;
+
+  function toX(i){return chartX+i/(N-1)*chartW;}
+  function toY(v){return chartY+chartH-(v-minV)/(maxV-minV)*chartH;}
+
+  // Axes
+  svg.append('line').attr('x1',chartX).attr('y1',chartY+chartH).attr('x2',chartX+chartW).attr('y2',chartY+chartH)
+    .attr('stroke',C.border).attr('stroke-width',1);
+  svg.append('line').attr('x1',chartX).attr('y1',chartY).attr('x2',chartX).attr('y2',chartY+chartH)
+    .attr('stroke',C.border).attr('stroke-width',1);
+  txt(svg,chartX-10,chartY+chartH/2,'value',{fill:C.muted,size:9,anchor:'end'});
+  txt(svg,chartX+chartW/2,chartY+chartH+20,'time step',{fill:C.muted,size:9});
+
+  // Raw signal
+  let rawPath='M'+toX(0)+','+toY(signal[0]);
+  for(let i=1;i<N;i++)rawPath+=' L'+toX(i)+','+toY(signal[i]);
+  svg.append('path').attr('d',rawPath).attr('stroke',C.muted).attr('stroke-width',1).attr('fill','none').attr('opacity',0.5);
+  txt(svg,chartX+chartW+10,toY(signal[N-1]),'raw',{fill:C.muted,size:9,anchor:'start'});
+
+  // Three EMA curves
+  const alphas=[{a:0.3,color:C.red,label:'\u03B1=0.3 (reactive)'},{a:0.1,color:C.orange,label:'\u03B1=0.1 (balanced)'},{a:0.02,color:C.green,label:'\u03B1=0.02 (smooth)'}];
+  alphas.forEach(({a,color,label})=>{
+    const ema=computeEMA(signal,a);
+    let path='M'+toX(0)+','+toY(ema[0]);
+    for(let i=1;i<N;i++)path+=' L'+toX(i)+','+toY(ema[i]);
+    svg.append('path').attr('d',path).attr('stroke',color).attr('stroke-width',2).attr('fill','none');
+    txt(svg,chartX+chartW+10,toY(ema[N-1]),label,{fill:color,size:8,anchor:'start'});
+  });
+
+  txt(svg,W/2,20,'EMA\u209C = \u03B1 \u00B7 x\u209C + (1\u2212\u03B1) \u00B7 EMA\u209C\u208B\u2081',{fill:C.heading,size:13,weight:600});
+
+  // Use cases
+  const usY=chartY+chartH+45;
+  const uses=[
+    {title:'Target Networks',desc:'\u03C4=0.005',color:C.blue,x:80},
+    {title:'Grokfast',desc:'\u03B1=0.98',color:C.purple,x:280},
+    {title:'Adam \u03B2\u2081',desc:'\u03B2\u2081=0.9',color:C.orange,x:480},
+    {title:'Adam \u03B2\u2082',desc:'\u03B2\u2082=0.999',color:C.green,x:680},
+  ];
+  uses.forEach(u=>{
+    box(svg,u.x,usY,150,40,u.color+'15',u.color,5);
+    txt(svg,u.x+75,usY+15,u.title,{fill:u.color,size:10,weight:600});
+    txt(svg,u.x+75,usY+30,u.desc,{fill:C.muted,size:9,mono:true});
+  });
+
+  txt(svg,W/2,H-8,'Small \u03B1 = heavy smoothing (slow response). Large \u03B1 = light smoothing (tracks signal closely).',{fill:C.muted,size:10});
+})();
+
+// ═══ Iframe isolation: show only targeted concept when embedded ═══
+(function(){
+  const isIframe = window.self !== window.top;
+  if (!isIframe) return;
+
+  const hash = window.location.hash.replace('#','');
+  if (!hash) return;
+
+  // Lock page — no scrolling, no extra content
+  document.body.style.overflow = 'hidden';
+  document.documentElement.style.overflow = 'hidden';
+
+  const article = document.querySelector('.article');
+  article.style.padding = '0.8rem 1rem 0';
+  article.style.maxWidth = '100%';
+
+  // Remove everything except the targeted section
+  const hdr = document.querySelector('header'); if (hdr) hdr.remove();
+  document.querySelector('.toc').remove();
+  document.querySelectorAll('hr').forEach(hr => hr.remove());
+
+  document.querySelectorAll('section').forEach(s => {
+    if (s.id === hash) {
+      s.style.marginTop = '0';
+      s.style.paddingTop = '0';
+      // Shrink the h3 a bit for popup context
+      const h3 = s.querySelector('h3');
+      if (h3) { h3.style.fontSize = '1.1rem'; h3.style.marginBottom = '0.3rem'; }
+      // Tighten paragraph spacing
+      s.querySelectorAll('p').forEach(p => { p.style.marginBottom = '0.4rem'; p.style.fontSize = '14px'; });
+    } else {
+      s.remove();
+    }
+  });
+})();
+</script>
+</body>
+</html>

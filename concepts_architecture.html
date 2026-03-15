@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ML Concepts: Visual Explanations</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --surface: #13161d;
+  --surface2: #1c2029;
+  --surface3: #252a36;
+  --border: #2a2f3e;
+  --border-bright: #3d4459;
+  --text: #b8c0cc;
+  --text-muted: #6b7280;
+  --heading: #e2e8f0;
+  --accent: #60a5fa;
+  --accent-dim: #2563eb;
+  --purple: #a78bfa;
+  --purple-dim: #7c3aed;
+  --green: #34d399;
+  --green-dim: #059669;
+  --red: #f87171;
+  --red-dim: #dc2626;
+  --orange: #fbbf24;
+  --orange-dim: #d97706;
+  --cyan: #22d3ee;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.78;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 3rem 1rem 6rem;
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+  margin-bottom: 0.6rem;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  font-size: 1rem;
+  color: var(--text-muted);
+  margin-bottom: 2rem;
+  line-height: 1.65;
+}
+
+nav.toc {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.2rem 1.6rem;
+  margin-bottom: 3rem;
+}
+
+nav.toc .toc-title {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.6rem;
+}
+
+nav.toc ul {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.5rem;
+}
+
+nav.toc a {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.92rem;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+nav.toc a:hover { border-bottom-color: var(--accent); }
+
+section {
+  margin-bottom: 4rem;
+  padding-top: 1rem;
+}
+
+h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--heading);
+  margin-bottom: 0.6rem;
+  letter-spacing: -0.02em;
+}
+
+.concept-desc {
+  font-size: 1.05rem;
+  margin-bottom: 1.4rem;
+  max-width: 750px;
+}
+
+.formula-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.8rem 1.2rem;
+  margin-bottom: 1.5rem;
+  display: inline-block;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.95rem;
+  color: var(--heading);
+}
+
+.formula-box .var { color: var(--accent); }
+.formula-box .op { color: var(--text-muted); }
+.formula-box .func { color: var(--purple); }
+.formula-box .num { color: var(--green); }
+
+.fig-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 2rem;
+  overflow-x: auto;
+}
+.fig-container svg { display: block; margin: 0 auto; }
+
+svg text { font-family: 'DM Sans', sans-serif; }
+svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
+
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0 0 3rem;
+}
+
+.back-link {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  display: inline-block;
+  margin-bottom: 1.5rem;
+}
+.back-link:hover { color: var(--accent); }
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+.slider-row input[type="range"] {
+  width: 200px;
+  accent-color: var(--accent);
+}
+.slider-row .val {
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--heading);
+  font-size: 0.85rem;
+  min-width: 3em;
+}
+
+@media (max-width: 720px) {
+  .article { padding: 2rem 0.75rem 4rem; }
+  h1 { font-size: 1.7rem; }
+  .fig-container { padding: 1rem; }
+  nav.toc ul { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+<div class="article">
+
+<a href="concepts.html" class="back-link">&larr; Back to concept map</a>
+
+<h1>Architecture Building Blocks</h1>
+<p class="subtitle">Tokenization, residual connections, autoencoders, and latent spaces.</p>
+
+<nav class="toc">
+  <div class="toc-title">On this page</div>
+  <ul>
+    <li><a href="#tokenization">Tokenization</a></li>
+    <li><a href="#residual-connections">Residual Connections</a></li>
+    <li><a href="#autoencoder">Autoencoder</a></li>
+    <li><a href="#latent-spaces">Latent Spaces</a></li>
+  </ul>
+</nav>
+
+<section id="tokenization">
+<h2>Tokenization</h2>
+<p class="concept-desc"><strong>Tokenization</strong> converts raw text (or DSL code) into a sequence of integer IDs that a neural network can process. Each unique token (word, number, symbol) maps to an ID, and that ID indexes into a learnable <strong>embedding table</strong> &mdash; a lookup table of vectors.</p>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Token</strong> &mdash; The smallest unit the model sees. Could be a word, subword, number, or symbol.</li>
+  <li><strong>Vocabulary</strong> &mdash; The set of all known tokens. Our ability DSL has a 252-token vocabulary.</li>
+  <li><strong>Token ID</strong> &mdash; Integer index into the vocabulary. &ldquo;damage&rdquo; &rarr; 42, &ldquo;circle&rdquo; &rarr; 87, etc.</li>
+  <li><strong>Embedding table</strong> &mdash; A matrix of shape [vocab_size &times; d_model]. Row <em>i</em> is the learnable vector for token <em>i</em>.</li>
+  <li><strong>[CLS] token</strong> &mdash; Special token prepended to the sequence. Its output embedding becomes a summary of the entire input.</li>
+  <li><strong>[MASK] token</strong> &mdash; Used in masked language modeling. Replaces a token during training; the model must predict the original.</li>
+  <li><strong>Padding</strong> &mdash; Sequences have different lengths. Shorter ones are padded with a special [PAD] token so batches are rectangular.</li>
+</ul>
+
+<div class="fig-container" id="fig-tokenization"></div>
+</section>
+
+<hr>
+
+
+<section id="residual-connections">
+<h2>Residual Connections</h2>
+<p class="concept-desc">A <strong>residual connection</strong> (skip connection) adds the input of a layer directly to its output: y = f(x) + x. This simple trick makes deep networks trainable. Without it, gradients vanish through many layers and the network can't learn. With it, the network only needs to learn the <em>difference</em> (residual) from the input.</p>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Skip connection</strong> &mdash; Another name for residual connection. The input &ldquo;skips&rdquo; over the layer and is added to the output.</li>
+  <li><strong>Residual</strong> &mdash; The difference f(x) = y &minus; x. The layer learns &ldquo;what to change&rdquo; rather than &ldquo;the complete answer.&rdquo;</li>
+  <li><strong>Identity shortcut</strong> &mdash; The skip path passes x unchanged. If the layer learns f(x)=0, the output is just x &mdash; the layer is a no-op. This is easier than learning the identity function from scratch.</li>
+  <li><strong>Gradient highway</strong> &mdash; Gradients flow directly through the skip connection, bypassing the layer. This prevents vanishing gradients in deep networks.</li>
+  <li><strong>Pre-norm residual</strong> &mdash; LayerNorm(x) &rarr; layer &rarr; + x. Used in modern transformers (including ours).</li>
+</ul>
+
+<div class="fig-container" id="fig-residual"></div>
+</section>
+
+<hr>
+
+
+<section id="autoencoder">
+<h2>Autoencoder</h2>
+<p class="concept-desc">An <strong>autoencoder</strong> is a neural network trained to reproduce its own input. It consists of an encoder that compresses the input to a small <strong>bottleneck</strong> (the latent space), and a decoder that reconstructs from it. The bottleneck forces the network to learn the most important features, discarding noise.</p>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Bottleneck</strong> &mdash; The narrow middle layer. If the input is 80-dim and the bottleneck is 32-dim, the network must compress 80 numbers into 32.</li>
+  <li><strong>Reconstruction</strong> &mdash; The decoder's output. A good autoencoder's reconstruction closely matches the original input.</li>
+  <li><strong>Representation learning</strong> &mdash; The bottleneck representation is often more useful than the raw input. It captures structure, not noise.</li>
+  <li><strong>Variational Autoencoder (VAE)</strong> &mdash; The bottleneck is a probability distribution, not a fixed vector. Enables generation of new data by sampling.</li>
+  <li><strong>Denoising Autoencoder</strong> &mdash; Add noise to the input, train the network to reconstruct the clean version. Forces robust features.</li>
+</ul>
+
+<div class="fig-container" id="fig-autoencoder"></div>
+</section>
+
+<hr>
+
+
+<section id="latent-spaces">
+<h2>Latent Spaces</h2>
+<p class="concept-desc">A <strong>latent space</strong> is a compressed, learned representation of data. An encoder maps high-dimensional inputs (like an ability's 80 raw properties) into a low-dimensional <strong>embedding</strong> (like a 32-dim vector). Similar inputs cluster together in this space &mdash; not because we told them to, but because the network learns that similarity is useful for downstream tasks.</p>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Embedding</strong> &mdash; A point in latent space. Each ability, entity, or token gets mapped to a dense vector.</li>
+  <li><strong>Encoder</strong> &mdash; The network that compresses inputs into the latent space (high-dim &rarr; low-dim).</li>
+  <li><strong>Decoder</strong> &mdash; Reconstructs the original from the embedding (low-dim &rarr; high-dim). Used during training to ensure the embedding preserves information.</li>
+  <li><strong>Manifold</strong> &mdash; The geometric surface in latent space where valid data lives. Real data doesn't fill the whole space &mdash; it lies on a lower-dimensional manifold.</li>
+  <li><strong>Reconstruction loss</strong> &mdash; MSE between the decoder's output and the original input. Forces the bottleneck to retain useful information.</li>
+  <li><strong>Contrastive loss</strong> &mdash; Pulls same-category embeddings together and pushes different categories apart.</li>
+</ul>
+
+<div class="fig-container" id="fig-latent-space"></div>
+
+<div class="slider-row" style="margin-top: 1rem;">
+  <span style="font-family:'DM Sans',sans-serif;font-size:0.85rem;color:var(--text-muted);">Bottleneck dimension:</span>
+  <input type="range" id="latent-dim-slider" min="2" max="64" step="1" value="32">
+  <span class="val" id="latent-dim-val">32</span>
+</div>
+</section>
+
+</div>
+
+<script>
+const C = {
+  bg:'#13161d', surface:'#1c2029', surface2:'#252a36', surface3:'#252a36',
+  border:'#2a2f3e', borderBright:'#3d4459',
+  text:'#b8c0cc', muted:'#6b7280', heading:'#e2e8f0',
+  blue:'#60a5fa', blueDim:'#2563eb', blueFaint:'rgba(96,165,250,0.08)',
+  purple:'#a78bfa', purpleDim:'#7c3aed', purpleFaint:'rgba(167,139,250,0.08)',
+  green:'#34d399', greenDim:'#059669',
+  red:'#f87171', redDim:'#dc2626',
+  orange:'#fbbf24', orangeDim:'#d97706',
+  cyan:'#22d3ee',
+};
+
+function box(g,x,y,w,h,fill,stroke,rx=6){return g.append('rect').attr('x',x).attr('y',y).attr('width',w).attr('height',h).attr('rx',rx).attr('fill',fill).attr('stroke',stroke).attr('stroke-width',1)}
+function txt(g,x,y,t,o={}){const e=g.append('text').attr('x',x).attr('y',y).text(t).attr('text-anchor',o.anchor||'middle').attr('fill',o.fill||C.text).attr('font-size',o.size||12).attr('font-weight',o.weight||400);if(o.mono)e.attr('class','label-mono');return e}
+function addArrow(svg,color){const id='a-'+color.replace(/[^a-z0-9]/gi,'');if(svg.select('#'+id).empty()){svg.append('defs').append('marker').attr('id',id).attr('viewBox','0 0 10 8').attr('refX',9).attr('refY',4).attr('markerWidth',8).attr('markerHeight',6).attr('orient','auto-start-reverse').append('path').attr('d','M0,0 L10,4 L0,8 Z').attr('fill',color)}return id}
+function arrow(g,svg,x1,y1,x2,y2,color=C.muted){const id=addArrow(svg,color);g.append('line').attr('x1',x1).attr('y1',y1).attr('x2',x2).attr('y2',y2).attr('stroke',color).attr('stroke-width',1.5).attr('marker-end','url(#'+id+')')}
+function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);const p=g.append('path').attr('d',d).attr('stroke',color).attr('stroke-width',1.5).attr('fill','none').attr('marker-end','url(#'+id+')');if(dash)p.attr('stroke-dasharray',dash);return p}
+
+// ═══ TOKENIZATION ═══
+(function(){
+  const W=960,H=350;
+  const svg=d3.select('#fig-tokenization').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  // Raw DSL text
+  txt(svg,W/2,20,'Ability DSL \u2192 Token IDs \u2192 Embedding Vectors',{fill:C.heading,size:13,weight:600});
+
+  // Step 1: Raw text
+  const rawY=45;
+  box(svg,30,rawY,900,35,C.surface,C.border,5);
+  txt(svg,W/2,rawY+22,'dmg 55 target enemy in circle ( 3 ) cd 120',{fill:C.text,size:13,mono:true});
+
+  // Arrow
+  arrow(svg,svg,W/2,rawY+35,W/2,rawY+50,C.accent);
+  txt(svg,W/2+50,rawY+48,'tokenize',{fill:C.accent,size:9,weight:600});
+
+  // Step 2: Token IDs
+  const tokens=[
+    {t:'[CLS]',id:0,col:C.blue},
+    {t:'dmg',id:14,col:C.text},
+    {t:'55',id:67,col:C.green},
+    {t:'target',id:8,col:C.text},
+    {t:'enemy',id:22,col:C.red},
+    {t:'in',id:5,col:C.text},
+    {t:'circle',id:31,col:C.orange},
+    {t:'(',id:3,col:C.muted},
+    {t:'3',id:42,col:C.green},
+    {t:')',id:4,col:C.muted},
+    {t:'cd',id:11,col:C.text},
+    {t:'120',id:89,col:C.green},
+  ];
+
+  const tokY=rawY+60,tokW=65,tokH=55,tokGap=5;
+  const tokStartX=(W-tokens.length*(tokW+tokGap)+tokGap)/2;
+
+  tokens.forEach((tok,i)=>{
+    const x=tokStartX+i*(tokW+tokGap);
+    box(svg,x,tokY,tokW,tokH,tok.t==='[CLS]'?C.blueDim+'20':C.surface2,tok.col+'60',4);
+    txt(svg,x+tokW/2,tokY+18,tok.t,{fill:tok.col,size:tok.t.length>4?8:10,weight:600,mono:true});
+    txt(svg,x+tokW/2,tokY+35,'ID: '+tok.id,{fill:C.muted,size:8,mono:true});
+    txt(svg,x+tokW/2,tokY+48,'\u2193',{fill:C.muted,size:10});
+  });
+
+  // Step 3: Embedding lookup
+  const embY=tokY+tokH+15;
+  arrow(svg,svg,W/2,tokY+tokH,W/2,embY-2,C.accent);
+
+  // Embedding table on the left
+  const etX=30,etY=embY+10;
+  box(svg,etX,etY,120,100,C.surface,C.purpleDim,6);
+  txt(svg,etX+60,etY+18,'Embedding',{fill:C.purple,size:10,weight:600});
+  txt(svg,etX+60,etY+34,'Table',{fill:C.purple,size:10,weight:600});
+  txt(svg,etX+60,etY+52,'252 \u00d7 128',{fill:C.muted,size:9,mono:true});
+  txt(svg,etX+60,etY+66,'(vocab \u00d7 d_model)',{fill:C.muted,size:7});
+  txt(svg,etX+60,etY+82,'row[ID] \u2192 vector',{fill:C.muted,size:8,mono:true});
+
+  // Embedding vectors for each token
+  tokens.forEach((tok,i)=>{
+    const x=tokStartX+i*(tokW+tokGap);
+    box(svg,x,embY,tokW,40,C.purpleDim+'15',C.purple+'40',3);
+    // Show mini vector
+    txt(svg,x+tokW/2,embY+15,'128d vector',{fill:C.purple,size:7,mono:true});
+    txt(svg,x+tokW/2,embY+30,'[0.2, -0.1, ...]',{fill:C.muted,size:6,mono:true});
+  });
+
+  // Arrow from table to vectors
+  arrow(svg,svg,etX+120,etY+50,tokStartX-5,embY+20,C.purple);
+
+  // Bottom: goes into transformer
+  const btY=embY+55;
+  arrow(svg,svg,W/2,embY+40,W/2,btY+5,C.accent);
+  box(svg,(W-300)/2,btY+5,300,30,C.surface,C.accent+'60',5);
+  txt(svg,W/2,btY+24,'\u2192 feeds into Transformer Encoder \u2192',{fill:C.accent,size:10,weight:600});
+})();
+
+// ═══ RESIDUAL CONNECTIONS ═══
+(function(){
+  const W=820,H=420;
+  const svg=d3.select('#fig-residual').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  // Left: without residual
+  const lx=40,ly=30,pw=340,ph=280;
+  box(svg,lx,ly,pw,ph,C.surface,C.border,8);
+  txt(svg,lx+pw/2,ly+20,'Without Residual',{fill:C.heading,size:12,weight:600});
+
+  // Stack of layers
+  const layH=40,layGap=15,layStartY=ly+45;
+  const layW=200,layX=lx+(pw-layW)/2;
+
+  for(let i=0;i<4;i++){
+    const y=layStartY+i*(layH+layGap);
+    box(svg,layX,y,layW,layH,C.surface2,C.purpleDim,5);
+    txt(svg,layX+layW/2,y+15,'Layer '+(i+1),{fill:C.purple,size:10,weight:500});
+    txt(svg,layX+layW/2,y+30,'Wx + b \u2192 ReLU',{fill:C.muted,size:8,mono:true});
+    if(i<3) arrow(svg,svg,layX+layW/2,y+layH,layX+layW/2,y+layH+layGap-2,C.muted);
+  }
+
+  // Gradient flow annotation
+  const gradY=layStartY+4*(layH+layGap)+5;
+  txt(svg,lx+pw/2,gradY+5,'Gradient must flow through',{fill:C.red,size:9,weight:500});
+  txt(svg,lx+pw/2,gradY+20,'every layer \u2192 vanishes!',{fill:C.red,size:9,weight:500});
+
+  // Gradient bars
+  const gbY=gradY+30,gbW=pw-40;
+  for(let i=0;i<4;i++){
+    const bw=gbW*Math.pow(0.4,i);
+    svg.append('rect').attr('x',lx+20).attr('y',gbY+i*14).attr('width',bw).attr('height',10).attr('rx',2)
+      .attr('fill',C.red).attr('opacity',0.3+0.15*i);
+    txt(svg,lx+20+bw+5,gbY+i*14+8,'Layer '+(4-i)+': '+(Math.pow(0.4,i)*100).toFixed(0)+'%',{fill:C.muted,size:7,mono:true,anchor:'start'});
+  }
+
+  // Right: with residual
+  const rx=lx+pw+60;
+  box(svg,rx,ly,pw,ph,C.surface,C.greenDim+'30',8);
+  txt(svg,rx+pw/2,ly+20,'With Residual Connection',{fill:C.heading,size:12,weight:600});
+
+  const rLayX=rx+(pw-layW)/2;
+
+  for(let i=0;i<4;i++){
+    const y=layStartY+i*(layH+layGap);
+    box(svg,rLayX,y,layW,layH,C.surface2,C.purpleDim,5);
+    txt(svg,rLayX+layW/2,y+15,'Layer '+(i+1),{fill:C.purple,size:10,weight:500});
+    txt(svg,rLayX+layW/2,y+30,'Wx + b \u2192 ReLU',{fill:C.muted,size:8,mono:true});
+
+    if(i<3){
+      arrow(svg,svg,rLayX+layW/2,y+layH,rLayX+layW/2,y+layH+layGap-2,C.muted);
+    }
+
+    // Skip connection (curved arc on the right side)
+    if(i<3){
+      const y1=y+layH/2;
+      const y2=y+layH+layGap+layH/2;
+      const skipX=rLayX+layW+25;
+      pathArrow(svg,svg,`M${rLayX+layW},${y1} Q${skipX},${(y1+y2)/2} ${rLayX+layW},${y2}`,C.green);
+      // Plus sign at the merge point
+      svg.append('circle').attr('cx',rLayX+layW+3).attr('cy',y2).attr('r',7).attr('fill',C.surface).attr('stroke',C.green).attr('stroke-width',1.5);
+      txt(svg,rLayX+layW+3,y2+4,'+',{fill:C.green,size:10,weight:700});
+    }
+  }
+
+  // Gradient flow annotation
+  txt(svg,rx+pw/2,gradY+5,'Gradient flows through skip',{fill:C.green,size:9,weight:500});
+  txt(svg,rx+pw/2,gradY+20,'connections \u2192 stays strong!',{fill:C.green,size:9,weight:500});
+
+  // Gradient bars
+  for(let i=0;i<4;i++){
+    const bw=gbW*Math.max(0.7,1-i*0.08);
+    svg.append('rect').attr('x',rx+20).attr('y',gbY+i*14).attr('width',bw).attr('height',10).attr('rx',2)
+      .attr('fill',C.green).attr('opacity',0.3+0.1*i);
+    txt(svg,rx+20+bw+5,gbY+i*14+8,'Layer '+(4-i)+': '+(Math.max(70,100-i*8)).toFixed(0)+'%',{fill:C.muted,size:7,mono:true,anchor:'start'});
+  }
+
+  // Formula at bottom
+  box(svg,(W-500)/2,H-35,500,28,C.surface2,C.border,5);
+  txt(svg,W/2,H-17,'y = f(x) + x     \u2192     layer only learns the residual f(x) = y \u2212 x',{fill:C.heading,size:10,weight:500,mono:true});
+})();
+
+// ═══ AUTOENCODER ═══
+(function(){
+  const W=820,H=320;
+  const svg=d3.select('#fig-autoencoder').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  txt(svg,W/2,20,'Autoencoder: Compress \u2192 Bottleneck \u2192 Reconstruct',{fill:C.heading,size:13,weight:600});
+
+  // Hourglass shape showing dimension reduction
+  const dims=[80,64,32,64,80];
+  const labels=['Input\n80d','Encode\n64d','Bottleneck\n32d','Decode\n64d','Output\n80d'];
+  const colors=[C.cyan,C.purple,C.orange,C.green,C.cyan];
+  const isEncoder=[true,true,false,false,false];
+  const centerY=170;
+  const maxH=200,minH=60;
+  const colW=100,colGap=35;
+  const startX2=(W-dims.length*(colW+colGap)+colGap)/2;
+
+  dims.forEach((d,i)=>{
+    const x=startX2+i*(colW+colGap);
+    const h=minH+(d/80)*(maxH-minH);
+    const y=centerY-h/2;
+
+    box(svg,x,y,colW,h,colors[i]+'15',colors[i],6);
+    const parts=labels[i].split('\n');
+    txt(svg,x+colW/2,centerY-5,parts[0],{fill:colors[i],size:11,weight:600});
+    txt(svg,x+colW/2,centerY+12,parts[1],{fill:C.muted,size:9,mono:true});
+
+    // Arrow between columns
+    if(i<dims.length-1){
+      arrow(svg,svg,x+colW+3,centerY,x+colW+colGap-5,centerY,i<2?C.purple:C.green);
+    }
+  });
+
+  // Encoder/Decoder labels
+  const encSpan=startX2+2*(colW+colGap);
+  box(svg,startX2,centerY+maxH/2+15,encSpan-startX2-colGap/2,25,C.purpleDim+'20',C.purple+'40',4);
+  txt(svg,(startX2+encSpan-colGap/2)/2,centerY+maxH/2+31,'Encoder (compress)',{fill:C.purple,size:10,weight:600});
+
+  const decStart=startX2+2*(colW+colGap)+colW+colGap/2;
+  const decEnd=startX2+4*(colW+colGap)+colW;
+  box(svg,decStart,centerY+maxH/2+15,decEnd-decStart,25,C.greenDim+'20',C.green+'40',4);
+  txt(svg,(decStart+decEnd)/2,centerY+maxH/2+31,'Decoder (reconstruct)',{fill:C.green,size:10,weight:600});
+
+  // Bottleneck annotation
+  const bnX=startX2+2*(colW+colGap)+colW/2;
+  txt(svg,bnX,centerY-minH/2-15,'Information bottleneck',{fill:C.orange,size:10,weight:600});
+  txt(svg,bnX,centerY-minH/2-3,'forces compression',{fill:C.muted,size:9});
+
+  // Loss annotation
+  box(svg,(W-350)/2,H-40,350,32,C.surface2,C.border,5);
+  txt(svg,W/2,H-20,'Loss = MSE(input, output)  \u2192  force bottleneck to preserve information',{fill:C.heading,size:10,weight:500,mono:true});
+})();
+
+// ═══ LATENT SPACES ═══
+(function(){
+  const W=960,H=450;
+  const svg=d3.select('#fig-latent-space').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  // Left panel: high-dimensional input
+  const lx=20,ly=20;
+  box(svg,lx,ly,200,400,C.surface,C.border,10);
+  txt(svg,lx+100,ly+22,'High-Dimensional Input',{fill:C.heading,size:12,weight:600});
+  txt(svg,lx+100,ly+40,'(80 ability properties)',{fill:C.muted,size:10});
+
+  // Show some example properties as bars
+  const props=[
+    {name:'damage',val:0.7,col:C.red},
+    {name:'range',val:0.4,col:C.orange},
+    {name:'cd',val:0.85,col:C.blue},
+    {name:'aoe_radius',val:0.3,col:C.green},
+    {name:'heal',val:0.0,col:C.green},
+    {name:'stun_dur',val:0.6,col:C.purple},
+    {name:'mana_cost',val:0.5,col:C.cyan},
+    {name:'cast_time',val:0.2,col:C.orange},
+    {name:'dot_tick',val:0.0,col:C.red},
+    {name:'knockback',val:0.0,col:C.purple},
+    {name:'shield',val:0.0,col:C.blue},
+    {name:'proj_speed',val:0.9,col:C.cyan},
+  ];
+  const barW=80,barH=16,barGap=6;
+  const barX=lx+80,barStartY=ly+58;
+  props.forEach((p,i)=>{
+    const y=barStartY+i*(barH+barGap);
+    txt(svg,barX-4,y+12,p.name,{fill:C.muted,size:8,anchor:'end',mono:true});
+    svg.append('rect').attr('x',barX).attr('y',y).attr('width',barW).attr('height',barH).attr('rx',3).attr('fill',C.surface2).attr('stroke',C.border);
+    svg.append('rect').attr('x',barX).attr('y',y).attr('width',barW*p.val).attr('height',barH).attr('rx',3).attr('fill',p.col).attr('opacity',0.5);
+    txt(svg,barX+barW+6,y+12,p.val.toFixed(1),{fill:p.col,size:8,mono:true,anchor:'start'});
+  });
+  txt(svg,lx+100,barStartY+props.length*(barH+barGap)+8,'... +68 more dims',{fill:C.muted,size:9});
+
+  // Encoder arrow
+  const encX=230,encY=ly+170;
+  const encW=80,encH=60;
+  arrow(svg,svg,lx+200,ly+200,encX+5,ly+200,C.purple);
+  box(svg,encX+5,encY,encW,encH,C.purpleDim+'30',C.purple,6);
+  txt(svg,encX+encW/2+5,encY+20,'Encoder',{fill:C.purple,size:11,weight:600});
+  txt(svg,encX+encW/2+5,encY+36,'80→64→32',{fill:C.muted,size:8,mono:true});
+  txt(svg,encX+encW/2+5,encY+48,'+ L2 norm',{fill:C.muted,size:8,mono:true});
+
+  // Center panel: latent space (2D projection)
+  const cx=340,cy=20;
+  const lsW=260,lsH=280;
+  box(svg,cx,cy,lsW,lsH,C.surface,C.border,10);
+  txt(svg,cx+lsW/2,cy+20,'Latent Space (32d → 2D t-SNE)',{fill:C.heading,size:12,weight:600});
+
+  arrow(svg,svg,encX+encW+5,ly+200,cx-2,cy+lsH/2,C.purple);
+
+  // Generate clustered points for different ability categories
+  const categories=[
+    {name:'Damage',color:C.red,cx:0.3,cy:0.3,n:12},
+    {name:'Heal',color:C.green,cx:0.7,cy:0.25,n:8},
+    {name:'CC',color:C.purple,cx:0.35,cy:0.7,n:10},
+    {name:'Shield',color:C.blue,cx:0.7,cy:0.65,n:7},
+    {name:'Buff',color:C.orange,cx:0.55,cy:0.5,n:6},
+  ];
+
+  // Pseudo-random seeded scatter
+  let seed=42;
+  function prand(){seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff;}
+
+  const ptR=4;
+  const plotX=cx+20,plotY=cy+35,plotW=lsW-40,plotH=lsH-60;
+  const allPts=[];
+  categories.forEach(cat=>{
+    for(let i=0;i<cat.n;i++){
+      const angle=prand()*Math.PI*2;
+      const r=prand()*0.12+0.02;
+      const px=cat.cx+Math.cos(angle)*r;
+      const py=cat.cy+Math.sin(angle)*r;
+      const sx=plotX+px*plotW;
+      const sy=plotY+py*plotH;
+      allPts.push({x:sx,y:sy,color:cat.color,cat:cat.name});
+      svg.append('circle').attr('cx',sx).attr('cy',sy).attr('r',ptR)
+        .attr('fill',cat.color).attr('opacity',0.6).attr('stroke',cat.color).attr('stroke-width',0.5);
+    }
+  });
+
+  // Legend inside latent space panel
+  const legY=cy+lsH-70;
+  categories.forEach((cat,i)=>{
+    const lx2=cx+20+i*48;
+    svg.append('circle').attr('cx',lx2).attr('cy',legY).attr('r',4).attr('fill',cat.color);
+    txt(svg,lx2+8,legY+4,cat.name,{fill:cat.color,size:7,weight:500,anchor:'start'});
+  });
+
+  txt(svg,cx+lsW/2,cy+lsH-15,'Similar abilities cluster together automatically',{fill:C.muted,size:9});
+
+  // Decoder arrow + box
+  const decX=cx+lsW+10,decY=ly+170;
+  arrow(svg,svg,cx+lsW,cy+lsH/2,decX+5,ly+200,C.green);
+  box(svg,decX+5,decY,80,60,C.greenDim+'30',C.green,6);
+  txt(svg,decX+45,decY+20,'Decoder',{fill:C.green,size:11,weight:600});
+  txt(svg,decX+45,decY+36,'32→64→80',{fill:C.muted,size:8,mono:true});
+  txt(svg,decX+45,decY+48,'reconstruct',{fill:C.muted,size:8,mono:true});
+
+  // Right panel: reconstructed output
+  const rx2=decX+95,ry2=ly;
+  box(svg,rx2,ry2,240,200,C.surface,C.border,10);
+  txt(svg,rx2+120,ry2+22,'Reconstructed Output',{fill:C.heading,size:11,weight:600});
+  arrow(svg,svg,decX+85,ly+200,rx2-2,ry2+100,C.green);
+
+  const reconProps=props.slice(0,6);
+  reconProps.forEach((p,i)=>{
+    const y=ry2+42+i*(barH+barGap);
+    const noisyVal=Math.min(1,Math.max(0,p.val+(prand()-0.5)*0.06));
+    txt(svg,rx2+80,y+12,p.name,{fill:C.muted,size:8,anchor:'end',mono:true});
+    svg.append('rect').attr('x',rx2+84).attr('y',y).attr('width',barW).attr('height',barH).attr('rx',3).attr('fill',C.surface2);
+    svg.append('rect').attr('x',rx2+84).attr('y',y).attr('width',barW*noisyVal).attr('height',barH).attr('rx',3).attr('fill',p.col).attr('opacity',0.4);
+    txt(svg,rx2+84+barW+6,y+12,noisyVal.toFixed(1),{fill:p.col,size:8,mono:true,anchor:'start'});
+  });
+
+  // Loss arrows
+  const lossY=ry2+200+20;
+  box(svg,rx2,lossY,240,60,C.surface2,C.orangeDim,6);
+  txt(svg,rx2+120,lossY+18,'Training Losses',{fill:C.orange,size:10,weight:600});
+  txt(svg,rx2+120,lossY+34,'Reconstruction MSE: 0.035',{fill:C.muted,size:9,mono:true});
+  txt(svg,rx2+120,lossY+48,'Contrastive kNN@5: 99.9%',{fill:C.muted,size:9,mono:true});
+
+  // Bottom callout
+  box(svg,40,H-40,W-80,32,C.purpleFaint,C.purpleDim+'60',5);
+  txt(svg,W/2,H-20,'The 32d bottleneck forces the network to discover which properties matter — similar abilities get similar embeddings',{fill:C.purple,size:10,weight:500});
+
+  // Dim slider interaction
+  d3.select('#latent-dim-slider').on('input',function(){
+    d3.select('#latent-dim-val').text(+this.value);
+  });
+})();
+
+// ═══ Iframe isolation: show only targeted concept when embedded ═══
+(function(){
+  const isIframe = window.self !== window.top;
+  if (!isIframe) return;
+
+  const hash = window.location.hash.replace('#','');
+  if (!hash) return;
+
+  // Lock page — no scrolling, no extra content
+  document.body.style.overflow = 'hidden';
+  document.documentElement.style.overflow = 'hidden';
+
+  const article = document.querySelector('.article');
+  article.style.padding = '0.8rem 1rem 0';
+  article.style.maxWidth = '100%';
+
+  // Remove everything except the targeted section
+  const hdr = document.querySelector('header'); if (hdr) hdr.remove();
+  document.querySelector('.toc').remove();
+  document.querySelectorAll('hr').forEach(hr => hr.remove());
+
+  document.querySelectorAll('section').forEach(s => {
+    if (s.id === hash) {
+      s.style.marginTop = '0';
+      s.style.paddingTop = '0';
+      // Shrink the h3 a bit for popup context
+      const h3 = s.querySelector('h3');
+      if (h3) { h3.style.fontSize = '1.1rem'; h3.style.marginBottom = '0.3rem'; }
+      // Tighten paragraph spacing
+      s.querySelectorAll('p').forEach(p => { p.style.marginBottom = '0.4rem'; p.style.fontSize = '14px'; });
+    } else {
+      s.remove();
+    }
+  });
+})();
+</script>
+</body>
+</html>

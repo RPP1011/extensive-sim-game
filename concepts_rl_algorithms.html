@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ML Concepts: Visual Explanations</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --surface: #13161d;
+  --surface2: #1c2029;
+  --surface3: #252a36;
+  --border: #2a2f3e;
+  --border-bright: #3d4459;
+  --text: #b8c0cc;
+  --text-muted: #6b7280;
+  --heading: #e2e8f0;
+  --accent: #60a5fa;
+  --accent-dim: #2563eb;
+  --purple: #a78bfa;
+  --purple-dim: #7c3aed;
+  --green: #34d399;
+  --green-dim: #059669;
+  --red: #f87171;
+  --red-dim: #dc2626;
+  --orange: #fbbf24;
+  --orange-dim: #d97706;
+  --cyan: #22d3ee;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.78;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 3rem 1rem 6rem;
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+  margin-bottom: 0.6rem;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  font-size: 1rem;
+  color: var(--text-muted);
+  margin-bottom: 2rem;
+  line-height: 1.65;
+}
+
+nav.toc {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.2rem 1.6rem;
+  margin-bottom: 3rem;
+}
+
+nav.toc .toc-title {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.6rem;
+}
+
+nav.toc ul {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.5rem;
+}
+
+nav.toc a {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.92rem;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+nav.toc a:hover { border-bottom-color: var(--accent); }
+
+section {
+  margin-bottom: 4rem;
+  padding-top: 1rem;
+}
+
+h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--heading);
+  margin-bottom: 0.6rem;
+  letter-spacing: -0.02em;
+}
+
+.concept-desc {
+  font-size: 1.05rem;
+  margin-bottom: 1.4rem;
+  max-width: 750px;
+}
+
+.formula-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.8rem 1.2rem;
+  margin-bottom: 1.5rem;
+  display: inline-block;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.95rem;
+  color: var(--heading);
+}
+
+.formula-box .var { color: var(--accent); }
+.formula-box .op { color: var(--text-muted); }
+.formula-box .func { color: var(--purple); }
+.formula-box .num { color: var(--green); }
+
+.fig-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 2rem;
+  overflow-x: auto;
+}
+.fig-container svg { display: block; margin: 0 auto; }
+
+svg text { font-family: 'DM Sans', sans-serif; }
+svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
+
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0 0 3rem;
+}
+
+.back-link {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  display: inline-block;
+  margin-bottom: 1.5rem;
+}
+.back-link:hover { color: var(--accent); }
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+.slider-row input[type="range"] {
+  width: 200px;
+  accent-color: var(--accent);
+}
+.slider-row .val {
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--heading);
+  font-size: 0.85rem;
+  min-width: 3em;
+}
+
+@media (max-width: 720px) {
+  .article { padding: 2rem 0.75rem 4rem; }
+  h1 { font-size: 1.7rem; }
+  .fig-container { padding: 1rem; }
+  nav.toc ul { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+<div class="article">
+
+<a href="concepts.html" class="back-link">&larr; Back to concept map</a>
+
+<h1>RL Algorithms</h1>
+<p class="subtitle">REINFORCE, PPO, IMPALA with V-Trace, and Soft Actor-Critic.</p>
+
+<nav class="toc">
+  <div class="toc-title">On this page</div>
+  <ul>
+    <li><a href="#reinforce">REINFORCE</a></li>
+    <li><a href="#ppo">PPO (Proximal Policy Optimization)</a></li>
+    <li><a href="#impala-vtrace">IMPALA &amp; V-Trace</a></li>
+    <li><a href="#sac">SAC (Soft Actor-Critic)</a></li>
+  </ul>
+</nav>
+
+<section id="reinforce">
+<h2>REINFORCE</h2>
+<p class="concept-desc">REINFORCE (Williams, 1992) is the simplest policy gradient algorithm. The idea: run your policy, see what happens, and <strong>increase the probability of actions that led to good outcomes</strong>. No value function, no critic &mdash; just the raw signal from episode returns.</p>
+
+<div class="formula-box">
+  <span class="func">&nabla;</span>J(<span class="var">&theta;</span>) <span class="op">=</span> <span class="func">E</span>[<span class="op">&sum;</span><sub>t</sub> <span class="func">&nabla;</span> log <span class="var">&pi;<sub>&theta;</sub></span>(a<sub>t</sub>|s<sub>t</sub>) <span class="op">&middot;</span> <span class="var">G<sub>t</sub></span>]
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>&pi;<sub>&theta;</sub>(a|s)</strong> &mdash; The policy: probability of taking action <em>a</em> in state <em>s</em>, parameterized by neural network weights &theta;.</li>
+  <li><strong>G<sub>t</sub></strong> &mdash; The <strong>return</strong>: discounted sum of future rewards from time <em>t</em>. G<sub>t</sub> = r<sub>t</sub> + &gamma;r<sub>t+1</sub> + &gamma;&sup2;r<sub>t+2</sub> + &hellip;</li>
+  <li><strong>&gamma; (gamma)</strong> &mdash; Discount factor (0&ndash;1). Lower values make the agent more myopic.</li>
+  <li><strong>log &pi;</strong> &mdash; Log probability of the chosen action. Gradient of this is the <strong>score function</strong>.</li>
+  <li><strong>Baseline</strong> &mdash; Subtract mean return to reduce variance: G<sub>t</sub> &minus; b. Doesn't change the expected gradient, but dramatically reduces noise.</li>
+</ul>
+
+<div class="fig-container" id="fig-reinforce"></div>
+</section>
+
+<hr>
+
+
+<section id="ppo">
+<h2>PPO (Proximal Policy Optimization)</h2>
+<p class="concept-desc">PPO (Schulman et al., 2017) fixes REINFORCE's instability by <strong>limiting how much the policy can change</strong> in each update. Instead of a raw gradient step, PPO computes an importance-weighted ratio between old and new policies, then <strong>clips</strong> it to prevent catastrophic updates.</p>
+
+<div class="formula-box">
+  L<sup>CLIP</sup> <span class="op">=</span> <span class="func">E</span>[min(<span class="var">r<sub>t</sub></span>(&theta;) <span class="var">A&#770;<sub>t</sub></span>, <span class="func">clip</span>(<span class="var">r<sub>t</sub></span>(&theta;), <span class="num">1&minus;&epsilon;</span>, <span class="num">1+&epsilon;</span>) <span class="var">A&#770;<sub>t</sub></span>)]
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>r<sub>t</sub>(&theta;) = &pi;<sub>&theta;</sub>(a|s) / &pi;<sub>&theta;<sub>old</sub></sub>(a|s)</strong> &mdash; The probability <strong>ratio</strong>. r=1 means the policy hasn't changed; r=2 means the action is now twice as likely.</li>
+  <li><strong>&epsilon; (epsilon)</strong> &mdash; Clip range, typically 0.2. Limits the ratio to [0.8, 1.2], preventing large policy jumps.</li>
+  <li><strong>A&#770;<sub>t</sub> (advantage)</strong> &mdash; How much better this action was than expected. Computed via <strong>GAE</strong> (Generalized Advantage Estimation).</li>
+  <li><strong>GAE(&gamma;, &lambda;)</strong> &mdash; Smooths advantage estimates over multiple timesteps. &lambda;=0 is one-step TD, &lambda;=1 is Monte Carlo.</li>
+  <li><strong>Clipping</strong> &mdash; The min + clip removes the incentive for the ratio to go outside [1&minus;&epsilon;, 1+&epsilon;]. This is what makes PPO stable.</li>
+</ul>
+
+<div class="fig-container" id="fig-ppo"></div>
+
+<div class="slider-row" style="margin-top: 1rem;">
+  <span style="font-family:'DM Sans',sans-serif;font-size:0.85rem;color:var(--text-muted);">Clip &epsilon;:</span>
+  <input type="range" id="ppo-eps-slider" min="0.05" max="0.5" step="0.01" value="0.2">
+  <span class="val" id="ppo-eps-val">0.20</span>
+  &nbsp;&nbsp;
+  <span style="font-family:'DM Sans',sans-serif;font-size:0.85rem;color:var(--text-muted);">Advantage:</span>
+  <input type="range" id="ppo-adv-slider" min="-2" max="2" step="0.1" value="1.0">
+  <span class="val" id="ppo-adv-val">+1.0</span>
+</div>
+</section>
+
+<hr>
+
+
+<section id="impala-vtrace">
+<h2>IMPALA &amp; V-Trace</h2>
+<p class="concept-desc">IMPALA (Espeholt et al., 2018) is a <strong>distributed actor-critic</strong> architecture. Many actors collect experience in parallel using a slightly stale policy, while a central learner updates the weights on GPU. V-Trace corrects for the mismatch between the actor's behavior policy and the learner's target policy using <strong>importance sampling</strong> with truncated weights.</p>
+
+<div class="formula-box">
+  v<sub>s</sub> <span class="op">=</span> <span class="var">V(x<sub>s</sub>)</span> <span class="op">+</span> <span class="op">&sum;</span><sub>t=s</sub><sup>s+n-1</sup> <span class="var">&gamma;</span><sup>t-s</sup> (<span class="op">&prod;</span><sub>i=s</sub><sup>t-1</sup> <span class="func">c<sub>i</sub></span>) <span class="var">&delta;<sub>t</sub>V</span>
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Actor</strong> &mdash; A process running the simulation with a (possibly stale) copy of the policy. Produces trajectories.</li>
+  <li><strong>Learner</strong> &mdash; The GPU process that consumes trajectories and updates the policy. Runs asynchronously from actors.</li>
+  <li><strong>Off-policy</strong> &mdash; The actor's policy (&mu;) differs from the learner's policy (&pi;) because the weights were updated since the trajectory was collected.</li>
+  <li><strong>&rho;<sub>t</sub> = min(&rho;&#772;, &pi;(a<sub>t</sub>|s<sub>t</sub>) / &mu;(a<sub>t</sub>|s<sub>t</sub>))</strong> &mdash; Truncated importance weight. Corrects for off-policy bias; clipped at &rho;&#772; (typically 1.0) to limit variance.</li>
+  <li><strong>c<sub>t</sub> = min(c&#772;, &pi;(a<sub>t</sub>|s<sub>t</sub>) / &mu;(a<sub>t</sub>|s<sub>t</sub>))</strong> &mdash; Trace-cutting coefficient. Controls how far back temporal differences propagate. Clipped at c&#772; (typically 1.0).</li>
+  <li><strong>&delta;<sub>t</sub>V = &rho;<sub>t</sub>(r<sub>t</sub> + &gamma;V(x<sub>t+1</sub>) &minus; V(x<sub>t</sub>))</strong> &mdash; Importance-weighted TD error.</li>
+  <li><strong>Throughput</strong> &mdash; IMPALA's advantage: actors never wait for the learner. 4,096 parallel sims can feed one GPU learner.</li>
+</ul>
+
+<div class="fig-container" id="fig-impala"></div>
+
+<div class="slider-row" style="margin-top: 1rem;">
+  <span style="font-family:'DM Sans',sans-serif;font-size:0.85rem;color:var(--text-muted);">Policy lag (steps behind):</span>
+  <input type="range" id="impala-lag-slider" min="0" max="50" step="1" value="10">
+  <span class="val" id="impala-lag-val">10</span>
+  &nbsp;&nbsp;
+  <span style="font-family:'DM Sans',sans-serif;font-size:0.85rem;color:var(--text-muted);">&rho;&#772; clip:</span>
+  <input type="range" id="impala-rho-slider" min="0.5" max="5.0" step="0.1" value="1.0">
+  <span class="val" id="impala-rho-val">1.0</span>
+</div>
+</section>
+
+<hr>
+
+
+<section id="sac">
+<h2>SAC (Soft Actor-Critic)</h2>
+<p class="concept-desc">SAC (Haarnoja et al., 2018) adds <strong>entropy regularization</strong> to the actor-critic framework: the agent is rewarded not just for high returns, but for maintaining high-entropy (diverse) action distributions. This creates a natural exploration mechanism and prevents premature convergence to deterministic policies.</p>
+
+<div class="formula-box">
+  J(<span class="var">&pi;</span>) <span class="op">=</span> <span class="func">E</span>[<span class="op">&sum;</span><sub>t</sub> <span class="var">&gamma;</span><sup>t</sup> (<span class="var">r<sub>t</sub></span> <span class="op">+</span> <span class="var">&alpha;</span> <span class="func">H</span>(<span class="var">&pi;</span>(&middot;|s<sub>t</sub>)))]
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>H(&pi;) = &minus;E[log &pi;(a|s)]</strong> &mdash; <strong>Entropy</strong> of the policy. High entropy = spread out probability = more exploration. Low entropy = peaked = exploitation.</li>
+  <li><strong>&alpha; (alpha / temperature)</strong> &mdash; Controls the exploration&ndash;exploitation tradeoff. High &alpha; favors diverse actions; low &alpha; favors high-reward actions. Can be learned automatically.</li>
+  <li><strong>Dual Q-networks</strong> &mdash; SAC trains <strong>two</strong> Q-functions (Q<sub>1</sub>, Q<sub>2</sub>) and takes the minimum. This prevents overestimation bias that plagues single-critic methods.</li>
+  <li><strong>Soft Q-value</strong> &mdash; Q<sup>soft</sup>(s,a) = r + &gamma; E[Q(s',a') &minus; &alpha; log &pi;(a'|s')]. Includes the entropy bonus in the value estimate.</li>
+  <li><strong>Reparameterization trick</strong> &mdash; Instead of sampling a &sim; &pi;(s), sample noise &epsilon; &sim; N(0,1) and compute a = &mu;(s) + &sigma;(s)&middot;&epsilon;. Makes the gradient flow through the sampling step.</li>
+  <li><strong>Off-policy</strong> &mdash; Like IMPALA, SAC uses a replay buffer. Old transitions can be reused because the Q-function is learned separately from the policy.</li>
+</ul>
+
+<div class="fig-container" id="fig-sac"></div>
+
+<div class="slider-row" style="margin-top: 1rem;">
+  <span style="font-family:'DM Sans',sans-serif;font-size:0.85rem;color:var(--text-muted);">Temperature &alpha;:</span>
+  <input type="range" id="sac-alpha-slider" min="0.01" max="2.0" step="0.01" value="0.2">
+  <span class="val" id="sac-alpha-val">0.20</span>
+</div>
+</section>
+
+</div>
+
+<script>
+const C = {
+  bg:'#13161d', surface:'#1c2029', surface2:'#252a36', surface3:'#252a36',
+  border:'#2a2f3e', borderBright:'#3d4459',
+  text:'#b8c0cc', muted:'#6b7280', heading:'#e2e8f0',
+  blue:'#60a5fa', blueDim:'#2563eb', blueFaint:'rgba(96,165,250,0.08)',
+  purple:'#a78bfa', purpleDim:'#7c3aed', purpleFaint:'rgba(167,139,250,0.08)',
+  green:'#34d399', greenDim:'#059669',
+  red:'#f87171', redDim:'#dc2626',
+  orange:'#fbbf24', orangeDim:'#d97706',
+  cyan:'#22d3ee',
+};
+
+function box(g,x,y,w,h,fill,stroke,rx=6){return g.append('rect').attr('x',x).attr('y',y).attr('width',w).attr('height',h).attr('rx',rx).attr('fill',fill).attr('stroke',stroke).attr('stroke-width',1)}
+function txt(g,x,y,t,o={}){const e=g.append('text').attr('x',x).attr('y',y).text(t).attr('text-anchor',o.anchor||'middle').attr('fill',o.fill||C.text).attr('font-size',o.size||12).attr('font-weight',o.weight||400);if(o.mono)e.attr('class','label-mono');return e}
+function addArrow(svg,color){const id='a-'+color.replace(/[^a-z0-9]/gi,'');if(svg.select('#'+id).empty()){svg.append('defs').append('marker').attr('id',id).attr('viewBox','0 0 10 8').attr('refX',9).attr('refY',4).attr('markerWidth',8).attr('markerHeight',6).attr('orient','auto-start-reverse').append('path').attr('d','M0,0 L10,4 L0,8 Z').attr('fill',color)}return id}
+function arrow(g,svg,x1,y1,x2,y2,color=C.muted){const id=addArrow(svg,color);g.append('line').attr('x1',x1).attr('y1',y1).attr('x2',x2).attr('y2',y2).attr('stroke',color).attr('stroke-width',1.5).attr('marker-end','url(#'+id+')')}
+function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);const p=g.append('path').attr('d',d).attr('stroke',color).attr('stroke-width',1.5).attr('fill','none').attr('marker-end','url(#'+id+')');if(dash)p.attr('stroke-dasharray',dash);return p}
+
+// ═══ REINFORCE ═══
+(function(){
+  const W=820,H=520;
+  const svg=d3.select('#fig-reinforce').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  // Top: the REINFORCE loop diagram
+  const centerX=W/2,topY=30;
+
+  // 1. Policy box
+  const polX=centerX-60,polY=topY;
+  box(svg,polX,polY,120,50,C.surface,C.purpleDim,8);
+  txt(svg,centerX,polY+20,'Policy \u03c0\u03b8',{fill:C.purple,size:14,weight:700});
+  txt(svg,centerX,polY+38,'neural network',{fill:C.muted,size:9});
+
+  // 2. Sample actions
+  const actX=centerX+160,actY=polY+80;
+  pathArrow(svg,svg,`M${polX+120},${polY+25} Q${polX+180},${polY+25} ${actX+60},${actY-3}`,C.blue);
+  box(svg,actX,actY,120,45,C.surface,C.blueDim,6);
+  txt(svg,actX+60,actY+18,'Sample Actions',{fill:C.blue,size:11,weight:600});
+  txt(svg,actX+60,actY+34,'a ~ \u03c0(a|s)',{fill:C.muted,size:9,mono:true});
+
+  // 3. Environment / Collect trajectory
+  const envX=centerX+160,envY=actY+80;
+  arrow(svg,svg,actX+60,actY+45,actX+60,envY-3,C.muted);
+  box(svg,envX,envY,120,50,C.surface,C.greenDim,6);
+  txt(svg,envX+60,envY+18,'Environment',{fill:C.green,size:11,weight:600});
+  txt(svg,envX+60,envY+36,'s, a, r trajectory',{fill:C.muted,size:9,mono:true});
+
+  // 4. Compute returns
+  const retX=centerX-60,retY=envY+80;
+  pathArrow(svg,svg,`M${envX},${envY+25} Q${envX-80},${envY+55} ${retX+120},${retY+20}`,C.orange);
+  box(svg,retX,retY,120,50,C.surface,C.orangeDim,6);
+  txt(svg,centerX,retY+18,'Compute G\u209c',{fill:C.orange,size:11,weight:600});
+  txt(svg,centerX,retY+36,'\u03a3 \u03b3\u1d57 r\u209c',{fill:C.muted,size:10,mono:true});
+
+  // 5. Update weights — arrow back to policy
+  pathArrow(svg,svg,`M${retX+60},${retY} Q${retX-30},${retY-60} ${polX+60},${polY+50+3}`,C.red);
+  txt(svg,retX-40,retY-30,'\u03b8 += \u03b1 \u2207log\u03c0 \u00b7 G\u209c',{fill:C.red,size:10,weight:600});
+
+  // Bottom half: concrete example showing trajectory
+  const exY=retY+90;
+  box(svg,30,exY,W-60,170,C.surface,C.border,8);
+  txt(svg,W/2,exY+20,'Example: One Episode Trajectory',{fill:C.heading,size:13,weight:600});
+
+  const steps=[
+    {s:'4v4, tick 100',a:'attack_weak',r:'+0.3',col:C.green},
+    {s:'3v4, tick 200',a:'ability: heal',r:'+0.5',col:C.green},
+    {s:'3v3, tick 300',a:'hold',r:'-0.1',col:C.red},
+    {s:'3v2, tick 400',a:'attack_near',r:'+1.0',col:C.green},
+    {s:'3v1, tick 500',a:'attack_near',r:'+2.0',col:C.green},
+  ];
+
+  const stepW=130,stepH=60,stepGap=12;
+  const stepsX=(W-steps.length*(stepW+stepGap)+stepGap)/2;
+  const stepsY=exY+40;
+
+  steps.forEach((step,i)=>{
+    const x=stepsX+i*(stepW+stepGap);
+    box(svg,x,stepsY,stepW,stepH,C.surface2,step.col+'60',5);
+    txt(svg,x+stepW/2,stepsY+15,step.s,{fill:C.text,size:9,mono:true});
+    txt(svg,x+stepW/2,stepsY+32,step.a,{fill:C.heading,size:10,weight:600,mono:true});
+    txt(svg,x+stepW/2,stepsY+48,'r = '+step.r,{fill:step.col,size:10,weight:700,mono:true});
+
+    if(i<steps.length-1){
+      arrow(svg,svg,x+stepW,stepsY+stepH/2,x+stepW+stepGap-2,stepsY+stepH/2,C.muted);
+    }
+  });
+
+  // Returns annotation
+  const retAnnY=stepsY+stepH+15;
+  const gamma=0.99;
+  const rewards=[0.3,0.5,-0.1,1.0,2.0];
+  const returns=[];
+  for(let i=rewards.length-1;i>=0;i--){
+    returns[i]=rewards[i]+(i<rewards.length-1?gamma*returns[i+1]:0);
+  }
+
+  steps.forEach((step,i)=>{
+    const x=stepsX+i*(stepW+stepGap)+stepW/2;
+    txt(svg,x,retAnnY+12,'G\u209c = '+returns[i].toFixed(2),{fill:C.orange,size:10,weight:600,mono:true});
+  });
+
+  // Gradient annotation
+  txt(svg,W/2,retAnnY+32,'Higher return G\u209c \u2192 stronger push to increase P(action) | Lower return \u2192 weaker push (or decrease)',{fill:C.muted,size:9});
+
+  // Bottom callout
+  box(svg,100,H-35,W-200,28,C.surface2,C.border,5);
+  txt(svg,W/2,H-17,'High variance: a single lucky/unlucky episode can dominate the gradient. Baselines and PPO fix this.',{fill:C.text,size:10});
+})();
+
+// ═══ PPO CLIPPED OBJECTIVE ═══
+(function(){
+  const W=820,H=420;
+  const container=d3.select('#fig-ppo');
+  const svg=container.append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  function drawPPO(eps,adv){
+    svg.selectAll('*').remove();
+
+    const plotX=80,plotY=30,plotW=350,plotH=320;
+    const rightX=plotX+plotW+60;
+
+    // Title
+    txt(svg,plotX+plotW/2,plotY-10,'PPO Clipped Surrogate Objective',{fill:C.heading,size:13,weight:600});
+
+    // Axes
+    svg.append('line').attr('x1',plotX).attr('y1',plotY+plotH).attr('x2',plotX+plotW).attr('y2',plotY+plotH).attr('stroke',C.border).attr('stroke-width',1);
+    svg.append('line').attr('x1',plotX).attr('y1',plotY).attr('x2',plotX).attr('y2',plotY+plotH).attr('stroke',C.border).attr('stroke-width',1);
+    txt(svg,plotX+plotW/2,plotY+plotH+25,'r(\u03b8) = \u03c0_new / \u03c0_old',{fill:C.text,size:11});
+    txt(svg,plotX-30,plotY+plotH/2,'L',{fill:C.text,size:11,weight:600});
+
+    // Scale: r from 0 to 2.5
+    const rMin=0,rMax=2.5;
+    const xScale=d3.scaleLinear().domain([rMin,rMax]).range([plotX,plotX+plotW]);
+
+    // Compute y range based on advantage
+    const yRange=Math.max(Math.abs(adv)*2.5, 1.5);
+    const yScale=d3.scaleLinear().domain([-yRange,yRange]).range([plotY+plotH,plotY]);
+
+    // Zero line
+    svg.append('line').attr('x1',plotX).attr('y1',yScale(0)).attr('x2',plotX+plotW).attr('y2',yScale(0)).attr('stroke',C.border).attr('stroke-width',1).attr('stroke-dasharray','4,4');
+
+    // r=1 line
+    svg.append('line').attr('x1',xScale(1)).attr('y1',plotY).attr('x2',xScale(1)).attr('y2',plotY+plotH).attr('stroke',C.muted).attr('stroke-width',1).attr('stroke-dasharray','4,4');
+    txt(svg,xScale(1),plotY+plotH+12,'1.0',{fill:C.muted,size:9,mono:true});
+
+    // Clip boundaries
+    const clipLo=1-eps,clipHi=1+eps;
+    svg.append('rect').attr('x',xScale(clipLo)).attr('y',plotY).attr('width',xScale(clipHi)-xScale(clipLo)).attr('height',plotH)
+      .attr('fill',C.blue).attr('opacity',0.05);
+    svg.append('line').attr('x1',xScale(clipLo)).attr('y1',plotY).attr('x2',xScale(clipLo)).attr('y2',plotY+plotH).attr('stroke',C.blue).attr('stroke-width',1.5).attr('stroke-dasharray','6,3');
+    svg.append('line').attr('x1',xScale(clipHi)).attr('y1',plotY).attr('x2',xScale(clipHi)).attr('y2',plotY+plotH).attr('stroke',C.blue).attr('stroke-width',1.5).attr('stroke-dasharray','6,3');
+    txt(svg,xScale(clipLo),plotY+plotH+12,(clipLo).toFixed(2),{fill:C.blue,size:9,mono:true});
+    txt(svg,xScale(clipHi),plotY+plotH+12,(clipHi).toFixed(2),{fill:C.blue,size:9,mono:true});
+
+    // Tick marks on x-axis
+    [0,0.5,1.5,2.0,2.5].forEach(v=>{
+      txt(svg,xScale(v),plotY+plotH+12,v.toFixed(1),{fill:C.muted,size:8,mono:true});
+    });
+
+    // Draw curves
+    const nPts=200;
+    const step=(rMax-rMin)/nPts;
+
+    // Unclipped: r * A
+    const unclippedPath=d3.line().x(d=>xScale(d[0])).y(d=>yScale(d[1]));
+    const unclippedData=[];
+    const clippedData=[];
+
+    for(let i=0;i<=nPts;i++){
+      const r=rMin+i*step;
+      const unclipped=r*adv;
+      const clipped=Math.min(Math.max(r,clipLo),clipHi)*adv;
+      const ppoObj=adv>=0?Math.min(unclipped,clipped):Math.max(unclipped,clipped);
+      unclippedData.push([r,unclipped]);
+      clippedData.push([r,ppoObj]);
+    }
+
+    // Unclipped line (faded)
+    svg.append('path').attr('d',unclippedPath(unclippedData)).attr('stroke',C.muted).attr('stroke-width',1.5).attr('fill','none').attr('stroke-dasharray','4,4');
+
+    // PPO clipped line (bold)
+    svg.append('path').attr('d',unclippedPath(clippedData)).attr('stroke',adv>=0?C.green:C.red).attr('stroke-width',2.5).attr('fill','none');
+
+    // Legend
+    const legX=plotX+10,legY2=plotY+15;
+    svg.append('line').attr('x1',legX).attr('y1',legY2).attr('x2',legX+20).attr('y2',legY2).attr('stroke',C.muted).attr('stroke-width',1.5).attr('stroke-dasharray','4,4');
+    txt(svg,legX+25,legY2+4,'r\u00b7A (unclipped)',{fill:C.muted,size:9,anchor:'start'});
+    svg.append('line').attr('x1',legX).attr('y1',legY2+18).attr('x2',legX+20).attr('y2',legY2+18).attr('stroke',adv>=0?C.green:C.red).attr('stroke-width',2.5);
+    txt(svg,legX+25,legY2+22,'L^CLIP (PPO objective)',{fill:adv>=0?C.green:C.red,size:9,anchor:'start'});
+
+    // Right side: explanation panel
+    box(svg,rightX,plotY,350,plotH,C.surface,C.border,8);
+    txt(svg,rightX+175,plotY+25,'How Clipping Works',{fill:C.heading,size:13,weight:600});
+
+    const isPos=adv>=0;
+    const lines = isPos ? [
+      {t:'Advantage A > 0 (good action)',c:C.green,s:12,w:600},
+      {t:'',c:C.muted,s:10,w:400},
+      {t:'The action was better than expected.',c:C.text,s:10,w:400},
+      {t:'We want to increase its probability.',c:C.text,s:10,w:400},
+      {t:'',c:C.muted,s:10,w:400},
+      {t:'Without clipping:',c:C.heading,s:11,w:600},
+      {t:'r increases \u2192 L increases linearly.',c:C.text,s:10,w:400},
+      {t:'No limit on how much \u03c0 can change!',c:C.red,s:10,w:500},
+      {t:'',c:C.muted,s:10,w:400},
+      {t:'With clipping (\u03b5 = '+eps.toFixed(2)+'):',c:C.blue,s:11,w:600},
+      {t:'L is flat for r > '+(1+eps).toFixed(2),c:C.blue,s:10,w:400},
+      {t:'No extra reward for increasing \u03c0',c:C.text,s:10,w:400},
+      {t:'beyond the clip boundary.',c:C.text,s:10,w:400},
+      {t:'',c:C.muted,s:10,w:400},
+      {t:'\u2192 Gradient is zero outside the clip zone.',c:C.orange,s:10,w:600},
+      {t:'  The policy update is "proximal."',c:C.muted,s:10,w:400},
+    ] : [
+      {t:'Advantage A < 0 (bad action)',c:C.red,s:12,w:600},
+      {t:'',c:C.muted,s:10,w:400},
+      {t:'The action was worse than expected.',c:C.text,s:10,w:400},
+      {t:'We want to decrease its probability.',c:C.text,s:10,w:400},
+      {t:'',c:C.muted,s:10,w:400},
+      {t:'Without clipping:',c:C.heading,s:11,w:600},
+      {t:'r decreasing \u2192 L increases (less neg).',c:C.text,s:10,w:400},
+      {t:'Could over-suppress the action!',c:C.red,s:10,w:500},
+      {t:'',c:C.muted,s:10,w:400},
+      {t:'With clipping (\u03b5 = '+eps.toFixed(2)+'):',c:C.blue,s:11,w:600},
+      {t:'L is flat for r < '+(1-eps).toFixed(2),c:C.blue,s:10,w:400},
+      {t:'Can\'t decrease probability more',c:C.text,s:10,w:400},
+      {t:'than the clip allows.',c:C.text,s:10,w:400},
+      {t:'',c:C.muted,s:10,w:400},
+      {t:'\u2192 Prevents catastrophic policy collapse.',c:C.orange,s:10,w:600},
+      {t:'  Trust region via simple clipping.',c:C.muted,s:10,w:400},
+    ];
+
+    lines.forEach((line,i)=>{
+      txt(svg,rightX+20,plotY+50+i*17,line.t,{fill:line.c,size:line.s,weight:line.w,anchor:'start'});
+    });
+  }
+
+  drawPPO(0.2,1.0);
+
+  d3.select('#ppo-eps-slider').on('input',function(){
+    const eps=+this.value;
+    d3.select('#ppo-eps-val').text(eps.toFixed(2));
+    drawPPO(eps,+d3.select('#ppo-adv-slider').node().value);
+  });
+  d3.select('#ppo-adv-slider').on('input',function(){
+    const adv=+this.value;
+    d3.select('#ppo-adv-val').text((adv>=0?'+':'')+adv.toFixed(1));
+    drawPPO(+d3.select('#ppo-eps-slider').node().value,adv);
+  });
+})();
+
+// ═══ IMPALA & V-TRACE ═══
+(function(){
+  const W=820,H=520;
+  const svg=d3.select('#fig-impala').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  // Left: Actor column
+  const numActors=4;
+  const actW=110,actH=65,actGap=10;
+  const actX=30,actStartY=60;
+
+  txt(svg,actX+actW/2,40,'Actors (CPU)',{fill:C.heading,size:13,weight:600});
+
+  for(let i=0;i<numActors;i++){
+    const y=actStartY+i*(actH+actGap);
+    const lag=Math.floor(Math.random()*30+5);
+    box(svg,actX,y,actW,actH,C.surface,C.cyan+'60',6);
+    txt(svg,actX+actW/2,y+18,'Actor '+i,{fill:C.cyan,size:11,weight:600});
+    txt(svg,actX+actW/2,y+34,'sim #'+(i*1024),{fill:C.muted,size:8,mono:true});
+    txt(svg,actX+actW/2,y+48,'\u03bc ('+lag+' steps old)',{fill:C.orangeDim,size:8,mono:true});
+  }
+
+  // More actors indicator
+  const moreY=actStartY+numActors*(actH+actGap);
+  txt(svg,actX+actW/2,moreY+5,'... \u00d7 4,096 total',{fill:C.muted,size:10});
+
+  // Trajectory buffer in the middle
+  const bufX=190,bufY=80,bufW=130,bufH=200;
+  box(svg,bufX,bufY,bufW,bufH,C.surface2,C.orange,8);
+  txt(svg,bufX+bufW/2,bufY+20,'Trajectory',{fill:C.orange,size:12,weight:600});
+  txt(svg,bufX+bufW/2,bufY+36,'Queue',{fill:C.orange,size:12,weight:600});
+
+  // Trajectory entries
+  const entryH=22,entryGap=4;
+  const entries=['(s,a,r,\u03bc)','{32 steps}','batch=512','async push'];
+  entries.forEach((e,i)=>{
+    const ey=bufY+52+i*(entryH+entryGap);
+    box(svg,bufX+10,ey,bufW-20,entryH,C.surface,C.border,3);
+    txt(svg,bufX+bufW/2,ey+15,e,{fill:C.muted,size:9,mono:true});
+  });
+
+  // Arrows from actors to buffer
+  for(let i=0;i<numActors;i++){
+    const ay=actStartY+i*(actH+actGap)+actH/2;
+    arrow(svg,svg,actX+actW,ay,bufX-2,Math.min(ay,bufY+bufH-10),C.cyan);
+  }
+
+  // Center: Learner (GPU)
+  const learnX=380,learnY=40,learnW=200,learnH=280;
+  box(svg,learnX,learnY,learnW,learnH,C.surface,C.purpleDim,10);
+  txt(svg,learnX+learnW/2,learnY+22,'Learner (GPU)',{fill:C.purple,size:14,weight:700});
+
+  // Internal architecture
+  const intX=learnX+15,intW=learnW-30;
+
+  // Policy network
+  box(svg,intX,learnY+40,intW,40,C.purpleDim+'30',C.purple+'80',5);
+  txt(svg,learnX+learnW/2,learnY+55,'Policy \u03c0\u03b8',{fill:C.purple,size:11,weight:600});
+  txt(svg,learnX+learnW/2,learnY+70,'(current weights)',{fill:C.muted,size:8});
+
+  // Value network
+  box(svg,intX,learnY+90,intW,40,C.blueDim+'30',C.blue+'80',5);
+  txt(svg,learnX+learnW/2,learnY+105,'Value V\u03b8',{fill:C.blue,size:11,weight:600});
+  txt(svg,learnX+learnW/2,learnY+120,'(critic)',{fill:C.muted,size:8});
+
+  // V-trace computation
+  box(svg,intX,learnY+145,intW,55,C.orangeDim+'30',C.orange+'80',5);
+  txt(svg,learnX+learnW/2,learnY+162,'V-Trace',{fill:C.orange,size:11,weight:700});
+  txt(svg,learnX+learnW/2,learnY+178,'\u03c1 = clip(\u03c0/\u03bc, \u03c1\u0305)',{fill:C.text,size:9,mono:true});
+  txt(svg,learnX+learnW/2,learnY+192,'off-policy correction',{fill:C.muted,size:8});
+
+  // Loss + gradient
+  box(svg,intX,learnY+210,intW,50,C.redDim+'30',C.red+'80',5);
+  txt(svg,learnX+learnW/2,learnY+228,'Policy gradient',{fill:C.red,size:10,weight:600});
+  txt(svg,learnX+learnW/2,learnY+243,'+ value loss + entropy',{fill:C.muted,size:8,mono:true});
+  txt(svg,learnX+learnW/2,learnY+255,'\u03b8 \u2190 \u03b8 - \u03b1\u2207L',{fill:C.red,size:9,mono:true});
+
+  // Arrow from buffer to learner
+  arrow(svg,svg,bufX+bufW,bufY+bufH/2,learnX-3,learnY+learnH/2,C.orange);
+
+  // Arrow from learner back to actors (weight sync)
+  const syncY=learnY+learnH+20;
+  pathArrow(svg,svg,`M${learnX},${learnY+learnH/2} Q${learnX-60},${syncY} ${actX+actW/2},${moreY+20}`,C.green,'6,3');
+  txt(svg,learnX-100,syncY+10,'weight sync',{fill:C.green,size:10,weight:600});
+  txt(svg,learnX-100,syncY+24,'(async, non-blocking)',{fill:C.muted,size:8});
+
+  // Right side: V-Trace detail
+  const vtX=620,vtY=40;
+  box(svg,vtX,vtY,180,280,C.surface,C.border,8);
+  txt(svg,vtX+90,vtY+22,'V-Trace Detail',{fill:C.heading,size:12,weight:600});
+
+  const vtLines=[
+    {t:'Problem:',c:C.heading,s:10,w:600},
+    {t:'Actor used \u03bc (old policy)',c:C.text,s:9,w:400},
+    {t:'Learner has \u03c0 (new policy)',c:C.text,s:9,w:400},
+    {t:'',c:C.muted,s:6,w:400},
+    {t:'Solution:',c:C.heading,s:10,w:600},
+    {t:'Importance weight:',c:C.orange,s:9,w:600},
+    {t:'\u03c1\u209c = \u03c0(a|s) / \u03bc(a|s)',c:C.orange,s:9,w:400},
+    {t:'',c:C.muted,s:6,w:400},
+    {t:'If \u03c0 \u2248 \u03bc: \u03c1 \u2248 1',c:C.green,s:9,w:500},
+    {t:'\u2192 trust the trajectory as-is',c:C.muted,s:8,w:400},
+    {t:'',c:C.muted,s:6,w:400},
+    {t:'If \u03c0 \u226b \u03bc: \u03c1 large',c:C.red,s:9,w:500},
+    {t:'\u2192 clip to \u03c1\u0305 (reduce variance)',c:C.muted,s:8,w:400},
+    {t:'',c:C.muted,s:6,w:400},
+    {t:'If \u03c0 \u226a \u03bc: \u03c1 \u2248 0',c:C.blue,s:9,w:500},
+    {t:'\u2192 ignore (action unlikely)',c:C.muted,s:8,w:400},
+    {t:'',c:C.muted,s:6,w:400},
+    {t:'Truncation:',c:C.heading,s:10,w:600},
+    {t:'\u03c1\u0305 = c\u0305 = 1.0 is default',c:C.text,s:9,w:400},
+    {t:'Recovers on-policy when',c:C.text,s:9,w:400},
+    {t:'\u03c0 = \u03bc (no correction)',c:C.muted,s:8,w:400},
+  ];
+
+  vtLines.forEach((line,i)=>{
+    txt(svg,vtX+15,vtY+45+i*11.5,line.t,{fill:line.c,size:line.s,weight:line.w,anchor:'start'});
+  });
+
+  // Bottom: comparison table
+  const tableY=350;
+  box(svg,30,tableY,W-60,150,C.surface,C.border,8);
+  txt(svg,W/2,tableY+22,'Why IMPALA over A3C / PPO?',{fill:C.heading,size:13,weight:600});
+
+  const colW2=240,colH2=30;
+  const cols=[
+    {title:'A3C',items:['Sync gradients','Actors wait for learner','On-policy only'],col:C.muted},
+    {title:'IMPALA',items:['Async everything','Actors never wait','Off-policy + V-trace'],col:C.green},
+    {title:'PPO',items:['On-policy batches','Recompute every epoch','Clip ratio \u2192 safe'],col:C.blue},
+  ];
+
+  cols.forEach((col,ci)=>{
+    const cx2=55+ci*(colW2+10);
+    box(svg,cx2,tableY+38,colW2,95,C.surface2,col.col+'40',5);
+    txt(svg,cx2+colW2/2,tableY+55,col.title,{fill:col.col,size:12,weight:700});
+    col.items.forEach((item,ii)=>{
+      txt(svg,cx2+colW2/2,tableY+72+ii*18,item,{fill:C.text,size:9});
+    });
+  });
+
+  // Slider interactions
+  d3.select('#impala-lag-slider').on('input',function(){
+    d3.select('#impala-lag-val').text(+this.value);
+  });
+  d3.select('#impala-rho-slider').on('input',function(){
+    d3.select('#impala-rho-val').text((+this.value).toFixed(1));
+  });
+})();
+
+// ═══ SAC (SOFT ACTOR-CRITIC) ═══
+(function(){
+  const W=820,H=520;
+  const container=d3.select('#fig-sac');
+  const svg=container.append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  function drawSAC(alpha){
+    svg.selectAll('*').remove();
+
+    // Top: architecture diagram
+    txt(svg,W/2,20,'SAC Architecture',{fill:C.heading,size:14,weight:600});
+
+    // Replay buffer
+    const rbX=30,rbY=50,rbW=120,rbH=140;
+    box(svg,rbX,rbY,rbW,rbH,C.surface,C.orangeDim,8);
+    txt(svg,rbX+rbW/2,rbY+20,'Replay',{fill:C.orange,size:12,weight:600});
+    txt(svg,rbX+rbW/2,rbY+36,'Buffer',{fill:C.orange,size:12,weight:600});
+    const rbEntries=['(s, a, r, s\')','1M transitions','uniform sample','off-policy!'];
+    rbEntries.forEach((e,i)=>{
+      txt(svg,rbX+rbW/2,rbY+55+i*16,e,{fill:C.muted,size:8,mono:true});
+    });
+
+    // Actor (policy)
+    const actorX=200,actorY=50,actorW=150,actorH=70;
+    box(svg,actorX,actorY,actorW,actorH,C.surface,C.purpleDim,8);
+    txt(svg,actorX+actorW/2,actorY+20,'Actor (\u03c0\u03b8)',{fill:C.purple,size:13,weight:700});
+    txt(svg,actorX+actorW/2,actorY+38,'Gaussian policy',{fill:C.muted,size:9});
+    txt(svg,actorX+actorW/2,actorY+52,'\u03bc(s), \u03c3(s) \u2192 a',{fill:C.muted,size:9,mono:true});
+
+    arrow(svg,svg,rbX+rbW,rbY+rbH/2-20,actorX-2,actorY+actorH/2,C.orange);
+
+    // Two Q-networks
+    const q1X=200,q1Y=150,qW=150,qH=55;
+    box(svg,q1X,q1Y,qW,qH,C.surface,C.blueDim,6);
+    txt(svg,q1X+qW/2,q1Y+18,'Q\u2081(s, a)',{fill:C.blue,size:12,weight:600});
+    txt(svg,q1X+qW/2,q1Y+36,'Critic #1',{fill:C.muted,size:9});
+
+    const q2X=200,q2Y=q1Y+qH+10;
+    box(svg,q2X,q2Y,qW,qH,C.surface,C.blueDim,6);
+    txt(svg,q2X+qW/2,q2Y+18,'Q\u2082(s, a)',{fill:C.blue,size:12,weight:600});
+    txt(svg,q2X+qW/2,q2Y+36,'Critic #2',{fill:C.muted,size:9});
+
+    arrow(svg,svg,rbX+rbW,rbY+rbH/2+20,q1X-2,q1Y+qH/2,C.orange);
+
+    // Min Q
+    const minX=400,minY=q1Y+(q2Y+qH-q1Y)/2-25;
+    box(svg,minX,minY,100,50,C.surface2,C.greenDim,6);
+    txt(svg,minX+50,minY+20,'min(Q\u2081, Q\u2082)',{fill:C.green,size:11,weight:600});
+    txt(svg,minX+50,minY+38,'anti-overestimate',{fill:C.muted,size:8});
+
+    arrow(svg,svg,q1X+qW,q1Y+qH/2,minX-2,minY+15,C.blue);
+    arrow(svg,svg,q2X+qW,q2Y+qH/2,minX-2,minY+35,C.blue);
+
+    // Entropy term
+    const entX=400,entY=50;
+    box(svg,entX,entY,140,65,C.surface,alpha>0.5?C.green:C.orangeDim,8);
+    txt(svg,entX+70,entY+18,'Entropy Bonus',{fill:alpha>0.5?C.green:C.orange,size:11,weight:600});
+    txt(svg,entX+70,entY+36,'\u03b1 = '+alpha.toFixed(2),{fill:C.heading,size:13,weight:700,mono:true});
+    txt(svg,entX+70,entY+52,'\u03b1 H(\u03c0) = -\u03b1 log \u03c0',{fill:C.muted,size:9,mono:true});
+
+    arrow(svg,svg,actorX+actorW,actorY+actorH/2,entX-2,entY+entY/2+5,C.purple);
+
+    // Combined objective
+    const objX=570,objY=80;
+    box(svg,objX,objY,220,50,C.surface,C.redDim,8);
+    txt(svg,objX+110,objY+18,'Soft Bellman Target',{fill:C.red,size:11,weight:600});
+    txt(svg,objX+110,objY+38,'r + \u03b3(min Q\' - \u03b1 log \u03c0)',{fill:C.heading,size:10,mono:true});
+
+    arrow(svg,svg,minX+100,minY+25,objX-2,objY+25,C.green);
+    arrow(svg,svg,entX+140,entY+32,objX-2,objY+15,C.orange);
+
+    // Bottom: Interactive entropy visualization
+    const vizY=300;
+    box(svg,30,vizY,W-60,200,C.surface,C.border,8);
+    txt(svg,W/2,vizY+22,'Effect of Temperature \u03b1 on Policy',{fill:C.heading,size:13,weight:600});
+
+    // Left: low alpha (exploitation)
+    const distX=80,distY=vizY+45,distW=280,distH=120;
+
+    // Draw a Gaussian-like distribution over actions
+    const actions=['atk_near','atk_weak','ability','hold','move'];
+    const nAct=actions.length;
+
+    // Compute softmax with temperature: higher alpha = more uniform
+    const rawPrefs=[2.0, 1.5, 0.8, -0.5, 0.2]; // raw "Q-values"
+
+    function softmaxWithTemp(prefs,temp){
+      // Higher alpha -> add more entropy -> more uniform
+      // SAC: pi* = exp((Q - alpha*logZ)/alpha) ∝ exp(Q/alpha)
+      const effectiveTemp = Math.max(0.01, temp);
+      const scaled = prefs.map(q => q / effectiveTemp);
+      const maxS = Math.max(...scaled);
+      const exps = scaled.map(s => Math.exp(s - maxS));
+      const sum = exps.reduce((a,b) => a+b, 0);
+      return exps.map(e => e / sum);
+    }
+
+    const probs = softmaxWithTemp(rawPrefs, alpha);
+    const maxProb = Math.max(...probs);
+    const entropy = -probs.reduce((s,p) => s + (p > 1e-10 ? p * Math.log(p) : 0), 0);
+    const maxEntropy = Math.log(nAct);
+
+    // Bar chart
+    const barW2 = 42, barGap2 = 14;
+    const barsStartX = distX;
+
+    actions.forEach((name, i) => {
+      const x = barsStartX + i * (barW2 + barGap2);
+      const barH2 = probs[i] / maxProb * distH * 0.85;
+      const y = distY + distH - barH2;
+
+      const col = probs[i] === maxProb ? C.green : C.blue;
+      svg.append('rect').attr('x', x).attr('y', y).attr('width', barW2).attr('height', barH2)
+        .attr('rx', 3).attr('fill', col).attr('opacity', 0.5);
+      svg.append('rect').attr('x', x).attr('y', y).attr('width', barW2).attr('height', barH2)
+        .attr('rx', 3).attr('fill', 'none').attr('stroke', col).attr('stroke-width', 1);
+
+      txt(svg, x + barW2/2, distY + distH + 14, name, {fill: C.text, size: 8, mono: true});
+      txt(svg, x + barW2/2, y - 6, (probs[i]*100).toFixed(1)+'%', {fill: col, size: 9, weight: 600, mono: true});
+    });
+
+    // Baseline
+    svg.append('line').attr('x1', barsStartX - 5).attr('y1', distY + distH).attr('x2', barsStartX + nAct*(barW2+barGap2)).attr('y2', distY + distH)
+      .attr('stroke', C.border).attr('stroke-width', 1);
+
+    // Right: entropy meter
+    const meterX = 420, meterY = vizY + 55, meterW = 350, meterH = 30;
+    box(svg, meterX, meterY, meterW, meterH, C.surface2, C.border, 5);
+
+    const fillW = (entropy / maxEntropy) * (meterW - 4);
+    const meterCol = entropy/maxEntropy > 0.7 ? C.green : entropy/maxEntropy > 0.4 ? C.orange : C.red;
+    svg.append('rect').attr('x', meterX + 2).attr('y', meterY + 2).attr('width', fillW).attr('height', meterH - 4)
+      .attr('rx', 4).attr('fill', meterCol).attr('opacity', 0.5);
+
+    txt(svg, meterX - 5, meterY + 20, 'Entropy:', {fill: C.heading, size: 10, weight: 600, anchor: 'end'});
+    txt(svg, meterX + meterW/2, meterY + 20, (entropy).toFixed(3) + ' / ' + maxEntropy.toFixed(3) + ' (' + (entropy/maxEntropy*100).toFixed(0) + '%)', {fill: meterCol, size: 11, weight: 600, mono: true});
+
+    // Labels
+    txt(svg, meterX, meterY + meterH + 18, 'Exploitation', {fill: C.red, size: 10, weight: 600, anchor: 'start'});
+    txt(svg, meterX + meterW, meterY + meterH + 18, 'Exploration', {fill: C.green, size: 10, weight: 600, anchor: 'end'});
+
+    // Explanation text
+    const explY = meterY + meterH + 40;
+    const explLines = alpha < 0.1 ? [
+      {t: '\u03b1 \u2248 0: Nearly greedy. Policy collapses to the highest-Q action.', c: C.red},
+      {t: 'Risk: gets stuck in local optima, no exploration.', c: C.muted},
+    ] : alpha < 0.5 ? [
+      {t: '\u03b1 moderate: Balances reward maximization with action diversity.', c: C.orange},
+      {t: 'Sweet spot: explores enough to discover better strategies.', c: C.muted},
+    ] : [
+      {t: '\u03b1 high: Strong exploration drive. Actions nearly uniform.', c: C.green},
+      {t: 'Useful early in training; auto-tuned \u03b1 will decrease over time.', c: C.muted},
+    ];
+
+    explLines.forEach((line, i) => {
+      txt(svg, meterX + meterW/2, explY + i * 16, line.t, {fill: line.c, size: 10});
+    });
+
+    // Dual Q annotation
+    const dqY = explY + 45;
+    box(svg, meterX - 10, dqY, meterW + 20, 40, C.surface2, C.blueDim + '60', 5);
+    txt(svg, meterX + meterW/2, dqY + 15, 'Why two Q-networks? Single Q overestimates \u2192 policy exploits errors \u2192 divergence.', {fill: C.blue, size: 9, weight: 500});
+    txt(svg, meterX + meterW/2, dqY + 30, 'min(Q\u2081, Q\u2082) is a pessimistic estimate that prevents this failure mode.', {fill: C.muted, size: 9});
+  }
+
+  drawSAC(0.2);
+
+  d3.select('#sac-alpha-slider').on('input',function(){
+    const alpha=+this.value;
+    d3.select('#sac-alpha-val').text(alpha.toFixed(2));
+    drawSAC(alpha);
+  });
+})();
+
+// ═══ Iframe isolation: show only targeted concept when embedded ═══
+(function(){
+  const isIframe = window.self !== window.top;
+  if (!isIframe) return;
+
+  const hash = window.location.hash.replace('#','');
+  if (!hash) return;
+
+  // Lock page — no scrolling, no extra content
+  document.body.style.overflow = 'hidden';
+  document.documentElement.style.overflow = 'hidden';
+
+  const article = document.querySelector('.article');
+  article.style.padding = '0.8rem 1rem 0';
+  article.style.maxWidth = '100%';
+
+  // Remove everything except the targeted section
+  const hdr = document.querySelector('header'); if (hdr) hdr.remove();
+  document.querySelector('.toc').remove();
+  document.querySelectorAll('hr').forEach(hr => hr.remove());
+
+  document.querySelectorAll('section').forEach(s => {
+    if (s.id === hash) {
+      s.style.marginTop = '0';
+      s.style.paddingTop = '0';
+      // Shrink the h3 a bit for popup context
+      const h3 = s.querySelector('h3');
+      if (h3) { h3.style.fontSize = '1.1rem'; h3.style.marginBottom = '0.3rem'; }
+      // Tighten paragraph spacing
+      s.querySelectorAll('p').forEach(p => { p.style.marginBottom = '0.4rem'; p.style.fontSize = '14px'; });
+    } else {
+      s.remove();
+    }
+  });
+})();
+</script>
+</body>
+</html>

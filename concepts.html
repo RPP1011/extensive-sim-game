@@ -195,128 +195,13 @@ hr {
 <body>
 <div class="article">
 
-<a href="blog_impala_v4.html" class="back-link">&larr; Back to IMPALA V4 blog post</a>
+<a href="index.html" class="back-link">&larr; Back to IMPALA V4 blog post</a>
 
 <h1>ML Concepts: Visual Explanations</h1>
 <p class="subtitle">Interactive diagrams explaining the machine learning building blocks used in the IMPALA V4 training pipeline. All numbers are from the actual model (d=32, 4 heads, 7 entity slots).</p>
 
-<nav class="toc">
-  <div class="toc-title">Concepts</div>
-  <ul>
-    <li><a href="#attention">Attention (Overview)</a></li>
-    <li><a href="#self-attention">Self-Attention</a></li>
-    <li><a href="#cross-attention">Cross-Attention</a></li>
-    <li><a href="#logits-softmax">Logits &amp; Softmax</a></li>
-    <li><a href="#masked-language-modeling">Masked Language Modeling</a></li>
-    <li><a href="#scaled-dot-product">Scaled Dot-Product Attention</a></li>
-  </ul>
-</nav>
-
-<!-- ═══════════════════════════════════════════ -->
-<section id="attention">
-<h2>What is Attention?</h2>
-<p class="concept-desc">Attention is a way for a neural network to <strong>selectively focus</strong> on the most relevant parts of its input. Instead of treating all information equally, attention asks: &ldquo;given what I&rsquo;m looking for, what should I pay attention to?&rdquo;</p>
-
-<p>The mechanism has three components, best understood through analogy:</p>
-
-<div class="fig-container" id="fig-attention-overview"></div>
-
-<p style="margin-top: 1rem;">The key insight: <strong>Query and Key are in the same space</strong>, so their dot product measures compatibility. A high dot product means &ldquo;this Key matches what the Query is looking for.&rdquo; After softmax normalization, the resulting weights select which Values to read.</p>
-
-<p>In our game AI, this appears in three places:</p>
-<ul style="margin: 0.8rem 0 0.5rem 1.5rem; color: var(--text); line-height: 2;">
-  <li><strong>Entity encoder</strong> &mdash; <a href="#self-attention">self-attention</a>: entities query each other (&ldquo;who on the battlefield matters to me?&rdquo;)</li>
-  <li><strong>Ability integration</strong> &mdash; <a href="#cross-attention">cross-attention</a>: abilities query entities (&ldquo;given what this ability does, which entities are relevant?&rdquo;)</li>
-  <li><strong>Target selection</strong> &mdash; <a href="#scaled-dot-product">pointer attention</a>: the combat head queries entities (&ldquo;who should I target?&rdquo;)</li>
-</ul>
-
-<h3 style="margin-top: 2rem;">Try It: Interactive Attention Calculator</h3>
-<p>Edit the Query and Key vectors below to see how changing numbers affects attention weights. The dot product of Q and each K produces raw scores; softmax converts them to weights that sum to 1.</p>
-
-<div id="attn-calculator" style="margin: 1.5rem 0;"></div>
-
-</section>
-
-<hr>
-
-<!-- ═══════════════════════════════════════════ -->
-<section id="self-attention">
-<h2>Self-Attention</h2>
-<p class="concept-desc">Self-attention lets each entity in the game "look at" every other entity to decide what matters. The entity encoder uses 4-head self-attention so that a healer can notice a wounded ally, or a damage-dealer can spot a vulnerable enemy &mdash; all learned, not hand-coded.</p>
-
-<div class="formula-box">
-  <span class="func">Attention</span>(<span class="var">Q</span>, <span class="var">K</span>, <span class="var">V</span>) = <span class="func">softmax</span>(<span class="var">Q</span><span class="var">K</span><sup>T</sup> <span class="op">/</span> <span class="num">&radic;d</span>) <span class="op">&middot;</span> <span class="var">V</span>
-</div>
-
-<div class="fig-container" id="fig-self-attn"></div>
-</section>
-
-<hr>
-
-<!-- ═══════════════════════════════════════════ -->
-<section id="cross-attention">
-<h2>Cross-Attention</h2>
-<p class="concept-desc">Cross-attention is like self-attention, but the query comes from a <em>different</em> source. Here, a pretrained ability embedding (e.g. "Fireball") generates the query, while entity tokens produce the keys and values. This lets each ability "ask" the battlefield: which entities am I most relevant to?</p>
-
-<div class="formula-box">
-  <span class="var">Q</span> = <span class="var">W<sub>q</sub></span> <span class="op">&middot;</span> <span class="var">ability_emb</span>&ensp;&ensp;
-  <span class="var">K</span> = <span class="var">W<sub>k</sub></span> <span class="op">&middot;</span> <span class="var">entity_tokens</span>&ensp;&ensp;
-  <span class="var">out</span> = <span class="func">softmax</span>(<span class="var">QK</span><sup>T</sup> <span class="op">/</span> <span class="num">&radic;32</span>) <span class="op">&middot;</span> <span class="var">V</span>
-</div>
-
-<div class="fig-container" id="fig-cross-attn"></div>
-</section>
-
-<hr>
-
-<!-- ═══════════════════════════════════════════ -->
-<section id="logits-softmax">
-<h2>Logits &amp; Softmax</h2>
-<p class="concept-desc">The model's raw output scores (logits) are arbitrary real numbers &mdash; they could be negative, large, or close together. Softmax converts them into a probability distribution that sums to 1.0. The temperature parameter controls how "sharp" or "flat" the distribution is: low temperature concentrates probability on the top action, high temperature spreads it out.</p>
-
-<div class="formula-box">
-  <span class="var">P</span>(<span class="var">i</span>) = <span class="func">exp</span>(<span class="var">z<sub>i</sub></span> <span class="op">/</span> <span class="var">&tau;</span>) <span class="op">/</span> <span class="op">&Sigma;</span><sub><span class="var">j</span></sub> <span class="func">exp</span>(<span class="var">z<sub>j</sub></span> <span class="op">/</span> <span class="var">&tau;</span>)
-</div>
-
-<div class="fig-container" id="fig-logits"></div>
-<div class="slider-row">
-  <label for="temp-slider">Temperature (&tau;):</label>
-  <input type="range" id="temp-slider" min="0.1" max="2.0" step="0.05" value="1.0">
-  <span class="val" id="temp-val">1.00</span>
-</div>
-</section>
-
-<hr>
-
-<!-- ═══════════════════════════════════════════ -->
-<section id="masked-language-modeling">
-<h2>Masked Language Modeling (MLM)</h2>
-<p class="concept-desc">MLM is a pretraining technique where we randomly hide (mask) some tokens in the input and train the model to predict them. By learning to fill in the blanks of ability DSL text, the transformer learns what each token means in context. The [CLS] token's output becomes a 128-dimensional summary embedding that captures the ability's full behavior.</p>
-
-<div class="formula-box">
-  <span class="func">Loss</span> = <span class="op">&minus;</span> <span class="op">&Sigma;</span><sub><span class="var">masked</span></sub> <span class="func">log</span> <span class="var">P</span>(<span class="var">token<sub>true</sub></span> | <span class="var">context</span>)
-</div>
-
-<div class="fig-container" id="fig-mlm"></div>
-</section>
-
-<hr>
-
-<!-- ═══════════════════════════════════════════ -->
-<section id="scaled-dot-product">
-<h2>Scaled Dot-Product Attention</h2>
-<p class="concept-desc">The fundamental computation behind all attention mechanisms. A query vector is compared against multiple key vectors using dot products, scaled down by &radic;d to prevent the softmax from saturating, then used to take a weighted average of value vectors. In our pointer heads, this is how the model selects which entity to target.</p>
-
-<div class="formula-box">
-  <span class="var">score<sub>i</sub></span> = <span class="var">Q</span> <span class="op">&middot;</span> <span class="var">K<sub>i</sub></span><sup>T</sup> <span class="op">/</span> <span class="num">&radic;d<sub>k</sub></span>
-  &emsp;&emsp;
-  <span class="var">&alpha;<sub>i</sub></span> = <span class="func">softmax</span>(<span class="var">score</span>)<sub><span class="var">i</span></sub>
-  &emsp;&emsp;
-  <span class="var">out</span> = <span class="op">&Sigma;</span><sub><span class="var">i</span></sub> <span class="var">&alpha;<sub>i</sub></span> <span class="var">V<sub>i</sub></span>
-</div>
-
-<div class="fig-container" id="fig-sdp"></div>
-</section>
+<div class="fig-container" id="fig-concept-map" style="padding:1rem;cursor:default;"></div>
+<p style="font-size:0.85rem;color:var(--text-muted);text-align:center;margin-top:0.5rem;">Click any node to jump to that section. Follow the arrows for a guided learning path.</p>
 
 </div>
 
@@ -339,794 +224,277 @@ function addArrow(svg,color){const id='a-'+color.replace(/[^a-z0-9]/gi,'');if(sv
 function arrow(g,svg,x1,y1,x2,y2,color=C.muted){const id=addArrow(svg,color);g.append('line').attr('x1',x1).attr('y1',y1).attr('x2',x2).attr('y2',y2).attr('stroke',color).attr('stroke-width',1.5).attr('marker-end','url(#'+id+')')}
 function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);const p=g.append('path').attr('d',d).attr('stroke',color).attr('stroke-width',1.5).attr('fill','none').attr('marker-end','url(#'+id+')');if(dash)p.attr('stroke-dasharray',dash);return p}
 
-// ═══ ATTENTION OVERVIEW ═══
+// ═══ CONCEPT MAP / FLOWCHART ═══
 (function(){
-  const W=820,H=400;
-  const svg=d3.select('#fig-attention-overview').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+  const W=1060,H=1020;
+  const svg=d3.select('#fig-concept-map').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
 
-  // ── Analogy panel: Library search ──
-  const lx=30, ly=15;
-  box(svg,lx,ly,370,365,C.surface,C.border,10);
-  txt(svg,lx+185,ly+22,'The Analogy: Searching a Library',{fill:C.heading,size:13,weight:600});
-
-  // Query = your question
-  const qy=ly+50;
-  box(svg,lx+20,qy,330,55,'rgba(96,165,250,0.12)',C.blueDim,8);
-  txt(svg,lx+50,qy+17,'Query (Q)',{fill:C.blue,size:12,weight:700,anchor:'left'});
-  txt(svg,lx+50,qy+35,'What you\'re looking for',{fill:C.blue,size:11,anchor:'left'});
-  txt(svg,lx+50,qy+48,'"I need a low-HP enemy to finish off"',{fill:C.muted,size:10,anchor:'left',mono:true});
-
-  // Key = book titles on spines
-  const ky=qy+70;
-  box(svg,lx+20,ky,330,55,'rgba(167,139,250,0.12)',C.purpleDim,8);
-  txt(svg,lx+50,ky+17,'Key (K)',{fill:C.purple,size:12,weight:700,anchor:'left'});
-  txt(svg,lx+50,ky+35,'Labels that describe each item',{fill:C.purple,size:11,anchor:'left'});
-  txt(svg,lx+50,ky+48,'"I\'m an enemy at 15% HP, range 4"',{fill:C.muted,size:10,anchor:'left',mono:true});
-
-  // Value = book contents
-  const vy=ky+70;
-  box(svg,lx+20,vy,330,55,'rgba(52,211,153,0.12)',C.greenDim,8);
-  txt(svg,lx+50,vy+17,'Value (V)',{fill:C.green,size:12,weight:700,anchor:'left'});
-  txt(svg,lx+50,vy+35,'The actual information to read',{fill:C.green,size:11,anchor:'left'});
-  txt(svg,lx+50,vy+48,'"Full 32d representation of this entity"',{fill:C.muted,size:10,anchor:'left',mono:true});
-
-  // Match score
-  const my=vy+75;
-  box(svg,lx+20,my,330,48,C.surface2,C.orangeDim,8);
-  txt(svg,lx+185,my+17,'Q \u00b7 K = compatibility score',{fill:C.orange,size:12,weight:600});
-  txt(svg,lx+185,my+35,'High score = "this Key matches my Query"',{fill:C.muted,size:10});
-
-  // ── Mechanism panel: the math ──
-  const rx=430, ry=15;
-  box(svg,rx,ry,365,365,C.surface,C.border,10);
-  txt(svg,rx+182,ry+22,'The Mechanism',{fill:C.heading,size:13,weight:600});
-
-  // Step-by-step with concrete example
-  const entities = [
-    {name:'Self',     color:C.cyan,  hp:'100%', score:'0.1'},
-    {name:'Enemy 0',  color:C.red,   hp:'15%',  score:'0.72'},
-    {name:'Enemy 1',  color:C.red,   hp:'80%',  score:'0.08'},
-    {name:'Ally 0',   color:C.green, hp:'60%',  score:'0.10'},
+  // Define nodes with positions (organized in tiers)
+  const tiers = [
+    // Tier 0: Foundations
+    {y:30, nodes:[
+      {id:'neural-networks',label:'Neural\nNetworks',color:C.cyan,x:130},
+      {id:'gradient-descent',label:'Gradient\nDescent',color:C.cyan,x:310},
+      {id:'loss-functions',label:'Loss\nFunctions',color:C.cyan,x:490},
+    ]},
+    // Tier 1: Training mechanics
+    {y:120, nodes:[
+      {id:'batch-epoch-lr',label:'Batch / Epoch\nLearning Rate',color:C.blue,x:130},
+      {id:'overfitting',label:'Overfitting &\nGeneralization',color:C.blue,x:310},
+      {id:'normalization',label:'Normalization',color:C.blue,x:490},
+    ]},
+    // Tier 2: Math & Statistics (row 1: basics)
+    {y:210, nodes:[
+      {id:'probability-distribution',label:'Probability\nDistribution',color:'#22d3ee',x:80},
+      {id:'expectation',label:'Expectation',color:'#22d3ee',x:280},
+      {id:'log-probability',label:'Log\nProbability',color:'#22d3ee',x:480},
+      {id:'sampling',label:'Sampling',color:'#22d3ee',x:680},
+    ]},
+    // Tier 3: Math & Statistics (row 2: info theory)
+    {y:300, nodes:[
+      {id:'entropy',label:'Entropy',color:'#22d3ee',x:80},
+      {id:'kl-divergence',label:'KL\nDivergence',color:'#22d3ee',x:280},
+      {id:'variance',label:'Variance',color:'#22d3ee',x:480},
+      {id:'bias-variance',label:'Bias-Variance\nTradeoff',color:'#22d3ee',x:680},
+    ]},
+    // Tier 4: Math & Statistics (row 3: tools)
+    {y:390, nodes:[
+      {id:'dot-product',label:'Dot\nProduct',color:'#22d3ee',x:80},
+      {id:'matrix-multiply',label:'Matrix\nMultiply',color:'#22d3ee',x:280},
+      {id:'cosine-similarity',label:'Cosine\nSimilarity',color:'#22d3ee',x:480},
+      {id:'ema',label:'Exponential\nMoving Avg',color:'#22d3ee',x:680},
+    ]},
+    // Tier 5: Architecture building blocks
+    {y:480, nodes:[
+      {id:'tokenization',label:'Tokenization',color:C.purple,x:130},
+      {id:'residual-connections',label:'Residual\nConnections',color:C.purple,x:310},
+      {id:'autoencoder',label:'Autoencoder',color:C.purple,x:490},
+      {id:'latent-spaces',label:'Latent\nSpaces',color:C.purple,x:670},
+    ]},
+    // Tier 6: Attention mechanisms
+    {y:570, nodes:[
+      {id:'attention',label:'Attention\n(Overview)',color:C.orange,x:130},
+      {id:'logits-softmax',label:'Logits &\nSoftmax',color:C.orange,x:310},
+      {id:'scaled-dot-product',label:'Scaled\nDot-Product',color:C.orange,x:490},
+    ]},
+    // Tier 7: Attention variants
+    {y:660, nodes:[
+      {id:'self-attention',label:'Self-\nAttention',color:C.orange,x:220},
+      {id:'cross-attention',label:'Cross-\nAttention',color:C.orange,x:400},
+      {id:'masked-language-modeling',label:'Masked Language\nModeling',color:C.orange,x:600},
+    ]},
+    // Tier 8: RL Foundations
+    {y:760, nodes:[
+      {id:'actor-critic',label:'Actor-\nCritic',color:C.green,x:80},
+      {id:'value-q-functions',label:'Value &\nQ-Functions',color:C.green,x:260},
+      {id:'reward-shaping',label:'Reward\nShaping',color:C.green,x:440},
+      {id:'on-off-policy',label:'On-Policy vs\nOff-Policy',color:C.green,x:620},
+      {id:'replay-buffer',label:'Replay\nBuffer',color:C.green,x:800},
+    ]},
+    // Tier 9: RL Algorithms
+    {y:860, nodes:[
+      {id:'reinforce',label:'REINFORCE',color:C.red,x:130},
+      {id:'ppo',label:'PPO',color:C.red,x:310},
+      {id:'impala-vtrace',label:'IMPALA &\nV-Trace',color:C.red,x:530},
+      {id:'sac',label:'SAC',color:C.red,x:730},
+    ]},
   ];
 
-  // Query box
-  const mqy=ry+44;
-  box(svg,rx+15,mqy,140,32,C.surface2,C.blueDim,4);
-  txt(svg,rx+85,mqy+20,'Q: "find weak enemy"',{fill:C.blue,size:10,weight:500});
-
-  // Arrow from Q to dot products
-  arrow(svg,svg,rx+155,mqy+16,rx+175,mqy+16,C.blue);
-
-  // Entity rows with dot product scores
-  const ew=160, eh=34, egap=4;
-  const esx=rx+180;
-  entities.forEach((ent,i) => {
-    const ey = mqy + i*(eh+egap);
-
-    // Key box
-    box(svg,esx,ey,ew,eh,C.surface2,ent.color+'60',4);
-    txt(svg,esx+8,ey+14,`K: ${ent.name}`,{fill:ent.color,size:10,weight:500,anchor:'left'});
-    txt(svg,esx+8,ey+27,`HP:${ent.hp}`,{fill:C.muted,size:9,anchor:'left',mono:true});
-
-    // Score
-    const scoreVal = parseFloat(ent.score);
-    const barW = scoreVal * 100;
-    const barColor = scoreVal > 0.5 ? C.orange : scoreVal > 0.15 ? C.orangeDim : C.surface3;
-
-    svg.append('rect').attr('x',esx+ew+8).attr('y',ey+4).attr('width',100).attr('height',eh-8).attr('rx',3).attr('fill',C.surface2).attr('stroke',C.border);
-    svg.append('rect').attr('x',esx+ew+8).attr('y',ey+4).attr('width',barW).attr('height',eh-8).attr('rx',3).attr('fill',barColor);
-    txt(svg,esx+ew+58,ey+eh/2+3,`${(scoreVal*100).toFixed(0)}%`,{fill:scoreVal>0.5?'#000':C.heading,size:11,weight:700});
-  });
-
-  // Softmax label
-  const slx=esx+ew+120, sly=mqy+20;
-  txt(svg,slx+15,sly,'softmax',{fill:C.orange,size:10,weight:600,anchor:'left'});
-  txt(svg,slx+15,sly+14,'\u2192 weights',{fill:C.muted,size:9,anchor:'left'});
-  txt(svg,slx+15,sly+28,'sum to 1.0',{fill:C.muted,size:9,anchor:'left'});
-
-  // Result arrow and output
-  const outY = mqy + entities.length*(eh+egap) + 10;
-  box(svg,rx+15,outY,335,50,C.surface2,C.greenDim,6);
-  txt(svg,rx+182,outY+18,'Output = weighted sum of Values',{fill:C.green,size:11,weight:600});
-  txt(svg,rx+182,outY+36,'72% Enemy0 + 10% Ally0 + 8% Enemy1 + 10% Self',{fill:C.muted,size:10,mono:true});
-
-  // Arrow down to output
-  arrow(svg,svg,rx+182,mqy+entities.length*(eh+egap)-2,rx+182,outY-2,C.green);
-
-  // Bottom summary
-  txt(svg,W/2,H-10,'The result is a new representation dominated by the most relevant entity \u2014 learned, not hand-coded.',{fill:C.muted,size:11});
-})();
-
-// ═══ INTERACTIVE ATTENTION CALCULATOR ═══
-(function(){
-  const container = document.getElementById('attn-calculator');
-  if (!container) return;
-
-  const dim = 4; // simplified 4d vectors for readability
-  const nKeys = 4;
-  const entities = ['Self','Enemy 0','Enemy 1','Ally 0'];
-  const entColors = [C.cyan, C.red, C.red, C.green];
-
-  // Initial values — Q is "looking for low-HP enemy"
-  let Q = [0.8, -0.3, 0.9, 0.1];
-  let Keys = [
-    [ 0.1,  0.2,  0.1,  0.8],  // Self: high HP, friendly
-    [ 0.7, -0.1,  0.8, -0.2],  // Enemy 0: matches Q well (low HP enemy)
-    [ 0.2,  0.5,  0.3,  0.1],  // Enemy 1: moderate
-    [-0.3,  0.6, -0.1,  0.7],  // Ally 0: different direction
-  ];
-  let Vals = [
-    [1.0, 0.9, 0.5, 0.2],
-    [0.3, 0.1, 0.8, 0.9],
-    [0.7, 0.5, 0.4, 0.3],
-    [0.9, 0.8, 0.2, 0.6],
-  ];
-
-  const scaleFactor = Math.sqrt(dim);
-
-  function softmax(arr) {
-    const max = Math.max(...arr);
-    const exps = arr.map(x => Math.exp(x - max));
-    const sum = exps.reduce((a,b) => a+b, 0);
-    return exps.map(e => e / sum);
-  }
-
-  function dot(a, b) {
-    return a.reduce((s, v, i) => s + v * b[i], 0);
-  }
-
-  function compute() {
-    const rawScores = Keys.map(k => dot(Q, k));
-    const scaled = rawScores.map(s => s / scaleFactor);
-    const weights = softmax(scaled);
-    const output = new Array(dim).fill(0);
-    weights.forEach((w, i) => {
-      Vals[i].forEach((v, d) => { output[d] += w * v; });
-    });
-    return { rawScores, scaled, weights, output };
-  }
-
-  function render() {
-    const { rawScores, scaled, weights, output } = compute();
-    const maxWeight = Math.max(...weights);
-
-    // Build HTML with editable inputs
-    let html = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">`;
-
-    // Left: Q and K vectors
-    html += `<div>`;
-    html += `<div style="margin-bottom:12px;">`;
-    html += `<div style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:11px;color:${C.blue};font-weight:600;margin-bottom:4px;">Query (Q) — "what am I looking for?"</div>`;
-    html += `<div style="display:flex;gap:4px;">`;
-    Q.forEach((v, i) => {
-      html += `<input type="number" step="0.1" value="${v.toFixed(1)}" data-type="q" data-i="${i}" style="width:56px;padding:4px 6px;background:${C.surface2};border:1px solid ${C.blueDim};border-radius:4px;color:${C.blue};font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:12px;text-align:center;">`;
-    });
-    html += `</div></div>`;
-
-    Keys.forEach((k, ki) => {
-      const w = weights[ki];
-      const barPct = (w * 100).toFixed(1);
-      const bg = w === maxWeight ? 'rgba(251,191,36,0.15)' : 'transparent';
-      html += `<div style="margin-bottom:8px;padding:6px 8px;border-radius:6px;background:${bg};border:1px solid ${w > 0.3 ? C.orangeDim : C.border};">`;
-      html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">`;
-      html += `<span style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:11px;color:${entColors[ki]};font-weight:600;min-width:60px;">${entities[ki]}</span>`;
-      html += `<span style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:10px;color:${C.muted};">Q·K=${rawScores[ki].toFixed(2)}</span>`;
-      html += `<span style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:10px;color:${C.muted};">÷√${dim}=${scaled[ki].toFixed(2)}</span>`;
-      html += `<span style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:11px;color:${w > 0.3 ? C.orange : C.text};font-weight:700;margin-left:auto;">${barPct}%</span>`;
-      html += `</div>`;
-      html += `<div style="display:flex;gap:4px;align-items:center;">`;
-      html += `<span style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:9px;color:${C.muted};min-width:16px;">K:</span>`;
-      k.forEach((v, i) => {
-        html += `<input type="number" step="0.1" value="${v.toFixed(1)}" data-type="k" data-ki="${ki}" data-i="${i}" style="width:52px;padding:3px 4px;background:${C.surface};border:1px solid ${C.border};border-radius:3px;color:${entColors[ki]};font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:11px;text-align:center;">`;
-      });
-      // Weight bar
-      html += `<div style="flex:1;height:14px;background:${C.surface};border-radius:3px;margin-left:6px;overflow:hidden;">`;
-      html += `<div style="width:${Math.min(barPct, 100)}%;height:100%;background:${w > 0.3 ? C.orange : C.orangeDim};border-radius:3px;transition:width 0.2s;"></div>`;
-      html += `</div>`;
-      html += `</div></div>`;
-    });
-    html += `</div>`;
-
-    // Right: step-by-step computation + output
-    html += `<div>`;
-    html += `<div style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:11px;color:${C.heading};font-weight:600;margin-bottom:8px;">Step-by-Step</div>`;
-
-    // Raw scores
-    html += `<div style="background:${C.surface};border:1px solid ${C.border};border-radius:6px;padding:8px 10px;margin-bottom:8px;">`;
-    html += `<div style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:10px;color:${C.muted};margin-bottom:4px;">1. Dot products (Q · K)</div>`;
-    rawScores.forEach((s, i) => {
-      html += `<div style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:11px;color:${entColors[i]};">  ${entities[i].padEnd(8)} → ${s >= 0 ? '+' : ''}${s.toFixed(3)}</div>`;
-    });
-    html += `</div>`;
-
-    // Scaled
-    html += `<div style="background:${C.surface};border:1px solid ${C.border};border-radius:6px;padding:8px 10px;margin-bottom:8px;">`;
-    html += `<div style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:10px;color:${C.muted};margin-bottom:4px;">2. Scale by ÷ √d = ÷ ${scaleFactor.toFixed(2)}</div>`;
-    scaled.forEach((s, i) => {
-      html += `<div style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:11px;color:${entColors[i]};">  ${entities[i].padEnd(8)} → ${s >= 0 ? '+' : ''}${s.toFixed(3)}</div>`;
-    });
-    html += `</div>`;
-
-    // Softmax
-    html += `<div style="background:${C.surface};border:1px solid ${C.orangeDim};border-radius:6px;padding:8px 10px;margin-bottom:8px;">`;
-    html += `<div style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:10px;color:${C.orange};margin-bottom:4px;">3. Softmax → weights (sum to 100%)</div>`;
-    weights.forEach((w, i) => {
-      const pct = (w * 100).toFixed(1);
-      const bar = '█'.repeat(Math.round(w * 20)) + '░'.repeat(20 - Math.round(w * 20));
-      html += `<div style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:11px;color:${w === maxWeight ? C.orange : entColors[i]};font-weight:${w === maxWeight ? 700 : 400};">  ${entities[i].padEnd(8)} ${bar} ${pct}%</div>`;
-    });
-    html += `</div>`;
-
-    // Output
-    html += `<div style="background:${C.surface};border:1px solid ${C.greenDim};border-radius:6px;padding:8px 10px;">`;
-    html += `<div style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:10px;color:${C.green};margin-bottom:4px;">4. Weighted sum of Values → Output</div>`;
-    html += `<div style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:11px;color:${C.green};">  [${output.map(v => v.toFixed(3)).join(', ')}]</div>`;
-    html += `<div style="font-family:var(--font-mono,'IBM Plex Mono',monospace);font-size:10px;color:${C.muted};margin-top:4px;">= ${weights.map((w,i) => `${(w*100).toFixed(0)}%·${entities[i]}`).join(' + ')}</div>`;
-    html += `</div>`;
-
-    html += `</div></div>`;
-
-    container.innerHTML = html;
-
-    // Attach input handlers
-    container.querySelectorAll('input[type="number"]').forEach(inp => {
-      inp.addEventListener('input', function() {
-        const val = parseFloat(this.value) || 0;
-        if (this.dataset.type === 'q') {
-          Q[parseInt(this.dataset.i)] = val;
-        } else if (this.dataset.type === 'k') {
-          Keys[parseInt(this.dataset.ki)][parseInt(this.dataset.i)] = val;
-        }
-        render();
-        // Restore focus to the same input
-        const sel = `input[data-type="${this.dataset.type}"]` +
-          (this.dataset.ki !== undefined ? `[data-ki="${this.dataset.ki}"]` : '') +
-          `[data-i="${this.dataset.i}"]`;
-        const el = container.querySelector(sel);
-        if (el) { el.focus(); el.select(); }
-      });
-    });
-  }
-
-  render();
-})();
-
-// ═══ SELF-ATTENTION ═══
-(function(){
-  const W=820,H=420;
-  const svg=d3.select('#fig-self-attn').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
-
-  // Entity slots at top
-  const entities=['Self','Enemy','Ally 0','Ally 1'];
-  const eCols=[C.cyan,C.red,C.green,C.green];
-  const slotW=130,slotH=40,slotGap=30;
-  const slotsX=(W-entities.length*(slotW+slotGap)+slotGap)/2;
-  const slotY=15;
-
-  entities.forEach((name,i)=>{
-    const x=slotsX+i*(slotW+slotGap);
-    box(svg,x,slotY,slotW,slotH,C.surface,eCols[i]+'80',5);
-    txt(svg,x+slotW/2,slotY+17,name,{fill:eCols[i],size:13,weight:600});
-    txt(svg,x+slotW/2,slotY+33,'30 features',{fill:C.muted,size:9,mono:true});
-  });
-
-  // Q, K, V projection
-  const projY=slotY+slotH+20;
-  const projLabels=['Q','K','V'];
-  const projCols=[C.blue,C.orange,C.green];
-  const projW=32,projH=22,projGap=6;
-
-  entities.forEach((name,i)=>{
-    const sx=slotsX+i*(slotW+slotGap);
-    arrow(svg,svg,sx+slotW/2,slotY+slotH,sx+slotW/2,projY-2,C.muted);
-    projLabels.forEach((l,j)=>{
-      const px=sx+(slotW-(3*projW+2*projGap))/2+j*(projW+projGap);
-      box(svg,px,projY,projW,projH,projCols[j]+'20',projCols[j]+'60',3);
-      txt(svg,px+projW/2,projY+15,l,{fill:projCols[j],size:10,weight:600});
+  // Flatten nodes for lookup
+  const nodeMap={};
+  const allNodes=[];
+  tiers.forEach(tier=>{
+    tier.nodes.forEach(n=>{
+      n.y=tier.y;
+      n.w=120;
+      n.h=50;
+      nodeMap[n.id]=n;
+      allNodes.push(n);
     });
   });
 
-  // Q*K^T label
-  const matY=projY+projH+25;
-  txt(svg,W/2,matY,'Q \u00b7 K\u1d40 / \u221a32  \u2192  4\u00d74 attention matrix',{fill:C.heading,size:13,weight:500});
-
-  // 4x4 heatmap
-  const hmY=matY+18;
-  const cellW=75,cellH=40,hmGap=3;
-  const hmW=4*(cellW+hmGap)-hmGap;
-  const hmX=(W-hmW)/2;
-
-  // Attention weights: each row sums to 1
-  const attnMatrix=[
-    [0.15, 0.55, 0.18, 0.12],  // Self attends mostly to Enemy
-    [0.10, 0.20, 0.40, 0.30],  // Enemy attends to allies
-    [0.25, 0.15, 0.10, 0.50],  // Ally0 attends to Ally1
-    [0.20, 0.60, 0.12, 0.08],  // Ally1 attends to Enemy
+  // Define edges (from → to)
+  const edges=[
+    // Foundations flow
+    ['neural-networks','gradient-descent'],
+    ['gradient-descent','loss-functions'],
+    ['neural-networks','batch-epoch-lr'],
+    ['loss-functions','overfitting'],
+    ['batch-epoch-lr','overfitting'],
+    ['gradient-descent','normalization'],
+    // Foundations → Math & Statistics
+    ['neural-networks','probability-distribution'],
+    ['neural-networks','expectation'],
+    ['loss-functions','log-probability'],
+    ['gradient-descent','variance'],
+    // Math & Statistics internal (row 1 → row 2)
+    ['probability-distribution','expectation'],
+    ['probability-distribution','sampling'],
+    ['probability-distribution','entropy'],
+    ['expectation','variance'],
+    ['log-probability','entropy'],
+    ['log-probability','kl-divergence'],
+    ['sampling','entropy'],
+    ['entropy','kl-divergence'],
+    ['variance','bias-variance'],
+    // Math & Statistics (row 2 → row 3)
+    ['dot-product','matrix-multiply'],
+    ['dot-product','cosine-similarity'],
+    ['expectation','ema'],
+    ['variance','ema'],
+    // Math & Statistics → Architecture
+    ['matrix-multiply','residual-connections'],
+    ['cosine-similarity','autoencoder'],
+    ['cosine-similarity','latent-spaces'],
+    // Math & Statistics → Attention
+    ['dot-product','attention'],
+    ['dot-product','scaled-dot-product'],
+    ['log-probability','logits-softmax'],
+    // Training → Architecture
+    ['normalization','tokenization'],
+    ['normalization','residual-connections'],
+    ['loss-functions','autoencoder'],
+    ['autoencoder','latent-spaces'],
+    // Architecture → Attention
+    ['tokenization','attention'],
+    ['residual-connections','attention'],
+    ['neural-networks','logits-softmax'],
+    ['logits-softmax','scaled-dot-product'],
+    ['attention','scaled-dot-product'],
+    // Attention variants
+    ['attention','self-attention'],
+    ['attention','cross-attention'],
+    ['scaled-dot-product','self-attention'],
+    ['scaled-dot-product','cross-attention'],
+    ['cross-attention','masked-language-modeling'],
+    ['latent-spaces','masked-language-modeling'],
+    // Math → RL
+    ['expectation','value-q-functions'],
+    ['variance','reinforce'],
+    ['bias-variance','ppo'],
+    ['kl-divergence','ppo'],
+    ['kl-divergence','impala-vtrace'],
+    ['entropy','sac'],
+    ['ema','actor-critic'],
+    ['sampling','reinforce'],
+    ['log-probability','reinforce'],
+    // RL foundations
+    ['gradient-descent','actor-critic'],
+    ['loss-functions','value-q-functions'],
+    ['actor-critic','value-q-functions'],
+    ['value-q-functions','reward-shaping'],
+    ['actor-critic','on-off-policy'],
+    ['on-off-policy','replay-buffer'],
+    // RL algorithms
+    ['actor-critic','reinforce'],
+    ['value-q-functions','reinforce'],
+    ['reinforce','ppo'],
+    ['reward-shaping','ppo'],
+    ['on-off-policy','impala-vtrace'],
+    ['ppo','impala-vtrace'],
+    ['replay-buffer','sac'],
+    ['on-off-policy','sac'],
+    ['value-q-functions','sac'],
   ];
 
-  const cScale=d3.scaleSequential(d3.interpolateRgbBasis([C.surface,'#1a3a5c',C.blue])).domain([0,0.65]);
-  const highlightRow=0;
-
-  // Column headers
-  entities.forEach((name,j)=>{
-    txt(svg,hmX+j*(cellW+hmGap)+cellW/2,hmY-5,name,{fill:eCols[j],size:9,weight:500});
+  // Draw edges first (behind nodes)
+  edges.forEach(([fromId,toId])=>{
+    const from=nodeMap[fromId],to=nodeMap[toId];
+    if(!from||!to) return;
+    const x1=from.x+from.w/2, y1=from.y+from.h;
+    const x2=to.x+to.w/2, y2=to.y;
+    // Use curved path for non-straight connections
+    const dx=x2-x1;
+    const dy=y2-y1;
+    const midY=y1+dy*0.5;
+    svg.append('path')
+      .attr('d',`M${x1},${y1} C${x1},${midY} ${x2},${midY} ${x2},${y2}`)
+      .attr('stroke',from.color).attr('stroke-width',1.2).attr('fill','none')
+      .attr('opacity',0.25).attr('stroke-dasharray','4,3');
   });
 
-  // Row labels + cells
-  entities.forEach((name,i)=>{
-    txt(svg,hmX-10,hmY+i*(cellH+hmGap)+cellH/2+4,name,{fill:eCols[i],size:9,weight:500,anchor:'end'});
+  // Tier labels
+  const tierLabels=['Foundations','Training','Math (Basics)','Math (Info Theory)','Math (Tools)','Architecture','Attention','Attention (contd.)','RL Foundations','RL Algorithms'];
+  tiers.forEach((tier,i)=>{
+    txt(svg,20,tier.y+tier.nodes[0].h/2+4,tierLabels[i],{fill:C.muted,size:8,weight:500,anchor:'start'});
+  });
 
-    entities.forEach((n2,j)=>{
-      const x=hmX+j*(cellW+hmGap);
-      const y=hmY+i*(cellH+hmGap);
-      const w=attnMatrix[i][j];
-      const isHighlight=i===highlightRow;
+  // Draw nodes
+  allNodes.forEach(n=>{
+    const g=svg.append('g').attr('class','concept-node').style('cursor','pointer');
 
-      box(svg,x,y,cellW,cellH,cScale(w),isHighlight?C.blue+'60':C.border+'40',4);
-      txt(svg,x+cellW/2,y+cellH/2+4,(w*100).toFixed(0)+'%',{fill:w>0.35?'#fff':C.heading,size:13,weight:w>0.35?700:400,mono:true});
+    // Background
+    g.append('rect')
+      .attr('x',n.x).attr('y',n.y).attr('width',n.w).attr('height',n.h)
+      .attr('rx',8).attr('fill',n.color+'15').attr('stroke',n.color).attr('stroke-width',1.5);
+
+    // Label (handle newlines)
+    const lines=n.label.split('\n');
+    const lineH=13;
+    const startY=n.y+n.h/2-(lines.length-1)*lineH/2+4;
+    lines.forEach((line,i)=>{
+      g.append('text')
+        .attr('x',n.x+n.w/2).attr('y',startY+i*lineH)
+        .attr('text-anchor','middle').attr('fill',n.color)
+        .attr('font-family','DM Sans, sans-serif').attr('font-size',10).attr('font-weight',600)
+        .text(line);
+    });
+
+    // Hover effect
+    g.on('mouseover',function(){
+      d3.select(this).select('rect').attr('fill',n.color+'30').attr('stroke-width',2.5);
+    }).on('mouseout',function(){
+      d3.select(this).select('rect').attr('fill',n.color+'15').attr('stroke-width',1.5);
+    });
+
+    // Click → scroll to section
+    const pageMap = {
+    'neural-networks':'concepts_foundations.html',
+    'gradient-descent':'concepts_foundations.html',
+    'loss-functions':'concepts_foundations.html',
+    'batch-epoch-lr':'concepts_foundations.html',
+    'overfitting':'concepts_foundations.html',
+    'normalization':'concepts_foundations.html',
+    'probability-distribution':'concepts_math.html',
+    'expectation':'concepts_math.html',
+    'log-probability':'concepts_math.html',
+    'sampling':'concepts_math.html',
+    'entropy':'concepts_math.html',
+    'kl-divergence':'concepts_math.html',
+    'variance':'concepts_math.html',
+    'bias-variance':'concepts_math.html',
+    'dot-product':'concepts_math.html',
+    'matrix-multiply':'concepts_math.html',
+    'cosine-similarity':'concepts_math.html',
+    'ema':'concepts_math.html',
+    'tokenization':'concepts_architecture.html',
+    'residual-connections':'concepts_architecture.html',
+    'autoencoder':'concepts_architecture.html',
+    'latent-spaces':'concepts_architecture.html',
+    'attention':'concepts_attention.html',
+    'self-attention':'concepts_attention.html',
+    'cross-attention':'concepts_attention.html',
+    'logits-softmax':'concepts_attention.html',
+    'masked-language-modeling':'concepts_attention.html',
+    'scaled-dot-product':'concepts_attention.html',
+    'actor-critic':'concepts_rl_foundations.html',
+    'value-q-functions':'concepts_rl_foundations.html',
+    'on-off-policy':'concepts_rl_foundations.html',
+    'reward-shaping':'concepts_rl_foundations.html',
+    'replay-buffer':'concepts_rl_foundations.html',
+    'reinforce':'concepts_rl_algorithms.html',
+    'ppo':'concepts_rl_algorithms.html',
+    'impala-vtrace':'concepts_rl_algorithms.html',
+    'sac':'concepts_rl_algorithms.html'
+  };
+    g.on('click',function(){
+      const page = pageMap[n.id];
+      if(page) window.location.href = page + '#' + n.id;
     });
   });
 
-  // Highlight row annotation
-  const annY=hmY+highlightRow*(cellH+hmGap)+cellH/2;
-  const annX=hmX+hmW+15;
-  txt(svg,annX,annY-4,'softmax row',{fill:C.blue,size:10,weight:600,anchor:'start'});
-  txt(svg,annX,annY+10,'sums to 1.0',{fill:C.muted,size:9,anchor:'start'});
-  svg.append('line').attr('x1',hmX+hmW+3).attr('y1',annY).attr('x2',annX-3).attr('y2',annY).attr('stroke',C.blue).attr('stroke-width',1);
-
-  // Output: weighted sum
-  const outY=hmY+4*(cellH+hmGap)+15;
-  txt(svg,W/2,outY,'Weighted sum:  out = \u03b1\u2080V\u2080 + \u03b1\u2081V\u2081 + \u03b1\u2082V\u2082 + \u03b1\u2083V\u2083',{fill:C.heading,size:12,weight:500});
-  txt(svg,W/2,outY+18,'Each entity gets a context-aware 32d representation encoding what it "sees"',{fill:C.muted,size:10});
-
-  arrow(svg,svg,W/2,hmY+4*(cellH+hmGap)-hmGap,W/2,outY-12,C.muted);
-})();
-
-// ═══ CROSS-ATTENTION ═══
-(function(){
-  const W=820,H=380;
-  const svg=d3.select('#fig-cross-attn').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
-
-  // Left: ability embedding
-  const abX=40,abY=30;
-  box(svg,abX,abY,160,55,C.surface,C.purpleDim,6);
-  txt(svg,abX+80,abY+20,'Fireball',{fill:C.purple,size:14,weight:700});
-  txt(svg,abX+80,abY+38,'128d pretrained emb.',{fill:C.muted,size:9,mono:true});
-
-  // Projection to Q
-  const projQY=abY+55+20;
-  arrow(svg,svg,abX+80,abY+55,abX+80,projQY-2,C.purple);
-  box(svg,abX+20,projQY,120,35,C.surface2,C.purpleDim,4);
-  txt(svg,abX+80,projQY+14,'W_q projection',{fill:C.purple,size:10,weight:500});
-  txt(svg,abX+80,projQY+28,'128 \u2192 32d',{fill:C.muted,size:9,mono:true});
-
-  const qBoxY=projQY+35+15;
-  arrow(svg,svg,abX+80,projQY+35,abX+80,qBoxY-2,C.purple);
-  box(svg,abX+30,qBoxY,100,32,C.blue+'20',C.blue+'80',4);
-  txt(svg,abX+80,qBoxY+20,'Query (1\u00d732)',{fill:C.blue,size:11,weight:600});
-
-  // Right: entity tokens
-  const entX=320,entY=30;
-  const entNames=['Self','Enemy 0','Enemy 1','Ally 0'];
-  const entCols=[C.cyan,C.red,C.red,C.green];
-  const eW=100,eGap=12;
-
-  txt(svg,entX+(entNames.length*(eW+eGap)-eGap)/2,entY-8,'Entity Tokens (from encoder)',{fill:C.text,size:11});
-
-  entNames.forEach((n,i)=>{
-    const x=entX+i*(eW+eGap);
-    box(svg,x,entY,eW,40,C.surface,entCols[i]+'60',4);
-    txt(svg,x+eW/2,entY+17,n,{fill:entCols[i],size:10,weight:600});
-    txt(svg,x+eW/2,entY+32,'32d',{fill:C.muted,size:9,mono:true});
-  });
-
-  // Projections to K, V
-  const kvY=entY+40+18;
-  entNames.forEach((n,i)=>{
-    const x=entX+i*(eW+eGap)+eW/2;
-    arrow(svg,svg,x,entY+40,x,kvY-2,C.muted);
-  });
-
-  box(svg,entX,kvY,(entNames.length*(eW+eGap)-eGap),32,C.surface2,C.borderBright,4);
-  txt(svg,entX+(entNames.length*(eW+eGap)-eGap)/2,kvY+14,'W_k, W_v projections \u2192 Keys (4\u00d732) + Values (4\u00d732)',{fill:C.text,size:10});
-
-  // Dot product row
-  const dotY=kvY+32+35;
-  txt(svg,W/2,dotY-18,'Q \u00b7 K\u1d40 / \u221a32',{fill:C.heading,size:14,weight:600});
-
-  // Connect Q to dot product — arrow leaves right side of Q box
-  const qBoxRight = abX+30+100; // right edge of Q box
-  const dotCenterX = entX+(entNames.length*(eW+eGap)-eGap)/2;
-  pathArrow(svg,svg,`M${qBoxRight},${qBoxY+16} L${entX-10},${qBoxY+16} L${entX-10},${dotY+8} L${entX+5},${dotY+8}`,C.blue,'5,3');
-  arrow(svg,svg,entX+(entNames.length*(eW+eGap)-eGap)/2,kvY+32,entX+(entNames.length*(eW+eGap)-eGap)/2,dotY-2,C.muted);
-
-  // Attention weight cells
-  const awY=dotY+5;
-  const weights=[0.05, 0.52, 0.38, 0.05];
-  const awW=100;
-  const cScale=d3.scaleSequential(d3.interpolateRgbBasis([C.surface,'#3a1a4c',C.purple])).domain([0,0.6]);
-
-  entNames.forEach((n,i)=>{
-    const x=entX+i*(awW+eGap);
-    box(svg,x,awY,awW,38,cScale(weights[i]),weights[i]>0.3?C.purple+'80':C.border+'40',4);
-    txt(svg,x+awW/2,awY+16,(weights[i]*100).toFixed(0)+'%',{fill:weights[i]>0.3?'#fff':C.heading,size:14,weight:700,mono:true});
-    txt(svg,x+awW/2,awY+30,n,{fill:weights[i]>0.3?'#ddd':C.muted,size:8});
-  });
-
-  // Annotation
-  const annX=entX+entNames.length*(awW+eGap)+5;
-  txt(svg,annX,awY+12,'Fireball attends',{fill:C.purple,size:10,weight:500,anchor:'start'});
-  txt(svg,annX,awY+26,'to enemies (targets)',{fill:C.muted,size:9,anchor:'start'});
-
-  // Output
-  const outY=awY+38+25;
-  arrow(svg,svg,entX+(entNames.length*(awW+eGap)-eGap)/2,awY+38,entX+(entNames.length*(awW+eGap)-eGap)/2,outY-2,C.purple);
-  box(svg,entX+60,outY,entNames.length*(awW+eGap)-eGap-120,38,C.surface,C.greenDim,6);
-  txt(svg,entX+(entNames.length*(awW+eGap)-eGap)/2,outY+15,'Ability-Conditioned Entity Summary',{fill:C.green,size:12,weight:600});
-  txt(svg,entX+(entNames.length*(awW+eGap)-eGap)/2,outY+30,'32d \u2014 "what Fireball sees on the battlefield"',{fill:C.muted,size:9});
-
-  // Key difference callout
-  box(svg,40,outY+55,740,30,C.purpleFaint,C.purpleDim+'60',5);
-  txt(svg,W/2,outY+74,'Key difference from self-attention: Query comes from ability (purple), not from the entities themselves',{fill:C.purple,size:10,weight:500});
-})();
-
-// ═══ LOGITS & SOFTMAX ═══
-(function(){
-  const W=820,H=350;
-  const svg=d3.select('#fig-logits').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
-
-  const actions=['attack','hold','ability\u2080','ability\u2081','ability\u2082'];
-  const logits=[2.1, -0.3, 1.5, -1.2, 0.8];
-  const actCols=[C.red,C.muted,C.purple,C.purple,C.purple];
-
-  const barMaxW=150,barH=28,barGap=8;
-  const labelW=70;
-  const logitNumW=40; // space for the number after the bar
-  const arrowZone=70; // pad + arrow + pad
-  const contentW=labelW+8+barMaxW+logitNumW+arrowZone+barMaxW+50; // total content width
-  const offsetX=(W-contentW)/2; // center horizontally
-  const logitX=offsetX+labelW+8;
-  const probX=logitX+barMaxW+logitNumW+arrowZone;
-  const topY=25;
-
-  // Title row
-  txt(svg,logitX+barMaxW/2,topY-5,'Raw Logits (z)',{fill:C.heading,size:12,weight:600});
-  txt(svg,probX+barMaxW/2,topY-5,'Probabilities (after softmax)',{fill:C.heading,size:12,weight:600});
-
-  function softmax(logits,temp){
-    const scaled=logits.map(z=>Math.exp(z/temp));
-    const sum=scaled.reduce((a,b)=>a+b,0);
-    return scaled.map(v=>v/sum);
-  }
-
-  function drawBars(temp){
-    svg.selectAll('.logit-bar-g').remove();
-    svg.selectAll('.prob-bar-g').remove();
-    svg.selectAll('.arrow-mid').remove();
-
-    const probs=softmax(logits,temp);
-    const logitMax=Math.max(...logits.map(Math.abs));
-
-    // Logit bars
-    const lg=svg.append('g').attr('class','logit-bar-g');
-    actions.forEach((name,i)=>{
-      const y=topY+i*(barH+barGap);
-      txt(lg,offsetX+labelW-4,y+barH/2+4,name,{fill:actCols[i],size:11,weight:500,anchor:'end',mono:true});
-
-      const bw=Math.abs(logits[i])/logitMax*barMaxW*0.7;
-      const bx=logits[i]>=0?logitX+barMaxW/2:logitX+barMaxW/2-bw;
-
-      // Zero line
-      lg.append('line').attr('x1',logitX+barMaxW/2).attr('y1',y).attr('x2',logitX+barMaxW/2).attr('y2',y+barH).attr('stroke',C.border).attr('stroke-width',1);
-
-      lg.append('rect').attr('x',bx).attr('y',y+2).attr('width',bw).attr('height',barH-4).attr('rx',3)
-        .attr('fill',actCols[i]).attr('opacity',logits[i]>=0?0.5:0.25);
-
-      // Fixed position for logit value — always right of bar area
-      txt(lg,logitX+barMaxW+4,y+barH/2+4,logits[i].toFixed(1),{fill:C.heading,size:11,weight:600,mono:true,anchor:'start'});
-    });
-
-    // Arrow in middle
-    const arrowLeft=logitX+barMaxW+logitNumW+10;
-    const arrowRight=probX-10;
-    const midY=topY+(actions.length*(barH+barGap))/2;
-    const ag=svg.append('g').attr('class','arrow-mid');
-    pathArrow(ag,svg,`M${arrowLeft},${midY} L${arrowRight},${midY}`,C.accent);
-    txt(ag,(arrowLeft+arrowRight)/2,midY-10,'softmax',{fill:C.accent,size:9,weight:600});
-
-    // Probability bars
-    const pg=svg.append('g').attr('class','prob-bar-g');
-    actions.forEach((name,i)=>{
-      const y=topY+i*(barH+barGap);
-
-      const bw=probs[i]*barMaxW*0.95; // scale to 1.0 = full width, not relative to max
-      pg.append('rect').attr('x',probX).attr('y',y+2).attr('width',bw).attr('height',barH-4).attr('rx',3)
-        .attr('fill',actCols[i]).attr('opacity',0.6);
-
-      txt(pg,probX+bw+8,y+barH/2+4,(probs[i]*100).toFixed(1)+'%',{fill:C.heading,size:11,weight:600,mono:true,anchor:'start'});
-    });
-
-    // Sum annotation
-    const sumY=topY+actions.length*(barH+barGap)+5;
-    txt(pg,probX+barMaxW/2,sumY,'\u03a3 = '+probs.reduce((a,b)=>a+b,0).toFixed(3),{fill:C.muted,size:10,mono:true});
-  }
-
-  drawBars(1.0);
-
-  // Temperature effects description
-  const descY=topY+actions.length*(barH+barGap)+25;
-  box(svg,30,descY,W-60,50,C.surface2,C.border,6);
-  txt(svg,W/2,descY+18,'\u03c4 \u2192 0: argmax (greedy, picks top action)     |     \u03c4 = 1.0: standard softmax     |     \u03c4 \u2192 \u221e: uniform (random)',{fill:C.text,size:10});
-  txt(svg,W/2,descY+36,'Use the slider below to see how temperature reshapes the distribution',{fill:C.muted,size:9});
-
-  // Slider interaction
-  d3.select('#temp-slider').on('input',function(){
-    const t=+this.value;
-    d3.select('#temp-val').text(t.toFixed(2));
-    drawBars(t);
-  });
-})();
-
-// ═══ MASKED LANGUAGE MODELING ═══
-(function(){
-  const W=960,H=420;
-  const svg=d3.select('#fig-mlm').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
-
-  // Token sequence
-  const tokens=['[CLS]','dmg','55','target','enemy','in','circle','(','3',')','cd','120'];
-  const masked=[false,false,false,false,false,false,false,false,false,false,true,true];
-  const tokW=52,tokH=28,tokGap=4;
-  const seqW=tokens.length*(tokW+tokGap)-tokGap;
-  const seqX=(W-seqW)/2;
-  const tokY=20;
-
-  txt(svg,W/2,tokY-5,'Input: Ability DSL tokens',{fill:C.heading,size:12,weight:500});
-
-  tokens.forEach((t,i)=>{
-    const x=seqX+i*(tokW+tokGap);
-    const isMask=masked[i];
-    const isCls=i===0;
-
-    box(svg,x,tokY,tokW,tokH,
-      isMask?C.purpleDim+'40':isCls?C.blueDim+'30':C.surface2,
-      isMask?C.purple:isCls?C.blue:C.border,4);
-
-    txt(svg,x+tokW/2,tokY+18,isMask?'[MASK]':t,{
-      fill:isMask?C.purple:isCls?C.blue:C.text,
-      size:isCls?8:isMask?9:9,weight:isMask||isCls?700:400,mono:true
-    });
-  });
-
-  // Arrows down
-  const encY=tokY+tokH+30;
-  tokens.forEach((t,i)=>{
-    const x=seqX+i*(tokW+tokGap)+tokW/2;
-    svg.append('line').attr('x1',x).attr('y1',tokY+tokH).attr('x2',x).attr('y2',encY-2).attr('stroke',C.border).attr('stroke-width',1).attr('stroke-dasharray','3,3');
-  });
-
-  // Transformer encoder block
-  const encH=80;
-  box(svg,seqX-10,encY,seqW+20,encH,C.surface,C.purpleDim,8);
-  txt(svg,W/2,encY+20,'Transformer Encoder',{fill:C.purple,size:14,weight:600});
-  txt(svg,W/2,encY+38,'4 layers, 4 heads, d=128',{fill:C.muted,size:10,mono:true});
-  txt(svg,W/2,encY+54,'252-token vocabulary',{fill:C.muted,size:10,mono:true});
-
-  // Internal layer vis
-  for(let l=0;l<4;l++){
-    const lx=seqX+20+l*170,ly=encY+64;
-    box(svg,lx,ly,150,12,C.purpleDim+'15',C.purple+'30',3);
-    txt(svg,lx+75,ly+9,'Layer '+(l+1),{fill:C.purple,size:7,weight:500});
-  }
-
-  // Outputs
-  const outY=encY+encH+25;
-
-  // Arrows down from encoder
-  tokens.forEach((t,i)=>{
-    const x=seqX+i*(tokW+tokGap)+tokW/2;
-    svg.append('line').attr('x1',x).attr('y1',encY+encH).attr('x2',x).attr('y2',outY-2).attr('stroke',C.border).attr('stroke-width',1).attr('stroke-dasharray','3,3');
-  });
-
-  // CLS output - special
-  const clsX=seqX+tokW/2;
-  box(svg,seqX-15,outY,tokW+30,55,C.blueDim+'20',C.blue,6);
-  txt(svg,clsX,outY+18,'[CLS] output',{fill:C.blue,size:10,weight:600});
-  txt(svg,clsX,outY+34,'128d Summary',{fill:C.heading,size:11,weight:700});
-  txt(svg,clsX,outY+48,'Embedding',{fill:C.heading,size:11,weight:700});
-
-  // Arrow from CLS to behavioral embedding box
-  const embY=outY+55+20;
-  arrow(svg,svg,clsX,outY+55,clsX,embY-2,C.blue);
-  box(svg,seqX-30,embY,tokW+60,30,C.surface,C.greenDim,5);
-  txt(svg,clsX,embY+19,'Behavioral Embedding',{fill:C.green,size:10,weight:600});
-
-  // Masked token predictions — directly below their masked tokens
-  const maskIndices=masked.map((m,i)=>m?i:null).filter(x=>x!==null);
-  const predW=120,predH=90;
-
-  maskIndices.forEach((mi)=>{
-    const tokenX=seqX+mi*(tokW+tokGap)+tokW/2;
-    const px=tokenX-predW/2;
-
-    // Arrow down from encoder to prediction
-    arrow(svg,svg,tokenX,encY+encH,tokenX,outY-2,C.purple);
-
-    box(svg,px,outY,predW,predH,C.surface2,C.purple+'60',5);
-    txt(svg,tokenX,outY+14,'Predict:',{fill:C.purple,size:9,weight:600});
-
-    // Top-3 predictions
-    const preds=mi===10?
-      [{t:'cd',p:0.82},{t:'cast',p:0.11},{t:'in',p:0.04}]:
-      [{t:'120',p:0.71},{t:'60',p:0.15},{t:'30',p:0.08}];
-
-    preds.forEach((pred,j)=>{
-      const py=outY+24+j*20;
-      const barW=pred.p*55;
-      svg.append('rect').attr('x',px+5).attr('y',py).attr('width',barW).attr('height',14).attr('rx',2)
-        .attr('fill',C.green).attr('opacity',j===0?0.6:0.2);
-      txt(svg,px+barW+10,py+11,pred.t,{fill:j===0?C.green:C.muted,size:9,weight:j===0?600:400,mono:true,anchor:'start'});
-      txt(svg,px+predW-8,py+11,(pred.p*100).toFixed(0)+'%',{fill:j===0?C.heading:C.muted,size:9,mono:true,anchor:'end'});
-    });
-  });
-
-  // Bottom annotation
-  const noteY=Math.max(embY+40, outY+predH+15);
-  box(svg,120,noteY,W-240,28,C.blueFaint,C.blueDim+'40',5);
-  txt(svg,W/2,noteY+18,'The same [CLS] embedding becomes the ability\'s 128d behavioral embedding, cached for RL',{fill:C.blue,size:10,weight:500});
-})();
-
-// ═══ SCALED DOT-PRODUCT ATTENTION ═══
-(function(){
-  const W=960,H=320;
-  const svg=d3.select('#fig-sdp').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
-
-  const stepX=[20, 210, 390, 545, 720];
-  const colW=[170, 140, 120, 130, 140];
-  const stepY=50;
-
-  // Step labels
-  const stepLabels=['1. Vectors','2. Dot Products','3. Scale','4. Softmax','5. Weighted Sum'];
-  stepLabels.forEach((l,i)=>{
-    txt(svg,stepX[i]+colW[i]/2,30,l,{fill:C.heading,size:11,weight:600});
-  });
-
-  // Step 1: Q vector and K matrix
-  const s1=svg.append('g');
-  const qx=stepX[0]+36; // offset for row labels
-  // Q vector
-  txt(s1,stepX[0]+colW[0]/2,stepY,'Q (query)',{fill:C.blue,size:10,weight:500});
-  const qVals=[0.8, -0.3, 1.2, 0.1];
-  const cellW=30,cellH=22;
-  qVals.forEach((v,i)=>{
-    box(s1,qx+i*cellW,stepY+8,cellW-2,cellH,C.blue+'15',C.blue+'40',3);
-    txt(s1,qx+i*cellW+cellW/2-1,stepY+23,v.toFixed(1),{fill:C.blue,size:8,mono:true});
-  });
-  txt(s1,stepX[0]+colW[0]/2,stepY+38,'1\u00d732 (showing 4)',{fill:C.muted,size:8,mono:true});
-
-  // K matrix
-  txt(s1,stepX[0]+colW[0]/2,stepY+58,'K (keys)',{fill:C.orange,size:10,weight:500});
-  const kRows=[
-    {name:'Self',  vals:[0.5, 0.2, -0.1, 0.9], color:C.cyan},
-    {name:'Ene0',  vals:[0.3, -0.8, 1.5, 0.2], color:C.red},
-    {name:'Ene1',  vals:[-0.4, 0.6, 0.7, -0.3], color:C.red},
-    {name:'Ally0', vals:[0.1, 0.3, -0.5, 0.8], color:C.green},
-  ];
-
-  kRows.forEach((row,r)=>{
-    const ry=stepY+68+r*(cellH+3);
-    txt(s1,stepX[0]+34,ry+15,row.name,{fill:row.color,size:8,weight:600,anchor:'end'});
-    row.vals.forEach((v,c)=>{
-      box(s1,qx+c*cellW,ry,cellW-2,cellH,C.orange+'10',C.orange+'30',3);
-      txt(s1,qx+c*cellW+cellW/2-1,ry+15,v.toFixed(1),{fill:C.orange,size:8,mono:true});
-    });
-  });
-  txt(s1,stepX[0]+colW[0]/2,stepY+68+4*(cellH+3)+5,'4\u00d732 (showing 4\u00d74)',{fill:C.muted,size:8,mono:true});
-
-  // Arrows between steps
-  for(let i=0;i<4;i++){
-    arrow(svg,svg,stepX[i]+colW[i]+5,stepY+70,stepX[i+1]-8,stepY+70,C.muted);
-  }
-
-  // Step 2: Dot products
-  const dotResults=[1.31, 1.15, 0.88, 0.45];
-  txt(svg,stepX[1]+colW[1]/2,stepY,'Q \u00b7 K\u1d40',{fill:C.heading,size:10,weight:500});
-
-  const entLabels=['Self','Ene0','Ene1','Ally0'];
-  const entColors=[C.cyan,C.red,C.red,C.green];
-  dotResults.forEach((v,i)=>{
-    const y=stepY+15+i*38;
-    box(svg,stepX[1]+5,y,colW[1]-10,28,C.surface2,C.borderBright,4);
-    txt(svg,stepX[1]+25,y+18,entLabels[i]+':',{fill:entColors[i],size:9,weight:500,anchor:'start'});
-    txt(svg,stepX[1]+colW[1]-15,y+18,v.toFixed(2),{fill:C.heading,size:11,weight:600,mono:true,anchor:'end'});
-  });
-
-  // Step 3: Scale by sqrt(d)
-  const scaled=dotResults.map(v=>v/5.66);
-  txt(svg,stepX[2]+colW[2]/2,stepY,'\u00f7 \u221a32 = \u00f7 5.66',{fill:C.heading,size:10,weight:500});
-
-  scaled.forEach((v,i)=>{
-    const y=stepY+15+i*38;
-    box(svg,stepX[2]+5,y,colW[2]-10,28,C.surface2,C.borderBright,4);
-    txt(svg,stepX[2]+22,y+18,entLabels[i]+':',{fill:entColors[i],size:9,weight:500,anchor:'start'});
-    txt(svg,stepX[2]+colW[2]-15,y+18,v.toFixed(3),{fill:C.heading,size:10,weight:600,mono:true,anchor:'end'});
-  });
-
-  // Step 4: Softmax
-  const expVals=scaled.map(v=>Math.exp(v));
-  const expSum=expVals.reduce((a,b)=>a+b,0);
-  const weights=expVals.map(v=>v/expSum);
-
-  txt(svg,stepX[3]+colW[3]/2,stepY,'softmax',{fill:C.heading,size:10,weight:500});
-
-  const wCScale=d3.scaleSequential(d3.interpolateRgbBasis([C.surface,'#2a3a1a',C.green])).domain([0,0.35]);
-  weights.forEach((v,i)=>{
-    const y=stepY+15+i*38;
-    box(svg,stepX[3]+5,y,colW[3]-10,28,wCScale(v),v>0.27?C.green+'60':C.border+'40',4);
-    txt(svg,stepX[3]+25,y+18,entLabels[i]+':',{fill:entColors[i],size:9,weight:500,anchor:'start'});
-    txt(svg,stepX[3]+colW[3]-15,y+18,(v*100).toFixed(1)+'%',{fill:v>0.27?'#fff':C.heading,size:10,weight:700,mono:true,anchor:'end'});
-  });
-
-  txt(svg,stepX[3]+colW[3]/2,stepY+15+4*38+5,'\u03a3 = 1.000',{fill:C.muted,size:9,mono:true});
-
-  // Step 5: Weighted output
-  txt(svg,stepX[4]+colW[4]/2,stepY,'\u03b1 \u00b7 V \u2192 output',{fill:C.heading,size:10,weight:500});
-
-  weights.forEach((w,i)=>{
-    const y=stepY+15+i*38;
-    const bw=w*(colW[4]-20);
-    box(svg,stepX[4]+5,y,colW[4]-10,28,C.surface2,C.borderBright,4);
-    svg.append('rect').attr('x',stepX[4]+7).attr('y',y+2).attr('width',bw).attr('height',24).attr('rx',3)
-      .attr('fill',entColors[i]).attr('opacity',0.3);
-    txt(svg,stepX[4]+15,y+18,entLabels[i],{fill:entColors[i],size:9,weight:500,anchor:'start'});
-    txt(svg,stepX[4]+colW[4]-15,y+18,'\u00d7V\u1d62',{fill:C.muted,size:8,mono:true,anchor:'end'});
-  });
-
-  // Final output
-  const outY=stepY+15+4*38+15;
-  box(svg,stepX[4]+5,outY,colW[4]-10,28,C.surface,C.greenDim,5);
-  txt(svg,stepX[4]+colW[4]/2,outY+18,'Output: 32d vector',{fill:C.green,size:11,weight:600});
-
-  arrow(svg,svg,stepX[4]+colW[4]/2,stepY+15+4*38-5,stepX[4]+colW[4]/2,outY-2,C.green);
-
-  // Bottom formula
-  box(svg,(W-540)/2,H-40,540,32,C.surface2,C.border,6);
-  txt(svg,W/2,H-20,'score = Q \u00b7 K\u1d40 / \u221ad\u2096     \u2192     \u03b1 = softmax(score)     \u2192     out = \u03a3 \u03b1\u1d62 V\u1d62',{fill:C.heading,size:12,weight:500,mono:true});
-})();
-
-// ═══ Iframe isolation: show only targeted concept when embedded ═══
-(function(){
-  const isIframe = window.self !== window.top;
-  if (!isIframe) return;
-
-  const hash = window.location.hash.replace('#','');
-  if (!hash) return;
-
-  // Lock page — no scrolling, no extra content
-  document.body.style.overflow = 'hidden';
-  document.documentElement.style.overflow = 'hidden';
-
-  const article = document.querySelector('.article');
-  article.style.padding = '0.8rem 1rem 0';
-  article.style.maxWidth = '100%';
-
-  // Remove everything except the targeted section
-  document.querySelector('header').remove();
-  document.querySelector('.toc').remove();
-  document.querySelectorAll('hr').forEach(hr => hr.remove());
-
-  document.querySelectorAll('section').forEach(s => {
-    if (s.id === hash) {
-      s.style.marginTop = '0';
-      s.style.paddingTop = '0';
-      // Shrink the h3 a bit for popup context
-      const h3 = s.querySelector('h3');
-      if (h3) { h3.style.fontSize = '1.1rem'; h3.style.marginBottom = '0.3rem'; }
-      // Tighten paragraph spacing
-      s.querySelectorAll('p').forEach(p => { p.style.marginBottom = '0.4rem'; p.style.fontSize = '14px'; });
-    } else {
-      s.remove();
-    }
-  });
+  // Title
+  txt(svg,W/2,H-5,'Start at the top-left and follow the arrows down. Each concept builds on the ones above it.',{fill:C.muted,size:10});
 })();
 </script>
 </body>
