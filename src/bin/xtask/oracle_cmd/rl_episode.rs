@@ -163,8 +163,7 @@ pub(crate) fn run_rl_episode(
             prev_enemy_hp = cur_enemy_hp;
             let event_r = pending_event_reward;
             pending_event_reward = 0.0;
-            let time_penalty = -0.01;
-            hp_reward + event_r + time_penalty
+            hp_reward + event_r
         } else {
             0.0
         };
@@ -413,16 +412,46 @@ pub(crate) fn run_rl_episode(
 
         let (new_sim, events) = step(sim, &intents, FIXED_TICK_MS);
 
-        // Dense event-based rewards
+        // Dense event-based rewards: reward GOOD PLAY, not winning
         for ev in &events {
-            if let bevy_game::ai::core::SimEvent::UnitDied { unit_id, .. } = ev {
-                if let Some(dead_unit) = new_sim.units.iter().find(|u| u.id == *unit_id) {
-                    if dead_unit.team == Team::Enemy {
-                        pending_event_reward += 0.3 / initial_enemy_count.max(1.0);
-                    } else if dead_unit.team == Team::Hero {
-                        pending_event_reward -= 0.4 / initial_hero_count.max(1.0);
+            match ev {
+                bevy_game::ai::core::SimEvent::UnitDied { unit_id, .. } => {
+                    if let Some(dead_unit) = new_sim.units.iter().find(|u| u.id == *unit_id) {
+                        if dead_unit.team == Team::Enemy {
+                            // Secured a kill — good play
+                            pending_event_reward += 0.3 / initial_enemy_count.max(1.0);
+                        }
+                        // Don't penalize hero deaths — asymmetric comps make losses inevitable
                     }
                 }
+                bevy_game::ai::core::SimEvent::AbilityUsed { unit_id, .. }
+                | bevy_game::ai::core::SimEvent::AbilityCastStarted { unit_id, .. } => {
+                    // Reward ability usage (heroes using their kit)
+                    if let Some(u) = new_sim.units.iter().find(|u| u.id == *unit_id) {
+                        if u.team == Team::Hero {
+                            pending_event_reward += 0.05;
+                        }
+                    }
+                }
+                bevy_game::ai::core::SimEvent::ControlApplied { target_id, .. } => {
+                    // Reward applying CC to enemies
+                    if let Some(t) = new_sim.units.iter().find(|u| u.id == *target_id) {
+                        if t.team == Team::Enemy {
+                            pending_event_reward += 0.1;
+                        }
+                    }
+                }
+                bevy_game::ai::core::SimEvent::HealApplied { target_id, amount, .. } => {
+                    // Reward effective healing (not overhealing)
+                    if *amount > 0 {
+                        if let Some(t) = new_sim.units.iter().find(|u| u.id == *target_id) {
+                            if t.team == Team::Hero {
+                                pending_event_reward += 0.05;
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -472,14 +501,16 @@ pub(crate) fn run_rl_episode(
         if drill_objective.is_none() && enemies_alive == 0 {
             return RlEpisode {
                 scenario: scenario_name.to_string(),
-                outcome: "Victory".to_string(), reward: 1.0,
+                outcome: "Victory".to_string(), reward: 0.5,  // mild bonus, not +1
                 ticks: sim.tick, unit_abilities, unit_ability_names, steps,
             };
         }
         if heroes_alive == 0 {
+            // No penalty for losing — asymmetric comps make losses inevitable.
+            // Dense rewards already captured the quality of play.
             return RlEpisode {
                 scenario: scenario_name.to_string(),
-                outcome: "Defeat".to_string(), reward: -1.0,
+                outcome: "Defeat".to_string(), reward: 0.0,
                 ticks: sim.tick, unit_abilities, unit_ability_names, steps,
             };
         }
