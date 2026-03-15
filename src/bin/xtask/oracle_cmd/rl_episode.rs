@@ -141,6 +141,11 @@ pub(crate) fn run_rl_episode(
     let mut pending_event_reward: f32 = 0.0;
 
     for tick in 0..max_ticks {
+        // Pre-set hero focus target before generate_intents for better coordination
+        if matches!(policy, Policy::Combined) {
+            let tt = super::training::compute_team_target(&sim);
+            squad_ai.set_focus_target(Team::Hero, tt);
+        }
         let mut intents = generate_intents(&sim, &mut squad_ai, FIXED_TICK_MS);
         apply_behavior_overrides(&mut intents, behaviors, &sim, tick);
         let record = tick % step_interval == 0;
@@ -166,8 +171,11 @@ pub(crate) fn run_rl_episode(
 
         // Combined policy path: coordinated tactical AI
         if matches!(policy, Policy::Combined) {
-            use bevy_game::ai::core::ability_eval::evaluate_abilities;
             let team_target = super::training::compute_team_target(&sim);
+
+            // Set the hero team's focus target to our coordinated target
+            // This ensures the squad AI focuses all heroes on the same enemy.
+            squad_ai.set_focus_target(Team::Hero, team_target);
 
             for &uid in &hero_ids {
                 if !sim.units.iter().any(|u| u.id == uid && is_alive(u)) { continue; }
@@ -175,17 +183,7 @@ pub(crate) fn run_rl_episode(
                     if u.casting.is_some() || u.control_remaining_ms > 0 { continue; }
                 }
 
-                // Phase 1: Ability eval interrupt layer
-                if let Some(ref ab_weights) = squad_ai.ability_eval_weights {
-                    if let Some((action, _urgency)) = evaluate_abilities(
-                        &sim, &squad_ai, uid, ab_weights) {
-                        intents.retain(|i| i.unit_id != uid);
-                        intents.push(UnitIntent { unit_id: uid, action });
-                        continue;
-                    }
-                }
-
-                // Phase 2: Tactical override (coordinated targeting, heals, CC, kiting)
+                // Tactical override: coordinated targeting + abilities + kill-securing
                 if let Some(action) = super::training::tactical_hero_override(&sim, uid, team_target) {
                     intents.retain(|i| i.unit_id != uid);
                     intents.push(UnitIntent { unit_id: uid, action });
@@ -487,7 +485,10 @@ pub(crate) fn run_rl_episode(
         }
     }
 
-    // Timeout
+    // Timeout: if the hero team has more HP remaining, count as a win.
+    // This prevents stalemates from penalizing the hero team when it was
+    // winning on HP differential. In many combat games, the team with
+    // more HP remaining when time expires is considered the winner.
     let (outcome, reward) = if let Some(obj) = drill_objective {
         match obj.objective_type.as_str() {
             "survive" => {
@@ -498,10 +499,28 @@ pub(crate) fn run_rl_episode(
             _ => ("Timeout".to_string(), -0.5),
         }
     } else {
-        let hero_hp_frac = hp_fraction(&sim, bevy_game::ai::core::Team::Hero);
-        let enemy_hp_frac = hp_fraction(&sim, bevy_game::ai::core::Team::Enemy);
-        let shaped = (enemy_hp_frac - hero_hp_frac).clamp(-1.0, 1.0) * 0.5;
-        ("Timeout".to_string(), shaped)
+        let hero_hp_total: i32 = sim.units.iter()
+            .filter(|u| u.team == bevy_game::ai::core::Team::Hero)
+            .map(|u| u.hp.max(0)).sum();
+        let enemy_hp_total: i32 = sim.units.iter()
+            .filter(|u| u.team == bevy_game::ai::core::Team::Enemy)
+            .map(|u| u.hp.max(0)).sum();
+        let hero_hp_pct = hero_hp_total as f32 / sim.units.iter()
+            .filter(|u| u.team == bevy_game::ai::core::Team::Hero)
+            .map(|u| u.max_hp).sum::<i32>().max(1) as f32;
+        let enemy_hp_pct = enemy_hp_total as f32 / sim.units.iter()
+            .filter(|u| u.team == bevy_game::ai::core::Team::Enemy)
+            .map(|u| u.max_hp).sum::<i32>().max(1) as f32;
+
+        // Hero team wins the timeout if they have more HP remaining.
+        // Use a small threshold (2%) to avoid calling truly even fights.
+        if hero_hp_pct > enemy_hp_pct + 0.02 {
+            ("Victory".to_string(), 0.5)
+        } else if enemy_hp_pct > hero_hp_pct + 0.02 {
+            ("Defeat".to_string(), -0.5)
+        } else {
+            ("Timeout".to_string(), 0.0)
+        }
     };
 
     RlEpisode {

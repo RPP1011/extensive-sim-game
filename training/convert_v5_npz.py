@@ -235,7 +235,7 @@ def main():
         agg_feat=agg_feat,
         hp_adv=hp_adv, surv=surv,
         move_dir=move_dir, move_vec=move_vec, combat_type=combat_type, target_idx=target_idx,
-        train_idx=train_idx, val_idx=val_idx,
+        ep_idx=ep_idx, train_idx=train_idx, val_idx=val_idx,
     )
     size_mb = out.stat().st_size / 1024 / 1024
     print(f"Saved {out} ({size_mb:.1f} MB)")

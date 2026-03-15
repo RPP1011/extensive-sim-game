@@ -532,24 +532,24 @@ fn action_class_to_intent(
 
 /// Priority scoring for hero target selection (lower = higher priority).
 ///
-/// Prioritizes:
-/// 1. Healers/CC units (Mystics) — they sustain the enemy team
-/// 2. Low absolute HP — secure kills to reduce incoming DPS
-/// 3. Proximity — don't walk past enemies to reach backline
+/// Balances threat assessment with kill-securing:
+/// - Healers and CC units get strong priority (removing them breaks the enemy team)
+/// - Wounded enemies get increasing priority as they get lower
+/// - Close enemies are preferred over distant ones
+/// - High-DPS enemies are preferred over low-DPS ones
 pub(crate) fn hero_target_priority(enemy: &bevy_game::ai::core::UnitState, hero: &bevy_game::ai::core::UnitState) -> f32 {
     let dist = bevy_game::ai::core::distance(hero.position, enemy.position);
+    let hp_pct = enemy.hp as f32 / enemy.max_hp.max(1) as f32;
 
     // Healer/CC threat: units with heal or CC capabilities are high priority
-    let is_healer = enemy.heal_amount > 0;
-    let is_controller = enemy.control_duration_ms > 0;
-    let threat_bonus = if is_healer { -200.0 } else { 0.0 }
-                     + if is_controller { -100.0 } else { 0.0 };
+    // Check DSL abilities for heal/CC hints since template heroes don't use flat fields
+    let is_healer = enemy.heal_amount > 0
+        || enemy.abilities.iter().any(|s| s.def.ai_hint.as_str() == "heal");
+    let is_controller = enemy.control_duration_ms > 0
+        || enemy.abilities.iter().any(|s| matches!(s.def.ai_hint.as_str(), "crowd_control" | "control"));
 
-    // Low HP bonus: strongly prefer enemies we can finish off
-    let hp_score = enemy.hp as f32;
-
-    // Distance penalty: slight preference for closer targets
-    let dist_penalty = dist * 5.0;
+    let threat_bonus = if is_healer { -300.0 } else { 0.0 }
+                     + if is_controller { -150.0 } else { 0.0 };
 
     // DPS threat: higher-DPS enemies are more dangerous
     let dps = if enemy.attack_cooldown_ms > 0 {
@@ -557,9 +557,21 @@ pub(crate) fn hero_target_priority(enemy: &bevy_game::ai::core::UnitState, hero:
     } else {
         enemy.attack_damage as f32
     };
-    let dps_bonus = -dps * 2.0;
+    let dps_bonus = -dps * 3.0;
 
-    hp_score + dist_penalty + threat_bonus + dps_bonus
+    // Kill-securing: strong bonus for wounded enemies to finish them off
+    let kill_bonus = if hp_pct < 0.15 { -500.0 }
+        else if hp_pct < 0.30 { -300.0 }
+        else if hp_pct < 0.50 { -100.0 }
+        else { 0.0 };
+
+    // HP score (lower HP = higher priority)
+    let hp_score = enemy.hp as f32 * 0.3;
+
+    // Distance: prefer closer targets to minimize movement waste
+    let dist_penalty = dist * 8.0;
+
+    hp_score + dist_penalty + threat_bonus + dps_bonus + kill_bonus
 }
 
 /// Tactical override for a single hero unit. Returns Some(action) if the hero
@@ -572,7 +584,7 @@ pub(crate) fn tactical_hero_override(
     uid: u32,
     team_target: Option<u32>,
 ) -> Option<bevy_game::ai::core::IntentAction> {
-    use bevy_game::ai::core::{is_alive, distance, move_away, IntentAction, Team};
+    use bevy_game::ai::core::{is_alive, distance, move_towards, position_at_range, IntentAction, Team, FIXED_TICK_MS};
 
     let unit = sim.units.iter().find(|u| u.id == uid)?;
     let hp_pct = unit.hp as f32 / unit.max_hp.max(1) as f32;
@@ -580,25 +592,30 @@ pub(crate) fn tactical_hero_override(
 
     // ---------------------------------------------------------------
     // DSL abilities (template heroes): check BEFORE legacy flat fields.
-    // Template heroes have abilities in unit.abilities with ai_hint tags;
-    // their legacy flat fields (heal_amount, control_duration_ms, etc.)
-    // are all zero, so checking those first would skip all ability usage.
     // ---------------------------------------------------------------
     if has_dsl_abilities {
         use bevy_game::ai::effects::AbilityTarget;
 
         // --- DSL Heal: find a heal ability and target the most hurt ally ---
-        let has_heal_ready = unit.abilities.iter().enumerate().any(|(_, s)| {
+        // Late-game heal suppression: after tick 400 (40 seconds), only heal
+        // when someone is critically low. This forces healers into DPS mode
+        // and prevents stalemates where both teams heal indefinitely.
+        let late_game = sim.tick >= 400;
+        // Heal aggressively to maintain HP advantage in timeouts.
+        // Enemy healers heal at any missing HP through the squad AI,
+        // so we match that aggressiveness.
+        let heal_threshold = if late_game { 0.30 } else { 0.80 };
+        let self_heal_threshold = if late_game { 0.25 } else { 0.70 };
+        let has_heal_ready = unit.abilities.iter().any(|s| {
             s.cooldown_remaining_ms == 0
                 && matches!(s.def.ai_hint.as_str(), "heal")
         });
         if has_heal_ready {
             let hurt_ally = sim.units.iter()
                 .filter(|u| u.team == Team::Hero && is_alive(u) && u.id != uid)
-                .filter(|u| (u.hp as f32 / u.max_hp.max(1) as f32) < 0.50)
+                .filter(|u| (u.hp as f32 / u.max_hp.max(1) as f32) < heal_threshold)
                 .min_by_key(|u| u.hp);
-            // Also consider self-heal when own HP is low
-            let heal_self = hp_pct < 0.50;
+            let heal_self = hp_pct < self_heal_threshold;
             let heal_target = hurt_ally.map(|a| a.id).or(if heal_self { Some(uid) } else { None });
             if let Some(ally_id) = heal_target {
                 let ally_pos = sim.units.iter().find(|u| u.id == ally_id)
@@ -606,7 +623,6 @@ pub(crate) fn tactical_hero_override(
                 for (idx, slot) in unit.abilities.iter().enumerate() {
                     if slot.cooldown_remaining_ms > 0 { continue; }
                     if slot.def.ai_hint.as_str() != "heal" { continue; }
-                    // Range check
                     let in_range = slot.def.range <= 0.0
                         || distance(unit.position, ally_pos) <= slot.def.range;
                     if !in_range { continue; }
@@ -626,24 +642,74 @@ pub(crate) fn tactical_hero_override(
         // --- DSL combat abilities (damage, CC, utility, defense, etc.) ---
         // Use the squad AI's scoring function which handles all ai_hint types,
         // threat-reduction scoring, conditional combos, AoE, etc.
+        // Try team target first, then fall back to nearby enemies.
+        use bevy_game::ai::squad::combat_evaluate_hero_ability;
+
+        // Build candidate list: team target first, then other enemies by priority
+        let mut candidates: Vec<u32> = Vec::new();
         if let Some(tid) = team_target {
-            use bevy_game::ai::squad::combat_evaluate_hero_ability;
-            if let Some(action) = combat_evaluate_hero_ability(sim, uid, tid) {
+            candidates.push(tid);
+        }
+        let mut other_enemies: Vec<_> = sim.units.iter()
+            .filter(|u| u.team == Team::Enemy && is_alive(u))
+            .filter(|u| team_target.map_or(true, |tid| u.id != tid))
+            .collect();
+        other_enemies.sort_by(|a, b| {
+            hero_target_priority(a, unit)
+                .partial_cmp(&hero_target_priority(b, unit))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        candidates.extend(other_enemies.iter().map(|u| u.id));
+
+        for &cid in &candidates {
+            if let Some(action) = combat_evaluate_hero_ability(sim, uid, cid) {
+                // Skip if the ability evaluator chose a heal ability — we already
+                // handled heals above with our own (more conservative) threshold.
+                // Letting combat_evaluate_hero_ability pick heals wastes DPS.
+                if let IntentAction::UseAbility { ability_index, .. } = &action {
+                    if let Some(slot) = unit.abilities.get(*ability_index) {
+                        if slot.def.ai_hint.as_str() == "heal" {
+                            continue;
+                        }
+                    }
+                }
                 return Some(action);
+            }
+        }
+
+        // If all abilities are on cooldown or out of range, move toward team
+        // target to get into range for next tick.
+        let has_ready_ability = unit.abilities.iter().any(|s| {
+            s.cooldown_remaining_ms == 0
+                && !matches!(s.def.ai_hint.as_str(), "heal")
+        });
+        if has_ready_ability {
+            if let Some(tid) = team_target {
+                if let Some(target) = sim.units.iter().find(|u| u.id == tid && is_alive(u)) {
+                    let dist = distance(unit.position, target.position);
+                    let max_ability_range = unit.abilities.iter()
+                        .filter(|s| s.cooldown_remaining_ms == 0 && !matches!(s.def.ai_hint.as_str(), "heal"))
+                        .map(|s| s.def.range)
+                        .fold(0.0f32, f32::max);
+                    if max_ability_range > 0.0 && dist > max_ability_range {
+                        let desired = position_at_range(unit.position, target.position, max_ability_range * 0.9);
+                        let step = unit.move_speed_per_sec * (FIXED_TICK_MS as f32 / 1000.0);
+                        let next = move_towards(unit.position, desired, step);
+                        return Some(IntentAction::MoveTo { position: next });
+                    }
+                }
             }
         }
     }
 
     // ---------------------------------------------------------------
     // Legacy flat-field abilities (non-template units only).
-    // These are kept as fallback for units that don't use the DSL system.
     // ---------------------------------------------------------------
     if !has_dsl_abilities {
-        // Heal allies below 50%
         if unit.heal_amount > 0 && unit.heal_cooldown_remaining_ms == 0 {
             let hurt_ally = sim.units.iter()
                 .filter(|u| u.team == Team::Hero && is_alive(u) && u.id != uid)
-                .filter(|u| (u.hp as f32 / u.max_hp.max(1) as f32) < 0.50)
+                .filter(|u| (u.hp as f32 / u.max_hp.max(1) as f32) < 0.70)
                 .min_by_key(|u| u.hp);
             if let Some(ally) = hurt_ally {
                 if distance(unit.position, ally.position) <= unit.heal_range {
@@ -652,7 +718,6 @@ pub(crate) fn tactical_hero_override(
             }
         }
 
-        // CC the focus target
         if unit.control_duration_ms > 0 && unit.control_cooldown_remaining_ms == 0 {
             if let Some(tid) = team_target {
                 if let Some(t) = sim.units.iter().find(|u| u.id == tid) {
@@ -663,7 +728,6 @@ pub(crate) fn tactical_hero_override(
             }
         }
 
-        // Ability damage on focus target
         if unit.ability_damage > 0 && unit.ability_cooldown_remaining_ms == 0 {
             if let Some(tid) = team_target {
                 if let Some(t) = sim.units.iter().find(|u| u.id == tid) {
@@ -673,6 +737,21 @@ pub(crate) fn tactical_hero_override(
                 }
             }
         }
+    }
+
+    // ---------------------------------------------------------------
+    // Kill-secure check: if any enemy is very low HP and in attack range,
+    // switch to them immediately regardless of team target.
+    // ---------------------------------------------------------------
+    let killable = sim.units.iter()
+        .filter(|u| u.team == Team::Enemy && is_alive(u))
+        .filter(|u| {
+            let ehp = u.hp as f32 / u.max_hp.max(1) as f32;
+            ehp < 0.20 && distance(unit.position, u.position) <= unit.attack_range * 1.2
+        })
+        .min_by_key(|u| u.hp);
+    if let Some(kill_target) = killable {
+        return Some(IntentAction::Attack { target_id: kill_target.id });
     }
 
     // Focus-fire attack on team target (or nearest enemy)
@@ -688,34 +767,18 @@ pub(crate) fn tactical_hero_override(
     });
 
     if let Some(tid) = target_id {
-        if let Some(target) = sim.units.iter().find(|u| u.id == tid) {
-            let dist = distance(unit.position, target.position);
-
-            // Low HP kiting
-            if hp_pct < 0.25 && dist < 2.0 {
-                let nearest_enemy = sim.units.iter()
-                    .filter(|u| u.team != unit.team && is_alive(u))
-                    .min_by(|a, b| {
-                        distance(unit.position, a.position)
-                            .partial_cmp(&distance(unit.position, b.position))
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
-                if let Some(ne) = nearest_enemy {
-                    let away = move_away(unit.position, ne.position, unit.move_speed_per_sec * 0.1);
-                    return Some(IntentAction::MoveTo { position: away });
-                }
-            }
-
-            return Some(IntentAction::Attack { target_id: tid });
-        }
+        return Some(IntentAction::Attack { target_id: tid });
     }
 
     None
 }
 
 /// Compute the coordinated team target for all heroes.
+///
+/// Uses an aggregated scoring approach: each living hero votes on enemy
+/// priority, and the enemy with the best total score wins.
 pub(crate) fn compute_team_target(sim: &bevy_game::ai::core::SimState) -> Option<u32> {
-    use bevy_game::ai::core::{is_alive, Team, SimVec2};
+    use bevy_game::ai::core::{is_alive, Team};
 
     let living_heroes: Vec<_> = sim.units.iter()
         .filter(|u| u.team == Team::Hero && is_alive(u))
@@ -724,20 +787,24 @@ pub(crate) fn compute_team_target(sim: &bevy_game::ai::core::SimState) -> Option
         return None;
     }
 
-    let cx = living_heroes.iter().map(|u| u.position.x).sum::<f32>() / living_heroes.len() as f32;
-    let cy = living_heroes.iter().map(|u| u.position.y).sum::<f32>() / living_heroes.len() as f32;
-    let dummy_hero = bevy_game::ai::core::UnitState {
-        position: SimVec2 { x: cx, y: cy },
-        ..living_heroes[0].clone()
-    };
-
-    sim.units.iter()
+    let living_enemies: Vec<_> = sim.units.iter()
         .filter(|u| u.team == Team::Enemy && is_alive(u))
+        .collect();
+    if living_enemies.is_empty() {
+        return None;
+    }
+
+    living_enemies.iter()
         .min_by(|a, b| {
-            hero_target_priority(a, &dummy_hero)
-                .partial_cmp(&hero_target_priority(b, &dummy_hero))
-                .unwrap_or(std::cmp::Ordering::Equal)
+            let score_a: f32 = living_heroes.iter()
+                .map(|h| hero_target_priority(a, h))
+                .sum();
+            let score_b: f32 = living_heroes.iter()
+                .map(|h| hero_target_priority(b, h))
+                .sum();
+            score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|u| u.id)
 }
+
 

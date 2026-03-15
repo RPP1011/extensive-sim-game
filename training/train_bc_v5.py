@@ -74,7 +74,7 @@ def main():
     pos_mask = torch.from_numpy(d["pos_mask"]).bool().to(DEVICE)
     agg_feat = torch.from_numpy(d["agg_feat"]).to(DEVICE)
     move_dir = torch.from_numpy(d["move_dir"]).long().to(DEVICE)
-    move_vec = torch.from_numpy(d["move_vec"]).to(DEVICE)  # (N, 3) — dx, dy, speed
+    move_vec = torch.from_numpy(d["move_vec"]).to(DEVICE) if "move_vec" in d else None
     combat_type = torch.from_numpy(d["combat_type"]).long().to(DEVICE)
     target_idx = torch.from_numpy(d["target_idx"]).long().to(DEVICE)
 
@@ -179,8 +179,10 @@ def main():
 
         loss_move = F.cross_entropy(move_logits, move_dir[idx], weight=move_weights)
         loss_combat = F.cross_entropy(combat_logits, combat_type[idx], weight=combat_weights)
-        loss_cont = F.mse_loss(move_cont, move_vec[idx])
-        loss = loss_move + loss_combat + 0.5 * loss_cont
+        loss = loss_move + loss_combat
+        if move_vec is not None:
+            loss_cont = F.mse_loss(move_cont, move_vec[idx])
+            loss = loss + 0.5 * loss_cont
 
         optimizer.zero_grad()
         loss.backward()
@@ -205,7 +207,8 @@ def main():
                     )
                     vl = F.cross_entropy(vm, move_dir[vidx]) + F.cross_entropy(vc, combat_type[vidx])
                     val_loss_sum += vl.item() * len(vidx)
-                    val_cont_sum += F.mse_loss(vmc, move_vec[vidx]).item() * len(vidx)
+                    if move_vec is not None:
+                        val_cont_sum += F.mse_loss(vmc, move_vec[vidx]).item() * len(vidx)
                     val_move_correct += (vm.argmax(-1) == move_dir[vidx]).sum().item()
                     val_combat_correct += (vc.argmax(-1) == combat_type[vidx]).sum().item()
                     val_n += len(vidx)
