@@ -61,6 +61,10 @@ def main():
     move_vec_list = []  # continuous (dx, dy, speed) ground truth
     combat_type_list = []
     target_idx_list = []
+    teacher_move_list = []   # DAgger teacher labels
+    teacher_combat_list = []
+    teacher_target_list = []
+    has_teacher = False
     ep_idx_list = []  # track which episode each sample came from
 
     # Direction vectors matching Rust move_dir_offset()
@@ -174,6 +178,13 @@ def main():
             speed = 0.0 if move_dir >= 8 else 1.0
             move_vec = (dx, dy, speed)
 
+            # DAgger teacher labels (if present)
+            t_move = step.get("teacher_move_dir", -1)
+            t_combat = step.get("teacher_combat_type", -1)
+            t_target = step.get("teacher_target_idx", -1)
+            if t_move >= 0:
+                has_teacher = True
+
             ent_list.append(ent)
             ent_type_list.append(et)
             ent_mask_list.append(em)
@@ -188,6 +199,9 @@ def main():
             move_vec_list.append(move_vec)
             combat_type_list.append(combat_type)
             target_idx_list.append(target_idx)
+            teacher_move_list.append(t_move if t_move >= 0 else move_dir)
+            teacher_combat_list.append(t_combat if t_combat >= 0 else combat_type)
+            teacher_target_list.append(t_target if t_target >= 0 else target_idx)
             ep_idx_list.append(epi)
 
     N = len(ent_list)
@@ -208,6 +222,9 @@ def main():
     move_vec = np.array(move_vec_list, dtype=np.float32)      # (N, 3) — dx, dy, speed
     combat_type = np.array(combat_type_list, dtype=np.int32)  # (N,)
     target_idx = np.array(target_idx_list, dtype=np.int32)    # (N,)
+    teacher_move = np.array(teacher_move_list, dtype=np.int32)      # (N,)
+    teacher_combat = np.array(teacher_combat_list, dtype=np.int32)  # (N,)
+    teacher_target = np.array(teacher_target_list, dtype=np.int32)  # (N,)
     ep_idx = np.array(ep_idx_list, dtype=np.int32)        # (N,)
 
     # Split by episode index (not by sample) to prevent leakage
@@ -235,6 +252,7 @@ def main():
         agg_feat=agg_feat,
         hp_adv=hp_adv, surv=surv,
         move_dir=move_dir, move_vec=move_vec, combat_type=combat_type, target_idx=target_idx,
+        teacher_move=teacher_move, teacher_combat=teacher_combat, teacher_target=teacher_target,
         ep_idx=ep_idx, train_idx=train_idx, val_idx=val_idx,
     )
     size_mb = out.stat().st_size / 1024 / 1024

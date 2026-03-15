@@ -60,6 +60,30 @@ pub struct RlStep {
     pub lp_pointer: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub aggregate_features: Option<Vec<f32>>,
+    /// DAgger: teacher (GOAP) action at this state (what the expert would have done)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub teacher_move_dir: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub teacher_combat_type: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub teacher_target_idx: Option<usize>,
+}
+
+impl RlStep {
+    /// Create with no teacher labels (non-DAgger paths)
+    pub fn without_teacher(
+        tick: u64, unit_id: u32, game_state: Vec<f32>, action: usize,
+        log_prob: f32, mask: Vec<bool>, step_reward: f32,
+    ) -> Self {
+        Self {
+            tick, unit_id, game_state, action, log_prob, mask, step_reward,
+            entities: None, entity_types: None, threats: None, positions: None,
+            action_type: None, target_idx: None, move_dir: None, combat_type: None,
+            lp_move: None, lp_combat: None, lp_pointer: None,
+            aggregate_features: None,
+            teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

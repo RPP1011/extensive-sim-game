@@ -242,6 +242,7 @@ impl ActiveSim {
                                 lp_move: Some(result.lp_move), lp_combat: Some(result.lp_combat),
                                 lp_pointer: Some(result.lp_pointer),
                                 aggregate_features: if agg.is_empty() { None } else { Some(agg) },
+                                teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
                             });
                             self.steps_recorded_this_tick.push(step_idx);
                             if let Some(ps) = self.hero_pre_step.iter_mut().find(|p| p.unit_id == uid) {

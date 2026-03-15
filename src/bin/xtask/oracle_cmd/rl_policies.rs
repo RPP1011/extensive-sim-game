@@ -75,6 +75,7 @@ pub(crate) fn apply_random_policy(
             lp_move: Some(0.0), lp_combat: Some(0.0),
             lp_pointer: Some(0.0),
             aggregate_features: if gs_v2.aggregate_features.is_empty() { None } else { Some(gs_v2.aggregate_features.clone()) },
+            teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
         });
     }
 }
@@ -189,6 +190,7 @@ pub(crate) fn apply_v3_policy(
             move_dir: None, combat_type: None,
             lp_move: None, lp_combat: None,
             lp_pointer: None, aggregate_features: None,
+            teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
         });
     }
 }
@@ -264,6 +266,19 @@ pub(crate) fn apply_gpu_policy(
             if record {
                 let game_state = extract_game_state(sim, unit);
                 let composite_lp = result.lp_move + result.lp_combat + result.lp_pointer;
+
+                // DAgger: compute what the GOAP teacher would do at this state
+                use bevy_game::ai::core::self_play::actions::intent_to_v4_action;
+                let team_target = super::training::compute_team_target(sim);
+                let teacher_action = super::training::tactical_hero_override(sim, uid, team_target);
+                let (t_move, t_combat, t_target) = if let Some(ref ta) = teacher_action {
+                    let ti = build_token_infos(sim, uid, &gs_v2.entity_types, &gs_v2.positions);
+                    intent_to_v4_action(ta, uid, sim, &ti)
+                        .unwrap_or((8, 1, 0))
+                } else {
+                    (8, 1, 0) // hold/stay if teacher has no opinion
+                };
+
                 steps.push(RlStep {
                     tick, unit_id: uid,
                     game_state: game_state.to_vec(),
@@ -278,6 +293,9 @@ pub(crate) fn apply_gpu_policy(
                     lp_move: Some(result.lp_move), lp_combat: Some(result.lp_combat),
                     lp_pointer: Some(result.lp_pointer),
                     aggregate_features: if gs_v2.aggregate_features.is_empty() { None } else { Some(gs_v2.aggregate_features.clone()) },
+                    teacher_move_dir: Some(t_move),
+                    teacher_combat_type: Some(t_combat),
+                    teacher_target_idx: Some(t_target),
                 });
             }
         }
@@ -386,6 +404,7 @@ pub(crate) fn apply_v4_policy(
             lp_move: Some(move_lp), lp_combat: Some(combat_lp),
             lp_pointer: Some(target_lp),
             aggregate_features: if gs_v2.aggregate_features.is_empty() { None } else { Some(gs_v2.aggregate_features.clone()) },
+            teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
         });
     }
 }
@@ -494,6 +513,7 @@ pub(crate) fn apply_v5_policy(
             lp_move: Some(move_lp), lp_combat: Some(combat_lp),
             lp_pointer: Some(target_lp),
             aggregate_features: Some(gs_v2.aggregate_features.clone()),
+            teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
         });
     }
 }

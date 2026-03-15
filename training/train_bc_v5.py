@@ -50,6 +50,8 @@ def main():
     p.add_argument("--lr", type=float, default=5e-4)
     p.add_argument("--lr-unfrozen", type=float, default=5e-5)
     p.add_argument("--eval-every", type=int, default=2000)
+    p.add_argument("--use-teacher", action="store_true",
+                   help="Train on teacher (GOAP) labels instead of model's own actions (DAgger)")
     p.add_argument("--seed", type=int, default=42)
     args = p.parse_args()
 
@@ -72,6 +74,13 @@ def main():
     move_dir = torch.from_numpy(d["move_dir"]).long().to(DEVICE)
     combat_type = torch.from_numpy(d["combat_type"]).long().to(DEVICE)
     target_idx = torch.from_numpy(d["target_idx"]).long().to(DEVICE)
+
+    # DAgger: use teacher labels if available and requested
+    if args.use_teacher and "teacher_move" in d:
+        print("  Using TEACHER labels (DAgger mode)")
+        move_dir = torch.from_numpy(d["teacher_move"]).long().to(DEVICE)
+        combat_type = torch.from_numpy(d["teacher_combat"]).long().to(DEVICE)
+        target_idx = torch.from_numpy(d["teacher_target"]).long().to(DEVICE)
 
     N = ent_feat.shape[0]
     print(f"  {N} samples, train={len(train_idx)}, val={len(val_idx)}")
@@ -145,16 +154,12 @@ def main():
         idx = train_perm[train_ptr:train_ptr + args.batch_size]
         train_ptr += args.batch_size
 
-        # Forward: encode_state (no CfC, no ability CLS) -> decide
-        enc = model.encode_state(
+        # Forward through full model including CfC (matches GPU inference path)
+        output, _ = model(
             ent_feat[idx], ent_types[idx], thr_feat[idx],
             ent_mask[idx], thr_mask[idx],
             [None] * MAX_ABILITIES,
-            pos_feat[idx], pos_mask[idx], agg_feat[idx],
-        )
-        output = model.decide(
-            enc["pooled"], enc["tokens"], enc["full_mask"],
-            enc["ability_cross_embs"], enc["full_type_ids"],
+            pos_feat[idx], pos_mask[idx],
             aggregate_features=agg_feat[idx],
         )
 
@@ -190,14 +195,12 @@ def main():
                 vl_sum = 0.0
                 for vs in range(0, len(val_idx), args.batch_size):
                     vi = val_idx[vs:vs + args.batch_size]
-                    ve = model.encode_state(
+                    vo, _ = model(
                         ent_feat[vi], ent_types[vi], thr_feat[vi],
                         ent_mask[vi], thr_mask[vi], [None] * MAX_ABILITIES,
-                        pos_feat[vi], pos_mask[vi], agg_feat[vi],
+                        pos_feat[vi], pos_mask[vi],
+                        aggregate_features=agg_feat[vi],
                     )
-                    vo = model.decide(ve["pooled"], ve["tokens"], ve["full_mask"],
-                                      ve["ability_cross_embs"], ve["full_type_ids"],
-                                      aggregate_features=agg_feat[vi])
                     vl_sum += (F.cross_entropy(vo["move_logits"], move_dir[vi]) +
                                F.cross_entropy(vo["combat_logits"], combat_type[vi])).item() * len(vi)
                     vm_ok += (vo["move_logits"].argmax(-1) == move_dir[vi]).sum().item()
