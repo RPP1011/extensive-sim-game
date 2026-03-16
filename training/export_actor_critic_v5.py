@@ -129,16 +129,16 @@ def main():
             "norm1": export_layer_norm(sd, f"{prefix}.norm1"),
             "norm2": export_layer_norm(sd, f"{prefix}.norm2"),
         })
-    export["entity_encoder_v5"] = {
+    ee_export = {
         "entity_proj": export_linear(sd, "entity_encoder.entity_proj"),
-        "threat_proj": export_linear(sd, "entity_encoder.threat_proj"),
-        "position_proj": export_linear(sd, "entity_encoder.position_proj"),
+        "zone_proj": export_linear(sd, "entity_encoder.zone_proj"),
         "agg_proj": export_linear(sd, "entity_encoder.agg_proj"),
         "type_emb": sd["entity_encoder.type_emb.weight"].cpu().numpy().tolist(),
         "input_norm": export_layer_norm(sd, "entity_encoder.input_norm"),
         "layers": ee_layers,
         "out_norm": export_layer_norm(sd, "entity_encoder.out_norm"),
     }
+    export["entity_encoder_v5"] = ee_export
 
     # Cross-attention
     export["cross_attn"] = {

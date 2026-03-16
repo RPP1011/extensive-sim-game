@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use crate::ai::core::{sim_vec2, SimState, SimVec2, Team, UnitState};
+use crate::ai::core::{sim_vec2, SimState, SimVec2, Team, UnitState, UnitStore};
 use crate::ai::effects::{AbilitySlot, HeroToml, PassiveSlot};
 use crate::ai::effects::dsl;
 
@@ -167,7 +167,7 @@ pub fn default_hero_party(seed: u64) -> SimState {
     SimState {
         tick: 0,
         rng_state: seed,
-        units,
+        units: UnitStore::new(units),
         projectiles: Vec::new(),
         passive_trigger_depth: 0,
         zones: Vec::new(),

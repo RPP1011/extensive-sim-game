@@ -45,8 +45,9 @@ import torch.nn.functional as F
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from model import (
     AbilityActorCriticV4, AbilityActorCriticV5,
-    MAX_ABILITIES, NUM_COMBAT_TYPES, POSITION_DIM, AGG_FEATURE_DIM,
+    MAX_ABILITIES, NUM_COMBAT_TYPES, AGG_FEATURE_DIM,
 )
+POSITION_DIM = 8  # Legacy position feature dim
 from tokenizer import AbilityTokenizer
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -54,8 +55,10 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MAX_ENTITIES = 20
 MAX_THREATS = 6
 MAX_POSITIONS = 8
+MAX_ZONES = 10
 ENTITY_DIM = 34
 THREAT_DIM = 10
+ZONE_DIM = 12
 
 SHM_MAGIC = 0x47505549
 SHM_VERSION = 1
@@ -83,9 +86,11 @@ def compute_sample_size(cls_dim: int, h_dim: int = 0, agg_dim: int = 0) -> int:
     ent_mask_padded = (MAX_ENTITIES + 3) & ~3
     thr_mask_padded = (MAX_THREATS + 3) & ~3
     pos_mask_padded = (MAX_POSITIONS + 3) & ~3
-    return (8 + MAX_ENTITIES * ENTITY_DIM * 4 + MAX_ENTITIES * 4 + ent_mask_padded +
+    zone_mask_padded = (MAX_ZONES + 3) & ~3
+    return (12 + MAX_ENTITIES * ENTITY_DIM * 4 + MAX_ENTITIES * 4 + ent_mask_padded +
             MAX_THREATS * THREAT_DIM * 4 + thr_mask_padded +
             MAX_POSITIONS * POSITION_DIM * 4 + pos_mask_padded +
+            MAX_ZONES * ZONE_DIM * 4 + zone_mask_padded +
             12 + MAX_ABILITIES + MAX_ABILITIES * cls_dim * 4 +
             h_dim * 4 +      # hidden_state_in
             agg_dim * 4)      # aggregate_features
@@ -128,11 +133,12 @@ class InferenceServer:
         ent_mask_padded = (MAX_ENTITIES + 3) & ~3
         thr_mask_padded = (MAX_THREATS + 3) & ~3
         pos_mask_padded = (MAX_POSITIONS + 3) & ~3
+        zone_mask_padded = (MAX_ZONES + 3) & ~3
 
         off = 0
         fields = []
-        # 0: counts (8 bytes: 4 x u16)
-        fields.append((off, 8)); off += 8
+        # 0: counts (12 bytes: 5 x u16 + 2 bytes padding for 4-byte alignment)
+        fields.append((off, 12)); off += 12
         # 1: ent_feat (MAX_ENTITIES * ENTITY_DIM * 4)
         sz = MAX_ENTITIES * ENTITY_DIM * 4
         fields.append((off, sz)); off += sz
@@ -151,18 +157,23 @@ class InferenceServer:
         fields.append((off, sz)); off += sz
         # 7: pos_mask (MAX_POSITIONS bytes, padded to 4)
         fields.append((off, MAX_POSITIONS)); off += pos_mask_padded
-        # 8: combat_mask (NUM_COMBAT_TYPES bytes + 2 padding = 12)
+        # 8: zone_feat (MAX_ZONES * ZONE_DIM * 4)
+        sz = MAX_ZONES * ZONE_DIM * 4
+        fields.append((off, sz)); off += sz
+        # 9: zone_mask (MAX_ZONES bytes, padded to 4)
+        fields.append((off, MAX_ZONES)); off += zone_mask_padded
+        # 10: combat_mask (NUM_COMBAT_TYPES bytes + 2 padding = 12)
         fields.append((off, NUM_COMBAT_TYPES)); off += 12
-        # 9: ability_has (MAX_ABILITIES bytes)
+        # 11: ability_has (MAX_ABILITIES bytes)
         fields.append((off, MAX_ABILITIES)); off += MAX_ABILITIES
-        # 10: ability_cls (MAX_ABILITIES * cls_dim * 4)
+        # 12: ability_cls (MAX_ABILITIES * cls_dim * 4)
         sz = MAX_ABILITIES * self.cls_dim * 4
         fields.append((off, sz)); off += sz
-        # 11: hidden_state_in (h_dim * 4) — GRU hidden state from previous tick
+        # 13: hidden_state_in (h_dim * 4) — GRU hidden state from previous tick
         if self.h_dim > 0:
             sz = self.h_dim * 4
             fields.append((off, sz)); off += sz
-        # 12: aggregate_features (agg_dim * 4) — crowd summary token
+        # 14: aggregate_features (agg_dim * 4) — crowd summary token
         if self.agg_dim > 0:
             sz = self.agg_dim * 4
             fields.append((off, sz)); off += sz
@@ -210,7 +221,7 @@ class InferenceServer:
         ).reshape(B, ss)
 
         # Extract each field by slicing columns, then reinterpret dtype
-        # Entity features: f32[B, 20, 30]
+        # Entity features: f32[B, 20, 34]
         foff, fsz = fo[1]
         ent_feat = np.ascontiguousarray(raw[:, foff:foff + fsz]).view(np.float32).reshape(B, MAX_ENTITIES, ENTITY_DIM)
 
@@ -222,32 +233,40 @@ class InferenceServer:
         foff, fsz = fo[3]
         ent_mask = raw[:, foff:foff + fsz].copy()
 
-        # Threat features: f32[B, 4, 8]
+        # Threat features: f32[B, 6, 10] (legacy)
         foff, fsz = fo[4]
         thr_feat = np.ascontiguousarray(raw[:, foff:foff + fsz]).view(np.float32).reshape(B, MAX_THREATS, THREAT_DIM)
 
-        # Threat mask: u8[B, 4]
+        # Threat mask: u8[B, 6] (legacy)
         foff, fsz = fo[5]
         thr_mask = raw[:, foff:foff + fsz].copy()
 
-        # Position features: f32[B, 4, 8]
+        # Position features: f32[B, 8, 8] (legacy)
         foff, fsz = fo[6]
         pos_feat = np.ascontiguousarray(raw[:, foff:foff + fsz]).view(np.float32).reshape(B, MAX_POSITIONS, POSITION_DIM)
 
-        # Position mask: u8[B, 4]
+        # Position mask: u8[B, 8] (legacy)
         foff, fsz = fo[7]
         pos_mask = raw[:, foff:foff + fsz].copy()
 
-        # Combat mask: u8[B, 10]
+        # Zone features: f32[B, 10, 12]
         foff, fsz = fo[8]
+        zone_feat = np.ascontiguousarray(raw[:, foff:foff + fsz]).view(np.float32).reshape(B, MAX_ZONES, ZONE_DIM)
+
+        # Zone mask: u8[B, 10]
+        foff, fsz = fo[9]
+        zone_mask = raw[:, foff:foff + fsz].copy()
+
+        # Combat mask: u8[B, 10]
+        foff, fsz = fo[10]
         combat_mask = raw[:, foff:foff + fsz].copy()
 
         # Ability has: u8[B, 8]
-        foff, fsz = fo[9]
+        foff, fsz = fo[11]
         ability_has = raw[:, foff:foff + fsz].copy()
 
         # Ability CLS: f32[B, 8, cls_dim]
-        foff, fsz = fo[10]
+        foff, fsz = fo[12]
         ability_cls = np.ascontiguousarray(raw[:, foff:foff + fsz]).view(np.float32).reshape(B, MAX_ABILITIES, self.cls_dim)
 
         result = {
@@ -258,28 +277,25 @@ class InferenceServer:
             "thr_mask": torch.from_numpy(thr_mask).bool().to(DEVICE),
             "pos_feat": torch.from_numpy(pos_feat).to(DEVICE),
             "pos_mask": torch.from_numpy(pos_mask).bool().to(DEVICE),
+            "zone_feat": torch.from_numpy(zone_feat).to(DEVICE),
+            "zone_mask": torch.from_numpy(zone_mask).bool().to(DEVICE),
             "combat_mask": torch.from_numpy(combat_mask).bool().to(DEVICE),
             "ability_has": ability_has,
             "ability_cls": torch.from_numpy(ability_cls).to(DEVICE),
         }
 
         # Hidden state input for GRU temporal context
-        if self.h_dim > 0 and len(fo) > 11:
-            foff, fsz = fo[11]
+        if self.h_dim > 0 and len(fo) > 13:
+            foff, fsz = fo[13]
             h_in = np.ascontiguousarray(raw[:, foff:foff + fsz]).view(np.float32).reshape(B, self.h_dim)
             result["h_prev"] = torch.from_numpy(h_in).to(DEVICE)
 
         # Aggregate features for V5
-        agg_field_idx = 12 if self.h_dim > 0 else 11
+        agg_field_idx = 14 if self.h_dim > 0 else 13
         if self.agg_dim > 0 and len(fo) > agg_field_idx:
             foff, fsz = fo[agg_field_idx]
             agg = np.ascontiguousarray(raw[:, foff:foff + fsz]).view(np.float32).reshape(B, self.agg_dim)
             result["aggregate_features"] = torch.from_numpy(agg).to(DEVICE)
-            # Debug: print first batch's aggregate values once
-            if not hasattr(self, '_agg_debug_done'):
-                self._agg_debug_done = True
-                print(f"  [gpu] AGG DEBUG: first sample agg[14:16] = "
-                      f"{agg[0, 14]:.4f}, {agg[0, 15]:.4f}", flush=True)
 
         return result
 
@@ -301,9 +317,8 @@ class InferenceServer:
         if self.is_v5:
             output, h_new = self.model(
                 batch["ent_feat"], batch["ent_types"],
-                batch["thr_feat"], batch["ent_mask"], batch["thr_mask"],
+                batch["zone_feat"], batch["ent_mask"], batch["zone_mask"],
                 ability_cls,
-                batch["pos_feat"], batch["pos_mask"],
                 aggregate_features=agg_feat,
                 h_prev=h_prev,
                 n_latents_override=self.n_latents if self.n_latents > 0 else None,

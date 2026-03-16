@@ -21,18 +21,23 @@ use super::weights::{
 use super::weights_actor_critic_v3::EntityStateV3;
 
 // ---------------------------------------------------------------------------
-// V5 entity encoder: entities(34) + threats(10) + positions(8) + aggregate(16)
+// V5 entity encoder: entities(34) + zones(12) + aggregate(16)
+// Also supports legacy threats(10) + positions(8) for backward compat.
 // ---------------------------------------------------------------------------
 
-const NUM_ENTITY_TYPES_V5: usize = 6; // self=0, enemy=1, ally=2, threat=3, position=4, aggregate=5
+const NUM_ENTITY_TYPES_V5: usize = 5; // self=0, enemy=1, ally=2, zone=3, aggregate=4
 
 #[derive(Debug, Deserialize)]
 struct EntityEncoderV5Json {
     entity_proj: LinearWeights,
-    threat_proj: LinearWeights,
-    position_proj: LinearWeights,
+    #[serde(default)]
+    threat_proj: Option<LinearWeights>,
+    #[serde(default)]
+    position_proj: Option<LinearWeights>,
+    #[serde(default)]
+    zone_proj: Option<LinearWeights>,
     agg_proj: LinearWeights,
-    type_emb: Vec<Vec<f32>>,  // [6 x d_model]
+    type_emb: Vec<Vec<f32>>,  // [5 x d_model] (or 6 for legacy)
     input_norm: LayerNormWeights,
     #[serde(default, alias = "self_attn_layers")]
     layers: Vec<TransformerLayerJson>,
@@ -42,10 +47,11 @@ struct EntityEncoderV5Json {
 #[derive(Debug, Clone)]
 struct FlatEntityEncoderV5 {
     entity_proj: FlatLinear,     // (34 -> d_model)
-    threat_proj: FlatLinear,     // (10 -> d_model)
-    position_proj: FlatLinear,   // (8 -> d_model)
+    threat_proj: Option<FlatLinear>,     // (10 -> d_model) legacy
+    position_proj: Option<FlatLinear>,   // (8 -> d_model) legacy
+    zone_proj: Option<FlatLinear>,       // (12 -> d_model) unified zones
     agg_proj: FlatLinear,        // (16 -> d_model)
-    type_emb: Vec<f32>,          // [6 x d_model]
+    type_emb: Vec<f32>,          // [5 x d_model] (zone=3, aggregate=4)
     input_norm: FlatLayerNorm,
     layers: Vec<TransformerLayer>,
     out_norm: FlatLayerNorm,
@@ -62,8 +68,9 @@ impl FlatEntityEncoderV5 {
             .collect();
         Self {
             entity_proj: FlatLinear::from_json(&ej.entity_proj),
-            threat_proj: FlatLinear::from_json(&ej.threat_proj),
-            position_proj: FlatLinear::from_json(&ej.position_proj),
+            threat_proj: ej.threat_proj.as_ref().map(FlatLinear::from_json),
+            position_proj: ej.position_proj.as_ref().map(FlatLinear::from_json),
+            zone_proj: ej.zone_proj.as_ref().map(FlatLinear::from_json),
             agg_proj: FlatLinear::from_json(&ej.agg_proj),
             type_emb,
             input_norm: FlatLayerNorm::from_json(&ej.input_norm),
@@ -73,22 +80,24 @@ impl FlatEntityEncoderV5 {
         }
     }
 
-    /// Encode variable-length entities + threats + positions + optional aggregate.
+    /// Encode variable-length entities + zones + optional aggregate.
+    /// Supports both legacy (threats+positions) and unified (zones) paths.
     /// Returns (tokens, mask, n_total, type_ids).
     fn forward(
         &self,
         entities: &[&[f32]],     // each 34-dim
         entity_types: &[usize],  // 0/1/2 per entity
-        threats: &[&[f32]],      // each 10-dim
-        positions: &[&[f32]],    // each 8-dim
+        threats: &[&[f32]],      // each 10-dim (legacy)
+        positions: &[&[f32]],    // each 8-dim (legacy)
+        zones: &[&[f32]],        // each 12-dim (unified)
         aggregate: Option<&[f32]>, // 16-dim or None
     ) -> (Vec<f32>, Vec<bool>, usize, Vec<usize>) {
         let d = self.d_model;
         let n_ents = entities.len();
-        let n_threats = threats.len();
-        let n_positions = positions.len();
+        let use_zones = self.zone_proj.is_some() && !zones.is_empty();
+        let n_spatial = if use_zones { zones.len() } else { threats.len() + positions.len() };
         let has_agg = aggregate.is_some();
-        let n_total = n_ents + n_threats + n_positions + if has_agg { 1 } else { 0 };
+        let n_total = n_ents + n_spatial + if has_agg { 1 } else { 0 };
 
         let mut tokens = vec![0.0f32; n_total * d];
         let mut mask = vec![true; n_total];
@@ -108,42 +117,69 @@ impl FlatEntityEncoderV5 {
             self.input_norm.forward(&mut tokens[i * d..(i + 1) * d]);
         }
 
-        // Project threats (type_id = 3)
-        for (ti, feats) in threats.iter().enumerate() {
-            let i = n_ents + ti;
-            let exists = feats.len() >= 10 && feats[7] > 0.5;
-            mask[i] = exists;
-            full_type_ids[i] = 3;
+        if use_zones {
+            // Unified zone path (type_id = 3 = zone)
+            let zone_proj = self.zone_proj.as_ref().unwrap();
+            for (zi, feats) in zones.iter().enumerate() {
+                let i = n_ents + zi;
+                let exists = feats.len() >= 12 && feats[11] > 0.5;
+                mask[i] = exists;
+                full_type_ids[i] = 3; // zone
 
-            self.threat_proj.forward(feats, &mut tokens[i * d..(i + 1) * d]);
-            for j in 0..d {
-                tokens[i * d + j] += self.type_emb[3 * d + j];
+                zone_proj.forward(feats, &mut tokens[i * d..(i + 1) * d]);
+                for j in 0..d {
+                    tokens[i * d + j] += self.type_emb[3 * d + j];
+                }
+                self.input_norm.forward(&mut tokens[i * d..(i + 1) * d]);
             }
-            self.input_norm.forward(&mut tokens[i * d..(i + 1) * d]);
+        } else {
+            // Legacy path: threats (type_id = 3) + positions (type_id = 4)
+            let n_threats = threats.len();
+            if let Some(ref threat_proj) = self.threat_proj {
+                for (ti, feats) in threats.iter().enumerate() {
+                    let i = n_ents + ti;
+                    let exists = feats.len() >= 10 && feats[7] > 0.5;
+                    mask[i] = exists;
+                    full_type_ids[i] = 3;
+
+                    threat_proj.forward(feats, &mut tokens[i * d..(i + 1) * d]);
+                    for j in 0..d {
+                        tokens[i * d + j] += self.type_emb[3 * d + j];
+                    }
+                    self.input_norm.forward(&mut tokens[i * d..(i + 1) * d]);
+                }
+            }
+
+            if let Some(ref position_proj) = self.position_proj {
+                let type_id_for_pos = if self.type_emb.len() / d > 4 { 4 } else { 3 };
+                for (pi, feats) in positions.iter().enumerate() {
+                    let i = n_ents + n_threats + pi;
+                    mask[i] = true;
+                    full_type_ids[i] = type_id_for_pos;
+
+                    position_proj.forward(feats, &mut tokens[i * d..(i + 1) * d]);
+                    if type_id_for_pos * d + d <= self.type_emb.len() {
+                        for j in 0..d {
+                            tokens[i * d + j] += self.type_emb[type_id_for_pos * d + j];
+                        }
+                    }
+                    self.input_norm.forward(&mut tokens[i * d..(i + 1) * d]);
+                }
+            }
         }
 
-        // Project positions (type_id = 4)
-        for (pi, feats) in positions.iter().enumerate() {
-            let i = n_ents + n_threats + pi;
-            mask[i] = true;
-            full_type_ids[i] = 4;
-
-            self.position_proj.forward(feats, &mut tokens[i * d..(i + 1) * d]);
-            for j in 0..d {
-                tokens[i * d + j] += self.type_emb[4 * d + j];
-            }
-            self.input_norm.forward(&mut tokens[i * d..(i + 1) * d]);
-        }
-
-        // Project aggregate (type_id = 5, always present, never masked)
+        // Project aggregate (type_id = 4 for unified, 5 for legacy)
         if let Some(agg_feats) = aggregate {
-            let i = n_ents + n_threats + n_positions;
+            let i = n_ents + n_spatial;
             mask[i] = true;
-            full_type_ids[i] = 5;
+            let agg_type = if use_zones { 4 } else { 5.min(self.type_emb.len() / d - 1) };
+            full_type_ids[i] = agg_type;
 
             self.agg_proj.forward(agg_feats, &mut tokens[i * d..(i + 1) * d]);
-            for j in 0..d {
-                tokens[i * d + j] += self.type_emb[5 * d + j];
+            if agg_type * d + d <= self.type_emb.len() {
+                for j in 0..d {
+                    tokens[i * d + j] += self.type_emb[agg_type * d + j];
+                }
             }
             self.input_norm.forward(&mut tokens[i * d..(i + 1) * d]);
         }
@@ -545,7 +581,8 @@ impl ActorCriticWeightsV5 {
     }
 
     /// Encode game state with V5 entity encoder.
-    /// Accepts 34-dim entities, 10-dim threats, 8-dim positions, optional 16-dim aggregate.
+    /// Accepts 34-dim entities, 10-dim threats, 8-dim positions, 12-dim zones, optional 16-dim aggregate.
+    /// When zones are non-empty and model has zone_proj, uses unified zone path.
     pub fn encode_entities(
         &self,
         entities: &[&[f32]],
@@ -554,9 +591,22 @@ impl ActorCriticWeightsV5 {
         positions: &[&[f32]],
         aggregate: Option<&[f32]>,
     ) -> EntityStateV3 {
+        self.encode_entities_with_zones(entities, entity_types, threats, positions, &[], aggregate)
+    }
+
+    /// Encode game state with unified zone tokens.
+    pub fn encode_entities_with_zones(
+        &self,
+        entities: &[&[f32]],
+        entity_types: &[usize],
+        threats: &[&[f32]],
+        positions: &[&[f32]],
+        zones: &[&[f32]],
+        aggregate: Option<&[f32]>,
+    ) -> EntityStateV3 {
         let d = self.d_model;
         let (tokens, mask, n_total, type_ids) = self.entity_encoder.forward(
-            entities, entity_types, threats, positions, aggregate,
+            entities, entity_types, threats, positions, zones, aggregate,
         );
 
         // Mean pool over valid tokens

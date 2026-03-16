@@ -84,9 +84,8 @@ class LatentWarmup(nn.Module):
             nn.Linear(d_model, 1),
         )
 
-    def forward(self, ent_feat, ent_types, thr_feat, ent_mask, thr_mask,
-                pos_feat, pos_mask, agg_feat,
-                h_prev=None, n_latents_override=None):
+    def forward(self, ent_feat, ent_types, zone_feat, ent_mask, zone_mask,
+                agg_feat, h_prev=None, n_latents_override=None):
         """
         Returns:
             hp_pred: (B, 1) -- predicted hp_advantage
@@ -96,8 +95,8 @@ class LatentWarmup(nn.Module):
         """
         # Encoder (frozen)
         tokens, full_mask = self.encoder(
-            ent_feat, ent_types, thr_feat, ent_mask, thr_mask,
-            pos_feat, pos_mask, agg_feat,
+            ent_feat, ent_types, zone_feat, ent_mask, zone_mask,
+            agg_feat,
         )
 
         # Latent interface (trainable)
@@ -150,10 +149,14 @@ def main():
     ent_feat = torch.from_numpy(d["ent_feat"]).to(DEVICE)
     ent_types = torch.from_numpy(d["ent_types"]).long().to(DEVICE)
     ent_mask = torch.from_numpy(d["ent_mask"]).bool().to(DEVICE)
-    thr_feat = torch.from_numpy(d["thr_feat"]).to(DEVICE)
-    thr_mask = torch.from_numpy(d["thr_mask"]).bool().to(DEVICE)
-    pos_feat = torch.from_numpy(d["pos_feat"]).to(DEVICE)
-    pos_mask = torch.from_numpy(d["pos_mask"]).bool().to(DEVICE)
+    # Prefer zone_feat/zone_mask; fall back to thr_feat/thr_mask for old npz files
+    if "zone_feat" in d:
+        zone_feat = torch.from_numpy(d["zone_feat"]).to(DEVICE)
+        zone_mask = torch.from_numpy(d["zone_mask"]).bool().to(DEVICE)
+    else:
+        print("  WARNING: zone_feat not found in npz, falling back to thr_feat/thr_mask")
+        zone_feat = torch.from_numpy(d["thr_feat"]).to(DEVICE)
+        zone_mask = torch.from_numpy(d["thr_mask"]).bool().to(DEVICE)
     agg_feat = torch.from_numpy(d["agg_feat"]).to(DEVICE)
     hp_adv = torch.from_numpy(d["hp_adv"]).to(DEVICE)
     surv = torch.from_numpy(d["surv"]).to(DEVICE)
@@ -238,9 +241,8 @@ def main():
             )
 
         hp_pred, surv_pred, value_pred, _ = model(
-            ent_feat[idx], ent_types[idx], thr_feat[idx],
-            ent_mask[idx], thr_mask[idx],
-            pos_feat[idx], pos_mask[idx], agg_feat[idx],
+            ent_feat[idx], ent_types[idx], zone_feat[idx],
+            ent_mask[idx], zone_mask[idx], agg_feat[idx],
             n_latents_override=n_latents_override,
         )
 
@@ -270,9 +272,8 @@ def main():
                 for vstart in range(0, len(val_idx), args.batch_size):
                     vidx = val_idx[vstart:vstart + args.batch_size]
                     vhp, vsurv, vval, _ = model(
-                        ent_feat[vidx], ent_types[vidx], thr_feat[vidx],
-                        ent_mask[vidx], thr_mask[vidx],
-                        pos_feat[vidx], pos_mask[vidx], agg_feat[vidx],
+                        ent_feat[vidx], ent_types[vidx], zone_feat[vidx],
+                        ent_mask[vidx], zone_mask[vidx], agg_feat[vidx],
                     )
                     val_hp_sum += F.mse_loss(vhp.squeeze(-1), hp_adv[vidx]).item() * len(vidx)
                     val_surv_sum += F.mse_loss(vsurv.squeeze(-1), surv[vidx]).item() * len(vidx)
@@ -291,9 +292,8 @@ def main():
                 for vstart in range(0, len(val_idx), args.batch_size):
                     vidx = val_idx[vstart:vstart + args.batch_size]
                     vhp_r, _, _, _ = model(
-                        ent_feat[vidx], ent_types[vidx], thr_feat[vidx],
-                        ent_mask[vidx], thr_mask[vidx],
-                        pos_feat[vidx], pos_mask[vidx], agg_feat[vidx],
+                        ent_feat[vidx], ent_types[vidx], zone_feat[vidx],
+                        ent_mask[vidx], zone_mask[vidx], agg_feat[vidx],
                         n_latents_override=n_reduced,
                     )
                     val_reduced_sum += F.mse_loss(vhp_r.squeeze(-1), hp_adv[vidx]).item() * len(vidx)

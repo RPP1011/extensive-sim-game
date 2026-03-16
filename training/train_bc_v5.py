@@ -70,6 +70,8 @@ def main():
     thr_mask = torch.from_numpy(d["thr_mask"]).bool().to(DEVICE)
     pos_feat = torch.from_numpy(d["pos_feat"]).to(DEVICE)
     pos_mask = torch.from_numpy(d["pos_mask"]).bool().to(DEVICE)
+    zone_feat = torch.from_numpy(d["zone_feat"]).to(DEVICE) if "zone_feat" in d else None
+    zone_mask = torch.from_numpy(d["zone_mask"]).bool().to(DEVICE) if "zone_mask" in d else None
     agg_feat = torch.from_numpy(d["agg_feat"]).to(DEVICE)
     move_dir = torch.from_numpy(d["move_dir"]).long().to(DEVICE)
     combat_type = torch.from_numpy(d["combat_type"]).long().to(DEVICE)
@@ -161,13 +163,21 @@ def main():
         train_ptr += args.batch_size
 
         # Forward through full model including CfC (matches GPU inference path)
-        output, _ = model(
-            ent_feat[idx], ent_types[idx], thr_feat[idx],
-            ent_mask[idx], thr_mask[idx],
-            [None] * MAX_ABILITIES,
-            pos_feat[idx], pos_mask[idx],
-            aggregate_features=agg_feat[idx],
-        )
+        if zone_feat is not None:
+            output, _ = model(
+                ent_feat[idx], ent_types[idx],
+                zone_feat[idx], ent_mask[idx], zone_mask[idx],
+                [None] * MAX_ABILITIES,
+                aggregate_features=agg_feat[idx],
+            )
+        else:
+            # Legacy: fall back to threats+positions (should not happen with new data)
+            output, _ = model(
+                ent_feat[idx], ent_types[idx],
+                thr_feat[idx], ent_mask[idx], thr_mask[idx],
+                [None] * MAX_ABILITIES,
+                aggregate_features=agg_feat[idx],
+            )
 
         # Position regression loss
         if "target_pos" in output and target_pos is not None:
@@ -208,12 +218,20 @@ def main():
                 vl_sum = 0.0
                 for vs in range(0, len(val_idx), args.batch_size):
                     vi = val_idx[vs:vs + args.batch_size]
-                    vo, _ = model(
-                        ent_feat[vi], ent_types[vi], thr_feat[vi],
-                        ent_mask[vi], thr_mask[vi], [None] * MAX_ABILITIES,
-                        pos_feat[vi], pos_mask[vi],
-                        aggregate_features=agg_feat[vi],
-                    )
+                    if zone_feat is not None:
+                        vo, _ = model(
+                            ent_feat[vi], ent_types[vi],
+                            zone_feat[vi], ent_mask[vi], zone_mask[vi],
+                            [None] * MAX_ABILITIES,
+                            aggregate_features=agg_feat[vi],
+                        )
+                    else:
+                        vo, _ = model(
+                            ent_feat[vi], ent_types[vi],
+                            thr_feat[vi], ent_mask[vi], thr_mask[vi],
+                            [None] * MAX_ABILITIES,
+                            aggregate_features=agg_feat[vi],
+                        )
                     if "target_pos" in vo and target_pos is not None:
                         vl_move = F.mse_loss(vo["target_pos"], target_pos[vi] / 20.0).item()
                     elif "move_logits" in vo:

@@ -105,6 +105,7 @@ pub fn extract_game_state_with_ids(
         entity_types,
         threats,
         positions,
+        zones: Vec::new(),
         aggregate_features,
     };
     (gs, unit_ids)

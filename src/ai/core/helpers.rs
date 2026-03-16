@@ -87,7 +87,7 @@ pub fn clamp_leash(idx: usize, state: &mut SimState) {
 }
 
 pub fn find_unit_idx(state: &SimState, unit_id: u32) -> Option<usize> {
-    state.units.iter().position(|unit| unit.id == unit_id)
+    state.units.idx_of(unit_id)
 }
 
 pub fn target_in_range_for_kind(

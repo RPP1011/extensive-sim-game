@@ -24,9 +24,11 @@ import numpy as np
 MAX_ENTITIES = 20
 MAX_THREATS = 6
 MAX_POSITIONS = 8
+MAX_ZONES = 10
 ENTITY_DIM = 34
 THREAT_DIM = 10
 POSITION_DIM = 8
+ZONE_DIM = 12
 AGG_DIM = 16
 
 
@@ -54,6 +56,8 @@ def main():
     thr_mask_list = []
     pos_list = []
     pos_mask_list = []
+    zone_list = []
+    zone_mask_list = []
     agg_list = []
     hp_adv_list = []
     surv_list = []
@@ -163,6 +167,15 @@ def main():
                 pos[j, :min(len(pp), POSITION_DIM)] = pp[:POSITION_DIM]
                 pm[j] = False
 
+            # Pad zones
+            zones = step.get("zones", [])
+            zn = np.zeros((MAX_ZONES, ZONE_DIM), dtype=np.float32)
+            zm = np.ones(MAX_ZONES, dtype=np.bool_)
+            for j in range(min(len(zones), MAX_ZONES)):
+                z = zones[j]
+                zn[j, :min(len(z), ZONE_DIM)] = z[:ZONE_DIM]
+                zm[j] = False
+
             # Aggregate
             agg_raw = step.get("aggregate_features", [0.0] * AGG_DIM)
             agg = np.zeros(AGG_DIM, dtype=np.float32)
@@ -207,6 +220,8 @@ def main():
             thr_mask_list.append(tm)
             pos_list.append(pos)
             pos_mask_list.append(pm)
+            zone_list.append(zn)
+            zone_mask_list.append(zm)
             agg_list.append(agg)
             hp_adv_list.append(hp_advantage)
             surv_list.append(survival_ratio)
@@ -230,6 +245,8 @@ def main():
     thr_mask = np.stack(thr_mask_list)   # (N, 6)
     pos_feat = np.stack(pos_list)        # (N, 8, 8)
     pos_mask = np.stack(pos_mask_list)   # (N, 8)
+    zone_feat = np.stack(zone_list)      # (N, 10, 12)
+    zone_mask = np.stack(zone_mask_list) # (N, 10)
     agg_feat = np.stack(agg_list)        # (N, 16)
     hp_adv = np.array(hp_adv_list, dtype=np.float32)      # (N,)
     surv = np.array(surv_list, dtype=np.float32)          # (N,)
@@ -265,6 +282,7 @@ def main():
         ent_feat=ent_feat, ent_types=ent_types, ent_mask=ent_mask,
         thr_feat=thr_feat, thr_mask=thr_mask,
         pos_feat=pos_feat, pos_mask=pos_mask,
+        zone_feat=zone_feat, zone_mask=zone_mask,
         agg_feat=agg_feat,
         hp_adv=hp_adv, surv=surv,
         move_dir=move_dir, move_vec=move_vec, combat_type=combat_type, target_idx=target_idx,

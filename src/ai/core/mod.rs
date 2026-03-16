@@ -1,6 +1,7 @@
 mod math;
 mod events;
 mod types;
+pub mod unit_store;
 mod helpers;
 mod conditions;
 mod targeting;
@@ -28,6 +29,8 @@ pub mod self_play;
 pub mod curriculum;
 pub mod ability_encoding;
 pub mod ability_transformer;
+#[cfg(any(feature = "burn-gpu", feature = "burn-cpu"))]
+pub mod burn_model;
 #[cfg(feature = "stream-monitor")]
 pub mod monitor;
 
@@ -51,3 +54,4 @@ pub use determinism::{
 pub use helpers::is_alive;
 pub use math::{distance, move_towards, move_away, position_at_range};
 pub use verify::{verify_tick, Violation, VerificationReport};
+pub use unit_store::UnitStore;

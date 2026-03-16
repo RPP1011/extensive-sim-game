@@ -5,7 +5,7 @@
 //! Stage 3: Team2 — 2v2 combat.
 //! Stage 4: Team4 — 4v4 combat (uses existing scenario files).
 
-use super::{SimState, SimVec2, Team, UnitState, sim_vec2};
+use super::{SimState, SimVec2, Team, UnitState, UnitStore, sim_vec2};
 
 /// Curriculum stage identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,7 +115,7 @@ pub fn generate_move(rng: &mut u64) -> (SimState, String) {
     let sim = SimState {
         tick: 0,
         rng_state: *rng,
-        units: vec![hero, dummy],
+        units: UnitStore::new(vec![hero, dummy]),
         projectiles: Vec::new(),
         passive_trigger_depth: 0,
         zones: Vec::new(),
@@ -135,7 +135,7 @@ pub fn generate_kill(rng: &mut u64) -> (SimState, String) {
     let sim = SimState {
         tick: 0,
         rng_state: *rng,
-        units: vec![hero, enemy],
+        units: UnitStore::new(vec![hero, enemy]),
         projectiles: Vec::new(),
         passive_trigger_depth: 0,
         zones: Vec::new(),
@@ -158,7 +158,7 @@ pub fn generate_team2(rng: &mut u64) -> (SimState, String) {
     let sim = SimState {
         tick: 0,
         rng_state: *rng,
-        units: vec![h1, h2, e1, e2],
+        units: UnitStore::new(vec![h1, h2, e1, e2]),
         projectiles: Vec::new(),
         passive_trigger_depth: 0,
         zones: Vec::new(),
@@ -198,7 +198,7 @@ pub fn generate_team2_asymmetric(rng: &mut u64) -> (SimState, String) {
     let sim = SimState {
         tick: 0,
         rng_state: *rng,
-        units: vec![h_tank, h_dps, e_tank, e_dps],
+        units: UnitStore::new(vec![h_tank, h_dps, e_tank, e_dps]),
         projectiles: Vec::new(),
         passive_trigger_depth: 0,
         zones: Vec::new(),

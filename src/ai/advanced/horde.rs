@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::ai::core::{
     distance, move_towards, position_at_range, run_replay, sim_vec2, step, IntentAction,
-    ReplayResult, SimState, Team, UnitIntent, UnitState,
+    ReplayResult, SimState, Team, UnitIntent, UnitState, UnitStore,
 };
 use crate::ai::pathing::{clamp_step_to_walkable, has_line_of_sight, next_waypoint, GridNav};
 use crate::ai::roles::Role;
@@ -124,7 +124,7 @@ pub fn horde_chokepoint_state(seed: u64) -> SimState {
     SimState {
         tick: 0,
         rng_state: seed,
-        units,
+        units: UnitStore::new(units),
         projectiles: Vec::new(),
         passive_trigger_depth: 0,
         zones: Vec::new(),
@@ -256,7 +256,7 @@ pub fn horde_chokepoint_hero_favored_state(seed: u64) -> SimState {
     SimState {
         tick: 0,
         rng_state: seed,
-        units,
+        units: UnitStore::new(units),
         projectiles: Vec::new(),
         passive_trigger_depth: 0,
         zones: Vec::new(),

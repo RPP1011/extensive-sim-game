@@ -61,6 +61,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 ENTITY_DIM = 34
 THREAT_DIM = 10
 POSITION_DIM = 8
+ZONE_DIM = 12
 AGG_DIM = 16
 
 SHM_NAME = "impala_v5_inf"
@@ -185,6 +186,9 @@ class PreTensorizedData:
         max_threats = max(max_threats, 1)
         max_positions = max((len(s.get("positions", [])) for s in all_steps), default=1)
         max_positions = max(max_positions, 1)
+        max_zones = max((len(s.get("zones", [])) for s in all_steps), default=1)
+        max_zones = max(max_zones, 1)
+        self.has_zones = any(s.get("zones") for s in all_steps[:10])
 
         # Pre-allocate numpy arrays (much faster than per-element torch.tensor)
         ent_feat_np = np.zeros((N, max_ents, ENTITY_DIM), dtype=np.float32)
@@ -194,6 +198,8 @@ class PreTensorizedData:
         thr_mask_np = np.ones((N, max_threats), dtype=np.bool_)
         pos_feat_np = np.zeros((N, max_positions, POSITION_DIM), dtype=np.float32)
         pos_mask_np = np.ones((N, max_positions), dtype=np.bool_)
+        zone_feat_np = np.zeros((N, max_zones, ZONE_DIM), dtype=np.float32) if self.has_zones else None
+        zone_mask_np = np.ones((N, max_zones), dtype=np.bool_) if self.has_zones else None
 
         # Aggregate features (V5: 16 floats, includes target direction)
         has_agg = any(s.get("aggregate_features") for s in all_steps[:10])
@@ -239,6 +245,14 @@ class PreTensorizedData:
                 n_p = len(positions)
                 pos_feat_np[i, :n_p] = positions
                 pos_mask_np[i, :n_p] = False
+
+            # Zones
+            if zone_feat_np is not None:
+                zones = s.get("zones")
+                if zones:
+                    n_z = len(zones)
+                    zone_feat_np[i, :n_z] = zones
+                    zone_mask_np[i, :n_z] = False
 
             # Aggregate features
             if agg_feat_np is not None:
@@ -296,6 +310,12 @@ class PreTensorizedData:
         self.thr_mask = thr_mask.pin_memory()
         self.pos_feat = pos_feat.pin_memory()
         self.pos_mask = pos_mask.pin_memory()
+        if zone_feat_np is not None:
+            self.zone_feat = torch.from_numpy(zone_feat_np).pin_memory()
+            self.zone_mask = torch.from_numpy(zone_mask_np).pin_memory()
+        else:
+            self.zone_feat = None
+            self.zone_mask = None
         self.move_dirs = move_dirs.pin_memory()
         self.combat_types = combat_types.pin_memory()
         self.target_indices = target_indices.pin_memory()
@@ -331,12 +351,15 @@ class PreTensorizedData:
         state = {
             "entity_features": self.ent_feat[idx_cpu].to(DEVICE, non_blocking=True),
             "entity_type_ids": self.ent_types[idx_cpu].to(DEVICE, non_blocking=True),
-            "threat_features": self.thr_feat[idx_cpu].to(DEVICE, non_blocking=True),
             "entity_mask": self.ent_mask[idx_cpu].to(DEVICE, non_blocking=True),
-            "threat_mask": self.thr_mask[idx_cpu].to(DEVICE, non_blocking=True),
-            "position_features": self.pos_feat[idx_cpu].to(DEVICE, non_blocking=True),
-            "position_mask": self.pos_mask[idx_cpu].to(DEVICE, non_blocking=True),
         }
+        if self.zone_feat is not None:
+            state["zone_features"] = self.zone_feat[idx_cpu].to(DEVICE, non_blocking=True)
+            state["zone_mask"] = self.zone_mask[idx_cpu].to(DEVICE, non_blocking=True)
+        else:
+            # Legacy: use threats as zone-like features (will fail if dims mismatch)
+            state["zone_features"] = self.thr_feat[idx_cpu].to(DEVICE, non_blocking=True)
+            state["zone_mask"] = self.thr_mask[idx_cpu].to(DEVICE, non_blocking=True)
         if self.agg_feat is not None:
             state["aggregate_features"] = self.agg_feat[idx_cpu].to(DEVICE, non_blocking=True)
         ab_cls = [t[idx_cpu].to(DEVICE, non_blocking=True) if t is not None else None for t in self.ability_cls]
@@ -354,6 +377,9 @@ def collate_states(steps: list[dict]) -> dict[str, torch.Tensor]:
     max_positions = max(
         (len(s.get("positions", [])) for s in steps), default=1)
     max_positions = max(max_positions, 1)
+    max_zones = max(
+        (len(s.get("zones", [])) for s in steps), default=1)
+    max_zones = max(max_zones, 1)
 
     ent_feat = torch.zeros(B, max_ents, ENTITY_DIM, device=DEVICE)
     ent_types = torch.zeros(B, max_ents, dtype=torch.long, device=DEVICE)
@@ -362,6 +388,8 @@ def collate_states(steps: list[dict]) -> dict[str, torch.Tensor]:
     thr_mask = torch.ones(B, max_threats, dtype=torch.bool, device=DEVICE)
     pos_feat = torch.zeros(B, max_positions, POSITION_DIM, device=DEVICE)
     pos_mask = torch.ones(B, max_positions, dtype=torch.bool, device=DEVICE)
+    zone_feat = torch.zeros(B, max_zones, ZONE_DIM, device=DEVICE)
+    zone_mask = torch.ones(B, max_zones, dtype=torch.bool, device=DEVICE)
 
     for i, s in enumerate(steps):
         n_e = len(s["entities"])
@@ -376,15 +404,17 @@ def collate_states(steps: list[dict]) -> dict[str, torch.Tensor]:
         if positions:
             pos_feat[i, :len(positions)] = torch.tensor(positions, dtype=torch.float)
             pos_mask[i, :len(positions)] = False
+        zones = s.get("zones", [])
+        if zones:
+            zone_feat[i, :len(zones)] = torch.tensor(zones, dtype=torch.float)
+            zone_mask[i, :len(zones)] = False
 
     return {
         "entity_features": ent_feat,
         "entity_type_ids": ent_types,
-        "threat_features": thr_feat,
         "entity_mask": ent_mask,
-        "threat_mask": thr_mask,
-        "position_features": pos_feat,
-        "position_mask": pos_mask,
+        "zone_features": zone_feat,
+        "zone_mask": zone_mask,
     }
 
 
@@ -473,10 +503,9 @@ def compute_policy_values(
         # V5: encode_state -> decide (no CfC for offline batch)
         enc = model.encode_state(
             state["entity_features"], state["entity_type_ids"],
-            state["threat_features"], state["entity_mask"], state["threat_mask"],
+            state["zone_features"], state["entity_mask"], state["zone_mask"],
             ability_cls,
-            state.get("position_features"), state.get("position_mask"),
-            state.get("aggregate_features"),
+            aggregate_features=state.get("aggregate_features"),
         )
 
         pooled = enc["pooled"]
@@ -918,10 +947,9 @@ def train_on_trajectories(
         # V5: encode_state -> decide (no CfC for shuffled batch)
         enc = model.encode_state(
             state["entity_features"], state["entity_type_ids"],
-            state["threat_features"], state["entity_mask"], state["threat_mask"],
+            state["zone_features"], state["entity_mask"], state["zone_mask"],
             ability_cls,
-            state.get("position_features"), state.get("position_mask"),
-            state.get("aggregate_features"),
+            aggregate_features=state.get("aggregate_features"),
         )
         pooled = enc["pooled"]
 

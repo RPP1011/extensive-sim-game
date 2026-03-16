@@ -267,13 +267,13 @@ fn zone_contains(zone: &crate::ai::core::ActiveZone, pos: SimVec2) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::core::{SimState, UnitState, Team, SimVec2};
+    use crate::ai::core::{SimState, UnitState, Team, SimVec2, UnitStore};
 
     fn make_state(hero_pos: SimVec2, enemy_pos: SimVec2) -> SimState {
         SimState {
             tick: 10,
             rng_state: 42,
-            units: vec![
+            units: UnitStore::new(vec![
                 UnitState {
                     id: 1,
                     team: Team::Hero,
@@ -370,7 +370,7 @@ mod tests {
                     cover_bonus: 0.0,
                     elevation: 0.0,
                 },
-            ],
+            ]),
             projectiles: vec![],
             passive_trigger_depth: 0,
             zones: vec![],

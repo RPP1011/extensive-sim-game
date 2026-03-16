@@ -11,7 +11,7 @@ use bevy_game::ai::effects::{
 };
 use bevy_game::ai::effects::dsl;
 use bevy_game::ai::effects::dsl::emit::emit_ability_dsl;
-use bevy_game::ai::core::{SimState, SimVec2, Team, UnitState};
+use bevy_game::ai::core::{SimState, SimVec2, Team, UnitState, UnitStore};
 
 pub const MAX_HP: i32 = 100;
 pub const CASTER_ID: u32 = 0;
@@ -292,7 +292,7 @@ pub fn make_sim(units: Vec<UnitState>) -> SimState {
     SimState {
         tick: 0,
         rng_state: 42,
-        units,
+        units: UnitStore::new(units),
         projectiles: Vec::new(),
         passive_trigger_depth: 0,
         zones: Vec::new(),

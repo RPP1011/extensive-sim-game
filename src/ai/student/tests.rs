@@ -1,7 +1,7 @@
 use super::*;
 use super::features::extract_features;
 use super::model::StudentMLP;
-use crate::ai::core::{sim_vec2, SimState, Team, UnitState};
+use crate::ai::core::{sim_vec2, SimState, Team, UnitState, UnitStore};
 use crate::ai::personality::PersonalityProfile;
 use crate::ai::roles::Role;
 use crate::ai::squad::FormationMode;
@@ -98,7 +98,7 @@ fn dummy_state() -> SimState {
     SimState {
         tick: 50,
         rng_state: 42,
-        units,
+        units: UnitStore::new(units),
         projectiles: Vec::new(),
         passive_trigger_depth: 0,
         zones: Vec::new(),

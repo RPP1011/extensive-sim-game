@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ai::core::{SimEvent, SimState};
+use crate::ai::core::{SimEvent, SimState, UnitStore};
 use crate::game_core::HeroCompanion;
 
 use super::types::CombatJournal;
@@ -190,7 +190,7 @@ mod tests {
         SimState {
             tick: 100,
             rng_state: 0,
-            units: vec![UnitState {
+            units: UnitStore::new(vec![UnitState {
                 id: 10,
                 team: Team::Hero,
                 hp: 50,
@@ -229,7 +229,7 @@ mod tests {
                 resource: 0,
                 max_resource: 0,
                 resource_regen_per_sec: 0.0, owner_id: None, directed: false, armor: 0.0, magic_resist: 0.0, cover_bonus: 0.0, elevation: 0.0, total_healing_done: 0, total_damage_done: 0,
-            }],
+            }]),
             projectiles: Vec::new(),
             passive_trigger_depth: 0,
             zones: Vec::new(),

@@ -33,7 +33,7 @@ pub(super) fn hero_unit(id: u32, team: Team, pos: (f32, f32)) -> UnitState {
 
 pub(super) fn make_state(units: Vec<UnitState>, seed: u64) -> SimState {
     SimState {
-        tick: 0, rng_state: seed, units,
+        tick: 0, rng_state: seed, units: UnitStore::new(units),
         projectiles: Vec::new(), passive_trigger_depth: 0,
         zones: Vec::new(), tethers: Vec::new(), grid_nav: None,
     }

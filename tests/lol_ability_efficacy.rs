@@ -9,7 +9,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::Path;
 
-use bevy_game::ai::core::{sim_vec2, step, UnitIntent, IntentAction, SimEvent, SimState, SimVec2, Team, UnitState, FIXED_TICK_MS};
+use bevy_game::ai::core::{sim_vec2, step, UnitIntent, IntentAction, SimEvent, SimState, SimVec2, Team, UnitState, UnitStore, FIXED_TICK_MS};
 use bevy_game::ai::effects::{AbilityTarget, AbilityTargeting, HeroToml};
 use bevy_game::ai::squad;
 use bevy_game::mission::hero_templates::{hero_toml_to_unit, parse_hero_toml};
@@ -189,7 +189,7 @@ fn lol_ability_efficacy_report() {
             let mut sim = SimState {
                 tick: 0,
                 rng_state: seed,
-                units,
+                units: UnitStore::new(units),
                 projectiles: Vec::new(),
                 passive_trigger_depth: 0,
                 zones: Vec::new(),
@@ -337,7 +337,7 @@ fn lol_ability_efficacy_report() {
             let mut units = vec![hero, ally];
             units.extend(enemies);
             let mut forced_sim = SimState {
-                tick: 0, rng_state: 99, units,
+                tick: 0, rng_state: 99, units: UnitStore::new(units),
                 projectiles: Vec::new(), passive_trigger_depth: 0,
                 zones: Vec::new(), tethers: Vec::new(), grid_nav: None,
             };

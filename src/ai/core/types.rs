@@ -7,6 +7,7 @@ use crate::ai::effects::{
     PassiveSlot, Projectile, Tags,
 };
 use super::events::SimEvent;
+use super::unit_store::UnitStore;
 
 pub const FIXED_TICK_MS: u32 = 100;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -232,7 +233,7 @@ pub struct ActiveTether {
 pub struct SimState {
     pub tick: u64,
     pub rng_state: u64,
-    pub units: Vec<UnitState>,
+    pub units: UnitStore,
     #[serde(default)]
     pub projectiles: Vec<Projectile>,
     #[serde(skip, default)]

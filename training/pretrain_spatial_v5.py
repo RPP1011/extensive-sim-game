@@ -113,9 +113,8 @@ class SpatialPretraining(nn.Module):
 
     def forward(
         self,
-        entity_features, entity_type_ids, threat_features,
-        entity_mask, threat_mask,
-        position_features=None, position_mask=None,
+        entity_features, entity_type_ids, zone_features,
+        entity_mask, zone_mask,
         aggregate_features=None,
     ):
         """
@@ -126,9 +125,8 @@ class SpatialPretraining(nn.Module):
         E = entity_features.shape[1]
 
         tokens, full_mask = self.encoder(
-            entity_features, entity_type_ids, threat_features,
-            entity_mask, threat_mask,
-            position_features, position_mask,
+            entity_features, entity_type_ids, zone_features,
+            entity_mask, zone_mask,
             aggregate_features,
         )
 
@@ -180,10 +178,14 @@ def main():
     ent_feat = torch.from_numpy(d["ent_feat"]).to(DEVICE)
     ent_types = torch.from_numpy(d["ent_types"]).long().to(DEVICE)
     ent_mask = torch.from_numpy(d["ent_mask"]).bool().to(DEVICE)
-    thr_feat = torch.from_numpy(d["thr_feat"]).to(DEVICE)
-    thr_mask = torch.from_numpy(d["thr_mask"]).bool().to(DEVICE)
-    pos_feat = torch.from_numpy(d["pos_feat"]).to(DEVICE)
-    pos_mask = torch.from_numpy(d["pos_mask"]).bool().to(DEVICE)
+    # Prefer zone_feat/zone_mask; fall back to thr_feat/thr_mask for old npz files
+    if "zone_feat" in d:
+        zone_feat = torch.from_numpy(d["zone_feat"]).to(DEVICE)
+        zone_mask = torch.from_numpy(d["zone_mask"]).bool().to(DEVICE)
+    else:
+        print("  WARNING: zone_feat not found in npz, falling back to thr_feat/thr_mask")
+        zone_feat = torch.from_numpy(d["thr_feat"]).to(DEVICE)
+        zone_mask = torch.from_numpy(d["thr_mask"]).bool().to(DEVICE)
     agg_feat = torch.from_numpy(d["agg_feat"]).to(DEVICE)
 
     N = ent_feat.shape[0]
@@ -252,9 +254,8 @@ def main():
         train_ptr += args.batch_size
 
         spatial_pred = model(
-            ent_feat[idx], ent_types[idx], thr_feat[idx],
-            ent_mask[idx], thr_mask[idx],
-            pos_feat[idx], pos_mask[idx], agg_feat[idx],
+            ent_feat[idx], ent_types[idx], zone_feat[idx],
+            ent_mask[idx], zone_mask[idx], agg_feat[idx],
         )
 
         # Masked MSE: only compute loss where entities exist
@@ -285,9 +286,8 @@ def main():
                 for vstart in range(0, len(val_idx), args.batch_size):
                     vidx = val_idx[vstart:vstart + args.batch_size]
                     vpred = model(
-                        ent_feat[vidx], ent_types[vidx], thr_feat[vidx],
-                        ent_mask[vidx], thr_mask[vidx],
-                        pos_feat[vidx], pos_mask[vidx], agg_feat[vidx],
+                        ent_feat[vidx], ent_types[vidx], zone_feat[vidx],
+                        ent_mask[vidx], zone_mask[vidx], agg_feat[vidx],
                     )
                     vtarget = spatial_targets[vidx]
                     vmask = ~ent_mask[vidx]

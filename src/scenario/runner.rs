@@ -1,4 +1,4 @@
-use crate::ai::core::{sim_vec2, SimState, SimVec2, Team};
+use crate::ai::core::{sim_vec2, SimState, SimVec2, Team, UnitStore};
 use crate::ai::effects::HeroToml;
 use crate::ai::effects::manifest::AbilityManifest;
 use crate::ai::pathing::GridNav;
@@ -175,7 +175,7 @@ fn build_hero_vs_hero_with_spawns(
     SimState {
         tick: 0,
         rng_state: seed,
-        units,
+        units: UnitStore::new(units),
         projectiles: Vec::new(),
         passive_trigger_depth: 0,
         zones: Vec::new(),

@@ -528,7 +528,7 @@ fn verify_detects_excessive_replanning() {
     let state = crate::ai::core::SimState {
         tick: 10,
         rng_state: 0,
-        units: vec![crate::ai::core::UnitState {
+        units: crate::ai::core::UnitStore::new(vec![crate::ai::core::UnitState {
             id: 1,
             team: crate::ai::core::Team::Hero,
             hp: 100,
@@ -575,7 +575,7 @@ fn verify_detects_excessive_replanning() {
             magic_resist: 0.0,
             cover_bonus: 0.0,
             elevation: 0.0,
-        }],
+        }]),
         projectiles: vec![],
         passive_trigger_depth: 0,
         zones: vec![],
@@ -770,7 +770,7 @@ fn bench_world_state_extract() {
     let state = crate::ai::core::SimState {
         tick: 100,
         rng_state: 0,
-        units,
+        units: crate::ai::core::UnitStore::new(units),
         projectiles: vec![],
         passive_trigger_depth: 0,
         zones: vec![],

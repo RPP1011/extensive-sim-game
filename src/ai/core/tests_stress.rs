@@ -172,7 +172,7 @@ mod tests_stress {
         ];
         let mut units: Vec<UnitState> = heroes.into_iter().chain(enemies).collect();
         units.sort_by_key(|u| u.id);
-        SimState { tick: 0, rng_state: seed, units, projectiles: Vec::new(), passive_trigger_depth: 0, zones: Vec::new(), tethers: Vec::new(), grid_nav: None }
+        SimState { tick: 0, rng_state: seed, units: UnitStore::new(units), projectiles: Vec::new(), passive_trigger_depth: 0, zones: Vec::new(), tethers: Vec::new(), grid_nav: None }
     }
 
     fn run_stress_fight(seed: u64, ticks: u32) -> (SimState, Vec<SimEvent>) {
@@ -265,5 +265,81 @@ mod tests_stress {
         assert!(projectile_seen, "No projectiles launched across {} seeds", seeds.len());
         assert!(morph_seen, "No morphed abilities used across {} seeds", seeds.len());
         assert!(resource_spent_seen, "No resources spent across {} seeds", seeds.len());
+    }
+
+    /// Benchmark: O(1) idx_of vs O(N) linear scan at various unit counts,
+    /// plus sim step throughput.
+    #[test]
+    fn bench_unit_store_lookup_and_sim_throughput() {
+        use std::time::Instant;
+        use std::hint::black_box;
+
+        eprintln!();
+        eprintln!("=== UnitStore Benchmark ===");
+        eprintln!();
+
+        // --- Lookup microbenchmark at various unit counts ---
+        for &n_units in &[8usize, 16, 32, 64] {
+            let units: Vec<UnitState> = (0..n_units as u32)
+                .map(|i| stress_unit(100 + i, if i < n_units as u32 / 2 { Team::Hero } else { Team::Enemy }, (i as f32, 0.0)))
+                .collect();
+            let store = UnitStore::new(units);
+            let ids: Vec<u32> = store.iter().map(|u| u.id).collect();
+
+            let n_lookups = 2_000_000;
+
+            // O(1) HashMap
+            let t0 = Instant::now();
+            for i in 0..n_lookups {
+                black_box(store.idx_of(ids[i % ids.len()]));
+            }
+            let idx_of_ns = t0.elapsed().as_nanos() as f64 / n_lookups as f64;
+
+            // O(N) linear scan
+            let t1 = Instant::now();
+            for i in 0..n_lookups {
+                let id = ids[i % ids.len()];
+                black_box(store.iter().position(|u| u.id == id));
+            }
+            let linear_ns = t1.elapsed().as_nanos() as f64 / n_lookups as f64;
+
+            let speedup = linear_ns / idx_of_ns;
+            eprintln!("  {n_units:>2} units: idx_of={idx_of_ns:.1}ns  linear={linear_ns:.1}ns  {speedup:.1}x");
+        }
+
+        // --- Sim step throughput (8-unit stress fights) ---
+        let n_fights = 100u64;
+        let ticks_per = 200u32;
+        let t2 = Instant::now();
+        for seed in 0..n_fights {
+            let _ = run_stress_fight(seed, ticks_per);
+        }
+        let total_steps = n_fights * ticks_per as u64;
+        let us_per_step = t2.elapsed().as_micros() as f64 / total_steps as f64;
+
+        // --- Sim step throughput with squad AI (matches IMPALA make_sim path) ---
+        let n_fights = 200u64;
+        let ticks_per = 300u32;
+        let t2 = Instant::now();
+        for seed in 0..n_fights {
+            let _ = run_stress_fight(seed, ticks_per);
+        }
+        let total_steps = n_fights * ticks_per as u64;
+        let us_per_step = t2.elapsed().as_micros() as f64 / total_steps as f64;
+        let ms_total = t2.elapsed().as_millis();
+
+        eprintln!();
+        eprintln!("  sim step (8 units, squad AI):");
+        eprintln!("    {total_steps} steps in {ms_total}ms ({us_per_step:.1} µs/step)");
+        eprintln!("    ({n_fights} fights × {ticks_per} ticks)");
+
+        // --- Extrapolate to IMPALA scale ---
+        // IMPALA: 474 episodes × ~175 ticks avg = ~83K steps, with ~96 find_unit_idx per step
+        let impala_steps = 83_000u64;
+        let projected_ms = impala_steps as f64 * us_per_step / 1000.0;
+        eprintln!();
+        eprintln!("  IMPALA projected (83K steps): {projected_ms:.0}ms sim time");
+        eprintln!("  (baseline make_sim was ~10.5s for 474 episodes)");
+        eprintln!("===========================");
     }
 }

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
-use crate::ai::core::{sim_vec2, SimState, SimVec2, Team, UnitState};
+use crate::ai::core::{sim_vec2, SimState, SimVec2, Team, UnitState, UnitStore};
 use crate::ai::effects::HeroToml;
 use crate::mission::hero_templates::hero_toml_to_unit;
 
@@ -128,7 +128,7 @@ pub fn build_default_sim(player_count: usize, enemy_count: usize, seed: u64) -> 
     SimState {
         tick: 0,
         rng_state: seed,
-        units,
+        units: UnitStore::new(units),
         projectiles: Vec::new(),
         passive_trigger_depth: 0,
         zones: Vec::new(),
@@ -174,7 +174,7 @@ pub fn build_sim_with_hero_templates(
     SimState {
         tick: 0,
         rng_state: seed,
-        units,
+        units: UnitStore::new(units),
         projectiles: Vec::new(),
         passive_trigger_depth: 0,
         zones: Vec::new(),

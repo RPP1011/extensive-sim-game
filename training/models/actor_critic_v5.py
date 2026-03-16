@@ -99,29 +99,26 @@ class AbilityActorCriticV5(nn.Module):
             return self.external_cls_proj(cls)
         return cls
 
-    def _build_full_type_ids(self, entity_type_ids, n_threats, n_positions, has_aggregate, device):
+    def _build_full_type_ids(self, entity_type_ids, n_zones, has_aggregate, device):
         B = entity_type_ids.shape[0]
         parts = [entity_type_ids]
-        parts.append(torch.full((B, n_threats), 3, device=device, dtype=torch.long))
-        if n_positions > 0:
-            parts.append(torch.full((B, n_positions), 4, device=device, dtype=torch.long))
+        parts.append(torch.full((B, n_zones), 3, device=device, dtype=torch.long))
         if has_aggregate:
-            parts.append(torch.full((B, 1), 5, device=device, dtype=torch.long))
+            parts.append(torch.full((B, 1), 4, device=device, dtype=torch.long))
         return torch.cat(parts, dim=1)
 
     def encode_state(
         self,
-        entity_features, entity_type_ids, threat_features,
-        entity_mask, threat_mask,
+        entity_features, entity_type_ids,
+        zone_features, entity_mask, zone_mask,
         ability_cls: list[torch.Tensor | None],
-        position_features=None, position_mask=None,
         aggregate_features=None,
         n_latents_override: int | None = None,
     ) -> dict:
         """Encode game state: entity encoder -> latent interface. No CfC."""
         tokens, full_mask = self.entity_encoder(
-            entity_features, entity_type_ids, threat_features,
-            entity_mask, threat_mask, position_features, position_mask,
+            entity_features, entity_type_ids, zone_features,
+            entity_mask, zone_mask,
             aggregate_features,
         )
 
@@ -138,11 +135,10 @@ class AbilityActorCriticV5(nn.Module):
             else:
                 ability_cross_embs.append(None)
 
-        n_threats = threat_features.shape[1]
-        n_positions = position_features.shape[1] if position_features is not None else 0
+        n_zones = zone_features.shape[1]
         has_agg = aggregate_features is not None
         full_type_ids = self._build_full_type_ids(
-            entity_type_ids, n_threats, n_positions, has_agg,
+            entity_type_ids, n_zones, has_agg,
             entity_features.device,
         )
 
@@ -168,19 +164,18 @@ class AbilityActorCriticV5(nn.Module):
 
     def forward(
         self,
-        entity_features, entity_type_ids, threat_features,
-        entity_mask, threat_mask,
+        entity_features, entity_type_ids,
+        zone_features, entity_mask, zone_mask,
         ability_cls: list[torch.Tensor | None],
-        position_features=None, position_mask=None,
         aggregate_features=None,
         h_prev=None,
         n_latents_override: int | None = None,
     ) -> tuple[dict, torch.Tensor]:
         """Single-step forward (for inference). Returns (output_dict, h_new)."""
         enc = self.encode_state(
-            entity_features, entity_type_ids, threat_features,
-            entity_mask, threat_mask, ability_cls,
-            position_features, position_mask, aggregate_features,
+            entity_features, entity_type_ids,
+            zone_features, entity_mask, zone_mask, ability_cls,
+            aggregate_features,
             n_latents_override,
         )
 

@@ -3,6 +3,7 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::ai::core::{
     position_at_range, run_replay, step, IntentAction, ReplayResult, SimState, Team, UnitIntent,
+    UnitStore,
 };
 
 #[derive(Debug, Clone)]
@@ -192,7 +193,7 @@ pub fn generate_intents(
 
 pub fn sample_phase1_skirmish_state(seed: u64) -> SimState {
     let mut state = crate::ai::core::sample_duel_state(seed);
-    state.units = vec![
+    state.units = UnitStore::new(vec![
         crate::ai::core::UnitState {
             id: 1,
             team: Team::Hero,
@@ -353,7 +354,7 @@ pub fn sample_phase1_skirmish_state(seed: u64) -> SimState {
             max_resource: 0,
             resource_regen_per_sec: 0.0, owner_id: None, directed: false, armor: 0.0, magic_resist: 0.0, cover_bonus: 0.0, elevation: 0.0, total_healing_done: 0, total_damage_done: 0,
         },
-    ];
+    ]);
     state.units.sort_by_key(|u| u.id);
     state
 }

@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io;
 
-use crate::ai::core::{run_replay, sim_vec2, step, SimState, Team, UnitIntent, UnitState};
+use crate::ai::core::{run_replay, sim_vec2, step, SimState, Team, UnitIntent, UnitState, UnitStore};
 use crate::ai::pathing::GridNav;
 use crate::ai::personality::{
     default_personalities, generate_scripted_intents, sample_phase5_party_state,
@@ -69,7 +69,7 @@ fn custom_scenario_to_state(s: &CustomScenario) -> SimState {
     SimState {
         tick: 0,
         rng_state: s.seed,
-        units,
+        units: UnitStore::new(units),
         projectiles: Vec::new(),
         passive_trigger_depth: 0,
         zones: Vec::new(),

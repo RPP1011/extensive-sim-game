@@ -68,12 +68,12 @@ class TemporalPretraining(nn.Module):
         )
         self.d_model = d_model
 
-    def encode_tick(self, ent_feat, ent_types, thr_feat, ent_mask, thr_mask,
-                    pos_feat, pos_mask, agg_feat):
+    def encode_tick(self, ent_feat, ent_types, zone_feat, ent_mask, zone_mask,
+                    agg_feat):
         """Encode a single tick and return pooled representation."""
         tokens, full_mask = self.encoder(
-            ent_feat, ent_types, thr_feat, ent_mask, thr_mask,
-            pos_feat, pos_mask, agg_feat,
+            ent_feat, ent_types, zone_feat, ent_mask, zone_mask,
+            agg_feat,
         )
         mask_exp = (~full_mask).unsqueeze(-1).float()
         pooled = (tokens * mask_exp).sum(dim=1) / mask_exp.sum(dim=1).clamp(min=1)
@@ -179,10 +179,14 @@ def main():
     ent_feat = torch.from_numpy(d["ent_feat"]).to(DEVICE)
     ent_types = torch.from_numpy(d["ent_types"]).long().to(DEVICE)
     ent_mask = torch.from_numpy(d["ent_mask"]).bool().to(DEVICE)
-    thr_feat = torch.from_numpy(d["thr_feat"]).to(DEVICE)
-    thr_mask = torch.from_numpy(d["thr_mask"]).bool().to(DEVICE)
-    pos_feat = torch.from_numpy(d["pos_feat"]).to(DEVICE)
-    pos_mask = torch.from_numpy(d["pos_mask"]).bool().to(DEVICE)
+    # Prefer zone_feat/zone_mask; fall back to thr_feat/thr_mask for old npz files
+    if "zone_feat" in d:
+        zone_feat = torch.from_numpy(d["zone_feat"]).to(DEVICE)
+        zone_mask = torch.from_numpy(d["zone_mask"]).bool().to(DEVICE)
+    else:
+        print("  WARNING: zone_feat not found in npz, falling back to thr_feat/thr_mask")
+        zone_feat = torch.from_numpy(d["thr_feat"]).to(DEVICE)
+        zone_mask = torch.from_numpy(d["thr_mask"]).bool().to(DEVICE)
     agg_feat = torch.from_numpy(d["agg_feat"]).to(DEVICE)
     hp_adv = torch.from_numpy(d["hp_adv"]).to(DEVICE)
 
@@ -297,9 +301,8 @@ def main():
                 idx = torch.tensor(indices, dtype=torch.long, device=DEVICE)
 
                 pooled = model.encode_tick(
-                    ent_feat[idx], ent_types[idx], thr_feat[idx],
-                    ent_mask[idx], thr_mask[idx],
-                    pos_feat[idx], pos_mask[idx], agg_feat[idx],
+                    ent_feat[idx], ent_types[idx], zone_feat[idx],
+                    ent_mask[idx], zone_mask[idx], agg_feat[idx],
                 )
                 pooled_all.append(pooled)
 
@@ -350,9 +353,8 @@ def main():
                         vidx = torch.tensor(indices, dtype=torch.long, device=DEVICE)
 
                         vpooled = model.encode_tick(
-                            ent_feat[vidx], ent_types[vidx], thr_feat[vidx],
-                            ent_mask[vidx], thr_mask[vidx],
-                            pos_feat[vidx], pos_mask[vidx], agg_feat[vidx],
+                            ent_feat[vidx], ent_types[vidx], zone_feat[vidx],
+                            ent_mask[vidx], zone_mask[vidx], agg_feat[vidx],
                         )
                         vpooled_all.append(vpooled)
 

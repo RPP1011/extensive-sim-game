@@ -70,14 +70,12 @@ class V5EncoderPretraining(nn.Module):
             nn.Linear(d_model, d_model), nn.GELU(), nn.Linear(d_model, 1),
         )
 
-    def forward(self, entity_features, entity_type_ids, threat_features,
-                entity_mask, threat_mask,
-                position_features=None, position_mask=None,
+    def forward(self, entity_features, entity_type_ids, zone_features,
+                entity_mask, zone_mask,
                 aggregate_features=None):
         tokens, full_mask = self.encoder(
-            entity_features, entity_type_ids, threat_features,
-            entity_mask, threat_mask,
-            position_features, position_mask,
+            entity_features, entity_type_ids, zone_features,
+            entity_mask, zone_mask,
             aggregate_features,
         )
         mask_expanded = (~full_mask).unsqueeze(-1).float()
@@ -120,17 +118,21 @@ def main():
     ent_feat = torch.from_numpy(d["ent_feat"]).to(DEVICE)
     ent_types = torch.from_numpy(d["ent_types"]).long().to(DEVICE)
     ent_mask = torch.from_numpy(d["ent_mask"]).bool().to(DEVICE)
-    thr_feat = torch.from_numpy(d["thr_feat"]).to(DEVICE)
-    thr_mask = torch.from_numpy(d["thr_mask"]).bool().to(DEVICE)
-    pos_feat = torch.from_numpy(d["pos_feat"]).to(DEVICE)
-    pos_mask = torch.from_numpy(d["pos_mask"]).bool().to(DEVICE)
+    # Prefer zone_feat/zone_mask; fall back to thr_feat/thr_mask for old npz files
+    if "zone_feat" in d:
+        zone_feat = torch.from_numpy(d["zone_feat"]).to(DEVICE)
+        zone_mask = torch.from_numpy(d["zone_mask"]).bool().to(DEVICE)
+    else:
+        print("  WARNING: zone_feat not found in npz, falling back to thr_feat/thr_mask")
+        zone_feat = torch.from_numpy(d["thr_feat"]).to(DEVICE)
+        zone_mask = torch.from_numpy(d["thr_mask"]).bool().to(DEVICE)
     agg_feat = torch.from_numpy(d["agg_feat"]).to(DEVICE)
     hp_adv = torch.from_numpy(d["hp_adv"]).to(DEVICE)
     surv = torch.from_numpy(d["surv"]).to(DEVICE)
 
     N = ent_feat.shape[0]
     print(f"  {N} samples, train={len(train_idx)}, val={len(val_idx)}")
-    print(f"  Entity shape: {ent_feat.shape}, Threat shape: {thr_feat.shape}")
+    print(f"  Entity shape: {ent_feat.shape}, Zone shape: {zone_feat.shape}")
     print(f"  hp_adv: mean={hp_adv[train_idx].mean():.3f} std={hp_adv[train_idx].std():.3f} unique~{len(torch.unique(torch.round(hp_adv[train_idx] * 1000)))}")
     print(f"  surv:   mean={surv[train_idx].mean():.3f} std={surv[train_idx].std():.3f} unique~{len(torch.unique(torch.round(surv[train_idx] * 1000)))}")
 
@@ -165,9 +167,8 @@ def main():
         train_ptr += args.batch_size
 
         hp_pred, surv_pred = model(
-            ent_feat[idx], ent_types[idx], thr_feat[idx],
-            ent_mask[idx], thr_mask[idx],
-            pos_feat[idx], pos_mask[idx], agg_feat[idx],
+            ent_feat[idx], ent_types[idx], zone_feat[idx],
+            ent_mask[idx], zone_mask[idx], agg_feat[idx],
         )
         loss_hp = F.mse_loss(hp_pred, hp_adv[idx])
         loss_surv = F.mse_loss(surv_pred, surv[idx])
@@ -190,9 +191,8 @@ def main():
                 for vstart in range(0, len(val_idx), args.batch_size):
                     vidx = val_idx[vstart:vstart + args.batch_size]
                     vhp, vsurv = model(
-                        ent_feat[vidx], ent_types[vidx], thr_feat[vidx],
-                        ent_mask[vidx], thr_mask[vidx],
-                        pos_feat[vidx], pos_mask[vidx], agg_feat[vidx],
+                        ent_feat[vidx], ent_types[vidx], zone_feat[vidx],
+                        ent_mask[vidx], zone_mask[vidx], agg_feat[vidx],
                     )
                     val_hp_sum += F.mse_loss(vhp, hp_adv[vidx]).item() * len(vidx)
                     val_surv_sum += F.mse_loss(vsurv, surv[vidx]).item() * len(vidx)

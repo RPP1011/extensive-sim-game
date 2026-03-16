@@ -5,6 +5,7 @@ use contracts::*;
 use crate::ai::effects::StatusKind;
 
 use super::types::*;
+use super::unit_store::UnitStore;
 use super::events::SimEvent;
 use super::math::*;
 use super::helpers::*;
@@ -332,7 +333,7 @@ pub fn sample_duel_state(seed: u64) -> SimState {
     SimState {
         tick: 0,
         rng_state: seed,
-        units,
+        units: UnitStore::new(units),
         projectiles: Vec::new(),
         passive_trigger_depth: 0,
         zones: Vec::new(),

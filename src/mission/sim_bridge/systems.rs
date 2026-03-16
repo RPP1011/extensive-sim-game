@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::ai::core::{self, IntentAction, SimEvent, SimState, SimVec2, Team, UnitIntent, FIXED_TICK_MS};
+use crate::ai::core::{self, IntentAction, SimEvent, SimState, SimVec2, Team, UnitIntent, UnitStore, FIXED_TICK_MS};
 use crate::ai::pathing::{cover_factor, GridNav};
 use crate::audio::{AudioEvent, AudioEventQueue, SfxKind};
 use crate::mission::unit_vis::{UnitHealthData, UnitPositionData};
@@ -66,7 +66,7 @@ pub fn advance_sim_system(
         sim_state.sim.grid_nav = sim_state.grid_nav.clone();
         let current_sim = std::mem::replace(
             &mut sim_state.sim,
-            SimState { tick: 0, rng_state: 0, units: Vec::new(), projectiles: Vec::new(), passive_trigger_depth: 0, zones: Vec::new(), tethers: Vec::new(), grid_nav: None },
+            SimState { tick: 0, rng_state: 0, units: UnitStore::new(Vec::new()), projectiles: Vec::new(), passive_trigger_depth: 0, zones: Vec::new(), tethers: Vec::new(), grid_nav: None },
         );
         let (mut new_sim, events) = core::step(current_sim, &all_intents, FIXED_TICK_MS);
         // Extract GridNav back (zones may have modified blocked cells)

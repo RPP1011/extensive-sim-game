@@ -11,7 +11,7 @@
 use std::fs;
 use std::path::Path;
 
-use bevy_game::ai::core::{sim_vec2, step, SimState, Team, UnitState, FIXED_TICK_MS};
+use bevy_game::ai::core::{sim_vec2, step, SimState, Team, UnitState, UnitStore, FIXED_TICK_MS};
 use bevy_game::ai::effects::HeroToml;
 use bevy_game::ai::squad;
 use bevy_game::mission::hero_templates::{hero_toml_to_unit, parse_hero_toml};
@@ -72,11 +72,11 @@ fn run_short_sim(hero: UnitState) -> (bool, u64, bool) {
     let mut sim = SimState {
         tick: 0,
         rng_state: 42,
-        units: vec![
+        units: UnitStore::new(vec![
             hero,
             make_enemy(100, sim_vec2(5.0, 0.0)),
             make_enemy(101, sim_vec2(6.0, 1.0)),
-        ],
+        ]),
         projectiles: Vec::new(),
         passive_trigger_depth: 0,
         zones: Vec::new(),

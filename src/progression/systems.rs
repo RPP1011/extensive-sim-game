@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::ai::core::{SimEvent, Team};
+use crate::ai::core::{SimEvent, Team, UnitStore};
 use crate::game_core::{
     AssignedHero, CampaignEventLog, CampaignRoster, EquipmentItem, HeroCompanion,
     HeroTrait, ItemRarity, MissionBoard, MissionData, MissionProgress, MissionResult,
@@ -79,7 +79,7 @@ pub fn dispatch_narrative_progression_system(
         let empty_sim = crate::ai::core::SimState {
             tick: 0,
             rng_state: 0,
-            units: Vec::new(),
+            units: UnitStore::new(Vec::new()),
             projectiles: Vec::new(),
             passive_trigger_depth: 0,
             zones: Vec::new(),
