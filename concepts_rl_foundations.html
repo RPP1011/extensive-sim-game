@@ -184,6 +184,23 @@ hr {
   min-width: 3em;
 }
 
+.page-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+}
+.page-nav a {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.page-nav a:hover { color: var(--accent); }
+.page-nav .next { margin-left: auto; }
+.page-nav-top { margin-bottom: 1.5rem; }
+.page-nav-bottom { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+
 @media (max-width: 720px) {
   .article { padding: 2rem 0.75rem 4rem; }
   h1 { font-size: 1.7rem; }
@@ -196,6 +213,10 @@ hr {
 <div class="article">
 
 <a href="index.html" class="back-link">&larr; Back to index</a>
+<div class="page-nav page-nav-top">
+  <a href="concepts_attention.html" class="prev">&larr; Attention</a>
+  <a href="concepts_rl_algorithms.html" class="next">RL Algorithms &rarr;</a>
+</div>
 
 <h1>RL Foundations</h1>
 <p class="subtitle">Actor-critic, value functions, on/off-policy, reward shaping, and replay buffers.</p>
@@ -269,6 +290,7 @@ hr {
   <li><strong>Distribution mismatch</strong> &mdash; The data was collected under &mu; but we're learning &pi;. If &pi; and &mu; differ too much, learning is unstable.</li>
   <li><strong>Importance sampling</strong> &mdash; Corrects for distribution mismatch by weighting samples by &pi;(a|s)/&mu;(a|s). V-Trace uses truncated importance weights.</li>
   <li><strong>Replay buffer</strong> &mdash; Stores past transitions for reuse. The key data structure enabling off-policy learning.</li>
+  <li><strong>Imitation learning</strong> &mdash; A third option: skip RL entirely and learn from expert demonstrations. <strong>Behavioral cloning</strong> treats it as supervised learning; <strong>DAgger</strong> iteratively collects student-visited states and asks the expert for labels. See <a href="concepts_rl_algorithms.html#bc" style="color:var(--accent)">RL Algorithms: BC &amp; DAgger</a>.</li>
 </ul>
 
 <div class="fig-container" id="fig-on-off-policy"></div>
@@ -313,6 +335,11 @@ hr {
 
 <div class="fig-container" id="fig-replay-buffer"></div>
 </section>
+
+<div class="page-nav page-nav-bottom">
+  <a href="concepts_attention.html" class="prev">&larr; Attention</a>
+  <a href="concepts_rl_algorithms.html" class="next">RL Algorithms &rarr;</a>
+</div>
 
 </div>
 

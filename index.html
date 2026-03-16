@@ -270,6 +270,21 @@ h1 .chimera {
   height: 50%;
 }
 
+.page-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+}
+.page-nav a {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.page-nav a:hover { color: var(--accent); }
+.page-nav .next { margin-left: auto; }
+
 @media (max-width: 720px) {
   .article { padding: 2rem 0.75rem 4rem; }
   h1 { font-size: 1.8rem; }
@@ -397,11 +412,17 @@ h1 .chimera {
           REINFORCE <span>&middot;</span>
           PPO <span>&middot;</span>
           IMPALA &amp; V-Trace <span>&middot;</span>
-          SAC
+          SAC <span>&middot;</span>
+          behavioral cloning <span>&middot;</span>
+          DAgger
         </div>
       </div>
     </a>
   </div>
+</div>
+
+<div class="page-nav" style="margin-top: 3rem;">
+  <a href="concepts_foundations.html" class="next">Start: Foundations &rarr;</a>
 </div>
 
 </div>

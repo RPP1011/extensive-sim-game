@@ -284,6 +284,33 @@ svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
 .response-fmt .rf-cell.actions { background: var(--surface2); }
 .response-fmt .rf-cell.logprobs { background: rgba(251,191,36,0.05); }
 
+.back-link {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  display: inline-block;
+  margin-bottom: 1.5rem;
+}
+.back-link:hover { color: var(--accent); }
+
+.page-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+}
+.page-nav a {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.page-nav a:hover { color: var(--accent); }
+.page-nav .next { margin-left: auto; }
+.page-nav-top { margin-bottom: 1.5rem; }
+.page-nav-bottom { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+
 @media (max-width: 720px) {
   .article { padding: 2rem 1.25rem 4rem; }
   h1 { font-size: 1.9rem; }
@@ -340,6 +367,11 @@ svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
 </head>
 <body>
 <div class="article">
+
+<a href="index.html" class="back-link">&larr; Back to index</a>
+<div class="page-nav page-nav-top">
+  <a href="concepts_rl_algorithms.html" class="prev">&larr; RL Algorithms</a>
+</div>
 
 <header>
   <h1>IMPALA V4: Behavioral Embeddings, V-Trace, and a SHM Bug</h1>
@@ -597,6 +629,10 @@ OFF_RELOAD_ACK  = 0x184    # was 0xC4</code></pre>
 <p>The next step is <strong>league training</strong>. Instead of training a single policy against a fixed opponent, we&rsquo;ll maintain a population of agents that play against each other &mdash; similar to AlphaStar&rsquo;s league. Agents that exploit a specific weakness get countered by new agents trained specifically against that exploit. The result is a policy that generalizes rather than overfits to one opponent&rsquo;s tendencies. The IMPALA infrastructure &mdash; 4,096 parallel sims, SHM GPU inference, behavioral embeddings &mdash; transfers directly; the main addition is matchmaking and population management.</p>
 
 <p class="footer-note" style="margin-top: 2rem; font-style: italic; color: var(--text-muted);">This work was done over 4 days in March 2026. Code, scenario definitions, and training infrastructure are all in a single Rust + Python repository.</p>
+
+<div class="page-nav page-nav-bottom">
+  <a href="concepts_rl_algorithms.html" class="prev">&larr; RL Algorithms</a>
+</div>
 
 </div>
 

@@ -184,6 +184,23 @@ hr {
   min-width: 3em;
 }
 
+.page-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+}
+.page-nav a {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.page-nav a:hover { color: var(--accent); }
+.page-nav .next { margin-left: auto; }
+.page-nav-top { margin-bottom: 1.5rem; }
+.page-nav-bottom { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+
 @media (max-width: 720px) {
   .article { padding: 2rem 0.75rem 4rem; }
   h1 { font-size: 1.7rem; }
@@ -196,9 +213,13 @@ hr {
 <div class="article">
 
 <a href="index.html" class="back-link">&larr; Back to index</a>
+<div class="page-nav page-nav-top">
+  <a href="concepts_rl_foundations.html" class="prev">&larr; RL Foundations</a>
+  <a href="blog_impala_v4.html" class="next">IMPALA V4 Blog &rarr;</a>
+</div>
 
 <h1>RL Algorithms</h1>
-<p class="subtitle">REINFORCE, PPO, IMPALA with V-Trace, and Soft Actor-Critic.</p>
+<p class="subtitle">REINFORCE, PPO, IMPALA with V-Trace, Soft Actor-Critic, and DAgger.</p>
 
 <nav class="toc">
   <div class="toc-title">On this page</div>
@@ -207,6 +228,8 @@ hr {
     <li><a href="#ppo">PPO (Proximal Policy Optimization)</a></li>
     <li><a href="#impala-vtrace">IMPALA &amp; V-Trace</a></li>
     <li><a href="#sac">SAC (Soft Actor-Critic)</a></li>
+    <li><a href="#bc">Behavioral Cloning</a></li>
+    <li><a href="#dagger">DAgger</a></li>
   </ul>
 </nav>
 
@@ -327,6 +350,69 @@ hr {
   <span class="val" id="sac-alpha-val">0.20</span>
 </div>
 </section>
+
+<hr>
+
+
+<section id="bc">
+<h2>Behavioral Cloning (BC)</h2>
+<p class="concept-desc">Behavioral Cloning is the simplest form of <strong>imitation learning</strong>: treat the expert's demonstrations as a supervised learning dataset and train a policy to <strong>mimic the expert's actions</strong> given the same states. No reward function, no environment interaction during training &mdash; just input&rarr;output regression (or classification).</p>
+
+<div class="formula-box">
+  L<sub>BC</sub> <span class="op">=</span> <span class="func">E</span><sub>(s,a)~D</sub>[<span class="op">&minus;</span>log <span class="var">&pi;<sub>&theta;</sub></span>(<span class="var">a</span>|<span class="var">s</span>)]
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Expert / Teacher</strong> &mdash; The policy being imitated. Could be a human, a hand-crafted AI (like GOAP/oracle), or a stronger model.</li>
+  <li><strong>Demonstration dataset D</strong> &mdash; Pairs of (state, expert_action) collected by running the expert. BC trains on this like any supervised learning problem.</li>
+  <li><strong>Distribution shift</strong> &mdash; The <strong>fatal flaw</strong> of BC. The student only sees states the expert visits. At test time, the student makes a small mistake, visits a new state, makes a bigger mistake, and the errors <strong>compound</strong>. The expert never demonstrated recovery from mistakes.</li>
+  <li><strong>Compounding error</strong> &mdash; Over T timesteps, BC error grows as O(T&sup2;). A 1% per-step error becomes catastrophic over a long episode.</li>
+  <li><strong>When BC works</strong> &mdash; Short horizons, simple action spaces, or when combined with DAgger. Also useful as a <strong>warm start</strong> before RL fine-tuning.</li>
+</ul>
+
+<div class="fig-container" id="fig-bc"></div>
+</section>
+
+<hr>
+
+
+<section id="dagger">
+<h2>DAgger (Dataset Aggregation)</h2>
+<p class="concept-desc">DAgger (Ross et al., 2011) fixes BC's distribution shift by <strong>iteratively collecting new data under the student's own policy</strong>, then asking the expert to label those states. Each round, the student visits states it actually encounters at test time, and learns what the expert <em>would have done</em> there. The training dataset grows (aggregates) across iterations.</p>
+
+<div class="formula-box">
+  D<sub>i+1</sub> <span class="op">=</span> D<sub>i</sub> <span class="op">&cup;</span> {(<span class="var">s</span>, <span class="var">&pi;*</span>(<span class="var">s</span>)) : <span class="var">s</span> ~ <span class="var">&pi;<sub>i</sub></span>}
+</div>
+
+<p>Key terms:</p>
+<ul style="margin: 0.8rem 0 1rem 1.5rem; color: var(--text); line-height: 2;">
+  <li><strong>Dataset Aggregation</strong> &mdash; Each iteration: (1) run the current student policy, (2) record states visited, (3) ask the expert for labels, (4) add to dataset, (5) retrain. The dataset <strong>aggregates</strong> across all iterations.</li>
+  <li><strong>&pi;<sub>i</sub></strong> &mdash; The student policy at iteration i. In early rounds, this is close to the BC baseline. It improves each round.</li>
+  <li><strong>&pi;*</strong> &mdash; The expert/teacher policy that provides labels. In our case, the GOAP oracle AI that computes the "correct" action for any state.</li>
+  <li><strong>Distribution shift fix</strong> &mdash; BC trains on expert states. DAgger trains on <em>student</em> states. Since the student <em>will</em> visit these states at test time, the training distribution matches deployment.</li>
+  <li><strong>Error bound</strong> &mdash; DAgger reduces compounding error from O(T&sup2;) to O(T). After enough iterations, the student's performance converges to the expert's.</li>
+  <li><strong>Mixing / &beta;-schedule</strong> &mdash; Classic DAgger interpolates: &pi;<sub>mix</sub> = &beta;&pi;* + (1&minus;&beta;)&pi;<sub>i</sub>. Start with mostly expert (&beta;&asymp;1), gradually shift to student (&beta;&rarr;0). Smooths the transition.</li>
+  <li><strong>Win filtering</strong> &mdash; A practical variant: only aggregate <em>winning</em> episodes, so the student learns from its own successful trajectories rather than all trajectories. Avoids learning from failures.</li>
+</ul>
+
+<div class="fig-container" id="fig-dagger"></div>
+
+<div class="slider-row" style="margin-top: 1rem;">
+  <span style="font-family:'DM Sans',sans-serif;font-size:0.85rem;color:var(--text-muted);">DAgger iteration:</span>
+  <input type="range" id="dagger-iter-slider" min="0" max="10" step="1" value="0">
+  <span class="val" id="dagger-iter-val">0</span>
+  &nbsp;&nbsp;
+  <span style="font-family:'DM Sans',sans-serif;font-size:0.85rem;color:var(--text-muted);">&beta; (expert mix):</span>
+  <input type="range" id="dagger-beta-slider" min="0" max="1.0" step="0.05" value="1.0">
+  <span class="val" id="dagger-beta-val">1.00</span>
+</div>
+</section>
+
+<div class="page-nav page-nav-bottom">
+  <a href="concepts_rl_foundations.html" class="prev">&larr; RL Foundations</a>
+  <a href="blog_impala_v4.html" class="next">IMPALA V4 Blog &rarr;</a>
+</div>
 
 </div>
 
@@ -899,6 +985,220 @@ function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);cons
     const alpha=+this.value;
     d3.select('#sac-alpha-val').text(alpha.toFixed(2));
     drawSAC(alpha);
+  });
+})();
+
+// ═══ BEHAVIORAL CLONING ═══
+(function(){
+  const W=820,H=480;
+  const svg=d3.select('#fig-bc').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  txt(svg,W/2,20,'Behavioral Cloning Pipeline',{fill:C.heading,size:14,weight:600});
+
+  // Expert demonstration collection (left)
+  const expX=30,expY=50,expW=200,expH=120;
+  box(svg,expX,expY,expW,expH,C.surface,C.greenDim,8);
+  txt(svg,expX+expW/2,expY+20,'Expert (Oracle/GOAP)',{fill:C.green,size:12,weight:600});
+  txt(svg,expX+expW/2,expY+40,'plays the game',{fill:C.muted,size:9});
+
+  // Trajectory recording
+  const recEntries=['s\u2081 \u2192 attack_near','s\u2082 \u2192 use_heal','s\u2083 \u2192 hold','s\u2084 \u2192 attack_weak'];
+  recEntries.forEach((e,i)=>{
+    txt(svg,expX+expW/2,expY+58+i*15,e,{fill:C.text,size:8,mono:true});
+  });
+
+  // Arrow to dataset
+  const dsX=280,dsY=50,dsW=160,dsH=120;
+  arrow(svg,svg,expX+expW,expY+expH/2,dsX-2,dsY+dsH/2,C.green);
+
+  box(svg,dsX,dsY,dsW,dsH,C.surface,C.orangeDim,8);
+  txt(svg,dsX+dsW/2,dsY+20,'Dataset D',{fill:C.orange,size:12,weight:600});
+  txt(svg,dsX+dsW/2,dsY+38,'(state, action) pairs',{fill:C.muted,size:9});
+  txt(svg,dsX+dsW/2,dsY+58,'50K+ samples',{fill:C.text,size:9,mono:true});
+  txt(svg,dsX+dsW/2,dsY+75,'expert states only!',{fill:C.red,size:9,weight:500});
+
+  // Arrow to student
+  const stuX=500,stuY=50,stuW=160,stuH=120;
+  arrow(svg,svg,dsX+dsW,dsY+dsH/2,stuX-2,stuY+stuH/2,C.orange);
+
+  box(svg,stuX,stuY,stuW,stuH,C.surface,C.purpleDim,8);
+  txt(svg,stuX+stuW/2,stuY+20,'Student \u03c0\u03b8',{fill:C.purple,size:12,weight:600});
+  txt(svg,stuX+stuW/2,stuY+40,'neural network',{fill:C.muted,size:9});
+  txt(svg,stuX+stuW/2,stuY+58,'min \u2212log \u03c0(a|s)',{fill:C.text,size:9,mono:true});
+  txt(svg,stuX+stuW/2,stuY+75,'supervised learning',{fill:C.muted,size:9});
+
+  // Deploy arrow
+  const depX=700,depY=50;
+  arrow(svg,svg,stuX+stuW,stuY+stuH/2,depX-2,depY+60,C.purple);
+  box(svg,depX,depY,100,120,C.surface,C.cyan,8);
+  txt(svg,depX+50,depY+25,'Deploy',{fill:C.cyan,size:11,weight:600});
+  txt(svg,depX+50,depY+45,'student',{fill:C.muted,size:9});
+  txt(svg,depX+50,depY+65,'plays',{fill:C.muted,size:9});
+  txt(svg,depX+50,depY+85,'alone',{fill:C.muted,size:9});
+
+  // Distribution shift visualization
+  const shiftY=200;
+  box(svg,30,shiftY,W-60,260,C.surface,C.border,8);
+  txt(svg,W/2,shiftY+22,'The Distribution Shift Problem',{fill:C.heading,size:13,weight:600});
+
+  // Expert trajectory (clean path)
+  const pathY=shiftY+50,pathH=80;
+  txt(svg,90,pathY,'Expert path:',{fill:C.green,size:10,weight:600,anchor:'start'});
+
+  const expertPath=[[100,pathY+40],[200,pathY+35],[300,pathY+38],[400,pathY+30],[500,pathY+33],[600,pathY+28],[700,pathY+25]];
+  const expertLine=d3.line().x(d=>d[0]).y(d=>d[1]).curve(d3.curveNatural);
+  svg.append('path').attr('d',expertLine(expertPath)).attr('stroke',C.green).attr('stroke-width',2.5).attr('fill','none');
+  expertPath.forEach(p=>{svg.append('circle').attr('cx',p[0]).attr('cy',p[1]).attr('r',3).attr('fill',C.green)});
+  txt(svg,720,pathY+25,'GOAL',{fill:C.green,size:9,weight:600});
+
+  // Student trajectory (drifting)
+  txt(svg,90,pathY+pathH+10,'Student path:',{fill:C.red,size:10,weight:600,anchor:'start'});
+
+  const studentPath=[[100,pathY+40],[200,pathY+42],[300,pathY+55],[400,pathY+75],[500,pathY+110],[600,pathY+160],[700,pathY+180]];
+  const studentLine=d3.line().x(d=>d[0]).y(d=>d[1]).curve(d3.curveNatural);
+  svg.append('path').attr('d',studentLine(studentPath)).attr('stroke',C.red).attr('stroke-width',2.5).attr('fill','none').attr('stroke-dasharray','6,3');
+  studentPath.forEach(p=>{svg.append('circle').attr('cx',p[0]).attr('cy',p[1]).attr('r',3).attr('fill',C.red)});
+
+  // Error annotations
+  const errAnnotations=[
+    {x:300,y1:pathY+38,y2:pathY+55,label:'small error'},
+    {x:500,y1:pathY+33,y2:pathY+110,label:'compounds!'},
+    {x:650,y1:pathY+28,y2:pathY+170,label:'catastrophic'},
+  ];
+
+  errAnnotations.forEach(a=>{
+    svg.append('line').attr('x1',a.x).attr('y1',a.y1).attr('x2',a.x).attr('y2',a.y2).attr('stroke',C.orange).attr('stroke-width',1).attr('stroke-dasharray','2,2');
+    txt(svg,a.x,a.y2+12,a.label,{fill:C.orange,size:8,weight:500});
+  });
+
+  // Unseen states annotation
+  box(svg,350,shiftY+200,350,40,C.surface2,C.red+'60',5);
+  txt(svg,525,shiftY+215,'Student enters states the expert never visited',{fill:C.red,size:9,weight:500});
+  txt(svg,525,shiftY+230,'No training data here \u2192 random behavior \u2192 more drift',{fill:C.muted,size:8});
+})();
+
+// ═══ DAGGER ═══
+(function(){
+  const W=820,H=560;
+  const container=d3.select('#fig-dagger');
+  const svg=container.append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  function drawDAgger(iter,beta){
+    svg.selectAll('*').remove();
+
+    txt(svg,W/2,20,'DAgger: Iterative Dataset Aggregation',{fill:C.heading,size:14,weight:600});
+
+    // The DAgger loop diagram
+    const cx=W/2,cy=200;
+
+    // Step 1: Student plays (top)
+    const s1X=cx-80,s1Y=50;
+    box(svg,s1X,s1Y,160,55,C.surface,C.purpleDim,8);
+    txt(svg,cx,s1Y+18,'1. Student Plays',{fill:C.purple,size:12,weight:600});
+    const mixLabel=beta>0.5?'\u03c0_mix \u2248 expert':beta>0.1?'\u03c0_mix = '+beta.toFixed(1)+'\u00b7\u03c0* + '+(1-beta).toFixed(1)+'\u00b7\u03c0_i':'\u03c0_i (student only)';
+    txt(svg,cx,s1Y+38,mixLabel,{fill:C.muted,size:8,mono:true});
+
+    // Step 2: Record states (right)
+    const s2X=cx+170,s2Y=130;
+    box(svg,s2X,s2Y,160,55,C.surface,C.cyanDim||C.cyan,8);
+    txt(svg,s2X+80,s2Y+18,'2. Record States',{fill:C.cyan,size:12,weight:600});
+    txt(svg,s2X+80,s2Y+38,'s ~ \u03c0_student',{fill:C.muted,size:9,mono:true});
+    pathArrow(svg,svg,`M${s1X+160},${s1Y+30} Q${s2X+80},${s1Y+30} ${s2X+80},${s2Y-3}`,C.purple);
+
+    // Step 3: Expert labels (bottom-right)
+    const s3X=cx+170,s3Y=240;
+    box(svg,s3X,s3Y,160,55,C.surface,C.greenDim,8);
+    txt(svg,s3X+80,s3Y+18,'3. Expert Labels',{fill:C.green,size:12,weight:600});
+    txt(svg,s3X+80,s3Y+38,'\u03c0*(s) for each state',{fill:C.muted,size:9,mono:true});
+    arrow(svg,svg,s2X+80,s2Y+55,s3X+80,s3Y-3,C.cyan);
+
+    // Step 4: Aggregate dataset (bottom)
+    const s4X=cx-80,s4Y=310;
+    box(svg,s4X,s4Y,160,55,C.surface,C.orangeDim,8);
+    txt(svg,cx,s4Y+18,'4. Aggregate D',{fill:C.orange,size:12,weight:600});
+    const dataSize=Math.round(50*(1+iter*0.6));
+    txt(svg,cx,s4Y+38,'D\u2080 \u222a D\u2081 \u222a ... ('+dataSize+'K pairs)',{fill:C.muted,size:8,mono:true});
+    pathArrow(svg,svg,`M${s3X+80},${s3Y+55} Q${s3X+80},${s4Y+27} ${s4X+160+3},${s4Y+27}`,C.green);
+
+    // Step 5: Retrain (left)
+    const s5X=cx-250,s5Y=240;
+    box(svg,s5X,s5Y,160,55,C.surface,C.redDim,8);
+    txt(svg,s5X+80,s5Y+18,'5. Retrain \u03c0\u03b8',{fill:C.red,size:12,weight:600});
+    txt(svg,s5X+80,s5Y+38,'supervised on D',{fill:C.muted,size:9,mono:true});
+    pathArrow(svg,svg,`M${s4X},${s4Y+27} Q${s5X+80},${s4Y+27} ${s5X+80},${s5Y+55+3}`,C.orange);
+
+    // Loop back arrow to step 1
+    pathArrow(svg,svg,`M${s5X+80},${s5Y} Q${s5X+80},${s1Y+27} ${s1X-3},${s1Y+27}`,C.red,'6,3');
+    txt(svg,s5X+30,s1Y+80,'iterate',{fill:C.text,size:9,weight:500});
+
+    // Iteration indicator
+    const iterLabel='Iteration '+iter+(iter===0?' (pure BC)':'');
+    const iterCol=iter===0?C.muted:iter<4?C.blue:C.green;
+    box(svg,cx-60,s4Y+70,120,30,iterCol+'15',iterCol,5);
+    txt(svg,cx,s4Y+89,iterLabel,{fill:iterCol,size:10,weight:600});
+
+    // Right panel: performance over iterations
+    const chartX=30,chartY=400,chartW=W-60,chartH=130;
+    box(svg,chartX,chartY,chartW,chartH,C.surface,C.border,8);
+    txt(svg,chartX+chartW/2,chartY+18,'Win Rate vs DAgger Iteration',{fill:C.heading,size:12,weight:600});
+
+    // Axes
+    const plotX=chartX+70,plotY=chartY+35,plotW=chartW-120,plotH=chartH-55;
+    svg.append('line').attr('x1',plotX).attr('y1',plotY+plotH).attr('x2',plotX+plotW).attr('y2',plotY+plotH).attr('stroke',C.border).attr('stroke-width',1);
+    svg.append('line').attr('x1',plotX).attr('y1',plotY).attr('x2',plotX).attr('y2',plotY+plotH).attr('stroke',C.border).attr('stroke-width',1);
+    txt(svg,plotX+plotW/2,plotY+plotH+14,'iteration',{fill:C.muted,size:8});
+    txt(svg,plotX-25,plotY+plotH/2,'win%',{fill:C.muted,size:8});
+
+    // Simulated win rates (BC starts ~22%, DAgger improves)
+    const winRates=[22.5,24.0,25.5,26.2,26.8,27.0,27.2,27.3,27.3,27.4,27.4];
+    const maxWR=35,minWR=15;
+    const xScale=d3.scaleLinear().domain([0,10]).range([plotX,plotX+plotW]);
+    const yScale=d3.scaleLinear().domain([minWR,maxWR]).range([plotY+plotH,plotY]);
+
+    // Y-axis ticks
+    [15,20,25,30,35].forEach(v=>{
+      svg.append('line').attr('x1',plotX-3).attr('y1',yScale(v)).attr('x2',plotX).attr('y2',yScale(v)).attr('stroke',C.muted);
+      txt(svg,plotX-8,yScale(v)+3,v+'%',{fill:C.muted,size:7,mono:true,anchor:'end'});
+      if(v>minWR) svg.append('line').attr('x1',plotX).attr('y1',yScale(v)).attr('x2',plotX+plotW).attr('y2',yScale(v)).attr('stroke',C.border).attr('stroke-width',0.5).attr('stroke-dasharray','3,3');
+    });
+
+    // BC baseline line
+    svg.append('line').attr('x1',plotX).attr('y1',yScale(22.5)).attr('x2',plotX+plotW).attr('y2',yScale(22.5)).attr('stroke',C.red).attr('stroke-width',1).attr('stroke-dasharray','4,4');
+    txt(svg,plotX+plotW+5,yScale(22.5)+3,'BC baseline',{fill:C.red,size:7,anchor:'start'});
+
+    // Plot line up to current iteration
+    const plotData=winRates.slice(0,iter+1);
+    if(plotData.length>1){
+      const linePath=d3.line().x((d,i)=>xScale(i)).y(d=>yScale(d)).curve(d3.curveMonotoneX);
+      svg.append('path').attr('d',linePath(plotData)).attr('stroke',C.green).attr('stroke-width',2).attr('fill','none');
+    }
+
+    // Points
+    plotData.forEach((wr,i)=>{
+      const col=i===iter?C.green:C.blue;
+      svg.append('circle').attr('cx',xScale(i)).attr('cy',yScale(wr)).attr('r',i===iter?5:3).attr('fill',col);
+      if(i===iter){
+        txt(svg,xScale(i),yScale(wr)-10,wr.toFixed(1)+'%',{fill:C.green,size:9,weight:700,mono:true});
+      }
+    });
+
+    // X-axis ticks
+    for(let i=0;i<=10;i++){
+      txt(svg,xScale(i),plotY+plotH+6,i+'',{fill:C.muted,size:7,mono:true});
+    }
+  }
+
+  drawDAgger(0,1.0);
+
+  d3.select('#dagger-iter-slider').on('input',function(){
+    const iter=+this.value;
+    d3.select('#dagger-iter-val').text(iter);
+    drawDAgger(iter,+d3.select('#dagger-beta-slider').node().value);
+  });
+  d3.select('#dagger-beta-slider').on('input',function(){
+    const beta=+this.value;
+    d3.select('#dagger-beta-val').text(beta.toFixed(2));
+    drawDAgger(+d3.select('#dagger-iter-slider').node().value,beta);
   });
 })();
 

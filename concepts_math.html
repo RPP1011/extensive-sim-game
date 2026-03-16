@@ -184,6 +184,23 @@ hr {
   min-width: 3em;
 }
 
+.page-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+}
+.page-nav a {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.page-nav a:hover { color: var(--accent); }
+.page-nav .next { margin-left: auto; }
+.page-nav-top { margin-bottom: 1.5rem; }
+.page-nav-bottom { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+
 @media (max-width: 720px) {
   .article { padding: 2rem 0.75rem 4rem; }
   h1 { font-size: 1.7rem; }
@@ -196,6 +213,10 @@ hr {
 <div class="article">
 
 <a href="index.html" class="back-link">&larr; Back to index</a>
+<div class="page-nav page-nav-top">
+  <a href="concepts_foundations.html" class="prev">&larr; Foundations</a>
+  <a href="concepts_architecture.html" class="next">Architecture &rarr;</a>
+</div>
 
 <h1>Math & Statistics</h1>
 <p class="subtitle">Probability, information theory, and linear algebra concepts used throughout ML.</p>
@@ -491,6 +512,11 @@ hr {
 
 <div class="fig-container" id="fig-ema"></div>
 </section>
+
+<div class="page-nav page-nav-bottom">
+  <a href="concepts_foundations.html" class="prev">&larr; Foundations</a>
+  <a href="concepts_architecture.html" class="next">Architecture &rarr;</a>
+</div>
 
 </div>
 
