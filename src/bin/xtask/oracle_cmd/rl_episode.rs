@@ -237,6 +237,7 @@ pub(crate) fn run_rl_episode(
                         lp_move: None, lp_combat: None,
                         lp_pointer: None,
                         aggregate_features: if gs_v2.aggregate_features.is_empty() { None } else { Some(gs_v2.aggregate_features) },
+                        teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
                     });
                 }
             }
@@ -372,6 +373,7 @@ pub(crate) fn run_rl_episode(
                         move_dir: None, combat_type: None,
                         lp_move: None, lp_combat: None,
                         lp_pointer: None, aggregate_features: None,
+                        teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
                     });
                 }
             }

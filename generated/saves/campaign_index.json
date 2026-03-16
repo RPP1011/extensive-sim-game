@@ -1,12 +1,3 @@
-{
-  "slots": [],
-  "autosave": {
-    "slot": "autosave",
-    "path": "generated/saves/campaign_autosave.json",
-    "save_version": 3,
-    "compatible": true,
-    "global_turn": 12,
-    "map_seed": 725587879915274462,
-    "saved_unix_seconds": 1772773372
-  }
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3321fc0118f81b063384c2ef3f90f14721d68d7d8190191582815480f3c1fbf0
+size 259
