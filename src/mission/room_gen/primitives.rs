@@ -47,7 +47,7 @@ pub(crate) fn place_wall_segment(
         return regions;
     }
 
-    let effective_gap = if gap > 0 { gap } else { rng.next_usize_range(2, 3) };
+    let effective_gap = if gap > 0 { gap.max(3) } else { rng.next_usize_range(3, 4) };
     let gap_start = if length > effective_gap + 3 {
         rng.next_usize_range(2, length - effective_gap - 1)
     } else {
@@ -61,14 +61,13 @@ pub(crate) fn place_wall_segment(
         let past_end = i == length;
 
         if (in_gap || past_end) && seg_start.is_some() {
-            // Close current segment
             let start = seg_start.unwrap();
             let end = i.saturating_sub(1);
             if end >= start {
                 let (c0, r0, c1, r1) = if horizontal {
-                    (col + start, row, col + end, row + 1)
+                    (col + start, row, col + end, row)
                 } else {
-                    (col, row + start, col + 1, row + end)
+                    (col, row + start, col, row + end)
                 };
                 if let Some(obs) = place_block(nav, c0, r0, c1, r1, height, OBS_WALL) {
                     regions.push(obs);
@@ -96,7 +95,7 @@ pub(crate) fn place_pillar_grid(
     height: f32,
 ) -> Vec<ObstacleRegion> {
     let mut regions = Vec::new();
-    let ps = pillar_size.max(2); // minimum 2×2 for visual weight
+    let ps = pillar_size.max(1);
     let sp = spacing.max(ps + 2); // ensure gaps between pillars
 
     let mut c = col0;
@@ -304,7 +303,7 @@ pub(crate) fn place_barricade_line(
         if placing {
             // Start of a segment — place as one block
             let end = (c + seg - 1).min(limit);
-            if let Some(obs) = place_block(nav, c, row, end, row + 1, height, OBS_BARRICADE) {
+            if let Some(obs) = place_block(nav, c, row, end, row, height, OBS_BARRICADE) {
                 regions.push(obs);
             }
             c = end + 1;

@@ -41,25 +41,22 @@ pub(crate) fn generate_tactical_obstacles(
         };
     }
 
-    // Pick a layout strategy — weighted toward structural layouts,
-    // elevated center only on largest rooms
-    let strategy = rng.next_usize_range(0, 9);
+    // Pick a layout strategy — all produce open-enough layouts for AI pathing
+    let strategy = rng.next_usize_range(0, 6);
     match strategy {
-        0 | 1 => strategy_corridor(nav, rng, play_lo, play_hi),
-        2 => strategy_pillared_hall(nav, rng, play_lo, play_hi),
-        3 | 4 => strategy_cross_walls(nav, rng, play_lo, play_hi),
-        5 => strategy_arena(nav, rng, play_lo, play_hi),
-        6 => strategy_barricade_rows(nav, rng, play_lo, play_hi),
-        7 => strategy_l_cover(nav, rng, play_lo, play_hi),
-        8 => strategy_compound(nav, rng, play_lo, play_hi),
-        _ => strategy_corridor(nav, rng, play_lo, play_hi),
+        0 => strategy_corridor(nav, rng, play_lo, play_hi),
+        1 => strategy_pillared_hall(nav, rng, play_lo, play_hi),
+        2 => strategy_cross_walls(nav, rng, play_lo, play_hi),
+        3 => strategy_barricade_rows(nav, rng, play_lo, play_hi),
+        4 => strategy_l_cover(nav, rng, play_lo, play_hi),
+        _ => strategy_compound(nav, rng, play_lo, play_hi),
     }
 }
 
 /// Compute spawn margin (columns reserved for spawns on each side).
 pub(super) fn spawn_margin(cols: usize) -> usize {
-    // ~20% of width on each side, minimum 2, maximum 6
-    (cols / 5).clamp(2, 6)
+    // ~20% of width on each side, minimum 2, maximum 5
+    (cols / 5).clamp(2, 5)
 }
 
 // ---------------------------------------------------------------------------
@@ -128,9 +125,9 @@ fn strategy_pillared_hall(
     let rows = nav.rows;
     let play_w = play_hi - play_lo;
 
-    // Spacing scales with room size: larger rooms get wider spacing
+    // Spacing scales with room size
     let spacing = (play_w / 3).clamp(4, 8);
-    let pillar_size = 2; // primitives enforce 2×2 minimum
+    let pillar_size = if play_w > 20 { 2 } else { 1 };
 
     let r_lo = rows / 5;
     let r_hi = 4 * rows / 5;
