@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use crate::ai::core::{distance, can_see, SimState, UnitState};
+use crate::ai::core::{distance, can_see, can_see_with_nav, SimState, UnitState};
 
 use crate::ai::squad::personality::Personality;
 use crate::ai::squad::state::{SquadBlackboard, TickContext};
@@ -28,7 +28,12 @@ pub(in crate::ai::squad) fn choose_target(
 
     // Filter enemies to only those visible to this unit
     let visible_enemies: Vec<u32> = enemies.iter().copied().filter(|&eid| {
-        ctx.unit(state, eid).map_or(false, |target| can_see(unit, target))
+        ctx.unit(state, eid).map_or(false, |target| {
+            match &state.grid_nav {
+                Some(nav) => can_see_with_nav(unit, target, nav),
+                None => can_see(unit, target),
+            }
+        })
     }).collect();
 
     if visible_enemies.is_empty() {
