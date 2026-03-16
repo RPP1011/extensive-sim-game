@@ -3,7 +3,14 @@ use crate::ai::core::{distance, is_alive, SimState, Team, UnitState};
 use crate::ai::effects::effect_enum::Effect;
 use crate::ai::goap::spatial::VisibilityMap;
 use crate::ai::pathing::GridNav;
-use super::features::unit_dps;
+/// Compute DPS from attack damage and cooldown.
+pub(crate) fn unit_dps(u: &UnitState) -> f32 {
+    if u.attack_cooldown_ms > 0 {
+        u.attack_damage as f32 / (u.attack_cooldown_ms as f32 / 1000.0)
+    } else {
+        0.0
+    }
+}
 
 use serde::{Serialize, Deserialize};
 

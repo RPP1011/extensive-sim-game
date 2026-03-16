@@ -1,7 +1,7 @@
 use crate::ai::core::{distance, is_alive, SimState, Team, UnitState};
 use crate::ai::goap::spatial::VisibilityMap;
 use crate::ai::pathing::GridNav;
-use super::features::unit_dps;
+use super::game_state::unit_dps;
 use super::game_state::{
     MAX_ENEMIES, MAX_ALLIES,
     rich_entity_features, rich_entity_features_spatial, summarize_abilities,

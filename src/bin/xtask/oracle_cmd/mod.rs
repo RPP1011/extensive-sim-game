@@ -1,19 +1,9 @@
-mod eval;
-mod dataset;
-mod training;
-mod selfplay;
-mod transformer_play;
 mod transformer_rl;
 mod rl_episode;
 mod rl_policies;
 mod rl_eval;
 mod rl_generate;
-mod rl_gpu;
-mod rl_gpu_sim;
 mod impala_train;
-mod operator_dataset;
-mod ability_profile;
-mod ability_profile_io;
 #[cfg(feature = "stream-monitor")]
 mod monitor_traces;
 
@@ -24,20 +14,7 @@ use super::cli::{OracleArgs, OracleSubcommand};
 
 pub fn run_oracle_cmd(args: OracleArgs) -> ExitCode {
     match args.sub {
-        OracleSubcommand::Eval(eval_args) => eval::run_oracle_eval(eval_args),
-        OracleSubcommand::Play(play_args) => eval::run_oracle_play(play_args),
-        OracleSubcommand::Dataset(dataset_args) => dataset::run_oracle_dataset(dataset_args),
-        OracleSubcommand::CombatDataset(args) => dataset::run_combat_dataset(args),
-        OracleSubcommand::Student(student_args) => training::run_oracle_student(student_args),
-        OracleSubcommand::AbilityDataset(args) => dataset::run_ability_dataset(args),
-        OracleSubcommand::SelfPlay(args) => selfplay::run_self_play(args),
-        OracleSubcommand::RawDataset(args) => selfplay::run_raw_dataset(args),
-        OracleSubcommand::OutcomeDataset(args) => dataset::run_outcome_dataset(args),
-        OracleSubcommand::NextstateDataset(args) => dataset::run_nextstate_dataset(args),
-        OracleSubcommand::TransformerPlay(args) => transformer_play::run_transformer_play(args),
         OracleSubcommand::TransformerRl(args) => transformer_rl::run_transformer_rl(args),
-        OracleSubcommand::OperatorDataset(args) => operator_dataset::run_operator_dataset(args),
-        OracleSubcommand::AbilityProfile(args) => ability_profile::run_ability_profile(args),
         #[cfg(feature = "stream-monitor")]
         OracleSubcommand::MonitorTraces(args) => {
             monitor_traces::run_monitor_traces(&args.path, args.sample)

@@ -101,7 +101,7 @@ fn print_unit_stats_table(result: &bevy_game::scenario::ScenarioResult) {
 }
 
 fn run_scenario_run(args: ScenarioRunArgs) -> ExitCode {
-    use bevy_game::scenario::{check_assertions, load_scenario_file, run_scenario, run_scenario_with_ability_eval, ScenarioResult};
+    use bevy_game::scenario::{check_assertions, load_scenario_file, run_scenario, ScenarioResult};
 
     let path = &args.path;
 
@@ -140,11 +140,7 @@ fn run_scenario_run(args: ScenarioRunArgs) -> ExitCode {
                 }
             };
 
-            let mut result = if let Some(ref eval_path) = args.ability_eval {
-                run_scenario_with_ability_eval(&scenario_file.scenario, eval_path)
-            } else {
-                run_scenario(&scenario_file.scenario)
-            };
+            let mut result = run_scenario(&scenario_file.scenario);
             if let Some(ref asserts) = scenario_file.assert {
                 let assertion_results = check_assertions(&result, asserts);
                 result.passed = assertion_results.iter().all(|a| a.passed);
@@ -215,11 +211,7 @@ fn run_scenario_run(args: ScenarioRunArgs) -> ExitCode {
             }
         };
 
-        let mut result = if let Some(ref eval_path) = args.ability_eval {
-            run_scenario_with_ability_eval(&scenario_file.scenario, eval_path)
-        } else {
-            run_scenario(&scenario_file.scenario)
-        };
+        let mut result = run_scenario(&scenario_file.scenario);
         if let Some(ref asserts) = scenario_file.assert {
             let assertion_results = check_assertions(&result, asserts);
             result.passed = assertion_results.iter().all(|a| a.passed);

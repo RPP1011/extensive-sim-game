@@ -30,209 +30,8 @@ pub struct OracleArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum OracleSubcommand {
-    Eval(OracleEvalArgs),
-    Play(OraclePlayArgs),
-    Dataset(OracleDatasetArgs),
-    CombatDataset(CombatDatasetArgs),
-    Student(OracleStudentArgs),
-    AbilityDataset(AbilityDatasetArgs),
-    SelfPlay(SelfPlayArgs),
-    RawDataset(RawDatasetArgs),
-    OutcomeDataset(OutcomeDatasetArgs),
-    NextstateDataset(NextstateDatasetArgs),
-    TransformerPlay(TransformerPlayArgs),
     TransformerRl(TransformerRlArgs),
-    OperatorDataset(OperatorDatasetArgs),
-    AbilityProfile(AbilityProfileArgs),
     MonitorTraces(MonitorTracesArgs),
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Generate oracle-labeled dataset with 311 raw features and 14-class actions")]
-pub struct RawDatasetArgs {
-    /// Path to a scenario .toml file, or a directory
-    pub path: PathBuf,
-    /// Output JSONL file
-    #[arg(long, default_value = "generated/raw_dataset.jsonl")]
-    pub output: PathBuf,
-    /// Rollout depth in ticks (default 10)
-    #[arg(long, default_value_t = 10)]
-    pub depth: u64,
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Evaluate default AI decisions against oracle recommendations")]
-pub struct OracleEvalArgs {
-    /// Path to a scenario .toml file, or a directory to evaluate all *.toml files in
-    pub path: PathBuf,
-    /// Directory to write per-scenario JSONL decision logs
-    #[arg(long)]
-    pub output_dir: Option<PathBuf>,
-    /// Rollout depth in ticks (default 10)
-    #[arg(long, default_value_t = 10)]
-    pub depth: u64,
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Run scenarios with heroes using oracle top picks instead of default AI")]
-pub struct OraclePlayArgs {
-    /// Path to a scenario .toml file, or a directory to play all *.toml files in
-    pub path: PathBuf,
-    /// Rollout depth in ticks (default 10)
-    #[arg(long, default_value_t = 10)]
-    pub depth: u64,
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Generate training dataset from oracle-played scenarios")]
-pub struct OracleDatasetArgs {
-    /// Path to a scenario .toml file, or a directory
-    pub path: PathBuf,
-    /// Output JSONL file
-    #[arg(long, default_value = "generated/oracle_dataset.jsonl")]
-    pub output: PathBuf,
-    /// Rollout depth in ticks (default 100)
-    #[arg(long, default_value_t = 100)]
-    pub depth: u64,
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Generate 5-class combat-only dataset (abilities excluded for frozen evaluators)")]
-pub struct CombatDatasetArgs {
-    /// Path to a scenario .toml file, or a directory
-    pub path: PathBuf,
-    /// Output JSONL file
-    #[arg(long, default_value = "generated/combat_dataset.jsonl")]
-    pub output: PathBuf,
-    /// Rollout depth in ticks (default 100)
-    #[arg(long, default_value_t = 100)]
-    pub depth: u64,
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Evaluate a trained student model against default AI")]
-pub struct OracleStudentArgs {
-    /// Path to scenario .toml file or directory
-    pub path: PathBuf,
-    /// Path to trained model JSON weights
-    #[arg(long)]
-    pub model: PathBuf,
-    /// Path to frozen ability evaluator weights JSON (composes with student model)
-    #[arg(long)]
-    pub ability_eval: Option<PathBuf>,
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Self-play: generate episodes or evaluate a policy")]
-pub struct SelfPlayArgs {
-    #[command(subcommand)]
-    pub sub: SelfPlaySubcommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum SelfPlaySubcommand {
-    Generate(SelfPlayGenerateArgs),
-    Eval(SelfPlayEvalArgs),
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Generate self-play episodes for REINFORCE training")]
-pub struct SelfPlayGenerateArgs {
-    /// Path to scenario .toml file or directory (only needed for stage=4v4)
-    #[arg(default_value = "scenarios/")]
-    pub path: PathBuf,
-    /// Output JSONL file for episodes
-    #[arg(long, default_value = "generated/self_play_episodes.jsonl")]
-    pub output: PathBuf,
-    /// Path to policy weights JSON (random init if not provided)
-    #[arg(long)]
-    pub policy: Option<PathBuf>,
-    /// Episodes per scenario
-    #[arg(long, default_value_t = 10)]
-    pub episodes: u32,
-    /// Exploration temperature
-    #[arg(long, default_value_t = 1.0)]
-    pub temperature: f32,
-    /// Number of parallel threads (0 = all cores)
-    #[arg(short = 'j', long, default_value_t = 0)]
-    pub threads: usize,
-    /// Override scenario max_ticks (shorter = faster episodes)
-    #[arg(long)]
-    pub max_ticks: Option<u64>,
-    /// Curriculum stage: move, kill, 2v2, 4v4 (default: 4v4 uses scenario files)
-    #[arg(long, default_value = "4v4")]
-    pub stage: String,
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Evaluate a trained self-play policy (greedy)")]
-pub struct SelfPlayEvalArgs {
-    /// Path to scenario .toml file or directory
-    pub path: PathBuf,
-    /// Path to policy weights JSON
-    #[arg(long)]
-    pub policy: PathBuf,
-    /// Override scenario max_ticks
-    #[arg(long)]
-    pub max_ticks: Option<u64>,
-    /// Joint focus-target search interval in ticks (0 = disabled)
-    #[arg(long, default_value_t = 0)]
-    pub focus: u64,
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Generate ability evaluator training dataset from oracle rollouts")]
-pub struct AbilityDatasetArgs {
-    /// Path to a scenario .toml file, or a directory
-    pub path: PathBuf,
-    /// Output JSONL file
-    #[arg(long, default_value = "generated/ability_eval_dataset.jsonl")]
-    pub output: PathBuf,
-    /// Rollout depth in ticks (default 10)
-    #[arg(long, default_value_t = 10)]
-    pub depth: u64,
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Generate outcome prediction dataset for entity encoder pre-training")]
-pub struct OutcomeDatasetArgs {
-    /// Path to a scenario .toml file, or a directory
-    pub path: PathBuf,
-    /// Output JSONL file
-    #[arg(long, default_value = "generated/outcome_dataset.jsonl")]
-    pub output: PathBuf,
-    /// Sample every N ticks (controls dataset size)
-    #[arg(long, default_value_t = 5)]
-    pub sample_interval: u64,
-    /// Use v2 format: variable-length entities + threats
-    #[arg(long)]
-    pub v2: bool,
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Generate next-state prediction dataset for entity encoder pre-training")]
-pub struct NextstateDatasetArgs {
-    /// Path to a scenario .toml file, or a directory
-    pub path: PathBuf,
-    /// Output JSONL file
-    #[arg(long, default_value = "generated/nextstate_dataset.jsonl")]
-    pub output: PathBuf,
-    /// Sample every N ticks (1 = every tick for max pairing flexibility)
-    #[arg(long, default_value_t = 1)]
-    pub sample_interval: u64,
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Play scenarios using ability transformer (DSL tokens + entity encoder)")]
-pub struct TransformerPlayArgs {
-    /// Path to scenario .toml file or directory
-    pub path: PathBuf,
-    /// Path to ability transformer decision weights JSON
-    #[arg(long)]
-    pub weights: PathBuf,
-    /// Urgency threshold for firing abilities (0.0-1.0)
-    #[arg(long, default_value_t = 0.4)]
-    pub urgency_threshold: f32,
 }
 
 #[derive(Debug, Parser)]
@@ -313,15 +112,9 @@ pub struct TransformerRlGenerateArgs {
     /// Path to policy weights JSON (not required for --policy combined)
     #[arg(long)]
     pub weights: Option<PathBuf>,
-    /// Policy type: transformer (default) or combined (ability-eval + squad AI)
+    /// Policy type: transformer (default) or combined (squad AI)
     #[arg(long, default_value = "transformer")]
     pub policy: String,
-    /// Path to ability eval weights JSON (for --policy combined)
-    #[arg(long)]
-    pub ability_eval: Option<PathBuf>,
-    /// Path to combat student model JSON (for --policy combined)
-    #[arg(long)]
-    pub student_model: Option<PathBuf>,
     /// Output JSONL file
     #[arg(long, short, default_value = "generated/rl_episodes.jsonl")]
     pub output: PathBuf,
@@ -349,15 +142,6 @@ pub struct TransformerRlGenerateArgs {
     /// Enemy embedding registry JSON (for self-play)
     #[arg(long)]
     pub enemy_registry: Option<PathBuf>,
-    /// GPU shared memory path (e.g. /dev/shm/impala_inf) — uses mmap batched inference
-    #[arg(long)]
-    pub gpu_shm: Option<String>,
-    /// Concurrent sims per thread for GPU pipelining (default 1 = blocking)
-    #[arg(long, default_value_t = 1)]
-    pub sims_per_thread: usize,
-    /// Self-play via GPU: both hero and enemy teams use the same GPU inference server
-    #[arg(long)]
-    pub self_play_gpu: bool,
     /// Play each scenario from both sides (swap hero/enemy teams), doubling episodes
     #[arg(long)]
     pub swap_sides: bool,
@@ -395,33 +179,6 @@ pub struct TransformerRlEvalArgs {
     /// Enemy embedding registry JSON (for self-play)
     #[arg(long)]
     pub enemy_registry: Option<PathBuf>,
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Generate ability operator training dataset from scenario replays")]
-pub struct OperatorDatasetArgs {
-    /// Path to a scenario .toml file, or a directory
-    pub path: PathBuf,
-    /// Output npz file
-    #[arg(long, default_value = "generated/operator_dataset.npz")]
-    pub output: PathBuf,
-    /// Number of parallel threads (0 = all cores)
-    #[arg(short = 'j', long, default_value_t = 0)]
-    pub threads: usize,
-}
-
-#[derive(Debug, Parser)]
-#[command(about = "Profile abilities via controlled sim experiments for behavioral embeddings")]
-pub struct AbilityProfileArgs {
-    /// Output npz file
-    #[arg(long, default_value = "dataset/ability_profiles.npz")]
-    pub output: PathBuf,
-    /// Samples per ability (across all condition combinations)
-    #[arg(long, default_value_t = 1000)]
-    pub samples_per_ability: usize,
-    /// Number of parallel threads (0 = all cores)
-    #[arg(short = 'j', long, default_value_t = 0)]
-    pub threads: usize,
 }
 
 #[derive(Debug, Parser)]
@@ -480,9 +237,6 @@ pub struct ScenarioRunArgs {
     /// Print per-unit combat statistics table
     #[arg(short, long)]
     pub verbose: bool,
-    /// Path to ability evaluator weights JSON (enables interrupt-driven ability usage)
-    #[arg(long)]
-    pub ability_eval: Option<PathBuf>,
 }
 
 #[derive(Debug, Parser)]

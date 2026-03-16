@@ -21,13 +21,8 @@ mod determinism;
 mod metrics;
 pub mod verify;
 mod verify_checks;
-pub mod oracle;
-pub mod decision_log;
-pub mod dataset;
 pub mod ability_eval;
 pub mod self_play;
-pub mod curriculum;
-pub mod ability_encoding;
 pub mod ability_transformer;
 #[cfg(any(feature = "burn-gpu", feature = "burn-cpu"))]
 pub mod burn_model;

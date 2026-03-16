@@ -163,26 +163,17 @@ pub(crate) fn masked_softmax_sample(
 // Policy abstraction
 // ---------------------------------------------------------------------------
 
-pub(crate) const NUM_ACTIONS: usize = 14;
 pub(crate) const MAX_ABILITIES: usize = 8;
 
-/// Either actor-critic weights (full policy), legacy transformer weights (bootstrap),
-/// or the combined ability-eval + squad AI system.
+/// V5 actor-critic policy, combined squad AI, or random baseline.
 pub(crate) enum Policy {
-    ActorCritic(bevy_game::ai::core::ability_transformer::ActorCriticWeights),
-    ActorCriticV2(bevy_game::ai::core::ability_transformer::ActorCriticWeightsV2),
-    ActorCriticV3(bevy_game::ai::core::ability_transformer::ActorCriticWeightsV3),
-    ActorCriticV4(bevy_game::ai::core::ability_transformer::ActorCriticWeightsV4),
     ActorCriticV5(bevy_game::ai::core::ability_transformer::ActorCriticWeightsV5),
-    /// GPU inference via SHM (legacy).
-    GpuServer(std::sync::Arc<bevy_game::ai::core::ability_transformer::gpu_client::GpuInferenceClient>),
     /// GPU inference via Burn/LibTorch (in-process, no SHM) — V5 model.
     #[cfg(feature = "burn-gpu")]
     BurnServer(std::sync::Arc<bevy_game::ai::core::burn_model::inference::BurnInferenceClient>),
     /// GPU inference via Burn/LibTorch — V6 model (spatial cross-attn + latent interface).
     #[cfg(feature = "burn-gpu")]
     BurnServerV6(std::sync::Arc<bevy_game::ai::core::burn_model::inference_v6::BurnInferenceClientV6>),
-    Legacy(bevy_game::ai::core::ability_transformer::AbilityTransformerWeights),
     /// Uses existing squad AI -- no transformer.
     Combined,
     /// Uniformly random actions -- no model inference.
@@ -193,34 +184,13 @@ impl Policy {
     pub(crate) fn load(path: &std::path::Path) -> Result<Self, String> {
         let json_str = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
-        if json_str.contains("\"actor_critic_v5\"") {
-            return Ok(Policy::ActorCriticV5(bevy_game::ai::core::ability_transformer::ActorCriticWeightsV5::from_json(&json_str)?));
-        }
-        if json_str.contains("\"actor_critic_v4\"") {
-            return Ok(Policy::ActorCriticV4(bevy_game::ai::core::ability_transformer::ActorCriticWeightsV4::from_json(&json_str)?));
-        }
-        if json_str.contains("\"actor_critic_v3\"") {
-            return Ok(Policy::ActorCriticV3(bevy_game::ai::core::ability_transformer::ActorCriticWeightsV3::from_json(&json_str)?));
-        }
-        if json_str.contains("\"actor_critic_v2\"") {
-            return Ok(Policy::ActorCriticV2(bevy_game::ai::core::ability_transformer::ActorCriticWeightsV2::from_json(&json_str)?));
-        }
-        if json_str.contains("\"actor_critic\"") {
-            return Ok(Policy::ActorCritic(bevy_game::ai::core::ability_transformer::ActorCriticWeights::from_json(&json_str)?));
-        }
-        let tw = bevy_game::ai::core::ability_transformer::AbilityTransformerWeights::from_json(&json_str)?;
-        Ok(Policy::Legacy(tw))
+        Ok(Policy::ActorCriticV5(bevy_game::ai::core::ability_transformer::ActorCriticWeightsV5::from_json(&json_str)?))
     }
 
     pub(crate) fn encode_cls(&self, token_ids: &[u32]) -> Vec<f32> {
         match self {
-            Policy::ActorCritic(ac) => ac.encode_cls(token_ids),
-            Policy::ActorCriticV2(ac) => ac.encode_cls(token_ids),
-            Policy::ActorCriticV3(ac) => ac.encode_cls(token_ids),
-            Policy::ActorCriticV4(ac) => ac.encode_cls(token_ids),
             Policy::ActorCriticV5(ac) => ac.encode_cls(token_ids),
-            Policy::Legacy(tw) => tw.encode_cls(token_ids),
-            Policy::GpuServer(_) | Policy::Combined | Policy::Random => Vec::new(),
+            Policy::Combined | Policy::Random => Vec::new(),
             #[cfg(feature = "burn-gpu")]
             Policy::BurnServer(_) | Policy::BurnServerV6(_) => Vec::new(),
         }
@@ -229,7 +199,7 @@ impl Policy {
     pub(crate) fn needs_transformer(&self) -> bool {
         #[cfg(feature = "burn-gpu")]
         if matches!(self, Policy::BurnServer(_) | Policy::BurnServerV6(_)) { return false; }
-        !matches!(self, Policy::Combined | Policy::GpuServer(_) | Policy::Random)
+        !matches!(self, Policy::Combined | Policy::Random)
     }
 
     pub(crate) fn is_v5(&self) -> bool {
@@ -238,9 +208,6 @@ impl Policy {
 
     pub(crate) fn project_external_cls(&self, cls: &[f32]) -> Vec<f32> {
         match self {
-            Policy::ActorCritic(ac) => ac.project_external_cls(cls),
-            Policy::ActorCriticV3(ac) => ac.project_external_cls(cls),
-            Policy::ActorCriticV4(ac) => ac.project_external_cls(cls),
             Policy::ActorCriticV5(ac) => ac.project_external_cls(cls),
             _ => cls.to_vec(),
         }
@@ -313,6 +280,115 @@ pub(crate) fn apply_action_mask(combat_mask: &mut [bool], action_mask: Option<&s
         }
         _ => {}
     }
+}
+
+// ---------------------------------------------------------------------------
+// Precomputed scenarios (extracted from former rl_gpu_sim module)
+// ---------------------------------------------------------------------------
+
+pub(crate) struct PrecomputedScenario {
+    pub(crate) sim: bevy_game::ai::core::SimState,
+    pub(crate) squad_ai: bevy_game::ai::squad::SquadAiState,
+    pub(crate) scenario_name: String,
+    pub(crate) max_ticks: u64,
+    pub(crate) unit_abilities: std::collections::HashMap<u32, Vec<Vec<u32>>>,
+    pub(crate) unit_ability_names: std::collections::HashMap<u32, Vec<String>>,
+    pub(crate) cls_cache: std::collections::HashMap<(u32, usize), Vec<f32>>,
+    pub(crate) hero_ids: Vec<u32>,
+    pub(crate) enemy_ids: Vec<u32>,
+    pub(crate) initial_hero_hp: i32,
+    pub(crate) initial_enemy_hp: i32,
+    pub(crate) avg_unit_hp: f32,
+    pub(crate) initial_hero_count: f32,
+    pub(crate) initial_enemy_count: f32,
+    pub(crate) drill_objective_type: Option<String>,
+    pub(crate) drill_target_position: Option<[f32; 2]>,
+    pub(crate) drill_target_radius: Option<f32>,
+    pub(crate) action_mask: Option<String>,
+    pub(crate) behavior_trees: std::collections::HashMap<u32, bevy_game::ai::behavior::BehaviorTree>,
+    pub(crate) objective: Option<bevy_game::scenario::ObjectiveDef>,
+}
+
+/// Build all scenario templates once. Returns one `PrecomputedScenario` per scenario.
+pub(crate) fn precompute_scenarios(
+    scenario_files: &[bevy_game::scenario::ScenarioFile],
+    max_ticks_override: Option<u64>,
+    tokenizer: &bevy_game::ai::core::ability_transformer::tokenizer::AbilityTokenizer,
+    registry: Option<&bevy_game::ai::core::ability_transformer::EmbeddingRegistry>,
+) -> Vec<PrecomputedScenario> {
+    use bevy_game::ai::core::Team;
+    use bevy_game::ai::effects::dsl::emit::emit_ability_dsl;
+    use bevy_game::scenario::run_scenario_to_state_with_room;
+
+    scenario_files.iter().map(|sf| {
+        let cfg = &sf.scenario;
+        let max_ticks = max_ticks_override.unwrap_or(cfg.max_ticks);
+        let (mut sim, squad_ai, nav) = run_scenario_to_state_with_room(cfg);
+        sim.grid_nav = Some(nav);
+
+        let hero_ids: Vec<u32> = sim.units.iter()
+            .filter(|u| u.team == Team::Hero).map(|u| u.id).collect();
+        let enemy_ids: Vec<u32> = sim.units.iter()
+            .filter(|u| u.team == Team::Enemy).map(|u| u.id).collect();
+
+        let mut unit_abilities = std::collections::HashMap::new();
+        let mut unit_ability_names = std::collections::HashMap::new();
+        let mut cls_cache = std::collections::HashMap::new();
+
+        for &uid in hero_ids.iter().chain(enemy_ids.iter()) {
+            if let Some(unit) = sim.units.iter().find(|u| u.id == uid) {
+                let mut tokens_list = Vec::new();
+                let mut names_list = Vec::new();
+                for (idx, slot) in unit.abilities.iter().enumerate() {
+                    let dsl = emit_ability_dsl(&slot.def);
+                    tokens_list.push(tokenizer.encode_with_cls(&dsl));
+                    let safe_name = slot.def.name.replace(' ', "_");
+                    if let Some(reg) = registry {
+                        if let Some(reg_cls) = reg.get(&safe_name) {
+                            cls_cache.insert((uid, idx), reg_cls.to_vec());
+                        }
+                    }
+                    names_list.push(slot.def.name.clone());
+                }
+                unit_abilities.insert(uid, tokens_list);
+                unit_ability_names.insert(uid, names_list);
+            }
+        }
+
+        let initial_hero_hp: i32 = sim.units.iter()
+            .filter(|u| u.team == Team::Hero).map(|u| u.hp).sum();
+        let initial_enemy_hp: i32 = sim.units.iter()
+            .filter(|u| u.team == Team::Enemy).map(|u| u.hp).sum();
+        let n_units = sim.units.iter().filter(|u| u.hp > 0).count().max(1) as f32;
+        let avg_unit_hp = (initial_hero_hp + initial_enemy_hp) as f32 / n_units;
+        let initial_hero_count = sim.units.iter()
+            .filter(|u| u.team == Team::Hero && u.hp > 0).count() as f32;
+        let initial_enemy_count = sim.units.iter()
+            .filter(|u| u.team == Team::Enemy && u.hp > 0).count() as f32;
+
+        let (drill_objective_type, drill_target_position, drill_target_radius) =
+            if let Some(ref obj) = cfg.objective {
+                (Some(obj.objective_type.clone()), obj.position, obj.radius)
+            } else if cfg.drill_type.is_some() {
+                (cfg.drill_type.clone(), cfg.target_position, Some(1.0))
+            } else {
+                (None, None, None)
+            };
+
+        let behavior_trees = load_behavior_trees(&sim, cfg);
+
+        PrecomputedScenario {
+            sim, squad_ai, scenario_name: cfg.name.clone(), max_ticks,
+            unit_abilities, unit_ability_names, cls_cache,
+            hero_ids, enemy_ids,
+            initial_hero_hp, initial_enemy_hp, avg_unit_hp,
+            initial_hero_count, initial_enemy_count,
+            drill_objective_type, drill_target_position, drill_target_radius,
+            action_mask: cfg.action_mask.clone(),
+            behavior_trees,
+            objective: cfg.objective.clone(),
+        }
+    }).collect()
 }
 
 // ---------------------------------------------------------------------------

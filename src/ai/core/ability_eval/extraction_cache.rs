@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use crate::ai::core::{distance, is_alive, SimState, Team, UnitState, SimVec2};
 use super::game_state::{AbilitySummary, summarize_abilities, ENTITY_FEATURE_DIM_LEGACY};
-use super::features::unit_dps;
+use super::game_state::unit_dps;
 
 /// Precomputed per-unit data that doesn't depend on the observing hero.
 pub struct UnitCache {

@@ -8,13 +8,12 @@ use super::transformer_rl::{Policy, run_rl_episode, load_behavior_trees};
 
 pub(crate) fn run_eval(args: crate::cli::TransformerRlEvalArgs) -> ExitCode {
     use bevy_game::ai::core::ability_transformer::tokenizer::AbilityTokenizer;
-    use bevy_game::scenario::{load_scenario_file, run_scenario_to_state, run_scenario_to_state_with_room};
+    use bevy_game::scenario::{load_scenario_file, run_scenario_to_state_with_room};
 
     let policy = match Policy::load(&args.weights) {
         Ok(p) => p,
         Err(e) => { eprintln!("Failed to load weights: {e}"); return ExitCode::from(1); }
     };
-    let is_v3 = matches!(&policy, Policy::ActorCriticV3(_) | Policy::ActorCriticV4(_) | Policy::ActorCriticV5(_));
 
     let tokenizer = AbilityTokenizer::new();
     let paths = collect_toml_paths(&args.path);
@@ -78,14 +77,11 @@ pub(crate) fn run_eval(args: crate::cli::TransformerRlEvalArgs) -> ExitCode {
     let enemy_policy_ref = enemy_policy.as_ref();
     let enemy_registry_ref = enemy_registry.as_ref();
     let max_ticks_override = args.max_ticks;
-    let no_student: Option<std::sync::Arc<super::training::StudentWeights>> = None;
-    let student_ref = &no_student;
 
     let results: Vec<(String, super::transformer_rl::RlEpisode)> = scenarios.par_iter().map(|scenario_file| {
         let cfg = &scenario_file.scenario;
         let max_ticks = max_ticks_override.unwrap_or(cfg.max_ticks);
 
-        // Always use room geometry for spatial features
         let (sim, squad_ai, grid_nav) = {
             let (s, ai, nav) = run_scenario_to_state_with_room(cfg);
             (s, ai, Some(nav))
@@ -95,7 +91,6 @@ pub(crate) fn run_eval(args: crate::cli::TransformerRlEvalArgs) -> ExitCode {
         let episode = run_rl_episode(
             sim, squad_ai, &cfg.name, max_ticks,
             policy_ref, tokenizer_ref, 0.01, 42, 1,
-            student_ref,
             grid_nav,
             registry_ref,
             enemy_policy_ref,

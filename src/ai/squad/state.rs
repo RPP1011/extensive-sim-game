@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::ai::core::{SimState, SimVec2, Team, UnitIntent, UnitState};
-use crate::ai::core::ability_eval::AbilityEvalWeights;
 use crate::ai::phase::AiPhase;
 
 use super::personality::{infer_personality, Personality};
@@ -107,8 +106,6 @@ pub struct SquadAiState {
     pub(super) memory: HashMap<u32, UnitMemory>,
     pub(super) blackboard_by_team: HashMap<Team, SquadBlackboard>,
     pub(super) eval_every_ticks: u64,
-    /// Optional ability evaluator weights for interrupt-driven ability usage.
-    pub ability_eval_weights: Option<AbilityEvalWeights>,
 }
 
 impl SquadAiState {
@@ -156,18 +153,7 @@ impl SquadAiState {
             memory,
             blackboard_by_team,
             eval_every_ticks: 5,
-            ability_eval_weights: None,
         }
-    }
-
-    /// Load ability evaluator weights from a JSON file.
-    pub fn load_ability_eval_weights(&mut self, path: &std::path::Path) -> Result<(), String> {
-        let data = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
-        let json: serde_json::Value = serde_json::from_str(&data)
-            .map_err(|e| format!("Failed to parse JSON: {e}"))?;
-        self.ability_eval_weights = Some(AbilityEvalWeights::from_json(&json));
-        Ok(())
     }
 
     /// Construct from role map (backward compatibility for control.rs / core.rs tests).

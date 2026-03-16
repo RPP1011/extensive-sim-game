@@ -21,12 +21,12 @@ pub(crate) fn reset_profiling() {
 
 use super::transformer_rl::{
     Policy, RlEpisode, RlStep,
-    lcg_f32, masked_softmax_sample, load_behavior_trees,
+    lcg_f32, masked_softmax_sample,
     apply_behavior_overrides,
     MAX_ABILITIES,
 };
 use super::rl_policies::{
-    apply_random_policy, apply_v3_policy, apply_gpu_policy, apply_v4_policy,
+    apply_random_policy,
     apply_v5_policy, check_drill_objective, hp_fraction,
 };
 
@@ -45,7 +45,6 @@ pub(crate) fn run_rl_episode(
     temperature: f32,
     rng_seed: u64,
     step_interval: u64,
-    student_weights: &Option<std::sync::Arc<super::training::StudentWeights>>,
     grid_nav: Option<bevy_game::ai::pathing::GridNav>,
     embedding_registry: Option<&bevy_game::ai::core::ability_transformer::EmbeddingRegistry>,
     enemy_policy: Option<&Policy>,
@@ -54,9 +53,9 @@ pub(crate) fn run_rl_episode(
     scenario_action_mask: Option<&str>,
     behaviors: &std::collections::HashMap<u32, bevy_game::ai::behavior::BehaviorTree>,
 ) -> RlEpisode {
-    use bevy_game::ai::core::{is_alive, step, distance, move_towards, position_at_range, Team, UnitIntent, FIXED_TICK_MS};
+    use bevy_game::ai::core::{is_alive, step, distance, move_towards, Team, UnitIntent, FIXED_TICK_MS};
     use bevy_game::ai::core::ability_eval::{extract_game_state, extract_game_state_v2, extract_game_state_v2_spatial, extract_game_state_v2_with_objectives, ZoneObjective};
-    use bevy_game::ai::core::self_play::actions::{action_mask, action_to_intent, intent_to_action};
+    use bevy_game::ai::core::self_play::actions::{action_mask, intent_to_action};
     use bevy_game::ai::effects::dsl::emit::emit_ability_dsl;
     use bevy_game::ai::goap::spatial::VisibilityMap;
     use bevy_game::ai::squad::generate_intents;
@@ -166,8 +165,6 @@ pub(crate) fn run_rl_episode(
     let avg_unit_hp = (prev_hero_hp + prev_enemy_hp) as f32 / n_units;
     let initial_enemy_count = sim.units.iter()
         .filter(|u| u.team == Team::Enemy && u.hp > 0).count() as f32;
-    let initial_hero_count = sim.units.iter()
-        .filter(|u| u.team == Team::Hero && u.hp > 0).count() as f32;
     let mut pending_event_reward: f32 = 0.0;
 
     let mut t_intents_ns: u64 = 0;
@@ -185,12 +182,6 @@ pub(crate) fn run_rl_episode(
     }
 
     for tick in 0..max_ticks {
-        let _tick_t0 = std::time::Instant::now();
-        // Pre-set hero focus target before generate_intents for better coordination
-        if matches!(policy, Policy::Combined) {
-            let tt = super::training::compute_team_target(&sim);
-            squad_ai.set_focus_target(Team::Hero, tt);
-        }
         let t0 = std::time::Instant::now();
         let mut intents = generate_intents(&sim, &mut squad_ai, FIXED_TICK_MS);
         t_intents_ns += t0.elapsed().as_nanos() as u64;
@@ -216,51 +207,8 @@ pub(crate) fn run_rl_episode(
             0.0
         };
 
-        // Combined policy path: coordinated tactical AI
+        // Combined policy path: use squad AI as-is, just record
         if matches!(policy, Policy::Combined) {
-            // Navigation override for drill scenarios with target positions
-            if let Some(obj) = drill_objective {
-                if let Some(target) = obj.position {
-                    let target_pos = bevy_game::ai::core::sim_vec2(target[0], target[1]);
-                    for &uid in &hero_ids {
-                        let unit = match sim.units.iter().find(|u| u.id == uid && is_alive(u)) {
-                            Some(u) => u,
-                            None => continue,
-                        };
-                        if unit.casting.is_some() || unit.control_remaining_ms > 0 { continue; }
-                        let dist = distance(unit.position, target_pos);
-                        if dist > 1.0 {
-                            let step = unit.move_speed_per_sec * 0.1;
-                            let next = move_towards(unit.position, target_pos, step);
-                            intents.retain(|i| i.unit_id != uid);
-                            intents.push(UnitIntent { unit_id: uid,
-                                action: bevy_game::ai::core::IntentAction::MoveTo { position: next } });
-                        }
-                    }
-                }
-            }
-
-            let team_target = super::training::compute_team_target(&sim);
-
-            // Set the hero team's focus target to our coordinated target
-            squad_ai.set_focus_target(Team::Hero, team_target);
-
-            let has_enemies = sim.units.iter().any(|u| u.team == Team::Enemy && is_alive(u));
-            if has_enemies {
-                for &uid in &hero_ids {
-                    if !sim.units.iter().any(|u| u.id == uid && is_alive(u)) { continue; }
-                    if let Some(u) = sim.units.iter().find(|u| u.id == uid) {
-                        if u.casting.is_some() || u.control_remaining_ms > 0 { continue; }
-                    }
-
-                    // Tactical override: coordinated targeting + abilities + kill-securing
-                    if let Some(action) = super::training::tactical_hero_override(&sim, uid, team_target) {
-                        intents.retain(|i| i.unit_id != uid);
-                        intents.push(UnitIntent { unit_id: uid, action });
-                    }
-                }
-            }
-
             if record {
                 use bevy_game::ai::core::self_play::actions::{
                     build_token_infos, intent_to_v3_action, intent_to_v4_action,
@@ -322,7 +270,7 @@ pub(crate) fn run_rl_episode(
                 }
             }
         } else {
-            // Transformer/AC policies: override hero intents with policy output
+            // V5/Random policies: override hero intents with policy output
             for &uid in &hero_ids {
                 let unit = match sim.units.iter().find(|u| u.id == uid && is_alive(u)) {
                     Some(u) => u,
@@ -363,28 +311,7 @@ pub(crate) fn run_rl_episode(
                     }
                 }
 
-                // V3 pointer policy
-                if let Policy::ActorCriticV3(ac) = policy {
-                    apply_v3_policy(
-                        ac, &sim, unit, uid, &gs_v2, &ability_cls_refs,
-                        &mask_arr, &mask_vec, temperature, record, step_r, tick,
-                        &mut rng, &mut intents, &mut steps,
-                    );
-                    continue;
-                }
-
-                // GPU server policy
-                if let Policy::GpuServer(gpu) = policy {
-                    apply_gpu_policy(
-                        gpu, &sim, unit, uid, &gs_v2, &ability_cls_refs,
-                        &mask_arr, &mask_vec, scenario_action_mask,
-                        record, step_r, tick,
-                        &mut intents, &mut steps,
-                    );
-                    continue;
-                }
-
-                // V5 dual-head policy (d=128, aggregate token, 34-dim entities, 10-dim threats)
+                // V5 dual-head policy
                 if let Policy::ActorCriticV5(ac) = policy {
                     apply_v5_policy(
                         ac, &sim, unit, uid, &gs_v2, &ability_cls_refs,
@@ -394,84 +321,12 @@ pub(crate) fn run_rl_episode(
                     );
                     continue;
                 }
-
-                // V4 dual-head policy
-                if let Policy::ActorCriticV4(ac) = policy {
-                    apply_v4_policy(
-                        ac, &sim, unit, uid, &gs_v2, &ability_cls_refs,
-                        &mask_arr, &mask_vec, scenario_action_mask,
-                        temperature, record, step_r, tick,
-                        &mut rng, &mut intents, &mut steps,
-                    );
-                    continue;
-                }
-
-                // V1/V2/Legacy flat action space
-                let logits: Vec<f32> = match policy {
-                    Policy::ActorCritic(ac) => {
-                        let game_state = extract_game_state(&sim, unit);
-                        let ent_state = ac.encode_entities(&game_state);
-                        ac.action_logits(&ent_state, &ability_cls_refs).to_vec()
-                    }
-                    Policy::ActorCriticV2(ac) => {
-                        let ent_refs: Vec<&[f32]> = gs_v2.entities.iter().map(|e| e.as_slice()).collect();
-                        let type_refs: Vec<usize> = gs_v2.entity_types.iter().map(|&t| t as usize).collect();
-                        let threat_refs: Vec<&[f32]> = gs_v2.threats.iter().map(|t| t.as_slice()).collect();
-                        let ent_state = ac.encode_entities_v2(&ent_refs, &type_refs, &threat_refs);
-                        ac.action_logits(&ent_state, &ability_cls_refs).to_vec()
-                    }
-                    Policy::Legacy(tw) => {
-                        let game_state = extract_game_state(&sim, unit);
-                        let mut logits = vec![0.0f32; super::transformer_rl::NUM_ACTIONS];
-                        if let Some(entities) = tw.encode_entities(&game_state) {
-                            for idx in 0..n_abilities {
-                                if let Some(cls) = cls_cache.get(&(uid, idx)) {
-                                    let output = tw.predict_from_cls(cls, Some(&entities));
-                                    let u = output.urgency.clamp(0.001, 0.999);
-                                    logits[3 + idx] = (u / (1.0 - u)).ln();
-                                }
-                            }
-                        }
-                        logits
-                    }
-                    #[cfg(feature = "burn-gpu")]
-                    Policy::BurnServer(_) | Policy::BurnServerV6(_) => unreachable!(),
-                    Policy::ActorCriticV3(_) | Policy::ActorCriticV4(_) | Policy::ActorCriticV5(_) | Policy::GpuServer(_) | Policy::Combined | Policy::Random => unreachable!(),
-                };
-
-                let (action, log_prob) = masked_softmax_sample(
-                    &logits, &mask_arr, temperature, &mut rng,
-                );
-                let intent_action = action_to_intent(action, uid, &sim);
-                intents.retain(|i| i.unit_id != uid);
-                intents.push(UnitIntent { unit_id: uid, action: intent_action });
-
-                if record {
-                    let game_state = extract_game_state(&sim, unit);
-                    steps.push(RlStep {
-                        tick, unit_id: uid,
-                        game_state: game_state.to_vec(),
-                        action, log_prob,
-                        mask: mask_vec,
-                        step_reward: step_r,
-                        entities: Some(gs_v2.entities.clone()),
-                        entity_types: Some(gs_v2.entity_types.clone()),
-                        threats: Some(gs_v2.threats.clone()),
-                        positions: None, zones: Some(gs_v2.zones.clone()),
-                        action_type: None, target_idx: None,
-                        move_dir: None, combat_type: None,
-                        lp_move: None, lp_combat: None,
-                        lp_pointer: None, aggregate_features: None,
-                        target_move_pos: None,
-                        teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
-                    });
-                }
             }
         }
 
         // Self-play: override enemy intents with enemy policy
         if let Some(ep) = enemy_policy {
-            if let Policy::ActorCritic(ac) = ep {
+            if let Policy::ActorCriticV5(ac) = ep {
                 for &uid in &enemy_ids {
                     let unit = match sim.units.iter().find(|u| u.id == uid && is_alive(u)) {
                         Some(u) => u,
@@ -479,6 +334,7 @@ pub(crate) fn run_rl_episode(
                     };
                     if unit.casting.is_some() || unit.control_remaining_ms > 0 { continue; }
                     let mask_arr = action_mask(&sim, uid);
+                    let mask_vec: Vec<bool> = mask_arr.to_vec();
                     let n_abilities = unit.abilities.len().min(MAX_ABILITIES);
                     let mut ability_cls_refs: Vec<Option<&[f32]>> = vec![None; MAX_ABILITIES];
                     for idx in 0..n_abilities {
@@ -488,16 +344,16 @@ pub(crate) fn run_rl_episode(
                             }
                         }
                     }
-                    let game_state = extract_game_state(&sim, unit);
-                    let ent_state = ac.encode_entities(&game_state);
-                    let raw = ac.action_logits(&ent_state, &ability_cls_refs);
-                    let logits: Vec<f32> = raw.to_vec();
-                    let (action, _log_prob) = masked_softmax_sample(
-                        &logits, &mask_arr, temperature, &mut rng,
+                    let gs_v2 = match (&vis_map, sim.grid_nav.as_ref()) {
+                        (Some(vm), Some(nav)) => extract_game_state_v2_spatial(&sim, unit, vm, nav),
+                        _ => extract_game_state_v2(&sim, unit),
+                    };
+                    apply_v5_policy(
+                        ac, &sim, unit, uid, &gs_v2, &ability_cls_refs,
+                        &mask_arr, &mask_vec, scenario_action_mask,
+                        temperature, false, 0.0, tick,
+                        &mut rng, &mut intents, &mut steps,
                     );
-                    let intent_action = action_to_intent(action, uid, &sim);
-                    intents.retain(|i| i.unit_id != uid);
-                    intents.push(UnitIntent { unit_id: uid, action: intent_action });
                 }
             }
         }
@@ -507,21 +363,18 @@ pub(crate) fn run_rl_episode(
         let (new_sim, events) = step(sim, &intents, FIXED_TICK_MS);
         t_step_ns += t0.elapsed().as_nanos() as u64;
 
-        // Dense event-based rewards: reward GOOD PLAY, not winning
+        // Dense event-based rewards
         for ev in &events {
             match ev {
                 bevy_game::ai::core::SimEvent::UnitDied { unit_id, .. } => {
                     if let Some(dead_unit) = new_sim.units.iter().find(|u| u.id == *unit_id) {
                         if dead_unit.team == Team::Enemy {
-                            // Secured a kill — good play
                             pending_event_reward += 0.3 / initial_enemy_count.max(1.0);
                         }
-                        // Don't penalize hero deaths — asymmetric comps make losses inevitable
                     }
                 }
                 bevy_game::ai::core::SimEvent::AbilityUsed { unit_id, .. }
                 | bevy_game::ai::core::SimEvent::AbilityCastStarted { unit_id, .. } => {
-                    // Reward ability usage (heroes using their kit)
                     if let Some(u) = new_sim.units.iter().find(|u| u.id == *unit_id) {
                         if u.team == Team::Hero {
                             pending_event_reward += 0.05;
@@ -529,7 +382,6 @@ pub(crate) fn run_rl_episode(
                     }
                 }
                 bevy_game::ai::core::SimEvent::ControlApplied { target_id, .. } => {
-                    // Reward applying CC to enemies
                     if let Some(t) = new_sim.units.iter().find(|u| u.id == *target_id) {
                         if t.team == Team::Enemy {
                             pending_event_reward += 0.1;
@@ -537,7 +389,6 @@ pub(crate) fn run_rl_episode(
                     }
                 }
                 bevy_game::ai::core::SimEvent::HealApplied { target_id, amount, .. } => {
-                    // Reward effective healing (not overhealing)
                     if *amount > 0 {
                         if let Some(t) = new_sim.units.iter().find(|u| u.id == *target_id) {
                             if t.team == Team::Hero {
@@ -602,7 +453,7 @@ pub(crate) fn run_rl_episode(
             flush_prof!();
             return RlEpisode {
                 scenario: scenario_name.to_string(),
-                outcome: "Victory".to_string(), reward: 0.5,  // mild bonus, not +1
+                outcome: "Victory".to_string(), reward: 0.5,
                 ticks: sim.tick, unit_abilities, unit_ability_names, steps,
             };
         }
@@ -616,35 +467,28 @@ pub(crate) fn run_rl_episode(
         }
     }
 
-    // Timeout: if the hero team has more HP remaining, count as a win.
-    // This prevents stalemates from penalizing the hero team when it was
-    // winning on HP differential. In many combat games, the team with
-    // more HP remaining when time expires is considered the winner.
+    // Timeout
     let (outcome, reward) = if let Some(obj) = drill_objective {
         match obj.objective_type.as_str() {
             "survive" => {
-                let heroes_alive = sim.units.iter().filter(|u| u.team == bevy_game::ai::core::Team::Hero && u.hp > 0).count();
+                let heroes_alive = sim.units.iter().filter(|u| u.team == Team::Hero && u.hp > 0).count();
                 if heroes_alive > 0 { ("Victory".to_string(), 1.0) }
                 else { ("Defeat".to_string(), -1.0) }
             }
             _ => ("Timeout".to_string(), -0.5),
         }
     } else {
-        let hero_hp_total: i32 = sim.units.iter()
-            .filter(|u| u.team == bevy_game::ai::core::Team::Hero)
-            .map(|u| u.hp.max(0)).sum();
-        let enemy_hp_total: i32 = sim.units.iter()
-            .filter(|u| u.team == bevy_game::ai::core::Team::Enemy)
-            .map(|u| u.hp.max(0)).sum();
-        let hero_hp_pct = hero_hp_total as f32 / sim.units.iter()
-            .filter(|u| u.team == bevy_game::ai::core::Team::Hero)
-            .map(|u| u.max_hp).sum::<i32>().max(1) as f32;
-        let enemy_hp_pct = enemy_hp_total as f32 / sim.units.iter()
-            .filter(|u| u.team == bevy_game::ai::core::Team::Enemy)
-            .map(|u| u.max_hp).sum::<i32>().max(1) as f32;
+        let hero_hp_pct = sim.units.iter()
+            .filter(|u| u.team == Team::Hero)
+            .map(|u| u.hp.max(0)).sum::<i32>() as f32
+            / sim.units.iter().filter(|u| u.team == Team::Hero)
+                .map(|u| u.max_hp).sum::<i32>().max(1) as f32;
+        let enemy_hp_pct = sim.units.iter()
+            .filter(|u| u.team == Team::Enemy)
+            .map(|u| u.hp.max(0)).sum::<i32>() as f32
+            / sim.units.iter().filter(|u| u.team == Team::Enemy)
+                .map(|u| u.max_hp).sum::<i32>().max(1) as f32;
 
-        // Hero team wins the timeout if they have more HP remaining.
-        // Use a small threshold (2%) to avoid calling truly even fights.
         if hero_hp_pct > enemy_hp_pct + 0.02 {
             ("Victory".to_string(), 0.5)
         } else if enemy_hp_pct > hero_hp_pct + 0.02 {
@@ -661,4 +505,3 @@ pub(crate) fn run_rl_episode(
         unit_abilities, unit_ability_names, steps,
     }
 }
-

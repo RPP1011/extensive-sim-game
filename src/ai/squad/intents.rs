@@ -69,23 +69,6 @@ pub fn generate_intents_with_terrain(state: &SimState, ai: &mut SquadAiState, dt
             continue;
         }
 
-        // --- Ability evaluator interrupt (hero units only) ---
-        // If trained weights are loaded, check if any ability should fire RIGHT NOW.
-        // This runs before all force/personality logic — abilities are interrupts.
-        if unit.team == Team::Hero {
-            if let Some(ref weights) = ai.ability_eval_weights {
-                if unit.casting.is_none() && unit.control_remaining_ms == 0 {
-                    if let Some((action, _urgency)) =
-                        crate::ai::core::ability_eval::evaluate_abilities(
-                            state, ai, unit_id, weights)
-                    {
-                        intents.push(UnitIntent { unit_id, action });
-                        continue;
-                    }
-                }
-            }
-        }
-
         let effective_mode = if board.mode == FormationMode::Retreat
             && anchor_dist > leash * 0.75
         {

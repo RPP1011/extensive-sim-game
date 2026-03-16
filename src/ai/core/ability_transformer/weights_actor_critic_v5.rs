@@ -18,7 +18,28 @@ use super::weights::{
     AC_MAX_ABILITIES,
     HeadJson, ActorCriticArchJson,
 };
-use super::weights_actor_critic_v3::EntityStateV3;
+/// Entity state after encoding: tokens + mask + pooled mean + type IDs.
+#[derive(Debug, Clone)]
+pub struct EntityStateV5 {
+    pub tokens: Vec<f32>,
+    pub mask: Vec<bool>,
+    pub pooled: Vec<f32>,
+    pub type_ids: Vec<usize>,
+    pub n_total: usize,
+}
+
+/// Dual-head output: movement direction + combat pointer.
+#[derive(Debug, Clone)]
+pub struct DualHeadOutput {
+    /// Movement direction logits (9 elements: 8 cardinal + stay).
+    pub move_logits: Vec<f32>,
+    /// Combat type logits (10 elements: attack(0), hold(1), ability_0..7(2..9)).
+    pub combat_logits: Vec<f32>,
+    /// Attack pointer logits over all tokens.
+    pub attack_ptr: Vec<f32>,
+    /// Per-ability pointer logits (None if ability slot empty).
+    pub ability_ptrs: Vec<Option<Vec<f32>>>,
+}
 
 // ---------------------------------------------------------------------------
 // V5 entity encoder: entities(34) + zones(12) + aggregate(16)
@@ -590,7 +611,7 @@ impl ActorCriticWeightsV5 {
         threats: &[&[f32]],
         positions: &[&[f32]],
         aggregate: Option<&[f32]>,
-    ) -> EntityStateV3 {
+    ) -> EntityStateV5 {
         self.encode_entities_with_zones(entities, entity_types, threats, positions, &[], aggregate)
     }
 
@@ -603,7 +624,7 @@ impl ActorCriticWeightsV5 {
         positions: &[&[f32]],
         zones: &[&[f32]],
         aggregate: Option<&[f32]>,
-    ) -> EntityStateV3 {
+    ) -> EntityStateV5 {
         let d = self.d_model;
         let (tokens, mask, n_total, type_ids) = self.entity_encoder.forward(
             entities, entity_types, threats, positions, zones, aggregate,
@@ -624,15 +645,15 @@ impl ActorCriticWeightsV5 {
             for v in &mut pooled { *v /= count; }
         }
 
-        EntityStateV3 { tokens, mask, pooled, type_ids, n_total }
+        EntityStateV5 { tokens, mask, pooled, type_ids, n_total }
     }
 
     /// Compute dual-head action logits: move direction + combat pointer.
     pub fn dual_head_logits(
         &self,
-        entity_state: &EntityStateV3,
+        entity_state: &EntityStateV5,
         ability_cls: &[Option<&[f32]>],
-    ) -> super::weights_actor_critic_v4::DualHeadOutput {
+    ) -> DualHeadOutput {
         let n_total = entity_state.n_total;
 
         // Cross-attend each ability CLS to entity tokens
@@ -661,7 +682,7 @@ impl ActorCriticWeightsV5 {
             &ability_cross_embs,
         );
 
-        super::weights_actor_critic_v4::DualHeadOutput {
+        DualHeadOutput {
             move_logits, combat_logits, attack_ptr, ability_ptrs,
         }
     }

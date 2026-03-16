@@ -73,25 +73,10 @@ fn get_or_create_ability_stats<'a>(
 // ---------------------------------------------------------------------------
 
 pub fn run_scenario(cfg: &ScenarioCfg) -> ScenarioResult {
-    run_scenario_impl(cfg, None)
-}
-
-/// Run a scenario with optional ability evaluator weights for interrupt-driven ability usage.
-pub fn run_scenario_with_ability_eval(cfg: &ScenarioCfg, weights_path: &Path) -> ScenarioResult {
-    run_scenario_impl(cfg, Some(weights_path))
-}
-
-fn run_scenario_impl(cfg: &ScenarioCfg, ability_eval_path: Option<&Path>) -> ScenarioResult {
     let (mut sim, mut squad_state) = run_scenario_to_state(cfg);
 
     #[cfg(feature = "stream-monitor")]
     let mut monitor = crate::ai::core::monitor::SimMonitor::new(&sim, 100);
-
-    if let Some(path) = ability_eval_path {
-        if let Err(e) = squad_state.load_ability_eval_weights(path) {
-            eprintln!("Warning: failed to load ability eval weights: {e}");
-        }
-    }
 
     let hero_ids: HashSet<u32> = sim
         .units
