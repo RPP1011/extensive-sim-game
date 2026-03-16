@@ -186,8 +186,10 @@ pub struct EncodedState<B: Backend> {
 
 /// Full model output.
 pub struct ActorCriticOutput<B: Backend> {
-    /// Target waypoint (normalized x/20, y/20): [B, 2]
+    /// Target waypoint mean μ (normalized x/20, y/20): [B, 2]
     pub target_pos: Tensor<B, 2>,
+    /// Target waypoint log std dev (learned): [2] broadcast to [B, 2]
+    pub move_log_std: Option<Tensor<B, 1>>,
     /// Combat action outputs
     pub combat: CombatOutput<B>,
 }
@@ -281,7 +283,7 @@ impl<B: Backend> ActorCriticV5<B> {
             pooled, tokens, mask, type_ids, ability_cross_embs,
         );
 
-        ActorCriticOutput { target_pos, combat }
+        ActorCriticOutput { target_pos, move_log_std: None, combat }
     }
 
     /// Full forward pass (encode + CfC + decide).

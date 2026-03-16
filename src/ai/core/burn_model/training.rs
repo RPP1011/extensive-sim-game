@@ -147,6 +147,8 @@ pub struct ImpalaConfig {
     pub grad_clip: f32,
     pub clip_rho: f32,
     pub clip_c: f32,
+    /// PPO clip epsilon for policy ratio clipping.
+    pub ppo_clip: f32,
     pub grokfast_alpha: f32,
     pub grokfast_lamb: f32,
     pub use_grokfast: bool,
@@ -170,6 +172,7 @@ impl Default for ImpalaConfig {
             grad_clip: 1.0,
             clip_rho: 1.0,
             clip_c: 1.0,
+            ppo_clip: 0.2,
             grokfast_alpha: 0.98,
             grokfast_lamb: 2.0,
             use_grokfast: false,
@@ -196,8 +199,10 @@ pub struct TrainingSample {
     pub aggregate_features: Vec<f32>,
     /// Corner tokens [n_corners, 11] (may be empty)
     pub corner_tokens: Vec<Vec<f32>>,
-    /// Continuous target position [x/20, y/20] from behavior policy
+    /// Sampled target position [x, y] in world space (from Gaussian policy during generation)
     pub target_move_pos: [f32; 2],
+    /// Behavior policy log prob for movement (Gaussian log prob at generation time)
+    pub behavior_lp_move: f32,
     /// Per-step reward (dense HP differential + event bonuses)
     pub step_reward: f32,
     /// Action taken: combat type (0-9)
@@ -206,7 +211,7 @@ pub struct TrainingSample {
     pub target_idx: usize,
     /// Action mask (which combat types are valid)
     pub combat_mask: Vec<bool>,
-    /// Behavior log prob (from data-generating policy)
+    /// Behavior log prob for combat+pointer (from data-generating policy)
     pub behavior_log_prob: f32,
     /// V-trace value target
     pub value_target: f32,
@@ -251,6 +256,8 @@ where
     let mut cmask_data = vec![0.0f32; bs * max_corners];
 
     let mut move_pos_targets = vec![0.0f32; bs * 2];
+    let mut old_lp_move = vec![0.0f32; bs];
+    let mut old_lp_combat = vec![0.0f32; bs];
     let mut combat_targets = vec![0i64; bs];
     let mut pointer_targets = vec![0i64; bs];
     let mut combat_masks = vec![0.0f32; bs * NUM_COMBAT_TYPES];
@@ -285,6 +292,8 @@ where
 
         move_pos_targets[i * 2] = s.target_move_pos[0];
         move_pos_targets[i * 2 + 1] = s.target_move_pos[1];
+        old_lp_move[i] = s.behavior_lp_move;
+        old_lp_combat[i] = s.behavior_log_prob;
         combat_targets[i] = s.combat_type as i64;
         pointer_targets[i] = s.target_idx.min(max_ent - 1) as i64;
         for (j, &m) in s.combat_mask.iter().enumerate().take(NUM_COMBAT_TYPES) {
@@ -327,11 +336,36 @@ where
         corner_tokens, corner_mask, Some(n_latents),
     );
 
-    // --- Movement loss (continuous MSE) ---
-    let target_pos = output.target_pos; // [B, 2] normalized (x/20, y/20)
-    let move_target_tensor = Tensor::<B, 1>::from_floats(move_pos_targets.as_slice(), device)
-        .reshape([bs, 2]);
-    let move_loss = (target_pos - move_target_tensor).powf_scalar(2.0).mean();
+    // Advantages tensor (detached — no gradient through advantages)
+    let adv_tensor = Tensor::<B, 1>::from_floats(advantages.as_slice(), device);
+
+    // --- Movement loss (Gaussian policy gradient) ---
+    // Model outputs μ [B, 2] and log_std [2]. Sampled action was target_move_pos (world space).
+    let mu = output.target_pos; // [B, 2] normalized
+    let sampled = Tensor::<B, 1>::from_floats(move_pos_targets.as_slice(), device)
+        .reshape([bs, 2]) / POSITION_NORM; // normalize to match μ
+
+    // log N(x|μ,σ²) = -0.5 * ((x-μ)/σ)² - log(σ) - 0.5*log(2π)
+    let log_std = output.move_log_std.unwrap_or_else(|| Tensor::zeros([2], device));
+    let log_std_expanded: Tensor<B, 2> = log_std.clone().unsqueeze_dim::<2>(0).expand([bs, 2]);
+    let std_expanded = log_std_expanded.clone().exp();
+    let diff = (sampled - mu) / std_expanded.clone();
+    let move_log_prob: Tensor<B, 1> = (diff.powf_scalar(2.0).neg() * 0.5
+        - log_std_expanded
+        - 0.9189) // 0.5 * log(2π) ≈ 0.9189
+        .sum_dim(1).squeeze_dim::<1>(1); // sum over [x, y] → [B]
+
+    // Movement entropy: H = 0.5 * log(2πeσ²) = log(σ) + 0.5*log(2πe) ≈ log(σ) + 1.4189
+    let move_entropy: Tensor<B, 1> = (log_std.clone() + 1.4189).mean().unsqueeze();
+
+    // PPO-clipped movement policy loss
+    let old_lp_move_tensor = Tensor::<B, 1>::from_floats(old_lp_move.as_slice(), device);
+    let move_ratio = (move_log_prob - old_lp_move_tensor).exp(); // π_new / π_old
+    let clipped_ratio = move_ratio.clone().clamp(1.0 - config.ppo_clip, 1.0 + config.ppo_clip);
+    let surr1 = move_ratio * adv_tensor.clone();
+    let surr2 = clipped_ratio * adv_tensor.clone();
+    // PPO loss: -E[min(surr1, surr2)] — take the pessimistic bound
+    let move_loss = surr1.min_pair(surr2).mean().neg();
 
     // --- Policy loss (combat + pointer) ---
 
@@ -360,14 +394,16 @@ where
     // Clamp pointer targets to valid range
     let ptr_lp: Tensor<B, 1> = ptr_log_probs.gather(1, pointer_targets_tensor).squeeze_dim::<1>(1); // [B]
 
-    // Combined log prob
+    // Combined combat log prob (combat type + pointer target)
     let log_prob = combat_lp.clone() + ptr_lp.clone();
 
-    // Advantages tensor (detached — no gradient through advantages)
-    let adv_tensor = Tensor::<B, 1>::from_floats(advantages.as_slice(), &device);
-
-    // Policy loss: -E[log_prob * advantage]
-    let policy_loss = (log_prob.clone() * adv_tensor.clone()).mean().neg();
+    // PPO-clipped combat policy loss
+    let old_lp_combat_tensor = Tensor::<B, 1>::from_floats(old_lp_combat.as_slice(), device);
+    let combat_ratio = (log_prob.clone() - old_lp_combat_tensor).exp();
+    let combat_clipped = combat_ratio.clone().clamp(1.0 - config.ppo_clip, 1.0 + config.ppo_clip);
+    let csurr1 = combat_ratio * adv_tensor.clone();
+    let csurr2 = combat_clipped * adv_tensor.clone();
+    let policy_loss = csurr1.min_pair(csurr2).mean().neg();
 
     // --- Value loss ---
     let value_pred: Tensor<B, 1> = value_out.attrition.squeeze_dim::<1>(1); // [B]
@@ -383,7 +419,8 @@ where
     let total_loss = policy_loss.clone()
         + move_loss.clone()
         + value_loss.clone() * config.value_coef
-        - combat_entropy.clone() * config.entropy_coef;
+        - combat_entropy.clone() * config.entropy_coef
+        - move_entropy.clone().mean() * config.entropy_coef;
 
     // Metrics (detached scalars)
     let metrics = TrainMetrics {
@@ -392,6 +429,7 @@ where
         move_loss: move_loss.into_scalar().elem::<f32>(),
         value_loss: value_loss.into_scalar().elem::<f32>(),
         entropy: combat_entropy.into_scalar().elem::<f32>(),
+        move_std: std_expanded.mean().into_scalar().elem::<f32>(),
         mean_advantage: adv_tensor.mean().into_scalar().elem::<f32>(),
     };
 
@@ -409,6 +447,8 @@ pub struct TrainMetrics {
     pub move_loss: f32,
     pub value_loss: f32,
     pub entropy: f32,
+    /// Current σ of movement Gaussian (learned)
+    pub move_std: f32,
     pub mean_advantage: f32,
 }
 

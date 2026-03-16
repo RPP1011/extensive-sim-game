@@ -13,6 +13,10 @@ pub const MAX_ABILITIES: usize = 8;
 /// Number of combat action types.
 pub const NUM_COMBAT_TYPES: usize = 10;
 
+/// Position normalization factor: world coords are divided by this.
+/// Matches the /20 normalization used in entity features and position head output.
+pub const POSITION_NORM: f32 = 20.0;
+
 /// Default model hyperparameters.
 pub const D_MODEL: usize = 128;
 pub const N_HEADS: usize = 8;

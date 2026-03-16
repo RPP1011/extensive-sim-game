@@ -33,10 +33,11 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
         ActorCriticV6Config,
         actor_critic_v6::V6_H_DIM,
         checkpoint,
-        training::{self, ImpalaConfig, TrainingSample, vtrace_targets, train_step},
+        training::{self, ImpalaConfig, TrainingSample, vtrace_targets, train_step, predict_values},
     };
     use burn::backend::{Autodiff, LibTorch};
     use burn::backend::libtorch::LibTorchDevice;
+    use burn::module::AutodiffModule;
     use burn::optim::{AdamWConfig, GradientsParams};
     use burn::prelude::*;
 
@@ -109,9 +110,16 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
     let log_path = args.output_dir.join("training_log.csv");
     let mut log_file = std::fs::File::create(&log_path).expect("create log file");
     use std::io::Write;
-    writeln!(log_file, "iter,episodes,steps,win_rate,loss,policy_loss,move_loss,value_loss,entropy").ok();
+    writeln!(log_file, "iter,episodes,steps,win_rate,loss,policy_loss,move_loss,value_loss,entropy,move_std").ok();
 
     let mut rng_state = 42u64;
+
+    // Replay buffer: keep all samples, evict lowest |step_reward| when over cap.
+    // High-reward samples (both positive and negative) are most informative.
+    // Re-score advantages every RESCORE_INTERVAL iterations using current value head.
+    const REPLAY_MAX: usize = 100_000;
+    const RESCORE_INTERVAL: usize = 5;
+    let mut replay_buffer: Vec<TrainingSample> = Vec::new();
 
     for iteration in 1..=args.iters {
         eprintln!("\n{}", "=".repeat(60));
@@ -119,8 +127,9 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
 
         // 1. Generate episodes using xtask generate --burn-v6
         let t0 = std::time::Instant::now();
+        // Burn's BinFileRecorder appends .bin automatically, so pass path without extension
         let prev_ckpt = if iteration > 1 {
-            Some(args.output_dir.join(format!("v6_iter{:04}.bin", iteration - 1)))
+            Some(args.output_dir.join(format!("v6_iter{:04}", iteration - 1)))
         } else {
             None
         };
@@ -144,22 +153,63 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
         let wins = episodes.iter().filter(|e| e.outcome == "Victory").count();
         let win_rate = wins as f32 / episodes.len().max(1) as f32;
 
-        let samples = extract_training_samples(&episodes, &train_config, &model, &device);
+        let new_samples = extract_training_samples(&episodes, &train_config, &model, &device);
         eprintln!("  Episodes: {}, steps: {}, WR: {:.1}%, gen: {:.1}s",
-            episodes.len(), samples.len(), win_rate * 100.0, gen_time);
+            episodes.len(), new_samples.len(), win_rate * 100.0, gen_time);
 
-        if samples.is_empty() {
+        if new_samples.is_empty() {
             eprintln!("  No training samples, skipping");
             continue;
         }
 
-        // 3. Train
+        // Add new samples, evict least-informative when over cap
+        let n_new = new_samples.len();
+        replay_buffer.extend(new_samples);
+        if replay_buffer.len() > REPLAY_MAX {
+            // Keep samples with highest |step_reward| — most informative for learning
+            replay_buffer.sort_by(|a, b| {
+                b.step_reward.abs().partial_cmp(&a.step_reward.abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            replay_buffer.truncate(REPLAY_MAX);
+        }
+
+        // Re-score advantages periodically using current value head
+        if iteration % RESCORE_INTERVAL == 0 {
+            let inner_model = model.valid();
+            let inner_device = burn::backend::libtorch::LibTorchDevice::Cuda(0);
+            let batch_sz = 256;
+            let mut new_values = Vec::with_capacity(replay_buffer.len());
+            for chunk in replay_buffer.chunks(batch_sz) {
+                let chunk_vec: Vec<TrainingSample> = chunk.to_vec();
+                let vals = predict_values(&inner_model, &chunk_vec, &inner_device);
+                new_values.extend(vals);
+            }
+            // Update advantages: advantage ≈ step_reward - V(s) (simple TD(0))
+            for (i, sample) in replay_buffer.iter_mut().enumerate() {
+                let v = new_values.get(i).copied().unwrap_or(0.0);
+                sample.value_target = sample.step_reward; // simple target
+                sample.advantage = sample.step_reward - v;
+            }
+            // Re-normalize advantages
+            let mean: f32 = replay_buffer.iter().map(|s| s.advantage).sum::<f32>() / replay_buffer.len() as f32;
+            let var: f32 = replay_buffer.iter().map(|s| (s.advantage - mean).powi(2)).sum::<f32>() / replay_buffer.len() as f32;
+            let std = var.sqrt().max(1e-8);
+            for s in &mut replay_buffer {
+                s.advantage = (s.advantage - mean) / std;
+            }
+            eprintln!("  Re-scored {} samples (mean_adv={:.4}, std={:.4})", replay_buffer.len(), mean, std);
+        }
+
+        eprintln!("  Replay buffer: {} samples (+{} new)", replay_buffer.len(), n_new);
+
+        // 3. Train on replay buffer (not just current iteration's samples)
         let t1 = std::time::Instant::now();
         let mut total_metrics = training::TrainMetrics::default();
 
         for step_i in 0..args.train_steps {
-            // Sample random minibatch
-            let batch: Vec<TrainingSample> = sample_batch(&samples, args.batch_size, &mut rng_state);
+            // Sample random minibatch from replay buffer
+            let batch: Vec<TrainingSample> = sample_batch(&replay_buffer, args.batch_size, &mut rng_state);
 
             let (new_model, metrics) = train_step(
                 model, &mut optimizer, &batch, &train_config, &device, &mut rng_state,
@@ -171,6 +221,7 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
             total_metrics.move_loss += metrics.move_loss;
             total_metrics.value_loss += metrics.value_loss;
             total_metrics.entropy += metrics.entropy;
+            total_metrics.move_std = metrics.move_std; // last value (not averaged)
         }
 
         let n = args.train_steps as f32;
@@ -181,10 +232,11 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
         total_metrics.entropy /= n;
 
         let train_time = t1.elapsed().as_secs_f64();
-        eprintln!("  Train: {} steps in {:.1}s, loss={:.4}, policy={:.4}, move={:.4}, value={:.4}, entropy={:.4}",
+        eprintln!("  Train: {} steps in {:.1}s, loss={:.4}, policy={:.4}, move={:.4}, value={:.4}, entropy={:.4}, σ={:.3}",
             args.train_steps, train_time,
             total_metrics.total_loss, total_metrics.policy_loss,
-            total_metrics.move_loss, total_metrics.value_loss, total_metrics.entropy);
+            total_metrics.move_loss, total_metrics.value_loss, total_metrics.entropy,
+            total_metrics.move_std);
 
         // 4. Save checkpoint
         let ckpt_path = args.output_dir.join(format!("v6_iter{iteration:04}"));
@@ -195,10 +247,11 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
         }
 
         // 5. Log
-        writeln!(log_file, "{},{},{},{:.4},{:.6},{:.6},{:.6},{:.6},{:.6}",
-            iteration, episodes.len(), samples.len(), win_rate,
+        writeln!(log_file, "{},{},{},{:.4},{:.6},{:.6},{:.6},{:.6},{:.6},{:.4}",
+            iteration, episodes.len(), replay_buffer.len(), win_rate,
             total_metrics.total_loss, total_metrics.policy_loss,
-            total_metrics.move_loss, total_metrics.value_loss, total_metrics.entropy).ok();
+            total_metrics.move_loss, total_metrics.value_loss, total_metrics.entropy,
+            total_metrics.move_std).ok();
         log_file.flush().ok();
     }
 
@@ -328,8 +381,8 @@ fn extract_training_samples(
                     }
                 }
 
-                let behav_lp = step.lp_move.unwrap_or(0.0)
-                    + step.lp_combat.unwrap_or(0.0)
+                let behav_lp_move = step.lp_move.unwrap_or(0.0);
+                let behav_lp_combat = step.lp_combat.unwrap_or(0.0)
                     + step.lp_pointer.unwrap_or(0.0);
 
                 raw_samples.push((TrainingSample {
@@ -337,9 +390,10 @@ fn extract_training_samples(
                     aggregate_features: agg,
                     corner_tokens: Vec::new(),
                     target_move_pos,
+                    behavior_lp_move: behav_lp_move,
                     step_reward: step.step_reward,
                     combat_type, target_idx, combat_mask,
-                    behavior_log_prob: behav_lp,
+                    behavior_log_prob: behav_lp_combat,
                     value_target: 0.0,
                     advantage: 0.0,
                 }, ep_idx, i));

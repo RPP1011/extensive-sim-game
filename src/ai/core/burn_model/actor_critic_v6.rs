@@ -9,7 +9,7 @@
 //! - ValueHead: two-headed value prediction for curriculum pretraining
 //! - h_dim=256 for CfC temporal cell
 
-use burn::module::Module;
+use burn::module::{Module, Param};
 use burn::nn::{Gelu, Linear, LinearConfig};
 use burn::prelude::*;
 
@@ -39,6 +39,9 @@ pub struct ActorCriticV6<B: Backend> {
     pub temporal_cell: CfCCell<B>,
     pub position_head_l1: Linear<B>,
     pub position_head_l2: Linear<B>,
+    /// Learnable log standard deviation for movement Gaussian policy [2].
+    /// σ = exp(move_log_std). Initialized to log(1.0) = 0 → σ=1.0 in normalized coords.
+    pub move_log_std: Param<Tensor<B, 1>>,
     pub combat_head: CombatPointerHead<B>,
     pub value_head: ValueHead<B>,
     pub external_cls_proj: Option<Linear<B>>,
@@ -118,6 +121,8 @@ impl ActorCriticV6Config {
             .init(device),
             position_head_l1: LinearConfig::new(d, d).init(device),
             position_head_l2: LinearConfig::new(d, 2).init(device),
+            // log(σ) initialized to 0 → σ=1.0 in normalized coords (= 20 world units)
+            move_log_std: Param::from_tensor(Tensor::zeros([2], device)),
             combat_head: CombatPointerHeadConfig { d_model: d }.init(device),
             value_head: ValueHeadConfig { d_model: d }.init(device),
             external_cls_proj: cls_proj,
@@ -220,10 +225,11 @@ impl<B: Backend> ActorCriticV6<B> {
     ) -> ActorCriticOutput<B> {
         let pos_h = self.gelu.forward(self.position_head_l1.forward(pooled.clone()));
         let target_pos = self.position_head_l2.forward(pos_h);
+        let move_log_std = Some(self.move_log_std.val());
         let combat = self.combat_head.forward(
             pooled, tokens, mask, type_ids, ability_cross_embs,
         );
-        ActorCriticOutput { target_pos, combat }
+        ActorCriticOutput { target_pos, move_log_std, combat }
     }
 
     /// Full forward pass: encode → spatial → latent → CfC → decide.

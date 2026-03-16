@@ -43,19 +43,29 @@ impl ActiveSim {
         let extraction_cache = ExtractionCache::build(&self.sim);
 
         let record = self.tick % self.step_interval == 0;
+        let has_drill_movement = self.drill_target_position.is_some()
+            || self.drill_objective_type.as_deref() == Some("reach_entity");
         let step_r = if record {
-            let cur_hero_hp: i32 = self.sim.units.iter()
-                .filter(|u| u.team == bevy_game::ai::core::Team::Hero).map(|u| u.hp.max(0)).sum();
-            let cur_enemy_hp: i32 = self.sim.units.iter()
-                .filter(|u| u.team == bevy_game::ai::core::Team::Enemy).map(|u| u.hp.max(0)).sum();
-            let enemy_dmg = (self.prev_enemy_hp - cur_enemy_hp).max(0) as f32;
-            let hero_dmg = (self.prev_hero_hp - cur_hero_hp).max(0) as f32;
-            let hp_reward = (enemy_dmg - hero_dmg) / self.avg_unit_hp.max(1.0);
-            self.prev_hero_hp = cur_hero_hp;
-            self.prev_enemy_hp = cur_enemy_hp;
-            let event_r = self.pending_event_reward;
-            self.pending_event_reward = 0.0;
-            hp_reward + event_r - 0.01
+            if has_drill_movement {
+                // Movement drills: base reward is 0 — all shaping comes from step_sim()
+                let event_r = self.pending_event_reward;
+                self.pending_event_reward = 0.0;
+                event_r
+            } else {
+                // Combat drills: HP differential reward
+                let cur_hero_hp: i32 = self.sim.units.iter()
+                    .filter(|u| u.team == bevy_game::ai::core::Team::Hero).map(|u| u.hp.max(0)).sum();
+                let cur_enemy_hp: i32 = self.sim.units.iter()
+                    .filter(|u| u.team == bevy_game::ai::core::Team::Enemy).map(|u| u.hp.max(0)).sum();
+                let enemy_dmg = (self.prev_enemy_hp - cur_enemy_hp).max(0) as f32;
+                let hero_dmg = (self.prev_hero_hp - cur_hero_hp).max(0) as f32;
+                let hp_reward = (enemy_dmg - hero_dmg) / self.avg_unit_hp.max(1.0);
+                self.prev_hero_hp = cur_hero_hp;
+                self.prev_enemy_hp = cur_enemy_hp;
+                let event_r = self.pending_event_reward;
+                self.pending_event_reward = 0.0;
+                hp_reward + event_r - 0.01
+            }
         } else { 0.0 };
 
         self.pending_units.clear();
@@ -322,17 +332,63 @@ impl ActiveSim {
             if let Some(pre) = self.hero_pre_step.iter().find(|p| p.unit_id == uid) {
                 let mut action_reward: f32 = 0.0;
                 if let Some(post_unit) = new_sim.units.iter().find(|u| u.id == uid) {
+                    // --- Drill objective reward (dense, per-step) ---
+                    if let Some(target) = self.drill_target_position {
+                        let target_pos = bevy_game::ai::core::sim_vec2(target[0], target[1]);
+                        let pre_dist = distance(pre.position, target_pos);
+                        let post_dist = distance(post_unit.position, target_pos);
+
+                        // Reward = distance reduction toward target, normalized by initial distance
+                        // This gives ~+1.0 total if the unit goes straight to target
+                        let dist_delta = pre_dist - post_dist;
+                        let initial_dist = pre_dist.max(1.0); // avoid div by zero
+                        action_reward += dist_delta / initial_dist * 3.0;
+
+                        // Big bonus for reaching target
+                        let radius = self.drill_target_radius.unwrap_or(1.0);
+                        if post_dist <= radius {
+                            action_reward += 5.0;
+                        }
+                    }
+
+                    // --- Reach-entity objective ---
+                    if self.drill_objective_type.as_deref() == Some("reach_entity") {
+                        if let Some(nearest_enemy) = new_sim.units.iter()
+                            .filter(|e| e.team == Team::Enemy && e.hp > 0)
+                            .min_by(|a, b| {
+                                let da = distance(post_unit.position, a.position);
+                                let db = distance(post_unit.position, b.position);
+                                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                            })
+                        {
+                            let pre_dist = pre.nearest_enemy_dist;
+                            let post_dist = distance(post_unit.position, nearest_enemy.position);
+                            if pre_dist < f32::MAX {
+                                action_reward += 1.0 * (pre_dist - post_dist);
+                            }
+                            let radius = self.drill_target_radius.unwrap_or(1.5);
+                            if post_dist <= radius { action_reward += 2.0; }
+                        }
+                    }
+
+                    // --- Combat reward shaping (for drills with enemies) ---
                     let post_nearest = new_sim.units.iter()
                         .filter(|e| e.team == Team::Enemy && e.hp > 0)
                         .map(|e| distance(post_unit.position, e.position))
                         .fold(f32::MAX, f32::min);
-                    if pre.nearest_enemy_dist < f32::MAX && post_nearest < f32::MAX {
-                        action_reward += 0.002 * (pre.nearest_enemy_dist - post_nearest);
+                    if self.drill_target_position.is_none() && self.drill_objective_type.as_deref() != Some("reach_entity") {
+                        // Only apply combat-approach reward when there's no specific movement target
+                        if pre.nearest_enemy_dist < f32::MAX && post_nearest < f32::MAX {
+                            action_reward += 0.002 * (pre.nearest_enemy_dist - post_nearest);
+                        }
+                        if post_nearest < 100.0 { action_reward += 0.01; }
                     }
-                    if post_nearest < 100.0 { action_reward += 0.01; }
                 }
-                if pre.combat_type == 1 && pre.nearest_enemy_dist < 150.0 { action_reward -= 0.02; }
-                if pre.combat_type == 0 || pre.combat_type >= 2 { action_reward += 0.01; }
+                if self.drill_target_position.is_none() {
+                    // Combat type bonuses only when not doing movement drills
+                    if pre.combat_type == 1 && pre.nearest_enemy_dist < 150.0 { action_reward -= 0.02; }
+                    if pre.combat_type == 0 || pre.combat_type >= 2 { action_reward += 0.01; }
+                }
                 self.steps[step_idx].step_reward += action_reward;
             }
         }
