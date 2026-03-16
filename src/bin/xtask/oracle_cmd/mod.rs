@@ -10,6 +10,7 @@ mod rl_eval;
 mod rl_generate;
 mod rl_gpu;
 mod rl_gpu_sim;
+mod impala_train;
 mod operator_dataset;
 mod ability_profile;
 mod ability_profile_io;

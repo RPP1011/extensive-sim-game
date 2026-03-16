@@ -5,6 +5,7 @@ mod capture;
 mod ralph;
 mod scenario_cmd;
 mod oracle_cmd;
+mod train_v6;
 
 use std::process::ExitCode;
 
@@ -27,5 +28,6 @@ fn main() -> ExitCode {
             RalphSubcommand::Status(args) => ralph::run_ralph_status(args),
         },
         TaskCommand::Scenario(cmd) => scenario_cmd::run_scenario_cmd(cmd),
+        TaskCommand::TrainV6(cmd) => train_v6::run_train_v6(cmd),
     }
 }

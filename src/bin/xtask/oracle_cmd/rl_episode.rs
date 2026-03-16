@@ -1,5 +1,24 @@
 //! Episode runner for transformer RL: runs a single scenario with a policy.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Global profiling counters (aggregated across all par_iter threads).
+pub(crate) static PROF_INTENTS_NS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static PROF_POLICY_NS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static PROF_STEP_NS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static PROF_TERRAIN_NS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static PROF_SETUP_NS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static PROF_TICKS: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn reset_profiling() {
+    PROF_INTENTS_NS.store(0, Ordering::Relaxed);
+    PROF_POLICY_NS.store(0, Ordering::Relaxed);
+    PROF_STEP_NS.store(0, Ordering::Relaxed);
+    PROF_TERRAIN_NS.store(0, Ordering::Relaxed);
+    PROF_SETUP_NS.store(0, Ordering::Relaxed);
+    PROF_TICKS.store(0, Ordering::Relaxed);
+}
+
 use super::transformer_rl::{
     Policy, RlEpisode, RlStep,
     lcg_f32, masked_softmax_sample, load_behavior_trees,
@@ -36,7 +55,7 @@ pub(crate) fn run_rl_episode(
     behaviors: &std::collections::HashMap<u32, bevy_game::ai::behavior::BehaviorTree>,
 ) -> RlEpisode {
     use bevy_game::ai::core::{is_alive, step, distance, move_towards, position_at_range, Team, UnitIntent, FIXED_TICK_MS};
-    use bevy_game::ai::core::ability_eval::{extract_game_state, extract_game_state_v2, extract_game_state_v2_spatial};
+    use bevy_game::ai::core::ability_eval::{extract_game_state, extract_game_state_v2, extract_game_state_v2_spatial, extract_game_state_v2_with_objectives, ZoneObjective};
     use bevy_game::ai::core::self_play::actions::{action_mask, action_to_intent, intent_to_action};
     use bevy_game::ai::effects::dsl::emit::emit_ability_dsl;
     use bevy_game::ai::goap::spatial::VisibilityMap;
@@ -52,6 +71,17 @@ pub(crate) fn run_rl_episode(
     let mut squad_ai = initial_squad_ai;
     let mut rng = rng_seed;
     let mut steps = Vec::new();
+
+    // Build zone objectives from drill objective
+    let zone_objectives: Vec<ZoneObjective> = if let Some(obj) = drill_objective {
+        if let Some(pos) = obj.position {
+            vec![ZoneObjective { position: pos, radius: obj.radius.unwrap_or(1.0) }]
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
 
     let hero_ids: Vec<u32> = sim.units.iter()
         .filter(|u| u.team == Team::Hero)
@@ -140,15 +170,33 @@ pub(crate) fn run_rl_episode(
         .filter(|u| u.team == Team::Hero && u.hp > 0).count() as f32;
     let mut pending_event_reward: f32 = 0.0;
 
+    let mut t_intents_ns: u64 = 0;
+    let mut t_policy_ns: u64 = 0;
+    let mut t_step_ns: u64 = 0;
+    let mut t_terrain_ns: u64 = 0;
+    // Flush per-episode counters to global atomics on any exit path
+    macro_rules! flush_prof {
+        () => {
+            PROF_INTENTS_NS.fetch_add(t_intents_ns, Ordering::Relaxed);
+            PROF_POLICY_NS.fetch_add(t_policy_ns, Ordering::Relaxed);
+            PROF_STEP_NS.fetch_add(t_step_ns, Ordering::Relaxed);
+            PROF_TERRAIN_NS.fetch_add(t_terrain_ns, Ordering::Relaxed);
+        };
+    }
+
     for tick in 0..max_ticks {
+        let _tick_t0 = std::time::Instant::now();
         // Pre-set hero focus target before generate_intents for better coordination
         if matches!(policy, Policy::Combined) {
             let tt = super::training::compute_team_target(&sim);
             squad_ai.set_focus_target(Team::Hero, tt);
         }
+        let t0 = std::time::Instant::now();
         let mut intents = generate_intents(&sim, &mut squad_ai, FIXED_TICK_MS);
+        t_intents_ns += t0.elapsed().as_nanos() as u64;
         apply_behavior_overrides(&mut intents, behaviors, &sim, tick);
         let record = tick % step_interval == 0;
+        let t0 = std::time::Instant::now();
 
         // Compute dense step reward
         let step_r = if record {
@@ -230,9 +278,15 @@ pub(crate) fn run_rl_episode(
                         .cloned()
                         .unwrap_or(bevy_game::ai::core::IntentAction::Hold);
                     let action = intent_to_action(&intent_action, uid, &sim);
-                    let gs_v2 = match (&vis_map, sim.grid_nav.as_ref()) {
-                        (Some(vm), Some(nav)) => extract_game_state_v2_spatial(&sim, unit, vm, nav),
-                        _ => extract_game_state_v2(&sim, unit),
+                    let gs_v2 = if !zone_objectives.is_empty() {
+                        extract_game_state_v2_with_objectives(
+                            &sim, unit, vis_map.as_ref(), sim.grid_nav.as_ref(), &zone_objectives,
+                        )
+                    } else {
+                        match (&vis_map, sim.grid_nav.as_ref()) {
+                            (Some(vm), Some(nav)) => extract_game_state_v2_spatial(&sim, unit, vm, nav),
+                            _ => extract_game_state_v2(&sim, unit),
+                        }
                     };
                     let game_state = extract_game_state(&sim, unit);
                     let token_infos = build_token_infos(
@@ -254,6 +308,7 @@ pub(crate) fn run_rl_episode(
                         entity_types: Some(gs_v2.entity_types),
                         threats: Some(gs_v2.threats),
                         positions: Some(gs_v2.positions),
+                        zones: Some(gs_v2.zones),
                         action_type: Some(v3_action_type),
                         target_idx: Some(v3_target_idx),
                         move_dir: Some(v4_move_dir),
@@ -288,9 +343,15 @@ pub(crate) fn run_rl_episode(
                     continue;
                 }
 
-                let gs_v2 = match (&vis_map, sim.grid_nav.as_ref()) {
-                    (Some(vm), Some(nav)) => extract_game_state_v2_spatial(&sim, unit, vm, nav),
-                    _ => extract_game_state_v2(&sim, unit),
+                let gs_v2 = if !zone_objectives.is_empty() {
+                    extract_game_state_v2_with_objectives(
+                        &sim, unit, vis_map.as_ref(), sim.grid_nav.as_ref(), &zone_objectives,
+                    )
+                } else {
+                    match (&vis_map, sim.grid_nav.as_ref()) {
+                        (Some(vm), Some(nav)) => extract_game_state_v2_spatial(&sim, unit, vm, nav),
+                        _ => extract_game_state_v2(&sim, unit),
+                    }
                 };
                 let n_abilities = unit.abilities.len().min(MAX_ABILITIES);
                 let mut ability_cls_refs: Vec<Option<&[f32]>> = vec![None; MAX_ABILITIES];
@@ -373,6 +434,8 @@ pub(crate) fn run_rl_episode(
                         }
                         logits
                     }
+                    #[cfg(feature = "burn-gpu")]
+                    Policy::BurnServer(_) | Policy::BurnServerV6(_) => unreachable!(),
                     Policy::ActorCriticV3(_) | Policy::ActorCriticV4(_) | Policy::ActorCriticV5(_) | Policy::GpuServer(_) | Policy::Combined | Policy::Random => unreachable!(),
                 };
 
@@ -394,7 +457,8 @@ pub(crate) fn run_rl_episode(
                         entities: Some(gs_v2.entities.clone()),
                         entity_types: Some(gs_v2.entity_types.clone()),
                         threats: Some(gs_v2.threats.clone()),
-                        positions: None, action_type: None, target_idx: None,
+                        positions: None, zones: Some(gs_v2.zones.clone()),
+                        action_type: None, target_idx: None,
                         move_dir: None, combat_type: None,
                         lp_move: None, lp_combat: None,
                         lp_pointer: None, aggregate_features: None,
@@ -438,7 +502,10 @@ pub(crate) fn run_rl_episode(
             }
         }
 
+        t_policy_ns += t0.elapsed().as_nanos() as u64;
+        let t0 = std::time::Instant::now();
         let (new_sim, events) = step(sim, &intents, FIXED_TICK_MS);
+        t_step_ns += t0.elapsed().as_nanos() as u64;
 
         // Dense event-based rewards: reward GOOD PLAY, not winning
         for ev in &events {
@@ -486,6 +553,7 @@ pub(crate) fn run_rl_episode(
         sim = new_sim;
 
         // Update terrain-derived properties (cover_bonus, elevation)
+        let t0 = std::time::Instant::now();
         if let Some(ref nav) = sim.grid_nav.clone() {
             use bevy_game::ai::pathing::cover_factor;
             let unit_count = sim.units.len();
@@ -515,11 +583,15 @@ pub(crate) fn run_rl_episode(
             }
         }
 
+        t_terrain_ns += t0.elapsed().as_nanos() as u64;
+        PROF_TICKS.fetch_add(1, Ordering::Relaxed);
+
         let heroes_alive = sim.units.iter().filter(|u| u.team == Team::Hero && u.hp > 0).count();
         let enemies_alive = sim.units.iter().filter(|u| u.team == Team::Enemy && u.hp > 0).count();
 
         // Check drill objective completion
         if let Some(done) = check_drill_objective(drill_objective, &sim, heroes_alive, enemies_alive) {
+            flush_prof!();
             return RlEpisode {
                 scenario: scenario_name.to_string(),
                 outcome: done.0, reward: done.1,
@@ -527,6 +599,7 @@ pub(crate) fn run_rl_episode(
             };
         }
         if drill_objective.is_none() && enemies_alive == 0 {
+            flush_prof!();
             return RlEpisode {
                 scenario: scenario_name.to_string(),
                 outcome: "Victory".to_string(), reward: 0.5,  // mild bonus, not +1
@@ -534,8 +607,7 @@ pub(crate) fn run_rl_episode(
             };
         }
         if heroes_alive == 0 {
-            // No penalty for losing — asymmetric comps make losses inevitable.
-            // Dense rewards already captured the quality of play.
+            flush_prof!();
             return RlEpisode {
                 scenario: scenario_name.to_string(),
                 outcome: "Defeat".to_string(), reward: 0.0,
@@ -582,6 +654,7 @@ pub(crate) fn run_rl_episode(
         }
     };
 
+    flush_prof!();
     RlEpisode {
         scenario: scenario_name.to_string(),
         outcome, reward, ticks: sim.tick,

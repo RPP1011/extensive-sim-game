@@ -30,9 +30,11 @@ use crossbeam_channel::{bounded, Sender, Receiver};
 const MAX_ENTITIES: usize = 20;
 const MAX_THREATS: usize = 6;
 const MAX_POSITIONS: usize = 8;
+const MAX_ZONES: usize = 10;
 const ENTITY_DIM: usize = 34;
 const THREAT_DIM: usize = 10;
 const POSITION_DIM: usize = 8;
+const ZONE_DIM: usize = 12;
 const MAX_ABILITIES: usize = 8;
 const NUM_COMBAT_TYPES: usize = 10;
 
@@ -54,10 +56,13 @@ pub struct InferenceRequest {
     pub entity_types: Vec<u8>,
     pub threats: Vec<Vec<f32>>,
     pub positions: Vec<Vec<f32>>,
+    pub zones: Vec<Vec<f32>>,
     pub combat_mask: Vec<bool>,
     pub ability_cls: Vec<Option<Vec<f32>>>,
     pub hidden_state: Vec<f32>,
     pub aggregate_features: Vec<f32>,
+    /// Corner tokens for spatial cross-attention (V6). Up to 8 corners × 11 features.
+    pub corner_tokens: Vec<Vec<f32>>,
 }
 
 #[derive(Clone, Debug)]
@@ -79,11 +84,21 @@ struct BatchItem {
 
 /// Opaque token for non-blocking inference. Returned by `submit()`, used with `try_recv()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct InferenceToken(u64);
+pub struct InferenceToken(pub u64);
 
 thread_local! {
     static PENDING: RefCell<HashMap<InferenceToken, Receiver<InferenceResult>>> =
         RefCell::new(HashMap::new());
+}
+
+/// Trait for GPU inference clients (both SHM and Burn).
+pub trait InferenceClient: Send + Sync {
+    fn infer(&self, request: InferenceRequest) -> Result<InferenceResult, String>;
+    fn submit(&self, request: InferenceRequest) -> Result<InferenceToken, String>;
+    fn try_recv(&self, token: InferenceToken) -> Result<Option<InferenceResult>, String>;
+    fn batch_epoch(&self) -> u64;
+    fn wait_for_batch(&self, since: u64);
+    fn h_dim(&self) -> usize;
 }
 
 pub struct GpuInferenceClient {
@@ -259,6 +274,15 @@ impl GpuInferenceClient {
     }
 }
 
+impl InferenceClient for GpuInferenceClient {
+    fn infer(&self, request: InferenceRequest) -> Result<InferenceResult, String> { self.infer(request) }
+    fn submit(&self, request: InferenceRequest) -> Result<InferenceToken, String> { self.submit(request) }
+    fn try_recv(&self, token: InferenceToken) -> Result<Option<InferenceResult>, String> { self.try_recv(token) }
+    fn batch_epoch(&self) -> u64 { self.batch_epoch() }
+    fn wait_for_batch(&self, since: u64) { self.wait_for_batch(since) }
+    fn h_dim(&self) -> usize { self.h_dim() }
+}
+
 struct BatcherThread {
     mmap: memmap2::MmapMut,
     request_rx: Receiver<BatchItem>,
@@ -390,9 +414,11 @@ fn serialize_sample(req: &InferenceRequest, cls_dim: usize, h_dim: usize, agg_di
     let ent_mask_padded = (MAX_ENTITIES + 3) & !3;
     let thr_mask_padded = (MAX_THREATS + 3) & !3;
     let pos_mask_padded = (MAX_POSITIONS + 3) & !3;
-    let sample_size = 8 + MAX_ENTITIES * ENTITY_DIM * 4 + MAX_ENTITIES * 4 + ent_mask_padded
+    let zone_mask_padded = (MAX_ZONES + 3) & !3;
+    let sample_size = 12 + MAX_ENTITIES * ENTITY_DIM * 4 + MAX_ENTITIES * 4 + ent_mask_padded
         + MAX_THREATS * THREAT_DIM * 4 + thr_mask_padded
         + MAX_POSITIONS * POSITION_DIM * 4 + pos_mask_padded
+        + MAX_ZONES * ZONE_DIM * 4 + zone_mask_padded
         + 12 + MAX_ABILITIES + MAX_ABILITIES * cls_dim * 4;
 
     let mut data = Vec::with_capacity(sample_size);
@@ -400,10 +426,13 @@ fn serialize_sample(req: &InferenceRequest, cls_dim: usize, h_dim: usize, agg_di
     let n_ent = req.entities.len().min(MAX_ENTITIES) as u16;
     let n_thr = req.threats.len().min(MAX_THREATS) as u16;
     let n_pos = req.positions.len().min(MAX_POSITIONS) as u16;
+    let n_zones = req.zones.len().min(MAX_ZONES) as u16;
     data.extend_from_slice(&n_ent.to_le_bytes());
     data.extend_from_slice(&n_thr.to_le_bytes());
     data.extend_from_slice(&n_pos.to_le_bytes());
-    data.extend_from_slice(&0u16.to_le_bytes());
+    data.extend_from_slice(&n_zones.to_le_bytes());
+    data.extend_from_slice(&0u16.to_le_bytes()); // padding
+    data.extend_from_slice(&0u16.to_le_bytes()); // pad to 12 bytes (4-byte aligned)
 
     for i in 0..MAX_ENTITIES {
         if i < req.entities.len() {
@@ -455,6 +484,24 @@ fn serialize_sample(req: &InferenceRequest, cls_dim: usize, h_dim: usize, agg_di
 
     for i in 0..pos_mask_padded {
         if i < MAX_POSITIONS { data.push(if i >= req.positions.len() { 1 } else { 0 }); }
+        else { data.push(1); }
+    }
+
+    // Zone features
+    for i in 0..MAX_ZONES {
+        if i < req.zones.len() {
+            for j in 0..ZONE_DIM {
+                let v = if j < req.zones[i].len() { req.zones[i][j] } else { 0.0 };
+                data.extend_from_slice(&v.to_le_bytes());
+            }
+        } else {
+            data.extend_from_slice(&[0u8; ZONE_DIM * 4]);
+        }
+    }
+
+    // Zone mask
+    for i in 0..zone_mask_padded {
+        if i < MAX_ZONES { data.push(if i >= req.zones.len() { 1 } else { 0 }); }
         else { data.push(1); }
     }
 

@@ -2,15 +2,35 @@
 
 ## Motivation
 
-The V6 model is ~12x larger than V4 (1.7M vs 134K params) with multiple new
-components (spatial cross-attention, latent interface, CfC temporal cell, aggregate
-token, wider entity/threat features). End-to-end RL from random initialization
-will not converge in reasonable time — the critic is random, advantages are noise,
-and policy gradients are meaningless.
+The V6 model is ~1.7M params with spatial cross-attention, latent interface, CfC
+temporal cell, aggregate token, and unified zone tokens.
 
-The curriculum pretrains **representations and the value function** bottom-up,
-then introduces RL on top of a stable foundation. The key principle: pretrain the
-critic first, because a calibrated value function stabilizes everything else.
+### Original plan: staged pretraining (ABANDONED)
+
+The original curriculum (stages 0a-0e below) proposed pretraining encoder, value
+head, CfC, latent interface, and combat pointer head separately before RL. In
+practice, pretraining didn't solve the curriculum's own Phase 1 despite hours of
+wall-clock time. The pretrained representations didn't transfer well to the RL
+objective.
+
+### Current plan: straight to RL, full unfreeze
+
+Skip all pretraining stages. Train end-to-end with IMPALA V-trace from random
+initialization. The only architectural regularization is **latent interface tail
+dropping** during training (randomly use 4-12 latents per forward pass), which
+forces the model to front-load important information into early latent slots.
+
+Everything is unfrozen from step 1. The zero-initialized output projections on
+spatial cross-attention and latent interface Write step provide implicit
+curriculum — those components start as identity passthrough and gradually learn
+to contribute, while the rest of the model can immediately learn basic behavior.
+
+---
+
+## Archived: Original Staged Curriculum
+
+> The stages below are retained for reference but are NOT the current training
+> plan. Skip to "Current Training Plan" below.
 
 ---
 
@@ -292,3 +312,94 @@ are fast supervised passes on the 4090 with no SHM/Rust overhead.
 | `training/model.py` | 0a-1e | Multi-task heads (attrition + survival), freeze/unfreeze API |
 | `training/validate_value.py` | Pre-RL | New: value-based action ranking evaluation |
 | `src/bin/xtask/oracle_cmd/` | 0a | Episode generation with configurable policy + difficulty |
+
+---
+
+## Current Training Plan: End-to-End IMPALA RL
+
+### Architecture
+
+All components unfrozen from the start. Zero-init output projections provide
+implicit warm-start:
+
+- **Spatial cross-attention:** starts as identity (zero out_proj). Entity tokens
+  pass through unchanged until the model discovers spatial signal is useful.
+- **Latent interface Write:** starts as identity (zero out_proj). Entity tokens
+  pass through unchanged; latent pooling starts from random Read attention.
+- **Everything else:** random initialization, standard training.
+
+### Regularization
+
+- **Latent tail dropping:** Each forward pass during training randomly samples
+  J from {4, 6, 8, 10, 12} latent tokens. Early latents get trained on every
+  batch; later latents only train when J is large. This forces the model to
+  front-load critical information and provides a natural compute-quality tradeoff
+  at inference time.
+- **No dropout** (following grokking literature — dropout prevents memorization
+  which is required for grokking to occur).
+- **AdamW λ=1.0** (strong weight decay, standard for grokking).
+
+### Hyperparameters
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Algorithm | IMPALA V-trace | Off-policy correction for sim lag |
+| LR | 5e-4 | LR ∝ 1/√d_model; d=128 → lower than d=32 |
+| Optimizer | AdamW | λ=1.0, β₂=0.98 |
+| Batch size | 512-1024 | Profile GPU utilization, increase if headroom |
+| Discount γ | 0.99 | |
+| V-trace clip ρ̄ | 1.0 | |
+| V-trace clip c̄ | 1.0 | |
+| Entropy coef | 0.01 | Encourage exploration |
+| Value coef | 0.5 | |
+| Grokfast EMA | α=0.98, λ=2.0 | Optional; helped in prior versions |
+| Grad clip | 1.0 | Max grad norm |
+| Tail drop J | {4, 6, 8, 10, 12} uniform | Latent interface only |
+| Inference latents | 12 (full) | No tail drop at inference |
+
+### Episode Generation
+
+Uses `--burn-v6` flag for in-process Burn/LibTorch GPU inference.
+No Python server, no SHM. Episodes written as NDJSON.
+
+```bash
+cargo run --release --features burn-gpu --bin xtask -- \
+    scenario oracle transformer-rl generate \
+    dataset/scenarios/hvh \
+    --burn-v6 \
+    --burn-checkpoint generated/v6_latest.bin \
+    --episodes 2 --threads 32 --sims-per-thread 64 \
+    --output generated/v6_episodes.jsonl
+```
+
+### Training Loop
+
+```
+for iteration in 1..N:
+    1. Generate episodes (Rust sim + Burn V6 inference)
+    2. Load episodes from NDJSON
+    3. Compute V-trace targets and advantages per trajectory
+    4. Train on minibatches (all params unfrozen, tail dropping active)
+    5. Save Burn checkpoint
+    6. Evaluate periodically (greedy policy, no exploration)
+```
+
+### Monitoring
+
+| Signal | Action |
+|--------|--------|
+| Win rate not improving after 10 iterations | Check reward shaping, verify spatial features are non-zero |
+| Value loss diverging | Reduce LR by 2x |
+| Entropy collapsing to 0 | Increase entropy coefficient |
+| Spatial cross-attn weights flat/uniform | Spatial signal may not be useful for current scenarios — acceptable |
+| Latent Read attention uniform | Increase n_latent_blocks or K |
+
+### Implementation
+
+| File | Purpose |
+|------|---------|
+| `src/ai/core/burn_model/actor_critic_v6.rs` | Model definition (Burn, generic over backend) |
+| `src/ai/core/burn_model/inference_v6.rs` | GPU inference client (LibTorch backend) |
+| `src/ai/core/burn_model/checkpoint.rs` | Save/load via BinFileRecorder |
+| `src/bin/xtask/oracle_cmd/rl_generate.rs` | Episode generation CLI (`--burn-v6`) |
+| `training/impala_learner_v6.py` | Training loop (Python, or migrate to Rust) |

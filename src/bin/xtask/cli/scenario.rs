@@ -246,6 +246,63 @@ pub struct TransformerRlArgs {
 pub enum TransformerRlSubcommand {
     Generate(TransformerRlGenerateArgs),
     Eval(TransformerRlEvalArgs),
+    /// Run IMPALA V-trace training loop using Burn V6 model (in-process, no SHM)
+    ImpalaTrain(ImpalaTrainArgs),
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "IMPALA V-trace training with Burn V6 (in-process GPU inference + autodiff)")]
+pub struct ImpalaTrainArgs {
+    /// Path(s) to scenario .toml file(s) or directory(ies)
+    pub path: Vec<PathBuf>,
+    /// Output directory for checkpoints and logs
+    #[arg(long, default_value = "generated/impala_v6")]
+    pub output_dir: PathBuf,
+    /// Path to embedding registry JSON
+    #[arg(long)]
+    pub embedding_registry: Option<PathBuf>,
+    /// Resume from Burn checkpoint
+    #[arg(long)]
+    pub checkpoint: Option<PathBuf>,
+    /// Number of training iterations
+    #[arg(long, default_value_t = 100)]
+    pub iters: usize,
+    /// Episodes per scenario per iteration
+    #[arg(long, default_value_t = 2)]
+    pub episodes: usize,
+    /// Threads for episode generation
+    #[arg(long, default_value_t = 32)]
+    pub threads: usize,
+    /// Sims per thread during episode generation
+    #[arg(long, default_value_t = 64)]
+    pub sims_per_thread: usize,
+    /// Training batch size
+    #[arg(long, default_value_t = 512)]
+    pub batch_size: usize,
+    /// Training steps per iteration
+    #[arg(long, default_value_t = 50)]
+    pub train_steps: usize,
+    /// Learning rate
+    #[arg(long, default_value_t = 5e-4)]
+    pub lr: f64,
+    /// Exploration temperature for episode generation
+    #[arg(long, default_value_t = 1.0)]
+    pub temperature: f32,
+    /// Step interval for recording (every N ticks)
+    #[arg(long, default_value_t = 3)]
+    pub step_interval: u64,
+    /// Entropy coefficient
+    #[arg(long, default_value_t = 0.01)]
+    pub entropy_coef: f32,
+    /// Value loss coefficient
+    #[arg(long, default_value_t = 0.5)]
+    pub value_coef: f32,
+    /// Enable Grokfast EMA gradient filter
+    #[arg(long)]
+    pub grokfast: bool,
+    /// Self-play: also run GPU inference for enemy units
+    #[arg(long)]
+    pub self_play: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -307,6 +364,15 @@ pub struct TransformerRlGenerateArgs {
     /// Use purely random actions (no model inference) for baseline measurement
     #[arg(long)]
     pub random_policy: bool,
+    /// Use Burn in-process GPU inference — V5 model (no SHM, no Python server)
+    #[arg(long)]
+    pub burn: bool,
+    /// Use Burn in-process GPU inference — V6 model (spatial cross-attn + latent interface)
+    #[arg(long)]
+    pub burn_v6: bool,
+    /// Path to Burn checkpoint file to load weights from (for --burn or --burn-v6)
+    #[arg(long)]
+    pub burn_checkpoint: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Parser)]

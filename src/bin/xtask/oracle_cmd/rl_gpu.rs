@@ -7,28 +7,28 @@ use super::transformer_rl::{
     apply_action_mask, apply_behavior_overrides,
     MAX_ABILITIES,
 };
-use super::rl_gpu_sim::{ActiveSim, PendingUnit, SimPhase, HeroPreStepState, make_active_sim};
+use super::rl_gpu_sim::{ActiveSim, PendingUnit, SimPhase, HeroPreStepState, active_sim_from_precomputed};
 
 static DUMMY_ATOMIC: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl ActiveSim {
     pub(crate) fn prepare_and_submit(
         &mut self,
-        gpu: &bevy_game::ai::core::ability_transformer::gpu_client::GpuInferenceClient,
+        gpu: &dyn bevy_game::ai::core::ability_transformer::gpu_client::InferenceClient,
     ) -> Result<(), String> {
         self.prepare_and_submit_profiled(gpu, &DUMMY_ATOMIC, &DUMMY_ATOMIC, &DUMMY_ATOMIC, &DUMMY_ATOMIC)
     }
 
     pub(crate) fn prepare_and_submit_profiled(
         &mut self,
-        gpu: &bevy_game::ai::core::ability_transformer::gpu_client::GpuInferenceClient,
+        gpu: &dyn bevy_game::ai::core::ability_transformer::gpu_client::InferenceClient,
         p_intent: &std::sync::atomic::AtomicU64,
         p_extract: &std::sync::atomic::AtomicU64,
         p_submit: &std::sync::atomic::AtomicU64,
         p_serialize: &std::sync::atomic::AtomicU64,
     ) -> Result<(), String> {
         use bevy_game::ai::core::{is_alive, FIXED_TICK_MS};
-        use bevy_game::ai::core::ability_eval::extract_game_state_v2;
+        use bevy_game::ai::core::ability_eval::{extract_game_state_v2, extract_game_state_v2_with_objectives, extract_game_state_v2_cached, extract_game_state_v2_cached_spatial, ExtractionCache, ZoneObjective};
         use bevy_game::ai::core::self_play::actions::action_mask;
         use bevy_game::ai::core::ability_transformer::gpu_client::InferenceRequest;
         use bevy_game::ai::squad::generate_intents;
@@ -38,6 +38,9 @@ impl ActiveSim {
         self.intents = generate_intents(&self.sim, &mut self.squad_ai, FIXED_TICK_MS);
         apply_behavior_overrides(&mut self.intents, &self.behavior_trees, &self.sim, self.tick);
         p_intent.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+
+        // Build extraction cache once per tick (shared across all hero extractions)
+        let extraction_cache = ExtractionCache::build(&self.sim);
 
         let record = self.tick % self.step_interval == 0;
         let step_r = if record {
@@ -79,7 +82,15 @@ impl ActiveSim {
             let t_ext = std::time::Instant::now();
             let mask_arr = action_mask(&self.sim, uid);
             let mask_vec: Vec<bool> = mask_arr.to_vec();
-            let gs_v2 = extract_game_state_v2(&self.sim, unit);
+            let objectives: Vec<ZoneObjective> = if let Some(pos) = self.drill_target_position {
+                vec![ZoneObjective { position: pos, radius: self.drill_target_radius.unwrap_or(1.0) }]
+            } else {
+                Vec::new()
+            };
+            let gs_v2 = extract_game_state_v2_cached_spatial(
+                &self.sim, unit, &extraction_cache, &objectives,
+                self.visibility_map.as_ref(), self.sim.grid_nav.as_ref(),
+            );
             let n_abilities = unit.abilities.len().min(MAX_ABILITIES);
             p_extract.fetch_add(t_ext.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
@@ -116,11 +127,22 @@ impl ActiveSim {
                     })
                 { agg[14] = (nearest.position.x - unit.position.x) / 20.0; agg[15] = (nearest.position.y - unit.position.y) / 20.0; }
             }
+            // Extract corner tokens from visibility map (V6 spatial cross-attention)
+            let corner_tokens: Vec<Vec<f32>> = match (&self.visibility_map, &self.sim.grid_nav) {
+                (Some(vis), Some(nav)) => vis
+                    .spatial_tokens_for_unit(nav, unit.position, 8)
+                    .into_iter()
+                    .map(|tok| tok.to_vec())
+                    .collect(),
+                _ => Vec::new(),
+            };
             let req = InferenceRequest {
                 entities: gs_v2.entities.clone(), entity_types: gs_v2.entity_types.clone(),
                 threats: gs_v2.threats.clone(), positions: gs_v2.positions.clone(),
+                zones: gs_v2.zones.clone(),
                 combat_mask: combat_mask_vec, ability_cls: ability_cls_for_req,
                 hidden_state: hidden, aggregate_features: agg,
+                corner_tokens,
             };
             p_serialize.fetch_add(t_ser.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
@@ -158,11 +180,21 @@ impl ActiveSim {
                         } else { None }
                     }).collect();
                 let hidden = self.hidden_states.get(&uid).cloned().unwrap_or_default();
+                let corner_tokens: Vec<Vec<f32>> = match (&self.visibility_map, &self.sim.grid_nav) {
+                    (Some(vis), Some(nav)) => vis
+                        .spatial_tokens_for_unit(nav, unit.position, 8)
+                        .into_iter()
+                        .map(|tok| tok.to_vec())
+                        .collect(),
+                    _ => Vec::new(),
+                };
                 let req = InferenceRequest {
                     entities: gs_v2.entities.clone(), entity_types: gs_v2.entity_types.clone(),
                     threats: gs_v2.threats.clone(), positions: gs_v2.positions.clone(),
+                    zones: gs_v2.zones.clone(),
                     combat_mask: combat_mask_vec, ability_cls: ability_cls_for_req,
                     hidden_state: hidden, aggregate_features: gs_v2.aggregate_features.clone(),
+                    corner_tokens,
                 };
                 if let Ok(token) = gpu.submit(req) {
                     self.pending_units.push(PendingUnit {
@@ -180,7 +212,7 @@ impl ActiveSim {
 
     pub(crate) fn poll_gpu(
         &mut self,
-        gpu: &bevy_game::ai::core::ability_transformer::gpu_client::GpuInferenceClient,
+        gpu: &dyn bevy_game::ai::core::ability_transformer::gpu_client::InferenceClient,
     ) -> Result<bool, String> {
         use bevy_game::ai::core::UnitIntent;
         use bevy_game::ai::core::ability_eval::extract_game_state;
@@ -248,12 +280,13 @@ impl ActiveSim {
                                 entity_types: Some(pu.gs_v2.entity_types.clone()),
                                 threats: Some(pu.gs_v2.threats.clone()),
                                 positions: Some(pu.gs_v2.positions.clone()),
+                                zones: Some(pu.gs_v2.zones.clone()),
                                 action_type: Some(combat_type), target_idx: Some(target_idx),
                                 move_dir: Some(move_dir), combat_type: Some(combat_type),
                                 lp_move: Some(result.lp_move), lp_combat: Some(result.lp_combat),
                                 lp_pointer: Some(result.lp_pointer),
                                 aggregate_features: if agg.is_empty() { None } else { Some(agg) },
-                                target_move_pos: None,
+                                target_move_pos: Some([result.move_dx, result.move_dy]),
                                 teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
                             });
                             self.steps_recorded_this_tick.push(step_idx);
@@ -312,14 +345,11 @@ impl ActiveSim {
 
 /// Run GPU-multiplexed episode generation.
 pub(crate) fn run_gpu_multiplexed(
-    gpu: &std::sync::Arc<bevy_game::ai::core::ability_transformer::gpu_client::GpuInferenceClient>,
-    scenarios: &[bevy_game::scenario::ScenarioFile],
+    gpu: &std::sync::Arc<dyn bevy_game::ai::core::ability_transformer::gpu_client::InferenceClient>,
+    precomputed: std::sync::Arc<Vec<super::rl_gpu_sim::PrecomputedScenario>>,
     episode_tasks: &[(usize, usize)],
     threads: usize, sims_per_thread: usize,
-    tokenizer: &bevy_game::ai::core::ability_transformer::tokenizer::AbilityTokenizer,
     temperature: f32, step_interval: u64,
-    max_ticks_override: Option<u64>,
-    registry: Option<&bevy_game::ai::core::ability_transformer::EmbeddingRegistry>,
     self_play_gpu: bool,
 ) -> Vec<RlEpisode> {
     use crossbeam_channel::{bounded, Sender, Receiver};
@@ -331,7 +361,8 @@ pub(crate) fn run_gpu_multiplexed(
 
     let results: std::sync::Arc<std::sync::Mutex<Vec<RlEpisode>>> =
         std::sync::Arc::new(std::sync::Mutex::new(Vec::with_capacity(episode_tasks.len())));
-    let scenarios_arc = std::sync::Arc::new(scenarios.to_vec());
+
+    let precomputed_arc = precomputed;
 
     let prof_intent_ns = std::sync::Arc::new(AtomicU64::new(0));
     let prof_extract_ns = std::sync::Arc::new(AtomicU64::new(0));
@@ -348,10 +379,7 @@ pub(crate) fn run_gpu_multiplexed(
         let gpu = gpu.clone();
         let task_rx = task_rx.clone();
         let results = results.clone();
-        let scenarios = scenarios_arc.clone();
-        let tok = tokenizer.clone();
-        let reg_data: Option<std::sync::Arc<bevy_game::ai::core::ability_transformer::EmbeddingRegistry>> =
-            registry.map(|r| std::sync::Arc::new(r.clone()));
+        let pre_arc = precomputed_arc.clone();
         let p_intent = prof_intent_ns.clone();
         let p_extract = prof_extract_ns.clone();
         let p_submit = prof_submit_ns.clone();
@@ -364,15 +392,13 @@ pub(crate) fn run_gpu_multiplexed(
         let p_serialize = prof_serialize_ns.clone();
 
         std::thread::spawn(move || {
-            let reg_ref = reg_data.as_deref();
             let mut active: Vec<ActiveSim> = Vec::with_capacity(sims_per_thread);
             while active.len() < sims_per_thread {
                 match task_rx.try_recv() {
                     Ok((si, ei)) => {
                         let t0 = std::time::Instant::now();
-                        if let Some(asim) = make_active_sim(&scenarios[si], si, ei, max_ticks_override, temperature, step_interval, &tok, reg_ref, self_play_gpu) {
-                            active.push(asim);
-                        }
+                        let asim = active_sim_from_precomputed(&pre_arc[si], si, ei, step_interval, temperature, self_play_gpu);
+                        active.push(asim);
                         p_make_sim.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
                     }
                     Err(_) => break,
@@ -385,14 +411,14 @@ pub(crate) fn run_gpu_multiplexed(
                         SimPhase::NeedsTick => {
                             if asim.is_done() { completed_indices.push(i); continue; }
                             p_ticks.fetch_add(1, Ordering::Relaxed);
-                            if let Err(e) = asim.prepare_and_submit_profiled(&gpu, &p_intent, &p_extract, &p_submit, &p_serialize) {
+                            if let Err(e) = asim.prepare_and_submit_profiled(&*gpu, &p_intent, &p_extract, &p_submit, &p_serialize) {
                                 eprintln!("GPU submit error: {e}"); completed_indices.push(i);
                             }
                         }
                         SimPhase::WaitingGpu => {
                             let t0 = std::time::Instant::now();
                             p_polls.fetch_add(1, Ordering::Relaxed);
-                            match asim.poll_gpu(&gpu) {
+                            match asim.poll_gpu(&*gpu) {
                                 Ok(true) => { p_poll.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed); if asim.is_done() { completed_indices.push(i); } }
                                 Ok(false) => { p_poll_misses.fetch_add(1, Ordering::Relaxed); p_gpu_wait.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed); }
                                 Err(e) => { eprintln!("GPU poll error: {e}"); completed_indices.push(i); }
@@ -408,7 +434,8 @@ pub(crate) fn run_gpu_multiplexed(
                     match task_rx.try_recv() {
                         Ok((si, ei)) => {
                             let t0 = std::time::Instant::now();
-                            if let Some(asim) = make_active_sim(&scenarios[si], si, ei, max_ticks_override, temperature, step_interval, &tok, reg_ref, self_play_gpu) { active.push(asim); }
+                            let asim = active_sim_from_precomputed(&pre_arc[si], si, ei, step_interval, temperature, self_play_gpu);
+                            active.push(asim);
                             p_make_sim.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
                         }
                         Err(_) => break,

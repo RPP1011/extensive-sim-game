@@ -48,6 +48,67 @@ pub(crate) fn run_generate(args: crate::cli::TransformerRlGenerateArgs) -> ExitC
 
     let policy = if args.random_policy {
         Policy::Random
+    } else if args.burn_v6 {
+        #[cfg(not(feature = "burn-gpu"))]
+        {
+            eprintln!("--burn-v6 requires building with --features burn-gpu");
+            return ExitCode::from(1);
+        }
+        #[cfg(feature = "burn-gpu")]
+        {
+            use bevy_game::ai::core::burn_model::{ActorCriticV6Config, inference_v6::BurnInferenceClientV6, checkpoint};
+            use burn::backend::libtorch::LibTorchDevice;
+            let device = LibTorchDevice::Cuda(0);
+            let config = ActorCriticV6Config {
+                vocab_size: 256,
+                d_model: 128,
+                d_ff: 256,
+                n_heads: 8,
+                n_layers: 4,
+                entity_encoder_layers: 4,
+                external_cls_dim: 0,
+                h_dim: 256,
+                n_latents: 12,
+                n_latent_blocks: 2,
+            };
+            let model = if let Some(ref ckpt_path) = args.burn_checkpoint {
+                match checkpoint::load_v6::<burn::backend::LibTorch>(&config, ckpt_path, &device) {
+                    Ok(m) => { eprintln!("Loaded V6 checkpoint: {}", ckpt_path.display()); m }
+                    Err(e) => { eprintln!("Failed to load V6 checkpoint: {e}"); return ExitCode::from(1); }
+                }
+            } else {
+                config.init::<burn::backend::LibTorch>(&device)
+            };
+            let client = BurnInferenceClientV6::new(model, device, 1024, 1);
+            eprintln!("Burn V6 GPU inference: d=128, h=256, K=12, device=CUDA:0");
+            Policy::BurnServerV6(client)
+        }
+    } else if args.burn {
+        #[cfg(not(feature = "burn-gpu"))]
+        {
+            eprintln!("--burn requires building with --features burn-gpu");
+            return ExitCode::from(1);
+        }
+        #[cfg(feature = "burn-gpu")]
+        {
+            use bevy_game::ai::core::burn_model::{ActorCriticV5Config, inference::BurnInferenceClient};
+            use burn::backend::libtorch::LibTorchDevice;
+            let device = LibTorchDevice::Cuda(0);
+            let model = ActorCriticV5Config {
+                vocab_size: 256,
+                d_model: 128,
+                d_ff: 256,
+                n_heads: 8,
+                n_layers: 4,
+                entity_encoder_layers: 4,
+                external_cls_dim: 0,
+                h_dim: 64,
+            }
+            .init::<burn::backend::LibTorch>(&device);
+            let client = BurnInferenceClient::new(model, device, 1024, 1);
+            eprintln!("Burn GPU inference: d=128, h=64, device=CUDA:0");
+            Policy::BurnServer(client)
+        }
     } else if let Some(ref shm_path) = args.gpu_shm {
         use bevy_game::ai::core::ability_transformer::gpu_client::GpuInferenceClient;
         match GpuInferenceClient::new(shm_path, 1024, 1) {
@@ -73,11 +134,17 @@ pub(crate) fn run_generate(args: crate::cli::TransformerRlGenerateArgs) -> ExitC
         Policy::ActorCriticV4(_) => "actor-critic-v4 (dual-head)",
         Policy::ActorCriticV5(_) => "actor-critic-v5 (d=128, aggregate)",
         Policy::GpuServer(_) => "gpu-server (dual-head)",
+        #[cfg(feature = "burn-gpu")]
+        Policy::BurnServer(_) => "burn-gpu-v5 (in-process)",
+        #[cfg(feature = "burn-gpu")]
+        Policy::BurnServerV6(_) => "burn-gpu-v6 (spatial+latent)",
         Policy::Legacy(_) => "legacy (bootstrap)",
         Policy::Combined => "combined (ability-eval + squad AI)",
         Policy::Random => "random",
     };
-    let is_v3 = matches!(&policy, Policy::ActorCriticV3(_) | Policy::ActorCriticV4(_) | Policy::ActorCriticV5(_) | Policy::GpuServer(_));
+    let mut is_v3 = matches!(&policy, Policy::ActorCriticV3(_) | Policy::ActorCriticV4(_) | Policy::ActorCriticV5(_) | Policy::GpuServer(_));
+    #[cfg(feature = "burn-gpu")]
+    { is_v3 = is_v3 || matches!(&policy, Policy::BurnServer(_) | Policy::BurnServerV6(_)); }
 
     let tokenizer = AbilityTokenizer::new();
 
@@ -182,23 +249,46 @@ pub(crate) fn run_generate(args: crate::cli::TransformerRlGenerateArgs) -> ExitC
         .flat_map(|(si, _)| (0..args.episodes as usize).map(move |ei| (si, ei)))
         .collect();
 
-    // Use multiplexed GPU path when sims_per_thread > 1 and policy is GpuServer
-    let episodes: Vec<RlEpisode> = if args.sims_per_thread > 1 {
+    // Precompute all scenarios once (parse DSL, generate rooms, tokenize abilities)
+    let precompute_t0 = std::time::Instant::now();
+    let precomputed = std::sync::Arc::new(super::rl_gpu_sim::precompute_scenarios(
+        &scenarios, max_ticks_override, tokenizer_ref, registry_ref,
+    ));
+    eprintln!("Precomputed {} scenarios in {:.1}s",
+        precomputed.len(), precompute_t0.elapsed().as_secs_f64());
+
+    // Use multiplexed GPU path when sims_per_thread > 1 and policy is GPU-backed
+    let gpu_client: Option<std::sync::Arc<dyn bevy_game::ai::core::ability_transformer::gpu_client::InferenceClient>> = {
+        #[allow(unused_mut)]
+        let mut client = None;
         if let Policy::GpuServer(ref gpu) = policy {
+            client = Some(gpu.clone() as std::sync::Arc<dyn bevy_game::ai::core::ability_transformer::gpu_client::InferenceClient>);
+        }
+        #[cfg(feature = "burn-gpu")]
+        if let Policy::BurnServer(ref burn) = policy {
+            client = Some(burn.clone() as std::sync::Arc<dyn bevy_game::ai::core::ability_transformer::gpu_client::InferenceClient>);
+        }
+        #[cfg(feature = "burn-gpu")]
+        if let Policy::BurnServerV6(ref burn) = policy {
+            client = Some(burn.clone() as std::sync::Arc<dyn bevy_game::ai::core::ability_transformer::gpu_client::InferenceClient>);
+        }
+        client
+    };
+    let episodes: Vec<RlEpisode> = if args.sims_per_thread > 1 {
+        if let Some(ref client) = gpu_client {
             eprintln!("GPU multiplexed: {} threads x {} sims/thread", threads, args.sims_per_thread);
             run_gpu_multiplexed(
-                gpu, &scenarios, &episode_tasks,
+                client, precomputed.clone(), &episode_tasks,
                 threads, args.sims_per_thread,
-                tokenizer_ref, temperature, step_interval,
-                max_ticks_override, registry_ref,
+                temperature, step_interval,
                 args.self_play_gpu,
             )
         } else {
-            eprintln!("Warning: --sims-per-thread > 1 only works with --gpu-shm, falling back to par_iter");
+            eprintln!("Warning: --sims-per-thread > 1 only works with GPU policy, falling back to par_iter");
             pool.install(|| {
                 episode_tasks.par_iter().map(|&(si, ei)| {
                     run_single_episode(
-                        &scenarios[si], si, ei, max_ticks_override, is_v3,
+                        &precomputed[si], si, ei, is_v3,
                         policy_ref, tokenizer_ref, temperature, step_interval,
                         student_ref, ability_eval_ref, registry_ref,
                         enemy_policy_ref, enemy_registry_ref,
@@ -207,17 +297,37 @@ pub(crate) fn run_generate(args: crate::cli::TransformerRlGenerateArgs) -> ExitC
             })
         }
     } else {
-        pool.install(|| {
+        let ep_t0 = std::time::Instant::now();
+        let result = pool.install(|| {
             episode_tasks.par_iter().map(|&(si, ei)| {
                 run_single_episode(
-                    &scenarios[si], si, ei, max_ticks_override, is_v3,
+                    &precomputed[si], si, ei, is_v3,
                     policy_ref, tokenizer_ref, temperature, step_interval,
                     student_ref, ability_eval_ref, registry_ref,
                     enemy_policy_ref, enemy_registry_ref,
                 )
             }).collect()
-        })
+        });
+        eprintln!("Episode generation: {:.1}s ({} threads)",
+            ep_t0.elapsed().as_secs_f64(), threads);
+        result
     };
+
+    // Print per-function profiling
+    {
+        use super::rl_episode::*;
+        use std::sync::atomic::Ordering;
+        let ticks = PROF_TICKS.load(Ordering::Relaxed).max(1);
+        let ms = |v: &std::sync::atomic::AtomicU64| v.load(Ordering::Relaxed) as f64 / 1e6;
+        let total = ms(&PROF_INTENTS_NS) + ms(&PROF_POLICY_NS) + ms(&PROF_STEP_NS) + ms(&PROF_TERRAIN_NS);
+        eprintln!("\n--- Episode Profiling ({ticks} ticks, {threads} threads) ---");
+        eprintln!("  intents:   {:>8.1}ms ({:.1}%)", ms(&PROF_INTENTS_NS), ms(&PROF_INTENTS_NS) / total * 100.0);
+        eprintln!("  policy:    {:>8.1}ms ({:.1}%)", ms(&PROF_POLICY_NS), ms(&PROF_POLICY_NS) / total * 100.0);
+        eprintln!("  step:      {:>8.1}ms ({:.1}%)", ms(&PROF_STEP_NS), ms(&PROF_STEP_NS) / total * 100.0);
+        eprintln!("  terrain:   {:>8.1}ms ({:.1}%)", ms(&PROF_TERRAIN_NS), ms(&PROF_TERRAIN_NS) / total * 100.0);
+        eprintln!("  total:     {:>8.1}ms (sum of thread-time)", total);
+        eprintln!("-----------------------------------------------");
+    }
 
     let wins = episodes.iter().filter(|e| e.outcome == "Victory").count();
     let losses = episodes.iter().filter(|e| e.outcome == "Defeat").count();

@@ -45,6 +45,8 @@ pub struct RlStep {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub positions: Option<Vec<Vec<f32>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zones: Option<Vec<Vec<f32>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action_type: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_idx: Option<usize>,
@@ -80,7 +82,7 @@ impl RlStep {
     ) -> Self {
         Self {
             tick, unit_id, game_state, action, log_prob, mask, step_reward,
-            entities: None, entity_types: None, threats: None, positions: None,
+            entities: None, entity_types: None, threats: None, positions: None, zones: None,
             action_type: None, target_idx: None, move_dir: None, combat_type: None,
             lp_move: None, lp_combat: None, lp_pointer: None,
             aggregate_features: None,
@@ -172,8 +174,14 @@ pub(crate) enum Policy {
     ActorCriticV3(bevy_game::ai::core::ability_transformer::ActorCriticWeightsV3),
     ActorCriticV4(bevy_game::ai::core::ability_transformer::ActorCriticWeightsV4),
     ActorCriticV5(bevy_game::ai::core::ability_transformer::ActorCriticWeightsV5),
-    /// GPU inference via TCP.
+    /// GPU inference via SHM (legacy).
     GpuServer(std::sync::Arc<bevy_game::ai::core::ability_transformer::gpu_client::GpuInferenceClient>),
+    /// GPU inference via Burn/LibTorch (in-process, no SHM) — V5 model.
+    #[cfg(feature = "burn-gpu")]
+    BurnServer(std::sync::Arc<bevy_game::ai::core::burn_model::inference::BurnInferenceClient>),
+    /// GPU inference via Burn/LibTorch — V6 model (spatial cross-attn + latent interface).
+    #[cfg(feature = "burn-gpu")]
+    BurnServerV6(std::sync::Arc<bevy_game::ai::core::burn_model::inference_v6::BurnInferenceClientV6>),
     Legacy(bevy_game::ai::core::ability_transformer::AbilityTransformerWeights),
     /// Uses existing squad AI -- no transformer.
     Combined,
@@ -213,10 +221,14 @@ impl Policy {
             Policy::ActorCriticV5(ac) => ac.encode_cls(token_ids),
             Policy::Legacy(tw) => tw.encode_cls(token_ids),
             Policy::GpuServer(_) | Policy::Combined | Policy::Random => Vec::new(),
+            #[cfg(feature = "burn-gpu")]
+            Policy::BurnServer(_) | Policy::BurnServerV6(_) => Vec::new(),
         }
     }
 
     pub(crate) fn needs_transformer(&self) -> bool {
+        #[cfg(feature = "burn-gpu")]
+        if matches!(self, Policy::BurnServer(_) | Policy::BurnServerV6(_)) { return false; }
         !matches!(self, Policy::Combined | Policy::GpuServer(_) | Policy::Random)
     }
 
@@ -311,6 +323,7 @@ pub fn run_transformer_rl(args: crate::cli::TransformerRlArgs) -> ExitCode {
     match args.sub {
         crate::cli::TransformerRlSubcommand::Generate(gen_args) => super::rl_generate::run_generate(gen_args),
         crate::cli::TransformerRlSubcommand::Eval(eval_args) => super::rl_eval::run_eval(eval_args),
+        crate::cli::TransformerRlSubcommand::ImpalaTrain(train_args) => super::impala_train::run_impala_train(train_args),
     }
 }
 

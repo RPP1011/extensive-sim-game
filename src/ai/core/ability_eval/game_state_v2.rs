@@ -8,6 +8,8 @@ use super::game_state::{
 };
 use super::game_state_threats::extract_threats_v2;
 use super::game_state_positions::extract_position_tokens;
+use super::game_state_zones::{extract_zone_tokens, ZoneObjective};
+use super::extraction_cache::ExtractionCache;
 
 use serde::{Serialize, Deserialize};
 
@@ -30,6 +32,10 @@ pub struct GameStateV2 {
     /// Areas of interest: cover spots, elevated positions, safe retreats, attack positions.
     #[serde(default)]
     pub positions: Vec<Vec<f32>>,
+    /// Unified zone tokens (ZONE_DIM=12 each, max 10).
+    /// Replaces threats + positions for V5+ models.
+    #[serde(default)]
+    pub zones: Vec<Vec<f32>>,
     /// Aggregate features summarizing entities that didn't get individual slots (16 floats).
     #[serde(default)]
     pub aggregate_features: Vec<f32>,
@@ -252,7 +258,7 @@ pub fn compute_aggregate_features(
 /// All living enemies and allies are included (no cap).
 /// Threats from projectiles, zones, and enemy casts are appended.
 pub fn extract_game_state_v2(state: &SimState, unit: &UnitState) -> GameStateV2 {
-    extract_game_state_v2_inner(state, unit, None, None)
+    extract_game_state_v2_inner(state, unit, None, None, &[])
 }
 
 /// Extract game state v2 with spatial summary features (34-dim entities).
@@ -265,7 +271,86 @@ pub fn extract_game_state_v2_spatial(
     vis_map: &VisibilityMap,
     nav: &GridNav,
 ) -> GameStateV2 {
-    extract_game_state_v2_inner(state, unit, Some(vis_map), Some(nav))
+    extract_game_state_v2_inner(state, unit, Some(vis_map), Some(nav), &[])
+}
+
+/// Extract game state v2 with objectives for unified zone tokens.
+pub fn extract_game_state_v2_with_objectives(
+    state: &SimState,
+    unit: &UnitState,
+    vis_map: Option<&VisibilityMap>,
+    nav: Option<&GridNav>,
+    objectives: &[ZoneObjective],
+) -> GameStateV2 {
+    extract_game_state_v2_inner(state, unit, vis_map, nav, objectives)
+}
+
+/// Extract game state using a per-tick cache. Avoids recomputing
+/// `summarize_abilities()` and entity scoring for each hero.
+///
+/// When `vis_map` and `nav` are provided, entity features are 34-dim
+/// (30 base + 4 spatial summary). Otherwise, spatial features are zero-filled.
+pub fn extract_game_state_v2_cached(
+    state: &SimState,
+    unit: &UnitState,
+    cache: &ExtractionCache,
+    objectives: &[ZoneObjective],
+) -> GameStateV2 {
+    extract_game_state_v2_cached_spatial(state, unit, cache, objectives, None, None)
+}
+
+/// Extract game state with spatial summary features from VisibilityMap.
+pub fn extract_game_state_v2_cached_spatial(
+    state: &SimState,
+    unit: &UnitState,
+    cache: &ExtractionCache,
+    objectives: &[ZoneObjective],
+    vis_map: Option<&VisibilityMap>,
+    nav: Option<&GridNav>,
+) -> GameStateV2 {
+    let max_other_slots = MAX_ENEMIES + MAX_ALLIES;
+    let selected_ids = cache.select_entity_slots(unit, max_other_slots);
+
+    let mut entities: Vec<Vec<f32>> = Vec::new();
+    let mut entity_types: Vec<u8> = Vec::new();
+
+    let entity_feats = |state: &SimState, caster: &UnitState, u: &UnitState, is_self: bool| -> Vec<f32> {
+        match (vis_map, nav) {
+            (Some(vm), Some(n)) => rich_entity_features_spatial(state, caster, u, is_self, vm, n).to_vec(),
+            _ => rich_entity_features(state, caster, u, is_self).to_vec(),
+        }
+    };
+
+    // Self entity
+    entities.push(entity_feats(state, unit, unit, true));
+    entity_types.push(0);
+
+    // Selected enemies
+    for &sid in &selected_ids {
+        if let Some(u) = state.units.iter().find(|u| u.id == sid && is_alive(u)) {
+            if u.team != unit.team {
+                entities.push(entity_feats(state, unit, u, false));
+                entity_types.push(1);
+            }
+        }
+    }
+
+    // Selected allies
+    for &sid in &selected_ids {
+        if let Some(u) = state.units.iter().find(|u| u.id == sid && is_alive(u)) {
+            if u.team == unit.team {
+                entities.push(entity_feats(state, unit, u, false));
+                entity_types.push(2);
+            }
+        }
+    }
+
+    let threats = extract_threats_v2(state, unit);
+    let positions = Vec::new(); // Skip position tokens in cached path (zones replace them)
+    let zones = extract_zone_tokens(state, unit, objectives);
+    let aggregate_features = compute_aggregate_features(state, unit, &selected_ids);
+
+    GameStateV2 { entities, entity_types, threats, positions, zones, aggregate_features }
 }
 
 fn extract_game_state_v2_inner(
@@ -273,6 +358,7 @@ fn extract_game_state_v2_inner(
     unit: &UnitState,
     vis_map: Option<&VisibilityMap>,
     nav: Option<&GridNav>,
+    objectives: &[ZoneObjective],
 ) -> GameStateV2 {
     // Use importance-based slot selection (exclude self slot from budget)
     let max_other_slots = MAX_ENEMIES + MAX_ALLIES; // 6 slots for non-self entities
@@ -318,10 +404,13 @@ fn extract_game_state_v2_inner(
     // Position tokens (areas of interest)
     let positions = extract_position_tokens(state, unit);
 
+    // Unified zone tokens (threats + opportunities + objectives + cover)
+    let zones = extract_zone_tokens(state, unit, objectives);
+
     // Aggregate features for truncated entities
     let aggregate_features = compute_aggregate_features(state, unit, &selected_ids);
 
-    GameStateV2 { entities, entity_types, threats, positions, aggregate_features }
+    GameStateV2 { entities, entity_types, threats, positions, zones, aggregate_features }
 }
 
 // ---------------------------------------------------------------------------
@@ -340,6 +429,9 @@ pub struct OutcomeSampleV2 {
     /// Per-position feature vectors (8-dim each), variable length.
     #[serde(default)]
     pub positions: Vec<Vec<f32>>,
+    /// Unified zone tokens (12-dim each), variable length.
+    #[serde(default)]
+    pub zones: Vec<Vec<f32>>,
     /// 1.0 = hero team wins, 0.0 = enemy team wins.
     pub hero_wins: f32,
     /// Hero team HP fraction at fight end (0-1).
@@ -410,6 +502,7 @@ pub fn generate_outcome_dataset_v2(
                 entity_types: gs.entity_types,
                 threats: gs.threats,
                 positions: gs.positions,
+                zones: gs.zones,
                 hero_wins,
                 hero_hp_remaining: final_hero_hp,
                 fight_progress: tick as f32 / total_ticks,

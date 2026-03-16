@@ -68,6 +68,9 @@ pub(crate) struct ActiveSim {
     pub(crate) drill_objective_reached: bool,
     pub(crate) action_mask: Option<String>,
     pub(crate) behavior_trees: std::collections::HashMap<u32, bevy_game::ai::behavior::BehaviorTree>,
+    /// Precomputed visibility map for corner tokens (V6 spatial cross-attention).
+    /// Built once from sim.grid_nav; None if no nav grid is available.
+    pub(crate) visibility_map: Option<bevy_game::ai::goap::spatial::VisibilityMap>,
 }
 
 impl ActiveSim {
@@ -127,6 +130,9 @@ impl ActiveSim {
         let initial_hero_count = sim.units.iter()
             .filter(|u| u.team == Team::Hero && u.hp > 0).count() as f32;
 
+        let visibility_map = sim.grid_nav.as_ref()
+            .map(bevy_game::ai::goap::spatial::VisibilityMap::build);
+
         ActiveSim {
             sim, squad_ai, scenario_name, max_ticks,
             rng: rng_seed, steps: Vec::new(),
@@ -148,6 +154,7 @@ impl ActiveSim {
             drill_objective_reached: false,
             action_mask: None,
             behavior_trees: std::collections::HashMap::new(),
+            visibility_map,
         }
     }
 
@@ -206,6 +213,164 @@ impl ActiveSim {
     }
 }
 
+/// Precomputed per-scenario data. Built once, cloned+reseeded per episode.
+pub(crate) struct PrecomputedScenario {
+    pub(crate) sim: bevy_game::ai::core::SimState,
+    pub(crate) squad_ai: bevy_game::ai::squad::SquadAiState,
+    pub(crate) scenario_name: String,
+    pub(crate) max_ticks: u64,
+    pub(crate) unit_abilities: std::collections::HashMap<u32, Vec<Vec<u32>>>,
+    pub(crate) unit_ability_names: std::collections::HashMap<u32, Vec<String>>,
+    pub(crate) cls_cache: std::collections::HashMap<(u32, usize), Vec<f32>>,
+    pub(crate) hero_ids: Vec<u32>,
+    pub(crate) enemy_ids: Vec<u32>,
+    pub(crate) initial_hero_hp: i32,
+    pub(crate) initial_enemy_hp: i32,
+    pub(crate) avg_unit_hp: f32,
+    pub(crate) initial_hero_count: f32,
+    pub(crate) initial_enemy_count: f32,
+    pub(crate) drill_objective_type: Option<String>,
+    pub(crate) drill_target_position: Option<[f32; 2]>,
+    pub(crate) drill_target_radius: Option<f32>,
+    pub(crate) action_mask: Option<String>,
+    pub(crate) behavior_trees: std::collections::HashMap<u32, bevy_game::ai::behavior::BehaviorTree>,
+    pub(crate) objective: Option<bevy_game::scenario::ObjectiveDef>,
+}
+
+/// Build all scenario templates once. Returns one `PrecomputedScenario` per scenario.
+pub(crate) fn precompute_scenarios(
+    scenario_files: &[bevy_game::scenario::ScenarioFile],
+    max_ticks_override: Option<u64>,
+    tokenizer: &bevy_game::ai::core::ability_transformer::tokenizer::AbilityTokenizer,
+    registry: Option<&bevy_game::ai::core::ability_transformer::EmbeddingRegistry>,
+) -> Vec<PrecomputedScenario> {
+    use bevy_game::ai::core::Team;
+    use bevy_game::ai::effects::dsl::emit::emit_ability_dsl;
+    use bevy_game::scenario::run_scenario_to_state_with_room;
+
+    scenario_files.iter().map(|sf| {
+        let cfg = &sf.scenario;
+        let max_ticks = max_ticks_override.unwrap_or(cfg.max_ticks);
+        let (mut sim, squad_ai, nav) = run_scenario_to_state_with_room(cfg);
+        sim.grid_nav = Some(nav);
+
+        // Tokenize abilities + build CLS cache (same as ActiveSim::new)
+        let hero_ids: Vec<u32> = sim.units.iter()
+            .filter(|u| u.team == Team::Hero).map(|u| u.id).collect();
+        let enemy_ids: Vec<u32> = sim.units.iter()
+            .filter(|u| u.team == Team::Enemy).map(|u| u.id).collect();
+
+        let mut unit_abilities = std::collections::HashMap::new();
+        let mut unit_ability_names = std::collections::HashMap::new();
+        let mut cls_cache = std::collections::HashMap::new();
+
+        for &uid in hero_ids.iter().chain(enemy_ids.iter()) {
+            if let Some(unit) = sim.units.iter().find(|u| u.id == uid) {
+                let mut tokens_list = Vec::new();
+                let mut names_list = Vec::new();
+                for (idx, slot) in unit.abilities.iter().enumerate() {
+                    let dsl = emit_ability_dsl(&slot.def);
+                    tokens_list.push(tokenizer.encode_with_cls(&dsl));
+                    let safe_name = slot.def.name.replace(' ', "_");
+                    if let Some(reg) = registry {
+                        if let Some(reg_cls) = reg.get(&safe_name) {
+                            cls_cache.insert((uid, idx), reg_cls.to_vec());
+                        }
+                    }
+                    names_list.push(slot.def.name.clone());
+                }
+                unit_abilities.insert(uid, tokens_list);
+                unit_ability_names.insert(uid, names_list);
+            }
+        }
+
+        let initial_hero_hp: i32 = sim.units.iter()
+            .filter(|u| u.team == Team::Hero).map(|u| u.hp).sum();
+        let initial_enemy_hp: i32 = sim.units.iter()
+            .filter(|u| u.team == Team::Enemy).map(|u| u.hp).sum();
+        let n_units = sim.units.iter().filter(|u| u.hp > 0).count().max(1) as f32;
+        let avg_unit_hp = (initial_hero_hp + initial_enemy_hp) as f32 / n_units;
+        let initial_hero_count = sim.units.iter()
+            .filter(|u| u.team == Team::Hero && u.hp > 0).count() as f32;
+        let initial_enemy_count = sim.units.iter()
+            .filter(|u| u.team == Team::Enemy && u.hp > 0).count() as f32;
+
+        // Drill / objective config
+        let (drill_objective_type, drill_target_position, drill_target_radius) =
+            if let Some(ref obj) = cfg.objective {
+                (Some(obj.objective_type.clone()), obj.position, obj.radius)
+            } else if cfg.drill_type.is_some() {
+                (cfg.drill_type.clone(), cfg.target_position, Some(1.0))
+            } else {
+                (None, None, None)
+            };
+
+        let behavior_trees = load_behavior_trees(&sim, cfg);
+
+        PrecomputedScenario {
+            sim, squad_ai, scenario_name: cfg.name.clone(), max_ticks,
+            unit_abilities, unit_ability_names, cls_cache,
+            hero_ids, enemy_ids,
+            initial_hero_hp, initial_enemy_hp, avg_unit_hp,
+            initial_hero_count, initial_enemy_count,
+            drill_objective_type, drill_target_position, drill_target_radius,
+            action_mask: cfg.action_mask.clone(),
+            behavior_trees,
+            objective: cfg.objective.clone(),
+        }
+    }).collect()
+}
+
+/// Spawn an ActiveSim from a precomputed scenario (clone + reseed).
+pub(crate) fn active_sim_from_precomputed(
+    pre: &PrecomputedScenario,
+    si: usize, ei: usize,
+    step_interval: u64, temperature: f32,
+    self_play_gpu: bool,
+) -> ActiveSim {
+    let seed = (si as u64 * 1000 + ei as u64) ^ 0xDEADBEEF;
+    let mut sim = pre.sim.clone();
+    sim.rng_state = seed;
+
+    let visibility_map = sim.grid_nav.as_ref()
+        .map(bevy_game::ai::goap::spatial::VisibilityMap::build);
+
+    ActiveSim {
+        sim,
+        squad_ai: pre.squad_ai.clone(),
+        scenario_name: pre.scenario_name.clone(),
+        max_ticks: pre.max_ticks,
+        rng: seed,
+        steps: Vec::new(),
+        unit_abilities: pre.unit_abilities.clone(),
+        unit_ability_names: pre.unit_ability_names.clone(),
+        cls_cache: pre.cls_cache.clone(),
+        hero_ids: pre.hero_ids.clone(),
+        enemy_ids: pre.enemy_ids.clone(),
+        prev_hero_hp: pre.initial_hero_hp,
+        prev_enemy_hp: pre.initial_enemy_hp,
+        avg_unit_hp: pre.avg_unit_hp,
+        initial_enemy_count: pre.initial_enemy_count,
+        initial_hero_count: pre.initial_hero_count,
+        pending_event_reward: 0.0,
+        hero_pre_step: Vec::new(),
+        steps_recorded_this_tick: Vec::new(),
+        tick: 0, step_interval, temperature,
+        intents: Vec::new(), pending_units: Vec::new(),
+        phase: SimPhase::NeedsTick,
+        self_play_gpu,
+        hidden_states: std::collections::HashMap::new(),
+        drill_objective_type: pre.drill_objective_type.clone(),
+        drill_target_position: pre.drill_target_position,
+        drill_target_radius: pre.drill_target_radius,
+        drill_objective_reached: false,
+        action_mask: pre.action_mask.clone(),
+        behavior_trees: pre.behavior_trees.clone(),
+        visibility_map,
+    }
+}
+
+/// Legacy: build from scenario file directly (no precompute). Still used by non-GPU path fallback.
 pub(crate) fn make_active_sim(
     scenario_file: &bevy_game::scenario::ScenarioFile,
     si: usize, ei: usize,

@@ -11,6 +11,8 @@ default = []
 gemini = ["dep:gemini-rust"]
 app = []
 stream-monitor = []
+burn-gpu = ["dep:burn", "burn/tch", "burn/autodiff"]
+burn-cpu = ["dep:burn", "burn/ndarray"]
 
 [dependencies]
 base64 = "0.22"
@@ -34,6 +36,7 @@ ndarray = "0.16"
 ndarray-npy = { version = "0.9", features = ["npz"] }
 memmap2 = "0.9"
 contracts = "0.6"
+burn = { version = "0.20", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
 proptest = "1.6"

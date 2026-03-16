@@ -392,22 +392,52 @@ interface sequence length at 22, not 30.
   unit, compute summary features from visible corners, append to feature vector
 - SHM: +16 bytes per entity slot (4 × f32) = +112 bytes total for 7 slots
 
-**Threat token update:**
-- Threat feature dimension updated from 8→10 to match formalized threat token format
-  (zones, cast indicators, projectiles with kind/LOS fields)
-- `threat_proj(10→128)` instead of `threat_proj(8→128)`
-- Threat slots expanded from 4→6 (AoE-heavy fights can saturate 4 slots)
-- Apply importance scoring to threats: closest/most-dangerous earn individual slots
-- SHM: 6 slots × 10 features × f32 = 240 bytes (was 4 × 8 × f32 = 128 bytes)
-- **Per-unit serialization:** Threat tokens include per-unit relative features
-  (direction, distance, LOS). Must be serialized relative to the acting unit,
-  not globally. Confirm this matches existing V4 behavior.
+**Unified zone tokens (supersedes threat token update):**
 
-**Rust / SHM changes:**
-- Priority-based entity slot selection + aggregate computation (see Scene Representation)
-- Spatial summary feature computation per entity slot
-- Threat token serialization with new format and 6 slots
-- SHM layout: +64 bytes aggregate + 112 bytes spatial features + 112 bytes threat expansion
+The original plan called for expanding threat tokens from 8→10 features and 4→6 slots.
+During implementation, threats evolved into a **unified zone token system** that covers
+all spatial points of interest in a single 12-dim representation. This is strictly more
+expressive than the original plan and eliminates the need for separate threat/position
+token types.
+
+- **Zone feature dimension: 12** (ZONE_DIM=12 in `game_state_zones.rs`)
+- **Up to 10 tokens per unit** (priority-tiered allocation)
+- **8 zone kinds** (linearly spaced [0,1]):
+  - KIND_DAMAGE=0.0, KIND_CC=0.14, KIND_OBSTACLE=0.29, KIND_PROJECTILE=0.43,
+    KIND_CAST=0.57, KIND_HEALING=0.71, KIND_COVER=0.86, KIND_OBJECTIVE=1.0
+- **6 hint categories** (linearly spaced [0,1]):
+  - AVOID, DODGE, APPROACH, HOLD, CONTEST, NEUTRAL
+- **12 features per token:** dx, dy, distance, radius, intensity, urgency, kind,
+  hint, friendliness, has_cc, terrain_quality, exists
+- **Priority-tiered slot allocation:**
+  - Tier 0 (imminent threats): 4 slots — hostile damage/CC zones, projectiles, enemy casts
+  - Tier 1 (objectives): 2 slots — capture points, extraction areas
+  - Tier 2 (friendly): 2 slots — healing circles (when HP < 80%)
+  - Tier 3-4 (other): remaining slots — non-imminent threats, cover positions
+- **Per-unit relative features:** dx/dy/distance are relative to the querying unit
+- `zone_proj(12→128)` in entity encoder, type_id=3, participates in full self-attention
+- Implemented in `src/ai/core/ability_eval/game_state_zones.rs`
+
+This replaces the legacy `threats` and `positions` fields in GameStateV2 (those fields
+still exist for backward compat but are empty in V6 extraction paths).
+
+**Rust / Burn inference changes (SHM eliminated):**
+
+The original plan assumed a Python GPU inference server communicating via shared memory.
+This was replaced by **Burn in-process GPU inference** (`BurnInferenceClientV6`), which
+eliminates all SHM serialization, byte alignment, and cross-language protocol concerns.
+
+- Priority-based entity slot selection + aggregate computation: `select_entity_slots()`,
+  `compute_aggregate_features()` in `game_state_v2.rs`
+- Spatial summary feature computation: `rich_entity_features_spatial()` via
+  `extract_game_state_v2_cached_spatial()` — passes `VisibilityMap` + `GridNav`
+- Zone token extraction: `extract_zone_tokens()` in `game_state_zones.rs`
+- Corner token extraction: `VisibilityMap::spatial_tokens_for_unit()` → 8 × 11-dim
+- CLS embeddings: packed per-ability from `InferenceRequest.ability_cls`
+- Burn tensors built directly from request structs — no byte packing
+- Double-buffered batching in `inference_v6.rs` (same pattern as V5 Burn client)
+- Checkpoint save/load: `checkpoint.rs` using `BinFileRecorder`
+- CLI: `--burn-v6 [--burn-checkpoint PATH]`
 
 **Training notes:**
 - Train from scratch — no weight transfer possible from V4
@@ -667,35 +697,37 @@ ability timing, recognizing re-engagement vs. sustained engagement.
 
 ---
 
-## SHM Layout Summary (Cumulative)
+## SHM Layout Summary (Historical — superseded by Burn)
+
+> **Note:** The SHM protocol was eliminated by the Burn migration. The model runs
+> in-process via LibTorch — no shared memory, no byte packing, no Python server.
+> `InferenceRequest` fields are converted directly to Burn tensors in `inference_v6.rs`.
+> This section is retained for historical reference.
 
 | Phase | Change | Delta |
 |-------|--------|-------|
 | 1 | Aggregate features (16 × f32) | +64 bytes |
 | 1 | Spatial summary features (7 slots × 4 × f32) | +112 bytes |
-| 1 | Threat expansion (6×10 - 4×8 features × f32) | +112 bytes |
+| 1 | Zone tokens (10×12 features × f32) | +480 bytes |
 | 2 | Corner tokens (8 × 11 × f32) | +352 bytes |
 | 3 | Hidden state expansion (2 × (256-64) × f32) | +1536 bytes |
 | 4 | delta_t (1 × f32) | +4 bytes |
-| **Total** | | **+2180 bytes** |
 
-**Caching note:** Corner token SHM block (Phase 2) can skip writes on cache hits.
-The spatial cache tracks a generation counter — if geometry hasn't changed and the
-acting unit hasn't crossed a cell boundary, the corner tokens in SHM are still valid.
-The Rust side should write a `corner_generation` field in the SHM header; the Python
-side compares to the previous value and reuses the previous corner tensor on match.
-This avoids 352 bytes of unnecessary SHM writes on ~90% of ticks.
+**With Burn, caching is simpler:** The `VisibilityMap` is built once per scenario and
+stored on `ActiveSim`. Corner tokens are computed per-unit per-tick via
+`spatial_tokens_for_unit()` — a single HashMap lookup (~20ns) for the visibility
+bitset plus feature composition for visible corners.
 
 ---
 
 ## Risk / Rollback Summary
 
-| Phase | Rust changes | SHM changes | Rollback path |
-|-------|-------------|-------------|---------------|
-| 1 — Scale d=128 + aggregate + spatial summary + threats | Slot scoring, aggregate serialization, spatial summary, threat format | +288 bytes | Revert model.py + game_state.rs, retrain |
-| 2 — Spatial Cross-Attention + Latent Interface | Corner token serialization | +352 bytes corners | Zero-init cross-attn + write = identity passthrough |
-| 3 — CfC + h_dim=256 | Buffer sizes, h_dim header | +1536 bytes | Swap CfCCell → GRUCell, revert h_dim |
-| 4 — delta_t | +4 bytes request, event tracking | +4 bytes | Hardcode delta_t=1.0 |
+| Phase | Changes | Rollback path |
+|-------|---------|---------------|
+| 1 — d=128, aggregate, spatial summary, zones | Burn entity encoder, zone extraction, aggregate computation | Use ActorCriticV5 (V5 Burn model still exists alongside V6) |
+| 2 — Spatial Cross-Attention + Latent Interface | New Burn modules, corner token pipeline | Zero-init output projections = identity at init; pass `None` for corners to skip spatial |
+| 3 — CfC + h_dim=256 | CfC cell config, hidden state buffers | Change V6_H_DIM back to 64 in ActorCriticV6Config |
+| 4 — delta_t | Not yet implemented | N/A (hardcoded delta_t=1.0) |
 
 ---
 
@@ -707,43 +739,125 @@ This avoids 352 bytes of unnecessary SHM writes on ~90% of ticks.
   early due to raw 128d CLS input (vs. previously projected 32d)
 - **Batch size at d=128:** Profile training step time — may be able to increase
   beyond 1024 for better gradient estimates given the underutilized GPU
-- **Whether to do Phases 1+2 together or sequentially:** Phase 1 alone is a big
-  jump; adding the latent interface + spatial cross-attention simultaneously is
-  low risk since both use zero-initialized output projections, but harder to
-  attribute any regression
-- **Threat slot count:** Starting at 6, but profile actual threat density in
-  recorded scenarios. If median is 2-3 and 95th percentile is 5, 6 is fine.
-  If AoE-heavy compositions regularly produce 7+, consider 8 slots.
-- **Corner token caching granularity:** Current plan caches per-unit per-cell.
-  If many units share cells (tight formations), a per-cell cache (shared across
-  units at the same cell) could reduce redundant computation. Low priority since
-  cache miss cost is ~150ns.
-- **Spatial cross-attention for all units vs. acting unit only:** Current plan
+- ~~**Whether to do Phases 1+2 together or sequentially**~~ → **RESOLVED:** All phases
+  implemented together. Zero-init output projections on spatial cross-attn and latent
+  interface write step mean they start as identity — no regression risk at init.
+- ~~**Threat slot count**~~ → **RESOLVED:** Unified zone token system with 10 slots,
+  priority-tiered (4 imminent + 2 objective + 2 friendly + 2 other). 12-dim features
+  cover all zone kinds including cover positions and objectives.
+- ~~**Corner token caching**~~ → **RESOLVED:** `VisibilityMap` built once per scenario
+  on `ActiveSim` init. Per-unit corner tokens computed via bitset lookup (~20ns) +
+  feature composition. No per-tick caching needed.
+- **Spatial cross-attention for all units vs. acting unit only:** Current implementation
   serializes corners only for the acting unit. If the combat pointer head needs
   spatial context for targeting (e.g., "target the enemy behind the corner"),
-  all entity tokens may need spatial enrichment. This means either serializing
-  corners per-slot (7 × 352 = 2464 bytes) or using a single global corner set
-  and computing relative features per-token inside the model. Defer until
-  Phase 2 evaluation.
+  all entity tokens may need spatial enrichment. Defer until training evaluation.
+- **Burn training loop:** Whether to implement IMPALA V-trace entirely in Rust using
+  `Autodiff<LibTorch>`, or use a hybrid approach with Python for gradient updates.
+  The Burn infrastructure supports either path.
 
 ---
 
-## Key Files to Modify
+## Key Files (Burn Implementation)
 
-| File | Phase | Change |
-|------|-------|--------|
-| `src/ai/core/ability_eval/game_state.rs` | 1 | Priority scoring, slot assignment, aggregate token serialization, spatial summary features per entity, threat format update |
-| `src/ai/core/ability_eval/game_state.rs` | 2 | Corner token serialization for acting unit |
-| `src/ai/goap/spatial.rs` | 1 | Spatial summary aggregation helper (visible_corner_count, avg/min passage_width, avg distance) |
-| `training/model.py` | 1 | d=128, 8 heads, entity_proj(34→128), threat_proj(10→128), 6 threat slots, remove CLS proj, add agg_proj + type_id=5 |
-| `training/model.py` | 2 | Add SpatialCrossAttention + LatentInterface classes, wire into V6 |
-| `training/model.py` | 3 | Add CfCCell, replace TemporalGRU |
-| `training/gpu_inference_server.py` | 1 | Parse spatial summary features, threat format, aggregate_features from SHM |
-| `training/gpu_inference_server.py` | 2 | Parse corner token block from SHM |
-| `training/gpu_inference_server.py` | 3 | h_dim=256, buffer sizes |
-| `src/ai/core/ability_transformer/gpu_client.rs` | 1 | Write aggregate block + wider entity features + threat format to SHM |
-| `src/ai/core/ability_transformer/gpu_client.rs` | 2 | Write corner token block to SHM |
-| `src/ai/core/ability_transformer/gpu_client.rs` | 3 | h_dim, SHM buffer sizes |
-| `src/bin/xtask/oracle_cmd/transformer_rl.rs` | 3 | Per-unit hidden state buffer |
-| `training/export_actor_critic_v4.py` | 1 | Clone → export_actor_critic_V6.py |
-| `src/ai/core/ability_transformer/weights.rs` | 1 | New weight layout for V6 |
+The original plan targeted Python model definitions + SHM protocol. The actual
+implementation uses **Burn (Rust ML framework)** for both inference and model
+definition, eliminating the Python GPU server and SHM entirely.
+
+### Burn Model (new files)
+
+| File | Purpose |
+|------|---------|
+| `src/ai/core/burn_model/actor_critic_v6.rs` | V6 top-level model: encoder → spatial cross-attn → latent interface → CfC → heads |
+| `src/ai/core/burn_model/latent_interface.rs` | ELIT-style latent interface: K=12 latents, Read/Write cross-attention, tail dropping |
+| `src/ai/core/burn_model/spatial_cross_attn.rs` | Corner token cross-attention (11-dim corners as K/V, zero-init output) |
+| `src/ai/core/burn_model/value_head.rs` | Two-headed value prediction (attrition ratio + survival ticks) |
+| `src/ai/core/burn_model/checkpoint.rs` | Save/load via Burn's BinFileRecorder |
+| `src/ai/core/burn_model/inference_v6.rs` | Double-buffered GPU inference client for V6 |
+
+### Existing files modified
+
+| File | Change |
+|------|--------|
+| `src/ai/core/burn_model/mod.rs` | Added V6 modules, checkpoint, inference_v6 |
+| `src/ai/core/burn_model/config.rs` | Constants: D_MODEL=128, N_HEADS=8, H_DIM=64, N_LATENT_TOKENS=12 |
+| `src/ai/core/burn_model/inference.rs` | Added CLS embedding packing (was stubbed as vec![None]) |
+| `src/ai/core/ability_eval/game_state_v2.rs` | Added `extract_game_state_v2_cached_spatial()` with VisibilityMap support |
+| `src/ai/core/ability_transformer/gpu_client.rs` | Added `corner_tokens` field to InferenceRequest |
+| `src/ai/goap/spatial.rs` | Corner extraction, VisibilityMap, spatial_tokens_for_unit() (11-dim) |
+| `src/bin/xtask/oracle_cmd/rl_gpu.rs` | Wired spatial features + corner tokens + zone tokens into InferenceRequest |
+| `src/bin/xtask/oracle_cmd/rl_gpu_sim.rs` | Added `visibility_map` field to ActiveSim, built at init |
+| `src/bin/xtask/oracle_cmd/rl_generate.rs` | Added `--burn-v6` and `--burn-checkpoint` policy paths |
+| `src/bin/xtask/oracle_cmd/transformer_rl.rs` | Added Policy::BurnServerV6 variant |
+| `src/bin/xtask/cli/scenario.rs` | Added `--burn-v6` and `--burn-checkpoint` CLI flags |
+| `Cargo.toml` | Added `std` feature to burn dependency (for file-based checkpoints) |
+| `training/impala_learner_v6.py` | IMPALA training loop using `--burn-v6` for episode generation |
+
+---
+
+## Implementation Status
+
+### Phase 1 — COMPLETE
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| d=128, 8 heads | ✅ | D_MODEL=128, N_HEADS=8 in burn_model/config.rs |
+| Entity features 30→34 (spatial summary) | ✅ | rich_entity_features_spatial() via VisibilityMap |
+| Unified zone tokens (12-dim, 10 slots) | ✅ | Supersedes original threat token plan; 8 kinds, tiered priority |
+| Aggregate token (16-dim) | ✅ | compute_aggregate_features(), agg_proj(16→128), type_id=4 |
+| Priority-based entity slot selection | ✅ | select_entity_slots() with threat/proximity/HP/casting scoring |
+| Ability CLS at 128d (no projection) | ✅ | CLS embeddings packed directly in inference, external_cls_proj optional |
+| Burn in-process GPU inference | ✅ | BurnInferenceClientV6, double-buffered, no SHM |
+
+### Phase 2 — COMPLETE
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Spatial cross-attention | ✅ | Corner tokens (8 × 11-dim) as K/V, zero-init output proj |
+| Latent interface (ELIT) | ✅ | K=12 latents, Read/Write cross-attention, 2 latent blocks |
+| Tail dropping | ✅ | n_latents_override parameter for variable compute budget |
+| Corner token extraction | ✅ | VisibilityMap::spatial_tokens_for_unit(), cached per scenario |
+| Per-unit visibility masking | ✅ | Bresenham LOS, u32 bitset per cell |
+
+### Phase 3 — COMPLETE
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| CfC temporal cell | ✅ | CfCCell in burn_model/cfc_cell.rs, replaces GRU |
+| h_dim=256 | ✅ | V6_H_DIM=256 in actor_critic_v6.rs (V5 retains H_DIM=64) |
+
+### Phase 4 — NOT STARTED (optional, post-validation)
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| delta_t via request | ❌ | Hardcoded delta_t=1.0; event-based timing deferred |
+
+### Infrastructure — COMPLETE
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Checkpoint save/load | ✅ | BinFileRecorder, roundtrip test passing |
+| CLI integration | ✅ | --burn-v6, --burn-checkpoint flags |
+| Value head (curriculum) | ✅ | Two-headed: attrition ratio + survival ticks |
+| 12 Burn model tests | ✅ | Including checkpoint roundtrip + V-trace |
+
+### Training — COMPLETE (all Rust, no Python)
+
+Staged pretraining (0a-0e) and graduated unfreezing (1a-1e) abandoned — pretraining
+didn't converge despite hours of training. Straight to IMPALA V-trace RL with full
+unfreeze from step 1. Only regularization: latent interface tail dropping.
+
+**Python eliminated entirely.** No PyTorch model, no SHM protocol, no export scripts.
+Episode generation + gradient updates both happen in-process via Burn `Autodiff<LibTorch>`.
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| ~~Stages 0a-0e: pretraining~~ | SKIPPED | Didn't converge in practice |
+| ~~Stages 1a-1d: graduated unfreezing~~ | SKIPPED | Going straight to full unfreeze |
+| End-to-end IMPALA RL | ✅ | `training.rs`: V-trace, policy+move+value loss, AdamW, tail dropping |
+| Episode generation | ✅ | `--burn-v6 --burn-checkpoint` CLI ready, records continuous target_move_pos |
+| Burn training loop | ✅ | `impala_train.rs`: full loop with no-grad value prediction for V-trace |
+| CLI command | ✅ | `xtask scenario oracle transformer-rl impala-train` |
+| Continuous movement | ✅ | MSE loss on target_pos [B, 2]; no discrete 9-way move head |
+| Value prediction for V-trace | ✅ | No-grad forward pass via model.valid() (inner backend) |
+| Python training code | DELETED | `training/impala_learner_v6.py` removed |

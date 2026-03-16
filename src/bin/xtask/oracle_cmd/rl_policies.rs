@@ -1,6 +1,6 @@
 //! Policy-specific application functions and helpers for RL episode runner.
 
-use super::transformer_rl::{Policy, RlEpisode, RlStep, lcg_f32, masked_softmax_sample, apply_action_mask, load_behavior_trees, MAX_ABILITIES};
+use super::transformer_rl::{Policy, RlEpisode, RlStep, lcg_f32, masked_softmax_sample, apply_action_mask, MAX_ABILITIES};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_random_policy(
@@ -26,10 +26,6 @@ pub(crate) fn apply_random_policy(
         NUM_MOVE_DIRS, COMBAT_TYPE_ATTACK, COMBAT_TYPE_HOLD,
     };
 
-    let gs_v2 = match (vis_map, nav) {
-        (Some(vm), Some(n)) => extract_game_state_v2_spatial(sim, unit, vm, n),
-        _ => extract_game_state_v2(sim, unit),
-    };
     let n_abilities = unit.abilities.len().min(MAX_ABILITIES);
     let move_dir = (lcg_f32(rng) * NUM_MOVE_DIRS as f32) as usize;
     let has_enemies = sim.units.iter().any(|e| e.team == Team::Enemy && e.hp > 0);
@@ -44,24 +40,77 @@ pub(crate) fn apply_random_policy(
     let valid_combat: Vec<usize> = combat_mask.iter().enumerate()
         .filter(|(_, &v)| v).map(|(i, _)| i).collect();
     let combat_type = valid_combat[(lcg_f32(rng) * valid_combat.len() as f32) as usize % valid_combat.len()];
-    let n_entities = gs_v2.entities.len();
+
+    // Only extract full game state on recording ticks
+    let gs_v2 = if record {
+        Some(match (vis_map, nav) {
+            (Some(vm), Some(n)) => extract_game_state_v2_spatial(sim, unit, vm, n),
+            _ => extract_game_state_v2(sim, unit),
+        })
+    } else {
+        None
+    };
+
+    let n_entities = gs_v2.as_ref().map_or(sim.units.len(), |g| g.entities.len());
     let target_idx = if n_entities > 0 {
         (lcg_f32(rng) * n_entities as f32) as usize % n_entities
     } else { 0 };
 
-    let token_infos = build_token_infos(sim, uid, &gs_v2.entity_types, &gs_v2.positions);
-    let move_intent = move_dir_to_intent(move_dir, uid, sim);
-    let combat_intent = combat_action_to_intent(combat_type, target_idx, uid, sim, &token_infos);
-    let final_intent = if !matches!(combat_intent, bevy_game::ai::core::IntentAction::Hold) {
-        combat_intent
+    // For intent generation, we only need token_infos when we have gs_v2
+    // Otherwise fall back to simple nearest-enemy targeting
+    if let Some(ref gs) = gs_v2 {
+        let token_infos = build_token_infos(sim, uid, &gs.entity_types, &gs.positions);
+        let move_intent = move_dir_to_intent(move_dir, uid, sim);
+        let combat_intent = combat_action_to_intent(combat_type, target_idx, uid, sim, &token_infos);
+        let final_intent = if !matches!(combat_intent, bevy_game::ai::core::IntentAction::Hold) {
+            combat_intent
+        } else {
+            move_intent
+        };
+        intents.retain(|i| i.unit_id != uid);
+        intents.push(UnitIntent { unit_id: uid, action: final_intent });
     } else {
-        move_intent
-    };
+        // Non-recording tick: lightweight random intent without full extraction
+        let move_intent = move_dir_to_intent(move_dir, uid, sim);
+        // For combat, just pick nearest enemy as target
+        let combat_intent = if combat_type == COMBAT_TYPE_HOLD {
+            bevy_game::ai::core::IntentAction::Hold
+        } else if combat_type == COMBAT_TYPE_ATTACK {
+            if let Some(target) = sim.units.iter()
+                .filter(|e| e.team == Team::Enemy && e.hp > 0)
+                .min_by(|a, b| {
+                    let da = (a.position.x - unit.position.x).powi(2) + (a.position.y - unit.position.y).powi(2);
+                    let db = (b.position.x - unit.position.x).powi(2) + (b.position.y - unit.position.y).powi(2);
+                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                }) {
+                bevy_game::ai::core::IntentAction::Attack { target_id: target.id }
+            } else {
+                bevy_game::ai::core::IntentAction::Hold
+            }
+        } else {
+            // Ability usage
+            let ability_idx = combat_type - 2;
+            if let Some(target) = sim.units.iter()
+                .filter(|e| e.team == Team::Enemy && e.hp > 0)
+                .next() {
+                bevy_game::ai::core::IntentAction::UseAbility {
+                    ability_index: ability_idx,
+                    target: bevy_game::ai::effects::AbilityTarget::Unit(target.id),
+                }
+            } else {
+                bevy_game::ai::core::IntentAction::Hold
+            }
+        };
+        let final_intent = if !matches!(combat_intent, bevy_game::ai::core::IntentAction::Hold) {
+            combat_intent
+        } else {
+            move_intent
+        };
+        intents.retain(|i| i.unit_id != uid);
+        intents.push(UnitIntent { unit_id: uid, action: final_intent });
+    }
 
-    intents.retain(|i| i.unit_id != uid);
-    intents.push(UnitIntent { unit_id: uid, action: final_intent });
-
-    if record {
+    if let Some(gs_v2) = gs_v2 {
         let game_state = extract_game_state(sim, unit);
         steps.push(RlStep {
             tick, unit_id: uid,
@@ -70,11 +119,12 @@ pub(crate) fn apply_random_policy(
             mask: mask_vec.to_vec(), step_reward: step_r,
             entities: Some(gs_v2.entities), entity_types: Some(gs_v2.entity_types),
             threats: Some(gs_v2.threats), positions: Some(gs_v2.positions),
+            zones: Some(gs_v2.zones),
             action_type: Some(combat_type), target_idx: Some(target_idx),
             move_dir: Some(move_dir), combat_type: Some(combat_type),
             lp_move: Some(0.0), lp_combat: Some(0.0),
             lp_pointer: Some(0.0),
-            aggregate_features: if gs_v2.aggregate_features.is_empty() { None } else { Some(gs_v2.aggregate_features.clone()) },
+            aggregate_features: if gs_v2.aggregate_features.is_empty() { None } else { Some(gs_v2.aggregate_features) },
             target_move_pos: None,
             teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
         });
@@ -187,6 +237,7 @@ pub(crate) fn apply_v3_policy(
             entity_types: Some(gs_v2.entity_types.clone()),
             threats: Some(gs_v2.threats.clone()),
             positions: Some(gs_v2.positions.clone()),
+            zones: Some(gs_v2.zones.clone()),
             action_type: Some(action_type), target_idx: Some(target_idx),
             move_dir: None, combat_type: None,
             lp_move: None, lp_combat: None,
@@ -240,10 +291,12 @@ pub(crate) fn apply_gpu_policy(
         entity_types: gs_v2.entity_types.clone(),
         threats: gs_v2.threats.clone(),
         positions: gs_v2.positions.clone(),
+        zones: gs_v2.zones.clone(),
         combat_mask: combat_mask_vec,
         ability_cls: ability_cls_for_req,
         hidden_state: Vec::new(),
         aggregate_features: gs_v2.aggregate_features.clone(),
+        corner_tokens: Vec::new(),
     };
 
     match gpu.infer(req) {
@@ -325,6 +378,7 @@ pub(crate) fn apply_gpu_policy(
                     entity_types: Some(gs_v2.entity_types.clone()),
                     threats: Some(gs_v2.threats.clone()),
                     positions: Some(gs_v2.positions.clone()),
+            zones: Some(gs_v2.zones.clone()),
                     action_type: Some(combat_type), target_idx: Some(target_idx),
                     move_dir: Some(move_dir), combat_type: Some(combat_type),
                     lp_move: Some(result.lp_move), lp_combat: Some(result.lp_combat),
@@ -437,6 +491,7 @@ pub(crate) fn apply_v4_policy(
             entity_types: Some(gs_v2.entity_types.clone()),
             threats: Some(gs_v2.threats.clone()),
             positions: Some(gs_v2.positions.clone()),
+            zones: Some(gs_v2.zones.clone()),
             action_type: Some(combat_type), target_idx: Some(target_idx),
             move_dir: Some(move_dir), combat_type: Some(combat_type),
             lp_move: Some(move_lp), lp_combat: Some(combat_lp),
@@ -478,13 +533,14 @@ pub(crate) fn apply_v5_policy(
     let type_refs: Vec<usize> = gs_v2.entity_types.iter().map(|&t| t as usize).collect();
     let threat_refs: Vec<&[f32]> = gs_v2.threats.iter().map(|t| t.as_slice()).collect();
     let pos_refs: Vec<&[f32]> = gs_v2.positions.iter().map(|p| p.as_slice()).collect();
+    let zone_refs: Vec<&[f32]> = gs_v2.zones.iter().map(|z| z.as_slice()).collect();
     let agg_ref: Option<&[f32]> = if gs_v2.aggregate_features.is_empty() {
         None
     } else {
         Some(gs_v2.aggregate_features.as_slice())
     };
 
-    let ent_state = ac.encode_entities(&ent_refs, &type_refs, &threat_refs, &pos_refs, agg_ref);
+    let ent_state = ac.encode_entities_with_zones(&ent_refs, &type_refs, &threat_refs, &pos_refs, &zone_refs, agg_ref);
     let dual = ac.dual_head_logits(&ent_state, ability_cls_refs);
 
     let move_mask = vec![true; NUM_MOVE_DIRS];
@@ -547,6 +603,7 @@ pub(crate) fn apply_v5_policy(
             entity_types: Some(gs_v2.entity_types.clone()),
             threats: Some(gs_v2.threats.clone()),
             positions: Some(gs_v2.positions.clone()),
+            zones: Some(gs_v2.zones.clone()),
             action_type: Some(combat_type), target_idx: Some(target_idx),
             move_dir: Some(move_dir), combat_type: Some(combat_type),
             lp_move: Some(move_lp), lp_combat: Some(combat_lp),
@@ -624,11 +681,10 @@ pub(crate) fn hp_fraction(sim: &bevy_game::ai::core::SimState, team: bevy_game::
 }
 
 pub(crate) fn run_single_episode(
-    scenario_file: &bevy_game::scenario::ScenarioFile,
+    pre: &super::rl_gpu_sim::PrecomputedScenario,
     si: usize,
     ei: usize,
-    max_ticks_override: Option<u64>,
-    is_v3: bool,
+    _is_v3: bool,
     policy: &Policy,
     tokenizer: &bevy_game::ai::core::ability_transformer::tokenizer::AbilityTokenizer,
     temperature: f32,
@@ -639,16 +695,12 @@ pub(crate) fn run_single_episode(
     enemy_policy: Option<&Policy>,
     enemy_registry: Option<&bevy_game::ai::core::ability_transformer::EmbeddingRegistry>,
 ) -> RlEpisode {
-    use bevy_game::scenario::{run_scenario_to_state, run_scenario_to_state_with_room};
+    let mut sim = pre.sim.clone();
+    let seed = (si as u64 * 1000 + ei as u64) ^ 0xDEADBEEF;
+    sim.rng_state = seed;
 
-    let cfg = &scenario_file.scenario;
-    let max_ticks = max_ticks_override.unwrap_or(cfg.max_ticks);
-
-    // Always use room geometry for spatial feature extraction
-    let (sim, mut squad_ai, grid_nav) = {
-        let (s, ai, nav) = run_scenario_to_state_with_room(cfg);
-        (s, ai, Some(nav))
-    };
+    let grid_nav = sim.grid_nav.clone();
+    let mut squad_ai = pre.squad_ai.clone();
 
     if matches!(policy, Policy::Combined) {
         if let Some(ref w) = *ability_eval_weights {
@@ -656,18 +708,15 @@ pub(crate) fn run_single_episode(
         }
     }
 
-    let seed = (si as u64 * 1000 + ei as u64) ^ 0xDEADBEEF;
-    let behaviors = load_behavior_trees(&sim, cfg);
-
     super::rl_episode::run_rl_episode(
-        sim, squad_ai, &cfg.name, max_ticks,
+        sim, squad_ai, &pre.scenario_name, pre.max_ticks,
         policy, tokenizer,
         temperature, seed, step_interval,
         student_weights,
         grid_nav, registry,
         enemy_policy, enemy_registry,
-        cfg.objective.as_ref(),
-        cfg.action_mask.as_deref(),
-        &behaviors,
+        pre.objective.as_ref(),
+        pre.action_mask.as_deref(),
+        &pre.behavior_trees,
     )
 }

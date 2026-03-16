@@ -1222,7 +1222,7 @@ mod tests {
         let state = SimState {
             tick: 50,
             rng_state: 0,
-            units: vec![],
+            units: crate::ai::core::UnitStore::new(vec![]),
             projectiles: vec![],
             passive_trigger_depth: 0,
             zones: vec![

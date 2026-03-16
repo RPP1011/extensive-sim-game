@@ -11,6 +11,8 @@ mod game_state;
 mod game_state_v2;
 mod game_state_threats;
 mod game_state_positions;
+mod game_state_zones;
+mod extraction_cache;
 mod game_state_nextstate;
 mod game_state_operator;
 mod oracle_scoring;
@@ -30,6 +32,10 @@ pub use game_state::*;
 pub use game_state_v2::*;
 #[allow(unused_imports)]
 pub use game_state_threats::*;
+#[allow(unused_imports)]
+pub use game_state_zones::*;
+#[allow(unused_imports)]
+pub use extraction_cache::*;
 #[allow(unused_imports)]
 pub use game_state_nextstate::*;
 #[allow(unused_imports)]
