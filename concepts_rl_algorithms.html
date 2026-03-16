@@ -668,23 +668,23 @@ function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);cons
 
 // ═══ IMPALA & V-TRACE ═══
 (function(){
-  const W=820,H=520;
+  const W=820,H=580;
   const svg=d3.select('#fig-impala').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
 
-  // Left: Actor column
-  const numActors=4;
-  const actW=110,actH=65,actGap=10;
-  const actX=30,actStartY=60;
+  // Left: Actor column — compact 3 actors
+  const numActors=3;
+  const actW=110,actH=55,actGap=8;
+  const actX=30,actStartY=55;
 
-  txt(svg,actX+actW/2,40,'Actors (CPU)',{fill:C.heading,size:13,weight:600});
+  txt(svg,actX+actW/2,38,'Actors (CPU)',{fill:C.heading,size:13,weight:600});
 
   for(let i=0;i<numActors;i++){
     const y=actStartY+i*(actH+actGap);
     const lag=Math.floor(Math.random()*30+5);
     box(svg,actX,y,actW,actH,C.surface,C.cyan+'60',6);
-    txt(svg,actX+actW/2,y+18,'Actor '+i,{fill:C.cyan,size:11,weight:600});
-    txt(svg,actX+actW/2,y+34,'sim #'+(i*1024),{fill:C.muted,size:8,mono:true});
-    txt(svg,actX+actW/2,y+48,'\u03bc ('+lag+' steps old)',{fill:C.orangeDim,size:8,mono:true});
+    txt(svg,actX+actW/2,y+16,'Actor '+i,{fill:C.cyan,size:11,weight:600});
+    txt(svg,actX+actW/2,y+30,'sim #'+(i*1024),{fill:C.muted,size:8,mono:true});
+    txt(svg,actX+actW/2,y+42,'\u03bc ('+lag+' steps old)',{fill:C.orangeDim,size:8,mono:true});
   }
 
   // More actors indicator
@@ -692,18 +692,18 @@ function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);cons
   txt(svg,actX+actW/2,moreY+5,'... \u00d7 4,096 total',{fill:C.muted,size:10});
 
   // Trajectory buffer in the middle
-  const bufX=190,bufY=80,bufW=130,bufH=200;
+  const bufX=190,bufY=65,bufW=130,bufH=160;
   box(svg,bufX,bufY,bufW,bufH,C.surface2,C.orange,8);
-  txt(svg,bufX+bufW/2,bufY+20,'Trajectory',{fill:C.orange,size:12,weight:600});
-  txt(svg,bufX+bufW/2,bufY+36,'Queue',{fill:C.orange,size:12,weight:600});
+  txt(svg,bufX+bufW/2,bufY+18,'Trajectory',{fill:C.orange,size:12,weight:600});
+  txt(svg,bufX+bufW/2,bufY+32,'Queue',{fill:C.orange,size:12,weight:600});
 
   // Trajectory entries
-  const entryH=22,entryGap=4;
+  const entryH=20,entryGap=3;
   const entries=['(s,a,r,\u03bc)','{32 steps}','batch=512','async push'];
   entries.forEach((e,i)=>{
-    const ey=bufY+52+i*(entryH+entryGap);
+    const ey=bufY+46+i*(entryH+entryGap);
     box(svg,bufX+10,ey,bufW-20,entryH,C.surface,C.border,3);
-    txt(svg,bufX+bufW/2,ey+15,e,{fill:C.muted,size:9,mono:true});
+    txt(svg,bufX+bufW/2,ey+14,e,{fill:C.muted,size:8,mono:true});
   });
 
   // Arrows from actors to buffer
@@ -713,67 +713,65 @@ function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);cons
   }
 
   // Center: Learner (GPU)
-  const learnX=380,learnY=40,learnW=200,learnH=280;
+  const learnX=370,learnY=35,learnW=200,learnH=250;
   box(svg,learnX,learnY,learnW,learnH,C.surface,C.purpleDim,10);
-  txt(svg,learnX+learnW/2,learnY+22,'Learner (GPU)',{fill:C.purple,size:14,weight:700});
+  txt(svg,learnX+learnW/2,learnY+20,'Learner (GPU)',{fill:C.purple,size:14,weight:700});
 
   // Internal architecture
   const intX=learnX+15,intW=learnW-30;
 
   // Policy network
-  box(svg,intX,learnY+40,intW,40,C.purpleDim+'30',C.purple+'80',5);
-  txt(svg,learnX+learnW/2,learnY+55,'Policy \u03c0\u03b8',{fill:C.purple,size:11,weight:600});
-  txt(svg,learnX+learnW/2,learnY+70,'(current weights)',{fill:C.muted,size:8});
+  box(svg,intX,learnY+35,intW,35,C.purpleDim+'30',C.purple+'80',5);
+  txt(svg,learnX+learnW/2,learnY+48,'Policy \u03c0\u03b8',{fill:C.purple,size:11,weight:600});
+  txt(svg,learnX+learnW/2,learnY+61,'(current weights)',{fill:C.muted,size:8});
 
   // Value network
-  box(svg,intX,learnY+90,intW,40,C.blueDim+'30',C.blue+'80',5);
-  txt(svg,learnX+learnW/2,learnY+105,'Value V\u03b8',{fill:C.blue,size:11,weight:600});
-  txt(svg,learnX+learnW/2,learnY+120,'(critic)',{fill:C.muted,size:8});
+  box(svg,intX,learnY+78,intW,35,C.blueDim+'30',C.blue+'80',5);
+  txt(svg,learnX+learnW/2,learnY+91,'Value V\u03b8',{fill:C.blue,size:11,weight:600});
+  txt(svg,learnX+learnW/2,learnY+104,'(critic)',{fill:C.muted,size:8});
 
   // V-trace computation
-  box(svg,intX,learnY+145,intW,55,C.orangeDim+'30',C.orange+'80',5);
-  txt(svg,learnX+learnW/2,learnY+162,'V-Trace',{fill:C.orange,size:11,weight:700});
-  txt(svg,learnX+learnW/2,learnY+178,'\u03c1 = clip(\u03c0/\u03bc, \u03c1\u0305)',{fill:C.text,size:9,mono:true});
-  txt(svg,learnX+learnW/2,learnY+192,'off-policy correction',{fill:C.muted,size:8});
+  box(svg,intX,learnY+122,intW,48,C.orangeDim+'30',C.orange+'80',5);
+  txt(svg,learnX+learnW/2,learnY+138,'V-Trace',{fill:C.orange,size:11,weight:700});
+  txt(svg,learnX+learnW/2,learnY+152,'\u03c1 = clip(\u03c0/\u03bc, \u03c1\u0305)',{fill:C.text,size:9,mono:true});
+  txt(svg,learnX+learnW/2,learnY+164,'off-policy correction',{fill:C.muted,size:8});
 
   // Loss + gradient
-  box(svg,intX,learnY+210,intW,50,C.redDim+'30',C.red+'80',5);
-  txt(svg,learnX+learnW/2,learnY+228,'Policy gradient',{fill:C.red,size:10,weight:600});
-  txt(svg,learnX+learnW/2,learnY+243,'+ value loss + entropy',{fill:C.muted,size:8,mono:true});
-  txt(svg,learnX+learnW/2,learnY+255,'\u03b8 \u2190 \u03b8 - \u03b1\u2207L',{fill:C.red,size:9,mono:true});
+  box(svg,intX,learnY+178,intW,48,C.redDim+'30',C.red+'80',5);
+  txt(svg,learnX+learnW/2,learnY+195,'Policy gradient',{fill:C.red,size:10,weight:600});
+  txt(svg,learnX+learnW/2,learnY+208,'+ value loss + entropy',{fill:C.muted,size:8,mono:true});
+  txt(svg,learnX+learnW/2,learnY+220,'\u03b8 \u2190 \u03b8 - \u03b1\u2207L',{fill:C.red,size:9,mono:true});
 
   // Arrow from buffer to learner
   arrow(svg,svg,bufX+bufW,bufY+bufH/2,learnX-3,learnY+learnH/2,C.orange);
 
-  // Arrow from learner back to actors (weight sync)
-  const syncY=learnY+learnH+20;
-  pathArrow(svg,svg,`M${learnX},${learnY+learnH/2} Q${learnX-60},${syncY} ${actX+actW/2},${moreY+20}`,C.green,'6,3');
-  txt(svg,learnX-100,syncY+10,'weight sync',{fill:C.green,size:10,weight:600});
-  txt(svg,learnX-100,syncY+24,'(async, non-blocking)',{fill:C.muted,size:8});
+  // Arrow from learner back to actors (weight sync) — route below actors
+  pathArrow(svg,svg,`M${learnX},${learnY+learnH-30} Q${learnX-80},${moreY+30} ${actX+actW/2},${moreY+15}`,C.green,'6,3');
+  txt(svg,175,moreY+35,'weight sync (async)',{fill:C.green,size:9,weight:600});
 
   // Right side: V-Trace detail
-  const vtX=620,vtY=40;
-  box(svg,vtX,vtY,180,280,C.surface,C.border,8);
-  txt(svg,vtX+90,vtY+22,'V-Trace Detail',{fill:C.heading,size:12,weight:600});
+  const vtX=610,vtY=35;
+  box(svg,vtX,vtY,190,250,C.surface,C.border,8);
+  txt(svg,vtX+95,vtY+20,'V-Trace Detail',{fill:C.heading,size:12,weight:600});
 
   const vtLines=[
     {t:'Problem:',c:C.heading,s:10,w:600},
     {t:'Actor used \u03bc (old policy)',c:C.text,s:9,w:400},
     {t:'Learner has \u03c0 (new policy)',c:C.text,s:9,w:400},
-    {t:'',c:C.muted,s:6,w:400},
+    {t:'',c:C.muted,s:5,w:400},
     {t:'Solution:',c:C.heading,s:10,w:600},
     {t:'Importance weight:',c:C.orange,s:9,w:600},
     {t:'\u03c1\u209c = \u03c0(a|s) / \u03bc(a|s)',c:C.orange,s:9,w:400},
-    {t:'',c:C.muted,s:6,w:400},
+    {t:'',c:C.muted,s:5,w:400},
     {t:'If \u03c0 \u2248 \u03bc: \u03c1 \u2248 1',c:C.green,s:9,w:500},
     {t:'\u2192 trust the trajectory as-is',c:C.muted,s:8,w:400},
-    {t:'',c:C.muted,s:6,w:400},
+    {t:'',c:C.muted,s:5,w:400},
     {t:'If \u03c0 \u226b \u03bc: \u03c1 large',c:C.red,s:9,w:500},
     {t:'\u2192 clip to \u03c1\u0305 (reduce variance)',c:C.muted,s:8,w:400},
-    {t:'',c:C.muted,s:6,w:400},
+    {t:'',c:C.muted,s:5,w:400},
     {t:'If \u03c0 \u226a \u03bc: \u03c1 \u2248 0',c:C.blue,s:9,w:500},
     {t:'\u2192 ignore (action unlikely)',c:C.muted,s:8,w:400},
-    {t:'',c:C.muted,s:6,w:400},
+    {t:'',c:C.muted,s:5,w:400},
     {t:'Truncation:',c:C.heading,s:10,w:600},
     {t:'\u03c1\u0305 = c\u0305 = 1.0 is default',c:C.text,s:9,w:400},
     {t:'Recovers on-policy when',c:C.text,s:9,w:400},
@@ -781,11 +779,11 @@ function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);cons
   ];
 
   vtLines.forEach((line,i)=>{
-    txt(svg,vtX+15,vtY+45+i*11.5,line.t,{fill:line.c,size:line.s,weight:line.w,anchor:'start'});
+    txt(svg,vtX+15,vtY+40+i*10.5,line.t,{fill:line.c,size:line.s,weight:line.w,anchor:'start'});
   });
 
-  // Bottom: comparison table
-  const tableY=350;
+  // Bottom: comparison table — clear separation from diagram above
+  const tableY=310;
   box(svg,30,tableY,W-60,150,C.surface,C.border,8);
   txt(svg,W/2,tableY+22,'Why IMPALA over A3C / PPO?',{fill:C.heading,size:13,weight:600});
 
@@ -804,6 +802,10 @@ function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);cons
       txt(svg,cx2+colW2/2,tableY+72+ii*18,item,{fill:C.text,size:9});
     });
   });
+
+  // Throughput callout
+  box(svg,100,tableY+140,W-200,28,C.surface2,C.border,5);
+  txt(svg,W/2,tableY+158,'Key insight: actors never block on the learner. Stale weights are corrected by V-Trace importance sampling.',{fill:C.text,size:9});
 
   // Slider interactions
   d3.select('#impala-lag-slider').on('input',function(){
@@ -1133,14 +1135,16 @@ function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);cons
 
     // Iteration indicator
     const iterLabel='Iteration '+iter+(iter===0?' (pure BC)':'');
+    const betaLabel=beta>0.8?'mostly expert':beta>0.3?'mixed':'mostly student';
     const iterCol=iter===0?C.muted:iter<4?C.blue:C.green;
-    box(svg,cx-60,s4Y+70,120,30,iterCol+'15',iterCol,5);
-    txt(svg,cx,s4Y+89,iterLabel,{fill:iterCol,size:10,weight:600});
+    box(svg,cx-90,s4Y+70,180,45,iterCol+'15',iterCol,5);
+    txt(svg,cx,s4Y+86,iterLabel,{fill:iterCol,size:10,weight:600});
+    txt(svg,cx,s4Y+102,'\u03b2='+beta.toFixed(2)+' ('+betaLabel+')',{fill:C.muted,size:8});
 
     // Right panel: performance over iterations
-    const chartX=30,chartY=400,chartW=W-60,chartH=130;
+    const chartX=30,chartY=420,chartW=W-60,chartH=130;
     box(svg,chartX,chartY,chartW,chartH,C.surface,C.border,8);
-    txt(svg,chartX+chartW/2,chartY+18,'Win Rate vs DAgger Iteration',{fill:C.heading,size:12,weight:600});
+    txt(svg,chartX+chartW/2,chartY+18,'Win Rate vs DAgger Iteration (drag \u03b2 to see effect)',{fill:C.heading,size:12,weight:600});
 
     // Axes
     const plotX=chartX+70,plotY=chartY+35,plotW=chartW-120,plotH=chartH-55;
@@ -1149,8 +1153,20 @@ function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);cons
     txt(svg,plotX+plotW/2,plotY+plotH+14,'iteration',{fill:C.muted,size:8});
     txt(svg,plotX-25,plotY+plotH/2,'win%',{fill:C.muted,size:8});
 
-    // Simulated win rates (BC starts ~22%, DAgger improves)
-    const winRates=[22.5,24.0,25.5,26.2,26.8,27.0,27.2,27.3,27.3,27.4,27.4];
+    // Simulated win rates — beta controls how fast DAgger converges
+    // High beta (mostly expert) = faster early gains, converges to ceiling
+    // Low beta (mostly student) = slower, noisier improvement
+    // beta=0 is pure student rollouts (still helps via dataset aggregation, but slower)
+    const ceiling=27.5;
+    const base=22.5;
+    const range=ceiling-base;
+    // Beta scales the learning rate: high beta → fast convergence, low beta → slow
+    const rate=0.15+beta*0.35; // 0.15 at beta=0, 0.50 at beta=1
+    const winRates=[];
+    for(let i=0;i<=10;i++){
+      // Exponential approach to ceiling, rate depends on beta
+      winRates.push(base+range*(1-Math.exp(-rate*i)));
+    }
     const maxWR=35,minWR=15;
     const xScale=d3.scaleLinear().domain([0,10]).range([plotX,plotX+plotW]);
     const yScale=d3.scaleLinear().domain([minWR,maxWR]).range([plotY+plotH,plotY]);
