@@ -606,11 +606,49 @@ fn run_single_match(
 
     let mut squad_state = build_unified_ai(&sim);
 
+    // Compute enemy spawn centroids for seek behavior
+    let hero_target = if !room.enemy_spawn.is_empty() {
+        let cx = room.enemy_spawn.iter().map(|p| p.x).sum::<f32>() / room.enemy_spawn.len() as f32;
+        let cy = room.enemy_spawn.iter().map(|p| p.y).sum::<f32>() / room.enemy_spawn.len() as f32;
+        SimVec2 { x: cx, y: cy }
+    } else {
+        SimVec2 { x: room.width as f32 / 2.0, y: room.depth as f32 / 2.0 }
+    };
+    let enemy_target = if !room.player_spawn.is_empty() {
+        let cx = room.player_spawn.iter().map(|p| p.x).sum::<f32>() / room.player_spawn.len() as f32;
+        let cy = room.player_spawn.iter().map(|p| p.y).sum::<f32>() / room.player_spawn.len() as f32;
+        SimVec2 { x: cx, y: cy }
+    } else {
+        SimVec2 { x: room.width as f32 / 2.0, y: room.depth as f32 / 2.0 }
+    };
+
     let max_ticks = 5000u64;
     let mut outcome = "Timeout";
 
     for _ in 0..max_ticks {
-        let intents = bevy_game::ai::squad::generate_intents(&sim, &mut squad_state, FIXED_TICK_MS);
+        let mut intents = bevy_game::ai::squad::generate_intents(&sim, &mut squad_state, FIXED_TICK_MS);
+
+        // Seek override: units far from all enemies move directly toward enemy spawn.
+        // This forces engagement instead of units wandering around obstacles.
+        for intent in &mut intents {
+            let Some(unit) = sim.units.iter().find(|u| u.id == intent.unit_id && u.hp > 0) else {
+                continue;
+            };
+            if unit.casting.is_some() || unit.control_remaining_ms > 0 {
+                continue;
+            }
+            // Find nearest enemy distance
+            let nearest_enemy_dist = sim.units.iter()
+                .filter(|e| e.team != unit.team && e.hp > 0)
+                .map(|e| bevy_game::ai::core::distance(unit.position, e.position))
+                .fold(f32::MAX, f32::min);
+            // If no enemy within 8 cells, override to seek toward enemy spawn
+            if nearest_enemy_dist > 8.0 {
+                let target = if unit.team == Team::Hero { hero_target } else { enemy_target };
+                intent.action = bevy_game::ai::core::IntentAction::MoveTo { position: target };
+            }
+        }
+
         let (new_sim, _events) = step(sim, &intents, FIXED_TICK_MS);
         sim = new_sim;
 
