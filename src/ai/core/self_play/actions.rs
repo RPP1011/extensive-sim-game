@@ -128,7 +128,7 @@ pub fn intent_to_action(
                 13
             }
         }
-        IntentAction::Hold => 13,
+        IntentAction::Skulk { .. } | IntentAction::Hide | IntentAction::Hold => 13,
         IntentAction::CastAbility { target_id }
         | IntentAction::CastHeal { target_id }
         | IntentAction::CastControl { target_id } => {

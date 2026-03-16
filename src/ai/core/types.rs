@@ -95,6 +95,7 @@ pub struct UnitState {
     /// Updated per-tick from terrain context.
     #[serde(skip, default)]
     pub elevation: f32,
+
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -259,6 +260,10 @@ pub enum IntentAction {
     UseAbility { ability_index: usize, target: AbilityTarget },
     MoveTo { position: SimVec2 },
     Hold,
+    /// Move toward objective while avoiding enemy vision. Stays near walls.
+    Skulk { objective: SimVec2 },
+    /// Move to nearest position that breaks LOS with all visible enemies.
+    Hide,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

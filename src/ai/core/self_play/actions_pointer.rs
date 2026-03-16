@@ -185,7 +185,7 @@ pub fn intent_to_v3_action(
                 Some((ACTION_TYPE_HOLD, 0))
             }
         }
-        IntentAction::Hold => Some((ACTION_TYPE_HOLD, 0)),
+        IntentAction::Skulk { .. } | IntentAction::Hide | IntentAction::Hold => Some((ACTION_TYPE_HOLD, 0)),
         IntentAction::CastAbility { target_id }
         | IntentAction::CastHeal { target_id }
         | IntentAction::CastControl { target_id } => {

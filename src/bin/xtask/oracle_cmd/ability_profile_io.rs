@@ -348,6 +348,7 @@ pub fn load_all_abilities() -> Vec<(String, AbilityDef, String)> {
     }
 
     load_abilities_from_toml_dir("assets/hero_templates", &mut seen_names, &mut abilities);
+    load_abilities_from_toml_dir("dataset/hero_templates", &mut seen_names, &mut abilities);
     load_abilities_from_toml_dir("assets/lol_heroes", &mut seen_names, &mut abilities);
 
     eprintln!("Loaded {} unique abilities", abilities.len());

@@ -1,0 +1,198 @@
+[hero]
+name = "Warlock"
+
+[stats]
+hp = 70
+move_speed = 2.3
+
+[stats.tags]
+DARK = 60.0
+FIRE = 30.0
+
+[attack]
+damage = 11
+range = 4.5
+cooldown = 1200
+cast_time = 350
+
+# --- Ability 1: Shadow Bolt ---
+[[abilities]]
+name = "ShadowBolt"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 4000
+cast_time_ms = 500
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "projectile"
+speed = 7.0
+pierce = false
+width = 0.3
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 50
+
+[abilities.delivery.on_hit.tags]
+DARK = 55.0
+
+# --- Ability 2: Corruption ---
+[[abilities]]
+name = "Corruption"
+targeting = "target_enemy"
+range = 4.5
+cooldown_ms = 6000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount_per_tick = 12
+tick_interval_ms = 1000
+duration_ms = 6000
+
+[abilities.effects.tags]
+DARK = 50.0
+
+# --- Ability 3: Drain Life ---
+[[abilities]]
+name = "DrainLife"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 8000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 30
+
+[abilities.effects.tags]
+DARK = 50.0
+
+[[abilities.effects]]
+type = "heal"
+amount = 20
+
+[abilities.effects.area]
+shape = "self"
+
+# --- Ability 4: Summon Imp ---
+[[abilities]]
+name = "SummonImp"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 20000
+cast_time_ms = 500
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "summon"
+template = "imp"
+count = 1
+
+# --- Ability 5: Terrify ---
+[[abilities]]
+name = "Terrify"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 12000
+cast_time_ms = 300
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 2000
+
+[abilities.effects.tags]
+FEAR = 55.0
+CROWD_CONTROL = 60.0
+
+# --- Ability 6: Hellfire ---
+[[abilities]]
+name = "Hellfire"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 10000
+cast_time_ms = 400
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 40
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+[abilities.effects.tags]
+FIRE = 55.0
+DARK = 45.0
+
+# --- Ability 7: Curse of Weakness ---
+[[abilities]]
+name = "CurseOfWeakness"
+targeting = "target_enemy"
+range = 4.5
+cooldown_ms = 8000
+cast_time_ms = 300
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "debuff"
+stat = "damage_output"
+factor = 0.7
+duration_ms = 5000
+
+[abilities.effects.tags]
+DARK = 50.0
+
+# --- Ability 8: Dark Ritual ---
+[[abilities]]
+name = "DarkRitual"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 18000
+cast_time_ms = 400
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "buff"
+stat = "damage_output"
+factor = 0.35
+duration_ms = 6000
+
+# --- Passive 1: Soul Link ---
+[[passives]]
+name = "SoulLink"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_taken"
+
+[[passives.effects]]
+type = "shield"
+amount = 15
+duration_ms = 2000
+
+# --- Passive 2: Demonic Embrace ---
+[[passives]]
+name = "DemonicEmbrace"
+cooldown_ms = 30000
+range = 0.0
+
+[passives.trigger]
+type = "on_hp_below"
+percent = 35.0
+
+[[passives.effects]]
+type = "heal"
+amount = 35
+
+[[passives.effects]]
+type = "buff"
+stat = "damage_output"
+factor = 0.2
+duration_ms = 4000

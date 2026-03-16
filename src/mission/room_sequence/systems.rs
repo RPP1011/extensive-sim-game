@@ -180,7 +180,13 @@ pub fn advance_room_system(
         None => return,
     };
     let new_seed = seq.seed + seq.current_index as u64;
-    let new_layout = generate_room(new_seed, new_room_type);
+    let new_layout = match seq.prompts.get(seq.current_index) {
+        Some(Some(prompt)) => {
+            let config = crate::mission::room_gen::ml_gen::MlGenConfig::default();
+            crate::mission::room_gen::ml_gen::generate_ml_room(prompt, new_room_type, new_seed, &config)
+        }
+        _ => generate_room(new_seed, new_room_type),
+    };
 
     seq.current_room_origin.z -= new_layout.depth + 5.0;
     let origin = seq.current_room_origin;

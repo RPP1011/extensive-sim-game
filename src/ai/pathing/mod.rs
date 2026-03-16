@@ -230,6 +230,124 @@ impl GridNav {
         self.chokepoint_score_by_cell.get(&self.cell_of(pos)).copied().unwrap_or(0)
     }
 
+    /// Compute which walkable cells are visible from a given position.
+    /// Returns a set of (col, row) cells that have line of sight to `from`.
+    /// Used to build per-enemy vision cones for stealth pathfinding.
+    pub fn visible_cells_from(&self, from: SimVec2, max_range: f32) -> HashSet<(i32, i32)> {
+        let mut visible = HashSet::new();
+        if self.fully_open {
+            // Everything is visible in open rooms
+            let cx0 = (self.min_x / self.cell_size).floor() as i32;
+            let cx1 = (self.max_x / self.cell_size).ceil() as i32;
+            let cy0 = (self.min_y / self.cell_size).floor() as i32;
+            let cy1 = (self.max_y / self.cell_size).ceil() as i32;
+            for x in cx0..=cx1 {
+                for y in cy0..=cy1 {
+                    let pos = self.cell_center(x, y);
+                    let dx = pos.x - from.x;
+                    let dy = pos.y - from.y;
+                    if (dx * dx + dy * dy).sqrt() <= max_range {
+                        visible.insert((x, y));
+                    }
+                }
+            }
+            return visible;
+        }
+
+        let range_cells = (max_range / self.cell_size).ceil() as i32;
+        let (fx, fy) = self.cell_of(from);
+
+        for dx in -range_cells..=range_cells {
+            for dy in -range_cells..=range_cells {
+                let cx = fx + dx;
+                let cy = fy + dy;
+                if self.blocked.contains(&(cx, cy)) || !self.in_bounds(cx, cy) {
+                    continue;
+                }
+                let target = self.cell_center(cx, cy);
+                let dist_sq = (target.x - from.x).powi(2) + (target.y - from.y).powi(2);
+                if dist_sq > max_range * max_range {
+                    continue;
+                }
+                if has_line_of_sight(self, from, target) {
+                    visible.insert((cx, cy));
+                }
+            }
+        }
+        visible
+    }
+
+    /// Get the world-space center of a grid cell.
+    pub fn cell_center(&self, cx: i32, cy: i32) -> SimVec2 {
+        sim_vec2(
+            (cx as f32 + 0.5) * self.cell_size,
+            (cy as f32 + 0.5) * self.cell_size,
+        )
+    }
+
+    /// Concealment score for a cell: 0.0 = fully exposed, 1.0 = maximum concealment.
+    /// Based on wall proximity — cells near walls/in corners are more concealed.
+    pub fn concealment_at(&self, cell: (i32, i32)) -> f32 {
+        let prox = self.wall_proximity_by_cell.get(&cell).copied().unwrap_or(5.0);
+        if prox < 1.0 {
+            0.9 // right against a wall
+        } else if prox < 1.5 {
+            0.7 // very close to wall
+        } else if prox < 2.5 {
+            0.4 // near wall
+        } else {
+            0.0 // open field
+        }
+    }
+
+    /// Find the best adjacent cell to move to that maximizes concealment
+    /// while making progress toward a goal. Used by Skulk intent.
+    pub fn skulk_next_cell(
+        &self,
+        current: (i32, i32),
+        goal: (i32, i32),
+        enemy_visible_cells: &HashSet<(i32, i32)>,
+    ) -> (i32, i32) {
+        let neighbors = [
+            (current.0 + 1, current.1),
+            (current.0 - 1, current.1),
+            (current.0, current.1 + 1),
+            (current.0, current.1 - 1),
+            (current.0 + 1, current.1 + 1),
+            (current.0 - 1, current.1 - 1),
+            (current.0 + 1, current.1 - 1),
+            (current.0 - 1, current.1 + 1),
+        ];
+
+        let goal_dist = |c: (i32, i32)| -> f32 {
+            ((c.0 - goal.0) as f32).abs() + ((c.1 - goal.1) as f32).abs()
+        };
+        let current_goal_dist = goal_dist(current);
+
+        let mut best = current;
+        let mut best_score = f32::MIN;
+
+        for &n in &neighbors {
+            if self.blocked.contains(&n) || !self.in_bounds(n.0, n.1) {
+                continue;
+            }
+
+            // Score: progress toward goal + concealment - exposure penalty
+            let progress = current_goal_dist - goal_dist(n); // positive = closer to goal
+            let concealment = self.concealment_at(n);
+            let exposed = if enemy_visible_cells.contains(&n) { -3.0 } else { 0.0 };
+
+            let score = progress * 2.0 + concealment * 1.5 + exposed;
+
+            if score > best_score {
+                best_score = score;
+                best = n;
+            }
+        }
+
+        best
+    }
+
     /// Returns true if a straight line between two positions passes only
     /// through walkable cells.  When `fully_open` is true this is an O(1)
     /// bounds check instead of per-cell Bresenham iteration.

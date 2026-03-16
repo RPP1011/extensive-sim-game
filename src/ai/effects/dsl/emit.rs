@@ -273,9 +273,11 @@ mod tests {
     #[test]
     fn test_roundtrip_hero_abilities() {
         // Parse real hero ability files, emit DSL, parse again
-        let dir = std::path::Path::new("assets/hero_templates");
         let mut total = 0;
         let mut roundtripped = 0;
+        for dir_path in &["assets/hero_templates", "dataset/hero_templates"] {
+            let dir = std::path::Path::new(dir_path);
+            if !dir.is_dir() { continue; }
         for entry in std::fs::read_dir(dir).expect("read_dir failed") {
             let path = entry.unwrap().path();
             if path.extension().map_or(true, |e| e != "ability") { continue; }
@@ -302,6 +304,7 @@ mod tests {
                     }
                 }
             }
+        }
         }
         println!("Round-tripped {roundtripped}/{total} abilities from hero templates");
         assert!(total > 0, "No hero ability files found");

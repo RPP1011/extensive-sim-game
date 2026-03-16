@@ -1,0 +1,230 @@
+[hero]
+name = "Mage"
+
+[stats]
+hp = 70
+move_speed = 2.5
+
+[attack]
+damage = 8
+range = 4.0
+
+# --- Ability 1: Fireball --- projectile 55 dmg + 15 AoE splash r=2.0
+[[abilities]]
+name = "Fireball"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 5000
+cast_time_ms = 500
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "projectile"
+speed = 8.0
+pierce = false
+width = 0.3
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 55
+
+[abilities.delivery.on_hit.tags]
+FIRE = 60.0
+
+[[abilities.delivery.on_arrival]]
+type = "damage"
+amount = 15
+
+[abilities.delivery.on_arrival.area]
+shape = "circle"
+radius = 2.0
+
+# --- Ability 2: Frost Nova --- AoE 20 dmg + 2s stun r=3.0
+[[abilities]]
+name = "FrostNova"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 10000
+cast_time_ms = 300
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "damage"
+amount = 20
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 2000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+[abilities.effects.tags]
+CROWD_CONTROL = 80.0
+ICE = 60.0
+
+# --- Ability 3: Arcane Missiles --- chain 3 bounces, 35 dmg per hit
+[[abilities]]
+name = "ArcaneMissiles"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 4000
+cast_time_ms = 200
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "chain"
+bounces = 3
+bounce_range = 3.0
+falloff = 0.8
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 35
+
+[abilities.delivery.on_hit.tags]
+MAGIC = 50.0
+
+# --- Ability 4: Blizzard --- zone AoE 15 dmg/tick + 30% slow, r=3.0, 4s
+[[abilities]]
+name = "Blizzard"
+targeting = "ground_target"
+range = 6.0
+cooldown_ms = 12000
+cast_time_ms = 400
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "zone"
+duration_ms = 4000
+tick_interval_ms = 1000
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 15
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 3.0
+
+[abilities.delivery.on_hit.tags]
+ICE = 50.0
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 1500
+
+[abilities.delivery.on_hit.area]
+shape = "circle"
+radius = 3.0
+
+# --- Ability 5: Meteor --- 80 dmg AoE r=2.5, long CD
+[[abilities]]
+name = "Meteor"
+targeting = "ground_target"
+range = 6.0
+cooldown_ms = 18000
+cast_time_ms = 800
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 80
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+FIRE = 70.0
+
+# --- Ability 6: Blink --- dash away 3.0 + 15 AoE dmg at origin
+[[abilities]]
+name = "Blink"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 10000
+cast_time_ms = 0
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "dash"
+to_target = false
+distance = 3.0
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.0
+
+[abilities.effects.tags]
+MAGIC = 40.0
+
+# --- Ability 7: Polymorph --- 3s polymorph on single target
+[[abilities]]
+name = "Polymorph"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 15000
+cast_time_ms = 300
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "polymorph"
+duration_ms = 3000
+
+[abilities.effects.tags]
+CROWD_CONTROL = 80.0
+
+# --- Ability 8: Mana Shield --- self 50 shield 5s
+[[abilities]]
+name = "ManaShield"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 14000
+cast_time_ms = 200
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 50
+duration_ms = 5000
+
+# --- Passive 1: Arcane Shield --- on_hp_below(50%), cd:30s, 40 shield 4s
+[[passives]]
+name = "ArcaneShield"
+cooldown_ms = 30000
+range = 0.0
+
+[passives.trigger]
+type = "on_hp_below"
+percent = 50.0
+
+[[passives.effects]]
+type = "shield"
+amount = 40
+duration_ms = 4000
+
+# --- Passive 2: Arcane Mastery --- on_ability_used, cd:8s, -15% cooldowns 3s
+[[passives]]
+name = "ArcaneMastery"
+cooldown_ms = 8000
+range = 0.0
+
+[passives.trigger]
+type = "on_ability_used"
+
+[[passives.effects]]
+type = "buff"
+stat = "cooldown_reduction"
+factor = 0.15
+duration_ms = 3000

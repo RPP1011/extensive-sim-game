@@ -1,0 +1,224 @@
+[hero]
+name = "Cleric"
+
+[stats]
+hp = 95
+move_speed = 2.8
+
+[stats.tags]
+HOLY = 40.0
+
+[attack]
+damage = 10
+range = 1.5
+
+# --- Ability 1: Holy Light --- 35 heal, +15 bonus if target below 30%
+[[abilities]]
+name = "HolyLight"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 2500
+cast_time_ms = 300
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount = 35
+
+[abilities.effects.tags]
+HOLY = 30.0
+
+[[abilities.effects]]
+type = "heal"
+amount = 15
+
+[abilities.effects.tags]
+HOLY = 30.0
+
+[abilities.effects.condition]
+type = "target_hp_below"
+percent = 30.0
+
+# --- Ability 2: Sanctuary --- AoE 15 heal r=4.0 + 8/s HoT 4s
+[[abilities]]
+name = "Sanctuary"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 12000
+cast_time_ms = 300
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount = 15
+
+[abilities.effects.area]
+shape = "circle"
+radius = 4.0
+
+[abilities.effects.tags]
+HOLY = 30.0
+
+[[abilities.effects]]
+type = "heal"
+amount_per_tick = 8
+tick_interval_ms = 1000
+duration_ms = 4000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 4.0
+
+[abilities.effects.tags]
+HOLY = 30.0
+
+# --- Ability 3: Smite --- 40 dmg + 10 self-heal
+[[abilities]]
+name = "Smite"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 4000
+cast_time_ms = 400
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 40
+
+[abilities.effects.tags]
+HOLY = 50.0
+
+[[abilities.effects]]
+type = "heal"
+amount = 10
+
+[abilities.effects.area]
+shape = "self"
+
+# --- Ability 4: Purify --- dispel debuffs on ally + 20 heal
+[[abilities]]
+name = "Purify"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 8000
+cast_time_ms = 200
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "dispel"
+target_tags = ["POISON", "SLOW", "CROWD_CONTROL"]
+
+[[abilities.effects]]
+type = "heal"
+amount = 20
+
+[abilities.effects.tags]
+HOLY = 30.0
+
+# --- Ability 5: Holy Barrier --- AoE 30 shield 4s r=3.5
+[[abilities]]
+name = "HolyBarrier"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 14000
+cast_time_ms = 300
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 30
+duration_ms = 4000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.5
+
+# --- Ability 6: Holy Fire --- 25 dmg + 6/s DoT 3s
+[[abilities]]
+name = "HolyFire"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 6000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 25
+
+[abilities.effects.tags]
+HOLY = 50.0
+
+[[abilities.effects]]
+type = "damage"
+amount_per_tick = 6
+tick_interval_ms = 1000
+duration_ms = 3000
+
+[abilities.effects.tags]
+HOLY = 40.0
+
+# --- Ability 7: Resurrect --- bring back dead ally at 40% HP
+[[abilities]]
+name = "Resurrect"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 40000
+cast_time_ms = 500
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "resurrect"
+hp_percent = 40.0
+
+# --- Ability 8: Holy Word --- 2s silence + 15 dmg
+[[abilities]]
+name = "HolyWord"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 10000
+cast_time_ms = 200
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "silence"
+duration_ms = 2000
+
+[abilities.effects.tags]
+CROWD_CONTROL = 60.0
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+
+[abilities.effects.tags]
+HOLY = 40.0
+
+# --- Passive 1: Blessed Aura --- periodic(3s), heal lowest ally in range 3.0 for 5
+[[passives]]
+name = "BlessedAura"
+cooldown_ms = 0
+range = 3.0
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 3000
+
+[[passives.effects]]
+type = "heal"
+amount = 5
+
+# --- Passive 2: Guardian Spirit --- on_ally_damaged, range:4.0, cd:30s, 50 shield 3s
+[[passives]]
+name = "GuardianSpirit"
+cooldown_ms = 30000
+range = 4.0
+
+[passives.trigger]
+type = "on_ally_damaged"
+range = 4.0
+
+[[passives.effects]]
+type = "shield"
+amount = 50
+duration_ms = 3000

@@ -1,0 +1,232 @@
+[hero]
+name = "Warrior"
+
+[stats]
+hp = 180
+move_speed = 2.2
+
+[stats.tags]
+CROWD_CONTROL = 60.0
+
+[attack]
+damage = 18
+range = 1.5
+
+# --- Ability 1: Whirlwind --- AoE 40 dmg r=2.5, +10 bonus if 3+ hit
+[[abilities]]
+name = "Whirlwind"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 8000
+cast_time_ms = 400
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 40
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+PHYSICAL = 50.0
+
+[[abilities.effects]]
+type = "damage"
+amount = 10
+
+[abilities.effects.condition]
+type = "hit_count_above"
+count = 2
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+PHYSICAL = 50.0
+
+# --- Ability 2: Shield Wall --- 60 shield 5s
+[[abilities]]
+name = "ShieldWall"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 15000
+cast_time_ms = 200
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 60
+duration_ms = 5000
+
+# --- Ability 3: Heroic Charge --- dash + 35 dmg + 1.5s stun
+[[abilities]]
+name = "HeroicCharge"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 10000
+cast_time_ms = 0
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+[[abilities.effects]]
+type = "damage"
+amount = 35
+
+[abilities.effects.tags]
+PHYSICAL = 50.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1500
+
+[abilities.effects.tags]
+CROWD_CONTROL = 70.0
+
+# --- Ability 4: Sunder Armor --- 20 dmg + target takes 30% more dmg 4s
+[[abilities]]
+name = "SunderArmor"
+targeting = "target_enemy"
+range = 1.5
+cooldown_ms = 6000
+cast_time_ms = 200
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 20
+
+[abilities.effects.tags]
+PHYSICAL = 40.0
+
+[[abilities.effects]]
+type = "damage_modify"
+factor = 1.3
+duration_ms = 4000
+
+# --- Ability 5: Intimidating Shout --- AoE fear 2s r=3.0
+[[abilities]]
+name = "IntimidatingShout"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 18000
+cast_time_ms = 300
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "fear"
+duration_ms = 2000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+[abilities.effects.tags]
+CROWD_CONTROL = 70.0
+
+# --- Ability 6: Battle Cry --- AoE buff allies +20% damage 5s r=4.0
+[[abilities]]
+name = "BattleCry"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 15000
+cast_time_ms = 300
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "buff"
+stat = "damage_output"
+factor = 0.2
+duration_ms = 5000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 4.0
+
+# --- Ability 7: Slam --- 45 dmg + 1s stun
+[[abilities]]
+name = "Slam"
+targeting = "target_enemy"
+range = 1.5
+cooldown_ms = 5000
+cast_time_ms = 500
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 45
+
+[abilities.effects.tags]
+PHYSICAL = 55.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1000
+
+[abilities.effects.tags]
+CROWD_CONTROL = 50.0
+
+# --- Ability 8: Overpower --- 60 dmg, +30 bonus if target stunned
+[[abilities]]
+name = "Overpower"
+targeting = "target_enemy"
+range = 1.5
+cooldown_ms = 7000
+cast_time_ms = 600
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 60
+
+[abilities.effects.tags]
+PHYSICAL = 50.0
+
+[[abilities.effects]]
+type = "damage"
+amount = 30
+
+[abilities.effects.condition]
+type = "target_is_stunned"
+
+[abilities.effects.tags]
+PHYSICAL = 50.0
+
+# --- Passive 1: Iron Skin --- on_damage_taken, cd:5s, 20 shield 3s
+[[passives]]
+name = "IronSkin"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_taken"
+
+[[passives.effects]]
+type = "shield"
+amount = 20
+duration_ms = 3000
+
+# --- Passive 2: Last Stand --- on_hp_below(25%), cd:45s, heal 50 + 30% dmg buff 5s
+[[passives]]
+name = "LastStand"
+cooldown_ms = 45000
+range = 0.0
+
+[passives.trigger]
+type = "on_hp_below"
+percent = 25.0
+
+[[passives.effects]]
+type = "heal"
+amount = 50
+
+[[passives.effects]]
+type = "buff"
+stat = "damage_output"
+factor = 0.3
+duration_ms = 5000

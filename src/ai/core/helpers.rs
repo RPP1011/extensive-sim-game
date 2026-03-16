@@ -20,6 +20,70 @@ pub fn is_alive(unit: &UnitState) -> bool {
     unit.hp > 0
 }
 
+/// Check if `observer` can see `target`.
+/// Non-stealthed units are always visible (if LOS exists).
+/// Stealthed units require:
+///   1. Line of sight (walls block vision completely)
+///   2. Within detection range (3 cells base)
+///   3. Detection range reduced by target's cover_bonus (near walls = harder to spot)
+///   4. Detection range reduced by target's wall proximity (alcoves/corners = concealment)
+pub fn can_see(observer: &UnitState, target: &UnitState) -> bool {
+    let is_stealthed = target.status_effects.iter()
+        .any(|s| matches!(s.kind, crate::ai::effects::StatusKind::Stealth { .. }));
+    if !is_stealthed {
+        return true;
+    }
+    let dist = super::math::distance(observer.position, target.position);
+    // Wall proximity reduces detection: closer to walls = more concealed
+    // wall_proximity 0-1 = right next to wall, 5 = open field
+    // concealment: 0.0 (open) to 0.6 (tucked in corner)
+    let wall_concealment = (1.0 - (target.cover_bonus * 0.5).min(0.5))
+        * (1.0 - (0.3 * (1.0 / (1.0 + target.elevation.abs()))));
+
+    // Base detection range 3.0, reduced by cover and concealment
+    let detection_range = 3.0 * wall_concealment;
+    dist <= detection_range
+}
+
+/// Like can_see but also checks line of sight through the grid.
+/// Use this when GridNav is available for proper wall occlusion.
+pub fn can_see_with_nav(
+    observer: &UnitState,
+    target: &UnitState,
+    nav: &crate::ai::pathing::GridNav,
+) -> bool {
+    let is_stealthed = target.status_effects.iter()
+        .any(|s| matches!(s.kind, crate::ai::effects::StatusKind::Stealth { .. }));
+
+    if !is_stealthed {
+        return true;
+    }
+
+    // Walls block vision completely — no seeing through walls
+    if !crate::ai::pathing::has_line_of_sight(nav, observer.position, target.position) {
+        return false;
+    }
+
+    let dist = super::math::distance(observer.position, target.position);
+
+    // Wall proximity: 0-1 = next to wall, 5 = open field
+    let wall_prox = nav.wall_proximity_at_pos(target.position);
+    // Concealment factor: near walls (prox < 2) = very hard to see
+    let concealment = if wall_prox < 1.5 {
+        0.3 // tucked against wall — 70% detection range reduction
+    } else if wall_prox < 3.0 {
+        0.6 // near cover — 40% reduction
+    } else {
+        1.0 // open field — full detection range
+    };
+
+    // Cover bonus from terrain also reduces detection
+    let cover_factor = 1.0 - target.cover_bonus * 0.5;
+
+    let detection_range = 3.0 * concealment * cover_factor;
+    dist <= detection_range
+}
+
 /// Clear casting/channeling/CC state when a unit dies.
 pub fn clear_dead_unit_state(unit: &mut UnitState) {
     unit.casting = None;

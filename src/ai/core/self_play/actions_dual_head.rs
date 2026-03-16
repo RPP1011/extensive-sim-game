@@ -146,7 +146,7 @@ pub fn intent_to_v4_action(
             let move_dir = position_to_dir(unit.position, *position);
             Some((move_dir, COMBAT_TYPE_HOLD, 0))
         }
-        IntentAction::Hold => Some((8, COMBAT_TYPE_HOLD, 0)),
+        IntentAction::Skulk { .. } | IntentAction::Hide | IntentAction::Hold => Some((8, COMBAT_TYPE_HOLD, 0)),
         IntentAction::CastAbility { target_id }
         | IntentAction::CastHeal { target_id }
         | IntentAction::CastControl { target_id } => {

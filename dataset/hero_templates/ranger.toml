@@ -1,0 +1,241 @@
+[hero]
+name = "Ranger"
+
+[stats]
+hp = 85
+move_speed = 3.0
+
+[attack]
+damage = 16
+range = 5.0
+
+# --- Ability 1: Power Shot --- projectile pierce, 45 dmg + 2.0 knockback + 25 AoE
+[[abilities]]
+name = "PowerShot"
+targeting = "target_enemy"
+range = 8.0
+cooldown_ms = 3500
+cast_time_ms = 500
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "projectile"
+speed = 12.0
+pierce = true
+width = 0.3
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 45
+
+[abilities.delivery.on_hit.tags]
+PHYSICAL = 40.0
+
+[[abilities.delivery.on_hit]]
+type = "knockback"
+distance = 2.0
+
+[[abilities.delivery.on_arrival]]
+type = "damage"
+amount = 25
+
+[abilities.delivery.on_arrival.area]
+shape = "circle"
+radius = 2.0
+
+# --- Ability 2: Rain of Arrows --- AoE 30 dmg + 30% slow 2s r=3.0
+[[abilities]]
+name = "RainOfArrows"
+targeting = "target_enemy"
+range = 6.0
+cooldown_ms = 8000
+cast_time_ms = 300
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "damage"
+amount = 30
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+[abilities.effects.tags]
+ICE = 30.0
+
+# --- Ability 3: Multi Shot --- spread 3 targets, 30 dmg each
+[[abilities]]
+name = "MultiShot"
+targeting = "target_enemy"
+range = 6.0
+cooldown_ms = 5000
+cast_time_ms = 200
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 30
+
+[abilities.effects.area]
+shape = "spread"
+radius = 4.0
+max_targets = 3
+
+[abilities.effects.tags]
+PHYSICAL = 40.0
+
+# --- Ability 4: Bear Trap --- trap, 2s root + 25 dmg on trigger
+[[abilities]]
+name = "BearTrap"
+targeting = "ground_target"
+range = 5.0
+cooldown_ms = 10000
+cast_time_ms = 200
+ai_hint = "crowd_control"
+
+[abilities.delivery]
+method = "trap"
+duration_ms = 15000
+trigger_radius = 1.5
+arm_time_ms = 500
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 25
+
+[abilities.delivery.on_hit.tags]
+PHYSICAL = 40.0
+
+[[abilities.delivery.on_hit]]
+type = "root"
+duration_ms = 2000
+
+[abilities.delivery.on_hit.tags]
+CROWD_CONTROL = 50.0
+
+# --- Ability 5: Disengage --- dash away 3.0 + 40% slow nearby 2s
+[[abilities]]
+name = "Disengage"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 8000
+cast_time_ms = 0
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "dash"
+to_target = false
+distance = 3.0
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.4
+duration_ms = 2000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.0
+
+# --- Ability 6: Hunter's Mark --- target takes 25% more dmg 5s
+[[abilities]]
+name = "HuntersMark"
+targeting = "target_enemy"
+range = 6.0
+cooldown_ms = 10000
+cast_time_ms = 200
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "damage_modify"
+factor = 1.25
+duration_ms = 5000
+
+# --- Ability 7: Explosive Arrow --- projectile 40 dmg + 20 AoE r=2.0
+[[abilities]]
+name = "ExplosiveArrow"
+targeting = "target_enemy"
+range = 7.0
+cooldown_ms = 6000
+cast_time_ms = 400
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+pierce = false
+width = 0.3
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 40
+
+[abilities.delivery.on_hit.tags]
+PHYSICAL = 40.0
+FIRE = 30.0
+
+[[abilities.delivery.on_arrival]]
+type = "damage"
+amount = 20
+
+[abilities.delivery.on_arrival.area]
+shape = "circle"
+radius = 2.0
+
+# --- Ability 8: Nature's Grasp --- 2.5s root + 15 dmg
+[[abilities]]
+name = "NaturesGrasp"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 9000
+cast_time_ms = 300
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "root"
+duration_ms = 2500
+
+[abilities.effects.tags]
+CROWD_CONTROL = 50.0
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+
+# --- Passive 1: Kiting Instinct --- on_damage_taken, cd:8s, +30% move speed 2s
+[[passives]]
+name = "KitingInstinct"
+cooldown_ms = 8000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_taken"
+
+[[passives.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.3
+duration_ms = 2000
+
+# --- Passive 2: Predator --- on_kill, cd:5s, +20% dmg buff 4s
+[[passives]]
+name = "Predator"
+cooldown_ms = 5000
+range = 0.0
+
+[passives.trigger]
+type = "on_kill"
+
+[[passives.effects]]
+type = "buff"
+stat = "damage_output"
+factor = 0.2
+duration_ms = 4000

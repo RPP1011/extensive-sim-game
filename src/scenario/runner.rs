@@ -16,7 +16,7 @@ use super::types::ScenarioCfg;
 
 /// Build a unified SquadAiState that covers both hero and enemy units,
 /// inferring personalities from unit stats.
-pub(crate) fn build_unified_ai(
+pub fn build_unified_ai(
     sim: &SimState,
 ) -> crate::ai::squad::SquadAiState {
     crate::ai::squad::SquadAiState::new_inferred(sim)
@@ -51,6 +51,7 @@ pub(crate) fn resolve_hero_templates(
                 }
             } else {
                 search_paths.push(format!("assets/hero_templates/{}.toml", name.to_lowercase()));
+                search_paths.push(format!("dataset/hero_templates/{}.toml", name.to_lowercase()));
                 search_paths.push(format!("assets/lol_heroes/{}.toml", name));
                 // Search dataset/heroes/ subdirectories
                 if let Ok(entries) = std::fs::read_dir("dataset/heroes") {
@@ -136,6 +137,19 @@ fn build_hero_vs_hero(
     seed: u64,
 ) -> SimState {
     build_hero_vs_hero_with_spawns(hero_tomls, enemy_tomls, seed, None, None)
+}
+
+pub fn build_hvh_with_spawns_and_tomls(
+    hero_tomls: &[HeroToml],
+    enemy_tomls: &[HeroToml],
+    seed: u64,
+    hero_spawns: &[SimVec2],
+    enemy_spawns: &[SimVec2],
+) -> SimState {
+    build_hero_vs_hero_with_spawns(
+        hero_tomls, enemy_tomls, seed,
+        Some(hero_spawns), Some(enemy_spawns),
+    )
 }
 
 fn build_hero_vs_hero_with_spawns(

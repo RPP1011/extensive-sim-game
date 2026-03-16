@@ -3,7 +3,7 @@
 use super::nav::NavGrid;
 
 /// Check that a layout has 2%-35% blocked interior and player<->enemy connectivity.
-pub(super) fn validate_layout(nav: &NavGrid) -> bool {
+pub(crate) fn validate_layout(nav: &NavGrid) -> bool {
     let cols = nav.cols;
     let rows = nav.rows;
 

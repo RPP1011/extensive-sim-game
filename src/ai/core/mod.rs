@@ -51,7 +51,7 @@ pub use determinism::{
     verify_determinism, verify_replay_against_hashes,
     DeterminismReport, hash_sim_state,
 };
-pub use helpers::is_alive;
+pub use helpers::{is_alive, can_see, can_see_with_nav};
 pub use math::{distance, move_towards, move_away, position_at_range};
 pub use verify::{verify_tick, Violation, VerificationReport};
 pub use unit_store::UnitStore;

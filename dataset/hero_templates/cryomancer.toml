@@ -1,0 +1,284 @@
+[hero]
+name = "Cryomancer"
+
+[stats]
+hp = 75
+move_speed = 2.5
+
+[stats.tags]
+ICE = 60.0
+
+[attack]
+damage = 9
+range = 4.5
+cooldown = 1200
+cast_time = 350
+
+# --- Ability 1: Frost Bolt ---
+[[abilities]]
+name = "Frost Bolt"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 3500
+cast_time_ms = 400
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "projectile"
+speed = 8.0
+pierce = false
+width = 0.3
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 40
+
+[abilities.delivery.on_hit.tags]
+ICE = 55.0
+
+[[abilities.delivery.on_hit]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[abilities.delivery.on_hit.tags]
+SLOW = 45.0
+
+# --- Ability 2: Blizzard ---
+[[abilities]]
+name = "Blizzard"
+targeting = "ground_target"
+range = 5.0
+cooldown_ms = 14000
+cast_time_ms = 400
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "zone"
+duration_ms = 4000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "damage"
+amount_per_tick = 12
+tick_interval_ms = 500
+duration_ms = 4000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+[abilities.effects.tags]
+ICE = 60.0
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 1500
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.0
+
+[abilities.effects.tags]
+SLOW = 45.0
+
+# --- Ability 3: Ice Lance ---
+[[abilities]]
+name = "Ice Lance"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 4000
+cast_time_ms = 500
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 55
+
+[abilities.effects.area]
+shape = "single_target"
+
+[abilities.effects.tags]
+ICE = 55.0
+
+[[abilities.effects]]
+type = "damage"
+amount = 30
+
+[abilities.effects.area]
+shape = "single_target"
+
+[abilities.effects.condition]
+type = "target_is_slowed"
+
+[abilities.effects.tags]
+ICE = 55.0
+
+# --- Ability 4: Frozen Barrier ---
+[[abilities]]
+name = "Frozen Barrier"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 14000
+cast_time_ms = 300
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 50
+duration_ms = 5000
+
+[abilities.effects.area]
+shape = "self"
+
+# --- Ability 5: Glacial Spike ---
+[[abilities]]
+name = "Glacial Spike"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 10000
+cast_time_ms = 400
+ai_hint = "crowd_control"
+
+[abilities.delivery]
+method = "projectile"
+speed = 7.0
+pierce = false
+width = 0.4
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 35
+
+[abilities.delivery.on_hit.tags]
+ICE = 55.0
+
+[[abilities.delivery.on_hit]]
+type = "stun"
+duration_ms = 2000
+
+[abilities.delivery.on_hit.tags]
+ICE = 55.0
+CROWD_CONTROL = 65.0
+
+# --- Ability 6: Deep Freeze ---
+[[abilities]]
+name = "Deep Freeze"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 12000
+cast_time_ms = 300
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "damage"
+amount = 25
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+ICE = 55.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1500
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+CROWD_CONTROL = 60.0
+
+# --- Ability 7: Permafrost ---
+[[abilities]]
+name = "Permafrost"
+targeting = "ground_target"
+range = 4.5
+cooldown_ms = 10000
+cast_time_ms = 300
+ai_hint = "crowd_control"
+
+[abilities.delivery]
+method = "zone"
+duration_ms = 4000
+tick_interval_ms = 1000
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.5
+duration_ms = 1500
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+ICE = 55.0
+SLOW = 50.0
+
+# --- Ability 8: Shatter ---
+[[abilities]]
+name = "Shatter"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 8000
+cast_time_ms = 600
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 60
+
+[abilities.effects.area]
+shape = "single_target"
+
+[abilities.effects.tags]
+ICE = 60.0
+
+[[abilities.effects]]
+type = "damage"
+amount = 25
+
+[abilities.effects.area]
+shape = "single_target"
+
+[abilities.effects.condition]
+type = "target_is_stunned"
+
+[abilities.effects.tags]
+ICE = 60.0
+
+# --- Passive 1: Frigid Touch ---
+[[passives]]
+name = "Frigid Touch"
+cooldown_ms = 4000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_dealt"
+
+[[passives.effects]]
+type = "slow"
+factor = 0.2
+duration_ms = 1500
+
+[passives.effects.tags]
+SLOW = 40.0
+
+# --- Passive 2: Ice Armor ---
+[[passives]]
+name = "Ice Armor"
+cooldown_ms = 6000
+range = 0.0
+
+[passives.trigger]
+type = "on_damage_taken"
+
+[[passives.effects]]
+type = "shield"
+amount = 18
+duration_ms = 2000

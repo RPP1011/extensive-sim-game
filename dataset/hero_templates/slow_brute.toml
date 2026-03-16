@@ -1,0 +1,13 @@
+# Slow, hard-hitting enemy — teaches "dodge/kite the attack"
+[hero]
+name = "SlowBrute"
+
+[stats]
+hp = 200
+move_speed = 1.2
+
+[attack]
+damage = 40
+range = 1.2
+cooldown = 2000
+cast_time = 500

@@ -47,18 +47,36 @@ impl Lcg {
 // Internal geometry records (used for both nav and visuals)
 // ---------------------------------------------------------------------------
 
+/// Obstacle type identifier for multi-channel grid export.
+///
+/// 0=floor, 1=wall, 2=pillar, 3=barricade, 4=l_shape,
+/// 5=cover_cluster, 6=sandbag, 7=platform_edge, 8=ramp
+pub type ObstacleType = u8;
+
+pub const OBS_FLOOR: u8 = 0;
+pub const OBS_WALL: u8 = 1;
+pub const OBS_PILLAR: u8 = 2;
+pub const OBS_BARRICADE: u8 = 3;
+pub const OBS_L_SHAPE: u8 = 4;
+pub const OBS_COVER_CLUSTER: u8 = 5;
+pub const OBS_SANDBAG: u8 = 6;
+pub const OBS_PLATFORM_EDGE: u8 = 7;
+pub const OBS_RAMP: u8 = 8;
+
 #[derive(Debug, Clone)]
-pub(crate) struct ObstacleRegion {
+pub struct ObstacleRegion {
     pub col0: usize,
     pub col1: usize,
     pub row0: usize,
     pub row1: usize,
     /// Visual height in world units (0.5-2.0).
     pub height: f32,
+    /// Obstacle type for multi-channel grid export.
+    pub obs_type: ObstacleType,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct RampRegion {
+pub struct RampRegion {
     pub col0: usize,
     pub col1: usize,
     pub row0: usize,

@@ -13,6 +13,8 @@ use crate::game_core::RoomType;
 pub struct MissionRoomSequence {
     /// The room types to visit in order (e.g. `[Entry, Pressure, Climax]`).
     pub rooms: Vec<RoomType>,
+    /// Optional per-room text prompts for ML generation.
+    pub prompts: Vec<Option<String>>,
     /// Index of the room that is currently loaded and active.
     pub current_index: usize,
     /// Base seed; individual rooms use `seed + current_index` for variance.
@@ -34,8 +36,10 @@ impl MissionRoomSequence {
                 RoomType::Climax,
             ],
         };
+        let prompts = vec![None; rooms.len()];
         Self {
             rooms,
+            prompts,
             current_index: 0,
             seed,
             current_room_origin: Vec3::ZERO,
