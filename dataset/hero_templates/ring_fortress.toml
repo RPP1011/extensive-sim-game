@@ -1,0 +1,96 @@
+# Stationary enemy surrounded by concentric damage rings + displacement zone.
+# Inner ring (r=2.0): 60 dmg — lethal to melee.
+# Outer ring (r=4.0): 40 dmg — punishes mid-range.
+# Safe band: 4.0-5.0 — only ranger's max attack range (5.0) is safe.
+# Displacement blast: ground_target r=2.5, 50 dmg — cast at hero's position on 8s cooldown.
+#   Forces hero to dodge OUT of safe band, then reposition back into it.
+# Teaches: precise range positioning + repositioning after forced dodge.
+[hero]
+name = "RingFortress"
+
+[stats]
+hp = 2000
+move_speed = 0.0
+
+[attack]
+damage = 5
+range = 1.5
+cooldown = 2000
+cast_time = 300
+
+# --- Inner Ring --- 60 dmg, r=2.0, self-targeted, always up
+[[abilities]]
+name = "InnerRing"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 3000
+cast_time_ms = 100
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "zone"
+duration_ms = 3000
+tick_interval_ms = 3000
+
+[[abilities.effects]]
+type = "damage"
+amount = 60
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.0
+
+[abilities.effects.tags]
+FIRE = 50.0
+
+# --- Outer Ring --- 40 dmg, r=4.0, self-targeted, always up
+[[abilities]]
+name = "OuterRing"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 3500
+cast_time_ms = 100
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "zone"
+duration_ms = 3500
+tick_interval_ms = 3500
+
+[[abilities.effects]]
+type = "damage"
+amount = 40
+
+[abilities.effects.area]
+shape = "circle"
+radius = 4.0
+
+[abilities.effects.tags]
+FIRE = 50.0
+
+# --- Displacement Blast --- 50 dmg, r=2.5, ground-targeted at hero, 8s cd
+# Long cast (1.2s) = warning to move. Lands on hero's position, forcing dodge.
+# Hero must dodge outward (losing range) or inward (into rings), then return to safe band.
+[[abilities]]
+name = "DisplacementBlast"
+targeting = "ground_target"
+range = 8.0
+cooldown_ms = 8000
+cast_time_ms = 1200
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "zone"
+duration_ms = 500
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "damage"
+amount = 50
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+FIRE = 50.0

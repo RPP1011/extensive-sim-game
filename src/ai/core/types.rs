@@ -94,6 +94,7 @@ pub struct UnitState {
     /// Updated per-tick from terrain context.
     #[serde(skip, default)]
     pub elevation: f32,
+
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

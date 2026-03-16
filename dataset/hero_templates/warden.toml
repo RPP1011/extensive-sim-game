@@ -1,0 +1,226 @@
+[hero]
+name = "Warden"
+
+[stats]
+hp = 170
+move_speed = 2.3
+
+[stats.tags]
+PHYSICAL = 40.0
+POISON = 35.0
+CROWD_CONTROL = 50.0
+
+[attack]
+damage = 13
+range = 1.5
+cooldown = 1000
+cast_time = 300
+
+# --- Ability 1: Vine Lash ---
+[[abilities]]
+name = "VineLash"
+targeting = "target_enemy"
+range = 3.0
+cooldown_ms = 6000
+cast_time_ms = 300
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "damage"
+amount = 30
+
+[abilities.effects.tags]
+PHYSICAL = 45.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 1500
+
+[abilities.effects.tags]
+CROWD_CONTROL = 55.0
+
+# --- Ability 2: Bark Shield ---
+[[abilities]]
+name = "BarkShield"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 14000
+cast_time_ms = 300
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 70
+duration_ms = 6000
+
+# --- Ability 3: Nature's Grasp ---
+[[abilities]]
+name = "NaturesGrasp"
+targeting = "target_enemy"
+range = 3.5
+cooldown_ms = 8000
+cast_time_ms = 300
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.5
+duration_ms = 3000
+
+[abilities.effects.tags]
+SLOW = 50.0
+
+[[abilities.effects]]
+type = "damage"
+amount_per_tick = 8
+tick_interval_ms = 1000
+duration_ms = 3000
+
+# --- Ability 4: Thorn Burst ---
+[[abilities]]
+name = "ThornBurst"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 8000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 35
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+PHYSICAL = 50.0
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.0
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.5
+
+[abilities.effects.tags]
+KNOCKBACK = 45.0
+
+# --- Ability 5: Living Wall ---
+[[abilities]]
+name = "LivingWall"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 10000
+cast_time_ms = 300
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 45
+duration_ms = 5000
+
+# --- Ability 6: Overgrowth ---
+[[abilities]]
+name = "Overgrowth"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 12000
+cast_time_ms = 300
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount_per_tick = 10
+tick_interval_ms = 1000
+duration_ms = 5000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.5
+
+# --- Ability 7: Crushing Roots ---
+[[abilities]]
+name = "CrushingRoots"
+targeting = "target_enemy"
+range = 3.0
+cooldown_ms = 10000
+cast_time_ms = 400
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "damage"
+amount = 40
+
+[abilities.effects.tags]
+PHYSICAL = 45.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 2000
+
+[abilities.effects.tags]
+CROWD_CONTROL = 60.0
+
+# --- Ability 8: Wild Charge ---
+[[abilities]]
+name = "WildCharge"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 7000
+cast_time_ms = 0
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+[[abilities.effects]]
+type = "damage"
+amount = 30
+
+[abilities.effects.tags]
+PHYSICAL = 45.0
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.3
+duration_ms = 2000
+
+[abilities.effects.tags]
+SLOW = 40.0
+
+# --- Passive 1: Thorny Hide ---
+[[passives]]
+name = "ThornyHide"
+cooldown_ms = 4000
+range = 1.5
+
+[passives.trigger]
+type = "on_damage_taken"
+
+[[passives.effects]]
+type = "damage"
+amount = 15
+
+# --- Passive 2: Nature's Resilience ---
+[[passives]]
+name = "NaturesResilience"
+cooldown_ms = 30000
+range = 0.0
+
+[passives.trigger]
+type = "on_hp_below"
+percent = 35.0
+
+[[passives.effects]]
+type = "shield"
+amount = 50
+duration_ms = 5000
+
+[[passives.effects]]
+type = "heal"
+amount_per_tick = 8
+tick_interval_ms = 1000
+duration_ms = 5000

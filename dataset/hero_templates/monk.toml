@@ -1,0 +1,236 @@
+[hero]
+name = "Monk"
+
+[stats]
+hp = 95
+move_speed = 3.5
+
+[stats.tags]
+CROWD_CONTROL = 45.0
+
+[attack]
+damage = 18
+range = 1.3
+cooldown = 800
+cast_time = 200
+
+# --- Ability 1: Flying Kick ---
+[[abilities]]
+name = "FlyingKick"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 5000
+cast_time_ms = 0
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "dash"
+to_target = true
+
+[abilities.effects.area]
+shape = "self"
+
+[[abilities.effects]]
+type = "damage"
+amount = 40
+
+[abilities.effects.area]
+shape = "single_target"
+
+[abilities.effects.tags]
+PHYSICAL = 45.0
+
+# --- Ability 2: Palm Strike ---
+[[abilities]]
+name = "PalmStrike"
+targeting = "target_enemy"
+range = 1.5
+cooldown_ms = 4000
+cast_time_ms = 200
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "damage"
+amount = 35
+
+[abilities.effects.area]
+shape = "single_target"
+
+[abilities.effects.tags]
+PHYSICAL = 50.0
+
+[[abilities.effects]]
+type = "knockback"
+distance = 2.5
+
+[abilities.effects.area]
+shape = "single_target"
+
+# --- Ability 3: Inner Peace ---
+[[abilities]]
+name = "InnerPeace"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 12000
+cast_time_ms = 300
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "heal"
+amount = 40
+
+[abilities.effects.area]
+shape = "self"
+
+[[abilities.effects]]
+type = "shield"
+amount = 20
+duration_ms = 3000
+
+[abilities.effects.area]
+shape = "self"
+
+# --- Ability 4: Flurry of Blows ---
+[[abilities]]
+name = "FlurryOfBlows"
+targeting = "target_enemy"
+range = 2.0
+cooldown_ms = 6000
+cast_time_ms = 200
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 15
+
+[abilities.delivery]
+method = "chain"
+bounces = 4
+bounce_range = 2.0
+falloff = 0.1
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 15
+
+# --- Ability 5: Meditation ---
+[[abilities]]
+name = "Meditation"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 15000
+cast_time_ms = 300
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount_per_tick = 15
+tick_interval_ms = 1000
+duration_ms = 4000
+
+[abilities.effects.area]
+shape = "self"
+
+# --- Ability 6: Spinning Crane Kick ---
+[[abilities]]
+name = "SpinningCraneKick"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 6000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[[abilities.effects]]
+type = "damage"
+amount = 35
+
+[abilities.effects.area]
+shape = "circle"
+radius = 2.0
+
+[abilities.effects.tags]
+PHYSICAL = 50.0
+
+# --- Ability 7: Chi Burst ---
+[[abilities]]
+name = "ChiBurst"
+targeting = "target_enemy"
+range = 6.0
+cooldown_ms = 8000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "projectile"
+speed = 10.0
+pierce = true
+width = 0.4
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 30
+
+[abilities.delivery.on_hit.tags]
+MAGIC = 45.0
+
+# --- Ability 8: Disabling Strike ---
+[[abilities]]
+name = "DisablingStrike"
+targeting = "target_enemy"
+range = 1.5
+cooldown_ms = 8000
+cast_time_ms = 200
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "damage"
+amount = 20
+
+[abilities.effects.area]
+shape = "single_target"
+
+[abilities.effects.tags]
+PHYSICAL = 40.0
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 2000
+
+[abilities.effects.area]
+shape = "single_target"
+
+[abilities.effects.tags]
+CROWD_CONTROL = 60.0
+
+# --- Passive 1: Counterattack ---
+[[passives]]
+name = "Counterattack"
+cooldown_ms = 4000
+range = 1.5
+
+[passives.trigger]
+type = "on_damage_taken"
+
+[[passives.effects]]
+type = "damage"
+amount = 20
+
+# --- Passive 2: Second Wind ---
+[[passives]]
+name = "SecondWind"
+cooldown_ms = 30000
+range = 0.0
+
+[passives.trigger]
+type = "on_hp_below"
+percent = 30.0
+
+[[passives.effects]]
+type = "heal"
+amount = 30
+
+[[passives.effects]]
+type = "buff"
+stat = "move_speed"
+factor = 0.2
+duration_ms = 3000

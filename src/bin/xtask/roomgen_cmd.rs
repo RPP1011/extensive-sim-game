@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::cli::{RoomgenCommand, RoomgenSubcommand, RoomgenExportArgs, RoomgenRenderArgs, RoomgenSimulateArgs, RoomgenFloorplanArgs};
+use crate::cli::{RoomgenCommand, RoomgenSubcommand, RoomgenExportArgs, RoomgenRenderArgs, RoomgenSimulateArgs, RoomgenFloorplanArgs, RoomgenRetrieveArgs};
 
 pub(crate) fn run_roomgen_cmd(cmd: RoomgenCommand) -> ExitCode {
     match cmd.sub {
@@ -11,6 +11,7 @@ pub(crate) fn run_roomgen_cmd(cmd: RoomgenCommand) -> ExitCode {
         RoomgenSubcommand::Render(args) => run_render(args),
         RoomgenSubcommand::Simulate(args) => run_simulate(args),
         RoomgenSubcommand::Floorplan(args) => run_floorplan(args),
+        RoomgenSubcommand::Retrieve(args) => run_retrieve(args),
     }
 }
 
@@ -431,6 +432,148 @@ fn run_floorplan(args: RoomgenFloorplanArgs) -> ExitCode {
 }
 
 // ---------------------------------------------------------------------------
+// Retrieve: solo hero vs N enemies, reach objective
+// ---------------------------------------------------------------------------
+
+fn run_retrieve(args: RoomgenRetrieveArgs) -> ExitCode {
+    use bevy_game::ai::effects::HeroToml;
+
+    let hero_tomls = load_hero_dir(&args.heroes);
+    if hero_tomls.is_empty() {
+        eprintln!("No hero templates found in {}", args.heroes.display());
+        return ExitCode::FAILURE;
+    }
+    let rooms = load_room_records(&args.rooms);
+    if rooms.is_empty() {
+        eprintln!("No rooms found in {}", args.rooms.display());
+        return ExitCode::FAILURE;
+    }
+    eprintln!("Loaded {} heroes, {} rooms", hero_tomls.len(), rooms.len());
+
+    let threads = if args.threads == 0 {
+        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4)
+    } else { args.threads };
+
+    // Build work: (room_idx, hero_idx)
+    let mut work = Vec::new();
+    let mut lcg = LcgSimple::new(99);
+    let n_heroes = hero_tomls.len();
+    let n_rooms = rooms.len();
+
+    for _ in 0..args.max_matches {
+        let room_idx = lcg.next() % n_rooms;
+        let hero_idx = lcg.next() % n_heroes;
+        work.push((room_idx, hero_idx));
+    }
+
+    let total = work.len();
+    let n_enemies = args.enemies;
+    eprintln!("Running {} retrieval missions (1 hero vs {} enemies)...", total, n_enemies);
+
+    // Pick a single enemy template for the guards (use the first non-special hero)
+    let guard_toml = &hero_tomls[0].1;
+    let guard_tomls: Vec<HeroToml> = (0..n_enemies).map(|_| guard_toml.clone()).collect();
+
+    let chunk_size = (work.len() + threads - 1) / threads;
+    let work_chunks: Vec<_> = work.chunks(chunk_size).map(|c| c.to_vec()).collect();
+    let rooms_ref = &rooms;
+    let hero_tomls_ref = &hero_tomls;
+    let guard_tomls_ref = &guard_tomls;
+    let progress = AtomicUsize::new(0);
+    let progress_ref = &progress;
+
+    let results: Vec<Vec<String>> = std::thread::scope(|s| {
+        let handles: Vec<_> = work_chunks
+            .into_iter()
+            .map(|chunk| {
+                s.spawn(move || {
+                    let mut lines = Vec::with_capacity(chunk.len());
+                    for &(room_idx, hero_idx) in &chunk {
+                        let room = &rooms_ref[room_idx];
+                        let (ref name, ref toml) = hero_tomls_ref[hero_idx];
+                        let result = run_retrieval_match(
+                            room, toml, name, guard_tomls_ref, room.seed + hero_idx as u64,
+                        );
+                        lines.push(result);
+                        let done = progress_ref.fetch_add(1, Ordering::Relaxed) + 1;
+                        if done % 100 == 0 {
+                            eprintln!("  {}/{} missions...", done, total);
+                        }
+                    }
+                    lines
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+
+    if let Some(parent) = args.output.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let file = std::fs::File::create(&args.output).unwrap();
+    let mut writer = BufWriter::new(file);
+    let mut victories = 0usize;
+    let mut defeats = 0usize;
+    let mut timeouts = 0usize;
+    let mut count = 0usize;
+
+    // Per-hero tracking
+    let mut hero_wins: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut hero_total: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+    for batch in &results {
+        for line in batch {
+            writeln!(writer, "{}", line).unwrap();
+            count += 1;
+            if line.contains("\"outcome\":\"Victory\"") { victories += 1; }
+            else if line.contains("\"outcome\":\"Defeat\"") { defeats += 1; }
+            else { timeouts += 1; }
+
+            // Extract hero name
+            if let Some(start) = line.find("\"hero\":\"") {
+                let rest = &line[start + 8..];
+                if let Some(end) = rest.find('"') {
+                    let name = rest[..end].to_string();
+                    *hero_total.entry(name.clone()).or_insert(0) += 1;
+                    if line.contains("\"outcome\":\"Victory\"") {
+                        *hero_wins.entry(name).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+    }
+    writer.flush().unwrap();
+
+    eprintln!("\n=== Retrieval Results ({} missions, 1 vs {}) ===", count, n_enemies);
+    eprintln!("  Reached obj: {:5} ({:.1}%)", victories, victories as f64 / count as f64 * 100.0);
+    eprintln!("  Killed:      {:5} ({:.1}%)", defeats, defeats as f64 / count as f64 * 100.0);
+    eprintln!("  Timeout:     {:5} ({:.1}%)", timeouts, timeouts as f64 / count as f64 * 100.0);
+
+    // Per-hero success rate
+    let mut hero_rates: Vec<_> = hero_total.iter()
+        .map(|(name, &total)| {
+            let wins = *hero_wins.get(name).unwrap_or(&0);
+            (name.clone(), wins, total)
+        })
+        .collect();
+    hero_rates.sort_by(|a, b| {
+        let ra = a.1 as f64 / a.2 as f64;
+        let rb = b.1 as f64 / b.2 as f64;
+        rb.partial_cmp(&ra).unwrap()
+    });
+
+    eprintln!("\n  {:<16} {:>6} {:>6}", "Hero", "Games", "Reach%");
+    eprintln!("  {}", "-".repeat(32));
+    for (name, wins, total) in &hero_rates {
+        let rate = *wins as f64 / *total as f64 * 100.0;
+        eprintln!("  {:<16} {:6} {:5.1}%", name, total, rate);
+    }
+
+    eprintln!("\nWrote {} results to {}", count, args.output.display());
+    ExitCode::SUCCESS
+}
+
+// ---------------------------------------------------------------------------
 // Simulate: run HvH combat on generated rooms
 // ---------------------------------------------------------------------------
 
@@ -577,6 +720,121 @@ fn run_simulate(args: RoomgenSimulateArgs) -> ExitCode {
     eprintln!("Wrote {} results to {}", count, args.output.display());
 
     ExitCode::SUCCESS
+}
+
+/// Run a solo retrieval mission: 1 hero vs many enemies.
+/// Hero wins by reaching the objective point (enemy spawn centroid).
+fn run_retrieval_match(
+    room: &RoomRecord,
+    hero_toml: &bevy_game::ai::effects::HeroToml,
+    hero_name: &str,
+    enemy_tomls: &[bevy_game::ai::effects::HeroToml],
+    seed: u64,
+) -> String {
+    use bevy_game::ai::core::{step, distance, move_towards, SimVec2, Team, IntentAction, UnitIntent, FIXED_TICK_MS};
+    use bevy_game::scenario::build_unified_ai;
+
+    let nav = room_record_to_navgrid(room);
+    let grid_nav = nav.to_gridnav();
+
+    // 1 hero vs N enemies
+    let hero_spawns = if room.player_spawn.is_empty() {
+        vec![SimVec2 { x: 2.0, y: room.depth as f32 / 2.0 }]
+    } else {
+        vec![room.player_spawn[0]]
+    };
+
+    // Scatter enemies across the room
+    let mut enemy_spawns: Vec<SimVec2> = Vec::new();
+    let mut erng = LcgSimple::new(seed);
+    for i in 0..enemy_tomls.len() {
+        if !room.enemy_spawn.is_empty() {
+            enemy_spawns.push(room.enemy_spawn[i % room.enemy_spawn.len()]);
+        } else {
+            let x = (erng.next() % (room.width - 4)) as f32 + 2.0;
+            let y = (erng.next() % (room.depth - 4)) as f32 + 2.0;
+            enemy_spawns.push(SimVec2 { x, y });
+        }
+    }
+
+    let mut sim = bevy_game::scenario::build_hvh_with_spawns_and_tomls(
+        &[hero_toml.clone()], enemy_tomls, seed,
+        &hero_spawns, &enemy_spawns,
+    );
+    sim.grid_nav = Some(grid_nav);
+
+    let mut squad_state = build_unified_ai(&sim);
+
+    // Objective: reach the enemy spawn centroid
+    let objective = if !room.enemy_spawn.is_empty() {
+        let cx = room.enemy_spawn.iter().map(|p| p.x).sum::<f32>() / room.enemy_spawn.len() as f32;
+        let cy = room.enemy_spawn.iter().map(|p| p.y).sum::<f32>() / room.enemy_spawn.len() as f32;
+        SimVec2 { x: cx, y: cy }
+    } else {
+        SimVec2 { x: room.width as f32 - 3.0, y: room.depth as f32 / 2.0 }
+    };
+
+    let max_ticks = 8000u64;
+    let mut outcome = "Timeout";
+
+    for _ in 0..max_ticks {
+        let mut intents = bevy_game::ai::squad::generate_intents(&sim, &mut squad_state, FIXED_TICK_MS);
+
+        // Override hero intent: move toward objective, auto-use stealth
+        for intent in &mut intents {
+            let Some(unit) = sim.units.iter().find(|u| u.id == intent.unit_id && u.hp > 0) else { continue };
+            if unit.team == Team::Hero {
+                // If near objective, victory
+                if distance(unit.position, objective) < 2.0 {
+                    outcome = "Victory";
+                    break;
+                }
+
+                // Auto-cast stealth abilities when off cooldown and not stealthed
+                let is_stealthed = unit.status_effects.iter()
+                    .any(|s| matches!(s.kind, bevy_game::ai::effects::StatusKind::Stealth { .. }));
+                if !is_stealthed && unit.casting.is_none() {
+                    // Find a stealth ability that's ready
+                    let stealth_ability = unit.abilities.iter().enumerate().find(|(_, ab)| {
+                        ab.cooldown_remaining_ms == 0
+                            && ab.def.effects.iter().any(|ce| matches!(ce.effect, bevy_game::ai::effects::Effect::Stealth { .. }))
+                    });
+                    if let Some((ai, _)) = stealth_ability {
+                        intent.action = IntentAction::UseAbility {
+                            ability_index: ai,
+                            target: bevy_game::ai::effects::AbilityTarget::None,
+                        };
+                        continue;
+                    }
+                }
+
+                // Move toward objective
+                intent.action = IntentAction::MoveTo { position: objective };
+            }
+        }
+
+        if outcome == "Victory" { break; }
+
+        // Check if hero died
+        let hero_alive = sim.units.iter().any(|u| u.team == Team::Hero && u.hp > 0);
+        if !hero_alive {
+            outcome = "Defeat";
+            break;
+        }
+
+        let (new_sim, _events) = step(sim, &intents, FIXED_TICK_MS);
+        sim = new_sim;
+    }
+
+    let hero_hp: i32 = sim.units.iter()
+        .filter(|u| u.team == Team::Hero && u.hp > 0)
+        .map(|u| u.hp).sum();
+
+    format!(
+        r#"{{"room_seed":{},"room_type":"{}","width":{},"depth":{},"hero":"{}","enemy_count":{},"outcome":"{}","ticks":{},"hero_hp_remaining":{}}}"#,
+        room.seed, room.room_type, room.width, room.depth,
+        hero_name, enemy_tomls.len(), outcome, sim.tick, hero_hp,
+    )
 }
 
 /// Run a single HvH match on a room. Returns a JSON line.

@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use crate::ai::core::{distance, SimState, UnitState};
+use crate::ai::core::{distance, can_see, SimState, UnitState};
 
 use crate::ai::squad::personality::Personality;
 use crate::ai::squad::state::{SquadBlackboard, TickContext};
@@ -26,7 +26,16 @@ pub(in crate::ai::squad) fn choose_target(
     let unit = ctx.unit(state, unit_id)?;
     let focus = board.focus_target;
 
-    enemies.iter().copied().max_by(|a, b| {
+    // Filter enemies to only those visible to this unit
+    let visible_enemies: Vec<u32> = enemies.iter().copied().filter(|&eid| {
+        ctx.unit(state, eid).map_or(false, |target| can_see(unit, target))
+    }).collect();
+
+    if visible_enemies.is_empty() {
+        return None;
+    }
+
+    visible_enemies.iter().copied().max_by(|a, b| {
         let score_a = target_score(state, unit, personality, *a, focus, ctx);
         let score_b = target_score(state, unit, personality, *b, focus, ctx);
         score_a

@@ -20,6 +20,22 @@ pub fn is_alive(unit: &UnitState) -> bool {
     unit.hp > 0
 }
 
+/// Check if `observer` can see `target`.
+/// Non-stealthed units are always visible.
+/// Stealthed units are only visible within close range (3 cells),
+/// further reduced by the target's cover_bonus (near walls = harder to spot).
+pub fn can_see(observer: &UnitState, target: &UnitState) -> bool {
+    let is_stealthed = target.status_effects.iter()
+        .any(|s| matches!(s.kind, crate::ai::effects::StatusKind::Stealth { .. }));
+    if !is_stealthed {
+        return true;
+    }
+    let dist = super::math::distance(observer.position, target.position);
+    // Base detection range 3.0, reduced by cover
+    let detection_range = 3.0 * (1.0 - target.cover_bonus);
+    dist <= detection_range
+}
+
 /// Clear casting/channeling/CC state when a unit dies.
 pub fn clear_dead_unit_state(unit: &mut UnitState) {
     unit.casting = None;

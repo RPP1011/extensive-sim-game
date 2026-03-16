@@ -45,6 +45,29 @@ pub enum RoomgenSubcommand {
     Simulate(RoomgenSimulateArgs),
     /// Generate mission floorplans (multi-room connected layouts)
     Floorplan(RoomgenFloorplanArgs),
+    /// Run solo retrieval missions: 1 hero vs N enemies, reach objective
+    Retrieve(RoomgenRetrieveArgs),
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Run solo retrieval missions on generated rooms")]
+pub struct RoomgenRetrieveArgs {
+    /// Room JSONL file
+    pub rooms: PathBuf,
+    /// Hero registry directory
+    pub heroes: PathBuf,
+    /// Number of enemies per mission
+    #[arg(long, default_value_t = 20)]
+    pub enemies: usize,
+    /// Maximum missions to run
+    #[arg(long, default_value_t = 500)]
+    pub max_matches: usize,
+    /// Number of parallel threads (0 = all cores)
+    #[arg(short = 'j', long, default_value_t = 0)]
+    pub threads: usize,
+    /// Output JSONL
+    #[arg(long, default_value = "generated/retrieval_results.jsonl")]
+    pub output: PathBuf,
 }
 
 #[derive(Debug, Parser)]

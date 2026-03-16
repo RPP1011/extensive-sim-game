@@ -51,6 +51,7 @@ pub(crate) fn resolve_hero_templates(
                 }
             } else {
                 search_paths.push(format!("assets/hero_templates/{}.toml", name.to_lowercase()));
+                search_paths.push(format!("dataset/hero_templates/{}.toml", name.to_lowercase()));
                 search_paths.push(format!("assets/lol_heroes/{}.toml", name));
                 // Search dataset/heroes/ subdirectories
                 if let Ok(entries) = std::fs::read_dir("dataset/heroes") {

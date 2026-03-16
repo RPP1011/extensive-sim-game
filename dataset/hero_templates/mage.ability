@@ -1,0 +1,97 @@
+// Mage abilities
+
+ability Fireball {
+    target: enemy, range: 5.0
+    cooldown: 5s, cast: 500ms
+    hint: damage
+
+    deliver projectile { speed: 8.0, width: 0.3 } {
+        on_hit {
+            damage 55 [FIRE: 60]
+        }
+        on_arrival {
+            damage 15 in circle(2.0)
+        }
+    }
+}
+
+ability FrostNova {
+    target: self_aoe
+    cooldown: 10s, cast: 300ms
+    hint: crowd_control
+
+    damage 20 in circle(3.0)
+    stun 2s in circle(3.0) [CROWD_CONTROL: 80, ICE: 60]
+}
+
+ability ArcaneMissiles {
+    target: enemy, range: 5.0
+    cooldown: 4s, cast: 200ms
+    hint: damage
+
+    deliver chain { bounces: 3, range: 3.0, falloff: 0.8 } {
+        on_hit {
+            damage 35 [MAGIC: 50]
+        }
+    }
+}
+
+ability Blizzard {
+    target: ground, range: 6.0
+    cooldown: 12s, cast: 400ms
+    hint: damage
+
+    deliver zone { duration: 4s, tick: 1s } {
+        on_hit {
+            damage 15 in circle(3.0) [ICE: 50]
+            slow 0.3 for 1.5s in circle(3.0)
+        }
+    }
+}
+
+ability Meteor {
+    target: ground, range: 6.0
+    cooldown: 18s, cast: 800ms
+    hint: damage
+
+    damage 80 in circle(2.5) [FIRE: 70]
+}
+
+ability Blink {
+    target: self
+    cooldown: 10s, cast: 0ms
+    hint: utility
+
+    dash 3.0
+    damage 15 in circle(2.0) [MAGIC: 40]
+}
+
+ability Polymorph {
+    target: enemy, range: 5.0
+    cooldown: 15s, cast: 300ms
+    hint: crowd_control
+
+    polymorph 3s [CROWD_CONTROL: 80]
+}
+
+ability ManaShield {
+    target: self
+    cooldown: 14s, cast: 200ms
+    hint: defense
+
+    shield 50 for 5s
+}
+
+passive ArcaneShield {
+    trigger: on_hp_below(50%)
+    cooldown: 30s
+
+    shield 40 for 4s
+}
+
+passive ArcaneMastery {
+    trigger: on_ability_used
+    cooldown: 8s
+
+    buff cooldown_reduction 0.15 for 3s
+}

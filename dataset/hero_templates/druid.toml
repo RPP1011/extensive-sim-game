@@ -1,0 +1,223 @@
+[hero]
+name = "Druid"
+
+[stats]
+hp = 110
+move_speed = 2.8
+
+[stats.tags]
+POISON = 40.0
+
+[attack]
+damage = 12
+range = 3.5
+cooldown = 1100
+cast_time = 300
+
+# --- Ability 1: Regrowth ---
+[[abilities]]
+name = "Regrowth"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 3000
+cast_time_ms = 300
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount = 20
+
+[abilities.effects.area]
+shape = "single_target"
+
+[[abilities.effects]]
+type = "heal"
+amount_per_tick = 8
+tick_interval_ms = 1000
+duration_ms = 5000
+
+[abilities.effects.area]
+shape = "single_target"
+
+# --- Ability 2: Entangling Roots ---
+[[abilities]]
+name = "EntanglingRoots"
+targeting = "target_enemy"
+range = 4.0
+cooldown_ms = 8000
+cast_time_ms = 300
+ai_hint = "crowd_control"
+
+[[abilities.effects]]
+type = "stun"
+duration_ms = 2000
+
+[abilities.effects.area]
+shape = "single_target"
+
+[abilities.effects.tags]
+CROWD_CONTROL = 55.0
+
+[[abilities.effects]]
+type = "damage"
+amount_per_tick = 8
+tick_interval_ms = 1000
+duration_ms = 2000
+
+[abilities.effects.area]
+shape = "single_target"
+
+# --- Ability 3: Summon Treant ---
+[[abilities]]
+name = "SummonTreant"
+targeting = "self_cast"
+range = 0.0
+cooldown_ms = 20000
+cast_time_ms = 500
+ai_hint = "utility"
+
+[[abilities.effects]]
+type = "summon"
+template = "treant"
+count = 1
+
+[abilities.effects.area]
+shape = "self"
+
+# --- Ability 4: Nature's Wrath ---
+[[abilities]]
+name = "NaturesWrath"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 5000
+cast_time_ms = 500
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "projectile"
+speed = 7.0
+pierce = false
+width = 0.3
+
+[[abilities.delivery.on_hit]]
+type = "damage"
+amount = 45
+
+[abilities.delivery.on_hit.tags]
+MAGIC = 50.0
+
+# --- Ability 5: Rejuvenation ---
+[[abilities]]
+name = "Rejuvenation"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 4000
+cast_time_ms = 200
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount_per_tick = 12
+tick_interval_ms = 1000
+duration_ms = 6000
+
+[abilities.effects.area]
+shape = "single_target"
+
+# --- Ability 6: Thorns ---
+[[abilities]]
+name = "Thorns"
+targeting = "target_ally"
+range = 4.0
+cooldown_ms = 10000
+cast_time_ms = 300
+ai_hint = "defense"
+
+[[abilities.effects]]
+type = "shield"
+amount = 30
+duration_ms = 6000
+
+[abilities.effects.area]
+shape = "single_target"
+
+# --- Ability 7: Hurricane ---
+[[abilities]]
+name = "Hurricane"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 15000
+cast_time_ms = 300
+ai_hint = "damage"
+
+[abilities.delivery]
+method = "channel"
+duration_ms = 3000
+tick_interval_ms = 500
+
+[[abilities.effects]]
+type = "damage"
+amount_per_tick = 15
+tick_interval_ms = 500
+duration_ms = 3000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.5
+
+[[abilities.effects]]
+type = "slow"
+factor = 0.4
+duration_ms = 3000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 3.5
+
+# --- Ability 8: Wild Growth ---
+[[abilities]]
+name = "WildGrowth"
+targeting = "self_aoe"
+range = 0.0
+cooldown_ms = 12000
+cast_time_ms = 300
+ai_hint = "heal"
+
+[[abilities.effects]]
+type = "heal"
+amount_per_tick = 6
+tick_interval_ms = 1000
+duration_ms = 6000
+
+[abilities.effects.area]
+shape = "circle"
+radius = 4.0
+
+# --- Passive 1: Nature's Blessing ---
+[[passives]]
+name = "NaturesBlessing"
+cooldown_ms = 0
+range = 3.0
+
+[passives.trigger]
+type = "periodic"
+interval_ms = 4000
+
+[[passives.effects]]
+type = "heal"
+amount = 8
+
+# --- Passive 2: Bark Skin ---
+[[passives]]
+name = "BarkSkin"
+cooldown_ms = 25000
+range = 0.0
+
+[passives.trigger]
+type = "on_hp_below"
+percent = 40.0
+
+[[passives.effects]]
+type = "shield"
+amount = 35
+duration_ms = 5000
