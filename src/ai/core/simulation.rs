@@ -13,6 +13,7 @@ use super::intent::*;
 use super::tick_systems::*;
 use super::tick_world::*;
 use super::verify::verify_tick;
+use crate::ai::pathing::has_line_of_sight;
 
 #[requires(state.units.iter().all(|u| u.position.x.is_finite() && u.position.y.is_finite()))]
 #[requires(state.units.iter().all(|u| u.hp <= u.max_hp))]
@@ -226,6 +227,86 @@ pub fn step(mut state: SimState, intents: &[UnitIntent], dt_ms: u32) -> (SimStat
             }
             IntentAction::UseAbility { ability_index, target } => {
                 try_start_hero_ability(idx, ability_index, target, tick, &mut state, &mut events);
+            }
+            IntentAction::Skulk { objective } => {
+                // Move toward objective using concealment-aware pathfinding
+                if let Some(ref nav) = state.grid_nav.clone() {
+                    let unit_pos = state.units[idx].position;
+                    let unit_team = state.units[idx].team;
+
+                    // Compute enemy vision: cells visible to any enemy
+                    let mut enemy_vision = std::collections::HashSet::new();
+                    for enemy in state.units.iter().filter(|u| u.team != unit_team && u.hp > 0) {
+                        let vis = nav.visible_cells_from(enemy.position, 8.0);
+                        enemy_vision.extend(vis);
+                    }
+
+                    let current_cell = nav.cell_of(unit_pos);
+                    let goal_cell = nav.cell_of(objective);
+                    let next_cell = nav.skulk_next_cell(current_cell, goal_cell, &enemy_vision);
+                    let next_pos = nav.cell_center(next_cell.0, next_cell.1);
+
+                    move_towards_position(idx, next_pos, tick, &mut state, dt_ms, &mut events);
+                } else {
+                    // No nav grid — fall back to direct movement
+                    move_towards_position(idx, objective, tick, &mut state, dt_ms, &mut events);
+                }
+            }
+            IntentAction::Hide => {
+                // Move to nearest cell that breaks LOS with all enemies
+                if let Some(ref nav) = state.grid_nav.clone() {
+                    let unit_pos = state.units[idx].position;
+                    let unit_team = state.units[idx].team;
+                    let unit_cell = nav.cell_of(unit_pos);
+
+                    // Find enemy positions
+                    let enemy_positions: Vec<SimVec2> = state.units.iter()
+                        .filter(|u| u.team != unit_team && u.hp > 0)
+                        .map(|u| u.position)
+                        .collect();
+
+                    if enemy_positions.is_empty() {
+                        // No enemies — just hold
+                    } else {
+                        // Search nearby cells for one that breaks LOS with all enemies
+                        let search_radius = 5i32;
+                        let mut best_cell = unit_cell;
+                        let mut best_score = f32::MIN;
+
+                        for dx in -search_radius..=search_radius {
+                            for dy in -search_radius..=search_radius {
+                                let c = (unit_cell.0 + dx, unit_cell.1 + dy);
+                                if nav.blocked.contains(&c) || !nav.in_bounds(c.0, c.1) {
+                                    continue;
+                                }
+                                let cell_pos = nav.cell_center(c.0, c.1);
+
+                                // Count how many enemies CAN'T see this cell
+                                let hidden_from = enemy_positions.iter()
+                                    .filter(|&&ep| !has_line_of_sight(nav, ep, cell_pos))
+                                    .count();
+
+                                let concealment = nav.concealment_at(c);
+                                let dist = ((dx * dx + dy * dy) as f32).sqrt();
+
+                                // Score: prefer hiding from more enemies, near walls, close by
+                                let score = hidden_from as f32 * 3.0
+                                    + concealment * 2.0
+                                    - dist * 0.5;
+
+                                if score > best_score {
+                                    best_score = score;
+                                    best_cell = c;
+                                }
+                            }
+                        }
+
+                        if best_cell != unit_cell {
+                            let hide_pos = nav.cell_center(best_cell.0, best_cell.1);
+                            move_towards_position(idx, hide_pos, tick, &mut state, dt_ms, &mut events);
+                        }
+                    }
+                }
             }
         }
     }

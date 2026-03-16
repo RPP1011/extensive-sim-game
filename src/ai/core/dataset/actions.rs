@@ -128,7 +128,7 @@ pub fn classify_combat_action(action: &IntentAction, unit_id: u32, state: &SimSt
                 Some(CombatActionClass::Hold)
             }
         }
-        IntentAction::Hold => Some(CombatActionClass::Hold),
+        IntentAction::Skulk { .. } | IntentAction::Hide | IntentAction::Hold => Some(CombatActionClass::Hold),
     }
 }
 
@@ -192,7 +192,7 @@ pub fn classify_action(action: &IntentAction, unit_id: u32, state: &SimState) ->
                 ActionClass::Hold
             }
         }
-        IntentAction::Hold => ActionClass::Hold,
+        IntentAction::Skulk { .. } | IntentAction::Hide | IntentAction::Hold => ActionClass::Hold,
     }
 }
 
@@ -237,7 +237,7 @@ pub fn classify_action_raw(action: &IntentAction, unit_id: u32, state: &SimState
                 13 // Hold
             }
         }
-        IntentAction::Hold => 13,
+        IntentAction::Skulk { .. } | IntentAction::Hide | IntentAction::Hold => 13,
     })
 }
 

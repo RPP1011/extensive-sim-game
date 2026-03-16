@@ -808,8 +808,12 @@ fn run_retrieval_match(
                     }
                 }
 
-                // Move toward objective
-                intent.action = IntentAction::MoveTo { position: objective };
+                // Move toward objective — skulk if stealthed, direct if not
+                if is_stealthed {
+                    intent.action = IntentAction::Skulk { objective };
+                } else {
+                    intent.action = IntentAction::MoveTo { position: objective };
+                }
             }
         }
 
