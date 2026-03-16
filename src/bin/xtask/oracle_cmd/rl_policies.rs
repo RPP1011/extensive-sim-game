@@ -75,6 +75,7 @@ pub(crate) fn apply_random_policy(
             lp_move: Some(0.0), lp_combat: Some(0.0),
             lp_pointer: Some(0.0),
             aggregate_features: if gs_v2.aggregate_features.is_empty() { None } else { Some(gs_v2.aggregate_features.clone()) },
+            target_move_pos: None,
             teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
         });
     }
@@ -190,6 +191,7 @@ pub(crate) fn apply_v3_policy(
             move_dir: None, combat_type: None,
             lp_move: None, lp_combat: None,
             lp_pointer: None, aggregate_features: None,
+            target_move_pos: None,
             teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
         });
     }
@@ -212,11 +214,11 @@ pub(crate) fn apply_gpu_policy(
     intents: &mut Vec<bevy_game::ai::core::UnitIntent>,
     steps: &mut Vec<RlStep>,
 ) {
-    use bevy_game::ai::core::UnitIntent;
+    use bevy_game::ai::core::{UnitIntent, distance, move_towards, sim_vec2};
     use bevy_game::ai::core::ability_eval::extract_game_state;
     use bevy_game::ai::core::ability_transformer::gpu_client::InferenceRequest;
     use bevy_game::ai::core::self_play::actions::{
-        move_dir_to_intent, combat_action_to_intent, build_token_infos,
+        combat_action_to_intent, build_token_infos,
     };
 
     let n_abilities = unit.abilities.len().min(MAX_ABILITIES);
@@ -246,11 +248,36 @@ pub(crate) fn apply_gpu_policy(
 
     match gpu.infer(req) {
         Ok(result) => {
-            let move_dir = result.move_dir as usize;
             let combat_type = result.combat_type as usize;
             let target_idx = result.target_idx as usize;
 
-            let move_intent = move_dir_to_intent(move_dir, uid, sim);
+            // Target position from GPU: (move_dx, move_dy) are world-space coordinates
+            let target_position = sim_vec2(result.move_dx, result.move_dy);
+            let unit_pos = sim.units.iter().find(|u| u.id == uid).map(|u| u.position)
+                .unwrap_or(target_position);
+            let step = sim.units.iter().find(|u| u.id == uid)
+                .map(|u| u.move_speed_per_sec * 0.1).unwrap_or(0.32);
+            let move_intent = if distance(unit_pos, target_position) > 0.1 {
+                let next = move_towards(unit_pos, target_position, step);
+                bevy_game::ai::core::IntentAction::MoveTo { position: next }
+            } else {
+                bevy_game::ai::core::IntentAction::Hold
+            };
+
+            // Discretize for recording (legacy compat)
+            let move_dir = {
+                let dx = target_position.x - unit_pos.x;
+                let dy = target_position.y - unit_pos.y;
+                if (dx * dx + dy * dy).sqrt() < 0.1 { 8 }
+                else {
+                    let angle = dy.atan2(dx);
+                    let a = if angle < 0.0 { angle + 2.0 * std::f32::consts::PI } else { angle };
+                    let shifted = (std::f32::consts::FRAC_PI_2 - a + 2.0 * std::f32::consts::PI)
+                        % (2.0 * std::f32::consts::PI);
+                    ((shifted + std::f32::consts::PI / 8.0) / (std::f32::consts::PI / 4.0)) as usize % 8
+                }
+            };
+
             let token_infos = build_token_infos(sim, uid, &gs_v2.entity_types, &gs_v2.positions);
             let combat_intent = combat_action_to_intent(combat_type, target_idx, uid, sim, &token_infos);
 
@@ -276,7 +303,17 @@ pub(crate) fn apply_gpu_policy(
                     intent_to_v4_action(ta, uid, sim, &ti)
                         .unwrap_or((8, 1, 0))
                 } else {
-                    (8, 1, 0) // hold/stay if teacher has no opinion
+                    (8, 1, 0)
+                };
+
+                // Teacher target position from their intent
+                let teacher_pos = match &teacher_action {
+                    Some(bevy_game::ai::core::IntentAction::MoveTo { position }) =>
+                        Some([position.x, position.y]),
+                    Some(bevy_game::ai::core::IntentAction::Attack { target_id }) =>
+                        sim.units.iter().find(|u| u.id == *target_id)
+                            .map(|t| [t.position.x, t.position.y]),
+                    _ => Some([unit_pos.x, unit_pos.y]),  // stay in place
                 };
 
                 steps.push(RlStep {
@@ -293,6 +330,7 @@ pub(crate) fn apply_gpu_policy(
                     lp_move: Some(result.lp_move), lp_combat: Some(result.lp_combat),
                     lp_pointer: Some(result.lp_pointer),
                     aggregate_features: if gs_v2.aggregate_features.is_empty() { None } else { Some(gs_v2.aggregate_features.clone()) },
+                    target_move_pos: teacher_pos,
                     teacher_move_dir: Some(t_move),
                     teacher_combat_type: Some(t_combat),
                     teacher_target_idx: Some(t_target),
@@ -404,6 +442,7 @@ pub(crate) fn apply_v4_policy(
             lp_move: Some(move_lp), lp_combat: Some(combat_lp),
             lp_pointer: Some(target_lp),
             aggregate_features: if gs_v2.aggregate_features.is_empty() { None } else { Some(gs_v2.aggregate_features.clone()) },
+            target_move_pos: None,
             teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
         });
     }
@@ -513,6 +552,7 @@ pub(crate) fn apply_v5_policy(
             lp_move: Some(move_lp), lp_combat: Some(combat_lp),
             lp_pointer: Some(target_lp),
             aggregate_features: Some(gs_v2.aggregate_features.clone()),
+            target_move_pos: None,
             teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
         });
     }

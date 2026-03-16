@@ -200,10 +200,21 @@ impl ActiveSim {
                     if !result.hidden_state_out.is_empty() {
                         self.hidden_states.insert(uid, result.hidden_state_out.clone());
                     }
-                    let move_dir = result.move_dir as usize;
                     let combat_type = result.combat_type as usize;
                     let target_idx = result.target_idx as usize;
-                    let move_intent = move_dir_to_intent(move_dir, uid, &self.sim);
+                    // Continuous target position from GPU
+                    let target_pos = bevy_game::ai::core::sim_vec2(result.move_dx, result.move_dy);
+                    let unit_pos = self.sim.units.iter().find(|u| u.id == uid)
+                        .map(|u| u.position).unwrap_or(target_pos);
+                    let step_size = self.sim.units.iter().find(|u| u.id == uid)
+                        .map(|u| u.move_speed_per_sec * 0.1).unwrap_or(0.32);
+                    let move_intent = if bevy_game::ai::core::distance(unit_pos, target_pos) > 0.1 {
+                        let next = bevy_game::ai::core::move_towards(unit_pos, target_pos, step_size);
+                        bevy_game::ai::core::IntentAction::MoveTo { position: next }
+                    } else {
+                        bevy_game::ai::core::IntentAction::Hold
+                    };
+                    let move_dir = 8usize; // legacy — not used for continuous
                     let token_infos = build_token_infos(&self.sim, uid, &pu.gs_v2.entity_types, &pu.gs_v2.positions);
                     let combat_intent = combat_action_to_intent(combat_type, target_idx, uid, &self.sim, &token_infos);
                     let final_intent = if !matches!(combat_intent, bevy_game::ai::core::IntentAction::Hold) { combat_intent } else { move_intent };
@@ -242,6 +253,7 @@ impl ActiveSim {
                                 lp_move: Some(result.lp_move), lp_combat: Some(result.lp_combat),
                                 lp_pointer: Some(result.lp_pointer),
                                 aggregate_features: if agg.is_empty() { None } else { Some(agg) },
+                                target_move_pos: None,
                                 teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
                             });
                             self.steps_recorded_this_tick.push(step_idx);

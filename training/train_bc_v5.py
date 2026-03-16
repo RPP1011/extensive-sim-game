@@ -75,6 +75,12 @@ def main():
     combat_type = torch.from_numpy(d["combat_type"]).long().to(DEVICE)
     target_idx = torch.from_numpy(d["target_idx"]).long().to(DEVICE)
 
+    # Target position for position regression (if available)
+    target_pos = None
+    if "target_move_pos" in d:
+        target_pos = torch.from_numpy(d["target_move_pos"]).to(DEVICE)
+        print(f"  Loaded target_move_pos: {target_pos.shape}")
+
     # DAgger: use teacher labels if available and requested
     if args.use_teacher and "teacher_move" in d:
         print("  Using TEACHER labels (DAgger mode)")
@@ -163,8 +169,15 @@ def main():
             aggregate_features=agg_feat[idx],
         )
 
-        # Move loss
-        loss_move = F.cross_entropy(output["move_logits"], move_dir[idx])
+        # Position regression loss
+        if "target_pos" in output and target_pos is not None:
+            # Normalize target pos: x/20, y/20
+            target_norm = target_pos[idx] / 20.0
+            loss_move = F.mse_loss(output["target_pos"], target_norm)
+        elif "move_logits" in output:
+            loss_move = F.cross_entropy(output["move_logits"], move_dir[idx])
+        else:
+            loss_move = torch.tensor(0.0, device=DEVICE)
 
         # Combat type loss (weighted)
         loss_combat = F.cross_entropy(output["combat_logits"], combat_type[idx], weight=combat_weights)
@@ -201,9 +214,20 @@ def main():
                         pos_feat[vi], pos_mask[vi],
                         aggregate_features=agg_feat[vi],
                     )
-                    vl_sum += (F.cross_entropy(vo["move_logits"], move_dir[vi]) +
-                               F.cross_entropy(vo["combat_logits"], combat_type[vi])).item() * len(vi)
-                    vm_ok += (vo["move_logits"].argmax(-1) == move_dir[vi]).sum().item()
+                    if "target_pos" in vo and target_pos is not None:
+                        vl_move = F.mse_loss(vo["target_pos"], target_pos[vi] / 20.0).item()
+                    elif "move_logits" in vo:
+                        vl_move = F.cross_entropy(vo["move_logits"], move_dir[vi]).item()
+                    else:
+                        vl_move = 0.0
+                    vl_sum += (vl_move + F.cross_entropy(vo["combat_logits"], combat_type[vi]).item()) * len(vi)
+                    if "target_pos" in vo and target_pos is not None:
+                        pred_pos = vo["target_pos"] * 20.0
+                        true_pos = target_pos[vi]
+                        dist_err = ((pred_pos - true_pos)**2).sum(-1).sqrt()
+                        vm_ok += (dist_err < 2.0).sum().item()  # within 2 world units
+                    elif "move_logits" in vo:
+                        vm_ok += (vo["move_logits"].argmax(-1) == move_dir[vi]).sum().item()
                     vc_ok += (vo["combat_logits"].argmax(-1) == combat_type[vi]).sum().item()
                     vatk = combat_type[vi] == 0
                     if vatk.any():

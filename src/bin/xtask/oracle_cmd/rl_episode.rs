@@ -170,22 +170,46 @@ pub(crate) fn run_rl_episode(
 
         // Combined policy path: coordinated tactical AI
         if matches!(policy, Policy::Combined) {
+            // Navigation override for drill scenarios with target positions
+            if let Some(obj) = drill_objective {
+                if let Some(target) = obj.position {
+                    let target_pos = bevy_game::ai::core::sim_vec2(target[0], target[1]);
+                    for &uid in &hero_ids {
+                        let unit = match sim.units.iter().find(|u| u.id == uid && is_alive(u)) {
+                            Some(u) => u,
+                            None => continue,
+                        };
+                        if unit.casting.is_some() || unit.control_remaining_ms > 0 { continue; }
+                        let dist = distance(unit.position, target_pos);
+                        if dist > 1.0 {
+                            let step = unit.move_speed_per_sec * 0.1;
+                            let next = move_towards(unit.position, target_pos, step);
+                            intents.retain(|i| i.unit_id != uid);
+                            intents.push(UnitIntent { unit_id: uid,
+                                action: bevy_game::ai::core::IntentAction::MoveTo { position: next } });
+                        }
+                    }
+                }
+            }
+
             let team_target = super::training::compute_team_target(&sim);
 
             // Set the hero team's focus target to our coordinated target
-            // This ensures the squad AI focuses all heroes on the same enemy.
             squad_ai.set_focus_target(Team::Hero, team_target);
 
-            for &uid in &hero_ids {
-                if !sim.units.iter().any(|u| u.id == uid && is_alive(u)) { continue; }
-                if let Some(u) = sim.units.iter().find(|u| u.id == uid) {
-                    if u.casting.is_some() || u.control_remaining_ms > 0 { continue; }
-                }
+            let has_enemies = sim.units.iter().any(|u| u.team == Team::Enemy && is_alive(u));
+            if has_enemies {
+                for &uid in &hero_ids {
+                    if !sim.units.iter().any(|u| u.id == uid && is_alive(u)) { continue; }
+                    if let Some(u) = sim.units.iter().find(|u| u.id == uid) {
+                        if u.casting.is_some() || u.control_remaining_ms > 0 { continue; }
+                    }
 
-                // Tactical override: coordinated targeting + abilities + kill-securing
-                if let Some(action) = super::training::tactical_hero_override(&sim, uid, team_target) {
-                    intents.retain(|i| i.unit_id != uid);
-                    intents.push(UnitIntent { unit_id: uid, action });
+                    // Tactical override: coordinated targeting + abilities + kill-securing
+                    if let Some(action) = super::training::tactical_hero_override(&sim, uid, team_target) {
+                        intents.retain(|i| i.unit_id != uid);
+                        intents.push(UnitIntent { unit_id: uid, action });
+                    }
                 }
             }
 
@@ -237,6 +261,7 @@ pub(crate) fn run_rl_episode(
                         lp_move: None, lp_combat: None,
                         lp_pointer: None,
                         aggregate_features: if gs_v2.aggregate_features.is_empty() { None } else { Some(gs_v2.aggregate_features) },
+                        target_move_pos: None,
                         teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
                     });
                 }
@@ -373,6 +398,7 @@ pub(crate) fn run_rl_episode(
                         move_dir: None, combat_type: None,
                         lp_move: None, lp_combat: None,
                         lp_pointer: None, aggregate_features: None,
+                        target_move_pos: None,
                         teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
                     });
                 }

@@ -60,6 +60,9 @@ pub struct RlStep {
     pub lp_pointer: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub aggregate_features: Option<Vec<f32>>,
+    /// Target movement position (world-space [x, y]) for continuous movement training
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_move_pos: Option<[f32; 2]>,
     /// DAgger: teacher (GOAP) action at this state (what the expert would have done)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub teacher_move_dir: Option<usize>,
@@ -81,6 +84,7 @@ impl RlStep {
             action_type: None, target_idx: None, move_dir: None, combat_type: None,
             lp_move: None, lp_combat: None, lp_pointer: None,
             aggregate_features: None,
+            target_move_pos: None,
             teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
         }
     }

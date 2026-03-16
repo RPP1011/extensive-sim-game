@@ -62,7 +62,8 @@ pub struct InferenceRequest {
 
 #[derive(Clone, Debug)]
 pub struct InferenceResult {
-    pub move_dir: u8,
+    pub move_dx: f32,
+    pub move_dy: f32,
     pub combat_type: u8,
     pub target_idx: u16,
     pub lp_move: f32,
@@ -275,7 +276,7 @@ struct BatcherThread {
 impl BatcherThread {
     fn run(mut self) {
         let dummy = InferenceResult {
-            move_dir: 8, combat_type: 1, target_idx: 0,
+            move_dx: 0.0, move_dy: 0.0, combat_type: 1, target_idx: 0,
             lp_move: -2.2, lp_combat: -0.7, lp_pointer: 0.0,
             hidden_state_out: vec![0.0; self.h_dim],
         };
@@ -343,7 +344,7 @@ impl BatcherThread {
                 let off = resp_base + i * self.response_sample_size;
                 let resp = &self.mmap[off..off + self.response_sample_size];
                 let hidden_state_out = if self.h_dim > 0 {
-                    let h_off = 16; // hidden state starts after the 16-byte fixed fields
+                    let h_off = 24; // hidden state starts after the 24-byte fixed fields
                     (0..self.h_dim)
                         .map(|j| f32::from_le_bytes(resp[h_off + j*4..h_off + j*4 + 4].try_into().unwrap()))
                         .collect()
@@ -351,12 +352,13 @@ impl BatcherThread {
                     Vec::new()
                 };
                 let _ = item.response_tx.send(InferenceResult {
-                    move_dir: resp[0],
-                    combat_type: resp[1],
-                    target_idx: u16::from_le_bytes([resp[2], resp[3]]),
-                    lp_move: f32::from_le_bytes(resp[4..8].try_into().unwrap()),
-                    lp_combat: f32::from_le_bytes(resp[8..12].try_into().unwrap()),
-                    lp_pointer: f32::from_le_bytes(resp[12..16].try_into().unwrap()),
+                    move_dx: f32::from_le_bytes(resp[0..4].try_into().unwrap()),
+                    move_dy: f32::from_le_bytes(resp[4..8].try_into().unwrap()),
+                    combat_type: resp[8],
+                    target_idx: u16::from_le_bytes([resp[10], resp[11]]),
+                    lp_move: f32::from_le_bytes(resp[12..16].try_into().unwrap()),
+                    lp_combat: f32::from_le_bytes(resp[16..20].try_into().unwrap()),
+                    lp_pointer: f32::from_le_bytes(resp[20..24].try_into().unwrap()),
                     hidden_state_out,
                 });
             }

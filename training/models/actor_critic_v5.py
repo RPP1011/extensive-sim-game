@@ -84,9 +84,11 @@ class AbilityActorCriticV5(nn.Module):
         # Temporal cell: CfC (Closed-form Continuous-time)
         self.temporal_cell = CfCCell(d_model, h_dim)
 
-        # Move head
-        self.move_head = nn.Sequential(
-            nn.Linear(d_model, d_model), nn.GELU(), nn.Linear(d_model, NUM_MOVE_DIRS),
+        # Position head: predict target (x, y) waypoint in world space
+        # Output is normalized (x/20, y/20) — the sim handles pathfinding
+        # One correct waypoint = correct movement until next decision tick
+        self.position_head = nn.Sequential(
+            nn.Linear(d_model, d_model), nn.GELU(), nn.Linear(d_model, 2),
         )
 
         # Combat pointer head
@@ -155,9 +157,14 @@ class AbilityActorCriticV5(nn.Module):
     def decide(self, pooled, tokens, full_mask, ability_cross_embs, full_type_ids,
                aggregate_features=None):
         """Run decision heads on CfC-enriched pooled representation."""
-        move_logits = self.move_head(pooled)
+        # Target position: (x/20, y/20) normalized waypoint
+        target_pos = self.position_head(pooled)  # (B, 2)
+
         combat_out = self.combat_head(pooled, tokens, full_mask, ability_cross_embs, full_type_ids)
-        return {"move_logits": move_logits, **combat_out}
+        return {
+            "target_pos": target_pos,  # (B, 2) — normalized (x/20, y/20)
+            **combat_out,
+        }
 
     def forward(
         self,

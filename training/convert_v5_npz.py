@@ -61,6 +61,7 @@ def main():
     move_vec_list = []  # continuous (dx, dy, speed) ground truth
     combat_type_list = []
     target_idx_list = []
+    target_move_pos_list = []  # continuous movement target (x, y)
     teacher_move_list = []   # DAgger teacher labels
     teacher_combat_list = []
     teacher_target_list = []
@@ -178,6 +179,20 @@ def main():
             speed = 0.0 if move_dir >= 8 else 1.0
             move_vec = (dx, dy, speed)
 
+            # Target movement position (if recorded)
+            tmp = step.get("target_move_pos")
+            if tmp is not None:
+                target_move_pos_list.append(tmp)
+            else:
+                # Fallback: compute from move_dir + unit position
+                self_pos_x = entities[0][5] * 20.0 if entities else 0.0
+                self_pos_y = entities[0][6] * 20.0 if entities else 0.0
+                if move_dir < 8:
+                    dx_d, dy_d = _DIR_VECS[move_dir]
+                    target_move_pos_list.append([self_pos_x + dx_d * 3.2 * 0.3, self_pos_y + dy_d * 3.2 * 0.3])
+                else:
+                    target_move_pos_list.append([self_pos_x, self_pos_y])
+
             # DAgger teacher labels (if present)
             t_move = step.get("teacher_move_dir", -1)
             t_combat = step.get("teacher_combat_type", -1)
@@ -222,6 +237,7 @@ def main():
     move_vec = np.array(move_vec_list, dtype=np.float32)      # (N, 3) — dx, dy, speed
     combat_type = np.array(combat_type_list, dtype=np.int32)  # (N,)
     target_idx = np.array(target_idx_list, dtype=np.int32)    # (N,)
+    target_move_pos = np.array(target_move_pos_list, dtype=np.float32)  # (N, 2)
     teacher_move = np.array(teacher_move_list, dtype=np.int32)      # (N,)
     teacher_combat = np.array(teacher_combat_list, dtype=np.int32)  # (N,)
     teacher_target = np.array(teacher_target_list, dtype=np.int32)  # (N,)
@@ -252,6 +268,7 @@ def main():
         agg_feat=agg_feat,
         hp_adv=hp_adv, surv=surv,
         move_dir=move_dir, move_vec=move_vec, combat_type=combat_type, target_idx=target_idx,
+        target_move_pos=target_move_pos,
         teacher_move=teacher_move, teacher_combat=teacher_combat, teacher_target=teacher_target,
         ep_idx=ep_idx, train_idx=train_idx, val_idx=val_idx,
     )

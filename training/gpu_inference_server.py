@@ -76,7 +76,7 @@ OFF_RELOAD_ACK = 0x184
 OFF_H_DIM = 0x18  # GRU hidden dimension stored in header
 OFF_AGG_DIM = 0x1C  # aggregate token feature dimension
 
-RESPONSE_BASE_SIZE = 16  # move_dir(1) + combat_type(1) + target(2) + 3×f32 log-probs
+RESPONSE_BASE_SIZE = 24  # move_dx(f32) + move_dy(f32) + combat_type(1) + pad(1) + target(2) + 3×f32 log-probs
 
 
 def compute_sample_size(cls_dim: int, h_dim: int = 0, agg_dim: int = 0) -> int:
@@ -319,13 +319,28 @@ class InferenceServer:
                 aggregate_features=agg_feat,
             )
 
-        move_logits = output["move_logits"] / self.temperature
-        combat_logits = output["combat_logits"].masked_fill(~batch["combat_mask"], -1e9) / self.temperature
+        # Target position head: model outputs (x/20, y/20) normalized waypoint
+        if "target_pos" in output:
+            target_pos = output["target_pos"]  # (B, 2) normalized
+            # Denormalize: multiply by 20 to get world coordinates
+            target_pos_world = target_pos * 20.0  # (B, 2) world space
+            # Log prob for position head = 0 (deterministic, no sampling)
+            lp_move = torch.zeros(batch_size, device=DEVICE)
+        else:
+            # Legacy: discrete movement
+            move_logits = output["move_logits"] / self.temperature
+            move_probs = F.softmax(move_logits, dim=-1)
+            move_dirs = torch.multinomial(move_probs, 1).squeeze(-1)
+            move_logp_raw = F.log_softmax(output["move_logits"], dim=-1)
+            lp_move = move_logp_raw.gather(1, move_dirs.unsqueeze(1)).squeeze(1)
+            # Convert to position for SHM
+            dir_vecs_t = torch.tensor([
+                [0.0, 1.0], [0.707, 0.707], [1.0, 0.0], [0.707, -0.707],
+                [0.0, -1.0], [-0.707, -0.707], [-1.0, 0.0], [-0.707, 0.707], [0.0, 0.0],
+            ], device=DEVICE)
+            target_pos_world = dir_vecs_t[move_dirs]  # Just direction, not real position
 
-        move_probs = F.softmax(move_logits, dim=-1)
-        move_dirs = torch.multinomial(move_probs, 1).squeeze(-1)
-        move_logp_raw = F.log_softmax(output["move_logits"], dim=-1)
-        lp_move = move_logp_raw.gather(1, move_dirs.unsqueeze(1)).squeeze(1)
+        combat_logits = output["combat_logits"].masked_fill(~batch["combat_mask"], -1e9) / self.temperature
 
         combat_probs = F.softmax(combat_logits, dim=-1)
         combat_types = torch.multinomial(combat_probs, 1).squeeze(-1)
@@ -362,21 +377,24 @@ class InferenceServer:
             lp_pointer[ab_mask] = lp_raw.gather(1, ti.unsqueeze(1)).squeeze(1).clamp(min=-10)
 
         # Vectorized response packing via numpy
+        # Layout: target_x(f32) target_y(f32) combat_type(u8) pad(u8) target_idx(u16) lp_move(f32) lp_combat(f32) lp_pointer(f32)
+        move_pos_cpu = np.ascontiguousarray(target_pos_world.cpu().numpy().astype(np.float32))  # (B, 2)
         rss = self.response_sample_size
         resp_np = np.zeros((batch_size, rss), dtype=np.uint8)
-        md_cpu = move_dirs.cpu().numpy().astype(np.uint8)
         ct_cpu = combat_types.cpu().numpy().astype(np.uint8)
         ti_cpu = target_indices.cpu().numpy().astype(np.uint16)
         lpm_cpu = lp_move.cpu().numpy().astype(np.float32)
         lpc_cpu = lp_combat.cpu().numpy().astype(np.float32)
         lpp_cpu = lp_pointer.cpu().numpy().astype(np.float32)
-        resp_np[:, 0] = md_cpu
-        resp_np[:, 1] = ct_cpu
-        resp_np[:, 2] = ti_cpu.view(np.uint8).reshape(-1, 2)[:, 0]
-        resp_np[:, 3] = ti_cpu.view(np.uint8).reshape(-1, 2)[:, 1]
-        resp_np[:, 4:8] = lpm_cpu.view(np.uint8).reshape(-1, 4)
-        resp_np[:, 8:12] = lpc_cpu.view(np.uint8).reshape(-1, 4)
-        resp_np[:, 12:16] = lpp_cpu.view(np.uint8).reshape(-1, 4)
+        resp_np[:, 0:4] = np.ascontiguousarray(move_pos_cpu[:, 0]).view(np.uint8).reshape(-1, 4)
+        resp_np[:, 4:8] = np.ascontiguousarray(move_pos_cpu[:, 1]).view(np.uint8).reshape(-1, 4)
+        resp_np[:, 8] = ct_cpu                                                 # combat_type
+        resp_np[:, 9] = 0                                                      # pad
+        resp_np[:, 10] = ti_cpu.view(np.uint8).reshape(-1, 2)[:, 0]           # target_idx lo
+        resp_np[:, 11] = ti_cpu.view(np.uint8).reshape(-1, 2)[:, 1]           # target_idx hi
+        resp_np[:, 12:16] = lpm_cpu.view(np.uint8).reshape(-1, 4)
+        resp_np[:, 16:20] = lpc_cpu.view(np.uint8).reshape(-1, 4)
+        resp_np[:, 20:24] = lpp_cpu.view(np.uint8).reshape(-1, 4)
         # Pack GRU hidden state output
         if self.h_dim > 0:
             h_cpu = h_new.cpu().numpy().astype(np.float32)
