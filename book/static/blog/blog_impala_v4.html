@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IMPALA V4: Behavioral Embeddings, V-Trace, and a SHM Bug</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --surface: #13161d;
+  --surface2: #1c2029;
+  --surface3: #252a36;
+  --border: #2a2f3e;
+  --border-bright: #3d4459;
+  --text: #b8c0cc;
+  --text-muted: #6b7280;
+  --heading: #e2e8f0;
+  --accent: #60a5fa;
+  --accent-dim: #2563eb;
+  --purple: #a78bfa;
+  --purple-dim: #7c3aed;
+  --green: #34d399;
+  --green-dim: #059669;
+  --red: #f87171;
+  --red-dim: #dc2626;
+  --orange: #fbbf24;
+  --orange-dim: #d97706;
+  --cyan: #22d3ee;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.78;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 4rem 2rem 8rem;
+}
+
+header {
+  margin-bottom: 3.5rem;
+  padding-bottom: 2.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.65;
+  max-width: 680px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 2rem 0 0;
+}
+
+.stat {
+  background: var(--surface);
+  padding: 1.2rem 1rem;
+  text-align: center;
+}
+
+.stat .value {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.stat .label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 0.3rem;
+}
+
+h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--heading);
+  margin-top: 4rem;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--purple);
+  margin-top: 2.5rem;
+  margin-bottom: 0.8rem;
+}
+
+p { margin-bottom: 1.1rem; }
+strong { color: var(--heading); font-weight: 600; }
+em { color: var(--text); }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+a:hover { border-bottom-color: var(--accent); }
+
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.2rem 1.5rem;
+  overflow-x: auto;
+  margin: 1.5rem 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.88em;
+}
+
+p code, li code, td code {
+  background: var(--surface2);
+  padding: 0.15em 0.45em;
+  border-radius: 4px;
+  font-size: 0.82em;
+  color: var(--accent);
+}
+
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+
+.dsl .keyword { color: var(--purple); }
+.dsl .name { color: var(--heading); font-weight: 600; }
+.dsl .prop { color: var(--accent); }
+.dsl .value { color: var(--green); }
+.dsl .type { color: var(--orange); }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+  font-family: 'DM Sans', sans-serif;
+}
+
+th {
+  background: var(--surface2);
+  color: var(--heading);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 2px solid var(--border-bright);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+td {
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+tr:hover td { background: var(--surface); }
+
+.good { color: var(--green); font-weight: 600; }
+.bad { color: var(--red); font-weight: 600; }
+.warn { color: var(--orange); font-weight: 600; }
+
+.callout {
+  background: var(--surface);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: 0 8px 8px 0;
+  padding: 1.1rem 1.4rem;
+  margin: 1.8rem 0;
+  font-size: 0.95rem;
+}
+
+.callout.bug { border-left-color: var(--red-dim); background: #18100f; }
+.callout.success { border-left-color: var(--green-dim); background: #0d1712; }
+.callout p:last-child { margin-bottom: 0; }
+
+ol, ul { margin: 0.8rem 0 1.2rem 1.6rem; }
+li { margin-bottom: 0.4rem; }
+
+hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
+
+figure { margin: 2.5rem 0; }
+figure.wide { margin-left: -3rem; margin-right: -3rem; }
+
+figcaption {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 0.8rem;
+  line-height: 1.5;
+}
+figcaption strong { color: var(--text); }
+
+.fig-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 2rem;
+  overflow-x: auto;
+}
+.fig-container svg { display: block; margin: 0 auto; }
+
+svg text { font-family: 'DM Sans', sans-serif; }
+svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
+
+.tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--surface3);
+  border: 1px solid var(--border-bright);
+  border-radius: 6px;
+  padding: 0.4rem 0.7rem;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--heading);
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 10;
+}
+
+.footer-note {
+  font-style: italic;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 2.5rem;
+  margin-top: 4rem;
+}
+
+.response-fmt {
+  display: flex;
+  gap: 0;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.78rem;
+  margin: 1.5rem 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.response-fmt .rf-cell {
+  padding: 0.6rem 0.8rem;
+  border-right: 1px solid var(--border);
+  text-align: center;
+  background: var(--surface);
+}
+.response-fmt .rf-cell:last-child { border-right: none; }
+.response-fmt .rf-name { color: var(--heading); font-weight: 500; font-size: 0.72rem; display: block; margin-bottom: 0.15rem; }
+.response-fmt .rf-type { color: var(--text-muted); font-size: 0.68rem; }
+.response-fmt .rf-cell.actions { background: var(--surface2); }
+.response-fmt .rf-cell.logprobs { background: rgba(251,191,36,0.05); }
+
+@media (max-width: 720px) {
+  .article { padding: 2rem 1.25rem 4rem; }
+  h1 { font-size: 1.9rem; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  figure.wide { margin-left: -0.5rem; margin-right: -0.5rem; }
+  .fig-container { padding: 1rem; }
+  .response-fmt { flex-wrap: wrap; }
+}
+
+.concept-link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--accent-dim);
+  cursor: help;
+}
+.concept-link:hover { border-bottom-style: solid; }
+
+.concept-popup {
+  position: absolute;
+  z-index: 100;
+  max-width: 470px;
+  background: var(--surface);
+  border: 1px solid var(--border-bright);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+.concept-popup.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.concept-popup iframe {
+  width: 470px;
+  height: 420px;
+  border: none;
+  background: var(--surface);
+}
+.concept-popup .popup-footer {
+  padding: 0.4rem 0.8rem;
+  border-top: 1px solid var(--border);
+  text-align: right;
+}
+.concept-popup .popup-footer a {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.78rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+.concept-popup .popup-footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="article">
+
+<header>
+  <h1>IMPALA V4: Behavioral Embeddings, V-Trace, and a SHM Bug</h1>
+  <p class="subtitle">How a 113K-parameter actor-critic learns to command squads of units with arbitrary abilities &mdash; and how a 4-byte bug hid inside a shared-memory inference server.</p>
+  <div class="stats">
+    <div class="stat"><div class="value">113K</div><div class="label">Parameters</div></div>
+    <div class="stat"><div class="value">943</div><div class="label">Unique Abilities</div></div>
+    <div class="stat"><div class="value">4,096</div><div class="label">Parallel Sims</div></div>
+    <div class="stat"><div class="value">25K</div><div class="label">Inferences/sec</div></div>
+  </div>
+</header>
+
+<h2>The Problem</h2>
+
+<p>We have a deterministic tactical combat simulator. Two teams of units fight on a grid. Each unit has up to 8 abilities drawn from an arbitrary pool of abilities &mdash; heals, stuns, dashes, AoE damage, shields, channeled beams, traps, you name it. Every ability is defined in a custom DSL:</p>
+
+<pre><code class="dsl"><span class="keyword">ability</span> <span class="name">Fireball</span> {
+    <span class="prop">target</span>: <span class="type">enemy</span>, <span class="prop">range</span>: <span class="value">5.0</span>
+    <span class="prop">cooldown</span>: <span class="value">5s</span>, <span class="prop">cast</span>: <span class="value">300ms</span>
+    <span class="prop">hint</span>: <span class="type">damage</span>
+    <span class="keyword">damage</span> <span class="value">55</span> [<span class="type">FIRE</span>: <span class="value">60</span>]
+    <span class="keyword">in</span> <span class="type">circle</span>(<span class="value">3.0</span>)
+}
+
+<span class="keyword">ability</span> <span class="name">Divine_Shield</span> {
+    <span class="prop">target</span>: <span class="type">self</span>
+    <span class="prop">cooldown</span>: <span class="value">30s</span>, <span class="prop">cast</span>: <span class="value">instant</span>
+    <span class="prop">hint</span>: <span class="type">defensive</span>
+    <span class="keyword">shield</span> <span class="value">500</span> <span class="prop">duration</span> <span class="value">4s</span>
+    <span class="keyword">immune</span> [<span class="type">STUN</span>, <span class="type">SLOW</span>, <span class="type">ROOT</span>] <span class="prop">duration</span> <span class="value">4s</span>
+}</code></pre>
+
+<p>The action space is heterogeneous: movement is a <strong>9-way directional choice</strong>, but combat involves selecting both an <strong>action type</strong> (attack, hold, or use ability 0-7) and a <strong>target entity</strong> via pointer attention. The number of valid abilities changes per unit, per tick.</p>
+
+<p>The goal: train a single policy network that commands any unit composition against any enemy composition, from random initialization, using only RL.</p>
+
+<hr>
+
+<h2>Architecture</h2>
+
+<p>The core challenge is representing arbitrary abilities in a way that generalizes. We can&rsquo;t use a flat one-hot &mdash; the action space would be enormous and sparse. Instead, we decompose the problem into <strong>pretrained components</strong> and a <strong>lightweight policy head</strong>, connected by <a class="concept-link" data-concept="attention">attention</a>:</p>
+
+<figure class="wide">
+  <div class="fig-container" id="fig-architecture"></div>
+  <figcaption><strong>Figure 1.</strong> Full architecture. The pretrained ability transformer (top, purple) runs once per fight to produce 128d ability embeddings. The learned policy network (bottom, blue) runs every tick &mdash; 113K parameters total.</figcaption>
+</figure>
+
+<p><strong>Why this decomposition?</strong> The ability transformer is expensive (~2.8M params, 4-layer encoder over token sequences). But abilities don&rsquo;t change mid-fight &mdash; a unit&rsquo;s kit is fixed at spawn. So we <strong>pre-compute</strong> a summary embedding for every ability once at fight start, cache them in a registry, and only the lightweight 113K-param policy runs per tick. A <a class="concept-link" data-concept="cross-attention">cross-attention</a> layer bridges the two: each ability embedding queries the entity state to decide relevance.</p>
+
+<h3>Entity Representation</h3>
+
+<p>Each game tick, we extract a fixed-size state vector from the simulator. Seven entity slots &mdash; self, three enemies, three allies &mdash; each described by 30 features covering vitals, spatial position, combat stats, ability readiness, healing, crowd control, and cumulative damage. These pass through <a class="concept-link" data-concept="self-attention">self-attention</a> so each entity&rsquo;s representation can incorporate information about the others.</p>
+
+<figure class="wide">
+  <div class="fig-container" id="fig-entity-encoder"></div>
+  <figcaption><strong>Figure 2.</strong> Entity encoder detail. Seven entity slots pass through self-attention, allowing the model to reason about team-level composition &mdash; e.g., &ldquo;I&rsquo;m a healer, my ally is low, the enemy has a stun ready.&rdquo;</figcaption>
+</figure>
+
+<h3>Pointer-Based Target Selection</h3>
+
+<p>The combat head uses <a class="concept-link" data-concept="scaled-dot-product">scaled dot-product attention</a> as a pointer mechanism. A query vector derived from the pooled entity state is dotted against per-entity key vectors to produce <a class="concept-link" data-concept="logits-softmax">logits</a> over potential targets:</p>
+
+<figure class="wide">
+  <div class="fig-container" id="fig-attention"></div>
+  <figcaption><strong>Figure 3.</strong> Pointer attention selects targets. The model learns to focus on low-HP enemies for attacks and low-HP allies for heals. Attention weights shown are illustrative of a trained policy targeting a weakened enemy.</figcaption>
+</figure>
+
+<p>This lets the model generalize across different numbers of enemies and different ability target types (single-target heal vs AoE damage vs self-buff).</p>
+
+<hr>
+
+<h2>Behavioral Embeddings: Understanding Abilities from Source Code</h2>
+
+<p>The 128-dimensional ability embeddings aren&rsquo;t just <a class="concept-link" data-concept="masked-language-modeling">MLM</a> features &mdash; they encode <strong>behavioral semantics</strong>. We train them in a two-phase curriculum:</p>
+
+<figure class="wide">
+  <div class="fig-container" id="fig-embeddings"></div>
+  <figcaption><strong>Figure 4.</strong> Behavioral embedding pipeline. Phase 1 learns syntax via masked language modeling. Phase 2 grounds embeddings in sim behavior. The resulting 128d space clusters abilities by function.</figcaption>
+</figure>
+
+<div class="callout">
+<p><strong>Key insight:</strong> Joint training (MLM + behavioral) destroys MLM performance. The solution is curriculum: MLM first to learn syntax, then freeze the encoder and train only a behavioral prediction head. The summary embeddings from this frozen encoder capture both syntactic structure (what tokens appear) and behavioral semantics (what the ability actually does in the sim).</p>
+</div>
+
+<p>The registry is a JSON file mapping ability names to 128d vectors. At episode generation time, Rust looks up each unit&rsquo;s abilities and passes the embeddings through shared memory alongside the game state.</p>
+
+<hr>
+
+<h2>Training Infrastructure: 4,096 Parallel Sims via Shared Memory</h2>
+
+<p>IMPALA needs massive throughput: each iteration generates thousands of episodes, trains one gradient step, then generates again. The bottleneck is inference &mdash; every sim tick, every unit needs a forward pass to choose actions.</p>
+
+<p>We solve this with a <strong>shared-memory GPU inference server</strong>:</p>
+
+<figure class="wide">
+  <div class="fig-container" id="fig-shm"></div>
+  <figcaption><strong>Figure 5.</strong> Shared-memory inference architecture. 4,096 parallel Rust simulations feed batched requests through a memory-mapped file to a Python GPU server running PyTorch.</figcaption>
+</figure>
+
+<p><strong>Protocol:</strong></p>
+<ol>
+  <li>Rust sim threads submit <code>InferenceRequest</code> structs to a batcher via lock-free channels</li>
+  <li>Batcher serializes up to 1024 requests into the SHM request region</li>
+  <li>Sets <code>flag = 1</code> (request ready)</li>
+  <li>GPU server reads batch, runs forward pass, writes responses, sets <code>flag = 2</code></li>
+  <li>Batcher reads responses, dispatches to waiting threads via condvar</li>
+</ol>
+
+<p><strong>Response format</strong> (16 bytes, zero-copy):</p>
+
+<div class="response-fmt">
+  <div class="rf-cell actions"><span class="rf-name">move_dir</span><span class="rf-type">u8</span></div>
+  <div class="rf-cell actions"><span class="rf-name">combat_type</span><span class="rf-type">u8</span></div>
+  <div class="rf-cell actions"><span class="rf-name">target_id</span><span class="rf-type">u16 LE</span></div>
+  <div class="rf-cell logprobs"><span class="rf-name">lp_move</span><span class="rf-type">f32 LE</span></div>
+  <div class="rf-cell logprobs"><span class="rf-name">lp_combat</span><span class="rf-type">f32 LE</span></div>
+  <div class="rf-cell logprobs"><span class="rf-name">lp_pointer</span><span class="rf-type">f32 LE</span></div>
+</div>
+
+<p>The log probabilities travel back with the action &mdash; they&rsquo;re stored in the episode data and used later for V-trace importance ratio computation.</p>
+
+<p><strong>Throughput:</strong> ~25,000 inferences/sec sustained, enough to generate 540 episodes across 108 scenarios in ~14 seconds.</p>
+
+<hr>
+
+<h2>The Training Loop: IMPALA with V-Trace</h2>
+
+<p>We use <a href="https://arxiv.org/abs/1802.01561">IMPALA</a> (Importance Weighted Actor-Learner Architecture) adapted for our dual-head action space:</p>
+
+<figure class="wide">
+  <div class="fig-container" id="fig-impala-loop"></div>
+  <figcaption><strong>Figure 6.</strong> IMPALA training loop. Step 2 (reload GPU server) is where the bug lived &mdash; the behavior policy was frozen for the entire training run.</figcaption>
+</figure>
+
+<h3>Dense Reward Shaping</h3>
+
+<p>Win/loss alone is too sparse for 113K params to learn from. We add per-tick dense rewards:</p>
+
+<table>
+  <thead><tr><th>Reward Component</th><th>Signal</th><th>Scale</th></tr></thead>
+  <tbody>
+    <tr><td>HP differential</td><td><code>(enemy_dmg - unit_dmg) / avg_unit_hp</code></td><td>1.0</td></tr>
+    <tr><td>Kill bonus</td><td>unit kills an enemy</td><td>+0.5</td></tr>
+    <tr><td>Death penalty</td><td>unit dies</td><td>&minus;0.5</td></tr>
+    <tr><td>Approach reward</td><td>closing distance to nearest enemy</td><td>0.002/unit</td></tr>
+    <tr><td>Engagement bonus</td><td>being within attack range</td><td>+0.01/tick</td></tr>
+    <tr><td>Hold penalty</td><td>holding position near enemies</td><td>&minus;0.02/tick</td></tr>
+    <tr><td>Attack bonus</td><td>attacking or using abilities</td><td>+0.01/tick</td></tr>
+  </tbody>
+</table>
+
+<h3>Curriculum</h3>
+
+<p>Training proceeds in 4 phases of increasing difficulty:</p>
+
+<figure>
+  <div class="fig-container" id="fig-curriculum"></div>
+  <figcaption><strong>Figure 7.</strong> Curriculum progression. Each phase adds more scenarios with increasingly complex unit kits. Checkpoints propagate forward.</figcaption>
+</figure>
+
+<p>Each phase runs 20 iterations, starting from the previous phase&rsquo;s best checkpoint.</p>
+
+<hr>
+
+<h2>The Bug: 64 Bytes of Chaos</h2>
+
+<p>After numerous experiments, every run showed the same pattern: KL divergence between the behavior policy and current policy would grow monotonically until the importance ratios became meaningless, typically reaching 10&ndash;22 within 10&ndash;15 iterations. We attributed this to fundamental V-trace instability and tried everything &mdash; learning rate reduction, entropy penalties, PPO clipping, advantage normalization, value head warmup. <strong>Nothing worked.</strong></p>
+
+<div class="callout bug">
+<p>Then, while implementing a &ldquo;policy resync&rdquo; feature, we noticed error messages in the logs that had been there all along:</p>
+<pre><code>[gpu] Failed to reload: [Errno 2] No such file or directory:
+  '/home/ricky/Projects/game/generated/impala_scratch/phase1/curre'</code></pre>
+<p><code>curre</code>. Not <code>current.pt</code>. <strong>The path was truncated.</strong></p>
+</div>
+
+<p>The shared memory protocol allocated <strong>64 bytes</strong> for the reload path:</p>
+
+<pre><code>OFF_RELOAD_PATH = 0x80   // offset in SHM header
+RELOAD_PATH_LEN = 64     // bytes allocated
+OFF_RELOAD_REQ  = 0xC0   // next field starts right after</code></pre>
+
+<p>Our checkpoint paths were 68&ndash;73 characters. The Python code dutifully truncated to fit:</p>
+
+<pre><code>path_bytes = abs_path.encode('utf-8')[:RELOAD_PATH_LEN - 1] + b'\x00'</code></pre>
+
+<p>The GPU server tried to open the truncated path, failed, printed a warning, and <strong>continued serving with the initial checkpoint weights</strong>. The training loop received an ACK timeout but treated it as non-fatal.</p>
+
+<div class="callout bug">
+<p><strong>The behavior policy never updated.</strong> Every experiment &mdash; every phase, every iteration &mdash; generated episodes using the <em>initial checkpoint</em> while the training policy diverged further and further. The &ldquo;KL drift&rdquo; wasn&rsquo;t V-trace instability. It was the cumulative divergence between a frozen behavior policy and an ever-changing trained policy.</p>
+</div>
+
+<h3>The Fix</h3>
+
+<p>Three lines:</p>
+
+<pre><code># gpu_inference_server.py and impala_learner.py
+RELOAD_PATH_LEN = 256      # was 64
+OFF_RELOAD_REQ  = 0x180    # was 0xC0
+OFF_RELOAD_ACK  = 0x184    # was 0xC4</code></pre>
+
+<h3>The Result</h3>
+
+<figure class="wide">
+  <div class="fig-container" id="fig-kl-chart"></div>
+  <figcaption><strong>Figure 8.</strong> KL divergence over training iterations. <span style="color:#f87171">Red: broken (EC2)</span> &mdash; behavior policy frozen, KL grows unbounded. <span style="color:#34d399">Green: fixed (EC3)</span> &mdash; behavior policy updates each iteration, KL converges to near zero. Hover for values.</figcaption>
+</figure>
+
+<table>
+  <thead><tr><th>Metric (iter 7)</th><th>Broken (EC2)</th><th>Fixed (EC3)</th></tr></thead>
+  <tbody>
+    <tr><td>KL divergence</td><td class="bad">1.93</td><td class="good">0.18</td></tr>
+    <tr><td>Value loss</td><td class="bad">0.0004 (dead)</td><td class="good">0.0057 (learning)</td></tr>
+    <tr><td>Training win%</td><td class="warn">31% (flat)</td><td class="good">45% (climbing)</td></tr>
+    <tr><td>Mean reward</td><td class="warn">0.006 (flat)</td><td class="good">0.020 (climbing)</td></tr>
+    <tr><td>Entropy</td><td class="bad">2.60 (collapsing)</td><td class="good">2.73 (stable)</td></tr>
+  </tbody>
+</table>
+
+<div class="callout success">
+<p>The value head &mdash; which had collapsed to zero in every previous experiment within 3&ndash;4 iterations &mdash; is now <strong>sustained at 0.005&ndash;0.007 after 20 iterations</strong>. It&rsquo;s actually learning state values because the V-trace advantages are computed against the correct behavior policy.</p>
+</div>
+
+<p>KL <em>decreased</em> over training (0.095 &rarr; 0.068 across 20 iterations) &mdash; the opposite of every previous run. As the policy converges, per-iteration changes shrink. This is textbook healthy RL.</p>
+
+<hr>
+
+<h2>What We Learned</h2>
+
+<div class="callout">
+<p><strong>1. Off-policy RL is fragile in ways that look like algorithmic failures.</strong> We spent days trying regularization techniques, learning rate schedules, and architectural changes to fix &ldquo;V-trace instability&rdquo; that was actually a plumbing bug. The symptoms (KL drift, value collapse, entropy oscillation) perfectly mimicked known failure modes of off-policy methods.</p>
+</div>
+
+<div class="callout">
+<p><strong>2. Always verify your data pipeline end-to-end.</strong> The weight reload was tested when the paths were short. It broke when we moved to a deeper directory structure. The truncation was silent, the error message was buried in logs, and the training loop treated the ACK timeout as non-fatal.</p>
+</div>
+
+<div class="callout">
+<p><strong>3. Dense rewards are necessary but not sufficient.</strong> Without dense per-step rewards, the value head has nothing to learn from and collapses immediately. With them, it sustains learning &mdash; but only if the behavior policy actually matches the current policy so V-trace corrections are meaningful.</p>
+</div>
+
+<div class="callout">
+<p><strong>4. Behavioral embeddings bridge the sim-to-policy gap.</strong> The pretrained 128d ability embeddings let a 113K-param policy network handle arbitrary abilities without ever seeing most of them during training. The curriculum (MLM &rarr; behavioral prediction) is critical &mdash; joint training destroys both objectives.</p>
+</div>
+
+<div class="callout">
+<p><strong>5. Shared-memory GPU inference makes IMPALA practical for complex environments.</strong> 4,096 parallel sims generating ~25K inferences/sec lets us run 20 IMPALA iterations in ~15 minutes on a single GPU. The serialization overhead is minimal compared to the forward pass.</p>
+</div>
+
+<hr>
+
+<h2>What&rsquo;s Next: League Training</h2>
+
+<p>With EC3, the core concept is proved: a 113K-parameter model trained via IMPALA with behavioral embeddings can learn tactical combat decisions across arbitrary abilities. KL decreases over training, the value head sustains learning, and win rate climbs above the BC baseline. The gap between &ldquo;it works on paper&rdquo; and &ldquo;it works in practice&rdquo; turned out to be four bytes in a shared memory flag.</p>
+
+<p>The next step is <strong>league training</strong>. Instead of training a single policy against a fixed opponent, we&rsquo;ll maintain a population of agents that play against each other &mdash; similar to AlphaStar&rsquo;s league. Agents that exploit a specific weakness get countered by new agents trained specifically against that exploit. The result is a policy that generalizes rather than overfits to one opponent&rsquo;s tendencies. The IMPALA infrastructure &mdash; 4,096 parallel sims, SHM GPU inference, behavioral embeddings &mdash; transfers directly; the main addition is matchmaking and population management.</p>
+
+<p class="footer-note" style="margin-top: 2rem; font-style: italic; color: var(--text-muted);">This work was done over 4 days in March 2026. Code, scenario definitions, and training infrastructure are all in a single Rust + Python repository.</p>
+
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+const C = {
+  bg:'#13161d', surface:'#1c2029', surface2:'#252a36', surface3:'#252a36',
+  border:'#2a2f3e', borderBright:'#3d4459',
+  text:'#b8c0cc', muted:'#6b7280', heading:'#e2e8f0',
+  blue:'#60a5fa', blueDim:'#2563eb', blueFaint:'rgba(96,165,250,0.08)',
+  purple:'#a78bfa', purpleDim:'#7c3aed', purpleFaint:'rgba(167,139,250,0.08)',
+  green:'#34d399', greenDim:'#059669',
+  red:'#f87171', redDim:'#dc2626',
+  orange:'#fbbf24', orangeDim:'#d97706',
+  cyan:'#22d3ee',
+};
+
+function box(g,x,y,w,h,fill,stroke,rx=6){return g.append('rect').attr('x',x).attr('y',y).attr('width',w).attr('height',h).attr('rx',rx).attr('fill',fill).attr('stroke',stroke).attr('stroke-width',1)}
+function txt(g,x,y,t,o={}){const e=g.append('text').attr('x',x).attr('y',y).text(t).attr('text-anchor',o.anchor||'middle').attr('fill',o.fill||C.text).attr('font-size',o.size||12).attr('font-weight',o.weight||400);if(o.mono)e.attr('class','label-mono');return e}
+function addArrow(svg,color){const id='a-'+color.replace(/[^a-z0-9]/gi,'');if(svg.select('#'+id).empty()){svg.append('defs').append('marker').attr('id',id).attr('viewBox','0 0 10 8').attr('refX',9).attr('refY',4).attr('markerWidth',8).attr('markerHeight',6).attr('orient','auto-start-reverse').append('path').attr('d','M0,0 L10,4 L0,8 Z').attr('fill',color)}return id}
+function arrow(g,svg,x1,y1,x2,y2,color=C.muted){const id=addArrow(svg,color);g.append('line').attr('x1',x1).attr('y1',y1).attr('x2',x2).attr('y2',y2).attr('stroke',color).attr('stroke-width',1.5).attr('marker-end','url(#'+id+')')}
+function pathArrow(g,svg,d,color=C.muted,dash){const id=addArrow(svg,color);const p=g.append('path').attr('d',d).attr('stroke',color).attr('stroke-width',1.5).attr('fill','none').attr('marker-end','url(#'+id+')');if(dash)p.attr('stroke-dasharray',dash);return p}
+
+// ═══ FIGURE 1: Architecture ═══
+(function(){
+  const W=820,H=560;
+  const svg=d3.select('#fig-architecture').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  // Pretrained zone
+  box(svg,20,10,W-40,145,C.purpleFaint,C.purpleDim,10);
+  txt(svg,W/2,30,'PRETRAINED (frozen in RL)',{fill:C.purple,size:11,weight:600});
+
+  box(svg,50,50,130,50,C.surface2,C.borderBright);
+  txt(svg,115,70,'Ability DSL',{fill:C.heading,size:12,weight:600});
+  txt(svg,115,87,'text tokens',{fill:C.muted,size:10});
+
+  box(svg,240,45,220,65,C.surface,C.purpleDim);
+  txt(svg,350,67,'Ability Transformer',{fill:C.purple,size:13,weight:600});
+  txt(svg,350,83,'d=128, 4 layers, 4 heads',{fill:C.muted,size:10,mono:true});
+  txt(svg,350,97,'252-token vocab',{fill:C.muted,size:10,mono:true});
+
+  box(svg,520,50,130,50,C.surface2,C.purpleDim);
+  txt(svg,585,70,'Summary Emb.',{fill:C.purple,size:12,weight:600});
+  txt(svg,585,87,'128d each',{fill:C.muted,size:10,mono:true});
+
+  box(svg,700,50,90,50,C.surface2,C.borderBright);
+  txt(svg,745,70,'Registry',{fill:C.heading,size:11,weight:600});
+  txt(svg,745,87,'943 \u00d7 128d',{fill:C.muted,size:10,mono:true});
+
+  arrow(svg,svg,180,75,237,75,C.purple);
+  arrow(svg,svg,460,75,517,75,C.purple);
+  arrow(svg,svg,650,75,697,75,C.muted);
+
+  // Learned zone
+  box(svg,20,175,W-40,365,C.blueFaint,C.blueDim,10);
+  txt(svg,W/2,197,'LEARNED DURING RL (113K params)',{fill:C.blue,size:11,weight:600});
+
+  box(svg,80,220,160,55,C.surface,C.blueDim);
+  txt(svg,160,242,'Emb. Projection',{fill:C.blue,size:12,weight:600});
+  txt(svg,160,258,'128 \u2192 32d linear',{fill:C.muted,size:10,mono:true});
+
+  pathArrow(svg,svg,`M745,100 L745,140 Q745,150 735,150 L160,150 Q150,150 150,160 L150,220`,C.muted,'6,3');
+
+  box(svg,360,220,220,55,C.surface,C.blueDim);
+  txt(svg,470,242,'Entity Encoder',{fill:C.blue,size:12,weight:600});
+  txt(svg,470,258,'d=32, 4 layers, self-attn',{fill:C.muted,size:10,mono:true});
+
+  box(svg,640,220,130,55,C.surface2,C.borderBright);
+  txt(svg,705,240,'Game State',{fill:C.heading,size:11,weight:600});
+  txt(svg,705,258,'7 \u00d7 30 = 210d',{fill:C.muted,size:10,mono:true});
+  arrow(svg,svg,640,247,580,247,C.muted);
+
+  // Cross-attention
+  box(svg,170,320,300,55,C.surface,C.greenDim);
+  txt(svg,320,342,'Cross-Attention Block',{fill:C.green,size:13,weight:600});
+  txt(svg,320,360,'ability queries \u00d7 entity keys, 4 heads',{fill:C.muted,size:10,mono:true});
+
+  arrow(svg,svg,160,275,260,320,C.blue);
+  arrow(svg,svg,470,275,380,320,C.blue);
+
+  // Output heads
+  const hy=420,hh=50;
+  box(svg,80,hy,140,hh,C.surface,C.orangeDim);
+  txt(svg,150,hy+20,'Move Head',{fill:C.orange,size:12,weight:600});
+  txt(svg,150,hy+36,'9-way softmax',{fill:C.muted,size:10,mono:true});
+
+  box(svg,260,hy,170,hh,C.surface,C.orangeDim);
+  txt(svg,345,hy+20,'Combat Pointer Head',{fill:C.orange,size:12,weight:600});
+  txt(svg,345,hy+36,'type + Q\u00b7K\u1d40/\u221ad',{fill:C.muted,size:10,mono:true});
+
+  box(svg,470,hy,140,hh,C.surface,C.borderBright);
+  txt(svg,540,hy+20,'Value Head',{fill:C.text,size:12,weight:600});
+  txt(svg,540,hy+36,'state \u2192 \u211d',{fill:C.muted,size:10,mono:true});
+  txt(svg,540,hy+55,'(training only)',{fill:C.muted,size:9});
+
+  arrow(svg,svg,250,375,150,hy,C.orange);
+  arrow(svg,svg,320,375,345,hy,C.orange);
+  arrow(svg,svg,390,375,540,hy,C.muted);
+
+  txt(svg,150,hy+hh+18,'\u2191\u2193\u2190\u2192\u2196\u2197\u2199\u2198\u2022',{fill:C.orange,size:14});
+  txt(svg,345,hy+hh+18,'target entity pointer',{fill:C.orange,size:10});
+
+  box(svg,640,hy,120,hh,'none','none');
+  txt(svg,700,hy+15,'Per tick:',{fill:C.muted,size:10});
+  txt(svg,700,hy+32,'~0.04ms',{fill:C.heading,size:13,weight:600});
+  txt(svg,700,hy+46,'on GPU',{fill:C.muted,size:10});
+})();
+
+// ═══ FIGURE 2: Entity Encoder ═══
+(function(){
+  const W=820,H=340;
+  const svg=d3.select('#fig-entity-encoder').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  const names=['Self','Enemy 0','Enemy 1','Enemy 2','Ally 0','Ally 1','Ally 2'];
+  const colors=[C.cyan,C.red,C.red,C.red,C.green,C.green,C.green];
+  const feats=['vitals(5)','pos(7)','combat(3)','ability(3)','heal(3)','CC(3)','state(4)','cumul(2)'];
+  const featC=['#60a5fa','#a78bfa','#fbbf24','#34d399','#f472b6','#fb923c','#818cf8','#6b7280'];
+
+  const sW=88,sH=130,gap=12;
+  const sx=(W-names.length*(sW+gap)+gap)/2,sy=20;
+
+  names.forEach((n,i)=>{
+    const x=sx+i*(sW+gap),g=svg.append('g');
+    box(g,x,sy,sW,sH,C.surface,colors[i]+'60',5);
+    txt(g,x+sW/2,sy+16,n,{fill:colors[i],size:10,weight:600});
+    let fy=sy+26;
+    feats.forEach((f,fi)=>{
+      const sh=(sH-32)/feats.length;
+      g.append('rect').attr('x',x+4).attr('y',fy).attr('width',sW-8).attr('height',sh-1).attr('rx',2).attr('fill',featC[fi]).attr('opacity',0.15);
+      txt(g,x+sW/2,fy+sh/2+3,f,{fill:featC[fi],size:7,mono:true});
+      fy+=sh;
+    });
+    arrow(g,svg,x+sW/2,sy+sH,x+sW/2,sy+sH+33,C.muted);
+  });
+
+  const saY=sy+sH+33,saW=names.length*(sW+gap)-gap;
+  box(svg,sx,saY,saW,48,C.surface,C.blueDim);
+  txt(svg,sx+saW/2,saY+20,'Multi-Head Self-Attention',{fill:C.blue,size:13,weight:600});
+  txt(svg,sx+saW/2,saY+36,'4 heads, 4 layers, d=32',{fill:C.muted,size:10,mono:true});
+
+  [[0,3],[1,5],[2,4],[0,6]].forEach(([a,b])=>{
+    const x1=sx+a*(sW+gap)+sW/2,x2=sx+b*(sW+gap)+sW/2;
+    svg.append('path').attr('d',`M${x1},${saY+24} Q${(x1+x2)/2},${saY+24+Math.abs(b-a)*5} ${x2},${saY+24}`)
+      .attr('stroke',C.blue).attr('stroke-width',1).attr('fill','none').attr('opacity',0.25).attr('stroke-dasharray','3,3');
+  });
+
+  txt(svg,sx+saW/2,saY+68,'7 \u00d7 32d encoded entity representations',{fill:C.heading,size:12,weight:500});
+})();
+
+// ═══ FIGURE 3: Pointer Attention ═══
+(function(){
+  const W=820,H=300;
+  const svg=d3.select('#fig-attention').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  box(svg,40,35,140,45,C.surface,C.blueDim);
+  txt(svg,110,52,'Query (Q)',{fill:C.blue,size:12,weight:600});
+  txt(svg,110,68,'pooled state, d=32',{fill:C.muted,size:9,mono:true});
+
+  const ents=['Self','Enemy 0','Enemy 1','Enemy 2','Ally 0','Ally 1','Ally 2'];
+  const eC=[C.cyan,C.red,C.red,C.red,C.green,C.green,C.green];
+  const kx=260,ky=18,kw=68,kg=4;
+  txt(svg,kx+(ents.length*(kw+kg)-kg)/2,12,'Keys (K) \u2014 7 \u00d7 d=32',{fill:C.text,size:11});
+  ents.forEach((n,i)=>{
+    const x=kx+i*(kw+kg);
+    box(svg,x,ky+8,kw,34,C.surface,eC[i]+'60',4);
+    txt(svg,x+kw/2,ky+29,n,{fill:eC[i],size:9,weight:500});
+  });
+
+  box(svg,330,80,180,36,C.surface2,C.borderBright);
+  txt(svg,420,102,'Q \u00b7 K\u1d40 / \u221ad',{fill:C.heading,size:14,weight:600});
+  arrow(svg,svg,180,57,327,95,C.blue);
+  arrow(svg,svg,420,50,420,77,C.muted);
+
+  // Heatmap
+  const hmX=260,hmY=140,cW=68;
+  const weights=[0.02,0.08,0.72,0.12,0.02,0.02,0.02];
+  const hps=[1.0,0.8,0.15,0.6,0.9,0.7,0.95];
+  const cScale=d3.scaleSequential(d3.interpolateRgbBasis([C.surface,C.orangeDim,C.orange])).domain([0,0.8]);
+
+  txt(svg,hmX+(ents.length*(cW+kg)-kg)/2,hmY-5,'Attention Weights (softmax)',{fill:C.text,size:11});
+
+  ents.forEach((n,i)=>{
+    const x=hmX+i*(cW+kg);
+    svg.append('rect').attr('x',x).attr('y',hmY).attr('width',cW).attr('height',42).attr('rx',4)
+      .attr('fill',cScale(weights[i])).attr('stroke',weights[i]>0.5?C.orange:C.border).attr('stroke-width',weights[i]>0.5?2:1);
+    txt(svg,x+cW/2,hmY+18,(weights[i]*100).toFixed(0)+'%',{fill:weights[i]>0.3?'#000':C.heading,size:13,weight:700});
+    txt(svg,x+cW/2,hmY+33,n,{fill:weights[i]>0.3?'#000':C.muted,size:8});
+
+    const by=hmY+48;
+    svg.append('rect').attr('x',x+4).attr('y',by).attr('width',cW-8).attr('height',7).attr('rx',2).attr('fill',C.surface2);
+    svg.append('rect').attr('x',x+4).attr('y',by).attr('width',(cW-8)*hps[i]).attr('height',7).attr('rx',2)
+      .attr('fill',hps[i]<0.3?C.red:hps[i]<0.5?C.orange:C.green);
+    txt(svg,x+cW/2,by+18,`HP: ${(hps[i]*100).toFixed(0)}%`,{fill:C.muted,size:8});
+  });
+
+  arrow(svg,svg,420,116,420,137,C.orange);
+
+  const selX=hmX+2*(cW+kg)+cW/2;
+  svg.append('line').attr('x1',selX).attr('y1',hmY+72).attr('x2',selX).attr('y2',hmY+88).attr('stroke',C.orange).attr('stroke-width',1.5);
+  txt(svg,selX,hmY+102,'\u2191 Selected target (argmax)',{fill:C.orange,size:11,weight:600});
+  txt(svg,selX,hmY+117,'Enemy 1 at 15% HP \u2014 focus fire',{fill:C.muted,size:10});
+})();
+
+// ═══ FIGURE 4: Behavioral Embeddings ═══
+(function(){
+  const W=820,H=360;
+  const svg=d3.select('#fig-embeddings').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  // Phase 1
+  box(svg,40,20,225,180,C.purpleFaint,C.purpleDim,8);
+  txt(svg,152,40,'Phase 1: MLM Pretraining',{fill:C.purple,size:12,weight:600});
+
+  const tokens=['dmg','55','???','60',']','in','circ','(','3',')'];
+  const tY=58;
+  tokens.forEach((t,i)=>{
+    const x=55+i*20;
+    const m=t==='???';
+    svg.append('rect').attr('x',x).attr('y',tY).attr('width',m?32:18).attr('height',16).attr('rx',3)
+      .attr('fill',m?C.purpleDim:C.surface2).attr('stroke',m?C.purple:C.border);
+    if(m)txt(svg,x+16,tY+12,'?',{fill:C.purple,size:9,weight:700,mono:true});
+  });
+  txt(svg,152,tY+32,'Mask 15% \u2192 predict tokens',{fill:C.muted,size:10});
+
+  box(svg,70,tY+42,170,32,C.surface,C.purpleDim);
+  txt(svg,155,tY+62,'Transformer Encoder',{fill:C.purple,size:11,weight:500});
+
+  box(svg,112,170,80,22,C.purpleDim,C.purple,11);
+  txt(svg,152,185,'97.5% acc',{fill:'#fff',size:10,weight:600});
+
+  // Phase 2
+  box(svg,305,20,225,180,`rgba(52,211,153,0.04)`,C.greenDim,8);
+  txt(svg,417,40,'Phase 2: Behavioral',{fill:C.green,size:12,weight:600});
+
+  box(svg,325,58,185,45,C.surface,C.borderBright);
+  txt(svg,417,74,'135,792 sim experiments',{fill:C.heading,size:11,weight:500});
+  txt(svg,417,90,'943 \u00d7 144 conditions',{fill:C.muted,size:10,mono:true});
+
+  box(svg,325,112,185,32,C.surface,C.greenDim);
+  txt(svg,417,132,'119-dim outcome vector',{fill:C.green,size:11,weight:500});
+
+  arrow(svg,svg,417,103,417,112,C.green);
+
+  txt(svg,285,100,'freeze',{fill:C.muted,size:9});
+  pathArrow(svg,svg,`M265,100 L305,100`,C.muted,'4,3');
+
+  // Cluster scatter
+  const cx2=590,cy2=20,cw=200,ch=180;
+  box(svg,cx2,cy2,cw,ch,C.surface,C.borderBright,8);
+  txt(svg,cx2+cw/2,cy2+16,'Embedding Space',{fill:C.heading,size:11,weight:600});
+
+  const rng=d3.randomLcg(42),rand=d3.randomNormal.source(rng);
+  [{cx:635,cy:70,c:C.red,l:'damage',n:22},{cx:725,cy:65,c:C.green,l:'heals',n:14},
+   {cx:650,cy:150,c:C.orange,l:'CC',n:16},{cx:740,cy:145,c:C.blue,l:'shields',n:11},
+   {cx:690,cy:105,c:C.purple,l:'utility',n:14}].forEach(cl=>{
+    const gn=rand(0,15);
+    for(let j=0;j<cl.n;j++){
+      const px=cl.cx+gn()+rand(0,6)(),py=cl.cy+gn()+rand(0,6)();
+      if(px>cx2+8&&px<cx2+cw-8&&py>cy2+24&&py<cy2+ch-15)
+        svg.append('circle').attr('cx',px).attr('cy',py).attr('r',2.5).attr('fill',cl.c).attr('opacity',0.6);
+    }
+    txt(svg,cl.cx,cl.cy-16,cl.l,{fill:cl.c,size:8,weight:500});
+  });
+
+  box(svg,cx2+cw/2-48,cy2+ch-22,96,18,C.surface2,C.borderBright,9);
+  txt(svg,cx2+cw/2,cy2+ch-9,'kNN@5: 99.4%',{fill:C.heading,size:9,weight:600,mono:true});
+
+  // Output
+  box(svg,180,260,460,42,C.surface,C.borderBright,8);
+  txt(svg,410,278,'943 abilities \u00d7 128d behavioral embeddings',{fill:C.heading,size:13,weight:600});
+  txt(svg,410,294,'cached in registry JSON, loaded at episode start',{fill:C.muted,size:10});
+
+  pathArrow(svg,svg,`M152,200 L152,230 Q152,245 170,245 L180,260`,C.muted,'5,3');
+  pathArrow(svg,svg,`M417,200 L417,230 Q417,245 430,245 L410,260`,C.muted,'5,3');
+  pathArrow(svg,svg,`M${cx2+cw/2},${cy2+ch} L${cx2+cw/2},${230} Q${cx2+cw/2},${245} ${cx2+cw/2-20},${245} L${640},${260}`,C.muted,'5,3');
+})();
+
+// ═══ FIGURE 5: SHM Infrastructure ═══
+(function(){
+  const W=820,H=360;
+  const svg=d3.select('#fig-shm').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  // GPU Server
+  box(svg,280,12,260,60,C.surface,C.greenDim,8);
+  svg.append('rect').attr('x',280).attr('y',12).attr('width',8).attr('height',60).attr('rx',4).attr('fill',C.greenDim);
+  txt(svg,420,35,'GPU Inference Server',{fill:C.green,size:14,weight:600});
+  txt(svg,420,52,'Python \u00b7 PyTorch \u00b7 CUDA \u00b7 25K inf/s',{fill:C.muted,size:10});
+
+  // SHM
+  const sY=100,sH=90;
+  box(svg,160,sY,500,sH,C.surface2,C.borderBright,8);
+  txt(svg,410,sY+16,'/dev/shm/impala_inf',{fill:C.heading,size:12,weight:600,mono:true});
+
+  const fields=[{n:'magic',w:52,c:C.muted},{n:'cls_dim',w:52,c:C.muted},{n:'flag',w:42,c:C.blue},{n:'reload_path',w:125,c:C.orange},{n:'req',w:32,c:C.muted},{n:'ack',w:32,c:C.muted}];
+  let fx=175;const fy=sY+28;
+  fields.forEach(f=>{box(svg,fx,fy,f.w,24,C.surface,f.c+'60',3);txt(svg,fx+f.w/2,fy+16,f.n,{fill:f.c,size:8,mono:true});fx+=f.w+3});
+  txt(svg,175,fy+36,'Header (512B)',{fill:C.muted,size:9,anchor:'start'});
+
+  box(svg,175,sY+58,225,24,C.surface,C.blue+'40',3);
+  txt(svg,287,sY+74,'Request: 1024\u00d7~7KB',{fill:C.blue,size:9,mono:true});
+  box(svg,405,sY+58,230,24,C.surface,C.green+'40',3);
+  txt(svg,520,sY+74,'Response: 1024\u00d716B',{fill:C.green,size:9,mono:true});
+
+  arrow(svg,svg,370,72,370,sY-3,C.green);
+  arrow(svg,svg,450,sY-3,450,72,C.blue);
+
+  // Rust sim
+  const rY=sY+sH+25;
+  box(svg,100,rY,620,115,C.surface,C.blueDim,8);
+  svg.append('rect').attr('x',100).attr('y',rY).attr('width',8).attr('height',115).attr('rx',4).attr('fill',C.blueDim);
+  txt(svg,420,rY+18,'Rust Simulation Engine (64 threads)',{fill:C.blue,size:13,weight:600});
+
+  const gx=130,gy=rY+30;
+  for(let t=0;t<64;t++){
+    const r=Math.floor(t/24),c=t%24,x=gx+c*23,y=gy+r*14;
+    svg.append('rect').attr('x',x).attr('y',y).attr('width',21).attr('height',12).attr('rx',2).attr('fill',C.surface2).attr('stroke',C.border);
+    if(t<3||t===63)txt(svg,x+10,y+9,t<3?`${t*64}`:'4032',{fill:C.muted,size:6,mono:true});
+  }
+  txt(svg,130,rY+100,'\u00d7 64 sims/thread = 4,096 parallel episodes',{fill:C.muted,size:10,anchor:'start'});
+
+  box(svg,575,rY+32,120,45,C.surface,C.borderBright);
+  txt(svg,635,rY+50,'Batcher',{fill:C.heading,size:11,weight:500});
+  txt(svg,635,rY+65,'crossbeam ch',{fill:C.muted,size:9,mono:true});
+
+  arrow(svg,svg,410,sY+sH+3,410,rY-3,C.muted);
+})();
+
+// ═══ FIGURE 6: IMPALA Loop ═══
+(function(){
+  const W=820,H=320;
+  const svg=d3.select('#fig-impala-loop').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+  const cx=W/2,cy=H/2-5,rx=250,ry=110;
+
+  const steps=[
+    {a:-90,l:'Export Weights',s:'model \u2192 current.pt',c:C.blue},
+    {a:-30,l:'Reload GPU Server',s:'\u2190 THE FIX',c:C.red,hi:true},
+    {a:30,l:'Generate Episodes',s:'4,096 parallel sims',c:C.green},
+    {a:90,l:'Compute V-Trace',s:'\u03c1 = clip(\u03c0/\u03bc, 0, 1)',c:C.purple},
+    {a:150,l:'Gradient Step',s:'-\u03c1A log\u03c0 + vl + H',c:C.orange},
+    {a:210,l:'Update Policy',s:'\u03b8 \u2190 \u03b8 - \u03b1\u2207L',c:C.blue},
+  ];
+
+  steps.forEach((st,i)=>{
+    const next=steps[(i+1)%steps.length];
+    let s0=st.a+18,e0=next.a-18;if(e0<s0)e0+=360;
+    const s=s0*Math.PI/180,e=e0*Math.PI/180;
+    const x1=cx+rx*Math.cos(s),y1=cy+ry*Math.sin(s),x2=cx+rx*Math.cos(e),y2=cy+ry*Math.sin(e);
+    const ac=next.hi?C.red:C.muted;
+    const id=addArrow(svg,ac);
+    svg.append('path').attr('d',`M${x1},${y1} A${rx},${ry} 0 0 1 ${x2},${y2}`)
+      .attr('stroke',C.border).attr('stroke-width',2).attr('fill','none').attr('marker-end',`url(#${id})`);
+  });
+
+  steps.forEach((st,i)=>{
+    const a=st.a*Math.PI/180,x=cx+rx*Math.cos(a),y=cy+ry*Math.sin(a);
+    const bw=148,bh=st.hi?52:46;
+    box(svg,x-bw/2,y-bh/2,bw,bh,st.hi?'#2a1215':C.surface,st.hi?C.redDim:st.c+'60',8);
+    if(st.hi)svg.append('rect').attr('x',x-bw/2).attr('y',y-bh/2).attr('width',bw).attr('height',bh).attr('rx',8).attr('fill','none').attr('stroke',C.red).attr('stroke-width',2).attr('stroke-dasharray','4,2');
+    txt(svg,x,y-(st.hi?7:4),st.l,{fill:st.hi?C.red:st.c,size:11,weight:600});
+    txt(svg,x,y+(st.hi?10:12),st.s,{fill:st.hi?C.red:C.muted,size:9,mono:!st.hi});
+    svg.append('circle').attr('cx',x-bw/2+12).attr('cy',y-bh/2+12).attr('r',9).attr('fill',st.hi?C.redDim:C.surface2).attr('stroke',st.hi?C.red:st.c+'60');
+    txt(svg,x-bw/2+12,y-bh/2+16,''+(i+1),{fill:st.hi?C.red:st.c,size:9,weight:700});
+  });
+
+  txt(svg,cx,cy-8,'IMPALA',{fill:C.heading,size:16,weight:700});
+  txt(svg,cx,cy+10,'V-Trace',{fill:C.muted,size:12});
+})();
+
+// ═══ FIGURE 7: KL Chart (D3) ═══
+(function(){
+  const m={top:30,right:30,bottom:45,left:55},W=780,H=300;
+  const w=W-m.left-m.right,h=H-m.top-m.bottom;
+  const svg=d3.select('#fig-kl-chart').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+  const g=svg.append('g').attr('transform',`translate(${m.left},${m.top})`);
+
+  const broken=[{i:1,k:0.10},{i:2,k:0.33},{i:3,k:0.58},{i:4,k:0.86},{i:5,k:1.18},{i:6,k:1.53},{i:7,k:1.93},{i:8,k:2.38},{i:9,k:2.98},{i:10,k:3.39},{i:11,k:4.23},{i:12,k:4.53},{i:13,k:4.87},{i:14,k:4.79},{i:15,k:4.81},{i:16,k:4.83},{i:17,k:4.89},{i:18,k:5.01},{i:19,k:5.24},{i:20,k:6.13}];
+  const fixed=[{i:1,k:0.095},{i:2,k:0.116},{i:3,k:0.138},{i:4,k:0.156},{i:5,k:0.169},{i:6,k:0.183},{i:7,k:0.181},{i:8,k:0.174},{i:9,k:0.170},{i:10,k:0.153},{i:11,k:0.137},{i:12,k:0.130},{i:13,k:0.129},{i:14,k:0.101},{i:15,k:0.098},{i:16,k:0.085},{i:17,k:0.074},{i:18,k:0.083},{i:19,k:0.071},{i:20,k:0.068}];
+
+  const x=d3.scaleLinear().domain([1,20]).range([0,w]);
+  const y=d3.scaleLinear().domain([0,7]).range([h,0]);
+
+  y.ticks(7).forEach(t=>{g.append('line').attr('x1',0).attr('y1',y(t)).attr('x2',w).attr('y2',y(t)).attr('stroke',C.border).attr('stroke-width',0.5)});
+
+  g.append('rect').attr('x',0).attr('y',y(7)).attr('width',w).attr('height',y(2)-y(7)).attr('fill',C.red).attr('opacity',0.03);
+  g.append('line').attr('x1',0).attr('y1',y(2)).attr('x2',w).attr('y2',y(2)).attr('stroke',C.red).attr('stroke-width',1).attr('stroke-dasharray','6,4').attr('opacity',0.3);
+  txt(g,w-5,y(2.3),'V-trace corrections meaningless above here',{fill:C.red,size:9,anchor:'end'});
+
+  g.append('g').attr('transform',`translate(0,${h})`).call(d3.axisBottom(x).ticks(10).tickSize(-4))
+    .call(g=>g.select('.domain').attr('stroke',C.border))
+    .call(g=>g.selectAll('.tick line').attr('stroke',C.border))
+    .call(g=>g.selectAll('.tick text').attr('fill',C.muted).attr('font-size',10).attr('font-family','DM Sans'));
+  g.append('g').call(d3.axisLeft(y).ticks(7).tickSize(-4))
+    .call(g=>g.select('.domain').attr('stroke',C.border))
+    .call(g=>g.selectAll('.tick line').attr('stroke',C.border))
+    .call(g=>g.selectAll('.tick text').attr('fill',C.muted).attr('font-size',10).attr('font-family','DM Sans'));
+
+  txt(g,w/2,h+35,'Training Iteration',{fill:C.muted,size:11});
+  svg.append('text').attr('transform',`translate(15,${m.top+h/2}) rotate(-90)`).attr('text-anchor','middle').attr('fill',C.muted).attr('font-size',11).attr('font-family','DM Sans').text('KL Divergence');
+
+  const line=d3.line().x(d=>x(d.i)).y(d=>y(d.k)).curve(d3.curveMonotoneX);
+
+  g.append('path').datum(broken).attr('d',d3.area().x(d=>x(d.i)).y0(h).y1(d=>y(d.k)).curve(d3.curveMonotoneX)).attr('fill',C.red).attr('opacity',0.06);
+  g.append('path').datum(broken).attr('d',line).attr('stroke',C.red).attr('stroke-width',2.5).attr('fill','none');
+
+  g.append('path').datum(fixed).attr('d',d3.area().x(d=>x(d.i)).y0(h).y1(d=>y(d.k)).curve(d3.curveMonotoneX)).attr('fill',C.green).attr('opacity',0.06);
+  g.append('path').datum(fixed).attr('d',line).attr('stroke',C.green).attr('stroke-width',2.5).attr('fill','none');
+
+  const tooltip=d3.select('#tooltip');
+  [{d:broken,c:C.red,l:'EC2 (broken)'},{d:fixed,c:C.green,l:'EC3 (fixed)'}].forEach(s=>{
+    g.selectAll(null).data(s.d).enter().append('circle')
+      .attr('cx',d=>x(d.i)).attr('cy',d=>y(d.k)).attr('r',4).attr('fill',s.c).attr('stroke',C.surface).attr('stroke-width',2).style('cursor','pointer')
+      .on('mouseover',function(ev,d){d3.select(this).attr('r',6);tooltip.style('opacity',1).html(`<strong>${s.l}</strong><br>Iter ${d.i}: KL = ${d.k.toFixed(3)}`).style('left',(ev.pageX+12)+'px').style('top',(ev.pageY-30)+'px')})
+      .on('mouseout',function(){d3.select(this).attr('r',4);tooltip.style('opacity',0)});
+  });
+
+  const lx=60,ly=5;
+  g.append('line').attr('x1',lx).attr('y1',ly).attr('x2',lx+25).attr('y2',ly).attr('stroke',C.red).attr('stroke-width',2.5);
+  txt(g,lx+30,ly+4,'EC2: Broken (frozen behavior policy)',{fill:C.red,size:10,anchor:'start'});
+  g.append('line').attr('x1',lx).attr('y1',ly+18).attr('x2',lx+25).attr('y2',ly+18).attr('stroke',C.green).attr('stroke-width',2.5);
+  txt(g,lx+30,ly+22,'EC3: Fixed (proper weight reload)',{fill:C.green,size:10,anchor:'start'});
+})();
+
+// ═══ FIGURE 8: Curriculum ═══
+(function(){
+  const W=760,H=190;
+  const svg=d3.select('#fig-curriculum').append('svg').attr('viewBox',`0 0 ${W} ${H}`).attr('width','100%');
+
+  const phases=[
+    {n:'Phase 1',s:108,d:'Autoattack Only',t:'10\u00d7 HP, no abilities',c:C.blue},
+    {n:'Phase 2',s:148,d:'Simple Kits',t:'1-2 abilities/unit',c:C.purple},
+    {n:'Phase 3',s:272,d:'Full Kits',t:'Complex compositions',c:C.orange},
+    {n:'Phase 4',s:474,d:'Everything',t:'All + stress tests',c:C.red},
+  ];
+
+  const maxS=474,barMax=160,sx=80,rH=40,by=15;
+
+  phases.forEach((p,i)=>{
+    const y=by+i*rH,bW=(p.s/maxS)*barMax;
+    txt(svg,sx-10,y+16,p.n,{fill:p.c,size:12,weight:600,anchor:'end'});
+    svg.append('rect').attr('x',sx).attr('y',y+2).attr('width',bW).attr('height',24).attr('rx',4).attr('fill',p.c).attr('opacity',0.2);
+    svg.append('rect').attr('x',sx).attr('y',y+2).attr('width',bW).attr('height',24).attr('rx',4).attr('fill','none').attr('stroke',p.c).attr('stroke-width',1.5);
+    txt(svg,sx+bW/2,y+18,`${p.s}`,{fill:p.c,size:12,weight:700,mono:true});
+    txt(svg,sx+barMax+20,y+12,p.d,{fill:C.heading,size:12,weight:500,anchor:'start'});
+    txt(svg,sx+barMax+20,y+27,p.t,{fill:C.muted,size:10,anchor:'start'});
+    txt(svg,sx+barMax+155,y+18,'20 iters',{fill:C.muted,size:9,mono:true,anchor:'start'});
+
+    if(i<phases.length-1){
+      const nW=(phases[i+1].s/maxS)*barMax;
+      svg.append('path').attr('d',`M${sx+bW+5},${y+14} L${sx+bW+15},${y+14} L${sx+bW+15},${y+rH+14} L${sx+nW-5},${y+rH+14}`)
+        .attr('stroke',C.border).attr('stroke-width',1.5).attr('fill','none').attr('stroke-dasharray','4,3');
+    }
+  });
+})();
+
+// ═══ Gwern-style concept popups ═══
+(function(){
+  const popup = document.createElement('div');
+  popup.className = 'concept-popup';
+  popup.innerHTML = '<iframe></iframe><div class="popup-footer"><a href="">View full explanation &rarr;</a></div>';
+  document.body.appendChild(popup);
+
+  let showTimer, hideTimer;
+  const iframe = popup.querySelector('iframe');
+  const footerLink = popup.querySelector('.popup-footer a');
+
+  document.querySelectorAll('.concept-link').forEach(link => {
+    link.addEventListener('mouseenter', function(e) {
+      clearTimeout(hideTimer);
+      showTimer = setTimeout(() => {
+        const concept = this.dataset.concept;
+        iframe.src = 'concepts_attention.html#' + concept;
+        footerLink.href = 'concepts_attention.html#' + concept;
+
+        const rect = this.getBoundingClientRect();
+        const left = Math.min(rect.left, window.innerWidth - 490);
+        popup.style.left = Math.max(10, left) + 'px';
+        popup.style.top = (rect.bottom + window.scrollY + 8) + 'px';
+        popup.classList.add('visible');
+      }, 200);
+    });
+
+    link.addEventListener('mouseleave', function() {
+      clearTimeout(showTimer);
+      hideTimer = setTimeout(() => popup.classList.remove('visible'), 300);
+    });
+  });
+
+  popup.addEventListener('mouseenter', () => clearTimeout(hideTimer));
+  popup.addEventListener('mouseleave', () => {
+    hideTimer = setTimeout(() => popup.classList.remove('visible'), 300);
+  });
+})();
+</script>
+</body>
+</html>

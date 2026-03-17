@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths:
       - 'book/**'
+      - 'docs/**'
   workflow_dispatch:
 
 permissions:
@@ -30,6 +31,9 @@ jobs:
       - name: Build book
         run: mdbook build
         working-directory: book
+
+      - name: Copy static HTML pages into build output
+        run: cp -r book/static/* book/book/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

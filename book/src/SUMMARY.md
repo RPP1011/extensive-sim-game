@@ -72,6 +72,15 @@
     - [sim_bridge Protocol](./tooling/sim-bridge.md)
     - [Map & Room Generation](./tooling/map-gen.md)
 
+# Dev Log
+
+- [Killing the Python Sidecar: Burn Migration](./blog/burn-migration.md)
+- [IMPALA V4: Behavioral Embeddings & V-Trace](./blog/impala-v4.md)
+
+# ML Concepts
+
+- [ML Concepts Learning Path](./blog/concepts.md)
+
 # Development
 
 - [Testing](./development/testing.md)
