@@ -36,7 +36,7 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
         ActorCriticV6Config,
         actor_critic_v6::V6_H_DIM,
         checkpoint,
-        training::{self, ImpalaConfig, TrainingSample, vtrace_targets, train_step, predict_values},
+        training::{self, ImpalaConfig, TrainingSample, vtrace_targets, train_step, train_step_bc, predict_values},
     };
     use burn::backend::{Autodiff, LibTorch};
     use burn::backend::libtorch::LibTorchDevice;
@@ -215,9 +215,11 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
                 eprintln!("  batch[0] adv: min={adv_min:.3} max={adv_max:.3} mean={adv_mean:.3} std={:.3} | rew_mean={rew_mean:.4}", adv_var.sqrt());
             }
 
-            let (new_model, metrics) = train_step(
-                model, &mut optimizer, &batch, &train_config, &device, &mut rng_state,
-            );
+            let (new_model, metrics) = if args.bc {
+                train_step_bc(model, &mut optimizer, &batch, &train_config, &device, &mut rng_state)
+            } else {
+                train_step(model, &mut optimizer, &batch, &train_config, &device, &mut rng_state)
+            };
             model = new_model;
 
             total_metrics.total_loss += metrics.total_loss;
@@ -286,10 +288,13 @@ fn generate_episodes(
         cmd.arg(p);
     }
 
-    // Use --policy combined (squad AI) to generate episodes with recorded steps.
-    // The combined policy records all V2 features (entities, zones, aggregate)
-    // needed for training, using squad AI decisions as behavioral policy.
-    cmd.arg("--policy").arg("combined");
+    // Use --burn-v6 when checkpoint available, --policy combined otherwise.
+    if let Some(ckpt) = checkpoint {
+        cmd.arg("--burn-v6");
+        cmd.arg("--burn-checkpoint").arg(ckpt);
+    } else {
+        cmd.arg("--policy").arg("combined");
+    }
     cmd.arg("--output").arg(output_path);
     cmd.arg("--episodes").arg(args.episodes.to_string());
     cmd.arg("--threads").arg(args.threads.to_string());

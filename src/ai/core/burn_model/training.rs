@@ -208,6 +208,73 @@ pub fn pack_batch<B: Backend>(
 // Loss computation
 // ---------------------------------------------------------------------------
 
+/// Behavioral cloning loss: maximize log prob of expert actions + MSE on position.
+/// No advantage weighting — pure supervised imitation learning.
+pub fn compute_bc_loss<B: burn::tensor::backend::AutodiffBackend>(
+    model: &ActorCriticV6<B>,
+    samples: &[TrainingSample],
+    n_latents: usize,
+    device: &B::Device,
+) -> (Tensor<B, 1>, TrainMetrics)
+where
+    B::InnerBackend: burn::tensor::backend::Backend,
+{
+    let batch = pack_batch(samples, device);
+    let bs = batch.bs;
+    let ability_cls: Vec<Option<Tensor<B, 2>>> = vec![None; MAX_ABILITIES];
+
+    let (output, _h_new, value_out) = model.forward(
+        batch.ent_feat, batch.ent_types, batch.zone_feat,
+        batch.ent_mask, batch.zone_mask,
+        &ability_cls, Some(batch.agg_feat), None,
+        batch.corner_tokens, batch.corner_mask, Some(n_latents),
+    );
+
+    // Movement: MSE to expert target position
+    let target_pos = Tensor::<B, 1>::from_floats(batch.move_targets.as_slice(), device)
+        .reshape([bs, 2]) / POSITION_NORM;
+    let move_loss: Tensor<B, 1> = (output.target_pos - target_pos).powf_scalar(2.0)
+        .sum_dim(1).squeeze_dim::<1>(1).mean().unsqueeze();
+
+    // Combat type: cross-entropy
+    let masked_logits = output.combat.combat_logits
+        + (batch.combat_masks - 1.0) * 1e9;
+    let combat_lp = log_softmax(masked_logits, 1)
+        .gather(1, Tensor::<B, 1, Int>::from_ints(batch.combat_targets.as_slice(), device).reshape([bs, 1]))
+        .squeeze_dim::<1>(1);
+    let combat_ce = combat_lp.mean().neg().unsqueeze(); // -mean(log_prob)
+
+    // Pointer target: cross-entropy, only for attack actions (combat_type 0 = attack)
+    // For hold/move actions, the pointer target is meaningless (masked to -1e9 by combat head)
+    let ptr_lp = log_softmax(output.combat.attack_ptr, 1)
+        .gather(1, Tensor::<B, 1, Int>::from_ints(batch.pointer_targets.as_slice(), device).reshape([bs, 1]))
+        .squeeze_dim::<1>(1);
+    // Mask: only train pointer on attack-type actions (combat_type 0)
+    let is_attack: Vec<f32> = batch.combat_targets.iter()
+        .map(|&ct| if ct == 0 { 1.0 } else { 0.0 }).collect();
+    let atk_mask = Tensor::<B, 1>::from_floats(is_attack.as_slice(), device);
+    let n_atk = atk_mask.clone().sum().into_scalar().elem::<f32>().max(1.0);
+    let ptr_ce = ((ptr_lp * atk_mask).sum() / n_atk).neg().unsqueeze();
+
+    // Value loss: Huber
+    let value_pred: Tensor<B, 1> = value_out.attrition.squeeze_dim::<1>(1);
+    let value_target = Tensor::<B, 1>::from_floats(batch.value_targets.as_slice(), device);
+    let value_loss = rl4burn::value_loss(value_pred, value_target);
+
+    // Total: move + combat + pointer + value
+    let policy_loss = move_loss.clone() + combat_ce.clone() + ptr_ce.clone();
+    let total = policy_loss.clone() + value_loss.clone() * 0.5;
+
+    let metrics = TrainMetrics {
+        total_loss: total.clone().into_scalar().elem::<f32>(),
+        policy_loss: policy_loss.into_scalar().elem::<f32>(),
+        value_loss: value_loss.into_scalar().elem::<f32>(),
+        mean_advantage: 0.0,
+    };
+
+    (total, metrics)
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct TrainMetrics {
     pub total_loss: f32,
@@ -313,6 +380,33 @@ where
     let n_latents = config.tail_drop_min + j_idx;
 
     let (loss, metrics) = compute_loss(&model, samples, config, n_latents, device);
+
+    let grads = loss.backward();
+    let grads_params = GradientsParams::from_grads(grads, &model);
+    let grads_params = rl4burn::clip_grad_norm(&model, grads_params, config.grad_clip);
+    let model = optimizer.step(config.lr, model, grads_params);
+
+    (model, metrics)
+}
+
+pub fn train_step_bc<B, O>(
+    model: ActorCriticV6<B>,
+    optimizer: &mut O,
+    samples: &[TrainingSample],
+    config: &ImpalaConfig,
+    device: &B::Device,
+    rng: &mut u64,
+) -> (ActorCriticV6<B>, TrainMetrics)
+where
+    B: burn::tensor::backend::AutodiffBackend,
+    B::InnerBackend: burn::tensor::backend::Backend,
+    O: Optimizer<ActorCriticV6<B>, B>,
+{
+    let j_range = config.tail_drop_max - config.tail_drop_min + 1;
+    let j_idx = (lcg(rng) as usize) % j_range;
+    let n_latents = config.tail_drop_min + j_idx;
+
+    let (loss, metrics) = compute_bc_loss(&model, samples, n_latents, device);
 
     let grads = loss.backward();
     let grads_params = GradientsParams::from_grads(grads, &model);

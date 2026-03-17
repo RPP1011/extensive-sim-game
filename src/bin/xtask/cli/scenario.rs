@@ -102,6 +102,9 @@ pub struct ImpalaTrainArgs {
     /// Self-play: also run GPU inference for enemy units
     #[arg(long)]
     pub self_play: bool,
+    /// Behavioral cloning mode: pure supervised imitation of squad AI
+    #[arg(long)]
+    pub bc: bool,
 }
 
 #[derive(Debug, Parser)]

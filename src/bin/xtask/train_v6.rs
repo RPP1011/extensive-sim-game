@@ -64,6 +64,7 @@ pub fn run_train_v6(args: TrainV6Args) -> ExitCode {
     }
     if args.grokfast { inner_args.push("--grokfast".into()); }
     if args.self_play { inner_args.push("--self-play".into()); }
+    if args.bc { inner_args.push("--bc".into()); }
 
     // --- PATH with ~/bin for c++ ---
     let path_env = format!("{}:{}", bin_dir,

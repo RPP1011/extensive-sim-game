@@ -342,6 +342,101 @@ pub(crate) fn run_rl_episode(
                     );
                     continue;
                 }
+
+                // V6 Burn GPU inference
+                #[cfg(feature = "burn-gpu")]
+                if let Policy::BurnServerV6(client) = policy {
+                    use bevy_game::ai::core::burn_model::inference::{InferenceRequest, InferenceClient};
+                    use bevy_game::ai::core::{UnitIntent, Team};
+                    use bevy_game::ai::core::ability_eval::extract_game_state;
+
+                    let h_dim = client.h_dim();
+                    let req = InferenceRequest {
+                        entities: gs_v2.entities.clone(),
+                        entity_types: gs_v2.entity_types.clone(),
+                        zones: gs_v2.zones.clone(),
+                        combat_mask: mask_vec.clone(),
+                        ability_cls: vec![None; MAX_ABILITIES],
+                        hidden_state: vec![0.0; h_dim],
+                        aggregate_features: gs_v2.aggregate_features.clone(),
+                        corner_tokens: vec![],
+                    };
+
+                    if let Ok(result) = client.infer(req) {
+                        // Convert model output to intent
+                        let combat_type = result.combat_type as usize;
+                        let target_idx = result.target_idx as usize;
+                        let target_pos = [
+                            unit.position.x + result.move_dx * 20.0,
+                            unit.position.y + result.move_dy * 20.0,
+                        ];
+
+                        let combat_intent = if combat_type == 0 {
+                            // Attack: find target entity
+                            let enemy_entities: Vec<&bevy_game::ai::core::UnitState> = sim.units.iter()
+                                .filter(|u| u.team == Team::Enemy && u.hp > 0).collect();
+                            if let Some(target) = enemy_entities.get(target_idx.min(enemy_entities.len().saturating_sub(1))) {
+                                bevy_game::ai::core::IntentAction::Attack { target_id: target.id }
+                            } else {
+                                bevy_game::ai::core::IntentAction::Hold
+                            }
+                        } else if combat_type == 1 {
+                            bevy_game::ai::core::IntentAction::Hold
+                        } else {
+                            // Ability usage
+                            let ability_idx = combat_type - 2;
+                            if ability_idx < unit.abilities.len() && mask_arr.get(3 + ability_idx).copied().unwrap_or(false) {
+                                let enemy = sim.units.iter()
+                                    .filter(|u| u.team == Team::Enemy && u.hp > 0).next();
+                                if let Some(e) = enemy {
+                                    bevy_game::ai::core::IntentAction::UseAbility {
+                                        ability_index: ability_idx,
+                                        target: bevy_game::ai::effects::AbilityTarget::Unit(e.id),
+                                    }
+                                } else {
+                                    bevy_game::ai::core::IntentAction::Hold
+                                }
+                            } else {
+                                bevy_game::ai::core::IntentAction::Hold
+                            }
+                        };
+
+                        let move_intent = bevy_game::ai::core::IntentAction::MoveTo {
+                            position: bevy_game::ai::core::SimVec2 { x: target_pos[0], y: target_pos[1] },
+                        };
+                        let final_intent = if !matches!(combat_intent, bevy_game::ai::core::IntentAction::Hold) {
+                            combat_intent
+                        } else {
+                            move_intent
+                        };
+
+                        intents.retain(|i| i.unit_id != uid);
+                        intents.push(UnitIntent { unit_id: uid, action: final_intent });
+
+                        if record {
+                            let game_state = extract_game_state(&sim, unit);
+                            steps.push(RlStep {
+                                tick, unit_id: uid,
+                                game_state: game_state.to_vec(),
+                                action: combat_type, log_prob: result.lp_combat + result.lp_pointer,
+                                mask: mask_vec.clone(), step_reward: step_r,
+                                entities: Some(gs_v2.entities.clone()),
+                                entity_types: Some(gs_v2.entity_types.clone()),
+                                threats: Some(gs_v2.threats.clone()),
+                                positions: Some(gs_v2.positions.clone()),
+                                zones: Some(gs_v2.zones.clone()),
+                                action_type: Some(combat_type), target_idx: Some(target_idx),
+                                move_dir: None, combat_type: Some(combat_type),
+                                lp_move: Some(result.lp_move), lp_combat: Some(result.lp_combat),
+                                lp_pointer: Some(result.lp_pointer),
+                                aggregate_features: Some(gs_v2.aggregate_features.clone()),
+                                target_move_pos: Some(target_pos),
+                                teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
+                            });
+                        }
+                    }
+                    continue;
+                }
             }
         }
 

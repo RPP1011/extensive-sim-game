@@ -79,6 +79,9 @@ pub struct TrainV6Args {
     /// Self-play: GPU inference for enemy units too
     #[arg(long)]
     pub self_play: bool,
+    /// Behavioral cloning mode: pure supervised imitation of squad AI
+    #[arg(long)]
+    pub bc: bool,
     /// Skip build step (assume binary is already built with burn-gpu)
     #[arg(long)]
     pub no_build: bool,
