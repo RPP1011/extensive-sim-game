@@ -178,8 +178,8 @@ pub fn apply_typed_damage(
     // Shield absorption
     let shield_before = state.units[target_idx].shield_hp;
     if state.units[target_idx].shield_hp > 0 {
-        let absorbed = damage.min(state.units[target_idx].shield_hp);
-        state.units[target_idx].shield_hp -= absorbed;
+        let absorbed = damage.min(state.units[target_idx].shield_hp).max(0);
+        state.units[target_idx].shield_hp = (state.units[target_idx].shield_hp - absorbed).max(0);
         damage -= absorbed;
         events.push(SimEvent::ShieldAbsorbed {
             tick, unit_id: target_id, absorbed,
@@ -291,6 +291,11 @@ pub fn apply_typed_damage(
 
     let shield_broke = shield_before > 0 && state.units[target_idx].shield_hp == 0;
     fire_damage_triggers(source_idx, target_idx, target_id, new_hp, shield_broke, tick, state, events);
+
+    // Re-clear dead unit state after triggers: OnDeath passives may set casting/channeling.
+    if new_hp == 0 {
+        clear_dead_unit_state(&mut state.units[target_idx]);
+    }
 }
 
 #[requires(base_amount >= 0)]

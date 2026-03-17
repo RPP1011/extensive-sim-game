@@ -136,7 +136,7 @@ fn apply_effect_primary(
         }
         Effect::Shield { amount, duration_ms } => {
             if let Some(tidx) = find_unit_idx(state, target_id) {
-                state.units[tidx].shield_hp += amount;
+                state.units[tidx].shield_hp = (state.units[tidx].shield_hp + amount).max(0);
                 state.units[tidx].status_effects.push(ActiveStatusEffect {
                     kind: StatusKind::Shield { amount: *amount },
                     source_id: caster_id,

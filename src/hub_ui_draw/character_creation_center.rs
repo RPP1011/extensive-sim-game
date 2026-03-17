@@ -11,7 +11,7 @@ use crate::game_core::{
     self, CharacterCreationState, HubScreen, HubUiState,
 };
 use crate::hub_types::{CharacterCreationUiState, StartMenuState};
-use crate::ui_helpers::{gemini_illustration_tile, split_faction_impact_sections};
+use crate::ui_helpers::{illustration_placeholder_tile, split_faction_impact_sections};
 use super::faction_color;
 
 #[allow(clippy::too_many_arguments)]
@@ -70,11 +70,11 @@ pub(crate) fn draw_faction_center(
                 let accent = faction_color(selected.index);
                 let (doctrine, profile, recruit) =
                     split_faction_impact_sections(&selected.impact);
-                gemini_illustration_tile(
+                illustration_placeholder_tile(
                     ui,
                     &format!("{} Key Art", selected.name),
                     &format!(
-                        "Gemini prompt: {} faction banner scene with terrain motifs.",
+                        "Prompt: {} faction banner scene with terrain motifs.",
                         selected.name
                     ),
                     accent,
@@ -243,20 +243,20 @@ pub(crate) fn draw_backstory_center(
                 .iter()
                 .find(|choice| character_creation.selected_backstory_id.as_deref() == Some(choice.id));
             if let Some(choice) = selected {
-                gemini_illustration_tile(
+                illustration_placeholder_tile(
                     ui,
                     &format!("{} Portrait", choice.name),
                     &format!(
-                        "Gemini prompt: {} hero line-art portrait for narrative cinematic.",
+                        "Prompt: {} hero line-art portrait for narrative cinematic.",
                         choice.name
                     ),
                     egui::Color32::from_rgb(224, 187, 120),
                 );
-                gemini_illustration_tile(
+                illustration_placeholder_tile(
                     ui,
                     "Backstory Scene Kit",
                     &format!(
-                        "Gemini prompt: cinematic line-art scene reflecting '{}'.",
+                        "Prompt: cinematic line-art scene reflecting '{}'.",
                         choice.summary
                     ),
                     egui::Color32::from_rgb(148, 180, 240),

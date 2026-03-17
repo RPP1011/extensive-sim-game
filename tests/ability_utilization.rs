@@ -216,6 +216,7 @@ fn ability_utilization_solo() {
                 hero_templates: vec![hero.to_string()],
                 enemy_hero_templates: Vec::new(),
                 hp_multiplier: 1.0,
+                ..Default::default()
             };
 
             let hero_names = hero_info(&cfg_template);
@@ -316,6 +317,7 @@ fn ability_utilization_party() {
             hero_templates: party.clone(),
             enemy_hero_templates: Vec::new(),
             hp_multiplier: 1.0,
+            ..Default::default()
         };
 
         let hero_names = hero_info(&cfg_template);
@@ -400,6 +402,7 @@ fn ability_utilization_party() {
         hero_templates: party.clone(),
         enemy_hero_templates: Vec::new(),
         hp_multiplier: 1.0,
+        ..Default::default()
     };
 
     let mut detail_metrics: HashMap<String, HeroMetrics> = HashMap::new();
@@ -537,6 +540,7 @@ fn rogue_vs_dummy() {
         hero_templates: vec!["rogue".to_string()],
         enemy_hero_templates: Vec::new(),
         hp_multiplier: 1.0,
+        ..Default::default()
     };
 
     let (mut sim, _) = run_scenario_to_state(&cfg);

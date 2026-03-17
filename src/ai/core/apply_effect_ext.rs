@@ -118,8 +118,8 @@ pub fn apply_effect_extended(
         }
         Effect::ShieldSteal { amount } => {
             if let Some(tidx) = find_unit_idx(state, target_id) {
-                let stolen = (*amount).min(state.units[tidx].shield_hp);
-                state.units[tidx].shield_hp -= stolen;
+                let stolen = (*amount).max(0).min(state.units[tidx].shield_hp.max(0));
+                state.units[tidx].shield_hp = (state.units[tidx].shield_hp - stolen).max(0);
                 state.units[caster_idx].shield_hp += stolen;
             }
         }

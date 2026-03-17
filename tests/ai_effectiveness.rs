@@ -26,6 +26,7 @@ fn cfg(
         hero_templates,
         enemy_hero_templates: Vec::new(),
         hp_multiplier: 1.0,
+        ..Default::default()
     }
 }
 

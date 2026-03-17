@@ -39,11 +39,11 @@ mod progression;
 
 use camera::{load_camera_settings, CameraFocusTransitionState, SceneViewBounds};
 use game_core::RunState;
-use game_core::{HubScreen, HubUiState, CharacterCreationState};
+use game_core::{CampaignSaveData, HubScreen, HubUiState, CharacterCreationState};
 use game_core::load_and_prepare_campaign_data;
 use ui::save_browser::{
     load_campaign_save_index_state, CampaignAutosaveState,
-    CampaignSaveNotice, CampaignSavePanelState,
+    CampaignSaveIndexState, CampaignSaveNotice, CampaignSavePanelState,
 };
 use ui::settings::{ManualScreenshotState, SettingsMenuState};
 use ui::quest_log::QuestLogState;

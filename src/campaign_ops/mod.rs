@@ -19,6 +19,7 @@ use crate::ui::save_browser::{SaveSlotMetadata, CURRENT_SAVE_VERSION};
 pub use save_load::{
     save_campaign_data, snapshot_campaign_from_world, save_campaign_to_slot,
     load_campaign_from_path_into_world, hub_continue_campaign_requested_system,
+    apply_loaded_campaign_to_world,
 };
 
 // Re-exports from initialization

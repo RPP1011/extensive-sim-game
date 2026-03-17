@@ -17,7 +17,7 @@ use super::actor_critic_v6::ActorCriticV6;
 use super::config::*;
 use super::spatial_cross_attn::CORNER_DIM;
 
-pub use crate::ai::core::ability_transformer::gpu_client::{
+pub use super::inference::{
     InferenceToken, InferenceClient, InferenceRequest, InferenceResult,
 };
 
@@ -369,15 +369,8 @@ impl DoubleBufferBatcherV6 {
 
         let n_tokens = output.combat.attack_ptr.dims()[1];
 
-        // Extract move_log_std (learnable, shared across batch) [2]
-        let log_std_data = output.move_log_std
-            .map(|ls| { let d = ls.to_data(); d.as_slice::<f32>().unwrap().to_vec() })
-            .unwrap_or_else(|| vec![0.0, 0.0]); // σ=1 if not provided
-        let std_x = log_std_data[0].exp();
-        let std_y = log_std_data[1].exp();
-
         // Extract results — single GPU→CPU transfer
-        let pos_2d = output.target_pos;
+        let pos_2d = output.target_pos; // deterministic μ, no sampling
         let combat_2d = output.combat.combat_logits;
         let ptr_2d = output.combat.attack_ptr;
         let h_2d = h_new;
@@ -392,31 +385,14 @@ impl DoubleBufferBatcherV6 {
         let o_ptr = o_combat + NUM_COMBAT_TYPES;
         let o_h = o_ptr + n_tokens;
 
-        // RNG for Gaussian sampling (seeded from batch contents)
-        let mut rng_state: u64 = 0xDEADBEEF ^ (bs as u64 * 31337);
-
         let mut results = Vec::with_capacity(bs);
         for i in 0..bs {
             let row = &all_f[i * row_len..(i + 1) * row_len];
             let req = &batch[i].request;
 
-            let mu_x = row[o_pos];
-            let mu_y = row[o_pos + 1];
-
-            // Sample from N(μ, σ²) using Box-Muller transform
-            let (z1, z2) = box_muller(&mut rng_state);
-            let sampled_x = mu_x + std_x * z1;
-            let sampled_y = mu_y + std_y * z2;
-
-            // Log prob of sampled position under N(μ, σ²)
-            // log N(x|μ,σ²) = -0.5 * ((x-μ)/σ)² - log(σ) - 0.5*log(2π)
-            let lp_x = -0.5 * ((sampled_x - mu_x) / std_x).powi(2) - log_std_data[0] - 0.9189;
-            let lp_y = -0.5 * ((sampled_y - mu_y) / std_y).powi(2) - log_std_data[1] - 0.9189;
-            let lp_move = lp_x + lp_y;
-
-            // Convert to world space for movement
-            let tx = sampled_x * 20.0;
-            let ty = sampled_y * 20.0;
+            // Deterministic movement: use model mean μ directly
+            let tx = row[o_pos] * 20.0;
+            let ty = row[o_pos + 1] * 20.0;
 
             let mut best_ct = 1usize;
             let mut best_score = f32::NEG_INFINITY;
@@ -439,7 +415,7 @@ impl DoubleBufferBatcherV6 {
             results.push(InferenceResult {
                 move_dx: tx, move_dy: ty,
                 combat_type: best_ct as u8, target_idx: best_ti as u16,
-                lp_move, lp_combat: 0.0, lp_pointer: 0.0,
+                lp_move: 0.0, lp_combat: 0.0, lp_pointer: 0.0,
                 hidden_state_out: h_out,
             });
         }

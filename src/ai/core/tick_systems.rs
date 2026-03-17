@@ -183,7 +183,7 @@ pub fn tick_status_effects(state: &mut SimState, tick: u64, dt_ms: u32, events: 
                     }
                 }
                 TickAction::ShieldExpire { amount } => {
-                    state.units[idx].shield_hp = state.units[idx].shield_hp.saturating_sub(amount.max(0));
+                    state.units[idx].shield_hp = (state.units[idx].shield_hp - amount.max(0)).max(0);
                     events.push(SimEvent::StatusEffectExpired {
                         tick, unit_id, effect_name: format!("shield"),
                     });
@@ -231,7 +231,7 @@ pub fn tick_status_effects(state: &mut SimState, tick: u64, dt_ms: u32, events: 
                                 target_hp_after: state.units[idx].hp,
                             });
                         }
-                        state.units[idx].shield_hp = state.units[idx].shield_hp.saturating_sub(shield_sub);
+                        state.units[idx].shield_hp = (state.units[idx].shield_hp - shield_sub).max(0);
                     }
                     ExpireAction::DeathMarkBurst { burst } => {
                         if burst > 0 {

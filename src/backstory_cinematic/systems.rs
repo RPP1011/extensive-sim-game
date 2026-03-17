@@ -1,9 +1,6 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
-use bevy_game::mapgen_gemini;
-use std::env;
 use std::fs;
-use std::path::Path;
 use std::sync::Arc;
 
 use crate::campaign_ops::truncate_for_hud;
@@ -88,76 +85,15 @@ pub fn backstory_narrative_gen_dispatch_system(
 
     narrative_gen.in_flight = true;
     narrative_gen.requested_seed = Some(campaign_seed);
-    let model = narrative_gen.model.clone();
-    let prompt = build_backstory_narrative_generation_prompt(
-        &character_creation,
-        &overworld,
-        &cinematic.beats,
-    );
-    let beat_count = cinematic.beats.len();
     let shared_result = Arc::clone(&narrative_gen.shared_result);
     std::thread::spawn(move || {
-        let mut success = false;
-        let mut status = String::new();
-        let mut summary = String::new();
-        let mut beat_subtitles = Vec::new();
-        let _ = mapgen_gemini::load_dotenv_if_present(Path::new(".env"));
-        let api_key = match env::var("GEMINI_API_KEY") {
-            Ok(v) if !v.trim().is_empty() => v,
-            _ => {
-                status = "Narrative text fallback active: GEMINI_API_KEY is missing.".to_string();
-                String::new()
-            }
-        };
-        if !api_key.is_empty() {
-            match mapgen_gemini::call_gemini_text(&model, &prompt, &api_key) {
-                Ok(response) => match mapgen_gemini::extract_parts(&response) {
-                    Ok(outputs) => {
-                        let Some(text) = outputs.text.as_deref() else {
-                            status = "Narrative text fallback active: provider returned no text."
-                                .to_string();
-                            if let Ok(mut slot) = shared_result.lock() {
-                                *slot = Some(BackstoryNarrativeResult {
-                                    campaign_seed,
-                                    summary,
-                                    beat_subtitles,
-                                    status,
-                                    success,
-                                });
-                            }
-                            return;
-                        };
-                        match parse_backstory_narrative_payload(text, beat_count) {
-                            Ok((generated_summary, generated_subtitles)) => {
-                                summary = generated_summary;
-                                beat_subtitles = generated_subtitles;
-                                success = true;
-                                status = "Narrative text generated from Gemini.".to_string();
-                            }
-                            Err(err) => {
-                                status =
-                                    format!("Narrative text fallback active: provider output invalid ({err}).");
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        status = format!(
-                            "Narrative text fallback active: provider parse failed ({err})."
-                        );
-                    }
-                },
-                Err(err) => {
-                    status = format!("Narrative text fallback active: request failed ({err}).");
-                }
-            }
-        }
         if let Ok(mut slot) = shared_result.lock() {
             *slot = Some(BackstoryNarrativeResult {
                 campaign_seed,
-                summary,
-                beat_subtitles,
-                status,
-                success,
+                summary: String::new(),
+                beat_subtitles: Vec::new(),
+                status: "Narrative text fallback active: no provider configured.".to_string(),
+                success: false,
             });
         }
     });

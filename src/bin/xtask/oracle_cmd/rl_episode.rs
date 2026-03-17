@@ -246,6 +246,27 @@ pub(crate) fn run_rl_episode(
                     let (v4_move_dir, v4_combat_type, _v4_target_idx) = intent_to_v4_action(
                         &intent_action, uid, &sim, &token_infos,
                     ).unwrap_or((8, 1, 0));
+                    // Derive target_move_pos from intent for V6 movement head training
+                    let target_move_pos = match &intent_action {
+                        bevy_game::ai::core::IntentAction::MoveTo { position } => Some([position.x, position.y]),
+                        bevy_game::ai::core::IntentAction::Skulk { objective } => Some([objective.x, objective.y]),
+                        bevy_game::ai::core::IntentAction::Attack { target_id }
+                        | bevy_game::ai::core::IntentAction::CastAbility { target_id }
+                        | bevy_game::ai::core::IntentAction::CastHeal { target_id }
+                        | bevy_game::ai::core::IntentAction::CastControl { target_id } => {
+                            sim.units.iter().find(|u| u.id == *target_id)
+                                .map(|t| [t.position.x, t.position.y])
+                        }
+                        bevy_game::ai::core::IntentAction::UseAbility { target, .. } => {
+                            match target {
+                                bevy_game::ai::effects::AbilityTarget::Unit(tid) =>
+                                    sim.units.iter().find(|u| u.id == *tid).map(|t| [t.position.x, t.position.y]),
+                                bevy_game::ai::effects::AbilityTarget::Position(p) => Some([p.x, p.y]),
+                                bevy_game::ai::effects::AbilityTarget::None => Some([unit.position.x, unit.position.y]),
+                            }
+                        }
+                        _ => Some([unit.position.x, unit.position.y]), // Hold/Hide → stay at current position
+                    };
                     steps.push(RlStep {
                         tick, unit_id: uid,
                         game_state: game_state.to_vec(),
@@ -264,7 +285,7 @@ pub(crate) fn run_rl_episode(
                         lp_move: None, lp_combat: None,
                         lp_pointer: None,
                         aggregate_features: if gs_v2.aggregate_features.is_empty() { None } else { Some(gs_v2.aggregate_features) },
-                        target_move_pos: None,
+                        target_move_pos,
                         teacher_move_dir: None, teacher_combat_type: None, teacher_target_idx: None,
                     });
                 }

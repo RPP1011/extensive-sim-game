@@ -14,6 +14,9 @@ use std::collections::HashMap;
 
 use crate::cli::ImpalaTrainArgs;
 
+#[cfg(feature = "burn-gpu")]
+use rl4burn::{ReplayBuffer, Logger, CompositeLogger, PrintLogger, TensorBoardLogger};
+
 pub(crate) fn run_impala_train(args: ImpalaTrainArgs) -> ExitCode {
     #[cfg(not(feature = "burn-gpu"))]
     {
@@ -85,13 +88,6 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
     let params: usize = 0; // TODO: count parameters
     eprintln!("Model initialized: d=128, h={V6_H_DIM}, K=12, device=CUDA:0");
 
-    // Optimizer
-    let optim_config = AdamWConfig::new()
-        .with_beta_1(0.9)
-        .with_beta_2(0.98)
-        .with_weight_decay(1.0);
-    let mut optimizer = optim_config.init();
-
     // Training config
     let train_config = ImpalaConfig {
         lr: args.lr,
@@ -103,23 +99,43 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
         ..Default::default()
     };
 
+    // Optimizer
+    let optim_config = AdamWConfig::new()
+        .with_beta_1(train_config.beta_1)
+        .with_beta_2(train_config.beta_2)
+        .with_weight_decay(train_config.weight_decay);
+    let mut optimizer = optim_config.init();
+
     // Episode output path
     let episode_path = args.output_dir.join("episodes.jsonl");
 
-    // CSV log
+    // Logger: print + TensorBoard
+    let tb_dir = args.output_dir.join("tb");
+    std::fs::create_dir_all(&tb_dir).ok();
+    let mut loggers: Vec<Box<dyn Logger>> = vec![
+        Box::new(PrintLogger::new(1)),
+    ];
+    match TensorBoardLogger::new(&tb_dir) {
+        Ok(tb) => loggers.push(Box::new(tb)),
+        Err(e) => eprintln!("Warning: TensorBoard logger init failed: {e}"),
+    }
+    let mut logger = CompositeLogger::new(loggers);
+
+    // CSV log (kept as fallback)
     let log_path = args.output_dir.join("training_log.csv");
     let mut log_file = std::fs::File::create(&log_path).expect("create log file");
     use std::io::Write;
-    writeln!(log_file, "iter,episodes,steps,win_rate,loss,policy_loss,move_loss,value_loss,entropy,move_std").ok();
+    writeln!(log_file, "iter,episodes,steps,win_rate,loss,policy_loss,value_loss").ok();
 
     let mut rng_state = 42u64;
 
-    // Replay buffer: keep all samples, evict lowest |step_reward| when over cap.
-    // High-reward samples (both positive and negative) are most informative.
+    // Replay buffer: FIFO eviction when over capacity.
     // Re-score advantages every RESCORE_INTERVAL iterations using current value head.
     const REPLAY_MAX: usize = 100_000;
     const RESCORE_INTERVAL: usize = 5;
-    let mut replay_buffer: Vec<TrainingSample> = Vec::new();
+    use rand::SeedableRng;
+    let mut replay_buffer: ReplayBuffer<TrainingSample, rand::rngs::StdRng> =
+        ReplayBuffer::new(REPLAY_MAX, rand::rngs::StdRng::seed_from_u64(42));
 
     for iteration in 1..=args.iters {
         eprintln!("\n{}", "=".repeat(60));
@@ -162,43 +178,21 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
             continue;
         }
 
-        // Add new samples, evict least-informative when over cap
+        // Add new samples; FIFO eviction is automatic when over capacity
         let n_new = new_samples.len();
         replay_buffer.extend(new_samples);
-        if replay_buffer.len() > REPLAY_MAX {
-            // Keep samples with highest |step_reward| — most informative for learning
-            replay_buffer.sort_by(|a, b| {
-                b.step_reward.abs().partial_cmp(&a.step_reward.abs())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            replay_buffer.truncate(REPLAY_MAX);
-        }
 
-        // Re-score advantages periodically using current value head
+        // Re-score V-trace advantages periodically using current value head
         if iteration % RESCORE_INTERVAL == 0 {
+            use bevy_game::ai::core::burn_model::training::rescore_replay_buffer;
             let inner_model = model.valid();
             let inner_device = burn::backend::libtorch::LibTorchDevice::Cuda(0);
-            let batch_sz = 256;
-            let mut new_values = Vec::with_capacity(replay_buffer.len());
-            for chunk in replay_buffer.chunks(batch_sz) {
-                let chunk_vec: Vec<TrainingSample> = chunk.to_vec();
-                let vals = predict_values(&inner_model, &chunk_vec, &inner_device);
-                new_values.extend(vals);
-            }
-            // Update advantages: advantage ≈ step_reward - V(s) (simple TD(0))
-            for (i, sample) in replay_buffer.iter_mut().enumerate() {
-                let v = new_values.get(i).copied().unwrap_or(0.0);
-                sample.value_target = sample.step_reward; // simple target
-                sample.advantage = sample.step_reward - v;
-            }
-            // Re-normalize advantages
-            let mean: f32 = replay_buffer.iter().map(|s| s.advantage).sum::<f32>() / replay_buffer.len() as f32;
-            let var: f32 = replay_buffer.iter().map(|s| (s.advantage - mean).powi(2)).sum::<f32>() / replay_buffer.len() as f32;
-            let std = var.sqrt().max(1e-8);
-            for s in &mut replay_buffer {
-                s.advantage = (s.advantage - mean) / std;
-            }
-            eprintln!("  Re-scored {} samples (mean_adv={:.4}, std={:.4})", replay_buffer.len(), mean, std);
+            let gamma_eff = train_config.gamma.powi(train_config.step_interval as i32);
+            rescore_replay_buffer(
+                replay_buffer.samples_mut(), &inner_model, &inner_device,
+                gamma_eff, train_config.clip_rho, train_config.clip_c,
+            );
+            eprintln!("  Re-scored {} samples with V-trace", replay_buffer.len());
         }
 
         eprintln!("  Replay buffer: {} samples (+{} new)", replay_buffer.len(), n_new);
@@ -209,7 +203,17 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
 
         for step_i in 0..args.train_steps {
             // Sample random minibatch from replay buffer
-            let batch: Vec<TrainingSample> = sample_batch(&replay_buffer, args.batch_size, &mut rng_state);
+            let batch: Vec<TrainingSample> = replay_buffer.sample_cloned(args.batch_size);
+
+            // Diagnostic: log advantage stats for first batch of each iteration
+            if step_i == 0 {
+                let adv_min = batch.iter().map(|s| s.advantage).fold(f32::INFINITY, f32::min);
+                let adv_max = batch.iter().map(|s| s.advantage).fold(f32::NEG_INFINITY, f32::max);
+                let adv_mean = batch.iter().map(|s| s.advantage).sum::<f32>() / batch.len() as f32;
+                let adv_var = batch.iter().map(|s| (s.advantage - adv_mean).powi(2)).sum::<f32>() / batch.len() as f32;
+                let rew_mean = batch.iter().map(|s| s.step_reward).sum::<f32>() / batch.len() as f32;
+                eprintln!("  batch[0] adv: min={adv_min:.3} max={adv_max:.3} mean={adv_mean:.3} std={:.3} | rew_mean={rew_mean:.4}", adv_var.sqrt());
+            }
 
             let (new_model, metrics) = train_step(
                 model, &mut optimizer, &batch, &train_config, &device, &mut rng_state,
@@ -218,25 +222,19 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
 
             total_metrics.total_loss += metrics.total_loss;
             total_metrics.policy_loss += metrics.policy_loss;
-            total_metrics.move_loss += metrics.move_loss;
             total_metrics.value_loss += metrics.value_loss;
-            total_metrics.entropy += metrics.entropy;
-            total_metrics.move_std = metrics.move_std; // last value (not averaged)
         }
 
         let n = args.train_steps as f32;
         total_metrics.total_loss /= n;
         total_metrics.policy_loss /= n;
-        total_metrics.move_loss /= n;
         total_metrics.value_loss /= n;
-        total_metrics.entropy /= n;
 
         let train_time = t1.elapsed().as_secs_f64();
-        eprintln!("  Train: {} steps in {:.1}s, loss={:.4}, policy={:.4}, move={:.4}, value={:.4}, entropy={:.4}, σ={:.3}",
+        eprintln!("  Train: {} steps in {:.1}s, loss={:.4}, policy={:.4}, value={:.4}",
             args.train_steps, train_time,
             total_metrics.total_loss, total_metrics.policy_loss,
-            total_metrics.move_loss, total_metrics.value_loss, total_metrics.entropy,
-            total_metrics.move_std);
+            total_metrics.value_loss);
 
         // 4. Save checkpoint
         let ckpt_path = args.output_dir.join(format!("v6_iter{iteration:04}"));
@@ -247,11 +245,19 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
         }
 
         // 5. Log
-        writeln!(log_file, "{},{},{},{:.4},{:.6},{:.6},{:.6},{:.6},{:.6},{:.4}",
+        let step = iteration as u64;
+        logger.log_scalar("loss/total", total_metrics.total_loss as f64, step);
+        logger.log_scalar("loss/policy", total_metrics.policy_loss as f64, step);
+        logger.log_scalar("loss/value", total_metrics.value_loss as f64, step);
+        logger.log_scalar("episode/win_rate", win_rate as f64, step);
+        logger.log_scalar("episode/count", episodes.len() as f64, step);
+        logger.log_scalar("replay/size", replay_buffer.len() as f64, step);
+        logger.flush();
+
+        writeln!(log_file, "{},{},{},{:.4},{:.6},{:.6},{:.6}",
             iteration, episodes.len(), replay_buffer.len(), win_rate,
             total_metrics.total_loss, total_metrics.policy_loss,
-            total_metrics.move_loss, total_metrics.value_loss, total_metrics.entropy,
-            total_metrics.move_std).ok();
+            total_metrics.value_loss).ok();
         log_file.flush().ok();
     }
 
@@ -280,19 +286,17 @@ fn generate_episodes(
         cmd.arg(p);
     }
 
-    cmd.arg("--burn-v6");
+    // Use --policy combined (squad AI) to generate episodes with recorded steps.
+    // The combined policy records all V2 features (entities, zones, aggregate)
+    // needed for training, using squad AI decisions as behavioral policy.
+    cmd.arg("--policy").arg("combined");
     cmd.arg("--output").arg(output_path);
     cmd.arg("--episodes").arg(args.episodes.to_string());
     cmd.arg("--threads").arg(args.threads.to_string());
-    cmd.arg("--sims-per-thread").arg(args.sims_per_thread.to_string());
     cmd.arg("--temperature").arg(args.temperature.to_string());
     cmd.arg("--step-interval").arg(args.step_interval.to_string());
-
-    if let Some(ckpt) = checkpoint {
-        cmd.arg("--burn-checkpoint").arg(ckpt);
-    }
     if args.self_play {
-        cmd.arg("--self-play-gpu");
+        cmd.arg("--swap-sides");
     }
     if let Some(ref reg) = args.embedding_registry {
         cmd.arg("--embedding-registry").arg(reg);
@@ -343,8 +347,9 @@ fn extract_training_samples(
     let gamma_eff = config.gamma.powi(config.step_interval as i32);
 
     // First pass: collect all raw samples (without V-trace targets)
-    let mut raw_samples: Vec<(TrainingSample, usize, usize)> = Vec::new(); // (sample, episode_idx, traj_position)
-    let mut traj_boundaries: Vec<(usize, usize, bool)> = Vec::new(); // (start_idx, len, is_terminal)
+    static NEXT_TRAJ_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let mut raw_samples: Vec<(TrainingSample, usize, usize)> = Vec::new();
+    let mut traj_boundaries: Vec<(usize, usize, bool)> = Vec::new();
 
     for (ep_idx, ep) in episodes.iter().enumerate() {
         let mut unit_steps: HashMap<u32, Vec<&RlStep>> = HashMap::new();
@@ -361,6 +366,7 @@ fn extract_training_samples(
             steps.sort_by_key(|s| s.tick);
             if steps.is_empty() { continue; }
 
+            let traj_id = NEXT_TRAJ_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let traj_start = raw_samples.len();
             for (i, step) in steps.iter().enumerate() {
                 let entities = step.entities.clone().unwrap_or_default();
@@ -396,6 +402,9 @@ fn extract_training_samples(
                     behavior_log_prob: behav_lp_combat,
                     value_target: 0.0,
                     advantage: 0.0,
+                    traj_id,
+                    traj_pos: i,
+                    traj_terminal: is_terminal,
                 }, ep_idx, i));
             }
             traj_boundaries.push((traj_start, steps.len(), is_terminal));
@@ -444,34 +453,7 @@ fn extract_training_samples(
         }
     }
 
-    let mut all_samples: Vec<TrainingSample> = raw_samples.into_iter().map(|(s, _, _)| s).collect();
-
-    // Normalize advantages
-    if all_samples.len() > 1 {
-        let mean: f32 = all_samples.iter().map(|s| s.advantage).sum::<f32>() / all_samples.len() as f32;
-        let var: f32 = all_samples.iter().map(|s| (s.advantage - mean).powi(2)).sum::<f32>() / all_samples.len() as f32;
-        let std = var.sqrt().max(1e-8);
-        for s in &mut all_samples {
-            s.advantage = (s.advantage - mean) / std;
-        }
-    }
-
-    all_samples
+    // Return raw (unnormalized) advantages — normalization happens per-minibatch in compute_loss
+    raw_samples.into_iter().map(|(s, _, _)| s).collect()
 }
 
-#[cfg(feature = "burn-gpu")]
-fn sample_batch(
-    samples: &[bevy_game::ai::core::burn_model::training::TrainingSample],
-    batch_size: usize,
-    rng: &mut u64,
-) -> Vec<bevy_game::ai::core::burn_model::training::TrainingSample> {
-    let n = samples.len();
-    let bs = batch_size.min(n);
-    let mut batch = Vec::with_capacity(bs);
-    for _ in 0..bs {
-        *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        let idx = (*rng >> 33) as usize % n;
-        batch.push(samples[idx].clone());
-    }
-    batch
-}

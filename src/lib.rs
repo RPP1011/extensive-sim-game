@@ -5,7 +5,6 @@
 pub mod ai;
 pub mod audio;
 pub mod game_core;
-pub mod mapgen_gemini;
 pub mod mapgen_voronoi;
 pub mod mission;
 pub mod progression;

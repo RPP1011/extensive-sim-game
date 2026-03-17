@@ -41,7 +41,7 @@ pub struct BackstoryNarrativeGenState {
 impl Default for BackstoryNarrativeGenState {
     fn default() -> Self {
         Self {
-            model: "gemini-2.0-flash".to_string(),
+            model: String::new(),
             in_flight: false,
             requested_seed: None,
             shared_result: Arc::new(Mutex::new(None)),

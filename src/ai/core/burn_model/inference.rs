@@ -17,10 +17,43 @@ use burn::backend::libtorch::LibTorchDevice;
 use super::actor_critic::ActorCriticV5;
 use super::config::*;
 
-// Re-use the same types from gpu_client for compatibility
-pub use crate::ai::core::ability_transformer::gpu_client::{
-    InferenceToken, InferenceClient, InferenceRequest, InferenceResult,
-};
+// Inference types (previously in gpu_client, now canonical here)
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct InferenceToken(pub u64);
+
+pub trait InferenceClient: Send + Sync {
+    fn infer(&self, request: InferenceRequest) -> Result<InferenceResult, String>;
+    fn submit(&self, request: InferenceRequest) -> Result<InferenceToken, String>;
+    fn try_recv(&self, token: InferenceToken) -> Result<Option<InferenceResult>, String>;
+    fn batch_epoch(&self) -> u64;
+    fn wait_for_batch(&self, since: u64);
+    fn h_dim(&self) -> usize;
+}
+
+#[derive(Clone)]
+pub struct InferenceRequest {
+    pub entities: Vec<Vec<f32>>,
+    pub entity_types: Vec<u8>,
+    pub zones: Vec<Vec<f32>>,
+    pub combat_mask: Vec<bool>,
+    pub ability_cls: Vec<Option<Vec<f32>>>,
+    pub hidden_state: Vec<f32>,
+    pub aggregate_features: Vec<f32>,
+    pub corner_tokens: Vec<Vec<f32>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct InferenceResult {
+    pub move_dx: f32,
+    pub move_dy: f32,
+    pub combat_type: u8,
+    pub target_idx: u16,
+    pub lp_move: f32,
+    pub lp_combat: f32,
+    pub lp_pointer: f32,
+    pub hidden_state_out: Vec<f32>,
+}
 
 type B = LibTorch;
 

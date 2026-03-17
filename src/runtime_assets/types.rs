@@ -5,11 +5,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeAssetProvider {
-    Gemini,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeAssetStyle {
     Concept,
     LineArt,
@@ -76,7 +71,6 @@ pub struct RuntimeAssetResult {
 
 #[derive(Resource, Clone)]
 pub struct RuntimeAssetGenState {
-    pub provider: RuntimeAssetProvider,
     pub model: String,
     pub output_dir: PathBuf,
     pub prompt_corpus_path: PathBuf,
@@ -93,8 +87,7 @@ pub struct RuntimeAssetGenState {
 impl Default for RuntimeAssetGenState {
     fn default() -> Self {
         Self {
-            provider: RuntimeAssetProvider::Gemini,
-            model: "gemini-3-pro-image-preview".to_string(),
+            model: String::new(),
             output_dir: PathBuf::from("generated/maps/runtime_env"),
             prompt_corpus_path: PathBuf::from("scripts/ai/fantasy_env_prompt_corpus.json"),
             pending: VecDeque::new(),

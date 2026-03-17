@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::ai::core::{SimEvent, Team, UnitStore};
+use crate::ai::core::{SimEvent, Team};
 use crate::game_core::{
     AssignedHero, CampaignEventLog, CampaignRoster, EquipmentItem, HeroCompanion,
     HeroTrait, ItemRarity, MissionBoard, MissionData, MissionProgress, MissionResult,
@@ -8,126 +8,22 @@ use crate::game_core::{
 };
 use crate::mission::sim_bridge::{MissionEventLog, MissionSimState, SimEventBuffer};
 
-use super::journal::build_combat_journal;
-use super::lfm_bridge::spawn_lfm_progression_request;
 use super::types::*;
 
 // ---------------------------------------------------------------------------
-// 1. Dispatch: after mission consequences are recorded, build journals and
-//    spawn LFM subprocess requests.
+// 1. Dispatch: after mission consequences are recorded (currently a no-op).
 // ---------------------------------------------------------------------------
 
 pub fn dispatch_narrative_progression_system(
-    run_state: Res<RunState>,
-    mission_query: Query<(&MissionData, &MissionProgress, &AssignedHero)>,
-    board: Res<MissionBoard>,
-    roster: Res<CampaignRoster>,
-    event_log: Option<Res<MissionEventLog>>,
-    sim_state: Option<Res<MissionSimState>>,
-    mut progression: ResMut<NarrativeProgressionState>,
+    _run_state: Res<RunState>,
+    _mission_query: Query<(&MissionData, &MissionProgress, &AssignedHero)>,
+    _board: Res<MissionBoard>,
+    _roster: Res<CampaignRoster>,
+    _event_log: Option<Res<MissionEventLog>>,
+    _sim_state: Option<Res<MissionSimState>>,
+    _progression: ResMut<NarrativeProgressionState>,
 ) {
-    if run_state.global_turn == 0 {
-        return;
-    }
-
-    // Only process when there are newly-recorded outcomes.
-    for &entity in &board.entities {
-        let Ok((data, progress, assigned)) = mission_query.get(entity) else {
-            continue;
-        };
-        // We want missions that just had their outcome recorded this turn.
-        // outcome_recorded is set by resolve_mission_consequences_system.
-        // We detect "just recorded" by checking outcome_recorded && result != InProgress
-        // and ensuring we haven't already dispatched for this hero+turn.
-        if !progress.outcome_recorded || progress.result == MissionResult::InProgress {
-            continue;
-        }
-
-        let Some(hero_id) = assigned.hero_id.or_else(|| {
-            // After consequence system, hero_id may already be cleared.
-            // Check if any in-flight request already covers this.
-            None
-        }) else {
-            continue;
-        };
-
-        // Skip if we already have an in-flight request for this hero.
-        if progression
-            .in_flight
-            .iter()
-            .any(|(id, _)| *id == hero_id)
-        {
-            continue;
-        }
-        // Skip if we already have a pending reward for this hero from this turn.
-        if progression
-            .pending
-            .iter()
-            .any(|p| p.hero_id == hero_id && p.source_turn == run_state.global_turn)
-        {
-            continue;
-        }
-
-        let Some(hero) = roster.heroes.iter().find(|h| h.id == hero_id) else {
-            continue;
-        };
-
-        let events = event_log.as_ref().map(|log| log.all_events.as_slice()).unwrap_or(&[]);
-        let sim_ref = sim_state.as_ref().map(|s| &s.sim);
-
-        // We need a SimState for max_hp lookup. If not available, create a minimal one.
-        let empty_sim = crate::ai::core::SimState {
-            tick: 0,
-            rng_state: 0,
-            units: UnitStore::new(Vec::new()),
-            projectiles: Vec::new(),
-            passive_trigger_depth: 0,
-            zones: Vec::new(),
-            tethers: Vec::new(),
-            grid_nav: None,
-        };
-        let sim = sim_ref.unwrap_or(&empty_sim);
-
-        // The hero's sim unit ID: in the real mission, hero units typically
-        // use IDs 1..N for heroes. We scan the sim for hero-team units.
-        // If the sim is empty (mission already cleaned up), we use hero_id as fallback.
-        let hero_unit_id = sim
-            .units
-            .iter()
-            .find(|u| u.team == Team::Hero && u.id == hero_id)
-            .map(|u| u.id)
-            .unwrap_or(hero_id);
-
-        let outcome_str = match progress.result {
-            MissionResult::Victory => "Victory",
-            MissionResult::Defeat => "Defeat",
-            MissionResult::InProgress => "InProgress",
-        };
-
-        let journal = build_combat_journal(
-            hero,
-            hero_unit_id,
-            events,
-            sim,
-            &data.mission_name,
-            outcome_str,
-        );
-
-        let journal_json = match serde_json::to_string(&journal) {
-            Ok(j) => j,
-            Err(e) => {
-                eprintln!("[progression] Failed to serialize journal: {e}");
-                continue;
-            }
-        };
-
-        let handle = spawn_lfm_progression_request(journal_json, hero_id);
-        progression.in_flight.push((hero_id, handle));
-        eprintln!(
-            "[progression] Dispatched LFM request for hero {} ({})",
-            hero.name, hero_id
-        );
-    }
+    // Narrative progression dispatch is disabled (no external provider configured).
 }
 
 // ---------------------------------------------------------------------------

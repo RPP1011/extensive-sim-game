@@ -127,6 +127,7 @@ fn run_batch(hero: &str, enemy_count: usize, room_type: &str) -> BatchResult {
             hero_templates: vec![hero.to_string()],
             enemy_hero_templates: Vec::new(),
             hp_multiplier: 1.0,
+            ..Default::default()
         };
 
         let (outcome_t, tick_t) = run_with_terrain(&cfg);
@@ -197,6 +198,7 @@ fn terrain_impact_party() {
                         hero_templates: party.clone(),
                         enemy_hero_templates: Vec::new(),
                         hp_multiplier: 1.0,
+                        ..Default::default()
                     };
                     let (ot, tt) = run_with_terrain(&cfg);
                     let (ont, tnt) = run_without_terrain(&cfg);

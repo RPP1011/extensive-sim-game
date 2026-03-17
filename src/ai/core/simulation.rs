@@ -312,6 +312,17 @@ pub fn step(mut state: SimState, intents: &[UnitIntent], dt_ms: u32) -> (SimStat
         }
     }
 
+    // Ensure dead units have no stale casting/channeling/control state.
+    // Effects triggered during death processing (e.g. OnDeath passives) can
+    // re-set these fields after the initial clear_dead_unit_state call.
+    for unit in state.units.iter_mut() {
+        if unit.hp <= 0 {
+            unit.casting = None;
+            unit.channeling = None;
+            unit.control_remaining_ms = 0;
+        }
+    }
+
     // Runtime verification: check invariants after every tick in debug/test builds.
     #[cfg(debug_assertions)]
     {

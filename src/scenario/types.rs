@@ -113,6 +113,30 @@ pub struct ObjectiveDef {
     pub max_damage_taken: Option<f32>,
 }
 
+impl Default for ScenarioCfg {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            seed: 0,
+            hero_count: default_hero_count(),
+            enemy_count: default_enemy_count(),
+            difficulty: default_difficulty(),
+            max_ticks: default_max_ticks(),
+            room_type: default_room_type(),
+            hero_templates: Vec::new(),
+            enemy_hero_templates: Vec::new(),
+            hp_multiplier: default_hp_multiplier(),
+            manifest_path: None,
+            drill_type: None,
+            target_position: None,
+            enemy_units: Vec::new(),
+            hazards: Vec::new(),
+            objective: None,
+            action_mask: None,
+        }
+    }
+}
+
 fn default_hp_multiplier() -> f32 {
     1.0
 }

@@ -121,8 +121,8 @@ impl ActorCriticV6Config {
             .init(device),
             position_head_l1: LinearConfig::new(d, d).init(device),
             position_head_l2: LinearConfig::new(d, 2).init(device),
-            // log(σ) initialized to 0 → σ=1.0 in normalized coords (= 20 world units)
-            move_log_std: Param::from_tensor(Tensor::zeros([2], device)),
+            // log(0.3) ≈ -1.204 → σ=0.3 in normalized coords (= 6 world units)
+            move_log_std: Param::from_tensor(Tensor::full([2], -1.204, device)),
             combat_head: CombatPointerHeadConfig { d_model: d }.init(device),
             value_head: ValueHeadConfig { d_model: d }.init(device),
             external_cls_proj: cls_proj,

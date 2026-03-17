@@ -95,7 +95,7 @@ pub fn paint_landscape_backsplash(ui: &egui::Ui, cinematic_tint: bool) {
     );
 }
 
-pub fn gemini_illustration_tile(ui: &mut egui::Ui, title: &str, caption: &str, color: egui::Color32) {
+pub fn illustration_placeholder_tile(ui: &mut egui::Ui, title: &str, caption: &str, color: egui::Color32) {
     egui::Frame::none()
         .fill(egui::Color32::from_rgba_premultiplied(9, 13, 18, 210))
         .stroke(egui::Stroke::new(
@@ -126,7 +126,7 @@ pub fn gemini_illustration_tile(ui: &mut egui::Ui, title: &str, caption: &str, c
             painter.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "Gemini illustration",
+                "Illustration",
                 egui::FontId::proportional(15.0),
                 egui::Color32::from_rgba_premultiplied(224, 236, 242, 190),
             );

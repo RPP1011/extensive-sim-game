@@ -12,6 +12,7 @@ fn basic_cfg(seed: u64, heroes: usize, enemies: usize) -> ScenarioCfg {
         hero_templates: Vec::new(),
         enemy_hero_templates: Vec::new(),
         hp_multiplier: 1.0,
+        ..Default::default()
     }
 }
 

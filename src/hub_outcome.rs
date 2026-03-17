@@ -162,7 +162,7 @@ pub fn draw_runtime_asset_gen_egui_system(
             ui.small(truncate_for_hud(&runtime_asset_gen.status, 140));
             ui.separator();
             ui.small(format!(
-                "Provider: Gemini (swappable) | Model: {}",
+                "Model: {}",
                 runtime_asset_gen.model
             ));
             ui.small(format!(

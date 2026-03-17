@@ -1,70 +1,9 @@
 use std::fs;
 use std::process::ExitCode;
 
-use bevy_game::mapgen_gemini;
 use bevy_game::mapgen_voronoi::{build_prompt, build_spec, load_overworld};
 
-use super::cli::{MapGeminiArgs, MapVoronoiArgs};
-
-pub fn run_map_gemini(args: MapGeminiArgs) -> ExitCode {
-    if let Err(err) = mapgen_gemini::load_dotenv_if_present(std::path::Path::new(".env")) {
-        eprintln!("Warning: {err}");
-    }
-
-    let prompt =
-        match mapgen_gemini::load_prompt(args.prompt.as_deref(), args.prompt_file.as_deref()) {
-            Ok(p) => p,
-            Err(err) => {
-                eprintln!("Argument error: {err}");
-                return ExitCode::from(2);
-            }
-        };
-
-    let api_key = match std::env::var("GEMINI_API_KEY") {
-        Ok(v) if !v.trim().is_empty() => v,
-        _ => {
-            eprintln!("Missing GEMINI_API_KEY environment variable.");
-            return ExitCode::from(2);
-        }
-    };
-
-    println!("Generating map with model '{}'...", args.model);
-    let response_json = match mapgen_gemini::call_gemini(&args.model, &prompt, &api_key) {
-        Ok(v) => v,
-        Err(err) => {
-            eprintln!("{err}");
-            return ExitCode::from(1);
-        }
-    };
-
-    let outputs = match mapgen_gemini::extract_parts(&response_json) {
-        Ok(v) => v,
-        Err(err) => {
-            eprintln!("{err}");
-            return ExitCode::from(1);
-        }
-    };
-
-    let Some(image_bytes) = outputs.image_bytes else {
-        eprintln!("No image returned by model.");
-        if let Some(text) = outputs.text {
-            eprintln!("Model text response:\n{text}");
-        }
-        return ExitCode::from(1);
-    };
-
-    if let Err(err) = mapgen_gemini::write_outputs(
-        &args.out,
-        &image_bytes,
-        outputs.text.as_deref(),
-        args.save_text,
-    ) {
-        eprintln!("{err}");
-        return ExitCode::from(1);
-    }
-
-    ExitCode::SUCCESS
-}
+use super::cli::MapVoronoiArgs;
 
 pub fn run_map_voronoi(args: MapVoronoiArgs) -> ExitCode {
     let save_data = match fs::read_to_string(&args.save) {
@@ -130,57 +69,6 @@ pub fn run_map_voronoi(args: MapVoronoiArgs) -> ExitCode {
         return ExitCode::from(1);
     }
     println!("Wrote spec:   {}", args.out_spec.display());
-
-    if !args.run_gemini {
-        return ExitCode::SUCCESS;
-    }
-
-    if let Err(err) = mapgen_gemini::load_dotenv_if_present(std::path::Path::new(".env")) {
-        eprintln!("Warning: {err}");
-    }
-
-    let api_key = match std::env::var("GEMINI_API_KEY") {
-        Ok(v) if !v.trim().is_empty() => v,
-        _ => {
-            eprintln!("Missing GEMINI_API_KEY environment variable.");
-            return ExitCode::from(2);
-        }
-    };
-
-    println!("Running Gemini model '{}'...", args.gemini_model);
-    let response_json = match mapgen_gemini::call_gemini(&args.gemini_model, &prompt, &api_key) {
-        Ok(v) => v,
-        Err(err) => {
-            eprintln!("{err}");
-            return ExitCode::from(1);
-        }
-    };
-
-    let outputs = match mapgen_gemini::extract_parts(&response_json) {
-        Ok(v) => v,
-        Err(err) => {
-            eprintln!("{err}");
-            return ExitCode::from(1);
-        }
-    };
-
-    let Some(image_bytes) = outputs.image_bytes else {
-        eprintln!("No image returned by model.");
-        if let Some(text) = outputs.text {
-            eprintln!("Model text response:\n{text}");
-        }
-        return ExitCode::from(1);
-    };
-
-    if let Err(err) = mapgen_gemini::write_outputs(
-        &args.gemini_out,
-        &image_bytes,
-        outputs.text.as_deref(),
-        true,
-    ) {
-        eprintln!("{err}");
-        return ExitCode::from(1);
-    }
 
     ExitCode::SUCCESS
 }

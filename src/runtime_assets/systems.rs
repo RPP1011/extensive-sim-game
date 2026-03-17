@@ -3,12 +3,10 @@ use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::render::texture::{CompressedImageFormats, ImageSampler, ImageType};
 use bevy_egui::{egui, EguiContexts};
-use std::env;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use bevy_game::mapgen_gemini;
 use crate::game_core::HubScreen;
 use crate::game_core::HubUiState;
 use crate::region_nav::RegionLayerTransitionState;
@@ -151,7 +149,7 @@ pub fn runtime_asset_gen_bootstrap_system(
     }
     asset_gen.auto_seeded = true;
     asset_gen.status = format!(
-        "Runtime asset generation queued {} environment jobs (provider: Gemini).",
+        "Runtime asset generation queued {} environment jobs.",
         seed_count
     );
 }
@@ -185,111 +183,22 @@ pub fn runtime_asset_gen_dispatch_system(mut asset_gen: ResMut<RuntimeAssetGenSt
             break;
         };
         asset_gen.in_flight_jobs += 1;
-        asset_gen.status = format!(
-            "Generating '{}' ({} in flight)...",
-            job.source_title, asset_gen.in_flight_jobs
-        );
-        let provider = asset_gen.provider;
-        let model = asset_gen.model.clone();
         let output_dir = asset_gen.output_dir.clone();
         let shared_results = Arc::clone(&asset_gen.shared_results);
         std::thread::spawn(move || {
             let image_stem = format!("runtime_{:03}_{}_{}", job.id, job.source_id, job.style.as_slug());
             let prompt_file = output_dir.join(format!("{image_stem}.prompt.txt"));
             let _ = fs::create_dir_all(&output_dir);
-            let mut status = String::new();
-            let mut success = false;
-            let mut generated_image: Option<std::path::PathBuf> = None;
-
-            if let Err(err) = fs::write(&prompt_file, format!("{}\n", job.prompt)) {
-                status = format!("Asset gen failed writing prompt file: {}", err);
-            } else {
-                let result = match provider {
-                    RuntimeAssetProvider::Gemini => {
-                        let _ = mapgen_gemini::load_dotenv_if_present(Path::new(".env"));
-                        let api_key = match env::var("GEMINI_API_KEY") {
-                            Ok(v) if !v.trim().is_empty() => v,
-                            _ => {
-                                status = "Asset gen failed: GEMINI_API_KEY is missing.".to_string();
-                                String::new()
-                            }
-                        };
-                        if api_key.is_empty() {
-                            Err(status.clone())
-                        } else {
-                            let response = if let Some(reference_path) = job.reference_image_path.as_ref() {
-                                match fs::read(reference_path) {
-                                    Ok(reference_bytes) => mapgen_gemini::call_gemini_with_reference_image(
-                                        &model,
-                                        &job.prompt,
-                                        &api_key,
-                                        &reference_bytes,
-                                        detect_mime_type_from_bytes(&reference_bytes),
-                                    ),
-                                    Err(err) => Err(format!(
-                                        "failed to read reference image {}: {}",
-                                        reference_path.display(),
-                                        err
-                                    )),
-                                }
-                            } else {
-                                mapgen_gemini::call_gemini(&model, &job.prompt, &api_key)
-                            };
-                            match response {
-                                Ok(json) => match mapgen_gemini::extract_parts(&json) {
-                                    Ok(outputs) => {
-                                        if let Some(image_bytes) = outputs.image_bytes {
-                                            let ext = detect_image_extension_from_bytes(&image_bytes);
-                                            let image_file = output_dir.join(format!("{image_stem}.{ext}"));
-                                            match mapgen_gemini::write_outputs(
-                                                &image_file,
-                                                &image_bytes,
-                                                outputs.text.as_deref(),
-                                                true,
-                                            ) {
-                                                Ok(_) => Ok(image_file),
-                                                Err(err) => Err(err),
-                                            }
-                                        } else {
-                                            Err("No image returned by provider.".to_string())
-                                        }
-                                    }
-                                    Err(err) => Err(err),
-                                },
-                                Err(err) => Err(err),
-                            }
-                        }
-                    }
-                };
-                match result {
-                    Ok(image_file) => {
-                        success = true;
-                        generated_image = Some(image_file.clone());
-                        let label = match job.kind {
-                            RuntimeAssetJobKind::EnvironmentScene => "scene",
-                            RuntimeAssetJobKind::CharacterPortrait => "portrait",
-                        };
-                        status = format!(
-                            "Generated {} '{}' at {}.",
-                            label,
-                            job.source_title,
-                            image_file.display()
-                        );
-                    }
-                    Err(err) => {
-                        status = format!("Asset gen failed for '{}': {}", job.source_title, err);
-                    }
-                }
-            }
+            let _ = fs::write(&prompt_file, format!("{}\n", job.prompt));
 
             let payload = RuntimeAssetResult {
                 job_id: job.id,
                 source_id: job.source_id,
                 source_title: job.source_title,
                 prompt_file,
-                image_file: generated_image,
-                success,
-                status,
+                image_file: None,
+                success: false,
+                status: "No image generation provider configured.".to_string(),
                 scene_tag: job.scene_tag,
                 sequence_index: job.sequence_index,
             };
