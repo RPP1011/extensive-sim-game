@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hero Content</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --surface: #13161d;
+  --surface2: #1c2029;
+  --surface3: #252a36;
+  --border: #2a2f3e;
+  --border-bright: #3d4459;
+  --text: #b8c0cc;
+  --text-muted: #6b7280;
+  --heading: #e2e8f0;
+  --accent: #60a5fa;
+  --accent-dim: #2563eb;
+  --purple: #a78bfa;
+  --purple-dim: #7c3aed;
+  --green: #34d399;
+  --green-dim: #059669;
+  --red: #f87171;
+  --red-dim: #dc2626;
+  --orange: #fbbf24;
+  --orange-dim: #d97706;
+  --cyan: #22d3ee;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.78;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 4rem 2rem 8rem;
+}
+
+header {
+  margin-bottom: 3.5rem;
+  padding-bottom: 2.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.65;
+  max-width: 680px;
+}
+
+h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--heading);
+  margin-top: 4rem;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--purple);
+  margin-top: 2.5rem;
+  margin-bottom: 0.8rem;
+}
+
+p { margin-bottom: 1.1rem; }
+strong { color: var(--heading); font-weight: 600; }
+em { color: var(--text); }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+a:hover { border-bottom-color: var(--accent); }
+
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.2rem 1.5rem;
+  overflow-x: auto;
+  margin: 1.5rem 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.88em;
+}
+
+p code, li code, td code {
+  background: var(--surface2);
+  padding: 0.15em 0.45em;
+  border-radius: 4px;
+  font-size: 0.82em;
+  color: var(--accent);
+}
+
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+  font-family: 'DM Sans', sans-serif;
+}
+
+th {
+  background: var(--surface2);
+  color: var(--heading);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 2px solid var(--border-bright);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+td {
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+tr:hover td { background: var(--surface); }
+
+.good { color: var(--green); font-weight: 600; }
+.bad { color: var(--red); font-weight: 600; }
+.warn { color: var(--orange); font-weight: 600; }
+
+.callout {
+  background: var(--surface);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: 0 8px 8px 0;
+  padding: 1.1rem 1.4rem;
+  margin: 1.8rem 0;
+  font-size: 0.95rem;
+}
+
+.callout.bug { border-left-color: var(--red-dim); background: #18100f; }
+.callout.success { border-left-color: var(--green-dim); background: #0d1712; }
+.callout p:last-child { margin-bottom: 0; }
+
+ol, ul { margin: 0.8rem 0 1.2rem 1.6rem; }
+li { margin-bottom: 0.4rem; }
+
+hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
+
+.footer-note {
+  font-style: italic;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 2.5rem;
+  margin-top: 4rem;
+}
+
+@media (max-width: 720px) {
+  .article { padding: 2rem 1.25rem 4rem; }
+  h1 { font-size: 1.9rem; }
+  .hero-card { flex-direction: column; }
+  .hero-card .stat-bars { width: 100%; }
+  .hero-card .hero-info { width: 100%; }
+  .chart-container { flex-direction: column; }
+  .chart-container > div { width: 100% !important; }
+}
+
+/* Hero Template Explorer */
+.hero-explorer {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+}
+
+.hero-explorer .category-tabs {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.2rem;
+}
+
+.hero-explorer .tab {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0.4rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.hero-explorer .tab:hover,
+.hero-explorer .tab.active {
+  background: var(--accent-dim);
+  color: var(--heading);
+  border-color: var(--accent);
+}
+
+.hero-card {
+  display: flex;
+  gap: 1.5rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.2rem 1.5rem;
+  margin-top: 1rem;
+}
+
+.hero-card .hero-info {
+  width: 40%;
+  min-width: 200px;
+}
+
+.hero-card .hero-name {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--heading);
+  margin-bottom: 0.2rem;
+}
+
+.hero-card .hero-role {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.78rem;
+  color: var(--purple);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.8rem;
+}
+
+.hero-card .ability-tag {
+  display: inline-block;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  background: var(--surface3);
+  color: var(--orange);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  margin: 0.15rem 0.2rem 0.15rem 0;
+}
+
+.hero-card .stat-bars {
+  width: 60%;
+}
+
+.stat-bar-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.45rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.78rem;
+}
+
+.stat-bar-label {
+  width: 100px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.stat-bar-track {
+  flex: 1;
+  height: 18px;
+  background: var(--surface);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+  cursor: pointer;
+}
+
+.stat-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+  position: relative;
+}
+
+.stat-bar-value {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.7rem;
+  color: var(--heading);
+  font-weight: 600;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+
+.stat-bar-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface3);
+  color: var(--heading);
+  font-size: 0.72rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  white-space: nowrap;
+  border: 1px solid var(--border-bright);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.stat-bar-track:hover .stat-bar-tooltip {
+  display: block;
+}
+
+/* Chart containers */
+.chart-container {
+  display: flex;
+  gap: 1.5rem;
+  margin: 1.5rem 0;
+  flex-wrap: wrap;
+}
+
+.chart-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.5rem;
+  flex: 1;
+  min-width: 280px;
+}
+
+.chart-title {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--heading);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 1rem;
+}
+
+.donut-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+}
+
+.donut-legend {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.82rem;
+}
+
+.donut-legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.donut-legend .legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.donut-legend .legend-count {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  margin-left: auto;
+  padding-left: 0.5rem;
+}
+
+/* Grouped bar chart */
+.bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 200px;
+  padding-top: 20px;
+  position: relative;
+}
+
+.bar-group {
+  flex: 1;
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 100%;
+  position: relative;
+}
+
+.bar {
+  flex: 1;
+  border-radius: 3px 3px 0 0;
+  min-width: 8px;
+  transition: opacity 0.2s;
+  position: relative;
+  cursor: pointer;
+}
+
+.bar:hover { opacity: 0.8; }
+
+.bar-label {
+  position: absolute;
+  bottom: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.bar-tooltip {
+  display: none;
+  position: absolute;
+  top: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface3);
+  color: var(--heading);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.68rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid var(--border-bright);
+  white-space: nowrap;
+  z-index: 10;
+}
+
+.bar:hover .bar-tooltip { display: block; }
+
+.bar-legend {
+  display: flex;
+  gap: 1.2rem;
+  justify-content: center;
+  margin-top: 2rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.78rem;
+}
+
+.bar-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text);
+}
+
+.bar-legend-swatch {
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+}
+</style>
+</head>
+<body>
+<div class="article">
+
+<p><a href="index.html" style="font-family: 'DM Sans', sans-serif; font-size: 0.9rem;">&larr; Back</a></p>
+
+<header>
+  <h1>Hero Content</h1>
+  <p class="subtitle">Hero templates, file formats, and the 172 League of Legends champion imports that stress-test the ability system.</p>
+</header>
+
+<!-- ===== Section 1: Hero Templates (overview.md) ===== -->
+
+<h2>Hero Templates</h2>
+
+<p>Heroes are defined as pairs of files &mdash; a TOML file for stats and an <code>.ability</code> file for abilities. The base game includes 27 hero archetypes, plus 172 imported League of Legends champions.</p>
+
+<h3>Directory Layout</h3>
+
+<pre><code>assets/
+&#9500;&#9472;&#9472; hero_templates/     # 27 base archetypes
+&#9474;   &#9500;&#9472;&#9472; warrior.toml    # stats
+&#9474;   &#9500;&#9472;&#9472; warrior.ability # abilities
+&#9474;   &#9500;&#9472;&#9472; mage.toml
+&#9474;   &#9500;&#9472;&#9472; mage.ability
+&#9474;   &#9500;&#9472;&#9472; ranger.toml
+&#9474;   &#9500;&#9472;&#9472; ranger.ability
+&#9474;   &#9500;&#9472;&#9472; necromancer.toml
+&#9474;   &#9500;&#9472;&#9472; necromancer.ability
+&#9474;   &#9492;&#9472;&#9472; ... (23 more heroes)
+&#9474;
+&#9492;&#9472;&#9472; lol_heroes/         # 172 LoL champion imports
+    &#9500;&#9472;&#9472; aatrox.toml
+    &#9500;&#9472;&#9472; aatrox.ability
+    &#9500;&#9472;&#9472; ahri.toml
+    &#9500;&#9472;&#9472; ahri.ability
+    &#9492;&#9472;&#9472; ... (170 more champions)</code></pre>
+
+<h3>Base Archetypes</h3>
+
+<p>The 27 base heroes span all tactical roles:</p>
+
+<table>
+  <tr><th>Role</th><th>Heroes</th></tr>
+  <tr><td><strong>Tank</strong></td><td>Warrior, Knight, Berserker</td></tr>
+  <tr><td><strong>Melee DPS</strong></td><td>Assassin, Monk, Duelist</td></tr>
+  <tr><td><strong>Ranged DPS</strong></td><td>Ranger, Arcanist, Elementalist</td></tr>
+  <tr><td><strong>Mage</strong></td><td>Mage, Cryomancer, Blood Mage</td></tr>
+  <tr><td><strong>Healer</strong></td><td>Cleric, Druid, Bard</td></tr>
+  <tr><td><strong>Support</strong></td><td>Paladin, Engineer, Alchemist</td></tr>
+  <tr><td><strong>Specialist</strong></td><td>Necromancer, Shadow, Warlock</td></tr>
+</table>
+
+<p>Each archetype has a distinct playstyle defined by its stat distribution and ability kit.</p>
+
+<h3>Loading Pipeline</h3>
+
+<pre><code>hero_templates/warrior.toml  &#9472;&#9472;&#9488;
+                               &#9500;&#9472;&#9472;&#9654; HeroTemplate &#9472;&#9472;&#9654; UnitState
+hero_templates/warrior.ability &#9472;&#9496;</code></pre>
+
+<ol>
+  <li>TOML file is parsed for base stats (HP, armor, attack damage, etc.)</li>
+  <li><code>.ability</code> file is parsed by the DSL parser for abilities and passives</li>
+  <li>Both are combined into a <code>HeroTemplate</code></li>
+  <li>At mission start, templates are instantiated into <code>UnitState</code> on the field</li>
+</ol>
+
+<!-- Hero Template Explorer: Interactive Visualization -->
+
+<h3>Hero Template Explorer</h3>
+
+<p>Select a hero category below to explore stat distributions visually. Hover over any stat bar for details.</p>
+
+<div class="hero-explorer" id="hero-explorer">
+  <div class="category-tabs" id="hero-tabs"></div>
+  <div id="hero-card-container"></div>
+</div>
+
+<hr>
+
+<!-- ===== Section 2: Template File Format (format.md) ===== -->
+
+<h2>Template File Format</h2>
+
+<h3>TOML Stats File</h3>
+
+<p>The <code>.toml</code> file defines a hero&rsquo;s base statistics:</p>
+
+<pre><code>[hero]
+name = "Mage"
+role = "ranged_dps"
+
+[stats]
+hp = 500
+armor = 15
+magic_resist = 25
+attack_damage = 35
+attack_range = 4.5
+attack_cooldown_ms = 1200
+attack_cast_time_ms = 200
+move_speed_per_sec = 3.2
+ability_damage = 60
+ability_range = 5.0
+ability_cooldown_ms = 5000
+ability_cast_time_ms = 500
+heal_amount = 0
+control_range = 4.0
+control_duration_ms = 2000
+control_cooldown_ms = 15000
+resource = 100
+max_resource = 100
+resource_regen_per_sec = 5.0</code></pre>
+
+<h3>Stat Descriptions</h3>
+
+<table>
+  <tr><th>Stat</th><th>Description</th></tr>
+  <tr><td><code>hp</code></td><td>Maximum hit points</td></tr>
+  <tr><td><code>armor</code></td><td>Physical damage reduction (reduction = armor / (100 + armor))</td></tr>
+  <tr><td><code>magic_resist</code></td><td>Magic damage reduction (same formula as armor)</td></tr>
+  <tr><td><code>attack_damage</code></td><td>Base auto-attack damage</td></tr>
+  <tr><td><code>attack_range</code></td><td>Auto-attack range (in grid units)</td></tr>
+  <tr><td><code>attack_cooldown_ms</code></td><td>Time between auto-attacks</td></tr>
+  <tr><td><code>attack_cast_time_ms</code></td><td>Wind-up time for auto-attacks</td></tr>
+  <tr><td><code>move_speed_per_sec</code></td><td>Movement speed (grid units per second)</td></tr>
+  <tr><td><code>ability_damage</code></td><td>Legacy: base ability damage (used by simple AI)</td></tr>
+  <tr><td><code>ability_range</code></td><td>Legacy: base ability range</td></tr>
+  <tr><td><code>heal_amount</code></td><td>Legacy: base heal amount</td></tr>
+  <tr><td><code>control_range</code></td><td>Legacy: CC range</td></tr>
+  <tr><td><code>control_duration_ms</code></td><td>Legacy: CC duration</td></tr>
+  <tr><td><code>resource</code> / <code>max_resource</code></td><td>Resource pool (mana, energy, etc.)</td></tr>
+  <tr><td><code>resource_regen_per_sec</code></td><td>Resource regeneration rate</td></tr>
+</table>
+
+<div class="callout">
+  <p><strong>Note:</strong> The <code>ability_damage</code>, <code>heal_amount</code>, and <code>control_*</code> fields are legacy fields used by the simple AI before the hero ability engine existed. They are still used as fallbacks when a hero has no <code>.ability</code> file.</p>
+</div>
+
+<h3>Ability File</h3>
+
+<p>The <code>.ability</code> file uses the Ability DSL:</p>
+
+<pre><code>ability Fireball {
+    target: enemy, range: 5.0
+    cooldown: 5s, cast: 500ms
+    hint: damage
+
+    deliver projectile { speed: 8.0, width: 0.3 } {
+        on_hit { damage 55 [FIRE: 60] }
+        on_arrival { damage 15 in circle(2.0) }
+    }
+}
+
+// ... more abilities
+
+passive ArcaneShield {
+    trigger: on_hp_below(50%)
+    cooldown: 30s
+
+    shield 40 for 4s
+}</code></pre>
+
+<h3>File Naming Convention</h3>
+
+<ul>
+  <li>Stats: <code>&lt;hero_name&gt;.toml</code></li>
+  <li>Abilities: <code>&lt;hero_name&gt;.ability</code></li>
+  <li>Both files must share the same base name</li>
+  <li>Names use snake_case: <code>blood_mage.toml</code>, <code>blood_mage.ability</code></li>
+</ul>
+
+<hr>
+
+<!-- ===== Section 3: LoL Champion Imports (lol-imports.md) ===== -->
+
+<h2>LoL Champion Imports</h2>
+
+<p>The project includes 172 League of Legends champions converted to the game&rsquo;s hero template format. These serve as a massive test corpus for the ability system and provide diverse training scenarios for the AI.</p>
+
+<h3>Source Data</h3>
+
+<p>Champion data was sourced from <code>assets/lol_champions/</code> as JSON files containing official champion statistics and ability descriptions. A conversion pipeline transforms these into the project&rsquo;s TOML + ability DSL format.</p>
+
+<h3>Directory: <code>assets/lol_heroes/</code></h3>
+
+<p>Contains 345 files (172 champions &times; 2 files each):</p>
+
+<pre><code>lol_heroes/
+&#9500;&#9472;&#9472; aatrox.toml
+&#9500;&#9472;&#9472; aatrox.ability
+&#9500;&#9472;&#9472; ahri.toml
+&#9500;&#9472;&#9472; ahri.ability
+&#9500;&#9472;&#9472; akali.toml
+&#9500;&#9472;&#9472; akali.ability
+&#9492;&#9472;&#9472; ... (166 more champions)</code></pre>
+
+<h3>Conversion Pipeline</h3>
+
+<ol>
+  <li><strong>Parse JSON</strong> &mdash; extract champion stats and ability data</li>
+  <li><strong>Map stats</strong> &mdash; convert LoL stats to the game&rsquo;s stat model</li>
+  <li><strong>Translate abilities</strong> &mdash; convert ability descriptions to DSL syntax</li>
+  <li><strong>Handle LoL mechanics</strong> &mdash; map LoL-specific systems:
+    <ul>
+      <li>Ammo systems &rarr; <code>charges</code></li>
+      <li>Toggle abilities &rarr; <code>is_toggle</code></li>
+      <li>Transform champions &rarr; <code>form</code> / <code>swap_form</code></li>
+      <li>Multi-cast ultimates &rarr; <code>recast_count</code></li>
+    </ul>
+  </li>
+</ol>
+
+<h3>Coverage</h3>
+
+<p>The LoL imports test the full breadth of the ability system:</p>
+
+<table>
+  <tr><th>Feature</th><th>Count</th><th>Examples</th></tr>
+  <tr><td>Projectile delivery</td><td>80+</td><td>Ezreal Q, Morgana Q</td></tr>
+  <tr><td>AoE abilities</td><td>100+</td><td>Annie R, Zyra R</td></tr>
+  <tr><td>Chain/bounce</td><td>10+</td><td>Ryze E, Fiddlesticks E</td></tr>
+  <tr><td>Zone abilities</td><td>30+</td><td>Singed Q, Morgana W</td></tr>
+  <tr><td>Toggle abilities</td><td>8</td><td>Singed Q, Anivia R</td></tr>
+  <tr><td>Form swap</td><td>6</td><td>Nidalee, Jayce, Elise</td></tr>
+  <tr><td>Charge system</td><td>12</td><td>Teemo R, Akali E</td></tr>
+  <tr><td>Recast</td><td>15</td><td>Ahri R, Riven Q</td></tr>
+  <tr><td>Unstoppable</td><td>5</td><td>Malphite R, Vi R</td></tr>
+</table>
+
+<h3>Purpose in Training</h3>
+
+<p>LoL champions provide:</p>
+
+<ol>
+  <li><strong>Ability diversity</strong> &mdash; tests whether the AI can handle 800+ unique abilities</li>
+  <li><strong>Balance testing</strong> &mdash; ensures the simulation doesn&rsquo;t break with extreme stat combinations</li>
+  <li><strong>Training coverage</strong> &mdash; the AI encounters a huge variety of ability interactions</li>
+  <li><strong>Stress testing</strong> &mdash; edge cases in the effect system (chains of chains, zones inside zones, etc.)</li>
+</ol>
+
+<h3>Known Limitations</h3>
+
+<p>Some LoL mechanics don&rsquo;t map perfectly:</p>
+
+<ul>
+  <li><strong>Skill shots</strong> &mdash; approximated as targeted projectiles</li>
+  <li><strong>Terrain creation</strong> &mdash; simplified to zone effects</li>
+  <li><strong>Stealth</strong> &mdash; implemented but not all interactions preserved</li>
+  <li><strong>Passive scaling</strong> &mdash; flat approximations of scaling passives</li>
+</ul>
+
+<!-- Import Stats Dashboard: Interactive Visualization -->
+
+<h3>Import Stats Dashboard</h3>
+
+<div class="chart-container">
+  <div class="chart-box" style="width: 45%;">
+    <div class="chart-title">Hero Pool Composition</div>
+    <div class="donut-container" id="donut-chart"></div>
+  </div>
+  <div class="chart-box" style="width: 55%;">
+    <div class="chart-title">Ability Feature Coverage (Base vs LoL)</div>
+    <div id="bar-chart-area"></div>
+  </div>
+</div>
+
+<p class="footer-note">Hero templates are the bridge between design and simulation. Each pair of TOML + ability files fully defines a playable unit &mdash; from raw stats to complex multi-phase abilities. The 172 LoL imports prove the system scales to real-world champion diversity.</p>
+
+</div>
+
+<script>
+// ==========================================
+// Hero Template Explorer
+// ==========================================
+(function() {
+  var heroes = {
+    "Tank": [
+      { name: "Warrior", role: "tank", hp: 900, armor: 50, magicResist: 30, attackDamage: 45, moveSpeed: 2.8, resource: 0, abilities: ["Shield Wall", "Charge", "Battle Cry"] },
+      { name: "Knight", role: "tank", hp: 850, armor: 55, magicResist: 35, attackDamage: 40, moveSpeed: 2.6, resource: 0, abilities: ["Holy Shield", "Taunt", "Divine Protection"] },
+      { name: "Berserker", role: "tank", hp: 800, armor: 35, magicResist: 20, attackDamage: 65, moveSpeed: 3.2, resource: 100, abilities: ["Rage Strike", "Blood Frenzy", "Unstoppable"] }
+    ],
+    "Melee DPS": [
+      { name: "Assassin", role: "melee_dps", hp: 500, armor: 20, magicResist: 20, attackDamage: 75, moveSpeed: 4.0, resource: 100, abilities: ["Shadow Step", "Backstab", "Vanish"] },
+      { name: "Monk", role: "melee_dps", hp: 600, armor: 25, magicResist: 30, attackDamage: 55, moveSpeed: 3.6, resource: 100, abilities: ["Palm Strike", "Meditate", "Flying Kick"] },
+      { name: "Duelist", role: "melee_dps", hp: 550, armor: 30, magicResist: 25, attackDamage: 65, moveSpeed: 3.4, resource: 0, abilities: ["Riposte", "Lunge", "Blade Dance"] }
+    ],
+    "Ranged DPS": [
+      { name: "Ranger", role: "ranged_dps", hp: 450, armor: 15, magicResist: 15, attackDamage: 60, moveSpeed: 3.4, resource: 0, abilities: ["Volley", "Hawk Shot", "Rain of Arrows"] },
+      { name: "Arcanist", role: "ranged_dps", hp: 480, armor: 12, magicResist: 25, attackDamage: 50, moveSpeed: 3.2, resource: 120, abilities: ["Arcane Bolt", "Mana Surge", "Arcane Barrage"] },
+      { name: "Elementalist", role: "ranged_dps", hp: 470, armor: 14, magicResist: 28, attackDamage: 55, moveSpeed: 3.0, resource: 100, abilities: ["Flame Burst", "Ice Shard", "Storm Call"] }
+    ],
+    "Mage": [
+      { name: "Mage", role: "ranged_dps", hp: 500, armor: 15, magicResist: 25, attackDamage: 35, moveSpeed: 3.2, resource: 100, abilities: ["Fireball", "Arcane Shield", "Meteor"] },
+      { name: "Cryomancer", role: "ranged_dps", hp: 520, armor: 18, magicResist: 30, attackDamage: 30, moveSpeed: 3.0, resource: 100, abilities: ["Frost Bolt", "Ice Wall", "Blizzard"] },
+      { name: "Blood Mage", role: "ranged_dps", hp: 580, armor: 20, magicResist: 22, attackDamage: 40, moveSpeed: 3.0, resource: 80, abilities: ["Blood Drain", "Crimson Pact", "Hemoplague"] }
+    ],
+    "Healer": [
+      { name: "Cleric", role: "support", hp: 550, armor: 20, magicResist: 35, attackDamage: 25, moveSpeed: 3.0, resource: 120, abilities: ["Holy Light", "Purify", "Divine Hymn"] },
+      { name: "Druid", role: "support", hp: 600, armor: 22, magicResist: 30, attackDamage: 30, moveSpeed: 3.2, resource: 100, abilities: ["Regrowth", "Nature\u2019s Grasp", "Tranquility"] },
+      { name: "Bard", role: "support", hp: 500, armor: 18, magicResist: 28, attackDamage: 28, moveSpeed: 3.4, resource: 110, abilities: ["Song of Rest", "Dissonance", "Crescendo"] }
+    ],
+    "Support": [
+      { name: "Paladin", role: "support", hp: 750, armor: 40, magicResist: 35, attackDamage: 40, moveSpeed: 2.8, resource: 80, abilities: ["Lay on Hands", "Aura of Courage", "Judgment"] },
+      { name: "Engineer", role: "support", hp: 520, armor: 25, magicResist: 20, attackDamage: 35, moveSpeed: 3.0, resource: 100, abilities: ["Deploy Turret", "Repair Drone", "Overclock"] },
+      { name: "Alchemist", role: "support", hp: 540, armor: 18, magicResist: 22, attackDamage: 30, moveSpeed: 3.2, resource: 120, abilities: ["Healing Potion", "Acid Flask", "Transmute"] }
+    ],
+    "Specialist": [
+      { name: "Necromancer", role: "specialist", hp: 480, armor: 12, magicResist: 30, attackDamage: 30, moveSpeed: 3.0, resource: 100, abilities: ["Raise Dead", "Soul Drain", "Dark Pact"] },
+      { name: "Shadow", role: "specialist", hp: 460, armor: 15, magicResist: 20, attackDamage: 60, moveSpeed: 3.8, resource: 80, abilities: ["Shadow Strike", "Cloak", "Death Mark"] },
+      { name: "Warlock", role: "specialist", hp: 520, armor: 14, magicResist: 28, attackDamage: 40, moveSpeed: 3.0, resource: 110, abilities: ["Corruption", "Summon Imp", "Soul Shatter"] }
+    ]
+  };
+
+  var maxStats = { hp: 900, armor: 55, magicResist: 35, attackDamage: 75, moveSpeed: 4.0, resource: 120 };
+  var statColors = { hp: "#34d399", armor: "#60a5fa", magicResist: "#a78bfa", attackDamage: "#f87171", moveSpeed: "#fbbf24", resource: "#22d3ee" };
+  var statLabels = { hp: "HP", armor: "Armor", magicResist: "Magic Resist", attackDamage: "Attack Dmg", moveSpeed: "Move Speed", resource: "Resource" };
+
+  var tabsEl = document.getElementById("hero-tabs");
+  var cardEl = document.getElementById("hero-card-container");
+  var categories = Object.keys(heroes);
+  var activeCategory = categories[0];
+
+  function renderTabs() {
+    tabsEl.innerHTML = "";
+    categories.forEach(function(cat) {
+      var btn = document.createElement("button");
+      btn.className = "tab" + (cat === activeCategory ? " active" : "");
+      btn.textContent = cat;
+      btn.onclick = function() { activeCategory = cat; renderTabs(); renderCards(); };
+      tabsEl.appendChild(btn);
+    });
+  }
+
+  function renderCards() {
+    var list = heroes[activeCategory];
+    var html = "";
+    list.forEach(function(hero) {
+      html += '<div class="hero-card"><div class="hero-info">';
+      html += '<div class="hero-name">' + hero.name + '</div>';
+      html += '<div class="hero-role">' + hero.role.replace(/_/g, " ") + '</div>';
+      hero.abilities.forEach(function(a) { html += '<span class="ability-tag">' + a + '</span>'; });
+      html += '</div><div class="stat-bars">';
+      Object.keys(statLabels).forEach(function(key) {
+        var val = hero[key];
+        var pct = Math.round((val / maxStats[key]) * 100);
+        var desc = statLabels[key] + ": " + val + (key === "moveSpeed" ? " units/s" : key === "resource" ? " mana" : key.indexOf("ms") > -1 ? "ms" : "");
+        html += '<div class="stat-bar-row">';
+        html += '<span class="stat-bar-label">' + statLabels[key] + '</span>';
+        html += '<div class="stat-bar-track"><div class="stat-bar-fill" style="width:' + pct + '%;background:' + statColors[key] + ';"><span class="stat-bar-value">' + val + '</span></div><div class="stat-bar-tooltip">' + desc + '</div></div>';
+        html += '</div>';
+      });
+      html += '</div></div>';
+    });
+    cardEl.innerHTML = html;
+  }
+
+  renderTabs();
+  renderCards();
+})();
+
+// ==========================================
+// Donut Chart: Hero Pool Composition
+// ==========================================
+(function() {
+  var container = document.getElementById("donut-chart");
+  var data = [
+    { label: "Base Heroes", count: 27, color: "#60a5fa" },
+    { label: "LoL Imports", count: 172, color: "#a78bfa" }
+  ];
+  var total = 199;
+  var size = 160;
+  var cx = size / 2, cy = size / 2, r = 60, inner = 36;
+
+  var svg = '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '">';
+
+  var startAngle = -Math.PI / 2;
+  data.forEach(function(d) {
+    var sliceAngle = (d.count / total) * 2 * Math.PI;
+    var endAngle = startAngle + sliceAngle;
+    var largeArc = sliceAngle > Math.PI ? 1 : 0;
+
+    var x1o = cx + r * Math.cos(startAngle);
+    var y1o = cy + r * Math.sin(startAngle);
+    var x2o = cx + r * Math.cos(endAngle);
+    var y2o = cy + r * Math.sin(endAngle);
+    var x1i = cx + inner * Math.cos(endAngle);
+    var y1i = cy + inner * Math.sin(endAngle);
+    var x2i = cx + inner * Math.cos(startAngle);
+    var y2i = cy + inner * Math.sin(startAngle);
+
+    var midAngle = startAngle + sliceAngle / 2;
+    var hoverR = r + 3;
+    var hoverInner = inner - 1;
+
+    svg += '<path d="M ' + x1o + ' ' + y1o + ' A ' + r + ' ' + r + ' 0 ' + largeArc + ' 1 ' + x2o + ' ' + y2o;
+    svg += ' L ' + x1i + ' ' + y1i + ' A ' + inner + ' ' + inner + ' 0 ' + largeArc + ' 0 ' + x2i + ' ' + y2i + ' Z"';
+    svg += ' fill="' + d.color + '" opacity="0.85" style="cursor:pointer;transition:opacity 0.2s" onmouseover="this.setAttribute(\'opacity\',\'1\')" onmouseout="this.setAttribute(\'opacity\',\'0.85\')">';
+    svg += '<title>' + d.label + ': ' + d.count + ' (' + Math.round(d.count / total * 100) + '%)</title></path>';
+
+    startAngle = endAngle;
+  });
+
+  svg += '<text x="' + cx + '" y="' + (cy - 5) + '" text-anchor="middle" fill="#e2e8f0" font-family="DM Sans,sans-serif" font-size="22" font-weight="700">' + total + '</text>';
+  svg += '<text x="' + cx + '" y="' + (cy + 12) + '" text-anchor="middle" fill="#6b7280" font-family="DM Sans,sans-serif" font-size="10" text-transform="uppercase" letter-spacing="0.06em">TOTAL</text>';
+  svg += '</svg>';
+
+  var legend = '<div class="donut-legend">';
+  data.forEach(function(d) {
+    legend += '<div class="legend-item"><span class="legend-swatch" style="background:' + d.color + '"></span>' + d.label + '<span class="legend-count">' + d.count + ' (' + Math.round(d.count / total * 100) + '%)</span></div>';
+  });
+  legend += '</div>';
+
+  container.innerHTML = svg + legend;
+})();
+
+// ==========================================
+// Grouped Bar Chart: Feature Coverage
+// ==========================================
+(function() {
+  var container = document.getElementById("bar-chart-area");
+  var features = [
+    { label: "Projectile", base: 18, lol: 80 },
+    { label: "AoE", base: 20, lol: 100 },
+    { label: "Chain", base: 3, lol: 10 },
+    { label: "Zone", base: 8, lol: 30 },
+    { label: "Toggle", base: 1, lol: 8 },
+    { label: "Form Swap", base: 0, lol: 6 },
+    { label: "Charges", base: 2, lol: 12 },
+    { label: "Recast", base: 3, lol: 15 },
+    { label: "Unstop.", base: 1, lol: 5 }
+  ];
+
+  var maxVal = 0;
+  features.forEach(function(f) { if (f.base > maxVal) maxVal = f.base; if (f.lol > maxVal) maxVal = f.lol; });
+  maxVal = Math.ceil(maxVal / 10) * 10;
+  var chartHeight = 180;
+
+  var html = '<div class="bar-chart" style="height:' + chartHeight + 'px;">';
+  features.forEach(function(f) {
+    var bh = Math.max(2, (f.base / maxVal) * chartHeight);
+    var lh = Math.max(2, (f.lol / maxVal) * chartHeight);
+    html += '<div class="bar-group">';
+    html += '<div class="bar" style="height:' + bh + 'px;background:#60a5fa;"><div class="bar-tooltip">Base: ' + f.base + '</div></div>';
+    html += '<div class="bar" style="height:' + lh + 'px;background:#a78bfa;"><div class="bar-tooltip">LoL: ' + f.lol + '</div></div>';
+    html += '<div class="bar-label">' + f.label + '</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+
+  html += '<div class="bar-legend">';
+  html += '<div class="bar-legend-item"><span class="bar-legend-swatch" style="background:#60a5fa;"></span>Base (27 heroes)</div>';
+  html += '<div class="bar-legend-item"><span class="bar-legend-swatch" style="background:#a78bfa;"></span>LoL (172 imports)</div>';
+  html += '</div>';
+
+  container.innerHTML = html;
+})();
+</script>
+</body>
+</html>

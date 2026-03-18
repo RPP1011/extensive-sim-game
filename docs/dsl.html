@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Ability DSL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --surface: #13161d;
+  --surface2: #1c2029;
+  --surface3: #252a36;
+  --border: #2a2f3e;
+  --border-bright: #3d4459;
+  --text: #b8c0cc;
+  --text-muted: #6b7280;
+  --heading: #e2e8f0;
+  --accent: #60a5fa;
+  --accent-dim: #2563eb;
+  --purple: #a78bfa;
+  --purple-dim: #7c3aed;
+  --green: #34d399;
+  --green-dim: #059669;
+  --red: #f87171;
+  --red-dim: #dc2626;
+  --orange: #fbbf24;
+  --orange-dim: #d97706;
+  --cyan: #22d3ee;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.78;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 4rem 2rem 8rem;
+}
+
+header {
+  margin-bottom: 3.5rem;
+  padding-bottom: 2.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.65;
+  max-width: 680px;
+}
+
+h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--heading);
+  margin-top: 4rem;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--purple);
+  margin-top: 2.5rem;
+  margin-bottom: 0.8rem;
+}
+
+h4 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.0rem;
+  font-weight: 600;
+  color: var(--cyan);
+  margin-top: 1.8rem;
+  margin-bottom: 0.6rem;
+}
+
+p { margin-bottom: 1.1rem; }
+strong { color: var(--heading); font-weight: 600; }
+em { color: var(--text); }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+a:hover { border-bottom-color: var(--accent); }
+
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.2rem 1.5rem;
+  overflow-x: auto;
+  margin: 1.5rem 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.88em;
+}
+
+p code, li code, td code {
+  background: var(--surface2);
+  padding: 0.15em 0.45em;
+  border-radius: 4px;
+  font-size: 0.82em;
+  color: var(--accent);
+}
+
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+  font-family: 'DM Sans', sans-serif;
+}
+
+th {
+  background: var(--surface2);
+  color: var(--heading);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 2px solid var(--border-bright);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+td {
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+tr:hover td { background: var(--surface); }
+
+.callout {
+  background: var(--surface);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: 0 8px 8px 0;
+  padding: 1.1rem 1.4rem;
+  margin: 1.8rem 0;
+  font-size: 0.95rem;
+}
+
+.callout.bug { border-left-color: var(--red-dim); background: #18100f; }
+.callout.success { border-left-color: var(--green-dim); background: #0d1712; }
+.callout p:last-child { margin-bottom: 0; }
+
+ol, ul { margin: 0.8rem 0 1.2rem 1.6rem; }
+li { margin-bottom: 0.4rem; }
+
+hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
+
+.footer-note {
+  font-style: italic;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 2.5rem;
+  margin-top: 4rem;
+}
+
+@media (max-width: 720px) {
+  .article { padding: 2rem 1.25rem 4rem; }
+  h1 { font-size: 1.9rem; }
+}
+
+/* Interactive Syntax Highlighter styles */
+.syntax-demo {
+  position: relative;
+  margin: 1.5rem 0;
+}
+
+.syntax-demo pre {
+  margin: 0;
+}
+
+.syntax-demo .token-effect { color: var(--red); }
+.syntax-demo .token-area { color: var(--green); }
+.syntax-demo .token-delivery { color: var(--orange); }
+.syntax-demo .token-trigger { color: var(--cyan); }
+.syntax-demo .token-tags { color: var(--purple); }
+.syntax-demo .token-keyword { color: var(--accent); }
+.syntax-demo .token-header { color: var(--text-muted); }
+.syntax-demo .token-comment { color: #4a5568; font-style: italic; }
+.syntax-demo .token-number { color: var(--orange); }
+.syntax-demo .token-name { color: var(--heading); font-weight: 600; }
+
+.syntax-demo [data-dim] {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 2px;
+  transition: background 0.15s, outline 0.15s;
+}
+
+.syntax-demo [data-dim]:hover {
+  outline: 1px solid currentColor;
+  background: rgba(255,255,255,0.05);
+}
+
+.dim-tooltip {
+  position: absolute;
+  top: -2.2rem;
+  right: 0.5rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.8rem;
+  border-radius: 6px;
+  color: var(--heading);
+  background: var(--surface3);
+  border: 1px solid var(--border-bright);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+
+.dim-tooltip.visible {
+  opacity: 1;
+}
+
+.dim-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem 1.5rem;
+  margin: 0.8rem 0 0.4rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8rem;
+}
+
+.dim-legend span {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.dim-legend .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+/* Pipeline visualization */
+.pipeline-viz {
+  margin: 2rem 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  overflow-x: auto;
+}
+
+.pipeline-stages {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  min-width: 760px;
+}
+
+.pipeline-stage {
+  flex: 1;
+  text-align: center;
+  position: relative;
+}
+
+.pipeline-stage-box {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.8rem 0.6rem;
+  margin: 0 0.3rem;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.pipeline-stage-box.active {
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 12px rgba(96, 165, 250, 0.15);
+}
+
+.pipeline-stage-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.5rem;
+}
+
+.pipeline-stage-content {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: var(--text);
+  text-align: left;
+  flex: 1;
+  white-space: pre;
+  overflow: hidden;
+}
+
+.pipeline-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  padding-top: 60px;
+}
+
+.pipeline-controls {
+  display: flex;
+  justify-content: center;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.pipeline-btn {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8rem;
+  padding: 0.4rem 1.2rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-bright);
+  background: var(--surface2);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.pipeline-btn:hover {
+  background: var(--surface3);
+  border-color: var(--accent-dim);
+}
+
+.pipeline-btn.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--heading);
+}
+
+.pipeline-status {
+  text-align: center;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 0.6rem;
+}
+</style>
+</head>
+<body>
+<div class="article">
+
+<p><a href="index.html" style="font-family: 'DM Sans', sans-serif; font-size: 0.9rem;">&larr; Back</a></p>
+
+<header>
+  <h1>The Ability DSL</h1>
+  <p class="subtitle">A domain-specific language for defining hero abilities &mdash; replacing verbose TOML with a compact, readable syntax that game designers can author without touching Rust code.</p>
+</header>
+
+<!-- ================================================================== -->
+<!-- SECTION 1: Overview -->
+<!-- ================================================================== -->
+
+<h2>Overview</h2>
+
+<h3>Motivation</h3>
+
+<p>Compare the TOML representation of a simple ability:</p>
+
+<pre><code>[[abilities]]
+name = "Fireball"
+targeting = "target_enemy"
+range = 5.0
+cooldown_ms = 5000
+cast_time_ms = 500
+ai_hint = "damage"
+
+[[abilities.effects]]
+effect = { Damage = 55 }
+tags = { FIRE = 60 }
+
+[[abilities.delivery]]
+type = "Projectile"
+speed = 8.0
+width = 0.3</code></pre>
+
+<p>With the DSL version:</p>
+
+<pre><code>ability Fireball {
+    target: enemy, range: 5.0
+    cooldown: 5s, cast: 500ms
+    hint: damage
+
+    deliver projectile { speed: 8.0, width: 0.3 } {
+        on_hit { damage 55 [FIRE: 60] }
+    }
+}</code></pre>
+
+<p>The DSL is more readable, more concise, and catches errors at parse time with line/column information.</p>
+
+<h3>File Convention</h3>
+
+<ul>
+  <li>Active abilities use the <code>ability Name { ... }</code> syntax</li>
+  <li>Passive abilities use the <code>passive Name { ... }</code> syntax</li>
+  <li>Files use the <code>.ability</code> extension</li>
+  <li>Hero templates pair a <code>.toml</code> file (stats) with an <code>.ability</code> file (abilities)</li>
+  <li>Multiple abilities and passives can be defined in a single file</li>
+</ul>
+
+<h3>Quick Example</h3>
+
+<p>A complete hero&rsquo;s abilities (<code>warrior.ability</code>):</p>
+
+<pre><code>ability Whirlwind {
+    target: self_aoe
+    cooldown: 8s, cast: 400ms
+    hint: damage
+
+    damage 40 in circle(2.5) [PHYSICAL: 50]
+    damage 10 in circle(2.5) when hit_count_above(2) [PHYSICAL: 50]
+}
+
+ability ShieldWall {
+    target: self
+    cooldown: 15s, cast: 200ms
+    hint: defense
+
+    shield 60 for 5s
+}
+
+ability HeroicCharge {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 0ms
+    hint: crowd_control
+
+    dash to_target
+    damage 35 [PHYSICAL: 50]
+    stun 1500ms [CROWD_CONTROL: 70]
+}
+
+passive IronSkin {
+    trigger: on_damage_taken
+    cooldown: 5s
+
+    shield 20 for 3s
+}
+
+passive LastStand {
+    trigger: on_hp_below(25%)
+    cooldown: 45s
+
+    heal 50
+    buff damage_output 0.3 for 5s
+}</code></pre>
+
+<h3>Module Location</h3>
+
+<p>The DSL parser lives in <code>src/ai/effects/dsl/</code> with 17 source files covering parsing, AST representation, lowering, emission, and testing.</p>
+
+<!-- ================================================================== -->
+<!-- SECTION 2: Syntax Reference -->
+<!-- ================================================================== -->
+
+<hr>
+
+<h2>Syntax Reference</h2>
+
+<p>This section is the complete syntax reference for the <code>.ability</code> DSL.</p>
+
+<h3>Interactive Syntax Highlighter</h3>
+
+<p>Hover over the color-coded tokens below to see which dimension each part of the DSL belongs to.</p>
+
+<div class="dim-legend">
+  <span><span class="swatch" style="background: var(--accent);"></span> Keyword</span>
+  <span><span class="swatch" style="background: var(--red);"></span> Effect</span>
+  <span><span class="swatch" style="background: var(--green);"></span> Area</span>
+  <span><span class="swatch" style="background: var(--orange);"></span> Delivery</span>
+  <span><span class="swatch" style="background: var(--cyan);"></span> Trigger</span>
+  <span><span class="swatch" style="background: var(--purple);"></span> Tags</span>
+</div>
+
+<div class="syntax-demo" id="syntaxDemo">
+  <div class="dim-tooltip" id="dimTooltip"></div>
+  <pre><code><span class="token-comment">// Pyromancer &mdash; fire mage specializing in AoE and DoT</span>
+
+<span class="token-keyword" data-dim="Keyword: ability declaration">ability</span> <span class="token-name">Ignite</span> {
+    <span class="token-header">target: enemy, range: 5.0</span>
+    <span class="token-header">cooldown: 6s, cast: 200ms</span>
+    <span class="token-header">hint: damage</span>
+
+    <span class="token-effect" data-dim="Effect: what happens (Damage)">damage 30</span> <span class="token-tags" data-dim="Tags: power levels [FIRE: 50]">[FIRE: 50]</span>
+    <span class="token-effect" data-dim="Effect: what happens (DoT)">dot 40 for 4s</span> <span class="token-tags" data-dim="Tags: power levels [FIRE: 40]">[FIRE: 40]</span>
+}
+
+<span class="token-keyword" data-dim="Keyword: ability declaration">ability</span> <span class="token-name">Inferno</span> {
+    <span class="token-header">target: ground, range: 6.0</span>
+    <span class="token-header">cooldown: 14s, cast: 600ms</span>
+    <span class="token-header">hint: damage</span>
+
+    <span class="token-delivery" data-dim="Delivery: how the effect reaches targets (Zone)">deliver zone { duration: 5s, tick: 1s }</span> {
+        <span class="token-delivery" data-dim="Delivery: trigger event (on_hit)">on_hit</span> {
+            <span class="token-effect" data-dim="Effect: what happens (Damage)">damage 20</span> <span class="token-area" data-dim="Area: where the effect applies (Circle r=2.5)">in circle(2.5)</span> <span class="token-tags" data-dim="Tags: power levels [FIRE: 60]">[FIRE: 60]</span>
+        }
+    }
+}
+
+<span class="token-keyword" data-dim="Keyword: passive declaration">passive</span> <span class="token-name">Cauterize</span> {
+    <span class="token-trigger" data-dim="Trigger: when the passive activates">trigger: on_ability_used</span>
+    <span class="token-header">cooldown: 10s</span>
+
+    <span class="token-effect" data-dim="Effect: what happens (HoT)">hot 20 for 3s</span>
+}</code></pre>
+</div>
+
+<h3>Ability Declaration</h3>
+
+<pre><code>ability &lt;Name&gt; {
+    &lt;header&gt;
+    &lt;effects and delivery&gt;
+}</code></pre>
+
+<h3>Header Fields</h3>
+
+<table>
+  <tr>
+    <th>Field</th>
+    <th>Syntax</th>
+    <th>Example</th>
+    <th>Required</th>
+  </tr>
+  <tr>
+    <td>Target</td>
+    <td><code>target: &lt;mode&gt;</code></td>
+    <td><code>target: enemy</code></td>
+    <td>Yes</td>
+  </tr>
+  <tr>
+    <td>Range</td>
+    <td><code>range: &lt;float&gt;</code></td>
+    <td><code>range: 5.0</code></td>
+    <td>No (default 0)</td>
+  </tr>
+  <tr>
+    <td>Cooldown</td>
+    <td><code>cooldown: &lt;duration&gt;</code></td>
+    <td><code>cooldown: 10s</code></td>
+    <td>Yes</td>
+  </tr>
+  <tr>
+    <td>Cast time</td>
+    <td><code>cast: &lt;duration&gt;</code></td>
+    <td><code>cast: 300ms</code></td>
+    <td>No (default 0)</td>
+  </tr>
+  <tr>
+    <td>AI hint</td>
+    <td><code>hint: &lt;category&gt;</code></td>
+    <td><code>hint: damage</code></td>
+    <td>No</td>
+  </tr>
+  <tr>
+    <td>Resource cost</td>
+    <td><code>cost: &lt;int&gt;</code></td>
+    <td><code>cost: 50</code></td>
+    <td>No</td>
+  </tr>
+</table>
+
+<p><strong>Target modes:</strong> <code>enemy</code>, <code>ally</code>, <code>self</code>, <code>self_aoe</code>, <code>ground</code>, <code>direction</code>, <code>vector</code>, <code>global</code></p>
+
+<p><strong>Duration formats:</strong> <code>5s</code> (seconds), <code>300ms</code> (milliseconds), <code>1.5s</code></p>
+
+<p><strong>AI hint values:</strong> <code>damage</code>, <code>crowd_control</code>, <code>defense</code>, <code>utility</code>, <code>heal</code></p>
+
+<p>Multiple header fields can appear on the same line, separated by commas:</p>
+
+<pre><code>target: enemy, range: 5.0
+cooldown: 5s, cast: 300ms</code></pre>
+
+<h3>Effect Statements</h3>
+
+<p>Effects appear in the body of an ability or inside delivery blocks:</p>
+
+<h4>Damage</h4>
+<pre><code>damage &lt;amount&gt;
+damage &lt;amount&gt; [TAG: value, ...]
+damage &lt;amount&gt; in &lt;area&gt;
+damage &lt;amount&gt; in &lt;area&gt; when &lt;condition&gt;</code></pre>
+
+<h4>Healing</h4>
+<pre><code>heal &lt;amount&gt;
+heal &lt;amount&gt; in &lt;area&gt;</code></pre>
+
+<h4>Shields</h4>
+<pre><code>shield &lt;amount&gt; for &lt;duration&gt;</code></pre>
+
+<h4>Crowd Control</h4>
+<pre><code>stun &lt;duration&gt;
+stun &lt;duration&gt; [CROWD_CONTROL: value]
+root &lt;duration&gt;
+silence &lt;duration&gt;
+fear &lt;duration&gt;
+polymorph &lt;duration&gt;
+slow &lt;factor&gt; for &lt;duration&gt;</code></pre>
+
+<h4>Knockback &amp; Movement</h4>
+<pre><code>knockback &lt;distance&gt;
+pull &lt;distance&gt;
+dash &lt;distance&gt;
+dash to_target</code></pre>
+
+<h4>Buffs &amp; Debuffs</h4>
+<pre><code>buff &lt;stat&gt; &lt;factor&gt; for &lt;duration&gt;
+buff &lt;stat&gt; &lt;factor&gt; for &lt;duration&gt; in &lt;area&gt;
+damage_modify &lt;factor&gt; for &lt;duration&gt;</code></pre>
+
+<p><strong>Buff stats:</strong> <code>damage_output</code>, <code>move_speed</code>, <code>attack_speed</code>, <code>cooldown_reduction</code>, <code>armor</code>, <code>magic_resist</code></p>
+
+<h4>Damage Over Time / Heal Over Time</h4>
+<pre><code>dot &lt;amount&gt; for &lt;duration&gt;
+hot &lt;amount&gt; for &lt;duration&gt;</code></pre>
+
+<h4>Summon</h4>
+<pre><code>summon &lt;template_name&gt;</code></pre>
+
+<h4>Utility</h4>
+<pre><code>revive
+rewind &lt;duration&gt;
+steal_buff
+cleanse</code></pre>
+
+<h3>Area Shapes</h3>
+
+<pre><code>in circle(&lt;radius&gt;)
+in line(&lt;width&gt;)
+in cone(&lt;angle&gt;)
+in ring(&lt;inner_radius&gt;, &lt;outer_radius&gt;)
+in rectangle(&lt;width&gt;, &lt;height&gt;)</code></pre>
+
+<h3>Conditions</h3>
+
+<pre><code>when hit_count_above(&lt;n&gt;)
+when target_is_stunned
+when target_hp_below(&lt;percent&gt;%)
+when caster_hp_below(&lt;percent&gt;%)
+when target_has_buff
+when target_has_debuff</code></pre>
+
+<h3>Tags</h3>
+
+<p>Tags follow an effect, enclosed in square brackets:</p>
+
+<pre><code>damage 55 [FIRE: 60, MAGIC: 40]
+stun 2s [CROWD_CONTROL: 80, ICE: 60]</code></pre>
+
+<h3>Delivery Blocks</h3>
+
+<pre><code>deliver &lt;type&gt; { &lt;params&gt; } {
+    on_hit { &lt;effects&gt; }
+    on_arrival { &lt;effects&gt; }
+    on_tick { &lt;effects&gt; }
+}</code></pre>
+
+<h4>Projectile</h4>
+<pre><code>deliver projectile { speed: 8.0, width: 0.3 } {
+    on_hit { damage 55 }
+}</code></pre>
+
+<h4>Chain</h4>
+<pre><code>deliver chain { bounces: 3, range: 3.0, falloff: 0.8 } {
+    on_hit { damage 35 }
+}</code></pre>
+
+<h4>Zone</h4>
+<pre><code>deliver zone { duration: 4s, tick: 1s } {
+    on_hit { damage 15 in circle(3.0) }
+}</code></pre>
+
+<h4>Tether</h4>
+<pre><code>deliver tether { duration: 3s, range: 6.0 } {
+    on_tick { damage 10 }
+}</code></pre>
+
+<h4>Boomerang</h4>
+<pre><code>deliver boomerang { speed: 6.0, return_speed: 8.0 } {
+    on_hit { damage 30 }
+}</code></pre>
+
+<h4>Wall</h4>
+<pre><code>deliver wall { segments: 5, spacing: 1.0 } {
+    on_hit { stun 1s }
+}</code></pre>
+
+<h3>Passive Declaration</h3>
+
+<pre><code>passive &lt;Name&gt; {
+    trigger: &lt;trigger_type&gt;
+    cooldown: &lt;duration&gt;
+
+    &lt;effects&gt;
+}</code></pre>
+
+<h4>Trigger Types</h4>
+<pre><code>trigger: on_damage_taken
+trigger: on_hp_below(50%)
+trigger: on_ability_used
+trigger: on_kill
+trigger: on_death
+trigger: on_ally_death</code></pre>
+
+<h3>Comments</h3>
+
+<p>Line comments start with <code>//</code>:</p>
+
+<pre><code>// Mage abilities
+ability Fireball {
+    // Main damage spell
+    target: enemy, range: 5.0
+    ...
+}</code></pre>
+
+<h3>Advanced Features</h3>
+
+<h4>Charges</h4>
+<pre><code>ability Mushroom {
+    target: ground, range: 4.0
+    cooldown: 1s, cast: 200ms
+    charges: 3, recharge: 20s
+    ...
+}</code></pre>
+
+<h4>Toggle</h4>
+<pre><code>ability PoisonTrail {
+    target: self
+    toggle: true
+    toggle_cost: 10/s
+    ...
+}</code></pre>
+
+<h4>Recast</h4>
+<pre><code>ability SpiritRush {
+    target: direction
+    cooldown: 12s, cast: 0ms
+    recast: 2, window: 10s
+    ...
+}</code></pre>
+
+<h4>Unstoppable</h4>
+<pre><code>ability UnstoppableForce {
+    target: enemy, range: 5.0
+    cooldown: 15s, cast: 500ms
+    unstoppable: true
+    ...
+}</code></pre>
+
+<!-- ================================================================== -->
+<!-- SECTION 3: Parser Pipeline -->
+<!-- ================================================================== -->
+
+<hr>
+
+<h2>Parser Pipeline</h2>
+
+<p>The ability DSL parser is built with <a href="https://docs.rs/winnow">winnow</a>, a parser combinator library in the tradition of nom but with better error messages and a simpler API.</p>
+
+<h3>Pipeline Stages</h3>
+
+<pre><code>Input text &rarr; Parser &rarr; AST &rarr; Lower &rarr; AbilityDef / PassiveDef</code></pre>
+
+<h3>Interactive Pipeline Visualization</h3>
+
+<p>Click each stage or use the controls to step through the transformation pipeline with sample data.</p>
+
+<div class="pipeline-viz" id="pipelineViz">
+  <div class="pipeline-stages">
+    <div class="pipeline-stage" id="ps-source">
+      <div class="pipeline-stage-box active">
+        <div class="pipeline-stage-label">Source Text</div>
+        <div class="pipeline-stage-content" id="ps-source-content"></div>
+      </div>
+    </div>
+    <div class="pipeline-arrow">&rarr;</div>
+    <div class="pipeline-stage" id="ps-tokens">
+      <div class="pipeline-stage-box">
+        <div class="pipeline-stage-label">Parser Tokens</div>
+        <div class="pipeline-stage-content" id="ps-tokens-content"></div>
+      </div>
+    </div>
+    <div class="pipeline-arrow">&rarr;</div>
+    <div class="pipeline-stage" id="ps-ast">
+      <div class="pipeline-stage-box">
+        <div class="pipeline-stage-label">AST Nodes</div>
+        <div class="pipeline-stage-content" id="ps-ast-content"></div>
+      </div>
+    </div>
+    <div class="pipeline-arrow">&rarr;</div>
+    <div class="pipeline-stage" id="ps-def">
+      <div class="pipeline-stage-box">
+        <div class="pipeline-stage-label">AbilityDef</div>
+        <div class="pipeline-stage-content" id="ps-def-content"></div>
+      </div>
+    </div>
+  </div>
+  <div class="pipeline-controls">
+    <button class="pipeline-btn active" id="pipeBtn0" onclick="setPipelineStage(0)">Source</button>
+    <button class="pipeline-btn" id="pipeBtn1" onclick="setPipelineStage(1)">Parse</button>
+    <button class="pipeline-btn" id="pipeBtn2" onclick="setPipelineStage(2)">AST</button>
+    <button class="pipeline-btn" id="pipeBtn3" onclick="setPipelineStage(3)">Lower</button>
+    <button class="pipeline-btn" id="pipeBtnAuto" onclick="toggleAutoPlay()">Auto</button>
+  </div>
+  <div class="pipeline-status" id="pipelineStatus">Stage 1 of 4 &mdash; Raw DSL source text</div>
+</div>
+
+<h3>Stage 1: Parsing (<code>parser.rs</code>)</h3>
+
+<p>The top-level entry point:</p>
+
+<pre><code>pub fn parse_ability_file(input: &amp;mut &amp;str)
+    -&gt; PResult&lt;Vec&lt;AstItem&gt;&gt;</code></pre>
+
+<p>This parses an entire <code>.ability</code> file into a list of <code>AstItem</code> nodes &mdash; either ability or passive declarations. The parser handles:</p>
+
+<ul>
+  <li>Whitespace and comment stripping</li>
+  <li>Header field parsing (target, range, cooldown, etc.)</li>
+  <li>Effect statement parsing (delegated to <code>parse_effects.rs</code>)</li>
+  <li>Delivery block parsing (delegated to <code>parse_delivery.rs</code>)</li>
+  <li>Tag parsing (<code>[KEY: value, ...]</code>)</li>
+  <li>Condition parsing (<code>when ...</code>)</li>
+  <li>Area parsing (<code>in circle(...)</code>)</li>
+</ul>
+
+<h3>Stage 2: AST (<code>ast.rs</code>)</h3>
+
+<p>The abstract syntax tree preserves the structure of the source without interpreting it:</p>
+
+<pre><code>pub enum AstItem {
+    Ability(AstAbility),
+    Passive(AstPassive),
+}
+
+pub struct AstAbility {
+    pub name: String,
+    pub header: Vec&lt;AstHeaderField&gt;,
+    pub body: Vec&lt;AstStatement&gt;,
+}</code></pre>
+
+<p>The AST is a faithful representation of the source text structure, not the final semantic model. For example, <code>cooldown: 5s</code> is stored as a header field with the string <code>&quot;5s&quot;</code>, not yet converted to <code>5000u32</code>.</p>
+
+<h3>Stage 3: Lowering (<code>lower.rs</code>)</h3>
+
+<p>The lowering pass converts the AST into the runtime types:</p>
+
+<pre><code>pub fn lower_file(file: &amp;[AstItem])
+    -&gt; Result&lt;(Vec&lt;AbilityDef&gt;, Vec&lt;PassiveDef&gt;), String&gt;</code></pre>
+
+<p>Lowering performs:</p>
+
+<ul>
+  <li>Duration string parsing (<code>&quot;5s&quot;</code> &rarr; <code>5000u32</code>, <code>&quot;300ms&quot;</code> &rarr; <code>300u32</code>)</li>
+  <li>Target mode string mapping (<code>&quot;enemy&quot;</code> &rarr; <code>AbilityTargeting::TargetEnemy</code>)</li>
+  <li>Effect type resolution (delegated to <code>lower_effects.rs</code>)</li>
+  <li>Delivery type resolution (delegated to <code>lower_delivery.rs</code>)</li>
+  <li>Validation (e.g., range is required for <code>TargetEnemy</code>)</li>
+</ul>
+
+<h3>Stage 4: Emission (<code>emit.rs</code>)</h3>
+
+<p>The emitter goes the other direction &mdash; from <code>AbilityDef</code> back to DSL text:</p>
+
+<pre><code>pub fn emit_ability(def: &amp;AbilityDef) -&gt; String</code></pre>
+
+<p>This enables:</p>
+
+<ul>
+  <li><strong>Round-trip testing</strong> &mdash; parse &rarr; lower &rarr; emit &rarr; parse again, verify equality</li>
+  <li><strong>Code generation</strong> &mdash; programmatically create abilities and emit them as DSL</li>
+  <li><strong>Pretty-printing</strong> &mdash; normalize formatting of hand-written ability files</li>
+</ul>
+
+<h3>Module Inventory</h3>
+
+<pre><code>src/ai/effects/dsl/
+&#x251C;&#x2500;&#x2500; parser.rs          # Top-level parser (ability/passive declarations)
+&#x251C;&#x2500;&#x2500; ast.rs             # AST types
+&#x251C;&#x2500;&#x2500; lower.rs           # AST &rarr; AbilityDef/PassiveDef
+&#x251C;&#x2500;&#x2500; lower_effects.rs   # Effect lowering
+&#x251C;&#x2500;&#x2500; lower_delivery.rs  # Delivery lowering
+&#x251C;&#x2500;&#x2500; emit.rs            # AbilityDef &rarr; DSL text
+&#x251C;&#x2500;&#x2500; emit_effects.rs    # Effect emission
+&#x251C;&#x2500;&#x2500; emit_helpers.rs    # Emission utilities
+&#x251C;&#x2500;&#x2500; parse_effects.rs   # Effect statement parser
+&#x251C;&#x2500;&#x2500; parse_delivery.rs  # Delivery block parser
+&#x251C;&#x2500;&#x2500; error.rs           # Error types with line/col info
+&#x251C;&#x2500;&#x2500; tests.rs           # Unit tests
+&#x251C;&#x2500;&#x2500; tests_roundtrip.rs # Round-trip (parse &rarr; emit &rarr; parse) tests
+&#x251C;&#x2500;&#x2500; fuzz.rs            # Proptest fuzz targets
+&#x251C;&#x2500;&#x2500; fuzz_generators.rs # Random ability generators
+&#x2514;&#x2500;&#x2500; fuzz_roundtrip.rs  # Fuzz round-trip testing</code></pre>
+
+<h3>Error Reporting</h3>
+
+<p>Parse errors include line, column, and context:</p>
+
+<pre><code>pub struct DslError {
+    pub message: String,
+    pub line: usize,
+    pub col: usize,
+    pub context: Option&lt;String&gt;,
+}</code></pre>
+
+<p>The <code>error.rs</code> module provides <code>offset_to_line_col()</code> to convert byte offsets (from winnow) into human-readable line/column numbers, plus <code>extract_line()</code> to show the offending source line.</p>
+
+<h3>Property-Based Testing</h3>
+
+<p>The parser is tested with <a href="https://docs.rs/proptest">proptest</a> for fuzzing:</p>
+
+<ul>
+  <li><code>fuzz_generators.rs</code> generates random valid <code>AbilityDef</code> structs</li>
+  <li><code>fuzz.rs</code> emits them to DSL text and verifies parsing succeeds</li>
+  <li><code>fuzz_roundtrip.rs</code> verifies that parse &rarr; emit &rarr; parse is idempotent</li>
+</ul>
+
+<p>This catches edge cases that hand-written tests miss: unusual tag combinations, extreme numeric values, deeply nested delivery blocks, etc.</p>
+
+<pre><code># Run fuzz tests
+cargo test fuzz -- --test-threads=1</code></pre>
+
+<!-- ================================================================== -->
+<!-- SECTION 4: Writing New Abilities -->
+<!-- ================================================================== -->
+
+<hr>
+
+<h2>Writing New Abilities</h2>
+
+<p>This section walks through creating a new hero with abilities from scratch.</p>
+
+<h3>Step 1: Create the Stats File</h3>
+
+<p>Create <code>assets/hero_templates/pyromancer.toml</code>:</p>
+
+<pre><code>[hero]
+name = "Pyromancer"
+role = "mage"
+
+[stats]
+hp = 450
+armor = 15
+magic_resist = 20
+attack_damage = 30
+attack_range = 4.0
+attack_cooldown_ms = 1200
+move_speed_per_sec = 3.0
+resource = 100
+max_resource = 100
+resource_regen_per_sec = 5.0</code></pre>
+
+<h3>Step 2: Create the Ability File</h3>
+
+<p>Create <code>assets/hero_templates/pyromancer.ability</code>:</p>
+
+<pre><code>// Pyromancer &mdash; fire mage specializing in AoE and DoT
+
+ability Ignite {
+    target: enemy, range: 5.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 30 [FIRE: 50]
+    dot 40 for 4s [FIRE: 40]
+}
+
+ability Inferno {
+    target: ground, range: 6.0
+    cooldown: 14s, cast: 600ms
+    hint: damage
+
+    deliver zone { duration: 5s, tick: 1s } {
+        on_hit {
+            damage 20 in circle(2.5) [FIRE: 60]
+        }
+    }
+}
+
+ability FlameBarrier {
+    target: self
+    cooldown: 18s, cast: 300ms
+    hint: defense
+
+    shield 40 for 4s
+    damage 15 in circle(2.0) [FIRE: 40]
+}
+
+ability Pyroblast {
+    target: enemy, range: 5.0
+    cooldown: 20s, cast: 1200ms
+    hint: damage
+    cost: 40
+
+    deliver projectile { speed: 6.0, width: 0.4 } {
+        on_hit {
+            damage 120 [FIRE: 80]
+        }
+        on_arrival {
+            damage 40 in circle(2.0) [FIRE: 60]
+        }
+    }
+}
+
+passive Cauterize {
+    trigger: on_ability_used
+    cooldown: 10s
+
+    hot 20 for 3s
+}</code></pre>
+
+<h3>Step 3: Verify Parsing</h3>
+
+<p>Run the parser on your new file to check for syntax errors:</p>
+
+<pre><code>cargo test -- --nocapture parse_abilities 2&gt;&amp;1 | head -50</code></pre>
+
+<p>Or use the scenario runner to load and simulate the hero:</p>
+
+<pre><code>cargo run --bin xtask -- scenario run scenarios/basic_4v4.toml</code></pre>
+
+<h3>Design Guidelines</h3>
+
+<h4>Ability Count</h4>
+
+<p>Each hero should have <strong>4&ndash;8 active abilities</strong> and <strong>1&ndash;3 passives</strong>. More than 8 actives overwhelms the AI evaluator; fewer than 4 feels flat.</p>
+
+<h4>Cooldown Ranges</h4>
+
+<ul>
+  <li><strong>Short</strong> (3&ndash;6s): bread-and-butter abilities, spammable</li>
+  <li><strong>Medium</strong> (8&ndash;15s): impactful abilities with tactical timing</li>
+  <li><strong>Long</strong> (18&ndash;30s+): ultimates, fight-defining cooldowns</li>
+</ul>
+
+<h4>Cast Times</h4>
+
+<ul>
+  <li><strong>0ms</strong>: instant (dashes, emergency buttons)</li>
+  <li><strong>200&ndash;400ms</strong>: fast (most abilities)</li>
+  <li><strong>500&ndash;800ms</strong>: deliberate (powerful effects)</li>
+  <li><strong>1000ms+</strong>: telegraphed (very powerful, interruptible)</li>
+</ul>
+
+<h4>AI Hints Matter</h4>
+
+<p>The <code>hint</code> field directly affects how the squad AI prioritizes abilities:</p>
+
+<ul>
+  <li><code>damage</code> hints are used when pursuing kills</li>
+  <li><code>crowd_control</code> hints are used against high-priority targets</li>
+  <li><code>heal</code> hints are used when allies are injured</li>
+  <li><code>defense</code> hints are used when under heavy pressure</li>
+  <li><code>utility</code> hints are used for mobility and positioning</li>
+</ul>
+
+<h4>Tag Values</h4>
+
+<p>Tag values range from 0 to 100:</p>
+
+<ul>
+  <li><strong>0&ndash;30</strong>: Minor effect</li>
+  <li><strong>40&ndash;60</strong>: Standard effect</li>
+  <li><strong>70&ndash;80</strong>: Strong effect</li>
+  <li><strong>90&ndash;100</strong>: Extreme (use sparingly)</li>
+</ul>
+
+<h4>Balance Through Tradeoffs</h4>
+
+<p>Good abilities have clear tradeoffs:</p>
+
+<ul>
+  <li>High damage &rarr; long cooldown or cast time</li>
+  <li>AoE &rarr; lower per-target damage</li>
+  <li>Crowd control &rarr; no damage</li>
+  <li>Mobility &rarr; no offensive effect</li>
+  <li>Instant cast &rarr; short range or weaker effect</li>
+</ul>
+
+<p class="footer-note">The ability DSL is defined in <code>src/ai/effects/dsl/</code> &mdash; 17 source files covering parsing, AST, lowering, emission, and property-based fuzz testing. Hero templates live in <code>assets/hero_templates/</code> as paired <code>.toml</code> (stats) and <code>.ability</code> (abilities) files.</p>
+
+</div>
+
+<script>
+// =====================================================================
+// Interactive Syntax Highlighter
+// =====================================================================
+(function() {
+  var demo = document.getElementById('syntaxDemo');
+  var tooltip = document.getElementById('dimTooltip');
+
+  demo.addEventListener('mouseover', function(e) {
+    var el = e.target.closest('[data-dim]');
+    if (el) {
+      tooltip.textContent = el.getAttribute('data-dim');
+      tooltip.classList.add('visible');
+    }
+  });
+
+  demo.addEventListener('mouseout', function(e) {
+    var el = e.target.closest('[data-dim]');
+    if (el) {
+      tooltip.classList.remove('visible');
+    }
+  });
+})();
+
+// =====================================================================
+// Parser Pipeline Visualization
+// =====================================================================
+var pipelineData = {
+  source: 'ability Fireball {\n    target: enemy, range: 5.0\n    cooldown: 5s, cast: 500ms\n    hint: damage\n\n    deliver projectile {\n      speed: 8.0, width: 0.3\n    } {\n      on_hit {\n        damage 55 [FIRE: 60]\n      }\n    }\n}',
+  tokens: '"ability"  IDENT("Fireball")\n"{"  \n  "target"  ":"  "enemy"\n  ","  "range"  ":"  NUM(5.0)\n  "cooldown" ":" DUR("5s")\n  ","  "cast"  ":"  DUR("500ms")\n  "hint"  ":"  "damage"\n  "deliver"  "projectile"\n  "{"  "speed" ":" NUM(8.0)\n       "width" ":" NUM(0.3) "}"\n  "{"  "on_hit" "{"\n    "damage" NUM(55)\n    "[" "FIRE" ":" NUM(60) "]"\n  "}" "}" "}"\n"}"',
+  ast: 'AstItem::Ability(\n  AstAbility {\n    name: "Fireball",\n    header: [\n      Target("enemy"),\n      Range("5.0"),\n      Cooldown("5s"),\n      Cast("500ms"),\n      Hint("damage"),\n    ],\n    body: [\n      Deliver {\n        kind: "projectile",\n        params: {speed:"8.0",\n                 width:"0.3"},\n        events: [\n          OnHit([\n            Effect("damage","55",\n              tags:[("FIRE","60")])\n          ])\n        ]\n      }\n    ]\n  }\n)',
+  def: 'AbilityDef {\n  name: "Fireball",\n  targeting: TargetEnemy,\n  range: 5.0,\n  cooldown_ms: 5000,\n  cast_time_ms: 500,\n  ai_hint: Damage,\n  delivery: Projectile {\n    speed: 8.0,\n    width: 0.3,\n  },\n  on_hit_effects: [\n    Effect::Damage {\n      amount: 55,\n      tags: {\n        FIRE: 60,\n      },\n    },\n  ],\n}'
+};
+
+var stageKeys = ['source', 'tokens', 'ast', 'def'];
+var stageLabels = [
+  'Stage 1 of 4 \u2014 Raw DSL source text',
+  'Stage 2 of 4 \u2014 Winnow parser tokenizes input',
+  'Stage 3 of 4 \u2014 Tokens assembled into AST nodes',
+  'Stage 4 of 4 \u2014 AST lowered to runtime AbilityDef'
+];
+
+var currentStage = 0;
+var autoInterval = null;
+
+// Populate initial content
+document.getElementById('ps-source-content').textContent = pipelineData.source;
+document.getElementById('ps-tokens-content').textContent = pipelineData.tokens;
+document.getElementById('ps-ast-content').textContent = pipelineData.ast;
+document.getElementById('ps-def-content').textContent = pipelineData.def;
+
+function setPipelineStage(n) {
+  currentStage = n;
+  var ids = ['ps-source', 'ps-tokens', 'ps-ast', 'ps-def'];
+  for (var i = 0; i < ids.length; i++) {
+    var box = document.getElementById(ids[i]).querySelector('.pipeline-stage-box');
+    if (i <= n) {
+      box.classList.add('active');
+    } else {
+      box.classList.remove('active');
+    }
+  }
+  for (var j = 0; j < 4; j++) {
+    var btn = document.getElementById('pipeBtn' + j);
+    btn.classList.toggle('active', j === n);
+  }
+  document.getElementById('pipelineStatus').textContent = stageLabels[n];
+}
+
+function toggleAutoPlay() {
+  var btn = document.getElementById('pipeBtnAuto');
+  if (autoInterval) {
+    clearInterval(autoInterval);
+    autoInterval = null;
+    btn.classList.remove('active');
+  } else {
+    btn.classList.add('active');
+    autoInterval = setInterval(function() {
+      currentStage = (currentStage + 1) % 4;
+      setPipelineStage(currentStage);
+    }, 1500);
+  }
+}
+
+// Clicking on stage boxes
+var stageEls = document.querySelectorAll('.pipeline-stage');
+for (var i = 0; i < stageEls.length; i++) {
+  (function(idx) {
+    stageEls[idx].addEventListener('click', function() {
+      setPipelineStage(idx);
+    });
+  })(i);
+}
+</script>
+</body>
+</html>
