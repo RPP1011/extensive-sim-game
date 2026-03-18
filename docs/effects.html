@@ -1,0 +1,1177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Effect System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --surface: #13161d;
+  --surface2: #1c2029;
+  --surface3: #252a36;
+  --border: #2a2f3e;
+  --border-bright: #3d4459;
+  --text: #b8c0cc;
+  --text-muted: #6b7280;
+  --heading: #e2e8f0;
+  --accent: #60a5fa;
+  --accent-dim: #2563eb;
+  --purple: #a78bfa;
+  --purple-dim: #7c3aed;
+  --green: #34d399;
+  --green-dim: #059669;
+  --red: #f87171;
+  --red-dim: #dc2626;
+  --orange: #fbbf24;
+  --orange-dim: #d97706;
+  --cyan: #22d3ee;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.78;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 4rem 2rem 8rem;
+}
+
+header {
+  margin-bottom: 3.5rem;
+  padding-bottom: 2.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.65;
+  max-width: 680px;
+}
+
+h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--heading);
+  margin-top: 4rem;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--purple);
+  margin-top: 2.5rem;
+  margin-bottom: 0.8rem;
+}
+
+p { margin-bottom: 1.1rem; }
+strong { color: var(--heading); font-weight: 600; }
+em { color: var(--text); }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+a:hover { border-bottom-color: var(--accent); }
+
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.2rem 1.5rem;
+  overflow-x: auto;
+  margin: 1.5rem 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.88em;
+}
+
+p code, li code, td code {
+  background: var(--surface2);
+  padding: 0.15em 0.45em;
+  border-radius: 4px;
+  font-size: 0.82em;
+  color: var(--accent);
+}
+
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+  font-family: 'DM Sans', sans-serif;
+}
+
+th {
+  background: var(--surface2);
+  color: var(--heading);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 2px solid var(--border-bright);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+td {
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+tr:hover td { background: var(--surface); }
+
+.callout {
+  background: var(--surface);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: 0 8px 8px 0;
+  padding: 1.1rem 1.4rem;
+  margin: 1.8rem 0;
+  font-size: 0.95rem;
+}
+
+.callout.bug { border-left-color: var(--red-dim); background: #18100f; }
+.callout.success { border-left-color: var(--green-dim); background: #0d1712; }
+.callout p:last-child { margin-bottom: 0; }
+
+ol, ul { margin: 0.8rem 0 1.2rem 1.6rem; }
+li { margin-bottom: 0.4rem; }
+
+hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
+
+.footer-note {
+  font-style: italic;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 2.5rem;
+  margin-top: 4rem;
+}
+
+@media (max-width: 720px) {
+  .article { padding: 2rem 1.25rem 4rem; }
+  h1 { font-size: 1.9rem; }
+}
+
+/* Interactive visualization styles */
+.viz-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.5rem;
+  margin: 2rem 0;
+  position: relative;
+}
+
+.viz-title {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 1rem;
+}
+
+/* Pentagon / Five Dimensions Explorer */
+#pentagon-viz {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#pentagon-svg {
+  cursor: pointer;
+}
+
+#pentagon-svg .dim-node {
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+#pentagon-svg .dim-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  fill: var(--heading);
+  text-anchor: middle;
+  pointer-events: none;
+  font-weight: 600;
+}
+
+#pentagon-svg .dim-sublabel {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 10px;
+  fill: var(--text-muted);
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+#dim-detail-panel {
+  background: var(--surface2);
+  border: 1px solid var(--border-bright);
+  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  margin-top: 1rem;
+  width: 100%;
+  max-width: 500px;
+  display: none;
+  font-size: 0.9rem;
+}
+
+#dim-detail-panel.active {
+  display: block;
+}
+
+#dim-detail-panel h4 {
+  font-family: 'DM Sans', sans-serif;
+  color: var(--heading);
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+#dim-detail-panel .dim-tag {
+  display: inline-block;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.2em 0.5em;
+  margin: 0.15em;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8em;
+  color: var(--accent);
+}
+
+/* Pipeline Flow */
+#pipeline-viz {
+  overflow-x: auto;
+}
+
+#pipeline-svg .stage-box {
+  cursor: pointer;
+}
+
+#pipeline-svg .stage-rect {
+  rx: 8;
+  ry: 8;
+  transition: fill 0.2s, stroke 0.2s;
+}
+
+#pipeline-svg .stage-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  fill: var(--heading);
+  text-anchor: middle;
+  pointer-events: none;
+  font-weight: 600;
+}
+
+#pipeline-svg .stage-sublabel {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  fill: var(--text-muted);
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+#pipeline-svg .arrow-line {
+  stroke: var(--border-bright);
+  stroke-width: 2;
+  marker-end: url(#arrowhead);
+}
+
+#pipeline-svg .pulse-dot {
+  fill: var(--accent);
+  opacity: 0;
+}
+
+#stage-detail-panel {
+  background: var(--surface2);
+  border: 1px solid var(--border-bright);
+  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  margin-top: 1rem;
+  display: none;
+  font-size: 0.9rem;
+}
+
+#stage-detail-panel.active {
+  display: block;
+}
+
+#stage-detail-panel h4 {
+  font-family: 'DM Sans', sans-serif;
+  color: var(--heading);
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+@keyframes pulseDot {
+  0% { opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { opacity: 0; }
+}
+</style>
+</head>
+<body>
+<div class="article">
+
+<p><a href="index.html" style="font-family: 'DM Sans', sans-serif; font-size: 0.9rem;">&larr; Back</a></p>
+
+<header>
+  <h1>The Effect System</h1>
+  <p class="subtitle">A composable, data-driven vocabulary for defining what abilities do &mdash; damage, healing, shields, crowd control, summons, terrain, and more &mdash; all as plain data dispatched via pattern matching.</p>
+</header>
+
+<!-- ============================================================ -->
+<!-- SECTION 1: Overview -->
+<!-- ============================================================ -->
+
+<h2>Overview</h2>
+
+<p>The effect system is the heart of what makes each hero unique. It defines a composable vocabulary of <strong>what abilities do</strong> &mdash; damage, healing, shields, crowd control, summons, terrain manipulation, and more &mdash; all as plain data.</p>
+
+<h3>Design Principles</h3>
+
+<ol>
+  <li><strong>Effects are data, not code.</strong> Every effect is a struct with fields, not a closure or trait object. This makes effects serializable, inspectable, and diffable.</li>
+  <li><strong>Dispatch via pattern matching.</strong> Effect application uses <code>match</code> on enum variants, not dynamic dispatch. The compiler can verify exhaustiveness.</li>
+  <li><strong>Composability over inheritance.</strong> A single ability can combine multiple effects, areas, delivery mechanisms, and conditions. There is no class hierarchy of ability types.</li>
+</ol>
+
+<h3>Module Layout</h3>
+
+<pre><code>src/ai/effects/
+&#x251C;&#x2500;&#x2500; defs.rs           # AbilityDef, PassiveDef, AbilitySlot
+&#x251C;&#x2500;&#x2500; types.rs          # Effect, Area, Delivery, Tags, ConditionalEffect
+&#x251C;&#x2500;&#x2500; effect_enum.rs    # Master enum of all effect types
+&#x251C;&#x2500;&#x2500; manifest.rs       # Ability registry and lookup
+&#x2514;&#x2500;&#x2500; dsl/              # Parser (see Ability DSL chapter)</code></pre>
+
+<h3>The Pipeline</h3>
+
+<p>From definition to execution:</p>
+
+<pre><code>  .ability file          Parser              Lowering           Runtime
+&#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;    &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;    &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;    &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;
+&#x2502; ability X {  &#x2502;    &#x2502;              &#x2502;    &#x2502;              &#x2502;    &#x2502;              &#x2502;
+&#x2502;   damage 50  &#x2502;&#x2500;&#x2500;&#x2500;&#x25B6;&#x2502;  AST nodes   &#x2502;&#x2500;&#x2500;&#x2500;&#x25B6;&#x2502;  AbilityDef  &#x2502;&#x2500;&#x2500;&#x2500;&#x25B6;&#x2502; apply_effect &#x2502;
+&#x2502;   stun 2s    &#x2502;    &#x2502;              &#x2502;    &#x2502;  { effects,  &#x2502;    &#x2502; (pattern     &#x2502;
+&#x2502; }            &#x2502;    &#x2502;              &#x2502;    &#x2502;    delivery } &#x2502;    &#x2502;  matching)   &#x2502;
+&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;    &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;    &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;    &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;</code></pre>
+
+<ol>
+  <li><code>.ability</code> DSL files are parsed into an AST by the winnow-based parser</li>
+  <li>The AST is lowered into <code>AbilityDef</code> / <code>PassiveDef</code> structs</li>
+  <li>At runtime, <code>apply_effect.rs</code> dispatches each effect via pattern matching</li>
+</ol>
+
+<h3>AbilityDef</h3>
+
+<p>The central type:</p>
+
+<pre><code>pub struct AbilityDef {
+    pub name: String,
+    pub targeting: AbilityTargeting,
+    pub range: f32,
+    pub cooldown_ms: u32,
+    pub cast_time_ms: u32,
+    pub ai_hint: String,
+    pub effects: Vec&lt;ConditionalEffect&gt;,
+    pub delivery: Option&lt;Delivery&gt;,
+    pub resource_cost: i32,
+    // ... advanced fields (charges, toggle, recast, forms)
+}</code></pre>
+
+<h3>Targeting Modes</h3>
+
+<pre><code>pub enum AbilityTargeting {
+    TargetEnemy,      // click an enemy
+    TargetAlly,       // click an ally
+    SelfCast,         // cast on self
+    SelfAoe,          // centered on caster
+    GroundTarget,     // click a position
+    Direction,        // aim in a direction
+    Vector,           // click-drag (start + direction)
+    Global,           // hits all enemies on map
+}</code></pre>
+
+<h3>PassiveDef</h3>
+
+<p>Passive abilities trigger automatically:</p>
+
+<pre><code>pub struct PassiveDef {
+    pub name: String,
+    pub trigger: Trigger,
+    pub cooldown_ms: u32,
+    pub effects: Vec&lt;ConditionalEffect&gt;,
+    pub range: f32,
+}</code></pre>
+
+<p>Passives fire when their trigger condition is met (taking damage, HP dropping below a threshold, using an ability, etc.) and respect their cooldown.</p>
+
+<hr>
+
+<!-- ============================================================ -->
+<!-- SECTION 2: Ability Definitions -->
+<!-- ============================================================ -->
+
+<h2>Ability Definitions</h2>
+
+<p>This section covers the full anatomy of an <code>AbilityDef</code> &mdash; all the fields and systems that make abilities work at runtime.</p>
+
+<h3>Runtime Slots</h3>
+
+<p>Abilities live on units as <code>AbilitySlot</code> wrappers:</p>
+
+<pre><code>pub struct AbilitySlot {
+    pub def: AbilityDef,
+    pub cooldown_remaining_ms: u32,
+    pub base_def: Option&lt;Box&lt;AbilityDef&gt;&gt;,  // for morphed abilities
+    pub charges: u32,
+    pub charge_timer_ms: u32,
+    pub is_toggled: bool,
+    pub recast_remaining: u32,
+    pub recast_timer_ms: u32,
+}</code></pre>
+
+<p>The slot tracks mutable runtime state (cooldowns, charges, toggle state) while the <code>def</code> holds the immutable definition.</p>
+
+<h3>Cooldown System</h3>
+
+<p>Standard cooldowns: when an ability is used, <code>cooldown_remaining_ms</code> is set to <code>def.cooldown_ms</code> and decremented each tick.</p>
+
+<h3>Charge System</h3>
+
+<p>Some abilities (like Teemo&rsquo;s mushrooms) use an ammo system:</p>
+
+<ul>
+  <li><code>max_charges</code> &mdash; maximum stored charges</li>
+  <li><code>charge_recharge_ms</code> &mdash; time per charge regeneration</li>
+  <li>The ability is usable as long as <code>charges &gt; 0</code></li>
+</ul>
+
+<h3>Toggle System</h3>
+
+<p>Toggle abilities (like Singed&rsquo;s Poison Trail) flip on/off:</p>
+
+<ul>
+  <li><code>is_toggle = true</code> &mdash; marks this ability as a toggle</li>
+  <li><code>toggle_cost_per_sec</code> &mdash; resource drain while active</li>
+  <li>No cooldown; the toggle is the &ldquo;cooldown&rdquo;</li>
+</ul>
+
+<h3>Recast System</h3>
+
+<p>Abilities with multiple phases (like Ahri&rsquo;s R):</p>
+
+<ul>
+  <li><code>recast_count</code> &mdash; number of additional casts</li>
+  <li><code>recast_window_ms</code> &mdash; time to recast before cooldown starts</li>
+  <li><code>recast_effects</code> &mdash; different effects for each recast</li>
+</ul>
+
+<h3>Form Swap</h3>
+
+<p>Abilities that change based on form (like Nidalee, Jayce):</p>
+
+<ul>
+  <li><code>form</code> &mdash; which form group this ability belongs to</li>
+  <li><code>swap_form</code> &mdash; casting this ability swaps all abilities in this form group</li>
+  <li><code>morph_into</code> &mdash; the alternate definition to swap to</li>
+</ul>
+
+<h3>AI Hints</h3>
+
+<p>The <code>ai_hint</code> field tells the AI what category of ability this is:</p>
+
+<ul>
+  <li><code>"damage"</code> &mdash; primarily deals damage</li>
+  <li><code>"crowd_control"</code> &mdash; primarily applies CC</li>
+  <li><code>"defense"</code> &mdash; shields, damage reduction</li>
+  <li><code>"utility"</code> &mdash; dashes, buffs, vision</li>
+  <li><code>"heal"</code> &mdash; restores HP</li>
+</ul>
+
+<p>The squad AI uses hints to prioritize abilities without parsing the full effect list.</p>
+
+<h3>Passive Slots</h3>
+
+<pre><code>pub struct PassiveSlot {
+    pub def: PassiveDef,
+    pub cooldown_remaining_ms: u32,
+}</code></pre>
+
+<p>Simpler than ability slots &mdash; passives just track their cooldown.</p>
+
+<h3>Loading from Files</h3>
+
+<p>Hero templates in <code>assets/hero_templates/</code> define abilities in <code>.ability</code> files. These are parsed at load time by the DSL parser and converted to <code>AbilityDef</code>/<code>PassiveDef</code> structs, which are then attached to units as <code>AbilitySlot</code>/<code>PassiveSlot</code>.</p>
+
+<hr>
+
+<!-- ============================================================ -->
+<!-- SECTION 3: The Five Dimensions -->
+<!-- ============================================================ -->
+
+<h2>The Five Dimensions</h2>
+
+<p>Every ability in the game can be described along five composable dimensions. These dimensions are orthogonal &mdash; any combination is valid, creating an exponentially large design space from a small set of primitives.</p>
+
+<!-- Interactive Pentagon Visualization -->
+<div class="viz-container">
+  <div class="viz-title">Five Dimensions Explorer &mdash; click a dimension to explore its variants</div>
+  <div id="pentagon-viz">
+    <svg id="pentagon-svg" width="460" height="400" viewBox="0 0 460 400"></svg>
+    <div id="dim-detail-panel"></div>
+  </div>
+</div>
+
+<h3>1. Effect &mdash; <em>What</em> Happens</h3>
+
+<p>The core of what an ability does to the world:</p>
+
+<table>
+  <tr><th>Effect</th><th>Description</th></tr>
+  <tr><td><code>damage N</code></td><td>Deal N damage</td></tr>
+  <tr><td><code>heal N</code></td><td>Restore N HP</td></tr>
+  <tr><td><code>shield N for Ts</code></td><td>Grant N temporary HP for T seconds</td></tr>
+  <tr><td><code>stun Ts</code></td><td>Prevent actions for T seconds</td></tr>
+  <tr><td><code>root Ts</code></td><td>Prevent movement for T seconds</td></tr>
+  <tr><td><code>slow F for Ts</code></td><td>Reduce move speed by factor F</td></tr>
+  <tr><td><code>silence Ts</code></td><td>Prevent ability usage</td></tr>
+  <tr><td><code>fear Ts</code></td><td>Force random movement</td></tr>
+  <tr><td><code>polymorph Ts</code></td><td>Transform (prevents all actions)</td></tr>
+  <tr><td><code>knockback D</code></td><td>Push away D units</td></tr>
+  <tr><td><code>pull D</code></td><td>Pull toward caster D units</td></tr>
+  <tr><td><code>dash D</code></td><td>Move caster D units</td></tr>
+  <tr><td><code>buff STAT F for Ts</code></td><td>Modify a stat by factor F</td></tr>
+  <tr><td><code>damage_modify F for Ts</code></td><td>Increase damage taken</td></tr>
+  <tr><td><code>dot N for Ts</code></td><td>Damage over time</td></tr>
+  <tr><td><code>hot N for Ts</code></td><td>Heal over time</td></tr>
+  <tr><td><code>summon NAME</code></td><td>Create a unit</td></tr>
+  <tr><td><code>revive</code></td><td>Resurrect a dead ally</td></tr>
+  <tr><td><code>rewind Ts</code></td><td>Restore position/HP from T seconds ago</td></tr>
+  <tr><td><code>steal_buff</code></td><td>Transfer a buff from target</td></tr>
+  <tr><td><code>cleanse</code></td><td>Remove negative status effects</td></tr>
+</table>
+
+<h3>2. Area &mdash; <em>Where</em> It Hits</h3>
+
+<p>Defines the spatial shape of the effect:</p>
+
+<table>
+  <tr><th>Area</th><th>Description</th></tr>
+  <tr><td>(none)</td><td>Single target</td></tr>
+  <tr><td><code>circle(R)</code></td><td>Circle with radius R around target</td></tr>
+  <tr><td><code>line(W)</code></td><td>Line from caster to target with width W</td></tr>
+  <tr><td><code>cone(A)</code></td><td>Cone in front of caster with angle A</td></tr>
+  <tr><td><code>ring(Rmin, Rmax)</code></td><td>Ring between two radii</td></tr>
+  <tr><td><code>rectangle(W, H)</code></td><td>Rectangle ahead of caster</td></tr>
+</table>
+
+<p>Example: <code>damage 50 in circle(3.0)</code> deals 50 damage to all enemies in a 3-unit radius circle.</p>
+
+<h3>3. Delivery &mdash; <em>How</em> It Gets There</h3>
+
+<p>Defines how the effect reaches its target:</p>
+
+<table>
+  <tr><th>Delivery</th><th>Description</th></tr>
+  <tr><td>(none)</td><td>Instant &mdash; effect applies immediately</td></tr>
+  <tr><td><code>projectile { speed, width }</code></td><td>Travels in a line, hits first target</td></tr>
+  <tr><td><code>chain { bounces, range, falloff }</code></td><td>Bounces between targets</td></tr>
+  <tr><td><code>zone { duration, tick }</code></td><td>Persists on the ground, ticking periodically</td></tr>
+  <tr><td><code>tether { duration, range }</code></td><td>Beam connecting caster to target</td></tr>
+  <tr><td><code>boomerang { speed, return_speed }</code></td><td>Travels out and returns</td></tr>
+  <tr><td><code>wall { segments, spacing }</code></td><td>Creates a wall of effects</td></tr>
+  <tr><td><code>aura { range }</code></td><td>Continuous effect around caster</td></tr>
+</table>
+
+<p>Each delivery wraps effects in <code>on_hit</code>, <code>on_arrival</code>, or <code>on_tick</code> blocks that fire at different points in the delivery lifecycle.</p>
+
+<h3>4. Trigger &mdash; <em>When</em> It Fires</h3>
+
+<p>For passives and conditional effects:</p>
+
+<table>
+  <tr><th>Trigger</th><th>Description</th></tr>
+  <tr><td><code>on_damage_taken</code></td><td>When this unit takes damage</td></tr>
+  <tr><td><code>on_hp_below(N%)</code></td><td>When HP drops below N%</td></tr>
+  <tr><td><code>on_ability_used</code></td><td>After using any ability</td></tr>
+  <tr><td><code>on_kill</code></td><td>After killing an enemy</td></tr>
+  <tr><td><code>on_death</code></td><td>When this unit dies</td></tr>
+  <tr><td><code>on_ally_death</code></td><td>When a teammate dies</td></tr>
+  <tr><td><code>when hit_count_above(N)</code></td><td>When ability hits N+ targets</td></tr>
+  <tr><td><code>when target_is_stunned</code></td><td>When target has a stun effect</td></tr>
+  <tr><td><code>when target_hp_below(N%)</code></td><td>When target HP is below N%</td></tr>
+</table>
+
+<h3>5. Tags &mdash; <em>Power Levels</em></h3>
+
+<p>Tags are key-value pairs that describe the nature and intensity of effects:</p>
+
+<pre><code>[FIRE: 60, CROWD_CONTROL: 80]</code></pre>
+
+<p>Tags serve multiple purposes:</p>
+
+<ul>
+  <li><strong>Elemental typing</strong> &mdash; <code>FIRE</code>, <code>ICE</code>, <code>LIGHTNING</code>, <code>MAGIC</code>, <code>PHYSICAL</code></li>
+  <li><strong>Effect intensity</strong> &mdash; a <code>CROWD_CONTROL: 80</code> stun is harder to resist than <code>50</code></li>
+  <li><strong>AI reasoning</strong> &mdash; the neural evaluator uses tags to estimate ability value</li>
+  <li><strong>Resistance matching</strong> &mdash; units with <code>resistance_tags</code> reduce matching effects</li>
+</ul>
+
+<h3>Composition Example</h3>
+
+<p>Here&rsquo;s a real ability showing all five dimensions:</p>
+
+<pre><code>ability Fireball {
+    target: enemy, range: 5.0        # targeting
+    cooldown: 5s, cast: 500ms        # timing
+
+    deliver projectile { speed: 8.0, width: 0.3 } {    # 3. Delivery
+        on_hit {
+            damage 55 [FIRE: 60]                         # 1. Effect + 5. Tags
+        }
+        on_arrival {
+            damage 15 in circle(2.0)                     # 1. Effect + 2. Area
+        }
+    }
+}</code></pre>
+
+<p>This Fireball:</p>
+
+<ul>
+  <li><strong>Effect:</strong> Deals 55 single-target damage on hit, plus 15 AoE on arrival</li>
+  <li><strong>Area:</strong> The on-arrival damage hits a circle of radius 2.0</li>
+  <li><strong>Delivery:</strong> Travels as a projectile at speed 8.0</li>
+  <li><strong>Tags:</strong> FIRE: 60 (strong fire element)</li>
+  <li><strong>Trigger:</strong> None (it&rsquo;s an active ability, not a passive)</li>
+</ul>
+
+<hr>
+
+<!-- ============================================================ -->
+<!-- SECTION 4: Effect Dispatch & Resolution -->
+<!-- ============================================================ -->
+
+<h2>Effect Dispatch &amp; Resolution</h2>
+
+<p>When an ability fires, its effects must be applied to the simulation state. This section covers how effects flow from definition to state mutation.</p>
+
+<!-- Interactive Pipeline Flow Visualization -->
+<div class="viz-container">
+  <div class="viz-title">Effect Pipeline Flow &mdash; click a stage to see details</div>
+  <div id="pipeline-viz">
+    <svg id="pipeline-svg" width="860" height="180" viewBox="0 0 860 180">
+      <defs>
+        <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#3d4459"/>
+        </marker>
+      </defs>
+    </svg>
+    <div id="stage-detail-panel"></div>
+  </div>
+</div>
+
+<h3>The Resolution Pipeline</h3>
+
+<pre><code>UnitIntent::UseAbility
+       &#x2502;
+       &#x25BC;
+   resolve_cast()          # validate targeting, start cast timer
+       &#x2502;
+       &#x25BC;
+   (cast_time elapses)     # unit is in CastState for N ticks
+       &#x2502;
+       &#x25BC;
+   complete_cast()         # cast finishes, effects fire
+       &#x2502;
+       &#x25BC;
+   apply_delivery()        # if delivery exists, create projectile/zone/etc
+       &#x2502;                   # otherwise, apply effects immediately
+       &#x25BC;
+   apply_effects()         # iterate ConditionalEffect list
+       &#x2502;
+       &#x25BC;
+   apply_effect()          # pattern match on each Effect variant
+       &#x2502;
+       &#x25BC;
+   SimState mutation       # HP changes, status applied, etc.
+   + SimEvent emission     # events logged</code></pre>
+
+<h3>Conditional Effects</h3>
+
+<p>Effects are wrapped in <code>ConditionalEffect</code>:</p>
+
+<pre><code>pub struct ConditionalEffect {
+    pub effect: Effect,
+    pub condition: Option&lt;Condition&gt;,
+    pub area: Option&lt;Area&gt;,
+    pub tags: Tags,
+}</code></pre>
+
+<p>Before applying an effect, its condition (if any) is checked against the current state. This is how abilities have conditional bonuses:</p>
+
+<pre><code>damage 60 [PHYSICAL: 50]
+damage 30 when target_is_stunned [PHYSICAL: 50]</code></pre>
+
+<p>The second line only fires if the target is stunned.</p>
+
+<h3>Effect Application</h3>
+
+<p><code>apply_effect.rs</code> and <code>apply_effect_ext.rs</code> contain the main dispatch:</p>
+
+<pre><code>fn apply_effect(
+    state: &amp;mut SimState,
+    source_idx: usize,
+    target_idx: usize,
+    effect: &amp;Effect,
+    tags: &amp;Tags,
+    events: &amp;mut Vec&lt;SimEvent&gt;,
+) {
+    match effect {
+        Effect::Damage(amount) =&gt; { /* reduce HP, emit DamageDealt */ }
+        Effect::Heal(amount) =&gt; { /* increase HP, emit HealApplied */ }
+        Effect::Shield { amount, duration_ms } =&gt; { /* add shield */ }
+        Effect::Stun(duration_ms) =&gt; { /* apply stun status */ }
+        Effect::Dash(distance) =&gt; { /* move caster */ }
+        Effect::Summon(template) =&gt; { /* create new unit */ }
+        // ... 30+ variants
+    }
+}</code></pre>
+
+<p>The pattern matching is exhaustive &mdash; the compiler ensures every effect type is handled. Adding a new effect variant requires adding a match arm, which prevents silent omissions.</p>
+
+<h3>Area Resolution</h3>
+
+<p>When an effect has an <code>Area</code>, the engine finds all valid targets within the shape:</p>
+
+<pre><code>fn targets_in_area(
+    state: &amp;SimState,
+    origin: SimVec2,
+    area: &amp;Area,
+    source_team: Team,
+    friendly: bool,
+) -&gt; Vec&lt;usize&gt;</code></pre>
+
+<p>The <code>friendly</code> flag determines whether the area selects allies or enemies. Most damage effects select enemies; most healing effects select allies.</p>
+
+<h3>Delivery Resolution</h3>
+
+<p>Deliveries add a time delay or movement phase between cast completion and effect application:</p>
+
+<p><strong>Projectile</strong> &mdash; Creates a <code>Projectile</code> entry in <code>SimState.projectiles</code>. Each tick, projectiles advance by <code>speed * dt</code>. On collision (distance &lt; <code>width</code>), <code>on_hit</code> effects fire. On reaching the target position, <code>on_arrival</code> effects fire.</p>
+
+<p><strong>Zone</strong> &mdash; Creates a <code>Zone</code> entry in <code>SimState.zones</code>. Each tick interval, <code>on_tick</code> effects are applied to all units inside the zone area.</p>
+
+<p><strong>Chain</strong> &mdash; Immediately applies <code>on_hit</code> effects to the primary target, then bounces to the nearest valid target within <code>range</code>, reducing damage by <code>falloff</code> per bounce.</p>
+
+<p><strong>Tether</strong> &mdash; Creates a <code>Tether</code> linking source and target. Effects apply each tick while the tether holds. If the target moves beyond <code>range</code>, the tether breaks.</p>
+
+<h3>Damage Calculation</h3>
+
+<p>The damage formula in <code>damage.rs</code>:</p>
+
+<pre><code>effective_damage = base_damage
+    * (1.0 - armor_reduction)     // armor / (100 + armor)
+    * (1.0 - resistance_reduction) // from matching resistance tags
+    * (1.0 + damage_modify)       // damage amplification debuffs
+    * (1.0 - cover_bonus)         // terrain cover</code></pre>
+
+<p>Damage is applied to shield first, then HP:</p>
+
+<pre><code>if target.shield_hp &gt; 0 {
+    let absorbed = min(effective_damage, target.shield_hp);
+    target.shield_hp -= absorbed;
+    remaining = effective_damage - absorbed;
+    emit ShieldAbsorbed event
+}
+target.hp -= remaining;</code></pre>
+
+<p class="footer-note">The effect system is plain data all the way down &mdash; no closures, no trait objects, no inheritance hierarchies. Every ability is a composition of five orthogonal dimensions, and every effect is dispatched through exhaustive pattern matching that the compiler can verify. This makes the system easy to serialize, diff, and reason about, both for humans and for the neural AI evaluators that learn to use abilities in combat.</p>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- JavaScript: Five Dimensions Pentagon Explorer -->
+<!-- ============================================================ -->
+<script>
+(function() {
+  const dimensions = [
+    {
+      name: "Effect",
+      subtitle: "What happens",
+      color: "#f87171",
+      variants: ["damage N", "heal N", "shield N for Ts", "stun Ts", "root Ts", "slow F for Ts", "silence Ts", "fear Ts", "polymorph Ts", "knockback D", "pull D", "dash D", "buff STAT F", "dot N for Ts", "hot N for Ts", "summon NAME", "revive", "rewind Ts", "cleanse"]
+    },
+    {
+      name: "Area",
+      subtitle: "Where it hits",
+      color: "#34d399",
+      variants: ["(single target)", "circle(R)", "line(W)", "cone(A)", "ring(Rmin, Rmax)", "rectangle(W, H)"]
+    },
+    {
+      name: "Delivery",
+      subtitle: "How it gets there",
+      color: "#60a5fa",
+      variants: ["(instant)", "projectile { speed, width }", "chain { bounces, range, falloff }", "zone { duration, tick }", "tether { duration, range }", "boomerang { speed, return_speed }", "wall { segments, spacing }", "aura { range }"]
+    },
+    {
+      name: "Trigger",
+      subtitle: "When it fires",
+      color: "#fbbf24",
+      variants: ["on_damage_taken", "on_hp_below(N%)", "on_ability_used", "on_kill", "on_death", "on_ally_death", "when hit_count_above(N)", "when target_is_stunned", "when target_hp_below(N%)"]
+    },
+    {
+      name: "Tags",
+      subtitle: "Power levels",
+      color: "#a78bfa",
+      variants: ["FIRE", "ICE", "LIGHTNING", "MAGIC", "PHYSICAL", "CROWD_CONTROL: N", "intensity values 0\u2013100"]
+    }
+  ];
+
+  const svg = document.getElementById("pentagon-svg");
+  const panel = document.getElementById("dim-detail-panel");
+  const cx = 230, cy = 185, radius = 130;
+  let selectedIdx = -1;
+
+  // Draw connecting lines (pentagon shape)
+  const points = dimensions.map(function(_, i) {
+    var angle = (i * 2 * Math.PI / 5) - Math.PI / 2;
+    return { x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) };
+  });
+
+  // Pentagon fill
+  var polyPoints = points.map(function(p) { return p.x + "," + p.y; }).join(" ");
+  var poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+  poly.setAttribute("points", polyPoints);
+  poly.setAttribute("fill", "rgba(96,165,250,0.06)");
+  poly.setAttribute("stroke", "#2a2f3e");
+  poly.setAttribute("stroke-width", "1.5");
+  svg.appendChild(poly);
+
+  // Draw lines from center
+  points.forEach(function(p) {
+    var line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", cx);
+    line.setAttribute("y1", cy);
+    line.setAttribute("x2", p.x);
+    line.setAttribute("y2", p.y);
+    line.setAttribute("stroke", "#1c2029");
+    line.setAttribute("stroke-width", "1");
+    svg.appendChild(line);
+  });
+
+  // Draw nodes
+  dimensions.forEach(function(dim, i) {
+    var p = points[i];
+    var g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("class", "dim-node");
+    g.setAttribute("data-idx", i);
+
+    // Outer ring
+    var outerCircle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    outerCircle.setAttribute("cx", p.x);
+    outerCircle.setAttribute("cy", p.y);
+    outerCircle.setAttribute("r", "36");
+    outerCircle.setAttribute("fill", "rgba(0,0,0,0.5)");
+    outerCircle.setAttribute("stroke", dim.color);
+    outerCircle.setAttribute("stroke-width", "2");
+    outerCircle.id = "dim-ring-" + i;
+    g.appendChild(outerCircle);
+
+    // Inner circle
+    var innerCircle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    innerCircle.setAttribute("cx", p.x);
+    innerCircle.setAttribute("cy", p.y);
+    innerCircle.setAttribute("r", "30");
+    innerCircle.setAttribute("fill", "#13161d");
+    innerCircle.setAttribute("stroke", dim.color);
+    innerCircle.setAttribute("stroke-width", "1.5");
+    innerCircle.setAttribute("stroke-opacity", "0.5");
+    innerCircle.id = "dim-inner-" + i;
+    g.appendChild(innerCircle);
+
+    // Label
+    var label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("x", p.x);
+    label.setAttribute("y", p.y - 3);
+    label.setAttribute("class", "dim-label");
+    label.setAttribute("fill", dim.color);
+    label.textContent = dim.name;
+    g.appendChild(label);
+
+    // Sublabel
+    var sublabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    sublabel.setAttribute("x", p.x);
+    sublabel.setAttribute("y", p.y + 13);
+    sublabel.setAttribute("class", "dim-sublabel");
+    sublabel.textContent = dim.subtitle;
+    g.appendChild(sublabel);
+
+    g.addEventListener("click", function() {
+      selectDimension(i);
+    });
+
+    g.addEventListener("mouseenter", function() {
+      outerCircle.setAttribute("stroke-width", "3");
+      innerCircle.setAttribute("fill", "#1c2029");
+    });
+
+    g.addEventListener("mouseleave", function() {
+      outerCircle.setAttribute("stroke-width", selectedIdx === i ? "3" : "2");
+      innerCircle.setAttribute("fill", selectedIdx === i ? "#1c2029" : "#13161d");
+    });
+
+    svg.appendChild(g);
+  });
+
+  // Center label
+  var centerText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  centerText.setAttribute("x", cx);
+  centerText.setAttribute("y", cy + 5);
+  centerText.setAttribute("text-anchor", "middle");
+  centerText.setAttribute("font-family", "'DM Sans', sans-serif");
+  centerText.setAttribute("font-size", "11");
+  centerText.setAttribute("fill", "#6b7280");
+  centerText.textContent = "5 Dimensions";
+  svg.appendChild(centerText);
+
+  function selectDimension(idx) {
+    // Toggle off if already selected
+    if (selectedIdx === idx) {
+      selectedIdx = -1;
+      panel.className = "";
+      panel.innerHTML = "";
+      // Reset all rings
+      dimensions.forEach(function(_, j) {
+        document.getElementById("dim-ring-" + j).setAttribute("stroke-width", "2");
+        document.getElementById("dim-inner-" + j).setAttribute("fill", "#13161d");
+      });
+      return;
+    }
+
+    selectedIdx = idx;
+    var dim = dimensions[idx];
+
+    // Update ring highlights
+    dimensions.forEach(function(_, j) {
+      document.getElementById("dim-ring-" + j).setAttribute("stroke-width", j === idx ? "3" : "2");
+      document.getElementById("dim-inner-" + j).setAttribute("fill", j === idx ? "#1c2029" : "#13161d");
+    });
+
+    // Build detail panel
+    var html = '<h4 style="color:' + dim.color + ';">' + dim.name + ' \u2014 ' + dim.subtitle + '</h4>';
+    html += '<p style="margin-bottom:0.6rem; color:#b8c0cc; font-size:0.85rem;">' + dim.variants.length + ' variants:</p>';
+    dim.variants.forEach(function(v) {
+      html += '<span class="dim-tag">' + v + '</span>';
+    });
+    panel.innerHTML = html;
+    panel.className = "active";
+  }
+})();
+</script>
+
+<!-- ============================================================ -->
+<!-- JavaScript: Effect Pipeline Flow Animation -->
+<!-- ============================================================ -->
+<script>
+(function() {
+  var stages = [
+    {
+      label: ".ability file",
+      sublabel: "DSL source",
+      detail: "Abilities are defined in <code>.ability</code> DSL files using a human-readable syntax. Example:<br><code>ability Fireball { damage 55 [FIRE: 60] }</code><br>These files live in <code>assets/hero_templates/</code>."
+    },
+    {
+      label: "Parser",
+      sublabel: "winnow",
+      detail: "A winnow-based parser in <code>src/ai/effects/dsl/parser.rs</code> tokenizes and parses the DSL into an abstract syntax tree (AST). The parser handles all five dimensions: effects, areas, delivery blocks, triggers, and tags."
+    },
+    {
+      label: "AST",
+      sublabel: "syntax tree",
+      detail: "The intermediate AST representation captures the full structure of the ability definition as typed nodes. This is a lossless representation of the source file before any semantic lowering."
+    },
+    {
+      label: "lower.rs",
+      sublabel: "AST \u2192 AbilityDef",
+      detail: "The lowering pass in <code>lower.rs</code> converts AST nodes into <code>AbilityDef</code> and <code>PassiveDef</code> structs. It resolves targeting modes, validates ranges, connects delivery blocks to their effects, and attaches tags."
+    },
+    {
+      label: "AbilityDef",
+      sublabel: "data struct",
+      detail: "The central runtime type. Contains <code>effects: Vec&lt;ConditionalEffect&gt;</code>, <code>delivery: Option&lt;Delivery&gt;</code>, targeting, cooldowns, AI hints, and all advanced fields (charges, toggle, recast, forms)."
+    },
+    {
+      label: "apply_effect",
+      sublabel: "dispatch",
+      detail: "At runtime, <code>apply_effect.rs</code> dispatches each effect via exhaustive pattern matching on the <code>Effect</code> enum. The compiler guarantees every variant is handled. Effects mutate <code>SimState</code> and emit <code>SimEvent</code> logs."
+    }
+  ];
+
+  var svg = document.getElementById("pipeline-svg");
+  var panel = document.getElementById("stage-detail-panel");
+  var boxW = 110, boxH = 60, gap = 30, startX = 25, startY = 50;
+  var selectedIdx = -1;
+
+  // Draw stages and arrows
+  stages.forEach(function(stage, i) {
+    var x = startX + i * (boxW + gap);
+    var y = startY;
+
+    // Arrow before this stage (except first)
+    if (i > 0) {
+      var ax1 = x - gap + 4;
+      var ax2 = x - 4;
+      var ay = y + boxH / 2;
+      var line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", ax1);
+      line.setAttribute("y1", ay);
+      line.setAttribute("x2", ax2);
+      line.setAttribute("y2", ay);
+      line.setAttribute("class", "arrow-line");
+      svg.appendChild(line);
+
+      // Animated pulse dot
+      var dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      dot.setAttribute("cx", ax1);
+      dot.setAttribute("cy", ay);
+      dot.setAttribute("r", "3");
+      dot.setAttribute("class", "pulse-dot");
+      dot.style.animation = "pulseDot 3s " + (i * 0.5) + "s infinite";
+
+      var animMotion = document.createElementNS("http://www.w3.org/2000/svg", "animateMotion");
+      animMotion.setAttribute("dur", "3s");
+      animMotion.setAttribute("begin", (i * 0.5) + "s");
+      animMotion.setAttribute("repeatCount", "indefinite");
+      animMotion.setAttribute("path", "M0,0 L" + (ax2 - ax1) + ",0");
+      dot.appendChild(animMotion);
+      svg.appendChild(dot);
+    }
+
+    var g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("class", "stage-box");
+    g.setAttribute("data-idx", i);
+
+    var colors = ["#f87171", "#fbbf24", "#a78bfa", "#34d399", "#60a5fa", "#22d3ee"];
+    var color = colors[i];
+
+    var rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("x", x);
+    rect.setAttribute("y", y);
+    rect.setAttribute("width", boxW);
+    rect.setAttribute("height", boxH);
+    rect.setAttribute("class", "stage-rect");
+    rect.setAttribute("fill", "#13161d");
+    rect.setAttribute("stroke", color);
+    rect.setAttribute("stroke-width", "1.5");
+    rect.setAttribute("stroke-opacity", "0.6");
+    rect.id = "stage-rect-" + i;
+    g.appendChild(rect);
+
+    var label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("x", x + boxW / 2);
+    label.setAttribute("y", y + boxH / 2 - 4);
+    label.setAttribute("class", "stage-label");
+    label.setAttribute("fill", color);
+    label.textContent = stage.label;
+    g.appendChild(label);
+
+    var sublabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    sublabel.setAttribute("x", x + boxW / 2);
+    sublabel.setAttribute("y", y + boxH / 2 + 14);
+    sublabel.setAttribute("class", "stage-sublabel");
+    sublabel.textContent = stage.sublabel;
+    g.appendChild(sublabel);
+
+    // Step number
+    var stepLabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    stepLabel.setAttribute("x", x + boxW / 2);
+    stepLabel.setAttribute("y", y - 10);
+    stepLabel.setAttribute("text-anchor", "middle");
+    stepLabel.setAttribute("font-family", "'DM Sans', sans-serif");
+    stepLabel.setAttribute("font-size", "10");
+    stepLabel.setAttribute("fill", "#6b7280");
+    stepLabel.textContent = "Step " + (i + 1);
+    g.appendChild(stepLabel);
+
+    g.addEventListener("click", function() {
+      selectStage(i);
+    });
+
+    g.addEventListener("mouseenter", function() {
+      rect.setAttribute("fill", "#1c2029");
+      rect.setAttribute("stroke-opacity", "1");
+      rect.setAttribute("stroke-width", "2");
+    });
+
+    g.addEventListener("mouseleave", function() {
+      rect.setAttribute("fill", selectedIdx === i ? "#1c2029" : "#13161d");
+      rect.setAttribute("stroke-opacity", selectedIdx === i ? "1" : "0.6");
+      rect.setAttribute("stroke-width", selectedIdx === i ? "2" : "1.5");
+    });
+
+    svg.appendChild(g);
+  });
+
+  function selectStage(idx) {
+    if (selectedIdx === idx) {
+      selectedIdx = -1;
+      panel.className = "";
+      panel.innerHTML = "";
+      stages.forEach(function(_, j) {
+        var r = document.getElementById("stage-rect-" + j);
+        r.setAttribute("fill", "#13161d");
+        r.setAttribute("stroke-opacity", "0.6");
+        r.setAttribute("stroke-width", "1.5");
+      });
+      return;
+    }
+
+    selectedIdx = idx;
+    var stage = stages[idx];
+
+    stages.forEach(function(_, j) {
+      var r = document.getElementById("stage-rect-" + j);
+      r.setAttribute("fill", j === idx ? "#1c2029" : "#13161d");
+      r.setAttribute("stroke-opacity", j === idx ? "1" : "0.6");
+      r.setAttribute("stroke-width", j === idx ? "2" : "1.5");
+    });
+
+    panel.innerHTML = '<h4>' + stage.label + '</h4><p style="margin-bottom:0; color:#b8c0cc; font-size:0.88rem;">' + stage.detail + '</p>';
+    panel.className = "active";
+  }
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Architecture &amp; Module Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --surface: #13161d;
+  --surface2: #1c2029;
+  --surface3: #252a36;
+  --border: #2a2f3e;
+  --border-bright: #3d4459;
+  --text: #b8c0cc;
+  --text-muted: #6b7280;
+  --heading: #e2e8f0;
+  --accent: #60a5fa;
+  --accent-dim: #2563eb;
+  --purple: #a78bfa;
+  --purple-dim: #7c3aed;
+  --green: #34d399;
+  --green-dim: #059669;
+  --red: #f87171;
+  --red-dim: #dc2626;
+  --orange: #fbbf24;
+  --orange-dim: #d97706;
+  --cyan: #22d3ee;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.78;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 4rem 2rem 8rem;
+}
+
+header {
+  margin-bottom: 3.5rem;
+  padding-bottom: 2.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.65;
+  max-width: 680px;
+}
+
+h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--heading);
+  margin-top: 4rem;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--purple);
+  margin-top: 2.5rem;
+  margin-bottom: 0.8rem;
+}
+
+p { margin-bottom: 1.1rem; }
+strong { color: var(--heading); font-weight: 600; }
+em { color: var(--text); }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+a:hover { border-bottom-color: var(--accent); }
+
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.2rem 1.5rem;
+  overflow-x: auto;
+  margin: 1.5rem 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.88em;
+}
+
+p code, li code, td code {
+  background: var(--surface2);
+  padding: 0.15em 0.45em;
+  border-radius: 4px;
+  font-size: 0.82em;
+  color: var(--accent);
+}
+
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+  font-family: 'DM Sans', sans-serif;
+}
+
+th {
+  background: var(--surface2);
+  color: var(--heading);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 2px solid var(--border-bright);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+td {
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+tr:hover td { background: var(--surface); }
+
+.callout {
+  background: var(--surface);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: 0 8px 8px 0;
+  padding: 1.1rem 1.4rem;
+  margin: 1.8rem 0;
+  font-size: 0.95rem;
+}
+
+.callout.bug { border-left-color: var(--red-dim); background: #18100f; }
+.callout.success { border-left-color: var(--green-dim); background: #0d1712; }
+.callout p:last-child { margin-bottom: 0; }
+
+ol, ul { margin: 0.8rem 0 1.2rem 1.6rem; }
+li { margin-bottom: 0.4rem; }
+
+hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
+
+.footer-note {
+  font-style: italic;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 2.5rem;
+  margin-top: 4rem;
+}
+
+@media (max-width: 720px) {
+  .article { padding: 2rem 1.25rem 4rem; }
+  h1 { font-size: 1.9rem; }
+}
+
+/* Interactive diagram styles */
+.diagram-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin: 1.8rem 0;
+  overflow: hidden;
+}
+
+.diagram-container svg {
+  display: block;
+  margin: 0 auto;
+}
+
+.diagram-tooltip {
+  position: absolute;
+  background: var(--surface3);
+  border: 1px solid var(--border-bright);
+  border-radius: 6px;
+  padding: 0.7rem 1rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.82rem;
+  color: var(--text);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+  max-width: 300px;
+  z-index: 100;
+  line-height: 1.5;
+}
+
+.diagram-tooltip strong {
+  color: var(--heading);
+  display: block;
+  margin-bottom: 0.3rem;
+}
+
+.diagram-tooltip .tt-detail {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+</style>
+</head>
+<body>
+<div class="article">
+
+<p><a href="index.html" style="font-family: 'DM Sans', sans-serif; font-size: 0.9rem;">&larr; Back</a></p>
+
+<header>
+  <h1>Architecture &amp; Module Map</h1>
+  <p class="subtitle">A guided tour of the three-layer simulation, workspace layout, and module hierarchy that powers a deterministic tactical RPG with neural AI.</p>
+</header>
+
+<!-- ============================================================ -->
+<!-- INTRODUCTION                                                  -->
+<!-- ============================================================ -->
+
+<h2>Introduction</h2>
+
+<p>This project is a tactical squad-based RPG built in Rust with the <a href="https://bevyengine.org/">Bevy</a> engine. It sits at the intersection of game development, AI research, and machine learning, using a custom deterministic combat simulation as its core.</p>
+
+<p>The game has three layers of gameplay:</p>
+
+<ol>
+  <li><strong>Campaign</strong> &mdash; a turn-based overworld with faction diplomacy, flashpoints, and narrative progression</li>
+  <li><strong>Mission</strong> &mdash; multi-room procedurally generated dungeons with objectives and enemy encounters</li>
+  <li><strong>Combat</strong> &mdash; a 100ms fixed-tick deterministic simulation where squads of heroes fight enemies using a rich, data-driven ability system</li>
+</ol>
+
+<p>The combat layer is where the most interesting engineering lives. It powers:</p>
+
+<ul>
+  <li>A <strong>composable ability DSL</strong> that defines hundreds of unique hero abilities</li>
+  <li>A <strong>layered AI decision pipeline</strong> from squad-level personality down to neural ability evaluation</li>
+  <li>A <strong>machine learning training pipeline</strong> that teaches agents to play through self-play, behavior cloning, and reinforcement learning</li>
+</ul>
+
+<!-- ============================================================ -->
+<!-- ARCHITECTURE OVERVIEW                                         -->
+<!-- ============================================================ -->
+
+<h2>Architecture Overview</h2>
+
+<p>This project is a tactical RPG built on three core principles:</p>
+
+<ol>
+  <li><strong>Determinism</strong> &mdash; identical inputs always produce identical outputs, enabling reproducible AI training and replay verification</li>
+  <li><strong>Data-driven design</strong> &mdash; abilities, behaviors, and hero definitions live in external files, not hardcoded logic</li>
+  <li><strong>Layered AI</strong> &mdash; decision-making flows through composable layers, from squad personality down to neural network evaluation</li>
+</ol>
+
+<h3>High-Level Architecture</h3>
+
+<pre><code>&#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;
+&#x2502;                     Bevy App                        &#x2502;
+&#x2502;  &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;  &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;  &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;  &#x2502;
+&#x2502;  &#x2502; Hub UI   &#x2502;  &#x2502; Camera   &#x2502;  &#x2502;  Audio / VFX     &#x2502;  &#x2502;
+&#x2502;  &#x2502; (egui)   &#x2502;  &#x2502; (orbit)  &#x2502;  &#x2502;  (Bevy systems)  &#x2502;  &#x2502;
+&#x2502;  &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x252C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;  &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;  &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;  &#x2502;
+&#x2502;       &#x2502;                                             &#x2502;
+&#x2502;  &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x25BC;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;  &#x2502;
+&#x2502;  &#x2502;               Game Loop                       &#x2502;  &#x2502;
+&#x2502;  &#x2502;  Campaign &#x2500;&#x2500;&#x25B6; Mission &#x2500;&#x2500;&#x25B6; Combat              &#x2502;  &#x2502;
+&#x2502;  &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x252C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;  &#x2502;
+&#x2502;                       &#x2502;                             &#x2502;
+&#x2502;  &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x25BC;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;  &#x2502;
+&#x2502;  &#x2502;            AI Decision Pipeline               &#x2502;  &#x2502;
+&#x2502;  &#x2502;  Squad &#x2192; GOAP &#x2192; Behavior &#x2192; Neural Eval        &#x2502;  &#x2502;
+&#x2502;  &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x252C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;  &#x2502;
+&#x2502;                       &#x2502;                             &#x2502;
+&#x2502;  &#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x25BC;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;  &#x2502;
+&#x2502;  &#x2502;          Deterministic Simulation             &#x2502;  &#x2502;
+&#x2502;  &#x2502;  step(state, intents, dt_ms) &#x2192; (state, events)&#x2502;  &#x2502;
+&#x2502;  &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;  &#x2502;
+&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;</code></pre>
+
+<h3>Key Design Decisions</h3>
+
+<h3>Pure Functional Simulation Core</h3>
+
+<p>The simulation engine is designed as a pure function:</p>
+
+<pre><code>pub fn step(state: SimState, intents: &amp;[UnitIntent], dt_ms: u32)
+    -&gt; (SimState, Vec&lt;SimEvent&gt;)</code></pre>
+
+<p><code>SimState</code> is taken by value, ensuring the caller cannot hold stale references. The function returns a new state plus a log of events. This makes the simulation trivially reproducible and replay-friendly.</p>
+
+<h3>Effects as Plain Data</h3>
+
+<p>The entire ability system uses plain data structs dispatched via pattern matching. There are no closures, no trait objects, no dynamic dispatch in the effect pipeline. This keeps the effect system serializable, inspectable, and cache-friendly.</p>
+
+<h3>AI as Intent Generation</h3>
+
+<p>AI systems never directly mutate game state. Instead, they produce <code>Vec&lt;UnitIntent&gt;</code>, which the simulation engine consumes. This separation means:</p>
+
+<ul>
+  <li>AI can be swapped, layered, or disabled without touching simulation code</li>
+  <li>Training pipelines can inject their own intents</li>
+  <li>Replays can substitute recorded intents for live AI</li>
+</ul>
+
+<h3>Technology Stack</h3>
+
+<table>
+  <tr><th>Layer</th><th>Technology</th></tr>
+  <tr><td>Game engine</td><td>Bevy 0.13</td></tr>
+  <tr><td>UI</td><td>bevy_egui</td></tr>
+  <tr><td>Parsing</td><td>winnow 0.7</td></tr>
+  <tr><td>ML (Rust)</td><td>Burn 0.20, ndarray</td></tr>
+  <tr><td>ML (Python)</td><td>PyTorch, NumPy</td></tr>
+  <tr><td>Serialization</td><td>serde + serde_json, TOML</td></tr>
+  <tr><td>Parallelism</td><td>rayon, crossbeam</td></tr>
+  <tr><td>CLI</td><td>clap 4.5</td></tr>
+  <tr><td>Testing</td><td>proptest (property-based)</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- THREE-LAYER SIMULATION                                        -->
+<!-- ============================================================ -->
+
+<h2>Three-Layer Simulation</h2>
+
+<p>The game is structured as three nested simulation layers, each operating at a different timescale and abstraction level.</p>
+
+<!-- Interactive Three-Layer Diagram -->
+<div class="diagram-container" id="three-layer-diagram"></div>
+<div class="diagram-tooltip" id="layer-tooltip"></div>
+
+<h3>Layer 1: Campaign</h3>
+
+<p><strong>Timescale:</strong> Turn-based (one turn = one strategic action)</p>
+
+<p>The campaign layer manages the overworld &mdash; a map of regions controlled by factions. Each turn, the player chooses actions like moving between regions, initiating diplomacy, or responding to flashpoints (dynamic crisis events).</p>
+
+<p><strong>Key types:</strong></p>
+<ul>
+  <li><code>CampaignState</code> &mdash; the full state of a campaign in progress</li>
+  <li><code>HeroState</code> &mdash; a hero&rsquo;s persistent stats across missions</li>
+  <li><code>OverworldRegion</code> &mdash; a map node with faction ownership and connections</li>
+</ul>
+
+<p><strong>Module:</strong> <code>src/game_core/</code></p>
+
+<p>The campaign layer invokes the mission layer when the player enters a dungeon or engages in combat.</p>
+
+<h3>Layer 2: Mission</h3>
+
+<p><strong>Timescale:</strong> Room-by-room progression through a dungeon</p>
+
+<p>A mission is a sequence of procedurally generated rooms with objectives (eliminate all enemies, protect an NPC, survive for N rounds, etc.). The player&rsquo;s squad moves through rooms, encountering enemies and environmental hazards.</p>
+
+<p><strong>Key types:</strong></p>
+<ul>
+  <li><code>MissionState</code> &mdash; tracks room sequence, objectives, and squad HP/resources</li>
+  <li><code>RoomLayout</code> &mdash; procedurally generated floorplan with cover, elevation, obstacles</li>
+</ul>
+
+<p><strong>Module:</strong> <code>src/mission/</code></p>
+
+<p>Each room&rsquo;s combat is resolved by dropping into the combat layer.</p>
+
+<h3>Layer 3: Combat</h3>
+
+<p><strong>Timescale:</strong> 100ms fixed ticks</p>
+
+<p>This is the heart of the simulation. A deterministic, tick-based combat engine where units move, attack, cast abilities, and apply effects. The simulation runs until one side is eliminated or a time limit is reached.</p>
+
+<p><strong>Key types:</strong></p>
+<ul>
+  <li><code>SimState</code> &mdash; the complete state of a combat encounter</li>
+  <li><code>UnitState</code> &mdash; a single unit&rsquo;s position, HP, cooldowns, abilities, status effects</li>
+  <li><code>UnitIntent</code> &mdash; what a unit wants to do this tick</li>
+</ul>
+
+<p><strong>Module:</strong> <code>src/ai/core/</code></p>
+
+<p>The combat layer is where all AI training happens. Its deterministic nature means training runs are reproducible and debuggable.</p>
+
+<h3>Data Flow Between Layers</h3>
+
+<pre><code>Campaign                    Mission                     Combat
+&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;                    &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;                     &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;
+HeroState &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x25B6;  squad composition  &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x25B6;  UnitState[]
+faction context &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x25B6;  enemy templates   &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x25B6;  UnitState[]
+                           room layout       &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x25B6;  NavGrid
+                                                       &#x2502;
+                                              step() loop
+                                                       &#x2502;
+                           room outcome  &#x25C0;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500; SimState
+campaign consequence &#x25C0;&#x2500;&#x2500;&#x2500;&#x2500; mission outcome              events log</code></pre>
+
+<p>Heroes carry persistent state (XP, items, health) from the campaign into missions. Mission outcomes propagate back to the campaign as faction reputation changes, territory control shifts, and narrative progression.</p>
+
+<!-- ============================================================ -->
+<!-- WORKSPACE & CRATE MAP                                         -->
+<!-- ============================================================ -->
+
+<h2>Workspace &amp; Crate Map</h2>
+
+<p>The project is a Cargo workspace with two member crates.</p>
+
+<h3>Workspace Layout</h3>
+
+<pre><code># Cargo.toml (root)
+[workspace]
+members = [".", "crates/ability_operator"]</code></pre>
+
+<h3><code>bevy_game</code> (root crate)</h3>
+
+<p>The main crate containing the game binary, simulation engine, AI systems, and all game logic. It compiles as both a library (for binary targets to link against) and a binary (the main game application).</p>
+
+<p><strong>Feature flags:</strong></p>
+<ul>
+  <li><code>app</code> &mdash; application mode (enables Bevy rendering and UI)</li>
+  <li><code>stream-monitor</code> &mdash; enables the real-time monitoring system</li>
+  <li><code>burn-gpu</code> &mdash; GPU-accelerated ML via Burn + tch backend</li>
+  <li><code>burn-cpu</code> &mdash; CPU ML via Burn + ndarray backend</li>
+</ul>
+
+<h3><code>crates/ability_operator</code></h3>
+
+<p>A standalone crate for <strong>behavioral embeddings</strong> of abilities. It trains a small neural network to map ability definitions to embedding vectors, enabling the AI to reason about unfamiliar abilities by their behavioral similarity to known ones.</p>
+
+<pre><code>crates/ability_operator/
+&#x251C;&#x2500;&#x2500; Cargo.toml
+&#x2514;&#x2500;&#x2500; src/
+    &#x251C;&#x2500;&#x2500; lib.rs           # library root
+    &#x251C;&#x2500;&#x2500; bin/train.rs     # training binary
+    &#x251C;&#x2500;&#x2500; model.rs         # Burn model architecture
+    &#x251C;&#x2500;&#x2500; train.rs         # training loop
+    &#x251C;&#x2500;&#x2500; loss.rs          # loss functions
+    &#x251C;&#x2500;&#x2500; data.rs          # dataset handling
+    &#x2514;&#x2500;&#x2500; grokfast.rs      # grokking acceleration</code></pre>
+
+<h3>Binary Targets</h3>
+
+<table>
+  <tr><th>Binary</th><th>Source</th><th>Purpose</th></tr>
+  <tr><td><code>bevy_game</code></td><td><code>src/main.rs</code></td><td>Main game application</td></tr>
+  <tr><td><code>xtask</code></td><td><code>src/bin/xtask/main.rs</code></td><td>CLI task runner (scenarios, training, maps)</td></tr>
+  <tr><td><code>sim_bridge</code></td><td><code>src/bin/sim_bridge/main.rs</code></td><td>Headless simulator with NDJSON protocol</td></tr>
+  <tr><td><code>gen_scenarios</code></td><td><code>src/bin/gen_scenarios.rs</code></td><td>Batch scenario generation</td></tr>
+  <tr><td><code>room_preview</code></td><td><code>src/bin/room_preview.rs</code></td><td>Room visualization tool</td></tr>
+  <tr><td><code>train_operator</code></td><td><code>crates/ability_operator/src/bin/train.rs</code></td><td>Ability operator training</td></tr>
+</table>
+
+<h3>Key Dependencies</h3>
+
+<table>
+  <tr><th>Crate</th><th>Version</th><th>Purpose</th></tr>
+  <tr><td><code>bevy</code></td><td>0.13.2</td><td>Game engine (ECS, rendering, input)</td></tr>
+  <tr><td><code>bevy_egui</code></td><td>0.27</td><td>Immediate-mode UI</td></tr>
+  <tr><td><code>winnow</code></td><td>0.7</td><td>Parser combinators for the ability DSL</td></tr>
+  <tr><td><code>serde</code></td><td>1.0</td><td>Serialization framework</td></tr>
+  <tr><td><code>toml</code></td><td>0.8</td><td>TOML config parsing</td></tr>
+  <tr><td><code>ndarray</code></td><td>0.16</td><td>N-dimensional arrays for ML features</td></tr>
+  <tr><td><code>burn</code></td><td>0.20</td><td>ML framework (optional, behind feature flags)</td></tr>
+  <tr><td><code>rayon</code></td><td>1.10</td><td>Data parallelism</td></tr>
+  <tr><td><code>clap</code></td><td>4.5</td><td>CLI argument parsing</td></tr>
+  <tr><td><code>contracts</code></td><td>0.6</td><td>Design-by-contract assertions</td></tr>
+  <tr><td><code>proptest</code></td><td>1.6</td><td>Property-based testing (dev only)</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- MODULE MAP                                                    -->
+<!-- ============================================================ -->
+
+<h2>Module Map</h2>
+
+<p>The <code>src/</code> directory contains approximately 317 Rust source files organized into a deep module hierarchy. This section provides a guided tour.</p>
+
+<!-- Interactive Module Map Diagram -->
+<div class="diagram-container" id="module-map-diagram"></div>
+<div class="diagram-tooltip" id="module-tooltip"></div>
+
+<h3>Top-Level Modules</h3>
+
+<p>From <code>src/lib.rs</code>:</p>
+
+<pre><code>pub mod ai;              // AI systems, simulation engine, effects
+pub mod audio;           // Audio playback
+pub mod game_core;       // Campaign, overworld, save/load
+pub mod mapgen_voronoi;  // Voronoi-based map generation
+pub mod mission;         // Multi-room dungeon missions
+pub mod progression;     // Narrative progression tracking
+pub mod scenario;        // Scenario definitions and runner</code></pre>
+
+<p>Additional modules in <code>src/main.rs</code> (binary-only):</p>
+
+<pre><code>app_systems      &#x2014; Bevy plugin registration
+camera           &#x2014; Orbit camera controller
+cli_args         &#x2014; CLI argument definitions
+hub_ui_draw/     &#x2014; Hub UI rendering (egui)
+game_loop        &#x2014; Main game loop state machine
+character_select &#x2014; Character selection screen</code></pre>
+
+<h3>The <code>ai</code> Module Tree</h3>
+
+<p>The <code>ai</code> module is the largest in the project (~200 files). Here is its structure:</p>
+
+<pre><code>ai/
+&#x251C;&#x2500;&#x2500; mod.rs              # re-exports spatial, tactics, coordination
+&#x251C;&#x2500;&#x2500; core/               # &#x2605; Simulation engine (see next chapter)
+&#x2502;   &#x251C;&#x2500;&#x2500; simulation.rs   #   The step() function
+&#x2502;   &#x251C;&#x2500;&#x2500; types.rs        #   SimState, UnitState, Team
+&#x2502;   &#x251C;&#x2500;&#x2500; events.rs       #   SimEvent logging
+&#x2502;   &#x251C;&#x2500;&#x2500; damage.rs       #   Damage calculation
+&#x2502;   &#x251C;&#x2500;&#x2500; targeting.rs    #   Target selection
+&#x2502;   &#x251C;&#x2500;&#x2500; conditions.rs   #   Ability condition checks
+&#x2502;   &#x251C;&#x2500;&#x2500; triggers.rs     #   Effect trigger system
+&#x2502;   &#x251C;&#x2500;&#x2500; helpers.rs      #   is_alive, can_see, etc.
+&#x2502;   &#x251C;&#x2500;&#x2500; math.rs         #   Vector math, movement
+&#x2502;   &#x251C;&#x2500;&#x2500; intent.rs       #   Intent action types
+&#x2502;   &#x251C;&#x2500;&#x2500; resolve.rs      #   Effect resolution pipeline
+&#x2502;   &#x251C;&#x2500;&#x2500; apply_effect.rs #   Effect application
+&#x2502;   &#x251C;&#x2500;&#x2500; determinism.rs  #   RNG, reproducibility
+&#x2502;   &#x251C;&#x2500;&#x2500; metrics.rs      #   Battle statistics
+&#x2502;   &#x251C;&#x2500;&#x2500; replay.rs       #   Replay utilities
+&#x2502;   &#x251C;&#x2500;&#x2500; verify.rs       #   Post-tick verification
+&#x2502;   &#x251C;&#x2500;&#x2500; ability_eval/   #   Neural ability urgency evaluator
+&#x2502;   &#x251C;&#x2500;&#x2500; ability_transformer/  # Grokking transformer
+&#x2502;   &#x251C;&#x2500;&#x2500; burn_model/     #   Burn ML models (feature-gated)
+&#x2502;   &#x251C;&#x2500;&#x2500; self_play/      #   RL training (REINFORCE, PPO)
+&#x2502;   &#x251C;&#x2500;&#x2500; hero/           #   Hero-specific mechanics
+&#x2502;   &#x2514;&#x2500;&#x2500; tests/          #   Determinism, mechanics, ability tests
+&#x2502;
+&#x251C;&#x2500;&#x2500; effects/            # &#x2605; Data-driven ability system
+&#x2502;   &#x251C;&#x2500;&#x2500; defs.rs         #   AbilityDef, PassiveDef
+&#x2502;   &#x251C;&#x2500;&#x2500; types.rs        #   Effect enums, Tags, Areas
+&#x2502;   &#x251C;&#x2500;&#x2500; effect_enum.rs  #   Enum dispatch
+&#x2502;   &#x251C;&#x2500;&#x2500; manifest.rs     #   Ability registry
+&#x2502;   &#x2514;&#x2500;&#x2500; dsl/            #   &#x2605; Winnow-based DSL parser
+&#x2502;       &#x251C;&#x2500;&#x2500; parser.rs   #     Top-level parser
+&#x2502;       &#x251C;&#x2500;&#x2500; ast.rs      #     Abstract syntax tree
+&#x2502;       &#x251C;&#x2500;&#x2500; lower.rs    #     AST &#x2192; AbilityDef lowering
+&#x2502;       &#x251C;&#x2500;&#x2500; emit.rs     #     AbilityDef &#x2192; DSL text
+&#x2502;       &#x2514;&#x2500;&#x2500; ...         #     (17 files total)
+&#x2502;
+&#x251C;&#x2500;&#x2500; squad/              # Squad-level AI
+&#x2502;   &#x251C;&#x2500;&#x2500; personality.rs  #   Personality profiles
+&#x2502;   &#x251C;&#x2500;&#x2500; intents.rs      #   Intent generation
+&#x2502;   &#x251C;&#x2500;&#x2500; state.rs        #   SquadAiState, FormationMode
+&#x2502;   &#x2514;&#x2500;&#x2500; combat/         #   Ability evaluation, targeting
+&#x2502;
+&#x251C;&#x2500;&#x2500; goap/               # Goal-Oriented Action Planning
+&#x2502;   &#x251C;&#x2500;&#x2500; planner.rs      #   A* planner
+&#x2502;   &#x251C;&#x2500;&#x2500; goal.rs         #   Goal definitions
+&#x2502;   &#x251C;&#x2500;&#x2500; action.rs       #   Action definitions
+&#x2502;   &#x251C;&#x2500;&#x2500; world_state.rs  #   Symbolic world state
+&#x2502;   &#x251C;&#x2500;&#x2500; dsl.rs          #   GOAP file parser
+&#x2502;   &#x2514;&#x2500;&#x2500; party.rs        #   Party culture modifiers
+&#x2502;
+&#x251C;&#x2500;&#x2500; behavior/           # Behavior tree DSL
+&#x2502;   &#x251C;&#x2500;&#x2500; parser.rs       #   .behavior file parser
+&#x2502;   &#x251C;&#x2500;&#x2500; interpreter.rs  #   Tree execution
+&#x2502;   &#x2514;&#x2500;&#x2500; types.rs        #   Node types
+&#x2502;
+&#x251C;&#x2500;&#x2500; pathing/            # Grid navigation
+&#x2502;   &#x2514;&#x2500;&#x2500; navigation.rs   #   A* pathfinding, LOS
+&#x2502;
+&#x251C;&#x2500;&#x2500; advanced/           # Advanced tactics
+&#x2502;   &#x251C;&#x2500;&#x2500; horde.rs        #   Horde mode AI
+&#x2502;   &#x251C;&#x2500;&#x2500; tactics.rs      #   Tactical reasoning
+&#x2502;   &#x2514;&#x2500;&#x2500; spatial.rs      #   Spatial awareness
+&#x2502;
+&#x251C;&#x2500;&#x2500; roles/              # Role system (tank, dps, support)
+&#x251C;&#x2500;&#x2500; student/            # Learning from oracle policies
+&#x251C;&#x2500;&#x2500; personality.rs      # Personality types
+&#x251C;&#x2500;&#x2500; control.rs          # CC timing coordination
+&#x251C;&#x2500;&#x2500; phase.rs            # Combat phase detection
+&#x251C;&#x2500;&#x2500; utility.rs          # Utility evaluation
+&#x2514;&#x2500;&#x2500; tooling/            # Debug &amp; visualization tools</code></pre>
+
+<h3>The <code>game_core</code> Module</h3>
+
+<p>Campaign and overworld systems:</p>
+
+<pre><code>game_core/
+&#x251C;&#x2500;&#x2500; types.rs                  # CampaignState, HeroState, Party
+&#x251C;&#x2500;&#x2500; overworld_types.rs        # Region, map data
+&#x251C;&#x2500;&#x2500; roster_types.rs           # Hero roster management
+&#x251C;&#x2500;&#x2500; setup.rs                  # Campaign initialization
+&#x251C;&#x2500;&#x2500; save.rs                   # Save/load serialization
+&#x251C;&#x2500;&#x2500; migrate.rs                # Save version migration
+&#x251C;&#x2500;&#x2500; campaign_systems.rs       # Turn processing
+&#x251C;&#x2500;&#x2500; overworld_systems.rs      # Region updates
+&#x251C;&#x2500;&#x2500; flashpoint_spawn.rs       # Crisis event generation
+&#x251C;&#x2500;&#x2500; flashpoint_progression.rs # Crisis resolution
+&#x251C;&#x2500;&#x2500; diplomacy_systems.rs      # Faction relationships
+&#x251C;&#x2500;&#x2500; companion.rs              # Companion story arcs
+&#x2514;&#x2500;&#x2500; tests/                    # Integration tests</code></pre>
+
+<h3>The <code>mission</code> Module</h3>
+
+<p>Multi-room dungeon runs:</p>
+
+<pre><code>mission/
+&#x251C;&#x2500;&#x2500; execution/        # Mission state machine
+&#x251C;&#x2500;&#x2500; room_gen/         # Procedural room generation
+&#x2502;   &#x251C;&#x2500;&#x2500; floorplan.rs  #   Layout algorithms
+&#x2502;   &#x251C;&#x2500;&#x2500; ml_gen.rs     #   ML-assisted generation
+&#x2502;   &#x251C;&#x2500;&#x2500; nav.rs        #   Navigation mesh
+&#x2502;   &#x2514;&#x2500;&#x2500; validation.rs #   Layout validation
+&#x251C;&#x2500;&#x2500; room_sequence/    # Room ordering
+&#x251C;&#x2500;&#x2500; sim_bridge/       # Combat integration
+&#x251C;&#x2500;&#x2500; vfx/              # Visual effects
+&#x251C;&#x2500;&#x2500; enemy_templates/  # Enemy spawn definitions
+&#x251C;&#x2500;&#x2500; objectives.rs     # Mission objectives
+&#x2514;&#x2500;&#x2500; hero_templates.rs # Hero loading</code></pre>
+
+<h3>The <code>scenario</code> Module</h3>
+
+<pre><code>scenario/
+&#x251C;&#x2500;&#x2500; types.rs          # ScenarioConfig (TOML)
+&#x251C;&#x2500;&#x2500; runner.rs         # Scenario execution
+&#x251C;&#x2500;&#x2500; simulation.rs     # Scenario simulation
+&#x2514;&#x2500;&#x2500; gen/              # Coverage-driven generation</code></pre>
+
+<p class="footer-note">This page was generated from the Architecture section of the project mdBook. For the full book, build locally with <code>mdbook build</code> in the <code>book/</code> directory.</p>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- INTERACTIVE VISUALIZATIONS (inline JS, no external deps)      -->
+<!-- ============================================================ -->
+
+<script>
+(function() {
+  // ============================================================
+  // Helper: create SVG element with attributes
+  // ============================================================
+  function svgEl(tag, attrs) {
+    var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+
+  function showTooltip(tooltipEl, evt, html) {
+    tooltipEl.innerHTML = html;
+    tooltipEl.style.opacity = '1';
+    var rect = tooltipEl.parentElement.getBoundingClientRect();
+    var x = evt.clientX - rect.left + 16;
+    var y = evt.clientY - rect.top + 16;
+    if (x + 320 > rect.width) x = evt.clientX - rect.left - 320;
+    if (y + 150 > window.innerHeight) y = evt.clientY - rect.top - 120;
+    tooltipEl.style.left = x + 'px';
+    tooltipEl.style.top = y + 'px';
+  }
+
+  function hideTooltip(tooltipEl) {
+    tooltipEl.style.opacity = '0';
+  }
+
+  // ============================================================
+  // 1. THREE-LAYER DIAGRAM
+  // ============================================================
+  (function() {
+    var container = document.getElementById('three-layer-diagram');
+    var tooltip = document.getElementById('layer-tooltip');
+    container.style.position = 'relative';
+
+    var W = 860, H = 420;
+    var svg = svgEl('svg', { width: '100%', height: H, viewBox: '0 0 ' + W + ' ' + H });
+
+    // Defs for gradients and glow
+    var defs = svgEl('defs', {});
+
+    // Arrow marker
+    var marker = svgEl('marker', { id: 'arrowLayer', viewBox: '0 0 10 10', refX: '10', refY: '5', markerWidth: '8', markerHeight: '8', orient: 'auto-start-reverse' });
+    marker.appendChild(svgEl('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: '#60a5fa' }));
+    defs.appendChild(marker);
+
+    // Glow filter
+    var filter = svgEl('filter', { id: 'glowLayer', x: '-20%', y: '-20%', width: '140%', height: '140%' });
+    var blur = svgEl('feGaussianBlur', { stdDeviation: '4', result: 'blur' });
+    filter.appendChild(blur);
+    var merge = svgEl('feMerge', {});
+    var mn1 = svgEl('feMergeNode', { 'in': 'blur' });
+    var mn2 = svgEl('feMergeNode', { 'in': 'SourceGraphic' });
+    merge.appendChild(mn1);
+    merge.appendChild(mn2);
+    filter.appendChild(merge);
+    defs.appendChild(filter);
+
+    svg.appendChild(defs);
+
+    var layers = [
+      {
+        id: 'campaign', label: 'Campaign', color: '#a78bfa', colorDim: '#7c3aed',
+        x: 40, y: 30, w: 780, h: 90,
+        subtitle: 'Turn-based Overworld',
+        tip: '<strong>Campaign Layer</strong>Timescale: Turn-based (strategic actions)<br>Manages the overworld map, factions, diplomacy, and flashpoints.<br><span class="tt-detail">Types: CampaignState, HeroState, OverworldRegion<br>Module: src/game_core/</span>'
+      },
+      {
+        id: 'mission', label: 'Mission', color: '#fbbf24', colorDim: '#d97706',
+        x: 100, y: 150, w: 660, h: 90,
+        subtitle: 'Multi-Room Dungeons',
+        tip: '<strong>Mission Layer</strong>Timescale: Room-by-room progression<br>Procedurally generated rooms with objectives and encounters.<br><span class="tt-detail">Types: MissionState, RoomLayout<br>Module: src/mission/</span>'
+      },
+      {
+        id: 'combat', label: 'Combat', color: '#f87171', colorDim: '#dc2626',
+        x: 170, y: 270, w: 520, h: 110,
+        subtitle: '100ms Fixed-Tick Deterministic Sim',
+        tip: '<strong>Combat Layer</strong>Timescale: 100ms fixed ticks<br>Deterministic tick-based engine: move, attack, cast, apply effects.<br>All AI training happens here.<br><span class="tt-detail">Types: SimState, UnitState, UnitIntent<br>Core: step(state, intents, dt_ms) &rarr; (state, events)<br>Module: src/ai/core/</span>'
+      }
+    ];
+
+    layers.forEach(function(l) {
+      var g = svgEl('g', { 'data-layer': l.id, style: 'cursor: pointer;' });
+
+      // Background rect
+      var rect = svgEl('rect', {
+        x: l.x, y: l.y, width: l.w, height: l.h, rx: '10', ry: '10',
+        fill: l.colorDim + '22', stroke: l.colorDim, 'stroke-width': '1.5',
+        style: 'transition: all 0.25s;'
+      });
+      g.appendChild(rect);
+
+      // Label
+      var text = svgEl('text', {
+        x: l.x + 24, y: l.y + 38,
+        fill: l.color, 'font-family': "'DM Sans', sans-serif", 'font-size': '20', 'font-weight': '700'
+      });
+      text.textContent = l.label;
+      g.appendChild(text);
+
+      // Subtitle
+      var sub = svgEl('text', {
+        x: l.x + 24, y: l.y + 62,
+        fill: '#6b7280', 'font-family': "'DM Sans', sans-serif", 'font-size': '13'
+      });
+      sub.textContent = l.subtitle;
+      g.appendChild(sub);
+
+      // Hover behavior
+      g.addEventListener('mouseenter', function(e) {
+        rect.setAttribute('fill', l.colorDim + '44');
+        rect.setAttribute('stroke-width', '2.5');
+        rect.setAttribute('filter', 'url(#glowLayer)');
+        showTooltip(tooltip, e, l.tip);
+      });
+      g.addEventListener('mousemove', function(e) {
+        showTooltip(tooltip, e, l.tip);
+      });
+      g.addEventListener('mouseleave', function() {
+        rect.setAttribute('fill', l.colorDim + '22');
+        rect.setAttribute('stroke-width', '1.5');
+        rect.removeAttribute('filter');
+        hideTooltip(tooltip);
+      });
+
+      svg.appendChild(g);
+    });
+
+    // Arrows between layers
+    var arrows = [
+      { x1: 430, y1: 120, x2: 430, y2: 150 },
+      { x1: 430, y1: 240, x2: 430, y2: 270 }
+    ];
+    arrows.forEach(function(a) {
+      var line = svgEl('line', {
+        x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2,
+        stroke: '#60a5fa', 'stroke-width': '2', 'marker-end': 'url(#arrowLayer)'
+      });
+      svg.appendChild(line);
+    });
+
+    // step() label on combat box
+    var stepLabel = svgEl('text', {
+      x: 170 + 260, y: 270 + 90,
+      fill: '#34d399', 'font-family': "'IBM Plex Mono', monospace", 'font-size': '12',
+      'text-anchor': 'middle'
+    });
+    stepLabel.textContent = 'step(state, intents, dt_ms) \u2192 (state, events)';
+    svg.appendChild(stepLabel);
+
+    container.appendChild(svg);
+  })();
+
+  // ============================================================
+  // 2. MODULE MAP DIAGRAM
+  // ============================================================
+  (function() {
+    var container = document.getElementById('module-map-diagram');
+    var tooltip = document.getElementById('module-tooltip');
+    container.style.position = 'relative';
+
+    var W = 860, H = 520;
+    var svg = svgEl('svg', { width: '100%', height: H, viewBox: '0 0 ' + W + ' ' + H });
+
+    var defs = svgEl('defs', {});
+
+    // Arrow marker
+    var marker = svgEl('marker', { id: 'arrowMod', viewBox: '0 0 10 10', refX: '10', refY: '5', markerWidth: '6', markerHeight: '6', orient: 'auto-start-reverse' });
+    marker.appendChild(svgEl('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: '#3d4459' }));
+    defs.appendChild(marker);
+
+    var markerHL = svgEl('marker', { id: 'arrowModHL', viewBox: '0 0 10 10', refX: '10', refY: '5', markerWidth: '6', markerHeight: '6', orient: 'auto-start-reverse' });
+    markerHL.appendChild(svgEl('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: '#60a5fa' }));
+    defs.appendChild(markerHL);
+
+    // Glow filter
+    var filter = svgEl('filter', { id: 'glowMod', x: '-20%', y: '-20%', width: '140%', height: '140%' });
+    filter.appendChild(svgEl('feGaussianBlur', { stdDeviation: '3', result: 'blur' }));
+    var merge = svgEl('feMerge', {});
+    merge.appendChild(svgEl('feMergeNode', { 'in': 'blur' }));
+    merge.appendChild(svgEl('feMergeNode', { 'in': 'SourceGraphic' }));
+    filter.appendChild(merge);
+    defs.appendChild(filter);
+
+    svg.appendChild(defs);
+
+    var modules = [
+      { id: 'core', label: 'ai/core', x: 340, y: 40, w: 150, h: 50, color: '#f87171', colorBg: '#dc262622',
+        tip: '<strong>ai/core</strong>Simulation engine: step(), SimState, UnitState, damage calc, targeting, determinism, metrics, replay.<br><span class="tt-detail">~50 files &bull; The heart of all AI training</span>' },
+      { id: 'effects', label: 'ai/effects', x: 130, y: 40, w: 150, h: 50, color: '#a78bfa', colorBg: '#7c3aed22',
+        tip: '<strong>ai/effects</strong>Data-driven ability system: AbilityDef, effect enums, DSL parser (winnow), AST lowering, emit.<br><span class="tt-detail">~22 files &bull; Includes dsl/ submodule with 17 parser files</span>' },
+      { id: 'squad', label: 'ai/squad', x: 570, y: 40, w: 150, h: 50, color: '#fbbf24', colorBg: '#d9770622',
+        tip: '<strong>ai/squad</strong>Squad-level AI: personality profiles, formation modes, intent generation, combat ability targeting.<br><span class="tt-detail">4+ files &bull; Team-wide behavior layer</span>' },
+      { id: 'goap', label: 'ai/goap', x: 130, y: 150, w: 150, h: 50, color: '#34d399', colorBg: '#05966922',
+        tip: '<strong>ai/goap</strong>Goal-Oriented Action Planning: A* planner, goal/action definitions, symbolic world state, party culture modifiers.<br><span class="tt-detail">6 files &bull; Strategic decision layer</span>' },
+      { id: 'behavior', label: 'ai/behavior', x: 340, y: 150, w: 150, h: 50, color: '#22d3ee', colorBg: '#0891b222',
+        tip: '<strong>ai/behavior</strong>Behavior tree DSL: .behavior file parser, tree interpreter, node types.<br><span class="tt-detail">3 files &bull; Reactive decision trees</span>' },
+      { id: 'pathing', label: 'ai/pathing', x: 570, y: 150, w: 150, h: 50, color: '#60a5fa', colorBg: '#2563eb22',
+        tip: '<strong>ai/pathing</strong>Grid navigation: A* pathfinding, line-of-sight calculations.<br><span class="tt-detail">1 file &bull; Used by core for unit movement</span>' },
+      { id: 'advanced', label: 'ai/advanced', x: 700, y: 100, w: 140, h: 44, color: '#c084fc', colorBg: '#9333ea22',
+        tip: '<strong>ai/advanced</strong>Horde mode AI, tactical reasoning, spatial awareness.<br><span class="tt-detail">3 files &bull; Higher-order tactics</span>' },
+      { id: 'game_core', label: 'game_core', x: 80, y: 290, w: 150, h: 50, color: '#fb923c', colorBg: '#ea580c22',
+        tip: '<strong>game_core</strong>Campaign layer: CampaignState, HeroState, overworld, save/load, diplomacy, flashpoints, companion arcs.<br><span class="tt-detail">~13 files &bull; src/game_core/</span>' },
+      { id: 'mission', label: 'mission', x: 310, y: 290, w: 150, h: 50, color: '#e879f9', colorBg: '#c026d322',
+        tip: '<strong>mission</strong>Multi-room dungeon runs: execution state machine, procedural room gen, enemy templates, objectives, VFX.<br><span class="tt-detail">~12 files &bull; src/mission/</span>' },
+      { id: 'scenario', label: 'scenario', x: 540, y: 290, w: 150, h: 50, color: '#4ade80', colorBg: '#16a34a22',
+        tip: '<strong>scenario</strong>Scenario config (TOML), runner, simulation, coverage-driven generation.<br><span class="tt-detail">4+ files &bull; src/scenario/</span>' },
+      { id: 'ability_op', label: 'ability_operator', x: 130, y: 410, w: 170, h: 50, color: '#facc15', colorBg: '#ca8a0422',
+        tip: '<strong>crates/ability_operator</strong>Standalone crate: behavioral embeddings for abilities. Burn model that maps ability defs to embedding vectors.<br><span class="tt-detail">7 files &bull; Separate workspace crate</span>' },
+      { id: 'training', label: 'training/ (Python)', x: 530, y: 410, w: 180, h: 50, color: '#38bdf8', colorBg: '#0284c722',
+        tip: '<strong>training/</strong>Python ML pipeline: model architectures (model.py), RL training (train_rl.py, train_rl_v3.py), pretraining, finetuning.<br><span class="tt-detail">PyTorch + NumPy &bull; Uses uv for deps</span>' }
+    ];
+
+    // Edges: [fromId, toId, label]
+    var edges = [
+      ['effects', 'core', 'AbilityDef dispatch'],
+      ['squad', 'core', 'Vec<UnitIntent>'],
+      ['goap', 'core', 'action plans'],
+      ['behavior', 'core', 'tree outputs'],
+      ['pathing', 'core', 'navigation'],
+      ['advanced', 'squad', 'tactics'],
+      ['game_core', 'mission', 'HeroState'],
+      ['mission', 'core', 'combat resolution'],
+      ['scenario', 'core', 'sim config'],
+      ['ability_op', 'effects', 'embeddings'],
+      ['training', 'core', 'weight files']
+    ];
+
+    // Index modules by id
+    var modMap = {};
+    modules.forEach(function(m) { modMap[m.id] = m; });
+
+    // Draw edges first (behind nodes)
+    var edgeEls = [];
+    edges.forEach(function(e) {
+      var from = modMap[e[0]], to = modMap[e[1]];
+      var x1 = from.x + (from.w || 150) / 2, y1 = from.y + (from.h || 50) / 2;
+      var x2 = to.x + (to.w || 150) / 2, y2 = to.y + (to.h || 50) / 2;
+      // Shorten line so it doesn't overlap the box
+      var dx = x2 - x1, dy = y2 - y1;
+      var len = Math.sqrt(dx * dx + dy * dy);
+      var ux = dx / len, uy = dy / len;
+      var sx = x1 + ux * 30, sy = y1 + uy * 25;
+      var ex = x2 - ux * 30, ey = y2 - uy * 25;
+
+      var line = svgEl('line', {
+        x1: sx, y1: sy, x2: ex, y2: ey,
+        stroke: '#2a2f3e', 'stroke-width': '1.5', 'marker-end': 'url(#arrowMod)',
+        'data-from': e[0], 'data-to': e[1], 'data-label': e[2],
+        style: 'transition: all 0.25s;'
+      });
+      svg.appendChild(line);
+      edgeEls.push({ el: line, from: e[0], to: e[1], label: e[2] });
+    });
+
+    // Draw nodes
+    var nodeEls = {};
+    modules.forEach(function(m) {
+      var g = svgEl('g', { 'data-module': m.id, style: 'cursor: pointer;' });
+
+      var rect = svgEl('rect', {
+        x: m.x, y: m.y, width: m.w, height: m.h, rx: '8', ry: '8',
+        fill: m.colorBg, stroke: m.color + '88', 'stroke-width': '1.5',
+        style: 'transition: all 0.25s;'
+      });
+      g.appendChild(rect);
+
+      var text = svgEl('text', {
+        x: m.x + m.w / 2, y: m.y + m.h / 2 + 5,
+        fill: m.color, 'font-family': "'IBM Plex Mono', monospace", 'font-size': '13', 'font-weight': '500',
+        'text-anchor': 'middle'
+      });
+      text.textContent = m.label;
+      g.appendChild(text);
+
+      nodeEls[m.id] = { g: g, rect: rect, color: m.color };
+
+      g.addEventListener('mouseenter', function(evt) {
+        rect.setAttribute('fill', m.color + '33');
+        rect.setAttribute('stroke', m.color);
+        rect.setAttribute('stroke-width', '2.5');
+        rect.setAttribute('filter', 'url(#glowMod)');
+        // Highlight connected edges
+        edgeEls.forEach(function(edge) {
+          if (edge.from === m.id || edge.to === m.id) {
+            edge.el.setAttribute('stroke', '#60a5fa');
+            edge.el.setAttribute('stroke-width', '2.5');
+            edge.el.setAttribute('marker-end', 'url(#arrowModHL)');
+            // Highlight connected node
+            var otherId = edge.from === m.id ? edge.to : edge.from;
+            if (nodeEls[otherId]) {
+              nodeEls[otherId].rect.setAttribute('stroke', nodeEls[otherId].color);
+              nodeEls[otherId].rect.setAttribute('stroke-width', '2');
+            }
+          }
+        });
+        showTooltip(tooltip, evt, m.tip);
+      });
+      g.addEventListener('mousemove', function(evt) {
+        showTooltip(tooltip, evt, m.tip);
+      });
+      g.addEventListener('mouseleave', function() {
+        rect.setAttribute('fill', m.colorBg);
+        rect.setAttribute('stroke', m.color + '88');
+        rect.setAttribute('stroke-width', '1.5');
+        rect.removeAttribute('filter');
+        edgeEls.forEach(function(edge) {
+          edge.el.setAttribute('stroke', '#2a2f3e');
+          edge.el.setAttribute('stroke-width', '1.5');
+          edge.el.setAttribute('marker-end', 'url(#arrowMod)');
+        });
+        modules.forEach(function(om) {
+          if (nodeEls[om.id]) {
+            nodeEls[om.id].rect.setAttribute('stroke', om.color + '88');
+            nodeEls[om.id].rect.setAttribute('stroke-width', '1.5');
+          }
+        });
+        hideTooltip(tooltip);
+      });
+
+      svg.appendChild(g);
+    });
+
+    // Legend
+    var legend = svgEl('text', {
+      x: W / 2, y: H - 10, fill: '#6b7280',
+      'font-family': "'DM Sans', sans-serif", 'font-size': '12',
+      'text-anchor': 'middle'
+    });
+    legend.textContent = 'Hover over a module to see details and data-flow connections';
+    svg.appendChild(legend);
+
+    container.appendChild(svg);
+  })();
+})();
+</script>
+
+</body>
+</html>

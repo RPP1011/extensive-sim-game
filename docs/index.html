@@ -292,7 +292,149 @@ h1 .chimera {
 </header>
 
 <div class="section">
+  <div class="section-label">Project Documentation</div>
+
+  <a href="architecture.html" class="blog-card">
+    <div class="blog-title">Architecture &amp; Module Map</div>
+    <div class="blog-desc">
+      Three-layer simulation design, workspace layout, crate map, and the full module dependency graph.
+    </div>
+    <div class="tags">
+      <span class="tag">three layers</span>
+      <span class="tag">modules</span>
+      <span class="tag">workspace</span>
+    </div>
+  </a>
+
+  <a href="simulation.html" class="blog-card">
+    <div class="blog-title">The Simulation Engine</div>
+    <div class="blog-desc">
+      The deterministic <code>step()</code> function, SimState, unit processing, RNG contract, and event logging.
+    </div>
+    <div class="tags">
+      <span class="tag">step()</span>
+      <span class="tag">determinism</span>
+      <span class="tag">SimState</span>
+      <span class="tag">events</span>
+    </div>
+  </a>
+
+  <a href="effects.html" class="blog-card">
+    <div class="blog-title">The Effect System</div>
+    <div class="blog-desc">
+      Data-driven ability definitions, the five composable dimensions, and effect dispatch &amp; resolution.
+    </div>
+    <div class="tags">
+      <span class="tag">AbilityDef</span>
+      <span class="tag">5 dimensions</span>
+      <span class="tag">dispatch</span>
+    </div>
+  </a>
+
+  <a href="dsl.html" class="blog-card">
+    <div class="blog-title">The Ability DSL</div>
+    <div class="blog-desc">
+      Syntax reference, winnow-based parser pipeline, and a step-by-step guide to writing new abilities.
+    </div>
+    <div class="tags">
+      <span class="tag">syntax</span>
+      <span class="tag">parser</span>
+      <span class="tag">.ability files</span>
+    </div>
+  </a>
+
+  <a href="ai.html" class="blog-card">
+    <div class="blog-title">AI Decision Pipeline</div>
+    <div class="blog-desc">
+      Squad AI, GOAP planner, behavior DSL, neural ability evaluator, transformer decision head, and personality roles.
+    </div>
+    <div class="tags">
+      <span class="tag">squad AI</span>
+      <span class="tag">GOAP</span>
+      <span class="tag">transformer</span>
+      <span class="tag">personality</span>
+    </div>
+  </a>
+
+  <a href="game.html" class="blog-card">
+    <div class="blog-title">Game Systems</div>
+    <div class="blog-desc">
+      Campaign overworld, factions, flashpoints, missions, procedural room generation, and objectives.
+    </div>
+    <div class="tags">
+      <span class="tag">campaign</span>
+      <span class="tag">missions</span>
+      <span class="tag">room gen</span>
+      <span class="tag">factions</span>
+    </div>
+  </a>
+
+  <a href="ml.html" class="blog-card">
+    <div class="blog-title">Machine Learning</div>
+    <div class="blog-desc">
+      Entity encoder, self-play RL, Burn model integration, and the Python training scripts.
+    </div>
+    <div class="tags">
+      <span class="tag">entity encoder</span>
+      <span class="tag">self-play</span>
+      <span class="tag">Burn</span>
+      <span class="tag">training</span>
+    </div>
+  </a>
+
+  <a href="heroes.html" class="blog-card">
+    <div class="blog-title">Hero Content</div>
+    <div class="blog-desc">
+      Hero template format, stat definitions, ability slots, and the 172 LoL champion imports.
+    </div>
+    <div class="tags">
+      <span class="tag">templates</span>
+      <span class="tag">TOML + DSL</span>
+      <span class="tag">LoL imports</span>
+    </div>
+  </a>
+
+  <a href="tooling.html" class="blog-card">
+    <div class="blog-title">Tooling</div>
+    <div class="blog-desc">
+      CLI &amp; xtask commands, scenario runner, sim_bridge NDJSON protocol, and map generation.
+    </div>
+    <div class="tags">
+      <span class="tag">xtask</span>
+      <span class="tag">scenarios</span>
+      <span class="tag">sim_bridge</span>
+    </div>
+  </a>
+
+  <a href="development.html" class="blog-card">
+    <div class="blog-title">Development</div>
+    <div class="blog-desc">
+      Testing strategy, test helpers, and contributing guidelines.
+    </div>
+    <div class="tags">
+      <span class="tag">testing</span>
+      <span class="tag">contributing</span>
+    </div>
+  </a>
+</div>
+
+<div class="section">
   <div class="section-label">Dev Log</div>
+
+  <a href="blog_burn_migration.html" class="blog-card">
+    <div class="blog-date">2026-03-18</div>
+    <div class="blog-title">Killing the Python Sidecar: Migrating GPU Inference to Burn</div>
+    <div class="blog-desc">
+      How we deleted 4,667 lines of cross-language serialization code by defining
+      the model once in Rust — and got 1.9x faster in the process.
+    </div>
+    <div class="tags">
+      <span class="tag">Burn</span>
+      <span class="tag">GPU inference</span>
+      <span class="tag">shared memory</span>
+      <span class="tag">migration</span>
+    </div>
+  </a>
 
   <a href="OLD/blog_impala_v4.html" class="blog-card">
     <div class="blog-date">2026-03-15</div>
