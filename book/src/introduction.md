@@ -65,4 +65,13 @@ cargo test                     # run all tests
 cargo run --bin xtask -- --help  # CLI task runner
 ```
 
+## Other Resources
+
+This book is part of a larger documentation site. See also:
+
+- [**Dev Log**](../blog_burn_migration.html) — engineering blog posts about the
+  training infrastructure and migration work
+- [**ML Concepts**](../OLD/concepts_foundations.html) — a six-part learning path
+  covering the mathematical foundations used in the ML pipeline
+
 Let's begin.

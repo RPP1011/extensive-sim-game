@@ -292,7 +292,43 @@ h1 .chimera {
 </header>
 
 <div class="section">
+  <div class="section-label">Project Book</div>
+
+  <a href="book/" class="blog-card" style="border-color: var(--accent-dim);">
+    <div class="blog-title" style="color: var(--accent);">The Bevy Game Book</div>
+    <div class="blog-desc">
+      Comprehensive Rust-style documentation covering the simulation engine,
+      effect system, ability DSL, AI decision pipeline, ML training infrastructure,
+      and all game systems. The full guided tour of the codebase.
+    </div>
+    <div class="tags">
+      <span class="tag">architecture</span>
+      <span class="tag">simulation</span>
+      <span class="tag">ability DSL</span>
+      <span class="tag">AI pipeline</span>
+      <span class="tag">ML training</span>
+      <span class="tag">contributing</span>
+    </div>
+  </a>
+</div>
+
+<div class="section">
   <div class="section-label">Dev Log</div>
+
+  <a href="book/blog/burn-migration.html" class="blog-card">
+    <div class="blog-date">2026-03-18</div>
+    <div class="blog-title">Killing the Python Sidecar: Migrating GPU Inference to Burn</div>
+    <div class="blog-desc">
+      How we deleted 4,667 lines of cross-language serialization code by defining
+      the model once in Rust — and got 1.9x faster in the process.
+    </div>
+    <div class="tags">
+      <span class="tag">Burn</span>
+      <span class="tag">GPU inference</span>
+      <span class="tag">shared memory</span>
+      <span class="tag">migration</span>
+    </div>
+  </a>
 
   <a href="OLD/blog_impala_v4.html" class="blog-card">
     <div class="blog-date">2026-03-15</div>

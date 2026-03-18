@@ -32,13 +32,16 @@ jobs:
         run: mdbook build
         working-directory: book
 
-      - name: Copy static HTML pages into build output
-        run: cp -r book/static/* book/book/
+      - name: Assemble site
+        run: |
+          # docs/ is the site root (landing page, blog posts, concepts)
+          # book output goes into docs/book/
+          cp -r book/book docs/book
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: book/book
+          path: docs
 
   deploy:
     needs: build
