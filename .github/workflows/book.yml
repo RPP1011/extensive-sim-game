@@ -4,7 +4,6 @@ on:
   push:
     branches: [master]
     paths:
-      - 'book/**'
       - 'docs/**'
   workflow_dispatch:
 
@@ -22,21 +21,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install mdBook
-        uses: peaceiris/actions-mdbook@v2
-        with:
-          mdbook-version: 'latest'
-
-      - name: Build book
-        run: mdbook build
-        working-directory: book
-
-      - name: Assemble site
-        run: |
-          # docs/ is the site root (landing page, blog posts, concepts)
-          # book output goes into docs/book/
-          cp -r book/book docs/book
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
