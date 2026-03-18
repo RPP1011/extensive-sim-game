@@ -22,7 +22,6 @@ pub(crate) fn reset_profiling() {
 use super::transformer_rl::{
     Policy, RlEpisode, RlStep,
     lcg_f32, masked_softmax_sample,
-    apply_behavior_overrides,
     MAX_ABILITIES,
 };
 use super::rl_policies::{
@@ -51,7 +50,6 @@ pub(crate) fn run_rl_episode(
     enemy_registry: Option<&bevy_game::ai::core::ability_transformer::EmbeddingRegistry>,
     drill_objective: Option<&bevy_game::scenario::ObjectiveDef>,
     scenario_action_mask: Option<&str>,
-    behaviors: &std::collections::HashMap<u32, bevy_game::ai::behavior::BehaviorTree>,
 ) -> RlEpisode {
     use bevy_game::ai::core::{is_alive, step, distance, move_towards, Team, UnitIntent, FIXED_TICK_MS};
     use bevy_game::ai::core::ability_eval::{extract_game_state, extract_game_state_v2, extract_game_state_v2_spatial, extract_game_state_v2_with_objectives, ZoneObjective};
@@ -185,7 +183,6 @@ pub(crate) fn run_rl_episode(
         let t0 = std::time::Instant::now();
         let mut intents = generate_intents(&sim, &mut squad_ai, FIXED_TICK_MS);
         t_intents_ns += t0.elapsed().as_nanos() as u64;
-        apply_behavior_overrides(&mut intents, behaviors, &sim, tick);
         let record = tick % step_interval == 0;
         let t0 = std::time::Instant::now();
 

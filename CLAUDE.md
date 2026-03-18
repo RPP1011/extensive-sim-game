@@ -19,18 +19,11 @@ cargo test -- --test-threads=1 # Serial execution (for determinism tests)
 ```bash
 cargo run --bin xtask -- scenario run scenarios/basic_4v4.toml
 cargo run --bin xtask -- scenario bench scenarios/
+cargo run --bin xtask -- scenario generate dataset/scenarios/
 cargo run --bin xtask -- scenario oracle eval scenarios/
-cargo run --bin xtask -- scenario oracle dataset scenarios/ --output generated/oracle.jsonl
-cargo run --bin xtask -- scenario oracle transformer-play PATH --weights W
 cargo run --bin xtask -- scenario oracle transformer-rl generate scenarios/
-```
-
-### Python Training
-
-Use `uv run --with numpy --with torch` for Python training scripts (no virtualenv needed):
-```bash
-uv run --with numpy --with torch python training/train_rl.py ...
-uv run --with numpy --with torch python training/pretrain_entity.py ...
+cargo run --bin xtask -- train-v6 dataset/scenarios/ --iters 100
+cargo run --bin xtask -- roomgen export --output generated/rooms.jsonl
 ```
 
 ## Architecture
@@ -43,24 +36,26 @@ Campaign (turn-based overworld) → Mission (multi-room dungeons) → Combat (10
 
 The combat layer is the core of the AI/ML work. Everything runs through `step(state, intents, dt_ms) → (state, events)` in `src/ai/core/simulation.rs`.
 
+**Namespace alias:** `crate::sim` re-exports `ai::core` — the simulation engine is not AI, it's the deterministic physics/rules engine. New code should prefer `crate::sim::*`.
+
 ### Key Module Map
 
-- **`src/ai/core/`** — Simulation engine: `SimState`, `UnitState`, `step()`, damage calc, effect application
+- **`src/ai/core/`** (aliased as `crate::sim`) — Simulation engine: `SimState`, `UnitState`, `step()`, damage calc, effect application
 - **`src/ai/effects/`** — Data-driven ability system with DSL parser (`.ability` files). Five composable dimensions: Effect (what), Area (where), Delivery (how), Trigger (when), Tags (power levels)
 - **`src/ai/effects/dsl/`** — winnow-based parser for ability DSL: `parser.rs` → `lower.rs` (AST→AbilityDef)
 - **`src/ai/core/ability_eval/`** — Neural ability evaluator (urgency interrupt layer, fires when urgency > 0.4)
 - **`src/ai/core/ability_transformer/`** — Grokking-based transformer for ability decisions, with cross-attention over entity tokens
 - **`src/ai/core/self_play/`** — RL policy learning (REINFORCE + PPO, pointer action space)
+- **`src/ai/goap/`** — GOAP (Goal-Oriented Action Planning) AI with DSL parser (`.goap` files), planner, party culture
 - **`src/ai/squad/`** — Squad-level AI: personality profiles, formation modes, intent generation
 - **`src/ai/pathing/`** — Grid navigation, pathfinding, cover
 - **`src/scenario/`** — Scenario config (TOML), runner, coverage-driven generation
-- **`src/bin/xtask/`** — CLI task runner (scenarios, oracle, map gen)
+- **`src/bin/xtask/`** — CLI task runner (scenarios, oracle, training, roomgen)
 - **`src/bin/sim_bridge/`** — Headless sim for external agents via NDJSON protocol
-- **`training/`** — Python model training: `model.py` (architectures), `train_rl.py`/`train_rl_v3.py` (RL), `pretrain_entity.py`, `finetune_decision.py`
 
 ### Determinism Contract
 
-All simulation randomness flows through `SimState.rng_state` via `next_rand_u32()`. Never use `thread_rng()` or any external RNG in simulation code. Unit processing order is shuffled per tick to prevent first-mover bias. Tests in `src/ai/core/tests/determinism.rs` verify reproducibility.
+All simulation randomness flows through `SimState.rng_state` via `next_rand_u32()`. Never use `thread_rng()` or any external RNG in simulation code. Unit processing order is shuffled per tick to prevent first-mover bias. Tests in `src/ai/core/tests/determinism.rs` verify reproducibility. CI runs determinism tests in both debug and release modes.
 
 ### Effect System
 
@@ -75,7 +70,8 @@ Intent generation flows through layers, each can override:
 1. **Squad AI** (`squad/intents.rs`): team-wide personality-driven behavior
 2. **Ability Evaluator** (optional): neural urgency interrupt for ability usage
 3. **Transformer** (optional): cross-attention decision head over entity + ability tokens
-4. **Control AI** (optional): hard CC timing coordination / GOAP overrides
+4. **GOAP** (optional): goal-oriented action planning with party culture modifiers
+5. **Control AI** (optional): hard CC timing coordination
 
 ### Workspace
 

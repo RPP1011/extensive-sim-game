@@ -336,6 +336,5 @@ pub(crate) fn run_single_episode(
         enemy_policy, enemy_registry,
         pre.objective.as_ref(),
         pre.action_mask.as_deref(),
-        &pre.behavior_trees,
     )
 }

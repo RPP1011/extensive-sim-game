@@ -30,7 +30,7 @@ ndarray-npy = { version = "0.9", features = ["npz"] }
 memmap2 = "0.9"
 contracts = "0.6"
 burn = { version = "0.20", default-features = false, features = ["std"], optional = true }
-rl4burn = { path = "../rl4burn", features = ["tensorboard"], optional = true }
+rl4burn = { git = "https://github.com/RPP1011/rl4burn", features = ["tensorboard"], optional = true }
 
 [dev-dependencies]
 proptest = "1.6"

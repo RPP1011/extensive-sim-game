@@ -214,56 +214,6 @@ impl Policy {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Behavior DSL loading and intent overrides
-// ---------------------------------------------------------------------------
-
-/// Load behavior trees for enemy units that have a `behavior` field set.
-pub(crate) fn load_behavior_trees(
-    sim: &bevy_game::ai::core::SimState,
-    cfg: &bevy_game::scenario::ScenarioCfg,
-) -> std::collections::HashMap<u32, bevy_game::ai::behavior::BehaviorTree> {
-    use bevy_game::ai::behavior::parse_behavior;
-    use bevy_game::ai::core::Team;
-
-    let mut trees = std::collections::HashMap::new();
-    if cfg.enemy_units.is_empty() { return trees; }
-
-    let enemy_ids: Vec<u32> = sim.units.iter()
-        .filter(|u| u.team == Team::Enemy).map(|u| u.id).collect();
-
-    for (i, eu) in cfg.enemy_units.iter().enumerate() {
-        if let Some(ref behavior_name) = eu.behavior {
-            if let Some(&uid) = enemy_ids.get(i) {
-                let path = format!("assets/behaviors/{}.behavior", behavior_name);
-                match std::fs::read_to_string(&path) {
-                    Ok(content) => match parse_behavior(&content) {
-                        Ok(tree) => { trees.insert(uid, tree); }
-                        Err(e) => eprintln!("Warning: failed to parse {}: {}", path, e),
-                    },
-                    Err(e) => eprintln!("Warning: failed to read {}: {}", path, e),
-                }
-            }
-        }
-    }
-    trees
-}
-
-/// Override intents for units that have behavior trees.
-pub(crate) fn apply_behavior_overrides(
-    intents: &mut [bevy_game::ai::core::UnitIntent],
-    behaviors: &std::collections::HashMap<u32, bevy_game::ai::behavior::BehaviorTree>,
-    sim: &bevy_game::ai::core::SimState,
-    tick: u64,
-) {
-    use bevy_game::ai::behavior::evaluate_behavior;
-    if behaviors.is_empty() { return; }
-    for intent in intents.iter_mut() {
-        if let Some(tree) = behaviors.get(&intent.unit_id) {
-            intent.action = evaluate_behavior(tree, sim, intent.unit_id, tick);
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Scenario-level action mask enforcement
@@ -305,7 +255,6 @@ pub(crate) struct PrecomputedScenario {
     pub(crate) drill_target_position: Option<[f32; 2]>,
     pub(crate) drill_target_radius: Option<f32>,
     pub(crate) action_mask: Option<String>,
-    pub(crate) behavior_trees: std::collections::HashMap<u32, bevy_game::ai::behavior::BehaviorTree>,
     pub(crate) objective: Option<bevy_game::scenario::ObjectiveDef>,
 }
 
@@ -375,8 +324,6 @@ pub(crate) fn precompute_scenarios(
                 (None, None, None)
             };
 
-        let behavior_trees = load_behavior_trees(&sim, cfg);
-
         PrecomputedScenario {
             sim, squad_ai, scenario_name: cfg.name.clone(), max_ticks,
             unit_abilities, unit_ability_names, cls_cache,
@@ -385,7 +332,6 @@ pub(crate) fn precompute_scenarios(
             initial_hero_count, initial_enemy_count,
             drill_objective_type, drill_target_position, drill_target_radius,
             action_mask: cfg.action_mask.clone(),
-            behavior_trees,
             objective: cfg.objective.clone(),
         }
     }).collect()

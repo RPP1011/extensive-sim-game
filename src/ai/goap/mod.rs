@@ -11,6 +11,7 @@ pub mod party;
 pub mod plan_cache;
 pub mod planner;
 pub mod spatial;
+pub mod target;
 pub mod verify;
 pub mod world_state;
 
@@ -19,7 +20,7 @@ mod tests;
 
 use std::collections::HashMap;
 
-use crate::ai::behavior::types::Target;
+use self::target::Target;
 use crate::ai::core::{
     distance, is_alive, move_away, move_towards, position_at_range, IntentAction, SimState,
     UnitIntent,

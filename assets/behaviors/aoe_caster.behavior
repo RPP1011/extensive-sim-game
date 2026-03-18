@@ -1,5 +1,0 @@
-behavior "aoe_caster" {
-  priority cast_if_ready ability0 on nearest_enemy when ability_ready ability0
-  default maintain_distance nearest_enemy 8
-  fallback hold
-}

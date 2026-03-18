@@ -1,5 +1,4 @@
 pub mod advanced;
-pub mod behavior;
 pub mod control;
 pub mod core;
 pub mod effects;

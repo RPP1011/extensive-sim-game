@@ -1,6 +1,0 @@
-behavior "cc_gatekeeper" {
-  priority cast_if_ready ability0 on nearest_enemy when nearest_enemy.distance < 4 and ability_ready ability0
-  priority attack nearest_enemy when can_attack
-  default chase nearest_enemy
-  fallback hold
-}

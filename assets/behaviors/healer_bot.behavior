@@ -1,6 +1,0 @@
-behavior "healer_bot" {
-  priority cast_if_ready ability0 on lowest_hp_ally when lowest_hp_ally.hp_pct < 0.5 and ability_ready ability0
-  default attack nearest_enemy when can_attack
-  default chase nearest_enemy
-  fallback hold
-}

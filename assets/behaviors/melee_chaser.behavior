@@ -1,5 +1,0 @@
-behavior "melee_chaser" {
-  priority attack nearest_enemy when nearest_enemy.distance < 1.5
-  default chase nearest_enemy
-  fallback hold
-}
