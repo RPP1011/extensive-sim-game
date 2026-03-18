@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Killing the Python Sidecar: Migrating GPU Inference to Burn</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --surface: #13161d;
+  --surface2: #1c2029;
+  --surface3: #252a36;
+  --border: #2a2f3e;
+  --border-bright: #3d4459;
+  --text: #b8c0cc;
+  --text-muted: #6b7280;
+  --heading: #e2e8f0;
+  --accent: #60a5fa;
+  --accent-dim: #2563eb;
+  --purple: #a78bfa;
+  --purple-dim: #7c3aed;
+  --green: #34d399;
+  --green-dim: #059669;
+  --red: #f87171;
+  --red-dim: #dc2626;
+  --orange: #fbbf24;
+  --orange-dim: #d97706;
+  --cyan: #22d3ee;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.78;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 4rem 2rem 8rem;
+}
+
+header {
+  margin-bottom: 3.5rem;
+  padding-bottom: 2.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.65;
+  max-width: 680px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 2rem 0 0;
+}
+
+.stat {
+  background: var(--surface);
+  padding: 1.2rem 1rem;
+  text-align: center;
+}
+
+.stat .value {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.stat .label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 0.3rem;
+}
+
+h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--heading);
+  margin-top: 4rem;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--purple);
+  margin-top: 2.5rem;
+  margin-bottom: 0.8rem;
+}
+
+p { margin-bottom: 1.1rem; }
+strong { color: var(--heading); font-weight: 600; }
+em { color: var(--text); }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+a:hover { border-bottom-color: var(--accent); }
+
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.2rem 1.5rem;
+  overflow-x: auto;
+  margin: 1.5rem 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.88em;
+}
+
+p code, li code, td code {
+  background: var(--surface2);
+  padding: 0.15em 0.45em;
+  border-radius: 4px;
+  font-size: 0.82em;
+  color: var(--accent);
+}
+
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+  font-family: 'DM Sans', sans-serif;
+}
+
+th {
+  background: var(--surface2);
+  color: var(--heading);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 2px solid var(--border-bright);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+td {
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+tr:hover td { background: var(--surface); }
+
+.good { color: var(--green); font-weight: 600; }
+.bad { color: var(--red); font-weight: 600; }
+.warn { color: var(--orange); font-weight: 600; }
+
+.callout {
+  background: var(--surface);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: 0 8px 8px 0;
+  padding: 1.1rem 1.4rem;
+  margin: 1.8rem 0;
+  font-size: 0.95rem;
+}
+
+.callout.bug { border-left-color: var(--red-dim); background: #18100f; }
+.callout.success { border-left-color: var(--green-dim); background: #0d1712; }
+.callout p:last-child { margin-bottom: 0; }
+
+ol, ul { margin: 0.8rem 0 1.2rem 1.6rem; }
+li { margin-bottom: 0.4rem; }
+
+hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
+
+.footer-note {
+  font-style: italic;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 2.5rem;
+  margin-top: 4rem;
+}
+
+@media (max-width: 720px) {
+  .article { padding: 2rem 1.25rem 4rem; }
+  h1 { font-size: 1.9rem; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+<div class="article">
+
+<p><a href="index.html">&larr; Back</a></p>
+
+<header>
+  <h1>Killing the Python Sidecar: Migrating GPU Inference from Shared Memory to Burn</h1>
+  <p class="subtitle">How we deleted 4,667 lines of cross-language serialization code by defining the model once in Rust &mdash; and got 1.9x faster in the process.</p>
+  <div class="stats">
+    <div class="stat"><div class="value">-3,558</div><div class="label">Net Lines</div></div>
+    <div class="stat"><div class="value">1.9x</div><div class="label">Speedup</div></div>
+    <div class="stat"><div class="value">0</div><div class="label">Python Processes</div></div>
+    <div class="stat"><div class="value">1</div><div class="label">Model Definition</div></div>
+  </div>
+</header>
+
+<h2>The Problem</h2>
+
+<p>Our IMPALA training loop runs 4,096 parallel combat simulations across 64 threads. Every sim tick, every hero needs a neural network forward pass to pick actions. That inference happens on a GPU.</p>
+
+<p>For six months, the GPU lived in a separate Python process. Rust sims serialized game state into a memory-mapped file, set a flag, spin-polled for the response, and deserialized the result. Python read the same file, ran PyTorch, wrote back. It worked. It was fast enough. And every time we changed the model, we wanted to set it on fire.</p>
+
+<p>This is the story of replacing that entire stack with Burn &mdash; a Rust ML framework that let us define the model once and run it on both CPU (for tests) and CUDA (for training), with no Python process, no shared memory file, and no byte-level serialization.</p>
+
+<h2>The Old Architecture: Shared Memory Protocol</h2>
+
+<p>The bridge between Rust and Python was a memory-mapped file at <code>/dev/shm/impala_inf</code>. The layout was, charitably, hand-rolled:</p>
+
+<pre><code>┌────────────────────────────────────────────────────────────────┐
+│                    512-byte Global Header                       │
+│                                                                 │
+│  [0x00] magic: u32 = 0x47505549 ("GPUI")                      │
+│  [0x04] version: u32 = 1                                       │
+│  [0x08] cls_dim: u32 (ability embedding dimension)             │
+│  [0x0C] max_batch_size: u32                                    │
+│  [0x10] sample_size: u32 (bytes per request)                   │
+│  [0x14] response_sample_size: u32                              │
+│  [0x18] h_dim: u32 (hidden state dimension)                    │
+│  [0x1C] agg_dim: u32 (aggregate feature dimension)             │
+│  ...                                                            │
+│  [0x40] flag: u32 (0=idle, 1=request_ready, 2=response_ready) │
+│  [0x44] batch_size: u32                                        │
+│  [0x80] reload_path: 256 bytes (null-terminated)               │
+│  [0x180] reload_request: u32                                   │
+│  [0x184] reload_ack: u32                                       │
+│                                                                 │
+│  [512..] Request region: max_batch × sample_size               │
+│  [512 + req_region..] Response region: max_batch × resp_size   │
+└────────────────────────────────────────────────────────────────┘</code></pre>
+
+<p>Each request sample was a densely packed binary blob. The serialization function in Rust (<code>serialize_sample</code>, 138 lines) wrote fields in a specific order with manual padding:</p>
+
+<pre><code>Per-sample request layout (~7KB):
+┌──────────────────────────────────────────────────────────────┐
+│ 12-byte header: n_entities(u16), n_threats(u16),             │
+│                 n_positions(u16), n_zones(u16), pad(4)       │
+├──────────────────────────────────────────────────────────────┤
+│ Entity features:    20 × 34 × f32 = 2,720 bytes             │
+│ Entity type IDs:    20 × i32       =    80 bytes             │
+│ Entity mask:        20 bytes (padded to 4-byte alignment)    │
+├──────────────────────────────────────────────────────────────┤
+│ Threat features:     6 × 10 × f32 =   240 bytes             │
+│ Threat mask:         8 bytes (padded)                        │
+├──────────────────────────────────────────────────────────────┤
+│ Position features:   8 ×  8 × f32 =   256 bytes             │
+│ Position mask:       8 bytes (padded)                        │
+├──────────────────────────────────────────────────────────────┤
+│ Zone features:      10 × 12 × f32 =   480 bytes             │
+│ Zone mask:          12 bytes (padded)                        │
+├──────────────────────────────────────────────────────────────┤
+│ Combat mask:        10 bytes + 2 pad                         │
+│ Ability presence:    8 bytes                                 │
+│ Ability CLS:         8 × 128 × f32 = 4,096 bytes            │
+├──────────────────────────────────────────────────────────────┤
+│ Hidden state:       h_dim × f32                              │
+│ Aggregate features: agg_dim × f32                            │
+└──────────────────────────────────────────────────────────────┘</code></pre>
+
+<p>The response was tighter &mdash; 24 bytes of fixed fields plus the hidden state:</p>
+
+<pre><code>Per-sample response:
+┌──────────┬──────────┬──────────────┬───────────┬──────────┬───────────┬─────────┐
+│ move_dx  │ move_dy  │ combat_type  │ target_id │ lp_move  │ lp_combat │ lp_ptr  │
+│ f32 LE   │ f32 LE   │ u8           │ u16 LE    │ f32 LE   │ f32 LE    │ f32 LE  │
+└──────────┴──────────┴──────────────┴───────────┴──────────┴───────────┴─────────┘
+│ hidden_state_out: h_dim × f32                                                   │
+└─────────────────────────────────────────────────────────────────────────────────┘</code></pre>
+
+<h3>Flag-Based Synchronization</h3>
+
+<p>The communication protocol was primitive:</p>
+
+<ol>
+  <li>Rust batcher writes batch into the request region</li>
+  <li>Sets <code>flag = 1</code> (request ready)</li>
+  <li>Python GPU server polls <code>flag</code>, sees 1, reads batch, runs forward pass</li>
+  <li>Writes results into response region, sets <code>flag = 2</code></li>
+  <li>Rust batcher polls <code>flag</code>, sees 2, reads responses</li>
+  <li>Sets <code>flag = 0</code> (idle)</li>
+</ol>
+
+<p>Both sides spin-poll. The Rust batcher used <code>std::hint::spin_loop()</code> with a 30-second timeout. The Python server polled in a tight loop with <code>time.sleep(0.0001)</code> backoff.</p>
+
+<h3>The Alignment Bug</h3>
+
+<p>When we added zone tokens to the model, each sample gained a 5-zone header: <code>n_zones(u16)</code> packed alongside the existing entity/threat/position counts. Five <code>u16</code> values = 10 bytes. But every subsequent float array expected 4-byte alignment.</p>
+
+<p>10 bytes is not 4-byte aligned.</p>
+
+<p>The Rust side added explicit 2-byte padding to bring the header to 12 bytes. But the Python side used numpy's <code>frombuffer</code> with computed offsets &mdash; and those offsets were wrong by 2 bytes. Every float array after the header was misaligned, causing numpy stride errors that only manifested with certain batch sizes where the misalignment didn't happen to land on a 4-byte boundary anyway.</p>
+
+<p>This took the better part of a day to track down, and the fix was adding <code>pad(2)</code> in two places. The kind of bug that only exists because two languages are independently computing byte offsets into the same memory region.</p>
+
+<h2>The Crossbeam Batching Pattern</h2>
+
+<p>The SHM protocol was the transport layer. Above it sat a batching system that coordinated 4,096 concurrent simulations:</p>
+
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│                  64 Rayon Threads                             │
+│                                                              │
+│  Thread 0: sim[0], sim[1], ..., sim[63]                     │
+│  Thread 1: sim[64], sim[65], ..., sim[127]                  │
+│  ...                                                         │
+│  Thread 63: sim[4032], sim[4033], ..., sim[4095]            │
+│                                                              │
+│  Each sim submits InferenceRequest via crossbeam channel     │
+│  Gets back InferenceToken for non-blocking polling           │
+└────────────────────────┬────────────────────────────────────┘
+                         │ bounded(max_batch * 32)
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Batcher Thread                             │
+│                                                              │
+│  loop {                                                      │
+│    // Block until first request arrives                      │
+│    batch.push(request_rx.recv());                           │
+│                                                              │
+│    // Drain more with 1ms deadline                          │
+│    while batch.len() &lt; max_batch {                          │
+│      match request_rx.recv_deadline(deadline) {             │
+│        Ok(item) =&gt; batch.push(item),                        │
+│        Err(Timeout) =&gt; break,                               │
+│      }                                                       │
+│    }                                                         │
+│                                                              │
+│    // Forward pass (SHM or Burn)                             │
+│    results = transport.forward(batch);                       │
+│                                                              │
+│    // Dispatch via per-request oneshot channels              │
+│    for (item, result) in zip(batch, results) {              │
+│      item.response_tx.send(result);                         │
+│    }                                                         │
+│                                                              │
+│    // Wake parked sim threads                                │
+│    batch_epoch.fetch_add(1);                                │
+│    condvar.notify_all();                                     │
+│  }                                                           │
+└─────────────────────────────────────────────────────────────┘</code></pre>
+
+<p>The key patterns:</p>
+
+<p><strong>Non-blocking pipelining.</strong> Each sim calls <code>submit()</code> to enqueue a request and gets back an <code>InferenceToken</code>. It can then advance other work before calling <code>try_recv(token)</code> to check for results. Pending responses are stored in thread-local <code>HashMap&lt;InferenceToken, Receiver&lt;InferenceResult&gt;&gt;</code>.</p>
+
+<p><strong>Deadline-based batching.</strong> The batcher blocks on the first request, then drains the channel for up to 1ms to build a batch. This balances latency (don't wait forever for a full batch) against throughput (don't run the GPU on single samples).</p>
+
+<p><strong>Condvar parking.</strong> When all of a thread's sims are waiting on inference, the thread calls <code>wait_for_batch(epoch)</code> which parks on a condvar instead of busy-polling. The batcher wakes everyone after each batch completes.</p>
+
+<p>This entire pattern survived the migration unchanged. Only the transport inside the batcher changed &mdash; from "serialize bytes into mmap, set flag, spin-poll" to "build Burn tensors, call <code>model.forward()</code>".</p>
+
+<h2>The Pain of Dual Maintenance</h2>
+
+<p>Every model architecture change touched a minimum of 6 files across 2 languages:</p>
+
+<pre><code>Model change (e.g., add zone tokens):
+┌──────────────────────────────────────────────────────────────┐
+│                                                               │
+│  Python side:                                                │
+│  ├─ training/models/encoder_v5.py      Model definition      │
+│  ├─ training/models/actor_critic_v5.py Full actor-critic     │
+│  ├─ training/gpu_inference_server.py   SHM parsing + forward │
+│  ├─ training/export_actor_critic_v5.py Weight export script  │
+│  └─ training/impala_learner_v5.py      Training loop         │
+│                                                               │
+│  Rust side:                                                  │
+│  ├─ weights_actor_critic_v5.rs    Hand-rolled inference      │
+│  │  (674 lines of manual matmul, softmax, layer norm)        │
+│  └─ gpu_client.rs                 SHM serialization          │
+│     (528 lines of byte packing/unpacking)                    │
+│                                                               │
+│  Shared:                                                     │
+│  └─ Implicit contract: field order, byte offsets, padding    │
+│     (documented nowhere, verified by "does it crash")        │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘</code></pre>
+
+<p>The Rust "inference" code in <code>weights_actor_critic_v5.rs</code> was 674 lines of <code>f32</code> array operations implementing multi-head self-attention, layer norm, GELU, and pointer attention by hand. No autodiff. No operator fusion. Just loops over arrays. It existed only for CPU-side evaluation (running scenarios without a GPU), but it had to exactly match the PyTorch model's numerics or the trained weights would produce wrong actions.</p>
+
+<p>The zone token change was a representative example of the pain:</p>
+
+<ol>
+  <li>Add <code>ZoneEncoder</code> to the Python model class</li>
+  <li>Update <code>gpu_inference_server.py</code> to parse zone features from new SHM offsets</li>
+  <li>Update <code>export_actor_critic_v5.py</code> to include zone encoder weights</li>
+  <li>Update Rust <code>serialize_sample()</code> with new byte layout</li>
+  <li>Update Rust <code>weights_actor_critic_v5.rs</code> with CPU zone encoder</li>
+  <li>Update the Python training scripts for the new architecture</li>
+  <li>Debug the alignment bug from step 4</li>
+</ol>
+
+<p>Every one of these steps was a potential source of silent disagreement between Python and Rust.</p>
+
+<h2>The Burn Solution</h2>
+
+<p>Burn lets you define a neural network module in Rust that is generic over its compute backend:</p>
+
+<pre><code>#[derive(Module, Debug)]
+pub struct ActorCriticV5&lt;B: Backend&gt; {
+    pub transformer: AbilityTransformer&lt;B&gt;,
+    pub entity_encoder: EntityEncoderV5&lt;B&gt;,
+    pub cross_attn: CrossAttentionBlock&lt;B&gt;,
+    pub temporal_cell: CfCCell&lt;B&gt;,
+    pub position_head_l1: Linear&lt;B&gt;,
+    pub position_head_l2: Linear&lt;B&gt;,
+    pub combat_head: CombatPointerHead&lt;B&gt;,
+    pub external_cls_proj: Option&lt;Linear&lt;B&gt;&gt;,
+    gelu: Gelu,
+    d_model: usize,
+}</code></pre>
+
+<p>The <code>B: Backend</code> parameter means this exact code runs on:</p>
+
+<ul>
+  <li><code>NdArray</code> &mdash; pure Rust CPU, no dependencies, used in unit tests</li>
+  <li><code>LibTorch</code> &mdash; libtorch CUDA backend, used for GPU inference and training</li>
+</ul>
+
+<p>Same struct. Same <code>forward()</code>. Same weights. No export step, no serialization disagreement, no alignment bugs.</p>
+
+<h3>The Components</h3>
+
+<p>Each piece of the architecture is a separate Burn module:</p>
+
+<p><strong>EntityEncoderV5</strong> &mdash; projects entities (34-dim), zones (12-dim), and aggregate features (16-dim) to d_model, adds learned type embeddings, runs self-attention:</p>
+
+<pre><code>#[derive(Module, Debug)]
+pub struct EntityEncoderV5&lt;B: Backend&gt; {
+    entity_proj: Linear&lt;B&gt;,
+    zone_proj: Linear&lt;B&gt;,
+    agg_proj: Linear&lt;B&gt;,
+    type_emb: Embedding&lt;B&gt;,
+    input_norm: LayerNorm&lt;B&gt;,
+    encoder: TransformerEncoder&lt;B&gt;,
+    out_norm: LayerNorm&lt;B&gt;,
+    d_model: usize,
+}</code></pre>
+
+<p><strong>CfCCell</strong> &mdash; closed-form continuous-time temporal cell. Replaces GRU with input-dependent time constants, so the cell learns different integration speeds for different game states:</p>
+
+<pre><code>#[derive(Module, Debug)]
+pub struct CfCCell&lt;B: Backend&gt; {
+    f_gate: Linear&lt;B&gt;,   // forget gate
+    h_gate: Linear&lt;B&gt;,   // candidate gate
+    t_a: Linear&lt;B&gt;,      // time constant A
+    t_b: Linear&lt;B&gt;,      // time constant B
+    proj: Linear&lt;B&gt;,     // output projection
+    h_dim: usize,
+}</code></pre>
+
+<p><strong>CombatPointerHead</strong> &mdash; dual-output head for combat type classification (10-way softmax) and pointer-based target selection (scaled dot-product attention over entity tokens):</p>
+
+<pre><code>#[derive(Module, Debug)]
+pub struct CombatPointerHead&lt;B: Backend&gt; {
+    type_l1: Linear&lt;B&gt;,
+    type_l2: Linear&lt;B&gt;,
+    pointer_key: Linear&lt;B&gt;,
+    attack_query: Linear&lt;B&gt;,
+    ability_queries: Vec&lt;Linear&lt;B&gt;&gt;,  // one per ability slot
+    gelu: Gelu,
+    d_model: usize,
+    scale: f32,
+}</code></pre>
+
+<h3>The InferenceClient Trait</h3>
+
+<p>The migration was designed as a drop-in replacement. Both the old SHM client and the new Burn client implement the same trait:</p>
+
+<pre><code>pub trait InferenceClient: Send + Sync {
+    fn infer(&amp;self, request: InferenceRequest) -&gt; Result&lt;InferenceResult, String&gt;;
+    fn submit(&amp;self, request: InferenceRequest) -&gt; Result&lt;InferenceToken, String&gt;;
+    fn try_recv(&amp;self, token: InferenceToken) -&gt; Result&lt;Option&lt;InferenceResult&gt;, String&gt;;
+    fn batch_epoch(&amp;self) -&gt; u64;
+    fn wait_for_batch(&amp;self, since: u64);
+    fn h_dim(&amp;self) -&gt; usize;
+}</code></pre>
+
+<p>The <code>GpuInferenceClient</code> (SHM) and <code>BurnInferenceClient</code> both implement this. The sim threads, the episode generator, the evaluation harness &mdash; none of them know or care which backend is running. A single feature flag (<code>burn-gpu</code>) switches between them.</p>
+
+<h3>BurnInferenceClient: Same Pattern, No Serialization</h3>
+
+<p>The new client uses the exact same crossbeam batching pattern. The difference is what happens inside the batcher thread:</p>
+
+<pre><code>OLD (SHM):                              NEW (Burn):
+
+request → serialize_sample()             request → build Burn tensors
+        → copy bytes into mmap                   → model.forward(tensors)
+        → set flag=1                             → extract f32 from output
+        → spin-poll flag==2                      → (done)
+        → read response bytes
+        → deserialize InferenceResult</code></pre>
+
+<p>The Burn batcher builds padded tensors directly from the request structs:</p>
+
+<pre><code>fn forward_batch(&amp;self, batch: &amp;[BatchItem]) -&gt; Vec&lt;InferenceResult&gt; {
+    // Build padded f32 arrays from requests
+    let mut ent_data = vec![0.0f32; bs * max_ent * ENTITY_DIM];
+    for (i, item) in batch.iter().enumerate() {
+        for (j, ent) in item.request.entities.iter().enumerate() {
+            let base = (i * max_ent + j) * ENTITY_DIM;
+            ent_data[base..base + ent.len()].copy_from_slice(ent);
+        }
+    }
+
+    // Convert to Burn tensors on GPU
+    let ent_feat = Tensor::&lt;B, 1&gt;::from_floats(ent_data.as_slice(), dev)
+        .reshape([bs, max_ent, ENTITY_DIM]);
+
+    // Forward pass — same code as training
+    let (output, h_new) = self.model.forward(
+        ent_feat, ent_types, zone_feat,
+        ent_mask, zone_mask,
+        &amp;ability_cls, Some(agg_feat), Some(h_prev),
+    );
+
+    // Extract results (greedy argmax over logits)
+    // ...
+}</code></pre>
+
+<p>No byte packing. No manual offsets. No alignment padding. No flag polling. The model runs directly on the GPU in the same process, and the output comes back as Burn tensors that we index into.</p>
+
+<h2>What Got Deleted</h2>
+
+<table>
+  <tr>
+    <th>Deleted File</th>
+    <th>Purpose</th>
+    <th>Lines</th>
+  </tr>
+  <tr>
+    <td><code>training/gpu_inference_server.py</code></td>
+    <td>SHM server</td>
+    <td>~850</td>
+  </tr>
+  <tr>
+    <td><code>training/export_actor_critic_v5.py</code></td>
+    <td>Weight export</td>
+    <td>~320</td>
+  </tr>
+  <tr>
+    <td><code>training/models/encoder_v5.py</code></td>
+    <td>Python encoder</td>
+    <td>~410</td>
+  </tr>
+  <tr>
+    <td><code>training/models/actor_critic_v5.py</code></td>
+    <td>Python actor-critic</td>
+    <td>~580</td>
+  </tr>
+  <tr>
+    <td><code>src/.../weights_actor_critic_v5.rs</code></td>
+    <td>Hand-rolled CPU inference</td>
+    <td>674</td>
+  </tr>
+  <tr>
+    <td><code>src/.../gpu_client.rs</code> (serialize_*)</td>
+    <td>Byte serialization</td>
+    <td>~138</td>
+  </tr>
+  <tr>
+    <td><code>scripts/start_gpu_server.sh</code></td>
+    <td>Launcher</td>
+    <td>~25</td>
+  </tr>
+  <tr>
+    <td><code>scripts/stop_gpu_server.sh</code></td>
+    <td>Stopper</td>
+    <td>~15</td>
+  </tr>
+  <tr>
+    <td><code>docs/shm_protocol.md</code></td>
+    <td>Protocol docs</td>
+    <td>~200</td>
+  </tr>
+  <tr>
+    <td colspan="2"><strong>Total deleted</strong></td>
+    <td><strong>~4,667</strong></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <th>Replacement File</th>
+    <th>Lines</th>
+  </tr>
+  <tr>
+    <td><code>src/ai/core/burn_model/actor_critic.rs</code></td>
+    <td>321</td>
+  </tr>
+  <tr>
+    <td><code>src/ai/core/burn_model/entity_encoder.rs</code></td>
+    <td>115</td>
+  </tr>
+  <tr>
+    <td><code>src/ai/core/burn_model/cross_attention.rs</code></td>
+    <td>~80</td>
+  </tr>
+  <tr>
+    <td><code>src/ai/core/burn_model/cfc_cell.rs</code></td>
+    <td>80</td>
+  </tr>
+  <tr>
+    <td><code>src/ai/core/burn_model/combat_head.rs</code></td>
+    <td>116</td>
+  </tr>
+  <tr>
+    <td><code>src/ai/core/burn_model/inference.rs</code></td>
+    <td>374</td>
+  </tr>
+  <tr>
+    <td><code>src/ai/core/burn_model/config.rs</code></td>
+    <td>23</td>
+  </tr>
+  <tr>
+    <td><strong>Total added</strong></td>
+    <td><strong>~1,109</strong></td>
+  </tr>
+  <tr>
+    <td><strong>Net</strong></td>
+    <td><strong class="good">-3,558 lines</strong></td>
+  </tr>
+</table>
+
+<p>More importantly, the model definition went from <strong>2 (Python + Rust CPU)</strong> to <strong>1 (Rust, generic over backend)</strong>. There is no longer a class of bugs where Python and Rust disagree about the model architecture.</p>
+
+<h2>Benchmark Results</h2>
+
+<p>Same workload: 217 drill scenarios, 10 episodes each = 2,170 episodes generating ~143K inference steps. 64 rayon threads, each running 64 concurrent sims (4,096 total).</p>
+
+<table>
+  <tr>
+    <th>Metric</th>
+    <th>SHM (old)</th>
+    <th>Burn (new)</th>
+  </tr>
+  <tr>
+    <td>Python server startup</td>
+    <td>~4.0s</td>
+    <td><span class="good">0s (no Python)</span></td>
+  </tr>
+  <tr>
+    <td>Episode generation</td>
+    <td>9.18s</td>
+    <td><span class="good">6.94s</span></td>
+  </tr>
+  <tr>
+    <td>Total wall clock</td>
+    <td>~13.2s</td>
+    <td><span class="good">6.94s</span></td>
+  </tr>
+  <tr>
+    <td>Speedup</td>
+    <td></td>
+    <td><strong class="good">1.9&times;</strong></td>
+  </tr>
+</table>
+
+<p>The wall clock improvement comes from two sources:</p>
+
+<p><strong>1. No startup cost.</strong> The SHM path required launching a Python process, loading PyTorch, loading model weights, allocating the SHM file, and waiting for a magic-byte handshake. Burn loads weights at process start and the model is ready immediately.</p>
+
+<p><strong>2. No serialization overhead.</strong> The SHM path serialized every request into a packed byte buffer, copied it into the mmap, then the Python side deserialized it into numpy arrays, converted to PyTorch tensors, ran the forward pass, serialized the output back into bytes, and Rust deserialized those. Burn builds tensors directly from the request structs and runs the forward pass in-process. The only data movement is the CPU-to-GPU transfer that both paths must do.</p>
+
+<p>The GPU forward pass itself is roughly the same speed &mdash; libtorch is libtorch whether you call it from Python or Rust. The gains are all in eliminating the ceremony around it.</p>
+
+<h2>Double-Buffered Batching: Eliminating Poll Waste</h2>
+
+<p>With the Burn migration done, we profiled the new inference path. The GPU was fast. The model was correct. And 72% of the work the sim threads were doing was wasted.</p>
+
+<h3>The Problem</h3>
+
+<p>The crossbeam batching pattern from the previous section has a structural inefficiency. While the GPU processes batch N, the batcher thread is blocked inside <code>model.forward()</code>. It cannot collect new requests. The 64 sim threads that have already extracted state for the next tick and called <code>submit()</code> are fine &mdash; their requests sit in the channel buffer. But the threads that called <code>try_recv()</code> to poll for batch N's results are spinning:</p>
+
+<pre><code>Profiling (143K steps, 1.9M try_recv polls):
+
+  Polls that returned Some(result):   530K   (28%)
+  Polls that returned None:          1,370K  (72%)  &lt;-- waste</code></pre>
+
+<p>530K successful polls out of 1.9M total. The other 72% are sim threads calling <code>try_recv()</code> in a loop, finding nothing, and calling again. Each poll is cheap &mdash; it's just a <code>crossbeam_channel::TryRecvError::Empty</code> &mdash; but the CPU time adds up across 64 threads.</p>
+
+<p>The timeline looks like this:</p>
+
+<pre><code>Single-buffered (current):
+
+Threads:   [extract][submit][poll..poll..poll..][extract][submit][poll..poll..]
+                            ^^^^^^^^^^^^^^^^^^^^
+                            GPU is busy, no results yet
+
+GPU:              [idle][======= batch N =======][idle][==== batch N+1 ====]
+                        ^                       ^
+                        batcher blocked         batcher drains channel,
+                        in forward()            builds next batch
+
+Batcher:   [drain][forward.................][drain][forward...............]</code></pre>
+
+<p>The problem is the gap after the GPU finishes: the batcher has to drain new requests from the channel <em>before</em> it can start the next forward pass. During <code>forward()</code>, it can't drain. During draining, the GPU sits idle. And the whole time the GPU is running, sim threads that need results are spin-polling with nothing to find.</p>
+
+<h3>Alternative Considered: Lock-Step Synchronous Batching</h3>
+
+<p>The simplest fix would be to drop the asynchronous batcher entirely. Use a barrier:</p>
+
+<ol>
+  <li>All sim threads extract state and submit requests</li>
+  <li>Barrier &mdash; wait for all 4,096 sims to submit</li>
+  <li>Run one big GPU batch</li>
+  <li>Scatter results back to threads</li>
+  <li>All threads advance one tick</li>
+  <li>Repeat</li>
+</ol>
+
+<p>No polling. No wasted cycles. Every thread does useful work or is parked on the barrier. Simple.</p>
+
+<p>It would also be slower.</p>
+
+<pre><code>Lock-step (considered):
+
+Threads:   [===== extract =====][barrier][idle..........][===== extract =====]
+GPU:                                     [=== batch ===]
+                                 ^^^^^^^^               ^^^^^^^^
+                                 GPU idle               CPU idle
+                                 (waiting for           (waiting for
+                                  all sims)              GPU)</code></pre>
+
+<p>The GPU and CPU never overlap. The fastest sim thread waits for the slowest (barrier), then the CPU waits for the GPU, then the GPU waits for the CPU. With 4,096 sims at varying tick counts (some fights are shorter, some units die early), the straggler problem is severe. The sim extraction time variance across threads is roughly 2x, so the barrier would waste half the CPU time on the fast threads.</p>
+
+<p>The current approach, despite the poll waste, at least lets the GPU and CPU overlap. Sim threads that finish extracting can submit immediately for the next batch without waiting for slower threads. The GPU runs on whatever it has. The throughput is higher even though individual threads waste cycles polling.</p>
+
+<h3>The Solution: Double-Buffered Batcher</h3>
+
+<p>The fix is to let the batcher collect the next batch while the GPU processes the current one. Two buffers, two phases, full overlap:</p>
+
+<pre><code>Double-buffered (new):
+
+Thread 1:  [extract][sub-&gt;B1][extract][sub-&gt;B2][extract][sub-&gt;B1][extract]
+Thread 2:  [extract][sub-&gt;B1][extract][sub-&gt;B2][extract][sub-&gt;B1][extract]
+  ...
+Thread 64: [extract][sub-&gt;B1][extract][sub-&gt;B2][extract][sub-&gt;B1][extract]
+
+GPU:              [idle][==== batch B1 ====][==== batch B2 ====][==== B1 ====]
+                        ^                   ^                   ^
+                        swap                swap                swap
+
+Batcher:   [drain B1][forward B1 + drain B2][forward B2 + drain B1][...]
+                      ^^^^^^^^^^^^^^^^^^^^^^
+                      GPU runs B1 while channel fills B2</code></pre>
+
+<p>vs the old single-buffer:</p>
+
+<pre><code>Single-buffered (old):
+
+Threads:   [extract][submit][poll..poll..poll..][extract][submit][poll..poll..]
+
+GPU:              [idle][====== batch ======][idle][====== batch ======]
+
+Batcher:   [drain][forward.................][drain][forward...............]
+                                             ^^^^^
+                                             GPU idle while draining</code></pre>
+
+<p>The implementation splits the batcher loop into two concurrent activities:</p>
+
+<ol>
+  <li><strong>GPU thread</strong> owns the model and runs <code>forward_batch()</code>. When it finishes, it sends completed results to a dispatch channel and swaps to the next pending batch.</li>
+  <li><strong>Collector thread</strong> drains the request channel continuously, building the next batch. When the GPU thread signals it's ready, the collector hands over the accumulated batch and starts a fresh one.</li>
+</ol>
+
+<p>The key constraint: the collector and GPU thread share no mutable state. The collector fills a <code>Vec&lt;BatchItem&gt;</code> and hands ownership to the GPU thread via a channel swap. No locks on the hot path.</p>
+
+<p>From the sim threads' perspective, nothing changes. They still call <code>submit()</code> and <code>try_recv()</code> on the same <code>InferenceClient</code> trait. But now <code>try_recv()</code> finds a result waiting almost immediately &mdash; because the next batch's results were computed while the sim was extracting state, not after.</p>
+
+<p>The condvar <code>wait_for_batch</code> still exists for the case where a thread has no other work to do and all its sims are blocked on inference. But it fires much less often: with double buffering, results arrive while sims are still submitting their next requests, so most <code>try_recv()</code> calls succeed on the first or second attempt instead of the thirtieth.</p>
+
+<h2>What's Next</h2>
+
+<p><strong>Weight loading from PyTorch checkpoints.</strong> We have months of trained checkpoints saved as <code>.pt</code> files. Burn has its own serialization format, so we need a bridge to load existing PyTorch state dicts into Burn modules. This is the immediate blocker for using trained models with the new inference path.</p>
+
+<p><strong>Training loop in Rust.</strong> The IMPALA V-trace computation and gradient updates still happen in Python. With the model defined in Burn and autodiff available via the <code>Autodiff&lt;LibTorch&gt;</code> backend, the entire training loop can move to Rust. No more exporting weights between training iterations &mdash; the learner and the inference server share the same model instance.</p>
+
+<p><strong>Movement curriculum with zone tokens.</strong> The zone token feature that caused the alignment bug? It's what lets the model see objective zones (capture points, extraction areas) in the game state. With the SHM protocol gone, adding new token types to the model is a single-file change instead of a six-file ordeal. The movement curriculum can now teach the model to navigate toward objectives, not just fight.</p>
+
+<p class="footer-note">The SHM protocol served us well for six months and through five model versions. It enabled the first IMPALA training runs that produced real learning curves. But the maintenance tax grew with every architecture change, and the alignment bug that ate a day of debugging was the final straw. Sometimes the best optimization is deleting the abstraction boundary entirely.</p>
+
+</div>
+</body>
+</html>
