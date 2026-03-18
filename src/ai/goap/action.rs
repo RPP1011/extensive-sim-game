@@ -1,6 +1,6 @@
 //! GOAP action definitions — preconditions, effects, and intent mapping.
 
-use crate::ai::behavior::types::Target;
+use super::target::Target;
 use super::goal::Precondition;
 use super::world_state::PropValue;
 

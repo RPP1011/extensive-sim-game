@@ -10,6 +10,13 @@ pub mod mission;
 pub mod progression;
 pub mod scenario;
 
+/// Re-export of `ai::core` under a clearer namespace.
+///
+/// The simulation engine (`SimState`, `step()`, `UnitState`, `SimEvent`, etc.)
+/// is not AI — it's the deterministic physics/rules engine. This alias lets
+/// new code use `crate::sim` (or `bevy_game::sim`) instead of `crate::ai::core`.
+pub use ai::core as sim;
+
 // ---------------------------------------------------------------------------
 // Stub types used by mission::execution that reference the binary crate root.
 // When compiled as a library these types need to exist at crate:: to satisfy

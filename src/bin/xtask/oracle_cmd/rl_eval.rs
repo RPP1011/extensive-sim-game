@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use rayon::prelude::*;
 
 use super::collect_toml_paths;
-use super::transformer_rl::{Policy, run_rl_episode, load_behavior_trees};
+use super::transformer_rl::{Policy, run_rl_episode};
 
 pub(crate) fn run_eval(args: crate::cli::TransformerRlEvalArgs) -> ExitCode {
     use bevy_game::ai::core::ability_transformer::tokenizer::AbilityTokenizer;
@@ -87,7 +87,6 @@ pub(crate) fn run_eval(args: crate::cli::TransformerRlEvalArgs) -> ExitCode {
             (s, ai, Some(nav))
         };
 
-        let behaviors = load_behavior_trees(&sim, cfg);
         let episode = run_rl_episode(
             sim, squad_ai, &cfg.name, max_ticks,
             policy_ref, tokenizer_ref, 0.01, 42, 1,
@@ -97,7 +96,6 @@ pub(crate) fn run_eval(args: crate::cli::TransformerRlEvalArgs) -> ExitCode {
             enemy_registry_ref,
             cfg.objective.as_ref(),
             cfg.action_mask.as_deref(),
-            &behaviors,
         );
         (cfg.name.clone(), episode)
     }).collect();

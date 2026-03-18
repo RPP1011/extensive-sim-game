@@ -1,4 +1,0 @@
-behavior "fleeing_target" {
-  default flee nearest_enemy
-  fallback hold
-}

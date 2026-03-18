@@ -8,7 +8,7 @@ use super::party::PartyCulture;
 use super::plan_cache::UnitPlanState;
 use super::planner;
 use super::world_state::*;
-use crate::ai::behavior::types::Target;
+use super::target::Target;
 
 // ---------------------------------------------------------------------------
 // World state
@@ -357,103 +357,6 @@ goap "interrupter" {
     assert!((def.actions[0].cost - 0.2).abs() < f32::EPSILON);
 }
 
-// ---------------------------------------------------------------------------
-// Behavior → GOAP desugaring
-// ---------------------------------------------------------------------------
-
-#[test]
-fn behavior_desugars_to_goap() {
-    let input = r#"behavior "melee_chaser" {
-        priority attack nearest_enemy when nearest_enemy.distance < 1.5
-        default chase nearest_enemy
-        fallback hold
-    }"#;
-
-    let def = dsl::parse_goap_or_behavior(input).unwrap();
-    assert_eq!(def.name, "melee_chaser");
-    assert_eq!(def.goals.len(), 1);
-    assert_eq!(def.goals[0].name, "act");
-    assert_eq!(def.actions.len(), 3);
-
-    // Priority rule gets lowest cost
-    assert!(def.actions[0].cost < def.actions[1].cost);
-    // Default gets medium cost
-    assert!(def.actions[1].cost < def.actions[2].cost);
-    // Fallback gets highest cost
-
-    // Priority rule should have a precondition (nearest_enemy.distance < 1.5)
-    assert!(!def.actions[0].preconditions.is_empty());
-    // Default chase has no condition
-    assert!(def.actions[1].preconditions.is_empty());
-    // Fallback hold has no condition
-    assert!(def.actions[2].preconditions.is_empty());
-}
-
-#[test]
-fn behavior_healer_desugars_conditions() {
-    let input = r#"behavior "healer_bot" {
-        priority cast_if_ready ability0 on lowest_hp_ally when lowest_hp_ally.hp_pct < 0.5 and ability_ready ability0
-        default attack nearest_enemy when can_attack
-        default chase nearest_enemy
-        fallback hold
-    }"#;
-
-    let def = dsl::parse_goap_or_behavior(input).unwrap();
-    assert_eq!(def.name, "healer_bot");
-    assert_eq!(def.actions.len(), 4);
-
-    // First rule: "when lowest_hp_ally.hp_pct < 0.5 and ability_ready ability0"
-    // Should desugar to 2 preconditions (AND → both collected)
-    assert_eq!(def.actions[0].preconditions.len(), 2);
-
-    // Second rule: "when can_attack" → in_attack_range == true
-    assert_eq!(def.actions[1].preconditions.len(), 1);
-}
-
-#[test]
-fn parse_goap_or_behavior_autodetects_goap() {
-    let input = r#"
-goap "test" {
-    goal "engage" {
-        desire enemy_count == 0
-        insistence fixed 0.8
-    }
-    action "attack" {
-        cost 1.0
-        precondition in_attack_range == true
-        effect enemy_count = 0
-        intent attack nearest_enemy
-        duration 1
-    }
-}
-"#;
-    let def = dsl::parse_goap_or_behavior(input).unwrap();
-    assert_eq!(def.name, "test");
-    assert_eq!(def.goals[0].name, "engage");
-}
-
-#[test]
-fn parse_goap_or_behavior_autodetects_behavior() {
-    let input = r#"behavior "simple" {
-        fallback hold
-    }"#;
-    let def = dsl::parse_goap_or_behavior(input).unwrap();
-    assert_eq!(def.name, "simple");
-    assert_eq!(def.goals[0].name, "act"); // desugared catch-all goal
-    assert_eq!(def.actions.len(), 1);
-}
-
-#[test]
-fn behavior_duration_is_one_tick() {
-    let input = r#"behavior "quick" {
-        default attack nearest_enemy
-        fallback hold
-    }"#;
-    let def = dsl::parse_goap_or_behavior(input).unwrap();
-    for action in &def.actions {
-        assert_eq!(action.duration_ticks, 1, "behavior actions should be 1-tick");
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Party culture
