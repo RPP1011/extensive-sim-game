@@ -128,17 +128,15 @@ pub fn campaign_outcome_ui_system(
 pub fn draw_runtime_asset_gen_egui_system(
     mut contexts: EguiContexts,
     hub_ui: Res<HubUiState>,
+    runtime_mode: Res<crate::game_loop::RuntimeModeState>,
     mut runtime_asset_gen: ResMut<RuntimeAssetGenState>,
     runtime_asset_preview: Res<crate::runtime_assets::RuntimeAssetPreviewState>,
 ) {
-    if matches!(
-        hub_ui.screen,
-        HubScreen::BackstoryCinematic
-            | HubScreen::CharacterCreationFaction
-            | HubScreen::CharacterCreationBackstory
-    ) {
+    if !runtime_mode.dev_mode {
         return;
     }
+    // Suppress on all screens — too noisy as a floating overlay
+    return;
     let preview_texture_id = runtime_asset_preview
         .texture_handle
         .as_ref()
@@ -224,6 +222,9 @@ pub fn local_intro_sequence_system(
     mut hub_ui: ResMut<HubUiState>,
     mut local_intro: ResMut<LocalEagleEyeIntroState>,
     mut hub_menu: ResMut<HubMenuState>,
+    mut commands: Commands,
+    roster: Option<Res<game_core::CampaignRoster>>,
+    run_state: Option<Res<game_core::RunState>>,
 ) {
     if hub_ui.screen != HubScreen::LocalEagleEyeIntro {
         return;
@@ -233,6 +234,41 @@ pub fn local_intro_sequence_system(
     }
     // When the intro completes and input is handed off, enter the mission.
     if local_intro.input_handoff_ready {
+        // Populate ActiveMissionContext with roster heroes and region data
+        let hero_templates: Vec<String> = roster
+            .as_ref()
+            .map(|r| {
+                r.heroes
+                    .iter()
+                    .filter(|h| h.active && !h.deserter)
+                    .map(|h| {
+                        // Map archetype to a default hero template name
+                        match h.archetype {
+                            game_core::PersonalityArchetype::Vanguard => "knight".to_string(),
+                            game_core::PersonalityArchetype::Guardian => "paladin".to_string(),
+                            game_core::PersonalityArchetype::Tactician => "ranger".to_string(),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let global_turn = run_state
+            .as_ref()
+            .map(|r| r.global_turn)
+            .unwrap_or(0);
+
+        let region_id = local_intro.source_region_id.unwrap_or(0);
+        let seed = (region_id as u64).wrapping_mul(31) ^ (global_turn as u64);
+
+        let ctx = crate::mission::execution::ActiveMissionContext {
+            hero_templates,
+            global_turn,
+            seed,
+            ..Default::default()
+        };
+        commands.insert_resource(ctx);
+
         hub_ui.screen = HubScreen::MissionExecution;
     }
 }

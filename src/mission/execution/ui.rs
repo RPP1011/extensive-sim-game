@@ -63,9 +63,8 @@ pub fn mission_outcome_ui_system(
                     ui.label(format!("Threat Level: {}", tl_roman));
                     ui.label(format!("Heroes survived: {}", heroes_survived));
                     ui.label(format!("Enemies defeated: {}", enemies_defeated));
-                    ui.label(format!("Rooms cleared: {}", rooms_cleared));
-                    ui.separator();
-                    ui.label("Loot: None");
+                    let total_rooms = room_seq.as_ref().map(|s| s.rooms.len()).unwrap_or(1);
+                    ui.label(format!("Rooms cleared: {} / {}", rooms_cleared, total_rooms));
                     ui.separator();
                     if ui.button("Return to Overworld").clicked() {
                         return_clicked = true;
@@ -95,7 +94,8 @@ pub fn mission_outcome_ui_system(
                     ui.label("All heroes have fallen.");
                     ui.separator();
                     ui.label(format!("Enemies remaining: {}", enemies_remaining));
-                    ui.label(format!("Rooms reached: {}", rooms_cleared));
+                    let total_rooms = room_seq.as_ref().map(|s| s.rooms.len()).unwrap_or(1);
+                    ui.label(format!("Rooms reached: {} / {}", rooms_cleared, total_rooms));
                     ui.separator();
                     if ui.button("Return to Overworld").clicked() {
                         return_clicked = true;
@@ -106,37 +106,8 @@ pub fn mission_outcome_ui_system(
             }
         }
         None => {
-            let heroes_alive = sim
-                .sim
-                .units
-                .iter()
-                .filter(|u| u.team == Team::Hero && u.hp > 0)
-                .count();
-            let enemies_alive = sim
-                .sim
-                .units
-                .iter()
-                .filter(|u| u.team == Team::Enemy && u.hp > 0)
-                .count();
-
-            let mut retreat_clicked = false;
-            egui::Window::new("Mission HUD")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::LEFT_TOP, egui::vec2(8.0, 8.0))
-                .show(ctx, |ui| {
-                    ui.label(format!("Threat Level: {}", tl_roman));
-                    ui.label(format!("Units: {} alive", heroes_alive));
-                    ui.label(format!("Enemies: {} alive", enemies_alive));
-                    ui.separator();
-                    if ui.button("Retreat").clicked() {
-                        retreat_clicked = true;
-                    }
-                });
-
-            if retreat_clicked {
-                hub_ui.screen = HubScreen::OverworldMap;
-            }
+            // Mission HUD info is now displayed inside the ASCII combat pane.
+            // No separate floating window needed during active combat.
         }
     }
 }

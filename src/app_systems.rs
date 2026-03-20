@@ -4,13 +4,14 @@ use bevy::prelude::*;
 
 use crate::audio;
 use crate::progression;
-use crate::camera::{orbit_camera_controller_system, persist_camera_settings_system, setup_camera};
+use crate::ascii_viewport::{MissionPaneState, draw_ascii_viewport_system};
+use crate::camera::{persist_camera_settings_system, setup_camera};
 use crate::events;
 use crate::game_core;
 use crate::game_loop::{
     exit_after_steps, increment_global_turn, run_if_gameplay_active, run_if_hub_runtime_active,
-    run_if_mission_execution_active, run_if_simulation_steps_exist, start_scene_input_system,
-    turn_pacing_input_system,
+    run_if_mission_execution_active, run_if_replay_viewer_active, run_if_simulation_steps_exist,
+    start_scene_input_system, turn_pacing_input_system,
 };
 use crate::hub_outcome::{
     campaign_outcome_check_system, campaign_outcome_ui_system,
@@ -18,7 +19,7 @@ use crate::hub_outcome::{
     local_intro_sequence_system, region_layer_transition_system,
 };
 use crate::hub_systems::{
-    hub_apply_action_system, hub_menu_input_system, sync_hub_scene_visibility_system,
+    hub_apply_action_system, hub_menu_input_system,
 };
 use crate::backstory_cinematic::{
     backstory_cinematic_bootstrap_system, backstory_cinematic_collect_system,
@@ -45,7 +46,7 @@ use crate::scenario_3d::{
 use crate::screenshot_capture::{
     ScreenshotCaptureConfig, ScreenshotCaptureState, ScreenshotMode, screenshot_capture_system,
 };
-use crate::terrain::setup_overworld_terrain_scene;
+// 3D terrain removed — using ASCII egui viewports instead
 use crate::ui::quest_log::{draw_quest_log_system, quest_log_toggle_system};
 use crate::ui::save_browser::{
     campaign_autosave_system, campaign_save_load_input_system, campaign_save_panel_input_system,
@@ -102,11 +103,12 @@ pub fn register_hub_systems(app: &mut App) {
     app.add_systems(Update, draw_runtime_asset_gen_egui_system);
     app.add_systems(Update, draw_quest_log_system);
     app.add_systems(Update, events::draw_event_notification_system);
+    app.init_resource::<MissionPaneState>();
+    app.add_systems(Update, draw_ascii_viewport_system);
     app.add_systems(
         Update,
         (
             backstory_cinematic_state_reset_system,
-            sync_hub_scene_visibility_system,
             runtime_asset_gen_bootstrap_system,
             backstory_cinematic_bootstrap_system,
             backstory_narrative_gen_dispatch_system,
@@ -131,13 +133,19 @@ pub fn register_hub_systems(app: &mut App) {
 
 fn register_mission_execution_systems(app: &mut App) {
     app.add_systems(Update, mission::execution::mission_scene_transition_system);
+    // Replay viewer systems
+    app.add_systems(Update, mission::execution::replay_viewer_transition_system);
     app.add_systems(
         Update,
         (
-            mission::sim_bridge::advance_sim_system,
-            mission::sim_bridge::apply_vfx_from_sim_events_system,
+            mission::execution::advance_replay_viewer_system,
+            mission::execution::replay_viewer_keyboard_system,
         )
-            .chain()
+            .run_if(run_if_replay_viewer_active),
+    );
+    app.add_systems(
+        Update,
+        mission::sim_bridge::advance_sim_system
             .run_if(run_if_mission_execution_active),
     );
     app.add_systems(
@@ -149,40 +157,12 @@ fn register_mission_execution_systems(app: &mut App) {
     app.add_systems(
         Update,
         (
-            mission::sim_bridge::player_ground_click_system,
             mission::sim_bridge::apply_player_orders_system,
-            mission::execution::sync_sim_to_visuals_system,
-            mission::unit_vis::update_unit_positions,
-            mission::unit_vis::update_hp_bars,
-            mission::unit_vis::update_unit_selection_rings,
-            mission::vfx::spawn_vfx_system,
-            mission::vfx::update_floating_text_system,
-            mission::vfx::update_hit_flash_system,
-            mission::vfx::update_death_fade_system,
             mission::objectives::check_objective_system,
-            mission::objectives::draw_objective_hud_system,
-            mission::room_sequence::spawn_room_door_system,
             mission::room_sequence::advance_room_system,
-            mission::execution::ability_hud_system,
             mission::execution::mission_outcome_ui_system,
             progression::apply_progression_on_unconscious_system,
         )
-            .run_if(run_if_mission_execution_active),
-    );
-    app.add_systems(
-        Update,
-        (
-            mission::vfx::sync_projectile_visuals_system,
-            mission::vfx::sync_zone_visuals_system,
-            mission::vfx::update_zone_pulse_system,
-            mission::vfx::sync_tether_visuals_system,
-            mission::vfx::sync_shield_indicators_system,
-            mission::vfx::sync_status_indicators_system,
-            mission::vfx::sync_buff_debuff_rings_system,
-            mission::vfx::emit_dot_hot_particles_system,
-            mission::vfx::update_channel_ring_system,
-        )
-            .after(mission::sim_bridge::advance_sim_system)
             .run_if(run_if_mission_execution_active),
     );
 }
@@ -284,7 +264,6 @@ pub fn register_rendered_input_systems(app: &mut App) {
             manual_screenshot_capture_system,
             persist_camera_settings_system,
             update_settings_menu_visual_system,
-            orbit_camera_controller_system,
         )
             .chain(),
     );
@@ -312,7 +291,7 @@ pub fn register_startup_systems(
     } else if hub_mode {
         app.add_systems(
             Startup,
-            (setup_camera, setup_overworld_terrain_scene, setup_settings_menu),
+            (setup_camera, setup_settings_menu),
         );
     } else {
         app.add_systems(
@@ -374,7 +353,7 @@ pub fn register_screenshot_systems(
         app.insert_resource(ScreenshotCaptureConfig {
             mode: ScreenshotMode::HubStages { dir },
             warmup_frames: screenshot_warmup_frames,
-            max_captures: Some(3),
+            max_captures: None, // capture all stages in HUB_STAGE_CAPTURE_SEQUENCE
             max_attempts: 180,
         });
         app.init_resource::<ScreenshotCaptureState>();

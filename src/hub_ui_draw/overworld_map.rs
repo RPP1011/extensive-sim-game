@@ -31,62 +31,43 @@ pub(crate) fn draw_overworld_map_panel(
     camera_query: &Query<&OrbitCameraController>,
     bounds: &SceneViewBounds,
     party_snapshots: &[game_core::CampaignParty],
-    _runtime_mode: &RuntimeModeState,
+    runtime_mode: &RuntimeModeState,
     transition_locked: bool,
 ) {
     // Navigation buttons
+    if super::common::ascii_button_enabled(ui, "Back To Start Menu", !transition_locked) {
+        enter_start_menu(hub_ui, start_menu);
+    }
     ui.horizontal(|ui| {
-        if ui
-            .add_enabled(!transition_locked, egui::Button::new("Back To Start Menu"))
-            .clicked()
-        {
-            enter_start_menu(hub_ui, start_menu);
-        }
-        if ui
-            .add_enabled(!transition_locked, egui::Button::new("Switch To Guild"))
-            .clicked()
-        {
+        if super::common::ascii_button_enabled(ui, "Guild", !transition_locked) {
             hub_ui.screen = HubScreen::GuildManagement;
         }
-        if ui
-            .add_enabled(!transition_locked, egui::Button::new("Overworld Details"))
-            .clicked()
-        {
+        if super::common::ascii_button_enabled(ui, "Details", !transition_locked) {
             hub_ui.screen = HubScreen::Overworld;
         }
     });
-    ui.separator();
-    ui.horizontal_wrapped(|ui| {
-        ui.label(format!("Travel CD: {}", overworld.travel_cooldown_turns));
-        ui.label(format!("Seed: {}", overworld.map_seed));
-        ui.label("Map View: campaign terrain");
-    });
+    super::common::ascii_separator(ui);
+    ui.colored_label(egui::Color32::from_rgb(120, 135, 155), format!("Travel CD: {}", overworld.travel_cooldown_turns));
     let selected_region_name = overworld
         .regions
         .get(overworld.selected_region)
         .map(|r| r.name.as_str())
         .unwrap_or("Unknown");
-    ui.horizontal_wrapped(|ui| {
-        if ui
-            .add_enabled(
-                !transition_locked,
-                egui::Button::new(format!("Enter {}", selected_region_name)),
-            )
-            .clicked()
-        {
-            let notice = request_enter_selected_region(
-                hub_ui,
-                target_picker,
-                camera_focus_transition,
-                region_transition,
-                overworld,
-                character_creation,
-            );
-            parties.notice = notice.clone();
-            hub_menu.notice = notice;
-        }
+    if super::common::ascii_button_enabled(ui, &format!("Enter {}", selected_region_name), !transition_locked) {
+        let notice = request_enter_selected_region(
+            hub_ui,
+            target_picker,
+            camera_focus_transition,
+            region_transition,
+            overworld,
+            character_creation,
+        );
+        parties.notice = notice.clone();
+        hub_menu.notice = notice;
+    }
+    if runtime_mode.dev_mode {
         ui.small(truncate_for_hud(&region_transition.status, 120));
-    });
+    }
     if transition_locked {
         ui.colored_label(
             egui::Color32::from_rgb(112, 207, 242),
@@ -94,13 +75,11 @@ pub(crate) fn draw_overworld_map_panel(
         );
     }
 
-    ui.separator();
-    overworld_map_strategic::draw_strategic_map(ui, overworld, target_picker, parties, party_snapshots, transition_locked);
-
-    ui.separator();
+    // Strategic map is now rendered in the CentralPanel by ascii_viewport
+    super::common::ascii_separator(ui);
     overworld_map_parties::draw_faction_control(ui, overworld);
 
-    ui.separator();
+    super::common::ascii_separator(ui);
     overworld_map_parties::draw_player_parties(
         ui,
         overworld,

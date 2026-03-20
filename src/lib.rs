@@ -36,6 +36,7 @@ pub enum HubScreen {
     RegionView,
     LocalEagleEyeIntro,
     MissionExecution,
+    ReplayViewer,
 }
 
 /// Hub UI resource (used by mission::execution).

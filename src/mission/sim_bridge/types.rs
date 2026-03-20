@@ -68,6 +68,25 @@ impl EnemyAiState {
     }
 }
 
+/// Records sim frames during a mission for post-combat replay.
+#[derive(Resource, Default)]
+pub struct MissionCombatRecording {
+    pub frames: Vec<SimState>,
+    pub events_per_frame: Vec<Vec<crate::ai::core::SimEvent>>,
+    pub active: bool,
+}
+
+/// Stores the replay data from the most recently completed mission.
+/// Persists across screen transitions so it can be viewed from the hub.
+#[derive(Resource)]
+pub struct LastMissionReplay {
+    pub name: String,
+    pub frames: Vec<SimState>,
+    pub events_per_frame: Vec<Vec<crate::ai::core::SimEvent>>,
+    /// Navigation grid for ASCII rendering of the combat terrain.
+    pub grid_nav: Option<crate::ai::pathing::GridNav>,
+}
+
 /// Player input and selection state.
 #[derive(Resource, Default)]
 pub struct PlayerOrderState {

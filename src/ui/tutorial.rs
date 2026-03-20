@@ -58,22 +58,17 @@ pub fn draw_tutorial_system(
         return;
     }
 
-    let in_active_scene = matches!(
-        hub_ui.screen,
-        HubScreen::MissionExecution
-            | HubScreen::Overworld
-            | HubScreen::OverworldMap
-            | HubScreen::RegionView
-    );
+    // Tutorial only shows on the Overworld details screen (text-only, no competing panels)
+    let in_active_scene = matches!(hub_ui.screen, HubScreen::Overworld);
     if !in_active_scene {
         return;
     }
 
     let ctx = contexts.ctx_mut();
     let screen_rect = ctx.screen_rect();
-    let window_width = 480.0_f32;
-    let window_x = screen_rect.center().x - window_width / 2.0;
-    let window_y = screen_rect.max.y - 120.0;
+    let window_width = 360.0_f32;
+    let window_x = screen_rect.max.x - window_width - 16.0;
+    let window_y = 16.0;
 
     egui::Window::new("Tutorial")
         .fixed_pos(egui::pos2(window_x, window_y))
@@ -81,6 +76,9 @@ pub fn draw_tutorial_system(
         .collapsible(false)
         .resizable(false)
         .title_bar(true)
+        .frame(egui::Frame::window(&(*ctx.style())).fill(
+            egui::Color32::from_rgba_premultiplied(10, 14, 20, 200),
+        ))
         .show(ctx, |ui| {
             let tip_index = tutorial_state.current_tip.min(TIPS.len() - 1);
             ui.label(TIPS[tip_index]);
@@ -99,12 +97,16 @@ pub fn draw_tutorial_system(
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .add(egui::Button::new(
-                            egui::RichText::new("Skip").weak(),
-                        ))
+                        .add(egui::Button::new(egui::RichText::new("Skip All").weak()))
                         .clicked()
                     {
                         tutorial_state.completed = true;
+                    }
+                    if ui
+                        .add(egui::Button::new(egui::RichText::new("Hide").weak()))
+                        .clicked()
+                    {
+                        tutorial_state.dismissed = true;
                     }
                 });
             });

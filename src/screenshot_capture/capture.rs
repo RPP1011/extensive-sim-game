@@ -74,6 +74,91 @@ pub fn configure_hub_stage_capture_fixture(world: &mut World, target_stage: HubS
         transition.status = "No active region context.".to_string();
     }
 
+    // MissionExecution: build combat state directly into the world so mission
+    // systems have their resources on the same frame the screen changes.
+    if target_stage == HubScreen::MissionExecution {
+        use crate::ai::core::Team;
+        use crate::mission::sim_bridge::{
+            EnemyAiState, MissionCombatRecording, MissionSimState, PlayerOrderState,
+            SimEventBuffer,
+        };
+        use crate::mission::unit_vis::{UnitHealthData, UnitPositionData, UnitSelection};
+        use crate::mission::room_sequence::MissionRoomSequence;
+        use crate::scenario::{build_combat, scenario_from_campaign};
+
+        let cfg = scenario_from_campaign(
+            &["knight".into(), "mage".into()],
+            2, 5, crate::game_core::RoomType::Entry, 42, None,
+        );
+        let setup = build_combat(&cfg);
+        let enemy_ai = EnemyAiState::new(&setup.sim);
+        world.insert_resource(MissionSimState {
+            sim: setup.sim,
+            tick_remainder_ms: 0,
+            outcome: None,
+            enemy_ai,
+            hero_intents: Vec::new(),
+            grid_nav: Some(setup.grid_nav),
+        });
+        world.insert_resource(PlayerOrderState::default());
+        world.insert_resource(UnitSelection::default());
+        world.insert_resource(UnitHealthData::default());
+        world.insert_resource(UnitPositionData::default());
+        world.insert_resource(SimEventBuffer::default());
+        world.insert_resource(MissionRoomSequence::new(2, 42));
+        world.insert_resource(MissionCombatRecording::default());
+    }
+
+    // ReplayViewer: build a short replay from a quick headless combat
+    if target_stage == HubScreen::ReplayViewer {
+        use crate::ai::core::{self, FIXED_TICK_MS};
+        use crate::mission::sim_bridge::LastMissionReplay;
+        use crate::scenario::{build_combat, ScenarioCfg};
+
+        let cfg = ScenarioCfg {
+            name: "screenshot_replay".into(),
+            seed: 42,
+            hero_count: 2,
+            enemy_count: 2,
+            ..ScenarioCfg::default()
+        };
+        let setup = build_combat(&cfg);
+        let mut sim = setup.sim;
+        let mut squad_ai = setup.squad_ai;
+
+        let mut frames = vec![sim.clone()];
+        let mut events_per_frame = vec![Vec::new()];
+        for _ in 0..30 {
+            let intents = crate::ai::squad::generate_intents(&sim, &mut squad_ai, FIXED_TICK_MS);
+            let (next, events) = core::step(sim, &intents, FIXED_TICK_MS);
+            sim = next;
+            frames.push(sim.clone());
+            events_per_frame.push(events);
+        }
+        world.insert_resource(LastMissionReplay {
+            name: "Screenshot Replay".to_string(),
+            frames: frames.clone(),
+            events_per_frame: events_per_frame.clone(),
+            grid_nav: None,
+        });
+
+        // Insert ReplayViewerState directly so advance_replay_viewer_system
+        // doesn't panic on the same frame the screen changes.
+        use crate::mission::execution::setup::ReplayViewerState;
+        use crate::mission::unit_vis::{UnitHealthData, UnitPositionData};
+        world.insert_resource(ReplayViewerState {
+            frames,
+            events_per_frame,
+            frame_index: 15, // mid-replay for a more interesting screenshot
+            tick_seconds: 0.1,
+            tick_accumulator: 0.0,
+            paused: true,
+            previous_screen: HubScreen::OverworldMap,
+        });
+        world.insert_resource(UnitPositionData::default());
+        world.insert_resource(UnitHealthData::default());
+    }
+
     if target_stage == HubScreen::LocalEagleEyeIntro {
         let region_payload = world
             .resource::<RegionLayerTransitionState>()
@@ -261,12 +346,19 @@ fn hub_stages_capture(
     };
     if should_prepare_stage {
         configure_hub_stage_capture_fixture(world, target_stage);
-        let ready_at = frames_seen.saturating_add(warmup_frames.max(1));
+    }
+    // Ensure stage_ready_at_frame is set (even if screen already matches)
+    {
         let mut state = world.resource_mut::<ScreenshotCaptureState>();
-        state.stage_ready_at_frame = Some(ready_at);
-        state.capture_attempts = 0;
-        state.pending_capture_path = None;
-        return;
+        if state.stage_ready_at_frame.is_none() {
+            let ready_at = frames_seen.saturating_add(warmup_frames.max(1));
+            state.stage_ready_at_frame = Some(ready_at);
+            state.capture_attempts = 0;
+            state.pending_capture_path = None;
+            if should_prepare_stage {
+                return;
+            }
+        }
     }
 
     if let Err(err) = fs::create_dir_all(dir) {

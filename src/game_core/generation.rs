@@ -99,7 +99,7 @@ pub(crate) fn hex_distance(a: (i32, i32), b: (i32, i32)) -> i32 {
     (dq.abs() + dr.abs() + (dq + dr).abs()) / 2
 }
 
-pub(crate) fn overworld_hex_coords() -> Vec<(i32, i32)> {
+pub fn overworld_hex_coords() -> Vec<(i32, i32)> {
     let mut coords = Vec::new();
     let radius = 2;
     for q in -radius..=radius {

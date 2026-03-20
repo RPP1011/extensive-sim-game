@@ -28,7 +28,7 @@ pub(crate) fn draw_crises_right_panel(
     egui::SidePanel::right("hub_crises_panel")
         .frame(
             egui::Frame::none()
-                .fill(egui::Color32::from_rgb(10, 12, 16))
+                .fill(egui::Color32::TRANSPARENT)
                 .inner_margin(egui::Margin::same(10.0)),
         )
         .resizable(false)
@@ -36,7 +36,7 @@ pub(crate) fn draw_crises_right_panel(
         .min_width(180.0)
         .show(ctx, |ui| {
             ui.label(egui::RichText::new("Active Crises").strong());
-            ui.separator();
+            super::common::ascii_separator(ui);
             if flashpoint_state.chains.is_empty() {
                 ui.small("No active flashpoint chains.");
             } else {
@@ -48,7 +48,7 @@ pub(crate) fn draw_crises_right_panel(
                         game_core::FlashpointIntent::CivilianFirst => "Civilian First",
                     };
                     egui::Frame::none()
-                        .fill(egui::Color32::from_rgba_premultiplied(20, 24, 32, 180))
+                        .fill(egui::Color32::TRANSPARENT)
                         .inner_margin(egui::Margin::same(4.0))
                         .show(ui, |ui| {
                             let title = if chain.objective.is_empty() {
@@ -60,14 +60,16 @@ pub(crate) fn draw_crises_right_panel(
                             ui.small(format!("Stage {} / 3", chain.stage));
                             ui.small(format!("Status: {}", status_label));
                             ui.small(format!("Intent: {}", intent_label));
-                            ui.small(format!("Region: {}", chain.region_id));
+                            let crisis_region = overworld.regions.get(chain.region_id)
+                                .map(|r| r.name.as_str()).unwrap_or("Unknown");
+                            ui.small(format!("Region: {}", crisis_region));
                         });
                     ui.add_space(2.0);
                 }
             }
-            ui.separator();
+            super::common::ascii_separator(ui);
             ui.label(egui::RichText::new("Faction Strength").strong());
-            ui.separator();
+            super::common::ascii_separator(ui);
             for faction in &overworld.factions {
                 let color = faction_color(faction.id);
                 ui.colored_label(color, egui::RichText::new(&faction.name).small().strong());
@@ -97,7 +99,7 @@ pub(crate) fn draw_crises_right_panel(
 pub(crate) fn draw_faction_control(ui: &mut egui::Ui, overworld: &game_core::OverworldMap) {
     ui.label(egui::RichText::new("Faction Control").strong());
     egui::Frame::none()
-        .fill(egui::Color32::from_rgb(13, 16, 22))
+        .fill(egui::Color32::TRANSPARENT)
         .inner_margin(egui::Margin::same(8.0))
         .show(ui, |ui| {
             let mut territory = vec![0usize; overworld.factions.len()];
@@ -133,7 +135,7 @@ pub(crate) fn draw_player_parties(
 ) {
     ui.label(egui::RichText::new("Player Parties").strong());
     egui::Frame::none()
-        .fill(egui::Color32::from_rgb(13, 16, 22))
+        .fill(egui::Color32::TRANSPARENT)
         .inner_margin(egui::Margin::same(8.0))
         .show(ui, |ui| {
             if let Some(active_transition) = camera_focus_transition.active.as_ref() {
@@ -212,7 +214,7 @@ pub(crate) fn draw_player_parties(
                         ui.small(
                             "Player party uses direct control; select a delegated party for orders.",
                         );
-                        if ui.button("Focus Selected Party").clicked() {
+                        if super::common::ascii_button(ui, "Focus Selected Party") {
                             focus_player_party(
                                 ui,
                                 overworld,
@@ -265,20 +267,20 @@ fn draw_delegated_party_controls(
         ui.small("Picker active: click a map region, then confirm or cancel.");
         ui.horizontal_wrapped(|ui| {
             ui.small(format!("Selected in picker: {}", picker_pending_region));
-            if ui.button("Confirm Target").clicked() {
+            if super::common::ascii_button(ui, "Confirm Target") {
                 match confirm_region_target_picker(target_picker, parties, party_id, overworld) {
                     Ok(notice) => parties.notice = notice,
                     Err(reason) => parties.notice = reason,
                 }
             }
-            if ui.button("Cancel Picker").clicked() {
+            if super::common::ascii_button(ui, "Cancel Picker") {
                 match cancel_region_target_picker(target_picker, party_id) {
                     Ok(notice) => parties.notice = notice,
                     Err(reason) => parties.notice = reason,
                 }
             }
         });
-    } else if ui.button("Pick Region Target").clicked() {
+    } else if super::common::ascii_button(ui, "Pick Region Target") {
         let party_ref = &parties.parties[party_idx];
         parties.notice = begin_region_target_picker(target_picker, party_ref);
     }
@@ -288,17 +290,17 @@ fn draw_delegated_party_controls(
         .selected_region
         .min(overworld.regions.len().saturating_sub(1));
     let assigned_target_region = parties.parties[party_idx].order_target_region_id;
-    ui.separator();
+    super::common::ascii_separator(ui);
     ui.small("Delegated Orders:");
     ui.horizontal_wrapped(|ui| {
-        if ui.button("Hold").clicked() {
+        if super::common::ascii_button(ui, "Hold") {
             order_update = Some((
                 game_core::PartyOrderKind::HoldPosition,
                 None,
                 format!("{} ordered to hold position.", party_name),
             ));
         }
-        if ui.button("Patrol").clicked() {
+        if super::common::ascii_button(ui, "Patrol") {
             let target = assigned_target_region;
             let target_suffix = target
                 .and_then(|id| overworld.regions.get(id))
@@ -310,7 +312,7 @@ fn draw_delegated_party_controls(
                 format!("{} ordered to patrol nearby{}", party_name, target_suffix),
             ));
         }
-        if ui.button("Reinforce Selected").clicked() {
+        if super::common::ascii_button(ui, "Reinforce Selected") {
             let target_region = assigned_target_region.unwrap_or(fallback_target_region);
             order_update = Some((
                 game_core::PartyOrderKind::ReinforceFront,
@@ -326,7 +328,7 @@ fn draw_delegated_party_controls(
                 ),
             ));
         }
-        if ui.button("Recruit/Train").clicked() {
+        if super::common::ascii_button(ui, "Recruit/Train") {
             let target_region = assigned_target_region.unwrap_or(fallback_target_region);
             order_update = Some((
                 game_core::PartyOrderKind::RecruitAndTrain,
@@ -334,7 +336,7 @@ fn draw_delegated_party_controls(
                 format!("{} ordered to recruit and train.", party_name),
             ));
         }
-        if ui.button("Take Command").clicked() {
+        if super::common::ascii_button(ui, "Take Command") {
             match transfer_direct_command_to_selected(parties) {
                 Ok(handoff) => {
                     target_picker.clear();

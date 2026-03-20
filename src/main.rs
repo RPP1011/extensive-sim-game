@@ -11,6 +11,7 @@ mod camera;
 mod events;
 mod game_core;
 mod mission;
+mod scenario;
 mod ui;
 
 // ---------------------------------------------------------------------------
@@ -35,6 +36,7 @@ mod simulation_cli;
 mod terrain;
 mod ui_helpers;
 mod hub_ui_draw;
+mod ascii_viewport;
 mod progression;
 
 use camera::{load_camera_settings, CameraFocusTransitionState, SceneViewBounds};

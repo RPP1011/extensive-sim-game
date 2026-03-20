@@ -59,11 +59,7 @@ pub(crate) fn draw_gui_only_screens(
                 (ctx.screen_rect().width() * 0.86).clamp(560.0, 1180.0)
             };
             egui::Frame::none()
-                .fill(egui::Color32::from_rgba_premultiplied(7, 12, 18, 224))
-                .stroke(egui::Stroke::new(
-                    1.0,
-                    egui::Color32::from_rgba_premultiplied(120, 160, 184, 98),
-                ))
+                .fill(egui::Color32::TRANSPARENT)
                 .inner_margin(egui::Margin::same(
                     if show_start_menu_sidebar { 18.0 } else { 24.0 },
                 ))
@@ -73,13 +69,7 @@ pub(crate) fn draw_gui_only_screens(
                         HubScreen::StartMenu => {
                             draw_start_menu_center(
                                 ui,
-                                hub_ui,
-                                start_menu,
                                 first_launch_lock,
-                                slot1,
-                                slot2,
-                                slot3,
-                                autosave,
                             );
                         }
                         HubScreen::CharacterCreationFaction => {
@@ -127,61 +117,53 @@ fn draw_hamburger_nav(
         .exact_width(nav_width)
         .frame(
             egui::Frame::none()
-                .fill(egui::Color32::from_rgba_premultiplied(8, 12, 18, 236))
+                .fill(egui::Color32::TRANSPARENT)
                 .inner_margin(egui::Margin::same(12.0)),
         )
         .show(ctx, |ui| {
-            if ui
-                .add(egui::Button::new("|||").min_size(egui::vec2(44.0, 34.0)))
-                .clicked()
+            if super::common::ascii_button(ui, "\u{2261}")
             {
                 start_menu.hamburger_expanded = !start_menu.hamburger_expanded;
             }
             if !start_menu.hamburger_expanded {
                 return;
             }
-            ui.separator();
+            super::common::ascii_separator(ui);
             ui.heading("Guild Menu");
             ui.small(truncate_for_hud(&start_menu.subtitle, 110));
-            ui.separator();
-            if ui
-                .add(egui::Button::new("New Campaign").min_size(egui::vec2(260.0, 46.0)))
-                .clicked()
-            {
+            super::common::ascii_separator(ui);
+
+            let btn_color = egui::Color32::from_rgb(200, 215, 235);
+
+            // Bracket-style menu buttons for the hamburger nav.
+            macro_rules! nav_bracket_button {
+                ($ui:expr, $label:expr, $width:expr, $height:expr, $enabled:expr) => {{
+                    if $enabled {
+                        super::common::ascii_button_colored($ui, $label, btn_color)
+                    } else {
+                        super::common::ascii_button_enabled($ui, $label, false)
+                    }
+                }};
+            }
+
+            if nav_bracket_button!(ui, "New Campaign", 260.0, 46.0, true) {
                 hub_ui.request_new_campaign = true;
             }
-            if ui
-                .add_enabled(
-                    can_continue && !first_launch_lock,
-                    egui::Button::new("Continue Campaign").min_size(egui::vec2(260.0, 42.0)),
-                )
-                .clicked()
-            {
+            if nav_bracket_button!(ui, "Continue Campaign", 260.0, 42.0, can_continue && !first_launch_lock) {
                 hub_ui.request_continue_campaign = true;
             }
             if runtime_mode.dev_mode
-                && ui
-                    .add(egui::Button::new("Overworld Map (Dev)").min_size(egui::vec2(260.0, 36.0)))
-                    .clicked()
+                && nav_bracket_button!(ui, "Overworld Map (Dev)", 260.0, 36.0, true)
             {
                 hub_ui.screen = HubScreen::OverworldMap;
             }
-            if ui
-                .add(egui::Button::new("Settings").min_size(egui::vec2(260.0, 36.0)))
-                .clicked()
-            {
+            if nav_bracket_button!(ui, "Settings", 260.0, 36.0, true) {
                 settings_menu.is_open = true;
             }
-            if ui
-                .add(egui::Button::new("Credits").min_size(egui::vec2(260.0, 36.0)))
-                .clicked()
-            {
+            if nav_bracket_button!(ui, "Credits", 260.0, 36.0, true) {
                 hub_ui.show_credits = true;
             }
-            if ui
-                .add(egui::Button::new("Quit").min_size(egui::vec2(260.0, 36.0)))
-                .clicked()
-            {
+            if nav_bracket_button!(ui, "Quit", 260.0, 36.0, true) {
                 hub_ui.request_quit = true;
             }
         });
@@ -189,33 +171,17 @@ fn draw_hamburger_nav(
 
 fn draw_start_menu_center(
     ui: &mut egui::Ui,
-    _hub_ui: &mut HubUiState,
-    start_menu: &StartMenuState,
     first_launch_lock: bool,
-    slot1: &str,
-    slot2: &str,
-    slot3: &str,
-    autosave: &str,
 ) {
-    ui.heading("Adventurer's Guild");
-    ui.label("A GUI-only command deck with a landscape backsplash.");
-    ui.separator();
-    ui.horizontal_wrapped(|ui| {
-        ui.small(format!("Slot1: {}", slot1));
-        ui.small(format!("Slot2: {}", slot2));
-        ui.small(format!("Slot3: {}", slot3));
-        ui.small(format!("Autosave: {}", autosave));
-    });
+    // The ASCII title art is rendered by draw_ascii_viewport_system as the CentralPanel.
+    // This area is overlaid on top, so keep it minimal to avoid obscuring the art.
+    ui.add_space(8.0);
     if first_launch_lock {
         ui.colored_label(
             egui::Color32::from_rgb(240, 185, 100),
             "First launch detected: start with New Campaign.",
         );
     }
-    ui.small(format!(
-        "Status: {}",
-        truncate_for_hud(&start_menu.status, 120)
-    ));
 }
 
 /// Side-panel variant of the start menu (used when the left SidePanel is active).
@@ -236,45 +202,38 @@ pub(crate) fn draw_start_menu_side_panel(
     save_panel: &CampaignSavePanelState,
 ) {
     ui.label(egui::RichText::new("Campaign Start").strong());
-    if ui
-        .add(egui::Button::new("New Campaign").min_size(egui::vec2(300.0, 48.0)))
-        .clicked()
-    {
+    let btn_color = egui::Color32::from_rgb(200, 215, 235);
+
+    // Helper closure: renders a bracket-style menu button, returns true if clicked.
+    macro_rules! bracket_button {
+        ($ui:expr, $label:expr, $width:expr, $height:expr, $enabled:expr) => {{
+            if $enabled {
+                super::common::ascii_button_colored($ui, $label, btn_color)
+            } else {
+                super::common::ascii_button_enabled($ui, $label, false)
+            }
+        }};
+    }
+
+    if bracket_button!(ui, "New Campaign", 300.0, 48.0, true) {
         hub_ui.request_new_campaign = true;
     }
     ui.horizontal_wrapped(|ui| {
-        if ui
-            .add_enabled(
-                can_continue && !first_launch_lock,
-                egui::Button::new("Continue Campaign").min_size(egui::vec2(220.0, 40.0)),
-            )
-            .clicked()
-        {
+        if bracket_button!(ui, "Continue Campaign", 220.0, 40.0, can_continue && !first_launch_lock) {
             hub_ui.request_continue_campaign = true;
         }
         if runtime_mode.dev_mode
-            && ui
-                .add(egui::Button::new("Overworld Map (Dev)").min_size(egui::vec2(180.0, 40.0)))
-                .clicked()
+            && bracket_button!(ui, "Overworld Map (Dev)", 180.0, 40.0, true)
         {
             hub_ui.screen = HubScreen::OverworldMap;
         }
-        if ui
-            .add(egui::Button::new("Settings").min_size(egui::vec2(120.0, 40.0)))
-            .clicked()
-        {
+        if bracket_button!(ui, "Settings", 120.0, 40.0, true) {
             settings_menu.is_open = true;
         }
-        if ui
-            .add(egui::Button::new("Credits").min_size(egui::vec2(110.0, 40.0)))
-            .clicked()
-        {
+        if bracket_button!(ui, "Credits", 110.0, 40.0, true) {
             hub_ui.show_credits = true;
         }
-        if ui
-            .add(egui::Button::new("Quit").min_size(egui::vec2(90.0, 40.0)))
-            .clicked()
-        {
+        if bracket_button!(ui, "Quit", 90.0, 40.0, true) {
             hub_ui.request_quit = true;
         }
     });
@@ -284,14 +243,14 @@ pub(crate) fn draw_start_menu_side_panel(
         ui.small("No compatible saves found. Start a new campaign.");
     }
 
-    ui.separator();
+    super::common::ascii_separator(ui);
     egui::CollapsingHeader::new("Saves")
         .default_open(false)
         .show(ui, |ui| {
             ui.small("Load shortcuts: F9 slot1 | Shift+F9 slot2 | Ctrl+F9 slot3");
             ui.small("Save panel: F6");
             egui::Frame::none()
-                .fill(egui::Color32::from_rgb(13, 16, 22))
+                .fill(egui::Color32::TRANSPARENT)
                 .inner_margin(egui::Margin::same(8.0))
                 .show(ui, |ui| {
                     let slot1_badge =

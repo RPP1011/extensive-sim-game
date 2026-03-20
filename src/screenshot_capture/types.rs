@@ -27,12 +27,14 @@ pub enum ScreenshotMode {
     HubStages { dir: String },
 }
 
-pub const HUB_STAGE_CAPTURE_SEQUENCE: [HubScreen; 5] = [
+pub const HUB_STAGE_CAPTURE_SEQUENCE: [HubScreen; 7] = [
     HubScreen::StartMenu,
     HubScreen::CharacterCreationFaction,
     HubScreen::OverworldMap,
     HubScreen::RegionView,
     HubScreen::LocalEagleEyeIntro,
+    HubScreen::MissionExecution,
+    HubScreen::ReplayViewer,
 ];
 
 pub fn hub_screen_capture_name(screen: HubScreen) -> &'static str {
@@ -47,6 +49,7 @@ pub fn hub_screen_capture_name(screen: HubScreen) -> &'static str {
         HubScreen::RegionView => "RegionView",
         HubScreen::LocalEagleEyeIntro => "LocalEagleEyeIntro",
         HubScreen::MissionExecution => "MissionExecution",
+        HubScreen::ReplayViewer => "ReplayViewer",
     }
 }
 

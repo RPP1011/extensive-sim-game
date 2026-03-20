@@ -6,6 +6,12 @@ use crate::campaign_ops::{enter_start_menu, truncate_for_hud};
 use crate::game_core::{self, HubScreen, HubUiState};
 use crate::hub_types::StartMenuState;
 
+fn format_bar(value: f32, max: f32) -> String {
+    let filled = ((value / max).clamp(0.0, 1.0) * 10.0).round() as usize;
+    let empty = 10 - filled;
+    format!("[{}{}]", "█".repeat(filled), "░".repeat(empty))
+}
+
 /// Draw the Overworld details side-panel (region list, diplomacy, offers).
 pub(crate) fn draw_overworld_details(
     ui: &mut egui::Ui,
@@ -16,20 +22,19 @@ pub(crate) fn draw_overworld_details(
     interactions: &game_core::InteractionBoard,
 ) {
     ui.horizontal(|ui| {
-        if ui.button("Back To Start Menu").clicked() {
+        if super::common::ascii_button(ui, "Back To Start Menu") {
             enter_start_menu(hub_ui, start_menu);
         }
-        if ui.button("Switch To Guild").clicked() {
+        if super::common::ascii_button(ui, "Switch To Guild") {
             hub_ui.screen = HubScreen::GuildManagement;
         }
-        if ui.button("Strategic Map").clicked() {
+        if super::common::ascii_button(ui, "Strategic Map") {
             hub_ui.screen = HubScreen::OverworldMap;
         }
     });
-    ui.separator();
+    super::common::ascii_separator(ui);
     ui.horizontal_wrapped(|ui| {
         ui.label(format!("Travel CD: {}", overworld.travel_cooldown_turns));
-        ui.label(format!("Seed: {}", overworld.map_seed));
         ui.label(format!(
             "Current: {}",
             overworld
@@ -49,10 +54,10 @@ pub(crate) fn draw_overworld_details(
     });
     ui.small("Controls: J/L select region | T travel | 1/2/3 flashpoint intent");
 
-    ui.separator();
+    super::common::ascii_separator(ui);
     ui.label(egui::RichText::new("Regions").strong());
     egui::Frame::none()
-        .fill(egui::Color32::from_rgb(13, 16, 22))
+        .fill(egui::Color32::TRANSPARENT)
         .inner_margin(egui::Margin::same(8.0))
         .show(ui, |ui| {
             for r in overworld.regions.iter().take(10) {
@@ -63,28 +68,24 @@ pub(crate) fn draw_overworld_details(
                 } else {
                     " "
                 };
-                let telemetry = if r.intel_level >= 65.0 {
-                    format!("unrest={:.0} control={:.0}", r.unrest, r.control)
+                let faction_name = overworld.factions.get(r.owner_faction_id)
+                    .map(|f| f.name.as_str()).unwrap_or("Unknown");
+                ui.label(format!("{marker} {} — {}", r.name, faction_name));
+                if r.intel_level >= 65.0 {
+                    ui.small(format!("  Intel {} Unrest {} Control {}",
+                        format_bar(r.intel_level, 100.0), format_bar(r.unrest, 100.0), format_bar(r.control, 100.0)));
                 } else if r.intel_level >= 35.0 {
-                    format!(
-                        "unrest~{:.0} control~{:.0}",
-                        (r.unrest / 10.0).round() * 10.0,
-                        (r.control / 10.0).round() * 10.0
-                    )
+                    ui.small(format!("  Intel {} (partial visibility)", format_bar(r.intel_level, 100.0)));
                 } else {
-                    "unrest=? control=?".to_string()
-                };
-                ui.label(format!(
-                    "{marker} {} [F{}] intel={:.0} {}",
-                    r.name, r.owner_faction_id, r.intel_level, telemetry
-                ));
+                    ui.small("  Intel [░░░░░░░░░░] (unknown)");
+                }
             }
         });
 
-    ui.separator();
+    super::common::ascii_separator(ui);
     ui.label(egui::RichText::new("Diplomacy & Offers").strong());
     egui::Frame::none()
-        .fill(egui::Color32::from_rgb(13, 16, 22))
+        .fill(egui::Color32::TRANSPARENT)
         .inner_margin(egui::Margin::same(8.0))
         .show(ui, |ui| {
             for (idx, f) in overworld
@@ -95,9 +96,18 @@ pub(crate) fn draw_overworld_details(
                 .take(5)
             {
                 let rel = diplomacy.relations[diplomacy.player_faction_id][idx];
-                ui.label(format!("{} relation={}", f.name, rel));
+                let tier = if rel >= 75 { "Allied" } else if rel >= 25 { "Neutral" } else { "Hostile" };
+                let tier_color = match tier {
+                    "Allied" => egui::Color32::from_rgb(126, 200, 122),
+                    "Hostile" => egui::Color32::from_rgb(220, 100, 100),
+                    _ => egui::Color32::from_rgb(180, 180, 160),
+                };
+                ui.horizontal(|ui| {
+                    ui.label(&f.name);
+                    ui.colored_label(tier_color, tier);
+                });
             }
-            ui.separator();
+            super::common::ascii_separator(ui);
             if interactions.offers.is_empty() {
                 ui.label("offers: none");
             } else {
@@ -109,13 +119,7 @@ pub(crate) fn draw_overworld_details(
                         .find(|r| r.id == o.region_id)
                         .map(|r| r.name.as_str())
                         .unwrap_or("Unknown Region");
-                    ui.label(format!(
-                        "{marker} #{} {:?} [{}] {}",
-                        o.id,
-                        o.kind,
-                        region,
-                        truncate_for_hud(&o.summary, 72)
-                    ));
+                    ui.label(format!("{marker} {} — {}", region, truncate_for_hud(&o.summary, 72)));
                 }
             }
         });

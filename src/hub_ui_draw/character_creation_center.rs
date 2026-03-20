@@ -11,7 +11,7 @@ use crate::game_core::{
     self, CharacterCreationState, HubScreen, HubUiState,
 };
 use crate::hub_types::{CharacterCreationUiState, StartMenuState};
-use crate::ui_helpers::{illustration_placeholder_tile, split_faction_impact_sections};
+use crate::ui_helpers::split_faction_impact_sections;
 use super::faction_color;
 
 #[allow(clippy::too_many_arguments)]
@@ -27,7 +27,17 @@ pub(crate) fn draw_faction_center(
 ) {
     let choices = build_faction_selection_choices(overworld);
     ui.heading("Step 1 of 2 \u{00b7} Faction");
-    ui.label("Choose your faction identity and campaign doctrine.");
+
+    // Flavor text frame
+    egui::Frame::none()
+        .fill(egui::Color32::TRANSPARENT)
+        .inner_margin(egui::Margin::same(10.0))
+        .show(ui, |ui| {
+            ui.colored_label(
+                egui::Color32::from_rgb(160, 175, 195),
+                "Choose the faction that shapes your campaign. Each offers different doctrine and recruits.",
+            );
+        });
 
     if !choices.is_empty() {
         let mut selected_pos = character_creation
@@ -60,119 +70,91 @@ pub(crate) fn draw_faction_center(
         }
     }
 
-    ui.separator();
-    ui.columns(2, |columns| {
-        columns[0].vertical(|ui| {
-            if let Some(selected) = choices
-                .iter()
-                .find(|choice| character_creation.selected_faction_index == Some(choice.index))
-            {
-                let accent = faction_color(selected.index);
-                let (doctrine, profile, recruit) =
-                    split_faction_impact_sections(&selected.impact);
-                illustration_placeholder_tile(
-                    ui,
-                    &format!("{} Key Art", selected.name),
-                    &format!(
-                        "Prompt: {} faction banner scene with terrain motifs.",
-                        selected.name
-                    ),
-                    accent,
-                );
-                egui::Frame::none()
-                    .fill(egui::Color32::from_rgba_premultiplied(9, 13, 18, 208))
-                    .stroke(egui::Stroke::new(1.0, accent))
-                    .rounding(egui::Rounding::same(8.0))
-                    .inner_margin(egui::Margin::same(12.0))
-                    .show(ui, |ui| {
-                        ui.colored_label(accent, format!("Selected: {}", selected.name));
-                        ui.small(doctrine);
-                        ui.small(profile);
-                        ui.small(recruit);
-                    });
-            } else {
-                ui.small("Select a faction to preview narrative tone and doctrine.");
-            }
-        });
-        columns[1].vertical(|ui| {
-            if choices.is_empty() {
-                ui.colored_label(
-                    egui::Color32::from_rgb(235, 95, 95),
-                    "No factions available. Return to Start Menu.",
-                );
-            } else {
-                egui::ScrollArea::vertical()
-                    .max_height(430.0)
-                    .show(ui, |ui| {
-                        for choice in &choices {
-                            let is_selected =
-                                character_creation.selected_faction_index == Some(choice.index);
-                            let accent = faction_color(choice.index);
+    ui.add_space(6.0);
+
+    if choices.is_empty() {
+        ui.colored_label(
+            egui::Color32::from_rgb(235, 95, 95),
+            "No factions available. Return to Start Menu.",
+        );
+    } else {
+        egui::ScrollArea::vertical()
+            .max_height(430.0)
+            .show(ui, |ui| {
+                for choice in &choices {
+                    let is_selected =
+                        character_creation.selected_faction_index == Some(choice.index);
+                    let accent = faction_color(choice.index);
+                    let marker = if is_selected { "(\u{25cf})" } else { "( )" };
+                    let bg = if is_selected {
+                        egui::Color32::from_rgba_premultiplied(
+                            accent.r(),
+                            accent.g(),
+                            accent.b(),
+                            40,
+                        )
+                    } else {
+                        egui::Color32::from_rgb(16, 22, 32)
+                    };
+
+                    let resp = egui::Frame::none()
+                        .fill(bg)
+                        .stroke(egui::Stroke::new(
+                            if is_selected { 2.0 } else { 1.0 },
+                            if is_selected {
+                                accent
+                            } else {
+                                egui::Color32::from_rgb(40, 50, 65)
+                            },
+                        ))
+                        .rounding(egui::Rounding::same(4.0))
+                        .inner_margin(egui::Margin::same(8.0))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(marker).monospace().color(accent),
+                                );
+                                ui.label(
+                                    egui::RichText::new(&choice.name).strong().color(accent),
+                                );
+                            });
                             let (doctrine, profile, recruit) =
                                 split_faction_impact_sections(&choice.impact);
-                            let bg = if is_selected {
-                                egui::Color32::from_rgba_premultiplied(
-                                    accent.r(),
-                                    accent.g(),
-                                    accent.b(),
-                                    44,
-                                )
-                            } else {
-                                egui::Color32::from_rgba_premultiplied(12, 18, 26, 195)
-                            };
-                            egui::Frame::none()
-                                .fill(bg)
-                                .stroke(egui::Stroke::new(
-                                    if is_selected { 2.0 } else { 1.0 },
-                                    if is_selected {
-                                        accent
-                                    } else {
-                                        egui::Color32::from_rgba_premultiplied(130, 162, 186, 82)
-                                    },
-                                ))
-                                .rounding(egui::Rounding::same(8.0))
-                                .inner_margin(egui::Margin::same(10.0))
-                                .show(ui, |ui| {
-                                    ui.horizontal_wrapped(|ui| {
-                                        if ui
-                                            .add(
-                                                egui::Button::new(&choice.name)
-                                                    .min_size(egui::vec2(180.0, 30.0)),
-                                            )
-                                            .clicked()
-                                        {
-                                            character_creation.selected_faction_index =
-                                                Some(choice.index);
-                                            character_creation.selected_faction_id =
-                                                Some(choice.id.clone());
-                                            creation_ui.status = format!(
-                                                "Selected '{}'. Continue when ready.",
-                                                choice.name
-                                            );
-                                        }
-                                        if is_selected {
-                                            ui.colored_label(accent, "Selected");
-                                        }
-                                    });
-                                    ui.small(doctrine);
-                                    ui.small(profile);
-                                    ui.small(recruit);
-                                });
-                            ui.add_space(8.0);
-                        }
-                    });
+                            ui.small(doctrine);
+                            ui.small(profile);
+                            ui.small(recruit);
+                        });
+
+                    if resp.response.clicked() {
+                        character_creation.selected_faction_index = Some(choice.index);
+                        character_creation.selected_faction_id = Some(choice.id.clone());
+                        creation_ui.status =
+                            format!("Selected '{}'. Continue when ready.", choice.name);
+                    }
+
+                    ui.add_space(4.0);
+                }
+            });
+    }
+
+    // Story-so-far bar
+    super::common::ascii_separator(ui);
+    ui.horizontal(|ui| {
+        ui.colored_label(egui::Color32::from_rgb(100, 115, 135), "So far:");
+        if let Some(idx) = character_creation.selected_faction_index {
+            if let Some(choice) = choices.iter().find(|c| c.index == idx) {
+                ui.colored_label(faction_color(idx), format!("[Faction: {}]", choice.name));
             }
-        });
+        }
     });
-    ui.separator();
+
+    super::common::ascii_separator(ui);
     ui.horizontal_wrapped(|ui| {
-        if ui.button("Back").clicked() {
+        if super::common::ascii_button(ui, "Back") {
             enter_start_menu(hub_ui, start_menu);
         }
         let has_selection = character_creation.selected_faction_index.is_some();
-        if ui
-            .add_enabled(has_selection, egui::Button::new("Continue To Backstory"))
-            .clicked()
+        if super::common::ascii_button_enabled(ui, "Continue To Backstory", has_selection)
         {
             let _ = confirm_faction_selection(
                 hub_ui,
@@ -184,10 +166,6 @@ pub(crate) fn draw_faction_center(
         }
         ui.small("Keyboard: Up/Down selects, Enter continues.");
     });
-    ui.small(format!(
-        "Status: {}",
-        truncate_for_hud(&creation_ui.status, 120)
-    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -202,8 +180,20 @@ pub(crate) fn draw_backstory_center(
     overworld: &game_core::OverworldMap,
 ) {
     let backstory_choices = build_backstory_selection_choices();
+    let faction_choices = build_faction_selection_choices(overworld);
     ui.heading("Step 2 of 2 \u{00b7} Backstory");
-    ui.label("Define your archetype and opening campaign pressure.");
+
+    // Flavor text frame
+    egui::Frame::none()
+        .fill(egui::Color32::TRANSPARENT)
+        .inner_margin(egui::Margin::same(10.0))
+        .show(ui, |ui| {
+            ui.colored_label(
+                egui::Color32::from_rgb(160, 175, 195),
+                "Define your archetype and opening campaign pressure.",
+            );
+        });
+
     if !backstory_choices.is_empty() {
         let mut selected_pos = character_creation
             .selected_backstory_id
@@ -236,106 +226,99 @@ pub(crate) fn draw_backstory_center(
             );
         }
     }
-    ui.separator();
-    ui.columns(2, |columns| {
-        columns[0].vertical(|ui| {
-            let selected = backstory_choices
-                .iter()
-                .find(|choice| character_creation.selected_backstory_id.as_deref() == Some(choice.id));
-            if let Some(choice) = selected {
-                illustration_placeholder_tile(
-                    ui,
-                    &format!("{} Portrait", choice.name),
-                    &format!(
-                        "Prompt: {} hero line-art portrait for narrative cinematic.",
+
+    ui.add_space(6.0);
+
+    let backstory_accent = egui::Color32::from_rgb(154, 182, 240);
+    egui::ScrollArea::vertical()
+        .max_height(430.0)
+        .show(ui, |ui| {
+            for choice in &backstory_choices {
+                let is_selected = character_creation
+                    .selected_backstory_id
+                    .as_deref()
+                    == Some(choice.id);
+                let marker = if is_selected { "(\u{25cf})" } else { "( )" };
+                let accent = if is_selected {
+                    backstory_accent
+                } else {
+                    egui::Color32::from_rgb(130, 155, 190)
+                };
+                let bg = if is_selected {
+                    egui::Color32::from_rgba_premultiplied(
+                        backstory_accent.r(),
+                        backstory_accent.g(),
+                        backstory_accent.b(),
+                        40,
+                    )
+                } else {
+                    egui::Color32::from_rgb(16, 22, 32)
+                };
+
+                let resp = egui::Frame::none()
+                    .fill(bg)
+                    .stroke(egui::Stroke::new(
+                        if is_selected { 2.0 } else { 1.0 },
+                        if is_selected {
+                            backstory_accent
+                        } else {
+                            egui::Color32::from_rgb(40, 50, 65)
+                        },
+                    ))
+                    .rounding(egui::Rounding::same(4.0))
+                    .inner_margin(egui::Margin::same(8.0))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(marker).monospace().color(accent),
+                            );
+                            ui.label(
+                                egui::RichText::new(choice.name).strong().color(accent),
+                            );
+                        });
+                        ui.small(truncate_for_hud(choice.summary, 130));
+                        ui.small(format!(
+                            "Stats: {}",
+                            choice.stat_modifiers.join(", ")
+                        ));
+                    });
+
+                if resp.response.clicked() {
+                    character_creation.selected_backstory_id =
+                        Some(choice.id.to_string());
+                    creation_ui.status = format!(
+                        "Selected '{}'. Confirm to proceed.",
                         choice.name
-                    ),
-                    egui::Color32::from_rgb(224, 187, 120),
-                );
-                illustration_placeholder_tile(
-                    ui,
-                    "Backstory Scene Kit",
-                    &format!(
-                        "Prompt: cinematic line-art scene reflecting '{}'.",
-                        choice.summary
-                    ),
-                    egui::Color32::from_rgb(148, 180, 240),
-                );
-            } else {
-                ui.small("Select a backstory to preview cinematic narrative prompts.");
+                    );
+                }
+
+                ui.add_space(4.0);
             }
         });
-        columns[1].vertical(|ui| {
-            egui::ScrollArea::vertical()
-                .max_height(430.0)
-                .show(ui, |ui| {
-                    for choice in &backstory_choices {
-                        let is_selected = character_creation
-                            .selected_backstory_id
-                            .as_deref()
-                            == Some(choice.id);
-                        egui::Frame::none()
-                            .fill(if is_selected {
-                                egui::Color32::from_rgb(37, 49, 74)
-                            } else {
-                                egui::Color32::from_rgba_premultiplied(12, 18, 26, 195)
-                            })
-                            .stroke(egui::Stroke::new(
-                                if is_selected { 2.0 } else { 1.0 },
-                                if is_selected {
-                                    egui::Color32::from_rgb(154, 182, 240)
-                                } else {
-                                    egui::Color32::from_rgba_premultiplied(130, 162, 186, 82)
-                                },
-                            ))
-                            .rounding(egui::Rounding::same(8.0))
-                            .inner_margin(egui::Margin::same(10.0))
-                            .show(ui, |ui| {
-                                ui.horizontal_wrapped(|ui| {
-                                    if ui
-                                        .add(
-                                            egui::Button::new(choice.name)
-                                                .min_size(egui::vec2(180.0, 30.0)),
-                                        )
-                                        .clicked()
-                                    {
-                                        character_creation.selected_backstory_id =
-                                            Some(choice.id.to_string());
-                                        creation_ui.status = format!(
-                                            "Selected '{}'. Confirm to proceed.",
-                                            choice.name
-                                        );
-                                    }
-                                    if is_selected {
-                                        ui.colored_label(
-                                            egui::Color32::from_rgb(154, 182, 240),
-                                            "Selected",
-                                        );
-                                    }
-                                });
-                                ui.small(truncate_for_hud(choice.summary, 130));
-                                ui.small(format!(
-                                    "Stat modifiers: {}",
-                                    choice.stat_modifiers.join(" | ")
-                                ));
-                            });
-                        ui.add_space(8.0);
-                    }
-                });
-        });
+
+    // Story-so-far bar
+    super::common::ascii_separator(ui);
+    ui.horizontal(|ui| {
+        ui.colored_label(egui::Color32::from_rgb(100, 115, 135), "So far:");
+        if let Some(idx) = character_creation.selected_faction_index {
+            if let Some(fc) = faction_choices.iter().find(|c| c.index == idx) {
+                ui.colored_label(faction_color(idx), format!("[Faction: {}]", fc.name));
+            }
+        }
+        if let Some(ref bs_id) = character_creation.selected_backstory_id {
+            if let Some(bc) = backstory_choices.iter().find(|c| c.id == bs_id.as_str()) {
+                ui.colored_label(backstory_accent, format!("[Backstory: {}]", bc.name));
+            }
+        }
     });
-    ui.separator();
+
+    super::common::ascii_separator(ui);
     ui.horizontal_wrapped(|ui| {
-        if ui.button("Back To Faction Step").clicked() {
+        if super::common::ascii_button(ui, "Back To Faction Step") {
             hub_ui.screen = HubScreen::CharacterCreationFaction;
         }
         let has_selection = character_creation.selected_backstory_id.is_some();
-        if ui
-            .add_enabled(
-                has_selection,
-                egui::Button::new("Confirm And Enter Overworld"),
-            )
-            .clicked()
+        if super::common::ascii_button_enabled(ui, "Confirm And Enter Overworld", has_selection)
         {
             let _ = confirm_backstory_selection(
                 hub_ui,
@@ -348,8 +331,4 @@ pub(crate) fn draw_backstory_center(
         }
         ui.small("Keyboard: Up/Down selects, Enter confirms.");
     });
-    ui.small(format!(
-        "Status: {}",
-        truncate_for_hud(&creation_ui.status, 120)
-    ));
 }

@@ -32,14 +32,14 @@ pub(crate) fn draw_guild_management(
     ];
 
     ui.horizontal(|ui| {
-        if ui.button("Back To Start Menu").clicked() {
+        if super::common::ascii_button(ui, "Back To Start Menu") {
             enter_start_menu(hub_ui, start_menu);
         }
-        if ui.button("Switch To Overworld").clicked() {
+        if super::common::ascii_button(ui, "Switch To Overworld") {
             hub_ui.screen = HubScreen::OverworldMap;
         }
     });
-    ui.separator();
+    super::common::ascii_separator(ui);
     ui.horizontal_wrapped(|ui| {
         ui.label(format!(
             "Attention: {:.0}/{:.0}",
@@ -58,7 +58,7 @@ pub(crate) fn draw_guild_management(
             96
         )
     ));
-    ui.separator();
+    super::common::ascii_separator(ui);
     ui.label(egui::RichText::new("Guild Actions").strong());
     egui::Grid::new("action_grid")
         .num_columns(2)
@@ -66,12 +66,12 @@ pub(crate) fn draw_guild_management(
         .show(ui, |ui| {
             for (idx, label) in options.iter().enumerate() {
                 let is_selected = idx == hub_menu.selected;
-                let mut button =
-                    egui::Button::new(*label).min_size(egui::vec2(240.0, 34.0));
-                if is_selected {
-                    button = button.fill(egui::Color32::from_rgb(52, 66, 88));
-                }
-                if ui.add(button).clicked() {
+                let color = if is_selected {
+                    egui::Color32::from_rgb(240, 245, 255)
+                } else {
+                    egui::Color32::from_rgb(170, 180, 195)
+                };
+                if super::common::ascii_button_colored(ui, label, color) {
                     hub_menu.selected = idx;
                     let action = HubAction::from_selected(idx);
                     if action == HubAction::LeaveGuild {
@@ -88,15 +88,15 @@ pub(crate) fn draw_guild_management(
             }
         });
 
-    ui.separator();
+    super::common::ascii_separator(ui);
     draw_mission_board(ui, board_rows);
 
-    ui.separator();
+    super::common::ascii_separator(ui);
     draw_roster(ui, hub_menu, roster);
 
     // Hero Detail Panel
     if !roster.heroes.is_empty() {
-        ui.separator();
+        super::common::ascii_separator(ui);
         draw_hero_detail(ui, roster, hero_detail);
     }
 }
@@ -104,7 +104,7 @@ pub(crate) fn draw_guild_management(
 fn draw_mission_board(ui: &mut egui::Ui, board_rows: &[BoardRow]) {
     ui.label(egui::RichText::new("Mission Board").strong());
     egui::Frame::none()
-        .fill(egui::Color32::from_rgb(13, 16, 22))
+        .fill(egui::Color32::TRANSPARENT)
         .inner_margin(egui::Margin::same(8.0))
         .show(ui, |ui| {
             egui::Grid::new("mission_grid")
@@ -156,7 +156,7 @@ fn draw_roster(
 ) {
     ui.label(egui::RichText::new("Roster").strong());
     egui::Frame::none()
-        .fill(egui::Color32::from_rgb(13, 16, 22))
+        .fill(egui::Color32::TRANSPARENT)
         .inner_margin(egui::Margin::same(8.0))
         .show(ui, |ui| {
             let mut selected_player = None;
@@ -171,12 +171,7 @@ fn draw_roster(
                         hero.stress,
                         hero.fatigue
                     ));
-                    if ui
-                        .add_enabled(
-                            !is_player,
-                            egui::Button::new(format!("Set Player##{}", hero.id)),
-                        )
-                        .clicked()
+                    if super::common::ascii_button_enabled(ui, &format!("Set Player##{}", hero.id), !is_player)
                     {
                         selected_player = Some(hero.id);
                     }
@@ -205,12 +200,12 @@ fn draw_hero_detail(
         for hero in roster.heroes.iter().take(6) {
             let selected =
                 hero_detail.selected_hero_id.unwrap_or(roster.heroes[0].id) == hero.id;
-            let mut btn = egui::Button::new(truncate_for_hud(&hero.name, 12))
-                .min_size(egui::vec2(80.0, 28.0));
-            if selected {
-                btn = btn.fill(egui::Color32::from_rgb(52, 80, 120));
-            }
-            if ui.add(btn).clicked() {
+            let color = if selected {
+                egui::Color32::from_rgb(240, 245, 255)
+            } else {
+                egui::Color32::from_rgb(170, 180, 195)
+            };
+            if super::common::ascii_button_colored(ui, &truncate_for_hud(&hero.name, 12), color) {
                 hero_detail.selected_hero_id = Some(hero.id);
                 hero_detail.pending_loot = None;
             }
@@ -227,15 +222,15 @@ fn draw_hero_detail(
 
     if let Some(hero) = roster.heroes.iter().find(|h| h.id == selected_id) {
         egui::Frame::none()
-            .fill(egui::Color32::from_rgb(18, 22, 32))
+            .fill(egui::Color32::TRANSPARENT)
             .inner_margin(egui::Margin::same(8.0))
             .show(ui, |ui| {
                 draw_hero_identity(ui, hero, roster.player_hero_id);
-                ui.separator();
+                super::common::ascii_separator(ui);
                 draw_hero_stats(ui, hero);
-                ui.separator();
+                super::common::ascii_separator(ui);
                 draw_hero_equipment(ui, hero);
-                ui.separator();
+                super::common::ascii_separator(ui);
                 draw_hero_loot(ui, hero, hero_detail, &mut equip_weapon_item, &mut gen_loot_seed);
             });
     }
@@ -274,10 +269,8 @@ fn draw_hero_identity(
     };
     ui.horizontal(|ui| {
         ui.label("XP:");
-        let xp_bar = egui::ProgressBar::new(xp_frac)
-            .desired_width(160.0)
-            .text(format!("{}/{}", hero.xp, xp_threshold));
-        ui.add(xp_bar);
+        super::common::ascii_progress_bar(ui, xp_frac, 15);
+        ui.small(format!("{}/{}", hero.xp, xp_threshold));
     });
     // Status
     let status_text = if hero.active {
@@ -301,13 +294,10 @@ fn draw_hero_stats(ui: &mut egui::Ui, hero: &game_core::HeroCompanion) {
         .num_columns(2)
         .spacing(egui::vec2(6.0, 4.0))
         .show(ui, |ui| {
-            for (label, value, color) in stat_rows {
+            for (label, value, _color) in stat_rows {
                 ui.label(label);
-                let bar = egui::ProgressBar::new((value / 100.0).clamp(0.0, 1.0))
-                    .desired_width(140.0)
-                    .fill(color)
-                    .text(format!("{:.0}", value));
-                ui.add(bar);
+                super::common::ascii_progress_bar(ui, (value / 100.0).clamp(0.0, 1.0), 15);
+                ui.label(format!("{:.0}", value));
                 ui.end_row();
             }
         });
@@ -387,7 +377,7 @@ fn draw_hero_loot(
             "Pending: {} ({}) +{}atk +{}hp",
             item.name, rarity_label, item.attack_bonus, item.hp_bonus
         ));
-        if ui.button("Equip as Weapon").clicked() {
+        if super::common::ascii_button(ui, "Equip as Weapon") {
             *equip_weapon_item = Some(item.clone());
         }
     } else {
@@ -396,7 +386,7 @@ fn draw_hero_loot(
             "No pending item.",
         );
     }
-    if ui.button("Generate Test Item").clicked() {
+    if super::common::ascii_button(ui, "Generate Test Item") {
         *gen_loot_seed = Some(hero.id as u64 + hero_detail.loot_seed_counter);
     }
 }

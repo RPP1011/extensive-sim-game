@@ -10,7 +10,7 @@ mod guild;
 mod overworld;
 mod overworld_map;
 mod overworld_map_parties;
-mod overworld_map_strategic;
+pub(crate) mod overworld_map_strategic;
 mod region;
 mod common;
 
@@ -85,7 +85,9 @@ pub(crate) fn draw_hub_egui_system(
         ResMut<HeroDetailUiState>,
     ),
     mut settings_menu: ResMut<SettingsMenuState>,
-    save_state: (Res<CampaignSaveIndexState>, Res<CampaignSavePanelState>, Res<RegionArtState>),
+    save_state: (Res<CampaignSaveIndexState>, Res<CampaignSavePanelState>, Res<RegionArtState>,
+        Option<Res<crate::mission::sim_bridge::LastMissionReplay>>,
+        ResMut<crate::ascii_viewport::MissionPaneState>),
 ) {
     let (runtime_mode, attention) = runtime_context;
     let (bounds, camera_query) = camera_context;
@@ -101,7 +103,7 @@ pub(crate) fn draw_hub_egui_system(
         flashpoint_state,
         mut hero_detail,
     ) = campaign_state;
-    let (save_index, save_panel, region_art) = save_state;
+    let (save_index, save_panel, region_art, last_replay, mut mission_pane) = save_state;
 
     // Pre-register the region art texture with egui before ctx_mut() borrows contexts.
     let region_art_texture_id: Option<egui::TextureId> = {
@@ -129,8 +131,8 @@ pub(crate) fn draw_hub_egui_system(
     let party_snapshots = parties.parties.clone();
     let first_launch_lock = !runtime_mode.dev_mode && !can_continue;
     let transition_locked = region_transition.interaction_locked;
-    let panel_width = (ctx.screen_rect().width() * 0.42).clamp(420.0, 680.0);
-    let panel_min_width = if ctx.screen_rect().width() < 1100.0 { 320.0 } else { 420.0 };
+    let panel_width = 200.0;
+    let panel_min_width = 180.0;
 
     let mut board_rows: Vec<BoardRow> = mission_query
         .iter()
@@ -183,13 +185,6 @@ pub(crate) fn draw_hub_egui_system(
     }
 
     // -----------------------------------------------------------------------
-    // Active Crises + Faction Strength right panel — OverworldMap only
-    // -----------------------------------------------------------------------
-    if hub_ui.screen == HubScreen::OverworldMap {
-        overworld_map_parties::draw_crises_right_panel(ctx, &overworld, &flashpoint_state);
-    }
-
-    // -----------------------------------------------------------------------
     // Main left side-panel
     // -----------------------------------------------------------------------
     egui::SidePanel::left("hub_panel")
@@ -209,7 +204,7 @@ pub(crate) fn draw_hub_egui_system(
                 &hub_menu.notice
             };
             ui.label(egui::RichText::new(truncate_for_hud(subtitle, 110)).italics());
-            ui.separator();
+            common::ascii_separator(ui);
 
             match hub_ui.screen {
                 HubScreen::StartMenu => {
@@ -324,13 +319,116 @@ pub(crate) fn draw_hub_egui_system(
                     );
                 }
                 HubScreen::MissionExecution => {
-                    ui.label("Mission in progress.");
+                    ui.label(
+                        egui::RichText::new("⚔  Mission In Progress")
+                            .strong()
+                            .color(egui::Color32::from_rgb(200, 215, 235)),
+                    );
+                    ui.add_space(4.0);
+
+                    // Battle list
+                    egui::Frame::none()
+                        .fill(egui::Color32::TRANSPARENT)
+                        .inner_margin(egui::Margin::same(8.0))
+                        .show(ui, |ui| {
+                            for (data, progress) in mission_query.iter() {
+                                let status_color = match progress.result {
+                                    MissionResult::InProgress => egui::Color32::from_rgb(80, 200, 120),
+                                    MissionResult::Victory => egui::Color32::from_rgb(80, 220, 80),
+                                    MissionResult::Defeat => egui::Color32::from_rgb(220, 60, 40),
+                                };
+                                let status_label = match progress.result {
+                                    MissionResult::InProgress => "ONGOING",
+                                    MissionResult::Victory => "VICTORY",
+                                    MissionResult::Defeat => "DEFEAT",
+                                };
+                                ui.horizontal(|ui| {
+                                    ui.colored_label(
+                                        egui::Color32::LIGHT_GRAY,
+                                        truncate_for_hud(&data.mission_name, 22),
+                                    );
+                                    ui.colored_label(status_color, status_label);
+                                });
+                                ui.small(format!(
+                                    "Turns: {}  Alert: {:.0}%",
+                                    progress.turns_remaining,
+                                    progress.alert_level * 100.0
+                                ));
+                            }
+                            if board_rows.is_empty() {
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(80, 90, 100),
+                                    "No active battles.",
+                                );
+                            }
+                        });
+
+                    ui.add_space(6.0);
+                    if common::ascii_button_colored(ui, "View Battle", egui::Color32::from_rgb(180, 220, 255)) {
+                        mission_pane.open = true;
+                    }
+                    if common::ascii_button_colored(ui, "Retreat All", egui::Color32::from_rgb(255, 130, 80)) {
+                        hub_ui.screen = HubScreen::OverworldMap;
+                    }
+                }
+                HubScreen::ReplayViewer => {
+                    ui.label(egui::RichText::new("▶ REPLAY VIEWER").strong().color(egui::Color32::from_rgb(140, 200, 255)));
+                    common::ascii_separator(ui);
+                    if let Some(ref replay) = last_replay {
+                        if let Some(frame) = replay.frames.first() {
+                            let heroes = frame.units.iter().filter(|u| u.team == crate::ai::core::Team::Hero).count();
+                            let enemies = frame.units.iter().filter(|u| u.team == crate::ai::core::Team::Enemy).count();
+                            ui.colored_label(egui::Color32::from_rgb(80, 160, 255), format!("Allies: {}", heroes));
+                            ui.colored_label(egui::Color32::from_rgb(255, 90, 80), format!("Enemies: {}", enemies));
+                        }
+                        let total = replay.frames.len();
+                        ui.colored_label(egui::Color32::from_rgb(120, 135, 155), format!("Frames: {}", total));
+
+                        // ASCII scrub bar showing approximate position
+                        // (actual frame index is in ReplayViewerState, shown in combat pane header)
+                        common::ascii_separator(ui);
+                        ui.label(egui::RichText::new("── Timeline ──").small().color(egui::Color32::from_rgb(80, 90, 105)));
+                        {
+                            let bar_w = 20usize;
+                            let font = egui::FontId::monospace(13.0);
+                            let mut job = egui::text::LayoutJob::default();
+                            job.append("[", 0.0, egui::TextFormat { font_id: font.clone(), color: egui::Color32::from_rgb(70, 80, 95), ..Default::default() });
+                            // Show full bar as reference (position shown in combat pane)
+                            let filled: String = "═".repeat(bar_w);
+                            job.append(&filled, 0.0, egui::TextFormat { font_id: font.clone(), color: egui::Color32::from_rgb(50, 65, 85), ..Default::default() });
+                            job.append("]", 0.0, egui::TextFormat { font_id: font.clone(), color: egui::Color32::from_rgb(70, 80, 95), ..Default::default() });
+                            ui.label(job);
+                        }
+                        ui.colored_label(egui::Color32::from_rgb(90, 100, 115), "Position shown in combat pane header");
+                    }
+                    common::ascii_separator(ui);
+                    ui.label(egui::RichText::new("── Controls ──").small().color(egui::Color32::from_rgb(80, 90, 105)));
+                    let kc = egui::Color32::from_rgb(140, 155, 175);
+                    ui.colored_label(kc, "Space  Play / Pause");
+                    ui.colored_label(kc, "←      Prev frame");
+                    ui.colored_label(kc, "→      Next frame");
+                    ui.colored_label(kc, "Esc    Exit replay");
+                    common::ascii_separator(ui);
+                    ui.label(egui::RichText::new("── Speed ──").small().color(egui::Color32::from_rgb(80, 90, 105)));
+                    ui.colored_label(egui::Color32::from_rgb(120, 140, 165), "Playback: 1x (100ms/frame)");
+                    ui.colored_label(egui::Color32::from_rgb(90, 100, 115), "Speed control: coming soon");
                 }
             }
 
-            ui.separator();
+            // Show "Review Last Mission" button when a replay is available
+            if last_replay.is_some()
+                && hub_ui.screen != HubScreen::MissionExecution
+                && hub_ui.screen != HubScreen::ReplayViewer
+            {
+                common::ascii_separator(ui);
+                if common::ascii_button(ui, "Review Last Mission") {
+                    hub_ui.screen = HubScreen::ReplayViewer;
+                }
+            }
+
+            common::ascii_separator(ui);
             ui.small("Global: F6 save panel | F5/F9 slot1 | Shift+F5/F9 slot2 | Ctrl+F5/F9 slot3 | Esc settings");
-            if !event_log.entries.is_empty() {
+            if runtime_mode.dev_mode && !event_log.entries.is_empty() {
                 ui.small(format!(
                     "Recent events tracked: {}",
                     event_log.entries.len()

@@ -2,6 +2,7 @@
 
 use bevy_egui::egui;
 
+use super::faction_color;
 use crate::campaign_ops::{enter_start_menu, truncate_for_hud};
 use crate::character_select::{
     build_backstory_selection_choices, build_faction_selection_choices, confirm_backstory_selection,
@@ -25,11 +26,11 @@ pub(crate) fn draw_faction_side_panel(
 ) {
     let choices = build_faction_selection_choices(overworld);
     ui.horizontal(|ui| {
-        if ui.button("Back To Start Menu").clicked() {
+        if super::common::ascii_button(ui, "Back To Start Menu") {
             enter_start_menu(hub_ui, start_menu);
         }
     });
-    ui.separator();
+    super::common::ascii_separator(ui);
     ui.label(egui::RichText::new("Character Creation - Faction").strong());
     ui.small("Choose your faction before continuing to backstory.");
     if choices.is_empty() {
@@ -39,16 +40,15 @@ pub(crate) fn draw_faction_side_panel(
         );
     } else {
         for choice in &choices {
+            let is_selected =
+                character_creation.selected_faction_index == Some(choice.index);
+            let accent = faction_color(choice.index);
             egui::Frame::none()
-                .fill(egui::Color32::from_rgb(13, 16, 22))
+                .fill(egui::Color32::TRANSPARENT)
                 .inner_margin(egui::Margin::same(8.0))
                 .show(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        let is_selected =
-                            character_creation.selected_faction_index == Some(choice.index);
-                        if ui
-                            .add(egui::Button::new(format!("Select {}", choice.name)))
-                            .clicked()
+                        if super::common::ascii_button(ui, &format!("Select {}", choice.name))
                         {
                             character_creation.selected_faction_index = Some(choice.index);
                             character_creation.selected_faction_id = Some(choice.id.clone());
@@ -58,18 +58,14 @@ pub(crate) fn draw_faction_side_panel(
                             );
                         }
                         if is_selected {
-                            ui.colored_label(
-                                egui::Color32::from_rgb(138, 206, 125),
-                                "Selected",
-                            );
+                            ui.colored_label(accent, "Selected");
                         }
                     });
-                    ui.small(format!("ID: {}", choice.id));
                     ui.label(truncate_for_hud(&choice.impact, 180));
                 });
         }
-        ui.separator();
-        if ui.button("Continue to Backstory").clicked() {
+        super::common::ascii_separator(ui);
+        if super::common::ascii_button(ui, "Continue to Backstory") {
             let _ = confirm_faction_selection(
                 hub_ui,
                 character_creation,
@@ -79,10 +75,6 @@ pub(crate) fn draw_faction_side_panel(
             );
         }
     }
-    ui.small(format!(
-        "Status: {}",
-        truncate_for_hud(&creation_ui.status, 120)
-    ));
 }
 
 /// Side-panel backstory selection screen.
@@ -99,20 +91,21 @@ pub(crate) fn draw_backstory_side_panel(
 ) {
     let backstory_choices = build_backstory_selection_choices();
     ui.horizontal(|ui| {
-        if ui.button("Back To Faction Step").clicked() {
+        if super::common::ascii_button(ui, "Back To Faction Step") {
             hub_ui.screen = HubScreen::CharacterCreationFaction;
         }
-        if runtime_mode.dev_mode && ui.button("Overworld Map (Dev)").clicked() {
+        if runtime_mode.dev_mode && super::common::ascii_button(ui, "Overworld Map (Dev)") {
             hub_ui.screen = HubScreen::OverworldMap;
         }
     });
-    ui.separator();
+    super::common::ascii_separator(ui);
     ui.label(egui::RichText::new("Character Creation - Backstory").strong());
-    let faction_text = character_creation
-        .selected_faction_id
-        .as_deref()
-        .unwrap_or("none");
-    ui.small(format!("Confirmed faction id: {}", faction_text));
+    let faction_name = character_creation
+        .selected_faction_index
+        .and_then(|idx| overworld.factions.get(idx))
+        .map(|f| f.name.as_str())
+        .unwrap_or("None");
+    ui.small(format!("Faction: {}", faction_name));
     if backstory_choices.is_empty() {
         ui.colored_label(
             egui::Color32::from_rgb(235, 95, 95),
@@ -123,18 +116,16 @@ pub(crate) fn draw_backstory_side_panel(
             "Choose an archetype. Stat modifiers and recruit-generation bias apply immediately on confirmation.",
         );
         for choice in &backstory_choices {
+            let is_selected = character_creation
+                .selected_backstory_id
+                .as_deref()
+                == Some(choice.id);
             egui::Frame::none()
-                .fill(egui::Color32::from_rgb(13, 16, 22))
+                .fill(egui::Color32::TRANSPARENT)
                 .inner_margin(egui::Margin::same(8.0))
                 .show(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        let is_selected = character_creation
-                            .selected_backstory_id
-                            .as_deref()
-                            == Some(choice.id);
-                        if ui
-                            .add(egui::Button::new(format!("Select {}", choice.name)))
-                            .clicked()
+                        if super::common::ascii_button(ui, &format!("Select {}", choice.name))
                         {
                             character_creation.selected_backstory_id =
                                 Some(choice.id.to_string());
@@ -145,25 +136,24 @@ pub(crate) fn draw_backstory_side_panel(
                         }
                         if is_selected {
                             ui.colored_label(
-                                egui::Color32::from_rgb(138, 206, 125),
+                                egui::Color32::from_rgb(154, 182, 240),
                                 "Selected",
                             );
                         }
                     });
-                    ui.small(format!("ID: {}", choice.id));
                     ui.label(truncate_for_hud(choice.summary, 180));
                     ui.small(format!(
-                        "Stat modifiers: {}",
-                        choice.stat_modifiers.join(" | ")
+                        "Stats: {}",
+                        choice.stat_modifiers.join(", ")
                     ));
                     ui.small(format!(
-                        "Recruit bias: {}",
-                        choice.recruit_bias_modifiers.join(" | ")
+                        "Recruit focus: {}",
+                        choice.recruit_bias_modifiers.join(", ")
                     ));
                 });
         }
-        ui.separator();
-        if ui.button("Confirm Backstory and Enter Overworld").clicked() {
+        super::common::ascii_separator(ui);
+        if super::common::ascii_button(ui, "Confirm Backstory and Enter Overworld") {
             let _ = confirm_backstory_selection(
                 hub_ui,
                 character_creation,
@@ -174,8 +164,4 @@ pub(crate) fn draw_backstory_side_panel(
             );
         }
     }
-    ui.small(format!(
-        "Status: {}",
-        truncate_for_hud(&creation_ui.status, 120)
-    ));
 }

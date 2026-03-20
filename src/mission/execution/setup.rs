@@ -1,23 +1,22 @@
 use bevy::prelude::*;
 
-use crate::ai::core::Team;
 use crate::game_core::{HubScreen, HubUiState, RoomType};
 use crate::mission::{
-    enemy_templates::{generate_boss, is_climax_room, BOSS_UNIT_ID},
-    room_gen::{generate_room, spawn_room, RoomFloor, RoomObstacle, RoomWall},
     room_sequence::MissionRoomSequence,
     sim_bridge::{
-        build_default_sim, EnemyAiState, MissionSimState, PlayerOrderState, PlayerUnitMarker,
+        EnemyAiState, LastMissionReplay, MissionCombatRecording, MissionSimState,
+        PlayerOrderState,
     },
-    unit_vis::{spawn_unit_visual, UnitHealthData, UnitPositionData, UnitSelection, UnitVisual},
+    unit_vis::{UnitHealthData, UnitPositionData, UnitSelection},
 };
+use crate::scenario::{ScenarioCfg, build_combat, scenario_from_campaign};
 
 // ---------------------------------------------------------------------------
 // Context resource
 // ---------------------------------------------------------------------------
 
 /// Marker resource set when entering the mission scene, cleared on exit.
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct ActiveMissionContext {
     pub room_type: RoomType,
     pub player_unit_count: usize,
@@ -27,6 +26,12 @@ pub struct ActiveMissionContext {
     pub difficulty: u32,
     /// The global campaign turn at the time this mission was started.
     pub global_turn: u32,
+    /// Hero template names from the campaign roster (e.g. "knight", "mage").
+    /// When non-empty, these are used instead of default hero units.
+    pub hero_templates: Vec<String>,
+    /// Pre-built scenario config. When `Some`, used directly instead of
+    /// generating one from the other fields (e.g. flashpoints with custom composition).
+    pub scenario_cfg: Option<ScenarioCfg>,
 }
 
 impl Default for ActiveMissionContext {
@@ -38,6 +43,8 @@ impl Default for ActiveMissionContext {
             seed: 42,
             difficulty: 2,
             global_turn: 0,
+            hero_templates: Vec::new(),
+            scenario_cfg: None,
         }
     }
 }
@@ -132,121 +139,88 @@ fn spawn_boss_visual_execution(
 
 pub(crate) fn mission_enter(
     commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
     ctx_opt: Option<&ActiveMissionContext>,
-    cameras: &mut Query<(&mut crate::camera::OrbitCameraController, &mut Transform)>,
 ) {
-    let (room_type, player_count, enemy_count, seed, difficulty) = match ctx_opt {
-        Some(ctx) => (ctx.room_type, ctx.player_unit_count, ctx.enemy_unit_count, ctx.seed, ctx.difficulty),
-        None => (RoomType::Entry, 4, 4, 42u64, 2u32),
-    };
+    let ctx = ctx_opt.cloned().unwrap_or_default();
 
-    let layout = generate_room(seed, room_type);
-    spawn_room(&layout, commands, meshes, materials);
-
-    let mut sim = if is_climax_room(&room_type) {
-        use crate::mission::sim_bridge::build_sim_with_templates;
-        let mut boss = generate_boss(42u64, difficulty);
-        let boss_pos = if !layout.enemy_spawn.positions.is_empty() {
-            let cx = layout.enemy_spawn.positions.iter().map(|p| p.x).sum::<f32>()
-                / layout.enemy_spawn.positions.len() as f32;
-            let cy = layout.enemy_spawn.positions.iter().map(|p| p.y).sum::<f32>()
-                / layout.enemy_spawn.positions.len() as f32;
-            crate::ai::core::SimVec2 { x: cx, y: cy }
-        } else {
-            crate::ai::core::SimVec2 { x: layout.width / 2.0, y: layout.depth / 2.0 }
-        };
-        boss.position = boss_pos;
-        build_sim_with_templates(player_count, vec![boss], seed)
+    // Build or reuse a ScenarioCfg, then run it through build_combat()
+    let cfg = if let Some(pre_built) = ctx.scenario_cfg.clone() {
+        pre_built
+    } else if !ctx.hero_templates.is_empty() {
+        scenario_from_campaign(
+            &ctx.hero_templates,
+            ctx.difficulty,
+            ctx.global_turn,
+            ctx.room_type,
+            ctx.seed,
+            None,
+        )
     } else {
-        build_default_sim(player_count, enemy_count, seed)
-    };
-    let _ = &mut sim;
-    let enemy_ai = EnemyAiState::new(&sim);
-
-    for unit in &sim.units {
-        let entity = if unit.id == BOSS_UNIT_ID {
-            spawn_boss_visual_execution(unit.id, unit.position, commands, meshes, materials)
-        } else {
-            spawn_unit_visual(unit.id, unit.team, unit.position, commands, meshes, materials)
-        };
-        if unit.team == Team::Hero {
-            commands.entity(entity).insert(PlayerUnitMarker { sim_unit_id: unit.id });
+        // Fallback: build a minimal ScenarioCfg from legacy fields
+        ScenarioCfg {
+            name: "mission".into(),
+            seed: ctx.seed,
+            hero_count: ctx.player_unit_count,
+            enemy_count: ctx.enemy_unit_count,
+            difficulty: ctx.difficulty,
+            room_type: match ctx.room_type {
+                RoomType::Entry => "Entry",
+                RoomType::Pressure => "Pressure",
+                RoomType::Pivot => "Pivot",
+                RoomType::Setpiece => "Setpiece",
+                RoomType::Recovery => "Recovery",
+                RoomType::Climax => "Climax",
+                RoomType::Open => "Open",
+            }
+            .to_string(),
+            ..ScenarioCfg::default()
         }
-    }
+    };
 
-    let grid_nav = layout.nav.to_gridnav();
+    let setup = build_combat(&cfg);
+
+    let enemy_ai = EnemyAiState::new(&setup.sim);
+
+    // Start recording combat frames for post-mission replay (clone initial frame before move)
+    let initial_frame = setup.sim.clone();
+
     commands.insert_resource(MissionSimState {
-        sim,
+        sim: setup.sim,
         tick_remainder_ms: 0,
         outcome: None,
         enemy_ai,
         hero_intents: Vec::new(),
-        grid_nav: Some(grid_nav),
+        grid_nav: Some(setup.grid_nav),
     });
     commands.insert_resource(PlayerOrderState::default());
     commands.insert_resource(UnitSelection::default());
     commands.insert_resource(UnitHealthData::default());
     commands.insert_resource(UnitPositionData::default());
-    commands.insert_resource(MissionRoomSequence::new(difficulty, seed));
+    commands.insert_resource(MissionRoomSequence::new(ctx.difficulty, ctx.seed));
 
-    commands.insert_resource(AmbientLight {
-        color: Color::WHITE,
-        brightness: 0.4,
+    // Start recording combat frames for post-mission replay
+    commands.insert_resource(MissionCombatRecording {
+        frames: vec![initial_frame],
+        events_per_frame: vec![Vec::new()],
+        active: true,
     });
-    commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight {
-            color: Color::WHITE,
-            illuminance: 18_000.0,
-            shadows_enabled: true,
-            ..default()
-        },
-        transform: Transform::from_rotation(Quat::from_euler(
-            EulerRot::XYZ,
-            -std::f32::consts::FRAC_PI_4,
-            std::f32::consts::FRAC_PI_4,
-            0.0,
-        )),
-        ..default()
-    });
-
-    let cx = layout.width * 0.5;
-    let cz = layout.depth * 0.5;
-    for (mut controller, mut transform) in cameras.iter_mut() {
-        controller.focus = Vec3::new(cx, 0.0, cz);
-        controller.radius = 28.0;
-        controller.yaw = 0.0;
-        controller.pitch = 1.0;
-        let horizontal = controller.radius * controller.pitch.cos();
-        let offset = Vec3::new(
-            horizontal * controller.yaw.sin(),
-            controller.radius * controller.pitch.sin(),
-            horizontal * controller.yaw.cos(),
-        );
-        transform.translation = controller.focus + offset;
-        transform.look_at(controller.focus, Vec3::Y);
-    }
 }
 
 pub(crate) fn mission_exit(
     commands: &mut Commands,
-    floor_query: &Query<Entity, With<RoomFloor>>,
-    wall_query: &Query<Entity, With<RoomWall>>,
-    obstacle_query: &Query<Entity, With<RoomObstacle>>,
-    unit_query: &Query<Entity, With<UnitVisual>>,
+    sim_state: Option<&MissionSimState>,
+    recording: Option<&MissionCombatRecording>,
 ) {
-    for entity in floor_query.iter() {
-        commands.entity(entity).despawn_recursive();
-    }
-    for entity in wall_query.iter() {
-        commands.entity(entity).despawn_recursive();
-    }
-    for entity in obstacle_query.iter() {
-        commands.entity(entity).despawn_recursive();
-    }
-    for entity in unit_query.iter() {
-        commands.entity(entity).despawn_recursive();
+    // Convert recording to replay for hub UI viewing
+    if let Some(rec) = recording {
+        if !rec.frames.is_empty() {
+            commands.insert_resource(LastMissionReplay {
+                name: "Last Mission".to_string(),
+                frames: rec.frames.clone(),
+                events_per_frame: rec.events_per_frame.clone(),
+                grid_nav: sim_state.and_then(|s| s.grid_nav.clone()),
+            });
+        }
     }
 
     commands.remove_resource::<MissionSimState>();
@@ -255,6 +229,7 @@ pub(crate) fn mission_exit(
     commands.remove_resource::<UnitHealthData>();
     commands.remove_resource::<UnitPositionData>();
     commands.remove_resource::<MissionRoomSequence>();
+    commands.remove_resource::<MissionCombatRecording>();
 }
 
 // ---------------------------------------------------------------------------
@@ -267,14 +242,9 @@ pub fn mission_scene_transition_system(
     hub_ui: Res<HubUiState>,
     mut last_screen: Local<Option<HubScreen>>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     ctx_opt: Option<Res<ActiveMissionContext>>,
-    mut cameras: Query<(&mut crate::camera::OrbitCameraController, &mut Transform)>,
-    floor_query: Query<Entity, With<RoomFloor>>,
-    wall_query: Query<Entity, With<RoomWall>>,
-    obstacle_query: Query<Entity, With<RoomObstacle>>,
-    unit_query: Query<Entity, With<UnitVisual>>,
+    sim_state: Option<Res<MissionSimState>>,
+    recording: Option<Res<MissionCombatRecording>>,
 ) {
     let current = hub_ui.screen;
     let previous = *last_screen;
@@ -287,14 +257,132 @@ pub fn mission_scene_transition_system(
     let exited_mission = previous == Some(HubScreen::MissionExecution);
 
     if exited_mission {
-        mission_exit(&mut commands, &floor_query, &wall_query, &obstacle_query, &unit_query);
+        mission_exit(
+            &mut commands,
+            sim_state.as_deref(),
+            recording.as_deref(),
+        );
     }
 
     if entered_mission {
-        mission_enter(&mut commands, &mut meshes, &mut materials, ctx_opt.as_deref(), &mut cameras);
+        mission_enter(&mut commands, ctx_opt.as_deref());
     }
 
     *last_screen = Some(current);
+}
+
+// ---------------------------------------------------------------------------
+// Replay viewer
+// ---------------------------------------------------------------------------
+
+/// Tracks replay viewer playback state.
+#[derive(Resource)]
+pub struct ReplayViewerState {
+    pub frames: Vec<crate::ai::core::SimState>,
+    pub events_per_frame: Vec<Vec<crate::ai::core::SimEvent>>,
+    pub frame_index: usize,
+    pub tick_seconds: f32,
+    pub tick_accumulator: f32,
+    pub paused: bool,
+    pub previous_screen: HubScreen,
+}
+
+/// Watches for transitions into/out of `ReplayViewer` and spawns/despawns the
+/// replay scene accordingly.
+pub fn replay_viewer_transition_system(
+    hub_ui: Res<HubUiState>,
+    mut last_screen: Local<Option<HubScreen>>,
+    mut commands: Commands,
+    last_replay: Option<Res<LastMissionReplay>>,
+) {
+    let current = hub_ui.screen;
+    let previous = *last_screen;
+
+    if previous == Some(current) {
+        return;
+    }
+
+    let entered_replay = current == HubScreen::ReplayViewer;
+    let exited_replay = previous == Some(HubScreen::ReplayViewer);
+
+    if exited_replay {
+        commands.remove_resource::<ReplayViewerState>();
+        commands.remove_resource::<UnitPositionData>();
+        commands.remove_resource::<UnitHealthData>();
+    }
+
+    if entered_replay {
+        if let Some(replay) = last_replay.as_ref() {
+            if !replay.frames.is_empty() {
+                let prev = previous.unwrap_or(HubScreen::GuildManagement);
+                commands.insert_resource(ReplayViewerState {
+                    frames: replay.frames.clone(),
+                    events_per_frame: replay.events_per_frame.clone(),
+                    frame_index: 0,
+                    tick_seconds: 0.1,
+                    tick_accumulator: 0.0,
+                    paused: false,
+                    previous_screen: prev,
+                });
+                commands.insert_resource(UnitPositionData::default());
+                commands.insert_resource(UnitHealthData::default());
+            }
+        }
+    }
+
+    *last_screen = Some(current);
+}
+
+/// Advances the replay viewer frame-by-frame.
+pub fn advance_replay_viewer_system(
+    time: Res<Time>,
+    viewer: Option<ResMut<ReplayViewerState>>,
+) {
+    let Some(mut viewer) = viewer else {
+        return;
+    };
+    if viewer.paused {
+        return;
+    }
+    if viewer.frame_index + 1 >= viewer.frames.len() {
+        return;
+    }
+
+    viewer.tick_accumulator += time.delta_seconds();
+    while viewer.tick_accumulator >= viewer.tick_seconds
+        && viewer.frame_index + 1 < viewer.frames.len()
+    {
+        viewer.tick_accumulator -= viewer.tick_seconds;
+        viewer.frame_index += 1;
+    }
+}
+
+/// Keyboard controls for the replay viewer.
+pub fn replay_viewer_keyboard_system(
+    keyboard: Option<Res<ButtonInput<KeyCode>>>,
+    mut hub_ui: ResMut<HubUiState>,
+    mut viewer: Option<ResMut<ReplayViewerState>>,
+) {
+    let Some(keyboard) = keyboard else { return };
+    let Some(ref mut viewer) = viewer else { return };
+
+    if keyboard.just_pressed(KeyCode::Escape) {
+        hub_ui.screen = viewer.previous_screen;
+        return;
+    }
+    if keyboard.just_pressed(KeyCode::Space) {
+        viewer.paused = !viewer.paused;
+    }
+    if keyboard.just_pressed(KeyCode::ArrowLeft) {
+        viewer.frame_index = viewer.frame_index.saturating_sub(1);
+        viewer.tick_accumulator = 0.0;
+        viewer.paused = true;
+    }
+    if keyboard.just_pressed(KeyCode::ArrowRight) {
+        viewer.frame_index = (viewer.frame_index + 1).min(viewer.frames.len().saturating_sub(1));
+        viewer.tick_accumulator = 0.0;
+        viewer.paused = true;
+    }
 }
 
 /// Bridges sim state into visual data resources each frame.

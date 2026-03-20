@@ -69,6 +69,7 @@ mod campaign_load_tests;
 mod campaign_index_tests;
 mod simulation_tests;
 mod regression_tests;
+mod mission_replay_tests;
 
 // ---------------------------------------------------------------------------
 // Shared test helpers

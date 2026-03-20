@@ -31,6 +31,7 @@ pub use overworld_types::*;
 pub use roster_types::*;
 pub use companion::*;
 pub use generation::overworld_region_plot_positions;
+pub use generation::overworld_hex_coords;
 pub use roster_gen::*;
 pub use setup::*;
 pub use campaign_systems::*;
