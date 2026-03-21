@@ -17,13 +17,19 @@ use super::types::*;
 /// consumers.
 pub fn advance_sim_system(
     time: Res<Time>,
-    mut sim_state: ResMut<MissionSimState>,
-    mut pos_data: ResMut<UnitPositionData>,
-    mut hp_data: ResMut<UnitHealthData>,
+    sim_state: Option<ResMut<MissionSimState>>,
+    pos_data: Option<ResMut<UnitPositionData>>,
+    hp_data: Option<ResMut<UnitHealthData>>,
     mut event_buf: ResMut<SimEventBuffer>,
     mut mission_log: Option<ResMut<MissionEventLog>>,
+    mut recording: Option<ResMut<MissionCombatRecording>>,
 ) {
     event_buf.events.clear();
+    let (Some(mut sim_state), Some(mut pos_data), Some(mut hp_data)) =
+        (sim_state, pos_data, hp_data)
+    else {
+        return;
+    };
 
     if sim_state.outcome.is_some() {
         return;
@@ -79,6 +85,14 @@ pub fn advance_sim_system(
 
         sim_state.sim = new_sim;
 
+        // Record frame for replay
+        if let Some(ref mut rec) = recording {
+            if rec.active {
+                rec.frames.push(sim_state.sim.clone());
+                rec.events_per_frame.push(events.clone());
+            }
+        }
+
         if let Some(ref mut log) = mission_log {
             log.all_events.extend(events.iter().cloned());
         }
@@ -115,10 +129,11 @@ pub fn advance_sim_system(
 
 /// Translates `SimEventBuffer` events into VFX events.
 pub fn apply_vfx_from_sim_events_system(
-    sim_state: Res<MissionSimState>,
+    sim_state: Option<Res<MissionSimState>>,
     event_buf: Res<SimEventBuffer>,
     mut vfx_queue: Option<ResMut<VfxEventQueue>>,
 ) {
+    let Some(sim_state) = sim_state else { return };
     let Some(ref mut vfx) = vfx_queue.as_deref_mut() else {
         return;
     };
@@ -278,9 +293,10 @@ pub fn player_ground_click_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     windows: Query<&Window>,
-    mut order_state: ResMut<PlayerOrderState>,
+    order_state: Option<ResMut<PlayerOrderState>>,
     unit_query: Query<(&PlayerUnitMarker, &Transform)>,
 ) {
+    let Some(mut order_state) = order_state else { return };
     let Ok(window) = windows.get_single() else {
         return;
     };
@@ -380,9 +396,12 @@ fn update_unit_terrain_modifiers(sim: &mut SimState, nav: &GridNav) {
 
 /// Applies pending player move orders to the selected units in the sim.
 pub fn apply_player_orders_system(
-    mut order_state: ResMut<PlayerOrderState>,
-    mut sim_state: ResMut<MissionSimState>,
+    order_state: Option<ResMut<PlayerOrderState>>,
+    sim_state: Option<ResMut<MissionSimState>>,
 ) {
+    let (Some(mut order_state), Some(mut sim_state)) = (order_state, sim_state) else {
+        return;
+    };
     let Some(target) = order_state.pending_move.take() else {
         return;
     };

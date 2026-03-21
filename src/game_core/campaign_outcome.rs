@@ -191,6 +191,7 @@ pub enum HubScreen {
     RegionView,
     LocalEagleEyeIntro,
     MissionExecution,
+    ReplayViewer,
 }
 
 #[derive(Resource)]

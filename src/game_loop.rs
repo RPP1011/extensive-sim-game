@@ -198,3 +198,7 @@ pub fn run_if_hub_runtime_active(
 pub fn run_if_mission_execution_active(hub_ui: Option<Res<HubUiState>>) -> bool {
     hub_ui.is_some_and(|ui| ui.screen == HubScreen::MissionExecution)
 }
+
+pub fn run_if_replay_viewer_active(hub_ui: Option<Res<HubUiState>>) -> bool {
+    hub_ui.is_some_and(|ui| ui.screen == HubScreen::ReplayViewer)
+}

@@ -9,6 +9,8 @@ pub use types::{
     MissionEventLog,
     SimEventBuffer,
     MissionSimState,
+    MissionCombatRecording,
+    LastMissionReplay,
     EnemyAiState,
     PlayerOrderState,
     PlayerUnitMarker,
