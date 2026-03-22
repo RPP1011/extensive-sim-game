@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/ability_operator"]
+members = [".", "crates/ability_operator", "crates/tactical_sim"]
 
 [package]
 name = "bevy_game"
@@ -9,11 +9,12 @@ edition = "2021"
 [features]
 default = []
 app = []
-stream-monitor = []
-burn-gpu = ["dep:burn", "dep:rl4burn", "burn/tch", "burn/autodiff"]
-burn-cpu = ["dep:burn", "dep:rl4burn", "burn/ndarray"]
+stream-monitor = ["tactical_sim/stream-monitor"]
+burn-gpu = ["tactical_sim/burn-gpu"]
+burn-cpu = ["tactical_sim/burn-cpu"]
 
 [dependencies]
+tactical_sim = { path = "crates/tactical_sim" }
 bevy = { version = "0.13.2", features = ["jpeg"] }
 bevy_egui = "0.27"
 clap = { version = "4.5", features = ["derive"] }
@@ -24,13 +25,9 @@ toml = "0.8"
 image = "0.25"
 rayon = "1.10"
 crossbeam-channel = "0.5"
-winnow = "0.7"
 ndarray = "0.16"
 ndarray-npy = { version = "0.9", features = ["npz"] }
 memmap2 = "0.9"
-contracts = "0.6"
-burn = { version = "0.20", default-features = false, features = ["std"], optional = true }
-rl4burn = { git = "https://github.com/RPP1011/rl4burn", features = ["tensorboard"], optional = true }
 
 [dev-dependencies]
 proptest = "1.6"
