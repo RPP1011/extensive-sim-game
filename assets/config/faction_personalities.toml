@@ -1,0 +1,27 @@
+[[personality]]
+name = "Marshal Elowen"
+aggression_override = 0.35
+cooperation_override = 0.75
+
+[personality.action_biases]
+diplomacy = 0.3
+defend = 0.2
+
+[[personality]]
+name = "Lord Caradoc"
+aggression_override = 0.78
+cooperation_override = 0.38
+
+[personality.action_biases]
+attack = 0.3
+expand = 0.2
+
+[[personality]]
+name = "Steward Nima"
+aggression_override = 0.44
+cooperation_override = 0.68
+
+[personality.action_biases]
+diplomacy = 0.2
+recruit = 0.2
+defend = 0.1

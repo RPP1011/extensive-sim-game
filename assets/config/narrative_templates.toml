@@ -1,0 +1,77 @@
+# Narrative templates — hot-reloadable.
+# Use {key} placeholders for string interpolation from game state context.
+# Available keys: player_faction, faction_0..N, region_0..N, hero_0..N, turn
+
+[[template]]
+key = "victory_celebration"
+title = "Victory!"
+body = "The {player_faction} has won a hard-fought battle. Spirits are high as the guild regroups on turn {turn}."
+
+[[template.dialogue]]
+speaker = "{hero_0}"
+text = "We held the line. That's what matters."
+
+[[template]]
+key = "victory_close_call"
+title = "Narrow Victory"
+body = "The {player_faction} barely scraped through. Several heroes are wounded, but the enemy retreats."
+
+[[template.dialogue]]
+speaker = "{hero_0}"
+text = "Too close. We need to be better prepared next time."
+
+[[template]]
+key = "defeat_mourning"
+title = "Defeat"
+body = "The {player_faction} suffers a devastating loss on turn {turn}. The retreat is chaotic and morale plummets."
+
+[[template.dialogue]]
+speaker = "{hero_0}"
+text = "Fall back! We can't hold this position."
+
+[[template]]
+key = "region_enter_hostile"
+title = "Hostile Territory"
+body = "The guild enters {region_0}, controlled by {faction_1}. Tension is palpable — the locals eye your party with suspicion."
+
+[[template]]
+key = "region_enter_friendly"
+title = "Friendly Ground"
+body = "The guild arrives in {region_0}. The people here are welcoming — supplies and rest are available."
+
+[[template]]
+key = "faction_attack_news"
+title = "War Report"
+body = "{faction_1} has launched an attack against {faction_2}. The balance of power shifts."
+
+[[template]]
+key = "faction_diplomacy_news"
+title = "Diplomatic Development"
+body = "{faction_1} extends a diplomatic overture to {faction_2}. Relations improve."
+
+[[template]]
+key = "turn_milestone_10"
+title = "Campaign Progress"
+body = "Turn {turn}: The campaign enters its next phase. Factions have established their territories and new threats emerge."
+
+[[template]]
+key = "hero_low_morale"
+title = "Wavering Resolve"
+body = "{hero_0}'s morale is faltering after recent battles. A rest or victory would help restore their confidence."
+
+[[template.dialogue]]
+speaker = "{hero_0}"
+text = "I'm not sure how much more of this I can take..."
+
+[[template]]
+key = "quest_escort"
+title = "Escort Mission"
+body = "A merchant caravan in {region_0} requests escort through dangerous territory. The reward is substantial."
+
+[[template.choices]]
+label = "Accept the escort mission"
+consequence_tag = "quest_escort_accept"
+
+[[template.choices]]
+label = "Decline — too risky"
+consequence_tag = "quest_escort_decline"
