@@ -21,6 +21,7 @@
 
 pub mod actions;
 pub mod batch;
+pub mod choice_templates;
 pub mod combat_oracle;
 pub mod config;
 pub mod mcts;

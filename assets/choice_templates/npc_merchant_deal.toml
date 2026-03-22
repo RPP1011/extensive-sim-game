@@ -1,0 +1,53 @@
+# NPC merchant encounter.
+#
+# Context variables:
+#   {npc_name}    - name of the NPC
+#   {npc_id}      - NPC ID
+
+category = "npc_encounter"
+trigger = "periodic"
+prompt = "{npc_name} approaches with an offer."
+deadline_secs = 60.0
+default_option = 1
+
+[[options]]
+label = "Accept Deal"
+description = "Pay 30g. {npc_name} provides supplies and improves relations."
+
+[[options.effects]]
+type = "gold"
+amount = -30.0
+
+[[options.effects]]
+type = "supplies"
+amount = 25.0
+
+[[options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 5.0
+
+[[options]]
+label = "Decline Politely"
+description = "No cost, no benefit. Relations unchanged."
+
+[[options.effects]]
+type = "narrative"
+text = "{npc_name} nods and departs."
+
+[[options]]
+label = "Counter-Offer"
+description = "Pay 15g for a smaller package. Slight relationship boost."
+
+[[options.effects]]
+type = "gold"
+amount = -15.0
+
+[[options.effects]]
+type = "supplies"
+amount = 10.0
+
+[[options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 2.0

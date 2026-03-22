@@ -114,8 +114,15 @@ fn apply_action(
             match idx {
                 Some(i) => {
                     let request = state.request_board.remove(i);
+                    let quest_id = request.id;
+                    let is_combat = matches!(
+                        request.quest_type,
+                        QuestType::Combat | QuestType::Rescue
+                    );
+                    let threat = request.threat_level;
+
                     state.active_quests.push(ActiveQuest {
-                        id: request.id,
+                        id: quest_id,
                         request,
                         status: ActiveQuestStatus::Preparing,
                         assigned_pool: Vec::new(),
@@ -123,6 +130,12 @@ fn apply_action(
                         elapsed_ms: 0,
                         events: Vec::new(),
                     });
+
+                    // Generate quest branch choice for combat/rescue quests
+                    if is_combat {
+                        generate_quest_branch_choice(state, quest_id, threat, events);
+                    }
+
                     ActionResult::Success(format!("Accepted quest {}", request_id))
                 }
                 None => ActionResult::InvalidAction(format!(
@@ -718,6 +731,52 @@ fn apply_choice_effects(
             }
         }
     }
+}
+
+/// Generate a quest branch choice when a combat/rescue quest is accepted.
+fn generate_quest_branch_choice(
+    state: &mut CampaignState,
+    quest_id: u32,
+    threat: f32,
+    events: &mut Vec<WorldEvent>,
+) {
+    use crate::headless_campaign::choice_templates::{
+        get_or_load_templates, instantiate_template, TemplateContext,
+    };
+
+    let templates = get_or_load_templates();
+    let quest_templates = templates.by_trigger("quest_preparing_combat");
+    if quest_templates.is_empty() {
+        return;
+    }
+
+    let template_idx = (lcg_next(&mut state.rng) as usize) % quest_templates.len();
+    let template = quest_templates[template_idx];
+
+    let quest_type_str = state
+        .active_quests
+        .iter()
+        .find(|q| q.id == quest_id)
+        .map(|q| format!("{:?}", q.request.quest_type))
+        .unwrap_or_else(|| "Combat".into());
+
+    let mut ctx = TemplateContext::new();
+    ctx.insert("quest_type".into(), quest_type_str);
+    ctx.insert("threat".into(), format!("{:.0}", threat));
+    ctx.insert("quest_id".into(), quest_id.to_string());
+
+    let choice_id = state.next_event_id;
+    state.next_event_id += 1;
+
+    let choice = instantiate_template(template, &ctx, choice_id, state.elapsed_ms);
+
+    events.push(WorldEvent::ChoicePresented {
+        choice_id,
+        prompt: choice.prompt.clone(),
+        num_options: choice.options.len(),
+    });
+
+    state.pending_choices.push(choice);
 }
 
 /// Auto-resolve expired choice events by selecting the default option.

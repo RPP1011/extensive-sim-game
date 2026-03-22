@@ -1,0 +1,42 @@
+# Quest approach choice for combat/rescue quests.
+#
+# Context variables (filled at instantiation):
+#   {quest_type}  - "Combat" or "Rescue"
+#   {threat}      - threat level as integer
+#   {quest_id}    - quest ID (used in effects)
+
+category = "quest_branch"
+trigger = "quest_preparing_combat"
+prompt = "How should the party approach the {quest_type} quest (threat {threat})?"
+deadline_secs = 60.0
+default_option = 1
+
+[[options]]
+label = "Stealth Approach"
+description = "Reduce threat by 30% but receive 20% less gold reward."
+
+[[options.effects]]
+type = "modify_quest_threat"
+quest_id = "{quest_id}"
+multiplier = 0.7
+
+[[options.effects]]
+type = "modify_quest_reward"
+quest_id = "{quest_id}"
+gold_factor = -0.4
+
+[[options]]
+label = "Direct Assault"
+description = "Standard approach. No modifiers."
+
+[[options.effects]]
+type = "narrative"
+text = "The party marches in directly."
+
+[[options]]
+label = "Negotiate First"
+description = "Costs 20g for a diplomat. Risky but potentially rewarding."
+
+[[options.effects]]
+type = "gold"
+amount = -20.0

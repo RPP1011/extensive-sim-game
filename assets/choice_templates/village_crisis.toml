@@ -1,0 +1,35 @@
+# A nearby village requests aid from bandits.
+
+category = "world_event"
+trigger = "periodic"
+prompt = "A nearby village reports bandit attacks. They request guild assistance."
+deadline_secs = 60.0
+default_option = 2
+
+[[options]]
+label = "Send Aid (20g)"
+description = "Costs gold but greatly improves reputation."
+
+[[options.effects]]
+type = "gold"
+amount = -20.0
+
+[[options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[options]]
+label = "Offer Advice"
+description = "No cost. Small reputation gain."
+
+[[options.effects]]
+type = "reputation"
+amount = 2.0
+
+[[options]]
+label = "Ignore"
+description = "Save resources but lose standing."
+
+[[options.effects]]
+type = "reputation"
+amount = -3.0

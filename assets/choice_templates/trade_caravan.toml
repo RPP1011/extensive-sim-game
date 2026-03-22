@@ -1,0 +1,39 @@
+# Trade caravan passes through offering bulk supplies.
+
+category = "world_event"
+trigger = "periodic"
+prompt = "A trade caravan passes through. They offer bulk supplies at a discount."
+deadline_secs = 45.0
+default_option = 2
+
+[[options]]
+label = "Buy Large (50g)"
+description = "50g for 80 supplies — great value."
+
+[[options.effects]]
+type = "gold"
+amount = -50.0
+
+[[options.effects]]
+type = "supplies"
+amount = 80.0
+
+[[options]]
+label = "Buy Small (20g)"
+description = "20g for 25 supplies — fair price."
+
+[[options.effects]]
+type = "gold"
+amount = -20.0
+
+[[options.effects]]
+type = "supplies"
+amount = 25.0
+
+[[options]]
+label = "Pass"
+description = "The caravan continues on its way."
+
+[[options.effects]]
+type = "narrative"
+text = "The caravan rumbles past without stopping."

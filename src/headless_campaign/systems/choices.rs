@@ -1,115 +1,90 @@
 //! Choice event generation — every 500 ticks (~50s).
 //!
-//! Generates branching decisions based on game state:
-//! - Quest approach choices (combat quests get stealth/assault/negotiate)
-//! - Progression picks (choose 1 of 3 unlocks at milestones)
-//! - NPC encounter deals (merchant offers, faction proposals)
-//! - Random world events (opportunities, crises)
+//! Generates branching decisions by instantiating templates loaded from
+//! `assets/choice_templates/`. Templates are TOML files with variable
+//! substitution for quest names, NPC names, threat levels, etc.
+
+use std::collections::HashMap;
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
+use crate::headless_campaign::choice_templates::{
+    instantiate_template, ChoiceTemplateRegistry, TemplateContext,
+};
 use crate::headless_campaign::state::*;
 
-/// How often to check for new choice events (ticks).
-const CHOICE_CHECK_INTERVAL: u64 = 500;
+/// Quest branch checks run every tick to catch quests in Preparing status.
+/// NPC/world event checks run at a slower cadence.
+const WORLD_EVENT_INTERVAL: u64 = 300;
 
 /// Maximum simultaneous pending choices.
 const MAX_PENDING_CHOICES: usize = 3;
 
-/// Default deadline for choices (ms). ~60s to decide.
-const DEFAULT_DEADLINE_MS: u64 = 60_000;
+fn get_templates() -> &'static ChoiceTemplateRegistry {
+    crate::headless_campaign::choice_templates::get_or_load_templates()
+}
 
 pub fn tick_choices(
     state: &mut CampaignState,
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % CHOICE_CHECK_INTERVAL != 0 || state.tick == 0 {
+    if state.tick == 0 || state.pending_choices.len() >= MAX_PENDING_CHOICES {
         return;
     }
 
-    if state.pending_choices.len() >= MAX_PENDING_CHOICES {
-        return;
-    }
+    let templates = get_templates();
 
-    // Roll for which kind of choice to generate
-    let roll = lcg_f32(&mut state.rng);
+    // Quest branches are triggered on AcceptQuest in step.rs, not here.
 
-    if roll < 0.3 {
-        try_generate_quest_branch(state, events);
-    } else if roll < 0.5 {
-        try_generate_npc_encounter(state, events);
-    } else if roll < 0.7 {
-        try_generate_world_event(state, events);
+    // NPC and world events check at a slower cadence
+    if state.tick % WORLD_EVENT_INTERVAL == 0 {
+        let roll = lcg_f32(&mut state.rng);
+        if roll < 0.4 {
+            try_npc_encounter(state, templates, events);
+        } else if roll < 0.75 {
+            try_world_event(state, templates, events);
+        }
     }
-    // 30% chance of no choice this interval — keeps them from flooding
 }
 
-/// Quest branch: a combat quest gets approach options that affect difficulty/reward.
-fn try_generate_quest_branch(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
-    // Find a preparing quest that hasn't had a branch yet
+/// Try to generate a quest branch choice from templates.
+fn try_quest_branch(
+    state: &mut CampaignState,
+    templates: &ChoiceTemplateRegistry,
+    events: &mut Vec<WorldEvent>,
+) {
+    // Find a preparing combat/rescue quest without an existing branch choice
     let quest = state.active_quests.iter().find(|q| {
         q.status == ActiveQuestStatus::Preparing
             && matches!(q.request.quest_type, QuestType::Combat | QuestType::Rescue)
-            && !state.pending_choices.iter().any(|c| matches!(&c.source, ChoiceSource::QuestBranch { quest_id } if *quest_id == q.id))
+            && !state.pending_choices.iter().any(|c| {
+                matches!(&c.source, ChoiceSource::QuestBranch { quest_id } if *quest_id == q.id)
+            })
     });
 
     let quest = match quest {
         Some(q) => q,
-        None => return,
+        None => return, // No RNG consumed if no eligible quest
     };
 
-    let quest_id = quest.id;
-    let threat = quest.request.threat_level;
+    let quest_templates = templates.by_trigger("quest_preparing_combat");
+    if quest_templates.is_empty() {
+        return; // No RNG consumed if no templates
+    }
+
+    // Only consume RNG when we have both a quest and a template
+    let template_idx = (lcg_next(&mut state.rng) as usize) % quest_templates.len();
+    let template = quest_templates[template_idx];
+
+    let mut ctx = TemplateContext::new();
+    ctx.insert("quest_type".into(), format!("{:?}", quest.request.quest_type));
+    ctx.insert("threat".into(), format!("{:.0}", quest.request.threat_level));
+    ctx.insert("quest_id".into(), quest.id.to_string());
+
     let choice_id = state.next_event_id;
     state.next_event_id += 1;
 
-    let choice = ChoiceEvent {
-        id: choice_id,
-        source: ChoiceSource::QuestBranch { quest_id },
-        prompt: format!(
-            "How should the party approach the {:?} quest (threat {:.0})?",
-            quest.request.quest_type, threat
-        ),
-        options: vec![
-            ChoiceOption {
-                label: "Stealth Approach".into(),
-                description: "Reduce threat by 30% but receive 20% less gold reward.".into(),
-                effects: vec![
-                    ChoiceEffect::ModifyQuestThreat { quest_id, multiplier: 0.7 },
-                    ChoiceEffect::ModifyQuestReward { quest_id, gold_bonus: -threat * 0.4, rep_bonus: 0.0 },
-                ],
-            },
-            ChoiceOption {
-                label: "Direct Assault".into(),
-                description: "Standard approach. No modifiers.".into(),
-                effects: vec![
-                    ChoiceEffect::Narrative("The party marches in directly.".into()),
-                ],
-            },
-            ChoiceOption {
-                label: "Negotiate First".into(),
-                description: "Costs 20g for a diplomat. If it works, +50% gold reward. If not, +20% threat.".into(),
-                effects: if lcg_f32(&mut state.rng) > 0.5 {
-                    // Negotiation succeeds
-                    vec![
-                        ChoiceEffect::Gold(-20.0),
-                        ChoiceEffect::ModifyQuestReward { quest_id, gold_bonus: threat * 1.0, rep_bonus: 2.0 },
-                        ChoiceEffect::Narrative("Negotiation succeeded — favorable terms!".into()),
-                    ]
-                } else {
-                    // Negotiation fails
-                    vec![
-                        ChoiceEffect::Gold(-20.0),
-                        ChoiceEffect::ModifyQuestThreat { quest_id, multiplier: 1.2 },
-                        ChoiceEffect::Narrative("Negotiation failed — they're on alert now.".into()),
-                    ]
-                },
-            },
-        ],
-        default_option: 1, // Direct Assault = least investment
-        deadline_ms: Some(state.elapsed_ms + DEFAULT_DEADLINE_MS),
-        created_at_ms: state.elapsed_ms,
-    };
+    let choice = instantiate_template(template, &ctx, choice_id, state.elapsed_ms);
 
     events.push(WorldEvent::ChoicePresented {
         choice_id,
@@ -120,61 +95,35 @@ fn try_generate_quest_branch(state: &mut CampaignState, events: &mut Vec<WorldEv
     state.pending_choices.push(choice);
 }
 
-/// NPC encounter: a merchant or informant offers a deal.
-fn try_generate_npc_encounter(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
+/// Try to generate an NPC encounter choice from templates.
+fn try_npc_encounter(
+    state: &mut CampaignState,
+    templates: &ChoiceTemplateRegistry,
+    events: &mut Vec<WorldEvent>,
+) {
     if state.npc_relationships.is_empty() {
+        return;
+    }
+
+    let npc_templates = templates.by_category("npc_encounter");
+    if npc_templates.is_empty() {
         return;
     }
 
     let npc_idx = (lcg_next(&mut state.rng) as usize) % state.npc_relationships.len();
     let npc = &state.npc_relationships[npc_idx];
-    let npc_id = npc.npc_id;
-    let npc_name = npc.npc_name.clone();
+
+    let template_idx = (lcg_next(&mut state.rng) as usize) % npc_templates.len();
+    let template = npc_templates[template_idx];
+
+    let mut ctx = TemplateContext::new();
+    ctx.insert("npc_name".into(), npc.npc_name.clone());
+    ctx.insert("npc_id".into(), npc.npc_id.to_string());
 
     let choice_id = state.next_event_id;
     state.next_event_id += 1;
 
-    let choice = ChoiceEvent {
-        id: choice_id,
-        source: ChoiceSource::NpcEncounter { npc_id },
-        prompt: format!("{} approaches with an offer.", npc_name),
-        options: vec![
-            ChoiceOption {
-                label: "Accept Deal".into(),
-                description: format!("Pay 30g. {} provides supplies and improves relations.", npc_name),
-                effects: vec![
-                    ChoiceEffect::Gold(-30.0),
-                    ChoiceEffect::Supplies(25.0),
-                    ChoiceEffect::FactionRelation {
-                        faction_id: 0,
-                        delta: 5.0,
-                    },
-                ],
-            },
-            ChoiceOption {
-                label: "Decline Politely".into(),
-                description: "No cost, no benefit. Relations unchanged.".into(),
-                effects: vec![
-                    ChoiceEffect::Narrative(format!("{} nods and departs.", npc_name)),
-                ],
-            },
-            ChoiceOption {
-                label: "Counter-Offer".into(),
-                description: "Pay 15g for a smaller package. Slight relationship boost.".into(),
-                effects: vec![
-                    ChoiceEffect::Gold(-15.0),
-                    ChoiceEffect::Supplies(10.0),
-                    ChoiceEffect::FactionRelation {
-                        faction_id: 0,
-                        delta: 2.0,
-                    },
-                ],
-            },
-        ],
-        default_option: 1, // Decline = zero investment
-        deadline_ms: Some(state.elapsed_ms + DEFAULT_DEADLINE_MS),
-        created_at_ms: state.elapsed_ms,
-    };
+    let choice = instantiate_template(template, &ctx, choice_id, state.elapsed_ms);
 
     events.push(WorldEvent::ChoicePresented {
         choice_id,
@@ -185,139 +134,31 @@ fn try_generate_npc_encounter(state: &mut CampaignState, events: &mut Vec<WorldE
     state.pending_choices.push(choice);
 }
 
-/// Random world event: opportunity or crisis that requires a response.
-fn try_generate_world_event(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
+/// Try to generate a world event choice from templates.
+fn try_world_event(
+    state: &mut CampaignState,
+    templates: &ChoiceTemplateRegistry,
+    events: &mut Vec<WorldEvent>,
+) {
+    let world_templates = templates.by_category("world_event");
+    if world_templates.is_empty() {
+        return;
+    }
+
+    let template_idx = (lcg_next(&mut state.rng) as usize) % world_templates.len();
+    let template = world_templates[template_idx];
+
+    let mut ctx = TemplateContext::new();
+    // Common world event context
+    let level = 2 + (lcg_next(&mut state.rng) % 3) as u32;
+    let cost = 40;
+    ctx.insert("level".into(), level.to_string());
+    ctx.insert("cost".into(), cost.to_string());
+
     let choice_id = state.next_event_id;
     state.next_event_id += 1;
 
-    let event_type = lcg_next(&mut state.rng) % 3;
-
-    let choice = match event_type {
-        0 => {
-            // Wandering adventurer
-            let level = 2 + (lcg_next(&mut state.rng) % 3) as u32;
-            ChoiceEvent {
-                id: choice_id,
-                source: ChoiceSource::WorldEvent,
-                prompt: format!("A level {} wandering adventurer offers to join the guild.", level),
-                options: vec![
-                    ChoiceOption {
-                        label: "Hire (40g)".into(),
-                        description: "A capable recruit joins immediately.".into(),
-                        effects: vec![
-                            ChoiceEffect::Gold(-40.0),
-                            ChoiceEffect::AddAdventurer(Adventurer {
-                                id: 0, // Will be reassigned
-                                name: "Wanderer".into(),
-                                archetype: "rogue".into(),
-                                level,
-                                xp: 0,
-                                stats: AdventurerStats {
-                                    max_hp: 55.0 + level as f32 * 5.0,
-                                    attack: 14.0 + level as f32 * 2.0,
-                                    defense: 7.0 + level as f32 * 1.5,
-                                    speed: 13.0,
-                                    ability_power: 5.0,
-                                },
-                                equipment: Equipment::default(),
-                                traits: Vec::new(),
-                                status: AdventurerStatus::Idle,
-                                loyalty: 45.0,
-                                stress: 20.0,
-                                fatigue: 15.0,
-                                injury: 0.0,
-                                resolve: 50.0,
-                                morale: 55.0,
-                                party_id: None,
-                                guild_relationship: 30.0,
-                            }),
-                        ],
-                    },
-                    ChoiceOption {
-                        label: "Decline".into(),
-                        description: "The wanderer moves on.".into(),
-                        effects: vec![
-                            ChoiceEffect::Narrative("The wanderer tips their hat and walks away.".into()),
-                        ],
-                    },
-                ],
-                default_option: 1, // Decline = no investment
-                deadline_ms: Some(state.elapsed_ms + 30_000), // 30s to decide
-                created_at_ms: state.elapsed_ms,
-            }
-        }
-        1 => {
-            // Regional crisis
-            ChoiceEvent {
-                id: choice_id,
-                source: ChoiceSource::WorldEvent,
-                prompt: "A nearby village reports bandit attacks. They request guild assistance.".into(),
-                options: vec![
-                    ChoiceOption {
-                        label: "Send Aid (20g)".into(),
-                        description: "Costs gold but greatly improves reputation.".into(),
-                        effects: vec![
-                            ChoiceEffect::Gold(-20.0),
-                            ChoiceEffect::Reputation(8.0),
-                        ],
-                    },
-                    ChoiceOption {
-                        label: "Offer Advice".into(),
-                        description: "No cost. Small reputation gain.".into(),
-                        effects: vec![
-                            ChoiceEffect::Reputation(2.0),
-                        ],
-                    },
-                    ChoiceOption {
-                        label: "Ignore".into(),
-                        description: "Save resources but lose standing.".into(),
-                        effects: vec![
-                            ChoiceEffect::Reputation(-3.0),
-                        ],
-                    },
-                ],
-                default_option: 2, // Ignore = least investment
-                deadline_ms: Some(state.elapsed_ms + DEFAULT_DEADLINE_MS),
-                created_at_ms: state.elapsed_ms,
-            }
-        }
-        _ => {
-            // Trade caravan opportunity
-            ChoiceEvent {
-                id: choice_id,
-                source: ChoiceSource::WorldEvent,
-                prompt: "A trade caravan passes through. They offer bulk supplies at a discount.".into(),
-                options: vec![
-                    ChoiceOption {
-                        label: "Buy Large (50g)".into(),
-                        description: "50g for 80 supplies — great value.".into(),
-                        effects: vec![
-                            ChoiceEffect::Gold(-50.0),
-                            ChoiceEffect::Supplies(80.0),
-                        ],
-                    },
-                    ChoiceOption {
-                        label: "Buy Small (20g)".into(),
-                        description: "20g for 25 supplies — fair price.".into(),
-                        effects: vec![
-                            ChoiceEffect::Gold(-20.0),
-                            ChoiceEffect::Supplies(25.0),
-                        ],
-                    },
-                    ChoiceOption {
-                        label: "Pass".into(),
-                        description: "The caravan continues on its way.".into(),
-                        effects: vec![
-                            ChoiceEffect::Narrative("The caravan rumbles past without stopping.".into()),
-                        ],
-                    },
-                ],
-                default_option: 2, // Pass = no investment
-                deadline_ms: Some(state.elapsed_ms + 45_000),
-                created_at_ms: state.elapsed_ms,
-            }
-        }
-    };
+    let choice = instantiate_template(template, &ctx, choice_id, state.elapsed_ms);
 
     events.push(WorldEvent::ChoicePresented {
         choice_id,

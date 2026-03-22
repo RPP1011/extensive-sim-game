@@ -1,0 +1,33 @@
+# A wandering adventurer offers to join.
+#
+# Context variables:
+#   {level}       - adventurer level
+#   {cost}        - hiring cost
+
+category = "world_event"
+trigger = "periodic"
+prompt = "A level {level} wandering adventurer offers to join the guild."
+deadline_secs = 30.0
+default_option = 1
+
+[[options]]
+label = "Hire ({cost}g)"
+description = "A capable recruit joins immediately."
+
+[[options.effects]]
+type = "gold"
+amount_var = "-{cost}"
+
+[[options.effects]]
+type = "add_adventurer"
+name = "Wanderer"
+archetype = "rogue"
+level_var = "{level}"
+
+[[options]]
+label = "Decline"
+description = "The wanderer moves on."
+
+[[options.effects]]
+type = "narrative"
+text = "The wanderer tips their hat and walks away."
