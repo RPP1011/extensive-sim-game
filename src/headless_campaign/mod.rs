@@ -30,6 +30,7 @@ pub mod state;
 pub mod step;
 pub mod trace;
 pub mod trace_viewer;
+pub mod world_templates;
 mod systems;
 #[cfg(test)]
 mod tests;

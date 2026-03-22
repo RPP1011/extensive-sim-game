@@ -1,0 +1,130 @@
+# Civil War — Political tension, diplomacy matters more.
+# 4 regions, 2 factions (both initially neutral but high military strength),
+# 5 locations, 2 NPCs.
+
+name = "Civil War"
+global_threat_level = 30.0
+
+[[regions]]
+id = 0
+name = "Crown's Landing"
+owner_faction_id = 0
+neighbors = [1, 2]
+unrest = 35.0
+control = 65.0
+threat_level = 20.0
+
+[[regions]]
+id = 1
+name = "The Marshlands"
+owner_faction_id = 1
+neighbors = [0, 3]
+unrest = 45.0
+control = 55.0
+threat_level = 35.0
+
+[[regions]]
+id = 2
+name = "Oldwall Province"
+owner_faction_id = 0
+neighbors = [0, 3]
+unrest = 25.0
+control = 75.0
+threat_level = 15.0
+
+[[regions]]
+id = 3
+name = "The Contested Reach"
+owner_faction_id = 1
+neighbors = [1, 2]
+unrest = 60.0
+control = 40.0
+threat_level = 50.0
+
+[[locations]]
+id = 0
+name = "The Capitol"
+position = [0.0, 0.0]
+location_type = "Settlement"
+threat_level = 15.0
+resource_availability = 90.0
+faction_owner = 0
+scouted = true
+
+[[locations]]
+id = 1
+name = "Fort Halvard"
+position = [15.0, 10.0]
+location_type = "Outpost"
+threat_level = 40.0
+resource_availability = 55.0
+faction_owner = 1
+scouted = true
+
+[[locations]]
+id = 2
+name = "Ashvale Mines"
+position = [-10.0, 15.0]
+location_type = "Dungeon"
+threat_level = 35.0
+resource_availability = 70.0
+faction_owner = 0
+scouted = false
+
+[[locations]]
+id = 3
+name = "The Burned Library"
+position = [-20.0, -5.0]
+location_type = "Ruin"
+threat_level = 25.0
+resource_availability = 40.0
+scouted = false
+
+[[locations]]
+id = 4
+name = "Borderwatch Tower"
+position = [10.0, -15.0]
+location_type = "Outpost"
+threat_level = 45.0
+resource_availability = 30.0
+scouted = false
+
+[[factions]]
+id = 0
+name = "The Loyalists"
+relationship_to_guild = 5.0
+military_strength = 100.0
+territory_size = 2
+diplomatic_stance = "Neutral"
+recent_actions = []
+
+[[factions]]
+id = 1
+name = "The Reformists"
+relationship_to_guild = 5.0
+military_strength = 95.0
+territory_size = 2
+diplomatic_stance = "Neutral"
+recent_actions = []
+
+[diplomacy]
+relations = [[0, -10], [-10, 0]]
+guild_faction_id = 0
+
+[[npc_relationships]]
+npc_id = 300
+npc_name = "Marshal Thane"
+npc_type = "FactionLeader"
+relationship_score = 20.0
+last_interaction_ms = 0
+rescue_available = false
+rescue_cost = 40.0
+
+[[npc_relationships]]
+npc_id = 301
+npc_name = "Spymaster Lena"
+npc_type = "Informant"
+relationship_score = 35.0
+last_interaction_ms = 0
+rescue_available = false
+rescue_cost = 70.0

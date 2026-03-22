@@ -22,6 +22,10 @@ label = "Encourage Partnership"
 description = "Both gain +5 morale and +3 loyalty when assigned together."
 
 [[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
 type = "narrative"
 text = "{adventurer1_name} and {adventurer2_name} are officially recognized as battle partners."
 

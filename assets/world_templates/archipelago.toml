@@ -1,0 +1,165 @@
+# Archipelago — Larger map, more exploration, slower conflict.
+# 5 regions, 3 factions (1 friendly, 1 neutral, 1 hostile), 6 locations, 3 NPCs.
+
+name = "Archipelago"
+global_threat_level = 15.0
+
+[[regions]]
+id = 0
+name = "Coral Haven"
+owner_faction_id = 0
+neighbors = [1, 2]
+unrest = 5.0
+control = 85.0
+threat_level = 10.0
+
+[[regions]]
+id = 1
+name = "Driftwood Shoals"
+owner_faction_id = 1
+neighbors = [0, 2, 3]
+unrest = 15.0
+control = 70.0
+threat_level = 25.0
+
+[[regions]]
+id = 2
+name = "The Drowned Reach"
+owner_faction_id = 2
+neighbors = [0, 1, 4]
+unrest = 40.0
+control = 50.0
+threat_level = 50.0
+
+[[regions]]
+id = 3
+name = "Stormbreak Isle"
+owner_faction_id = 1
+neighbors = [1, 4]
+unrest = 20.0
+control = 65.0
+threat_level = 30.0
+
+[[regions]]
+id = 4
+name = "The Abyssal Shelf"
+owner_faction_id = 2
+neighbors = [2, 3]
+unrest = 55.0
+control = 40.0
+threat_level = 60.0
+
+[[locations]]
+id = 0
+name = "Port Serenity"
+position = [0.0, 0.0]
+location_type = "Settlement"
+threat_level = 5.0
+resource_availability = 80.0
+faction_owner = 0
+scouted = true
+
+[[locations]]
+id = 1
+name = "Tidepool Market"
+position = [12.0, 8.0]
+location_type = "Settlement"
+threat_level = 10.0
+resource_availability = 75.0
+faction_owner = 1
+scouted = true
+
+[[locations]]
+id = 2
+name = "The Barnacle Crypts"
+position = [-10.0, 25.0]
+location_type = "Dungeon"
+threat_level = 50.0
+resource_availability = 45.0
+scouted = false
+
+[[locations]]
+id = 3
+name = "Sunken Temple of Tides"
+position = [-25.0, 15.0]
+location_type = "Ruin"
+threat_level = 65.0
+resource_availability = 60.0
+scouted = false
+
+[[locations]]
+id = 4
+name = "Stormwatch Outpost"
+position = [20.0, -10.0]
+location_type = "Outpost"
+threat_level = 30.0
+resource_availability = 50.0
+faction_owner = 1
+scouted = false
+
+[[locations]]
+id = 5
+name = "The Leviathan's Maw"
+position = [-30.0, -20.0]
+location_type = "Dungeon"
+threat_level = 75.0
+resource_availability = 35.0
+scouted = false
+
+[[factions]]
+id = 0
+name = "Coral Compact"
+relationship_to_guild = 50.0
+military_strength = 40.0
+territory_size = 1
+diplomatic_stance = "Friendly"
+recent_actions = []
+
+[[factions]]
+id = 1
+name = "Tideborne League"
+relationship_to_guild = 10.0
+military_strength = 70.0
+territory_size = 2
+diplomatic_stance = "Neutral"
+recent_actions = []
+
+[[factions]]
+id = 2
+name = "Abyssal Cult"
+relationship_to_guild = -60.0
+military_strength = 90.0
+territory_size = 2
+diplomatic_stance = "Hostile"
+recent_actions = []
+
+[diplomacy]
+relations = [[0, 10, -30], [10, 0, -15], [-30, -15, 0]]
+guild_faction_id = 0
+
+[[npc_relationships]]
+npc_id = 200
+npc_name = "Captain Reva"
+npc_type = "Mercenary"
+relationship_score = 40.0
+last_interaction_ms = 0
+rescue_available = false
+rescue_cost = 50.0
+
+[[npc_relationships]]
+npc_id = 201
+npc_name = "Elder Nautica"
+npc_type = "FactionLeader"
+relationship_score = 60.0
+last_interaction_ms = 0
+rescue_available = true
+rescue_cost = 0.0
+
+[[npc_relationships]]
+npc_id = 202
+npc_name = "Finn the Smuggler"
+npc_type = "Merchant"
+relationship_score = 15.0
+last_interaction_ms = 0
+rescue_available = false
+rescue_cost = 80.0

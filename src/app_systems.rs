@@ -10,7 +10,8 @@ use crate::events;
 use crate::game_core;
 use crate::game_loop::{
     exit_after_steps, increment_global_turn, run_if_gameplay_active, run_if_hub_runtime_active,
-    run_if_mission_execution_active, run_if_replay_viewer_active, run_if_simulation_steps_exist,
+    run_if_campaign_trace_viewer_active, run_if_mission_execution_active,
+    run_if_replay_viewer_active, run_if_simulation_steps_exist,
     start_scene_input_system, turn_pacing_input_system,
 };
 use crate::hub_outcome::{
@@ -57,6 +58,10 @@ use crate::ui::settings::{
     settings_menu_toggle_system, update_settings_menu_visual_system,
 };
 use crate::keybinds::keybind_dispatch_system;
+use bevy_game::headless_campaign::trace_viewer::{
+    advance_campaign_trace_viewer_system, campaign_trace_viewer_keyboard_system,
+    campaign_trace_viewer_transition_system,
+};
 use crate::ui::tutorial::{draw_tutorial_system, tutorial_toggle_system};
 
 pub fn register_scenario_3d_systems(app: &mut App) {
@@ -143,6 +148,16 @@ fn register_mission_execution_systems(app: &mut App) {
             mission::execution::replay_viewer_keyboard_system,
         )
             .run_if(run_if_replay_viewer_active),
+    );
+    // Campaign trace viewer systems
+    app.add_systems(Update, campaign_trace_viewer_transition_system);
+    app.add_systems(
+        Update,
+        (
+            advance_campaign_trace_viewer_system,
+            campaign_trace_viewer_keyboard_system,
+        )
+            .run_if(run_if_campaign_trace_viewer_active),
     );
     app.add_systems(
         Update,

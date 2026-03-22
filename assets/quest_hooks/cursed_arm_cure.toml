@@ -35,6 +35,10 @@ type = "gold"
 amount = -30.0
 
 [[choice.options.effects]]
+type = "reputation"
+amount = 20.0
+
+[[choice.options.effects]]
 type = "narrative"
 text = "{adventurer_name} sets out alone to find the hermit."
 
@@ -45,6 +49,14 @@ description = "Send {adventurer_name} with escorts. Costs 50g but much safer."
 [[choice.options.effects]]
 type = "gold"
 amount = -50.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 20.0
 
 [[choice.options.effects]]
 type = "narrative"

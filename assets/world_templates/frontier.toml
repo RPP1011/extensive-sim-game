@@ -1,0 +1,110 @@
+# Frontier — Small map, immediate conflict.
+# 3 regions, 2 factions (1 friendly, 1 hostile at war), 4 locations, 2 NPCs.
+
+name = "Frontier"
+global_threat_level = 20.0
+
+[[regions]]
+id = 0
+name = "Greenhollow"
+owner_faction_id = 0
+neighbors = [1, 2]
+unrest = 10.0
+control = 80.0
+threat_level = 15.0
+
+[[regions]]
+id = 1
+name = "Ironridge"
+owner_faction_id = 1
+neighbors = [0, 2]
+unrest = 30.0
+control = 60.0
+threat_level = 40.0
+
+[[regions]]
+id = 2
+name = "Mistfen"
+owner_faction_id = 0
+neighbors = [0, 1]
+unrest = 20.0
+control = 70.0
+threat_level = 25.0
+
+[[locations]]
+id = 0
+name = "Thornwall Keep"
+position = [10.0, 5.0]
+location_type = "Settlement"
+threat_level = 10.0
+resource_availability = 70.0
+faction_owner = 0
+scouted = true
+
+[[locations]]
+id = 1
+name = "The Sunken Crypt"
+position = [-15.0, 20.0]
+location_type = "Dungeon"
+threat_level = 55.0
+resource_availability = 30.0
+scouted = false
+
+[[locations]]
+id = 2
+name = "Trader's Rest"
+position = [5.0, -10.0]
+location_type = "Settlement"
+threat_level = 5.0
+resource_availability = 85.0
+faction_owner = 0
+scouted = true
+
+[[locations]]
+id = 3
+name = "Wolfcrag Ruins"
+position = [-20.0, -15.0]
+location_type = "Ruin"
+threat_level = 45.0
+resource_availability = 40.0
+scouted = false
+
+[[factions]]
+id = 0
+name = "The Accord"
+relationship_to_guild = 40.0
+military_strength = 50.0
+territory_size = 2
+diplomatic_stance = "Friendly"
+recent_actions = []
+
+[[factions]]
+id = 1
+name = "Iron Dominion"
+relationship_to_guild = -50.0
+military_strength = 120.0
+territory_size = 1
+diplomatic_stance = "AtWar"
+recent_actions = []
+
+[diplomacy]
+relations = [[0, -20], [-20, 0]]
+guild_faction_id = 0
+
+[[npc_relationships]]
+npc_id = 100
+npc_name = "Old Gareth"
+npc_type = "Mercenary"
+relationship_score = 30.0
+last_interaction_ms = 0
+rescue_available = false
+rescue_cost = 60.0
+
+[[npc_relationships]]
+npc_id = 101
+npc_name = "Lady Voss"
+npc_type = "FactionLeader"
+relationship_score = 55.0
+last_interaction_ms = 0
+rescue_available = true
+rescue_cost = 0.0

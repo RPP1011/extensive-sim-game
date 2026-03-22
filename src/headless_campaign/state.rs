@@ -924,125 +924,16 @@ impl CampaignState {
             },
         ];
 
-        let regions = vec![
-            Region {
-                id: 0,
-                name: "Greenhollow".into(),
-                owner_faction_id: 0,
-                neighbors: vec![1, 2],
-                unrest: 10.0,
-                control: 80.0,
-                threat_level: 15.0,
-            },
-            Region {
-                id: 1,
-                name: "Ironridge".into(),
-                owner_faction_id: 1,
-                neighbors: vec![0, 2],
-                unrest: 30.0,
-                control: 60.0,
-                threat_level: 40.0,
-            },
-            Region {
-                id: 2,
-                name: "Mistfen".into(),
-                owner_faction_id: 0,
-                neighbors: vec![0, 1],
-                unrest: 20.0,
-                control: 70.0,
-                threat_level: 25.0,
-            },
-        ];
+        // Load world template: pick one based on seed from assets/world_templates/,
+        // falling back to the built-in default if no templates are found.
+        let world_template = Self::load_world_template(seed);
 
-        let locations = vec![
-            Location {
-                id: 0,
-                name: "Thornwall Keep".into(),
-                position: (10.0, 5.0),
-                location_type: LocationType::Settlement,
-                threat_level: 10.0,
-                resource_availability: 70.0,
-                faction_owner: Some(0),
-                scouted: true,
-            },
-            Location {
-                id: 1,
-                name: "The Sunken Crypt".into(),
-                position: (-15.0, 20.0),
-                location_type: LocationType::Dungeon,
-                threat_level: 55.0,
-                resource_availability: 30.0,
-                faction_owner: None,
-                scouted: false,
-            },
-            Location {
-                id: 2,
-                name: "Trader's Rest".into(),
-                position: (5.0, -10.0),
-                location_type: LocationType::Settlement,
-                threat_level: 5.0,
-                resource_availability: 85.0,
-                faction_owner: Some(0),
-                scouted: true,
-            },
-            Location {
-                id: 3,
-                name: "Wolfcrag Ruins".into(),
-                position: (-20.0, -15.0),
-                location_type: LocationType::Ruin,
-                threat_level: 45.0,
-                resource_availability: 40.0,
-                faction_owner: None,
-                scouted: false,
-            },
-        ];
-
-        let factions = vec![
-            FactionState {
-                id: 0,
-                name: "The Accord".into(),
-                relationship_to_guild: 40.0,
-                military_strength: 50.0,
-                territory_size: 2,
-                diplomatic_stance: DiplomaticStance::Friendly,
-                recent_actions: Vec::new(),
-            },
-            FactionState {
-                id: 1,
-                name: "Iron Dominion".into(),
-                relationship_to_guild: -50.0,
-                military_strength: 120.0,
-                territory_size: 1,
-                diplomatic_stance: DiplomaticStance::AtWar,
-                recent_actions: Vec::new(),
-            },
-        ];
-
-        let diplomacy = DiplomacyMatrix {
-            relations: vec![vec![0, -20], vec![-20, 0]],
-            guild_faction_id: 0,
-        };
-
-        let npc_relationships = vec![
-            NpcRelationship {
-                npc_id: 100,
-                npc_name: "Old Gareth".into(),
-                npc_type: NpcType::Mercenary,
-                relationship_score: 30.0,
-                last_interaction_ms: 0,
-                rescue_available: false,
-                rescue_cost: 60.0,
-            },
-            NpcRelationship {
-                npc_id: 101,
-                npc_name: "Lady Voss".into(),
-                npc_type: NpcType::FactionLeader,
-                relationship_score: 55.0,
-                last_interaction_ms: 0,
-                rescue_available: true,
-                rescue_cost: 0.0,
-            },
-        ];
+        let regions = world_template.regions;
+        let locations = world_template.locations;
+        let factions = world_template.factions;
+        let diplomacy = world_template.diplomacy;
+        let npc_relationships = world_template.npc_relationships;
+        let global_threat_level = world_template.global_threat_level;
 
         CampaignState {
             tick: 0,
@@ -1064,7 +955,7 @@ impl CampaignState {
             overworld: OverworldState {
                 regions,
                 locations,
-                global_threat_level: 20.0,
+                global_threat_level,
                 campaign_progress: 0.0,
                 endgame_calamity: None,
             },
@@ -1093,6 +984,23 @@ impl CampaignState {
             available_starting_choices: Self::load_or_default_starting_choices(),
             config: CampaignConfig::default(),
         }
+    }
+
+    /// Load a world template based on seed from `assets/world_templates/`,
+    /// falling back to the built-in default frontier template.
+    fn load_world_template(seed: u64) -> super::world_templates::WorldTemplate {
+        let dir = std::path::Path::new("assets/world_templates");
+        if dir.exists() {
+            match super::world_templates::WorldTemplate::load_from_dir(dir) {
+                Ok(templates) if !templates.is_empty() => {
+                    let idx = (seed as usize) % templates.len();
+                    return templates.into_iter().nth(idx).unwrap();
+                }
+                Ok(_) => {} // empty dir, fall through
+                Err(_) => {} // parse error, fall through
+            }
+        }
+        super::world_templates::WorldTemplate::default_frontier()
     }
 
     /// Load starting choices from `assets/starting_packages/` or return defaults.

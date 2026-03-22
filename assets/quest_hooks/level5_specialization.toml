@@ -22,21 +22,37 @@ label = "Offensive Mastery"
 description = "+5 attack, +3 ability power. Commit to dealing damage."
 
 [[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
 type = "narrative"
-text = "{adventurer_name} focuses on offensive techniques."
+text = "{adventurer_name} focuses on offensive techniques, earning renown as a fearsome combatant."
 
 [[choice.options]]
 label = "Defensive Mastery"
 description = "+5 defense, +15 max HP. Become the party's anchor."
 
 [[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
 type = "narrative"
-text = "{adventurer_name} trains in defensive arts."
+text = "{adventurer_name} trains in defensive arts, becoming the party's stalwart anchor."
 
 [[choice.options]]
 label = "Versatile Training"
 description = "+2 to all stats. Jack of all trades."
 
 [[choice.options.effects]]
+type = "reputation"
+amount = 2.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -5.0
+
+[[choice.options.effects]]
 type = "narrative"
-text = "{adventurer_name} pursues a balanced regimen."
+text = "{adventurer_name} pursues a balanced regimen, requiring extra training supplies."
