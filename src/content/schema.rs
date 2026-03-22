@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Tagged union of all content data types in the registry.
@@ -13,6 +15,12 @@ pub enum ContentData {
     Dialogue(DialogueContent),
     Encounter(EncounterContent),
     ScenarioConfig(ScenarioConfigContent),
+    // --- Tier 2 content types (Issue #15) ---
+    Theme(ThemeContent),
+    Region(RegionContent),
+    Event(EventContent),
+    Item(ItemContent),
+    NarrativeArc(NarrativeArcContent),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,4 +119,47 @@ pub struct ScenarioConfigContent {
     pub hero_count: u32,
     pub enemy_count: u32,
     pub max_ticks: u32,
+}
+
+// ---------------------------------------------------------------------------
+// Tier 2 content types (Issue #15 — AOT Content Generation Pipeline)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThemeContent {
+    pub name: String,
+    pub mood: String,
+    pub color_palette: Vec<[u8; 3]>,
+    pub keywords: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegionContent {
+    pub name: String,
+    pub terrain_type: String,
+    pub description: String,
+    pub settlement_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventContent {
+    pub name: String,
+    pub description: String,
+    pub triggers: Vec<String>,
+    pub effects: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItemContent {
+    pub name: String,
+    pub description: String,
+    pub rarity: String,
+    pub stats: HashMap<String, f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NarrativeArcContent {
+    pub name: String,
+    pub acts: Vec<String>,
+    pub faction_ids: Vec<String>,
 }

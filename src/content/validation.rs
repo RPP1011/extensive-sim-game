@@ -33,6 +33,11 @@ pub fn validate_entry(entry: &ContentEntry) -> Result<(), ValidationError> {
             | (ContentKind::Dialogue, ContentData::Dialogue(_))
             | (ContentKind::Encounter, ContentData::Encounter(_))
             | (ContentKind::ScenarioConfig, ContentData::ScenarioConfig(_))
+            | (ContentKind::Theme, ContentData::Theme(_))
+            | (ContentKind::Region, ContentData::Region(_))
+            | (ContentKind::Event, ContentData::Event(_))
+            | (ContentKind::Item, ContentData::Item(_))
+            | (ContentKind::NarrativeArc, ContentData::NarrativeArc(_))
     );
 
     if !kind_matches {
@@ -91,6 +96,52 @@ pub fn validate_entry(entry: &ContentEntry) -> Result<(), ValidationError> {
                 return Err(ValidationError {
                     content_id: id_str,
                     message: "quest must have at least one objective".to_string(),
+                });
+            }
+        }
+        ContentData::Theme(t) => {
+            if t.name.is_empty() {
+                return Err(ValidationError {
+                    content_id: id_str,
+                    message: "theme name is empty".to_string(),
+                });
+            }
+        }
+        ContentData::Region(r) => {
+            if r.name.is_empty() {
+                return Err(ValidationError {
+                    content_id: id_str,
+                    message: "region name is empty".to_string(),
+                });
+            }
+        }
+        ContentData::Event(ev) => {
+            if ev.name.is_empty() {
+                return Err(ValidationError {
+                    content_id: id_str,
+                    message: "event name is empty".to_string(),
+                });
+            }
+        }
+        ContentData::Item(it) => {
+            if it.name.is_empty() {
+                return Err(ValidationError {
+                    content_id: id_str,
+                    message: "item name is empty".to_string(),
+                });
+            }
+        }
+        ContentData::NarrativeArc(n) => {
+            if n.name.is_empty() {
+                return Err(ValidationError {
+                    content_id: id_str,
+                    message: "narrative arc name is empty".to_string(),
+                });
+            }
+            if n.acts.is_empty() {
+                return Err(ValidationError {
+                    content_id: id_str,
+                    message: "narrative arc must have at least one act".to_string(),
                 });
             }
         }

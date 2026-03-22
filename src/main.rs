@@ -40,6 +40,8 @@ mod keybinds;
 mod ascii_viewport;
 mod combat_view;
 mod content;
+mod model_backend;
+mod ascii_gen;
 mod progression;
 
 use camera::{load_camera_settings, CameraFocusTransitionState, SceneViewBounds};
