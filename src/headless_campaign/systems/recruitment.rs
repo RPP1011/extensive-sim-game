@@ -6,21 +6,13 @@
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
-/// Check interval: every 3000 ticks (~5 minutes game time).
-const RECRUIT_INTERVAL: u64 = 3000;
-
-/// Base gold cost to recruit.
-const RECRUIT_COST: f32 = 40.0;
-
-/// Max adventurers the guild can have.
-const MAX_ADVENTURERS: usize = 12;
-
 pub fn tick_recruitment(
     state: &mut CampaignState,
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % RECRUIT_INTERVAL != 0 || state.tick == 0 {
+    let cfg = &state.config.recruitment;
+    if state.tick % cfg.interval_ticks != 0 || state.tick == 0 {
         return;
     }
 
@@ -30,30 +22,31 @@ pub fn tick_recruitment(
         .filter(|a| a.status != AdventurerStatus::Dead)
         .count();
 
-    if alive_count >= MAX_ADVENTURERS {
+    if alive_count >= cfg.max_adventurers {
         return;
     }
 
     // Recruitment chance scales with reputation
-    let recruit_chance = (state.guild.reputation / 100.0).clamp(0.2, 0.8);
+    let recruit_chance = (state.guild.reputation / 100.0).clamp(cfg.min_recruit_chance, cfg.max_recruit_chance);
     let roll = lcg_f32(&mut state.rng);
     if roll > recruit_chance {
         return;
     }
 
     // Auto-recruit if we can afford it
-    if state.guild.gold < RECRUIT_COST {
+    if state.guild.gold < cfg.recruit_cost {
         return;
     }
 
-    state.guild.gold -= RECRUIT_COST;
+    state.guild.gold -= cfg.recruit_cost;
 
     // Generate a random adventurer
     let archetypes = ["ranger", "knight", "mage", "cleric", "rogue"];
     let archetype_idx = (lcg_next(&mut state.rng) as usize) % archetypes.len();
     let archetype = archetypes[archetype_idx];
 
-    let level = 1 + (lcg_next(&mut state.rng) % 3) as u32; // level 1-3
+    let level_range = cfg.max_level - cfg.min_level + 1;
+    let level = cfg.min_level + (lcg_next(&mut state.rng) % level_range) as u32;
 
     let names = [
         "Alaric", "Brynn", "Cira", "Daven", "Elara", "Finn", "Greta", "Holt",
@@ -86,11 +79,11 @@ pub fn tick_recruitment(
         level,
         xp: 0,
         stats: AdventurerStats {
-            max_hp: hp + level as f32 * 5.0,
-            attack: atk + level as f32 * 2.0,
-            defense: def + level as f32 * 1.5,
+            max_hp: hp + level as f32 * state.config.recruitment.hp_per_level,
+            attack: atk + level as f32 * state.config.recruitment.attack_per_level,
+            defense: def + level as f32 * state.config.recruitment.defense_per_level,
             speed: spd,
-            ability_power: ap + level as f32 * 2.0,
+            ability_power: ap + level as f32 * state.config.recruitment.ability_power_per_level,
         },
         equipment: Equipment::default(),
         traits: Vec::new(),

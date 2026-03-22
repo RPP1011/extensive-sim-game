@@ -9,6 +9,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::actions::*;
+use super::config::CampaignConfig;
 use super::state::*;
 use super::step::step_campaign;
 use super::trace::{CampaignTrace, TraceRecorder};
@@ -62,6 +63,8 @@ pub struct BatchConfig {
     pub trace_snapshot_interval: u64,
     /// Output directory for trace files.
     pub trace_output_dir: String,
+    /// Campaign balance config (overrides defaults).
+    pub campaign_config: CampaignConfig,
 }
 
 impl Default for BatchConfig {
@@ -75,6 +78,7 @@ impl Default for BatchConfig {
             record_traces: 0,
             trace_snapshot_interval: 100,
             trace_output_dir: "generated/traces".into(),
+            campaign_config: CampaignConfig::default(),
         }
     }
 }
@@ -89,7 +93,12 @@ impl Default for BatchConfig {
 /// - Calls rescue when battle health < 0.3
 /// - Otherwise waits
 pub fn run_single_campaign(seed: u64, max_ticks: u64) -> CampaignRunResult {
-    let mut state = CampaignState::default_test_campaign(seed);
+    run_single_campaign_with_config(seed, max_ticks, &CampaignConfig::default())
+}
+
+/// Run a single campaign with a custom config.
+pub fn run_single_campaign_with_config(seed: u64, max_ticks: u64, config: &CampaignConfig) -> CampaignRunResult {
+    let mut state = CampaignState::with_config(seed, config.clone());
     let mut total_violations = Vec::new();
     let mut adventurers_lost = 0usize;
 
@@ -149,7 +158,17 @@ pub fn run_single_campaign_with_trace(
     max_ticks: u64,
     snapshot_interval: u64,
 ) -> (CampaignRunResult, CampaignTrace) {
-    let mut state = CampaignState::default_test_campaign(seed);
+    run_single_campaign_with_trace_and_config(seed, max_ticks, snapshot_interval, &CampaignConfig::default())
+}
+
+/// Run a single campaign with trace recording and custom config.
+pub fn run_single_campaign_with_trace_and_config(
+    seed: u64,
+    max_ticks: u64,
+    snapshot_interval: u64,
+    config: &CampaignConfig,
+) -> (CampaignRunResult, CampaignTrace) {
+    let mut state = CampaignState::with_config(seed, config.clone());
     let mut recorder = TraceRecorder::new(seed, snapshot_interval);
     let mut total_violations = Vec::new();
     let mut adventurers_lost = 0usize;
@@ -312,6 +331,7 @@ pub fn run_batch(config: &BatchConfig) -> BatchSummary {
     let trace_output_dir = config.trace_output_dir.clone();
     let trace_snapshot_interval = config.trace_snapshot_interval;
     let record_traces = config.record_traces;
+    let campaign_config = config.campaign_config.clone();
 
     pool.install(|| {
         use rayon::prelude::*;
@@ -332,10 +352,11 @@ pub fn run_batch(config: &BatchConfig) -> BatchSummary {
                 && traces_recorded.load(Ordering::Relaxed) < record_traces;
 
             let result = if should_trace {
-                let (run_result, trace) = run_single_campaign_with_trace(
+                let (run_result, trace) = run_single_campaign_with_trace_and_config(
                     seed,
                     config.max_ticks,
                     trace_snapshot_interval,
+                    &campaign_config,
                 );
                 // Save trace file
                 let path = std::path::PathBuf::from(&trace_output_dir)
@@ -347,7 +368,7 @@ pub fn run_batch(config: &BatchConfig) -> BatchSummary {
                 }
                 run_result
             } else {
-                run_single_campaign(seed, config.max_ticks)
+                run_single_campaign_with_config(seed, config.max_ticks, &campaign_config)
             };
 
             let run_num = total_runs.fetch_add(1, Ordering::Relaxed) + 1;

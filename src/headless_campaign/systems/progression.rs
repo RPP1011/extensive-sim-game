@@ -7,21 +7,17 @@
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
-/// Minimum quests completed before first unlock.
-const UNLOCK_THRESHOLD: usize = 3;
-/// Quests between unlock checks.
-const UNLOCK_INTERVAL: usize = 5;
-
 pub fn tick_progression(
     state: &mut CampaignState,
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
+    let cfg = &state.config.progression;
     let total = state.completed_quests.len();
-    if total < UNLOCK_THRESHOLD {
+    if total < cfg.unlock_threshold {
         return;
     }
-    if total % UNLOCK_INTERVAL != 0 {
+    if total % cfg.unlock_interval != 0 {
         return;
     }
     // Only trigger once per quest count milestone
@@ -35,7 +31,7 @@ pub fn tick_progression(
     }
 
     // Simple playstyle detection from recent quests
-    let recent = &state.completed_quests[total.saturating_sub(5)..];
+    let recent = &state.completed_quests[total.saturating_sub(cfg.recent_quest_window)..];
     let combat_count = recent
         .iter()
         .filter(|q| matches!(q.quest_type, QuestType::Combat))
@@ -45,13 +41,14 @@ pub fn tick_progression(
         .filter(|q| matches!(q.quest_type, QuestType::Exploration))
         .count();
 
-    let (category, name, desc) = if combat_count >= 3 {
+    let themed_count = cfg.themed_unlock_count;
+    let (category, name, desc) = if combat_count >= themed_count {
         (
             UnlockCategory::PassiveBuff,
             "Battle Hardened",
             "Party members deal 10% more damage",
         )
-    } else if explore_count >= 3 {
+    } else if explore_count >= themed_count {
         (
             UnlockCategory::Information,
             "Scout Network",
@@ -73,12 +70,12 @@ pub fn tick_progression(
         category,
         properties: UnlockProperties {
             cooldown_ms: if category == UnlockCategory::ActiveAbility {
-                30_000
+                state.config.progression.active_ability_cooldown_ms
             } else {
                 0
             },
             target_type: TargetType::GuildSelf,
-            magnitude: 0.1,
+            magnitude: state.config.progression.default_magnitude,
             duration_ms: 0,
             resource_cost: 0.0,
             is_passive: !matches!(category, UnlockCategory::ActiveAbility),

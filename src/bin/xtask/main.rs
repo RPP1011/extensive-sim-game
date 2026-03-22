@@ -31,6 +31,21 @@ fn main() -> ExitCode {
         TaskCommand::ContentGen(cmd) => content_gen_cmd::run_content_gen_cmd(cmd),
         TaskCommand::AsciiGen(cmd) => ascii_gen_cmd::run_ascii_gen_cmd(cmd),
         TaskCommand::CampaignBatch(args) => {
+            let campaign_config = if let Some(ref path) = args.config {
+                match bevy_game::headless_campaign::config::CampaignConfig::load_from_toml(path) {
+                    Ok(c) => {
+                        eprintln!("Loaded campaign config from {}", path.display());
+                        c
+                    }
+                    Err(e) => {
+                        eprintln!("Error loading config: {}", e);
+                        return ExitCode::from(1);
+                    }
+                }
+            } else {
+                bevy_game::headless_campaign::config::CampaignConfig::default()
+            };
+
             let config = bevy_game::headless_campaign::batch::BatchConfig {
                 target_successes: args.target,
                 max_ticks: args.max_ticks,
@@ -40,6 +55,7 @@ fn main() -> ExitCode {
                 record_traces: args.record_traces,
                 trace_snapshot_interval: args.trace_snapshot_interval,
                 trace_output_dir: args.trace_output_dir,
+                campaign_config,
             };
             bevy_game::headless_campaign::batch::run_batch(&config);
             ExitCode::SUCCESS

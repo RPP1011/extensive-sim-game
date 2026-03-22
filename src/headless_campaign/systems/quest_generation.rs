@@ -6,17 +6,18 @@
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
-/// Mean ticks between quest arrivals at reputation 50.
-const BASE_ARRIVAL_INTERVAL_TICKS: u64 = 150; // ~15s — faster cadence for meaningful campaigns
-
 pub fn tick_quest_generation(
     state: &mut CampaignState,
     deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
+    let cfg = &state.config.quest_generation;
+
     // Poisson check: probability of arrival this tick = 1 / mean_interval
-    let rep_factor = (state.guild.reputation / 50.0).max(0.5).min(2.0);
-    let mean_interval = (BASE_ARRIVAL_INTERVAL_TICKS as f32 / rep_factor) as u64;
+    let rep_factor = (state.guild.reputation / cfg.reputation_scaling_center)
+        .max(cfg.reputation_factor_min)
+        .min(cfg.reputation_factor_max);
+    let mean_interval = (cfg.base_arrival_interval_ticks as f32 / rep_factor) as u64;
     let threshold = 1.0 / mean_interval.max(1) as f32;
 
     let roll = lcg_f32(&mut state.rng);
@@ -50,13 +51,16 @@ pub fn tick_quest_generation(
     };
 
     // Threat scales with distance, global threat, and campaign progress
-    let progress_scaling = 1.0 + state.overworld.campaign_progress * 2.0; // threats grow as campaign progresses
-    let base_threat = (15.0 + distance * 0.5 + state.overworld.global_threat_level * 0.5) * progress_scaling;
-    let threat_level = (base_threat + lcg_f32(&mut state.rng) * 30.0 - 15.0).clamp(5.0, 100.0);
+    let cfg = &state.config.quest_generation;
+    let progress_scaling = 1.0 + state.overworld.campaign_progress * cfg.progress_threat_scaling;
+    let base_threat = (cfg.base_threat + distance * cfg.distance_threat_rate
+        + state.overworld.global_threat_level * cfg.global_threat_rate) * progress_scaling;
+    let threat_level = (base_threat + lcg_f32(&mut state.rng) * cfg.threat_variance * 2.0 - cfg.threat_variance)
+        .clamp(cfg.min_threat, cfg.max_threat);
 
     // Rewards scale with threat
-    let gold_reward = threat_level * 2.0 + lcg_f32(&mut state.rng) * 20.0;
-    let rep_reward = (threat_level * 0.1).min(5.0);
+    let gold_reward = threat_level * cfg.gold_per_threat + lcg_f32(&mut state.rng) * cfg.gold_variance;
+    let rep_reward = (threat_level * cfg.rep_per_threat).min(cfg.max_rep_reward);
 
     // Pick source faction
     let source_faction = if state.factions.is_empty() {
@@ -81,7 +85,7 @@ pub fn tick_quest_generation(
             relation_faction_id: source_faction,
             relation_change: if source_faction.is_some() { 5.0 } else { 0.0 },
             supply_reward: if matches!(quest_type, QuestType::Gather) {
-                15.0
+                cfg.gather_supply_reward
             } else {
                 0.0
             },
@@ -89,7 +93,7 @@ pub fn tick_quest_generation(
         },
         distance,
         target_position: target_pos,
-        deadline_ms: state.elapsed_ms + 120_000, // 2 minutes to accept
+        deadline_ms: state.elapsed_ms + cfg.quest_deadline_ms,
         description: format!("{:?} quest (threat {:.0})", quest_type, threat_level),
         arrived_at_ms: state.elapsed_ms,
     };

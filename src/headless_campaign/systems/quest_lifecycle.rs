@@ -47,9 +47,9 @@ pub fn tick_quest_lifecycle(
                     quest.request.quest_type,
                     QuestType::Combat | QuestType::Rescue
                 ) {
-                    // Trigger battle after 20 ticks (~2s) at location
+                    // Trigger battle after configured delay at location
                     let time_at_location = elapsed.saturating_sub(quest.request.arrived_at_ms);
-                    if time_at_location > 2000 && quest.dispatched_party_id.is_some() {
+                    if time_at_location > state.config.quest_lifecycle.battle_trigger_delay_ms && quest.dispatched_party_id.is_some() {
                         let battle_id = state.next_battle_id;
                         state.next_battle_id += 1;
 
@@ -92,7 +92,7 @@ pub fn tick_quest_lifecycle(
                     }
                 } else {
                     // Non-combat quests complete after a duration proportional to threat
-                    let duration = (quest.request.threat_level * 500.0) as u64; // ms
+                    let duration = (quest.request.threat_level * state.config.quest_lifecycle.non_combat_duration_multiplier) as u64;
                     if quest.elapsed_ms > duration {
                         completed_indices.push((i, QuestResult::Victory));
                     }
@@ -196,25 +196,26 @@ pub fn tick_quest_lifecycle(
             .map(|a| a.id)
             .collect();
 
+        let qlcfg = &state.config.quest_lifecycle;
         for &mid in &member_ids {
             if let Some(adv) = state.adventurers.iter_mut().find(|a| a.id == mid) {
                 match result {
                     QuestResult::Victory => {
                         // Victory: small injuries, XP gain, stress relief
-                        let damage_taken = (1.0 - battle_hp) * 30.0;
+                        let damage_taken = (1.0 - battle_hp) * qlcfg.victory_injury_scaling;
                         adv.injury = (adv.injury + damage_taken).min(100.0);
-                        adv.stress = (adv.stress - 5.0).max(0.0);
-                        adv.loyalty = (adv.loyalty + 3.0).min(100.0);
-                        adv.morale = (adv.morale + 5.0).min(100.0);
-                        adv.xp += 20 + (threat * 0.5) as u32;
+                        adv.stress = (adv.stress - qlcfg.victory_stress_relief).max(0.0);
+                        adv.loyalty = (adv.loyalty + qlcfg.victory_loyalty_gain).min(100.0);
+                        adv.morale = (adv.morale + qlcfg.victory_morale_gain).min(100.0);
+                        adv.xp += qlcfg.victory_base_xp + (threat * qlcfg.victory_threat_xp_rate) as u32;
 
                         // Level up check
-                        let threshold = adv.level * adv.level * 50;
+                        let threshold = adv.level * adv.level * qlcfg.level_up_xp_multiplier;
                         if adv.xp >= threshold {
                             adv.level += 1;
-                            adv.stats.max_hp += 5.0;
-                            adv.stats.attack += 2.0;
-                            adv.stats.defense += 1.5;
+                            adv.stats.max_hp += qlcfg.level_hp_gain;
+                            adv.stats.attack += qlcfg.level_attack_gain;
+                            adv.stats.defense += qlcfg.level_defense_gain;
                             events.push(WorldEvent::AdventurerLevelUp {
                                 adventurer_id: mid,
                                 new_level: adv.level,
@@ -223,17 +224,17 @@ pub fn tick_quest_lifecycle(
                     }
                     QuestResult::Defeat => {
                         // Defeat: heavy injuries, possible death
-                        let severity = threat / 50.0; // 0-2 range
-                        adv.injury = (adv.injury + 25.0 + severity * 15.0).min(100.0);
-                        adv.stress = (adv.stress + 15.0).min(100.0);
-                        adv.loyalty = (adv.loyalty - 5.0).max(0.0);
-                        adv.morale = (adv.morale - 15.0).max(0.0);
-                        adv.xp += 5;
+                        let severity = threat / qlcfg.defeat_severity_divisor;
+                        adv.injury = (adv.injury + qlcfg.defeat_base_injury + severity * qlcfg.defeat_severity_injury).min(100.0);
+                        adv.stress = (adv.stress + qlcfg.defeat_stress_gain).min(100.0);
+                        adv.loyalty = (adv.loyalty - qlcfg.defeat_loyalty_loss).max(0.0);
+                        adv.morale = (adv.morale - qlcfg.defeat_morale_loss).max(0.0);
+                        adv.xp += qlcfg.defeat_base_xp;
 
                         // Death check: high injury + bad luck
                         if adv.injury > 90.0 {
                             let death_roll = lcg_f32(&mut state.rng);
-                            if death_roll < 0.3 { // 30% death chance when severely injured
+                            if death_roll < qlcfg.death_chance {
                                 adv.status = AdventurerStatus::Dead;
                                 casualties += 1;
                                 events.push(WorldEvent::AdventurerDied {
@@ -245,7 +246,7 @@ pub fn tick_quest_lifecycle(
                         }
 
                         // Incapacitation
-                        if adv.injury > 65.0 {
+                        if adv.injury > qlcfg.incapacitation_threshold {
                             adv.status = AdventurerStatus::Injured;
                             events.push(WorldEvent::AdventurerInjured {
                                 adventurer_id: mid,
@@ -254,8 +255,8 @@ pub fn tick_quest_lifecycle(
                         }
                     }
                     QuestResult::Abandoned => {
-                        adv.stress = (adv.stress + 8.0).min(100.0);
-                        adv.morale = (adv.morale - 10.0).max(0.0);
+                        adv.stress = (adv.stress + qlcfg.abandon_stress).min(100.0);
+                        adv.morale = (adv.morale - qlcfg.abandon_morale_loss).max(0.0);
                     }
                 }
 

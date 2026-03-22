@@ -7,15 +7,16 @@
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::{BattleStatus, CampaignState, CombatMode};
 
-/// How many campaign ticks a battle lasts (oracle mode estimate).
-/// Real duration would come from the oracle's predicted ticks.
-const DEFAULT_BATTLE_DURATION_TICKS: u64 = 50;
-
 pub fn tick_battles(
     state: &mut CampaignState,
     deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
+    let duration_ticks = state.config.battle.default_duration_ticks;
+    let victory_damage = state.config.battle.victory_party_damage;
+    let defeat_damage = state.config.battle.defeat_enemy_damage;
+    let update_interval = state.config.battle.update_interval_ticks;
+
     for battle in &mut state.active_battles {
         if battle.status != BattleStatus::Active {
             continue;
@@ -27,26 +28,26 @@ pub fn tick_battles(
             CombatMode::Oracle => {
                 // Interpolate toward predicted outcome over expected duration
                 let progress =
-                    (battle.elapsed_ticks as f32 / DEFAULT_BATTLE_DURATION_TICKS as f32).min(1.0);
+                    (battle.elapsed_ticks as f32 / duration_ticks as f32).min(1.0);
 
                 if battle.predicted_outcome > 0.0 {
                     // Trending toward victory
                     battle.enemy_health_ratio =
                         (1.0 - progress * (1.0 - 0.0)).max(0.0);
                     battle.party_health_ratio =
-                        (1.0 - progress * (1.0 - battle.predicted_outcome.abs() * 0.3))
+                        (1.0 - progress * (1.0 - battle.predicted_outcome.abs() * victory_damage))
                             .max(0.1);
                 } else {
                     // Trending toward defeat
                     battle.party_health_ratio =
                         (1.0 - progress * (1.0 - 0.0)).max(0.0);
                     battle.enemy_health_ratio =
-                        (1.0 - progress * (1.0 - battle.predicted_outcome.abs() * 0.3))
+                        (1.0 - progress * (1.0 - battle.predicted_outcome.abs() * defeat_damage))
                             .max(0.1);
                 }
 
-                // Emit updates every 10 ticks
-                if battle.elapsed_ticks % 10 == 0 {
+                // Emit updates at configured interval
+                if battle.elapsed_ticks % update_interval == 0 {
                     events.push(WorldEvent::BattleUpdate {
                         battle_id: battle.id,
                         party_health_ratio: battle.party_health_ratio,
@@ -55,7 +56,7 @@ pub fn tick_battles(
                 }
 
                 // Resolve when duration exceeded
-                if battle.elapsed_ticks >= DEFAULT_BATTLE_DURATION_TICKS {
+                if battle.elapsed_ticks >= duration_ticks {
                     if battle.predicted_outcome > 0.0 {
                         battle.status = BattleStatus::Victory;
                     } else {

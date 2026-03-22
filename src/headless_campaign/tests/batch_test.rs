@@ -1,6 +1,7 @@
 //! Batch run validation test.
 
 use crate::headless_campaign::batch::{run_batch, BatchConfig};
+use crate::headless_campaign::config::CampaignConfig;
 
 #[test]
 fn test_batch_1000_campaigns() {
@@ -13,6 +14,7 @@ fn test_batch_1000_campaigns() {
         record_traces: 0,
         trace_snapshot_interval: 100,
         trace_output_dir: "generated/test_traces".into(),
+        campaign_config: CampaignConfig::default(),
     };
 
     let summary = run_batch(&config);

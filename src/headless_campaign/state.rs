@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::config::CampaignConfig;
+
 /// Fixed tick duration in milliseconds, matching the combat sim.
 pub const CAMPAIGN_TICK_MS: u32 = 100;
 
@@ -69,6 +71,10 @@ pub struct CampaignState {
 
     // --- Combat mode ---
     pub combat_mode: CombatMode,
+
+    // --- Configuration ---
+    /// All tunable balance parameters. Systems read from this.
+    pub config: CampaignConfig,
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -941,6 +947,21 @@ impl CampaignState {
             next_unlock_id: 1,
             next_event_id: 1,
             combat_mode: CombatMode::Oracle,
+            config: CampaignConfig::default(),
         }
+    }
+
+    /// Create a test campaign with custom config.
+    pub fn with_config(seed: u64, config: CampaignConfig) -> Self {
+        let mut state = Self::default_test_campaign(seed);
+        // Apply starting state from config
+        state.guild.gold = config.starting_state.gold;
+        state.guild.supplies = config.starting_state.supplies;
+        state.guild.reputation = config.starting_state.reputation;
+        state.guild.base.defensive_strength = config.starting_state.base_defensive_strength;
+        state.guild.active_quest_capacity = config.starting_state.active_quest_capacity;
+        state.overworld.global_threat_level = config.starting_state.global_threat_level;
+        state.config = config;
+        state
     }
 }

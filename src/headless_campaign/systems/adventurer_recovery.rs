@@ -6,29 +6,34 @@
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::{AdventurerStatus, CampaignState};
 
-const RECOVERY_INJURY_THRESHOLD: f32 = 40.0;
-const RECOVERY_FATIGUE_THRESHOLD: f32 = 40.0;
-
 pub fn tick_adventurer_recovery(
     state: &mut CampaignState,
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % 100 != 0 {
+    let cfg = &state.config.adventurer_recovery;
+    if state.tick % cfg.recovery_interval_ticks != 0 {
         return;
     }
+
+    let stress_recovery = cfg.stress_recovery;
+    let fatigue_recovery = cfg.fatigue_recovery;
+    let injury_recovery = cfg.injury_recovery;
+    let loyalty_recovery = cfg.loyalty_recovery;
+    let injury_threshold = cfg.injury_threshold;
+    let fatigue_threshold = cfg.fatigue_threshold;
 
     for adv in &mut state.adventurers {
         if adv.status != AdventurerStatus::Injured {
             continue;
         }
 
-        adv.stress = (adv.stress - 3.0).max(0.0);
-        adv.fatigue = (adv.fatigue - 4.0).max(0.0);
-        adv.injury = (adv.injury - 3.5).max(0.0);
-        adv.loyalty = (adv.loyalty + 0.7).min(100.0);
+        adv.stress = (adv.stress - stress_recovery).max(0.0);
+        adv.fatigue = (adv.fatigue - fatigue_recovery).max(0.0);
+        adv.injury = (adv.injury - injury_recovery).max(0.0);
+        adv.loyalty = (adv.loyalty + loyalty_recovery).min(100.0);
 
-        if adv.injury <= RECOVERY_INJURY_THRESHOLD && adv.fatigue <= RECOVERY_FATIGUE_THRESHOLD {
+        if adv.injury <= injury_threshold && adv.fatigue <= fatigue_threshold {
             adv.status = AdventurerStatus::Idle;
             events.push(WorldEvent::AdventurerRecovered {
                 adventurer_id: adv.id,

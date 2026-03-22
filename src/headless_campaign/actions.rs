@@ -414,7 +414,7 @@ impl CampaignState {
             if matches!(
                 party.status,
                 PartyStatus::Traveling | PartyStatus::OnMission | PartyStatus::Fighting
-            ) && self.guild.gold >= SUPPLY_COST_PER_UNIT * 10.0
+            ) && self.guild.gold >= self.config.economy.supply_cost_per_unit * 10.0
             {
                 actions.push(CampaignAction::PurchaseSupplies {
                     party_id: party.id,
@@ -424,7 +424,7 @@ impl CampaignState {
         }
 
         // Train idle adventurers
-        if self.guild.gold >= TRAINING_COST {
+        if self.guild.gold >= self.config.economy.training_cost {
             for &adv_id in &idle_adventurers {
                 for &tt in &[
                     TrainingType::Combat,
@@ -451,7 +451,7 @@ impl CampaignState {
         }
 
         // Send runner to in-field parties
-        if self.guild.gold >= RUNNER_COST {
+        if self.guild.gold >= self.config.economy.runner_cost {
             for party in &self.parties {
                 if matches!(
                     party.status,
@@ -470,7 +470,7 @@ impl CampaignState {
         }
 
         // Hire mercenary
-        if self.guild.gold >= MERCENARY_COST {
+        if self.guild.gold >= self.config.economy.mercenary_cost {
             for quest in &self.active_quests {
                 if matches!(
                     quest.status,
@@ -484,7 +484,7 @@ impl CampaignState {
         // Call rescue
         for battle in &self.active_battles {
             if battle.status == BattleStatus::Active && battle.party_health_ratio < 0.4 {
-                let can_afford = self.guild.gold >= RESCUE_BRIBE_COST;
+                let can_afford = self.guild.gold >= self.config.economy.rescue_bribe_cost;
                 let has_free_rescue = self
                     .npc_relationships
                     .iter()
@@ -498,7 +498,7 @@ impl CampaignState {
         }
 
         // Hire scout
-        if self.guild.gold >= SCOUT_COST {
+        if self.guild.gold >= self.config.economy.scout_cost {
             for loc in &self.overworld.locations {
                 if !loc.scouted {
                     actions.push(CampaignAction::HireScout {

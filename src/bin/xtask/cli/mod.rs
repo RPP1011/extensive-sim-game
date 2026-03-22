@@ -60,6 +60,9 @@ pub struct CampaignBatchArgs {
     /// Output directory for trace files
     #[arg(long, default_value = "generated/traces")]
     pub trace_output_dir: String,
+    /// Path to campaign config TOML (overrides defaults)
+    #[arg(long)]
+    pub config: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Parser)]

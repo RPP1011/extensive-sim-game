@@ -10,21 +10,29 @@ pub fn tick_adventurer_condition(
     deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % 10 != 0 {
+    let cfg = &state.config.adventurer_condition;
+    if state.tick % cfg.drift_interval_ticks != 0 {
         return;
     }
+
+    let fighting_drift = cfg.fighting_drift;
+    let on_mission_drift = cfg.on_mission_drift;
+    let idle_drift = cfg.idle_drift;
+    let injured_drift = cfg.injured_drift;
+    let desertion_loyalty = cfg.desertion_loyalty_threshold;
+    let desertion_stress = cfg.desertion_stress_threshold;
 
     for adv in &mut state.adventurers {
         if adv.status == AdventurerStatus::Dead {
             continue;
         }
 
-        let (stress_d, fatigue_d, morale_d, loyalty_d) = match adv.status {
-            AdventurerStatus::Fighting => (0.8, 0.6, -0.5, -0.1),
-            AdventurerStatus::OnMission | AdventurerStatus::Traveling => (0.3, 0.4, -0.2, 0.0),
-            AdventurerStatus::Idle => (-0.5, -0.3, 0.3, 0.05),
-            AdventurerStatus::Injured => (-0.2, -0.5, -0.1, -0.05),
-            _ => (0.0, 0.0, 0.0, 0.0),
+        let [stress_d, fatigue_d, morale_d, loyalty_d] = match adv.status {
+            AdventurerStatus::Fighting => fighting_drift,
+            AdventurerStatus::OnMission | AdventurerStatus::Traveling => on_mission_drift,
+            AdventurerStatus::Idle => idle_drift,
+            AdventurerStatus::Injured => injured_drift,
+            _ => [0.0, 0.0, 0.0, 0.0],
         };
 
         adv.stress = (adv.stress + stress_d).clamp(0.0, 100.0);
@@ -33,7 +41,7 @@ pub fn tick_adventurer_condition(
         adv.loyalty = (adv.loyalty + loyalty_d).clamp(0.0, 100.0);
 
         // Desertion check: low loyalty + high stress
-        if adv.loyalty <= 10.0 && adv.stress >= 70.0 && adv.status == AdventurerStatus::Idle {
+        if adv.loyalty <= desertion_loyalty && adv.stress >= desertion_stress && adv.status == AdventurerStatus::Idle {
             adv.status = AdventurerStatus::Dead; // "deserted" = removed from play
             events.push(WorldEvent::AdventurerDeserted {
                 adventurer_id: adv.id,

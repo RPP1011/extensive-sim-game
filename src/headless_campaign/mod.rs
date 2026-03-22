@@ -22,6 +22,7 @@
 pub mod actions;
 pub mod batch;
 pub mod combat_oracle;
+pub mod config;
 pub mod mcts;
 pub mod state;
 pub mod step;

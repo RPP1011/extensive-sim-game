@@ -206,10 +206,10 @@ fn apply_action(
                     member_ids: member_ids.clone(),
                     position: state.guild.base.position,
                     destination: Some(target),
-                    speed: 5.0, // tiles per second
+                    speed: state.config.quest_lifecycle.party_speed,
                     status: PartyStatus::Traveling,
-                    supply_level: 100.0,
-                    morale: 80.0,
+                    supply_level: state.config.quest_lifecycle.party_starting_supply,
+                    morale: state.config.quest_lifecycle.party_starting_morale,
                     quest_id: Some(quest_id),
                 };
 
@@ -235,7 +235,7 @@ fn apply_action(
         }
 
         CampaignAction::PurchaseSupplies { party_id, amount } => {
-            let cost = amount * SUPPLY_COST_PER_UNIT;
+            let cost = amount * state.config.economy.supply_cost_per_unit;
             if state.guild.gold < cost {
                 return ActionResult::Failed("Not enough gold".into());
             }
@@ -255,7 +255,7 @@ fn apply_action(
             adventurer_id,
             training_type,
         } => {
-            if state.guild.gold < TRAINING_COST {
+            if state.guild.gold < state.config.economy.training_cost {
                 return ActionResult::Failed("Not enough gold".into());
             }
             if let Some(adv) = state
@@ -266,7 +266,7 @@ fn apply_action(
                 if adv.status != AdventurerStatus::Idle {
                     return ActionResult::Failed("Adventurer not idle".into());
                 }
-                state.guild.gold -= TRAINING_COST;
+                state.guild.gold -= state.config.economy.training_cost;
                 match training_type {
                     TrainingType::Combat => adv.stats.attack += 2.0,
                     TrainingType::Exploration => adv.stats.speed += 1.0,
@@ -330,11 +330,12 @@ fn apply_action(
         }
 
         CampaignAction::SendRunner { party_id, payload } => {
-            if state.guild.gold < RUNNER_COST {
+            let runner_cost = state.config.economy.runner_cost;
+            if state.guild.gold < runner_cost {
                 return ActionResult::Failed("Not enough gold".into());
             }
             if let Some(party) = state.parties.iter_mut().find(|p| p.id == party_id) {
-                state.guild.gold -= RUNNER_COST;
+                state.guild.gold -= runner_cost;
                 match &payload {
                     RunnerPayload::Supplies(amount) => {
                         party.supply_level = (party.supply_level + amount).min(100.0);
@@ -346,7 +347,7 @@ fn apply_action(
                 deltas.runners_sent += 1;
                 events.push(WorldEvent::RunnerSent {
                     party_id,
-                    cost: RUNNER_COST,
+                    cost: runner_cost,
                 });
                 ActionResult::Success(format!("Runner sent to party {}", party_id))
             } else {
@@ -355,10 +356,11 @@ fn apply_action(
         }
 
         CampaignAction::HireMercenary { quest_id } => {
-            if state.guild.gold < MERCENARY_COST {
+            let merc_cost = state.config.economy.mercenary_cost;
+            if state.guild.gold < merc_cost {
                 return ActionResult::Failed("Not enough gold".into());
             }
-            state.guild.gold -= MERCENARY_COST;
+            state.guild.gold -= merc_cost;
             // Boost the battle's predicted outcome
             if let Some(battle) = state
                 .active_battles
@@ -371,7 +373,7 @@ fn apply_action(
             deltas.mercenaries_hired += 1;
             events.push(WorldEvent::MercenaryHired {
                 quest_id,
-                cost: MERCENARY_COST,
+                cost: merc_cost,
             });
             ActionResult::Success(format!("Mercenary hired for quest {}", quest_id))
         }
@@ -385,7 +387,7 @@ fn apply_action(
             let cost = if free_npc.is_some() {
                 0.0
             } else {
-                RESCUE_BRIBE_COST
+                state.config.economy.rescue_bribe_cost
             };
             if cost > 0.0 && state.guild.gold < cost {
                 return ActionResult::Failed("Not enough gold for rescue".into());
@@ -409,7 +411,8 @@ fn apply_action(
         }
 
         CampaignAction::HireScout { location_id } => {
-            if state.guild.gold < SCOUT_COST {
+            let scout_cost = state.config.economy.scout_cost;
+            if state.guild.gold < scout_cost {
                 return ActionResult::Failed("Not enough gold".into());
             }
             if let Some(loc) = state
@@ -418,7 +421,7 @@ fn apply_action(
                 .iter_mut()
                 .find(|l| l.id == location_id)
             {
-                state.guild.gold -= SCOUT_COST;
+                state.guild.gold -= scout_cost;
                 loc.scouted = true;
                 events.push(WorldEvent::ScoutReport {
                     location_id,
@@ -514,12 +517,12 @@ fn check_campaign_outcome(state: &CampaignState) -> Option<CampaignOutcome> {
         .iter()
         .filter(|a| matches!(a.status, AdventurerStatus::Idle | AdventurerStatus::Assigned))
         .count();
-    if state.guild.gold < 10.0 && available == 0 && state.active_quests.is_empty() {
+    if state.guild.gold < state.config.starting_state.bankrupt_gold_threshold && available == 0 && state.active_quests.is_empty() {
         return Some(CampaignOutcome::Defeat);
     }
 
     // Defeat: all territory lost (after early game)
-    if state.tick > 1000 && !state.overworld.regions.is_empty() {
+    if state.tick > state.config.starting_state.early_game_protection_ticks && !state.overworld.regions.is_empty() {
         let guild_regions = state
             .overworld
             .regions

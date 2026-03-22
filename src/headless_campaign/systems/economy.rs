@@ -5,9 +5,6 @@
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::CampaignState;
 
-/// Passive gold income per second.
-const PASSIVE_GOLD_PER_SEC: f32 = 0.5;
-
 pub fn tick_economy(
     state: &mut CampaignState,
     deltas: &mut StepDeltas,
@@ -19,7 +16,7 @@ pub fn tick_economy(
     deltas.reputation_before = state.guild.reputation;
 
     // Passive income
-    state.guild.gold += PASSIVE_GOLD_PER_SEC * dt_sec;
+    state.guild.gold += state.config.economy.passive_gold_per_sec * dt_sec;
 
     // Apply completed quest rewards (process newly completed quests)
     // Quest rewards are applied by quest_lifecycle when quests complete,
