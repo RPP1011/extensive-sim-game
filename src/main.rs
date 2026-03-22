@@ -36,7 +36,10 @@ mod simulation_cli;
 mod terrain;
 mod ui_helpers;
 mod hub_ui_draw;
+mod keybinds;
 mod ascii_viewport;
+mod combat_view;
+mod content;
 mod progression;
 
 use camera::{load_camera_settings, CameraFocusTransitionState, SceneViewBounds};
@@ -256,7 +259,12 @@ fn main() {
         .init_resource::<audio::AudioHandles>()
         .init_resource::<audio::AudioEventQueue>()
         .init_resource::<TutorialState>()
-        .init_resource::<FadeState>();
+        .init_resource::<FadeState>()
+        .init_resource::<fade::ScreenTransition>()
+        .init_resource::<hub_types::ScreenHistory>()
+        .init_resource::<keybinds::KeybindConfig>()
+        .init_resource::<keybinds::ActionEvents>()
+        .init_resource::<content::ContentRegistry>();
 
     if let Some(seed) = map_seed {
         app.insert_resource(game_core::OverworldMap::from_seed(seed));

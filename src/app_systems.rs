@@ -30,7 +30,7 @@ use crate::backstory_cinematic::{
 use crate::campaign_ops::{
     hub_continue_campaign_requested_system, hub_new_campaign_requested_system,
 };
-use crate::fade::{draw_fade_system, update_fade_system};
+use crate::fade::{draw_fade_system, screen_transition_system, update_fade_system};
 use crate::mission;
 use crate::runtime_assets::{
     draw_runtime_menu_background_egui_system, runtime_asset_gen_bootstrap_system,
@@ -56,6 +56,7 @@ use crate::ui::settings::{
     settings_menu_slider_input_system, settings_menu_toggle_input_system,
     settings_menu_toggle_system, update_settings_menu_visual_system,
 };
+use crate::keybinds::keybind_dispatch_system;
 use crate::ui::tutorial::{draw_tutorial_system, tutorial_toggle_system};
 
 pub fn register_scenario_3d_systems(app: &mut App) {
@@ -234,6 +235,7 @@ pub fn register_default_mission_systems(app: &mut App) {
 }
 
 pub fn register_common_systems(app: &mut App) {
+    app.add_systems(Update, keybind_dispatch_system);
     app.add_systems(
         Update,
         (
@@ -249,6 +251,7 @@ pub fn register_common_systems(app: &mut App) {
     app.add_systems(Update, draw_tutorial_system);
     app.add_systems(Update, update_fade_system);
     app.add_systems(Update, draw_fade_system);
+    app.add_systems(Update, screen_transition_system);
 }
 
 pub fn register_rendered_input_systems(app: &mut App) {
