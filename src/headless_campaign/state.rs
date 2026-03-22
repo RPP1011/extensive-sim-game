@@ -72,6 +72,16 @@ pub struct CampaignState {
     // --- Combat mode ---
     pub combat_mode: CombatMode,
 
+    // --- Campaign phase ---
+    /// Whether the player has chosen a starting package.
+    /// Until true, the only valid action is `ChooseStartingPackage`.
+    /// Systems don't tick until this is true.
+    pub initialized: bool,
+
+    /// Available starting packages. Loaded from data files.
+    /// Emptied after the player chooses one.
+    pub available_starting_choices: Vec<StartingChoice>,
+
     // --- Configuration ---
     /// All tunable balance parameters. Systems read from this.
     pub config: CampaignConfig,
@@ -641,17 +651,47 @@ pub enum CampaignOutcome {
 // Starting choice
 // ---------------------------------------------------------------------------
 
+/// A starting package the player can choose at tick 0.
+///
+/// Loaded from data files (TOML/JSON). Each package defines its own
+/// adventurers, gold bonus, supply bonus, and flavor text.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum StartingChoice {
-    /// Extra starting gold.
-    Money { gold_bonus: f32 },
-    /// One overleveled adventurer with a debilitating negative trait.
-    Veteran {
-        adventurer: Adventurer,
-        negative_trait: String,
-    },
-    /// A full party of low-level rookies.
-    Rookies { adventurers: Vec<Adventurer> },
+pub struct StartingChoice {
+    /// Display name (e.g. "War Chest", "The Veteran", "Fresh Recruits").
+    pub name: String,
+    /// Description shown to the player.
+    pub description: String,
+    /// Adventurers granted by this package.
+    pub adventurers: Vec<Adventurer>,
+    /// Gold added to the guild's starting gold.
+    pub gold_bonus: f32,
+    /// Supplies added to the guild's starting supplies.
+    pub supply_bonus: f32,
+    /// Starting reputation modifier.
+    pub reputation_bonus: f32,
+    /// Optional starting inventory items.
+    pub items: Vec<InventoryItem>,
+}
+
+impl StartingChoice {
+    /// Load all starting packages from a directory of TOML files.
+    pub fn load_from_dir(dir: &std::path::Path) -> Result<Vec<Self>, String> {
+        let mut choices = Vec::new();
+        let entries = std::fs::read_dir(dir)
+            .map_err(|e| format!("Failed to read {}: {}", dir.display(), e))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("Read error: {}", e))?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("toml") {
+                let content = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+                let choice: StartingChoice = toml::from_str(&content)
+                    .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))?;
+                choices.push(choice);
+            }
+        }
+        Ok(choices)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -676,12 +716,17 @@ pub fn lcg_f32(state: &mut u64) -> f32 {
 // ---------------------------------------------------------------------------
 
 impl CampaignState {
-    /// Create a minimal test campaign with handmade content.
+    /// Create a campaign with world content but no adventurers.
     ///
-    /// Includes 4 adventurers, 3 regions, 2 factions, 4 locations,
-    /// and 2 NPC relationships. No LFM required — all content is static.
+    /// The player must issue `ChooseStartingPackage` as their first action
+    /// to receive adventurers and starting resources. Until then, the sim
+    /// does not tick.
+    ///
+    /// Includes 3 regions, 2 factions, 4 locations, 2 NPC relationships.
     pub fn default_test_campaign(seed: u64) -> Self {
-        let adventurers = vec![
+        // These adventurers are NOT placed in the guild — they're templates
+        // for the starting choice packages. The guild starts empty.
+        let _adventurer_templates = vec![
             Adventurer {
                 id: 1,
                 name: "Kael the Swift".into(),
@@ -930,7 +975,7 @@ impl CampaignState {
             },
             factions,
             diplomacy,
-            adventurers,
+            adventurers: Vec::new(), // Empty until ChooseStartingPackage
             parties: Vec::new(),
             request_board: Vec::new(),
             active_quests: Vec::new(),
@@ -947,8 +992,103 @@ impl CampaignState {
             next_unlock_id: 1,
             next_event_id: 1,
             combat_mode: CombatMode::Oracle,
+            initialized: false,
+            available_starting_choices: Self::load_or_default_starting_choices(),
             config: CampaignConfig::default(),
         }
+    }
+
+    /// Load starting choices from `assets/starting_packages/` or return defaults.
+    fn load_or_default_starting_choices() -> Vec<StartingChoice> {
+        let dir = std::path::Path::new("assets/starting_packages");
+        if dir.exists() {
+            match StartingChoice::load_from_dir(dir) {
+                Ok(choices) if !choices.is_empty() => return choices,
+                Ok(_) => {} // empty dir, fall through
+                Err(_) => {} // parse error, fall through
+            }
+        }
+
+        // Fallback: three inline defaults
+        vec![
+            StartingChoice {
+                name: "War Chest".into(),
+                description: "Extra gold, two mid-level adventurers".into(),
+                adventurers: vec![
+                    Adventurer {
+                        id: 1, name: "Finn".into(), archetype: "ranger".into(), level: 2, xp: 0,
+                        stats: AdventurerStats { max_hp: 70.0, attack: 14.0, defense: 8.0, speed: 12.0, ability_power: 6.0 },
+                        equipment: Equipment::default(), traits: Vec::new(),
+                        status: AdventurerStatus::Idle,
+                        loyalty: 60.0, stress: 10.0, fatigue: 5.0, injury: 0.0, resolve: 50.0, morale: 70.0,
+                        party_id: None, guild_relationship: 40.0,
+                    },
+                    Adventurer {
+                        id: 2, name: "Greta".into(), archetype: "knight".into(), level: 2, xp: 0,
+                        stats: AdventurerStats { max_hp: 100.0, attack: 10.0, defense: 16.0, speed: 7.0, ability_power: 4.0 },
+                        equipment: Equipment::default(), traits: Vec::new(),
+                        status: AdventurerStatus::Idle,
+                        loyalty: 65.0, stress: 5.0, fatigue: 8.0, injury: 0.0, resolve: 55.0, morale: 75.0,
+                        party_id: None, guild_relationship: 45.0,
+                    },
+                ],
+                gold_bonus: 150.0, supply_bonus: 30.0, reputation_bonus: 5.0, items: Vec::new(),
+            },
+            StartingChoice {
+                name: "The Veteran".into(),
+                description: "One overleveled adventurer with a cursed arm".into(),
+                adventurers: vec![
+                    Adventurer {
+                        id: 1, name: "Gareth Ironhand".into(), archetype: "knight".into(), level: 6, xp: 0,
+                        stats: AdventurerStats { max_hp: 150.0, attack: 22.0, defense: 25.0, speed: 6.0, ability_power: 8.0 },
+                        equipment: Equipment::default(), traits: vec!["cursed_arm".into()],
+                        status: AdventurerStatus::Idle,
+                        loyalty: 40.0, stress: 30.0, fatigue: 20.0, injury: 15.0, resolve: 80.0, morale: 50.0,
+                        party_id: None, guild_relationship: 25.0,
+                    },
+                ],
+                gold_bonus: 0.0, supply_bonus: 0.0, reputation_bonus: 10.0, items: Vec::new(),
+            },
+            StartingChoice {
+                name: "Fresh Recruits".into(),
+                description: "Four level-1 rookies".into(),
+                adventurers: vec![
+                    Adventurer {
+                        id: 1, name: "Alaric".into(), archetype: "ranger".into(), level: 1, xp: 0,
+                        stats: AdventurerStats { max_hp: 60.0, attack: 12.0, defense: 6.0, speed: 13.0, ability_power: 5.0 },
+                        equipment: Equipment::default(), traits: Vec::new(),
+                        status: AdventurerStatus::Idle,
+                        loyalty: 55.0, stress: 12.0, fatigue: 8.0, injury: 0.0, resolve: 45.0, morale: 65.0,
+                        party_id: None, guild_relationship: 35.0,
+                    },
+                    Adventurer {
+                        id: 2, name: "Brynn".into(), archetype: "mage".into(), level: 1, xp: 0,
+                        stats: AdventurerStats { max_hp: 45.0, attack: 5.0, defense: 4.0, speed: 9.0, ability_power: 18.0 },
+                        equipment: Equipment::default(), traits: Vec::new(),
+                        status: AdventurerStatus::Idle,
+                        loyalty: 50.0, stress: 15.0, fatigue: 5.0, injury: 0.0, resolve: 40.0, morale: 60.0,
+                        party_id: None, guild_relationship: 30.0,
+                    },
+                    Adventurer {
+                        id: 3, name: "Cira".into(), archetype: "cleric".into(), level: 1, xp: 0,
+                        stats: AdventurerStats { max_hp: 55.0, attack: 4.0, defense: 8.0, speed: 8.0, ability_power: 15.0 },
+                        equipment: Equipment::default(), traits: Vec::new(),
+                        status: AdventurerStatus::Idle,
+                        loyalty: 70.0, stress: 8.0, fatigue: 3.0, injury: 0.0, resolve: 50.0, morale: 75.0,
+                        party_id: None, guild_relationship: 45.0,
+                    },
+                    Adventurer {
+                        id: 4, name: "Daven".into(), archetype: "rogue".into(), level: 1, xp: 0,
+                        stats: AdventurerStats { max_hp: 50.0, attack: 15.0, defense: 5.0, speed: 14.0, ability_power: 4.0 },
+                        equipment: Equipment::default(), traits: Vec::new(),
+                        status: AdventurerStatus::Idle,
+                        loyalty: 45.0, stress: 18.0, fatigue: 10.0, injury: 0.0, resolve: 35.0, morale: 55.0,
+                        party_id: None, guild_relationship: 25.0,
+                    },
+                ],
+                gold_bonus: 20.0, supply_bonus: 10.0, reputation_bonus: 0.0, items: Vec::new(),
+            },
+        ]
     }
 
     /// Create a test campaign with custom config.

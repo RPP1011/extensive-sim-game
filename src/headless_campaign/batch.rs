@@ -224,6 +224,15 @@ pub fn run_single_campaign_with_trace_and_config(
 
 /// Simple heuristic policy for batch runs.
 fn heuristic_policy(state: &CampaignState) -> Option<CampaignAction> {
+    // 0. Choose starting package if not initialized
+    if !state.initialized {
+        if let Some(choice) = state.available_starting_choices.last() {
+            return Some(CampaignAction::ChooseStartingPackage {
+                choice: choice.clone(),
+            });
+        }
+    }
+
     // 1. Accept quests (lower threshold = more aggressive)
     for req in &state.request_board {
         if state.active_quests.len() < state.guild.active_quest_capacity {

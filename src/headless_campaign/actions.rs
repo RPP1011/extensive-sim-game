@@ -71,6 +71,10 @@ pub enum CampaignAction {
 
     /// Set the guild's economic spending priority.
     SetSpendPriority { priority: SpendPriority },
+
+    /// Choose starting package. Only valid at tick 0 before the campaign has
+    /// been initialized. This is the player's first decision.
+    ChooseStartingPackage { choice: StartingChoice },
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -363,6 +367,15 @@ pub struct AdventurerStatDelta {
 impl CampaignState {
     /// Returns all currently valid actions the player can take.
     pub fn valid_actions(&self) -> Vec<CampaignAction> {
+        // Before initialization, only starting package choices are valid
+        if !self.initialized {
+            return self.available_starting_choices
+                .iter()
+                .cloned()
+                .map(|choice| CampaignAction::ChooseStartingPackage { choice })
+                .collect();
+        }
+
         let mut actions = vec![CampaignAction::Wait];
 
         // Accept/decline quests on the board

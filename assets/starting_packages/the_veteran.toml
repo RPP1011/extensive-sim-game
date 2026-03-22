@@ -1,0 +1,31 @@
+name = "The Veteran"
+description = "A legendary adventurer joins your guild — overleveled and battle-hardened, but carrying a cursed arm that saps his loyalty and leaves him perpetually stressed. Can you cure him before he walks out?"
+gold_bonus = 0.0
+supply_bonus = 0.0
+reputation_bonus = 10.0
+items = []
+
+[[adventurers]]
+id = 1
+name = "Gareth Ironhand"
+archetype = "knight"
+level = 6
+xp = 0
+traits = ["cursed_arm", "battle_scarred", "veteran_instinct"]
+status = "Idle"
+loyalty = 40.0
+stress = 30.0
+fatigue = 20.0
+injury = 15.0
+resolve = 80.0
+morale = 50.0
+guild_relationship = 25.0
+
+[adventurers.stats]
+max_hp = 150.0
+attack = 22.0
+defense = 25.0
+speed = 6.0
+ability_power = 8.0
+
+[adventurers.equipment]

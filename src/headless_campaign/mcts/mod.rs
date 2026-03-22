@@ -276,6 +276,18 @@ pub fn run_mcts_campaign(
     let mut samples: Vec<MctsTrainingSample> = Vec::new();
     let mut next_decision_tick = config.decision_interval_ticks;
 
+    // Handle starting choice via MCTS before the main loop
+    if !state.initialized {
+        let (action, decision) = mcts_search(&state, config);
+        samples.push(MctsTrainingSample {
+            tick: 0,
+            decision,
+            seed,
+            campaign_outcome: None,
+        });
+        step_campaign(&mut state, Some(action));
+    }
+
     loop {
         if state.tick >= config.max_campaign_ticks {
             // Fill in outcome for all samples
@@ -328,7 +340,7 @@ mod tests {
 
     #[test]
     fn test_mcts_search_produces_decision() {
-        let state = CampaignState::default_test_campaign(42);
+        let mut s = CampaignState::default_test_campaign(42);
         let config = MctsConfig {
             simulations_per_move: 50,
             rollout_horizon_ticks: 500,
@@ -337,8 +349,13 @@ mod tests {
             ..Default::default()
         };
 
-        // Advance state until quests appear
-        let mut s = state;
+        // First decision should be starting choice
+        let (_action, decision) = mcts_search(&s, &config);
+        assert!(!decision.action_visits.is_empty(), "Should have starting choices");
+
+        // Initialize and advance until quests appear
+        let choice = s.available_starting_choices[0].clone();
+        step_campaign(&mut s, Some(CampaignAction::ChooseStartingPackage { choice }));
         for _ in 0..2000 {
             step_campaign(&mut s, None);
             if !s.request_board.is_empty() {

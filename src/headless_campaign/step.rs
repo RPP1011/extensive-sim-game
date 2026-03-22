@@ -30,6 +30,22 @@ pub fn step_campaign(
         None
     };
 
+    // --- Don't tick until the player has chosen a starting package ---
+    if !state.initialized {
+        deltas.gold_after = state.guild.gold;
+        deltas.supplies_after = state.guild.supplies;
+        deltas.reputation_after = state.guild.reputation;
+        return CampaignStepResult {
+            events,
+            violations: Vec::new(),
+            outcome: None,
+            deltas,
+            action_result,
+            tick: state.tick,
+            elapsed_ms: state.elapsed_ms,
+        };
+    }
+
     // --- Advance tick ---
     state.tick += 1;
     state.elapsed_ms = state.tick * CAMPAIGN_TICK_MS as u64;
@@ -494,6 +510,38 @@ fn apply_action(
         CampaignAction::SetSpendPriority { priority: _ } => {
             // Store as guild state for economy system to reference
             ActionResult::Success("Spending priority updated".into())
+        }
+
+        CampaignAction::ChooseStartingPackage { choice } => {
+            if state.initialized {
+                return ActionResult::Failed("Campaign already initialized".into());
+            }
+
+            // Apply the starting package
+            state.guild.gold += choice.gold_bonus;
+            state.guild.supplies += choice.supply_bonus;
+            state.guild.reputation = (state.guild.reputation + choice.reputation_bonus).min(100.0);
+
+            // Add adventurers with corrected IDs
+            let base_id = state.adventurers.iter().map(|a| a.id).max().unwrap_or(0) + 1;
+            for (i, mut adv) in choice.adventurers.into_iter().enumerate() {
+                adv.id = base_id + i as u32;
+                state.adventurers.push(adv);
+            }
+
+            // Add starting items to inventory
+            for item in choice.items {
+                state.guild.inventory.push(item);
+            }
+
+            state.initialized = true;
+            state.available_starting_choices.clear();
+
+            events.push(WorldEvent::CampaignMilestone {
+                description: format!("Starting package chosen: {}", choice.name),
+            });
+
+            ActionResult::Success(format!("Campaign started with: {}", choice.name))
         }
     }
 }

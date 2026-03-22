@@ -4,6 +4,14 @@ use crate::headless_campaign::actions::CampaignAction;
 use crate::headless_campaign::state::CampaignState;
 use crate::headless_campaign::step::step_campaign;
 
+/// Initialize a campaign by picking the first available starting package.
+fn init_campaign(state: &mut CampaignState) {
+    if !state.initialized {
+        let choice = state.available_starting_choices[0].clone();
+        step_campaign(state, Some(CampaignAction::ChooseStartingPackage { choice }));
+    }
+}
+
 fn campaign_hash(state: &CampaignState) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let mix = |h: &mut u64, v: u64| {
@@ -41,6 +49,8 @@ fn campaign_hash(state: &CampaignState) -> u64 {
 fn test_determinism_no_actions() {
     let mut state_a = CampaignState::default_test_campaign(42);
     let mut state_b = CampaignState::default_test_campaign(42);
+    init_campaign(&mut state_a);
+    init_campaign(&mut state_b);
 
     for _ in 0..500 {
         step_campaign(&mut state_a, None);
@@ -58,6 +68,8 @@ fn test_determinism_no_actions() {
 fn test_determinism_with_actions() {
     let mut state_a = CampaignState::default_test_campaign(42);
     let mut state_b = CampaignState::default_test_campaign(42);
+    init_campaign(&mut state_a);
+    init_campaign(&mut state_b);
 
     // Run until a quest appears
     for _ in 0..2000 {
@@ -92,6 +104,8 @@ fn test_determinism_with_actions() {
 fn test_different_seeds_diverge() {
     let mut state_a = CampaignState::default_test_campaign(42);
     let mut state_b = CampaignState::default_test_campaign(99);
+    init_campaign(&mut state_a);
+    init_campaign(&mut state_b);
 
     for _ in 0..500 {
         step_campaign(&mut state_a, None);
@@ -108,6 +122,7 @@ fn test_different_seeds_diverge() {
 #[test]
 fn test_no_violations_basic_run() {
     let mut state = CampaignState::default_test_campaign(42);
+    init_campaign(&mut state);
 
     for _ in 0..1000 {
         let result = step_campaign(&mut state, None);
@@ -123,6 +138,7 @@ fn test_no_violations_basic_run() {
 #[test]
 fn test_quest_lifecycle() {
     let mut state = CampaignState::default_test_campaign(42);
+    init_campaign(&mut state);
 
     // Run until a quest appears
     let mut quest_appeared = false;

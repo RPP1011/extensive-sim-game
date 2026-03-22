@@ -54,6 +54,15 @@ pub fn heuristic_rollout(
 /// - Rescue when battle going badly
 /// - Wait otherwise
 pub fn heuristic_rollout_policy(state: &CampaignState) -> Option<CampaignAction> {
+    // Choose starting package if not initialized
+    if !state.initialized {
+        if let Some(choice) = state.available_starting_choices.last() {
+            return Some(CampaignAction::ChooseStartingPackage {
+                choice: choice.clone(),
+            });
+        }
+    }
+
     // Accept quests with reward/threat > 1.0
     for req in &state.request_board {
         let ratio = req.reward.gold / req.threat_level.max(1.0);
