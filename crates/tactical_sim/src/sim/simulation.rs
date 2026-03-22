@@ -323,6 +323,29 @@ pub fn step(mut state: SimState, intents: &[UnitIntent], dt_ms: u32) -> (SimStat
         }
     }
 
+    // Clean up status effects on living units that reference dead units.
+    // When a taunter/partner/protector/host dies, the status effect on the
+    // victim must be removed to prevent stale references.
+    let dead_ids: Vec<u32> = state.units.iter()
+        .filter(|u| u.hp <= 0)
+        .map(|u| u.id)
+        .collect();
+    if !dead_ids.is_empty() {
+        for unit in state.units.iter_mut() {
+            if unit.hp <= 0 { continue; }
+            unit.status_effects.retain(|se| {
+                match &se.kind {
+                    StatusKind::Taunt { taunter_id } => !dead_ids.contains(taunter_id),
+                    StatusKind::Duel { partner_id } => !dead_ids.contains(partner_id),
+                    StatusKind::Link { partner_id, .. } => !dead_ids.contains(partner_id),
+                    StatusKind::Redirect { protector_id, .. } => !dead_ids.contains(protector_id),
+                    StatusKind::Attached { host_id } => !dead_ids.contains(host_id),
+                    _ => true,
+                }
+            });
+        }
+    }
+
     // Runtime verification: check invariants after every tick in debug/test builds.
     #[cfg(debug_assertions)]
     {

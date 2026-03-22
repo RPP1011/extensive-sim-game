@@ -4,6 +4,7 @@ mod rl_policies;
 mod rl_eval;
 mod rl_generate;
 mod impala_train;
+mod playtester;
 #[cfg(feature = "stream-monitor")]
 mod monitor_traces;
 
@@ -15,6 +16,7 @@ use super::cli::{OracleArgs, OracleSubcommand};
 pub fn run_oracle_cmd(args: OracleArgs) -> ExitCode {
     match args.sub {
         OracleSubcommand::TransformerRl(args) => transformer_rl::run_transformer_rl(args),
+        OracleSubcommand::Playtester(args) => playtester::run_playtester(args),
         #[cfg(feature = "stream-monitor")]
         OracleSubcommand::MonitorTraces(args) => {
             monitor_traces::run_monitor_traces(&args.path, args.sample)
