@@ -282,7 +282,7 @@ ability ManaShield {
 
 #[test]
 fn parse_full_mage_kit() {
-    let input = include_str!("../../../../assets/hero_templates/mage.ability");
+    let input = include_str!("../../../../../assets/hero_templates/mage.ability");
     let (abilities, passives) = parse_abilities(input).unwrap();
     assert_eq!(abilities.len(), 8, "mage should have 8 abilities");
     assert_eq!(passives.len(), 2, "mage should have 2 passives");
@@ -389,7 +389,7 @@ ability MultiShot {
 #[test]
 fn parse_all_lol_heroes() {
     let lol_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("assets/lol_heroes");
+        .join("../../assets/lol_heroes");
     let mut count = 0;
     let mut errors = Vec::new();
 
