@@ -275,8 +275,12 @@ mod tests {
         // Parse real hero ability files, emit DSL, parse again
         let mut total = 0;
         let mut roundtripped = 0;
-        for dir_path in &["assets/hero_templates", "dataset/hero_templates"] {
-            let dir = std::path::Path::new(dir_path);
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let candidates = [
+            manifest.join("../../assets/hero_templates"),
+            manifest.join("../../dataset/hero_templates"),
+        ];
+        for dir in &candidates {
             if !dir.is_dir() { continue; }
         for entry in std::fs::read_dir(dir).expect("read_dir failed") {
             let path = entry.unwrap().path();

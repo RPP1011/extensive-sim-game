@@ -400,9 +400,8 @@ fn arcanist_prefers_combo_zone_over_non_combo() {
 
 #[test]
 fn arcanist_template_parses_and_has_zone_tags() {
-    use crate::mission::hero_templates::parse_hero_toml;
-    let toml_str = include_str!("../../../../assets/hero_templates/arcanist.toml");
-    let hero = parse_hero_toml(toml_str).expect("arcanist template should parse");
+    let toml_str = include_str!("../../../../../assets/hero_templates/arcanist.toml");
+    let hero: crate::effects::defs::HeroToml = toml::from_str(toml_str).expect("arcanist template should parse");
     assert_eq!(hero.abilities.len(), 6);
 
     let fire = hero.abilities.iter().find(|a| a.name == "FireRing").unwrap();

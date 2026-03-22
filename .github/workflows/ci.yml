@@ -39,8 +39,14 @@ jobs:
       - name: cargo check
         run: cargo check --all-targets
 
+      - name: cargo check (tactical_sim)
+        run: cargo check -p tactical_sim --all-targets
+
       - name: cargo test (unit + integration)
         run: cargo test --lib --tests -- --test-threads=1
+
+      - name: cargo test (tactical_sim)
+        run: cargo test -p tactical_sim --lib --tests -- --test-threads=1
 
   determinism:
     name: Determinism Tests
@@ -69,7 +75,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Run determinism tests (debug)
-        run: cargo test determinism -- --test-threads=1
+        run: cargo test -p tactical_sim determinism -- --test-threads=1
 
       - name: Run determinism tests (release)
-        run: cargo test --release determinism -- --test-threads=1
+        run: cargo test -p tactical_sim --release determinism -- --test-threads=1
