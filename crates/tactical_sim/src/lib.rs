@@ -14,3 +14,4 @@ pub mod advanced;
 pub mod student;
 pub mod tooling;
 pub mod mapgen_voronoi;
+pub mod morale;

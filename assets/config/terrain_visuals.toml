@@ -1,0 +1,59 @@
+# Terrain visual properties — hot-reloadable.
+# Edit glyphs and colors here to customize the overworld map appearance.
+# Each entry maps a terrain type name to a glyph character and RGB color.
+
+[terrain.plains]
+glyph = "."
+color = [138, 154, 122]
+
+[terrain.grassland]
+glyph = "."
+color = [120, 150, 100]
+
+[terrain.forest]
+glyph = "♣"
+color = [90, 122, 74]
+
+[terrain.dense_forest]
+glyph = "♣"
+color = [60, 95, 50]
+
+[terrain.hills]
+glyph = "~"
+color = [154, 138, 106]
+
+[terrain.foothills]
+glyph = "~"
+color = [138, 128, 96]
+
+[terrain.mountain]
+glyph = "^"
+color = [138, 122, 90]
+
+[terrain.peak]
+glyph = "▲"
+color = [170, 160, 150]
+
+[terrain.shallow_water]
+glyph = "≈"
+color = [122, 154, 187]
+
+[terrain.deep_water]
+glyph = "≈"
+color = [80, 120, 170]
+
+[terrain.coast]
+glyph = ","
+color = [180, 170, 140]
+
+[terrain.marsh]
+glyph = "~"
+color = [100, 140, 110]
+
+[terrain.road]
+glyph = "═"
+color = [160, 155, 145]
+
+[terrain.settlement]
+glyph = "⌂"
+color = [221, 221, 204]

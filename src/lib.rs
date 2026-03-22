@@ -34,6 +34,9 @@ pub mod ai {
 
 pub mod content;
 pub mod scenario;
+pub mod narrative;
+pub mod overworld_grid;
+pub mod hot_reload;
 pub use tactical_sim::mapgen_voronoi;
 
 // ---------------------------------------------------------------------------

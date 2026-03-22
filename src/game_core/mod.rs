@@ -16,6 +16,7 @@ mod consequence_systems;
 mod campaign_outcome;
 mod mission_systems;
 mod attention_systems;
+pub mod faction_ai;
 mod save;
 mod migrate;
 pub mod verify;
