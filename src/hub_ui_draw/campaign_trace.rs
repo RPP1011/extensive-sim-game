@@ -510,6 +510,14 @@ fn format_world_event(event: &WorldEvent) -> (String, egui::Color32) {
             format!("+{:.0} supplies: {}", amount, reason),
             blue,
         ),
+        WorldEvent::ChoicePresented { prompt, num_options, .. } => (
+            format!("CHOICE: {} ({} options)", prompt, num_options),
+            egui::Color32::from_rgb(220, 180, 255),
+        ),
+        WorldEvent::ChoiceResolved { label, was_default, .. } => {
+            let prefix = if *was_default { "Auto-chose" } else { "Chose" };
+            (format!("{}: {}", prefix, label), egui::Color32::from_rgb(180, 160, 220))
+        },
         WorldEvent::CalamityWarning { description } => (description.clone(), red),
         WorldEvent::CampaignMilestone { description } => (description.clone(), green),
     }

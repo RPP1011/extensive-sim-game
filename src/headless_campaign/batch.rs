@@ -233,6 +233,23 @@ fn heuristic_policy(state: &CampaignState) -> Option<CampaignAction> {
         }
     }
 
+    // 0.5. Respond to pending choices (pick first non-default option if we can afford it)
+    if let Some(choice) = state.pending_choices.first() {
+        // Heuristic: pick option 0 (usually the most aggressive/rewarding)
+        // unless it costs more gold than we have
+        let best = choice.options.iter().enumerate().find(|(_, opt)| {
+            opt.effects.iter().all(|e| match e {
+                ChoiceEffect::Gold(amount) => state.guild.gold + amount >= 0.0,
+                _ => true,
+            })
+        });
+        let idx = best.map(|(i, _)| i).unwrap_or(choice.default_option);
+        return Some(CampaignAction::RespondToChoice {
+            choice_id: choice.id,
+            option_index: idx,
+        });
+    }
+
     // 1. Accept quests (lower threshold = more aggressive)
     for req in &state.request_board {
         if state.active_quests.len() < state.guild.active_quest_capacity {

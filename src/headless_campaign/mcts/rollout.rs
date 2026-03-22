@@ -63,6 +63,14 @@ pub fn heuristic_rollout_policy(state: &CampaignState) -> Option<CampaignAction>
         }
     }
 
+    // Respond to pending choices (pick default = least investment for rollout speed)
+    if let Some(choice) = state.pending_choices.first() {
+        return Some(CampaignAction::RespondToChoice {
+            choice_id: choice.id,
+            option_index: choice.default_option,
+        });
+    }
+
     // Accept quests with reward/threat > 1.0
     for req in &state.request_board {
         let ratio = req.reward.gold / req.threat_level.max(1.0);

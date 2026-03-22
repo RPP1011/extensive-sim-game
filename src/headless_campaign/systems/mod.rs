@@ -3,6 +3,7 @@
 //! Each system is a pure function: `fn(state: &mut CampaignState, deltas: &mut StepDeltas, events: &mut Vec<WorldEvent>)`
 //! Systems fire at different cadences (all multiples of the 100ms base tick).
 
+pub mod choices;
 pub mod travel;
 pub mod supply;
 pub mod battles;

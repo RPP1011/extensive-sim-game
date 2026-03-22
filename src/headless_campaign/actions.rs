@@ -75,6 +75,9 @@ pub enum CampaignAction {
     /// Choose starting package. Only valid at tick 0 before the campaign has
     /// been initialized. This is the player's first decision.
     ChooseStartingPackage { choice: StartingChoice },
+
+    /// Respond to a pending choice event by selecting an option index.
+    RespondToChoice { choice_id: u32, option_index: usize },
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -288,6 +291,19 @@ pub enum WorldEvent {
         reason: String,
     },
 
+    // --- Choices ---
+    ChoicePresented {
+        choice_id: u32,
+        prompt: String,
+        num_options: usize,
+    },
+    ChoiceResolved {
+        choice_id: u32,
+        option_index: usize,
+        label: String,
+        was_default: bool,
+    },
+
     // --- Campaign ---
     CalamityWarning {
         description: String,
@@ -377,6 +393,16 @@ impl CampaignState {
         }
 
         let mut actions = vec![CampaignAction::Wait];
+
+        // Pending choices — must be responded to
+        for choice in &self.pending_choices {
+            for (i, _option) in choice.options.iter().enumerate() {
+                actions.push(CampaignAction::RespondToChoice {
+                    choice_id: choice.id,
+                    option_index: i,
+                });
+            }
+        }
 
         // Accept/decline quests on the board
         for req in &self.request_board {

@@ -50,6 +50,9 @@ pub fn step_campaign(
     state.tick += 1;
     state.elapsed_ms = state.tick * CAMPAIGN_TICK_MS as u64;
 
+    // --- Auto-resolve expired choices ---
+    resolve_expired_choices(state, &mut events);
+
     // --- Run tick systems in order ---
     // Every-tick systems
     systems::travel::tick_travel(state, &mut deltas, &mut events);
@@ -68,6 +71,7 @@ pub fn step_campaign(
     systems::faction_ai::tick_faction_ai(state, &mut deltas, &mut events);
     systems::progression::tick_progression(state, &mut deltas, &mut events);
     systems::recruitment::tick_recruitment(state, &mut deltas, &mut events);
+    systems::choices::tick_choices(state, &mut deltas, &mut events);
     systems::threat::tick_threat(state, &mut deltas, &mut events);
 
     // Final economy snapshot
@@ -512,6 +516,41 @@ fn apply_action(
             ActionResult::Success("Spending priority updated".into())
         }
 
+        CampaignAction::RespondToChoice { choice_id, option_index } => {
+            // Validate before removing
+            let valid = state.pending_choices.iter().any(|c| {
+                c.id == choice_id && option_index < c.options.len()
+            });
+            if !valid {
+                let exists = state.pending_choices.iter().any(|c| c.id == choice_id);
+                if !exists {
+                    return ActionResult::InvalidAction(format!(
+                        "Choice {} not found", choice_id
+                    ));
+                }
+                return ActionResult::InvalidAction(format!(
+                    "Option index {} out of range", option_index
+                ));
+            }
+
+            let idx = state.pending_choices.iter().position(|c| c.id == choice_id).unwrap();
+            let choice = state.pending_choices.remove(idx);
+            let selected = &choice.options[option_index];
+            let label = selected.label.clone();
+            let effects = selected.effects.clone();
+
+            apply_choice_effects(state, &effects, events);
+
+            events.push(WorldEvent::ChoiceResolved {
+                choice_id,
+                option_index,
+                label: label.clone(),
+                was_default: false,
+            });
+
+            ActionResult::Success(format!("Chose: {}", label))
+        }
+
         CampaignAction::ChooseStartingPackage { choice } => {
             if state.initialized {
                 return ActionResult::Failed("Campaign already initialized".into());
@@ -588,4 +627,129 @@ fn check_campaign_outcome(state: &CampaignState) -> Option<CampaignOutcome> {
     }
 
     None
+}
+
+/// Apply the effects of a selected choice option.
+fn apply_choice_effects(
+    state: &mut CampaignState,
+    effects: &[ChoiceEffect],
+    events: &mut Vec<WorldEvent>,
+) {
+    for effect in effects {
+        match effect {
+            ChoiceEffect::Gold(amount) => {
+                state.guild.gold += amount;
+                events.push(WorldEvent::GoldChanged {
+                    amount: *amount,
+                    reason: "Choice effect".into(),
+                });
+            }
+            ChoiceEffect::Supplies(amount) => {
+                state.guild.supplies += amount;
+                events.push(WorldEvent::SupplyChanged {
+                    amount: *amount,
+                    reason: "Choice effect".into(),
+                });
+            }
+            ChoiceEffect::Reputation(delta) => {
+                state.guild.reputation = (state.guild.reputation + delta).clamp(0.0, 100.0);
+            }
+            ChoiceEffect::FactionRelation { faction_id, delta } => {
+                if let Some(f) = state.factions.iter_mut().find(|f| f.id == *faction_id) {
+                    let old = f.relationship_to_guild;
+                    f.relationship_to_guild = (f.relationship_to_guild + delta).clamp(-100.0, 100.0);
+                    events.push(WorldEvent::FactionRelationChanged {
+                        faction_id: *faction_id,
+                        old,
+                        new: f.relationship_to_guild,
+                    });
+                }
+            }
+            ChoiceEffect::GrantUnlock(unlock) => {
+                events.push(WorldEvent::ProgressionUnlocked {
+                    unlock_id: unlock.id,
+                    category: unlock.category,
+                    name: unlock.name.clone(),
+                });
+                state.unlocks.push(unlock.clone());
+            }
+            ChoiceEffect::ModifyQuestThreat { quest_id, multiplier } => {
+                if let Some(q) = state.active_quests.iter_mut().find(|q| q.id == *quest_id) {
+                    q.request.threat_level *= multiplier;
+                }
+            }
+            ChoiceEffect::ModifyQuestReward { quest_id, gold_bonus, rep_bonus } => {
+                if let Some(q) = state.active_quests.iter_mut().find(|q| q.id == *quest_id) {
+                    q.request.reward.gold += gold_bonus;
+                    q.request.reward.reputation += rep_bonus;
+                }
+            }
+            ChoiceEffect::AddAdventurer(adv) => {
+                let mut adv = adv.clone();
+                adv.id = state.adventurers.iter().map(|a| a.id).max().unwrap_or(0) + 1;
+                state.adventurers.push(adv);
+            }
+            ChoiceEffect::ModifyAdventurerInjury { adventurer_id, delta } => {
+                if let Some(a) = state.adventurers.iter_mut().find(|a| a.id == *adventurer_id) {
+                    a.injury = (a.injury + delta).clamp(0.0, 100.0);
+                }
+            }
+            ChoiceEffect::ModifyAdventurerLoyalty { adventurer_id, delta } => {
+                if let Some(a) = state.adventurers.iter_mut().find(|a| a.id == *adventurer_id) {
+                    a.loyalty = (a.loyalty + delta).clamp(0.0, 100.0);
+                }
+            }
+            ChoiceEffect::AddItem(item) => {
+                state.guild.inventory.push(item.clone());
+            }
+            ChoiceEffect::SetQuestStatus { quest_id, status } => {
+                if let Some(q) = state.active_quests.iter_mut().find(|q| q.id == *quest_id) {
+                    q.status = *status;
+                }
+            }
+            ChoiceEffect::Narrative(text) => {
+                let id = state.next_event_id;
+                state.next_event_id += 1;
+                state.event_log.push(CampaignEvent {
+                    id,
+                    tick: state.tick,
+                    description: text.clone(),
+                });
+            }
+        }
+    }
+}
+
+/// Auto-resolve expired choice events by selecting the default option.
+fn resolve_expired_choices(
+    state: &mut CampaignState,
+    events: &mut Vec<WorldEvent>,
+) {
+    let now = state.elapsed_ms;
+    let mut expired = Vec::new();
+
+    for (i, choice) in state.pending_choices.iter().enumerate() {
+        if let Some(deadline) = choice.deadline_ms {
+            if now >= deadline {
+                expired.push(i);
+            }
+        }
+    }
+
+    // Process in reverse to avoid index invalidation
+    expired.reverse();
+    for idx in expired {
+        let choice = state.pending_choices.remove(idx);
+        let default_idx = choice.default_option.min(choice.options.len().saturating_sub(1));
+        let selected = &choice.options[default_idx];
+
+        apply_choice_effects(state, &selected.effects, events);
+
+        events.push(WorldEvent::ChoiceResolved {
+            choice_id: choice.id,
+            option_index: default_idx,
+            label: selected.label.clone(),
+            was_default: true,
+        });
+    }
 }
