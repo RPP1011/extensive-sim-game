@@ -1,0 +1,36 @@
+//! Headless campaign simulator for automated playtesting.
+//!
+//! Provides a pure-data campaign simulation with no Bevy ECS dependency.
+//! Designed for:
+//! - MCTS tree search (state is `Clone`, deterministic, fast to step)
+//! - Automated playtesting (no GUI required)
+//! - Balance probing (MAP-Elites, evolutionary search)
+//! - CI regression testing
+//!
+//! # Usage
+//!
+//! ```rust,ignore
+//! use bevy_game::headless_campaign::{CampaignState, step_campaign, CampaignAction};
+//!
+//! let mut state = CampaignState::default_test_campaign(42);
+//! for _ in 0..1000 {
+//!     let result = step_campaign(&mut state, None);
+//!     if result.outcome.is_some() { break; }
+//! }
+//! ```
+
+pub mod actions;
+pub mod batch;
+pub mod combat_oracle;
+pub mod mcts;
+pub mod state;
+pub mod step;
+pub mod trace;
+pub mod trace_viewer;
+mod systems;
+#[cfg(test)]
+mod tests;
+
+pub use actions::{CampaignAction, CampaignStepResult, WorldEvent, ActionResult, StepDeltas};
+pub use state::{CampaignState, CampaignOutcome, CAMPAIGN_TICK_MS};
+pub use step::step_campaign;

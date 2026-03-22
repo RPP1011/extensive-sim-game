@@ -142,7 +142,7 @@ impl NarrativeEngine {
     pub fn on_battle_complete(
         &mut self,
         victory: bool,
-        hero_names: &[String],
+        _hero_names: &[String],
         current_turn: u32,
         context: &NarrativeContext,
     ) -> Vec<NarrativeOutput> {

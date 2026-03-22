@@ -30,5 +30,19 @@ fn main() -> ExitCode {
         TaskCommand::Model(cmd) => model_cmd::run_model_cmd(cmd),
         TaskCommand::ContentGen(cmd) => content_gen_cmd::run_content_gen_cmd(cmd),
         TaskCommand::AsciiGen(cmd) => ascii_gen_cmd::run_ascii_gen_cmd(cmd),
+        TaskCommand::CampaignBatch(args) => {
+            let config = bevy_game::headless_campaign::batch::BatchConfig {
+                target_successes: args.target,
+                max_ticks: args.max_ticks,
+                threads: args.threads,
+                base_seed: args.seed,
+                report_interval: args.report_interval,
+                record_traces: args.record_traces,
+                trace_snapshot_interval: args.trace_snapshot_interval,
+                trace_output_dir: args.trace_output_dir,
+            };
+            bevy_game::headless_campaign::batch::run_batch(&config);
+            ExitCode::SUCCESS
+        }
     }
 }

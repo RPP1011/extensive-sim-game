@@ -50,6 +50,7 @@ pub fn hub_screen_capture_name(screen: HubScreen) -> &'static str {
         HubScreen::LocalEagleEyeIntro => "LocalEagleEyeIntro",
         HubScreen::MissionExecution => "MissionExecution",
         HubScreen::ReplayViewer => "ReplayViewer",
+        HubScreen::CampaignTraceViewer => "CampaignTraceViewer",
     }
 }
 

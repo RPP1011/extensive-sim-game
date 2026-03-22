@@ -192,6 +192,7 @@ pub enum HubScreen {
     LocalEagleEyeIntro,
     MissionExecution,
     ReplayViewer,
+    CampaignTraceViewer,
 }
 
 impl HubScreen {

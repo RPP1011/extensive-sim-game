@@ -29,6 +29,37 @@ pub enum TaskCommand {
     ContentGen(ContentGenCommand),
     /// ASCII art generation
     AsciiGen(AsciiGenCommand),
+    /// Run headless campaign batch simulation
+    CampaignBatch(CampaignBatchArgs),
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Run headless campaigns in parallel for validation and data generation")]
+pub struct CampaignBatchArgs {
+    /// Target number of successful runs
+    #[arg(long, default_value_t = 100_000)]
+    pub target: u64,
+    /// Maximum ticks per campaign before timeout
+    #[arg(long, default_value_t = 50_000)]
+    pub max_ticks: u64,
+    /// Number of threads (0 = all cores)
+    #[arg(short = 'j', long, default_value_t = 0)]
+    pub threads: usize,
+    /// Base RNG seed
+    #[arg(long, default_value_t = 2026)]
+    pub seed: u64,
+    /// Progress report interval (every N runs)
+    #[arg(long, default_value_t = 1000)]
+    pub report_interval: u64,
+    /// Record traces for the first N campaigns (0 = disabled)
+    #[arg(long, default_value_t = 0)]
+    pub record_traces: u64,
+    /// Snapshot interval for traces (ticks between keyframes)
+    #[arg(long, default_value_t = 100)]
+    pub trace_snapshot_interval: u64,
+    /// Output directory for trace files
+    #[arg(long, default_value = "generated/traces")]
+    pub trace_output_dir: String,
 }
 
 #[derive(Debug, Parser)]

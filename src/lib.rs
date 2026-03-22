@@ -4,6 +4,7 @@
 
 pub mod audio;
 pub mod game_core;
+pub mod headless_campaign;
 pub mod mission;
 pub mod progression;
 
@@ -61,6 +62,7 @@ pub enum HubScreen {
     LocalEagleEyeIntro,
     MissionExecution,
     ReplayViewer,
+    CampaignTraceViewer,
 }
 
 impl HubScreen {

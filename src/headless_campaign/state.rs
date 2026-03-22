@@ -1,0 +1,946 @@
+//! Campaign state for headless simulation.
+//!
+//! All types are `Clone + Debug` for MCTS tree search (cheap state cloning,
+//! deterministic stepping). The game world advances via fixed 100ms ticks.
+
+use serde::{Deserialize, Serialize};
+
+/// Fixed tick duration in milliseconds, matching the combat sim.
+pub const CAMPAIGN_TICK_MS: u32 = 100;
+
+// ---------------------------------------------------------------------------
+// Top-level state
+// ---------------------------------------------------------------------------
+
+/// Complete campaign state as a plain, Clone-able struct.
+///
+/// Designed for MCTS: cheap to clone, deterministic to step.
+/// No Bevy ECS — all state is explicit fields.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CampaignState {
+    // --- Time ---
+    /// Monotonic tick counter (increments by 1 each step).
+    pub tick: u64,
+    /// Total elapsed game time in milliseconds (`tick * CAMPAIGN_TICK_MS`).
+    pub elapsed_ms: u64,
+
+    // --- Guild ---
+    pub guild: GuildState,
+
+    // --- World ---
+    pub overworld: OverworldState,
+    pub factions: Vec<FactionState>,
+    pub diplomacy: DiplomacyMatrix,
+
+    // --- Units ---
+    pub adventurers: Vec<Adventurer>,
+    pub parties: Vec<Party>,
+
+    // --- Quests ---
+    /// Available requests on the guild board (not yet accepted).
+    pub request_board: Vec<QuestRequest>,
+    /// Accepted, in-progress quests.
+    pub active_quests: Vec<ActiveQuest>,
+    /// Completed quest history (bounded ring buffer in practice).
+    pub completed_quests: Vec<CompletedQuest>,
+
+    // --- Battles ---
+    pub active_battles: Vec<BattleState>,
+
+    // --- Progression ---
+    /// Unlocked abilities/buffs. Effect-property vectors, NOT identity-indexed.
+    pub unlocks: Vec<UnlockInstance>,
+    pub progression_history: Vec<ProgressionEvent>,
+
+    // --- Narrative ---
+    pub event_log: Vec<CampaignEvent>,
+    pub npc_relationships: Vec<NpcRelationship>,
+
+    // --- RNG ---
+    /// LCG state for deterministic randomness. Isolated from combat sim RNG.
+    pub rng: u64,
+
+    // --- ID counters ---
+    pub next_quest_id: u32,
+    pub next_party_id: u32,
+    pub next_battle_id: u32,
+    pub next_unlock_id: u32,
+    pub next_event_id: u32,
+
+    // --- Combat mode ---
+    pub combat_mode: CombatMode,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CombatMode {
+    /// Predict outcomes via small MLP (microseconds). Used during MCTS.
+    Oracle,
+    /// Run full deterministic combat sim (milliseconds). Used for evaluation.
+    FullSim,
+}
+
+// ---------------------------------------------------------------------------
+// Guild
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GuildState {
+    pub gold: f32,
+    /// Aggregate supply pool at the guild base.
+    pub supplies: f32,
+    /// 0–100. Affects request quality and pricing.
+    pub reputation: f32,
+    pub base: BaseState,
+    /// How many quests can run simultaneously.
+    pub active_quest_capacity: usize,
+    /// Bitmask of known unlock categories.
+    pub unlock_bitmask: u64,
+    /// Inventory of unequipped gear.
+    pub inventory: Vec<InventoryItem>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BaseState {
+    pub base_type: BaseType,
+    /// Overworld coordinates (x, y).
+    pub position: (f32, f32),
+    pub upgrade_slots: Vec<UpgradeSlot>,
+    pub defensive_strength: f32,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BaseType {
+    Camp,
+    Fixed,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UpgradeSlot {
+    pub slot_type: UpgradeSlotType,
+    pub installed: Option<String>,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UpgradeSlotType {
+    Defense,
+    Storage,
+    Training,
+    Information,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InventoryItem {
+    pub id: u32,
+    pub name: String,
+    pub slot: EquipmentSlot,
+    pub quality: f32,
+    pub stat_bonuses: StatBonuses,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct StatBonuses {
+    pub hp_bonus: f32,
+    pub attack_bonus: f32,
+    pub defense_bonus: f32,
+    pub speed_bonus: f32,
+}
+
+// ---------------------------------------------------------------------------
+// Adventurer
+// ---------------------------------------------------------------------------
+
+/// An adventurer in the guild. Maps from existing `HeroCompanion`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Adventurer {
+    pub id: u32,
+    pub name: String,
+    /// Archetype from hero_templates (e.g. "knight", "ranger", "mage").
+    pub archetype: String,
+    pub level: u32,
+    pub xp: u32,
+
+    // --- Combat stats summary ---
+    pub stats: AdventurerStats,
+    pub equipment: Equipment,
+    pub traits: Vec<String>,
+
+    // --- Condition ---
+    pub status: AdventurerStatus,
+    /// 0–100.
+    pub loyalty: f32,
+    /// 0–100.
+    pub stress: f32,
+    /// 0–100.
+    pub fatigue: f32,
+    /// 0–100. ≥90 = incapacitated.
+    pub injury: f32,
+    /// 0–100.
+    pub resolve: f32,
+    /// 0–100.
+    pub morale: f32,
+
+    // --- Assignment ---
+    /// Which party this adventurer belongs to, if any.
+    pub party_id: Option<u32>,
+    /// NPC relationship score to the guild (−100 to 100).
+    pub guild_relationship: f32,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct AdventurerStats {
+    pub max_hp: f32,
+    pub attack: f32,
+    pub defense: f32,
+    pub speed: f32,
+    pub ability_power: f32,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Equipment {
+    pub weapon: Option<u32>,
+    pub offhand: Option<u32>,
+    pub chest: Option<u32>,
+    pub boots: Option<u32>,
+    pub accessory: Option<u32>,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AdventurerStatus {
+    Idle,
+    /// In the candidate pool for a quest, not yet dispatched.
+    Assigned,
+    /// En route to quest location.
+    Traveling,
+    /// At quest location, executing.
+    OnMission,
+    /// In active battle.
+    Fighting,
+    /// Recovering from injury, unavailable.
+    Injured,
+    Dead,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EquipmentSlot {
+    Weapon,
+    Offhand,
+    Chest,
+    Boots,
+    Accessory,
+}
+
+// ---------------------------------------------------------------------------
+// Party
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Party {
+    pub id: u32,
+    /// Adventurer IDs in this party.
+    pub member_ids: Vec<u32>,
+    /// Continuous overworld position (x, y).
+    pub position: (f32, f32),
+    /// Where the party is heading. `None` = stationary.
+    pub destination: Option<(f32, f32)>,
+    /// Tiles per second.
+    pub speed: f32,
+    pub status: PartyStatus,
+    /// 0–100.
+    pub supply_level: f32,
+    /// Aggregate party morale (mean of members).
+    pub morale: f32,
+    /// Which quest this party is assigned to.
+    pub quest_id: Option<u32>,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PartyStatus {
+    Idle,
+    Traveling,
+    OnMission,
+    Fighting,
+    /// Heading back to guild base.
+    Returning,
+}
+
+// ---------------------------------------------------------------------------
+// Quests
+// ---------------------------------------------------------------------------
+
+/// A request on the guild board (not yet accepted).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct QuestRequest {
+    pub id: u32,
+    pub source_faction_id: Option<usize>,
+    pub source_area_id: Option<usize>,
+    pub quest_type: QuestType,
+    /// Estimated difficulty (0–100).
+    pub threat_level: f32,
+    pub reward: QuestReward,
+    /// Distance from guild base in tiles.
+    pub distance: f32,
+    /// Location where the quest takes place.
+    pub target_position: (f32, f32),
+    /// Expires at this elapsed_ms if not accepted.
+    pub deadline_ms: u64,
+    pub description: String,
+    /// When it appeared on the board.
+    pub arrived_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QuestType {
+    Combat,
+    Exploration,
+    Diplomatic,
+    Escort,
+    Rescue,
+    Gather,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct QuestReward {
+    pub gold: f32,
+    pub reputation: f32,
+    pub relation_faction_id: Option<usize>,
+    pub relation_change: f32,
+    pub supply_reward: f32,
+    /// Whether this quest has a chance of dropping equipment.
+    pub potential_loot: bool,
+}
+
+/// An accepted, in-progress quest.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ActiveQuest {
+    pub id: u32,
+    /// Original request data (preserved for reward application).
+    pub request: QuestRequest,
+    pub status: ActiveQuestStatus,
+    /// Adventurer IDs the player assigned to the candidate pool.
+    pub assigned_pool: Vec<u32>,
+    /// Party formed by the NPC system after dispatch.
+    pub dispatched_party_id: Option<u32>,
+    /// Milliseconds since the quest was accepted.
+    pub elapsed_ms: u64,
+    /// Events that happened during the quest.
+    pub events: Vec<QuestEvent>,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ActiveQuestStatus {
+    /// Pool assigned, not yet dispatched.
+    Preparing,
+    /// Party formed, traveling to quest location.
+    Dispatched,
+    /// At location, executing quest objectives.
+    InProgress,
+    /// Battle triggered.
+    InCombat,
+    /// Completed, party heading back.
+    Returning,
+    /// Going sideways — support actions available.
+    NeedsSupport,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct QuestEvent {
+    pub tick: u64,
+    pub description: String,
+}
+
+/// A quest that has been completed (history record).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CompletedQuest {
+    pub id: u32,
+    pub quest_type: QuestType,
+    pub result: QuestResult,
+    pub reward_applied: QuestReward,
+    pub completed_at_ms: u64,
+    pub party_id: u32,
+    pub casualties: u32,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QuestResult {
+    Victory,
+    Defeat,
+    Abandoned,
+}
+
+// ---------------------------------------------------------------------------
+// Battles
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BattleState {
+    pub id: u32,
+    /// Which quest triggered this battle.
+    pub quest_id: u32,
+    /// Our party.
+    pub party_id: u32,
+    pub location: (f32, f32),
+
+    // --- Summarized combat state ---
+    /// Aggregate HP remaining for our party (0–1).
+    pub party_health_ratio: f32,
+    /// Aggregate HP remaining for enemies (0–1).
+    pub enemy_health_ratio: f32,
+    /// Enemy composition strength estimate.
+    pub enemy_strength: f32,
+    pub elapsed_ticks: u64,
+    /// Combat oracle prediction (−1 = certain defeat, +1 = certain victory).
+    pub predicted_outcome: f32,
+    pub status: BattleStatus,
+
+    // --- Support state ---
+    pub runner_sent: bool,
+    pub mercenary_hired: bool,
+    pub rescue_called: bool,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BattleStatus {
+    Active,
+    Victory,
+    Defeat,
+    Retreat,
+}
+
+// ---------------------------------------------------------------------------
+// Overworld
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OverworldState {
+    pub regions: Vec<Region>,
+    /// Named locations: settlements, dungeons, ruins, outposts.
+    pub locations: Vec<Location>,
+    /// Global threat level (0–100).
+    pub global_threat_level: f32,
+    /// Overall campaign progress toward endgame (0–1).
+    pub campaign_progress: f32,
+    /// Endgame calamity, if one has been selected.
+    pub endgame_calamity: Option<CalamityType>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Region {
+    pub id: usize,
+    pub name: String,
+    pub owner_faction_id: usize,
+    pub neighbors: Vec<usize>,
+    /// 0–100.
+    pub unrest: f32,
+    /// 0–100.
+    pub control: f32,
+    /// Regional threat level (0–100).
+    pub threat_level: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Location {
+    pub id: usize,
+    pub name: String,
+    pub position: (f32, f32),
+    pub location_type: LocationType,
+    /// 0–100.
+    pub threat_level: f32,
+    /// 0–100.
+    pub resource_availability: f32,
+    pub faction_owner: Option<usize>,
+    /// Whether the guild has scouted this location.
+    pub scouted: bool,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LocationType {
+    Settlement,
+    Wilderness,
+    Dungeon,
+    Ruin,
+    Outpost,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum CalamityType {
+    /// An aggressive faction with a super-ruler unit.
+    AggressiveFaction { faction_id: usize },
+    /// A major monster threatening the world.
+    MajorMonster { name: String, strength: f32 },
+    /// A flood of minor crises overwhelming the region.
+    CrisisFlood,
+    /// A conquest victory condition.
+    Conquest,
+}
+
+// ---------------------------------------------------------------------------
+// Factions & Diplomacy
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FactionState {
+    pub id: usize,
+    pub name: String,
+    /// Relationship to the guild (−100 to 100).
+    pub relationship_to_guild: f32,
+    pub military_strength: f32,
+    pub territory_size: usize,
+    pub diplomatic_stance: DiplomaticStance,
+    /// Recent actions taken by this faction (bounded).
+    pub recent_actions: Vec<FactionActionRecord>,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DiplomaticStance {
+    Friendly,
+    Neutral,
+    Hostile,
+    AtWar,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FactionActionRecord {
+    pub tick: u64,
+    pub action: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DiplomacyMatrix {
+    /// Faction-to-faction relations. `relations[a][b]` = how faction a feels
+    /// about faction b (signed).
+    pub relations: Vec<Vec<i32>>,
+    /// Which faction the guild is affiliated with.
+    pub guild_faction_id: usize,
+}
+
+// ---------------------------------------------------------------------------
+// Progression Unlocks
+// ---------------------------------------------------------------------------
+
+/// NOT identity-indexed. Described by mechanical properties so the model
+/// can handle LFM-generated novel abilities.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UnlockInstance {
+    pub id: u32,
+    pub category: UnlockCategory,
+    pub properties: UnlockProperties,
+    pub name: String,
+    pub description: String,
+    /// Whether this unlock is available for use.
+    pub active: bool,
+    /// Remaining cooldown in milliseconds (0 = ready).
+    pub cooldown_remaining_ms: u64,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UnlockCategory {
+    /// Scout networks, alarms — reduces uncertainty.
+    Information,
+    /// Send potion, call favor — direct intervention.
+    ActiveAbility,
+    /// Improved coordination, last stands.
+    PassiveBuff,
+    /// Better supply chains, cheaper hiring.
+    Economic,
+}
+
+/// Mechanical properties — this is what the model sees, not the name.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UnlockProperties {
+    /// 0 = passive (always on).
+    pub cooldown_ms: u64,
+    pub target_type: TargetType,
+    /// Effect strength (interpretation depends on category).
+    pub magnitude: f32,
+    /// 0 = instant or permanent.
+    pub duration_ms: u64,
+    /// Gold cost to use.
+    pub resource_cost: f32,
+    pub is_passive: bool,
+    /// Learned category features for the entity encoder.
+    pub category_embedding: [f32; 8],
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TargetType {
+    GuildSelf,
+    Adventurer,
+    Party,
+    Quest,
+    Area,
+    Faction,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProgressionEvent {
+    pub tick: u64,
+    pub unlock_id: u32,
+    pub description: String,
+}
+
+// ---------------------------------------------------------------------------
+// NPC Relationships
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NpcRelationship {
+    pub npc_id: u32,
+    pub npc_name: String,
+    pub npc_type: NpcType,
+    /// −100 to 100.
+    pub relationship_score: f32,
+    /// Last interaction timestamp (elapsed_ms).
+    pub last_interaction_ms: u64,
+    /// Whether this NPC can rescue for free (relationship-gated).
+    pub rescue_available: bool,
+    /// Gold cost if rescue is not free.
+    pub rescue_cost: f32,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NpcType {
+    Adventurer,
+    FactionLeader,
+    Merchant,
+    Informant,
+    Mercenary,
+}
+
+// ---------------------------------------------------------------------------
+// Narrative events
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CampaignEvent {
+    pub id: u32,
+    pub tick: u64,
+    pub description: String,
+}
+
+// ---------------------------------------------------------------------------
+// Campaign outcome
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CampaignOutcome {
+    /// Player defeated the endgame calamity.
+    Victory,
+    /// Guild collapsed (no adventurers, no gold, or calamity won).
+    Defeat,
+    /// Hit the maximum tick limit.
+    Timeout,
+}
+
+// ---------------------------------------------------------------------------
+// Starting choice
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum StartingChoice {
+    /// Extra starting gold.
+    Money { gold_bonus: f32 },
+    /// One overleveled adventurer with a debilitating negative trait.
+    Veteran {
+        adventurer: Adventurer,
+        negative_trait: String,
+    },
+    /// A full party of low-level rookies.
+    Rookies { adventurers: Vec<Adventurer> },
+}
+
+// ---------------------------------------------------------------------------
+// RNG helper
+// ---------------------------------------------------------------------------
+
+/// Deterministic LCG (same as combat sim). Returns value in [0, u32::MAX].
+#[inline]
+pub fn lcg_next(state: &mut u64) -> u32 {
+    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    (*state >> 33) as u32
+}
+
+/// Returns a float in [0, 1).
+#[inline]
+pub fn lcg_f32(state: &mut u64) -> f32 {
+    lcg_next(state) as f32 / u32::MAX as f32
+}
+
+// ---------------------------------------------------------------------------
+// Test campaign constructors
+// ---------------------------------------------------------------------------
+
+impl CampaignState {
+    /// Create a minimal test campaign with handmade content.
+    ///
+    /// Includes 4 adventurers, 3 regions, 2 factions, 4 locations,
+    /// and 2 NPC relationships. No LFM required — all content is static.
+    pub fn default_test_campaign(seed: u64) -> Self {
+        let adventurers = vec![
+            Adventurer {
+                id: 1,
+                name: "Kael the Swift".into(),
+                archetype: "ranger".into(),
+                level: 3,
+                xp: 0,
+                stats: AdventurerStats {
+                    max_hp: 80.0,
+                    attack: 18.0,
+                    defense: 10.0,
+                    speed: 14.0,
+                    ability_power: 8.0,
+                },
+                equipment: Equipment::default(),
+                traits: vec!["keen_eye".into()],
+                status: AdventurerStatus::Idle,
+                loyalty: 70.0,
+                stress: 10.0,
+                fatigue: 5.0,
+                injury: 0.0,
+                resolve: 60.0,
+                morale: 80.0,
+                party_id: None,
+                guild_relationship: 50.0,
+            },
+            Adventurer {
+                id: 2,
+                name: "Sera the Stalwart".into(),
+                archetype: "knight".into(),
+                level: 4,
+                xp: 0,
+                stats: AdventurerStats {
+                    max_hp: 120.0,
+                    attack: 14.0,
+                    defense: 20.0,
+                    speed: 8.0,
+                    ability_power: 5.0,
+                },
+                equipment: Equipment::default(),
+                traits: vec!["shield_wall".into()],
+                status: AdventurerStatus::Idle,
+                loyalty: 80.0,
+                stress: 5.0,
+                fatigue: 10.0,
+                injury: 0.0,
+                resolve: 75.0,
+                morale: 85.0,
+                party_id: None,
+                guild_relationship: 60.0,
+            },
+            Adventurer {
+                id: 3,
+                name: "Mira the Wise".into(),
+                archetype: "mage".into(),
+                level: 3,
+                xp: 0,
+                stats: AdventurerStats {
+                    max_hp: 60.0,
+                    attack: 8.0,
+                    defense: 6.0,
+                    speed: 10.0,
+                    ability_power: 25.0,
+                },
+                equipment: Equipment::default(),
+                traits: vec!["arcane_focus".into()],
+                status: AdventurerStatus::Idle,
+                loyalty: 65.0,
+                stress: 15.0,
+                fatigue: 8.0,
+                injury: 0.0,
+                resolve: 55.0,
+                morale: 75.0,
+                party_id: None,
+                guild_relationship: 40.0,
+            },
+            Adventurer {
+                id: 4,
+                name: "Bron the Healer".into(),
+                archetype: "cleric".into(),
+                level: 2,
+                xp: 0,
+                stats: AdventurerStats {
+                    max_hp: 70.0,
+                    attack: 6.0,
+                    defense: 12.0,
+                    speed: 9.0,
+                    ability_power: 20.0,
+                },
+                equipment: Equipment::default(),
+                traits: vec!["healing_hands".into()],
+                status: AdventurerStatus::Idle,
+                loyalty: 85.0,
+                stress: 8.0,
+                fatigue: 3.0,
+                injury: 0.0,
+                resolve: 70.0,
+                morale: 90.0,
+                party_id: None,
+                guild_relationship: 65.0,
+            },
+        ];
+
+        let regions = vec![
+            Region {
+                id: 0,
+                name: "Greenhollow".into(),
+                owner_faction_id: 0,
+                neighbors: vec![1, 2],
+                unrest: 10.0,
+                control: 80.0,
+                threat_level: 15.0,
+            },
+            Region {
+                id: 1,
+                name: "Ironridge".into(),
+                owner_faction_id: 1,
+                neighbors: vec![0, 2],
+                unrest: 30.0,
+                control: 60.0,
+                threat_level: 40.0,
+            },
+            Region {
+                id: 2,
+                name: "Mistfen".into(),
+                owner_faction_id: 0,
+                neighbors: vec![0, 1],
+                unrest: 20.0,
+                control: 70.0,
+                threat_level: 25.0,
+            },
+        ];
+
+        let locations = vec![
+            Location {
+                id: 0,
+                name: "Thornwall Keep".into(),
+                position: (10.0, 5.0),
+                location_type: LocationType::Settlement,
+                threat_level: 10.0,
+                resource_availability: 70.0,
+                faction_owner: Some(0),
+                scouted: true,
+            },
+            Location {
+                id: 1,
+                name: "The Sunken Crypt".into(),
+                position: (-15.0, 20.0),
+                location_type: LocationType::Dungeon,
+                threat_level: 55.0,
+                resource_availability: 30.0,
+                faction_owner: None,
+                scouted: false,
+            },
+            Location {
+                id: 2,
+                name: "Trader's Rest".into(),
+                position: (5.0, -10.0),
+                location_type: LocationType::Settlement,
+                threat_level: 5.0,
+                resource_availability: 85.0,
+                faction_owner: Some(0),
+                scouted: true,
+            },
+            Location {
+                id: 3,
+                name: "Wolfcrag Ruins".into(),
+                position: (-20.0, -15.0),
+                location_type: LocationType::Ruin,
+                threat_level: 45.0,
+                resource_availability: 40.0,
+                faction_owner: None,
+                scouted: false,
+            },
+        ];
+
+        let factions = vec![
+            FactionState {
+                id: 0,
+                name: "The Accord".into(),
+                relationship_to_guild: 40.0,
+                military_strength: 50.0,
+                territory_size: 2,
+                diplomatic_stance: DiplomaticStance::Friendly,
+                recent_actions: Vec::new(),
+            },
+            FactionState {
+                id: 1,
+                name: "Iron Dominion".into(),
+                relationship_to_guild: -50.0,
+                military_strength: 120.0,
+                territory_size: 1,
+                diplomatic_stance: DiplomaticStance::AtWar,
+                recent_actions: Vec::new(),
+            },
+        ];
+
+        let diplomacy = DiplomacyMatrix {
+            relations: vec![vec![0, -20], vec![-20, 0]],
+            guild_faction_id: 0,
+        };
+
+        let npc_relationships = vec![
+            NpcRelationship {
+                npc_id: 100,
+                npc_name: "Old Gareth".into(),
+                npc_type: NpcType::Mercenary,
+                relationship_score: 30.0,
+                last_interaction_ms: 0,
+                rescue_available: false,
+                rescue_cost: 60.0,
+            },
+            NpcRelationship {
+                npc_id: 101,
+                npc_name: "Lady Voss".into(),
+                npc_type: NpcType::FactionLeader,
+                relationship_score: 55.0,
+                last_interaction_ms: 0,
+                rescue_available: true,
+                rescue_cost: 0.0,
+            },
+        ];
+
+        CampaignState {
+            tick: 0,
+            elapsed_ms: 0,
+            guild: GuildState {
+                gold: 100.0,
+                supplies: 80.0,
+                reputation: 25.0,
+                base: BaseState {
+                    base_type: BaseType::Camp,
+                    position: (0.0, 0.0),
+                    upgrade_slots: Vec::new(),
+                    defensive_strength: 10.0,
+                },
+                active_quest_capacity: 3,
+                unlock_bitmask: 0,
+                inventory: Vec::new(),
+            },
+            overworld: OverworldState {
+                regions,
+                locations,
+                global_threat_level: 20.0,
+                campaign_progress: 0.0,
+                endgame_calamity: None,
+            },
+            factions,
+            diplomacy,
+            adventurers,
+            parties: Vec::new(),
+            request_board: Vec::new(),
+            active_quests: Vec::new(),
+            completed_quests: Vec::new(),
+            active_battles: Vec::new(),
+            unlocks: Vec::new(),
+            progression_history: Vec::new(),
+            event_log: Vec::new(),
+            npc_relationships,
+            rng: seed,
+            next_quest_id: 1,
+            next_party_id: 1,
+            next_battle_id: 1,
+            next_unlock_id: 1,
+            next_event_id: 1,
+            combat_mode: CombatMode::Oracle,
+        }
+    }
+}
