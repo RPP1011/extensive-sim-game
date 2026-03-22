@@ -32,6 +32,8 @@ pub struct OracleArgs {
 pub enum OracleSubcommand {
     TransformerRl(TransformerRlArgs),
     MonitorTraces(MonitorTracesArgs),
+    /// Run RL playtester agent population on scenarios
+    Playtester(PlaytesterArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -256,4 +258,35 @@ pub struct ScenarioBenchArgs {
     /// Profile per-phase timing breakdown (intent generation vs sim step)
     #[arg(long)]
     pub profile: bool,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Run RL playtester agent population on scenarios (random policy baseline)")]
+pub struct PlaytesterArgs {
+    /// Path(s) to scenario .toml file(s) or directory(ies)
+    pub path: Vec<PathBuf>,
+    /// Number of agents in the population
+    #[arg(long, default_value_t = 8)]
+    pub population: usize,
+    /// Number of training iterations
+    #[arg(long, default_value_t = 5)]
+    pub iterations: usize,
+    /// Episodes per agent per iteration
+    #[arg(long, default_value_t = 4)]
+    pub episodes_per_agent: usize,
+    /// Base RNG seed
+    #[arg(long, default_value_t = 2026)]
+    pub seed: u64,
+    /// Step recording interval (every N ticks)
+    #[arg(long, default_value_t = 5)]
+    pub step_interval: u64,
+    /// Override scenario max_ticks
+    #[arg(long)]
+    pub max_ticks: Option<u64>,
+    /// Number of parallel threads (0 = all cores)
+    #[arg(short = 'j', long, default_value_t = 0)]
+    pub threads: usize,
+    /// Output directory for metrics and reports
+    #[arg(long)]
+    pub output_dir: Option<PathBuf>,
 }
