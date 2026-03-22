@@ -1,0 +1,36 @@
+# Keybind configuration
+# Each key name corresponds to a Bevy KeyCode variant.
+# Multiple keys can be assigned to the same action.
+
+[navigation]
+menu_up = ["ArrowUp", "KeyW"]
+menu_down = ["ArrowDown", "KeyS"]
+menu_left = ["ArrowLeft", "KeyA"]
+menu_right = ["ArrowRight", "KeyD"]
+menu_select = ["Enter", "Space"]
+menu_back = ["Escape", "Backspace"]
+
+[ui]
+quest_log = ["KeyJ"]
+settings = ["Escape"]
+tutorial = ["F1"]
+
+[save]
+quick_save = ["F5"]
+quick_load = ["F9"]
+save_browser = ["F6"]
+
+[combat]
+pause = ["Space"]
+speed_up = ["BracketRight"]
+slow_down = ["BracketLeft"]
+next_unit = ["Tab"]
+
+[screenshot]
+capture = ["F12", "Semicolon"]
+
+[replay]
+play_pause = ["Space"]
+next_frame = ["ArrowRight"]
+prev_frame = ["ArrowLeft"]
+exit = ["Escape"]

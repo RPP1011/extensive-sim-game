@@ -32,6 +32,7 @@ pub mod ai {
     pub use tactical_sim::tooling;
 }
 
+pub mod content;
 pub mod scenario;
 pub use tactical_sim::mapgen_voronoi;
 
@@ -55,6 +56,18 @@ pub enum HubScreen {
     LocalEagleEyeIntro,
     MissionExecution,
     ReplayViewer,
+}
+
+impl HubScreen {
+    /// Whether this screen shows the shared left side panel.
+    pub fn shows_side_panel(&self) -> bool {
+        !matches!(
+            self,
+            HubScreen::CharacterCreationFaction
+                | HubScreen::CharacterCreationBackstory
+                | HubScreen::BackstoryCinematic
+        )
+    }
 }
 
 /// Hub UI resource (used by mission::execution).

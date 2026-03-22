@@ -120,3 +120,23 @@ pub struct HeroDetailUiState {
     /// Tracks an internal seed counter so repeated button presses yield different items.
     pub loot_seed_counter: u64,
 }
+
+/// Navigation history stack for back-navigation between screens.
+#[derive(Resource, Default)]
+pub struct ScreenHistory {
+    pub stack: Vec<crate::game_core::HubScreen>,
+}
+
+impl ScreenHistory {
+    pub fn push(&mut self, screen: crate::game_core::HubScreen) {
+        self.stack.push(screen);
+    }
+
+    pub fn pop(&mut self) -> Option<crate::game_core::HubScreen> {
+        self.stack.pop()
+    }
+
+    pub fn clear(&mut self) {
+        self.stack.clear();
+    }
+}

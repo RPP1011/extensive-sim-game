@@ -194,6 +194,18 @@ pub enum HubScreen {
     ReplayViewer,
 }
 
+impl HubScreen {
+    /// Whether this screen shows the shared left side panel.
+    pub fn shows_side_panel(&self) -> bool {
+        !matches!(
+            self,
+            HubScreen::CharacterCreationFaction
+                | HubScreen::CharacterCreationBackstory
+                | HubScreen::BackstoryCinematic
+        )
+    }
+}
+
 #[derive(Resource)]
 pub struct HubUiState {
     pub screen: HubScreen,

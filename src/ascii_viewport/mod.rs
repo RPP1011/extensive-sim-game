@@ -17,6 +17,9 @@ use crate::mission::sim_bridge::{MissionSimState, LastMissionReplay, SimEventBuf
 use crate::mission::execution::ReplayViewerState;
 use crate::region_nav::RegionTargetPickerState;
 
+pub mod glyph_atlas;
+pub mod batched_renderer;
+
 // ---------------------------------------------------------------------------
 // Resources
 // ---------------------------------------------------------------------------
