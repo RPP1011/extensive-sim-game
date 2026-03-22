@@ -1,0 +1,58 @@
+# Fires when a Ruin location is scouted.
+# Ancient artifact discovery with multiple handling options.
+
+name = "Ancient Artifact"
+priority = 7
+repeatable = true
+cooldown_ticks = 9000
+
+[trigger]
+type = "LocationScouted"
+location_type = "Ruin"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "While exploring the ruins at {location_name}, your scouts unearth a sealed chamber containing an ancient artifact pulsing with residual magic."
+deadline_secs = 90.0
+default_option = 2
+
+[[choice.options]]
+label = "Study the Artifact (25g)"
+description = "Hire a scholar to analyze it. Costly but could unlock powerful knowledge."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -25.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 6.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A sage carefully examines the artifact, revealing ancient techniques that benefit the guild."
+
+[[choice.options]]
+label = "Sell to Collectors (profit)"
+description = "Find a buyer among the wealthy collectors. Pure profit, but you learn nothing."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 40.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A private collector pays handsomely. The artifact vanishes into a guarded vault."
+
+[[choice.options]]
+label = "Seal It Back Up"
+description = "Some things are best left undisturbed. Mark the location and move on."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The chamber is resealed. Whatever power the artifact holds, it can wait."

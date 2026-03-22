@@ -1,0 +1,47 @@
+# A rare equipment merchant visits the guild hall.
+
+category = "npc_encounter"
+trigger = "periodic"
+prompt = "A renowned equipment merchant has set up shop outside the guild hall, displaying weapons and armor of exceptional quality."
+deadline_secs = 60.0
+default_option = 2
+
+[[options]]
+label = "Buy Premium Gear (50g)"
+description = "Invest heavily in top-tier equipment. Boosts quest rewards and reputation."
+
+[[options.effects]]
+type = "gold"
+amount = -50.0
+
+[[options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[options.effects]]
+type = "narrative"
+text = "The guild armory gleams with newly acquired masterwork equipment."
+
+[[options]]
+label = "Trade Supplies for Gear"
+description = "Barter 25 supplies for decent equipment. Moderate improvement."
+
+[[options.effects]]
+type = "supplies"
+amount = -25.0
+
+[[options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[options.effects]]
+type = "narrative"
+text = "The merchant accepts a crate of supplies and hands over solid, if not exceptional, gear."
+
+[[options]]
+label = "Browse Only"
+description = "Window-shop and move on. Maybe next time."
+
+[[options.effects]]
+type = "narrative"
+text = "The merchant packs up and continues to the next town."

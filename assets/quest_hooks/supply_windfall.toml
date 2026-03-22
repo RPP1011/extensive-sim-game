@@ -1,0 +1,60 @@
+# Fires when guild supplies climb above 80.
+# Decide what to do with the surplus.
+
+name = "Supply Windfall"
+priority = 4
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "GuildResource"
+resource = "supplies"
+direction = "above"
+threshold = 80.0
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "The guild's storerooms are overflowing with {supplies} units of supplies. Time to put the surplus to use."
+deadline_secs = 60.0
+default_option = 1
+
+[[choice.options]]
+label = "Donate to the People"
+description = "Give supplies to the local populace. Costs 30 supplies, earns significant reputation."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Wagons of supplies roll out to nearby villages. The people cheer the guild's generosity."
+
+[[choice.options]]
+label = "Stockpile"
+description = "Keep everything in reserve. No cost, no benefit — just security."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The quartermaster tallies every barrel and crate. Reserves are secure."
+
+[[choice.options]]
+label = "Trade for Gold"
+description = "Sell surplus supplies on the open market. -25 supplies, +30g."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -25.0
+
+[[choice.options.effects]]
+type = "gold"
+amount = 30.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Merchants eagerly snap up the guild's surplus at a fair price."

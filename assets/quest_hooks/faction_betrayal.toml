@@ -1,0 +1,68 @@
+# Fires when a faction's relation is above 40 (supposedly friendly).
+# A trusted faction secretly plots against the guild.
+
+name = "Faction Betrayal"
+priority = 9
+repeatable = false
+
+[trigger]
+type = "FactionRelation"
+direction = "above"
+threshold = 40.0
+
+[choice]
+category = "diplomacy"
+trigger = "hook"
+prompt = "A spy within {faction_name} (relation {relation}) has uncovered evidence of a secret plot against the guild. Your trusted allies may not be what they seem."
+deadline_secs = 60.0
+default_option = 2
+
+[[choice.options]]
+label = "Confront Them (20g)"
+description = "Present the evidence publicly. Costs gold for the investigation but exposes the truth. Relations will suffer."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = -20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild presents its evidence before a stunned assembly. {faction_name}'s treachery is laid bare."
+
+[[choice.options]]
+label = "Counter-Scheme"
+description = "Quietly use the intelligence to your advantage. Costs 35g but turns the plot around."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -35.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = -10.0
+
+[[choice.options.effects]]
+type = "gold"
+amount = 50.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild subtly exploits {faction_name}'s scheme, profiting from their betrayal."
+
+[[choice.options]]
+label = "Ignore the Report"
+description = "Maybe the spy is wrong. Maintain the status quo and hope for the best."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The evidence is filed away. Perhaps it's better not to know."

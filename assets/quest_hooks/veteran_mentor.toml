@@ -1,0 +1,60 @@
+# Fires when an adventurer reaches level 4+.
+# The veteran can mentor a newer guild member.
+
+name = "Veteran Mentor"
+priority = 5
+repeatable = true
+cooldown_ticks = 7000
+
+[trigger]
+type = "AdventurerLevel"
+min_level = 4
+
+[choice]
+category = "character"
+trigger = "hook"
+prompt = "{adventurer_name} (level {level}) has become a seasoned veteran. They offer to mentor a less experienced guild member."
+deadline_secs = 90.0
+default_option = 2
+
+[[choice.options]]
+label = "Formal Mentorship (15g)"
+description = "Fund a structured training program. Costs gold but yields a skilled recruit."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "add_adventurer"
+name = "Apprentice"
+archetype = "rogue"
+level_var = "2"
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer_name} takes a young apprentice under their wing. Training begins at dawn."
+
+[[choice.options]]
+label = "Share Stories"
+description = "The veteran shares tales over ale. Boosts guild morale and reputation at no cost."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 4.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild gathers round as {adventurer_name} recounts hard-won lessons from the field."
+
+[[choice.options]]
+label = "Focus on Quests"
+description = "No time for mentoring — there are quests to complete."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer_name} nods and heads back to the quest board."

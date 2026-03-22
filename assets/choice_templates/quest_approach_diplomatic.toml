@@ -1,0 +1,51 @@
+# Quest approach choice for Diplomatic quests.
+#
+# Context variables:
+#   {quest_type}  - "Diplomatic"
+#   {threat}      - threat level as integer
+#   {quest_id}    - quest ID (used in effects)
+
+category = "quest_branch"
+trigger = "quest_preparing_diplomatic"
+prompt = "How should the party approach the {quest_type} quest (threat {threat})?"
+deadline_secs = 60.0
+default_option = 1
+
+[[options]]
+label = "Bring Gifts (25g)"
+description = "Spend gold on lavish gifts. Reduces threat by 40% and boosts quest reward."
+
+[[options.effects]]
+type = "gold"
+amount = -25.0
+
+[[options.effects]]
+type = "modify_quest_threat"
+quest_id = "{quest_id}"
+multiplier = 0.6
+
+[[options.effects]]
+type = "modify_quest_reward"
+quest_id = "{quest_id}"
+rep_bonus = 5.0
+
+[[options]]
+label = "Flattery"
+description = "Rely on charm alone. Free but risky — threat unchanged."
+
+[[options.effects]]
+type = "narrative"
+text = "The party puts on its best manners and hopes for the best."
+
+[[options]]
+label = "Veiled Threats"
+description = "Intimidation. Reduces threat by 20% but damages reputation."
+
+[[options.effects]]
+type = "modify_quest_threat"
+quest_id = "{quest_id}"
+multiplier = 0.8
+
+[[options.effects]]
+type = "reputation"
+amount = -5.0

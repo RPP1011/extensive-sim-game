@@ -4,10 +4,12 @@
 //! that the entity encoder consumes. Each token has a `type_id` discriminating
 //! the entity kind and a variable-length `features` vector.
 
+use serde::{Deserialize, Serialize};
+
 use super::state::*;
 
 /// A single entity token for the V6 entity encoder.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EntityToken {
     pub type_id: u8,
     pub features: Vec<f32>,

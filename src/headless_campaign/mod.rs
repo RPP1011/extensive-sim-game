@@ -28,6 +28,7 @@ pub mod mcts;
 pub mod quest_hooks;
 pub mod state;
 pub mod step;
+pub mod tokens;
 pub mod trace;
 pub mod trace_viewer;
 pub mod world_templates;

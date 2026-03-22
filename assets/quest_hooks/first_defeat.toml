@@ -1,0 +1,55 @@
+# Fires after the guild has completed at least 1 quest.
+# Rally the guild after early setbacks.
+
+name = "Rally After Setback"
+priority = 7
+repeatable = false
+
+[trigger]
+type = "QuestsCompleted"
+min_count = 1
+
+[choice]
+category = "character"
+trigger = "hook"
+prompt = "The guild has tasted both victory and hardship. Morale wavers as adventurers question whether the risks are worth it."
+deadline_secs = 60.0
+default_option = 2
+
+[[choice.options]]
+label = "Inspiring Speech"
+description = "The guild leader rallies the troops. Reputation boost from renewed determination."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A rousing speech echoes through the guild hall. Spirits lift."
+
+[[choice.options]]
+label = "Hire a Mercenary Bodyguard (25g)"
+description = "Bring in experienced muscle to protect the guild on future quests."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -25.0
+
+[[choice.options.effects]]
+type = "add_adventurer"
+name = "Mercenary"
+archetype = "warrior"
+level_var = "3"
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A scarred mercenary takes up post at the guild hall. The rookies breathe easier."
+
+[[choice.options]]
+label = "Carry On"
+description = "No special action. The guild presses forward as-is."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild grits its teeth and moves on. There will be time to grieve later."

@@ -8,6 +8,7 @@ mod roomgen_cmd;
 mod model_cmd;
 mod content_gen_cmd;
 mod ascii_gen_cmd;
+mod mcts_bootstrap_cmd;
 
 use std::process::ExitCode;
 
@@ -30,6 +31,7 @@ fn main() -> ExitCode {
         TaskCommand::Model(cmd) => model_cmd::run_model_cmd(cmd),
         TaskCommand::ContentGen(cmd) => content_gen_cmd::run_content_gen_cmd(cmd),
         TaskCommand::AsciiGen(cmd) => ascii_gen_cmd::run_ascii_gen_cmd(cmd),
+        TaskCommand::MctsBootstrap(args) => mcts_bootstrap_cmd::run_mcts_bootstrap(args),
         TaskCommand::CampaignBatch(args) => {
             let campaign_config = if let Some(ref path) = args.config {
                 match bevy_game::headless_campaign::config::CampaignConfig::load_from_toml(path) {

@@ -1,0 +1,47 @@
+# Regional supply shortage forces a decision.
+
+category = "world_event"
+trigger = "periodic"
+prompt = "A regional drought has disrupted supply lines. Provisions are scarce and prices are climbing."
+deadline_secs = 45.0
+default_option = 1
+
+[[options]]
+label = "Buy at Premium (35g)"
+description = "Pay inflated prices to keep the guild well-supplied. +30 supplies."
+
+[[options.effects]]
+type = "gold"
+amount = -35.0
+
+[[options.effects]]
+type = "supplies"
+amount = 30.0
+
+[[options]]
+label = "Ration Carefully"
+description = "Stretch existing stocks. Morale suffers but no gold spent. -3 reputation."
+
+[[options.effects]]
+type = "reputation"
+amount = -3.0
+
+[[options.effects]]
+type = "narrative"
+text = "Adventurers grumble about the thin rations but make do."
+
+[[options]]
+label = "Forage in the Wilds"
+description = "Send a party to forage. Moderate supplies gained, but risky. +15 supplies, -10g."
+
+[[options.effects]]
+type = "gold"
+amount = -10.0
+
+[[options.effects]]
+type = "supplies"
+amount = 15.0
+
+[[options.effects]]
+type = "narrative"
+text = "A foraging party returns with armfuls of provisions — and a few scratches."

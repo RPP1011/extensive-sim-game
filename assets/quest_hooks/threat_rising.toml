@@ -1,0 +1,62 @@
+# Fires when the global threat level rises above 50.
+# Forces a strategic decision about how to handle escalating danger.
+
+name = "Rising Threat"
+priority = 8
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "ThreatLevel"
+min_threat = 50.0
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "Dark forces gather strength across the region. Threat level has reached {threat}. The guild must respond."
+deadline_secs = 90.0
+default_option = 0
+
+[[choice.options]]
+label = "Fortify Defenses"
+description = "Shore up guild defenses. Costs supplies but keeps everyone safe."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Barricades go up and patrols double. The guild hunkers down."
+
+[[choice.options]]
+label = "Preemptive Strike (30g)"
+description = "Send a strike team to disrupt enemy operations. Risky but could lower threat."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A bold strike team heads out under cover of darkness."
+
+[[choice.options]]
+label = "Gather Intelligence (15g)"
+description = "Spend gold on scouts and spies. Knowledge is power."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Agents are dispatched to uncover the source of the rising threat."

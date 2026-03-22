@@ -7,6 +7,7 @@
 //! Output: visit-count distributions over actions at each decision point,
 //! used as behavioral cloning targets for the playtester model.
 
+pub mod export;
 mod rollout;
 
 use serde::{Deserialize, Serialize};

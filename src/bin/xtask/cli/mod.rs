@@ -31,6 +31,8 @@ pub enum TaskCommand {
     AsciiGen(AsciiGenCommand),
     /// Run headless campaign batch simulation
     CampaignBatch(CampaignBatchArgs),
+    /// Run MCTS bootstrap campaigns and export BC training data
+    MctsBootstrap(MctsBootstrapArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -390,3 +392,38 @@ pub struct AsciiGenExportArgs {
     pub seed: u64,
 }
 
+// ---------------------------------------------------------------------------
+// MCTS bootstrap subcommand
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Parser)]
+#[command(about = "Run MCTS bootstrap campaigns and export BC training data as JSONL")]
+pub struct MctsBootstrapArgs {
+    /// Total campaigns to run
+    #[arg(long, default_value_t = 1000)]
+    pub campaigns: u64,
+    /// MCTS simulations per decision point
+    #[arg(long, default_value_t = 200)]
+    pub simulations: u32,
+    /// Maximum ticks per campaign before timeout
+    #[arg(long, default_value_t = 30000)]
+    pub max_ticks: u64,
+    /// Rollout horizon in ticks
+    #[arg(long, default_value_t = 5000)]
+    pub rollout_horizon: u64,
+    /// Ticks between decision points
+    #[arg(long, default_value_t = 50)]
+    pub decision_interval: u64,
+    /// Base RNG seed
+    #[arg(long, default_value_t = 2026)]
+    pub seed: u64,
+    /// Number of threads (0 = all cores)
+    #[arg(short = 'j', long, default_value_t = 0)]
+    pub threads: usize,
+    /// Output JSONL file
+    #[arg(long, default_value = "generated/mcts_bootstrap.jsonl")]
+    pub output: std::path::PathBuf,
+    /// Path to campaign config TOML (overrides defaults)
+    #[arg(long)]
+    pub config: Option<std::path::PathBuf>,
+}

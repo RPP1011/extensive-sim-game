@@ -1,0 +1,49 @@
+# An informant offers intel about an upcoming quest location.
+#
+# Context variables:
+#   {npc_name}    - name of the informant
+#   {quest_id}    - quest ID (used in effects)
+
+category = "npc_encounter"
+trigger = "periodic"
+prompt = "A hooded figure calling themselves {npc_name} claims to know the layout of your next target. They want payment for the information."
+deadline_secs = 45.0
+default_option = 2
+
+[[options]]
+label = "Pay for Intel (20g)"
+description = "Reliable information. Reduces quest threat by 25%."
+
+[[options.effects]]
+type = "gold"
+amount = -20.0
+
+[[options.effects]]
+type = "modify_quest_threat"
+quest_id = "{quest_id}"
+multiplier = 0.75
+
+[[options.effects]]
+type = "narrative"
+text = "{npc_name} hands over a detailed map and disappears into the crowd."
+
+[[options]]
+label = "Bargain (10g)"
+description = "Haggle for a lower price. Partial intel — 10% threat reduction."
+
+[[options.effects]]
+type = "gold"
+amount = -10.0
+
+[[options.effects]]
+type = "modify_quest_threat"
+quest_id = "{quest_id}"
+multiplier = 0.9
+
+[[options]]
+label = "Decline"
+description = "Trust your own scouts. No cost, no benefit."
+
+[[options.effects]]
+type = "narrative"
+text = "The informant shrugs and slips away."

@@ -1,0 +1,67 @@
+# Fires periodically every 6000 ticks.
+# Seasonal festival with multiple celebration options.
+
+name = "Seasonal Festival"
+priority = 3
+repeatable = true
+cooldown_ticks = 6000
+
+[trigger]
+type = "Periodic"
+interval_ticks = 6000
+
+[choice]
+category = "world_event"
+trigger = "hook"
+prompt = "The annual harvest festival is upon the region. The whole town buzzes with excitement. How should the guild participate?"
+deadline_secs = 60.0
+default_option = 2
+
+[[choice.options]]
+label = "Host a Grand Feast (30g)"
+description = "Throw a lavish celebration. Major reputation boost and improved faction relations."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild hall overflows with food, drink, and laughter. The festival is one for the ages."
+
+[[choice.options]]
+label = "Set Up a Market Stall"
+description = "Sell surplus goods during the festival rush. Earn gold from the crowds."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "gold"
+amount = 25.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 2.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Brisk trade fills the guild coffers as festival-goers snap up supplies."
+
+[[choice.options]]
+label = "Work Through It"
+description = "Festivals are distractions. The guild keeps its focus on the mission."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "While the town celebrates, the guild presses on with business as usual."

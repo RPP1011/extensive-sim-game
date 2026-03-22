@@ -1,0 +1,51 @@
+# A rival guild issues a challenge.
+
+category = "world_event"
+trigger = "periodic"
+prompt = "The Iron Fang Guild has issued a public challenge, claiming they can clear more quests than your guild this season."
+deadline_secs = 60.0
+default_option = 2
+
+[[options]]
+label = "Accept the Challenge"
+description = "Compete head-to-head. Win big reputation if you prevail, lose some if you don't."
+
+[[options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[options.effects]]
+type = "supplies"
+amount = -15.0
+
+[[options.effects]]
+type = "narrative"
+text = "The guild rallies to meet the Iron Fang challenge. All hands on deck."
+
+[[options]]
+label = "Propose Cooperation"
+description = "Suggest a joint operation instead. Share the glory and the spoils."
+
+[[options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[options.effects]]
+type = "gold"
+amount = 15.0
+
+[[options.effects]]
+type = "narrative"
+text = "An unexpected partnership forms between the two guilds."
+
+[[options]]
+label = "Ignore Them"
+description = "Let the challenge go unanswered. No cost, slight reputation dip."
+
+[[options.effects]]
+type = "reputation"
+amount = -2.0
+
+[[options.effects]]
+type = "narrative"
+text = "The Iron Fang Guild mocks your silence, but the guild carries on unbothered."

@@ -1,0 +1,67 @@
+# Fires when guild reputation climbs above 60.
+# Strategic choice about how to leverage your growing fame.
+
+name = "Reputation Milestone"
+priority = 6
+repeatable = true
+cooldown_ticks = 10000
+
+[trigger]
+type = "GuildResource"
+resource = "reputation"
+direction = "above"
+threshold = 60.0
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "The guild's reputation has reached new heights ({reputation} renown). Word of your deeds spreads far and wide. How will you capitalize?"
+deadline_secs = 90.0
+default_option = 2
+
+[[choice.options]]
+label = "Expand Operations"
+description = "Invest in a second quest board. Costs 40g but opens up more opportunities."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -40.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A second quest board is erected in the town square. More work flows in."
+
+[[choice.options]]
+label = "Recruitment Drive"
+description = "Your fame attracts a talented recruit. Costs 20g for onboarding."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "add_adventurer"
+name = "Aspirant"
+archetype = "warrior"
+level_var = "2"
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A bright-eyed aspirant joins the guild, eager to prove their worth."
+
+[[choice.options]]
+label = "Diplomatic Leverage"
+description = "Use your reputation to improve faction standing. Free but no material gain."
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild's good name opens doors that gold cannot."
