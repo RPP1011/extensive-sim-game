@@ -1,0 +1,60 @@
+# Fires when a faction's relation drops below -40.
+# Assassination attempt on the guild.
+
+name = "Assassination Attempt"
+priority = 9
+repeatable = true
+cooldown_ticks = 10000
+
+[trigger]
+type = "FactionRelation"
+direction = "below"
+threshold = -40.0
+
+[choice]
+category = "crisis"
+trigger = "hook"
+prompt = "Agents of {faction_name} have been spotted near the guild hall. Intelligence suggests an assassination attempt is imminent."
+deadline_secs = 30.0
+default_option = 1
+
+[[choice.options]]
+label = "Set an Ambush (25g)"
+description = "Pay for counter-intelligence. If it works, capture the agents and gain leverage."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -25.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild sets a trap. The assassins walk right into it."
+
+[[choice.options]]
+label = "Increase Guards"
+description = "Basic defense. Your best adventurer takes a minor injury but the guild is safe."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Extra guards deter the attack, but not without a scuffle."
+
+[[choice.options]]
+label = "Negotiate"
+description = "Send a diplomat. Costly but might de-escalate."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -40.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 1
+delta = 15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Tense negotiations. A fragile truce is reached — for now."

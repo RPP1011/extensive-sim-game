@@ -1,0 +1,42 @@
+# Fires when two adventurers have completed enough quests together.
+# Rivalry or bond event.
+
+name = "Forged in Battle"
+priority = 4
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "AdventurerBond"
+min_shared_quests = 3
+
+[choice]
+category = "character"
+trigger = "hook"
+prompt = "{adventurer1_name} and {adventurer2_name} have fought side by side through {shared_quests} missions. Their bond deepens."
+deadline_secs = 90.0
+default_option = 0
+
+[[choice.options]]
+label = "Encourage Partnership"
+description = "Both gain +5 morale and +3 loyalty when assigned together."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer1_name} and {adventurer2_name} are officially recognized as battle partners."
+
+[[choice.options]]
+label = "Promote One"
+description = "Promote {adventurer1_name} to squad leader. +5 resolve but {adventurer2_name} loses -3 morale."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer1_name} steps into a leadership role."
+
+[[choice.options]]
+label = "Keep Professional"
+description = "No special treatment. Business as usual."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild maintains its professional standards."

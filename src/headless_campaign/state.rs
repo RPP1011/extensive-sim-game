@@ -59,6 +59,11 @@ pub struct CampaignState {
     /// If deadline passes, the `default_option` is auto-selected.
     pub pending_choices: Vec<ChoiceEvent>,
 
+    // --- Hook state ---
+    /// Tracks which quest hooks have fired and when.
+    #[serde(default)]
+    pub hook_state: super::quest_hooks::HookState,
+
     // --- Narrative ---
     pub event_log: Vec<CampaignEvent>,
     pub npc_relationships: Vec<NpcRelationship>,
@@ -1072,6 +1077,7 @@ impl CampaignState {
             completed_quests: Vec::new(),
             active_battles: Vec::new(),
             pending_choices: Vec::new(),
+            hook_state: super::quest_hooks::HookState::default(),
             unlocks: Vec::new(),
             progression_history: Vec::new(),
             event_log: Vec::new(),

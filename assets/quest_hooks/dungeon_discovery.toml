@@ -1,0 +1,54 @@
+# Fires when a dungeon location is scouted.
+# Exploration chain starter.
+
+name = "Dungeon Discovery"
+priority = 6
+repeatable = true
+cooldown_ticks = 5000
+
+[trigger]
+type = "LocationScouted"
+location_type = "Dungeon"
+
+[[conditions]]
+type = "MinAdventurers"
+count = 3
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Scouts report that {location_name} (threat {threat}) contains ancient treasures — but also deadly traps. How to proceed?"
+deadline_secs = 90.0
+default_option = 2
+
+[[choice.options]]
+label = "Full Expedition"
+description = "Send a well-supplied party. High cost (40g) but best chance of clearing the dungeon completely."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -40.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A fully equipped expedition prepares to delve into {location_name}."
+
+[[choice.options]]
+label = "Quick Raid"
+description = "Grab what you can and get out. Low cost but may miss the best loot."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A small team sneaks in for a smash-and-grab."
+
+[[choice.options]]
+label = "Mark for Later"
+description = "Note the location but don't commit resources yet."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The dungeon's location is marked on the guild map. It can wait."

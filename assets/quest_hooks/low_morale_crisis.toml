@@ -1,0 +1,54 @@
+# Fires when an adventurer has very high stress.
+# Morale crisis — intervene or risk desertion.
+
+name = "Morale Crisis"
+priority = 7
+repeatable = true
+cooldown_ticks = 5000
+
+[trigger]
+type = "GuildResource"
+resource = "adventurers"
+direction = "above"
+threshold = 1.0
+
+[[conditions]]
+type = "AdventurerStat"
+stat = "stress"
+direction = "above"
+threshold = 55.0
+
+[choice]
+category = "character"
+trigger = "hook"
+prompt = "One of your adventurers is nearing their breaking point. High stress threatens desertion."
+deadline_secs = 60.0
+default_option = 2
+
+[[choice.options]]
+label = "Rest & Recuperation (15g)"
+description = "Grant paid leave. -20 stress, +10 loyalty, costs 15g."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A stressed adventurer receives much-needed rest."
+
+[[choice.options]]
+label = "Counseling"
+description = "The guild chaplain talks them through it. -10 stress, +5 morale."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Words of encouragement bolster flagging spirits."
+
+[[choice.options]]
+label = "Let It Ride"
+description = "No intervention. They'll manage — or they won't."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild carries on. Hopefully the pressure eases on its own."

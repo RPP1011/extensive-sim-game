@@ -25,6 +25,7 @@ pub mod choice_templates;
 pub mod combat_oracle;
 pub mod config;
 pub mod mcts;
+pub mod quest_hooks;
 pub mod state;
 pub mod step;
 pub mod trace;

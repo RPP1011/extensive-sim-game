@@ -72,6 +72,11 @@ pub fn step_campaign(
     systems::progression::tick_progression(state, &mut deltas, &mut events);
     systems::recruitment::tick_recruitment(state, &mut deltas, &mut events);
     systems::choices::tick_choices(state, &mut deltas, &mut events);
+
+    // Quest hooks — check triggers against game state
+    if state.tick % 50 == 0 {
+        super::quest_hooks::evaluate_hooks(state, &mut events);
+    }
     systems::threat::tick_threat(state, &mut deltas, &mut events);
 
     // Final economy snapshot

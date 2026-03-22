@@ -1,0 +1,59 @@
+# Fires when an adventurer with "cursed_arm" trait has high enough loyalty.
+# The veteran's signature quest hook — cure the curse.
+
+name = "Cure the Cursed Arm"
+priority = 10
+repeatable = false
+
+[trigger]
+type = "AdventurerTrait"
+trait_name = "cursed_arm"
+
+[[conditions]]
+type = "AdventurerStat"
+stat = "loyalty"
+direction = "above"
+threshold = 45.0
+
+[[conditions]]
+type = "MinGold"
+amount = 30.0
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "{adventurer_name}'s cursed arm flares with dark energy. A hermit in the hills claims to know a cure — but the journey is dangerous."
+deadline_secs = 90.0
+default_option = 2
+
+[[choice.options]]
+label = "Seek the Cure (30g)"
+description = "Send {adventurer_name} on a personal quest. Costs 30g. If successful, removes the cursed_arm trait and grants +20 loyalty."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer_name} sets out alone to find the hermit."
+
+[[choice.options]]
+label = "Send a Party"
+description = "Send {adventurer_name} with escorts. Costs 50g but much safer."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -50.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A full party escorts {adventurer_name} into the hills."
+
+[[choice.options]]
+label = "Not Now"
+description = "The curse can wait. {adventurer_name} continues to serve, arm and all."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer_name} grits their teeth and carries on."

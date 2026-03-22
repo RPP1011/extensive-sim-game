@@ -1,0 +1,42 @@
+# Fires when any adventurer reaches level 5.
+# Class specialization choice.
+
+name = "Class Specialization"
+priority = 5
+repeatable = true
+cooldown_ticks = 6000
+
+[trigger]
+type = "AdventurerLevel"
+min_level = 5
+
+[choice]
+category = "progression"
+trigger = "hook"
+prompt = "{adventurer_name} (level {level}) has honed their skills enough to specialize. Choose a path."
+deadline_secs = 120.0
+default_option = 0
+
+[[choice.options]]
+label = "Offensive Mastery"
+description = "+5 attack, +3 ability power. Commit to dealing damage."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer_name} focuses on offensive techniques."
+
+[[choice.options]]
+label = "Defensive Mastery"
+description = "+5 defense, +15 max HP. Become the party's anchor."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer_name} trains in defensive arts."
+
+[[choice.options]]
+label = "Versatile Training"
+description = "+2 to all stats. Jack of all trades."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer_name} pursues a balanced regimen."

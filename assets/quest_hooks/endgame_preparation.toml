@@ -1,0 +1,58 @@
+# Fires when campaign progress passes 50%.
+# Endgame preparation — choose your strategy.
+
+name = "Endgame Preparation"
+priority = 15
+repeatable = false
+
+[trigger]
+type = "CampaignProgress"
+min_progress = 0.5
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "The guild has made significant progress ({progress}%). A major threat looms on the horizon. How should the guild prepare?"
+deadline_secs = 120.0
+default_option = 0
+
+[[choice.options]]
+label = "Fortify"
+description = "Invest in defenses and consolidate territory. +15 supplies, reputation boost."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 15.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild fortifies its position and gathers strength."
+
+[[choice.options]]
+label = "Press the Attack"
+description = "Aggressive expansion. Risk more but progress faster."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild redoubles its efforts, pushing into hostile territory."
+
+[[choice.options]]
+label = "Seek Allies"
+description = "Improve all faction relations. Slower but safer approach."
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Envoys are dispatched to every corner of the realm."

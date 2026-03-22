@@ -1,0 +1,57 @@
+# Fires when a faction's relation goes above 60.
+# Alliance proposal.
+
+name = "Alliance Proposal"
+priority = 8
+repeatable = false
+
+[trigger]
+type = "FactionRelation"
+direction = "above"
+threshold = 60.0
+
+[choice]
+category = "diplomacy"
+trigger = "hook"
+prompt = "{faction_name} (relation {relation}) sends an emissary proposing a formal alliance. This would grant military aid but obligate the guild to defend their territory."
+deadline_secs = 120.0
+default_option = 2
+
+[[choice.options]]
+label = "Accept Alliance"
+description = "Military aid from {faction_name}. +20 relation, +10 reputation. You're now obligated to their wars."
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[choice.options]]
+label = "Trade Pact Only"
+description = "A limited agreement. +5 relation, steady gold income."
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 5.0
+
+[[choice.options.effects]]
+type = "gold"
+amount = 30.0
+
+[[choice.options]]
+label = "Decline"
+description = "Maintain independence. Slight relationship cooling."
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The emissary departs with a polite but strained smile."
