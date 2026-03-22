@@ -33,6 +33,8 @@ pub mod ai {
 }
 
 pub mod content;
+pub mod model_backend;
+pub mod ascii_gen;
 pub mod scenario;
 pub use tactical_sim::mapgen_voronoi;
 

@@ -37,6 +37,12 @@ pub enum ContentKind {
     Dialogue,
     Encounter,
     ScenarioConfig,
+    // Tier 2 (Issue #15)
+    Theme,
+    Region,
+    Event,
+    Item,
+    NarrativeArc,
 }
 
 impl std::fmt::Display for ContentKind {
@@ -52,6 +58,11 @@ impl std::fmt::Display for ContentKind {
             Self::Dialogue => "dialogue",
             Self::Encounter => "encounter",
             Self::ScenarioConfig => "scenario",
+            Self::Theme => "theme",
+            Self::Region => "region",
+            Self::Event => "event",
+            Self::Item => "item",
+            Self::NarrativeArc => "narrative_arc",
         };
         write!(f, "{s}")
     }

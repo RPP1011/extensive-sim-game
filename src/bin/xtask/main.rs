@@ -5,6 +5,9 @@ mod scenario_cmd;
 mod oracle_cmd;
 mod train_v6;
 mod roomgen_cmd;
+mod model_cmd;
+mod content_gen_cmd;
+mod ascii_gen_cmd;
 
 use std::process::ExitCode;
 
@@ -24,5 +27,8 @@ fn main() -> ExitCode {
         TaskCommand::Scenario(cmd) => scenario_cmd::run_scenario_cmd(cmd),
         TaskCommand::TrainV6(cmd) => train_v6::run_train_v6(cmd),
         TaskCommand::Roomgen(cmd) => roomgen_cmd::run_roomgen_cmd(cmd),
+        TaskCommand::Model(cmd) => model_cmd::run_model_cmd(cmd),
+        TaskCommand::ContentGen(cmd) => content_gen_cmd::run_content_gen_cmd(cmd),
+        TaskCommand::AsciiGen(cmd) => ascii_gen_cmd::run_ascii_gen_cmd(cmd),
     }
 }

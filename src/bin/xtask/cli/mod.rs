@@ -23,6 +23,12 @@ pub enum TaskCommand {
     /// Build with burn-gpu and run IMPALA V6 training (auto-detects libtorch)
     TrainV6(TrainV6Args),
     Roomgen(RoomgenCommand),
+    /// Model backend management (status, test)
+    Model(ModelCommand),
+    /// AOT content generation pipeline
+    ContentGen(ContentGenCommand),
+    /// ASCII art generation
+    AsciiGen(AsciiGenCommand),
 }
 
 #[derive(Debug, Parser)]
@@ -209,5 +215,144 @@ pub struct RoomgenSimulateArgs {
     /// Output JSONL results file
     #[arg(long, default_value = "generated/room_sim_results.jsonl")]
     pub output: PathBuf,
+}
+
+// ---------------------------------------------------------------------------
+// Model backend subcommand tree
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Parser)]
+#[command(about = "Model backend management")]
+pub struct ModelCommand {
+    #[command(subcommand)]
+    pub sub: ModelSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ModelSubcommand {
+    /// Check model backend availability and hardware tier
+    Status,
+    /// Test model generation with a prompt
+    Test(ModelTestArgs),
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Test model generation")]
+pub struct ModelTestArgs {
+    /// Prompt to send to the model
+    pub prompt: String,
+    /// Path to model weights
+    #[arg(long)]
+    pub model_path: Option<PathBuf>,
+    /// Path to inference script
+    #[arg(long)]
+    pub script_path: Option<PathBuf>,
+    /// Python executable
+    #[arg(long)]
+    pub python: Option<String>,
+    /// Deterministic seed
+    #[arg(long, default_value_t = 42)]
+    pub seed: u64,
+}
+
+// ---------------------------------------------------------------------------
+// Content generation subcommand tree
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Parser)]
+#[command(about = "AOT content generation pipeline")]
+pub struct ContentGenCommand {
+    #[command(subcommand)]
+    pub sub: ContentGenSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ContentGenSubcommand {
+    /// Run the full 9-stage world generation pipeline
+    Generate(ContentGenGenerateArgs),
+    /// Inspect cached world context for a campaign seed
+    Inspect(ContentGenInspectArgs),
+}
+
+#[derive(Debug, Parser)]
+pub struct ContentGenGenerateArgs {
+    /// Campaign seed for deterministic generation
+    #[arg(long, default_value_t = 42)]
+    pub seed: u64,
+    /// Output directory for cached world context
+    #[arg(long, default_value = "generated/campaigns")]
+    pub output_dir: PathBuf,
+    /// Resume from a specific stage (skips earlier stages)
+    #[arg(long)]
+    pub from_stage: Option<String>,
+}
+
+#[derive(Debug, Parser)]
+pub struct ContentGenInspectArgs {
+    /// Campaign seed to inspect
+    #[arg(long, default_value_t = 42)]
+    pub seed: u64,
+    /// Directory where campaign data is cached
+    #[arg(long, default_value = "generated/campaigns")]
+    pub output_dir: PathBuf,
+}
+
+// ---------------------------------------------------------------------------
+// ASCII art generation subcommand tree
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Parser)]
+#[command(about = "ASCII art generation")]
+pub struct AsciiGenCommand {
+    #[command(subcommand)]
+    pub sub: AsciiGenSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AsciiGenSubcommand {
+    /// Generate a single ASCII art grid
+    Generate(AsciiGenGenerateArgs),
+    /// Batch-export ASCII art grids as JSONL
+    Export(AsciiGenExportArgs),
+}
+
+#[derive(Debug, Parser)]
+pub struct AsciiGenGenerateArgs {
+    /// Description of what to generate
+    pub prompt: String,
+    /// Art style: environment, portrait, item, ui
+    #[arg(long, default_value = "environment")]
+    pub style: String,
+    /// Grid width in characters
+    #[arg(long, default_value_t = 40)]
+    pub width: usize,
+    /// Grid height in characters
+    #[arg(long, default_value_t = 20)]
+    pub height: usize,
+    /// Deterministic seed
+    #[arg(long, default_value_t = 42)]
+    pub seed: u64,
+    /// Optional output file (JSON)
+    #[arg(long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Parser)]
+pub struct AsciiGenExportArgs {
+    /// Output JSONL file
+    #[arg(long, default_value = "generated/ascii_art.jsonl")]
+    pub output: PathBuf,
+    /// Number of grids per style
+    #[arg(long, default_value_t = 100)]
+    pub count_per_style: usize,
+    /// Grid width
+    #[arg(long, default_value_t = 20)]
+    pub width: usize,
+    /// Grid height
+    #[arg(long, default_value_t = 10)]
+    pub height: usize,
+    /// Base seed
+    #[arg(long, default_value_t = 2026)]
+    pub seed: u64,
 }
 
