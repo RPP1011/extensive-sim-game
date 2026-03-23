@@ -897,7 +897,7 @@ pub struct PendingProgression {
 }
 
 /// What kind of progression content was generated.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProgressionKind {
     /// A new ability for an adventurer (ability DSL).
     Ability,

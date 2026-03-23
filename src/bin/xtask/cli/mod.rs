@@ -39,6 +39,55 @@ pub enum TaskCommand {
     BfsExplore(BfsExploreArgs),
     /// Fuzz campaigns with randomized configs and random actions
     CampaignFuzz(CampaignFuzzArgs),
+    /// Collect VAE training dataset (sweep campaigns + LLM generation + slot extraction)
+    VaeDataset(VaeDatasetArgs),
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Collect training data for the grammar-guided content VAE")]
+pub struct VaeDatasetArgs {
+    /// Number of campaigns to sweep
+    #[arg(long, default_value_t = 100)]
+    pub campaigns: u64,
+    /// Max ticks per campaign
+    #[arg(long, default_value_t = 30_000)]
+    pub max_ticks: u64,
+    /// Threads for campaign sweep
+    #[arg(short = 'j', long, default_value_t = 0)]
+    pub threads: usize,
+    /// Base RNG seed
+    #[arg(long, default_value_t = 2026)]
+    pub seed: u64,
+    /// Output directory
+    #[arg(long, default_value = "generated")]
+    pub output_dir: String,
+    /// Skip LLM generation (sweep only, or use existing store)
+    #[arg(long)]
+    pub no_llm: bool,
+    /// Only run campaign sweep (no generation or extraction)
+    #[arg(long)]
+    pub sweep_only: bool,
+    /// Only run extraction on existing contexts + store
+    #[arg(long)]
+    pub extract_only: bool,
+    /// Skip procedural item/quest generation
+    #[arg(long)]
+    pub no_procedural: bool,
+    /// Parallel LLM workers
+    #[arg(long, default_value_t = 4)]
+    pub workers: usize,
+    /// LLM candidates per item (best-of-N)
+    #[arg(long, default_value_t = 3)]
+    pub candidates: u32,
+    /// Ollama server URL
+    #[arg(long, default_value = "http://localhost:11434")]
+    pub llm_url: String,
+    /// Ollama model name
+    #[arg(long, default_value = "qwen35-9b")]
+    pub llm_model: String,
+    /// Campaign config TOML
+    #[arg(long)]
+    pub config: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Parser)]

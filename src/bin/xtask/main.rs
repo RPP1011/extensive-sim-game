@@ -9,6 +9,7 @@ mod model_cmd;
 mod content_gen_cmd;
 mod ascii_gen_cmd;
 mod mcts_bootstrap_cmd;
+mod vae_dataset_cmd;
 
 use std::process::ExitCode;
 
@@ -150,5 +151,6 @@ fn main() -> ExitCode {
             bevy_game::headless_campaign::batch::run_batch(&config);
             ExitCode::SUCCESS
         }
+        TaskCommand::VaeDataset(args) => vae_dataset_cmd::run_vae_dataset(args),
     }
 }
