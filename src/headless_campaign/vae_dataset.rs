@@ -175,15 +175,62 @@ pub fn sweep_campaigns(config: &VaeDatasetConfig) -> Vec<TriggerContext> {
     contexts
 }
 
+/// Diversity-aware policy for dataset sweeps.
+/// Randomizes character creation choices and starting packages based on seed
+/// so each campaign produces different trait combos, backstories, and compositions.
+fn diverse_policy(state: &CampaignState, rng: &mut u64) -> Option<CampaignAction> {
+    if state.phase != CampaignPhase::Playing {
+        // Randomize backstory/creation choices
+        if let Some(choice) = state.pending_choices.first() {
+            *rng ^= *rng << 13;
+            *rng ^= *rng >> 7;
+            *rng ^= *rng << 17;
+            let option_index = (*rng as usize) % choice.options.len().max(1);
+            return Some(CampaignAction::RespondToChoice {
+                choice_id: choice.id,
+                option_index,
+            });
+        }
+        // Randomize starting package
+        if state.phase == CampaignPhase::ChoosingStartingPackage {
+            if !state.available_starting_choices.is_empty() {
+                *rng ^= *rng << 13;
+                *rng ^= *rng >> 7;
+                *rng ^= *rng << 17;
+                let idx = (*rng as usize) % state.available_starting_choices.len();
+                return Some(CampaignAction::ChooseStartingPackage {
+                    choice: state.available_starting_choices[idx].clone(),
+                });
+            }
+        }
+        return None;
+    }
+
+    // During play, use the standard heuristic but randomize choice responses
+    if let Some(choice) = state.pending_choices.first() {
+        *rng ^= *rng << 13;
+        *rng ^= *rng >> 7;
+        *rng ^= *rng << 17;
+        let option_index = (*rng as usize) % choice.options.len().max(1);
+        return Some(CampaignAction::RespondToChoice {
+            choice_id: choice.id,
+            option_index,
+        });
+    }
+
+    // Fall back to heuristic for gameplay decisions
+    heuristic_policy(state)
+}
+
 /// Run one campaign, returning trigger contexts.
 fn sweep_single_campaign(seed: u64, config: &VaeDatasetConfig) -> Vec<TriggerContext> {
     let mut state = CampaignState::with_config(seed, config.campaign_config.clone());
-    // No LLM — template fallback only
     let mut contexts = Vec::new();
     let mut seen_triggers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut rng = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
 
     for _ in 0..config.max_ticks {
-        let action = heuristic_policy(&state);
+        let action = diverse_policy(&state, &mut rng);
 
         // Check for new progression items BEFORE stepping
         // (they get added during step by progression_triggers)

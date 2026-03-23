@@ -40,8 +40,12 @@ pub fn tick_recruitment(
 
     state.guild.gold -= cfg.recruit_cost;
 
-    // Generate a random adventurer
-    let archetypes = ["ranger", "knight", "mage", "cleric", "rogue"];
+    // Generate a random adventurer from expanded archetype pool
+    let archetypes = [
+        "ranger", "knight", "mage", "cleric", "rogue",
+        "paladin", "berserker", "necromancer", "bard", "druid",
+        "warlock", "monk", "assassin", "guardian", "shaman",
+    ];
     let archetype_idx = (lcg_next(&mut state.rng) as usize) % archetypes.len();
     let archetype = archetypes[archetype_idx];
 
@@ -51,6 +55,7 @@ pub fn tick_recruitment(
     let names = [
         "Alaric", "Brynn", "Cira", "Daven", "Elara", "Finn", "Greta", "Holt",
         "Ivy", "Jorik", "Kessa", "Lorn", "Maren", "Nyx", "Orin", "Petra",
+        "Quinlan", "Rhea", "Soren", "Thalia", "Ulric", "Vera", "Wren", "Xara",
     ];
     let name_idx = (lcg_next(&mut state.rng) as usize) % names.len();
     let name = format!("{} the {}", names[name_idx], archetype.chars().next().unwrap().to_uppercase().to_string() + &archetype[1..]);
@@ -63,13 +68,24 @@ pub fn tick_recruitment(
         .unwrap_or(0)
         + 1;
 
+    //                     HP    ATK   DEF   SPD   AP
     let (hp, atk, def, spd, ap) = match archetype {
-        "knight" => (110.0, 12.0, 18.0, 7.0, 4.0),
-        "ranger" => (75.0, 16.0, 8.0, 13.0, 7.0),
-        "mage" => (55.0, 6.0, 5.0, 9.0, 22.0),
-        "cleric" => (65.0, 5.0, 10.0, 8.0, 18.0),
-        "rogue" => (65.0, 18.0, 6.0, 15.0, 6.0),
-        _ => (70.0, 10.0, 10.0, 10.0, 10.0),
+        "knight"     => (110.0, 12.0, 18.0,  7.0,  4.0),
+        "ranger"     => ( 75.0, 16.0,  8.0, 13.0,  7.0),
+        "mage"       => ( 55.0,  6.0,  5.0,  9.0, 22.0),
+        "cleric"     => ( 65.0,  5.0, 10.0,  8.0, 18.0),
+        "rogue"      => ( 65.0, 18.0,  6.0, 15.0,  6.0),
+        "paladin"    => (100.0, 10.0, 15.0,  6.0, 10.0),
+        "berserker"  => ( 95.0, 22.0,  5.0, 10.0,  3.0),
+        "necromancer" => ( 50.0,  8.0,  4.0,  7.0, 24.0),
+        "bard"       => ( 60.0,  7.0,  7.0, 11.0, 15.0),
+        "druid"      => ( 70.0,  8.0,  9.0,  9.0, 16.0),
+        "warlock"    => ( 55.0, 10.0,  5.0,  8.0, 20.0),
+        "monk"       => ( 75.0, 14.0, 10.0, 16.0,  8.0),
+        "assassin"   => ( 60.0, 20.0,  4.0, 17.0,  5.0),
+        "guardian"   => (120.0,  8.0, 20.0,  5.0,  3.0),
+        "shaman"     => ( 65.0,  7.0,  8.0,  8.0, 18.0),
+        _            => ( 70.0, 10.0, 10.0, 10.0, 10.0),
     };
 
     let adventurer = Adventurer {
