@@ -4,11 +4,30 @@ use crate::headless_campaign::actions::CampaignAction;
 use crate::headless_campaign::state::{CampaignPhase, CampaignState};
 use crate::headless_campaign::step::step_campaign;
 
-/// Initialize a campaign by picking the first available starting package.
+/// Initialize a campaign by processing all creation events and picking a starting package.
 fn init_campaign(state: &mut CampaignState) {
-    if state.phase != CampaignPhase::Playing {
-        let choice = state.available_starting_choices[0].clone();
-        step_campaign(state, Some(CampaignAction::ChooseStartingPackage { choice }));
+    // Process up to 20 steps to get through character creation
+    for _ in 0..20 {
+        if state.phase == CampaignPhase::Playing {
+            break;
+        }
+        // Respond to pending choices
+        if let Some(choice) = state.pending_choices.first() {
+            let id = choice.id;
+            step_campaign(state, Some(CampaignAction::RespondToChoice {
+                choice_id: id,
+                option_index: 0,
+            }));
+            continue;
+        }
+        // Pick starting package
+        if !state.available_starting_choices.is_empty() {
+            let choice = state.available_starting_choices[0].clone();
+            step_campaign(state, Some(CampaignAction::ChooseStartingPackage { choice }));
+            continue;
+        }
+        // Tick to let creation system initialize
+        step_campaign(state, None);
     }
 }
 

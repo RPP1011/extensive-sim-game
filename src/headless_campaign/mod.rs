@@ -20,6 +20,7 @@
 //! ```
 
 pub mod actions;
+pub mod backstory;
 pub mod batch;
 pub mod bfs_explore;
 pub mod choice_templates;

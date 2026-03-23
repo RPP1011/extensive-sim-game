@@ -6,7 +6,7 @@
 //! template effects to concrete `ChoiceEffect`s.
 
 use std::collections::HashMap;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::state::*;
 
@@ -32,7 +32,7 @@ pub struct OptionTemplate {
     pub effects: Vec<EffectTemplate>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EffectTemplate {
     #[serde(rename = "type")]
     pub effect_type: String,
@@ -207,7 +207,7 @@ fn substitute(template: &str, ctx: &TemplateContext) -> String {
 }
 
 /// Convert a template effect to a concrete ChoiceEffect.
-fn instantiate_effect(e: &EffectTemplate, ctx: &TemplateContext) -> Option<ChoiceEffect> {
+pub fn instantiate_effect(e: &EffectTemplate, ctx: &TemplateContext) -> Option<ChoiceEffect> {
     match e.effect_type.as_str() {
         "gold" => {
             let amount = if let Some(ref var) = e.amount_var {

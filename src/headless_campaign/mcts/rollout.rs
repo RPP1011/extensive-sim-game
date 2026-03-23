@@ -54,13 +54,22 @@ pub fn heuristic_rollout(
 /// - Rescue when battle going badly
 /// - Wait otherwise
 pub fn heuristic_rollout_policy(state: &CampaignState) -> Option<CampaignAction> {
-    // Choose starting package if not initialized
+    // Handle pre-game phases
     if state.phase != CampaignPhase::Playing {
-        if let Some(choice) = state.available_starting_choices.last() {
-            return Some(CampaignAction::ChooseStartingPackage {
-                choice: choice.clone(),
+        if let Some(choice) = state.pending_choices.first() {
+            return Some(CampaignAction::RespondToChoice {
+                choice_id: choice.id,
+                option_index: choice.default_option,
             });
         }
+        if state.phase == CampaignPhase::ChoosingStartingPackage {
+            if let Some(choice) = state.available_starting_choices.last() {
+                return Some(CampaignAction::ChooseStartingPackage {
+                    choice: choice.clone(),
+                });
+            }
+        }
+        return None;
     }
 
     // Respond to pending choices (pick default = least investment for rollout speed)

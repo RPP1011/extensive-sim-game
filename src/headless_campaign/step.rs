@@ -30,8 +30,22 @@ pub fn step_campaign(
         None
     };
 
-    // --- Don't tick until the player has chosen a starting package ---
+    // --- Handle pre-game phases ---
     if state.phase != CampaignPhase::Playing {
+        if state.phase == CampaignPhase::CharacterCreation {
+            // Initialize creation on first entry
+            if state.player_character.is_none()
+                && state.pending_choices.is_empty()
+                && state.creation_event_queue.is_empty()
+            {
+                super::backstory::init_character_creation(state, &mut events);
+            }
+            // If we just resolved a creation choice, apply PC effects and queue next
+            else if let Some(ActionResult::Success(_)) = &action_result {
+                super::backstory::apply_creation_effects(state, &mut events);
+            }
+        }
+
         deltas.gold_after = state.guild.gold;
         deltas.supplies_after = state.guild.supplies;
         deltas.reputation_after = state.guild.reputation;

@@ -1,52 +1,29 @@
-# Event 4: Your first real recruit. Who shows up?
-# This determines your initial party composition alongside the PC.
-
 name = "First Blood"
 world_template = "Frontier"
 sequence = 4
-
+default_option = 0
 prompt = "Your guild's first morning. A stranger walks through the door. They've heard about what you're building and want in."
 
 [[options]]
 label = "A Young Farmhand"
 description = "Strong, eager, completely untrained. 'I can lift a plow. I can lift a sword. How different can it be?'"
-
-[[options.effects]]
-type = "add_adventurer"
-name = "Tam"
-archetype = "knight"
-level_var = "1"
-
-[[options.effects]]
-type = "narrative"
-text = "Tam signed the ledger with hands still calloused from fieldwork."
+effects = [
+    { type = "add_adventurer", name = "Tam", archetype = "knight", level_var = "1" },
+    { type = "narrative", text = "Tam signed the ledger with hands still calloused from fieldwork." },
+]
 
 [[options]]
 label = "A Retired Scout"
-description = "Gray-haired, quiet, knows the frontier like her own hands. 'I've got a few good years left. Might as well use them.'"
-
-[[options.effects]]
-type = "add_adventurer"
-name = "Old Wren"
-archetype = "ranger"
-level_var = "3"
-
-[[options.effects]]
-type = "narrative"
-text = "Wren didn't say much. She didn't need to. Her eyes said she'd seen everything."
+description = "Gray-haired, quiet, knows the frontier like her own hands. 'I've got a few good years left.'"
+effects = [
+    { type = "add_adventurer", name = "Old Wren", archetype = "ranger", level_var = "3" },
+    { type = "narrative", text = "Wren didn't say much. She didn't need to." },
+]
 
 [[options]]
 label = "A Runaway Apprentice"
-description = "A mage's apprentice who left their tower over a 'philosophical disagreement.' Keeps glancing over their shoulder."
-
-[[options.effects]]
-type = "add_adventurer"
-name = "Pip"
-archetype = "mage"
-level_var = "2"
-
-[[options.effects]]
-type = "narrative"
-text = "Pip's hands trembled slightly as they signed. Running from something — but running toward something too."
-
-default_option = 0
+description = "A mage's apprentice who left their tower over a 'philosophical disagreement.'"
+effects = [
+    { type = "add_adventurer", name = "Pip", archetype = "mage", level_var = "2" },
+    { type = "narrative", text = "Pip's hands trembled slightly as they signed. Running from something — but running toward something too." },
+]

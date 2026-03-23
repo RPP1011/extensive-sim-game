@@ -95,6 +95,10 @@ pub struct CampaignState {
     #[serde(default)]
     pub player_character: Option<PlayerCharacter>,
 
+    /// Queue of backstory events to present during character creation.
+    #[serde(default)]
+    pub creation_event_queue: Vec<super::backstory::BackstoryEvent>,
+
     // --- Configuration ---
     /// All tunable balance parameters. Systems read from this.
     pub config: CampaignConfig,
@@ -1092,9 +1096,10 @@ impl CampaignState {
             next_unlock_id: 1,
             next_event_id: 1,
             combat_mode: CombatMode::Oracle,
-            phase: CampaignPhase::ChoosingStartingPackage,
+            phase: CampaignPhase::CharacterCreation,
             available_starting_choices: Self::load_or_default_starting_choices(),
             player_character: None,
+            creation_event_queue: Vec::new(),
             config: CampaignConfig::default(),
         }
     }

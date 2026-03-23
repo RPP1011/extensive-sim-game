@@ -224,13 +224,24 @@ pub fn run_single_campaign_with_trace_and_config(
 
 /// Simple heuristic policy for batch runs.
 pub fn heuristic_policy(state: &CampaignState) -> Option<CampaignAction> {
-    // 0. Choose starting package if not initialized
+    // 0. Handle pre-game phases
     if state.phase != CampaignPhase::Playing {
-        if let Some(choice) = state.available_starting_choices.last() {
-            return Some(CampaignAction::ChooseStartingPackage {
-                choice: choice.clone(),
+        // Respond to pending choices (creation or otherwise)
+        if let Some(choice) = state.pending_choices.first() {
+            return Some(CampaignAction::RespondToChoice {
+                choice_id: choice.id,
+                option_index: 0,
             });
         }
+        // Only choose starting package when in the right phase
+        if state.phase == CampaignPhase::ChoosingStartingPackage {
+            if let Some(choice) = state.available_starting_choices.last() {
+                return Some(CampaignAction::ChooseStartingPackage {
+                    choice: choice.clone(),
+                });
+            }
+        }
+        return None; // Wait for creation system to initialize
     }
 
     // 0.5. Respond to pending choices (pick first non-default option if we can afford it)
