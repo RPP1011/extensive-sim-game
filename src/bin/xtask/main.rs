@@ -32,6 +32,60 @@ fn main() -> ExitCode {
         TaskCommand::ContentGen(cmd) => content_gen_cmd::run_content_gen_cmd(cmd),
         TaskCommand::AsciiGen(cmd) => ascii_gen_cmd::run_ascii_gen_cmd(cmd),
         TaskCommand::MctsBootstrap(args) => mcts_bootstrap_cmd::run_mcts_bootstrap(args),
+        TaskCommand::HeuristicBc(args) => {
+            let campaign_config = if let Some(ref path) = args.config {
+                match bevy_game::headless_campaign::config::CampaignConfig::load_from_toml(path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Error loading config: {}", e);
+                        return ExitCode::from(1);
+                    }
+                }
+            } else {
+                bevy_game::headless_campaign::config::CampaignConfig::default()
+            };
+
+            let config = bevy_game::headless_campaign::heuristic_bc::BcConfig {
+                campaigns: args.campaigns,
+                max_ticks: args.max_ticks,
+                threads: args.threads,
+                base_seed: args.seed,
+                report_interval: args.report_interval,
+                output_path: args.output,
+                campaign_config,
+                sample_rate: args.sample_rate,
+            };
+            bevy_game::headless_campaign::heuristic_bc::run_bc_generation(&config);
+            ExitCode::SUCCESS
+        }
+        TaskCommand::BfsExplore(args) => {
+            let campaign_config = if let Some(ref path) = args.config {
+                match bevy_game::headless_campaign::config::CampaignConfig::load_from_toml(path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Error loading config: {}", e);
+                        return ExitCode::from(1);
+                    }
+                }
+            } else {
+                bevy_game::headless_campaign::config::CampaignConfig::default()
+            };
+
+            let config = bevy_game::headless_campaign::bfs_explore::BfsConfig {
+                waves: args.waves,
+                ticks_per_branch: args.ticks_per_branch,
+                clusters_per_wave: args.clusters,
+                initial_roots: args.initial_roots,
+                trajectory_max_ticks: args.trajectory_ticks,
+                root_sample_interval: args.root_interval,
+                campaign_config,
+                base_seed: args.seed,
+                threads: args.threads,
+                output_path: args.output,
+            };
+            bevy_game::headless_campaign::bfs_explore::run_bfs_exploration(&config);
+            ExitCode::SUCCESS
+        }
         TaskCommand::CampaignBatch(args) => {
             let campaign_config = if let Some(ref path) = args.config {
                 match bevy_game::headless_campaign::config::CampaignConfig::load_from_toml(path) {

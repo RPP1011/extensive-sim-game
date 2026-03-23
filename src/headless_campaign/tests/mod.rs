@@ -2,3 +2,4 @@
 
 mod batch_test;
 mod determinism;
+mod profile;

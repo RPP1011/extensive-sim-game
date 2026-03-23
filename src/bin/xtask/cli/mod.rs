@@ -33,6 +33,74 @@ pub enum TaskCommand {
     CampaignBatch(CampaignBatchArgs),
     /// Run MCTS bootstrap campaigns and export BC training data
     MctsBootstrap(MctsBootstrapArgs),
+    /// Generate behavioral cloning data from heuristic policy with coverage analysis
+    HeuristicBc(HeuristicBcArgs),
+    /// BFS state-space exploration with cluster-and-prune
+    BfsExplore(BfsExploreArgs),
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "BFS state-space exploration: expand all actions, cluster leaves, prune to medians")]
+pub struct BfsExploreArgs {
+    /// Number of BFS waves
+    #[arg(long, default_value_t = 5)]
+    pub waves: u32,
+    /// Ticks to advance per branch (let action play out)
+    #[arg(long, default_value_t = 200)]
+    pub ticks_per_branch: u64,
+    /// Clusters per wave (controls width)
+    #[arg(long, default_value_t = 20)]
+    pub clusters: usize,
+    /// Initial root states to generate
+    #[arg(long, default_value_t = 50)]
+    pub initial_roots: usize,
+    /// Max ticks for heuristic trajectory (root generation)
+    #[arg(long, default_value_t = 15000)]
+    pub trajectory_ticks: u64,
+    /// Root sampling interval from trajectory
+    #[arg(long, default_value_t = 300)]
+    pub root_interval: u64,
+    /// Base RNG seed
+    #[arg(long, default_value_t = 2026)]
+    pub seed: u64,
+    /// Number of threads (0 = all cores)
+    #[arg(short = 'j', long, default_value_t = 0)]
+    pub threads: usize,
+    /// Output JSONL file
+    #[arg(long, default_value = "generated/bfs_explore.jsonl")]
+    pub output: String,
+    /// Path to campaign config TOML
+    #[arg(long)]
+    pub config: Option<std::path::PathBuf>,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Generate BC training data from heuristic policy with state coverage analysis")]
+pub struct HeuristicBcArgs {
+    /// Total campaigns to run
+    #[arg(long, default_value_t = 10_000)]
+    pub campaigns: u64,
+    /// Maximum ticks per campaign
+    #[arg(long, default_value_t = 30_000)]
+    pub max_ticks: u64,
+    /// Number of threads (0 = all cores)
+    #[arg(short = 'j', long, default_value_t = 0)]
+    pub threads: usize,
+    /// Base RNG seed
+    #[arg(long, default_value_t = 2026)]
+    pub seed: u64,
+    /// Progress report interval
+    #[arg(long, default_value_t = 1000)]
+    pub report_interval: u64,
+    /// Output JSONL file
+    #[arg(long, default_value = "generated/heuristic_bc.jsonl")]
+    pub output: String,
+    /// Record every N-th decision (1 = all)
+    #[arg(long, default_value_t = 1)]
+    pub sample_rate: usize,
+    /// Path to campaign config TOML
+    #[arg(long)]
+    pub config: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Parser)]
