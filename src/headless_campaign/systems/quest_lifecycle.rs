@@ -203,7 +203,7 @@ pub fn tick_quest_lifecycle(
                     QuestResult::Victory => {
                         // Victory: small injuries, XP gain, stress relief
                         let damage_taken = (1.0 - battle_hp) * qlcfg.victory_injury_scaling;
-                        adv.injury = (adv.injury + damage_taken).min(100.0);
+                        adv.injury = (adv.injury + damage_taken).clamp(0.0, 100.0);
                         adv.stress = (adv.stress - qlcfg.victory_stress_relief).max(0.0);
                         adv.loyalty = (adv.loyalty + qlcfg.victory_loyalty_gain).min(100.0);
                         adv.morale = (adv.morale + qlcfg.victory_morale_gain).min(100.0);
@@ -244,7 +244,7 @@ pub fn tick_quest_lifecycle(
 
                         // Defeat: heavy injuries, possible death
                         let severity = threat / qlcfg.defeat_severity_divisor;
-                        adv.injury = (adv.injury + qlcfg.defeat_base_injury + severity * qlcfg.defeat_severity_injury).min(100.0);
+                        adv.injury = (adv.injury + qlcfg.defeat_base_injury + severity * qlcfg.defeat_severity_injury).clamp(0.0, 100.0);
                         adv.stress = (adv.stress + qlcfg.defeat_stress_gain).min(100.0);
                         adv.loyalty = (adv.loyalty - qlcfg.defeat_loyalty_loss).max(0.0);
                         adv.morale = (adv.morale - qlcfg.defeat_morale_loss).max(0.0);

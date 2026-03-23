@@ -37,6 +37,37 @@ pub enum TaskCommand {
     HeuristicBc(HeuristicBcArgs),
     /// BFS state-space exploration with cluster-and-prune
     BfsExplore(BfsExploreArgs),
+    /// Fuzz campaigns with randomized configs and random actions
+    CampaignFuzz(CampaignFuzzArgs),
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Fuzz campaigns with randomized configs and random action policies")]
+pub struct CampaignFuzzArgs {
+    /// Total campaigns to fuzz
+    #[arg(long, default_value_t = 10_000)]
+    pub campaigns: u64,
+    /// Max ticks per campaign
+    #[arg(long, default_value_t = 100_000)]
+    pub max_ticks: u64,
+    /// Number of threads (0 = all cores)
+    #[arg(short = 'j', long, default_value_t = 0)]
+    pub threads: usize,
+    /// Base RNG seed
+    #[arg(long, default_value_t = 0xFEED)]
+    pub seed: u64,
+    /// Config mutation strength (0.0-1.0)
+    #[arg(long, default_value_t = 0.5)]
+    pub mutation_strength: f64,
+    /// Fraction of campaigns using purely random actions (0.0-1.0)
+    #[arg(long, default_value_t = 0.5)]
+    pub random_action_ratio: f64,
+    /// Output JSONL file for findings
+    #[arg(long, default_value = "generated/fuzz_findings.jsonl")]
+    pub output: String,
+    /// Progress report interval
+    #[arg(long, default_value_t = 500)]
+    pub report_interval: u64,
 }
 
 #[derive(Debug, Parser)]

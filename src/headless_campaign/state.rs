@@ -1474,9 +1474,9 @@ impl CampaignState {
     pub fn with_config(seed: u64, config: CampaignConfig) -> Self {
         let mut state = Self::default_test_campaign(seed);
         // Apply starting state from config
-        state.guild.gold = config.starting_state.gold;
-        state.guild.supplies = config.starting_state.supplies;
-        state.guild.reputation = config.starting_state.reputation;
+        state.guild.gold = config.starting_state.gold.max(0.0);
+        state.guild.supplies = config.starting_state.supplies.max(0.0);
+        state.guild.reputation = config.starting_state.reputation.clamp(0.0, 100.0);
         state.guild.base.defensive_strength = config.starting_state.base_defensive_strength;
         state.guild.active_quest_capacity = config.starting_state.active_quest_capacity;
         state.overworld.global_threat_level = config.starting_state.global_threat_level;

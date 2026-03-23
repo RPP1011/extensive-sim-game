@@ -86,6 +86,21 @@ fn main() -> ExitCode {
             bevy_game::headless_campaign::bfs_explore::run_bfs_exploration(&config);
             ExitCode::SUCCESS
         }
+        TaskCommand::CampaignFuzz(args) => {
+            let config = bevy_game::headless_campaign::fuzz::FuzzConfig {
+                campaigns: args.campaigns,
+                max_ticks: args.max_ticks,
+                threads: args.threads,
+                base_seed: args.seed,
+                mutation_strength: args.mutation_strength,
+                output_path: args.output,
+                report_interval: args.report_interval,
+                random_action_ratio: args.random_action_ratio,
+                ..Default::default()
+            };
+            bevy_game::headless_campaign::fuzz::run_fuzz(&config);
+            ExitCode::SUCCESS
+        }
         TaskCommand::CampaignBatch(args) => {
             let campaign_config = if let Some(ref path) = args.config {
                 match bevy_game::headless_campaign::config::CampaignConfig::load_from_toml(path) {

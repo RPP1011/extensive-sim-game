@@ -30,6 +30,7 @@ pub mod heuristic_bc;
 pub mod combat_oracle;
 pub mod content_prompts;
 pub mod config;
+pub mod fuzz;
 pub mod mcts;
 pub mod quest_hooks;
 pub mod state;

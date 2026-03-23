@@ -55,8 +55,14 @@ pub fn tick_quest_generation(
     let progress_scaling = 1.0 + state.overworld.campaign_progress * cfg.progress_threat_scaling;
     let base_threat = (cfg.base_threat + distance * cfg.distance_threat_rate
         + state.overworld.global_threat_level * cfg.global_threat_rate) * progress_scaling;
+    // Ensure min <= max even if config is mutated (fuzzer safety)
+    let (threat_min, threat_max) = if cfg.min_threat <= cfg.max_threat {
+        (cfg.min_threat, cfg.max_threat)
+    } else {
+        (cfg.max_threat, cfg.min_threat)
+    };
     let threat_level = (base_threat + lcg_f32(&mut state.rng) * cfg.threat_variance * 2.0 - cfg.threat_variance)
-        .clamp(cfg.min_threat, cfg.max_threat);
+        .clamp(threat_min, threat_max);
 
     // Rewards scale with threat
     let gold_reward = threat_level * cfg.gold_per_threat + lcg_f32(&mut state.rng) * cfg.gold_variance;

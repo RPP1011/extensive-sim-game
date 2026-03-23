@@ -737,7 +737,7 @@ fn apply_action(
             // Apply the starting package
             state.guild.gold += choice.gold_bonus;
             state.guild.supplies += choice.supply_bonus;
-            state.guild.reputation = (state.guild.reputation + choice.reputation_bonus).min(100.0);
+            state.guild.reputation = (state.guild.reputation + choice.reputation_bonus).clamp(0.0, 100.0);
 
             // Add adventurers with corrected IDs
             let base_id = state.adventurers.iter().map(|a| a.id).max().unwrap_or(0) + 1;
