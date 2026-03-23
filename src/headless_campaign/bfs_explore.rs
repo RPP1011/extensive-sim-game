@@ -454,6 +454,94 @@ pub struct BfsStats {
 }
 
 // ---------------------------------------------------------------------------
+// Diverse policy for human-like root generation
+// ---------------------------------------------------------------------------
+
+/// Policy that simulates varied human playstyles for root generation.
+/// Randomizes creation choices, occasionally rests, trains, or diplomats
+/// instead of always taking the greedy quest-focused heuristic path.
+fn diverse_root_policy(state: &CampaignState, rng: &mut u64) -> Option<CampaignAction> {
+    // Pre-game: randomize creation and starting package choices
+    if state.phase != CampaignPhase::Playing {
+        if let Some(choice) = state.pending_choices.first() {
+            *rng ^= *rng << 13; *rng ^= *rng >> 7; *rng ^= *rng << 17;
+            let idx = (*rng as usize) % choice.options.len().max(1);
+            return Some(CampaignAction::RespondToChoice {
+                choice_id: choice.id,
+                option_index: idx,
+            });
+        }
+        if state.phase == CampaignPhase::ChoosingStartingPackage {
+            if !state.available_starting_choices.is_empty() {
+                *rng ^= *rng << 13; *rng ^= *rng >> 7; *rng ^= *rng << 17;
+                let idx = (*rng as usize) % state.available_starting_choices.len();
+                return Some(CampaignAction::ChooseStartingPackage {
+                    choice: state.available_starting_choices[idx].clone(),
+                });
+            }
+        }
+        return None;
+    }
+
+    // Randomize choice responses during play
+    if let Some(choice) = state.pending_choices.first() {
+        *rng ^= *rng << 13; *rng ^= *rng >> 7; *rng ^= *rng << 17;
+        let idx = (*rng as usize) % choice.options.len().max(1);
+        return Some(CampaignAction::RespondToChoice {
+            choice_id: choice.id,
+            option_index: idx,
+        });
+    }
+
+    // ~10% chance: rest if there are pending progression items
+    *rng ^= *rng << 13; *rng ^= *rng >> 7; *rng ^= *rng << 17;
+    if (*rng % 10) == 0 && !state.pending_progression.is_empty() {
+        return Some(CampaignAction::Rest);
+    }
+
+    // ~5% chance: train a random adventurer if we have gold
+    *rng ^= *rng << 13; *rng ^= *rng >> 7; *rng ^= *rng << 17;
+    if (*rng % 20) == 0 && state.guild.gold > state.config.economy.training_cost {
+        let idle: Vec<u32> = state.adventurers.iter()
+            .filter(|a| a.status == AdventurerStatus::Idle)
+            .map(|a| a.id)
+            .collect();
+        if !idle.is_empty() {
+            let idx = (*rng as usize) % idle.len();
+            let training_types = [TrainingType::Combat, TrainingType::Exploration,
+                                  TrainingType::Leadership, TrainingType::Survival];
+            *rng ^= *rng << 13; *rng ^= *rng >> 7; *rng ^= *rng << 17;
+            let ti = (*rng as usize) % training_types.len();
+            return Some(CampaignAction::TrainAdventurer {
+                adventurer_id: idle[idx],
+                training_type: training_types[ti],
+            });
+        }
+    }
+
+    // ~5% chance: diplomatic action if we have factions
+    *rng ^= *rng << 13; *rng ^= *rng >> 7; *rng ^= *rng << 17;
+    if (*rng % 20) == 0 && !state.factions.is_empty() {
+        let fi = (*rng as usize) % state.factions.len();
+        return Some(CampaignAction::DiplomaticAction {
+            faction_id: state.factions[fi].id,
+            action_type: DiplomacyActionType::ImproveRelations,
+        });
+    }
+
+    // ~3% chance: decline a quest instead of accepting
+    *rng ^= *rng << 13; *rng ^= *rng >> 7; *rng ^= *rng << 17;
+    if (*rng % 30) == 0 {
+        if let Some(quest) = state.request_board.first() {
+            return Some(CampaignAction::DeclineQuest { request_id: quest.id });
+        }
+    }
+
+    // Otherwise: use the standard heuristic
+    heuristic_policy(state)
+}
+
+// ---------------------------------------------------------------------------
 // Root generation
 // ---------------------------------------------------------------------------
 
@@ -470,17 +558,11 @@ fn generate_initial_roots(
         let mut state = CampaignState::with_config(seed, config.campaign_config.clone());
         state.llm_config = config.llm_config.clone();
         state.llm_store = llm_store.clone();
+        let mut rng = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
 
-        // Pick starting choice based on seed to get variety
-        if !state.available_starting_choices.is_empty() {
-            let choice_idx = (seed as usize) % state.available_starting_choices.len();
-            let choice = state.available_starting_choices[choice_idx].clone();
-            step_campaign(&mut state, Some(CampaignAction::ChooseStartingPackage { choice }));
-        }
-
-        // Run heuristic trajectory, sample roots at intervals
-        for tick in 0..config.trajectory_max_ticks {
-            let action = heuristic_policy(&state);
+        // Run heuristic trajectory with diverse character creation
+        for _tick in 0..config.trajectory_max_ticks {
+            let action = diverse_root_policy(&state, &mut rng);
             let result = step_campaign(&mut state, action);
 
             if state.tick > 0 && state.tick % config.root_sample_interval == 0 {
