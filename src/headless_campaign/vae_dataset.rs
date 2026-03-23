@@ -241,7 +241,27 @@ fn sweep_single_campaign(seed: u64, config: &VaeDatasetConfig) -> Vec<TriggerCon
     campaign_config.campaign_progress.victory_quest_count =
         victory_options[(rng as usize) % victory_options.len()];
 
+    // ~30% of campaigns: mark first adventurer as player character (enables PC triggers)
+    rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+    let has_pc = (rng % 3) == 0;
+
+    // ~15% of campaigns: weaken the guild to produce defeats
+    rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+    let hard_mode = (rng % 7) == 0;
+    if hard_mode {
+        campaign_config.combat.sigmoid_steepness = 1.5; // harder fights
+        campaign_config.quest_generation.base_threat *= 1.5;
+        campaign_config.starting_state.gold = 30.0; // less starting gold
+    }
+
     let mut state = CampaignState::with_config(seed, campaign_config);
+
+    if has_pc {
+        if let Some(adv) = state.adventurers.first_mut() {
+            adv.is_player_character = true;
+        }
+    }
+
     let mut contexts = Vec::new();
     let mut seen_triggers: std::collections::HashSet<String> = std::collections::HashSet::new();
 

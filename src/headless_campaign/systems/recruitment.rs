@@ -45,6 +45,7 @@ pub fn tick_recruitment(
         "ranger", "knight", "mage", "cleric", "rogue",
         "paladin", "berserker", "necromancer", "bard", "druid",
         "warlock", "monk", "assassin", "guardian", "shaman",
+        "artificer", "tank",
     ];
     let archetype_idx = (lcg_next(&mut state.rng) as usize) % archetypes.len();
     let archetype = archetypes[archetype_idx];
@@ -85,6 +86,8 @@ pub fn tick_recruitment(
         "assassin"   => ( 60.0, 20.0,  4.0, 17.0,  5.0),
         "guardian"   => (120.0,  8.0, 20.0,  5.0,  3.0),
         "shaman"     => ( 65.0,  7.0,  8.0,  8.0, 18.0),
+        "artificer"  => ( 60.0,  9.0,  7.0, 10.0, 16.0),
+        "tank"       => (130.0,  6.0, 22.0,  4.0,  2.0),
         _            => ( 70.0, 10.0, 10.0, 10.0, 10.0),
     };
 

@@ -74,11 +74,23 @@ pub fn adventurer_context(state: &CampaignState, adv_id: u32) -> String {
 /// Build the list of available tags from an adventurer's archetype.
 pub fn adventurer_tags(adv: &Adventurer) -> Vec<&'static str> {
     match adv.archetype.as_str() {
-        "ranger" => vec!["ranged", "nature", "stealth", "tracking", "survival"],
-        "knight" => vec!["melee", "defense", "leadership", "fortification", "honor"],
-        "mage" => vec!["arcane", "elemental", "ritual", "knowledge", "enchantment"],
-        "cleric" => vec!["healing", "divine", "protection", "purification", "restoration"],
-        "rogue" => vec!["stealth", "assassination", "agility", "deception", "sabotage"],
+        "ranger"      => vec!["ranged", "nature", "stealth", "tracking", "survival"],
+        "knight"      => vec!["melee", "defense", "leadership", "fortification", "honor"],
+        "mage"        => vec!["arcane", "elemental", "ritual", "knowledge", "enchantment"],
+        "cleric"      => vec!["healing", "divine", "protection", "purification", "restoration"],
+        "rogue"       => vec!["stealth", "assassination", "agility", "deception", "sabotage"],
+        "paladin"     => vec!["melee", "divine", "leadership", "protection", "honor"],
+        "berserker"   => vec!["melee", "agility", "survival", "inspiration", "sacrifice"],
+        "necromancer" => vec!["arcane", "ritual", "deception", "sabotage", "sacrifice"],
+        "bard"        => vec!["inspiration", "leadership", "deception", "knowledge", "agility"],
+        "druid"       => vec!["nature", "healing", "elemental", "protection", "survival"],
+        "warlock"     => vec!["arcane", "deception", "ritual", "sabotage", "enchantment"],
+        "monk"        => vec!["melee", "agility", "survival", "protection", "stealth"],
+        "assassin"    => vec!["assassination", "stealth", "agility", "deception", "sabotage"],
+        "guardian"    => vec!["defense", "fortification", "protection", "leadership", "honor"],
+        "shaman"      => vec!["nature", "elemental", "healing", "ritual", "inspiration"],
+        "artificer"   => vec!["knowledge", "enchantment", "fortification", "arcane", "leadership"],
+        "tank"        => vec!["defense", "fortification", "melee", "protection", "survival"],
         _ => vec!["melee", "survival"],
     }
 }
