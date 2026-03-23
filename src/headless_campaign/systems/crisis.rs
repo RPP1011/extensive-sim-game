@@ -148,6 +148,7 @@ pub fn activate_crisis_from_template(
                     is_player_character: false,
                     faction_id: None,
                     rallying_to: None,
+                    tier_status: Default::default(),
                 };
 
                 champion_ids.push(id);

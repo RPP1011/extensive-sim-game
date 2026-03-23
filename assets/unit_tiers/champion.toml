@@ -1,0 +1,46 @@
+# Tier 2: Champion — represents a faction or region.
+# Their power comes from the group they serve. Betrayal strips everything.
+
+name = "Champion"
+tier_index = 2
+description = "The embodiment of a faction's strength. They fight not for themselves but for their people."
+
+[requirements]
+min_level = 5
+min_quests_completed = 15
+min_fame = 50.0
+# Must be affiliated with a faction (faction_id set, or guild with 6+ adventurers)
+min_group_size = 6
+# Must have completed a champion quest (quest hook with "champion_trial" tag)
+
+[flat_bonuses]
+attack = 8.0
+defense = 6.0
+max_hp = 40.0
+resolve = 20.0
+speed = 2.0
+
+[scaling]
+# Scales with faction/guild strength
+coefficient = 0.15
+source = "faction_strength"
+# At faction strength 100: 0.15 * 100 = 15.0 → stats multiplied by 1.15
+# At faction strength 200: 0.15 * 200 = 30.0 → stats multiplied by 1.30
+
+[behavior]
+# Must act in the group's interest. Quest completion for the faction,
+# defending faction territory, improving faction relations.
+required_actions = ["AcceptQuest", "DispatchQuest", "DiplomaticAction"]
+forbidden_actions = ["DeclineQuest"]  # declining quests that affect their faction
+idle_decay_ticks = 3000
+decay_rate = 0.03
+
+# Actions that betray the group cause immediate fame collapse
+betrayal_actions = ["Threaten own faction", "Abandon faction territory"]
+betrayal_fame_penalty = -100.0  # instant collapse
+
+[demotion]
+fame_threshold = 10.0
+trigger = "betrayal_or_fame_collapse"
+# Falls to Named (not Adventurer) — they still have personal achievements
+fall_to_tier = 1

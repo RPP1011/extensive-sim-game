@@ -307,6 +307,7 @@ pub fn instantiate_effect(e: &EffectTemplate, ctx: &TemplateContext) -> Option<C
                 is_player_character: false,
                 faction_id: None,
                 rallying_to: None,
+                    tier_status: Default::default(),
             }))
         }
         _ => {

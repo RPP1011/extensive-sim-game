@@ -1,0 +1,44 @@
+# Tier 5: Legend — a proven hero whose power is permanent.
+# Achieved by completing the hero quest. Fame becomes self-sustaining.
+# Can be safely deployed against other threats without risk of status loss.
+# The behavioral contract relaxes — a legend has earned their freedom.
+
+name = "Legend"
+tier_index = 5
+description = "Their story is complete. Their power endures. A legend walks among mortals."
+
+[requirements]
+# Can only be reached by completing a hero trial quest as a Hero (tier 4)
+min_prior_tier = 4
+requires_quest_completion = "hero_trial_final"
+# No other requirements — if you made it here, you earned it
+
+[flat_bonuses]
+attack = 30.0
+defense = 25.0
+max_hp = 200.0
+resolve = 50.0
+speed = 5.0
+ability_power = 25.0
+
+[scaling]
+# Legends keep crisis scaling but also gain fame-based scaling
+# Their fame no longer decays — it's locked at its peak
+coefficient = 0.15
+source = "fame"
+# At fame 500: 0.15 * 500 = 75.0 → 1.75× multiplier
+# This is permanent and doesn't require an active crisis
+
+[behavior]
+# Relaxed contract — legends have earned the right to act freely
+# No required actions, no forbidden actions
+# Fame no longer decays
+idle_decay_ticks = 0  # no decay
+decay_rate = 0.0
+
+[demotion]
+# Legends cannot be demoted through normal means.
+# Only death or a narrative-level betrayal (siding with a crisis) can strip it.
+fame_threshold = -1.0  # effectively impossible
+trigger = "narrative_betrayal_only"
+fall_to_tier = 0  # If somehow demoted, falls to nothing

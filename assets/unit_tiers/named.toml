@@ -1,0 +1,35 @@
+# Tier 1: Named — represents a party/squad.
+# A veteran who has led successful missions. Party members trust them.
+
+name = "Named"
+tier_index = 1
+description = "A recognized leader. Their presence strengthens those around them."
+
+[requirements]
+min_level = 3
+min_quests_completed = 5
+min_party_victories = 3
+# Must have led a party (been assigned to at least N quests)
+
+[flat_bonuses]
+attack = 3.0
+defense = 2.0
+max_hp = 15.0
+resolve = 10.0
+
+[scaling]
+# Scales with party size — each party member adds a fraction of bonus
+coefficient = 0.08
+source = "party_size"
+# At party size 4: 0.08 * 4 = 0.32 → 32% bonus on top of flat
+
+[behavior]
+# Must continue leading parties. Extended idleness erodes status.
+required_actions = ["DispatchQuest", "AssignToPool"]
+idle_decay_ticks = 5000  # fame decays after this many ticks idle
+decay_rate = 0.02  # per tick of decay
+
+[demotion]
+# Drops to Adventurer if fame reaches 0 or party wipes under their command
+fame_threshold = 0.0
+trigger = "party_wipe_as_leader"

@@ -33,6 +33,7 @@ pub mod quest_hooks;
 pub mod state;
 pub mod step;
 pub mod tokens;
+pub mod unit_tiers;
 pub mod trace;
 pub mod trace_viewer;
 pub mod world_templates;

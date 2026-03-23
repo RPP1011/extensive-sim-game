@@ -1,0 +1,23 @@
+# Tier 0: Adventurer — represents themselves only.
+# Every unit starts here. No scaling, no behavioral contract.
+
+name = "Adventurer"
+tier_index = 0
+description = "A capable individual. Their power comes from personal skill and equipment."
+
+# No requirements — this is the default tier.
+[requirements]
+
+# No flat bonuses — base stats only.
+[flat_bonuses]
+
+# No scaling — personal stats are what they are.
+[scaling]
+coefficient = 0.0
+source = "none"
+
+# No behavioral contract.
+[behavior]
+
+# Cannot be demoted below this.
+[demotion]

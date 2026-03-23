@@ -1,0 +1,62 @@
+# Tier 4: Hero — represents opposition to a crisis.
+# Cannot exist without an active crisis to oppose. Power scales with
+# the severity of the threat. Created through a quest chain that
+# culminates in a defining act. Until the quest completes, they are
+# a candidate — not yet a hero.
+
+name = "Hero"
+tier_index = 4
+description = "Forged in opposition to an existential threat. Their power grows as the crisis deepens. One failure can destroy everything."
+
+[requirements]
+min_level = 8
+min_quests_completed = 40
+min_fame = 300.0
+# Must be at least Champion tier before attempting hero candidacy
+min_prior_tier = 2
+# An active crisis must exist
+requires_active_crisis = true
+# Must complete a hero trial quest chain
+requires_quest_completion = "hero_trial"
+# Absurd resource investment
+min_gold_invested = 500.0
+
+[flat_bonuses]
+attack = 25.0
+defense = 20.0
+max_hp = 150.0
+resolve = 40.0
+speed = 5.0
+ability_power = 20.0
+
+[scaling]
+# Scales with crisis severity — the worse the threat, the stronger the hero
+coefficient = 0.20
+source = "crisis_severity"
+# Crisis severity 100: 0.20 * 100 = 20.0 → 1.20× multiplier
+# Crisis severity 500 (sleeping king late game): 0.20 * 500 = 100.0 → 2.0× multiplier
+# Crisis severity 1000+: hero becomes truly legendary
+
+[behavior]
+# Must actively oppose the crisis. Retreating from crisis-related combat,
+# ignoring crisis quests, or failing to intercept threats erodes status.
+required_actions = ["AcceptQuest", "DispatchQuest"]
+crisis_actions_required = true  # must take actions related to the active crisis
+idle_decay_ticks = 1500
+decay_rate = 0.05
+
+# A single visible failure against the crisis is devastating
+betrayal_actions = ["Retreat from crisis battle", "Ignore crisis quest"]
+betrayal_fame_penalty = -500.0  # effectively kills hero status
+
+[demotion]
+fame_threshold = 50.0  # high threshold — heroes need constant fame
+trigger = "crisis_failure_or_fame_collapse"
+fall_to_tier = 0  # Falls ALL THE WAY to Adventurer — not Champion, not Named
+# A fallen hero is broken. Their fame is shattered.
+
+[candidacy]
+# Before the hero quest is complete, they are a Candidate.
+# Candidates get 50% of the flat bonuses and scaling.
+# Completion of the quest grants full power permanently (Legend transition).
+bonus_fraction_as_candidate = 0.5

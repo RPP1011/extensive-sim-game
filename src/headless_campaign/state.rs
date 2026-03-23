@@ -233,6 +233,9 @@ pub struct Adventurer {
     /// If traveling to join a faction (Sleeping King mechanic).
     #[serde(default)]
     pub rallying_to: Option<RallyTarget>,
+    /// Unit tier progression status.
+    #[serde(default)]
+    pub tier_status: super::unit_tiers::UnitTierStatus,
 }
 
 /// A leadership role that provides passive buffs while the adventurer is active.
@@ -1131,6 +1134,7 @@ impl CampaignState {
                 is_player_character: false,
                 faction_id: None,
                 rallying_to: None,
+                    tier_status: Default::default(),
             },
             Adventurer {
                 id: 2,
@@ -1160,6 +1164,7 @@ impl CampaignState {
                 is_player_character: false,
                 faction_id: None,
                 rallying_to: None,
+                    tier_status: Default::default(),
             },
             Adventurer {
                 id: 3,
@@ -1189,6 +1194,7 @@ impl CampaignState {
                 is_player_character: false,
                 faction_id: None,
                 rallying_to: None,
+                    tier_status: Default::default(),
             },
             Adventurer {
                 id: 4,
@@ -1218,6 +1224,7 @@ impl CampaignState {
                 is_player_character: false,
                 faction_id: None,
                 rallying_to: None,
+                    tier_status: Default::default(),
             },
         ];
 
@@ -1328,6 +1335,7 @@ impl CampaignState {
                         loyalty: 60.0, stress: 10.0, fatigue: 5.0, injury: 0.0, resolve: 50.0, morale: 70.0,
                         party_id: None, guild_relationship: 40.0,
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
+                    tier_status: Default::default(),
                     },
                     Adventurer {
                         id: 2, name: "Greta".into(), archetype: "knight".into(), level: 2, xp: 0,
@@ -1337,6 +1345,7 @@ impl CampaignState {
                         loyalty: 65.0, stress: 5.0, fatigue: 8.0, injury: 0.0, resolve: 55.0, morale: 75.0,
                         party_id: None, guild_relationship: 45.0,
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
+                    tier_status: Default::default(),
                     },
                 ],
                 gold_bonus: 150.0, supply_bonus: 30.0, reputation_bonus: 5.0, items: Vec::new(),
@@ -1353,6 +1362,7 @@ impl CampaignState {
                         loyalty: 40.0, stress: 30.0, fatigue: 20.0, injury: 15.0, resolve: 80.0, morale: 50.0,
                         party_id: None, guild_relationship: 25.0,
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
+                    tier_status: Default::default(),
                     },
                 ],
                 gold_bonus: 0.0, supply_bonus: 0.0, reputation_bonus: 10.0, items: Vec::new(),
@@ -1369,6 +1379,7 @@ impl CampaignState {
                         loyalty: 55.0, stress: 12.0, fatigue: 8.0, injury: 0.0, resolve: 45.0, morale: 65.0,
                         party_id: None, guild_relationship: 35.0,
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
+                    tier_status: Default::default(),
                     },
                     Adventurer {
                         id: 2, name: "Brynn".into(), archetype: "mage".into(), level: 1, xp: 0,
@@ -1378,6 +1389,7 @@ impl CampaignState {
                         loyalty: 50.0, stress: 15.0, fatigue: 5.0, injury: 0.0, resolve: 40.0, morale: 60.0,
                         party_id: None, guild_relationship: 30.0,
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
+                    tier_status: Default::default(),
                     },
                     Adventurer {
                         id: 3, name: "Cira".into(), archetype: "cleric".into(), level: 1, xp: 0,
@@ -1387,6 +1399,7 @@ impl CampaignState {
                         loyalty: 70.0, stress: 8.0, fatigue: 3.0, injury: 0.0, resolve: 50.0, morale: 75.0,
                         party_id: None, guild_relationship: 45.0,
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
+                    tier_status: Default::default(),
                     },
                     Adventurer {
                         id: 4, name: "Daven".into(), archetype: "rogue".into(), level: 1, xp: 0,
@@ -1396,6 +1409,7 @@ impl CampaignState {
                         loyalty: 45.0, stress: 18.0, fatigue: 10.0, injury: 0.0, resolve: 35.0, morale: 55.0,
                         party_id: None, guild_relationship: 25.0,
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
+                    tier_status: Default::default(),
                     },
                 ],
                 gold_bonus: 20.0, supply_bonus: 10.0, reputation_bonus: 0.0, items: Vec::new(),
