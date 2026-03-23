@@ -43,7 +43,7 @@ pub fn tick_progression_triggers(
         // --- Level milestone abilities (every 5 levels) ---
         if *level >= 5 && *level % 5 == 0 {
             let trigger = format!("level_{}", level);
-            let content = generate_ability(state, *adv_id, &trigger);
+            let content = generate_ability(state, *adv_id, &trigger, archetype, *level);
             try_add_progression(state, *adv_id, ProgressionKind::Ability,
                 &trigger,
                 &format!("{} reached level {} — new ability available", name, level),
@@ -54,7 +54,7 @@ pub fn tick_progression_triggers(
         // --- Quest completion abilities (every 5 quests per adventurer) ---
         if *quests > 0 && *quests % 5 == 0 {
             let trigger = format!("quests_{}", quests);
-            let content = generate_ability(state, *adv_id, &trigger);
+            let content = generate_ability(state, *adv_id, &trigger, archetype, *level);
             try_add_progression(state, *adv_id, ProgressionKind::Ability,
                 &trigger,
                 &format!("{} completed {} quests — experience yields insight", name, quests),
@@ -65,7 +65,7 @@ pub fn tick_progression_triggers(
         // --- Battle veteran abilities (every 3 victories) ---
         if *victories > 0 && *victories % 3 == 0 {
             let trigger = format!("victories_{}", victories);
-            let content = generate_ability(state, *adv_id, &trigger);
+            let content = generate_ability(state, *adv_id, &trigger, archetype, *level);
             try_add_progression(state, *adv_id, ProgressionKind::Ability,
                 &trigger,
                 &format!("{} won {} battles — combat instincts sharpen", name, victories),
@@ -78,7 +78,7 @@ pub fn tick_progression_triggers(
         for &threshold in &fame_thresholds {
             if *fame >= threshold {
                 let trigger = format!("class_fame_{}", threshold as u32);
-                let content = generate_class(state, *adv_id, &trigger);
+                let content = generate_class(state, *adv_id, &trigger, archetype, *level, *fame);
                 try_add_progression(state, *adv_id, ProgressionKind::ClassOffer,
                     &trigger,
                     &format!("{}'s reputation grows (fame {:.0}) — a new path opens", name, fame),
@@ -90,7 +90,7 @@ pub fn tick_progression_triggers(
         // --- Crisis response abilities ---
         if has_crisis && *quests >= 3 {
             let trigger = format!("crisis_response_{}", crisis_count);
-            let content = generate_ability(state, *adv_id, &trigger);
+            let content = generate_ability(state, *adv_id, &trigger, archetype, *level);
             try_add_progression(state, *adv_id, ProgressionKind::Ability,
                 &trigger,
                 &format!("{} faces {} active crises — desperation breeds innovation", name, crisis_count),
@@ -114,7 +114,7 @@ pub fn tick_progression_triggers(
             .map(|a| a.injury)
             .unwrap_or(0.0);
         if adv_injury > 80.0 {
-            let content = generate_ability(state, *adv_id, "injury_survivor");
+            let content = generate_ability(state, *adv_id, "injury_survivor", archetype, *level);
             try_add_progression(state, *adv_id, ProgressionKind::Ability,
                 "injury_survivor",
                 &format!("{} fights through grievous wounds — survival instincts awaken", name),
@@ -127,7 +127,7 @@ pub fn tick_progression_triggers(
             for &milestone in &[10usize, 25, 50] {
                 if *quests >= milestone {
                     let trigger = format!("pc_milestone_{}", milestone);
-                    let content = generate_ability(state, *adv_id, &trigger);
+                    let content = generate_ability(state, *adv_id, &trigger, archetype, *level);
                     try_add_progression(state, *adv_id, ProgressionKind::Ability,
                         &trigger,
                         &format!("{}'s journey continues — {} quests shape their destiny", name, milestone),
@@ -243,45 +243,25 @@ fn try_add_progression(
 // ---------------------------------------------------------------------------
 
 /// Generate ability content: try LLM first, fall back to template.
-fn generate_ability(state: &CampaignState, adv_id: u32, trigger: &str) -> String {
+/// Takes archetype/level from snapshot to avoid stale adventurer lookups.
+fn generate_ability(state: &CampaignState, adv_id: u32, trigger: &str, archetype: &str, level: u32) -> String {
     if let (Some(ref llm_cfg), Some(ref store)) = (&state.llm_config, &state.llm_store) {
         let context = content_prompts::ability_prompt(state, adv_id, trigger);
         if let Some(content) = llm::generate_ability(llm_cfg, store, &context) {
             return content;
         }
     }
-    // Fallback to template
-    let archetype = state.adventurers.iter()
-        .find(|a| a.id == adv_id)
-        .map(|a| a.archetype.as_str())
-        .unwrap_or("warrior");
-    let level = state.adventurers.iter()
-        .find(|a| a.id == adv_id)
-        .map(|a| a.level)
-        .unwrap_or(1);
     generate_ability_template(archetype, level)
 }
 
 /// Generate class content: try LLM first, fall back to template.
-fn generate_class(state: &CampaignState, adv_id: u32, trigger: &str) -> String {
+fn generate_class(state: &CampaignState, adv_id: u32, trigger: &str, archetype: &str, level: u32, fame: f32) -> String {
     if let (Some(ref llm_cfg), Some(ref store)) = (&state.llm_config, &state.llm_store) {
         let context = content_prompts::class_prompt(state, adv_id, trigger);
         if let Some(content) = llm::generate_class(llm_cfg, store, &context) {
             return content;
         }
     }
-    let archetype = state.adventurers.iter()
-        .find(|a| a.id == adv_id)
-        .map(|a| a.archetype.as_str())
-        .unwrap_or("warrior");
-    let level = state.adventurers.iter()
-        .find(|a| a.id == adv_id)
-        .map(|a| a.level)
-        .unwrap_or(1);
-    let fame = state.adventurers.iter()
-        .find(|a| a.id == adv_id)
-        .map(|a| a.tier_status.fame)
-        .unwrap_or(0.0);
     generate_class_template(archetype, level, fame)
 }
 
