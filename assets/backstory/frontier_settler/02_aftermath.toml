@@ -1,0 +1,58 @@
+# Event 2: In the aftermath, someone offers help. Who do you trust?
+
+name = "The Aftermath"
+world_template = "Frontier"
+sequence = 2
+
+prompt = "The dust settles. Your home is damaged but standing. Three people approach you in the days that follow."
+
+[[options]]
+label = "Accept the Accord's Envoy"
+description = "A diplomat from The Accord offers supplies and protection — in exchange for your loyalty. 'Join us, and this won't happen again.'"
+
+[[options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 15.0
+
+[[options.effects]]
+type = "supplies"
+amount = 20.0
+
+[[options.effects]]
+type = "narrative"
+text = "You accepted The Accord's patronage. They sent a cart of supplies and a promise."
+
+[[options]]
+label = "Trust the Wandering Healer"
+description = "A traveling cleric tends to the wounded without asking for anything. She offers to stay. 'Someone has to look after these people.'"
+
+[[options.effects]]
+type = "add_adventurer"
+name = "Sister Maren"
+archetype = "cleric"
+level_var = "2"
+
+[[options.effects]]
+type = "narrative"
+text = "Sister Maren joined your cause. Her steady hands and steadier faith are a comfort."
+
+[[options]]
+label = "Take the Mercenary's Deal"
+description = "A scarred sellsword offers her blade. 'I'll fight for you — but I don't work for free. Fifty gold, and I'm yours for the season.'"
+
+[[options.effects]]
+type = "gold"
+amount = -50.0
+
+[[options.effects]]
+type = "add_adventurer"
+name = "Vex Ironjaw"
+archetype = "rogue"
+level_var = "4"
+
+[[options.effects]]
+type = "narrative"
+text = "Vex Ironjaw signed on. Expensive, but she's worth it — probably."
+
+default_option = 0

@@ -1,0 +1,85 @@
+# Event 3: What kind of guild do you want to build?
+# This shapes the player's approach to the game.
+
+name = "The Choice"
+world_template = "Frontier"
+sequence = 3
+
+prompt = "Word spreads about what happened at your homestead. People start showing up — some looking for safety, others for work, a few for purpose. You realize you could build something here. But what?"
+
+[[options]]
+label = "A Shield for the Frontier"
+description = "You'll protect people. Train fighters, patrol the roads, keep the border safe. The Dominion won't catch anyone off guard again."
+
+[[options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[options.effects]]
+type = "narrative"
+text = "You declared your purpose: to stand between the frontier and whatever threatens it."
+
+[[options.pc_traits]]
+trait = "protector"
+
+# Implicit goal: defend all regions, never lose one
+[[options.goal]]
+name = "Shield of the Frontier"
+description = "Hold all guild-controlled regions above 50 control. Never let a region fall."
+
+[[options.goal.conditions]]
+type = "RegionControl"
+region_id = 0
+min_control = 50.0
+
+[[options]]
+label = "A Trading Company"
+description = "There's money to be made connecting settlements, running caravans, brokering deals. Protection is a service — and services have prices."
+
+[[options.effects]]
+type = "gold"
+amount = 40.0
+
+[[options.effects]]
+type = "narrative"
+text = "You saw opportunity in the chaos. Every crisis is a market."
+
+[[options.pc_traits]]
+trait = "merchant_mind"
+
+[[options.goal]]
+name = "Fortune Builder"
+description = "Accumulate 500 gold while maintaining 60+ reputation."
+
+[[options.goal.conditions]]
+type = "Gold"
+min_gold = 500.0
+
+[[options.goal.conditions]]
+type = "Reputation"
+min_reputation = 60.0
+
+[[options]]
+label = "A Force for Unity"
+description = "The frontier is divided — factions squabbling while raiders burn farms. Someone needs to bring everyone together."
+
+[[options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 10.0
+
+[[options.effects]]
+type = "narrative"
+text = "You set out to do what no one thought possible: unite the frontier."
+
+[[options.pc_traits]]
+trait = "diplomat_born"
+
+[[options.goal]]
+name = "United Frontier"
+description = "Bring all factions to Friendly or Coalition status."
+
+[[options.goal.conditions]]
+type = "AllFactionsAllied"
+
+default_option = 0

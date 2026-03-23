@@ -1,0 +1,68 @@
+# Event 1: Your homestead is raided. How do you respond?
+# This is the inciting incident that starts the guild.
+
+name = "The Raid"
+world_template = "Frontier"
+sequence = 1
+
+prompt = "Dawn breaks over your homestead at the edge of Greenhollow. Smoke rises from the neighbor's farm. Raiders from the Iron Dominion have crossed the border. They're coming this way."
+
+[[options]]
+label = "Stand and Fight"
+description = "You grab your father's sword and meet them at the gate. Two fall before they overwhelm you. You survive — barely."
+
+[[options.effects]]
+type = "narrative"
+text = "You fought the raiders alone. The scars will remind you."
+
+[[options.effects]]
+type = "reputation"
+amount = 5.0
+
+# Sets PC archetype toward combat
+[[options.pc_traits]]
+trait = "battle_scarred"
+
+[[options.pc_stats]]
+attack = 3.0
+defense = 1.0
+injury = 15.0
+
+[[options]]
+label = "Rally the Neighbors"
+description = "You run door to door, pulling families together. Together you drive the raiders back with pitchforks and determination."
+
+[[options.effects]]
+type = "narrative"
+text = "The community held because you held it together."
+
+[[options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[options.pc_traits]]
+trait = "natural_leader"
+
+[[options.pc_stats]]
+resolve = 5.0
+loyalty_bonus = 10.0
+
+[[options]]
+label = "Save What You Can"
+description = "You know a losing fight when you see one. You grab the strongbox and your mother's locket, and lead your family into the woods."
+
+[[options.effects]]
+type = "gold"
+amount = 30.0
+
+[[options.effects]]
+type = "narrative"
+text = "You lost the homestead but kept what matters."
+
+[[options.pc_traits]]
+trait = "pragmatist"
+
+[[options.pc_stats]]
+speed = 2.0
+
+default_option = 2

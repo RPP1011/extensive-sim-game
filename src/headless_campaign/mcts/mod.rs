@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::f64;
 
 use super::actions::CampaignAction;
-use super::state::{CampaignOutcome, CampaignState, CAMPAIGN_TICK_MS};
+use super::state::{CampaignOutcome, CampaignPhase, CampaignState, CAMPAIGN_TICK_MS};
 use super::step::step_campaign;
 
 pub use rollout::heuristic_rollout_policy;
@@ -278,7 +278,7 @@ pub fn run_mcts_campaign(
     let mut next_decision_tick = config.decision_interval_ticks;
 
     // Handle starting choice via MCTS before the main loop
-    if !state.initialized {
+    if state.phase != CampaignPhase::Playing {
         let (action, decision) = mcts_search(&state, config);
         samples.push(MctsTrainingSample {
             tick: 0,

@@ -390,13 +390,38 @@ pub struct AdventurerStatDelta {
 impl CampaignState {
     /// Returns all currently valid actions the player can take.
     pub fn valid_actions(&self) -> Vec<CampaignAction> {
-        // Before initialization, only starting package choices are valid
-        if !self.initialized {
-            return self.available_starting_choices
-                .iter()
-                .cloned()
-                .map(|choice| CampaignAction::ChooseStartingPackage { choice })
-                .collect();
+        // Pre-game phases
+        match self.phase {
+            CampaignPhase::CharacterCreation => {
+                // During creation, only pending choices (backstory events) are valid
+                let mut actions = Vec::new();
+                for choice in &self.pending_choices {
+                    for (i, _) in choice.options.iter().enumerate() {
+                        actions.push(CampaignAction::RespondToChoice {
+                            choice_id: choice.id,
+                            option_index: i,
+                        });
+                    }
+                }
+                if actions.is_empty() {
+                    // No pending creation choices — transition to package selection
+                    // Return starting packages as the valid actions
+                    return self.available_starting_choices
+                        .iter()
+                        .cloned()
+                        .map(|choice| CampaignAction::ChooseStartingPackage { choice })
+                        .collect();
+                }
+                return actions;
+            }
+            CampaignPhase::ChoosingStartingPackage => {
+                return self.available_starting_choices
+                    .iter()
+                    .cloned()
+                    .map(|choice| CampaignAction::ChooseStartingPackage { choice })
+                    .collect();
+            }
+            CampaignPhase::Playing => {} // fall through to normal actions
         }
 
         let mut actions = vec![CampaignAction::Wait];

@@ -55,7 +55,7 @@ pub fn heuristic_rollout(
 /// - Wait otherwise
 pub fn heuristic_rollout_policy(state: &CampaignState) -> Option<CampaignAction> {
     // Choose starting package if not initialized
-    if !state.initialized {
+    if state.phase != CampaignPhase::Playing {
         if let Some(choice) = state.available_starting_choices.last() {
             return Some(CampaignAction::ChooseStartingPackage {
                 choice: choice.clone(),

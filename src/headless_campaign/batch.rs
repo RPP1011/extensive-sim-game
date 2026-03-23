@@ -225,7 +225,7 @@ pub fn run_single_campaign_with_trace_and_config(
 /// Simple heuristic policy for batch runs.
 pub fn heuristic_policy(state: &CampaignState) -> Option<CampaignAction> {
     // 0. Choose starting package if not initialized
-    if !state.initialized {
+    if state.phase != CampaignPhase::Playing {
         if let Some(choice) = state.available_starting_choices.last() {
             return Some(CampaignAction::ChooseStartingPackage {
                 choice: choice.clone(),

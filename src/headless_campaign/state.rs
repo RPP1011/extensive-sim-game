@@ -83,14 +83,17 @@ pub struct CampaignState {
     pub combat_mode: CombatMode,
 
     // --- Campaign phase ---
-    /// Whether the player has chosen a starting package.
-    /// Until true, the only valid action is `ChooseStartingPackage`.
-    /// Systems don't tick until this is true.
-    pub initialized: bool,
+    /// Current phase of the campaign.
+    pub phase: CampaignPhase,
 
     /// Available starting packages. Loaded from data files.
     /// Emptied after the player chooses one.
     pub available_starting_choices: Vec<StartingChoice>,
+
+    // --- Player character ---
+    /// The player's created character. Built up during character creation.
+    #[serde(default)]
+    pub player_character: Option<PlayerCharacter>,
 
     // --- Configuration ---
     /// All tunable balance parameters. Systems read from this.
@@ -679,6 +682,90 @@ pub enum CampaignOutcome {
 }
 
 // ---------------------------------------------------------------------------
+// Campaign phase
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CampaignPhase {
+    /// Character creation — backstory events playing out.
+    /// Systems don't tick. Only creation choices are valid.
+    CharacterCreation,
+    /// Starting package selection (final creation step).
+    ChoosingStartingPackage,
+    /// Normal gameplay.
+    Playing,
+}
+
+impl Default for CampaignPhase {
+    fn default() -> Self {
+        Self::CharacterCreation
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Player character
+// ---------------------------------------------------------------------------
+
+/// The player's named character — an adventurer with a special flag.
+/// Built incrementally during character creation from backstory choices.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlayerCharacter {
+    /// The adventurer ID in the adventurers list.
+    pub adventurer_id: u32,
+    /// Player-chosen name.
+    pub name: String,
+    /// Origin backstory (e.g. "Noble Exile", "Frontier Settler").
+    pub origin: String,
+    /// Accumulated backstory summary from creation choices.
+    pub backstory: Vec<String>,
+    /// Personal goal — tracked but doesn't end the game.
+    pub goal: Option<PersonalGoal>,
+    /// Whether the PC is alive (if dead, leadership transfers).
+    pub alive: bool,
+    /// Successor adventurer ID (appointed second-in-command).
+    pub successor_id: Option<u32>,
+}
+
+/// A personal goal chosen during character creation.
+/// Cosmetic to the world — just tracks progress toward a player ambition.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PersonalGoal {
+    pub name: String,
+    pub description: String,
+    /// Conditions to check against CampaignState.
+    pub conditions: Vec<GoalCondition>,
+    /// Has this goal been achieved? (doesn't end the game)
+    pub achieved: bool,
+    /// Can this goal become impossible?
+    pub fail_condition: Option<String>,
+    pub failed: bool,
+}
+
+/// A condition for goal completion, checked against game state.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum GoalCondition {
+    /// Faction relationship above threshold.
+    FactionRelation { faction_id: usize, min_relation: f32 },
+    /// Guild reputation above threshold.
+    Reputation { min_reputation: f32 },
+    /// Gold above threshold.
+    Gold { min_gold: f32 },
+    /// Region control above threshold.
+    RegionControl { region_id: usize, min_control: f32 },
+    /// Quest victory count above threshold.
+    QuestsCompleted { min_count: usize },
+    /// Adventurer count above threshold.
+    AdventurerCount { min_count: usize },
+    /// PC level above threshold.
+    PlayerLevel { min_level: u32 },
+    /// All factions at Friendly or Coalition.
+    AllFactionsAllied,
+    /// Specific trait acquired by PC.
+    HasTrait { trait_name: String },
+}
+
+// ---------------------------------------------------------------------------
 // Choice events
 // ---------------------------------------------------------------------------
 
@@ -1005,8 +1092,9 @@ impl CampaignState {
             next_unlock_id: 1,
             next_event_id: 1,
             combat_mode: CombatMode::Oracle,
-            initialized: false,
+            phase: CampaignPhase::ChoosingStartingPackage,
             available_starting_choices: Self::load_or_default_starting_choices(),
+            player_character: None,
             config: CampaignConfig::default(),
         }
     }

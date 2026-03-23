@@ -31,7 +31,7 @@ pub fn step_campaign(
     };
 
     // --- Don't tick until the player has chosen a starting package ---
-    if !state.initialized {
+    if state.phase != CampaignPhase::Playing {
         deltas.gold_after = state.guild.gold;
         deltas.supplies_after = state.guild.supplies;
         deltas.reputation_after = state.guild.reputation;
@@ -640,7 +640,7 @@ fn apply_action(
         }
 
         CampaignAction::ChooseStartingPackage { choice } => {
-            if state.initialized {
+            if state.phase == CampaignPhase::Playing {
                 return ActionResult::Failed("Campaign already initialized".into());
             }
 
@@ -661,7 +661,7 @@ fn apply_action(
                 state.guild.inventory.push(item);
             }
 
-            state.initialized = true;
+            state.phase = CampaignPhase::Playing;
             state.available_starting_choices.clear();
 
             events.push(WorldEvent::CampaignMilestone {

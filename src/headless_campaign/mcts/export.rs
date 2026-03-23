@@ -9,7 +9,7 @@ use std::path::Path;
 
 use super::{mcts_search, MctsConfig, MctsDecision};
 use crate::headless_campaign::config::CampaignConfig;
-use crate::headless_campaign::state::{CampaignOutcome, CampaignState};
+use crate::headless_campaign::state::{CampaignOutcome, CampaignPhase, CampaignState};
 use crate::headless_campaign::step::step_campaign;
 use crate::headless_campaign::tokens::EntityToken;
 use crate::headless_campaign::world_templates::WorldTemplate;
@@ -80,7 +80,7 @@ pub fn export_mcts_campaign(
 
     // Handle starting choice via MCTS before the main loop.
     // The starting choice is part of the MCTS tree (not pre-selected).
-    if !state.initialized {
+    if state.phase != CampaignPhase::Playing {
         let tokens = state.to_tokens();
         let (action, decision) = mcts_search(&state, mcts_config);
 

@@ -1,12 +1,12 @@
 //! Determinism tests: same seed + same actions = identical state.
 
 use crate::headless_campaign::actions::CampaignAction;
-use crate::headless_campaign::state::CampaignState;
+use crate::headless_campaign::state::{CampaignPhase, CampaignState};
 use crate::headless_campaign::step::step_campaign;
 
 /// Initialize a campaign by picking the first available starting package.
 fn init_campaign(state: &mut CampaignState) {
-    if !state.initialized {
+    if state.phase != CampaignPhase::Playing {
         let choice = state.available_starting_choices[0].clone();
         step_campaign(state, Some(CampaignAction::ChooseStartingPackage { choice }));
     }
