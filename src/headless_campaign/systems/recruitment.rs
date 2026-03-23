@@ -96,6 +96,10 @@ pub fn tick_recruitment(
         morale: 60.0 + lcg_f32(&mut state.rng) * 30.0,
         party_id: None,
         guild_relationship: 30.0 + lcg_f32(&mut state.rng) * 20.0,
+        leadership_role: None,
+        is_player_character: false,
+        faction_id: None,
+        rallying_to: None,
     };
 
     events.push(WorldEvent::AdventurerRecovered {

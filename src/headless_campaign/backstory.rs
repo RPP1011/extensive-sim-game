@@ -238,6 +238,10 @@ pub fn init_character_creation(
         morale: 90.0,
         party_id: None,
         guild_relationship: 100.0,
+        leadership_role: None,
+        is_player_character: false,
+        faction_id: None,
+        rallying_to: None,
     };
 
     state.adventurers.push(pc);

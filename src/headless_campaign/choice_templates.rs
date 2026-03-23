@@ -303,6 +303,10 @@ pub fn instantiate_effect(e: &EffectTemplate, ctx: &TemplateContext) -> Option<C
                 morale: 55.0,
                 party_id: None,
                 guild_relationship: 30.0,
+                leadership_role: None,
+                is_player_character: false,
+                faction_id: None,
+                rallying_to: None,
             }))
         }
         _ => {

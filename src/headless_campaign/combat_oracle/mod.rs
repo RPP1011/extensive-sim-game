@@ -157,6 +157,10 @@ mod tests {
             morale: 80.0,
             party_id: None,
             guild_relationship: 50.0,
+            leadership_role: None,
+            is_player_character: false,
+            faction_id: None,
+            rallying_to: None,
         }
     }
 

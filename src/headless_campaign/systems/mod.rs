@@ -4,6 +4,7 @@
 //! Systems fire at different cadences (all multiples of the 100ms base tick).
 
 pub mod choices;
+pub mod crisis;
 pub mod travel;
 pub mod supply;
 pub mod battles;

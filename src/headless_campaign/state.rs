@@ -217,6 +217,62 @@ pub struct Adventurer {
     pub party_id: Option<u32>,
     /// NPC relationship score to the guild (−100 to 100).
     pub guild_relationship: f32,
+
+    // --- Leadership ---
+    /// Leadership role providing passive buffs to the guild/faction.
+    /// Unlocked through progression. Buff is active while adventurer is
+    /// alive and not on a quest.
+    #[serde(default)]
+    pub leadership_role: Option<LeadershipRole>,
+    /// Whether this is the player character.
+    #[serde(default)]
+    pub is_player_character: bool,
+    /// Which faction this adventurer belongs to (None = guild).
+    #[serde(default)]
+    pub faction_id: Option<usize>,
+    /// If traveling to join a faction (Sleeping King mechanic).
+    #[serde(default)]
+    pub rallying_to: Option<RallyTarget>,
+}
+
+/// A leadership role that provides passive buffs while the adventurer is active.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LeadershipRole {
+    pub title: String,
+    pub buff: LeadershipBuff,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum LeadershipBuff {
+    /// Adds flat military strength to the faction.
+    MilitaryStrength(f32),
+    /// Multiplier on faction attack power.
+    AttackMultiplier(f32),
+    /// Reduces control loss from enemy attacks.
+    DefenseBonus(f32),
+    /// Passive gold income per tick.
+    GoldIncome(f32),
+    /// Faster adventurer recovery.
+    RecoveryRate(f32),
+    /// Improved quest reward scaling.
+    RewardMultiplier(f32),
+    /// Better recruitment chances.
+    RecruitBonus(f32),
+    /// Improved faction relationship drift.
+    DiplomacyBonus(f32),
+    /// Reduces adventurer stress accumulation.
+    MoraleAura(f32),
+}
+
+/// An adventurer traveling to rally to a faction (for crisis mechanics).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RallyTarget {
+    /// Faction they're traveling to join.
+    pub faction_id: usize,
+    /// Position they're heading to.
+    pub destination: (f32, f32),
+    /// Travel speed (tiles/sec).
+    pub speed: f32,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -454,6 +510,9 @@ pub struct OverworldState {
     pub campaign_progress: f32,
     /// Endgame calamity, if one has been selected.
     pub endgame_calamity: Option<CalamityType>,
+    /// Active endgame crisis state (if a crisis has triggered).
+    #[serde(default)]
+    pub active_crisis: Option<ActiveCrisis>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -504,6 +563,48 @@ pub enum CalamityType {
     CrisisFlood,
     /// A conquest victory condition.
     Conquest,
+}
+
+/// Active endgame crisis with tracking state.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ActiveCrisis {
+    /// The Sleeping King: champions rally to a distant ruler.
+    SleepingKing {
+        /// The faction ID of the King's growing empire.
+        king_faction_id: usize,
+        /// Adventurer IDs of the champions (scattered across map).
+        champion_ids: Vec<u32>,
+        /// How many champions have arrived.
+        champions_arrived: u32,
+        /// Tick when next champion activates.
+        next_activation_tick: u64,
+        /// Ticks between champion activations.
+        activation_interval: u64,
+    },
+    /// The Breach: dungeon monsters pour out in waves.
+    Breach {
+        source_location_id: usize,
+        wave_number: u32,
+        wave_strength: f32,
+        next_wave_tick: u64,
+    },
+    /// The Corruption: spreading contamination.
+    Corruption {
+        origin_region_id: usize,
+        corrupted_regions: Vec<usize>,
+        spread_rate_ticks: u64,
+        next_spread_tick: u64,
+    },
+    /// The Unifier: political crisis, a charismatic leader unites factions.
+    Unifier {
+        unifier_faction_id: usize,
+        absorbed_factions: Vec<usize>,
+    },
+    /// The Decline: slow resource drain, everything gets worse.
+    Decline {
+        severity: f32,
+        tick_started: u64,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -962,6 +1063,10 @@ impl CampaignState {
                 morale: 80.0,
                 party_id: None,
                 guild_relationship: 50.0,
+                leadership_role: None,
+                is_player_character: false,
+                faction_id: None,
+                rallying_to: None,
             },
             Adventurer {
                 id: 2,
@@ -987,6 +1092,10 @@ impl CampaignState {
                 morale: 85.0,
                 party_id: None,
                 guild_relationship: 60.0,
+                leadership_role: None,
+                is_player_character: false,
+                faction_id: None,
+                rallying_to: None,
             },
             Adventurer {
                 id: 3,
@@ -1012,6 +1121,10 @@ impl CampaignState {
                 morale: 75.0,
                 party_id: None,
                 guild_relationship: 40.0,
+                leadership_role: None,
+                is_player_character: false,
+                faction_id: None,
+                rallying_to: None,
             },
             Adventurer {
                 id: 4,
@@ -1037,6 +1150,10 @@ impl CampaignState {
                 morale: 90.0,
                 party_id: None,
                 guild_relationship: 65.0,
+                leadership_role: None,
+                is_player_character: false,
+                faction_id: None,
+                rallying_to: None,
             },
         ];
 
@@ -1074,6 +1191,7 @@ impl CampaignState {
                 global_threat_level,
                 campaign_progress: 0.0,
                 endgame_calamity: None,
+                active_crisis: None,
             },
             factions,
             diplomacy,
@@ -1145,6 +1263,7 @@ impl CampaignState {
                         status: AdventurerStatus::Idle,
                         loyalty: 60.0, stress: 10.0, fatigue: 5.0, injury: 0.0, resolve: 50.0, morale: 70.0,
                         party_id: None, guild_relationship: 40.0,
+                        leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     },
                     Adventurer {
                         id: 2, name: "Greta".into(), archetype: "knight".into(), level: 2, xp: 0,
@@ -1153,6 +1272,7 @@ impl CampaignState {
                         status: AdventurerStatus::Idle,
                         loyalty: 65.0, stress: 5.0, fatigue: 8.0, injury: 0.0, resolve: 55.0, morale: 75.0,
                         party_id: None, guild_relationship: 45.0,
+                        leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     },
                 ],
                 gold_bonus: 150.0, supply_bonus: 30.0, reputation_bonus: 5.0, items: Vec::new(),
@@ -1168,6 +1288,7 @@ impl CampaignState {
                         status: AdventurerStatus::Idle,
                         loyalty: 40.0, stress: 30.0, fatigue: 20.0, injury: 15.0, resolve: 80.0, morale: 50.0,
                         party_id: None, guild_relationship: 25.0,
+                        leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     },
                 ],
                 gold_bonus: 0.0, supply_bonus: 0.0, reputation_bonus: 10.0, items: Vec::new(),
@@ -1183,6 +1304,7 @@ impl CampaignState {
                         status: AdventurerStatus::Idle,
                         loyalty: 55.0, stress: 12.0, fatigue: 8.0, injury: 0.0, resolve: 45.0, morale: 65.0,
                         party_id: None, guild_relationship: 35.0,
+                        leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     },
                     Adventurer {
                         id: 2, name: "Brynn".into(), archetype: "mage".into(), level: 1, xp: 0,
@@ -1191,6 +1313,7 @@ impl CampaignState {
                         status: AdventurerStatus::Idle,
                         loyalty: 50.0, stress: 15.0, fatigue: 5.0, injury: 0.0, resolve: 40.0, morale: 60.0,
                         party_id: None, guild_relationship: 30.0,
+                        leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     },
                     Adventurer {
                         id: 3, name: "Cira".into(), archetype: "cleric".into(), level: 1, xp: 0,
@@ -1199,6 +1322,7 @@ impl CampaignState {
                         status: AdventurerStatus::Idle,
                         loyalty: 70.0, stress: 8.0, fatigue: 3.0, injury: 0.0, resolve: 50.0, morale: 75.0,
                         party_id: None, guild_relationship: 45.0,
+                        leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     },
                     Adventurer {
                         id: 4, name: "Daven".into(), archetype: "rogue".into(), level: 1, xp: 0,
@@ -1207,6 +1331,7 @@ impl CampaignState {
                         status: AdventurerStatus::Idle,
                         loyalty: 45.0, stress: 18.0, fatigue: 10.0, injury: 0.0, resolve: 35.0, morale: 55.0,
                         party_id: None, guild_relationship: 25.0,
+                        leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     },
                 ],
                 gold_bonus: 20.0, supply_bonus: 10.0, reputation_bonus: 0.0, items: Vec::new(),
