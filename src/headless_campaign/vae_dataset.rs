@@ -223,11 +223,27 @@ fn diverse_policy(state: &CampaignState, rng: &mut u64) -> Option<CampaignAction
 }
 
 /// Run one campaign, returning trigger contexts.
+/// Randomizes XP rate and victory threshold per campaign to get diverse level ranges.
 fn sweep_single_campaign(seed: u64, config: &VaeDatasetConfig) -> Vec<TriggerContext> {
-    let mut state = CampaignState::with_config(seed, config.campaign_config.clone());
+    let mut campaign_config = config.campaign_config.clone();
+
+    // Vary XP multiplier: some campaigns level fast (10), others slow (80)
+    // This produces level 1-40+ content across the dataset
+    let mut rng = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+    rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+    let xp_mult_options = [10, 15, 20, 30, 50, 80];
+    campaign_config.quest_lifecycle.level_up_xp_multiplier =
+        xp_mult_options[(rng as usize) % xp_mult_options.len()];
+
+    // Vary victory quest count to let some campaigns run longer
+    rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+    let victory_options = [15.0, 25.0, 40.0, 60.0, 100.0];
+    campaign_config.campaign_progress.victory_quest_count =
+        victory_options[(rng as usize) % victory_options.len()];
+
+    let mut state = CampaignState::with_config(seed, campaign_config);
     let mut contexts = Vec::new();
     let mut seen_triggers: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut rng = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
 
     for _ in 0..config.max_ticks {
         let action = diverse_policy(&state, &mut rng);
