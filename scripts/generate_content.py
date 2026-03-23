@@ -12,49 +12,155 @@ import json
 import sys
 import time
 
-MODEL_ID = "Qwen/Qwen3.5-4B"
+MODEL_ID = "Qwen/Qwen3.5-9B"
 
-ABILITY_SYSTEM = '''Output ONLY the ability block. No thinking. No explanation.
+ABILITY_SYSTEM = '''You generate ability definitions in a custom DSL. Output ONLY the ability block. No thinking. No explanation. No markdown.
+
+## Grammar
+
+ability <snake_case_name> {
+    type: active|passive
+    cooldown: <N>s                    (required for active, omit for passive)
+    trigger: <trigger_type>           (required for passive, omit for active)
+    effect: <effect_description>
+    tag: <single_tag>
+    description: "<flavor text>"
+}
+
+## Valid stats (ONLY these exist)
+attack, defense, speed, max_hp, ability_power
+
+## Valid tags (pick ONE)
+ranged, nature, stealth, tracking, survival,
+melee, defense, leadership, fortification, honor,
+arcane, elemental, ritual, knowledge, enchantment,
+healing, divine, protection, purification, restoration,
+assassination, agility, deception, sabotage,
+crisis, legendary, inspiration, sacrifice
+
+## Valid triggers (passive only)
+on_damage_dealt, on_damage_taken, on_kill, on_ally_damaged,
+on_death, on_ability_used, on_hp_below, on_hp_above,
+on_shield_broken, periodic
+
+## Effect types
+damage <N>, heal <N>, shield <N>, stun <N>s, slow <factor> <N>s,
+knockback <N>, dash, buff <stat> <N>% <N>s, debuff <stat> <N>% <N>s,
+stealth <N>s, evasion <N>%, tenacity <N>, teleport, aura <stat> +<N>
+
+## Examples
 
 ability shield_bash {
     type: active
     cooldown: 10s
-    effect: stun 2s + 30 damage
+    effect: stun 2s + damage 30
     tag: melee
     description: "A devastating shield strike"
 }
 
-ability divine_grace {
-    type: active
-    cooldown: 20s
-    effect: heal 50 to all allies
-    tag: healing
-    description: "A prayer answered with golden light"
+ability battle_sense {
+    type: passive
+    trigger: on_damage_taken
+    effect: buff defense 15% 5s
+    tag: defense
+    description: "Pain sharpens focus"
 }
 
 ability shadow_step {
     type: active
     cooldown: 15s
-    effect: teleport behind target + 40 damage
+    effect: teleport + damage 40 + stealth 3s
     tag: stealth
     description: "Vanish and reappear behind your prey"
 }'''
 
-CLASS_SYSTEM = '''Output ONLY the class block. No thinking. No explanation.
+CLASS_SYSTEM = '''You generate class definitions in a custom DSL. Output ONLY the class block. No thinking. No explanation. No markdown.
+
+## Grammar
+
+class <PascalCaseName> {
+    stat_growth: +<N> <stat>, +<N> <stat>, ... per level
+    tags: <tag>, <tag>, ...
+    scaling <source> {
+        when <condition>: <bonus>
+        always: <bonus>
+    }
+    abilities {
+        level <N>: <snake_case_name> "<description>"
+    }
+    requirements: <req>, <req>, ...
+    consolidates_at: <N>              (optional, for prestige classes)
+}
+
+## Valid stats (ONLY these, no others)
+attack, defense, speed, max_hp, ability_power
+
+## Stat growth rules
+- Total per level should be 5-15 for normal classes, up to 25 for hero classes
+- Use "+N all" as shorthand for equal growth in all stats
+
+## Valid tags
+ranged, nature, stealth, tracking, survival,
+melee, defense, leadership, fortification, honor,
+arcane, elemental, ritual, knowledge, enchantment,
+healing, divine, protection, purification, restoration,
+assassination, agility, deception, sabotage,
+crisis, legendary, inspiration, sacrifice
+
+## Valid scaling sources
+party_alive_count, party_size, faction_strength, coalition_strength,
+crisis_severity, fame, territory_control, adventurer_count,
+gold, reputation, threat_level
+
+## Valid conditions in "when" clauses
+party_members > N, party_members >= N, faction_alive,
+faction_territory >= N, crisis_active, crisis_severity > N,
+solo (party_members == 1)
+
+## Valid bonuses
++N% <stat>          (percentage stat boost)
++N <stat>           (flat stat boost)
+tenacity <N>        (CC reduction, 0-1)
+escape <N>          (disengage chance)
+aura <stat> +<N>    (buff nearby allies)
+last_stand below <N>% max_hp +<N>% attack
+inspire nearby +<N> <stat>
+
+## Valid requirements
+level <N>, fame <N>, quests <N>, trait <name>,
+active_crisis, gold <N>, group_size <N>, allies <N>
+
+## Examples
 
 class Sentinel {
     stat_growth: +1 attack, +3 defense, +3 max_hp per level
     tags: melee, defense, leadership
     scaling party_alive_count {
         when party_members > 0: +10% defense
+        when party_members >= 3: tenacity 0.5
         always: aura defense +2
     }
     abilities {
-        level 1: shield_wall "Reduces incoming damage"
+        level 1: shield_wall "Reduces incoming damage to party"
         level 5: taunt "Forces enemies to target this unit"
         level 10: iron_will "Immune to morale effects"
     }
     requirements: level 5, fame 50
+}
+
+class Shadowmaster {
+    stat_growth: +3 attack, +3 speed, +1 ability_power per level
+    tags: stealth, assassination, agility
+    scaling party_alive_count {
+        when party_members == 1: +25% attack
+        always: +5% speed
+    }
+    abilities {
+        level 1: ambush "Bonus damage on first strike"
+        level 5: evasion "Chance to dodge attacks"
+        level 10: assassinate "Attempt to one-shot a target"
+    }
+    requirements: level 10, fame 100
 }'''
 
 
