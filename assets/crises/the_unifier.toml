@@ -1,0 +1,12 @@
+name = "The Unifier"
+description = "A charismatic leader absorbs weaker factions, growing into an unstoppable empire"
+crisis_type = "unifier"
+world_templates = []
+trigger_threshold = 0.75
+priority = 6
+allow_simultaneous = true
+
+[config]
+type = "Unifier"
+absorb_interval_ticks = 5000
+strength_absorption_rate = 0.7

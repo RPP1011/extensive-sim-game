@@ -24,6 +24,7 @@ pub mod backstory;
 pub mod batch;
 pub mod bfs_explore;
 pub mod choice_templates;
+pub mod crisis_templates;
 pub mod heuristic_bc;
 pub mod combat_oracle;
 pub mod config;

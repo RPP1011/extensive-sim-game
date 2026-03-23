@@ -566,6 +566,8 @@ pub enum CalamityType {
 }
 
 /// Active endgame crisis with tracking state.
+///
+/// All escalation parameters come from TOML templates in `assets/crises/`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ActiveCrisis {
     /// The Sleeping King: champions rally to a distant ruler.
@@ -580,6 +582,12 @@ pub enum ActiveCrisis {
         next_activation_tick: u64,
         /// Ticks between champion activations.
         activation_interval: u64,
+        /// Power growth formula from template.
+        #[serde(default = "default_quadratic")]
+        power_formula: String,
+        /// Champions needed before declaring war (from template).
+        #[serde(default = "default_war_threshold")]
+        war_threshold: u32,
     },
     /// The Breach: dungeon monsters pour out in waves.
     Breach {
@@ -587,6 +595,18 @@ pub enum ActiveCrisis {
         wave_number: u32,
         wave_strength: f32,
         next_wave_tick: u64,
+        /// Strength multiplier per wave (from template).
+        #[serde(default = "default_strength_multiplier")]
+        strength_multiplier: f32,
+        /// Ticks subtracted from interval each wave (from template).
+        #[serde(default = "default_wave_acceleration")]
+        wave_acceleration: u64,
+        /// Minimum ticks between waves (from template).
+        #[serde(default = "default_min_wave_interval")]
+        min_wave_interval: u64,
+        /// Initial wave interval for computing next wave tick (from template).
+        #[serde(default = "default_initial_wave_interval")]
+        initial_wave_interval: u64,
     },
     /// The Corruption: spreading contamination.
     Corruption {
@@ -594,18 +614,62 @@ pub enum ActiveCrisis {
         corrupted_regions: Vec<usize>,
         spread_rate_ticks: u64,
         next_spread_tick: u64,
+        /// Control damage per tick to corrupted regions (from template).
+        #[serde(default = "default_control_damage")]
+        control_damage_per_tick: f32,
+        /// Unrest damage per tick to corrupted regions (from template).
+        #[serde(default = "default_unrest_damage")]
+        unrest_damage_per_tick: f32,
     },
     /// The Unifier: political crisis, a charismatic leader unites factions.
     Unifier {
         unifier_faction_id: usize,
         absorbed_factions: Vec<usize>,
+        /// Ticks between absorption attempts (from template).
+        #[serde(default = "default_absorb_interval")]
+        absorb_interval_ticks: u64,
+        /// Fraction of absorbed faction's strength gained (from template).
+        #[serde(default = "default_absorption_rate")]
+        strength_absorption_rate: f32,
     },
     /// The Decline: slow resource drain, everything gets worse.
     Decline {
         severity: f32,
         tick_started: u64,
+        /// Gold drained per application (from template).
+        #[serde(default = "default_gold_drain")]
+        gold_drain_per_tick: f32,
+        /// Supplies drained per application (from template).
+        #[serde(default = "default_supply_drain")]
+        supply_drain_per_tick: f32,
+        /// Morale drained per adventurer per application (from template).
+        #[serde(default = "default_morale_drain")]
+        morale_drain_per_tick: f32,
+        /// Control drained per region per application (from template).
+        #[serde(default = "default_control_drain")]
+        control_drain_per_tick: f32,
+        /// Severity growth rate (from template).
+        #[serde(default = "default_severity_growth_rate")]
+        severity_growth_rate: f32,
     },
 }
+
+// Serde defaults for backward compatibility with saved states.
+fn default_quadratic() -> String { "quadratic".into() }
+fn default_war_threshold() -> u32 { 5 }
+fn default_strength_multiplier() -> f32 { 1.3 }
+fn default_wave_acceleration() -> u64 { 200 }
+fn default_min_wave_interval() -> u64 { 500 }
+fn default_initial_wave_interval() -> u64 { 3000 }
+fn default_control_damage() -> f32 { 0.3 }
+fn default_unrest_damage() -> f32 { 0.5 }
+fn default_absorb_interval() -> u64 { 5000 }
+fn default_absorption_rate() -> f32 { 0.7 }
+fn default_gold_drain() -> f32 { 0.5 }
+fn default_supply_drain() -> f32 { 0.3 }
+fn default_morale_drain() -> f32 { 0.1 }
+fn default_control_drain() -> f32 { 0.1 }
+fn default_severity_growth_rate() -> f32 { 10000.0 }
 
 // ---------------------------------------------------------------------------
 // Factions & Diplomacy

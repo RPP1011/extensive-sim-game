@@ -1,0 +1,13 @@
+name = "The Spreading Blight"
+description = "A strange corruption spreads across the land, damaging control and stirring unrest"
+crisis_type = "corruption"
+world_templates = []
+trigger_threshold = 0.7
+priority = 7
+allow_simultaneous = true
+
+[config]
+type = "Corruption"
+spread_interval_ticks = 5000
+control_damage_per_tick = 0.3
+unrest_damage_per_tick = 0.5

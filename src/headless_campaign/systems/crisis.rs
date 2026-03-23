@@ -3,8 +3,14 @@
 //! Each crisis type has its own escalation mechanics.
 //! Multiple crises can be active at once — the world can face a
 //! Sleeping King AND a dungeon breach simultaneously.
+//!
+//! All content (champion rosters, escalation rates, etc.) comes from
+//! TOML templates in `assets/crises/`. This module is pure mechanics.
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
+use crate::headless_campaign::crisis_templates::{
+    compute_power_boost, parse_leadership_buff, parse_location_type, CrisisConfig, CrisisTemplate,
+};
 use crate::headless_campaign::state::*;
 
 /// Tick all active crises. Runs every tick.
@@ -48,60 +54,81 @@ pub fn tick_crisis(
     state.overworld.active_crises = updated_crises;
 }
 
-/// Activate a crisis from a CalamityType. Called by threat.rs when
-/// campaign progress crosses the threshold.
-pub fn activate_crisis(
+/// Activate a crisis from a template. Called by threat.rs when
+/// campaign progress crosses the template's threshold.
+pub fn activate_crisis_from_template(
     state: &mut CampaignState,
-    calamity: &CalamityType,
+    template: &CrisisTemplate,
     events: &mut Vec<WorldEvent>,
 ) {
     // Don't duplicate crisis types
+    let crisis_type = template.crisis_type.as_str();
     let already_active = state.overworld.active_crises.iter().any(|c| {
         matches!(
-            (c, calamity),
-            (ActiveCrisis::SleepingKing { .. }, CalamityType::AggressiveFaction { .. })
-            | (ActiveCrisis::Breach { .. }, CalamityType::MajorMonster { .. })
-            | (ActiveCrisis::Corruption { .. }, CalamityType::CrisisFlood)
-            | (ActiveCrisis::Decline { .. }, CalamityType::Conquest)
+            (c, crisis_type),
+            (ActiveCrisis::SleepingKing { .. }, "sleeping_king")
+                | (ActiveCrisis::Breach { .. }, "breach")
+                | (ActiveCrisis::Corruption { .. }, "corruption")
+                | (ActiveCrisis::Unifier { .. }, "unifier")
+                | (ActiveCrisis::Decline { .. }, "decline")
         )
     });
     if already_active {
         return;
     }
 
-    match calamity {
-        CalamityType::AggressiveFaction { faction_id } => {
-            // Spawn 7 champion adventurers scattered across the map
-            let mut champion_ids = Vec::new();
-            let champion_names = [
-                ("Sera the Strategist", "knight", 7, LeadershipBuff::AttackMultiplier(1.5)),
-                ("Vorn the Smith", "knight", 6, LeadershipBuff::DefenseBonus(20.0)),
-                ("Kira Shadowstep", "rogue", 8, LeadershipBuff::GoldIncome(5.0)),
-                ("Brother Aldous", "cleric", 6, LeadershipBuff::RecoveryRate(2.0)),
-                ("Mira Farsight", "ranger", 7, LeadershipBuff::RecruitBonus(0.5)),
-                ("Dax Ironwall", "knight", 9, LeadershipBuff::MilitaryStrength(50.0)),
-                ("The Whisperer", "mage", 8, LeadershipBuff::DiplomacyBonus(20.0)),
-            ];
+    match &template.config {
+        CrisisConfig::SleepingKing {
+            king_faction_name,
+            champions,
+            first_activation_ticks,
+            activation_interval_ticks,
+            power_formula,
+            war_threshold,
+        } => {
+            // Find the faction by name, or pick the strongest hostile faction
+            let king_faction_id = state
+                .factions
+                .iter()
+                .find(|f| f.name == *king_faction_name)
+                .map(|f| f.id)
+                .or_else(|| {
+                    state
+                        .factions
+                        .iter()
+                        .filter(|f| {
+                            matches!(
+                                f.diplomatic_stance,
+                                DiplomaticStance::Hostile | DiplomaticStance::AtWar
+                            )
+                        })
+                        .max_by(|a, b| {
+                            a.military_strength
+                                .partial_cmp(&b.military_strength)
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        })
+                        .map(|f| f.id)
+                })
+                .unwrap_or(1); // fallback
 
-            for (i, (name, archetype, level, buff)) in champion_names.iter().enumerate() {
+            let mut champion_ids = Vec::new();
+
+            for (i, champ_def) in champions.iter().enumerate() {
                 let id = 9000 + i as u32;
-                let pos = (
-                    (i as f32 * 17.0 - 50.0),
-                    (i as f32 * 13.0 - 40.0),
-                );
+                let buff = parse_leadership_buff(&champ_def.buff_type, champ_def.buff_value);
 
                 let champ = Adventurer {
                     id,
-                    name: name.to_string(),
-                    archetype: archetype.to_string(),
-                    level: *level,
+                    name: champ_def.name.clone(),
+                    archetype: champ_def.archetype.clone(),
+                    level: champ_def.level,
                     xp: 0,
                     stats: AdventurerStats {
-                        max_hp: 100.0 + *level as f32 * 15.0,
-                        attack: 10.0 + *level as f32 * 4.0,
-                        defense: 8.0 + *level as f32 * 3.0,
+                        max_hp: 100.0 + champ_def.level as f32 * 15.0,
+                        attack: 10.0 + champ_def.level as f32 * 4.0,
+                        defense: 8.0 + champ_def.level as f32 * 3.0,
                         speed: 10.0,
-                        ability_power: 8.0 + *level as f32 * 3.0,
+                        ability_power: 8.0 + champ_def.level as f32 * 3.0,
                     },
                     equipment: Equipment::default(),
                     traits: vec!["champion".into()],
@@ -113,13 +140,13 @@ pub fn activate_crisis(
                     resolve: 90.0,
                     morale: 95.0,
                     party_id: None,
-                    guild_relationship: 30.0, // Neutral — player may interact
+                    guild_relationship: 30.0,
                     leadership_role: Some(LeadershipRole {
-                        title: format!("Champion of the King"),
-                        buff: buff.clone(),
+                        title: "Champion of the King".to_string(),
+                        buff,
                     }),
                     is_player_character: false,
-                    faction_id: None, // Unaffiliated until activated
+                    faction_id: None,
                     rallying_to: None,
                 };
 
@@ -128,72 +155,167 @@ pub fn activate_crisis(
             }
 
             let crisis = ActiveCrisis::SleepingKing {
-                king_faction_id: *faction_id,
+                king_faction_id,
                 champion_ids,
                 champions_arrived: 0,
-                next_activation_tick: state.tick + 3000, // First activation in ~5 min
-                activation_interval: 2000, // Then every ~3.3 min
+                next_activation_tick: state.tick + first_activation_ticks,
+                activation_interval: *activation_interval_ticks,
+                power_formula: power_formula.clone(),
+                war_threshold: *war_threshold,
             };
 
             state.overworld.active_crises.push(crisis);
 
             events.push(WorldEvent::CampaignMilestone {
-                description: "The Sleeping King stirs! Ancient champions across the land feel the call...".into(),
+                description: format!(
+                    "{}: {}",
+                    template.name, template.description
+                ),
             });
         }
 
-        CalamityType::MajorMonster { name, strength } => {
-            // Find a dungeon location as the source
-            let source = state.overworld.locations.iter()
-                .find(|l| l.location_type == LocationType::Dungeon)
+        CrisisConfig::Breach {
+            source_location_type,
+            initial_strength,
+            strength_multiplier,
+            initial_wave_interval,
+            wave_acceleration,
+            min_wave_interval,
+        } => {
+            let loc_type = parse_location_type(source_location_type);
+            let source = state
+                .overworld
+                .locations
+                .iter()
+                .find(|l| l.location_type == loc_type)
                 .map(|l| l.id)
                 .unwrap_or(0);
+
+            // Scale initial strength by world threat level
+            let base_strength = state.overworld.global_threat_level.max(50.0);
+            let wave_strength = base_strength * initial_strength;
 
             let crisis = ActiveCrisis::Breach {
                 source_location_id: source,
                 wave_number: 0,
-                wave_strength: *strength * 0.3,
-                next_wave_tick: state.tick + 2000,
+                wave_strength,
+                next_wave_tick: state.tick + initial_wave_interval,
+                strength_multiplier: *strength_multiplier,
+                wave_acceleration: *wave_acceleration,
+                min_wave_interval: *min_wave_interval,
+                initial_wave_interval: *initial_wave_interval,
             };
 
             state.overworld.active_crises.push(crisis);
 
             events.push(WorldEvent::CampaignMilestone {
-                description: format!("The ground trembles... {} stirs beneath the earth!", name),
+                description: format!(
+                    "{}: {}",
+                    template.name, template.description
+                ),
             });
         }
 
-        CalamityType::CrisisFlood => {
-            // Find the most unstable region as origin
-            let origin = state.overworld.regions.iter()
-                .max_by(|a, b| a.unrest.partial_cmp(&b.unrest).unwrap_or(std::cmp::Ordering::Equal))
+        CrisisConfig::Corruption {
+            spread_interval_ticks,
+            control_damage_per_tick,
+            unrest_damage_per_tick,
+        } => {
+            let origin = state
+                .overworld
+                .regions
+                .iter()
+                .max_by(|a, b| {
+                    a.unrest
+                        .partial_cmp(&b.unrest)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
                 .map(|r| r.id)
                 .unwrap_or(0);
 
             let crisis = ActiveCrisis::Corruption {
                 origin_region_id: origin,
                 corrupted_regions: vec![origin],
-                spread_rate_ticks: 5000,
-                next_spread_tick: state.tick + 5000,
+                spread_rate_ticks: *spread_interval_ticks,
+                next_spread_tick: state.tick + spread_interval_ticks,
+                control_damage_per_tick: *control_damage_per_tick,
+                unrest_damage_per_tick: *unrest_damage_per_tick,
             };
 
             state.overworld.active_crises.push(crisis);
 
             events.push(WorldEvent::CampaignMilestone {
-                description: "A strange blight spreads across the land...".into(),
+                description: format!(
+                    "{}: {}",
+                    template.name, template.description
+                ),
             });
         }
 
-        CalamityType::Conquest => {
-            let crisis = ActiveCrisis::Decline {
-                severity: 1.0,
-                tick_started: state.tick,
+        CrisisConfig::Unifier {
+            absorb_interval_ticks,
+            strength_absorption_rate,
+        } => {
+            // Pick the strongest hostile faction as the unifier
+            let unifier_faction_id = state
+                .factions
+                .iter()
+                .filter(|f| {
+                    f.id != state.diplomacy.guild_faction_id
+                        && matches!(
+                            f.diplomatic_stance,
+                            DiplomaticStance::Hostile | DiplomaticStance::AtWar
+                        )
+                })
+                .max_by(|a, b| {
+                    a.military_strength
+                        .partial_cmp(&b.military_strength)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|f| f.id)
+                .unwrap_or(1);
+
+            let crisis = ActiveCrisis::Unifier {
+                unifier_faction_id,
+                absorbed_factions: Vec::new(),
+                absorb_interval_ticks: *absorb_interval_ticks,
+                strength_absorption_rate: *strength_absorption_rate,
             };
 
             state.overworld.active_crises.push(crisis);
 
             events.push(WorldEvent::CampaignMilestone {
-                description: "The world grows weary. Resources dwindle, morale falters...".into(),
+                description: format!(
+                    "{}: {}",
+                    template.name, template.description
+                ),
+            });
+        }
+
+        CrisisConfig::Decline {
+            gold_drain_per_tick,
+            supply_drain_per_tick,
+            morale_drain_per_tick,
+            control_drain_per_tick,
+            severity_growth_rate,
+        } => {
+            let crisis = ActiveCrisis::Decline {
+                severity: 1.0,
+                tick_started: state.tick,
+                gold_drain_per_tick: *gold_drain_per_tick,
+                supply_drain_per_tick: *supply_drain_per_tick,
+                morale_drain_per_tick: *morale_drain_per_tick,
+                control_drain_per_tick: *control_drain_per_tick,
+                severity_growth_rate: *severity_growth_rate,
+            };
+
+            state.overworld.active_crises.push(crisis);
+
+            events.push(WorldEvent::CampaignMilestone {
+                description: format!(
+                    "{}: {}",
+                    template.name, template.description
+                ),
             });
         }
     }
@@ -208,13 +330,34 @@ fn tick_sleeping_king(
     events: &mut Vec<WorldEvent>,
     crisis: ActiveCrisis,
 ) -> Option<ActiveCrisis> {
-    let (king_faction_id, champion_ids, mut champions_arrived, mut next_activation_tick, activation_interval) =
-        match crisis {
-            ActiveCrisis::SleepingKing {
-                king_faction_id, champion_ids, champions_arrived, next_activation_tick, activation_interval,
-            } => (king_faction_id, champion_ids, champions_arrived, next_activation_tick, activation_interval),
-            _ => return Some(crisis),
-        };
+    let (
+        king_faction_id,
+        champion_ids,
+        mut champions_arrived,
+        mut next_activation_tick,
+        activation_interval,
+        power_formula,
+        war_threshold,
+    ) = match crisis {
+        ActiveCrisis::SleepingKing {
+            king_faction_id,
+            champion_ids,
+            champions_arrived,
+            next_activation_tick,
+            activation_interval,
+            power_formula,
+            war_threshold,
+        } => (
+            king_faction_id,
+            champion_ids,
+            champions_arrived,
+            next_activation_tick,
+            activation_interval,
+            power_formula,
+            war_threshold,
+        ),
+        _ => return Some(crisis),
+    };
 
     // Activate next dormant champion on schedule
     if state.tick >= next_activation_tick {
@@ -224,9 +367,17 @@ fn tick_sleeping_king(
                 && a.faction_id != Some(king_faction_id)
                 && a.status != AdventurerStatus::Dead
         }) {
-            let king_pos = state.overworld.regions.iter()
+            let king_pos = state
+                .overworld
+                .regions
+                .iter()
                 .find(|r| r.owner_faction_id == king_faction_id)
-                .map(|r| ((r.id as f32 * 20.0) - 30.0, (r.id as f32 * 15.0) - 20.0))
+                .map(|r| {
+                    (
+                        (r.id as f32 * 20.0) - 30.0,
+                        (r.id as f32 * 15.0) - 20.0,
+                    )
+                })
                 .unwrap_or((50.0, 50.0));
 
             let name = champ.name.clone();
@@ -238,14 +389,17 @@ fn tick_sleeping_king(
             champ.status = AdventurerStatus::Traveling;
 
             events.push(WorldEvent::CampaignMilestone {
-                description: format!("{} has heard the King's call and begins their journey!", name),
+                description: format!(
+                    "{} has heard the King's call and begins their journey!",
+                    name
+                ),
             });
 
             next_activation_tick = state.tick + activation_interval;
         }
     }
 
-    // Check for arrivals (simplified: arrive after activation_interval ticks of travel)
+    // Check for arrivals
     let mut newly_arrived = Vec::new();
     for champ in &mut state.adventurers {
         if !champion_ids.contains(&champ.id) || champ.status == AdventurerStatus::Dead {
@@ -265,34 +419,46 @@ fn tick_sleeping_king(
         champions_arrived += 1;
 
         if let Some(faction) = state.factions.iter_mut().find(|f| f.id == king_faction_id) {
-            // QUADRATIC snowball: power = 25 * n^2
-            let power_boost = 25.0 * (champions_arrived as f32) * (champions_arrived as f32);
+            let power_boost = compute_power_boost(&power_formula, champions_arrived);
             faction.military_strength += power_boost;
             faction.max_military_strength += power_boost;
 
             events.push(WorldEvent::CampaignMilestone {
                 description: format!(
                     "{} has joined the Sleeping King! ({}/{} champions, +{:.0} strength, total {:.0})",
-                    name, champions_arrived, champion_ids.len(),
-                    power_boost, faction.military_strength
+                    name,
+                    champions_arrived,
+                    champion_ids.len(),
+                    power_boost,
+                    faction.military_strength
                 ),
             });
 
-            if champions_arrived >= 5 && faction.diplomatic_stance != DiplomaticStance::AtWar {
+            if champions_arrived >= war_threshold
+                && faction.diplomatic_stance != DiplomaticStance::AtWar
+            {
                 faction.diplomatic_stance = DiplomaticStance::AtWar;
-                if !faction.at_war_with.contains(&state.diplomacy.guild_faction_id) {
-                    faction.at_war_with.push(state.diplomacy.guild_faction_id);
+                if !faction
+                    .at_war_with
+                    .contains(&state.diplomacy.guild_faction_id)
+                {
+                    faction
+                        .at_war_with
+                        .push(state.diplomacy.guild_faction_id);
                 }
                 faction.relationship_to_guild = -100.0;
                 events.push(WorldEvent::CampaignMilestone {
-                    description: "The Sleeping King declares war on all who oppose them!".into(),
+                    description: "The Sleeping King declares war on all who oppose them!"
+                        .into(),
                 });
             }
         }
     }
 
-    // Crisis resolved if king faction destroyed (all regions lost, strength < 10)
-    let king_alive = state.factions.iter()
+    // Crisis resolved if king faction destroyed
+    let king_alive = state
+        .factions
+        .iter()
         .find(|f| f.id == king_faction_id)
         .map(|f| f.military_strength > 10.0 || f.territory_size > 0)
         .unwrap_or(false);
@@ -301,7 +467,7 @@ fn tick_sleeping_king(
         events.push(WorldEvent::CampaignMilestone {
             description: "The Sleeping King has been defeated!".into(),
         });
-        return None; // Remove crisis
+        return None;
     }
 
     Some(ActiveCrisis::SleepingKing {
@@ -310,6 +476,8 @@ fn tick_sleeping_king(
         champions_arrived,
         next_activation_tick,
         activation_interval,
+        power_formula,
+        war_threshold,
     })
 }
 
@@ -322,37 +490,87 @@ fn tick_breach(
     events: &mut Vec<WorldEvent>,
     crisis: ActiveCrisis,
 ) -> Option<ActiveCrisis> {
-    let (source_location_id, mut wave_number, mut wave_strength, next_wave_tick) = match crisis {
-        ActiveCrisis::Breach { source_location_id, wave_number, wave_strength, next_wave_tick } =>
-            (source_location_id, wave_number, wave_strength, next_wave_tick),
+    let (
+        source_location_id,
+        mut wave_number,
+        mut wave_strength,
+        next_wave_tick,
+        strength_multiplier,
+        wave_acceleration,
+        min_wave_interval,
+        initial_wave_interval,
+    ) = match crisis {
+        ActiveCrisis::Breach {
+            source_location_id,
+            wave_number,
+            wave_strength,
+            next_wave_tick,
+            strength_multiplier,
+            wave_acceleration,
+            min_wave_interval,
+            initial_wave_interval,
+        } => (
+            source_location_id,
+            wave_number,
+            wave_strength,
+            next_wave_tick,
+            strength_multiplier,
+            wave_acceleration,
+            min_wave_interval,
+            initial_wave_interval,
+        ),
         _ => return Some(crisis),
     };
 
     if state.tick < next_wave_tick {
-        return Some(ActiveCrisis::Breach { source_location_id, wave_number, wave_strength, next_wave_tick });
+        return Some(ActiveCrisis::Breach {
+            source_location_id,
+            wave_number,
+            wave_strength,
+            next_wave_tick,
+            strength_multiplier,
+            wave_acceleration,
+            min_wave_interval,
+            initial_wave_interval,
+        });
     }
 
     wave_number += 1;
-    wave_strength *= 1.3;
+    wave_strength *= strength_multiplier;
 
-    if let Some(region) = state.overworld.regions.iter_mut()
+    if let Some(region) = state
+        .overworld
+        .regions
+        .iter_mut()
         .filter(|r| r.owner_faction_id == state.diplomacy.guild_faction_id)
-        .min_by(|a, b| a.control.partial_cmp(&b.control).unwrap_or(std::cmp::Ordering::Equal))
+        .min_by(|a, b| {
+            a.control
+                .partial_cmp(&b.control)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     {
         region.control = (region.control - wave_strength * 0.5).max(0.0);
         region.unrest = (region.unrest + wave_strength * 0.3).min(100.0);
     }
 
     events.push(WorldEvent::CampaignMilestone {
-        description: format!("Breach wave {} erupts! (strength {:.0})", wave_number, wave_strength),
+        description: format!(
+            "Breach wave {} erupts! (strength {:.0})",
+            wave_number, wave_strength
+        ),
     });
 
-    let wave_interval = 3000u64.saturating_sub(wave_number as u64 * 200);
+    let next_interval =
+        initial_wave_interval.saturating_sub(wave_number as u64 * wave_acceleration);
     Some(ActiveCrisis::Breach {
         source_location_id,
         wave_number,
         wave_strength,
-        next_wave_tick: state.tick + wave_interval.max(500),
+        next_wave_tick: state.tick + next_interval.max(min_wave_interval),
+        strength_multiplier,
+        wave_acceleration,
+        min_wave_interval,
+        initial_wave_interval,
     })
 }
 
@@ -365,17 +583,37 @@ fn tick_corruption(
     events: &mut Vec<WorldEvent>,
     crisis: ActiveCrisis,
 ) -> Option<ActiveCrisis> {
-    let (origin_region_id, mut corrupted_regions, spread_rate_ticks, next_spread_tick) = match crisis {
-        ActiveCrisis::Corruption { origin_region_id, corrupted_regions, spread_rate_ticks, next_spread_tick } =>
-            (origin_region_id, corrupted_regions, spread_rate_ticks, next_spread_tick),
+    let (
+        origin_region_id,
+        mut corrupted_regions,
+        spread_rate_ticks,
+        next_spread_tick,
+        control_damage_per_tick,
+        unrest_damage_per_tick,
+    ) = match crisis {
+        ActiveCrisis::Corruption {
+            origin_region_id,
+            corrupted_regions,
+            spread_rate_ticks,
+            next_spread_tick,
+            control_damage_per_tick,
+            unrest_damage_per_tick,
+        } => (
+            origin_region_id,
+            corrupted_regions,
+            spread_rate_ticks,
+            next_spread_tick,
+            control_damage_per_tick,
+            unrest_damage_per_tick,
+        ),
         _ => return Some(crisis),
     };
 
-    // Ongoing damage to corrupted regions
+    // Ongoing damage to corrupted regions — rates from template
     for &rid in &corrupted_regions {
         if let Some(region) = state.overworld.regions.iter_mut().find(|r| r.id == rid) {
-            region.unrest = (region.unrest + 0.5).min(100.0);
-            region.control = (region.control - 0.3).max(0.0);
+            region.unrest = (region.unrest + unrest_damage_per_tick).min(100.0);
+            region.control = (region.control - control_damage_per_tick).max(0.0);
         }
     }
 
@@ -391,22 +629,30 @@ fn tick_corruption(
                     }
                 }
             }
-            if spread_to.is_some() { break; }
+            if spread_to.is_some() {
+                break;
+            }
         }
 
         if let Some(new_rid) = spread_to {
             corrupted_regions.push(new_rid);
-            let name = state.overworld.regions.iter()
+            let name = state
+                .overworld
+                .regions
+                .iter()
                 .find(|r| r.id == new_rid)
                 .map(|r| r.name.clone())
                 .unwrap_or_else(|| format!("Region {}", new_rid));
             events.push(WorldEvent::CampaignMilestone {
-                description: format!("The corruption spreads to {}! ({}/{} regions)",
-                    name, corrupted_regions.len(), state.overworld.regions.len()),
+                description: format!(
+                    "The corruption spreads to {}! ({}/{} regions)",
+                    name,
+                    corrupted_regions.len(),
+                    state.overworld.regions.len()
+                ),
             });
         }
 
-        // Resolved if all regions corrupted or all corrupted regions purged
         if corrupted_regions.len() >= state.overworld.regions.len() {
             events.push(WorldEvent::CampaignMilestone {
                 description: "The corruption has consumed the entire realm!".into(),
@@ -418,10 +664,19 @@ fn tick_corruption(
             corrupted_regions,
             spread_rate_ticks,
             next_spread_tick: state.tick + spread_rate_ticks,
+            control_damage_per_tick,
+            unrest_damage_per_tick,
         });
     }
 
-    Some(ActiveCrisis::Corruption { origin_region_id, corrupted_regions, spread_rate_ticks, next_spread_tick })
+    Some(ActiveCrisis::Corruption {
+        origin_region_id,
+        corrupted_regions,
+        spread_rate_ticks,
+        next_spread_tick,
+        control_damage_per_tick,
+        unrest_damage_per_tick,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -433,21 +688,37 @@ fn tick_unifier(
     events: &mut Vec<WorldEvent>,
     crisis: ActiveCrisis,
 ) -> Option<ActiveCrisis> {
-    let (unifier_faction_id, mut absorbed_factions) = match crisis {
-        ActiveCrisis::Unifier { unifier_faction_id, absorbed_factions } =>
-            (unifier_faction_id, absorbed_factions),
-        _ => return Some(crisis),
-    };
+    let (unifier_faction_id, mut absorbed_factions, absorb_interval_ticks, strength_absorption_rate) =
+        match crisis {
+            ActiveCrisis::Unifier {
+                unifier_faction_id,
+                absorbed_factions,
+                absorb_interval_ticks,
+                strength_absorption_rate,
+            } => (
+                unifier_faction_id,
+                absorbed_factions,
+                absorb_interval_ticks,
+                strength_absorption_rate,
+            ),
+            _ => return Some(crisis),
+        };
 
-    // Every 5000 ticks, the unifier absorbs the weakest non-guild faction
-    if state.tick % 5000 == 0 {
-        let weakest = state.factions.iter()
+    // Absorb on the template-defined interval
+    if absorb_interval_ticks > 0 && state.tick % absorb_interval_ticks == 0 {
+        let weakest = state
+            .factions
+            .iter()
             .filter(|f| {
                 f.id != unifier_faction_id
                     && f.id != state.diplomacy.guild_faction_id
                     && !absorbed_factions.contains(&f.id)
             })
-            .min_by(|a, b| a.military_strength.partial_cmp(&b.military_strength).unwrap_or(std::cmp::Ordering::Equal))
+            .min_by(|a, b| {
+                a.military_strength
+                    .partial_cmp(&b.military_strength)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|f| f.id);
 
         if let Some(target_id) = weakest {
@@ -460,31 +731,46 @@ fn tick_unifier(
                 }
             }
 
-            // Absorb military strength
-            let target_strength = state.factions.iter()
+            // Absorb military strength at template-defined rate
+            let target_strength = state
+                .factions
+                .iter()
                 .find(|f| f.id == target_id)
                 .map(|f| f.military_strength)
                 .unwrap_or(0.0);
-            if let Some(unifier) = state.factions.iter_mut().find(|f| f.id == unifier_faction_id) {
-                unifier.military_strength += target_strength * 0.7;
-                unifier.max_military_strength += target_strength * 0.5;
+            if let Some(unifier) = state
+                .factions
+                .iter_mut()
+                .find(|f| f.id == unifier_faction_id)
+            {
+                unifier.military_strength += target_strength * strength_absorption_rate;
+                unifier.max_military_strength +=
+                    target_strength * (strength_absorption_rate * 0.7);
             }
 
-            let target_name = state.factions.iter()
+            let target_name = state
+                .factions
+                .iter()
                 .find(|f| f.id == target_id)
                 .map(|f| f.name.clone())
                 .unwrap_or_default();
 
             events.push(WorldEvent::CampaignMilestone {
-                description: format!("The Unifier has absorbed {}! ({} factions remain independent)",
+                description: format!(
+                    "The Unifier has absorbed {}! ({} factions remain independent)",
                     target_name,
-                    state.factions.len() - absorbed_factions.len() - 1 // -1 for the unifier itself
+                    state.factions.len() - absorbed_factions.len() - 1
                 ),
             });
         }
     }
 
-    Some(ActiveCrisis::Unifier { unifier_faction_id, absorbed_factions })
+    Some(ActiveCrisis::Unifier {
+        unifier_faction_id,
+        absorbed_factions,
+        absorb_interval_ticks,
+        strength_absorption_rate,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -493,33 +779,65 @@ fn tick_unifier(
 
 fn tick_decline(
     state: &mut CampaignState,
-    events: &mut Vec<WorldEvent>,
+    _events: &mut Vec<WorldEvent>,
     crisis: ActiveCrisis,
 ) -> Option<ActiveCrisis> {
-    let (severity, tick_started) = match crisis {
-        ActiveCrisis::Decline { severity, tick_started } => (severity, tick_started),
+    let (
+        _severity,
+        tick_started,
+        gold_drain_per_tick,
+        supply_drain_per_tick,
+        morale_drain_per_tick,
+        control_drain_per_tick,
+        severity_growth_rate,
+    ) = match crisis {
+        ActiveCrisis::Decline {
+            severity,
+            tick_started,
+            gold_drain_per_tick,
+            supply_drain_per_tick,
+            morale_drain_per_tick,
+            control_drain_per_tick,
+            severity_growth_rate,
+        } => (
+            severity,
+            tick_started,
+            gold_drain_per_tick,
+            supply_drain_per_tick,
+            morale_drain_per_tick,
+            control_drain_per_tick,
+            severity_growth_rate,
+        ),
         _ => return Some(crisis),
     };
 
     let elapsed = state.tick.saturating_sub(tick_started);
-    let severity = 1.0 + (elapsed as f32 / 10000.0);
+    let severity = 1.0 + (elapsed as f32 / severity_growth_rate);
 
     if state.tick % 100 == 0 {
-        state.guild.gold = (state.guild.gold - severity * 0.5).max(0.0);
-        state.guild.supplies = (state.guild.supplies - severity * 0.3).max(0.0);
+        state.guild.gold = (state.guild.gold - severity * gold_drain_per_tick).max(0.0);
+        state.guild.supplies = (state.guild.supplies - severity * supply_drain_per_tick).max(0.0);
 
         for adv in &mut state.adventurers {
             if adv.status != AdventurerStatus::Dead {
-                adv.morale = (adv.morale - severity * 0.1).max(0.0);
-                adv.stress = (adv.stress + severity * 0.05).min(100.0);
+                adv.morale = (adv.morale - severity * morale_drain_per_tick).max(0.0);
+                adv.stress = (adv.stress + severity * (morale_drain_per_tick * 0.5)).min(100.0);
             }
         }
 
         for region in &mut state.overworld.regions {
-            region.control = (region.control - severity * 0.1).max(0.0);
-            region.unrest = (region.unrest + severity * 0.05).min(100.0);
+            region.control = (region.control - severity * control_drain_per_tick).max(0.0);
+            region.unrest = (region.unrest + severity * (control_drain_per_tick * 0.5)).min(100.0);
         }
     }
 
-    Some(ActiveCrisis::Decline { severity, tick_started })
+    Some(ActiveCrisis::Decline {
+        severity,
+        tick_started,
+        gold_drain_per_tick,
+        supply_drain_per_tick,
+        morale_drain_per_tick,
+        control_drain_per_tick,
+        severity_growth_rate,
+    })
 }

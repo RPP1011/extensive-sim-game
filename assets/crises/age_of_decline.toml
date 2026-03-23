@@ -1,0 +1,15 @@
+name = "Age of Decline"
+description = "The world grows weary. Resources dwindle, morale falters, control erodes"
+crisis_type = "decline"
+world_templates = []
+trigger_threshold = 0.95
+priority = 5
+allow_simultaneous = true
+
+[config]
+type = "Decline"
+gold_drain_per_tick = 0.5
+supply_drain_per_tick = 0.3
+morale_drain_per_tick = 0.1
+control_drain_per_tick = 0.1
+severity_growth_rate = 10000.0

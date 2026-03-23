@@ -1,9 +1,11 @@
 //! Global threat and campaign progress — every 600 ticks (~60s).
 //!
 //! Updates global threat level based on world state.
-//! Checks for endgame calamity conditions.
+//! Checks for endgame crisis conditions using data-driven templates
+//! loaded from `assets/crises/*.toml`.
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
+use crate::headless_campaign::crisis_templates::get_or_load_crises;
 use crate::headless_campaign::state::*;
 
 pub fn tick_threat(
@@ -74,50 +76,64 @@ pub fn tick_threat(
         }
     }
 
-    // Endgame calamity warning
-    if state.overworld.campaign_progress > pcfg.calamity_warning_threshold && state.overworld.endgame_calamity.is_none() {
-        // Select a calamity based on world state
-        let strongest_hostile = state
-            .factions
-            .iter()
-            .filter(|f| f.diplomatic_stance == DiplomaticStance::AtWar)
-            .max_by(|a, b| a.military_strength.partial_cmp(&b.military_strength).unwrap_or(std::cmp::Ordering::Equal));
+    // --- Data-driven crisis activation from templates ---
+    let templates = get_or_load_crises();
 
-        let calamity = if let Some(faction) = strongest_hostile {
-            CalamityType::AggressiveFaction {
-                faction_id: faction.id,
-            }
-        } else if avg_unrest > pcfg.crisis_flood_unrest_threshold {
-            CalamityType::CrisisFlood
-        } else {
-            CalamityType::Conquest
-        };
-
-        // Activate the crisis
-        super::crisis::activate_crisis(state, &calamity, events);
-        state.overworld.endgame_calamity = Some(calamity);
-    }
-
-    // Additional crises can trigger at higher progress thresholds
-    // (multiple simultaneous crises)
-    if state.overworld.campaign_progress > 0.85 && state.overworld.active_crises.len() < 2 {
-        // Second crisis based on different conditions
-        let has_breach = state.overworld.active_crises.iter().any(|c| matches!(c, ActiveCrisis::Breach { .. }));
-        let has_dungeon = state.overworld.locations.iter().any(|l| l.location_type == LocationType::Dungeon);
-
-        if !has_breach && has_dungeon {
-            let calamity = CalamityType::MajorMonster {
-                name: "The Ancient One".into(),
-                strength: 50.0 + state.overworld.global_threat_level,
-            };
-            super::crisis::activate_crisis(state, &calamity, events);
+    // Templates are already sorted by priority (highest first).
+    // Activate each template whose threshold is met, respecting allow_simultaneous.
+    for template in templates {
+        if state.overworld.campaign_progress < template.trigger_threshold {
+            continue;
         }
-    }
 
-    if state.overworld.campaign_progress > 0.95 && state.overworld.active_crises.len() < 3 {
-        let has_decline = state.overworld.active_crises.iter().any(|c| matches!(c, ActiveCrisis::Decline { .. }));
-        if !has_decline {
-            super::crisis::activate_crisis(state, &CalamityType::Conquest, events);
+        // Check world_template filter (empty = any world)
+        // We match against faction names as a proxy for world template identity.
+        if !template.world_templates.is_empty() {
+            let faction_names: Vec<&str> = state.factions.iter().map(|f| f.name.as_str()).collect();
+            let world_match = template.world_templates.iter().any(|wt| {
+                faction_names.iter().any(|fn_| fn_.contains(wt.as_str()))
+            });
+            if !world_match {
+                continue;
+            }
+        }
+
+        // Check allow_simultaneous: if false, skip if any crisis is already active
+        if !template.allow_simultaneous && !state.overworld.active_crises.is_empty() {
+            continue;
+        }
+
+        // Activate the crisis (activate_crisis_from_template handles dedup)
+        super::crisis::activate_crisis_from_template(state, template, events);
+
+        // Track the first crisis as the endgame_calamity for backward compat
+        if state.overworld.endgame_calamity.is_none() {
+            let calamity = match template.crisis_type.as_str() {
+                "sleeping_king" => {
+                    let fid = state
+                        .factions
+                        .iter()
+                        .find(|f| {
+                            matches!(
+                                f.diplomatic_stance,
+                                DiplomaticStance::Hostile | DiplomaticStance::AtWar
+                            )
+                        })
+                        .map(|f| f.id)
+                        .unwrap_or(1);
+                    Some(CalamityType::AggressiveFaction { faction_id: fid })
+                }
+                "breach" => Some(CalamityType::MajorMonster {
+                    name: template.name.clone(),
+                    strength: state.overworld.global_threat_level,
+                }),
+                "corruption" => Some(CalamityType::CrisisFlood),
+                "decline" | "unifier" => Some(CalamityType::Conquest),
+                _ => None,
+            };
+            if let Some(c) = calamity {
+                state.overworld.endgame_calamity = Some(c);
+            }
         }
     }
 }

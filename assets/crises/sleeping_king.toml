@@ -1,0 +1,78 @@
+name = "The Sleeping King"
+description = "Ancient champions rally to a waking ruler, growing in power until they declare war"
+crisis_type = "sleeping_king"
+world_templates = []
+trigger_threshold = 0.7
+priority = 10
+allow_simultaneous = true
+
+[config]
+type = "SleepingKing"
+king_faction_name = "Iron Dominion"
+first_activation_ticks = 3000
+activation_interval_ticks = 2000
+power_formula = "quadratic"
+war_threshold = 5
+
+[[config.champions]]
+name = "Sera the Strategist"
+archetype = "knight"
+level = 7
+buff_type = "attack_multiplier"
+buff_value = 1.5
+starting_position = [-50.0, 10.0]
+travel_speed = 3.0
+
+[[config.champions]]
+name = "Vorn the Smith"
+archetype = "knight"
+level = 6
+buff_type = "defense_bonus"
+buff_value = 20.0
+starting_position = [-33.0, -27.0]
+travel_speed = 3.0
+
+[[config.champions]]
+name = "Kira Shadowstep"
+archetype = "rogue"
+level = 8
+buff_type = "gold_income"
+buff_value = 5.0
+starting_position = [-16.0, -14.0]
+travel_speed = 3.0
+
+[[config.champions]]
+name = "Brother Aldous"
+archetype = "cleric"
+level = 6
+buff_type = "recovery_rate"
+buff_value = 2.0
+starting_position = [1.0, -1.0]
+travel_speed = 3.0
+
+[[config.champions]]
+name = "Mira Farsight"
+archetype = "ranger"
+level = 7
+buff_type = "recruit_bonus"
+buff_value = 0.5
+starting_position = [18.0, 12.0]
+travel_speed = 3.0
+
+[[config.champions]]
+name = "Dax Ironwall"
+archetype = "knight"
+level = 9
+buff_type = "military_strength"
+buff_value = 50.0
+starting_position = [35.0, 25.0]
+travel_speed = 3.0
+
+[[config.champions]]
+name = "The Whisperer"
+archetype = "mage"
+level = 8
+buff_type = "diplomacy_bonus"
+buff_value = 20.0
+starting_position = [52.0, 38.0]
+travel_speed = 3.0
