@@ -42,9 +42,9 @@ pub enum TaskCommand {
 #[derive(Debug, Parser)]
 #[command(about = "BFS state-space exploration: expand all actions, cluster leaves, prune to medians")]
 pub struct BfsExploreArgs {
-    /// Number of BFS waves
-    #[arg(long, default_value_t = 5)]
-    pub waves: u32,
+    /// Max BFS waves (0 = unlimited, run until all branches complete)
+    #[arg(long, default_value_t = 0)]
+    pub max_waves: u32,
     /// Ticks to advance per branch (let action play out)
     #[arg(long, default_value_t = 200)]
     pub ticks_per_branch: u64,

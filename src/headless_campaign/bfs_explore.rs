@@ -66,8 +66,8 @@ struct RootState {
 /// Configuration for BFS exploration.
 #[derive(Clone, Debug)]
 pub struct BfsConfig {
-    /// Number of BFS waves (depth of exploration).
-    pub waves: u32,
+    /// Maximum BFS waves (0 = unlimited, run until all leaves are terminal).
+    pub max_waves: u32,
     /// Ticks to advance after each action (let it play out).
     pub ticks_per_branch: u64,
     /// Number of clusters per wave (controls width).
@@ -91,7 +91,7 @@ pub struct BfsConfig {
 impl Default for BfsConfig {
     fn default() -> Self {
         Self {
-            waves: 5,
+            max_waves: 0, // 0 = run until completion
             ticks_per_branch: 200, // ~20s game time per branch
             clusters_per_wave: 20,
             initial_roots: 50,
@@ -278,9 +278,14 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
     let mut stats = BfsStats::default();
     let t0 = std::time::Instant::now();
 
+    let max_waves_str = if config.max_waves == 0 {
+        "unlimited (until completion)".to_string()
+    } else {
+        config.max_waves.to_string()
+    };
     eprintln!("=== BFS State-Space Exploration ===");
-    eprintln!("Waves: {}, Clusters/wave: {}, Ticks/branch: {}",
-        config.waves, config.clusters_per_wave, config.ticks_per_branch);
+    eprintln!("Max waves: {}, Clusters/wave: {}, Ticks/branch: {}",
+        max_waves_str, config.clusters_per_wave, config.ticks_per_branch);
     eprintln!("Initial roots: {}, Threads: {}", config.initial_roots, threads);
 
     // Phase 1: Generate initial roots from diverse heuristic trajectories
@@ -288,9 +293,24 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
     eprintln!("Generated {} initial root states", roots.len());
     stats.initial_roots = roots.len();
 
-    // Phase 2: BFS waves
-    for wave in 0..config.waves {
+    // Phase 2: BFS waves — continue until all leaves are terminal or max_waves reached
+    let mut wave: u32 = 0;
+    let mut total_terminal = 0u64;
+    let mut total_victories = 0u64;
+    let mut total_defeats = 0u64;
+
+    loop {
+        if config.max_waves > 0 && wave >= config.max_waves {
+            eprintln!("  Reached max waves ({}), stopping", config.max_waves);
+            break;
+        }
+        if roots.is_empty() {
+            eprintln!("  No more roots to expand (all terminal), stopping");
+            break;
+        }
+
         let wave_t0 = std::time::Instant::now();
+        let num_roots = roots.len();
 
         // Expand all roots in parallel
         let (samples, leaves): (Vec<Vec<BfsSample>>, Vec<Vec<(CampaignState, Vec<f32>, u64)>>) = pool.install(|| {
@@ -306,6 +326,16 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
         let all_leaves: Vec<(CampaignState, Vec<f32>, u64)> =
             leaves.into_iter().flatten().collect();
 
+        // Count terminal outcomes in this wave's samples
+        let wave_terminal: usize = all_samples.iter().filter(|s| s.leaf_outcome.is_some()).count();
+        let wave_victories: usize = all_samples.iter()
+            .filter(|s| s.leaf_outcome.as_deref() == Some("Victory")).count();
+        let wave_defeats: usize = all_samples.iter()
+            .filter(|s| s.leaf_outcome.as_deref() == Some("Defeat")).count();
+        total_terminal += wave_terminal as u64;
+        total_victories += wave_victories as u64;
+        total_defeats += wave_defeats as u64;
+
         // Write samples
         {
             use std::io::Write;
@@ -320,7 +350,24 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
         stats.total_samples += all_samples.len();
         stats.total_leaves += all_leaves.len();
 
-        // Cluster leaves and select medians for next wave
+        // If no non-terminal leaves, we're done
+        if all_leaves.is_empty() {
+            let unique_action_types: std::collections::HashSet<&str> = all_samples
+                .iter()
+                .map(|s| s.action_type.as_str())
+                .collect();
+            eprintln!(
+                "  Wave {}: {} roots → {} samples (all terminal: {}V/{}D), {} action types, {:.1}s",
+                wave, num_roots, all_samples.len(),
+                wave_victories, wave_defeats,
+                unique_action_types.len(),
+                wave_t0.elapsed().as_secs_f64(),
+            );
+            eprintln!("  All branches reached terminal states, stopping");
+            break;
+        }
+
+        // Cluster non-terminal leaves and select medians for next wave
         let leaf_states_features: Vec<(CampaignState, Vec<f32>)> = all_leaves
             .iter()
             .map(|(s, f, _)| (s.clone(), f.clone()))
@@ -347,23 +394,31 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
             .collect();
 
         eprintln!(
-            "  Wave {}: {} roots → {} samples, {} leaves → {} clusters → {} next roots ({} action types, {:.1}s)",
-            wave,
-            if wave == 0 { config.initial_roots } else { config.clusters_per_wave },
-            all_samples.len(),
+            "  Wave {}: {} roots → {} samples ({} terminal: {}V/{}D), {} live leaves → {} clusters → {} next roots ({} action types, {:.1}s)",
+            wave, num_roots,
+            all_samples.len(), wave_terminal, wave_victories, wave_defeats,
             all_leaves.len(),
             config.clusters_per_wave,
             roots.len(),
             unique_action_types.len(),
             wave_t0.elapsed().as_secs_f64(),
         );
+
+        wave += 1;
     }
 
     let elapsed = t0.elapsed().as_secs_f64();
     stats.elapsed_secs = elapsed;
+    stats.total_terminal = total_terminal as usize;
+    stats.total_victories = total_victories as usize;
+    stats.total_defeats = total_defeats as usize;
+    stats.waves_completed = wave;
 
     eprintln!("\n=== BFS Exploration Complete ===");
+    eprintln!("Waves: {}", wave);
     eprintln!("Total samples: {}", stats.total_samples);
+    eprintln!("Terminal outcomes: {} ({} victories, {} defeats)",
+        total_terminal, total_victories, total_defeats);
     eprintln!("Total leaves explored: {}", stats.total_leaves);
     eprintln!("Rate: {:.0} samples/s", stats.total_samples as f64 / elapsed);
     eprintln!("Output: {} ({:.1} MB)",
@@ -378,6 +433,10 @@ pub struct BfsStats {
     pub initial_roots: usize,
     pub total_samples: usize,
     pub total_leaves: usize,
+    pub total_terminal: usize,
+    pub total_victories: usize,
+    pub total_defeats: usize,
+    pub waves_completed: u32,
     pub elapsed_secs: f64,
 }
 

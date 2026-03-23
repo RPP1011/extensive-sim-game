@@ -72,7 +72,7 @@ fn main() -> ExitCode {
             };
 
             let config = bevy_game::headless_campaign::bfs_explore::BfsConfig {
-                waves: args.waves,
+                max_waves: args.max_waves,
                 ticks_per_branch: args.ticks_per_branch,
                 clusters_per_wave: args.clusters,
                 initial_roots: args.initial_roots,
