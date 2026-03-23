@@ -510,9 +510,9 @@ pub struct OverworldState {
     pub campaign_progress: f32,
     /// Endgame calamity, if one has been selected.
     pub endgame_calamity: Option<CalamityType>,
-    /// Active endgame crisis state (if a crisis has triggered).
+    /// Active endgame crises. Multiple can run simultaneously.
     #[serde(default)]
-    pub active_crisis: Option<ActiveCrisis>,
+    pub active_crises: Vec<ActiveCrisis>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1191,7 +1191,7 @@ impl CampaignState {
                 global_threat_level,
                 campaign_progress: 0.0,
                 endgame_calamity: None,
-                active_crisis: None,
+                active_crises: Vec::new(),
             },
             factions,
             diplomacy,

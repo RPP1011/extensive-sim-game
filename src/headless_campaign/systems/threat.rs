@@ -93,9 +93,31 @@ pub fn tick_threat(
             CalamityType::Conquest
         };
 
+        // Activate the crisis
+        super::crisis::activate_crisis(state, &calamity, events);
         state.overworld.endgame_calamity = Some(calamity);
-        events.push(WorldEvent::CalamityWarning {
-            description: "Endgame calamity approaching!".into(),
-        });
+    }
+
+    // Additional crises can trigger at higher progress thresholds
+    // (multiple simultaneous crises)
+    if state.overworld.campaign_progress > 0.85 && state.overworld.active_crises.len() < 2 {
+        // Second crisis based on different conditions
+        let has_breach = state.overworld.active_crises.iter().any(|c| matches!(c, ActiveCrisis::Breach { .. }));
+        let has_dungeon = state.overworld.locations.iter().any(|l| l.location_type == LocationType::Dungeon);
+
+        if !has_breach && has_dungeon {
+            let calamity = CalamityType::MajorMonster {
+                name: "The Ancient One".into(),
+                strength: 50.0 + state.overworld.global_threat_level,
+            };
+            super::crisis::activate_crisis(state, &calamity, events);
+        }
+    }
+
+    if state.overworld.campaign_progress > 0.95 && state.overworld.active_crises.len() < 3 {
+        let has_decline = state.overworld.active_crises.iter().any(|c| matches!(c, ActiveCrisis::Decline { .. }));
+        if !has_decline {
+            super::crisis::activate_crisis(state, &CalamityType::Conquest, events);
+        }
     }
 }
