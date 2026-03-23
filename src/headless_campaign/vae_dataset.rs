@@ -263,7 +263,16 @@ fn sweep_single_campaign(seed: u64, config: &VaeDatasetConfig) -> Vec<TriggerCon
 // Step 2: Batch LLM Generation
 // ---------------------------------------------------------------------------
 
+/// Coarse dedup key: archetype + level_bucket(5) + trigger.
+/// Contexts with the same key get the same LLM output, saving ~98% of calls.
+fn coarse_key(ctx: &TriggerContext) -> String {
+    let level_bucket = (ctx.level / 5) * 5;
+    format!("{}_{}_{}_{}", ctx.archetype, level_bucket, ctx.trigger, ctx.content_type)
+}
+
 /// Read trigger contexts and generate content via LLM.
+/// Deduplicates by coarse key (archetype + level_bucket + trigger) so we only
+/// call the LLM once per unique combination instead of once per context.
 pub fn generate_content(config: &VaeDatasetConfig, contexts: &[TriggerContext]) {
     let llm_cfg = match &config.llm_config {
         Some(c) => c,
@@ -280,14 +289,21 @@ pub fn generate_content(config: &VaeDatasetConfig, contexts: &[TriggerContext]) 
 
     let store = std::sync::Arc::new(llm::create_store(llm_cfg));
 
-    // Filter to only ability and class contexts (quests are procedural)
+    // Deduplicate: pick one representative context per coarse key
     let llm_contexts: Vec<&TriggerContext> = contexts.iter()
         .filter(|c| c.content_type == "ability" || c.content_type == "class")
         .collect();
 
+    let mut seen_keys = std::collections::HashSet::new();
+    let unique_contexts: Vec<&TriggerContext> = llm_contexts.iter()
+        .filter(|c| seen_keys.insert(coarse_key(c)))
+        .copied()
+        .collect();
+
     eprintln!("\n=== VAE Dataset: LLM Generation ===");
-    eprintln!("{} contexts to generate ({} workers, {} candidates each)",
-        llm_contexts.len(), config.llm_workers, config.llm_candidates);
+    eprintln!("{} total LLM contexts → {} unique keys ({} workers, {} candidates each)",
+        llm_contexts.len(), unique_contexts.len(),
+        config.llm_workers, config.llm_candidates);
 
     let completed = AtomicU64::new(0);
     let valid = AtomicU64::new(0);
@@ -302,7 +318,7 @@ pub fn generate_content(config: &VaeDatasetConfig, contexts: &[TriggerContext]) 
     llm_cfg_with_candidates.candidates = config.llm_candidates;
 
     pool.install(|| {
-        llm_contexts.par_iter().for_each(|ctx| {
+        unique_contexts.par_iter().for_each(|ctx| {
             let result = match ctx.content_type.as_str() {
                 "ability" => llm::generate_ability(&llm_cfg_with_candidates, &store, &ctx.context_text),
                 "class" => llm::generate_class(&llm_cfg_with_candidates, &store, &ctx.context_text),
@@ -314,10 +330,10 @@ pub fn generate_content(config: &VaeDatasetConfig, contexts: &[TriggerContext]) 
             }
 
             let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
-            if done % 10 == 0 {
+            if done % 10 == 0 || done == unique_contexts.len() as u64 {
                 let elapsed = start.elapsed().as_secs_f64();
                 eprintln!("[{done}/{}] {:.2}/s, {} valid",
-                    llm_contexts.len(), done as f64 / elapsed,
+                    unique_contexts.len(), done as f64 / elapsed,
                     valid.load(Ordering::Relaxed));
             }
         });
@@ -325,7 +341,7 @@ pub fn generate_content(config: &VaeDatasetConfig, contexts: &[TriggerContext]) 
 
     let elapsed = start.elapsed().as_secs_f64();
     let (total, hits, valid_count) = store.stats();
-    eprintln!("\nGeneration complete in {:.1}s", elapsed);
+    eprintln!("\nGeneration complete in {:.1}s ({:.1}min)", elapsed, elapsed / 60.0);
     eprintln!("Total calls: {}, cache hits: {}, valid: {}", total, hits, valid_count);
 }
 
@@ -334,9 +350,10 @@ pub fn generate_content(config: &VaeDatasetConfig, contexts: &[TriggerContext]) 
 // ---------------------------------------------------------------------------
 
 /// Parse LLM outputs and extract slot vectors, writing the final dataset.
+///
+/// Maps contexts to LLM outputs by coarse key (archetype + level_bucket + trigger)
+/// so one LLM generation serves many contexts with different exact stats.
 pub fn extract_dataset(config: &VaeDatasetConfig, contexts: &[TriggerContext]) {
-    use tactical_sim::effects::dsl;
-
     eprintln!("\n=== VAE Dataset: Extract Slots ===");
 
     // Load the content store to get LLM outputs
@@ -352,13 +369,33 @@ pub fn extract_dataset(config: &VaeDatasetConfig, contexts: &[TriggerContext]) {
         vec![]
     };
 
-    // Build lookup: context_text hash → best content
-    let mut content_lookup: std::collections::HashMap<u64, (String, f32)> = std::collections::HashMap::new();
+    // Build lookup: prompt_hash → best content
+    let mut content_by_hash: std::collections::HashMap<u64, (String, f32)> = std::collections::HashMap::new();
     for record in &store_records {
         if let Some(ref selected) = record.selected {
-            content_lookup.insert(record.prompt_hash, (selected.clone(), record.score));
+            content_by_hash.insert(record.prompt_hash, (selected.clone(), record.score));
         }
     }
+
+    // Also build coarse key → content lookup from the representative contexts
+    // (the ones that were actually sent to the LLM)
+    let mut content_by_key: std::collections::HashMap<String, (String, f32)> = std::collections::HashMap::new();
+    for ctx in contexts {
+        if ctx.content_type != "ability" && ctx.content_type != "class" {
+            continue;
+        }
+        let key = coarse_key(ctx);
+        if content_by_key.contains_key(&key) {
+            continue;
+        }
+        // Try exact hash first, then skip
+        let prompt_hash = hash_prompt(&ctx.context_text);
+        if let Some(entry) = content_by_hash.get(&prompt_hash) {
+            content_by_key.insert(key, entry.clone());
+        }
+    }
+
+    eprintln!("Content store: {} records, {} unique outputs", store_records.len(), content_by_key.len());
 
     if let Some(parent) = std::path::Path::new(&config.dataset_path).parent() {
         std::fs::create_dir_all(parent).ok();
@@ -368,17 +405,19 @@ pub fn extract_dataset(config: &VaeDatasetConfig, contexts: &[TriggerContext]) {
 
     let mut total = 0u64;
     let mut valid_count = 0u64;
+    let mut matched = 0u64;
     let mut by_type: std::collections::HashMap<String, (u64, u64)> = std::collections::HashMap::new();
 
     for ctx in contexts {
         match ctx.content_type.as_str() {
             "ability" | "class" => {
-                // Look up LLM-generated content by prompt hash
-                let prompt_hash = hash_prompt(&ctx.context_text);
-                let (content, score) = match content_lookup.get(&prompt_hash) {
+                // Look up by coarse key
+                let key = coarse_key(ctx);
+                let (content, score) = match content_by_key.get(&key) {
                     Some((c, s)) => (c.clone(), *s),
-                    None => continue, // No LLM output for this context
+                    None => continue, // No LLM output for this key
                 };
+                matched += 1;
 
                 // Parse and extract slots
                 let (slots, valid) = if ctx.content_type == "ability" {
@@ -409,16 +448,13 @@ pub fn extract_dataset(config: &VaeDatasetConfig, contexts: &[TriggerContext]) {
                 total += 1;
             }
             "quest" => {
-                // Procedural quest — slot extract directly from the context
-                // We need the original QuestRequest, but we only have the context vector.
-                // For now, skip procedural quests in the slot extraction.
-                // They can be added by running sweep with quest data attached.
+                // Skip procedural quests for now
             }
             _ => {}
         }
     }
 
-    eprintln!("Dataset: {} records ({} valid)", total, valid_count);
+    eprintln!("Dataset: {} records ({} valid), {} matched to LLM outputs", total, valid_count, matched);
     for (t, (n, v)) in &by_type {
         eprintln!("  {}: {}/{} valid ({:.0}%)", t, v, n,
             if *n > 0 { *v as f64 / *n as f64 * 100.0 } else { 0.0 });
