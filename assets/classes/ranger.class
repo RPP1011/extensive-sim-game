@@ -1,0 +1,19 @@
+class Ranger {
+    stat_growth: +2 attack, +1 defense, +3 speed, +1 ability_power per level
+
+    scaling party_alive_count {
+        when party_members > 0: tenacity 0.3
+        when party_members >= 2: +10% speed
+        always: aura morale +1
+    }
+
+    abilities {
+        level 1: keen_eye "Improved scouting range"
+        level 5: multishot "Attacks can hit multiple targets"
+        level 10: camouflage "Can escape from losing battles"
+        level 20: deadeye "Critical hit chance doubled"
+        level 40: pathfinder "Party travel speed doubled"
+    }
+
+    requirements: level 1
+}

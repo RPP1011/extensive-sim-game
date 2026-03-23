@@ -1,0 +1,18 @@
+class Rogue {
+    stat_growth: +3 attack, +3 speed per level
+
+    scaling party_alive_count {
+        when party_members >= 1: +15% attack
+        always: +5% speed
+    }
+
+    abilities {
+        level 1: ambush "Bonus damage on first strike"
+        level 5: evasion "Chance to dodge attacks"
+        level 10: backstab "Massive damage to distracted enemies"
+        level 20: shadowstep "Reposition instantly in combat"
+        level 40: assassinate "Attempt to one-shot a target"
+    }
+
+    requirements: level 1
+}

@@ -1,0 +1,24 @@
+class Hero {
+    stat_growth: +5 all per level
+
+    scaling crisis_severity {
+        when crisis_active: +20% all_stats
+        when crisis_severity > 200: escape 1.0
+        when crisis_severity > 500: last_stand below 20% hp +100% attack
+    }
+
+    scaling fame {
+        always: +1% all_stats
+    }
+
+    abilities {
+        level 1: rallying_cry "Nearby allies gain combat bonuses"
+        level 3: crisis_sense "Bonus damage against crisis-related threats"
+        level 5: undying_will "Cannot be killed for a short duration at low HP"
+        level 7: inspire_legend "All allies in battle gain massive morale boost"
+        level 10: consolidation "Merges with primary class — all abilities enhanced"
+    }
+
+    requirements: fame 2000, active_crisis
+    consolidates_at: 10
+}

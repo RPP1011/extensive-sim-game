@@ -1,0 +1,18 @@
+class Cleric {
+    stat_growth: +2 ability_power, +2 defense, +2 max_hp per level
+
+    scaling party_alive_count {
+        when party_members > 0: +10% max_hp
+        always: aura max_hp +3
+    }
+
+    abilities {
+        level 1: heal "Restore HP to one ally"
+        level 5: bless "Temporary stat boost to party"
+        level 10: resurrect "Revive a fallen party member mid-battle"
+        level 20: sanctuary "Party takes reduced damage for a duration"
+        level 40: miracle "Full party heal and cleanse"
+    }
+
+    requirements: level 1
+}

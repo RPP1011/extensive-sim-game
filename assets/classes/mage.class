@@ -1,0 +1,18 @@
+class Mage {
+    stat_growth: +4 ability_power, +1 speed per level
+
+    scaling party_alive_count {
+        when party_members > 0: +5% ability_power
+        always: aura ability_power +1
+    }
+
+    abilities {
+        level 1: arcane_bolt "Ranged magic attack"
+        level 5: barrier "Absorbs damage for one ally"
+        level 10: area_blast "Damages all enemies"
+        level 20: dispel "Removes enemy buffs"
+        level 40: arcane_mastery "All ability costs halved"
+    }
+
+    requirements: level 1
+}

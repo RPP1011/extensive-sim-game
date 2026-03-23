@@ -1,0 +1,19 @@
+class Knight {
+    stat_growth: +1 attack, +3 defense, +3 max_hp per level
+
+    scaling party_alive_count {
+        when party_members > 0: +10% defense
+        when party_members >= 3: tenacity 0.5
+        always: aura defense +2
+    }
+
+    abilities {
+        level 1: shield_wall "Reduces incoming damage to party"
+        level 5: taunt "Forces enemies to target this unit"
+        level 10: iron_will "Immune to morale effects"
+        level 20: bulwark "Party cannot be flanked"
+        level 40: unbreakable "Survives one lethal hit per battle"
+    }
+
+    requirements: level 1
+}
