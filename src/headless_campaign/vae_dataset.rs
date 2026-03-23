@@ -282,6 +282,7 @@ pub fn generate_content(config: &VaeDatasetConfig, contexts: &[TriggerContext]) 
         }
     };
 
+    llm::enable_llm(); // Reset disabled flag from previous failed runs
     if !llm::check_ollama(llm_cfg) {
         eprintln!("Ollama not reachable, skipping generation");
         return;
