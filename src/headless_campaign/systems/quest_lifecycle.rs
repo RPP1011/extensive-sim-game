@@ -209,6 +209,21 @@ pub fn tick_quest_lifecycle(
                         adv.morale = (adv.morale + qlcfg.victory_morale_gain).min(100.0);
                         adv.xp += qlcfg.victory_base_xp + (threat * qlcfg.victory_threat_xp_rate) as u32;
 
+                        // Fame: scales with threat relative to level
+                        // Easy quests (threat < level*2) give 0 fame
+                        let fame_base = (threat - adv.level as f32 * 2.0).max(0.0);
+                        let solo_bonus = if member_ids.len() == 1 { 2.0 } else { 1.0 };
+                        let crisis_mult = if !state.overworld.active_crises.is_empty() {
+                            1.0 + state.overworld.active_crises.len() as f32 * 0.5
+                        } else { 1.0 };
+                        let fame_gained = fame_base * solo_bonus * crisis_mult;
+                        adv.tier_status.fame += fame_gained;
+                        if adv.tier_status.fame > adv.tier_status.peak_fame {
+                            adv.tier_status.peak_fame = adv.tier_status.fame;
+                        }
+                        adv.tier_status.quests_completed += 1;
+                        adv.tier_status.party_victories += 1;
+
                         // Level up check
                         let threshold = adv.level * adv.level * qlcfg.level_up_xp_multiplier;
                         if adv.xp >= threshold {
@@ -223,6 +238,10 @@ pub fn tick_quest_lifecycle(
                         }
                     }
                     QuestResult::Defeat => {
+                        // Fame loss on defeat
+                        adv.tier_status.fame = (adv.tier_status.fame - 15.0).max(0.0);
+                        adv.tier_status.quests_completed += 1;
+
                         // Defeat: heavy injuries, possible death
                         let severity = threat / qlcfg.defeat_severity_divisor;
                         adv.injury = (adv.injury + qlcfg.defeat_base_injury + severity * qlcfg.defeat_severity_injury).min(100.0);

@@ -1,17 +1,13 @@
 //! Progression trigger system — detects when content should be generated.
 //!
-//! Runs every 100 ticks. Scans adventurers and game state for trigger
-//! conditions. When a trigger fires, adds a PendingProgression entry
-//! that will be presented at the next rest event.
-//!
+//! Scans adventurers and game state for trigger conditions. When a trigger
+//! fires, adds a PendingProgression entry to be presented at the next rest.
 //! In the full game, triggers send requests to the LLM immediately.
-//! The LLM generates content asynchronously and the result is cached
-//! in pending_progression. For now, we use template-based generation.
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
-const TRIGGER_CHECK_INTERVAL: u64 = 100;
+const TRIGGER_CHECK_INTERVAL: u64 = 50;
 
 pub fn tick_progression_triggers(
     state: &mut CampaignState,
@@ -24,210 +20,243 @@ pub fn tick_progression_triggers(
 
     state.ticks_since_rest += TRIGGER_CHECK_INTERVAL;
 
-    // Check each adventurer for progression triggers
-    let adventurer_snapshots: Vec<(u32, String, u32, Vec<String>, f32)> = state
+    // Snapshot adventurer data to avoid borrow conflicts
+    let adv_data: Vec<(u32, String, String, u32, Vec<String>, f32, usize, usize, bool)> = state
         .adventurers
         .iter()
         .filter(|a| a.status != AdventurerStatus::Dead)
-        .map(|a| (a.id, a.archetype.clone(), a.level, a.traits.clone(), a.tier_status.fame))
+        .map(|a| (
+            a.id, a.name.clone(), a.archetype.clone(), a.level,
+            a.traits.clone(), a.tier_status.fame,
+            a.tier_status.quests_completed, a.tier_status.party_victories,
+            a.is_player_character,
+        ))
         .collect();
 
-    for (adv_id, archetype, level, traits, fame) in &adventurer_snapshots {
-        // Already has pending progression for this adventurer? Skip.
-        if state.pending_progression.iter().any(|p| p.adventurer_id == Some(*adv_id)) {
-            continue;
+    let completed_quests = state.completed_quests.len();
+    let has_crisis = !state.overworld.active_crises.is_empty();
+    let crisis_count = state.overworld.active_crises.len();
+
+    for (adv_id, name, archetype, level, traits, fame, quests, victories, is_pc) in &adv_data {
+        // --- Level milestone abilities (every 5 levels) ---
+        if *level >= 5 && *level % 5 == 0 {
+            try_add_progression(state, *adv_id, ProgressionKind::Ability,
+                &format!("level_{}", level),
+                &format!("{} reached level {} — new ability available", name, level),
+                &generate_ability_template(&archetype, *level),
+            );
         }
 
-        // Ability trigger: every 5 levels, offer a contextual ability
-        if *level > 0 && *level % 5 == 0 {
-            let already_offered = state.pending_progression.iter()
-                .any(|p| p.adventurer_id == Some(*adv_id) && matches!(p.kind, ProgressionKind::Ability));
-            if !already_offered {
-                state.pending_progression.push(PendingProgression {
-                    adventurer_id: Some(*adv_id),
-                    kind: ProgressionKind::Ability,
-                    content: generate_template_ability(&archetype, *level),
-                    description: format!("New ability available for level {} {}", level, archetype),
-                    generated_at_tick: state.tick,
-                    trigger: format!("level_{}", level),
-                });
+        // --- Quest completion abilities (every 5 quests per adventurer) ---
+        if *quests > 0 && *quests % 5 == 0 {
+            try_add_progression(state, *adv_id, ProgressionKind::Ability,
+                &format!("quests_{}", quests),
+                &format!("{} completed {} quests — experience yields insight", name, quests),
+                &generate_ability_template(&archetype, *level),
+            );
+        }
+
+        // --- Battle veteran abilities (every 3 victories) ---
+        if *victories > 0 && *victories % 3 == 0 {
+            try_add_progression(state, *adv_id, ProgressionKind::Ability,
+                &format!("victories_{}", victories),
+                &format!("{} won {} battles — combat instincts sharpen", name, victories),
+                &generate_ability_template(&archetype, *level),
+            );
+        }
+
+        // --- Fame threshold class offers ---
+        let fame_thresholds = [30.0, 80.0, 200.0, 500.0, 1000.0, 2000.0];
+        for &threshold in &fame_thresholds {
+            if *fame >= threshold {
+                try_add_progression(state, *adv_id, ProgressionKind::ClassOffer,
+                    &format!("class_fame_{}", threshold as u32),
+                    &format!("{}'s reputation grows (fame {:.0}) — a new path opens", name, fame),
+                    &generate_class_template(&archetype, *level, *fame),
+                );
             }
         }
 
-        // Class trigger: at fame thresholds, offer a class
-        let fame_thresholds = [50.0, 200.0, 500.0, 2000.0];
-        for &threshold in &fame_thresholds {
-            if *fame >= threshold {
-                let trigger_key = format!("class_fame_{}", threshold as u32);
-                let already_offered = state.pending_progression.iter()
-                    .any(|p| p.adventurer_id == Some(*adv_id) && p.trigger == trigger_key);
-                if !already_offered {
-                    state.pending_progression.push(PendingProgression {
-                        adventurer_id: Some(*adv_id),
-                        kind: ProgressionKind::ClassOffer,
-                        content: generate_template_class(&archetype, *level, *fame),
-                        description: format!("Class specialization available (fame {:.0})", fame),
-                        generated_at_tick: state.tick,
-                        trigger: trigger_key,
-                    });
+        // --- Crisis response abilities ---
+        if has_crisis && *quests >= 3 {
+            try_add_progression(state, *adv_id, ProgressionKind::Ability,
+                &format!("crisis_response_{}", crisis_count),
+                &format!("{} faces {} active crises — desperation breeds innovation", name, crisis_count),
+                &generate_ability_template(&archetype, *level),
+            );
+        }
+
+        // --- Hero candidacy ---
+        if *fame >= 2000.0 && has_crisis {
+            try_add_progression(state, *adv_id, ProgressionKind::HeroCandidacy,
+                "hero_candidacy",
+                &format!("{}'s legend grows — the path of the Hero opens", name),
+                &generate_hero_class(),
+            );
+        }
+
+        // --- Injury survival ability (survived 80+ injury) ---
+        let adv_injury = state.adventurers.iter()
+            .find(|a| a.id == *adv_id)
+            .map(|a| a.injury)
+            .unwrap_or(0.0);
+        if adv_injury > 80.0 {
+            try_add_progression(state, *adv_id, ProgressionKind::Ability,
+                "injury_survivor",
+                &format!("{} fights through grievous wounds — survival instincts awaken", name),
+                &generate_ability_template(&archetype, *level),
+            );
+        }
+
+        // --- PC-specific triggers ---
+        if *is_pc {
+            // PC backstory-related ability at quests 10, 25, 50
+            for &milestone in &[10usize, 25, 50] {
+                if *quests >= milestone {
+                    try_add_progression(state, *adv_id, ProgressionKind::Ability,
+                        &format!("pc_milestone_{}", milestone),
+                        &format!("{}'s journey continues — {} quests shape their destiny", name, milestone),
+                        &generate_ability_template(&archetype, *level),
+                    );
                 }
             }
         }
+    }
 
-        // Hero candidacy: fame >= 2000 + active crisis
-        if *fame >= 2000.0 && !state.overworld.active_crises.is_empty() {
-            let already_offered = state.pending_progression.iter()
-                .any(|p| p.adventurer_id == Some(*adv_id) && matches!(p.kind, ProgressionKind::HeroCandidacy));
-            if !already_offered {
-                state.pending_progression.push(PendingProgression {
-                    adventurer_id: Some(*adv_id),
-                    kind: ProgressionKind::HeroCandidacy,
-                    content: generate_hero_class(),
-                    description: "Hero class candidacy available — a defining quest awaits".into(),
-                    generated_at_tick: state.tick,
-                    trigger: "hero_candidacy".into(),
-                });
-            }
+    // --- Guild-wide triggers ---
+
+    // Guild milestone abilities (every 25 quests completed)
+    if completed_quests > 0 && completed_quests % 25 == 0 {
+        try_add_progression(state, 0, ProgressionKind::QuestHook,
+            &format!("guild_milestone_{}", completed_quests),
+            &format!("The guild has completed {} quests — its reputation precedes it", completed_quests),
+            "Guild milestone quest hook",
+        );
+    }
+
+    // New crisis trigger — collect keys first to avoid borrow conflict
+    if has_crisis {
+        let crisis_keys: Vec<(String, String)> = state.overworld.active_crises.iter().map(|crisis| {
+            let key = match crisis {
+                ActiveCrisis::SleepingKing { champions_arrived, .. } =>
+                    format!("sleeping_king_champ_{}", champions_arrived),
+                ActiveCrisis::Breach { wave_number, .. } =>
+                    format!("breach_wave_{}", wave_number),
+                ActiveCrisis::Corruption { corrupted_regions, .. } =>
+                    format!("corruption_{}", corrupted_regions.len()),
+                ActiveCrisis::Unifier { absorbed_factions, .. } =>
+                    format!("unifier_{}", absorbed_factions.len()),
+                ActiveCrisis::Decline { severity, .. } =>
+                    format!("decline_{}", (*severity * 10.0) as u32),
+            };
+            (format!("crisis_escalation_{}", key), format!("Crisis escalation: {}", key))
+        }).collect();
+
+        for (trigger_key, desc) in crisis_keys {
+            try_add_progression(state, 0, ProgressionKind::QuestHook,
+                &trigger_key, &desc, "Crisis escalation quest hook");
         }
     }
 
-    // Prompt rest if enough ticks have passed
-    if state.ticks_since_rest > 5000 && !state.resting && !state.pending_progression.is_empty() {
-        // Add a gentle reminder (don't spam)
+    // Faction relation milestones — collect first
+    let faction_triggers: Vec<(String, String)> = state.factions.iter().flat_map(|faction| {
+        [50.0f32, 75.0, 90.0].iter().filter_map(move |&threshold| {
+            if faction.relationship_to_guild >= threshold {
+                Some((
+                    format!("faction_{}_{}", faction.id, threshold as u32),
+                    format!("{} relations reach {:.0} — new opportunities arise", faction.name, threshold),
+                ))
+            } else {
+                None
+            }
+        })
+    }).collect();
+
+    for (trigger_key, desc) in faction_triggers {
+        try_add_progression(state, 0, ProgressionKind::QuestHook,
+            &trigger_key, &desc, "Faction milestone quest hook");
+    }
+
+    // Rest reminder
+    if state.ticks_since_rest > 3000
+        && !state.resting
+        && !state.pending_progression.is_empty()
+    {
         let already_reminded = state.event_log.iter().rev().take(5)
             .any(|e| e.description.contains("should rest"));
         if !already_reminded {
+            let n = state.pending_progression.len();
             let id = state.next_event_id;
             state.next_event_id += 1;
             state.event_log.push(CampaignEvent {
-                id,
-                tick: state.tick,
-                description: format!(
-                    "Your adventurers should rest soon. {} progression items await.",
-                    state.pending_progression.len()
-                ),
+                id, tick: state.tick,
+                description: format!("Your adventurers should rest. {} progression items await.", n),
             });
         }
     }
+}
+
+/// Try to add a progression item if the trigger hasn't already fired.
+fn try_add_progression(
+    state: &mut CampaignState,
+    adv_id: u32,
+    kind: ProgressionKind,
+    trigger_key: &str,
+    description: &str,
+    content: &str,
+) {
+    // Check if this trigger already fired for this adventurer
+    let already_exists = state.pending_progression.iter().any(|p| {
+        p.trigger == trigger_key && p.adventurer_id == (if adv_id > 0 { Some(adv_id) } else { None })
+    });
+    if already_exists {
+        return;
+    }
+
+    state.pending_progression.push(PendingProgression {
+        adventurer_id: if adv_id > 0 { Some(adv_id) } else { None },
+        kind,
+        content: content.to_string(),
+        description: description.to_string(),
+        generated_at_tick: state.tick,
+        trigger: trigger_key.to_string(),
+    });
 }
 
 // ---------------------------------------------------------------------------
 // Template generators (placeholder until LLM is wired)
 // ---------------------------------------------------------------------------
 
-fn generate_template_ability(archetype: &str, level: u32) -> String {
+fn generate_ability_template(archetype: &str, level: u32) -> String {
     match archetype {
-        "ranger" => format!(r#"
-ability eagle_eye_{} {{
-    type: passive
-    trigger: on_ability_used
-    effect: +{}% attack for 5s
-    tag: ranged
-    description: "Keen eyes spot weakness"
-}}"#, level, level * 2),
-        "knight" => format!(r#"
-ability shield_bash_{} {{
-    type: active
-    cooldown: 10s
-    effect: stun 2s + {} damage
-    tag: melee
-    description: "A devastating shield strike"
-}}"#, level, level * 3),
-        "mage" => format!(r#"
-ability arcane_surge_{} {{
-    type: active
-    cooldown: 15s
-    effect: +{}% ability_power for 8s
-    tag: arcane
-    description: "Channel raw magical energy"
-}}"#, level, level * 3),
-        "cleric" => format!(r#"
-ability divine_grace_{} {{
-    type: active
-    cooldown: 20s
-    effect: heal {} to all allies
-    tag: healing
-    description: "A prayer answered with golden light"
-}}"#, level, level * 5),
-        "rogue" => format!(r#"
-ability shadow_strike_{} {{
-    type: active
-    cooldown: 8s
-    effect: {} damage + stealth 3s
-    tag: stealth
-    description: "Strike from the shadows"
-}}"#, level, level * 4),
-        _ => format!(r#"
-ability veteran_instinct_{} {{
-    type: passive
-    trigger: on_damage_taken
-    effect: +{}% defense for 3s
-    tag: survival
-    description: "Experience turns pain into focus"
-}}"#, level, level),
+        "ranger" => format!("ability ranger_skill_{} {{ type: passive, trigger: on_ability_used, effect: buff attack 10% 5s, tag: ranged, description: \"Sharpened instincts\" }}", level),
+        "knight" => format!("ability knight_skill_{} {{ type: active, cooldown: 12s, effect: buff defense 15% 8s + aura defense +3, tag: defense, description: \"Steadfast resolve\" }}", level),
+        "mage" => format!("ability mage_skill_{} {{ type: active, cooldown: 15s, effect: damage 40 + debuff defense 10% 5s, tag: arcane, description: \"Arcane disruption\" }}", level),
+        "cleric" => format!("ability cleric_skill_{} {{ type: active, cooldown: 20s, effect: heal 40 + buff max_hp 10% 10s, tag: healing, description: \"Restorative prayer\" }}", level),
+        "rogue" => format!("ability rogue_skill_{} {{ type: active, cooldown: 10s, effect: damage 50 + stealth 3s, tag: stealth, description: \"Strike from shadows\" }}", level),
+        _ => format!("ability veteran_skill_{} {{ type: passive, trigger: on_damage_taken, effect: buff defense 10% 3s, tag: survival, description: \"Battle hardened\" }}", level),
     }
 }
 
-fn generate_template_class(archetype: &str, level: u32, fame: f32) -> String {
-    let class_name = match (archetype, fame as u32) {
-        ("ranger", 0..=199) => "Scout",
-        ("ranger", _) => "Pathfinder",
-        ("knight", 0..=199) => "Sentinel",
-        ("knight", _) => "Warden",
-        ("mage", 0..=199) => "Evoker",
-        ("mage", _) => "Archmage",
-        ("cleric", 0..=199) => "Healer",
-        ("cleric", _) => "High Priest",
-        ("rogue", 0..=199) => "Infiltrator",
-        ("rogue", _) => "Shadowmaster",
-        (_, 0..=199) => "Veteran",
-        (_, _) => "Elite",
+fn generate_class_template(archetype: &str, level: u32, fame: f32) -> String {
+    let class_name = match (archetype, fame > 200.0) {
+        ("ranger", false) => "Scout",
+        ("ranger", true) => "Pathfinder",
+        ("knight", false) => "Sentinel",
+        ("knight", true) => "Warden",
+        ("mage", false) => "Evoker",
+        ("mage", true) => "Archmage",
+        ("cleric", false) => "Healer",
+        ("cleric", true) => "HighPriest",
+        ("rogue", false) => "Infiltrator",
+        ("rogue", true) => "Shadowmaster",
+        (_, false) => "Veteran",
+        (_, true) => "Elite",
     };
-
-    format!(r#"class {} {{
-    stat_growth: +2 attack, +2 defense, +1 speed per level
-
-    tags: {}, leadership
-
-    scaling party_alive_count {{
-        when party_members > 0: +10% attack
-        always: aura morale +2
-    }}
-
-    abilities {{
-        level 1: {} "Specialized combat technique"
-    }}
-
-    requirements: level {}, fame {}
-}}"#,
-        class_name,
-        archetype,
-        class_name.to_lowercase().replace(' ', "_"),
-        level.saturating_sub(2),
-        fame as u32 / 2,
-    )
+    format!("class {} {{ stat_growth: +2 attack, +2 defense, +1 speed per level, tags: {}, scaling party_alive_count {{ always: +5% attack }}, abilities {{ level 1: specialization \"Class ability\" }}, requirements: level {}, fame {} }}",
+        class_name, archetype, level.saturating_sub(2), fame as u32 / 2)
 }
 
 fn generate_hero_class() -> String {
-    r#"class Hero {
-    stat_growth: +5 all per level
-
-    tags: crisis, leadership, legendary, inspiration, sacrifice
-
-    scaling crisis_severity {
-        when crisis_active: +20% all_stats
-        when crisis_severity > 200: escape 1.0
-        when crisis_severity > 500: last_stand below 20% hp +100% attack
-    }
-
-    abilities {
-        level 1: rallying_cry "Nearby allies gain combat bonuses"
-        level 3: crisis_sense "Bonus damage against crisis threats"
-        level 5: undying_will "Cannot die for 10 ticks when below 20% HP"
-        level 10: consolidation "Merge with primary class — all abilities enhanced"
-    }
-
-    requirements: fame 2000, active_crisis
-    consolidates_at: 10
-}"#.to_string()
+    "class Hero { stat_growth: +5 all per level, tags: crisis, leadership, legendary, scaling crisis_severity { when crisis_active: +20% all_stats }, abilities { level 1: rallying_cry \"Allies gain combat bonuses\" }, requirements: fame 2000, active_crisis, consolidates_at: 10 }".into()
 }
