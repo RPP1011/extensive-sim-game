@@ -1,0 +1,81 @@
+name = "The Berserker Warband"
+description = "Two berserkers and a shaman healer. All offense, barely any defense. They hit hard and fast — pray the shaman can keep them standing."
+gold_bonus = 30.0
+supply_bonus = 15.0
+reputation_bonus = 0.0
+items = []
+
+[[adventurers]]
+id = 1
+name = "Bjorn"
+archetype = "berserker"
+level = 3
+xp = 0
+traits = ["battle_scarred"]
+status = "Idle"
+loyalty = 45.0
+stress = 25.0
+fatigue = 10.0
+injury = 0.0
+resolve = 75.0
+morale = 65.0
+guild_relationship = 20.0
+
+[adventurers.stats]
+max_hp = 90.0
+attack = 22.0
+defense = 5.0
+speed = 10.0
+ability_power = 3.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 2
+name = "Helga"
+archetype = "berserker"
+level = 2
+xp = 0
+traits = ["ambitious", "battle_scarred"]
+status = "Idle"
+loyalty = 40.0
+stress = 20.0
+fatigue = 12.0
+injury = 0.0
+resolve = 70.0
+morale = 60.0
+guild_relationship = 18.0
+
+[adventurers.stats]
+max_hp = 85.0
+attack = 20.0
+defense = 4.0
+speed = 11.0
+ability_power = 3.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 3
+name = "Runa"
+archetype = "shaman"
+level = 2
+xp = 0
+traits = ["natural_leader"]
+status = "Idle"
+loyalty = 55.0
+stress = 10.0
+fatigue = 5.0
+injury = 0.0
+resolve = 50.0
+morale = 70.0
+guild_relationship = 30.0
+
+[adventurers.stats]
+max_hp = 60.0
+attack = 7.0
+defense = 8.0
+speed = 8.0
+ability_power = 17.0
+
+[adventurers.equipment]

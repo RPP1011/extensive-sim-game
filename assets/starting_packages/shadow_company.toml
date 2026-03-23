@@ -1,0 +1,81 @@
+name = "Shadow Company"
+description = "A ranger scout, an assassin, and a rogue. Masters of stealth and ambush. They prefer to avoid fights they can't win — but when they strike, it's lethal."
+gold_bonus = 50.0
+supply_bonus = 10.0
+reputation_bonus = 0.0
+items = []
+
+[[adventurers]]
+id = 1
+name = "Mira Farsight"
+archetype = "ranger"
+level = 3
+xp = 0
+traits = ["explorer", "keen_eye"]
+status = "Idle"
+loyalty = 55.0
+stress = 8.0
+fatigue = 5.0
+injury = 0.0
+resolve = 60.0
+morale = 70.0
+guild_relationship = 35.0
+
+[adventurers.stats]
+max_hp = 70.0
+attack = 15.0
+defense = 8.0
+speed = 13.0
+ability_power = 7.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 2
+name = "Whisper"
+archetype = "assassin"
+level = 2
+xp = 0
+traits = ["pragmatist"]
+status = "Idle"
+loyalty = 35.0
+stress = 12.0
+fatigue = 5.0
+injury = 0.0
+resolve = 55.0
+morale = 60.0
+guild_relationship = 20.0
+
+[adventurers.stats]
+max_hp = 55.0
+attack = 19.0
+defense = 4.0
+speed = 16.0
+ability_power = 5.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 3
+name = "Dagger"
+archetype = "rogue"
+level = 2
+xp = 0
+traits = ["merchant_mind"]
+status = "Idle"
+loyalty = 45.0
+stress = 15.0
+fatigue = 8.0
+injury = 0.0
+resolve = 40.0
+morale = 55.0
+guild_relationship = 25.0
+
+[adventurers.stats]
+max_hp = 60.0
+attack = 17.0
+defense = 5.0
+speed = 14.0
+ability_power = 5.0
+
+[adventurers.equipment]

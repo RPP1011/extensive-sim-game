@@ -1,0 +1,81 @@
+name = "The Holy Order"
+description = "A paladin leads a small order of faithful warriors. Strong defense and healing, but slow and inflexible. They fight for honor, not gold."
+gold_bonus = 10.0
+supply_bonus = 30.0
+reputation_bonus = 15.0
+items = []
+
+[[adventurers]]
+id = 1
+name = "Sir Aldric"
+archetype = "paladin"
+level = 3
+xp = 0
+traits = ["natural_leader", "protector"]
+status = "Idle"
+loyalty = 75.0
+stress = 5.0
+fatigue = 5.0
+injury = 0.0
+resolve = 70.0
+morale = 80.0
+guild_relationship = 50.0
+
+[adventurers.stats]
+max_hp = 95.0
+attack = 10.0
+defense = 15.0
+speed = 6.0
+ability_power = 10.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 2
+name = "Sister Elara"
+archetype = "cleric"
+level = 2
+xp = 0
+traits = ["protector", "peacemaker"]
+status = "Idle"
+loyalty = 70.0
+stress = 8.0
+fatigue = 3.0
+injury = 0.0
+resolve = 60.0
+morale = 75.0
+guild_relationship = 45.0
+
+[adventurers.stats]
+max_hp = 60.0
+attack = 4.0
+defense = 9.0
+speed = 8.0
+ability_power = 16.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 3
+name = "Brother Theron"
+archetype = "guardian"
+level = 2
+xp = 0
+traits = ["protector"]
+status = "Idle"
+loyalty = 65.0
+stress = 10.0
+fatigue = 8.0
+injury = 0.0
+resolve = 55.0
+morale = 70.0
+guild_relationship = 40.0
+
+[adventurers.stats]
+max_hp = 110.0
+attack = 8.0
+defense = 18.0
+speed = 5.0
+ability_power = 3.0
+
+[adventurers.equipment]

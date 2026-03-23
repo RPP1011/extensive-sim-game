@@ -1,0 +1,81 @@
+name = "The Dark Covenant"
+description = "A necromancer, a warlock, and an assassin walk into a guild hall. Morally questionable, magically potent, and nobody asks where the gold comes from."
+gold_bonus = 80.0
+supply_bonus = 5.0
+reputation_bonus = -5.0
+items = []
+
+[[adventurers]]
+id = 1
+name = "Morrigan"
+archetype = "necromancer"
+level = 3
+xp = 0
+traits = ["ambitious", "pragmatist"]
+status = "Idle"
+loyalty = 35.0
+stress = 20.0
+fatigue = 5.0
+injury = 0.0
+resolve = 55.0
+morale = 50.0
+guild_relationship = 20.0
+
+[adventurers.stats]
+max_hp = 45.0
+attack = 8.0
+defense = 4.0
+speed = 7.0
+ability_power = 22.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 2
+name = "Shade"
+archetype = "warlock"
+level = 2
+xp = 0
+traits = ["ambitious"]
+status = "Idle"
+loyalty = 40.0
+stress = 15.0
+fatigue = 8.0
+injury = 0.0
+resolve = 45.0
+morale = 55.0
+guild_relationship = 25.0
+
+[adventurers.stats]
+max_hp = 50.0
+attack = 10.0
+defense = 5.0
+speed = 8.0
+ability_power = 18.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 3
+name = "Vex"
+archetype = "assassin"
+level = 2
+xp = 0
+traits = ["pragmatist"]
+status = "Idle"
+loyalty = 30.0
+stress = 10.0
+fatigue = 5.0
+injury = 0.0
+resolve = 50.0
+morale = 60.0
+guild_relationship = 15.0
+
+[adventurers.stats]
+max_hp = 55.0
+attack = 19.0
+defense = 4.0
+speed = 16.0
+ability_power = 5.0
+
+[adventurers.equipment]

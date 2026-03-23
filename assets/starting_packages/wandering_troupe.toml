@@ -1,0 +1,81 @@
+name = "The Wandering Troupe"
+description = "A bard, a monk, and a druid who've traveled the world together. Unorthodox fighters but deeply bonded. The bard keeps morale sky-high."
+gold_bonus = 40.0
+supply_bonus = 20.0
+reputation_bonus = 5.0
+items = []
+
+[[adventurers]]
+id = 1
+name = "Lyric"
+archetype = "bard"
+level = 2
+xp = 0
+traits = ["wanderer", "diplomat_born"]
+status = "Idle"
+loyalty = 60.0
+stress = 5.0
+fatigue = 5.0
+injury = 0.0
+resolve = 50.0
+morale = 85.0
+guild_relationship = 40.0
+
+[adventurers.stats]
+max_hp = 55.0
+attack = 7.0
+defense = 7.0
+speed = 11.0
+ability_power = 14.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 2
+name = "Kai"
+archetype = "monk"
+level = 2
+xp = 0
+traits = ["explorer"]
+status = "Idle"
+loyalty = 55.0
+stress = 3.0
+fatigue = 3.0
+injury = 0.0
+resolve = 65.0
+morale = 70.0
+guild_relationship = 35.0
+
+[adventurers.stats]
+max_hp = 70.0
+attack = 13.0
+defense = 10.0
+speed = 15.0
+ability_power = 7.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 3
+name = "Willow"
+archetype = "druid"
+level = 2
+xp = 0
+traits = ["wanderer", "peacemaker"]
+status = "Idle"
+loyalty = 65.0
+stress = 8.0
+fatigue = 5.0
+injury = 0.0
+resolve = 55.0
+morale = 75.0
+guild_relationship = 38.0
+
+[adventurers.stats]
+max_hp = 65.0
+attack = 8.0
+defense = 9.0
+speed = 9.0
+ability_power = 15.0
+
+[adventurers.equipment]
