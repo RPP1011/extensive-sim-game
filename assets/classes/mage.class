@@ -1,6 +1,8 @@
 class Mage {
     stat_growth: +4 ability_power, +1 speed per level
 
+    tags: arcane, elemental, ritual, knowledge, enchantment
+
     scaling party_alive_count {
         when party_members > 0: +5% ability_power
         always: aura ability_power +1

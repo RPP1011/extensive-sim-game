@@ -1,6 +1,8 @@
 class Rogue {
     stat_growth: +3 attack, +3 speed per level
 
+    tags: stealth, assassination, agility, deception, sabotage
+
     scaling party_alive_count {
         when party_members >= 1: +15% attack
         always: +5% speed

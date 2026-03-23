@@ -1,6 +1,8 @@
 class Knight {
     stat_growth: +1 attack, +3 defense, +3 max_hp per level
 
+    tags: melee, defense, leadership, fortification, honor
+
     scaling party_alive_count {
         when party_members > 0: +10% defense
         when party_members >= 3: tenacity 0.5

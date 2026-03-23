@@ -33,7 +33,11 @@ use serde::{Deserialize, Serialize};
 pub struct ClassDef {
     pub name: String,
     pub stat_growth: StatGrowth,
+    /// Tags defining which contextual ability pools this class can learn from.
+    /// The LFM generates contextual abilities tagged with these during gameplay.
+    pub tags: Vec<String>,
     pub scalings: Vec<ScalingBlock>,
+    /// Guaranteed abilities unlocked at specific levels.
     pub abilities: Vec<AbilityUnlock>,
     pub requirements: Vec<Requirement>,
     pub consolidates_at: Option<u32>,
@@ -145,6 +149,7 @@ pub fn parse_class(input: &str) -> Result<ClassDef, ParseError> {
     let mut def = ClassDef {
         name,
         stat_growth: StatGrowth::default(),
+        tags: Vec::new(),
         scalings: Vec::new(),
         abilities: Vec::new(),
         requirements: Vec::new(),
@@ -161,6 +166,9 @@ pub fn parse_class(input: &str) -> Result<ClassDef, ParseError> {
 
         if line.starts_with("stat_growth:") {
             def.stat_growth = parse_stat_growth(line, line_num)?;
+        } else if line.starts_with("tags:") {
+            let body = line.trim_start_matches("tags:").trim();
+            def.tags = body.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
         } else if line.starts_with("scaling ") {
             let (block, consumed) = parse_scaling_block(&lines[i..], line_num)?;
             def.scalings.push(block);
@@ -671,6 +679,8 @@ mod tests {
 class Ranger {
     stat_growth: +2 attack, +1 defense, +3 speed per level
 
+    tags: ranged, nature, stealth, tracking
+
     scaling party_alive_count {
         when party_members > 0: tenacity 0.5
         when party_members >= 3: +15% defense
@@ -690,6 +700,7 @@ class Ranger {
         assert_eq!(def.name, "Ranger");
         assert_eq!(def.stat_growth.attack, 2.0);
         assert_eq!(def.stat_growth.speed, 3.0);
+        assert_eq!(def.tags, vec!["ranged", "nature", "stealth", "tracking"]);
         assert_eq!(def.scalings.len(), 1);
         assert_eq!(def.scalings[0].source, "party_alive_count");
         assert_eq!(def.scalings[0].rules.len(), 3);

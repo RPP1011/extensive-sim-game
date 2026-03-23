@@ -1,6 +1,8 @@
 class Hero {
     stat_growth: +5 all per level
 
+    tags: crisis, leadership, legendary, inspiration, sacrifice
+
     scaling crisis_severity {
         when crisis_active: +20% all_stats
         when crisis_severity > 200: escape 1.0

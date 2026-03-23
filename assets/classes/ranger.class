@@ -1,6 +1,8 @@
 class Ranger {
     stat_growth: +2 attack, +1 defense, +3 speed, +1 ability_power per level
 
+    tags: ranged, nature, stealth, tracking, survival
+
     scaling party_alive_count {
         when party_members > 0: tenacity 0.3
         when party_members >= 2: +10% speed

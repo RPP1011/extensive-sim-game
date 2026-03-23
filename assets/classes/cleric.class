@@ -1,6 +1,8 @@
 class Cleric {
     stat_growth: +2 ability_power, +2 defense, +2 max_hp per level
 
+    tags: healing, divine, protection, purification, restoration
+
     scaling party_alive_count {
         when party_members > 0: +10% max_hp
         always: aura max_hp +3
