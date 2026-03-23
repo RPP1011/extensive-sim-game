@@ -495,7 +495,19 @@ fn apply_action(
                     }
                     DiplomacyActionType::Threaten => {
                         faction.relationship_to_guild -= 15.0;
-                        faction.diplomatic_stance = DiplomaticStance::Hostile;
+                        if faction.diplomatic_stance != DiplomaticStance::AtWar {
+                            faction.diplomatic_stance = DiplomaticStance::Hostile;
+                        }
+                    }
+                    DiplomacyActionType::ProposeCeasefire => {
+                        if faction.diplomatic_stance == DiplomaticStance::AtWar {
+                            // Ceasefire costs gold and reputation
+                            state.guild.gold -= 30.0;
+                            faction.diplomatic_stance = DiplomaticStance::Hostile;
+                            faction.at_war_with.retain(|&id| id != state.diplomacy.guild_faction_id);
+                            faction.relationship_to_guild =
+                                (faction.relationship_to_guild + 10.0).min(0.0); // Cap at 0
+                        }
                     }
                 }
                 events.push(WorldEvent::FactionRelationChanged {
@@ -507,6 +519,64 @@ fn apply_action(
                     "{:?} with faction {}",
                     action_type, faction_id
                 ))
+            } else {
+                ActionResult::InvalidAction(format!("Faction {} not found", faction_id))
+            }
+        }
+
+        CampaignAction::ProposeCoalition { faction_id } => {
+            if let Some(faction) = state.factions.iter_mut().find(|f| f.id == faction_id) {
+                if faction.relationship_to_guild < 60.0 {
+                    return ActionResult::Failed("Relationship too low for coalition".into());
+                }
+                if faction.coalition_member {
+                    return ActionResult::Failed("Already in coalition".into());
+                }
+                faction.coalition_member = true;
+                faction.diplomatic_stance = DiplomaticStance::Coalition;
+                let old = faction.relationship_to_guild;
+                faction.relationship_to_guild = (faction.relationship_to_guild + 15.0).min(100.0);
+                events.push(WorldEvent::FactionRelationChanged {
+                    faction_id,
+                    old,
+                    new: faction.relationship_to_guild,
+                });
+                events.push(WorldEvent::CampaignMilestone {
+                    description: format!("{} joined the coalition!", faction.name),
+                });
+                ActionResult::Success(format!("Coalition formed with faction {}", faction_id))
+            } else {
+                ActionResult::InvalidAction(format!("Faction {} not found", faction_id))
+            }
+        }
+
+        CampaignAction::RequestCoalitionAid { faction_id } => {
+            if let Some(faction) = state.factions.iter_mut().find(|f| f.id == faction_id) {
+                if !faction.coalition_member {
+                    return ActionResult::Failed("Not a coalition member".into());
+                }
+                if faction.military_strength < 20.0 {
+                    return ActionResult::Failed("Coalition member too weak to help".into());
+                }
+                // Coalition member sends adventurers and supplies
+                let aid_strength = faction.military_strength * 0.1;
+                faction.military_strength -= aid_strength;
+                state.guild.supplies += 15.0;
+                // Boost control of lowest-control guild region
+                if let Some(region) = state
+                    .overworld
+                    .regions
+                    .iter_mut()
+                    .filter(|r| r.owner_faction_id == state.diplomacy.guild_faction_id)
+                    .min_by(|a, b| a.control.partial_cmp(&b.control).unwrap_or(std::cmp::Ordering::Equal))
+                {
+                    region.control = (region.control + aid_strength).min(100.0);
+                }
+                events.push(WorldEvent::SupplyChanged {
+                    amount: 15.0,
+                    reason: format!("Coalition aid from faction {}", faction_id),
+                });
+                ActionResult::Success(format!("Coalition aid received from faction {}", faction_id))
             } else {
                 ActionResult::InvalidAction(format!("Faction {} not found", faction_id))
             }

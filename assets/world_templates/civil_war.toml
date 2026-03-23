@@ -94,8 +94,13 @@ id = 0
 name = "The Loyalists"
 relationship_to_guild = 5.0
 military_strength = 100.0
+max_military_strength = 150.0
 territory_size = 2
 diplomatic_stance = "Neutral"
+coalition_member = false
+at_war_with = []
+has_guild = false
+guild_adventurer_count = 0
 recent_actions = []
 
 [[factions]]
@@ -103,8 +108,13 @@ id = 1
 name = "The Reformists"
 relationship_to_guild = 5.0
 military_strength = 95.0
+max_military_strength = 142.5
 territory_size = 2
 diplomatic_stance = "Neutral"
+coalition_member = false
+at_war_with = []
+has_guild = false
+guild_adventurer_count = 0
 recent_actions = []
 
 [diplomacy]

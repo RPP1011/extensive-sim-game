@@ -74,8 +74,13 @@ id = 0
 name = "The Accord"
 relationship_to_guild = 40.0
 military_strength = 50.0
+max_military_strength = 75.0
 territory_size = 2
 diplomatic_stance = "Friendly"
+coalition_member = false
+at_war_with = []
+has_guild = true
+guild_adventurer_count = 6
 recent_actions = []
 
 [[factions]]
@@ -83,8 +88,13 @@ id = 1
 name = "Iron Dominion"
 relationship_to_guild = -50.0
 military_strength = 120.0
+max_military_strength = 180.0
 territory_size = 1
 diplomatic_stance = "AtWar"
+coalition_member = false
+at_war_with = [0]
+has_guild = false
+guild_adventurer_count = 0
 recent_actions = []
 
 [diplomacy]

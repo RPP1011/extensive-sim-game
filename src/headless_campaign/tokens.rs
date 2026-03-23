@@ -79,6 +79,7 @@ fn diplomatic_stance_index(s: DiplomaticStance) -> f32 {
         DiplomaticStance::Neutral => 1.0,
         DiplomaticStance::Hostile => 2.0,
         DiplomaticStance::AtWar => 3.0,
+        DiplomaticStance::Coalition => 4.0,
     }
 }
 

@@ -510,18 +510,39 @@ pub struct FactionState {
     /// Relationship to the guild (−100 to 100).
     pub relationship_to_guild: f32,
     pub military_strength: f32,
+    /// Strength cap — factions rebuild toward this over time.
+    #[serde(default = "default_max_strength")]
+    pub max_military_strength: f32,
     pub territory_size: usize,
     pub diplomatic_stance: DiplomaticStance,
+    /// Whether this faction is in a coalition with the guild.
+    #[serde(default)]
+    pub coalition_member: bool,
+    /// Faction-to-faction war targets (faction IDs this faction is at war with).
+    #[serde(default)]
+    pub at_war_with: Vec<usize>,
+    /// Whether this faction has an adventurer guild (NPC guild for coalition).
+    #[serde(default)]
+    pub has_guild: bool,
+    /// NPC guild adventurer count (if has_guild).
+    #[serde(default)]
+    pub guild_adventurer_count: u32,
     /// Recent actions taken by this faction (bounded).
     pub recent_actions: Vec<FactionActionRecord>,
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DiplomaticStance {
+    /// Positive relations, willing to trade and cooperate.
     Friendly,
+    /// Default stance, no strong feelings.
     Neutral,
+    /// Negative relations, building military, may declare war.
     Hostile,
+    /// Actively attacking the guild's territory.
     AtWar,
+    /// Allied — shares intel, provides military aid, joint operations.
+    Coalition,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -798,6 +819,10 @@ impl StartingChoice {
 pub fn lcg_next(state: &mut u64) -> u32 {
     *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
     (*state >> 33) as u32
+}
+
+fn default_max_strength() -> f32 {
+    100.0
 }
 
 /// Returns a float in [0, 1).

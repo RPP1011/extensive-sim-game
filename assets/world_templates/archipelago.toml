@@ -111,8 +111,13 @@ id = 0
 name = "Coral Compact"
 relationship_to_guild = 50.0
 military_strength = 40.0
+max_military_strength = 60.0
 territory_size = 1
 diplomatic_stance = "Friendly"
+coalition_member = false
+at_war_with = []
+has_guild = true
+guild_adventurer_count = 6
 recent_actions = []
 
 [[factions]]
@@ -120,8 +125,13 @@ id = 1
 name = "Tideborne League"
 relationship_to_guild = 10.0
 military_strength = 70.0
+max_military_strength = 105.0
 territory_size = 2
 diplomatic_stance = "Neutral"
+coalition_member = false
+at_war_with = []
+has_guild = false
+guild_adventurer_count = 0
 recent_actions = []
 
 [[factions]]
@@ -129,8 +139,13 @@ id = 2
 name = "Abyssal Cult"
 relationship_to_guild = -60.0
 military_strength = 90.0
+max_military_strength = 135.0
 territory_size = 2
 diplomatic_stance = "Hostile"
+coalition_member = false
+at_war_with = []
+has_guild = false
+guild_adventurer_count = 0
 recent_actions = []
 
 [diplomacy]

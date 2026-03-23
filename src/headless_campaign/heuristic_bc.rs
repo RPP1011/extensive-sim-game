@@ -237,6 +237,8 @@ pub fn action_type_name(action: &CampaignAction) -> String {
         CampaignAction::SetSpendPriority { .. } => "SetSpendPriority".into(),
         CampaignAction::ChooseStartingPackage { .. } => "StartingChoice".into(),
         CampaignAction::RespondToChoice { .. } => "RespondToChoice".into(),
+        CampaignAction::ProposeCoalition { .. } => "ProposeCoalition".into(),
+        CampaignAction::RequestCoalitionAid { .. } => "RequestCoalitionAid".into(),
     }
 }
 

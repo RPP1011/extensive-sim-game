@@ -63,6 +63,12 @@ pub enum CampaignAction {
         action_type: DiplomacyActionType,
     },
 
+    /// Propose a coalition with a friendly faction.
+    ProposeCoalition { faction_id: usize },
+
+    /// Request military aid from a coalition member.
+    RequestCoalitionAid { faction_id: usize },
+
     /// Use an active unlock ability on a target.
     UseAbility {
         unlock_id: u32,
@@ -100,6 +106,7 @@ pub enum DiplomacyActionType {
     TradeAgreement,
     RequestAid,
     Threaten,
+    ProposeCeasefire,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -547,18 +554,56 @@ impl CampaignState {
             }
         }
 
-        // Diplomacy
+        // Diplomacy — context-sensitive actions per faction
         for faction in &self.factions {
-            for &dt in &[
-                DiplomacyActionType::ImproveRelations,
-                DiplomacyActionType::TradeAgreement,
-                DiplomacyActionType::RequestAid,
-                DiplomacyActionType::Threaten,
-            ] {
-                actions.push(CampaignAction::DiplomaticAction {
-                    faction_id: faction.id,
-                    action_type: dt,
-                });
+            match faction.diplomatic_stance {
+                DiplomaticStance::AtWar => {
+                    // Can only ceasefire or threaten enemies at war
+                    actions.push(CampaignAction::DiplomaticAction {
+                        faction_id: faction.id,
+                        action_type: DiplomacyActionType::ProposeCeasefire,
+                    });
+                }
+                DiplomaticStance::Hostile => {
+                    actions.push(CampaignAction::DiplomaticAction {
+                        faction_id: faction.id,
+                        action_type: DiplomacyActionType::ImproveRelations,
+                    });
+                    actions.push(CampaignAction::DiplomaticAction {
+                        faction_id: faction.id,
+                        action_type: DiplomacyActionType::Threaten,
+                    });
+                }
+                DiplomaticStance::Neutral => {
+                    actions.push(CampaignAction::DiplomaticAction {
+                        faction_id: faction.id,
+                        action_type: DiplomacyActionType::ImproveRelations,
+                    });
+                    actions.push(CampaignAction::DiplomaticAction {
+                        faction_id: faction.id,
+                        action_type: DiplomacyActionType::TradeAgreement,
+                    });
+                }
+                DiplomaticStance::Friendly => {
+                    actions.push(CampaignAction::DiplomaticAction {
+                        faction_id: faction.id,
+                        action_type: DiplomacyActionType::TradeAgreement,
+                    });
+                    // Can propose coalition if relation > 60
+                    if faction.relationship_to_guild > 60.0 && !faction.coalition_member {
+                        actions.push(CampaignAction::ProposeCoalition {
+                            faction_id: faction.id,
+                        });
+                    }
+                }
+                DiplomaticStance::Coalition => {
+                    // Can request military aid from coalition members
+                    if faction.military_strength > 20.0 {
+                        actions.push(CampaignAction::RequestCoalitionAid {
+                            faction_id: faction.id,
+                        });
+                    }
+                }
             }
         }
 
