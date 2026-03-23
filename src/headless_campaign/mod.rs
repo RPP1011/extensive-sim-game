@@ -28,6 +28,7 @@ pub mod class_dsl;
 pub mod crisis_templates;
 pub mod heuristic_bc;
 pub mod combat_oracle;
+pub mod content_prompts;
 pub mod config;
 pub mod mcts;
 pub mod quest_hooks;
