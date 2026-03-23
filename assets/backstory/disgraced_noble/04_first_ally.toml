@@ -1,0 +1,29 @@
+name = "First Ally"
+world_template = "Civil War"
+sequence = 4
+default_option = 2
+prompt = "Word of your survival spreads despite your caution. One morning, someone arrives at your door — not with a warrant, but with an offer."
+
+[[options]]
+label = "A Disillusioned Guard Captain"
+description = "Captain Edric served the Crown for twenty years. He watched your trial and saw the rot. 'I didn't swear my oath to liars. I swore it to the realm.'"
+effects = [
+    { type = "add_adventurer", name = "Captain Edric", archetype = "knight", level_var = "3" },
+    { type = "narrative", text = "Edric arrived in battered armor with a dozen old scars. Every one of them was earned honestly." },
+]
+
+[[options]]
+label = "A Court Mage"
+description = "Magister Lenne was at the trial. She saw the enchantments woven into the forged evidence. 'I can prove your innocence — given time and resources.'"
+effects = [
+    { type = "add_adventurer", name = "Magister Lenne", archetype = "mage", level_var = "2" },
+    { type = "narrative", text = "Lenne spoke softly but carried the weight of conviction. She had risked everything to find you." },
+]
+
+[[options]]
+label = "A Street Urchin"
+description = "A scrappy kid who slips through your window one night. 'I know every alley, every sewer, every secret door in Crown's Landing. You need eyes? I'm your eyes.'"
+effects = [
+    { type = "add_adventurer", name = "Shade", archetype = "rogue", level_var = "1" },
+    { type = "narrative", text = "Shade was young, fast, and utterly fearless. The streets had taught what no academy could." },
+]

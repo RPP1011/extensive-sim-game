@@ -1,0 +1,29 @@
+name = "First Mate"
+world_template = "Archipelago"
+sequence = 4
+default_option = 1
+prompt = "You pin a notice to the harbor board: 'Crew wanted. Experience preferred. Cowards need not apply.' By morning, three people are waiting at your door."
+
+[[options]]
+label = "A Stranded Marine"
+description = "Broad-shouldered, square-jawed, and still wearing her regiment's insignia. 'My garrison was disbanded. I need a cause. You look like you have one.'"
+effects = [
+    { type = "add_adventurer", name = "Sergeant Voss", archetype = "knight", level_var = "2" },
+    { type = "narrative", text = "Voss saluted when she signed on. Old habits. You told her she could drop the formality. She didn't." },
+]
+
+[[options]]
+label = "A Pearl Diver"
+description = "Quick, quiet, and lean as a reef eel. He can hold his breath for four minutes and pick a lock in two. 'I know every cave in these islands.'"
+effects = [
+    { type = "add_adventurer", name = "Mako", archetype = "rogue", level_var = "1" },
+    { type = "narrative", text = "Mako didn't sign the ledger. He carved a small fish into the wood instead. 'That's my mark,' he said." },
+]
+
+[[options]]
+label = "A Shipwright's Apprentice"
+description = "Soft-spoken, with hands stained by pitch and prayer beads wound around her wrist. 'I can mend a hull or mend a person. Whichever you need more.'"
+effects = [
+    { type = "add_adventurer", name = "Ama Driftwood", archetype = "cleric", level_var = "2" },
+    { type = "narrative", text = "Ama brought her own tools — a caulking mallet and a healer's kit. She saw no difference between the two." },
+]

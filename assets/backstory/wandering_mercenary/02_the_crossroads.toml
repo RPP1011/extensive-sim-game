@@ -1,0 +1,33 @@
+name = "The Crossroads"
+sequence = 2
+default_option = 0
+prompt = "You stop at a crossroads inn to figure out your next move. Three opportunities find you before you finish your drink."
+
+[[options]]
+label = "Guard a Merchant Caravan"
+description = "A caravan master needs swords for the mountain pass. Good pay, honest work. One of the guards is a traveling cleric who keeps the crew patched up."
+effects = [
+    { type = "gold", amount = 40.0 },
+    { type = "supplies", amount = 15.0 },
+    { type = "add_adventurer", name = "Brother Aldric", archetype = "cleric", level_var = "2" },
+    { type = "narrative", text = "The caravan job paid well. Brother Aldric stayed on after the pass — said he liked your company." },
+]
+
+[[options]]
+label = "Help the Village Elder"
+description = "An old woman begs for help. Bandits have been raiding her village for weeks. She can't pay much, but the people will remember."
+effects = [
+    { type = "reputation", amount = 15.0 },
+    { type = "faction_relation", faction_id = 0, delta = 10.0 },
+    { type = "add_adventurer", name = "Kael Thornwood", archetype = "ranger", level_var = "2" },
+    { type = "narrative", text = "You cleared the bandits. Kael, the village hunter, decided to follow you. Said you reminded her of someone worth following." },
+]
+
+[[options]]
+label = "Go Into Business with Drak"
+description = "An old war buddy, Drak, slides into the booth. 'I've got a scheme. Low risk, high reward. Just need someone I trust watching my back.'"
+effects = [
+    { type = "gold", amount = 60.0 },
+    { type = "add_adventurer", name = "Drak Sable", archetype = "rogue", level_var = "3" },
+    { type = "narrative", text = "Drak's scheme worked — mostly. You made coin and gained a partner who knows every back alley in the region." },
+]

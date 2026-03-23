@@ -1,0 +1,55 @@
+name = "The Guild"
+sequence = 3
+default_option = 0
+prompt = "You find an abandoned guildhouse with a leaking roof and a faded charter on the wall. For the first time in years, you think about staying put. Why start a guild?"
+
+[[options]]
+label = "For the Coin"
+description = "Mercenary work pays by the job. A guild pays forever. Dues, contracts, percentages — you'll build an empire."
+pc_traits = [{ trait = "merchant_mind" }]
+effects = [
+    { type = "gold", amount = 30.0 },
+    { type = "narrative", text = "You hung a price list before you hung a banner. First things first." },
+]
+
+[options.goal]
+name = "Mercenary Fortune"
+description = "Accumulate 500 gold through guild contracts."
+
+[[options.goal.conditions]]
+type = "Gold"
+min_gold = 500.0
+
+[[options]]
+label = "To Protect the Weak"
+description = "You've seen what happens when no one stands up. Villages burn, people suffer. Your sword can mean something more."
+pc_traits = [{ trait = "protector" }]
+effects = [
+    { type = "reputation", amount = 10.0 },
+    { type = "narrative", text = "You wrote the guild's first rule on the wall: 'We fight for those who cannot.'" },
+]
+
+[options.goal]
+name = "Sword and Shield"
+description = "Complete 20 quests in defense of the defenseless."
+
+[[options.goal.conditions]]
+type = "QuestsCompleted"
+min_quests = 20
+
+[[options]]
+label = "To Find a Home"
+description = "You've wandered long enough. A guild is roots, a crew, a reason to come back. You want to belong somewhere."
+pc_traits = [{ trait = "wanderer" }]
+effects = [
+    { type = "reputation", amount = 5.0 },
+    { type = "narrative", text = "You patched the roof first. Then the door. It felt strange — building instead of leaving." },
+]
+
+[options.goal]
+name = "A Place to Belong"
+description = "Earn the trust of the land. Reach 80 reputation."
+
+[[options.goal.conditions]]
+type = "Reputation"
+min_reputation = 80.0

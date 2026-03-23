@@ -1,0 +1,28 @@
+name = "Word Gets Out"
+sequence = 4
+default_option = 0
+prompt = "You've barely hung the guild sign when someone walks through the door. Word travels fast in these parts. Your first real recruit — who is it?"
+
+[[options]]
+label = "A Young Idealist"
+description = "Bright-eyed, polished armor, quotes the Knight's Code like scripture. Never seen real combat, but burns with conviction."
+effects = [
+    { type = "add_adventurer", name = "Sera Bright", archetype = "knight", level_var = "1" },
+    { type = "narrative", text = "Sera signed up before you finished explaining the dangers. Her enthusiasm is either inspiring or terrifying." },
+]
+
+[[options]]
+label = "A Disgraced Soldier"
+description = "Hollow eyes, weathered gear, a discharge brand on his wrist. 'I've done things I'm not proud of. Let me do something better.'"
+effects = [
+    { type = "add_adventurer", name = "Harsk the Fallen", archetype = "knight", level_var = "3" },
+    { type = "narrative", text = "Harsk didn't meet your eyes when he signed. But his sword hand was steady." },
+]
+
+[[options]]
+label = "A Curious Scholar"
+description = "Ink-stained fingers, a satchel full of scrolls, and a spark of arcane energy trailing from her staff. 'I want to study conflict up close. For research purposes.'"
+effects = [
+    { type = "add_adventurer", name = "Lyra Quill", archetype = "mage", level_var = "2" },
+    { type = "narrative", text = "Lyra immediately started cataloging your guildhouse. You're not sure if she joined or is conducting a survey." },
+]

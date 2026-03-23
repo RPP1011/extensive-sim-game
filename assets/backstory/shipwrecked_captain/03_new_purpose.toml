@@ -1,0 +1,56 @@
+name = "New Purpose"
+world_template = "Archipelago"
+sequence = 3
+default_option = 2
+prompt = "Weeks pass. The salt fades from your clothes but not from your blood. The Archipelago is beautiful, dangerous, and full of opportunity. You have nothing — which means you can become anything."
+
+[[options]]
+label = "Build a Fleet"
+description = "You know ships. You know trade routes. With enough gold, you can build something that makes the Silver Gull look like a rowboat."
+pc_traits = [{ trait = "merchant_mind" }]
+effects = [
+    { type = "gold", amount = 20.0 },
+    { type = "narrative", text = "You started sketching hull designs in the sand. One ship, then two, then a fleet." },
+]
+
+[options.goal]
+name = "Fleet Admiral"
+description = "Accumulate 400 gold to fund a new trading fleet."
+
+[[options.goal.conditions]]
+type = "Gold"
+min_gold = 400.0
+
+[[options]]
+label = "Protect the Islands"
+description = "Pirates, storms, sea monsters — the Archipelago needs someone willing to stand between its people and the deep."
+pc_traits = [{ trait = "protector" }]
+effects = [
+    { type = "reputation", amount = 10.0 },
+    { type = "narrative", text = "You swore an oath on the beach where you nearly died: no one else drowns on your watch." },
+]
+
+[options.goal]
+name = "Guardian of the Archipelago"
+description = "Hold all guild-controlled regions above 50 control."
+
+[[options.goal.conditions]]
+type = "RegionControl"
+region_id = 0
+min_control = 50.0
+
+[[options]]
+label = "Map the Unknown"
+description = "There are islands out there no chart has ever marked. Reefs, ruins, and things older than the sea itself. You want to find them all."
+pc_traits = [{ trait = "explorer" }]
+effects = [
+    { type = "reputation", amount = 5.0 },
+    { type = "narrative", text = "You bought a blank journal and wrote one word on the first page: 'Everything.'" },
+]
+
+[options.goal]
+name = "Cartographer of the Deep"
+description = "Scout all locations in the Archipelago."
+
+[[options.goal.conditions]]
+type = "AllLocationsDiscovered"

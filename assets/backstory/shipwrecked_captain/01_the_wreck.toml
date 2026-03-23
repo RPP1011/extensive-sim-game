@@ -1,0 +1,34 @@
+name = "The Wreck"
+world_template = "Archipelago"
+sequence = 1
+default_option = 0
+prompt = "The storm came out of nowhere. Three days of howling wind and black water. Your trade vessel, the Silver Gull, broke apart on a reef near the Coral Archipelago. The sea swallowed everything. You remember the cold, the dark, and then — sand beneath your fingers."
+
+[[options]]
+label = "Clung to Wreckage"
+description = "You grabbed a broken spar and held on through the night. The current carried you to shore. Survival is just stubbornness with saltwater."
+pc_traits = [{ trait = "pragmatist" }]
+pc_stats = { speed = 3.0 }
+effects = [
+    { type = "narrative", text = "You washed ashore alone, half-drowned, clinging to a plank. But you washed ashore." },
+]
+
+[[options]]
+label = "Saved the Crew First"
+description = "You dove back into the wreck three times, pulling sailors from the hold before the hull split. One of them refused to leave your side."
+pc_traits = [{ trait = "natural_leader" }]
+pc_stats = { resolve = 5.0 }
+effects = [
+    { type = "add_adventurer", name = "Bosun Kell", archetype = "knight", level_var = "1" },
+    { type = "narrative", text = "Kell said he owed you his life. You told him you'd settle for his loyalty." },
+]
+
+[[options]]
+label = "Grabbed the Cargo"
+description = "The strongbox was bolted to the captain's cabin floor. You pried it loose as the water rose. Gold is gold, even at the bottom of the sea."
+pc_traits = [{ trait = "merchant_mind" }]
+pc_stats = { speed = 1.0 }
+effects = [
+    { type = "gold", amount = 50.0 },
+    { type = "narrative", text = "You dragged the strongbox through the surf. Some would call it greed. You call it planning." },
+]

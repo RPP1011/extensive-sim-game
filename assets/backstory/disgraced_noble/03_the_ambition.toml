@@ -1,0 +1,57 @@
+name = "The Ambition"
+world_template = "Civil War"
+sequence = 3
+default_option = 0
+prompt = "Alone one evening, you stare into the fire and ask yourself the question you've been avoiding: what now? You lost everything. But loss has a way of clarifying purpose."
+
+[[options]]
+label = "Reclaim My Name"
+description = "The truth will come out. You will rebuild your reputation piece by piece until the realm itself demands your restoration."
+pc_traits = [{ trait = "noble_blood" }]
+effects = [
+    { type = "reputation", amount = 5.0 },
+    { type = "narrative", text = "You swore an oath to the fire: your name would be spoken with respect again." },
+]
+
+[options.goal]
+name = "Restored Honor"
+description = "Rebuild your reputation to 80 or higher."
+
+[[options.goal.conditions]]
+type = "Reputation"
+min_reputation = 80.0
+
+[[options]]
+label = "Seize Power"
+description = "Titles can be taken as easily as they are given. You will carve out a domain of your own — by diplomacy or by force."
+pc_traits = [{ trait = "ambitious" }]
+pc_stats = { attack = 3.0 }
+effects = [
+    { type = "narrative", text = "You stopped mourning what was taken and started planning what you would take." },
+]
+
+[options.goal]
+name = "New Dominion"
+description = "Control 3 or more regions."
+
+[[options.goal.conditions]]
+type = "RegionControl"
+region_id = 0
+min_control = 50.0
+
+[[options]]
+label = "Unite the Factions"
+description = "The civil war is tearing the realm apart. Someone must bridge the divide — and who better than someone with nothing left to lose?"
+pc_traits = [{ trait = "peacemaker" }]
+effects = [
+    { type = "faction_relation", faction_id = 0, delta = 10.0 },
+    { type = "faction_relation", faction_id = 1, delta = 10.0 },
+    { type = "narrative", text = "You chose the hardest path: to heal a kingdom that cast you out." },
+]
+
+[options.goal]
+name = "United Realm"
+description = "Bring all factions to Friendly or Allied status."
+
+[[options.goal.conditions]]
+type = "AllFactionsAllied"

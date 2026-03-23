@@ -1,0 +1,31 @@
+name = "The Shore"
+world_template = "Archipelago"
+sequence = 2
+default_option = 2
+prompt = "You limp into the nearest settlement — a cluster of stilt-houses built over a turquoise lagoon. Word travels fast on small islands. Three offers find you before sundown."
+
+[[options]]
+label = "Join the Coral Compact"
+description = "The Compact's harbormaster offers you membership. 'We look after our own out here. Sign the charter and you'll have a roof, a meal, and a voice.'"
+effects = [
+    { type = "faction_relation", faction_id = 0, delta = 15.0 },
+    { type = "supplies", amount = 25.0 },
+    { type = "narrative", text = "You signed the Coral Compact's charter. In the Archipelago, community isn't charity — it's survival." },
+]
+
+[[options]]
+label = "Accept the Fisherman's Help"
+description = "An old fisherman named Ren offers his spare skiff and a lifetime of knowledge about the reefs. 'The sea gives if you know how to ask.'"
+effects = [
+    { type = "add_adventurer", name = "Ren Tidecaller", archetype = "ranger", level_var = "2" },
+    { type = "narrative", text = "Ren handed you a paddle and pointed east. 'That's where the good fishing is. That's where the trouble is too.'" },
+]
+
+[[options]]
+label = "Take the Smuggler's Coin"
+description = "A woman with too many rings and too few questions slides a pouch of gold across the table. 'Deliver one crate. No questions. We're even.'"
+effects = [
+    { type = "gold", amount = 60.0 },
+    { type = "reputation", amount = -10.0 },
+    { type = "narrative", text = "You took the smuggler's money. The crate was heavy and you didn't ask what was inside." },
+]

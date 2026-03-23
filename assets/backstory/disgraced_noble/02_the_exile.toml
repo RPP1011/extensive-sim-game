@@ -1,0 +1,32 @@
+name = "The Exile"
+world_template = "Civil War"
+sequence = 2
+default_option = 2
+prompt = "Weeks pass in a cramped room above a tavern in a border town. You're running low on everything — coin, hope, options. Then a knock at the door. Someone has found you."
+
+[[options]]
+label = "A Former Servant"
+description = "Old Callum, your family's steward for thirty years. He tracked you across three provinces. 'I served your father. I'll serve you. No title needed.'"
+effects = [
+    { type = "add_adventurer", name = "Callum", archetype = "knight", level_var = "1" },
+    { type = "narrative", text = "Callum knelt despite your protests. Some loyalties outlast any decree." },
+]
+
+[[options]]
+label = "A Spy Network Contact"
+description = "A hooded woman slides a sealed letter across the table. 'The Loyalists remember who you are. We have eyes in the court — and we share what we see.'"
+effects = [
+    { type = "faction_relation", faction_id = 0, delta = 15.0 },
+    { type = "reputation", amount = 5.0 },
+    { type = "narrative", text = "The Loyalists reached out from the shadows. You are not as alone as you thought." },
+]
+
+[[options]]
+label = "A Black Market Dealer"
+description = "A grinning merchant with no scruples and a heavy satchel. 'I don't care about politics. I care about profit. And you, my friend, are an investment.'"
+effects = [
+    { type = "gold", amount = 60.0 },
+    { type = "supplies", amount = 25.0 },
+    { type = "reputation", amount = -10.0 },
+    { type = "narrative", text = "The coin spends the same regardless of whose hands it passed through." },
+]

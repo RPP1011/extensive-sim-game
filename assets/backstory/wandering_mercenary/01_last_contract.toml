@@ -1,0 +1,35 @@
+name = "The Last Contract"
+sequence = 1
+default_option = 1
+prompt = "You've sold your sword across a dozen kingdoms. The last job was supposed to be routine — escort a merchant, collect the fee, move on. But nothing about it went right. What happened?"
+
+[[options]]
+label = "The Employer Betrayed Us"
+description = "The merchant set us up. Led us straight into an ambush so he could collect the bounty on our heads. Half the company died. You barely crawled out."
+pc_traits = [{ trait = "battle_scarred" }]
+pc_stats = { attack = 3.0, defense = 2.0, injury = 20.0 }
+effects = [
+    { type = "narrative", text = "You survived the betrayal. Trust is a luxury you can no longer afford." },
+    { type = "reputation", amount = 5.0 },
+]
+
+[[options]]
+label = "I Walked Away Mid-Job"
+description = "The pay was good but the cause was rotten. You pocketed the advance and disappeared in the night. Professional? No. But you sleep fine."
+pc_traits = [{ trait = "pragmatist" }]
+pc_stats = { speed = 2.0 }
+effects = [
+    { type = "gold", amount = 50.0 },
+    { type = "narrative", text = "You kept the coin and lost the reference. A fair trade." },
+    { type = "reputation", amount = -10.0 },
+]
+
+[[options]]
+label = "The Target Was Innocent"
+description = "They sent you to kill a 'dangerous fugitive.' You found a healer protecting orphans. You sheathed your blade and walked away from the guild forever."
+pc_traits = [{ trait = "protector" }]
+pc_stats = { resolve = 4.0 }
+effects = [
+    { type = "narrative", text = "You chose mercy over money. The look of relief on those children's faces still haunts you — in a good way." },
+    { type = "reputation", amount = 10.0 },
+]
