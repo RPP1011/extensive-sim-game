@@ -71,6 +71,24 @@ fn main() -> ExitCode {
                 bevy_game::headless_campaign::config::CampaignConfig::default()
             };
 
+            let llm_config = if args.llm {
+                let cfg = bevy_game::headless_campaign::llm::LlmConfig {
+                    base_url: args.llm_url.clone(),
+                    model: args.llm_model.clone(),
+                    candidates: args.llm_candidates,
+                    ..Default::default()
+                };
+                if bevy_game::headless_campaign::llm::check_ollama(&cfg) {
+                    eprintln!("LLM: connected to {} (model: {})", cfg.base_url, cfg.model);
+                    Some(cfg)
+                } else {
+                    eprintln!("LLM: Ollama not reachable, falling back to templates");
+                    None
+                }
+            } else {
+                None
+            };
+
             let config = bevy_game::headless_campaign::bfs_explore::BfsConfig {
                 max_waves: args.max_waves,
                 ticks_per_branch: args.ticks_per_branch,
@@ -82,6 +100,7 @@ fn main() -> ExitCode {
                 base_seed: args.seed,
                 threads: args.threads,
                 output_path: args.output,
+                llm_config,
             };
             bevy_game::headless_campaign::bfs_explore::run_bfs_exploration(&config);
             ExitCode::SUCCESS

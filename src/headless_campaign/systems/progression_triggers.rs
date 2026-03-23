@@ -5,6 +5,8 @@
 //! In the full game, triggers send requests to the LLM immediately.
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
+use crate::headless_campaign::content_prompts;
+use crate::headless_campaign::llm;
 use crate::headless_campaign::state::*;
 
 const TRIGGER_CHECK_INTERVAL: u64 = 50;
@@ -40,28 +42,34 @@ pub fn tick_progression_triggers(
     for (adv_id, name, archetype, level, traits, fame, quests, victories, is_pc) in &adv_data {
         // --- Level milestone abilities (every 5 levels) ---
         if *level >= 5 && *level % 5 == 0 {
+            let trigger = format!("level_{}", level);
+            let content = generate_ability(state, *adv_id, &trigger);
             try_add_progression(state, *adv_id, ProgressionKind::Ability,
-                &format!("level_{}", level),
+                &trigger,
                 &format!("{} reached level {} — new ability available", name, level),
-                &generate_ability_template(&archetype, *level),
+                &content,
             );
         }
 
         // --- Quest completion abilities (every 5 quests per adventurer) ---
         if *quests > 0 && *quests % 5 == 0 {
+            let trigger = format!("quests_{}", quests);
+            let content = generate_ability(state, *adv_id, &trigger);
             try_add_progression(state, *adv_id, ProgressionKind::Ability,
-                &format!("quests_{}", quests),
+                &trigger,
                 &format!("{} completed {} quests — experience yields insight", name, quests),
-                &generate_ability_template(&archetype, *level),
+                &content,
             );
         }
 
         // --- Battle veteran abilities (every 3 victories) ---
         if *victories > 0 && *victories % 3 == 0 {
+            let trigger = format!("victories_{}", victories);
+            let content = generate_ability(state, *adv_id, &trigger);
             try_add_progression(state, *adv_id, ProgressionKind::Ability,
-                &format!("victories_{}", victories),
+                &trigger,
                 &format!("{} won {} battles — combat instincts sharpen", name, victories),
-                &generate_ability_template(&archetype, *level),
+                &content,
             );
         }
 
@@ -69,29 +77,34 @@ pub fn tick_progression_triggers(
         let fame_thresholds = [30.0, 80.0, 200.0, 500.0, 1000.0, 2000.0];
         for &threshold in &fame_thresholds {
             if *fame >= threshold {
+                let trigger = format!("class_fame_{}", threshold as u32);
+                let content = generate_class(state, *adv_id, &trigger);
                 try_add_progression(state, *adv_id, ProgressionKind::ClassOffer,
-                    &format!("class_fame_{}", threshold as u32),
+                    &trigger,
                     &format!("{}'s reputation grows (fame {:.0}) — a new path opens", name, fame),
-                    &generate_class_template(&archetype, *level, *fame),
+                    &content,
                 );
             }
         }
 
         // --- Crisis response abilities ---
         if has_crisis && *quests >= 3 {
+            let trigger = format!("crisis_response_{}", crisis_count);
+            let content = generate_ability(state, *adv_id, &trigger);
             try_add_progression(state, *adv_id, ProgressionKind::Ability,
-                &format!("crisis_response_{}", crisis_count),
+                &trigger,
                 &format!("{} faces {} active crises — desperation breeds innovation", name, crisis_count),
-                &generate_ability_template(&archetype, *level),
+                &content,
             );
         }
 
         // --- Hero candidacy ---
         if *fame >= 2000.0 && has_crisis {
+            let content = generate_hero(state, *adv_id);
             try_add_progression(state, *adv_id, ProgressionKind::HeroCandidacy,
                 "hero_candidacy",
                 &format!("{}'s legend grows — the path of the Hero opens", name),
-                &generate_hero_class(),
+                &content,
             );
         }
 
@@ -101,22 +114,24 @@ pub fn tick_progression_triggers(
             .map(|a| a.injury)
             .unwrap_or(0.0);
         if adv_injury > 80.0 {
+            let content = generate_ability(state, *adv_id, "injury_survivor");
             try_add_progression(state, *adv_id, ProgressionKind::Ability,
                 "injury_survivor",
                 &format!("{} fights through grievous wounds — survival instincts awaken", name),
-                &generate_ability_template(&archetype, *level),
+                &content,
             );
         }
 
         // --- PC-specific triggers ---
         if *is_pc {
-            // PC backstory-related ability at quests 10, 25, 50
             for &milestone in &[10usize, 25, 50] {
                 if *quests >= milestone {
+                    let trigger = format!("pc_milestone_{}", milestone);
+                    let content = generate_ability(state, *adv_id, &trigger);
                     try_add_progression(state, *adv_id, ProgressionKind::Ability,
-                        &format!("pc_milestone_{}", milestone),
+                        &trigger,
                         &format!("{}'s journey continues — {} quests shape their destiny", name, milestone),
-                        &generate_ability_template(&archetype, *level),
+                        &content,
                     );
                 }
             }
@@ -224,7 +239,65 @@ fn try_add_progression(
 }
 
 // ---------------------------------------------------------------------------
-// Template generators (placeholder until LLM is wired)
+// Content generators — LLM with template fallback
+// ---------------------------------------------------------------------------
+
+/// Generate ability content: try LLM first, fall back to template.
+fn generate_ability(state: &CampaignState, adv_id: u32, trigger: &str) -> String {
+    if let (Some(ref llm_cfg), Some(ref store)) = (&state.llm_config, &state.llm_store) {
+        let context = content_prompts::ability_prompt(state, adv_id, trigger);
+        if let Some(content) = llm::generate_ability(llm_cfg, store, &context) {
+            return content;
+        }
+    }
+    // Fallback to template
+    let archetype = state.adventurers.iter()
+        .find(|a| a.id == adv_id)
+        .map(|a| a.archetype.as_str())
+        .unwrap_or("warrior");
+    let level = state.adventurers.iter()
+        .find(|a| a.id == adv_id)
+        .map(|a| a.level)
+        .unwrap_or(1);
+    generate_ability_template(archetype, level)
+}
+
+/// Generate class content: try LLM first, fall back to template.
+fn generate_class(state: &CampaignState, adv_id: u32, trigger: &str) -> String {
+    if let (Some(ref llm_cfg), Some(ref store)) = (&state.llm_config, &state.llm_store) {
+        let context = content_prompts::class_prompt(state, adv_id, trigger);
+        if let Some(content) = llm::generate_class(llm_cfg, store, &context) {
+            return content;
+        }
+    }
+    let archetype = state.adventurers.iter()
+        .find(|a| a.id == adv_id)
+        .map(|a| a.archetype.as_str())
+        .unwrap_or("warrior");
+    let level = state.adventurers.iter()
+        .find(|a| a.id == adv_id)
+        .map(|a| a.level)
+        .unwrap_or(1);
+    let fame = state.adventurers.iter()
+        .find(|a| a.id == adv_id)
+        .map(|a| a.tier_status.fame)
+        .unwrap_or(0.0);
+    generate_class_template(archetype, level, fame)
+}
+
+/// Generate hero class content: try LLM first, fall back to template.
+fn generate_hero(state: &CampaignState, adv_id: u32) -> String {
+    if let (Some(ref llm_cfg), Some(ref store)) = (&state.llm_config, &state.llm_store) {
+        let context = content_prompts::class_prompt(state, adv_id, "hero_candidacy");
+        if let Some(content) = llm::generate_class(llm_cfg, store, &context) {
+            return content;
+        }
+    }
+    generate_hero_class_template()
+}
+
+// ---------------------------------------------------------------------------
+// Template fallbacks
 // ---------------------------------------------------------------------------
 
 fn generate_ability_template(archetype: &str, level: u32) -> String {
@@ -257,6 +330,6 @@ fn generate_class_template(archetype: &str, level: u32, fame: f32) -> String {
         class_name, archetype, level.saturating_sub(2), fame as u32 / 2)
 }
 
-fn generate_hero_class() -> String {
+fn generate_hero_class_template() -> String {
     "class Hero { stat_growth: +5 all per level, tags: crisis, leadership, legendary, scaling crisis_severity { when crisis_active: +20% all_stats }, abilities { level 1: rallying_cry \"Allies gain combat bonuses\" }, requirements: fame 2000, active_crisis, consolidates_at: 10 }".into()
 }

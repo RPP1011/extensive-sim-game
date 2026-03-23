@@ -86,6 +86,8 @@ pub struct BfsConfig {
     pub threads: usize,
     /// Output JSONL path.
     pub output_path: String,
+    /// Optional LLM config for content generation.
+    pub llm_config: Option<super::llm::LlmConfig>,
 }
 
 impl Default for BfsConfig {
@@ -101,6 +103,7 @@ impl Default for BfsConfig {
             base_seed: 2026,
             threads: 0,
             output_path: "generated/bfs_explore.jsonl".into(),
+            llm_config: None,
         }
     }
 }
@@ -275,6 +278,11 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
         std::fs::File::create(&config.output_path).expect("Failed to create output file"),
     ));
 
+    // Create shared LLM content store if LLM is enabled
+    let llm_store = config.llm_config.as_ref().map(|cfg| {
+        std::sync::Arc::new(super::llm::create_store(cfg))
+    });
+
     let mut stats = BfsStats::default();
     let t0 = std::time::Instant::now();
 
@@ -289,7 +297,7 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
     eprintln!("Initial roots: {}, Threads: {}", config.initial_roots, threads);
 
     // Phase 1: Generate initial roots from diverse heuristic trajectories
-    let mut roots = generate_initial_roots(config);
+    let mut roots = generate_initial_roots(config, &llm_store);
     eprintln!("Generated {} initial root states", roots.len());
     stats.initial_roots = roots.len();
 
@@ -425,6 +433,11 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
         config.output_path,
         std::fs::metadata(&config.output_path).map(|m| m.len() as f64 / 1_000_000.0).unwrap_or(0.0));
 
+    if let Some(ref store) = llm_store {
+        let (total, hits, valid) = store.stats();
+        eprintln!("LLM: {} requests, {} cache hits, {} valid generations", total, hits, valid);
+    }
+
     stats
 }
 
@@ -445,13 +458,18 @@ pub struct BfsStats {
 // ---------------------------------------------------------------------------
 
 /// Generate initial roots from diverse campaigns.
-fn generate_initial_roots(config: &BfsConfig) -> Vec<RootState> {
+fn generate_initial_roots(
+    config: &BfsConfig,
+    llm_store: &Option<std::sync::Arc<super::llm::ContentStore>>,
+) -> Vec<RootState> {
     let mut roots = Vec::new();
     let campaigns_needed = (config.initial_roots / 10).max(5);
 
     for i in 0..campaigns_needed as u64 {
         let seed = config.base_seed.wrapping_add(i * 7919); // spread seeds
         let mut state = CampaignState::with_config(seed, config.campaign_config.clone());
+        state.llm_config = config.llm_config.clone();
+        state.llm_store = llm_store.clone();
 
         // Pick starting choice based on seed to get variety
         if !state.available_starting_choices.is_empty() {

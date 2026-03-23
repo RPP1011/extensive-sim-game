@@ -64,7 +64,7 @@ impl Default for FuzzConfig {
     fn default() -> Self {
         Self {
             campaigns: 10_000,
-            max_ticks: 100_000,
+            max_ticks: 50_000,
             threads: 0,
             base_seed: 0xF022,
             mutation_strength: 0.5,

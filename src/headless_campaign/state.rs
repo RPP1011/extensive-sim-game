@@ -114,6 +114,16 @@ pub struct CampaignState {
     // --- Configuration ---
     /// All tunable balance parameters. Systems read from this.
     pub config: CampaignConfig,
+
+    // --- LLM content generation ---
+    /// Optional LLM config for generating abilities/classes via Ollama.
+    /// When None, falls back to template generators.
+    #[serde(skip)]
+    pub llm_config: Option<super::llm::LlmConfig>,
+    /// Shared content store for LLM request/response logging and dedup.
+    /// Arc so it survives Clone (BFS branches share the same store).
+    #[serde(skip)]
+    pub llm_store: Option<std::sync::Arc<super::llm::ContentStore>>,
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1343,6 +1353,8 @@ impl CampaignState {
             player_character: None,
             creation_event_queue: Vec::new(),
             config: CampaignConfig::default(),
+            llm_config: None,
+            llm_store: None,
         }
     }
 

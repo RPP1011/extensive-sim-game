@@ -285,16 +285,14 @@ pub fn ability_prompt(state: &CampaignState, adv_id: u32, trigger: &str) -> Stri
     let tags = adventurer_tags(adv);
 
     format!(
-        "Generate an ability for this adventurer:\n\n\
-         {}\n\
-         Tags available: {}\n\n\
-         {}\n\
+        "{}\n\
+         Tags: {}\n\
          {}\n\
          {}\n\
          {}\n\
-         Trigger: {}\n\n\
-         The ability should reflect this adventurer's specific experiences, \
-         personality, and role in the guild. It should feel earned, not generic.",
+         {}\n\
+         Trigger: {}\n\
+         The ability should reflect this adventurer's experiences and role.",
         adventurer_context(state, adv_id),
         tags.join(", "),
         quest_history_context(state, adv_id),
@@ -315,19 +313,14 @@ pub fn class_prompt(state: &CampaignState, adv_id: u32, trigger: &str) -> String
     let tags = adventurer_tags(adv);
 
     format!(
-        "Generate a class specialization for this adventurer:\n\n\
-         {}\n\
-         Base tags: {}\n\n\
-         {}\n\
+        "{}\n\
+         Tags: {}\n\
          {}\n\
          {}\n\
          {}\n\
-         Trigger: {}\n\n\
-         The class should represent a natural evolution of how this adventurer \
-         has been playing. The scaling source should match their role \
-         (party-based for squad leaders, faction-based for champions, \
-         crisis-based for heroes). Abilities should feel like a culmination \
-         of their journey.",
+         {}\n\
+         Trigger: {}\n\
+         The class should evolve from how this adventurer has been playing.",
         adventurer_context(state, adv_id),
         tags.join(", "),
         quest_history_context(state, adv_id),

@@ -103,6 +103,18 @@ pub struct BfsExploreArgs {
     /// Path to campaign config TOML
     #[arg(long)]
     pub config: Option<std::path::PathBuf>,
+    /// Enable LLM content generation via Ollama (requires running server)
+    #[arg(long)]
+    pub llm: bool,
+    /// Ollama server URL (default: http://localhost:11434)
+    #[arg(long, default_value = "http://localhost:11434")]
+    pub llm_url: String,
+    /// Ollama model name (default: qwen35-9b)
+    #[arg(long, default_value = "qwen35-9b")]
+    pub llm_model: String,
+    /// LLM candidates per generation (best-of-N, default: 3)
+    #[arg(long, default_value_t = 3)]
+    pub llm_candidates: usize,
 }
 
 #[derive(Debug, Parser)]
