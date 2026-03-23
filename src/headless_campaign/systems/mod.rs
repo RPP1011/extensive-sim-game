@@ -17,6 +17,7 @@ pub mod faction_ai;
 pub mod npc_relationships;
 pub mod economy;
 pub mod progression;
+pub mod progression_triggers;
 pub mod cooldowns;
 pub mod recruitment;
 pub mod threat;

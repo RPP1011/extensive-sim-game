@@ -15,6 +15,11 @@ pub enum CampaignAction {
     /// Do nothing. CfC integrates, world ticks forward.
     Wait,
 
+    /// Rest the guild. Triggers recovery, presents pending progression,
+    /// and allows adventurers to level up / gain abilities / accept classes.
+    /// No quests can be dispatched during rest.
+    Rest,
+
     /// Accept a quest from the request board.
     AcceptQuest { request_id: u32 },
 
@@ -424,7 +429,7 @@ impl CampaignState {
             CampaignPhase::Playing => {} // fall through to normal actions
         }
 
-        let mut actions = vec![CampaignAction::Wait];
+        let mut actions = vec![CampaignAction::Wait, CampaignAction::Rest];
 
         // Pending choices — must be responded to
         for choice in &self.pending_choices {

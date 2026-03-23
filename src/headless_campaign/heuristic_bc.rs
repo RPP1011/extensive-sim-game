@@ -220,6 +220,7 @@ impl CoverageTracker {
 pub fn action_type_name(action: &CampaignAction) -> String {
     match action {
         CampaignAction::Wait => "Wait".into(),
+        CampaignAction::Rest => "Rest".into(),
         CampaignAction::AcceptQuest { .. } => "AcceptQuest".into(),
         CampaignAction::DeclineQuest { .. } => "DeclineQuest".into(),
         CampaignAction::AssignToPool { .. } => "AssignToPool".into(),

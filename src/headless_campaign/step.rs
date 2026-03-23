@@ -96,6 +96,9 @@ pub fn step_campaign(
     }
     systems::threat::tick_threat(state, &mut deltas, &mut events);
 
+    // Progression triggers — detect when content should be generated
+    systems::progression_triggers::tick_progression_triggers(state, &mut deltas, &mut events);
+
     // Final economy snapshot
     deltas.gold_after = state.guild.gold;
     deltas.supplies_after = state.guild.supplies;
@@ -127,6 +130,76 @@ fn apply_action(
 ) -> ActionResult {
     match action {
         CampaignAction::Wait => ActionResult::Success("Observing...".into()),
+
+        CampaignAction::Rest => {
+            if state.resting {
+                return ActionResult::Failed("Already resting".into());
+            }
+            state.resting = true;
+            state.ticks_since_rest = 0;
+
+            // Apply recovery to all idle/injured adventurers
+            for adv in &mut state.adventurers {
+                if adv.status == AdventurerStatus::Dead {
+                    continue;
+                }
+                adv.stress = (adv.stress - 15.0).max(0.0);
+                adv.fatigue = (adv.fatigue - 20.0).max(0.0);
+                adv.morale = (adv.morale + 10.0).min(100.0);
+                if adv.status == AdventurerStatus::Injured {
+                    adv.injury = (adv.injury - 10.0).max(0.0);
+                }
+            }
+
+            // Present pending progression as choice events
+            let pending = std::mem::take(&mut state.pending_progression);
+            for prog in &pending {
+                let choice_id = state.next_event_id;
+                state.next_event_id += 1;
+
+                let choice = ChoiceEvent {
+                    id: choice_id,
+                    source: ChoiceSource::ProgressionUnlock,
+                    prompt: prog.description.clone(),
+                    options: vec![
+                        ChoiceOption {
+                            label: "Accept".into(),
+                            description: format!("Apply: {}", prog.content.chars().take(100).collect::<String>()),
+                            effects: vec![
+                                ChoiceEffect::Narrative(format!("Progression applied: {}", prog.description)),
+                            ],
+                        },
+                        ChoiceOption {
+                            label: "Decline".into(),
+                            description: "Pass on this opportunity.".into(),
+                            effects: vec![
+                                ChoiceEffect::Narrative("The opportunity fades.".into()),
+                            ],
+                        },
+                    ],
+                    default_option: 1,
+                    deadline_ms: None, // No deadline — player decides during rest
+                    created_at_ms: state.elapsed_ms,
+                };
+
+                events.push(WorldEvent::ChoicePresented {
+                    choice_id,
+                    prompt: choice.prompt.clone(),
+                    num_options: 2,
+                });
+
+                state.pending_choices.push(choice);
+            }
+
+            let n = pending.len();
+            state.resting = false; // Rest completes immediately for now
+
+            events.push(WorldEvent::CampaignMilestone {
+                description: format!("The guild rests. {} progression items available.", n),
+            });
+
+            ActionResult::Success(format!("Rested. {} progression choices pending.", n))
+        }
 
         CampaignAction::AcceptQuest { request_id } => {
             if state.active_quests.len() >= state.guild.active_quest_capacity {
