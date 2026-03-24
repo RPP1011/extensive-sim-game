@@ -34,6 +34,7 @@ pub mod config;
 pub mod fuzz;
 pub mod llm;
 pub mod mcts;
+pub mod quest_gen;
 pub mod quest_hooks;
 pub mod state;
 pub mod step;
