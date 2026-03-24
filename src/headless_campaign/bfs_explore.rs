@@ -203,15 +203,36 @@ fn estimate_value(state: &CampaignState) -> f32 {
     // Additive progress
     let progress_score = progress * 2.0 + (quests_won / 25.0).min(1.0) + win_rate;
 
+    // --- War pressure: are hostile factions threatening our territory? ---
+    let war_penalty = state.factions.iter()
+        .filter(|f| f.diplomatic_stance == DiplomaticStance::AtWar)
+        .map(|f| {
+            // Stronger enemies = bigger penalty
+            let strength_ratio = f.military_strength / 50.0; // 50 = baseline
+            strength_ratio.min(3.0) * 0.3
+        })
+        .sum::<f32>();
+
+    // Territory safety: how much control do we have?
+    let guild_faction_id = state.diplomacy.guild_faction_id;
+    let guild_regions = state.overworld.regions.iter()
+        .filter(|r| r.owner_faction_id == guild_faction_id)
+        .count() as f32;
+    let total_regions = state.overworld.regions.len().max(1) as f32;
+    let territory_score = guild_regions / total_regions;
+    let territory_penalty = if territory_score < 0.5 { (1.0 - territory_score) * 0.8 } else { 0.0 };
+
     // Penalties
     let injured_penalty = injured_count * 0.15;
     let threat_penalty = threat * 0.5 + crisis_pressure * 0.3;
     let bankruptcy_penalty = if state.guild.gold < 20.0 { 0.5 } else { 0.0 };
 
     // Combine with multiplicative factors for larger dynamic range
-    let base = progress_score + level_score * 0.5 + quest_load * 0.3;
+    let base = progress_score + level_score * 0.5 + quest_load * 0.3
+        + territory_score * 0.5; // territory control is valuable
     let v = base * roster_factor * health_factor * economy_factor
-        - injured_penalty - threat_penalty - bankruptcy_penalty;
+        - injured_penalty - threat_penalty - bankruptcy_penalty
+        - war_penalty - territory_penalty;
 
     v.clamp(0.0, 5.0)
 }
