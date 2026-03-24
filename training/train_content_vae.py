@@ -81,11 +81,24 @@ class ContentVAE(nn.Module):
             nn.Linear(hidden_dim // 4, 2),
         )
 
-        # Ability decoder: concat(z, x) → proj → N residual blocks → slots
+        # Ability decoder: shared trunk + factored heads
         self.ab_proj = nn.Linear(dec_input_dim, hidden_dim)
         self.ab_blocks = nn.Sequential(*[ResBlock(hidden_dim, dropout) for _ in range(n_layers)])
         self.ab_norm = nn.LayerNorm(hidden_dim)
-        self.ab_head = nn.Linear(hidden_dim, ability_slot_dim)
+
+        # Structural head: output_type(3) + targeting(8) + continuous(4) + hint(5) + delivery(7) + delivery_params(6) + flags(9) = 42 dims
+        self.ab_struct_head = nn.Linear(hidden_dim, 42)
+
+        # Per-effect classification heads (4 effects × dedicated MLP each)
+        # Each effect = 25 dims: type(17) + param(1) + dur(1) + area(5) + cond(1)
+        self.ab_effect_heads = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim // 4),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim // 4, 25),
+            ) for _ in range(4)
+        ])
 
         # Class decoder: concat(z, x) → proj → N residual blocks → slots
         self.cl_proj = nn.Linear(dec_input_dim, hidden_dim)
@@ -108,11 +121,14 @@ class ContentVAE(nn.Module):
         # Concatenate latent + input for conditional decoding
         zx = torch.cat([z, x], dim=-1)
 
-        # Ability head
+        # Ability: shared trunk → factored heads
         ha = F.gelu(self.ab_proj(zx))
         ha = self.ab_blocks(ha)
         ha = self.ab_norm(ha)
-        ability_slots = self.ab_head(ha)
+
+        struct_slots = self.ab_struct_head(ha)  # (batch, 42)
+        effect_slots = torch.cat([head(ha) for head in self.ab_effect_heads], dim=-1)  # (batch, 100)
+        ability_slots = torch.cat([struct_slots, effect_slots], dim=-1)  # (batch, 142)
 
         # Class head
         hc = F.gelu(self.cl_proj(zx))

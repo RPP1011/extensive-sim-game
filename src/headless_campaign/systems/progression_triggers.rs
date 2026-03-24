@@ -242,27 +242,18 @@ fn try_add_progression(
 // Content generators — LLM with template fallback
 // ---------------------------------------------------------------------------
 
-/// Generate ability content: try VAE first, then LLM, fall back to template.
-/// Takes archetype/level from snapshot to avoid stale adventurer lookups.
-fn generate_ability(state: &CampaignState, adv_id: u32, trigger: &str, archetype: &str, level: u32) -> String {
-    // Try VAE model first (instant, ~0.1ms)
-    if let Some(ref vae) = state.vae_model {
-        let input = super::super::vae_features::assemble_input(
-            state, adv_id, trigger, ProgressionKind::Ability,
-        );
-        let name = format!("{}_{}", archetype, trigger);
-        return vae.generate_ability(&input, &name);
-    }
+/// Generate ability content via grammar walker (instant, diverse, valid).
+fn generate_ability(state: &CampaignState, _adv_id: u32, trigger: &str, archetype: &str, level: u32) -> String {
+    // Seed RNG from game state for determinism
+    let mut rng = state.tick.wrapping_mul(6364136223846793005)
+        .wrapping_add(level as u64 * 7919)
+        .wrapping_add(archetype.as_bytes().iter().map(|b| *b as u64).sum::<u64>() * 31);
 
-    // Try LLM (slow, ~8s)
-    if let (Some(ref llm_cfg), Some(ref store)) = (&state.llm_config, &state.llm_store) {
-        let context = content_prompts::ability_prompt(state, adv_id, trigger);
-        if let Some(content) = llm::generate_ability(llm_cfg, store, &context) {
-            return content;
-        }
-    }
+    let (mut def, _is_passive) = super::super::ability_gen::generate_ability(archetype, level, &mut rng);
+    def.name = format!("{}_{}", archetype, trigger.replace("_", ""));
 
-    generate_ability_template(archetype, level)
+    // Use the real DSL emitter for perfect roundtrip
+    tactical_sim::effects::dsl::emit::emit_ability_dsl(&def)
 }
 
 /// Generate class content: try VAE first, then LLM, fall back to template.
