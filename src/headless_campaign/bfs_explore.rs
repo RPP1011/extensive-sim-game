@@ -646,19 +646,24 @@ fn generate_initial_roots(
             let action = diverse_root_policy(&state, &mut rng);
             let result = step_campaign(&mut state, action);
 
-            // Only sample roots from mid-game (tick 600-8000) where decisions matter
-            let min_tick = config.root_sample_interval * 3; // skip early game
-            let max_tick = config.trajectory_max_ticks as u64 * 2 / 3; // skip late game
-            // Skip dead/lost states — no strategic decisions possible
+            let min_tick = config.root_sample_interval * 3;
+            let max_tick = config.trajectory_max_ticks as u64 * 2 / 3;
             let alive = state.adventurers.iter()
                 .filter(|a| a.status != AdventurerStatus::Dead).count();
             let is_viable = alive >= 2 && state.guild.gold > 10.0;
 
+            // Stratified sampling: tag roots by what actions are available
+            let has_quest_board = !state.request_board.is_empty();
+            let has_active_quest = !state.active_quests.is_empty();
+            let has_battle = !state.active_battles.is_empty();
+            let has_injured = state.adventurers.iter().any(|a| a.injury > 30.0);
+            let has_crisis = !state.overworld.active_crises.is_empty();
+            let has_pending_choice = !state.pending_choices.is_empty();
+
             let has_tension = is_viable && (
-                state.guild.gold < 150.0
-                || state.adventurers.iter().any(|a| a.injury > 30.0)
-                || !state.active_quests.is_empty()
-                || !state.overworld.active_crises.is_empty()
+                has_quest_board || has_active_quest || has_battle
+                || has_injured || has_crisis || has_pending_choice
+                || state.guild.gold < 150.0
                 || state.overworld.global_threat_level > 30.0
                 || state.completed_quests.len() >= 3
             );
