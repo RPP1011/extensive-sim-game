@@ -124,8 +124,19 @@ file = "iron_sentinel.ability"</code></pre>
 
 <h2>Content Library</h2>
 
-<h3>27 Base Heroes</h3>
-<p>Hand-crafted heroes in <code>assets/hero_templates/</code>, each with a unique kit designed to test specific game mechanics. These cover the core archetypes: tanks, healers, mages, assassins, fighters, marksmen, and controllers.</p>
+<h3>Base Heroes (24 TOML + 14 DSL files)</h3>
+<p>Hand-crafted heroes in <code>assets/hero_templates/</code>, each with 8 active abilities and 2 passives:</p>
+
+<table>
+<tr><th>Hero</th><th>HP</th><th>Speed</th><th>Archetype</th><th>Key Stats</th></tr>
+<tr><td><strong>Warrior</strong></td><td>180</td><td>2.2</td><td>Tank/Initiator</td><td>CC 60, Whirlwind, ShieldWall, HeroicCharge</td></tr>
+<tr><td><strong>Paladin</strong></td><td>160</td><td>2.4</td><td>Tank/Healer hybrid</td><td>CC 50, Holy 40, Blessing, Lay on Hands</td></tr>
+<tr><td><strong>Rogue</strong></td><td>80</td><td>3.8</td><td>Assassin</td><td>22 AD, Poison 30, high mobility</td></tr>
+<tr><td><strong>Monk</strong></td><td>95</td><td>3.5</td><td>Mobile Fighter</td><td>CC 45, 18 AD, fast attacks</td></tr>
+<tr><td><strong>Cleric</strong></td><td>95</td><td>2.8</td><td>Healer/Support</td><td>Holy 40, Holy Light, Sanctuary</td></tr>
+<tr><td><strong>Mage</strong></td><td>~100</td><td>3.0</td><td>Ranged DPS</td><td>5.0 range, high ability damage</td></tr>
+<tr><td colspan="5" style="color: var(--text-muted); font-style: italic;">+ Ranger, Knight, Berserker, Assassin, Shaman, Druid, Bard, Alchemist, Necromancer, Warlock, Elementalist, Cryomancer, Pyromancer, and more</td></tr>
+</table>
 
 <h3>172 LoL Champion Imports</h3>
 <p>Auto-generated hero templates in <code>assets/lol_heroes/</code>, imported from League of Legends champion data. These provide a massive roster for stress-testing the effect system and AI decision pipeline. Each import maps LoL champion abilities to the native <a href="abilities.html">effect system</a>.</p>
