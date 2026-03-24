@@ -132,8 +132,9 @@ pub enum AbilityTarget {
     Faction(usize),
 }
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SpendPriority {
+    #[default]
     Balanced,
     SaveForEmergencies,
     InvestInGrowth,

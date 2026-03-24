@@ -158,6 +158,66 @@ pub struct GuildState {
     pub unlock_bitmask: u64,
     /// Inventory of unequipped gear.
     pub inventory: Vec<InventoryItem>,
+
+    // --- Economy system ---
+    /// Current spending priority allocation.
+    #[serde(default)]
+    pub spend_priority: super::actions::SpendPriority,
+    /// Dynamic market price multipliers.
+    #[serde(default)]
+    pub market_prices: MarketPrices,
+    /// Accumulated trade income from controlled regions.
+    #[serde(default)]
+    pub total_trade_income: f32,
+    /// Investment levels across spending categories.
+    #[serde(default)]
+    pub investment: InvestmentState,
+    /// Rolling purchase history for market inflation.
+    #[serde(default)]
+    pub purchase_history: PurchaseHistory,
+}
+
+/// Dynamic market price multipliers. Prices inflate with demand.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MarketPrices {
+    /// Multiplier for supply costs.
+    pub supply_multiplier: f32,
+    /// Multiplier for recruitment costs.
+    pub recruitment_multiplier: f32,
+    /// Multiplier for training costs.
+    pub training_multiplier: f32,
+    /// Multiplier for mercenary costs.
+    pub mercenary_multiplier: f32,
+}
+
+impl Default for MarketPrices {
+    fn default() -> Self {
+        Self {
+            supply_multiplier: 1.0,
+            recruitment_multiplier: 1.0,
+            training_multiplier: 1.0,
+            mercenary_multiplier: 1.0,
+        }
+    }
+}
+
+/// Investment levels for the four spending categories.
+/// Each level provides diminishing returns to its domain.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct InvestmentState {
+    pub defense_level: f32,
+    pub recruitment_level: f32,
+    pub infrastructure_level: f32,
+    pub intelligence_level: f32,
+}
+
+/// Rolling purchase counts that decay over time, driving market inflation.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PurchaseHistory {
+    pub supply_purchases: f32,
+    pub recruitment_purchases: f32,
+    pub training_purchases: f32,
+    pub mercenary_purchases: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1331,6 +1391,11 @@ impl CampaignState {
                 active_quest_capacity: 3,
                 unlock_bitmask: 0,
                 inventory: Vec::new(),
+                spend_priority: Default::default(),
+                market_prices: Default::default(),
+                total_trade_income: 0.0,
+                investment: Default::default(),
+                purchase_history: Default::default(),
             },
             overworld: OverworldState {
                 regions,

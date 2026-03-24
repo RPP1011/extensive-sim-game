@@ -70,6 +70,7 @@ pub fn step_campaign(
     // --- Run tick systems in order ---
     // Every-tick systems
     systems::travel::tick_travel(state, &mut deltas, &mut events);
+    systems::interception::tick_interception(state, &mut deltas, &mut events);
     systems::supply::tick_supply(state, &mut deltas, &mut events);
     systems::battles::tick_battles(state, &mut deltas, &mut events);
     systems::quest_lifecycle::tick_quest_lifecycle(state, &mut deltas, &mut events);
@@ -363,16 +364,20 @@ fn apply_action(
         }
 
         CampaignAction::PurchaseSupplies { party_id, amount } => {
-            let cost = amount * state.config.economy.supply_cost_per_unit;
+            let base_cost = amount * state.config.economy.supply_cost_per_unit;
+            let cost = systems::economy::effective_cost(
+                base_cost,
+                state.guild.market_prices.supply_multiplier,
+            );
             if state.guild.gold < cost {
                 return ActionResult::Failed("Not enough gold".into());
             }
             if let Some(party) = state.parties.iter_mut().find(|p| p.id == party_id) {
-                if state.guild.gold < cost {
-                    return ActionResult::Failed("Not enough gold".into());
-                }
-                state.guild.gold = (state.guild.gold - cost).max(0.0);
                 party.supply_level = (party.supply_level + amount).min(100.0);
+                // Deduct and record after releasing the party borrow
+                drop(party);
+                state.guild.gold = (state.guild.gold - cost).max(0.0);
+                state.guild.purchase_history.supply_purchases += 1.0;
                 ActionResult::Success(format!(
                     "Purchased {} supplies for party {} (cost: {:.0}g)",
                     amount, party_id, cost
@@ -386,21 +391,29 @@ fn apply_action(
             adventurer_id,
             training_type,
         } => {
-            if state.guild.gold < state.config.economy.training_cost {
+            let training_cost = systems::economy::effective_cost(
+                state.config.economy.training_cost,
+                state.guild.market_prices.training_multiplier,
+            );
+            if state.guild.gold < training_cost {
                 return ActionResult::Failed("Not enough gold".into());
             }
+            // Check status before borrowing mutably
+            let adv_status = state.adventurers.iter().find(|a| a.id == adventurer_id).map(|a| a.status);
+            match adv_status {
+                Some(AdventurerStatus::Idle) => {}
+                Some(_) => return ActionResult::Failed("Adventurer not idle".into()),
+                None => return ActionResult::InvalidAction(format!("Adventurer {} not found", adventurer_id)),
+            }
+
+            state.guild.gold = (state.guild.gold - training_cost).max(0.0);
+            state.guild.purchase_history.training_purchases += 1.0;
+
             if let Some(adv) = state
                 .adventurers
                 .iter_mut()
                 .find(|a| a.id == adventurer_id)
             {
-                if adv.status != AdventurerStatus::Idle {
-                    return ActionResult::Failed("Adventurer not idle".into());
-                }
-                if state.guild.gold < state.config.economy.training_cost {
-                    return ActionResult::Failed("Not enough gold".into());
-                }
-                state.guild.gold = (state.guild.gold - state.config.economy.training_cost).max(0.0);
                 match training_type {
                     TrainingType::Combat => adv.stats.attack += 2.0,
                     TrainingType::Exploration => adv.stats.speed += 1.0,
@@ -469,9 +482,6 @@ fn apply_action(
                 return ActionResult::Failed("Not enough gold".into());
             }
             if let Some(party) = state.parties.iter_mut().find(|p| p.id == party_id) {
-                if state.guild.gold < runner_cost {
-                    return ActionResult::Failed("Not enough gold".into());
-                }
                 state.guild.gold = (state.guild.gold - runner_cost).max(0.0);
                 match &payload {
                     RunnerPayload::Supplies(amount) => {
@@ -493,11 +503,15 @@ fn apply_action(
         }
 
         CampaignAction::HireMercenary { quest_id } => {
-            let merc_cost = state.config.economy.mercenary_cost;
+            let merc_cost = systems::economy::effective_cost(
+                state.config.economy.mercenary_cost,
+                state.guild.market_prices.mercenary_multiplier,
+            );
             if state.guild.gold < merc_cost {
                 return ActionResult::Failed("Not enough gold".into());
             }
             state.guild.gold = (state.guild.gold - merc_cost).max(0.0);
+            state.guild.purchase_history.mercenary_purchases += 1.0;
             // Boost the battle's predicted outcome
             if let Some(battle) = state
                 .active_battles
@@ -558,9 +572,6 @@ fn apply_action(
                 .iter_mut()
                 .find(|l| l.id == location_id)
             {
-                if state.guild.gold < scout_cost {
-                    return ActionResult::Failed("Not enough gold".into());
-                }
                 state.guild.gold = (state.guild.gold - scout_cost).max(0.0);
                 loc.scouted = true;
                 events.push(WorldEvent::ScoutReport {
@@ -701,9 +712,10 @@ fn apply_action(
             }
         }
 
-        CampaignAction::SetSpendPriority { priority: _ } => {
+        CampaignAction::SetSpendPriority { priority } => {
             // Store as guild state for economy system to reference
-            ActionResult::Success("Spending priority updated".into())
+            state.guild.spend_priority = priority;
+            ActionResult::Success(format!("Spending priority set to {:?}", priority))
         }
 
         CampaignAction::RespondToChoice { choice_id, option_index } => {
@@ -851,8 +863,8 @@ fn apply_action(
             }
 
             // Apply the starting package
-            state.guild.gold = (state.guild.gold + choice.gold_bonus).max(0.0);
-            state.guild.supplies = (state.guild.supplies + choice.supply_bonus).max(0.0);
+            state.guild.gold += choice.gold_bonus;
+            state.guild.supplies += choice.supply_bonus;
             state.guild.reputation = (state.guild.reputation + choice.reputation_bonus).clamp(0.0, 100.0);
 
             // Add adventurers with corrected IDs
@@ -932,14 +944,14 @@ fn apply_choice_effects(
     for effect in effects {
         match effect {
             ChoiceEffect::Gold(amount) => {
-                state.guild.gold = (state.guild.gold + amount).max(0.0);
+                state.guild.gold += amount;
                 events.push(WorldEvent::GoldChanged {
                     amount: *amount,
                     reason: "Choice effect".into(),
                 });
             }
             ChoiceEffect::Supplies(amount) => {
-                state.guild.supplies = (state.guild.supplies + amount).max(0.0);
+                state.guild.supplies += amount;
                 events.push(WorldEvent::SupplyChanged {
                     amount: *amount,
                     reason: "Choice effect".into(),

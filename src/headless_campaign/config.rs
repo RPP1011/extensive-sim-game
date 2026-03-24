@@ -316,7 +316,60 @@ pub struct EconomyConfig {
     pub training_cost: f32,
     pub rescue_bribe_cost: f32,
     pub supply_cost_per_unit: f32,
+
+    // --- Trade & Market ---
+    /// Gold per second per point of region control for guild-owned settlements.
+    #[serde(default = "default_trade_rate")]
+    pub trade_income_per_control: f32,
+    /// How fast market prices inflate per purchase (added to rolling history).
+    #[serde(default = "default_inflation")]
+    pub market_inflation_rate: f32,
+    /// How fast purchase history decays per tick (multiplicative).
+    #[serde(default = "default_market_decay")]
+    pub market_decay_rate: f32,
+    /// Maximum price multiplier from market inflation.
+    #[serde(default = "default_market_max")]
+    pub market_max_multiplier: f32,
+
+    // --- Investment ---
+    /// Gold drained per second into current spend priority category.
+    #[serde(default = "default_invest_gold")]
+    pub investment_gold_per_sec: f32,
+    /// Investment level gain per gold invested (before diminishing returns).
+    #[serde(default = "default_invest_return")]
+    pub investment_return_rate: f32,
+    /// Maximum investment level per category (diminishing returns cap).
+    #[serde(default = "default_invest_max")]
+    pub investment_max_level: f32,
+
+    // --- Supply chain ---
+    /// Fatigue penalty per tile of distance from base when out of supply.
+    #[serde(default = "default_supply_dist")]
+    pub supply_distance_penalty: f32,
+    /// Fatigue added per tick to out-of-supply parties.
+    #[serde(default = "default_oos_fatigue")]
+    pub out_of_supply_fatigue: f32,
+    /// Morale drained per tick from out-of-supply parties.
+    #[serde(default = "default_oos_morale")]
+    pub out_of_supply_morale: f32,
+
+    // --- Threat reward ---
+    /// Bonus gold per second per point of global threat (risk = reward).
+    #[serde(default = "default_threat_bonus")]
+    pub threat_reward_bonus: f32,
 }
+
+fn default_trade_rate() -> f32 { 0.02 }
+fn default_inflation() -> f32 { 0.1 }
+fn default_market_decay() -> f32 { 0.05 }
+fn default_market_max() -> f32 { 3.0 }
+fn default_invest_gold() -> f32 { 0.3 }
+fn default_invest_return() -> f32 { 0.01 }
+fn default_invest_max() -> f32 { 10.0 }
+fn default_supply_dist() -> f32 { 0.001 }
+fn default_oos_fatigue() -> f32 { 0.5 }
+fn default_oos_morale() -> f32 { 0.3 }
+fn default_threat_bonus() -> f32 { 0.005 }
 
 impl Default for EconomyConfig {
     fn default() -> Self {
@@ -328,6 +381,17 @@ impl Default for EconomyConfig {
             training_cost: 20.0,
             rescue_bribe_cost: 80.0,
             supply_cost_per_unit: 0.5,
+            trade_income_per_control: default_trade_rate(),
+            market_inflation_rate: default_inflation(),
+            market_decay_rate: default_market_decay(),
+            market_max_multiplier: default_market_max(),
+            investment_gold_per_sec: default_invest_gold(),
+            investment_return_rate: default_invest_return(),
+            investment_max_level: default_invest_max(),
+            supply_distance_penalty: default_supply_dist(),
+            out_of_supply_fatigue: default_oos_fatigue(),
+            out_of_supply_morale: default_oos_morale(),
+            threat_reward_bonus: default_threat_bonus(),
         }
     }
 }
