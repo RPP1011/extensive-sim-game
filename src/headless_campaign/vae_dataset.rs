@@ -290,11 +290,14 @@ fn sweep_single_campaign(seed: u64, config: &VaeDatasetConfig) -> Vec<TriggerCon
                 continue; // already recorded this trigger
             }
 
-            let adv_id = prog.adventurer_id.unwrap_or(0);
+            let adv_id = match prog.adventurer_id {
+                Some(id) => id,
+                None => continue, // skip guild-wide triggers (adv_id=0 creates ghost data)
+            };
             let content_type = match prog.kind {
                 ProgressionKind::Ability => "ability",
                 ProgressionKind::ClassOffer | ProgressionKind::HeroCandidacy => "class",
-                ProgressionKind::QuestHook => "quest_hook",
+                ProgressionKind::QuestHook => continue, // quest hooks are guild-wide, skip
                 _ => continue, // skip LevelUp, ItemReward
             };
 

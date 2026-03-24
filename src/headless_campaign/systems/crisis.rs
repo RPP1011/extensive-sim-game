@@ -814,7 +814,12 @@ fn tick_decline(
     };
 
     let elapsed = state.tick.saturating_sub(tick_started);
-    let severity = 1.0 + (elapsed as f32 / severity_growth_rate);
+    let base_severity = 1.0 + (elapsed as f32 / severity_growth_rate);
+
+    // Recovery: high reputation and quest completions push back against decline
+    let quest_recovery = (state.completed_quests.len() as f32 * 0.05).min(3.0);
+    let rep_recovery = (state.guild.reputation / 50.0).max(0.0); // rep 50 → 1.0 recovery
+    let severity = (base_severity - quest_recovery - rep_recovery).max(0.5);
 
     if state.tick % 100 == 0 {
         state.guild.gold = (state.guild.gold - severity * gold_drain_per_tick).max(0.0);
