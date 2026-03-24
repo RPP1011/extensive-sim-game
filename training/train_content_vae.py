@@ -1,26 +1,24 @@
 #!/usr/bin/env python3
 """Train grammar-guided VAE for content generation.
 
-Architecture:
-  Encoder: 124-dim input → MLP → μ, σ → z (latent)
-  Decoder: z → factored heads for ability slots (142) + class slots (75)
+Architecture (v2):
+  Encoder: 124-dim → 4-layer residual MLP → μ, σ → z (latent)
+  Decoder: z → 4-layer factored heads for ability slots (142) + class slots (75)
+  Free-bits KL: minimum λ per latent dimension to prevent posterior collapse
   Serializer: deterministic slot→DSL (in Rust, not trained)
 
-Loss: reconstruction (MSE on continuous slots, BCE on categorical slots) + β·KL
-
 Usage:
-    uv run --with numpy --with torch python3 training/train_content_vae.py \
+    uv run --with numpy --with torch --find-links https://download.pytorch.org/whl/cu124 \
+        python3 training/train_content_vae.py \
         --data generated/vae_training_data.npz \
-        --epochs 200 \
-        --latent-dim 32 \
-        --lr 1e-3
+        --class-data generated/vae_training_class.npz \
+        --epochs 200 --latent-dim 32 --hidden-dim 512 --lr 3e-4
 """
 
 import argparse
 import json
 import os
 import sys
-import time
 
 import numpy as np
 import torch
@@ -33,49 +31,64 @@ from torch.utils.data import DataLoader, TensorDataset
 # Model
 # ---------------------------------------------------------------------------
 
-class ContentVAE(nn.Module):
-    """Grammar-guided VAE with factored decoder heads."""
+class ResBlock(nn.Module):
+    """Residual MLP block with LayerNorm."""
+    def __init__(self, dim, dropout=0.1):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim, dim),
+            nn.Dropout(dropout),
+        )
 
-    def __init__(self, input_dim=124, latent_dim=32, hidden_dim=256,
-                 ability_slot_dim=142, class_slot_dim=75):
+    def forward(self, x):
+        return x + self.net(x)
+
+
+class ContentVAE(nn.Module):
+    """Grammar-guided VAE with factored decoder heads (v2: deeper, residual)."""
+
+    def __init__(self, input_dim=124, latent_dim=32, hidden_dim=512,
+                 ability_slot_dim=142, class_slot_dim=75,
+                 n_layers=4, dropout=0.1):
         super().__init__()
         self.latent_dim = latent_dim
         self.ability_slot_dim = ability_slot_dim
         self.class_slot_dim = class_slot_dim
 
-        # Encoder: input → hidden → μ, log_σ²
-        self.encoder = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-        )
+        # Encoder: input → proj → N residual blocks → μ, log_σ²
+        self.enc_proj = nn.Linear(input_dim, hidden_dim)
+        self.enc_blocks = nn.Sequential(*[ResBlock(hidden_dim, dropout) for _ in range(n_layers)])
+        self.enc_norm = nn.LayerNorm(hidden_dim)
         self.fc_mu = nn.Linear(hidden_dim, latent_dim)
         self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
 
         # Content type head: z → P(ability | class)
-        self.content_type_head = nn.Linear(latent_dim, 2)
-
-        # Ability decoder: z → ability slots
-        self.ability_decoder = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, ability_slot_dim),
+        self.content_type_head = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dim // 4),
+            nn.GELU(),
+            nn.Linear(hidden_dim // 4, 2),
         )
 
-        # Class decoder: z → class slots
-        self.class_decoder = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, class_slot_dim),
-        )
+        # Ability decoder: z → proj → N residual blocks → slots
+        self.ab_proj = nn.Linear(latent_dim, hidden_dim)
+        self.ab_blocks = nn.Sequential(*[ResBlock(hidden_dim, dropout) for _ in range(n_layers)])
+        self.ab_norm = nn.LayerNorm(hidden_dim)
+        self.ab_head = nn.Linear(hidden_dim, ability_slot_dim)
+
+        # Class decoder: z → proj → N residual blocks → slots
+        self.cl_proj = nn.Linear(latent_dim, hidden_dim)
+        self.cl_blocks = nn.Sequential(*[ResBlock(hidden_dim, dropout) for _ in range(n_layers)])
+        self.cl_norm = nn.LayerNorm(hidden_dim)
+        self.cl_head = nn.Linear(hidden_dim, class_slot_dim)
 
     def encode(self, x):
-        h = self.encoder(x)
+        h = F.gelu(self.enc_proj(x))
+        h = self.enc_blocks(h)
+        h = self.enc_norm(h)
         return self.fc_mu(h), self.fc_logvar(h)
 
     def reparameterize(self, mu, logvar):
@@ -84,10 +97,20 @@ class ContentVAE(nn.Module):
         return mu + eps * std
 
     def decode(self, z):
-        ability_slots = self.ability_decoder(z)
-        class_slots = self.class_decoder(z)
-        content_type_logits = self.content_type_head(z)
-        return ability_slots, class_slots, content_type_logits
+        # Ability head
+        ha = F.gelu(self.ab_proj(z))
+        ha = self.ab_blocks(ha)
+        ha = self.ab_norm(ha)
+        ability_slots = self.ab_head(ha)
+
+        # Class head
+        hc = F.gelu(self.cl_proj(z))
+        hc = self.cl_blocks(hc)
+        hc = self.cl_norm(hc)
+        class_slots = self.cl_head(hc)
+
+        ct_logits = self.content_type_head(z)
+        return ability_slots, class_slots, ct_logits
 
     def forward(self, x):
         mu, logvar = self.encode(x)
@@ -96,15 +119,23 @@ class ContentVAE(nn.Module):
         return ability_slots, class_slots, ct_logits, mu, logvar
 
 
-def vae_loss(ability_pred, class_pred, ct_logits, mu, logvar,
-             ability_target, class_target, ct_target, beta=1.0):
-    """Combined loss: reconstruction + KL divergence."""
+def free_bits_kl(mu, logvar, free_bits=0.1):
+    """KL with free-bits: each latent dim must contribute at least λ nats.
+    Prevents posterior collapse by ensuring the encoder uses the latent space."""
+    # Per-dimension KL: 0.5 * (μ² + σ² - 1 - log σ²)
+    kl_per_dim = 0.5 * (mu.pow(2) + logvar.exp() - 1 - logvar)  # (batch, latent)
+    # Clamp each dim's mean KL to at least free_bits
+    kl_per_dim_mean = kl_per_dim.mean(dim=0)  # (latent,)
+    kl_clamped = torch.clamp(kl_per_dim_mean, min=free_bits)
+    return kl_clamped.sum()
 
-    # Content type classification loss
+
+def vae_loss(ability_pred, class_pred, ct_logits, mu, logvar,
+             ability_target, class_target, ct_target,
+             beta=1.0, free_bits=0.1):
+    """Combined loss: reconstruction + free-bits KL + content type CE."""
     ct_loss = F.cross_entropy(ct_logits, ct_target)
 
-    # Reconstruction loss: MSE on the relevant slots only
-    # Mask by content type: abilities use ability slots, classes use class slots
     is_ability = (ct_target == 0).float().unsqueeze(1)
     is_class = (ct_target == 1).float().unsqueeze(1)
 
@@ -114,8 +145,7 @@ def vae_loss(ability_pred, class_pred, ct_logits, mu, logvar,
     n = mu.size(0)
     recon_loss = (ability_recon + class_recon) / n
 
-    # KL divergence
-    kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / n
+    kl_loss = free_bits_kl(mu, logvar, free_bits)
 
     total = recon_loss + ct_loss + beta * kl_loss
     return total, recon_loss, kl_loss, ct_loss
@@ -133,13 +163,31 @@ def train(args):
     slots_class = torch.from_numpy(data["slots_class"])
     content_types = torch.from_numpy(data["content_types"]).long()
 
+    # Optionally load and merge class data
+    if args.class_data and os.path.exists(args.class_data):
+        print(f"Loading class data from {args.class_data}...")
+        cdata = np.load(args.class_data)
+        inputs = torch.cat([inputs, torch.from_numpy(cdata["inputs"])], 0)
+        slots_ability = torch.cat([slots_ability, torch.from_numpy(cdata["slots_ability"])], 0)
+        slots_class = torch.cat([slots_class, torch.from_numpy(cdata["slots_class"])], 0)
+        content_types = torch.cat([content_types, torch.from_numpy(cdata["content_types"]).long()], 0)
+
     n = inputs.shape[0]
-    print(f"Samples: {n:,} (abilities: {(content_types==0).sum():,}, classes: {(content_types==1).sum():,})")
+    n_ab = (content_types == 0).sum().item()
+    n_cl = (content_types == 1).sum().item()
+    print(f"Samples: {n:,} (abilities: {n_ab:,}, classes: {n_cl:,})")
     print(f"Input dim: {inputs.shape[1]}, Ability slots: {slots_ability.shape[1]}, Class slots: {slots_class.shape[1]}")
+
+    # Drop dead slots for better gradient signal
+    ab_std = slots_ability.std(dim=0)
+    cl_std = slots_class.std(dim=0)
+    ab_active = (ab_std > 0.001).sum().item()
+    cl_active = (cl_std > 0.001).sum().item()
+    print(f"Active ability slots: {ab_active}/{slots_ability.shape[1]}, class slots: {cl_active}/{slots_class.shape[1]}")
 
     # Train/val split
     perm = torch.randperm(n)
-    val_n = max(1000, n // 10)
+    val_n = max(2000, n // 10)
     val_idx = perm[:val_n]
     train_idx = perm[val_n:]
 
@@ -148,8 +196,10 @@ def train(args):
     val_ds = TensorDataset(inputs[val_idx], slots_ability[val_idx],
                            slots_class[val_idx], content_types[val_idx])
 
-    train_dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, drop_last=True)
-    val_dl = DataLoader(val_ds, batch_size=args.batch_size)
+    train_dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
+                          drop_last=True, num_workers=2, pin_memory=True)
+    val_dl = DataLoader(val_ds, batch_size=args.batch_size,
+                        num_workers=2, pin_memory=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -160,15 +210,17 @@ def train(args):
         hidden_dim=args.hidden_dim,
         ability_slot_dim=slots_ability.shape[1],
         class_slot_dim=slots_class.shape[1],
+        n_layers=args.layers,
+        dropout=args.dropout,
     ).to(device)
 
     param_count = sum(p.numel() for p in model.parameters())
-    print(f"Parameters: {param_count:,}")
+    print(f"Parameters: {param_count:,} ({args.layers} layers, hidden={args.hidden_dim})")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
-    # Beta annealing: start at 0, linearly ramp to target over warmup epochs
+    # Beta annealing
     beta_target = args.beta
     beta_warmup = args.epochs // 5
 
@@ -187,12 +239,13 @@ def train(args):
         train_batches = 0
 
         for batch in train_dl:
-            x, ab_target, cl_target, ct_target = [b.to(device) for b in batch]
+            x, ab_target, cl_target, ct_target = [b.to(device, non_blocking=True) for b in batch]
 
             ab_pred, cl_pred, ct_logits, mu, logvar = model(x)
             loss, recon, kl, ct_loss = vae_loss(
                 ab_pred, cl_pred, ct_logits, mu, logvar,
-                ab_target, cl_target, ct_target, beta,
+                ab_target, cl_target, ct_target,
+                beta, args.free_bits,
             )
 
             optimizer.zero_grad()
@@ -219,11 +272,12 @@ def train(args):
 
         with torch.no_grad():
             for batch in val_dl:
-                x, ab_target, cl_target, ct_target = [b.to(device) for b in batch]
+                x, ab_target, cl_target, ct_target = [b.to(device, non_blocking=True) for b in batch]
                 ab_pred, cl_pred, ct_logits, mu, logvar = model(x)
                 loss, recon, kl, ct_loss = vae_loss(
                     ab_pred, cl_pred, ct_logits, mu, logvar,
-                    ab_target, cl_target, ct_target, beta,
+                    ab_target, cl_target, ct_target,
+                    beta, args.free_bits,
                 )
                 val_total += loss.item()
                 val_recon += recon.item()
@@ -253,7 +307,7 @@ def train(args):
             print(f"[{epoch:4d}/{args.epochs}] "
                   f"loss={train_total:.4f} recon={train_recon:.4f} kl={train_kl:.4f} "
                   f"ct={train_ct:.4f} | "
-                  f"val={val_total:.4f} recon={val_recon:.4f} ct_acc={val_ct_acc:.3f} "
+                  f"val={val_total:.4f} recon={val_recon:.4f} kl={val_kl:.4f} ct_acc={val_ct_acc:.3f} "
                   f"β={beta:.3f} lr={scheduler.get_last_lr()[0]:.6f}")
 
         # Save best
@@ -268,6 +322,8 @@ def train(args):
                     "hidden_dim": args.hidden_dim,
                     "ability_slot_dim": slots_ability.shape[1],
                     "class_slot_dim": slots_class.shape[1],
+                    "n_layers": args.layers,
+                    "dropout": args.dropout,
                 },
                 "epoch": epoch,
                 "val_loss": val_total,
@@ -283,6 +339,8 @@ def train(args):
             "hidden_dim": args.hidden_dim,
             "ability_slot_dim": slots_ability.shape[1],
             "class_slot_dim": slots_class.shape[1],
+            "n_layers": args.layers,
+            "dropout": args.dropout,
         },
         "epoch": args.epochs,
         "val_loss": val_total,
@@ -298,13 +356,17 @@ def train(args):
 def main():
     parser = argparse.ArgumentParser(description="Train content generation VAE")
     parser.add_argument("--data", default="generated/vae_training_data.npz")
+    parser.add_argument("--class-data", default=None, help="Additional NPZ with class samples")
     parser.add_argument("--output-dir", default="generated/content_vae")
     parser.add_argument("--epochs", type=int, default=200)
-    parser.add_argument("--batch-size", type=int, default=512)
+    parser.add_argument("--batch-size", type=int, default=2048)
     parser.add_argument("--latent-dim", type=int, default=32)
-    parser.add_argument("--hidden-dim", type=int, default=256)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--beta", type=float, default=1.0, help="KL weight (annealed from 0)")
+    parser.add_argument("--hidden-dim", type=int, default=512)
+    parser.add_argument("--layers", type=int, default=4)
+    parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--beta", type=float, default=0.5, help="KL weight (annealed from 0)")
+    parser.add_argument("--free-bits", type=float, default=0.1, help="Min KL per latent dim (nats)")
     parser.add_argument("--log-interval", type=int, default=10)
     args = parser.parse_args()
     train(args)
