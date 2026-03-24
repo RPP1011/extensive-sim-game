@@ -262,6 +262,12 @@ pub struct Adventurer {
     /// Unit tier progression status.
     #[serde(default)]
     pub tier_status: super::unit_tiers::UnitTierStatus,
+
+    /// History tags accumulated from gameplay. Used to bias ability generation
+    /// so abilities reflect the adventurer's actual journey.
+    /// e.g., {"solo": 10, "blight_prevention": 3, "region_defense": 5}
+    #[serde(default)]
+    pub history_tags: std::collections::HashMap<String, u32>,
 }
 
 /// A leadership role that provides passive buffs while the adventurer is active.
@@ -1199,6 +1205,7 @@ impl CampaignState {
                 faction_id: None,
                 rallying_to: None,
                     tier_status: Default::default(),
+                    history_tags: Default::default(),
             },
             Adventurer {
                 id: 2,
@@ -1229,6 +1236,7 @@ impl CampaignState {
                 faction_id: None,
                 rallying_to: None,
                     tier_status: Default::default(),
+                    history_tags: Default::default(),
             },
             Adventurer {
                 id: 3,
@@ -1259,6 +1267,7 @@ impl CampaignState {
                 faction_id: None,
                 rallying_to: None,
                     tier_status: Default::default(),
+                    history_tags: Default::default(),
             },
             Adventurer {
                 id: 4,
@@ -1289,6 +1298,7 @@ impl CampaignState {
                 faction_id: None,
                 rallying_to: None,
                     tier_status: Default::default(),
+                    history_tags: Default::default(),
             },
         ];
 
@@ -1406,6 +1416,7 @@ impl CampaignState {
                         party_id: None, guild_relationship: 40.0,
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     tier_status: Default::default(),
+                    history_tags: Default::default(),
                     },
                     Adventurer {
                         id: 2, name: "Greta".into(), archetype: "knight".into(), level: 2, xp: 0,
@@ -1416,6 +1427,7 @@ impl CampaignState {
                         party_id: None, guild_relationship: 45.0,
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     tier_status: Default::default(),
+                    history_tags: Default::default(),
                     },
                 ],
                 gold_bonus: 150.0, supply_bonus: 30.0, reputation_bonus: 5.0, items: Vec::new(),
@@ -1433,6 +1445,7 @@ impl CampaignState {
                         party_id: None, guild_relationship: 25.0,
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     tier_status: Default::default(),
+                    history_tags: Default::default(),
                     },
                 ],
                 gold_bonus: 0.0, supply_bonus: 0.0, reputation_bonus: 10.0, items: Vec::new(),
@@ -1450,6 +1463,7 @@ impl CampaignState {
                         party_id: None, guild_relationship: 35.0,
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     tier_status: Default::default(),
+                    history_tags: Default::default(),
                     },
                     Adventurer {
                         id: 2, name: "Brynn".into(), archetype: "mage".into(), level: 1, xp: 0,
@@ -1460,6 +1474,7 @@ impl CampaignState {
                         party_id: None, guild_relationship: 30.0,
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     tier_status: Default::default(),
+                    history_tags: Default::default(),
                     },
                     Adventurer {
                         id: 3, name: "Cira".into(), archetype: "cleric".into(), level: 1, xp: 0,
@@ -1470,6 +1485,7 @@ impl CampaignState {
                         party_id: None, guild_relationship: 45.0,
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     tier_status: Default::default(),
+                    history_tags: Default::default(),
                     },
                     Adventurer {
                         id: 4, name: "Daven".into(), archetype: "rogue".into(), level: 1, xp: 0,
@@ -1480,6 +1496,7 @@ impl CampaignState {
                         party_id: None, guild_relationship: 25.0,
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     tier_status: Default::default(),
+                    history_tags: Default::default(),
                     },
                 ],
                 gold_bonus: 20.0, supply_bonus: 10.0, reputation_bonus: 0.0, items: Vec::new(),

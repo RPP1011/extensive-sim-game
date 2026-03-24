@@ -174,17 +174,151 @@ fn profile_for_archetype(archetype: &str) -> ArchetypeProfile {
 }
 
 // ---------------------------------------------------------------------------
+// History tag biasing
+// ---------------------------------------------------------------------------
+
+/// Apply history tag biases to an archetype profile.
+/// Each tag shifts specific probability weights to make abilities reflect gameplay.
+fn apply_history_biases(p: &mut ArchetypeProfile, history: &std::collections::HashMap<String, u32>) {
+    let get = |key: &str| -> f32 { *history.get(key).unwrap_or(&0) as f32 };
+
+    // Solo play → boost self-targeting, sustain effects
+    let solo = get("solo");
+    if solo > 0.0 {
+        let s = (solo / 10.0).min(1.5); // caps at 15 solo quests
+        p.targeting[2] += s * 2.0;      // self-cast
+        p.effect_weights[1] += s;        // heal
+        p.effect_weights[2] += s;        // shield
+        p.effect_weights[13] += s * 1.5; // lifesteal
+        p.passive_chance += s * 0.05;
+    }
+
+    // Party combat → boost ally targeting, aura/buff effects
+    let party = get("party_combat");
+    if party > 0.0 {
+        let s = (party / 10.0).min(1.5);
+        p.targeting[1] += s * 2.0;       // ally
+        p.targeting[3] += s;             // self_aoe
+        p.effect_weights[9] += s * 2.0;  // buff
+        p.hint[3] += s;                  // utility
+    }
+
+    // Near death → boost defensive/survival
+    let near_death = get("near_death");
+    if near_death > 0.0 {
+        let s = (near_death / 5.0).min(2.0);
+        p.effect_weights[2] += s * 2.0;  // shield
+        p.effect_weights[1] += s;         // heal
+        p.effect_weights[8] += s * 0.5;  // dash (escape)
+        p.hint[2] += s;                   // defense
+        p.passive_chance += s * 0.1;
+        p.trigger[4] += s * 2.0;          // on_hp_below
+    }
+
+    // High threat quests → boost damage scaling and CC
+    let high_threat = get("high_threat");
+    if high_threat > 0.0 {
+        let s = (high_threat / 8.0).min(1.5);
+        p.effect_weights[0] += s;         // damage
+        p.effect_weights[3] += s * 0.5;   // stun
+        p.effect_weights[14] += s * 0.5;  // execute
+    }
+
+    // Exploration → boost mobility and utility
+    let explore = get("exploration");
+    if explore > 0.0 {
+        let s = (explore / 8.0).min(1.5);
+        p.effect_weights[8] += s * 2.0;   // dash
+        p.effect_weights[12] += s;         // stealth
+        p.hint[3] += s;                    // utility
+        p.range[1] += s;                   // longer range
+    }
+
+    // Diplomatic → boost crowd control and debuffs
+    let diplo = get("diplomatic");
+    if diplo > 0.0 {
+        let s = (diplo / 5.0).min(1.5);
+        p.effect_weights[3] += s;          // stun
+        p.effect_weights[6] += s;          // slow
+        p.effect_weights[10] += s * 1.5;   // debuff
+        p.hint[1] += s;                    // crowd_control
+    }
+
+    // Crisis: blight → boost nature/purification/resistance
+    let blight = get("crisis_blight_prevention");
+    if blight > 0.0 {
+        let s = (blight / 3.0).min(2.0);
+        p.effect_weights[1] += s;          // heal
+        p.effect_weights[2] += s;          // shield
+        p.effect_weights[9] += s;          // buff (resistance)
+        p.hint[2] += s;                    // defense
+        p.delivery[3] += s;               // zone (purification area)
+    }
+
+    // Crisis: breach defense → boost AoE, fortification
+    let breach = get("crisis_breach_defense");
+    if breach > 0.0 {
+        let s = (breach / 3.0).min(2.0);
+        p.area_chance += s * 0.15;
+        p.effect_weights[0] += s;          // damage (AoE)
+        p.effect_weights[3] += s;          // stun (crowd control)
+        p.delivery[3] += s;               // zone
+        p.hint[1] += s;                    // crowd_control
+    }
+
+    // Crisis: sleeping king → boost leadership, rally
+    let king = get("crisis_sleeping_king");
+    if king > 0.0 {
+        let s = (king / 3.0).min(2.0);
+        p.effect_weights[9] += s * 2.0;   // buff (rally)
+        p.targeting[3] += s;              // self_aoe (aura)
+        p.hint[3] += s;                   // utility
+    }
+
+    // Region defense → boost fortification effects
+    let region_def = get("region_defense");
+    if region_def > 0.0 {
+        let s = (region_def / 8.0).min(1.5);
+        p.effect_weights[2] += s;          // shield
+        p.effect_weights[7] += s;          // knockback (repel)
+        p.delivery[5] += s;               // trap
+    }
+
+    // Rescue quests → boost healing
+    let rescue = get("rescue");
+    if rescue > 0.0 {
+        let s = (rescue / 5.0).min(2.0);
+        p.effect_weights[1] += s * 2.0;   // heal
+        p.effect_weights[15] += s;         // resurrect
+        p.targeting[1] += s;              // ally
+        p.hint[4] += s;                   // heal hint
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Ability generation
 // ---------------------------------------------------------------------------
 
-/// Generate a random ability for the given archetype and level.
-/// Returns (AbilityDef or PassiveDef slots, is_passive).
+/// Generate a random ability for the given archetype, level, and history.
+/// History tags bias the probability distributions so abilities reflect
+/// the adventurer's actual journey.
 pub fn generate_ability(
     archetype: &str,
     level: u32,
     rng: &mut u64,
 ) -> (AbilityDef, bool) {
-    let p = profile_for_archetype(archetype);
+    generate_ability_with_history(archetype, level, rng, &std::collections::HashMap::new())
+}
+
+/// Generate with history tag biasing.
+pub fn generate_ability_with_history(
+    archetype: &str,
+    level: u32,
+    rng: &mut u64,
+    history: &std::collections::HashMap<String, u32>,
+) -> (AbilityDef, bool) {
+    let mut p = profile_for_archetype(archetype);
+    apply_history_biases(&mut p, history);
     let is_passive = rf(rng) < p.passive_chance;
 
     // Scale params by level

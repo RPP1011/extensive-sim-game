@@ -308,6 +308,7 @@ pub fn instantiate_effect(e: &EffectTemplate, ctx: &TemplateContext) -> Option<C
                 faction_id: None,
                 rallying_to: None,
                     tier_status: Default::default(),
+                    history_tags: Default::default(),
             }))
         }
         _ => {

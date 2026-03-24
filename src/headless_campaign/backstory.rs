@@ -243,6 +243,7 @@ pub fn init_character_creation(
         faction_id: None,
         rallying_to: None,
                     tier_status: Default::default(),
+                    history_tags: Default::default(),
     };
 
     state.adventurers.push(pc);

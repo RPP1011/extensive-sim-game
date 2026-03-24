@@ -120,6 +120,7 @@ pub fn tick_recruitment(
         faction_id: None,
         rallying_to: None,
                     tier_status: Default::default(),
+                    history_tags: Default::default(),
     };
 
     events.push(WorldEvent::AdventurerRecovered {

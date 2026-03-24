@@ -242,17 +242,24 @@ fn try_add_progression(
 // Content generators — LLM with template fallback
 // ---------------------------------------------------------------------------
 
-/// Generate ability content via grammar walker (instant, diverse, valid).
-fn generate_ability(state: &CampaignState, _adv_id: u32, trigger: &str, archetype: &str, level: u32) -> String {
+/// Generate ability content via grammar walker with history-biased distributions.
+fn generate_ability(state: &CampaignState, adv_id: u32, trigger: &str, archetype: &str, level: u32) -> String {
     // Seed RNG from game state for determinism
     let mut rng = state.tick.wrapping_mul(6364136223846793005)
         .wrapping_add(level as u64 * 7919)
         .wrapping_add(archetype.as_bytes().iter().map(|b| *b as u64).sum::<u64>() * 31);
 
-    let (mut def, _is_passive) = super::super::ability_gen::generate_ability(archetype, level, &mut rng);
+    // Get adventurer's history tags for biasing
+    let history = state.adventurers.iter()
+        .find(|a| a.id == adv_id)
+        .map(|a| a.history_tags.clone())
+        .unwrap_or_default();
+
+    let (mut def, _is_passive) = super::super::ability_gen::generate_ability_with_history(
+        archetype, level, &mut rng, &history,
+    );
     def.name = format!("{}_{}", archetype, trigger.replace("_", ""));
 
-    // Use the real DSL emitter for perfect roundtrip
     tactical_sim::effects::dsl::emit::emit_ability_dsl(&def)
 }
 

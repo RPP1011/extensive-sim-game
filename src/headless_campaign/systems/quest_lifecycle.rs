@@ -236,6 +236,46 @@ pub fn tick_quest_lifecycle(
                                 new_level: adv.level,
                             });
                         }
+
+                        // --- History tag accumulation ---
+                        // Quest type tags
+                        match quest.request.quest_type {
+                            QuestType::Combat     => { *adv.history_tags.entry("combat".into()).or_default() += 1; }
+                            QuestType::Exploration => { *adv.history_tags.entry("exploration".into()).or_default() += 1; }
+                            QuestType::Diplomatic  => { *adv.history_tags.entry("diplomatic".into()).or_default() += 1; }
+                            QuestType::Escort      => { *adv.history_tags.entry("escort".into()).or_default() += 1; }
+                            QuestType::Rescue      => { *adv.history_tags.entry("rescue".into()).or_default() += 1; }
+                            QuestType::Gather      => { *adv.history_tags.entry("gather".into()).or_default() += 1; }
+                        }
+                        // Solo vs party
+                        if member_ids.len() == 1 {
+                            *adv.history_tags.entry("solo".into()).or_default() += 1;
+                        } else {
+                            *adv.history_tags.entry("party_combat".into()).or_default() += 1;
+                        }
+                        // Survived heavy damage
+                        if battle_hp < 0.3 {
+                            *adv.history_tags.entry("near_death".into()).or_default() += 1;
+                        }
+                        // High threat quest
+                        if threat > 50.0 {
+                            *adv.history_tags.entry("high_threat".into()).or_default() += 1;
+                        }
+                        // Region defense (quest had a target position near a region)
+                        if quest.request.quest_type == QuestType::Combat {
+                            *adv.history_tags.entry("region_defense".into()).or_default() += 1;
+                        }
+                        // Crisis involvement tags
+                        for crisis in &state.overworld.active_crises {
+                            let tag = match crisis {
+                                ActiveCrisis::SleepingKing { .. } => "crisis_sleeping_king",
+                                ActiveCrisis::Breach { .. } => "crisis_breach_defense",
+                                ActiveCrisis::Corruption { .. } => "crisis_blight_prevention",
+                                ActiveCrisis::Unifier { .. } => "crisis_unifier_resistance",
+                                ActiveCrisis::Decline { .. } => "crisis_decline_survival",
+                            };
+                            *adv.history_tags.entry(tag.into()).or_default() += 1;
+                        }
                     }
                     QuestResult::Defeat => {
                         // Fame loss on defeat
