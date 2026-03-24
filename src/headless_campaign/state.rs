@@ -671,6 +671,14 @@ pub struct Region {
     pub control: f32,
     /// Regional threat level (0–100).
     pub threat_level: f32,
+    /// Fog-of-war visibility (0.0 = unknown, 1.0 = fully scouted).
+    /// Decays over time as information goes stale.
+    #[serde(default = "default_region_visibility")]
+    pub visibility: f32,
+}
+
+fn default_region_visibility() -> f32 {
+    0.3
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

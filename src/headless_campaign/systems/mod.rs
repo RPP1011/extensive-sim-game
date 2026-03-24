@@ -23,6 +23,7 @@ pub mod recruitment;
 pub mod random_events;
 pub mod threat;
 pub mod buildings;
+pub mod scouting;
 pub mod verify;
 pub mod loot;
 pub mod interception;

@@ -101,6 +101,9 @@ pub fn step_campaign(
     // Bond system — decay, party bonding
     systems::bonds::tick_bonds(state, &mut deltas, &mut events);
 
+    // Scouting / fog-of-war (every 50 ticks)
+    systems::scouting::tick_scouting(state, &mut deltas, &mut events);
+
     // Quest hooks — check triggers against game state
     if state.tick % 50 == 0 {
         super::quest_hooks::evaluate_hooks(state, &mut events);
@@ -584,10 +587,30 @@ fn apply_action(
             {
                 state.guild.gold = (state.guild.gold - scout_cost).max(0.0);
                 loc.scouted = true;
+                let faction_owner = loc.faction_owner;
                 events.push(WorldEvent::ScoutReport {
                     location_id,
                     threat_level: loc.threat_level,
                 });
+
+                // Boost visibility of the region owned by this location's faction.
+                if let Some(fid) = faction_owner {
+                    if let Some(rid) = state
+                        .overworld
+                        .regions
+                        .iter()
+                        .find(|r| r.owner_faction_id == fid)
+                        .map(|r| r.id)
+                    {
+                        systems::scouting::boost_region_visibility(
+                            state,
+                            rid,
+                            systems::scouting::HIRE_SCOUT_BOOST,
+                            events,
+                        );
+                    }
+                }
+
                 ActionResult::Success(format!("Scout hired for location {}", location_id))
             } else {
                 ActionResult::InvalidAction(format!("Location {} not found", location_id))

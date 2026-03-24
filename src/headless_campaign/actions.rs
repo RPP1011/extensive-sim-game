@@ -279,6 +279,12 @@ pub enum WorldEvent {
         location_id: usize,
         threat_level: f32,
     },
+    /// Detailed scout report generated when a region crosses the visibility
+    /// threshold (0.5). Contains faction strength, threats, and opportunities.
+    RegionScoutReport {
+        region_id: usize,
+        details: ScoutReportDetails,
+    },
 
     // --- Factions ---
     FactionActionTaken {
@@ -438,6 +444,28 @@ pub struct AdventurerStatDelta {
     pub morale_delta: f32,
     /// Which system caused this change.
     pub source: String,
+}
+
+// ---------------------------------------------------------------------------
+// Scout report details
+// ---------------------------------------------------------------------------
+
+/// Detailed intelligence gathered when a region is scouted past the
+/// visibility threshold.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScoutReportDetails {
+    /// Name of the region.
+    pub region_name: String,
+    /// Military strength of the faction controlling this region.
+    pub faction_military_strength: f32,
+    /// Current unrest level (0–100).
+    pub unrest: f32,
+    /// Regional threat level (0–100).
+    pub threat_level: f32,
+    /// Number of active quest opportunities in the region.
+    pub quest_opportunities: usize,
+    /// Champion sightings (adventurer IDs of champions in this region).
+    pub champion_sightings: Vec<u32>,
 }
 
 // ---------------------------------------------------------------------------

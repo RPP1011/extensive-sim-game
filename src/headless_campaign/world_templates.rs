@@ -70,6 +70,7 @@ impl WorldTemplate {
                     unrest: 10.0,
                     control: 80.0,
                     threat_level: 15.0,
+                    visibility: 0.8, // guild territory
                 },
                 Region {
                     id: 1,
@@ -79,6 +80,7 @@ impl WorldTemplate {
                     unrest: 30.0,
                     control: 60.0,
                     threat_level: 40.0,
+                    visibility: 0.3,
                 },
                 Region {
                     id: 2,
@@ -88,6 +90,7 @@ impl WorldTemplate {
                     unrest: 20.0,
                     control: 70.0,
                     threat_level: 25.0,
+                    visibility: 0.8, // guild territory
                 },
             ],
             locations: vec![
