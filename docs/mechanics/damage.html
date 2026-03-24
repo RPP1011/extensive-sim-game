@@ -103,6 +103,45 @@ pub magic_resist: f32,  // Reduces magic damage</code></pre>
 
 <hr>
 
+<h2>Damage Variance</h2>
+
+<p>All damage and healing have built-in variance to prevent perfectly predictable outcomes:</p>
+
+<pre><code>// Damage: 90-110% of base amount (uniform random)
+let variance_percent = 90 + (next_rand_u32(state) % 21) as i32;
+let damage = ((base_amount * variance_percent) + 99) / 100;
+
+// Healing: 95-105% of base amount (tighter variance)
+let variance_percent = 95 + (next_rand_u32(state) % 11) as i32;</code></pre>
+
+<p>This uses the <a href="combat_loop.html#determinism">deterministic RNG</a>, so the same seed always produces the same variance rolls.</p>
+
+<hr>
+
+<h2>The Full Damage Pipeline</h2>
+
+<p>When damage is applied, it passes through these stages <strong>in order</strong>:</p>
+
+<ol>
+  <li><strong>Base variance</strong> &mdash; 90&ndash;110% random roll</li>
+  <li><strong>Resistance reduction</strong> &mdash; Armor (physical) or MR (magic). True bypasses.</li>
+  <li><strong>Damage output buff/debuff</strong> &mdash; Source's <code>damage_output</code> stat modifier</li>
+  <li><strong>Cover reduction</strong> &mdash; <code>1 - cover_bonus</code>, scaled by outnumber ratio</li>
+  <li><strong>Elevation</strong> &mdash; &plusmn;15% per metre of height difference</li>
+  <li><strong>DamageModify status</strong> &mdash; Multiplicative factor on the target</li>
+  <li><strong>Redirect check</strong> &mdash; Transfer to protector if Redirect charges remain</li>
+  <li><strong>Shield absorption</strong> &mdash; Reduce shield_hp first, overflow to HP</li>
+  <li><strong>HP application</strong> &mdash; Reduce HP (clamped at 0)</li>
+  <li><strong>DeathMark accumulation</strong> &mdash; Track damage for eventual burst</li>
+  <li><strong>Reflect</strong> &mdash; Return <code>damage * percent / 100</code> to source</li>
+  <li><strong>Lifesteal</strong> &mdash; Heal source for <code>damage * percent / 100</code></li>
+  <li><strong>Stealth break</strong> &mdash; Remove stealth if <code>break_on_damage</code></li>
+  <li><strong>Link sharing</strong> &mdash; Partner takes <code>damage * share_percent / 100</code></li>
+  <li><strong>Death processing</strong> &mdash; If HP &le; 0, fire OnDeath triggers</li>
+</ol>
+
+<hr>
+
 <h2>Shields</h2>
 
 <p>Shields provide temporary bonus HP that absorbs damage before the unit's actual HP is reduced.</p>
@@ -137,17 +176,30 @@ pub magic_resist: f32,  // Reduces magic damage</code></pre>
 
 <h3>Cover Bonus</h3>
 
-<pre><code>pub cover_bonus: f32,  // 0.0 (none) to 0.5 (max)</code></pre>
+<pre><code>pub cover_bonus: f32,  // 0.0 (none) to 0.7 (max)</code></pre>
 
-<p>Units near terrain features receive a <code>cover_bonus</code> that reduces incoming damage by up to 50%. This value is updated per-tick from the terrain context. Cover stacks multiplicatively with armor/MR:</p>
+<p>Units near terrain features receive a <code>cover_bonus</code> that reduces incoming damage. The effective cover is scaled by <strong>outnumber ratio</strong> &mdash; a unit fighting outnumbered gets more value from cover:</p>
 
-<pre><code>final_damage = raw_damage * (1 - armor_reduction) * (1 - cover_bonus)</code></pre>
+<pre><code>// Outnumber ratio: sqrt(enemies / allies), clamped 1.0-4.0
+// 4v1 → 2.0x cover; 2v1 → 1.41x; 1v1 → 1.0x
+effective_cover = (cover_bonus * sqrt(enemies / allies)).min(0.7);
+final_damage = post_armor_damage * (1.0 - effective_cover);</code></pre>
+
+<p>True damage bypasses cover entirely.</p>
 
 <h3>Elevation</h3>
 
 <pre><code>pub elevation: f32,  // Metres above baseline</code></pre>
 
-<p>A unit's elevation is updated per-tick from the terrain context. Elevated units may gain combat advantages (range bonuses, damage modifiers) depending on the terrain system configuration.</p>
+<p>Elevation provides a <strong>&plusmn;15% damage modifier per metre</strong> of height difference:</p>
+
+<ul>
+  <li><strong>Attacker on high ground:</strong> +15% damage per metre above target</li>
+  <li><strong>Defender on high ground:</strong> -15% damage per metre above attacker (amplified by outnumber ratio)</li>
+  <li>Total elevation modifier is clamped to <strong>0.5x&ndash;1.3x</strong></li>
+</ul>
+
+<p>True damage bypasses elevation modifiers. Elevation is updated per-tick from the <code>GridNav</code> terrain context.</p>
 
 <hr>
 

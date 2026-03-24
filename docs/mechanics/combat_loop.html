@@ -140,7 +140,16 @@ for unit in shuffled_units {
 
 <h2 id="determinism">The Determinism Contract</h2>
 
-<p>All simulation randomness flows through <code>SimState.rng_state</code> via <code>next_rand_u32()</code>. This is a simple LCG (linear congruential generator) that advances the seed deterministically.</p>
+<p>All simulation randomness flows through <code>SimState.rng_state</code> via <code>next_rand_u32()</code>. This is a <strong>XorShift64</strong> generator:</p>
+
+<pre><code>pub fn next_rand_u32(state: &amp;mut SimState) -&gt; u32 {
+    let mut x = state.rng_state;
+    x ^= x &gt;&gt; 12;
+    x ^= x &lt;&lt; 25;
+    x ^= x &gt;&gt; 27;
+    state.rng_state = x;
+    (x.wrapping_mul(0x2545_f491_4f6c_dd1d) &gt;&gt; 32) as u32
+}</code></pre>
 
 <div class="callout bug">
   <p><strong>Never use <code>thread_rng()</code></strong> or any external RNG source in simulation code. This would break determinism. All randomness must come from <code>SimState.rng_state</code>.</p>
