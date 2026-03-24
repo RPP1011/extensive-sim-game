@@ -268,29 +268,40 @@ impl ContentVaeWeights {
         linear(&x, head_w, head_b, out_dim)
     }
 
+    /// Concatenate z and input for conditional decoding.
+    fn concat_zx(z: &[f32], input: &[f32]) -> Vec<f32> {
+        let mut zx = Vec::with_capacity(z.len() + input.len());
+        zx.extend_from_slice(z);
+        zx.extend_from_slice(input);
+        zx
+    }
+
     /// Generate an ability DSL string from a 124-dim input vector.
     pub fn generate_ability(&self, input: &[f32; VAE_INPUT_DIM], name: &str) -> String {
         let z = self.encode(input);
-        let slots = self.decode_ability(&z);
+        let zx = Self::concat_zx(&z, input);
+        let slots = self.decode_ability(&zx);
         vae_serialize::slots_to_ability_dsl(&slots, name)
     }
 
     /// Generate a class DSL string from a 124-dim input vector.
     pub fn generate_class(&self, input: &[f32; VAE_INPUT_DIM], name: &str) -> String {
         let z = self.encode(input);
-        let slots = self.decode_class(&z);
+        let zx = Self::concat_zx(&z, input);
+        let slots = self.decode_class(&zx);
         vae_serialize::slots_to_class_dsl(&slots, name)
     }
 
     /// Generate content — auto-selects ability vs class based on the model's prediction.
     pub fn generate(&self, input: &[f32; VAE_INPUT_DIM], name: &str) -> (String, &'static str) {
         let z = self.encode(input);
-        let ct = self.decode_content_type(&z);
+        let zx = Self::concat_zx(&z, input);
+        let ct = self.decode_content_type(&zx);
         if ct == 0 {
-            let slots = self.decode_ability(&z);
+            let slots = self.decode_ability(&zx);
             (vae_serialize::slots_to_ability_dsl(&slots, name), "ability")
         } else {
-            let slots = self.decode_class(&z);
+            let slots = self.decode_class(&zx);
             (vae_serialize::slots_to_class_dsl(&slots, name), "class")
         }
     }

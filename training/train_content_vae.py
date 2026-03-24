@@ -49,12 +49,19 @@ class ResBlock(nn.Module):
 
 
 class ContentVAE(nn.Module):
-    """Grammar-guided VAE with factored decoder heads (v2: deeper, residual)."""
+    """Conditional VAE with input skip-connections to decoder.
+
+    The decoder receives concat(z, x) so it can use the input context directly.
+    This prevents mode collapse where the decoder ignores z and the input.
+    z captures the "style" (which of the valid abilities for this context),
+    while x provides the "what kind" (archetype, level, trigger).
+    """
 
     def __init__(self, input_dim=124, latent_dim=32, hidden_dim=512,
                  ability_slot_dim=142, class_slot_dim=75,
                  n_layers=4, dropout=0.1):
         super().__init__()
+        self.input_dim = input_dim
         self.latent_dim = latent_dim
         self.ability_slot_dim = ability_slot_dim
         self.class_slot_dim = class_slot_dim
@@ -66,21 +73,22 @@ class ContentVAE(nn.Module):
         self.fc_mu = nn.Linear(hidden_dim, latent_dim)
         self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
 
-        # Content type head: z → P(ability | class)
+        # Content type head: concat(z, x) → P(ability | class)
+        dec_input_dim = latent_dim + input_dim  # z + x skip connection
         self.content_type_head = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim // 4),
+            nn.Linear(dec_input_dim, hidden_dim // 4),
             nn.GELU(),
             nn.Linear(hidden_dim // 4, 2),
         )
 
-        # Ability decoder: z → proj → N residual blocks → slots
-        self.ab_proj = nn.Linear(latent_dim, hidden_dim)
+        # Ability decoder: concat(z, x) → proj → N residual blocks → slots
+        self.ab_proj = nn.Linear(dec_input_dim, hidden_dim)
         self.ab_blocks = nn.Sequential(*[ResBlock(hidden_dim, dropout) for _ in range(n_layers)])
         self.ab_norm = nn.LayerNorm(hidden_dim)
         self.ab_head = nn.Linear(hidden_dim, ability_slot_dim)
 
-        # Class decoder: z → proj → N residual blocks → slots
-        self.cl_proj = nn.Linear(latent_dim, hidden_dim)
+        # Class decoder: concat(z, x) → proj → N residual blocks → slots
+        self.cl_proj = nn.Linear(dec_input_dim, hidden_dim)
         self.cl_blocks = nn.Sequential(*[ResBlock(hidden_dim, dropout) for _ in range(n_layers)])
         self.cl_norm = nn.LayerNorm(hidden_dim)
         self.cl_head = nn.Linear(hidden_dim, class_slot_dim)
@@ -96,26 +104,29 @@ class ContentVAE(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def decode(self, z):
+    def decode(self, z, x):
+        # Concatenate latent + input for conditional decoding
+        zx = torch.cat([z, x], dim=-1)
+
         # Ability head
-        ha = F.gelu(self.ab_proj(z))
+        ha = F.gelu(self.ab_proj(zx))
         ha = self.ab_blocks(ha)
         ha = self.ab_norm(ha)
         ability_slots = self.ab_head(ha)
 
         # Class head
-        hc = F.gelu(self.cl_proj(z))
+        hc = F.gelu(self.cl_proj(zx))
         hc = self.cl_blocks(hc)
         hc = self.cl_norm(hc)
         class_slots = self.cl_head(hc)
 
-        ct_logits = self.content_type_head(z)
+        ct_logits = self.content_type_head(zx)
         return ability_slots, class_slots, ct_logits
 
     def forward(self, x):
         mu, logvar = self.encode(x)
         z = self.reparameterize(mu, logvar)
-        ability_slots, class_slots, ct_logits = self.decode(z)
+        ability_slots, class_slots, ct_logits = self.decode(z, x)
         return ability_slots, class_slots, ct_logits, mu, logvar
 
 
