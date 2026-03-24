@@ -136,6 +136,8 @@ pub enum CombatMode {
     Oracle,
     /// Run full deterministic combat sim (milliseconds). Used for evaluation.
     FullSim,
+    /// Run tactical sim bridge with generated abilities (~0.1ms).
+    TacticalSim,
 }
 
 // ---------------------------------------------------------------------------

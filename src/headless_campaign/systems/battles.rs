@@ -69,8 +69,8 @@ pub fn tick_battles(
                     });
                 }
             }
-            CombatMode::FullSim => {
-                // TODO: Integrate with run_rl_episode() for full combat sim.
+            CombatMode::FullSim | CombatMode::TacticalSim => {
+                // TODO: Integrate with tactical_bridge for full combat sim.
                 // For now, fall back to oracle-like behavior.
             }
         }

@@ -4,9 +4,12 @@
 //! battle is too slow. The oracle predicts outcomes in microseconds from
 //! party composition and enemy strength.
 //!
-//! Two implementations:
+//! Three implementations:
 //! - `HeuristicOracle`: deterministic formula-based (no training data needed)
+//! - `TacticalBridge`: runs actual combat sim with generated abilities (~0.1ms)
 //! - `MlpOracle`: small trained MLP (future — requires combat sim dataset)
+
+pub mod tactical_bridge;
 
 use super::state::*;
 
