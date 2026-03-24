@@ -560,7 +560,13 @@ fn parse_ability_slots(dsl_text: &str) -> (Vec<f32>, bool) {
                 (vec![0.0; vae_slots::ABILITY_SLOT_DIM], false)
             }
         }
-        Err(_) => (vec![0.0; vae_slots::ABILITY_SLOT_DIM], false),
+        Err(e) => {
+            static LOG_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            if LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 5 {
+                eprintln!("Parse error: {} | DSL: {}", e, &dsl_text[..dsl_text.len().min(80)]);
+            }
+            (vec![0.0; vae_slots::ABILITY_SLOT_DIM], false)
+        }
     }
 }
 
@@ -592,4 +598,72 @@ pub fn run_full_pipeline(config: &VaeDatasetConfig) {
     let contexts = sweep_campaigns(config);
     generate_content(config, &contexts);
     extract_dataset(config, &contexts);
+}
+
+// ---------------------------------------------------------------------------
+// Standalone slot extraction from JSONL
+// ---------------------------------------------------------------------------
+
+/// Read a JSONL file with {content_type, raw_dsl} records, parse each through
+/// the real Rust DSL parsers, extract slot vectors, and print {slots, valid} JSONL
+/// to stdout. This is the ground-truth slot extraction — no regex approximation.
+pub fn extract_slots_from_jsonl(input_path: &str) {
+    use std::io::BufRead;
+
+    let file = std::fs::File::open(input_path)
+        .unwrap_or_else(|e| panic!("Failed to open {}: {}", input_path, e));
+    let reader = std::io::BufReader::new(file);
+
+    let mut total = 0u64;
+    let mut valid_count = 0u64;
+    let mut ability_ok = 0u64;
+    let mut class_ok = 0u64;
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let record: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let content_type = record["content_type"].as_str().unwrap_or("");
+        // Prefer combat_dsl (mapped to real parser format), fall back to raw_dsl
+        let raw_dsl = record.get("combat_dsl")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .or_else(|| record["raw_dsl"].as_str())
+            .unwrap_or("");
+
+        let (slots, valid) = match content_type {
+            "ability" => {
+                let (s, v) = parse_ability_slots(raw_dsl);
+                if v { ability_ok += 1; }
+                (s, v)
+            }
+            "class" => {
+                let (s, v) = parse_class_slots(raw_dsl);
+                if v { class_ok += 1; }
+                (s, v)
+            }
+            _ => (vec![], false),
+        };
+
+        total += 1;
+        if valid { valid_count += 1; }
+
+        let output = serde_json::json!({
+            "slots": slots,
+            "valid": valid,
+        });
+        println!("{}", output);
+
+        if total % 50000 == 0 {
+            eprintln!("[{total}] ability_ok={ability_ok} class_ok={class_ok}");
+        }
+    }
+
+    eprintln!("Slot extraction: {valid_count}/{total} valid (ability={ability_ok}, class={class_ok})");
 }

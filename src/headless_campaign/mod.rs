@@ -40,6 +40,7 @@ pub mod tokens;
 pub mod unit_tiers;
 pub mod vae_dataset;
 pub mod vae_features;
+pub mod vae_gt_dataset;
 pub mod vae_slots;
 pub mod trace;
 pub mod trace_viewer;

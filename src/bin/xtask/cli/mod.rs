@@ -41,6 +41,41 @@ pub enum TaskCommand {
     CampaignFuzz(CampaignFuzzArgs),
     /// Collect VAE training dataset (sweep campaigns + LLM generation + slot extraction)
     VaeDataset(VaeDatasetArgs),
+    /// Extract slot vectors from DSL text using Rust parsers (ground truth)
+    VaeExtractSlots(VaeExtractSlotsArgs),
+    /// Build VAE training data from existing ability DSL files (no LLM needed)
+    VaeGtDataset(VaeGtDatasetArgs),
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Build VAE training data from ground-truth ability DSL files")]
+pub struct VaeGtDatasetArgs {
+    /// Number of campaigns to sweep for contexts
+    #[arg(long, default_value_t = 1000)]
+    pub campaigns: u64,
+    /// Max ticks per campaign
+    #[arg(long, default_value_t = 30_000)]
+    pub max_ticks: u64,
+    /// Threads
+    #[arg(short = 'j', long, default_value_t = 0)]
+    pub threads: usize,
+    /// Base RNG seed
+    #[arg(long, default_value_t = 2026)]
+    pub seed: u64,
+    /// Abilities sampled per trigger context
+    #[arg(long, default_value_t = 4)]
+    pub samples_per_context: usize,
+    /// Output JSONL file
+    #[arg(long, default_value = "generated/vae_gt_dataset.jsonl")]
+    pub output: String,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Parse DSL text through Rust parsers and extract exact slot vectors")]
+pub struct VaeExtractSlotsArgs {
+    /// Input JSONL with {content_type, raw_dsl} records
+    #[arg(long, default_value = "generated/vae_dataset_final.jsonl")]
+    pub input: String,
 }
 
 #[derive(Debug, Parser)]

@@ -152,5 +152,21 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         TaskCommand::VaeDataset(args) => vae_dataset_cmd::run_vae_dataset(args),
+        TaskCommand::VaeExtractSlots(args) => {
+            bevy_game::headless_campaign::vae_dataset::extract_slots_from_jsonl(&args.input);
+            ExitCode::SUCCESS
+        }
+        TaskCommand::VaeGtDataset(args) => {
+            let config = bevy_game::headless_campaign::vae_gt_dataset::GtDatasetConfig {
+                campaigns: args.campaigns,
+                max_ticks: args.max_ticks,
+                threads: args.threads,
+                base_seed: args.seed,
+                samples_per_context: args.samples_per_context,
+                output_path: args.output,
+            };
+            bevy_game::headless_campaign::vae_gt_dataset::run_gt_pipeline(&config);
+            ExitCode::SUCCESS
+        }
     }
 }
