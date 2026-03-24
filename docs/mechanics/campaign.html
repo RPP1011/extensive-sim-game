@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Campaign Overworld</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10; --surface: #13161d; --surface2: #1c2029; --surface3: #252a36;
+  --border: #2a2f3e; --border-bright: #3d4459; --text: #b8c0cc; --text-muted: #6b7280;
+  --heading: #e2e8f0; --accent: #60a5fa; --accent-dim: #2563eb; --purple: #a78bfa;
+  --green: #34d399; --green-dim: #059669; --red: #f87171; --red-dim: #dc2626;
+  --orange: #fbbf24; --cyan: #22d3ee;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Source Serif 4', Georgia, serif; background: var(--bg); color: var(--text); line-height: 1.78; font-size: 17px; -webkit-font-smoothing: antialiased; }
+.article { max-width: 900px; margin: 0 auto; padding: 4rem 2rem 8rem; }
+header { margin-bottom: 3.5rem; padding-bottom: 2.5rem; border-bottom: 1px solid var(--border); }
+h1 { font-family: 'DM Sans', sans-serif; font-size: 2.6rem; font-weight: 700; color: var(--heading); line-height: 1.2; margin-bottom: 1.2rem; letter-spacing: -0.03em; }
+.subtitle { font-size: 1.1rem; color: var(--text-muted); font-style: italic; line-height: 1.65; max-width: 680px; }
+h2 { font-family: 'DM Sans', sans-serif; font-size: 1.5rem; font-weight: 600; color: var(--heading); margin-top: 4rem; margin-bottom: 1.2rem; letter-spacing: -0.02em; }
+h3 { font-family: 'DM Sans', sans-serif; font-size: 1.15rem; font-weight: 600; color: var(--purple); margin-top: 2.5rem; margin-bottom: 0.8rem; }
+p { margin-bottom: 1.1rem; } strong { color: var(--heading); font-weight: 600; }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+a:hover { border-bottom-color: var(--accent); }
+pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.2rem 1.5rem; overflow-x: auto; margin: 1.5rem 0; font-size: 0.82rem; line-height: 1.6; }
+code { font-family: 'IBM Plex Mono', monospace; font-size: 0.88em; }
+p code, li code, td code { background: var(--surface2); padding: 0.15em 0.45em; border-radius: 4px; font-size: 0.82em; color: var(--accent); }
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+table { width: 100%; border-collapse: collapse; margin: 1.5rem 0; font-size: 0.9rem; font-family: 'DM Sans', sans-serif; }
+th { background: var(--surface2); color: var(--heading); font-weight: 600; text-align: left; padding: 0.7rem 0.9rem; border-bottom: 2px solid var(--border-bright); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.03em; }
+td { padding: 0.55rem 0.9rem; border-bottom: 1px solid var(--border); }
+tr:hover td { background: var(--surface); }
+.callout { background: var(--surface); border-left: 3px solid var(--accent-dim); border-radius: 0 8px 8px 0; padding: 1.1rem 1.4rem; margin: 1.8rem 0; font-size: 0.95rem; }
+.callout p:last-child { margin-bottom: 0; }
+ol, ul { margin: 0.8rem 0 1.2rem 1.6rem; } li { margin-bottom: 0.4rem; }
+hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
+.footer-note { font-style: italic; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: 2.5rem; margin-top: 4rem; }
+@media (max-width: 720px) { .article { padding: 2rem 1.25rem 4rem; } h1 { font-size: 1.9rem; } }
+</style>
+</head>
+<body>
+<div class="article">
+
+<p><a href="index.html" style="font-family: 'DM Sans', sans-serif; font-size: 0.9rem;">&larr; Game Mechanics</a></p>
+
+<header>
+  <h1>Campaign Overworld</h1>
+  <p class="subtitle">The top layer of the three-layer architecture. A turn-based overworld where factions compete for territory, the player's guild manages resources, and flashpoints escalate into missions.</p>
+</header>
+
+<h2>The Three Layers</h2>
+
+<pre><code>Campaign (you are here)
+  &darr; flashpoints trigger
+Mission (multi-room dungeons)     &rarr; see <a href="missions.html">Missions</a>
+  &darr; rooms contain
+Combat (100ms deterministic sim)  &rarr; see <a href="combat_loop.html">Combat Loop</a></code></pre>
+
+<p>The campaign layer is turn-based. Each turn, the player takes an action and all factions execute their AI. Events cascade downward &mdash; territorial conflicts generate flashpoints, flashpoints launch missions, missions resolve through combat.</p>
+
+<hr>
+
+<h2>The step_campaign Loop</h2>
+
+<pre><code>pub fn step_campaign(
+    state: &amp;mut CampaignState,
+    action: Option&lt;CampaignAction&gt;,
+) -&gt; CampaignStepResult</code></pre>
+
+<p>Each call to <code>step_campaign</code> advances one turn:</p>
+
+<ol>
+  <li><strong>Snapshot economy</strong> &mdash; Record gold, supplies, reputation before the turn for delta tracking</li>
+  <li><strong>Apply player action</strong> &mdash; Execute the player's chosen <code>CampaignAction</code> (if any)</li>
+  <li><strong>Tick factions</strong> &mdash; All NPC factions execute their AI via <code>step_all_factions</code></li>
+  <li><strong>Generate events</strong> &mdash; Diplomatic shifts, territory changes, flashpoint creation</li>
+  <li><strong>Return result</strong> &mdash; <code>CampaignStepResult</code> with events and deltas</li>
+</ol>
+
+<hr>
+
+<h2>Campaign Actions</h2>
+
+<p>Each turn, the player can take one <code>CampaignAction</code>:</p>
+
+<table>
+<tr><th>Action</th><th>Description</th></tr>
+<tr><td><strong>Deploy</strong></td><td>Send heroes to a region for defense or attack</td></tr>
+<tr><td><strong>Recruit</strong></td><td>Spend gold to add new heroes to the guild roster</td></tr>
+<tr><td><strong>Trade</strong></td><td>Exchange resources between regions</td></tr>
+<tr><td><strong>Diplomacy</strong></td><td>Improve or worsen relations with a faction</td></tr>
+<tr><td><strong>Rest</strong></td><td>Recover hero HP and cooldowns between missions</td></tr>
+<tr><td><strong>Accept Mission</strong></td><td>Launch a <a href="missions.html">mission</a> from a flashpoint</td></tr>
+</table>
+
+<hr>
+
+<h2>Factions</h2>
+
+<p>The overworld contains multiple NPC factions, each with their own territory, resources, and AI.</p>
+
+<pre><code>pub struct FactionState {
+    pub id: u32,
+    pub name: String,
+    pub resources: FactionResources,
+    pub controlled_regions: Vec&lt;usize&gt;,
+    // ...
+}</code></pre>
+
+<h3>Faction AI</h3>
+
+<p>Each faction has a <code>FactionCommander</code> that decides its action each turn via <code>step_faction_turn</code>:</p>
+
+<pre><code>pub fn step_faction_turn(
+    faction: &amp;FactionState,
+    commander: &amp;FactionCommander,
+    map: &amp;OverworldMap,
+    diplomacy: &amp;DiplomacyState,
+    personality: Option&lt;&amp;FactionPersonalityConfig&gt;,
+    rng_seed: u64,
+) -&gt; FactionTurnResult</code></pre>
+
+<p>The AI uses <code>score_actions</code> to evaluate possible moves and picks the highest-scoring one. Personality configs bias the scoring &mdash; aggressive factions weight expansion, defensive factions weight fortification.</p>
+
+<div class="callout">
+  <p><strong>Deterministic faction AI:</strong> Like the combat layer, faction AI uses deterministic RNG (<code>lcg_next</code>) seeded from the map seed and turn number. Same map + same turns = identical faction behavior.</p>
+</div>
+
+<hr>
+
+<h2>Regions &amp; Territory</h2>
+
+<pre><code>pub struct OverworldMap {
+    pub regions: Vec&lt;Region&gt;,
+    pub factions: Vec&lt;FactionState&gt;,
+    pub map_seed: u64,
+    // ...
+}</code></pre>
+
+<p>The map is divided into regions, each owned by a faction. Regions provide resources and strategic value. Contested borders create flashpoints.</p>
+
+<hr>
+
+<h2>Diplomacy</h2>
+
+<p>Faction relationships are tracked in the <code>DiplomacyState</code>:</p>
+
+<ul>
+  <li><strong>Allies:</strong> Won't attack each other, may cooperate</li>
+  <li><strong>Neutral:</strong> No active conflict, can trade</li>
+  <li><strong>Hostile:</strong> Actively compete for territory, generate flashpoints</li>
+</ul>
+
+<p>Diplomatic relationships evolve based on faction actions (territory grabs shift relations hostile, trade shifts them positive).</p>
+
+<hr>
+
+<h2>Guild Economy</h2>
+
+<p>The player's guild manages three resources:</p>
+
+<table>
+<tr><th>Resource</th><th>Source</th><th>Use</th></tr>
+<tr><td><strong>Gold</strong></td><td>Controlled regions, mission rewards</td><td>Recruit heroes, buy equipment</td></tr>
+<tr><td><strong>Supplies</strong></td><td>Trade, region production</td><td>Sustain deployed heroes, mission upkeep</td></tr>
+<tr><td><strong>Reputation</strong></td><td>Completed missions, diplomacy</td><td>Unlock faction quests, improve recruitment</td></tr>
+</table>
+
+<p>Economy deltas are tracked per-turn in <code>StepDeltas</code> so the player can see income vs. expenditure.</p>
+
+<hr>
+
+<h2>Flashpoints</h2>
+
+<p>When factions conflict over a region, a <strong>flashpoint</strong> is generated. Flashpoints are the bridge between campaign and <a href="missions.html">missions</a>:</p>
+
+<ol>
+  <li>Hostile factions share a border</li>
+  <li>AI decides to contest the region</li>
+  <li>A flashpoint event fires</li>
+  <li>The player can accept the flashpoint as a mission</li>
+  <li>Mission resolves through <a href="combat_loop.html">combat</a></li>
+  <li>Outcome feeds back into the campaign (territory change, reputation gain/loss)</li>
+</ol>
+
+<p class="footer-note">See also: <a href="missions.html">Missions &amp; Rooms</a> &middot; <a href="combat_loop.html">The Combat Loop</a> &middot; <a href="hero_templates.html">Hero Templates</a></p>
+
+</div>
+</body>
+</html>

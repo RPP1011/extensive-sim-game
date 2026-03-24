@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Delivery Methods</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10; --surface: #13161d; --surface2: #1c2029; --surface3: #252a36;
+  --border: #2a2f3e; --border-bright: #3d4459; --text: #b8c0cc; --text-muted: #6b7280;
+  --heading: #e2e8f0; --accent: #60a5fa; --accent-dim: #2563eb; --purple: #a78bfa;
+  --green: #34d399; --green-dim: #059669; --red: #f87171; --red-dim: #dc2626;
+  --orange: #fbbf24; --cyan: #22d3ee;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Source Serif 4', Georgia, serif; background: var(--bg); color: var(--text); line-height: 1.78; font-size: 17px; -webkit-font-smoothing: antialiased; }
+.article { max-width: 900px; margin: 0 auto; padding: 4rem 2rem 8rem; }
+header { margin-bottom: 3.5rem; padding-bottom: 2.5rem; border-bottom: 1px solid var(--border); }
+h1 { font-family: 'DM Sans', sans-serif; font-size: 2.6rem; font-weight: 700; color: var(--heading); line-height: 1.2; margin-bottom: 1.2rem; letter-spacing: -0.03em; }
+.subtitle { font-size: 1.1rem; color: var(--text-muted); font-style: italic; line-height: 1.65; max-width: 680px; }
+h2 { font-family: 'DM Sans', sans-serif; font-size: 1.5rem; font-weight: 600; color: var(--heading); margin-top: 4rem; margin-bottom: 1.2rem; letter-spacing: -0.02em; }
+h3 { font-family: 'DM Sans', sans-serif; font-size: 1.15rem; font-weight: 600; color: var(--purple); margin-top: 2.5rem; margin-bottom: 0.8rem; }
+p { margin-bottom: 1.1rem; } strong { color: var(--heading); font-weight: 600; }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+a:hover { border-bottom-color: var(--accent); }
+pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.2rem 1.5rem; overflow-x: auto; margin: 1.5rem 0; font-size: 0.82rem; line-height: 1.6; }
+code { font-family: 'IBM Plex Mono', monospace; font-size: 0.88em; }
+p code, li code, td code { background: var(--surface2); padding: 0.15em 0.45em; border-radius: 4px; font-size: 0.82em; color: var(--accent); }
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+table { width: 100%; border-collapse: collapse; margin: 1.5rem 0; font-size: 0.9rem; font-family: 'DM Sans', sans-serif; }
+th { background: var(--surface2); color: var(--heading); font-weight: 600; text-align: left; padding: 0.7rem 0.9rem; border-bottom: 2px solid var(--border-bright); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.03em; }
+td { padding: 0.55rem 0.9rem; border-bottom: 1px solid var(--border); }
+tr:hover td { background: var(--surface); }
+.callout { background: var(--surface); border-left: 3px solid var(--accent-dim); border-radius: 0 8px 8px 0; padding: 1.1rem 1.4rem; margin: 1.8rem 0; font-size: 0.95rem; }
+.callout p:last-child { margin-bottom: 0; }
+ol, ul { margin: 0.8rem 0 1.2rem 1.6rem; } li { margin-bottom: 0.4rem; }
+hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
+.footer-note { font-style: italic; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: 2.5rem; margin-top: 4rem; }
+@media (max-width: 720px) { .article { padding: 2rem 1.25rem 4rem; } h1 { font-size: 1.9rem; } }
+</style>
+</head>
+<body>
+<div class="article">
+
+<p><a href="index.html" style="font-family: 'DM Sans', sans-serif; font-size: 0.9rem;">&larr; Game Mechanics</a></p>
+
+<header>
+  <h1>Delivery Methods</h1>
+  <p class="subtitle">Seven ways effects can reach their targets &mdash; from instant application to persistent zones on the ground. Each method creates unique timing, counterplay, and tactical depth.</p>
+</header>
+
+<h2>Overview</h2>
+
+<p>The <strong>Delivery</strong> dimension determines <em>how</em> an ability's effects reach their targets. It's one of the <a href="abilities.html">five composable dimensions</a> of the effect system. Every ability has an optional delivery; if none is specified, effects are applied instantly.</p>
+
+<pre><code>pub enum Delivery {
+    Instant,
+    Projectile { speed, pierce, width, on_hit, on_arrival },
+    Channel { duration_ms, tick_interval_ms },
+    Zone { duration_ms, tick_interval_ms },
+    Tether { max_range, tick_interval_ms, on_complete },
+    Trap { duration_ms, trigger_radius },
+    Chain { max_bounces, bounce_range, damage_falloff },
+}</code></pre>
+
+<table>
+<tr><th>Method</th><th>Timing</th><th>Dodgeable</th><th>Counterplay</th></tr>
+<tr><td>Instant</td><td>Immediate</td><td>No</td><td>Shields, immunity</td></tr>
+<tr><td>Projectile</td><td>Travel time</td><td>Yes (sidestep)</td><td>Move, <code>ProjectileBlock</code></td></tr>
+<tr><td>Channel</td><td>Over duration</td><td>No (once started)</td><td>Interrupt caster (stun/kill)</td></tr>
+<tr><td>Zone</td><td>Persistent area</td><td>Yes (walk out)</td><td>Reposition</td></tr>
+<tr><td>Tether</td><td>While connected</td><td>Yes (break range)</td><td>Move beyond <code>max_range</code></td></tr>
+<tr><td>Trap</td><td>On trigger</td><td>Yes (avoid area)</td><td>Vision, careful pathing</td></tr>
+<tr><td>Chain</td><td>Sequential bounces</td><td>Partially (spread out)</td><td>Spacing</td></tr>
+</table>
+
+<hr>
+
+<h2>Instant</h2>
+
+<pre><code>Delivery::Instant</code></pre>
+
+<p>Effects are applied immediately when the cast completes. No travel time, no delay. This is the default when no delivery is specified on an <a href="abilities.html">AbilityDef</a>. Most targeted heals, buffs, and point-blank abilities use instant delivery.</p>
+
+<hr>
+
+<h2>Projectile</h2>
+
+<pre><code>Delivery::Projectile {
+    speed: f32,                        // Units per second
+    pierce: bool,                      // Continue through first target?
+    width: f32,                        // Collision width (skillshot)
+    on_hit: Vec&lt;ConditionalEffect&gt;,    // Effects on hitting a unit
+    on_arrival: Vec&lt;ConditionalEffect&gt;, // Effects at destination
+}</code></pre>
+
+<p>Creates an in-flight projectile that travels from the caster toward the target or position. Projectiles are advanced each tick during the <code>advance_projectiles</code> phase of the <a href="combat_loop.html">combat loop</a>.</p>
+
+<ul>
+  <li><strong>Speed:</strong> Distance traveled = <code>speed * dt_ms / 1000</code> per tick</li>
+  <li><strong>Pierce:</strong> If true, the projectile continues past the first target it hits, potentially hitting multiple units</li>
+  <li><strong>Width:</strong> For skillshot-style projectiles; wider projectiles are easier to hit but harder to dodge</li>
+  <li><strong>on_hit:</strong> Additional effects applied to each unit the projectile strikes</li>
+  <li><strong>on_arrival:</strong> Effects applied at the final destination (for ground-targeted projectiles)</li>
+</ul>
+
+<p>Events: <code>ProjectileSpawned</code>, <code>ProjectileHit</code>, <code>ProjectileArrived</code></p>
+
+<div class="callout">
+  <p><strong>ProjectileBlock:</strong> The <code>ProjectileBlock</code> <a href="advanced_mechanics.html">effect</a> blocks enemy projectiles in an area for its duration, providing a defensive counter.</p>
+</div>
+
+<hr>
+
+<h2>Channel</h2>
+
+<pre><code>Delivery::Channel {
+    duration_ms: u32,       // Total channel time
+    tick_interval_ms: u32,  // Apply effects every N ms
+}</code></pre>
+
+<p>The caster enters a channeling state and applies effects repeatedly at the tick interval. The channel occupies the caster &mdash; they cannot move or use other abilities while channeling.</p>
+
+<ul>
+  <li>Channels are <strong>interruptible</strong>: any <a href="crowd_control.html">hard CC</a> (stun, silence, knockback) or death cancels the channel</li>
+  <li>Tracked via <code>ChannelState</code> on the caster's <a href="units.html">UnitState</a></li>
+  <li>Advanced during <code>tick_channels</code> phase of the <a href="combat_loop.html">combat loop</a></li>
+  <li>Total effect = <code>(duration_ms / tick_interval_ms)</code> applications</li>
+</ul>
+
+<hr>
+
+<h2>Zone</h2>
+
+<pre><code>Delivery::Zone {
+    duration_ms: u32,       // How long the zone persists
+    tick_interval_ms: u32,  // Apply effects every N ms
+}</code></pre>
+
+<p>Places a persistent area on the ground at the target location. The zone lasts for its duration and applies effects to units inside it at each tick interval. The zone's shape is determined by the ability's <a href="targeting.html">Area</a> parameter.</p>
+
+<ul>
+  <li>Zones are independent of the caster &mdash; they persist even if the caster dies</li>
+  <li>Ticked during <code>tick_zones</code> phase of the <a href="combat_loop.html">combat loop</a></li>
+  <li>Fires <code>ZoneCreated</code> event when placed</li>
+  <li>Counterplay: walk out of the zone area</li>
+</ul>
+
+<hr>
+
+<h2>Tether</h2>
+
+<pre><code>Delivery::Tether {
+    max_range: f32,                     // Break distance
+    tick_interval_ms: u32,              // Apply effects every N ms (default 0)
+    on_complete: Vec&lt;ConditionalEffect&gt;, // Effects when tether expires naturally
+}</code></pre>
+
+<p>Creates a connection between the caster and the target. As long as the tether holds, effects are applied at the tick interval. The tether has two possible outcomes:</p>
+
+<ol>
+  <li><strong>Target stays in range:</strong> Tether completes naturally, <code>on_complete</code> effects fire (often a stronger effect like a stun)</li>
+  <li><strong>Target moves beyond <code>max_range</code>:</strong> Tether breaks early, no completion bonus</li>
+</ol>
+
+<p>Tethers are checked during <code>tick_tethers</code> in the combat loop. This creates a strategic choice: stay close and eat the full effect, or burn movement/dash to break it.</p>
+
+<hr>
+
+<h2>Trap</h2>
+
+<pre><code>Delivery::Trap {
+    duration_ms: u32,       // How long the trap persists before expiring
+    trigger_radius: f32,    // Detection radius
+}</code></pre>
+
+<p>Places an invisible trap on the ground. When an enemy unit enters the <code>trigger_radius</code>, the trap activates and applies its effects. Traps that are not triggered expire after <code>duration_ms</code>.</p>
+
+<ul>
+  <li>Traps are invisible to the enemy team</li>
+  <li>Only triggers on enemy units (respects team allegiance)</li>
+  <li>Single-use: triggers once, then is consumed</li>
+</ul>
+
+<hr>
+
+<h2>Chain</h2>
+
+<pre><code>Delivery::Chain {
+    max_bounces: u32,       // Maximum number of bounces
+    bounce_range: f32,      // Max distance for next bounce target
+    damage_falloff: f32,    // Multiplier per bounce (e.g., 0.8 = 20% less each bounce)
+}</code></pre>
+
+<p>Effects bounce from the initial target to nearby enemy units. Each bounce searches for the closest un-hit enemy within <code>bounce_range</code>. Damage (and other numeric effects) are multiplied by <code>damage_falloff</code> with each bounce.</p>
+
+<ul>
+  <li>Fires <code>ChainBounce</code> event for each bounce with the bounce number</li>
+  <li>A chain with <code>max_bounces: 5</code> and <code>damage_falloff: 0.8</code> deals 100%, 80%, 64%, 51%, 41% on successive hits</li>
+  <li>Counterplay: spread out so bounces can't reach the next target</li>
+</ul>
+
+<p class="footer-note">See also: <a href="targeting.html">Targeting &amp; Areas</a> &middot; <a href="abilities.html">Abilities &amp; Effects</a> &middot; <a href="combat_loop.html">The Combat Loop</a></p>
+
+</div>
+</body>
+</html>

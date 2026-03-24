@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Abilities &amp; Effects</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10; --surface: #13161d; --surface2: #1c2029; --surface3: #252a36;
+  --border: #2a2f3e; --border-bright: #3d4459; --text: #b8c0cc; --text-muted: #6b7280;
+  --heading: #e2e8f0; --accent: #60a5fa; --accent-dim: #2563eb; --purple: #a78bfa;
+  --green: #34d399; --green-dim: #059669; --red: #f87171; --red-dim: #dc2626;
+  --orange: #fbbf24; --cyan: #22d3ee;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Source Serif 4', Georgia, serif; background: var(--bg); color: var(--text); line-height: 1.78; font-size: 17px; -webkit-font-smoothing: antialiased; }
+.article { max-width: 900px; margin: 0 auto; padding: 4rem 2rem 8rem; }
+header { margin-bottom: 3.5rem; padding-bottom: 2.5rem; border-bottom: 1px solid var(--border); }
+h1 { font-family: 'DM Sans', sans-serif; font-size: 2.6rem; font-weight: 700; color: var(--heading); line-height: 1.2; margin-bottom: 1.2rem; letter-spacing: -0.03em; }
+.subtitle { font-size: 1.1rem; color: var(--text-muted); font-style: italic; line-height: 1.65; max-width: 680px; }
+h2 { font-family: 'DM Sans', sans-serif; font-size: 1.5rem; font-weight: 600; color: var(--heading); margin-top: 4rem; margin-bottom: 1.2rem; letter-spacing: -0.02em; }
+h3 { font-family: 'DM Sans', sans-serif; font-size: 1.15rem; font-weight: 600; color: var(--purple); margin-top: 2.5rem; margin-bottom: 0.8rem; }
+p { margin-bottom: 1.1rem; } strong { color: var(--heading); font-weight: 600; }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+a:hover { border-bottom-color: var(--accent); }
+pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.2rem 1.5rem; overflow-x: auto; margin: 1.5rem 0; font-size: 0.82rem; line-height: 1.6; }
+code { font-family: 'IBM Plex Mono', monospace; font-size: 0.88em; }
+p code, li code, td code { background: var(--surface2); padding: 0.15em 0.45em; border-radius: 4px; font-size: 0.82em; color: var(--accent); }
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+table { width: 100%; border-collapse: collapse; margin: 1.5rem 0; font-size: 0.9rem; font-family: 'DM Sans', sans-serif; }
+th { background: var(--surface2); color: var(--heading); font-weight: 600; text-align: left; padding: 0.7rem 0.9rem; border-bottom: 2px solid var(--border-bright); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.03em; }
+td { padding: 0.55rem 0.9rem; border-bottom: 1px solid var(--border); }
+tr:hover td { background: var(--surface); }
+.callout { background: var(--surface); border-left: 3px solid var(--accent-dim); border-radius: 0 8px 8px 0; padding: 1.1rem 1.4rem; margin: 1.8rem 0; font-size: 0.95rem; }
+.callout p:last-child { margin-bottom: 0; }
+ol, ul { margin: 0.8rem 0 1.2rem 1.6rem; } li { margin-bottom: 0.4rem; }
+hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
+.footer-note { font-style: italic; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: 2.5rem; margin-top: 4rem; }
+@media (max-width: 720px) { .article { padding: 2rem 1.25rem 4rem; } h1 { font-size: 1.9rem; } }
+</style>
+</head>
+<body>
+<div class="article">
+
+<p><a href="index.html" style="font-family: 'DM Sans', sans-serif; font-size: 0.9rem;">&larr; Game Mechanics</a></p>
+
+<header>
+  <h1>Abilities &amp; Effects</h1>
+  <p class="subtitle">52 effect types across 7 design phases, composed along five orthogonal dimensions. Every ability in the game is built from these primitives.</p>
+</header>
+
+<h2>The Five Dimensions</h2>
+
+<p>Every ability is a composition of five independent dimensions:</p>
+
+<table>
+<tr><th>Dimension</th><th>Question</th><th>Type</th><th>Details</th></tr>
+<tr><td><strong>Effect</strong></td><td>What does it do?</td><td><code>Effect</code> enum (52 variants)</td><td><a href="#effect-catalog">See catalog below</a></td></tr>
+<tr><td><strong>Area</strong></td><td>Where does it hit?</td><td><code>Area</code> enum</td><td><a href="targeting.html">7 shapes</a></td></tr>
+<tr><td><strong>Delivery</strong></td><td>How does it reach?</td><td><code>Delivery</code> enum</td><td><a href="delivery.html">7 methods</a></td></tr>
+<tr><td><strong>Trigger</strong></td><td>When does it fire?</td><td><code>Trigger</code> enum</td><td><a href="passives.html">20+ conditions</a></td></tr>
+<tr><td><strong>Tags</strong></td><td>What power level?</td><td><code>Tags</code></td><td>Resistance, categories</td></tr>
+</table>
+
+<div class="callout">
+  <p><strong>Composability over inheritance.</strong> A single ability can combine multiple effects, any area shape, any delivery method, and conditional triggers. There is no class hierarchy of ability types &mdash; just flat data.</p>
+</div>
+
+<hr>
+
+<h2>AbilityDef</h2>
+
+<p>The central type that defines an active ability:</p>
+
+<pre><code>pub struct AbilityDef {
+    pub name: String,
+    pub targeting: AbilityTargeting,  // How the ability is aimed
+    pub range: f32,                   // Max cast range
+    pub cooldown_ms: u32,             // Time between uses
+    pub cast_time_ms: u32,            // Wind-up before effects apply
+    pub ai_hint: String,              // Hint for AI decision-making
+    pub effects: Vec&lt;ConditionalEffect&gt;, // What the ability does
+    pub delivery: Option&lt;Delivery&gt;,   // How effects reach targets
+    pub resource_cost: i32,           // Mana/resource cost
+    // Advanced fields:
+    // charges, toggle, recast, forms, evolve_into
+}</code></pre>
+
+<h3>Cooldowns</h3>
+<p>After use, an ability enters cooldown for <code>cooldown_ms</code>. Cooldowns tick down during the <code>tick_hero_cooldowns</code> phase of each <a href="combat_loop.html">tick</a>. The <code>cooldown_reduction</code> buff stat accelerates this. The <code>CooldownModify</code> effect can directly reduce a specific ability's remaining cooldown.</p>
+
+<h3>Cast Times</h3>
+<p>A non-zero <code>cast_time_ms</code> means the unit enters a <code>CastState</code> and cannot act until the cast completes. Casts can be interrupted by <a href="crowd_control.html">hard CC</a>. The <code>CastStarted</code> / <code>AbilityCastStarted</code> events fire at the start of a cast.</p>
+
+<h3>Resources</h3>
+<p>If <code>resource_cost &gt; 0</code>, the unit must have sufficient <code>resource</code> (mana). See <a href="units.html">Units &amp; Stats</a> for the resource system (<code>resource</code>, <code>max_resource</code>, <code>resource_regen_per_sec</code>).</p>
+
+<h3>Conditional Effects</h3>
+<pre><code>pub struct ConditionalEffect {
+    pub effect: Effect,
+    pub condition: Option&lt;Condition&gt;,  // Only apply if condition is met
+    pub area: Option&lt;Area&gt;,            // Override ability-level area
+    pub target: Option&lt;AbilityTarget&gt;, // Override target (self, allies, enemies)
+}</code></pre>
+<p>Each ability can have multiple effects, each with optional conditions. This allows complex abilities like "deal damage to enemies, heal allies, and buff self" in a single cast.</p>
+
+<hr>
+
+<h2 id="effect-catalog">Effect Catalog (52 Types)</h2>
+
+<h3>Phase 1: Core Effects</h3>
+<table>
+<tr><th>Effect</th><th>Key Parameters</th><th>Description</th></tr>
+<tr><td><code>Damage</code></td><td>amount, damage_type, bonus (scaling)</td><td>Deal <a href="damage.html">damage</a>. Supports DoT via amount_per_tick/duration_ms.</td></tr>
+<tr><td><code>Heal</code></td><td>amount, bonus (scaling)</td><td>Restore HP. Supports HoT via amount_per_tick/duration_ms.</td></tr>
+<tr><td><code>Shield</code></td><td>amount, duration_ms</td><td>Grant temporary <a href="damage.html">shield HP</a>.</td></tr>
+<tr><td><code>Stun</code></td><td>duration_ms</td><td><a href="crowd_control.html">Hard CC</a>: prevent all actions.</td></tr>
+<tr><td><code>Slow</code></td><td>factor, duration_ms</td><td>Reduce <a href="movement.html">movement speed</a>.</td></tr>
+<tr><td><code>Knockback</code></td><td>distance</td><td>Push target away. See <a href="movement.html">movement</a>.</td></tr>
+<tr><td><code>Dash</code></td><td>distance, to_target, is_blink</td><td>Caster repositions. See <a href="movement.html">movement</a>.</td></tr>
+<tr><td><code>Buff</code></td><td>stat, factor, duration_ms</td><td>Increase a stat. See <a href="status_effects.html">status effects</a>.</td></tr>
+<tr><td><code>Debuff</code></td><td>stat, factor, duration_ms</td><td>Decrease a stat.</td></tr>
+<tr><td><code>Duel</code></td><td>duration_ms</td><td>Force 1v1. See <a href="advanced_mechanics.html">advanced</a>.</td></tr>
+<tr><td><code>Summon</code></td><td>template, count, clone</td><td>Create units. See <a href="summons.html">summons</a>.</td></tr>
+<tr><td><code>CommandSummons</code></td><td>speed</td><td>Move directed summons.</td></tr>
+<tr><td><code>Dispel</code></td><td>target_tags</td><td>Remove <a href="status_effects.html">status effects</a>.</td></tr>
+</table>
+
+<h3>Phase 2: CC &amp; Positioning</h3>
+<table>
+<tr><th>Effect</th><th>Key Parameters</th><th>Description</th></tr>
+<tr><td><code>Root</code></td><td>duration_ms</td><td>Prevent movement, allow abilities. See <a href="crowd_control.html">CC</a>.</td></tr>
+<tr><td><code>Silence</code></td><td>duration_ms</td><td>Prevent abilities, allow movement.</td></tr>
+<tr><td><code>Fear</code></td><td>duration_ms</td><td>Force random movement away.</td></tr>
+<tr><td><code>Taunt</code></td><td>duration_ms</td><td>Force attacks on taunter.</td></tr>
+<tr><td><code>Pull</code></td><td>distance</td><td>Pull target toward caster.</td></tr>
+<tr><td><code>Swap</code></td><td>&mdash;</td><td>Swap caster and target positions.</td></tr>
+</table>
+
+<h3>Phase 3: Damage Modifiers</h3>
+<table>
+<tr><th>Effect</th><th>Key Parameters</th><th>Description</th></tr>
+<tr><td><code>Reflect</code></td><td>percent, duration_ms</td><td>Return damage to attacker. See <a href="damage.html">damage</a>.</td></tr>
+<tr><td><code>Lifesteal</code></td><td>percent, duration_ms</td><td>Heal from damage dealt.</td></tr>
+<tr><td><code>DamageModify</code></td><td>factor, duration_ms</td><td>Multiply all damage dealt.</td></tr>
+<tr><td><code>SelfDamage</code></td><td>amount</td><td>Damage the caster (HP cost).</td></tr>
+<tr><td><code>Execute</code></td><td>hp_threshold_percent</td><td>Kill target below HP threshold.</td></tr>
+<tr><td><code>Blind</code></td><td>miss_chance, duration_ms</td><td>Cause auto-attacks to miss.</td></tr>
+<tr><td><code>OnHitBuff</code></td><td>duration_ms, on_hit_effects</td><td>Bonus effects on auto-attack.</td></tr>
+</table>
+
+<h3>Phase 4: Healing &amp; Shield</h3>
+<table>
+<tr><th>Effect</th><th>Key Parameters</th><th>Description</th></tr>
+<tr><td><code>Resurrect</code></td><td>hp_percent</td><td>Revive a dead unit.</td></tr>
+<tr><td><code>OverhealShield</code></td><td>duration_ms, conversion_percent</td><td>Overheal becomes shield.</td></tr>
+<tr><td><code>AbsorbToHeal</code></td><td>shield_amount, duration_ms, heal_percent</td><td>Shield that heals on break.</td></tr>
+<tr><td><code>ShieldSteal</code></td><td>amount</td><td>Take shield from target.</td></tr>
+<tr><td><code>StatusClone</code></td><td>max_count</td><td>Copy buffs from target.</td></tr>
+</table>
+
+<h3>Phase 5: Status Interaction</h3>
+<table>
+<tr><th>Effect</th><th>Key Parameters</th><th>Description</th></tr>
+<tr><td><code>Immunity</code></td><td>immune_to, duration_ms</td><td>Block specific effect types.</td></tr>
+<tr><td><code>Detonate</code></td><td>damage_multiplier</td><td>Consume stacks for burst. See <a href="status_effects.html">stacks</a>.</td></tr>
+<tr><td><code>StatusTransfer</code></td><td>steal_buffs</td><td>Move debuffs to target (or steal buffs).</td></tr>
+<tr><td><code>DeathMark</code></td><td>duration_ms, damage_percent</td><td>Store damage, detonate on expiry.</td></tr>
+</table>
+
+<h3>Phase 6: Control &amp; AI Override</h3>
+<table>
+<tr><th>Effect</th><th>Key Parameters</th><th>Description</th></tr>
+<tr><td><code>Polymorph</code></td><td>duration_ms</td><td>Transform: no abilities/attacks, can move.</td></tr>
+<tr><td><code>Banish</code></td><td>duration_ms</td><td>Untargetable + unable to act.</td></tr>
+<tr><td><code>Confuse</code></td><td>duration_ms</td><td>Randomize actions and targets.</td></tr>
+<tr><td><code>Charm</code></td><td>duration_ms</td><td>Walk toward caster, no actions.</td></tr>
+</table>
+
+<h3>Phase 7: Complex Mechanics</h3>
+<table>
+<tr><th>Effect</th><th>Key Parameters</th><th>Description</th></tr>
+<tr><td><code>Stealth</code></td><td>duration_ms, break_on_damage/ability</td><td>Become untargetable. See <a href="advanced_mechanics.html">advanced</a>.</td></tr>
+<tr><td><code>Leash</code></td><td>max_range, duration_ms</td><td>Tether target to caster.</td></tr>
+<tr><td><code>Link</code></td><td>duration_ms, share_percent</td><td>Share damage between units.</td></tr>
+<tr><td><code>Redirect</code></td><td>duration_ms, charges</td><td>Redirect damage to caster.</td></tr>
+<tr><td><code>Rewind</code></td><td>lookback_ms</td><td>Reset to past state.</td></tr>
+<tr><td><code>CooldownModify</code></td><td>amount_ms, ability_name</td><td>Change cooldown remaining.</td></tr>
+<tr><td><code>ApplyStacks</code></td><td>name, count, max_stacks, duration_ms</td><td>Add named stacks.</td></tr>
+<tr><td><code>Obstacle</code></td><td>width, height</td><td>Create terrain blocker.</td></tr>
+<tr><td><code>Suppress</code></td><td>duration_ms</td><td>Uncleansable hard CC.</td></tr>
+<tr><td><code>Grounded</code></td><td>duration_ms</td><td>Prevent dashes/blinks.</td></tr>
+<tr><td><code>ProjectileBlock</code></td><td>duration_ms</td><td>Block enemy projectiles.</td></tr>
+<tr><td><code>Attach</code></td><td>duration_ms</td><td>Ride on an ally.</td></tr>
+<tr><td><code>EvolveAbility</code></td><td>ability_index</td><td>Permanently upgrade ability.</td></tr>
+</table>
+
+<hr>
+
+<h2>The Ability DSL</h2>
+
+<p>Abilities are defined in <code>.ability</code> files using a custom DSL parsed by a winnow-based parser. The pipeline:</p>
+
+<pre><code>.ability file  &rarr;  Parser (winnow)  &rarr;  AST  &rarr;  lower.rs  &rarr;  AbilityDef</code></pre>
+
+<p>See the <a href="../dsl.html">Ability DSL reference</a> for full syntax documentation.</p>
+
+<p class="footer-note">See also: <a href="combat_loop.html">The Combat Loop</a> &middot; <a href="targeting.html">Targeting &amp; Areas</a> &middot; <a href="delivery.html">Delivery Methods</a> &middot; <a href="passives.html">Passives &amp; Triggers</a> &middot; <a href="damage.html">Damage &amp; Defenses</a></p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crowd Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10; --surface: #13161d; --surface2: #1c2029; --surface3: #252a36;
+  --border: #2a2f3e; --border-bright: #3d4459; --text: #b8c0cc; --text-muted: #6b7280;
+  --heading: #e2e8f0; --accent: #60a5fa; --accent-dim: #2563eb; --purple: #a78bfa;
+  --green: #34d399; --green-dim: #059669; --red: #f87171; --red-dim: #dc2626;
+  --orange: #fbbf24; --cyan: #22d3ee;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Source Serif 4', Georgia, serif; background: var(--bg); color: var(--text); line-height: 1.78; font-size: 17px; -webkit-font-smoothing: antialiased; }
+.article { max-width: 900px; margin: 0 auto; padding: 4rem 2rem 8rem; }
+header { margin-bottom: 3.5rem; padding-bottom: 2.5rem; border-bottom: 1px solid var(--border); }
+h1 { font-family: 'DM Sans', sans-serif; font-size: 2.6rem; font-weight: 700; color: var(--heading); line-height: 1.2; margin-bottom: 1.2rem; letter-spacing: -0.03em; }
+.subtitle { font-size: 1.1rem; color: var(--text-muted); font-style: italic; line-height: 1.65; max-width: 680px; }
+h2 { font-family: 'DM Sans', sans-serif; font-size: 1.5rem; font-weight: 600; color: var(--heading); margin-top: 4rem; margin-bottom: 1.2rem; letter-spacing: -0.02em; }
+h3 { font-family: 'DM Sans', sans-serif; font-size: 1.15rem; font-weight: 600; color: var(--purple); margin-top: 2.5rem; margin-bottom: 0.8rem; }
+p { margin-bottom: 1.1rem; } strong { color: var(--heading); font-weight: 600; }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+a:hover { border-bottom-color: var(--accent); }
+pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.2rem 1.5rem; overflow-x: auto; margin: 1.5rem 0; font-size: 0.82rem; line-height: 1.6; }
+code { font-family: 'IBM Plex Mono', monospace; font-size: 0.88em; }
+p code, li code, td code { background: var(--surface2); padding: 0.15em 0.45em; border-radius: 4px; font-size: 0.82em; color: var(--accent); }
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+table { width: 100%; border-collapse: collapse; margin: 1.5rem 0; font-size: 0.9rem; font-family: 'DM Sans', sans-serif; }
+th { background: var(--surface2); color: var(--heading); font-weight: 600; text-align: left; padding: 0.7rem 0.9rem; border-bottom: 2px solid var(--border-bright); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.03em; }
+td { padding: 0.55rem 0.9rem; border-bottom: 1px solid var(--border); }
+tr:hover td { background: var(--surface); }
+.callout { background: var(--surface); border-left: 3px solid var(--accent-dim); border-radius: 0 8px 8px 0; padding: 1.1rem 1.4rem; margin: 1.8rem 0; font-size: 0.95rem; }
+.callout.bug { border-left-color: var(--red-dim); background: #18100f; }
+.callout.success { border-left-color: var(--green-dim); background: #0d1712; }
+.callout p:last-child { margin-bottom: 0; }
+ol, ul { margin: 0.8rem 0 1.2rem 1.6rem; } li { margin-bottom: 0.4rem; }
+hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
+.footer-note { font-style: italic; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: 2.5rem; margin-top: 4rem; }
+@media (max-width: 720px) { .article { padding: 2rem 1.25rem 4rem; } h1 { font-size: 1.9rem; } }
+</style>
+</head>
+<body>
+<div class="article">
+
+<p><a href="index.html" style="font-family: 'DM Sans', sans-serif; font-size: 0.9rem;">&larr; Game Mechanics</a></p>
+
+<header>
+  <h1>Crowd Control</h1>
+  <p class="subtitle">Twelve CC types ranging from hard lockdowns to soft movement restrictions. Each has distinct counterplay and strategic purpose in team fights.</p>
+</header>
+
+<h2>Overview</h2>
+
+<p>Crowd control (CC) effects restrict a unit's ability to act, move, or use abilities. They are the primary tool for creating windows of opportunity in combat. CC effects are applied as <a href="status_effects.html">status effects</a> with a fixed duration that ticks down during the <a href="combat_loop.html">combat loop</a>.</p>
+
+<div class="callout">
+  <p><strong>CC and the tick system:</strong> CC durations are tracked in milliseconds. Each 100ms tick decrements the remaining duration. A unit's CC status is checked at the start of per-unit processing &mdash; if CC is active, the unit skips its action phase.</p>
+</div>
+
+<hr>
+
+<h2>Complete CC Reference</h2>
+
+<table>
+<tr><th>Effect</th><th>Category</th><th>Movement</th><th>Abilities</th><th>Attacks</th><th>Parameters</th></tr>
+<tr><td><code>Stun</code></td><td>Hard</td><td>Blocked</td><td>Blocked</td><td>Blocked</td><td><code>duration_ms</code></td></tr>
+<tr><td><code>Suppress</code></td><td>Hard</td><td>Blocked</td><td>Blocked</td><td>Blocked</td><td><code>duration_ms</code></td></tr>
+<tr><td><code>Polymorph</code></td><td>Hard</td><td>Allowed</td><td>Blocked</td><td>Blocked</td><td><code>duration_ms</code></td></tr>
+<tr><td><code>Banish</code></td><td>Hard</td><td>Blocked</td><td>Blocked</td><td>Blocked</td><td><code>duration_ms</code></td></tr>
+<tr><td><code>Charm</code></td><td>Forced</td><td>Forced</td><td>Blocked</td><td>Blocked</td><td><code>duration_ms</code></td></tr>
+<tr><td><code>Fear</code></td><td>Forced</td><td>Forced</td><td>Blocked</td><td>Blocked</td><td><code>duration_ms</code></td></tr>
+<tr><td><code>Taunt</code></td><td>Forced</td><td>Allowed</td><td>Blocked</td><td>Forced</td><td><code>duration_ms</code></td></tr>
+<tr><td><code>Root</code></td><td>Soft</td><td>Blocked</td><td>Allowed</td><td>Allowed</td><td><code>duration_ms</code></td></tr>
+<tr><td><code>Silence</code></td><td>Soft</td><td>Allowed</td><td>Blocked</td><td>Allowed</td><td><code>duration_ms</code></td></tr>
+<tr><td><code>Grounded</code></td><td>Soft</td><td>Allowed</td><td>No dashes</td><td>Allowed</td><td><code>duration_ms</code></td></tr>
+<tr><td><code>Slow</code></td><td>Soft</td><td>Reduced</td><td>Allowed</td><td>Allowed</td><td><code>factor</code>, <code>duration_ms</code></td></tr>
+<tr><td><code>Blind</code></td><td>Soft</td><td>Allowed</td><td>Allowed</td><td>Miss chance</td><td><code>miss_chance</code>, <code>duration_ms</code></td></tr>
+<tr><td><code>Confuse</code></td><td>Soft</td><td>Random</td><td>Random targets</td><td>Random targets</td><td><code>duration_ms</code></td></tr>
+</table>
+
+<hr>
+
+<h2>Hard CC</h2>
+
+<p>Hard CC completely prevents the target from taking voluntary actions.</p>
+
+<h3>Stun</h3>
+<pre><code>Effect::Stun { duration_ms: u32 }</code></pre>
+<p>The most common hard CC. Prevents all movement, abilities, and auto-attacks for the duration. The stunned unit is locked in place and cannot act. Fires <code>ControlApplied</code> event. The <code>OnStunExpire</code> <a href="passives.html">trigger</a> fires when the stun wears off.</p>
+
+<h3>Suppress</h3>
+<pre><code>Effect::Suppress { duration_ms: u32 }</code></pre>
+<p>The strongest CC in the game. Like stun, but <strong>cannot be cleansed</strong> by normal means (Dispel, QSS-style effects). Only the suppressing unit's death or the duration expiring ends it. Typically used for ultimate abilities.</p>
+
+<h3>Banish</h3>
+<pre><code>Effect::Banish { duration_ms: u32 }</code></pre>
+<p>Removes the target from play entirely. The unit becomes <strong>untargetable</strong> and <strong>unable to act</strong>. No damage can be dealt to or by the banished unit. Can be used defensively (save an ally) or offensively (remove a threat).</p>
+
+<h3>Polymorph</h3>
+<pre><code>Effect::Polymorph { duration_ms: u32 }</code></pre>
+<p>Transforms the target, preventing all abilities and attacks but allowing movement. The polymorphed unit can still walk but cannot fight back.</p>
+
+<hr>
+
+<h2>Forced Action CC</h2>
+
+<p>These effects override the target's AI, forcing specific behavior.</p>
+
+<h3>Charm</h3>
+<pre><code>Effect::Charm { duration_ms: u32 }</code></pre>
+<p>Forces the target to walk toward the caster. The charmed unit cannot attack or use abilities &mdash; it just walks harmlessly toward whoever charmed it.</p>
+
+<h3>Fear</h3>
+<pre><code>Effect::Fear { duration_ms: u32 }</code></pre>
+<p>Forces the target to move in a random direction away from the caster. The feared unit cannot attack or use abilities.</p>
+
+<h3>Taunt</h3>
+<pre><code>Effect::Taunt { duration_ms: u32 }</code></pre>
+<p>Forces the target to auto-attack the taunter. The taunted unit can move (toward the taunter) but cannot use abilities or attack anyone else. Key defensive tool for tanks.</p>
+
+<hr>
+
+<h2>Soft CC</h2>
+
+<p>Soft CC partially restricts the target without fully disabling them.</p>
+
+<h3>Root</h3>
+<pre><code>Effect::Root { duration_ms: u32 }</code></pre>
+<p>Prevents all movement (walking, dashing) but the target can still attack and use non-movement abilities. The <code>Grounded</code> effect is automatically applied during root.</p>
+
+<h3>Silence</h3>
+<pre><code>Effect::Silence { duration_ms: u32 }</code></pre>
+<p>Prevents all ability usage but the target can still move and auto-attack. Particularly devastating against ability-dependent heroes.</p>
+
+<h3>Grounded</h3>
+<pre><code>Effect::Grounded { duration_ms: u32 }</code></pre>
+<p>Specifically prevents <a href="movement.html">dashes, blinks, and movement abilities</a>. Normal walking is still allowed. Counters high-mobility heroes.</p>
+
+<h3>Slow</h3>
+<pre><code>Effect::Slow { factor: f32, duration_ms: u32 }</code></pre>
+<p>Reduces movement speed by the given factor. A <code>factor: 0.5</code> means the unit moves at 50% of its normal speed. Multiple slows don't stack &mdash; only the strongest slow applies.</p>
+
+<h3>Blind</h3>
+<pre><code>Effect::Blind { miss_chance: f32, duration_ms: u32 }</code></pre>
+<p>Causes auto-attacks to miss with the given probability. A <code>miss_chance: 0.75</code> means 75% of attacks miss. Fires <code>AttackMissed</code> event on miss. Does not affect abilities.</p>
+
+<h3>Confuse</h3>
+<pre><code>Effect::Confuse { duration_ms: u32 }</code></pre>
+<p>Randomizes the target's actions. Movement becomes random, and attacks/abilities may target allies instead of enemies.</p>
+
+<hr>
+
+<h2>Displacement</h2>
+
+<p>Displacement effects forcibly reposition units. They are instant and do not have a duration. See <a href="movement.html">Movement &amp; Positioning</a> for details.</p>
+
+<table>
+<tr><th>Effect</th><th>Parameters</th><th>Description</th></tr>
+<tr><td><code>Knockback</code></td><td><code>distance: f32</code></td><td>Pushes target away from caster</td></tr>
+<tr><td><code>Pull</code></td><td><code>distance: f32</code></td><td>Pulls target toward caster</td></tr>
+<tr><td><code>Swap</code></td><td>(none)</td><td>Swaps positions of caster and target</td></tr>
+</table>
+
+<hr>
+
+<h2>Countering CC</h2>
+
+<h3>Immunity</h3>
+<pre><code>Effect::Immunity { immune_to: Vec&lt;String&gt;, duration_ms: u32 }</code></pre>
+<p>Grants immunity to specific effect tags for the duration. When an immune unit would receive a matching effect, it's blocked and an <code>EffectResisted</code> event fires.</p>
+
+<h3>Dispel</h3>
+<pre><code>Effect::Dispel { target_tags: Vec&lt;String&gt; }</code></pre>
+<p>Removes active <a href="status_effects.html">status effects</a> from a unit. Can be filtered by tags to only remove specific categories (e.g., only CC effects, only debuffs). Fires <code>DispelApplied</code> event with the count of removed effects.</p>
+
+<h3>Resistance Tags</h3>
+<p>Units have a <code>resistance_tags: Tags</code> field that can grant permanent immunity to specific effect categories. This is checked before any effect is applied.</p>
+
+<p class="footer-note">See also: <a href="combat_loop.html">The Combat Loop</a> &middot; <a href="abilities.html">Abilities &amp; Effects</a> &middot; <a href="status_effects.html">Status Effects</a> &middot; <a href="movement.html">Movement</a></p>
+
+</div>
+</body>
+</html>

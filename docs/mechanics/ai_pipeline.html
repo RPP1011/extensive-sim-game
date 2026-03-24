@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Decision Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10; --surface: #13161d; --surface2: #1c2029; --surface3: #252a36;
+  --border: #2a2f3e; --border-bright: #3d4459; --text: #b8c0cc; --text-muted: #6b7280;
+  --heading: #e2e8f0; --accent: #60a5fa; --accent-dim: #2563eb; --purple: #a78bfa;
+  --green: #34d399; --green-dim: #059669; --red: #f87171; --red-dim: #dc2626;
+  --orange: #fbbf24; --cyan: #22d3ee;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Source Serif 4', Georgia, serif; background: var(--bg); color: var(--text); line-height: 1.78; font-size: 17px; -webkit-font-smoothing: antialiased; }
+.article { max-width: 900px; margin: 0 auto; padding: 4rem 2rem 8rem; }
+header { margin-bottom: 3.5rem; padding-bottom: 2.5rem; border-bottom: 1px solid var(--border); }
+h1 { font-family: 'DM Sans', sans-serif; font-size: 2.6rem; font-weight: 700; color: var(--heading); line-height: 1.2; margin-bottom: 1.2rem; letter-spacing: -0.03em; }
+.subtitle { font-size: 1.1rem; color: var(--text-muted); font-style: italic; line-height: 1.65; max-width: 680px; }
+h2 { font-family: 'DM Sans', sans-serif; font-size: 1.5rem; font-weight: 600; color: var(--heading); margin-top: 4rem; margin-bottom: 1.2rem; letter-spacing: -0.02em; }
+h3 { font-family: 'DM Sans', sans-serif; font-size: 1.15rem; font-weight: 600; color: var(--purple); margin-top: 2.5rem; margin-bottom: 0.8rem; }
+p { margin-bottom: 1.1rem; } strong { color: var(--heading); font-weight: 600; }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+a:hover { border-bottom-color: var(--accent); }
+pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.2rem 1.5rem; overflow-x: auto; margin: 1.5rem 0; font-size: 0.82rem; line-height: 1.6; }
+code { font-family: 'IBM Plex Mono', monospace; font-size: 0.88em; }
+p code, li code, td code { background: var(--surface2); padding: 0.15em 0.45em; border-radius: 4px; font-size: 0.82em; color: var(--accent); }
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+table { width: 100%; border-collapse: collapse; margin: 1.5rem 0; font-size: 0.9rem; font-family: 'DM Sans', sans-serif; }
+th { background: var(--surface2); color: var(--heading); font-weight: 600; text-align: left; padding: 0.7rem 0.9rem; border-bottom: 2px solid var(--border-bright); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.03em; }
+td { padding: 0.55rem 0.9rem; border-bottom: 1px solid var(--border); }
+tr:hover td { background: var(--surface); }
+.callout { background: var(--surface); border-left: 3px solid var(--accent-dim); border-radius: 0 8px 8px 0; padding: 1.1rem 1.4rem; margin: 1.8rem 0; font-size: 0.95rem; }
+.callout p:last-child { margin-bottom: 0; }
+ol, ul { margin: 0.8rem 0 1.2rem 1.6rem; } li { margin-bottom: 0.4rem; }
+hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
+.footer-note { font-style: italic; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: 2.5rem; margin-top: 4rem; }
+@media (max-width: 720px) { .article { padding: 2rem 1.25rem 4rem; } h1 { font-size: 1.9rem; } }
+</style>
+</head>
+<body>
+<div class="article">
+
+<p><a href="index.html" style="font-family: 'DM Sans', sans-serif; font-size: 0.9rem;">&larr; Game Mechanics</a></p>
+
+<header>
+  <h1>AI Decision Pipeline</h1>
+  <p class="subtitle">A layered override system where each AI layer can override the one above it &mdash; from team-wide squad strategy down to individual neural urgency interrupts. The final intent for each unit is what gets fed to <code>step()</code>.</p>
+</header>
+
+<h2>Overview</h2>
+
+<p>Intent generation flows through five layers, each of which can override the decision from the layer above:</p>
+
+<pre><code>Layer 1: Squad AI        (team personality &amp; formation)
+   &darr; override
+Layer 2: Ability Evaluator (neural urgency interrupt, fires when urgency &gt; 0.4)
+   &darr; override
+Layer 3: Transformer      (cross-attention decision head)
+   &darr; override
+Layer 4: GOAP             (goal-oriented action planning)
+   &darr; override
+Layer 5: Control AI       (hard CC timing coordination)
+   &darr;
+Final UnitIntent &rarr; step()</code></pre>
+
+<p>Each layer is optional. A minimal setup might only use Squad AI. The full pipeline uses all five for maximum tactical intelligence.</p>
+
+<hr>
+
+<h2>The Intent System</h2>
+
+<p>Every unit's desired action for a tick is represented as a <code>UnitIntent</code>. Intents are collected from the AI pipeline and passed to <code>step()</code> as a slice:</p>
+
+<pre><code>pub fn step(state: SimState, intents: &amp;[UnitIntent], dt_ms: u32) -&gt; (SimState, Vec&lt;SimEvent&gt;)</code></pre>
+
+<p>Common intent types include:</p>
+<ul>
+  <li><strong>Attack</strong> a specific target (auto-attack)</li>
+  <li><strong>UseAbility</strong> on a target or position (hero ability by index)</li>
+  <li><strong>Move</strong> to a position</li>
+  <li><strong>Heal</strong> an ally</li>
+  <li><strong>Idle</strong> (do nothing this tick)</li>
+</ul>
+
+<hr>
+
+<h2>Layer 1: Squad AI</h2>
+
+<p>The highest-level AI operates at the team/squad level. It assigns broad behavior based on <strong>personality profiles</strong> and <strong>formation modes</strong>.</p>
+
+<h3>Personality Profiles</h3>
+<p>Each squad has a personality that biases all unit decisions:</p>
+
+<table>
+<tr><th>Personality</th><th>Behavior</th></tr>
+<tr><td><strong>Aggressive</strong></td><td>Prioritize damage, dive backline, focus kills</td></tr>
+<tr><td><strong>Defensive</strong></td><td>Protect allies, peel for carries, hold formation</td></tr>
+<tr><td><strong>Balanced</strong></td><td>Adapt to situation, trade efficiently</td></tr>
+<tr><td><strong>Skirmish</strong></td><td>Hit-and-run, kite, disengage when pressured</td></tr>
+</table>
+
+<h3>Formation Modes</h3>
+<p>Formation determines spatial behavior &mdash; how the squad positions itself on the grid:</p>
+<ul>
+  <li><strong>Line:</strong> Tanks front, ranged behind</li>
+  <li><strong>Spread:</strong> Units spread to avoid AoE</li>
+  <li><strong>Cluster:</strong> Group for shared buffs/heals</li>
+  <li><strong>Flank:</strong> Send mobile units around the sides</li>
+</ul>
+
+<p>Source: <code>src/ai/squad/intents.rs</code></p>
+
+<hr>
+
+<h2>Layer 2: Neural Ability Evaluator</h2>
+
+<p>An urgency-based interrupt layer that can override Squad AI's decision when an ability use is critical.</p>
+
+<div class="callout">
+  <p><strong>Urgency threshold:</strong> The evaluator fires when <code>urgency &gt; 0.4</code>. Below that threshold, Squad AI's intent stands. Above it, the evaluator's ability recommendation takes priority.</p>
+</div>
+
+<p>The evaluator is a small neural network that scores each available ability based on:</p>
+<ul>
+  <li>Current combat state (ally/enemy positions, HP, cooldowns)</li>
+  <li>Ability properties (damage, CC duration, range)</li>
+  <li>Tactical context (is an ally about to die? is an enemy grouped for AoE?)</li>
+</ul>
+
+<p>It produces an <strong>urgency score</strong> (0.0&ndash;1.0) and a recommended ability + target. Only abilities with urgency above the threshold override the squad-level intent.</p>
+
+<p>Source: <code>src/ai/core/ability_eval/</code></p>
+
+<hr>
+
+<h2>Layer 3: Transformer Decision Head</h2>
+
+<p>A grokking-based transformer that processes <strong>entity tokens</strong> (all units on the field) and <strong>ability tokens</strong> (available abilities) through cross-attention to make decisions.</p>
+
+<h3>Architecture</h3>
+<ul>
+  <li><strong>Entity tokens:</strong> Each unit is encoded as a feature vector (HP%, position, team, status effects, etc.)</li>
+  <li><strong>Ability tokens:</strong> Each available ability is encoded (cooldown state, damage, range, effect type)</li>
+  <li><strong>Cross-attention:</strong> Ability tokens attend to entity tokens to determine optimal target selection</li>
+  <li><strong>Output:</strong> Action distribution over (ability, target) pairs</li>
+</ul>
+
+<p>The transformer uses a <strong>pointer action space</strong> &mdash; it points to specific entities on the field rather than choosing from a fixed action set. This allows it to generalize across different team compositions.</p>
+
+<p>Source: <code>src/ai/core/ability_transformer/</code></p>
+
+<hr>
+
+<h2>Layer 4: GOAP Planner</h2>
+
+<p>Goal-Oriented Action Planning provides structured decision-making through goals and actions.</p>
+
+<h3>How GOAP Works</h3>
+<ol>
+  <li><strong>Goals</strong> define desired world states (e.g., "enemy_healer_dead", "ally_HP_above_50%")</li>
+  <li><strong>Actions</strong> define how to change world state (e.g., "attack_healer", "cast_heal")</li>
+  <li>The <strong>planner</strong> searches for the cheapest sequence of actions to achieve the highest-priority goal</li>
+  <li>The first action in the plan becomes the unit's intent</li>
+</ol>
+
+<h3>Party Culture</h3>
+<p>GOAP is modified by <strong>party culture</strong> &mdash; a set of modifiers that bias goal priorities and action costs based on the squad's overall composition and personality. A party with many healers might deprioritize "self-heal" goals in favor of "protect-ally" goals.</p>
+
+<p>GOAP also has its own DSL (<code>.goap</code> files) for defining goals and actions declaratively.</p>
+
+<p>Source: <code>src/ai/goap/</code></p>
+
+<hr>
+
+<h2>Layer 5: Control AI</h2>
+
+<p>The lowest-level override, specialized for <strong>hard CC timing coordination</strong>. When a <a href="crowd_control.html">crowd control</a> opportunity arises, the Control AI can override all other layers to ensure CC is applied at the optimal moment.</p>
+
+<p>Key behaviors:</p>
+<ul>
+  <li><strong>CC chaining:</strong> Stagger stuns so they don't overlap, maximizing total lockdown time</li>
+  <li><strong>Interrupt priority:</strong> Use CC to interrupt enemy channels at the right moment</li>
+  <li><strong>Peel timing:</strong> Save CC for when an ally is in immediate danger</li>
+</ul>
+
+<hr>
+
+<h2>Self-Play Reinforcement Learning</h2>
+
+<p>The AI layers (especially Layer 2 and 3) are trained via self-play RL:</p>
+
+<table>
+<tr><th>Algorithm</th><th>Use</th></tr>
+<tr><td><strong>REINFORCE</strong></td><td>Policy gradient baseline for simple ability decisions</td></tr>
+<tr><td><strong>PPO</strong></td><td>Proximal Policy Optimization for stable transformer training</td></tr>
+</table>
+
+<p>The self-play loop:</p>
+<ol>
+  <li>Two AI squads play against each other using the current policy</li>
+  <li>Combat outcomes generate reward signals (damage dealt, kills, survival, healing)</li>
+  <li>Gradients update the policy network</li>
+  <li>The improved policy plays against itself, creating a curriculum of increasing difficulty</li>
+</ol>
+
+<p>Source: <code>src/ai/core/self_play/</code></p>
+
+<p class="footer-note">See also: <a href="combat_loop.html">The Combat Loop</a> &middot; <a href="abilities.html">Abilities &amp; Effects</a> &middot; <a href="crowd_control.html">Crowd Control</a> &middot; <a href="units.html">Units &amp; Stats</a></p>
+
+</div>
+</body>
+</html>
