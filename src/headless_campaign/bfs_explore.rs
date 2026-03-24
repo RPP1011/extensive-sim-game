@@ -134,21 +134,83 @@ fn group_actions(valid_actions: &[CampaignAction]) -> Vec<(String, CampaignActio
 /// Quick heuristic value for a campaign state.
 /// Higher = better. Combines multiple signals.
 fn estimate_value(state: &CampaignState) -> f32 {
-    let alive = state
-        .adventurers
-        .iter()
+    let adventurers: Vec<_> = state.adventurers.iter()
         .filter(|a| a.status != AdventurerStatus::Dead)
-        .count() as f32;
-    let gold = (state.guild.gold / 100.0).min(5.0);
-    let rep = state.guild.reputation / 100.0;
-    let progress = state.overworld.campaign_progress;
-    let quests_done = state
-        .completed_quests
-        .iter()
-        .filter(|q| q.result == QuestResult::Victory)
-        .count() as f32;
+        .collect();
+    let alive = adventurers.len() as f32;
 
-    alive * 0.15 + gold * 0.1 + rep * 0.2 + progress * 0.3 + (quests_done / 25.0).min(1.0) * 0.25
+    if alive == 0.0 {
+        return 0.0; // everyone dead = worst case
+    }
+
+    // --- Roster health (0-1): how healthy are our adventurers? ---
+    let mean_health = adventurers.iter()
+        .map(|a| {
+            let injury_penalty = a.injury / 100.0;
+            let stress_penalty = a.stress / 200.0; // stress matters less
+            let morale_bonus = a.morale / 200.0;
+            (1.0 - injury_penalty - stress_penalty + morale_bonus).clamp(0.0, 1.0)
+        })
+        .sum::<f32>() / alive;
+
+    // --- Resource position (0-1) ---
+    let gold_score = (state.guild.gold / 200.0).clamp(0.0, 1.0);
+    let supply_score = (state.guild.supplies / 100.0).clamp(0.0, 1.0);
+    let rep_score = state.guild.reputation / 100.0;
+
+    // --- Progress (0-1) ---
+    let progress = state.overworld.campaign_progress;
+    let quests_won = state.completed_quests.iter()
+        .filter(|q| q.result == QuestResult::Victory).count() as f32;
+    let quests_lost = state.completed_quests.iter()
+        .filter(|q| q.result == QuestResult::Defeat).count() as f32;
+    let win_rate = if quests_won + quests_lost > 0.0 {
+        quests_won / (quests_won + quests_lost)
+    } else {
+        0.5
+    };
+
+    // --- Threat pressure (0-1, higher = worse) ---
+    let threat = (state.overworld.global_threat_level / 100.0).clamp(0.0, 1.0);
+    let crisis_pressure = (state.overworld.active_crises.len() as f32 * 0.2).min(1.0);
+
+    // --- Operational capacity: idle adventurers vs active quests ---
+    let idle = adventurers.iter()
+        .filter(|a| a.status == AdventurerStatus::Idle)
+        .count() as f32;
+    let capacity = (idle / alive.max(1.0)).clamp(0.0, 1.0);
+    let quest_load = (state.active_quests.len() as f32 / state.guild.active_quest_capacity.max(1) as f32)
+        .clamp(0.0, 1.0);
+
+    // --- Mean level (growth indicator) ---
+    let mean_level = adventurers.iter().map(|a| a.level as f32).sum::<f32>() / alive;
+    let level_score = (mean_level / 20.0).min(1.0);
+
+    // --- Penalties for negative states (amplify differences) ---
+    let injured_count = adventurers.iter()
+        .filter(|a| a.injury > 40.0).count() as f32;
+    let deserted = state.adventurers.iter()
+        .filter(|a| a.status == AdventurerStatus::Dead).count() as f32;
+
+    // Multiplicative components — create larger spreads
+    let roster_factor = (alive / (alive + deserted).max(1.0)).powf(0.5); // survival rate
+    let health_factor = mean_health.powf(1.5); // amplify health differences
+    let economy_factor = (gold_score * 0.6 + supply_score * 0.2 + rep_score * 0.2).powf(0.8);
+
+    // Additive progress
+    let progress_score = progress * 2.0 + (quests_won / 25.0).min(1.0) + win_rate;
+
+    // Penalties
+    let injured_penalty = injured_count * 0.15;
+    let threat_penalty = threat * 0.5 + crisis_pressure * 0.3;
+    let bankruptcy_penalty = if state.guild.gold < 20.0 { 0.5 } else { 0.0 };
+
+    // Combine with multiplicative factors for larger dynamic range
+    let base = progress_score + level_score * 0.5 + quest_load * 0.3;
+    let v = base * roster_factor * health_factor * economy_factor
+        - injured_penalty - threat_penalty - bankruptcy_penalty;
+
+    v.clamp(0.0, 5.0)
 }
 
 /// Feature vector for clustering leaf states.
@@ -554,7 +616,7 @@ fn generate_initial_roots(
     llm_store: &Option<std::sync::Arc<super::llm::ContentStore>>,
 ) -> Vec<RootState> {
     let mut roots = Vec::new();
-    let campaigns_needed = (config.initial_roots / 10).max(5);
+    let campaigns_needed = (config.initial_roots / 3).max(10); // more campaigns = more diversity
 
     for i in 0..campaigns_needed as u64 {
         let seed = config.base_seed.wrapping_add(i * 7919); // spread seeds
