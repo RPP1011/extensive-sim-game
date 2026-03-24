@@ -398,6 +398,59 @@ impl CampaignState {
         let gold_log = (self.guild.gold.max(1.0)).ln();
         let supplies_log = (self.guild.supplies.max(1.0)).ln();
 
+        // Scouting: mean region visibility
+        let mean_visibility = if self.overworld.regions.is_empty() {
+            0.5
+        } else {
+            self.overworld.regions.iter().map(|r| r.visibility).sum::<f32>()
+                / self.overworld.regions.len() as f32
+        };
+
+        // Bond network density
+        let alive = self.adventurers.iter()
+            .filter(|a| a.status != AdventurerStatus::Dead).count() as f32;
+        let max_bonds = (alive * (alive - 1.0) / 2.0).max(1.0);
+        let bond_density = self.adventurer_bonds.len() as f32 / max_bonds;
+        let mean_bond_strength = if self.adventurer_bonds.is_empty() {
+            0.0
+        } else {
+            self.adventurer_bonds.values().sum::<f32>()
+                / self.adventurer_bonds.len() as f32 / 100.0
+        };
+
+        // Building tiers (sum normalized to 0-1)
+        let b = &self.guild_buildings;
+        let building_sum = (b.training_grounds + b.watchtower + b.trade_post
+            + b.barracks + b.infirmary + b.war_room) as f32 / 18.0;
+
+        // Rival guild state
+        let rival_active = if self.rival_guild.active { 1.0 } else { 0.0 };
+        let rival_rep = self.rival_guild.reputation / 100.0;
+        let rival_power = self.rival_guild.power_level / 100.0;
+
+        // Season (cyclical)
+        let season_idx = match self.overworld.season {
+            Season::Spring => 0.0,
+            Season::Summer => 0.25,
+            Season::Autumn => 0.5,
+            Season::Winter => 0.75,
+        };
+
+        // Diplomacy summary
+        let coalition_count = self.factions.iter()
+            .filter(|f| f.coalition_member).count() as f32;
+        let war_count = self.factions.iter()
+            .filter(|f| f.diplomatic_stance == DiplomaticStance::AtWar).count() as f32;
+
+        // Trade income
+        let trade_income_log = (self.guild.total_trade_income.max(1.0)).ln() / 5.0;
+
+        // Territory control
+        let guild_faction_id = self.diplomacy.guild_faction_id;
+        let guild_regions = self.overworld.regions.iter()
+            .filter(|r| r.owner_faction_id == guild_faction_id).count() as f32;
+        let territory_ratio = guild_regions / self.overworld.regions.len().max(1) as f32;
+
         EntityToken {
             type_id: 9,
             features: vec![
@@ -411,6 +464,19 @@ impl CampaignState {
                 self.overworld.campaign_progress,
                 self.overworld.global_threat_level / 100.0,
                 self.pending_choices.len() as f32,
+                // Extended state dimensions:
+                mean_visibility,
+                bond_density,
+                mean_bond_strength,
+                building_sum,
+                rival_active,
+                rival_rep,
+                rival_power,
+                season_idx,
+                coalition_count,
+                war_count,
+                trade_income_log,
+                territory_ratio,
             ],
         }
     }
