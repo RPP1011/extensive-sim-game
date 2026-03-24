@@ -71,6 +71,10 @@ impl WorldTemplate {
                     control: 80.0,
                     threat_level: 15.0,
                     visibility: 0.8, // guild territory
+                    population: 500,
+                    civilian_morale: 60.0,
+                    tax_rate: 0.1,
+                    growth_rate: 0.0,
                 },
                 Region {
                     id: 1,
@@ -81,6 +85,10 @@ impl WorldTemplate {
                     control: 60.0,
                     threat_level: 40.0,
                     visibility: 0.3,
+                    population: 400,
+                    civilian_morale: 40.0,
+                    tax_rate: 0.15,
+                    growth_rate: 0.0,
                 },
                 Region {
                     id: 2,
@@ -91,6 +99,10 @@ impl WorldTemplate {
                     control: 70.0,
                     threat_level: 25.0,
                     visibility: 0.8, // guild territory
+                    population: 350,
+                    civilian_morale: 55.0,
+                    tax_rate: 0.1,
+                    growth_rate: 0.0,
                 },
             ],
             locations: vec![
@@ -168,6 +180,7 @@ impl WorldTemplate {
             diplomacy: DiplomacyMatrix {
                 relations: vec![vec![0, -20], vec![-20, 0]],
                 guild_faction_id: 0,
+                agreements: Vec::new(),
             },
             npc_relationships: vec![
                 NpcRelationship {

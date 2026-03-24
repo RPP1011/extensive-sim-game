@@ -551,5 +551,173 @@ fn format_world_event(event: &WorldEvent) -> (String, egui::Color32) {
             format!("Season changed to {:?}", new_season),
             yellow,
         ),
+
+        // --- New system events (catch-all formatting) ---
+        WorldEvent::AgreementFormed { faction_a, faction_b, agreement_type } => (
+            format!("{} between factions {} and {}", agreement_type, faction_a, faction_b), blue),
+        WorldEvent::AgreementExpired { faction_a, faction_b, agreement_type } => (
+            format!("{} expired between factions {} and {}", agreement_type, faction_a, faction_b), gray),
+        WorldEvent::WarCeasefire { faction_a, faction_b, .. } => (
+            format!("Ceasefire between factions {} and {}", faction_a, faction_b), yellow),
+        WorldEvent::FactionSplit { original_id, new_faction_name } => (
+            format!("Faction {} split: {} formed", original_id, new_faction_name), red),
+        WorldEvent::PopulationEvent { description, .. } => (description.clone(), gray),
+        WorldEvent::TaxCollected { amount, .. } => (format!("Tax collected: {:.0}g", amount), green),
+        WorldEvent::RefugeesArrived { region, count } => (
+            format!("{} refugees arrived in {}", count, region), yellow),
+        WorldEvent::CaravanCompleted { gold_delivered, .. } => (
+            format!("Caravan delivered {:.0}g", gold_delivered), green),
+        WorldEvent::CaravanRaided { raider_faction, .. } => (
+            format!("Caravan raided by {}", raider_faction), red),
+        WorldEvent::AdventurerRetired { name, legacy_type, .. } => (
+            format!("{} retired ({})", name, legacy_type), blue),
+        WorldEvent::LegacyBonusApplied { legacy_type, .. } => (
+            format!("Legacy bonus: {}", legacy_type), green),
+        WorldEvent::MentorshipCompleted { mentor_id, apprentice_id, .. } => (
+            format!("Mentorship complete: {} → {}", mentor_id, apprentice_id), green),
+        WorldEvent::SkillTransferred { from_id, to_id, tag } => (
+            format!("Skill {} transferred: {} → {}", tag, from_id, to_id), blue),
+        WorldEvent::CivilWarStarted { faction_id, cause } => (
+            format!("Civil war in faction {}: {}", faction_id, cause), red),
+        WorldEvent::CivilWarResolved { faction_id, description, .. } => (
+            format!("Civil war resolved in faction {}: {}", faction_id, description), yellow),
+        WorldEvent::LegendaryDeedEarned { adventurer_id, title, .. } => (
+            format!("Legendary deed: #{} — {}", adventurer_id, title), green),
+        WorldEvent::RumorReceived { rumor_type, .. } => (
+            format!("Rumor received: {}", rumor_type), blue),
+        WorldEvent::RumorInvestigated { outcome, .. } => (
+            format!("Rumor investigated: {}", outcome), blue),
+        WorldEvent::WarExhaustionMilestone { faction_id, description, .. } => (
+            format!("War exhaustion (faction {}): {}", faction_id, description), yellow),
+        WorldEvent::GuildTierChanged { old_tier, new_tier, .. } => (
+            format!("Guild tier: {} → {}", old_tier, new_tier), green),
+        WorldEvent::IntelGathered { faction_id, .. } => (
+            format!("Intel gathered on faction {}", faction_id), blue),
+        WorldEvent::SpyCaught { faction_id, .. } => (
+            format!("Spy caught in faction {}", faction_id), red),
+        WorldEvent::MercenaryContractExpired { name, .. } => (
+            format!("Mercenary contract expired: {}", name), gray),
+        WorldEvent::MercenaryDeserted { name, .. } => (
+            format!("Mercenary deserted: {}", name), red),
+        WorldEvent::MercenaryBetrayedGuild { name, .. } => (
+            format!("Mercenary betrayal: {}", name), red),
+        WorldEvent::BlackMarketDeal { description, .. } => (
+            format!("Black market: {}", description), yellow),
+        WorldEvent::BlackMarketDiscovered { reputation_lost } => (
+            format!("Black market discovered! -{:.0} rep", reputation_lost), red),
+        WorldEvent::GamblingOutcome { adventurer_id, amount } => (
+            format!("#{} gambling: {}{:.0}g", adventurer_id, if *amount > 0.0 { "+" } else { "" }, amount),
+            if *amount > 0.0 { green } else { red }),
+        WorldEvent::ItemCrafted { name, quality } => (
+            format!("Crafted: {} ({})", name, quality), green),
+        WorldEvent::ResourceGathered { resource, amount } => (
+            format!("Gathered {:.0} {}", amount, resource), blue),
+        WorldEvent::MigrationStarted { from, to, count, .. } => (
+            format!("{} people migrating: {} → {}", count, from, to), yellow),
+        WorldEvent::FestivalStarted { name, faction } => (
+            format!("Festival: {} ({})", name, faction), blue),
+        WorldEvent::RivalryFormed { a, b, cause } => (
+            format!("Rivalry: #{} vs #{} ({})", a, b, cause), yellow),
+        WorldEvent::RivalryDuel { challenger, challenged } => (
+            format!("Duel: #{} challenges #{}", challenger, challenged), yellow),
+        WorldEvent::RivalryResolved { a, b } => (
+            format!("Rivalry resolved: #{} and #{}", a, b), green),
+        WorldEvent::ChronicleRecorded { text, .. } => (text.clone(), gray),
+        WorldEvent::NemesisAppeared { name, faction } => (
+            format!("Nemesis appeared: {} ({})", name, faction), red),
+        WorldEvent::NemesisGrew { name, new_strength } => (
+            format!("Nemesis {} grew stronger ({:.0})", name, new_strength), red),
+        WorldEvent::NemesisDefeated { name, .. } => (
+            format!("Nemesis defeated: {}", name), green),
+        WorldEvent::FavorRequested { faction_id, .. } => (
+            format!("Favor requested by faction {}", faction_id), blue),
+        WorldEvent::FavorCompleted { faction_id, reward_favor, .. } => (
+            format!("Favor completed for faction {} (+{:.0})", faction_id, reward_favor), green),
+        WorldEvent::FavorCalledIn { description, .. } => (
+            format!("Favor called in: {}", description), yellow),
+        WorldEvent::SiteCompleted { region_id, prep_type, .. } => (
+            format!("Site completed: {} in region {}", prep_type, region_id), green),
+        WorldEvent::SiteDestroyed { region_id, .. } => (
+            format!("Site destroyed in region {}", region_id), red),
+        WorldEvent::CouncilVoteProposed { topic } => (
+            format!("Council vote proposed: {}", topic), blue),
+        WorldEvent::CouncilVoteResolved { passed, topic } => (
+            format!("Council vote {}: {}", if *passed { "passed" } else { "failed" }, topic),
+            if *passed { green } else { red }),
+        WorldEvent::DiseaseOutbreak { disease_name, .. } => (
+            format!("Disease outbreak: {}", disease_name), red),
+        WorldEvent::DiseaseSpread { to_region, .. } => (
+            format!("Disease spread to region {}", to_region), red),
+        WorldEvent::DiseaseContained { disease_name, .. } => (
+            format!("Disease contained: {}", disease_name), green),
+        WorldEvent::AdventurerInfected { adventurer_id, .. } => (
+            format!("Adventurer #{} infected", adventurer_id), red),
+        WorldEvent::PrisonerCaptured { prisoner_name, .. } => (
+            format!("Prisoner captured: {}", prisoner_name), blue),
+        WorldEvent::PrisonerEscaped { prisoner_name, .. } => (
+            format!("Prisoner escaped: {}", prisoner_name), red),
+        WorldEvent::AdventurerCaptured { adventurer_id, .. } => (
+            format!("Adventurer #{} captured", adventurer_id), red),
+        WorldEvent::PropagandaEffect { description, .. } => (description.clone(), blue),
+        WorldEvent::PropagandaExpired { campaign_type, .. } => (
+            format!("Propaganda expired: {}", campaign_type), gray),
+        WorldEvent::MonsterAttack { region, species, .. } => (
+            format!("{} attack in {}", species, region), red),
+        WorldEvent::MonsterSwarm { region, species } => (
+            format!("{} swarm in {}", species, region), red),
+        WorldEvent::MonsterMigration { from, to, species } => (
+            format!("{} migrated: {} → {}", species, from, to), yellow),
+        WorldEvent::VisionReceived { adventurer_id, vision_type, .. } => (
+            format!("Vision for #{}: {}", adventurer_id, vision_type), blue),
+        WorldEvent::VisionFulfilled { adventurer_id, .. } => (
+            format!("Vision fulfilled for #{}", adventurer_id), green),
+        WorldEvent::HobbyDeveloped { adventurer_id, hobby } => (
+            format!("#{} developed hobby: {}", adventurer_id, hobby), blue),
+        WorldEvent::LoanRepaid { amount, .. } => (
+            format!("Loan payment: {:.0}g", amount), green),
+        WorldEvent::LoanDefaulted { amount_owed, .. } => (
+            format!("Loan defaulted: {:.0}g owed", amount_owed), red),
+        WorldEvent::CreditRatingChanged { old, new } => (
+            format!("Credit rating: {:.0} → {:.0}", old, new),
+            if *new > *old { green } else { red }),
+        WorldEvent::VictoryProgress { condition, percent } => (
+            format!("Victory progress ({}): {:.0}%", condition, percent), green),
+        WorldEvent::VictoryAchieved { condition } => (
+            format!("VICTORY: {}!", condition), green),
+        WorldEvent::DungeonExplored { dungeon_name, explored_pct, .. } => (
+            format!("Dungeon {}: {:.0}% explored", dungeon_name, explored_pct), blue),
+        WorldEvent::DungeonLootFound { dungeon_name, gold_found, .. } => (
+            format!("Loot in {}: {:.0}g", dungeon_name, gold_found), green),
+        WorldEvent::DungeonThreatEmerged { dungeon_name, threat_level, .. } => (
+            format!("Threat in {}: level {:.0}", dungeon_name, threat_level), red),
+        WorldEvent::DungeonConnectionDiscovered { from_name, to_name, .. } => (
+            format!("Dungeon connection: {} ↔ {}", from_name, to_name), blue),
+        WorldEvent::DungeonRumorHeard { dungeon_name, region_name, .. } => (
+            format!("Dungeon rumor: {} in {}", dungeon_name, region_name), blue),
+        WorldEvent::NpcReputationChanged { npc_name, old, new } => (
+            format!("{} reputation: {:.0} → {:.0}", npc_name, old, new),
+            if *new > *old { green } else { red }),
+        WorldEvent::NpcServiceUnlocked { npc_name, service } => (
+            format!("{} unlocked: {}", npc_name, service), green),
+        WorldEvent::WeatherStarted { weather_type, severity, .. } => (
+            format!("{:?} started (severity {:.0})", weather_type, severity), yellow),
+        WorldEvent::WeatherEnded { weather_type } => (
+            format!("{:?} ended", weather_type), blue),
+        WorldEvent::WeatherDamage { description, .. } => (description.clone(), red),
+        WorldEvent::ArtifactCreated { name, origin } => (
+            format!("Artifact created: {} (from {})", name, origin), green),
+        WorldEvent::ArtifactEquipped { name, adventurer_id } => (
+            format!("{} equipped by #{}", name, adventurer_id), blue),
+        WorldEvent::DifficultyEscalation { description } => (description.clone(), red),
+        WorldEvent::DifficultyRelief { description } => (description.clone(), green),
+        WorldEvent::PressureChanged { old, new } => (
+            format!("Pressure: {:.0} → {:.0}", old, new),
+            if *new > *old { red } else { green }),
+        WorldEvent::CultureShift { region_id, dominant_culture } => (
+            format!("Region {} culture shift: {}", region_id, dominant_culture), blue),
+        WorldEvent::CulturalMilestone { region_id, culture, level } => (
+            format!("Region {} {} milestone: {:.0}", region_id, culture, level), green),
+        WorldEvent::NearVictoryEscalation => (
+            "Near victory — enemies escalating!".into(), red),
     }
 }

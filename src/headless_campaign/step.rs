@@ -114,6 +114,44 @@ pub fn step_campaign(
     // Progression triggers — detect when content should be generated
     systems::progression_triggers::tick_progression_triggers(state, &mut deltas, &mut events);
 
+    // --- New system ticks ---
+    systems::diplomacy::tick_diplomacy(state, &mut deltas, &mut events);
+    systems::population::tick_population(state, &mut deltas, &mut events);
+    systems::caravans::tick_caravans(state, &mut deltas, &mut events);
+    systems::retirement::tick_retirement(state, &mut deltas, &mut events);
+    systems::mentorship::tick_mentorship(state, &mut deltas, &mut events);
+    systems::civil_war::tick_civil_wars(state, &mut deltas, &mut events);
+    systems::legendary_deeds::tick_legendary_deeds(state, &mut deltas, &mut events);
+    systems::rumors::tick_rumors(state, &mut deltas, &mut events);
+    systems::war_exhaustion::tick_war_exhaustion(state, &mut deltas, &mut events);
+    systems::guild_tiers::tick_guild_tiers(state, &mut deltas, &mut events);
+    systems::espionage::tick_espionage(state, &mut deltas, &mut events);
+    systems::mercenaries::tick_mercenaries(state, &mut deltas, &mut events);
+    systems::black_market::tick_black_market(state, &mut deltas, &mut events);
+    systems::crafting::tick_crafting(state, &mut deltas, &mut events);
+    systems::migration::tick_migration(state, &mut deltas, &mut events);
+    systems::festivals::tick_festivals(state, &mut deltas, &mut events);
+    systems::rivalries::tick_rivalries(state, &mut deltas, &mut events);
+    systems::chronicle::tick_chronicle(state, &mut deltas, &mut events);
+    systems::nemesis::tick_nemesis(state, &mut deltas, &mut events);
+    systems::favors::tick_favors(state, &mut deltas, &mut events);
+    systems::site_prep::tick_site_prep(state, &mut deltas, &mut events);
+    systems::council::tick_council(state, &mut deltas, &mut events);
+    systems::disease::tick_disease(state, &mut deltas, &mut events);
+    systems::prisoners::tick_prisoners(state, &mut deltas, &mut events);
+    systems::propaganda::tick_propaganda(state, &mut deltas, &mut events);
+    systems::monster_ecology::tick_monster_ecology(state, &mut deltas, &mut events);
+    systems::visions::tick_visions(state, &mut deltas, &mut events);
+    systems::hobbies::tick_hobbies(state, &mut deltas, &mut events);
+    systems::loans::tick_loans(state, &mut deltas, &mut events);
+    systems::victory_conditions::tick_victory_conditions(state, &mut deltas, &mut events);
+    systems::dungeons::tick_dungeons(state, &mut deltas, &mut events);
+    systems::npc_reputation::tick_npc_reputation(state, &mut deltas, &mut events);
+    systems::weather::tick_weather(state, &mut deltas, &mut events);
+    systems::artifacts::tick_artifacts(state, &mut deltas, &mut events);
+    systems::difficulty_scaling::tick_difficulty_scaling(state, &mut deltas, &mut events);
+    systems::culture::tick_culture(state, &mut deltas, &mut events);
+
     // Final economy snapshot
     deltas.gold_after = state.guild.gold;
     deltas.supplies_after = state.guild.supplies;
@@ -1045,6 +1083,12 @@ fn apply_choice_effects(
             ChoiceEffect::SetQuestStatus { quest_id, status } => {
                 if let Some(q) = state.active_quests.iter_mut().find(|q| q.id == *quest_id) {
                     q.status = *status;
+                }
+            }
+            ChoiceEffect::AttendFestival(festival_id) => {
+                // Mark the festival as attended
+                if let Some(f) = state.active_festivals.iter_mut().find(|f| f.id == *festival_id) {
+                    f.attended = true;
                 }
             }
             ChoiceEffect::Narrative(text) => {

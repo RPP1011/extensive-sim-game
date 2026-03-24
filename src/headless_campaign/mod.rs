@@ -49,6 +49,7 @@ pub mod vae_slots;
 pub mod trace;
 pub mod trace_viewer;
 pub mod world_templates;
+pub mod world_lore_gen;
 mod systems;
 #[cfg(test)]
 mod tests;

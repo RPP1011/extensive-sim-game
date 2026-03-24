@@ -488,6 +488,10 @@ mod tests {
             rallying_to: None,
             tier_status: Default::default(),
             history_tags: Default::default(),
+            backstory: None,
+            deeds: Vec::new(),
+            hobbies: Vec::new(),
+            disease_status: crate::headless_campaign::state::DiseaseStatus::Healthy,
         }
     }
 

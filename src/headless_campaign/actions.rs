@@ -141,6 +141,15 @@ pub enum SpendPriority {
     MilitaryFocus,
 }
 
+/// Returns a human-readable name for a diplomatic agreement type.
+pub fn agreement_type_name(agreement: &super::state::DiplomaticAgreement) -> &'static str {
+    match agreement {
+        super::state::DiplomaticAgreement::TradeAgreement { .. } => "Trade Agreement",
+        super::state::DiplomaticAgreement::NonAggressionPact { .. } => "Non-Aggression Pact",
+        super::state::DiplomaticAgreement::MilitaryAlliance { .. } => "Military Alliance",
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Action costs (gold)
 // ---------------------------------------------------------------------------
@@ -381,6 +390,164 @@ pub enum WorldEvent {
         new_tier: u8,
         cost: f32,
     },
+
+    // --- Diplomacy ---
+    AgreementFormed { faction_a: usize, faction_b: usize, agreement_type: String },
+    AgreementExpired { faction_a: usize, faction_b: usize, agreement_type: String },
+    WarCeasefire { faction_a: usize, faction_b: usize, reason: String },
+    FactionSplit { original_id: usize, new_faction_name: String },
+
+    // --- Population ---
+    PopulationEvent { region_id: usize, event_type: String, description: String },
+    TaxCollected { region_id: usize, amount: f32 },
+    RefugeesArrived { region: String, count: u32 },
+
+    // --- Caravans ---
+    CaravanCompleted { route_id: u32, gold_delivered: f32 },
+    CaravanRaided { route_id: u32, gold_stolen: f32, raider_faction: String },
+
+    // --- Retirement ---
+    AdventurerRetired { adventurer_id: u32, name: String, legacy_type: String, bonus_description: String },
+    LegacyBonusApplied { legacy_type: String, description: String },
+
+    // --- Mentorship ---
+    MentorshipCompleted { mentor_id: u32, apprentice_id: u32, xp_gained: f32 },
+    SkillTransferred { from_id: u32, to_id: u32, tag: String },
+
+    // --- Civil War ---
+    CivilWarStarted { faction_id: usize, cause: String },
+    CivilWarResolved { faction_id: usize, rebels_won: bool, description: String },
+
+    // --- Legendary Deeds ---
+    LegendaryDeedEarned { adventurer_id: u32, title: String, description: String },
+
+    // --- Rumors ---
+    RumorReceived { text: String, rumor_type: String },
+    RumorInvestigated { rumor_id: u32, outcome: String },
+
+    // --- War Exhaustion ---
+    WarExhaustionMilestone { faction_id: usize, level: f32, description: String },
+
+    // --- Guild Tiers ---
+    GuildTierChanged { old_tier: String, new_tier: String, description: String },
+
+    // --- Espionage ---
+    IntelGathered { spy_id: u32, faction_id: usize, total_intel: f32 },
+    SpyCaught { spy_id: u32, adventurer_id: u32, faction_id: usize },
+
+    // --- Mercenaries ---
+    MercenaryContractExpired { mercenary_id: u32, name: String },
+    MercenaryDeserted { mercenary_id: u32, name: String },
+    MercenaryBetrayedGuild { mercenary_id: u32, name: String, strength: f32 },
+
+    // --- Black Market ---
+    BlackMarketDeal { description: String, profit: f32 },
+    BlackMarketDiscovered { reputation_lost: f32 },
+    GamblingOutcome { adventurer_id: u32, amount: f32 },
+
+    // --- Crafting ---
+    ItemCrafted { name: String, quality: String },
+    ResourceGathered { resource: String, amount: f32 },
+
+    // --- Migration ---
+    MigrationStarted { from: String, to: String, count: u32, cause: String },
+
+    // --- Festivals ---
+    FestivalStarted { faction: String, name: String },
+
+    // --- Rivalries ---
+    RivalryFormed { a: u32, b: u32, cause: String },
+    RivalryDuel { challenger: u32, challenged: u32 },
+    RivalryResolved { a: u32, b: u32 },
+
+    // --- Chronicle ---
+    ChronicleRecorded { text: String, significance: f32 },
+
+    // --- Nemesis ---
+    NemesisAppeared { name: String, faction: String },
+    NemesisGrew { name: String, new_strength: f32 },
+    NemesisDefeated { name: String, adventurer_id: u32 },
+
+    // --- Favors ---
+    FavorRequested { request_id: u32, faction_id: usize, description: String },
+    FavorCompleted { faction_id: usize, request_id: u32, reward_favor: f32 },
+    FavorCalledIn { faction_id: usize, favor_type: String, cost: f32, description: String },
+
+    // --- Site Prep ---
+    SiteCompleted { site_id: u32, region_id: usize, prep_type: String },
+    SiteDestroyed { site_id: u32, region_id: usize },
+
+    // --- Council ---
+    CouncilVoteProposed { topic: String },
+    CouncilVoteResolved { passed: bool, topic: String },
+
+    // --- Disease ---
+    DiseaseOutbreak { disease_id: u32, disease_name: String, region_id: usize, severity: f32 },
+    DiseaseSpread { disease_id: u32, from_region: usize, to_region: usize },
+    DiseaseContained { disease_id: u32, disease_name: String },
+    AdventurerInfected { adventurer_id: u32, disease_id: u32 },
+
+    // --- Prisoners ---
+    PrisonerCaptured { prisoner_id: u32, prisoner_name: String, faction_id: usize },
+    PrisonerEscaped { prisoner_id: u32, prisoner_name: String, faction_id: usize },
+    AdventurerCaptured { adventurer_id: u32, adventurer_name: String, faction_id: usize },
+
+    // --- Propaganda ---
+    PropagandaEffect { campaign_id: u32, description: String },
+    PropagandaExpired { campaign_id: u32, campaign_type: String },
+
+    // --- Monster Ecology ---
+    MonsterAttack { region: String, species: String, damage: f32 },
+    MonsterSwarm { region: String, species: String },
+    MonsterMigration { from: String, to: String, species: String },
+
+    // --- Visions ---
+    VisionReceived { adventurer_id: u32, vision_type: String, text: String },
+    VisionFulfilled { adventurer_id: u32, text: String, vision_type: String },
+
+    // --- Hobbies ---
+    HobbyDeveloped { adventurer_id: u32, hobby: String },
+
+    // --- Loans ---
+    LoanRepaid { loan_id: u32, amount: f32, remaining: f32 },
+    LoanDefaulted { loan_id: u32, lender_faction_id: usize, amount_owed: f32 },
+    CreditRatingChanged { old: f32, new: f32 },
+
+    // --- Victory Conditions ---
+    VictoryProgress { condition: String, percent: f32 },
+    VictoryAchieved { condition: String },
+
+    // --- Dungeons ---
+    DungeonExplored { dungeon_id: u32, dungeon_name: String, explored_pct: f32 },
+    DungeonLootFound { dungeon_id: u32, dungeon_name: String, gold_found: f32 },
+    DungeonThreatEmerged { dungeon_id: u32, dungeon_name: String, threat_level: f32 },
+    DungeonConnectionDiscovered { from_dungeon_id: u32, from_name: String, to_dungeon_id: u32, to_name: String },
+    DungeonRumorHeard { dungeon_id: u32, dungeon_name: String, region_name: String },
+
+    // --- NPC Reputation ---
+    NpcReputationChanged { npc_name: String, old: f32, new: f32 },
+    NpcServiceUnlocked { npc_name: String, service: String },
+
+    // --- Weather ---
+    WeatherStarted { weather_type: super::state::WeatherType, regions: Vec<usize>, severity: f32 },
+    WeatherEnded { weather_type: super::state::WeatherType },
+    WeatherDamage { weather_type: super::state::WeatherType, description: String },
+
+    // --- Artifacts ---
+    ArtifactCreated { name: String, origin: String },
+    ArtifactEquipped { name: String, adventurer_id: u32 },
+
+    // --- Difficulty Scaling ---
+    DifficultyEscalation { description: String },
+    DifficultyRelief { description: String },
+    PressureChanged { old: f32, new: f32 },
+
+    // --- Culture ---
+    CultureShift { region_id: usize, dominant_culture: String },
+    CulturalMilestone { region_id: usize, culture: String, level: f32 },
+
+    // --- Near-victory escalation ---
+    NearVictoryEscalation,
 }
 
 // ---------------------------------------------------------------------------

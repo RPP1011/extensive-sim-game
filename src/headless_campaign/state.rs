@@ -143,6 +143,105 @@ pub struct CampaignState {
     /// AI-controlled competing guild. Activates at tick 2000.
     #[serde(default)]
     pub rival_guild: RivalGuildState,
+
+    // --- New systems state ---
+    #[serde(default)]
+    pub trade_routes: Vec<TradeRoute>,
+    #[serde(default)]
+    pub caravans: Vec<Caravan>,
+    #[serde(default)]
+    pub next_caravan_id: u32,
+    #[serde(default)]
+    pub next_route_id: u32,
+    #[serde(default)]
+    pub retired_adventurers: Vec<RetiredAdventurer>,
+    #[serde(default)]
+    pub mentor_assignments: Vec<MentorAssignment>,
+    #[serde(default)]
+    pub civil_wars: Vec<CivilWarState>,
+    #[serde(default)]
+    pub rumors: Vec<Rumor>,
+    #[serde(default)]
+    pub war_exhaustion: Vec<WarExhaustion>,
+    #[serde(default)]
+    pub spies: Vec<Spy>,
+    #[serde(default)]
+    pub next_spy_id: u32,
+    #[serde(default)]
+    pub available_mercenaries: Vec<MercenaryCompany>,
+    #[serde(default)]
+    pub hired_mercenaries: Vec<MercenaryCompany>,
+    #[serde(default)]
+    pub black_market: BlackMarketState,
+    #[serde(default)]
+    pub resource_nodes: Vec<ResourceNode>,
+    #[serde(default)]
+    pub gathering_boosts: std::collections::HashMap<usize, u64>,
+    #[serde(default)]
+    pub migrations: Vec<MigrationWave>,
+    #[serde(default)]
+    pub next_migration_id: u32,
+    #[serde(default)]
+    pub active_festivals: Vec<Festival>,
+    #[serde(default)]
+    pub rivalries: Vec<Rivalry>,
+    #[serde(default)]
+    pub chronicle: Vec<ChronicleEntry>,
+    #[serde(default)]
+    pub nemeses: Vec<Nemesis>,
+    #[serde(default)]
+    pub faction_favors: Vec<FactionFavor>,
+    #[serde(default)]
+    pub favor_requests: Vec<FavorRequest>,
+    #[serde(default)]
+    pub site_preparations: Vec<SitePreparation>,
+    #[serde(default)]
+    pub next_site_id: u32,
+    #[serde(default)]
+    pub council_votes: Vec<CouncilVote>,
+    #[serde(default)]
+    pub next_vote_id: u32,
+    #[serde(default)]
+    pub diseases: Vec<Disease>,
+    #[serde(default)]
+    pub next_disease_id: u32,
+    #[serde(default)]
+    pub prisoners: Vec<Prisoner>,
+    #[serde(default)]
+    pub next_prisoner_id: u32,
+    #[serde(default)]
+    pub captured_adventurers: Vec<u32>,
+    #[serde(default)]
+    pub propaganda_campaigns: Vec<PropagandaCampaign>,
+    #[serde(default)]
+    pub monster_populations: Vec<MonsterPopulation>,
+    #[serde(default)]
+    pub visions: Vec<Vision>,
+    #[serde(default)]
+    pub next_vision_id: u32,
+    #[serde(default)]
+    pub loans: Vec<Loan>,
+    #[serde(default)]
+    pub credit_rating: f32,
+    #[serde(default)]
+    pub victory_condition: VictoryCondition,
+    #[serde(default)]
+    pub victory_progress: VictoryProgress,
+    #[serde(default)]
+    pub named_npcs: Vec<NamedNpc>,
+    #[serde(default)]
+    pub artifacts: Vec<Artifact>,
+    #[serde(default)]
+    pub next_artifact_id: u32,
+    #[serde(default)]
+    pub difficulty_scaling: DifficultyState,
+    #[serde(default)]
+    pub regional_cultures: Vec<RegionalCulture>,
+    #[serde(default)]
+    pub dungeons: Vec<Dungeon>,
+    /// Crafting resource stockpile.
+    #[serde(default)]
+    pub resources: std::collections::HashMap<ResourceType, f32>,
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,6 +289,12 @@ pub struct GuildState {
     /// Rolling purchase history for market inflation.
     #[serde(default)]
     pub purchase_history: PurchaseHistory,
+    /// Current guild reputation tier.
+    #[serde(default)]
+    pub guild_tier: GuildTier,
+    /// Crafting resource stockpile.
+    #[serde(default)]
+    pub resources: std::collections::HashMap<ResourceType, f32>,
 }
 
 /// Dynamic market price multipliers. Prices inflate with demand.
@@ -345,6 +450,20 @@ pub struct Adventurer {
     /// e.g., {"solo": 10, "blight_prevention": 3, "region_defense": 5}
     #[serde(default)]
     pub history_tags: std::collections::HashMap<String, u32>,
+
+    // --- New system fields ---
+    /// Generated backstory — birthplace, motivation, flaw, personal quest hook.
+    #[serde(default)]
+    pub backstory: Option<super::systems::backstory::Backstory>,
+    /// Legendary deeds earned through achievements.
+    #[serde(default)]
+    pub deeds: Vec<LegendaryDeed>,
+    /// Hobbies developed during idle downtime.
+    #[serde(default)]
+    pub hobbies: Vec<HobbyProgress>,
+    /// Health status with respect to diseases.
+    #[serde(default)]
+    pub disease_status: DiseaseStatus,
 }
 
 /// A leadership role that provides passive buffs while the adventurer is active.
@@ -662,6 +781,12 @@ pub struct OverworldState {
     /// Tick counter within the current season (resets each transition).
     #[serde(default)]
     pub season_tick: u64,
+    /// Active weather hazards.
+    #[serde(default)]
+    pub active_weather: Vec<WeatherEvent>,
+    /// Next weather event ID.
+    #[serde(default)]
+    pub next_weather_id: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -680,6 +805,18 @@ pub struct Region {
     /// Decays over time as information goes stale.
     #[serde(default = "default_region_visibility")]
     pub visibility: f32,
+    /// Civilian population (100-1000 typical range).
+    #[serde(default = "default_population")]
+    pub population: u32,
+    /// Civilian morale (0-100). Affects growth, unrest, events.
+    #[serde(default = "default_civilian_morale")]
+    pub civilian_morale: f32,
+    /// Tax rate (0.0-1.0). Controls income vs morale trade-off.
+    #[serde(default = "default_tax_rate")]
+    pub tax_rate: f32,
+    /// Population growth rate modifier.
+    #[serde(default)]
+    pub growth_rate: f32,
 }
 
 fn default_region_visibility() -> f32 {
@@ -887,6 +1024,9 @@ pub struct DiplomacyMatrix {
     pub relations: Vec<Vec<i32>>,
     /// Which faction the guild is affiliated with.
     pub guild_faction_id: usize,
+    /// Active diplomatic agreements between faction pairs.
+    #[serde(default)]
+    pub agreements: Vec<(usize, usize, DiplomaticAgreement)>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1170,6 +1310,10 @@ pub enum ChoiceSource {
     FlashpointIntent { region_id: usize },
     /// Random world event.
     WorldEvent,
+    /// Faction demand (ransom or ultimatum).
+    FactionDemand,
+    /// Rivalry duel challenge.
+    RivalryDuel { challenger: u32, challenged: u32 },
 }
 
 /// A single option in a choice event.
@@ -1212,6 +1356,8 @@ pub enum ChoiceEffect {
     SetQuestStatus { quest_id: u32, status: ActiveQuestStatus },
     /// Narrative flavor — no mechanical effect.
     Narrative(String),
+    /// Attend a festival for morale/relationship bonuses.
+    AttendFestival(u32),
 }
 
 // ---------------------------------------------------------------------------
@@ -1304,6 +1450,883 @@ pub enum RivalPersonality {
 }
 
 // ---------------------------------------------------------------------------
+// New system types
+// ---------------------------------------------------------------------------
+
+/// A formal diplomatic agreement between two factions.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum DiplomaticAgreement {
+    TradeAgreement { gold_per_tick: f32, expires_tick: u64 },
+    NonAggressionPact { expires_tick: u64 },
+    MilitaryAlliance { expires_tick: u64 },
+}
+
+/// A trade route between two guild-controlled settlements.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TradeRoute {
+    pub id: u32,
+    pub start_location_id: usize,
+    pub end_location_id: usize,
+    pub gold_per_trip: f32,
+    pub active: bool,
+}
+
+/// A caravan traveling along a trade route.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Caravan {
+    pub id: u32,
+    pub route_id: u32,
+    pub position: (f32, f32),
+    pub progress: f32,
+    pub gold_carried: f32,
+    pub guard_strength: f32,
+    pub forward: bool,
+}
+
+/// A retired adventurer who provides lasting legacy bonuses.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RetiredAdventurer {
+    pub id: u32,
+    pub name: String,
+    pub archetype: String,
+    pub level: u32,
+    pub legacy_type: LegacyType,
+    pub bonus_value: f32,
+    pub retired_at_tick: u64,
+}
+
+/// The type of lasting bonus a retired adventurer provides.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum LegacyType {
+    TrainingMentor,
+    Quartermaster,
+    Diplomat,
+    Strategist,
+    Recruiter,
+    Lorekeeper,
+}
+
+/// An active mentor-apprentice training relationship.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MentorAssignment {
+    pub mentor_id: u32,
+    pub apprentice_id: u32,
+    pub started_tick: u64,
+    pub xp_transferred: f32,
+    pub skill_focus: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CivilWarState {
+    pub faction_id: usize,
+    pub rebel_strength: f32,
+    pub loyalist_strength: f32,
+    pub started_tick: u64,
+    pub rebel_leader_name: String,
+    pub cause: CivilWarCause,
+    #[serde(default)]
+    pub guild_supported_side: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CivilWarCause {
+    SuccessionCrisis,
+    Corruption,
+    MilitaryDefeat,
+    ForeignInfluence,
+    ReligiousSplit,
+}
+
+/// A legendary deed earned by an adventurer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LegendaryDeed {
+    pub title: String,
+    pub earned_at_tick: u64,
+    pub deed_type: DeedType,
+    pub bonus: DeedBonus,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeedType {
+    Slayer,
+    Peacemaker,
+    Explorer,
+    Survivor,
+    Wealthy,
+    Defender,
+    Undefeated,
+    Savior,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum DeedBonus {
+    FactionRelationBoost(f32),
+    CombatPowerBoost(f32),
+    QuestRewardBoost(f32),
+    RecruitmentBoost(f32),
+    MoraleAura(f32),
+}
+
+/// An intelligence fragment.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Rumor {
+    pub id: u32,
+    pub text: String,
+    pub rumor_type: RumorType,
+    pub accuracy: f32,
+    pub source_tick: u64,
+    pub revealed: bool,
+    pub target_region_id: Option<usize>,
+    pub target_faction_id: Option<usize>,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RumorType {
+    HiddenQuest,
+    CrisisWarning,
+    FactionPlan,
+    TreasureLocation,
+    AmbushThreat,
+    TradeOpportunity,
+}
+
+impl Default for RumorType {
+    fn default() -> Self { RumorType::HiddenQuest }
+}
+
+/// War exhaustion for a single faction.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct WarExhaustion {
+    pub faction_id: usize,
+    pub exhaustion_level: f32,
+    pub war_start_tick: u64,
+    pub casualties: u32,
+    pub gold_spent: f32,
+}
+
+/// Guild reputation tier.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum GuildTier {
+    #[default]
+    Bronze,
+    Silver,
+    Gold,
+    Legendary,
+}
+
+impl GuildTier {
+    pub fn from_reputation(rep: f32) -> GuildTier {
+        if rep >= 75.0 { GuildTier::Legendary }
+        else if rep >= 50.0 { GuildTier::Gold }
+        else if rep >= 25.0 { GuildTier::Silver }
+        else { GuildTier::Bronze }
+    }
+    pub fn name(&self) -> &'static str {
+        match self {
+            GuildTier::Bronze => "Bronze",
+            GuildTier::Silver => "Silver",
+            GuildTier::Gold => "Gold",
+            GuildTier::Legendary => "Legendary",
+        }
+    }
+}
+
+/// A spy planted in a faction.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Spy {
+    pub id: u32,
+    pub adventurer_id: u32,
+    pub target_faction_id: usize,
+    pub cover: f32,
+    pub intel_gathered: f32,
+    pub planted_tick: u64,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SabotageType {
+    WeakenDefenses,
+    StealGold,
+    SowDiscord,
+}
+
+/// A mercenary company.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MercenaryCompany {
+    pub id: u32,
+    pub name: String,
+    pub strength: f32,
+    pub cost_per_tick: f32,
+    pub loyalty: f32,
+    pub specialty: MercenarySpecialty,
+    pub hired_tick: u64,
+    pub contract_duration: u64,
+    pub assigned_party_id: Option<u32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MercenarySpecialty {
+    HeavyInfantry,
+    Scouts,
+    Archers,
+    Siege,
+    Cavalry,
+    Assassins,
+}
+
+/// Black market state.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BlackMarketState {
+    pub available_deals: Vec<BlackMarketDeal>,
+    pub heat: f32,
+    pub total_profit: f32,
+    pub last_refresh_tick: u64,
+}
+
+impl Default for BlackMarketState {
+    fn default() -> Self {
+        Self {
+            available_deals: Vec::new(),
+            heat: 0.0,
+            total_profit: 0.0,
+            last_refresh_tick: 0,
+        }
+    }
+}
+
+/// A single black market deal.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BlackMarketDeal {
+    pub id: u32,
+    pub description: String,
+    pub deal_type: DealType,
+    pub gold_reward: f32,
+    pub reputation_risk: f32,
+    pub supply_cost: f32,
+    pub heat_cost: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DealType {
+    StolenGoods,
+    SmuggledSupplies,
+    ForgedDocuments,
+    PoisonContracts,
+    InformationBrokering,
+    RelicFencing,
+}
+
+/// Types of harvestable resources.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ResourceType {
+    Iron,
+    Wood,
+    Crystal,
+    Herbs,
+    Hide,
+    Obsidian,
+}
+
+/// A harvestable resource node in a region.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResourceNode {
+    pub id: u32,
+    pub region_id: usize,
+    pub resource_type: ResourceType,
+    pub amount: f32,
+    pub regen_rate: f32,
+    pub max_amount: f32,
+}
+
+/// A recipe for crafting equipment.
+#[derive(Clone, Debug)]
+pub struct CraftingRecipe {
+    pub name: &'static str,
+    pub materials: &'static [(ResourceType, f32)],
+    pub output_slot: EquipmentSlot,
+    pub output_quality: f32,
+    pub stat_bonus: f32,
+}
+
+/// A migration wave moving between regions.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MigrationWave {
+    pub id: u32,
+    pub origin_region_id: usize,
+    pub destination_region_id: usize,
+    pub population_count: u32,
+    pub cause: MigrationCause,
+    pub started_tick: u64,
+    pub progress: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MigrationCause {
+    War,
+    Famine,
+    Crisis,
+    Persecution,
+    Opportunity,
+}
+
+/// A faction-hosted seasonal festival.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Festival {
+    pub id: u32,
+    pub name: String,
+    pub faction_id: usize,
+    pub festival_type: FestivalType,
+    pub started_tick: u64,
+    pub duration: u64,
+    pub attended: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FestivalType {
+    HarvestFeast,
+    WarMemorial,
+    TradeFair,
+    ReligiousCeremony,
+    ArtisanExpo,
+    MartialTournament,
+}
+
+/// An active rivalry between two adventurers.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Rivalry {
+    pub adventurer_a: u32,
+    pub adventurer_b: u32,
+    pub intensity: f32,
+    pub cause: RivalryCause,
+    pub started_tick: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum RivalryCause {
+    QuestCompetition,
+    PersonalInsult,
+    LoyaltyConflict,
+    RomanticRivalry,
+    ProfessionalJealousy,
+}
+
+/// A narrative chronicle entry.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChronicleEntry {
+    pub tick: u64,
+    pub entry_type: ChronicleType,
+    pub text: String,
+    pub participants: Vec<u32>,
+    pub location_id: Option<usize>,
+    pub faction_id: Option<usize>,
+    pub significance: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChronicleType {
+    BattleRecord,
+    QuestCompletion,
+    HeroicDeed,
+    Tragedy,
+    DiplomaticEvent,
+    CrisisEvent,
+    Discovery,
+    Construction,
+    Death,
+    Betrayal,
+}
+
+/// A recurring faction champion that grows stronger.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Nemesis {
+    pub id: u32,
+    pub name: String,
+    pub faction_id: usize,
+    pub strength: f32,
+    pub kills: u32,
+    pub created_tick: u64,
+    pub region_id: Option<usize>,
+    pub defeated: bool,
+}
+
+/// Accumulated favor balance with a faction.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct FactionFavor {
+    pub faction_id: usize,
+    pub favor_balance: f32,
+    pub favors_given: u32,
+    pub favors_called: u32,
+    #[serde(default)]
+    pub trade_deal_expires_tick: u64,
+}
+
+/// A favor request from a faction.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FavorRequest {
+    pub id: u32,
+    pub faction_id: usize,
+    pub description: String,
+    pub reward_favor: f32,
+    pub quest_type: String,
+    pub expires_tick: u64,
+}
+
+/// A site preparation at a region.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SitePreparation {
+    pub id: u32,
+    pub region_id: usize,
+    pub prep_type: PrepType,
+    pub level: f32,
+    pub assigned_party_id: Option<u32>,
+    pub gold_invested: f32,
+    pub created_tick: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PrepType {
+    Defensive,
+    Offensive,
+    Logistical,
+}
+
+/// A council vote on a major guild decision.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CouncilVote {
+    pub id: u32,
+    pub topic: VoteTopic,
+    pub proposed_tick: u64,
+    pub deadline_tick: u64,
+    pub votes_for: Vec<u32>,
+    pub votes_against: Vec<u32>,
+    pub resolved: bool,
+    pub passed: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum VoteTopic {
+    DeclareWar { faction_id: usize },
+    SuePeace { faction_id: usize },
+    ExileAdventurer { adventurer_id: u32 },
+    ChangePolicy { policy: String },
+    MajorExpedition { region_id: usize },
+    AllianceProposal { faction_id: usize },
+}
+
+/// An active disease spreading through the world.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Disease {
+    pub id: u32,
+    pub name: String,
+    pub severity: f32,
+    pub spread_rate: f32,
+    pub affected_regions: Vec<usize>,
+    pub started_tick: u64,
+    pub containment: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum DiseaseStatus {
+    Healthy,
+    Infected { disease_id: u32, severity: f32 },
+    Recovering,
+}
+
+impl Default for DiseaseStatus {
+    fn default() -> Self { DiseaseStatus::Healthy }
+}
+
+/// An enemy prisoner held by the guild.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Prisoner {
+    pub id: u32,
+    pub name: String,
+    pub faction_id: usize,
+    pub strength: f32,
+    pub captured_tick: u64,
+    pub ransom_value: f32,
+    pub escape_chance: f32,
+    pub loyalty_shift: f32,
+}
+
+/// A propaganda campaign run by the guild.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PropagandaCampaign {
+    pub id: u32,
+    pub campaign_type: PropagandaType,
+    pub target_region_id: Option<usize>,
+    pub target_faction_id: Option<usize>,
+    pub effectiveness: f32,
+    pub gold_spent: f32,
+    pub started_tick: u64,
+    pub duration: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PropagandaType {
+    BoostReputation,
+    CounterRival,
+    DiscreditFaction,
+    RecruitmentDrive,
+    WarPropaganda,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum MonsterSpecies {
+    Wolves,
+    Bandits,
+    Undead,
+    Goblins,
+    Trolls,
+    Drakes,
+    Aberrations,
+}
+
+/// A monster population in a region.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MonsterPopulation {
+    pub region_id: usize,
+    pub species: MonsterSpecies,
+    pub population: f32,
+    pub aggression: f32,
+    pub last_hunted_tick: u64,
+}
+
+/// A prophetic vision received by an adventurer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Vision {
+    pub id: u32,
+    pub adventurer_id: u32,
+    pub vision_type: VisionType,
+    pub text: String,
+    pub accuracy: f32,
+    pub tick: u64,
+    pub fulfilled: bool,
+    #[serde(default)]
+    pub faded: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VisionType {
+    CrisisWarning,
+    BetrayalForecast,
+    TreasureReveal,
+    DeathOmen,
+    VictoryGlimpse,
+    FactionDoom,
+}
+
+/// A hobby adventurers develop during idle downtime.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Hobby {
+    Cooking,
+    Cartography,
+    Gambling,
+    Herbalism,
+    Smithing,
+    Storytelling,
+    Training,
+    Meditation,
+}
+
+/// Tracks hobby progress for an adventurer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HobbyProgress {
+    pub hobby: Hobby,
+    pub skill_level: f32,
+    pub started_tick: u64,
+}
+
+/// A loan the guild has taken from a faction.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Loan {
+    pub id: u32,
+    pub lender_faction_id: usize,
+    pub principal: f32,
+    pub interest_rate: f32,
+    pub amount_owed: f32,
+    pub taken_tick: u64,
+    pub due_tick: u64,
+    pub payments_made: u32,
+}
+
+/// Victory condition type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VictoryCondition {
+    SurviveCrisis,
+    EconomicDominance,
+    DiplomaticUnity,
+    MilitaryConquest,
+    CulturalHegemony,
+    QuestMaster,
+}
+
+impl Default for VictoryCondition {
+    fn default() -> Self { VictoryCondition::SurviveCrisis }
+}
+
+/// Progress toward the active victory condition.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct VictoryProgress {
+    pub percent: f32,
+    pub total_gold_earned: f32,
+    pub quests_completed: u32,
+    pub regions_controlled: u32,
+    pub max_adventurer_tier: u32,
+    pub total_building_tiers: u32,
+    pub factions_above_60: u32,
+}
+
+/// An underground dungeon beneath a region.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Dungeon {
+    pub id: u32,
+    pub region_id: usize,
+    pub name: String,
+    pub depth: u32,
+    pub explored: f32,
+    pub threat_level: f32,
+    pub connected_to: Vec<u32>,
+    pub loot_remaining: f32,
+    pub monster_strength: f32,
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NpcRole {
+    Merchant,
+    Noble,
+    Informant,
+    Healer,
+    Blacksmith,
+    Scholar,
+}
+
+/// A named NPC with individual reputation tracking.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NamedNpc {
+    pub id: u32,
+    pub name: String,
+    pub role: NpcRole,
+    pub region_id: usize,
+    pub reputation: f32,
+    pub services_unlocked: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WeatherType {
+    Storm,
+    Blizzard,
+    Flood,
+    Drought,
+    Fog,
+    Heatwave,
+}
+
+/// An active weather hazard.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WeatherEvent {
+    pub id: u32,
+    pub weather_type: WeatherType,
+    pub affected_regions: Vec<usize>,
+    pub severity: f32,
+    pub started_tick: u64,
+    pub duration: u64,
+}
+
+/// A legacy artifact.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Artifact {
+    pub id: u32,
+    pub name: String,
+    pub origin_adventurer_name: String,
+    pub origin_deed: String,
+    pub slot: String,
+    pub stat_bonuses: ArtifactStats,
+    pub special_effect: ArtifactEffect,
+    pub created_tick: u64,
+    pub equipped_by: Option<u32>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ArtifactStats {
+    pub attack: f32,
+    pub defense: f32,
+    pub hp: f32,
+    pub speed: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ArtifactEffect {
+    MoraleAura(f32),
+    CombatPowerBoost(f32),
+    XpMultiplier(f32),
+    FactionInfluence(f32),
+    ThreatReduction(f32),
+    HealingBoost(f32),
+    None,
+}
+
+impl Default for ArtifactEffect {
+    fn default() -> Self { ArtifactEffect::None }
+}
+
+/// Dynamic difficulty adjustment state.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DifficultyState {
+    pub current_pressure: f32,
+    pub target_pressure: f32,
+    pub guild_power_rating: f32,
+    pub consecutive_wins: u32,
+    pub consecutive_losses: u32,
+    pub scaling_events_triggered: u32,
+}
+
+impl Default for DifficultyState {
+    fn default() -> Self {
+        Self {
+            current_pressure: 50.0,
+            target_pressure: 50.0,
+            guild_power_rating: 0.0,
+            consecutive_wins: 0,
+            consecutive_losses: 0,
+            scaling_events_triggered: 0,
+        }
+    }
+}
+
+/// Regional culture identity.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RegionalCulture {
+    pub region_id: usize,
+    pub martial_influence: f32,
+    pub trade_influence: f32,
+    pub scholarly_influence: f32,
+    pub diplomatic_influence: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CultureAxis {
+    Martial,
+    Trade,
+    Scholarly,
+    Diplomatic,
+}
+
+impl LegacyType {
+    pub fn base_bonus(&self) -> f32 {
+        match self {
+            LegacyType::TrainingMentor => 0.10,
+            LegacyType::Quartermaster => 0.10,
+            LegacyType::Diplomat => 5.0,
+            LegacyType::Strategist => 0.05,
+            LegacyType::Recruiter => 2.0,
+            LegacyType::Lorekeeper => 0.10,
+        }
+    }
+    pub fn bonus_description(&self) -> &'static str {
+        match self {
+            LegacyType::TrainingMentor => "+10% XP gain",
+            LegacyType::Quartermaster => "-10% supply consumption",
+            LegacyType::Diplomat => "+5 faction relation",
+            LegacyType::Strategist => "+5% combat power",
+            LegacyType::Recruiter => "+2 base stats on recruits",
+            LegacyType::Lorekeeper => "+10% quest gold rewards",
+        }
+    }
+}
+
+impl VoteTopic {
+    pub fn description(&self) -> String {
+        match self {
+            VoteTopic::DeclareWar { faction_id } => format!("Declare war on faction {}", faction_id),
+            VoteTopic::SuePeace { faction_id } => format!("Sue for peace with faction {}", faction_id),
+            VoteTopic::ExileAdventurer { adventurer_id } => format!("Exile adventurer {}", adventurer_id),
+            VoteTopic::ChangePolicy { policy } => format!("Change policy: {}", policy),
+            VoteTopic::MajorExpedition { region_id } => format!("Launch expedition to region {}", region_id),
+            VoteTopic::AllianceProposal { faction_id } => format!("Alliance with faction {}", faction_id),
+        }
+    }
+}
+
+impl FestivalType {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            FestivalType::HarvestFeast => "Harvest Feast",
+            FestivalType::WarMemorial => "War Memorial",
+            FestivalType::TradeFair => "Trade Fair",
+            FestivalType::ReligiousCeremony => "Religious Ceremony",
+            FestivalType::ArtisanExpo => "Artisan Expo",
+            FestivalType::MartialTournament => "Martial Tournament",
+        }
+    }
+    pub fn reward_description(&self) -> &'static str {
+        match self {
+            FestivalType::HarvestFeast => "+20% trade income",
+            FestivalType::WarMemorial => "+morale, less aggression",
+            FestivalType::TradeFair => "Better buy/sell prices",
+            FestivalType::ReligiousCeremony => "Reduced civilian unrest",
+            FestivalType::ArtisanExpo => "Crafting bonus",
+            FestivalType::MartialTournament => "Prize gold + reputation",
+        }
+    }
+}
+
+impl RegionalCulture {
+    pub fn dominant(&self) -> Option<CultureAxis> {
+        let vals = [
+            (self.martial_influence, CultureAxis::Martial),
+            (self.trade_influence, CultureAxis::Trade),
+            (self.scholarly_influence, CultureAxis::Scholarly),
+            (self.diplomatic_influence, CultureAxis::Diplomatic),
+        ];
+        // Only return a dominant if one axis is clearly above neutral (25)
+        vals.iter()
+            .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+            .filter(|v| v.0 > 30.0)
+            .map(|v| v.1)
+    }
+}
+
+impl Default for RegionalCulture {
+    fn default() -> Self {
+        Self {
+            region_id: 0,
+            martial_influence: 25.0,
+            trade_influence: 25.0,
+            scholarly_influence: 25.0,
+            diplomatic_influence: 25.0,
+        }
+    }
+}
+
+impl ResourceType {
+    pub const ALL: [ResourceType; 6] = [
+        ResourceType::Iron, ResourceType::Wood, ResourceType::Crystal,
+        ResourceType::Herbs, ResourceType::Hide, ResourceType::Obsidian,
+    ];
+}
+
+impl MonsterSpecies {
+    pub const ALL: [MonsterSpecies; 7] = [
+        MonsterSpecies::Wolves, MonsterSpecies::Bandits, MonsterSpecies::Undead,
+        MonsterSpecies::Goblins, MonsterSpecies::Trolls, MonsterSpecies::Drakes,
+        MonsterSpecies::Aberrations,
+    ];
+}
+
+impl VictoryCondition {
+    pub const ALL: [VictoryCondition; 6] = [
+        VictoryCondition::SurviveCrisis, VictoryCondition::EconomicDominance,
+        VictoryCondition::DiplomaticUnity, VictoryCondition::MilitaryConquest,
+        VictoryCondition::CulturalHegemony, VictoryCondition::QuestMaster,
+    ];
+}
+
+// Serde defaults for new fields
+fn default_population() -> u32 { 500 }
+fn default_civilian_morale() -> f32 { 50.0 }
+fn default_tax_rate() -> f32 { 0.1 }
+
+// ---------------------------------------------------------------------------
 // RNG helper
 // ---------------------------------------------------------------------------
 
@@ -1370,6 +2393,10 @@ impl CampaignState {
                 rallying_to: None,
                     tier_status: Default::default(),
                     history_tags: Default::default(),
+                    backstory: None,
+                    deeds: Vec::new(),
+                    hobbies: Vec::new(),
+                    disease_status: DiseaseStatus::Healthy,
             },
             Adventurer {
                 id: 2,
@@ -1401,6 +2428,10 @@ impl CampaignState {
                 rallying_to: None,
                     tier_status: Default::default(),
                     history_tags: Default::default(),
+                    backstory: None,
+                    deeds: Vec::new(),
+                    hobbies: Vec::new(),
+                    disease_status: DiseaseStatus::Healthy,
             },
             Adventurer {
                 id: 3,
@@ -1432,6 +2463,10 @@ impl CampaignState {
                 rallying_to: None,
                     tier_status: Default::default(),
                     history_tags: Default::default(),
+                    backstory: None,
+                    deeds: Vec::new(),
+                    hobbies: Vec::new(),
+                    disease_status: DiseaseStatus::Healthy,
             },
             Adventurer {
                 id: 4,
@@ -1463,6 +2498,10 @@ impl CampaignState {
                 rallying_to: None,
                     tier_status: Default::default(),
                     history_tags: Default::default(),
+                    backstory: None,
+                    deeds: Vec::new(),
+                    hobbies: Vec::new(),
+                    disease_status: DiseaseStatus::Healthy,
             },
         ];
 
@@ -1498,6 +2537,8 @@ impl CampaignState {
                 total_trade_income: 0.0,
                 investment: Default::default(),
                 purchase_history: Default::default(),
+                guild_tier: GuildTier::default(),
+                resources: std::collections::HashMap::new(),
             },
             overworld: OverworldState {
                 regions,
@@ -1508,6 +2549,8 @@ impl CampaignState {
                 active_crises: Vec::new(),
                 season: Season::default(),
                 season_tick: 0,
+                active_weather: Vec::new(),
+                next_weather_id: 1,
             },
             factions,
             diplomacy,
@@ -1544,6 +2587,54 @@ impl CampaignState {
             llm_store: None,
             vae_model: None,
             rival_guild: RivalGuildState::default(),
+            trade_routes: Vec::new(),
+            caravans: Vec::new(),
+            next_caravan_id: 1,
+            next_route_id: 1,
+            retired_adventurers: Vec::new(),
+            mentor_assignments: Vec::new(),
+            civil_wars: Vec::new(),
+            rumors: Vec::new(),
+            war_exhaustion: Vec::new(),
+            spies: Vec::new(),
+            next_spy_id: 1,
+            available_mercenaries: Vec::new(),
+            hired_mercenaries: Vec::new(),
+            black_market: BlackMarketState::default(),
+            resource_nodes: Vec::new(),
+            gathering_boosts: std::collections::HashMap::new(),
+            migrations: Vec::new(),
+            next_migration_id: 1,
+            active_festivals: Vec::new(),
+            rivalries: Vec::new(),
+            chronicle: Vec::new(),
+            nemeses: Vec::new(),
+            faction_favors: Vec::new(),
+            favor_requests: Vec::new(),
+            site_preparations: Vec::new(),
+            next_site_id: 1,
+            council_votes: Vec::new(),
+            next_vote_id: 1,
+            diseases: Vec::new(),
+            next_disease_id: 1,
+            prisoners: Vec::new(),
+            next_prisoner_id: 1,
+            captured_adventurers: Vec::new(),
+            propaganda_campaigns: Vec::new(),
+            monster_populations: Vec::new(),
+            visions: Vec::new(),
+            next_vision_id: 1,
+            loans: Vec::new(),
+            credit_rating: 100.0,
+            victory_condition: VictoryCondition::default(),
+            victory_progress: VictoryProgress::default(),
+            named_npcs: Vec::new(),
+            artifacts: Vec::new(),
+            next_artifact_id: 1,
+            difficulty_scaling: DifficultyState::default(),
+            regional_cultures: Vec::new(),
+            dungeons: Vec::new(),
+            resources: std::collections::HashMap::new(),
         }
     }
 
@@ -1591,6 +2682,10 @@ impl CampaignState {
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     tier_status: Default::default(),
                     history_tags: Default::default(),
+                    backstory: None,
+                    deeds: Vec::new(),
+                    hobbies: Vec::new(),
+                    disease_status: DiseaseStatus::Healthy,
                     },
                     Adventurer {
                         id: 2, name: "Greta".into(), archetype: "knight".into(), level: 2, xp: 0,
@@ -1602,6 +2697,10 @@ impl CampaignState {
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     tier_status: Default::default(),
                     history_tags: Default::default(),
+                    backstory: None,
+                    deeds: Vec::new(),
+                    hobbies: Vec::new(),
+                    disease_status: DiseaseStatus::Healthy,
                     },
                 ],
                 gold_bonus: 150.0, supply_bonus: 30.0, reputation_bonus: 5.0, items: Vec::new(),
@@ -1620,6 +2719,10 @@ impl CampaignState {
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     tier_status: Default::default(),
                     history_tags: Default::default(),
+                    backstory: None,
+                    deeds: Vec::new(),
+                    hobbies: Vec::new(),
+                    disease_status: DiseaseStatus::Healthy,
                     },
                 ],
                 gold_bonus: 0.0, supply_bonus: 0.0, reputation_bonus: 10.0, items: Vec::new(),
@@ -1638,6 +2741,10 @@ impl CampaignState {
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     tier_status: Default::default(),
                     history_tags: Default::default(),
+                    backstory: None,
+                    deeds: Vec::new(),
+                    hobbies: Vec::new(),
+                    disease_status: DiseaseStatus::Healthy,
                     },
                     Adventurer {
                         id: 2, name: "Brynn".into(), archetype: "mage".into(), level: 1, xp: 0,
@@ -1649,6 +2756,10 @@ impl CampaignState {
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     tier_status: Default::default(),
                     history_tags: Default::default(),
+                    backstory: None,
+                    deeds: Vec::new(),
+                    hobbies: Vec::new(),
+                    disease_status: DiseaseStatus::Healthy,
                     },
                     Adventurer {
                         id: 3, name: "Cira".into(), archetype: "cleric".into(), level: 1, xp: 0,
@@ -1660,6 +2771,10 @@ impl CampaignState {
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     tier_status: Default::default(),
                     history_tags: Default::default(),
+                    backstory: None,
+                    deeds: Vec::new(),
+                    hobbies: Vec::new(),
+                    disease_status: DiseaseStatus::Healthy,
                     },
                     Adventurer {
                         id: 4, name: "Daven".into(), archetype: "rogue".into(), level: 1, xp: 0,
@@ -1671,6 +2786,10 @@ impl CampaignState {
                         leadership_role: None, is_player_character: false, faction_id: None, rallying_to: None,
                     tier_status: Default::default(),
                     history_tags: Default::default(),
+                    backstory: None,
+                    deeds: Vec::new(),
+                    hobbies: Vec::new(),
+                    disease_status: DiseaseStatus::Healthy,
                     },
                 ],
                 gold_bonus: 20.0, supply_bonus: 10.0, reputation_bonus: 0.0, items: Vec::new(),
