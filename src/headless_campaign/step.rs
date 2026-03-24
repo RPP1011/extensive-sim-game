@@ -69,6 +69,7 @@ pub fn step_campaign(
 
     // --- Run tick systems in order ---
     // Every-tick systems
+    systems::seasons::tick_seasons(state, &mut deltas, &mut events);
     systems::travel::tick_travel(state, &mut deltas, &mut events);
     systems::interception::tick_interception(state, &mut deltas, &mut events);
     systems::supply::tick_supply(state, &mut deltas, &mut events);

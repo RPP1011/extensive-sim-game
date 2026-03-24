@@ -343,6 +343,11 @@ pub enum WorldEvent {
         faction_id: usize,
     },
 
+    // --- Seasons ---
+    SeasonChanged {
+        new_season: Season,
+    },
+
     // --- Campaign ---
     CalamityWarning {
         description: String,

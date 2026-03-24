@@ -593,6 +593,37 @@ pub enum BattleStatus {
 }
 
 // ---------------------------------------------------------------------------
+// Seasons
+// ---------------------------------------------------------------------------
+
+/// The four seasons of the campaign world, cycling every 5000 ticks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Season {
+    Spring,
+    Summer,
+    Autumn,
+    Winter,
+}
+
+impl Default for Season {
+    fn default() -> Self {
+        Season::Spring
+    }
+}
+
+impl Season {
+    /// Return the next season in the cycle.
+    pub fn next(self) -> Season {
+        match self {
+            Season::Spring => Season::Summer,
+            Season::Summer => Season::Autumn,
+            Season::Autumn => Season::Winter,
+            Season::Winter => Season::Spring,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Overworld
 // ---------------------------------------------------------------------------
 
@@ -610,6 +641,12 @@ pub struct OverworldState {
     /// Active endgame crises. Multiple can run simultaneously.
     #[serde(default)]
     pub active_crises: Vec<ActiveCrisis>,
+    /// Current season of the world.
+    #[serde(default)]
+    pub season: Season,
+    /// Tick counter within the current season (resets each transition).
+    #[serde(default)]
+    pub season_tick: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1404,6 +1441,8 @@ impl CampaignState {
                 campaign_progress: 0.0,
                 endgame_calamity: None,
                 active_crises: Vec::new(),
+                season: Season::default(),
+                season_tick: 0,
             },
             factions,
             diplomacy,
