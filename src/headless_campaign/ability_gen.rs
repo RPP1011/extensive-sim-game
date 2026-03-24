@@ -200,7 +200,7 @@ pub fn generate_ability(
         _ => AbilityTargeting::Direction,
     };
 
-    let range = p.range[0] + rf(rng) * (p.range[1] - p.range[0]);
+    let range = ((p.range[0] + rf(rng) * (p.range[1] - p.range[0])) * 2.0).round() / 2.0; // round to 0.5
     let cooldown_ms = p.cooldown[0] + (rf(rng) * (p.cooldown[1] - p.cooldown[0]) as f32) as u32;
     let cooldown_ms = (cooldown_ms / 1000) * 1000; // round to seconds
 
@@ -222,9 +222,9 @@ pub fn generate_ability(
         match di {
             0 => None, // instant
             1 => Some(Delivery::Projectile {
-                speed: 6.0 + rf(rng) * 8.0,
+                speed: (6.0 + rf(rng) * 8.0).round(),
                 pierce: rf(rng) < 0.2,
-                width: 0.3 + rf(rng) * 0.7,
+                width: ((0.3 + rf(rng) * 0.7) * 4.0).round() / 4.0,
                 on_hit: vec![],
                 on_arrival: vec![],
             }),
@@ -318,27 +318,27 @@ fn gen_effect(p: &ArchetypeProfile, level_scale: f32, rng: &mut u64) -> Conditio
         4 => Effect::Root { duration_ms: 500 + (rf(rng) * 2000.0) as u32 },
         5 => Effect::Silence { duration_ms: 500 + (rf(rng) * 2000.0) as u32 },
         6 => Effect::Slow {
-            factor: 0.2 + rf(rng) * 0.5,
-            duration_ms: 1000 + (rf(rng) * 3000.0) as u32,
+            factor: ((0.2 + rf(rng) * 0.5) * 20.0).round() / 20.0, // round to 0.05
+            duration_ms: ((1000 + (rf(rng) * 3000.0) as u32) / 250) * 250, // round to 250ms
         },
-        7 => Effect::Knockback { distance: 1.0 + rf(rng) * 3.0 },
+        7 => Effect::Knockback { distance: ((1.0 + rf(rng) * 3.0) * 2.0).round() / 2.0 },
         8 => Effect::Dash {
             to_target: rf(rng) < 0.5,
-            distance: 3.0 + rf(rng) * 4.0,
+            distance: ((3.0 + rf(rng) * 4.0) * 2.0).round() / 2.0,
             to_position: false,
             is_blink: rf(rng) < 0.2,
         },
         9 => Effect::Buff {
             stat: ["attack_damage", "defense", "attack_speed", "move_speed", "damage_output"]
                 [(xrng(rng) as usize) % 5].into(),
-            factor: 0.1 + rf(rng) * 0.3,
-            duration_ms: 3000 + (rf(rng) * 7000.0) as u32,
+            factor: ((0.1 + rf(rng) * 0.3) * 20.0).round() / 20.0,
+            duration_ms: ((3000 + (rf(rng) * 7000.0) as u32) / 500) * 500,
         },
         10 => Effect::Debuff {
             stat: ["attack_damage", "defense", "attack_speed", "move_speed"]
                 [(xrng(rng) as usize) % 4].into(),
-            factor: 0.1 + rf(rng) * 0.25,
-            duration_ms: 2000 + (rf(rng) * 5000.0) as u32,
+            factor: ((0.1 + rf(rng) * 0.25) * 20.0).round() / 20.0,
+            duration_ms: ((2000 + (rf(rng) * 5000.0) as u32) / 500) * 500,
         },
         11 => Effect::Summon {
             template: "minion".into(),
@@ -367,15 +367,16 @@ fn gen_effect(p: &ArchetypeProfile, level_scale: f32, rng: &mut u64) -> Conditio
         },
     };
 
-    // Optional area
+    // Optional area (round to 0.5 for clean DSL output)
     let area = if rf(rng) < p.area_chance {
         let ai = (xrng(rng) as usize) % 5;
+        let r2 = |v: f32| (v * 2.0).round() / 2.0;
         Some(match ai {
             0 => Area::SingleTarget,
-            1 => Area::Circle { radius: 1.5 + rf(rng) * 3.0 },
-            2 => Area::Cone { radius: 3.0 + rf(rng) * 3.0, angle_deg: 40.0 + rf(rng) * 50.0 },
-            3 => Area::Line { length: 4.0 + rf(rng) * 6.0, width: 0.5 + rf(rng) * 1.0 },
-            _ => Area::Spread { radius: 3.0 + rf(rng) * 3.0, max_targets: 2 + (rf(rng) * 3.0) as u32 },
+            1 => Area::Circle { radius: r2(1.5 + rf(rng) * 3.0) },
+            2 => Area::Cone { radius: r2(3.0 + rf(rng) * 3.0), angle_deg: (40.0 + rf(rng) * 50.0).round() },
+            3 => Area::Line { length: r2(4.0 + rf(rng) * 6.0), width: r2(0.5 + rf(rng) * 1.0) },
+            _ => Area::Spread { radius: r2(3.0 + rf(rng) * 3.0), max_targets: 2 + (rf(rng) * 3.0) as u32 },
         })
     } else {
         None
@@ -442,9 +443,12 @@ pub fn generate_batch(
     results
 }
 
-/// Generate synthetic abilities and write slot vectors to JSONL on stdout.
-pub fn dump_synthetic(count: usize, seed: u64) {
+/// Generate synthetic abilities and write to stdout.
+/// With `emit_dsl=true`, outputs the actual DSL text instead of slot vectors.
+pub fn dump_synthetic(count: usize, seed: u64, emit_dsl: bool) {
     use std::io::Write;
+    use tactical_sim::effects::dsl::emit::emit_ability_dsl;
+
     let archetypes = [
         "knight", "ranger", "mage", "cleric", "rogue",
         "paladin", "berserker", "necromancer", "bard", "druid",
@@ -452,19 +456,89 @@ pub fn dump_synthetic(count: usize, seed: u64) {
         "artificer", "tank", "warrior", "fighter",
     ];
 
-    let batch = generate_batch(&archetypes.iter().map(|s| *s).collect::<Vec<_>>(), 40, count, seed);
     let stdout = std::io::stdout();
     let mut out = std::io::BufWriter::new(stdout.lock());
+    let mut rng = seed;
 
-    for (slots, arch, level, is_passive) in &batch {
-        let record = serde_json::json!({
-            "slots": slots,
-            "archetype": arch,
-            "level": level,
-            "is_passive": is_passive,
-        });
-        writeln!(out, "{}", record).ok();
+    for _ in 0..count {
+        let arch_idx = (xrng(&mut rng) as usize) % archetypes.len();
+        let archetype = archetypes[arch_idx];
+        let level = 1 + (xrng(&mut rng) % 40) as u32;
+
+        let (mut def, is_passive) = generate_ability(archetype, level, &mut rng);
+        def.name = format!("{}_L{}", archetype, level);
+
+        if emit_dsl {
+            let dsl = if is_passive {
+                let p = &profile_for_archetype(archetype);
+                let trigger_idx = sample_weighted(&mut rng, &p.trigger);
+                let trigger = match trigger_idx {
+                    0 => Trigger::OnDamageDealt,
+                    1 => Trigger::OnDamageTaken,
+                    2 => Trigger::OnKill,
+                    3 => Trigger::OnAbilityUsed,
+                    4 => Trigger::OnHpBelow { percent: 0.3 + rf(&mut rng) * 0.3 },
+                    _ => Trigger::Periodic { interval_ms: 3000 + (rf(&mut rng) * 5000.0) as u32 },
+                };
+                let passive = tactical_sim::effects::defs::PassiveDef {
+                    name: def.name.clone(),
+                    trigger,
+                    cooldown_ms: def.cooldown_ms,
+                    effects: def.effects.clone(),
+                    range: def.range,
+                };
+                // No emit_passive_dsl in the crate, format manually
+                let trigger_str = match &passive.trigger {
+                    Trigger::OnDamageDealt => "on_damage_dealt".into(),
+                    Trigger::OnDamageTaken => "on_damage_taken".into(),
+                    Trigger::OnKill => "on_kill".into(),
+                    Trigger::OnAbilityUsed => "on_ability_used".into(),
+                    Trigger::OnHpBelow { percent } => format!("on_hp_below({:.0}%)", percent * 100.0),
+                    Trigger::Periodic { interval_ms } => format!("periodic({}ms)", interval_ms),
+                    _ => "on_damage_taken".into(),
+                };
+                // Emit as ability but change header to passive
+                let mut dsl = emit_ability_dsl(&def);
+                // Replace "ability Name {" with "passive Name {"
+                if let Some(brace) = dsl.find('{') {
+                    let header = format!("passive {} {{\n    trigger: {}\n    cooldown: {}s\n",
+                        def.name, trigger_str, passive.cooldown_ms / 1000);
+                    // Find end of original header (after hint line)
+                    let lines: Vec<&str> = dsl.lines().collect();
+                    let body_start = lines.iter().position(|l| l.trim().is_empty())
+                        .unwrap_or(4);
+                    let body = lines[body_start..].join("\n");
+                    dsl = format!("{}{}", header, body);
+                }
+                dsl
+            } else {
+                emit_ability_dsl(&def)
+            };
+            writeln!(out, "// {} L{}", archetype, level).ok();
+            writeln!(out, "{}", dsl).ok();
+            writeln!(out).ok();
+        } else {
+            let slots = if is_passive {
+                let passive = tactical_sim::effects::defs::PassiveDef {
+                    name: def.name.clone(),
+                    trigger: Trigger::OnDamageTaken,
+                    cooldown_ms: def.cooldown_ms,
+                    effects: def.effects,
+                    range: def.range,
+                };
+                super::vae_slots::passive_to_slots(&passive)
+            } else {
+                super::vae_slots::ability_to_slots(&def)
+            };
+            let record = serde_json::json!({
+                "slots": slots,
+                "archetype": archetype,
+                "level": level,
+                "is_passive": is_passive,
+            });
+            writeln!(out, "{}", record).ok();
+        }
     }
 
-    eprintln!("Generated {} synthetic abilities", batch.len());
+    eprintln!("Generated {} synthetic abilities", count);
 }

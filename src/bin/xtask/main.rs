@@ -172,8 +172,8 @@ fn main() -> ExitCode {
             bevy_game::headless_campaign::vae_dataset::extract_slots_from_jsonl(&args.input);
             ExitCode::SUCCESS
         }
-        TaskCommand::SynthAbilities { count, seed } => {
-            bevy_game::headless_campaign::ability_gen::dump_synthetic(count, seed);
+        TaskCommand::SynthAbilities { count, seed, dsl } => {
+            bevy_game::headless_campaign::ability_gen::dump_synthetic(count, seed, dsl);
             ExitCode::SUCCESS
         }
         TaskCommand::VaeGtDataset(args) => {

@@ -45,8 +45,13 @@ pub enum TaskCommand {
     VaeExtractSlots(VaeExtractSlotsArgs),
     /// Build VAE training data from existing ability DSL files (no LLM needed)
     VaeGtDataset(VaeGtDatasetArgs),
-    /// Generate synthetic abilities via grammar walker and dump slot JSONL
-    SynthAbilities { #[arg(long, default_value_t = 100000)] count: usize, #[arg(long, default_value_t = 42)] seed: u64 },
+    /// Generate synthetic abilities via grammar walker
+    SynthAbilities {
+        #[arg(long, default_value_t = 100000)] count: usize,
+        #[arg(long, default_value_t = 42)] seed: u64,
+        /// Emit DSL text instead of slot JSONL
+        #[arg(long)] dsl: bool,
+    },
 }
 
 #[derive(Debug, Parser)]
