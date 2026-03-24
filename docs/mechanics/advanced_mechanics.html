@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Advanced Mechanics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --surface: #13161d;
+  --surface2: #1c2029;
+  --surface3: #252a36;
+  --border: #2a2f3e;
+  --border-bright: #3d4459;
+  --text: #b8c0cc;
+  --text-muted: #6b7280;
+  --heading: #e2e8f0;
+  --accent: #60a5fa;
+  --accent-dim: #2563eb;
+  --purple: #a78bfa;
+  --purple-dim: #7c3aed;
+  --green: #34d399;
+  --green-dim: #059669;
+  --red: #f87171;
+  --red-dim: #dc2626;
+  --orange: #fbbf24;
+  --orange-dim: #d97706;
+  --cyan: #22d3ee;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.78;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 4rem 2rem 8rem;
+}
+
+header {
+  margin-bottom: 3.5rem;
+  padding-bottom: 2.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.65;
+  max-width: 680px;
+}
+
+h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--heading);
+  margin-top: 4rem;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--purple);
+  margin-top: 2.5rem;
+  margin-bottom: 0.8rem;
+}
+
+p { margin-bottom: 1.1rem; }
+strong { color: var(--heading); font-weight: 600; }
+em { color: var(--text); }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+a:hover { border-bottom-color: var(--accent); }
+
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.2rem 1.5rem;
+  overflow-x: auto;
+  margin: 1.5rem 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.88em;
+}
+
+p code, li code, td code {
+  background: var(--surface2);
+  padding: 0.15em 0.45em;
+  border-radius: 4px;
+  font-size: 0.82em;
+  color: var(--accent);
+}
+
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+  font-family: 'DM Sans', sans-serif;
+}
+
+th {
+  background: var(--surface2);
+  color: var(--heading);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 2px solid var(--border-bright);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+td {
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+tr:hover td { background: var(--surface); }
+
+.callout {
+  background: var(--surface);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: 0 8px 8px 0;
+  padding: 1.1rem 1.4rem;
+  margin: 1.8rem 0;
+  font-size: 0.95rem;
+}
+
+.callout.bug { border-left-color: var(--red-dim); background: #18100f; }
+.callout.success { border-left-color: var(--green-dim); background: #0d1712; }
+.callout p:last-child { margin-bottom: 0; }
+
+ol, ul { margin: 0.8rem 0 1.2rem 1.6rem; }
+li { margin-bottom: 0.4rem; }
+
+hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
+
+.footer-note {
+  font-style: italic;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 2.5rem;
+  margin-top: 4rem;
+}
+
+.breadcrumb {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 2rem;
+}
+
+.breadcrumb a { color: var(--text-muted); }
+.breadcrumb a:hover { color: var(--accent); }
+.breadcrumb .sep { margin: 0 0.4em; }
+
+@media (max-width: 720px) {
+  .article { padding: 2rem 1.25rem 4rem; }
+  h1 { font-size: 1.9rem; }
+}
+</style>
+</head>
+<body>
+<div class="article">
+
+<nav class="breadcrumb">
+  <a href="../effects.html">Effects</a><span class="sep">/</span>
+  <a href="index.html">Mechanics</a><span class="sep">/</span>
+  Advanced Mechanics
+</nav>
+
+<header>
+  <h1>Advanced Mechanics</h1>
+  <p class="subtitle">
+    A comprehensive reference for the simulation's complex effect variants &mdash; stealth,
+    tethers, damage sharing, temporal rewind, terrain creation, and more.
+  </p>
+</header>
+
+<!-- ================================================================== -->
+<h2>1. Stealth</h2>
+
+<p>
+  The <code>Stealth</code> effect makes a unit untargetable by enemies for its duration.
+  While stealthed, the unit cannot be selected as an attack or ability target. Stealth can
+  be configured to break under specific conditions.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>duration_ms</code></td><td>u32</td><td><em>required</em></td><td>How long stealth lasts, in milliseconds.</td></tr>
+    <tr><td><code>break_on_damage</code></td><td>bool</td><td>false</td><td>If true, stealth ends when the unit takes damage.</td></tr>
+    <tr><td><code>break_on_ability</code></td><td>bool</td><td>false</td><td>If true, stealth ends when the unit casts an ability.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Implementation: a <code>StatusKind::Stealth</code> status effect is applied to the target.
+  The targeting system checks for this status and skips stealthed units when resolving enemy
+  targets. The AI can still issue <code>Skulk</code> and <code>Hide</code> intents to move
+  tactically while stealthed.
+</p>
+
+<pre><code>effect stealth {
+  duration_ms = 3000
+  break_on_damage = true
+  break_on_ability = true
+}</code></pre>
+
+<hr>
+
+<!-- ================================================================== -->
+<h2>2. Leash</h2>
+
+<p>
+  The <code>Leash</code> effect tethers a target to its current position. If the target moves
+  beyond <code>max_range</code>, it is forced back within the leash radius. This is useful
+  for zone-control abilities that prevent enemies from escaping.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>max_range</code></td><td>f32</td><td><em>required</em></td><td>Maximum distance the target can move from the anchor point.</td></tr>
+    <tr><td><code>duration_ms</code></td><td>u32</td><td><em>required</em></td><td>How long the leash persists.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Implementation: a <code>StatusKind::Leash</code> status is applied with the target's
+  current position stored as <code>anchor_pos</code>. Each tick, the simulation checks
+  whether the unit has exceeded <code>max_range</code> from the anchor and pulls it back
+  if so.
+</p>
+
+<pre><code>effect leash {
+  max_range = 5.0
+  duration_ms = 4000
+}</code></pre>
+
+<hr>
+
+<!-- ================================================================== -->
+<h2>3. Link</h2>
+
+<p>
+  The <code>Link</code> effect creates a damage-sharing bond between the caster and the
+  target. When either linked unit takes damage, a percentage of that damage is shared with
+  the other unit.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>duration_ms</code></td><td>u32</td><td><em>required</em></td><td>How long the link persists.</td></tr>
+    <tr><td><code>share_percent</code></td><td>f32</td><td>50.0</td><td>Percentage of damage transferred to the linked partner.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Implementation: both the caster and the target receive a <code>StatusKind::Link</code>
+  status effect, each pointing to the other via <code>partner_id</code>. The damage pipeline
+  checks for Link statuses and redirects <code>share_percent</code> of incoming damage to
+  the partner.
+</p>
+
+<div class="callout">
+  <p><strong>Bidirectional.</strong> The link is symmetric &mdash; both units share damage
+  with each other. This can be used defensively (link a tank to a squishy ally to spread damage)
+  or offensively (link two enemies so damaging one hurts both).</p>
+</div>
+
+<pre><code>effect link {
+  duration_ms = 5000
+  share_percent = 40
+}</code></pre>
+
+<hr>
+
+<!-- ================================================================== -->
+<h2>4. Redirect</h2>
+
+<p>
+  The <code>Redirect</code> effect causes incoming damage to the target to be redirected to
+  the caster instead. This acts as a protective bodyguard mechanic with a limited number of
+  charges.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>duration_ms</code></td><td>u32</td><td><em>required</em></td><td>How long the redirect persists.</td></tr>
+    <tr><td><code>charges</code></td><td>u32</td><td>3</td><td>Number of damage instances that can be redirected before the effect expires.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Implementation: a <code>StatusKind::Redirect</code> status is applied to the protected
+  target, storing the <code>protector_id</code> (the caster). When the target takes damage,
+  the damage is routed to the protector instead, and one charge is consumed. The effect ends
+  when all charges are used or the duration expires.
+</p>
+
+<pre><code>effect redirect {
+  duration_ms = 4000
+  charges = 5
+}</code></pre>
+
+<hr>
+
+<!-- ================================================================== -->
+<h2>5. Rewind</h2>
+
+<p>
+  The <code>Rewind</code> effect resets a unit to a previous position and HP value by reading
+  from the unit's <code>state_history</code> ring buffer. This is a temporal mechanic that
+  effectively "undoes" recent movement and damage.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>lookback_ms</code></td><td>u32</td><td>3000</td><td>How far back in time to look, in milliseconds.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Implementation: the engine converts <code>lookback_ms</code> to a target tick
+  (<code>current_tick - lookback_ms / FIXED_TICK_MS</code>) and searches the unit's
+  <code>state_history: VecDeque&lt;(tick, position, hp)&gt;</code> ring buffer in reverse
+  for the nearest entry at or before that tick. The unit's position and HP are restored
+  (HP is capped at <code>max_hp</code>). A <code>RewindApplied</code> event is logged.
+</p>
+
+<div class="callout">
+  <p><strong>Ring buffer.</strong> The <code>state_history</code> field is populated
+  automatically each tick by the simulation loop. It is marked <code>#[serde(skip)]</code>
+  so it is not serialized &mdash; Rewind only works within a live simulation, not across
+  save/load boundaries.</p>
+</div>
+
+<pre><code>effect rewind {
+  lookback_ms = 4000
+}</code></pre>
+
+<hr>
+
+<!-- ================================================================== -->
+<h2>6. CooldownModify</h2>
+
+<p>
+  The <code>CooldownModify</code> effect adjusts ability cooldowns by a flat millisecond
+  amount. It can reduce cooldowns (negative value) to let abilities come off cooldown faster,
+  or increase them (positive value) to delay enemy abilities.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>amount_ms</code></td><td>i32</td><td><em>required</em></td><td>Milliseconds to add (positive) or remove (negative) from cooldowns. Negative values use saturating subtraction.</td></tr>
+    <tr><td><code>ability_name</code></td><td>Option&lt;String&gt;</td><td>None</td><td>If specified, only affects the named ability. If omitted, affects all abilities on the target.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Implementation: the engine iterates over the target's <code>abilities</code> vector. If
+  <code>ability_name</code> is set, only the matching slot is modified. For negative
+  <code>amount_ms</code>, <code>saturating_sub</code> prevents underflow. For positive values,
+  the cooldown is simply increased.
+</p>
+
+<pre><code>// Reduce all cooldowns by 2 seconds
+effect cooldown_modify {
+  amount_ms = -2000
+}
+
+// Increase a specific ability's cooldown by 3 seconds
+effect cooldown_modify {
+  amount_ms = 3000
+  ability_name = "Fireball"
+}</code></pre>
+
+<hr>
+
+<!-- ================================================================== -->
+<h2>7. Duel</h2>
+
+<p>
+  The <code>Duel</code> effect forces two units into a 1v1 confrontation. Both the caster and
+  the target receive a <code>StatusKind::Duel</code> status effect, each referencing the other
+  as their <code>partner_id</code>. While dueling, units can only interact with their duel
+  partner.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>duration_ms</code></td><td>u32</td><td><em>required</em></td><td>How long the forced duel lasts.</td></tr>
+  </tbody>
+</table>
+
+<h3>Events</h3>
+<p>Two events are logged for each duel:</p>
+<ul>
+  <li><code>DuelStarted { tick, unit_a, unit_b }</code> &mdash; emitted when the duel begins.</li>
+  <li><code>DuelEnded { tick, unit_a, unit_b }</code> &mdash; emitted when the duel status expires or one participant dies.</li>
+</ul>
+
+<pre><code>effect duel {
+  duration_ms = 5000
+}</code></pre>
+
+<hr>
+
+<!-- ================================================================== -->
+<h2>8. Obstacle</h2>
+
+<p>
+  The <code>Obstacle</code> effect creates impassable terrain on the battlefield. Unlike most
+  effects, obstacles are not applied to a target unit &mdash; they are handled at zone creation
+  time and modify the pathfinding grid.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>width</code></td><td>f32</td><td><em>required</em></td><td>Width of the obstacle in grid units.</td></tr>
+    <tr><td><code>height</code></td><td>f32</td><td><em>required</em></td><td>Height of the obstacle in grid units.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Implementation: the <code>apply_effect_extended</code> function is a no-op for
+  <code>Obstacle</code> &mdash; the actual terrain modification happens in the zone system,
+  which populates <code>blocked_cells</code> on the <code>ActiveZone</code> and updates the
+  <code>GridNav</code> pathfinding grid. Units cannot move through blocked cells.
+</p>
+
+<pre><code>effect obstacle {
+  width = 3.0
+  height = 1.0
+}</code></pre>
+
+<hr>
+
+<!-- ================================================================== -->
+<h2>9. ProjectileBlock</h2>
+
+<p>
+  The <code>ProjectileBlock</code> effect blocks incoming enemy projectiles for a duration.
+  It creates a protective zone that intercepts projectiles before they reach their target.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>duration_ms</code></td><td>u32</td><td><em>required</em></td><td>How long the projectile block lasts.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Implementation: currently applied as a <code>StatusKind::Immunity</code> status on the
+  caster with <code>immune_to: ["projectile"]</code>. The projectile advancement system
+  (<code>advance_projectiles</code>) checks for this immunity when resolving projectile
+  collisions.
+</p>
+
+<pre><code>effect projectile_block {
+  duration_ms = 4000
+}</code></pre>
+
+<hr>
+
+<!-- ================================================================== -->
+<h2>10. Attach</h2>
+
+<p>
+  The <code>Attach</code> effect causes the caster to become untargetable and physically
+  attach to an allied unit, moving with them. This is used for "ride-along" abilities where
+  a support character latches onto a carry.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>duration_ms</code></td><td>u32</td><td>0 (indefinite)</td><td>How long the attachment lasts. A value of 0 means indefinite (internally treated as 60000ms).</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Implementation: the caster receives two status effects &mdash;
+  <code>StatusKind::Attached { host_id }</code> to track the host, and
+  <code>StatusKind::Banish</code> to make them untargetable. The caster's position is
+  snapped to the host's position immediately and continues to follow the host each tick.
+</p>
+
+<pre><code>effect attach {
+  duration_ms = 5000
+}</code></pre>
+
+<hr>
+
+<!-- ================================================================== -->
+<h2>11. EvolveAbility</h2>
+
+<p>
+  The <code>EvolveAbility</code> effect permanently replaces one of the caster's abilities
+  with its evolved variant. This is a one-time transformation &mdash; once evolved, the
+  ability cannot revert.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>ability_index</code></td><td>usize</td><td><em>required</em></td><td>Index into the caster's <code>abilities</code> vector identifying which ability to evolve.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Implementation: the engine looks up the ability slot at <code>ability_index</code> and
+  checks for an <code>evolve_into</code> field on the <code>AbilityDef</code>. If present,
+  the entire ability definition is replaced with the evolved version, cooldown is reset to 0,
+  and charges are refilled to the new definition's <code>max_charges</code>. An
+  <code>AbilityUsed</code> event is logged with the prefix "Evolved: ".
+</p>
+
+<pre><code>effect evolve_ability {
+  ability_index = 0
+}</code></pre>
+
+<hr>
+
+<!-- ================================================================== -->
+<h2>12. Execute</h2>
+
+<p>
+  The <code>Execute</code> effect instantly kills a target if its current HP is at or below
+  a percentage threshold of its max HP. This is a finisher mechanic designed to close out
+  low-health targets.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>hp_threshold_percent</code></td><td>f32</td><td><em>required</em></td><td>HP percentage threshold. If the target's current HP / max HP * 100 is at or below this value, the target dies instantly.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Implementation: the engine computes the target's HP percentage. If it is at or below the
+  threshold, the target's HP is set to 0, all dead-unit state is cleared, and two events
+  are logged: <code>ExecuteTriggered</code> followed by <code>UnitDied</code>. Death triggers
+  are then fired via <code>fire_damage_triggers</code>.
+</p>
+
+<div class="callout bug">
+  <p><strong>Order matters.</strong> Execute checks happen after other effects in the same
+  ability resolve. If an ability deals damage and has an Execute effect, the damage lands
+  first, potentially bringing the target below the threshold before Execute checks.</p>
+</div>
+
+<pre><code>effect execute {
+  hp_threshold_percent = 20
+}</code></pre>
+
+<hr>
+
+<!-- ================================================================== -->
+<h2>13. DeathMark</h2>
+
+<p>
+  The <code>DeathMark</code> effect places a mark on the target that accumulates all damage
+  taken during its duration. When the mark expires, it detonates, dealing a percentage of
+  the accumulated damage as bonus damage.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>duration_ms</code></td><td>u32</td><td><em>required</em></td><td>How long the mark lasts before detonating.</td></tr>
+    <tr><td><code>damage_percent</code></td><td>f32</td><td>50.0</td><td>Percentage of accumulated damage dealt on detonation.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Implementation: a <code>StatusKind::DeathMark</code> status is applied with
+  <code>accumulated_damage: 0</code>. The damage pipeline increments
+  <code>accumulated_damage</code> whenever the marked unit takes damage. When the status
+  expires, the engine deals <code>accumulated_damage * damage_percent / 100</code> as bonus
+  damage.
+</p>
+
+<pre><code>effect death_mark {
+  duration_ms = 3000
+  damage_percent = 60
+}</code></pre>
+
+<hr>
+
+<!-- ================================================================== -->
+<h2>14. Reflect</h2>
+
+<p>
+  The <code>Reflect</code> effect returns a percentage of incoming damage back to the
+  attacker. This is a defensive buff that punishes enemies for attacking the protected unit.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>percent</code></td><td>f32</td><td><em>required</em></td><td>Percentage of incoming damage reflected back to the attacker.</td></tr>
+    <tr><td><code>duration_ms</code></td><td>u32</td><td><em>required</em></td><td>How long the reflect buff lasts.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Implementation: a <code>StatusKind::Reflect</code> status is applied. When the damage
+  pipeline processes an incoming hit, it checks for Reflect statuses on the target. If
+  present, <code>damage * percent / 100</code> is dealt back to the attacker as reflected
+  damage.
+</p>
+
+<pre><code>effect reflect {
+  percent = 30
+  duration_ms = 5000
+}</code></pre>
+
+<hr>
+
+<!-- ================================================================== -->
+<h2>15. Lifesteal</h2>
+
+<p>
+  The <code>Lifesteal</code> effect heals the attacker for a percentage of damage dealt.
+  This is a sustain buff that rewards aggressive play by converting outgoing damage into
+  healing.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>percent</code></td><td>f32</td><td><em>required</em></td><td>Percentage of damage dealt that is converted to healing for the attacker.</td></tr>
+    <tr><td><code>duration_ms</code></td><td>u32</td><td><em>required</em></td><td>How long the lifesteal buff lasts.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Implementation: a <code>StatusKind::Lifesteal</code> status is applied. The damage
+  pipeline checks for Lifesteal statuses on the attacking unit. When present, the attacker
+  is healed for <code>damage_dealt * percent / 100</code> after applying damage to the
+  target.
+</p>
+
+<pre><code>effect lifesteal {
+  percent = 25
+  duration_ms = 6000
+}</code></pre>
+
+<hr>
+
+<p class="footer-note">
+  See also:
+  <a href="../effects.html">The Effect System</a> &middot;
+  <a href="summons.html">Summons &amp; Directed Units</a> &middot;
+  <a href="../abilities.html">Abilities</a> &middot;
+  <a href="../units.html">Units</a> &middot;
+  <a href="../combat_loop.html">Combat Loop</a>
+</p>
+
+</div>
+</body>
+</html>
