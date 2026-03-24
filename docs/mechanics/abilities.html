@@ -205,6 +205,61 @@ hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
 
 <pre><code>.ability file  &rarr;  Parser (winnow)  &rarr;  AST  &rarr;  lower.rs  &rarr;  AbilityDef</code></pre>
 
+<h3>DSL Example</h3>
+
+<pre><code>ability Fireball {
+    target: enemy, range: 5.0
+    cooldown: 5s, cast: 500ms
+    cost: 15, hint: damage
+
+    damage 55 [FIRE: 60]
+}
+
+ability FrostNova {
+    target: self_aoe
+    cooldown: 10s, cast: 300ms
+
+    damage 20 in circle(3.0)
+    stun 2s in circle(3.0) [CROWD_CONTROL: 80]
+}
+
+ability VampStrike {
+    target: enemy, range: 1.5
+    cooldown: 4s, cast: 200ms
+
+    damage 35 + 50% caster_attack_damage [PHYSICAL: 50]
+    heal 20 when hit_count_above(3)
+}</code></pre>
+
+<h3>Conditions</h3>
+<p>Each effect can have a <code>when</code> condition and an optional <code>else</code> clause:</p>
+<pre><code>damage 50 when target_hp_below(30%)
+shield 40 when caster_hp_below(50%)
+damage 30 when target_is_stunned else heal 20</code></pre>
+
+<p>Compound conditions: <code>and(cond1, cond2)</code>, <code>or(cond1, cond2)</code>, <code>not(cond)</code>. Available conditions include <code>target_hp_below</code>, <code>caster_hp_above</code>, <code>target_is_stunned</code>, <code>target_has_tag</code>, <code>hit_count_above</code>, <code>target_distance_below</code>, <code>ally_count_below</code>, <code>target_stack_count</code>, and 20+ more.</p>
+
+<h3>Stacking &amp; Probability</h3>
+<table>
+<tr><th>Stacking Mode</th><th>Behavior</th></tr>
+<tr><td><code>refresh</code> (default)</td><td>Reset duration on re-application</td></tr>
+<tr><td><code>extend</code></td><td>Add duration</td></tr>
+<tr><td><code>strongest</code></td><td>Keep highest power level</td></tr>
+<tr><td><code>stack</code></td><td>Allow multiple instances up to max_stacks</td></tr>
+</table>
+
+<p>Any effect can have a <code>chance</code> modifier: <code>damage 50 chance 0.75</code> (75% trigger chance).</p>
+
+<h3>Advanced Features</h3>
+<ul>
+  <li><strong>Morph:</strong> <code>morph into { ... } for 8s</code> &mdash; temporarily replace the ability</li>
+  <li><strong>Recast:</strong> <code>recast: 1, recast_window: 10s</code> &mdash; multi-cast within a window</li>
+  <li><strong>Charges:</strong> <code>charges: 6, recharge: 500ms</code> &mdash; ammo system</li>
+  <li><strong>Toggle:</strong> <code>toggle, toggle_cost: 25.0</code> &mdash; on/off with resource drain</li>
+  <li><strong>Form swap:</strong> <code>form: "melee", swap_form: "ranged"</code> &mdash; stance switching</li>
+  <li><strong>Unstoppable:</strong> <code>unstoppable</code> &mdash; CC immune during cast</li>
+</ul>
+
 <p>See the <a href="../dsl.html">Ability DSL reference</a> for full syntax documentation.</p>
 
 <p class="footer-note">See also: <a href="combat_loop.html">The Combat Loop</a> &middot; <a href="targeting.html">Targeting &amp; Areas</a> &middot; <a href="delivery.html">Delivery Methods</a> &middot; <a href="passives.html">Passives &amp; Triggers</a> &middot; <a href="damage.html">Damage &amp; Defenses</a></p>
