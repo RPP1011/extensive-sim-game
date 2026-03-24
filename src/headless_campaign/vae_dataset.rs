@@ -24,6 +24,25 @@ use super::vae_features;
 use super::vae_slots;
 
 // ---------------------------------------------------------------------------
+// XorShift helper (used throughout this module)
+// ---------------------------------------------------------------------------
+
+/// Advance a xorshift64 RNG state and return the new value.
+#[inline]
+fn xorshift(rng: &mut u64) {
+    *rng ^= *rng << 13;
+    *rng ^= *rng >> 7;
+    *rng ^= *rng << 17;
+}
+
+/// Return a float in [0, 1) from the xorshift state.
+#[inline]
+fn xorshift_f32(rng: &mut u64) -> f32 {
+    xorshift(rng);
+    (*rng as u32) as f32 / u32::MAX as f32
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -97,6 +116,295 @@ impl Default for VaeDatasetConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Initial condition modifiers (Improvement 1)
+// ---------------------------------------------------------------------------
+
+/// Apply 0–3 random starting modifiers to create diverse initial states.
+/// This ensures campaigns don't all begin from the same peaceful baseline.
+fn randomize_initial_conditions(state: &mut CampaignState, rng: &mut u64) {
+    // Decide how many modifiers to apply (0–3)
+    xorshift(rng);
+    let num_modifiers = (*rng as usize) % 4;
+
+    // Build a list of available modifiers and pick from them
+    let mut available: Vec<u8> = (0..5).collect();
+    for _ in 0..num_modifiers {
+        if available.is_empty() {
+            break;
+        }
+        xorshift(rng);
+        let idx = (*rng as usize) % available.len();
+        let modifier = available.remove(idx);
+
+        match modifier {
+            0 => {
+                // Pre-existing faction wars: make 1-2 factions hostile/at-war
+                for faction in &mut state.factions {
+                    if faction.id == state.diplomacy.guild_faction_id {
+                        continue;
+                    }
+                    xorshift(rng);
+                    if *rng % 3 == 0 {
+                        faction.diplomatic_stance = DiplomaticStance::Hostile;
+                        faction.relationship_to_guild = -30.0 - (*rng % 40) as f32;
+                        faction.military_strength *= 1.5;
+                    }
+                }
+                // Raise unrest in some regions
+                for region in &mut state.overworld.regions {
+                    xorshift(rng);
+                    if *rng % 2 == 0 {
+                        region.unrest = 30.0 + (*rng % 40) as f32;
+                    }
+                }
+            }
+            1 => {
+                // High threat: monsters already at dangerous levels
+                state.overworld.global_threat_level =
+                    50.0 + (*rng % 30) as f32;
+                for region in &mut state.overworld.regions {
+                    xorshift(rng);
+                    region.threat_level = 40.0 + (*rng % 40) as f32;
+                }
+            }
+            2 => {
+                // Low gold: forces loan/mercenary/black market decisions early
+                state.guild.gold = 15.0 + (*rng % 20) as f32;
+                state.guild.supplies = 20.0 + (*rng % 20) as f32;
+            }
+            3 => {
+                // Active faction wars between NPCs (civil war scenario)
+                let faction_count = state.factions.len();
+                if faction_count >= 2 {
+                    // Pick two non-guild factions and put them at war
+                    let non_guild: Vec<usize> = state.factions.iter()
+                        .filter(|f| f.id != state.diplomacy.guild_faction_id)
+                        .map(|f| f.id)
+                        .collect();
+                    if non_guild.len() >= 2 {
+                        let a = non_guild[0];
+                        let b = non_guild[1];
+                        for f in &mut state.factions {
+                            if f.id == a {
+                                f.at_war_with.push(b);
+                                f.diplomatic_stance = DiplomaticStance::Hostile;
+                            }
+                            if f.id == b {
+                                f.at_war_with.push(a);
+                                f.diplomatic_stance = DiplomaticStance::Hostile;
+                            }
+                        }
+                    }
+                }
+                // Boost unrest from the civil war
+                for region in &mut state.overworld.regions {
+                    xorshift(rng);
+                    region.unrest = (region.unrest + 20.0 + (*rng % 20) as f32).min(100.0);
+                }
+            }
+            4 => {
+                // Pre-existing high reputation + faction friendships
+                // (accelerates diplomacy/coalition/marriage systems)
+                state.guild.reputation = 60.0 + (*rng % 30) as f32;
+                for faction in &mut state.factions {
+                    if faction.id == state.diplomacy.guild_faction_id {
+                        continue;
+                    }
+                    xorshift(rng);
+                    if *rng % 2 == 0 {
+                        faction.relationship_to_guild = 40.0 + (*rng % 30) as f32;
+                        faction.diplomatic_stance = DiplomaticStance::Friendly;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Config mutation (Improvement 3)
+// ---------------------------------------------------------------------------
+
+/// Randomize config parameters within +/-50% to create diverse campaign dynamics.
+/// Each call deterministically mutates based on the provided rng.
+fn mutate_config(config: &mut CampaignConfig, rng: &mut u64) {
+    // Helper: scale a value by a random factor in [0.5, 1.5]
+    let scale = |val: &mut f32, rng: &mut u64| {
+        let factor = 0.5 + xorshift_f32(rng);
+        *val *= factor;
+    };
+    let scale_u64 = |val: &mut u64, rng: &mut u64| {
+        let factor = 0.5 + xorshift_f32(rng);
+        *val = ((*val as f64) * factor as f64).max(1.0) as u64;
+    };
+
+    // Quest generation rates
+    scale_u64(&mut config.quest_generation.base_arrival_interval_ticks, rng);
+    scale(&mut config.quest_generation.threat_variance, rng);
+    scale(&mut config.quest_generation.gold_per_threat, rng);
+
+    // Faction aggression
+    scale(&mut config.faction_ai.hostile_strength_gain, rng);
+    scale(&mut config.faction_ai.war_declaration_threshold, rng);
+    scale_u64(&mut config.faction_ai.decision_interval_ticks, rng);
+
+    // Economy
+    scale(&mut config.economy.passive_gold_per_sec, rng);
+    scale(&mut config.economy.market_inflation_rate, rng);
+    scale(&mut config.economy.investment_return_rate, rng);
+    scale(&mut config.economy.trade_income_per_control, rng);
+    scale(&mut config.economy.threat_reward_bonus, rng);
+
+    // Recruitment
+    scale(&mut config.recruitment.recruit_cost, rng);
+    scale_u64(&mut config.recruitment.interval_ticks, rng);
+
+    // Crisis timing
+    scale(&mut config.campaign_progress.crisis_flood_unrest_threshold, rng);
+    scale(&mut config.campaign_progress.calamity_warning_threshold, rng);
+}
+
+// ---------------------------------------------------------------------------
+// System exerciser (Improvement 2)
+// ---------------------------------------------------------------------------
+
+/// Check which game systems haven't produced events yet and try to create
+/// preconditions so they fire. Called every 500 ticks during the sweep.
+fn exercise_dormant_systems(
+    state: &mut CampaignState,
+    rng: &mut u64,
+    events_seen: &std::collections::HashSet<&'static str>,
+) -> Option<CampaignAction> {
+    // Diplomacy: if we haven't done any diplomatic actions and have factions
+    if !events_seen.contains("diplomacy") && !state.factions.is_empty() {
+        // Find a non-guild faction
+        for faction in &state.factions {
+            if faction.id != state.diplomacy.guild_faction_id {
+                xorshift(rng);
+                let action_type = match *rng % 3 {
+                    0 => DiplomacyActionType::ImproveRelations,
+                    1 => DiplomacyActionType::TradeAgreement,
+                    _ => DiplomacyActionType::ProposeCeasefire,
+                };
+                return Some(CampaignAction::DiplomaticAction {
+                    faction_id: faction.id,
+                    action_type,
+                });
+            }
+        }
+    }
+
+    // Coalition: if we haven't proposed any and have a friendly faction
+    if !events_seen.contains("coalition") {
+        for faction in &state.factions {
+            if faction.relationship_to_guild > 30.0
+                && faction.id != state.diplomacy.guild_faction_id
+                && !faction.coalition_member
+            {
+                return Some(CampaignAction::ProposeCoalition {
+                    faction_id: faction.id,
+                });
+            }
+        }
+    }
+
+    // Training: if we haven't trained anyone and have idle adventurers + gold
+    if !events_seen.contains("training") && state.guild.gold >= state.config.economy.training_cost {
+        for adv in &state.adventurers {
+            if adv.status == AdventurerStatus::Idle {
+                xorshift(rng);
+                let training_type = match *rng % 4 {
+                    0 => TrainingType::Combat,
+                    1 => TrainingType::Exploration,
+                    2 => TrainingType::Leadership,
+                    _ => TrainingType::Survival,
+                };
+                return Some(CampaignAction::TrainAdventurer {
+                    adventurer_id: adv.id,
+                    training_type,
+                });
+            }
+        }
+    }
+
+    // Scouting: if we haven't scouted and have gold
+    if !events_seen.contains("scouting") && state.guild.gold >= state.config.economy.scout_cost {
+        for loc in &state.overworld.locations {
+            if !loc.scouted {
+                return Some(CampaignAction::HireScout {
+                    location_id: loc.id,
+                });
+            }
+        }
+    }
+
+    // Mercenary: if we haven't hired mercs and have an active quest + gold
+    if !events_seen.contains("mercenary") && state.guild.gold >= state.config.economy.mercenary_cost {
+        for quest in &state.active_quests {
+            if quest.status == ActiveQuestStatus::Preparing
+                || quest.status == ActiveQuestStatus::Dispatched
+            {
+                return Some(CampaignAction::HireMercenary {
+                    quest_id: quest.id,
+                });
+            }
+        }
+    }
+
+    // Spend priority: cycle through non-default priorities
+    if !events_seen.contains("spend_priority") {
+        xorshift(rng);
+        let priority = match *rng % 3 {
+            0 => SpendPriority::InvestInGrowth,
+            1 => SpendPriority::MilitaryFocus,
+            _ => SpendPriority::SaveForEmergencies,
+        };
+        return Some(CampaignAction::SetSpendPriority { priority });
+    }
+
+    // Rest: ensure resting fires at least once (triggers progression presentation)
+    if !events_seen.contains("rest") && !state.pending_progression.is_empty() {
+        return Some(CampaignAction::Rest);
+    }
+
+    None
+}
+
+/// Track which broad system categories have fired based on world events.
+fn classify_event(event: &WorldEvent) -> Option<&'static str> {
+    match event {
+        WorldEvent::FactionRelationChanged { .. } |
+        WorldEvent::FactionActionTaken { .. } => Some("diplomacy"),
+        WorldEvent::ScoutReport { .. } |
+        WorldEvent::RegionScoutReport { .. } => Some("scouting"),
+        WorldEvent::MercenaryHired { .. } => Some("mercenary"),
+        WorldEvent::CampaignMilestone { description, .. } if description.contains("rest") => Some("rest"),
+        WorldEvent::BuildingUpgraded { .. } => Some("building"),
+        WorldEvent::BondGrief { .. } => Some("bonds"),
+        WorldEvent::SeasonChanged { .. } => Some("season"),
+        WorldEvent::RandomEvent { .. } => Some("random_event"),
+        WorldEvent::CalamityWarning { .. } => Some("crisis"),
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Campaign length tiers (Improvement 5)
+// ---------------------------------------------------------------------------
+
+/// Return the max ticks for a campaign based on its index for length variety.
+/// Short (5000), medium (15000), long (30000), and the configured default.
+fn campaign_length_for_index(i: u64, default_max: u64) -> u64 {
+    match i % 4 {
+        0 => 5_000,   // short: early-game focused
+        1 => 15_000,  // medium: mid-game
+        2 => 30_000,  // long: endgame/crisis resolution
+        _ => default_max, // configured default
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Step 1: Campaign Sweep
 // ---------------------------------------------------------------------------
 
@@ -125,7 +433,8 @@ pub fn sweep_campaigns(config: &VaeDatasetConfig) -> Vec<TriggerContext> {
     pool.install(|| {
         (0..config.campaigns).into_par_iter().for_each(|i| {
             let seed = config.base_seed.wrapping_add(i.wrapping_mul(7919));
-            let contexts = sweep_single_campaign(seed, config);
+            let max_ticks = campaign_length_for_index(i, config.max_ticks);
+            let contexts = sweep_single_campaign(seed, i, max_ticks, config);
             let n = contexts.len();
 
             total_triggers.fetch_add(n as u64, Ordering::Relaxed);
@@ -175,53 +484,29 @@ pub fn sweep_campaigns(config: &VaeDatasetConfig) -> Vec<TriggerContext> {
     contexts
 }
 
-/// Personality modes for diverse policy — creates varied playstyle data.
-#[derive(Clone, Copy, Debug)]
-enum PolicyPersonality {
-    Standard,
-    Greedy,
-    Cautious,
-    Random,
-}
-
-impl PolicyPersonality {
-    fn from_seed(seed: u64) -> Self {
-        match seed % 4 {
-            0 => Self::Standard,
-            1 => Self::Greedy,
-            2 => Self::Cautious,
-            _ => Self::Random,
-        }
-    }
-}
-
-/// Inline xorshift step for the VAE dataset policy.
-fn xorshift_vae(rng: &mut u64) {
-    *rng ^= *rng << 13;
-    *rng ^= *rng >> 7;
-    *rng ^= *rng << 17;
-}
-
 /// Diversity-aware policy for dataset sweeps.
-/// Features personality modes, deliberate bad choices, and undersampled action boosting.
+/// Randomizes character creation choices and starting packages based on seed
+/// so each campaign produces different trait combos, backstories, and compositions.
+/// Also exercises dormant systems every 500 ticks to ensure coverage.
 fn diverse_policy(
     state: &CampaignState,
     rng: &mut u64,
-    personality: PolicyPersonality,
-    action_counts: &mut std::collections::HashMap<String, u64>,
+    events_seen: &std::collections::HashSet<&'static str>,
 ) -> Option<CampaignAction> {
     if state.phase != CampaignPhase::Playing {
+        // Randomize backstory/creation choices
         if let Some(choice) = state.pending_choices.first() {
-            xorshift_vae(rng);
+            xorshift(rng);
             let option_index = (*rng as usize) % choice.options.len().max(1);
             return Some(CampaignAction::RespondToChoice {
                 choice_id: choice.id,
                 option_index,
             });
         }
+        // Randomize starting package
         if state.phase == CampaignPhase::ChoosingStartingPackage {
             if !state.available_starting_choices.is_empty() {
-                xorshift_vae(rng);
+                xorshift(rng);
                 let idx = (*rng as usize) % state.available_starting_choices.len();
                 return Some(CampaignAction::ChooseStartingPackage {
                     choice: state.available_starting_choices[idx].clone(),
@@ -231,8 +516,9 @@ fn diverse_policy(
         return None;
     }
 
+    // During play, use the standard heuristic but randomize choice responses
     if let Some(choice) = state.pending_choices.first() {
-        xorshift_vae(rng);
+        xorshift(rng);
         let option_index = (*rng as usize) % choice.options.len().max(1);
         return Some(CampaignAction::RespondToChoice {
             choice_id: choice.id,
@@ -240,150 +526,42 @@ fn diverse_policy(
         });
     }
 
-    // 10% chance: make deliberately bad choices (negative training examples)
-    xorshift_vae(rng);
-    if *rng % 100 < 10 {
-        let valid = state.valid_actions();
-        if !valid.is_empty() {
-            xorshift_vae(rng);
-            let idx = (*rng as usize) % valid.len();
-            let action = valid[idx].clone();
-            let atype = super::heuristic_bc::action_type_name(&action);
-            *action_counts.entry(atype).or_default() += 1;
+    // Every 500 ticks, try to exercise systems that haven't fired yet
+    if state.tick > 0 && state.tick % 500 == 0 {
+        // Need a mutable copy of the state for the exerciser to inspect
+        // (we only read state, mutation happens through returned action)
+        if let Some(action) = exercise_dormant_systems(
+            &mut state.clone(), rng, events_seen,
+        ) {
             return Some(action);
         }
     }
 
-    // Personality-driven action selection
-    let action = match personality {
-        PolicyPersonality::Standard => heuristic_policy(state),
-        PolicyPersonality::Greedy => greedy_policy(state, rng),
-        PolicyPersonality::Cautious => cautious_policy(state, rng),
-        PolicyPersonality::Random => random_policy(state, rng),
-    };
-
-    // Boost undersampled action types
-    if let Some(ref a) = action {
-        let atype = super::heuristic_bc::action_type_name(a);
-        let chosen_count = action_counts.get(&atype).copied().unwrap_or(0);
-        *action_counts.entry(atype).or_default() += 1;
-
-        xorshift_vae(rng);
-        if chosen_count > 50 && *rng % 100 < 15 {
-            let valid = state.valid_actions();
-            let mut best: Option<CampaignAction> = None;
-            let mut best_count = u64::MAX;
-            for va in &valid {
-                let vtype = super::heuristic_bc::action_type_name(va);
-                let c = action_counts.get(&vtype).copied().unwrap_or(0);
-                if c < best_count { best_count = c; best = Some(va.clone()); }
-            }
-            if let Some(b) = best {
-                let btype = super::heuristic_bc::action_type_name(&b);
-                *action_counts.entry(btype).or_default() += 1;
-                return Some(b);
-            }
-        }
-    }
-
-    action
-}
-
-/// Greedy policy: maximize quest throughput.
-fn greedy_policy(state: &CampaignState, _rng: &mut u64) -> Option<CampaignAction> {
-    if let Some(req) = state.request_board.first() {
-        if state.active_quests.len() < state.guild.active_quest_capacity {
-            return Some(CampaignAction::AcceptQuest { request_id: req.id });
-        }
-    }
-    for quest in &state.active_quests {
-        if quest.status == ActiveQuestStatus::Preparing && !quest.assigned_pool.is_empty() {
-            return Some(CampaignAction::DispatchQuest { quest_id: quest.id });
-        }
-    }
-    let idle: Vec<u32> = state.adventurers.iter()
-        .filter(|a| a.status == AdventurerStatus::Idle).map(|a| a.id).collect();
-    for quest in &state.active_quests {
-        if quest.status == ActiveQuestStatus::Preparing {
-            for &adv_id in &idle {
-                if !quest.assigned_pool.contains(&adv_id) {
-                    return Some(CampaignAction::AssignToPool { adventurer_id: adv_id, quest_id: quest.id });
-                }
-            }
-        }
-    }
-    if state.guild.gold >= state.config.economy.mercenary_cost {
-        for quest in &state.active_quests {
-            if matches!(quest.status, ActiveQuestStatus::InProgress | ActiveQuestStatus::InCombat) {
-                return Some(CampaignAction::HireMercenary { quest_id: quest.id });
-            }
-        }
-    }
+    // Fall back to heuristic for gameplay decisions
     heuristic_policy(state)
-}
-
-/// Cautious policy: rest often, train, avoid risky quests.
-fn cautious_policy(state: &CampaignState, rng: &mut u64) -> Option<CampaignAction> {
-    let has_stressed = state.adventurers.iter()
-        .any(|a| a.status != AdventurerStatus::Dead && (a.stress > 30.0 || a.injury > 20.0));
-    if has_stressed || !state.pending_progression.is_empty() {
-        return Some(CampaignAction::Rest);
-    }
-    if state.guild.gold >= state.config.economy.training_cost {
-        let idle: Vec<u32> = state.adventurers.iter()
-            .filter(|a| a.status == AdventurerStatus::Idle).map(|a| a.id).collect();
-        if !idle.is_empty() {
-            xorshift_vae(rng);
-            let ai = (*rng as usize) % idle.len();
-            let types = [TrainingType::Combat, TrainingType::Survival];
-            xorshift_vae(rng);
-            let ti = (*rng as usize) % types.len();
-            return Some(CampaignAction::TrainAdventurer {
-                adventurer_id: idle[ai], training_type: types[ti],
-            });
-        }
-    }
-    for faction in &state.factions {
-        if faction.diplomatic_stance == DiplomaticStance::Hostile {
-            return Some(CampaignAction::DiplomaticAction {
-                faction_id: faction.id, action_type: DiplomacyActionType::ImproveRelations,
-            });
-        }
-    }
-    if state.guild.gold >= state.config.economy.scout_cost {
-        for loc in &state.overworld.locations {
-            if !loc.scouted {
-                return Some(CampaignAction::HireScout { location_id: loc.id });
-            }
-        }
-    }
-    heuristic_policy(state)
-}
-
-/// Random policy: uniform random selection from valid actions.
-fn random_policy(state: &CampaignState, rng: &mut u64) -> Option<CampaignAction> {
-    let valid = state.valid_actions();
-    if valid.is_empty() { return None; }
-    xorshift_vae(rng);
-    let idx = (*rng as usize) % valid.len();
-    Some(valid[idx].clone())
 }
 
 /// Run one campaign, returning trigger contexts.
-/// Randomizes XP rate and victory threshold per campaign to get diverse level ranges.
-fn sweep_single_campaign(seed: u64, config: &VaeDatasetConfig) -> Vec<TriggerContext> {
+/// Randomizes XP rate, victory threshold, config parameters, initial conditions,
+/// and campaign length per campaign to maximize system coverage.
+fn sweep_single_campaign(
+    seed: u64,
+    campaign_index: u64,
+    max_ticks: u64,
+    config: &VaeDatasetConfig,
+) -> Vec<TriggerContext> {
     let mut campaign_config = config.campaign_config.clone();
 
     // Vary XP multiplier: some campaigns level fast (10), others slow (80)
     // This produces level 1-40+ content across the dataset
     let mut rng = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-    rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+    xorshift(&mut rng);
     let xp_mult_options = [10, 15, 20, 30, 50, 80];
     campaign_config.quest_lifecycle.level_up_xp_multiplier =
         xp_mult_options[(rng as usize) % xp_mult_options.len()];
 
     // Vary victory quest count to let some campaigns run longer
-    rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+    xorshift(&mut rng);
     let victory_options = [15.0, 25.0, 40.0, 60.0, 100.0];
     campaign_config.campaign_progress.victory_quest_count =
         victory_options[(rng as usize) % victory_options.len()];
@@ -407,11 +585,25 @@ fn sweep_single_campaign(seed: u64, config: &VaeDatasetConfig) -> Vec<TriggerCon
     campaign_config.recruitment.min_recruit_chance = diff_cfg.recruitment.min_recruit_chance;
     campaign_config.campaign_progress.crisis_flood_unrest_threshold = diff_cfg.campaign_progress.crisis_flood_unrest_threshold;
 
+    // Improvement 3: Mutate config parameters within +/-50% for variety
+    // Apply to ~60% of campaigns (the rest use standard difficulty settings)
+    xorshift(&mut rng);
+    if rng % 5 >= 2 {
+        mutate_config(&mut campaign_config, &mut rng);
+    }
+
     // ~30% of campaigns: mark first adventurer as player character (enables PC triggers)
-    rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+    xorshift(&mut rng);
     let has_pc = (rng % 3) == 0;
 
     let mut state = CampaignState::with_config(seed, campaign_config);
+
+    // Improvement 1: Randomize initial conditions (faction wars, threat, gold, etc.)
+    // Apply to ~50% of campaigns for a mix of standard and varied starts
+    xorshift(&mut rng);
+    if rng % 2 == 0 {
+        randomize_initial_conditions(&mut state, &mut rng);
+    }
 
     if has_pc {
         if let Some(adv) = state.adventurers.first_mut() {
@@ -421,19 +613,37 @@ fn sweep_single_campaign(seed: u64, config: &VaeDatasetConfig) -> Vec<TriggerCon
 
     let mut contexts = Vec::new();
     let mut seen_triggers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Improvement 2: Track which system categories have fired
+    let mut events_seen: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
+    // Also track spend_priority and rest/training as "seen" when the diverse_policy exercises them
+    let _ = campaign_index; // used above for length selection
 
-    // Select personality mode for this campaign based on seed
-    let personality = PolicyPersonality::from_seed(rng);
-    // Track action type counts for undersampled action boosting
-    let mut action_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    for _ in 0..max_ticks {
+        let action = diverse_policy(&state, &mut rng, &events_seen);
 
-    for _ in 0..config.max_ticks {
-        let action = diverse_policy(&state, &mut rng, personality, &mut action_counts);
+        // Track system exerciser actions
+        match &action {
+            Some(CampaignAction::SetSpendPriority { .. }) => { events_seen.insert("spend_priority"); }
+            Some(CampaignAction::Rest) => { events_seen.insert("rest"); }
+            Some(CampaignAction::TrainAdventurer { .. }) => { events_seen.insert("training"); }
+            Some(CampaignAction::HireScout { .. }) => { events_seen.insert("scouting"); }
+            Some(CampaignAction::HireMercenary { .. }) => { events_seen.insert("mercenary"); }
+            Some(CampaignAction::ProposeCoalition { .. }) => { events_seen.insert("coalition"); }
+            Some(CampaignAction::DiplomaticAction { .. }) => { events_seen.insert("diplomacy"); }
+            _ => {}
+        }
 
         // Check for new progression items BEFORE stepping
         // (they get added during step by progression_triggers)
         let prev_count = state.pending_progression.len();
         let result = step_campaign(&mut state, action);
+
+        // Improvement 2: Track which system categories produced events
+        for event in &result.events {
+            if let Some(category) = classify_event(event) {
+                events_seen.insert(category);
+            }
+        }
 
         // Record any new progression triggers
         for prog in state.pending_progression.iter().skip(prev_count) {

@@ -27,6 +27,9 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+use super::action_meta::{
+    action_meta_features, action_context, predict_outcome, action_synergy,
+};
 use super::actions::*;
 use super::batch::heuristic_policy;
 use super::config::{CampaignConfig, Difficulty};
@@ -122,6 +125,45 @@ pub struct BfsSample {
     /// Importance sampling weight = 1/P(action_selected). (pass 5)
     #[serde(default)]
     pub importance_weight: f32,
+    /// Action metadata features (category, cost, risk, etc.) — 8 floats. (pass 8)
+    #[serde(default)]
+    pub action_meta: Vec<f32>,
+    /// Action prerequisite context (why this action is valid) — 5 floats. (pass 8)
+    #[serde(default)]
+    pub action_prereqs: Vec<f32>,
+    /// Predicted outcome features (gold change, reputation, risk, duration) — 4 floats. (pass 8)
+    #[serde(default)]
+    pub action_outcome: Vec<f32>,
+    /// Synergy score with recent actions (0-1). (pass 8)
+    #[serde(default)]
+    pub action_synergy: f32,
+    /// Curriculum difficulty tier (1=beginner, 2=intermediate, 3=advanced, 4=expert). (pass 9)
+    #[serde(default)]
+    pub curriculum_tier: u8,
+    /// Skill tags this sample teaches (e.g. "economy", "diplomacy", "combat_timing"). (pass 9)
+    #[serde(default)]
+    pub teaches: Vec<String>,
+    /// Whether this sample was part of a winning trajectory (set post-hoc). (pass 9)
+    #[serde(default)]
+    pub trajectory_won: Option<bool>,
+    /// Final campaign progress at trajectory end (set post-hoc). (pass 9)
+    #[serde(default)]
+    pub campaign_outcome: Option<f32>,
+    /// Cascade score: how much value improved over subsequent steps (set post-hoc). (pass 9)
+    #[serde(default)]
+    pub cascade_score: f32,
+    /// Links positive/negative contrastive pair samples from the same root. (pass 9)
+    #[serde(default)]
+    pub contrastive_pair_id: Option<u32>,
+    /// Whether this is the positive (best) or negative (worst) example in a pair. (pass 9)
+    #[serde(default)]
+    pub is_positive_example: bool,
+    /// Scalar measuring how interesting/complex this state is for learning. (pass 9)
+    #[serde(default)]
+    pub state_complexity: f32,
+    /// Estimated impact of this action on the state (0-1). (pass 10)
+    #[serde(default)]
+    pub estimated_impact: f32,
 }
 
 /// State delta between root and leaf — captures what changed during a branch. (pass 2)
@@ -157,7 +199,7 @@ struct RootState {
 }
 
 /// Dataset format version. Increment when the BfsSample schema changes. (pass 6)
-pub const BFS_DATASET_VERSION: u32 = 2;
+pub const BFS_DATASET_VERSION: u32 = 3;
 
 /// Shared mutable state for UCB action selection and state novelty tracking
 /// across all roots in a BFS wave. (pass 5)
@@ -449,6 +491,293 @@ fn strategic_value_of(action_type: &str) -> f32 {
         "wait" => 0.1,
         _ => 0.5,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Action pruning by relevance (pass 10)
+// ---------------------------------------------------------------------------
+
+/// Remove actions that are clearly suboptimal given the current state.
+/// This focuses BFS compute on decisions that actually matter while ensuring
+/// at least 1 action per strategic bucket survives.
+fn prune_irrelevant_actions(actions: &[CampaignAction], state: &CampaignState) -> Vec<CampaignAction> {
+    if actions.len() <= 10 {
+        return actions.to_vec();
+    }
+
+    let no_injured = !state.adventurers.iter()
+        .any(|a| a.status != AdventurerStatus::Dead && (a.injury > 10.0 || a.stress > 30.0));
+    let no_progression = state.pending_progression.is_empty();
+    let _gold_high = state.guild.gold > 200.0;
+    let supplies_high = state.guild.supplies > 80.0;
+    let no_diseases = state.diseases.is_empty();
+    let no_corruption_crisis = !state.overworld.active_crises.iter().any(|c| {
+        matches!(c, ActiveCrisis::Corruption { corrupted_regions, .. } if !corrupted_regions.is_empty())
+    });
+    let no_wars = !state.factions.iter().any(|f| f.diplomatic_stance == DiplomaticStance::AtWar);
+    let no_battles = state.active_battles.is_empty();
+    let no_field_parties = !state.parties.iter()
+        .any(|p| matches!(p.status, PartyStatus::Traveling | PartyStatus::OnMission | PartyStatus::Fighting));
+    let all_scouted = state.overworld.locations.iter().all(|l| l.scouted);
+    let no_active_quests = state.active_quests.is_empty();
+    let no_idle = !state.adventurers.iter()
+        .any(|a| a.status == AdventurerStatus::Idle);
+    let low_gold = state.guild.gold < 30.0;
+    let no_inventory = state.guild.inventory.is_empty();
+
+    let mut kept = Vec::with_capacity(actions.len());
+
+    for action in actions {
+        let dominated = match action {
+            CampaignAction::Rest if no_injured && no_progression => true,
+            CampaignAction::PurchaseSupplies { .. } if supplies_high || no_field_parties => true,
+            CampaignAction::SendRunner { .. } if no_field_parties => true,
+            CampaignAction::CallRescue { .. } if no_battles => true,
+            CampaignAction::HireMercenary { .. } if no_active_quests || low_gold => true,
+            CampaignAction::DiplomaticAction { action_type: DiplomacyActionType::ProposeCeasefire, .. }
+                if no_wars => true,
+            CampaignAction::RequestCoalitionAid { .. } if no_wars && no_battles => true,
+            CampaignAction::HireScout { .. } if all_scouted => true,
+            CampaignAction::TrainAdventurer { .. } if no_idle || low_gold => true,
+            CampaignAction::EquipGear { .. } if no_inventory || no_idle => true,
+            CampaignAction::InterceptChampion { .. } if no_battles
+                && state.overworld.active_crises.is_empty() => true,
+            CampaignAction::DiplomaticAction { action_type: DiplomacyActionType::ImproveRelations, faction_id, .. }
+                if no_corruption_crisis && no_wars && state.factions.iter()
+                    .find(|f| f.id == *faction_id)
+                    .map(|f| f.diplomatic_stance == DiplomaticStance::Friendly || f.diplomatic_stance == DiplomaticStance::Coalition)
+                    .unwrap_or(false) => true,
+            CampaignAction::SendRunner { party_id, payload: RunnerPayload::Supplies(_) }
+                if no_diseases && state.parties.iter()
+                    .find(|p| p.id == *party_id)
+                    .map(|p| p.supply_level > 50.0)
+                    .unwrap_or(true) => true,
+            _ => false,
+        };
+
+        if !dominated {
+            kept.push(action.clone());
+        }
+    }
+
+    // Ensure at least 1 action per strategic bucket survives
+    for action in actions {
+        let atype = action_type_name(action);
+        let bucket = strategic_bucket(&atype);
+        let bucket_in_kept = kept.iter().any(|a| {
+            strategic_bucket(&action_type_name(a)) == bucket
+        });
+        if !bucket_in_kept {
+            kept.push(action.clone());
+            break;
+        }
+    }
+
+    if kept.len() < 3 && !actions.is_empty() {
+        return actions.to_vec();
+    }
+
+    kept
+}
+
+// ---------------------------------------------------------------------------
+// Action clustering (pass 10)
+// ---------------------------------------------------------------------------
+
+/// Group similar actions and sample representatives to reduce effective
+/// action space from 100+ to ~30 while preserving diversity.
+fn cluster_similar_actions(actions: &[CampaignAction], state: &CampaignState) -> Vec<CampaignAction> {
+    if actions.len() <= 30 {
+        return actions.to_vec();
+    }
+
+    let mut result: Vec<CampaignAction> = Vec::with_capacity(30);
+    let mut dispatch_quests: Vec<&CampaignAction> = Vec::new();
+    let mut spend_priorities: Vec<&CampaignAction> = Vec::new();
+    let mut assign_pool: Vec<&CampaignAction> = Vec::new();
+    let mut unassign_pool: Vec<&CampaignAction> = Vec::new();
+    let mut diplomacy: Vec<&CampaignAction> = Vec::new();
+    let mut train: Vec<&CampaignAction> = Vec::new();
+    let mut equip: Vec<&CampaignAction> = Vec::new();
+    let mut hire_scout: Vec<&CampaignAction> = Vec::new();
+    let mut abilities: Vec<&CampaignAction> = Vec::new();
+    let mut purchase: Vec<&CampaignAction> = Vec::new();
+    let mut other: Vec<&CampaignAction> = Vec::new();
+
+    for action in actions {
+        match action {
+            CampaignAction::DispatchQuest { .. } => dispatch_quests.push(action),
+            CampaignAction::SetSpendPriority { .. } => spend_priorities.push(action),
+            CampaignAction::AssignToPool { .. } => assign_pool.push(action),
+            CampaignAction::UnassignFromPool { .. } => unassign_pool.push(action),
+            CampaignAction::DiplomaticAction { .. }
+            | CampaignAction::ProposeCoalition { .. }
+            | CampaignAction::RequestCoalitionAid { .. } => diplomacy.push(action),
+            CampaignAction::TrainAdventurer { .. } => train.push(action),
+            CampaignAction::EquipGear { .. } => equip.push(action),
+            CampaignAction::HireScout { .. } => hire_scout.push(action),
+            CampaignAction::UseAbility { .. } => abilities.push(action),
+            CampaignAction::PurchaseSupplies { .. } => purchase.push(action),
+            _ => other.push(action),
+        }
+    }
+
+    fn sample_k<'a>(items: &[&'a CampaignAction], k: usize) -> Vec<&'a CampaignAction> {
+        if items.len() <= k { return items.to_vec(); }
+        let mut sampled = Vec::with_capacity(k);
+        for i in 0..k {
+            let idx = i * (items.len() - 1) / (k - 1).max(1);
+            sampled.push(items[idx]);
+        }
+        sampled
+    }
+
+    for &a in &sample_k(&dispatch_quests, 3) { result.push(a.clone()); }
+    for &a in &spend_priorities { result.push(a.clone()); }
+    for &a in &sample_k(&assign_pool, 3) { result.push(a.clone()); }
+    for &a in &sample_k(&unassign_pool, 2) { result.push(a.clone()); }
+    for &a in &sample_k(&diplomacy, 4) { result.push(a.clone()); }
+    for &a in &sample_k(&train, 2) { result.push(a.clone()); }
+    for &a in &sample_k(&equip, 2) { result.push(a.clone()); }
+    for &a in &sample_k(&hire_scout, 2) { result.push(a.clone()); }
+
+    let mut sorted_abilities = abilities.clone();
+    sorted_abilities.sort_by(|a, b| {
+        let ca = action_gold_cost(a, state);
+        let cb = action_gold_cost(b, state);
+        ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    for &a in &sample_k(&sorted_abilities, 3) { result.push(a.clone()); }
+
+    for &a in &sample_k(&purchase, 2) { result.push(a.clone()); }
+    for &a in &other { result.push(a.clone()); }
+
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Hierarchical action selection (pass 10)
+// ---------------------------------------------------------------------------
+
+/// Two-level action selection: first pick a strategic bucket via UCB,
+/// then pick an action within the selected bucket uniformly.
+fn hierarchical_select_actions(
+    grouped: &[(String, CampaignAction)],
+    target_count: usize,
+    shared: &Mutex<BfsSharedState>,
+    rng_seed: u64,
+) -> Vec<usize> {
+    if grouped.len() <= target_count {
+        return (0..grouped.len()).collect();
+    }
+
+    let mut bucket_indices: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (idx, (action_type, _)) in grouped.iter().enumerate() {
+        let bucket = strategic_bucket(action_type);
+        bucket_indices.entry(bucket).or_default().push(idx);
+    }
+
+    let buckets: Vec<&str> = bucket_indices.keys().copied().collect();
+    if buckets.is_empty() {
+        return vec![];
+    }
+
+    let mut selected: Vec<usize> = Vec::with_capacity(target_count);
+    let mut selected_set: HashSet<usize> = HashSet::new();
+    let mut rng = rng_seed;
+
+    let mut bucket_scores: Vec<(&str, f32)> = {
+        let shared_guard = shared.lock().unwrap();
+        buckets.iter().map(|&bucket| {
+            let sv = strategic_value_of(
+                bucket_indices[bucket].first()
+                    .map(|&i| grouped[i].0.as_str())
+                    .unwrap_or("Wait")
+            );
+            let ucb = shared_guard.ucb_score(bucket, sv);
+            (bucket, ucb)
+        }).collect()
+    };
+    bucket_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut round = 0;
+    while selected.len() < target_count {
+        let mut any_added = false;
+        for &(bucket, _) in &bucket_scores {
+            if selected.len() >= target_count { break; }
+            let indices = &bucket_indices[bucket];
+            if round < indices.len() {
+                xorshift(&mut rng);
+                let available: Vec<usize> = indices.iter()
+                    .filter(|i| !selected_set.contains(i))
+                    .copied()
+                    .collect();
+                if !available.is_empty() {
+                    let pick = available[rng as usize % available.len()];
+                    selected_set.insert(pick);
+                    selected.push(pick);
+                    any_added = true;
+                }
+            }
+        }
+        round += 1;
+        if !any_added { break; }
+    }
+
+    selected
+}
+
+// ---------------------------------------------------------------------------
+// Action impact estimation (pass 10)
+// ---------------------------------------------------------------------------
+
+/// Quick heuristic to estimate how much an action will change the state.
+fn estimate_impact(action: &CampaignAction, state: &CampaignState) -> f32 {
+    let base = match action {
+        CampaignAction::InterceptChampion { .. } => 0.9,
+        CampaignAction::CallRescue { .. } => 0.85,
+        CampaignAction::HireMercenary { .. } => 0.75,
+        CampaignAction::DiplomaticAction { action_type: DiplomacyActionType::Threaten, .. } => 0.8,
+        CampaignAction::DiplomaticAction { action_type: DiplomacyActionType::ProposeCeasefire, .. } => 0.85,
+        CampaignAction::ProposeCoalition { .. } => 0.8,
+        CampaignAction::RequestCoalitionAid { .. } => 0.7,
+        CampaignAction::DispatchQuest { .. } => 0.7,
+        CampaignAction::AcceptQuest { .. } => 0.65,
+        CampaignAction::TrainAdventurer { .. } => 0.55,
+        CampaignAction::UseAbility { .. } => 0.65,
+        CampaignAction::EquipGear { .. } => 0.5,
+        CampaignAction::HireScout { .. } => 0.5,
+        CampaignAction::DiplomaticAction { action_type: DiplomacyActionType::ImproveRelations, .. } => 0.45,
+        CampaignAction::DiplomaticAction { action_type: DiplomacyActionType::TradeAgreement, .. } => 0.5,
+        CampaignAction::DiplomaticAction { action_type: DiplomacyActionType::RequestAid, .. } => 0.55,
+        CampaignAction::PurchaseSupplies { amount, .. } => (amount / 50.0).clamp(0.2, 0.6),
+        CampaignAction::SendRunner { .. } => 0.4,
+        CampaignAction::AssignToPool { .. } => 0.35,
+        CampaignAction::UnassignFromPool { .. } => 0.3,
+        CampaignAction::DeclineQuest { .. } => 0.3,
+        CampaignAction::RespondToChoice { .. } => 0.5,
+        CampaignAction::SetSpendPriority { .. } => 0.2,
+        CampaignAction::ChooseStartingPackage { .. } => 0.4,
+        CampaignAction::Rest => {
+            let has_injured = state.adventurers.iter()
+                .any(|a| a.status != AdventurerStatus::Dead && a.injury > 30.0);
+            if has_injured { 0.5 } else { 0.15 }
+        }
+        CampaignAction::Wait => 0.05,
+    };
+
+    let mut impact = base;
+    if !state.overworld.active_crises.is_empty() {
+        impact *= 1.15;
+    }
+    let cost = action_gold_cost(action, state);
+    if cost > 0.0 && state.guild.gold < 50.0 {
+        impact *= 1.2;
+    }
+    if matches!(action, CampaignAction::DispatchQuest { .. }) && state.active_quests.len() <= 1 {
+        impact *= 1.2;
+    }
+    impact.clamp(0.0, 1.0)
 }
 
 /// Strategic rollout modes for branch simulation. (pass 2)
@@ -1133,6 +1462,237 @@ fn phase_tag(tick: u64, progress: f32) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Curriculum design (pass 9)
+// ---------------------------------------------------------------------------
+
+/// Compute curriculum difficulty tier (1-4) from state complexity metrics.
+fn compute_curriculum_tier(state: &CampaignState, valid_action_count: usize) -> u8 {
+    let war_count = state.factions.iter()
+        .filter(|f| f.diplomatic_stance == DiplomaticStance::AtWar)
+        .count();
+    let crisis_count = state.overworld.active_crises.len();
+    let threat = state.overworld.global_threat_level;
+    let alive = state.adventurers.iter()
+        .filter(|a| a.status != AdventurerStatus::Dead)
+        .count();
+    let total_adventurers = state.adventurers.len();
+    let progress = state.overworld.campaign_progress;
+
+    let t = &state.system_trackers;
+    let active_systems = [
+        war_count > 0,
+        crisis_count > 0,
+        t.total_intel_gathered > 10.0,
+        t.total_mercenary_strength > 0.0,
+        t.active_civil_war_count > 0,
+        t.prisoner_count > 0,
+        t.active_caravan_routes > 0,
+        t.black_market_heat > 10.0,
+        state.rival_guild.active,
+        !state.active_battles.is_empty(),
+        state.guild_buildings.training_grounds + state.guild_buildings.watchtower
+            + state.guild_buildings.trade_post + state.guild_buildings.barracks
+            + state.guild_buildings.infirmary + state.guild_buildings.war_room > 3,
+        state.factions.iter().any(|f| f.coalition_member),
+    ].iter().filter(|&&x| x).count();
+
+    let near_defeat = alive <= 2 && total_adventurers >= 4;
+    let simultaneous_crises = crisis_count >= 2;
+    let civil_war = t.active_civil_war_count > 0 && t.guild_civil_war_involvement;
+
+    if (simultaneous_crises && war_count > 0)
+        || civil_war
+        || (near_defeat && (crisis_count > 0 || war_count > 0))
+        || (active_systems >= 8 && threat > 60.0)
+        || (progress > 0.8 && active_systems >= 6)
+    {
+        return 4;
+    }
+
+    if war_count > 0
+        || crisis_count > 0
+        || t.total_intel_gathered > 20.0
+        || t.total_mercenary_strength > 30.0
+        || active_systems >= 5
+        || (threat > 50.0 && valid_action_count >= 10)
+    {
+        return 3;
+    }
+
+    if valid_action_count >= 6
+        || state.factions.iter().any(|f| f.diplomatic_stance == DiplomaticStance::Hostile
+            || f.diplomatic_stance == DiplomaticStance::Friendly)
+        || state.guild.gold > 100.0
+        || active_systems >= 3
+        || progress > 0.3
+    {
+        return 2;
+    }
+
+    1
+}
+
+/// Derive skill tags from what systems are active and what actions are available.
+fn compute_teaches(
+    state: &CampaignState,
+    action_type: &str,
+    delta: &Option<StateDelta>,
+    valid_action_types: &[String],
+) -> Vec<String> {
+    let mut skills = Vec::new();
+
+    match strategic_bucket(action_type) {
+        "economy" | "logistics" => skills.push("economy".to_string()),
+        "diplomacy" => skills.push("diplomacy".to_string()),
+        "quest_mgmt" => skills.push("quest_management".to_string()),
+        "military" => skills.push("combat_timing".to_string()),
+        "development" => skills.push("development".to_string()),
+        "scouting" => skills.push("exploration".to_string()),
+        "rest" => skills.push("resource_recovery".to_string()),
+        _ => {}
+    }
+
+    if state.factions.iter().any(|f| f.diplomatic_stance == DiplomaticStance::AtWar) {
+        skills.push("war_management".to_string());
+    }
+    if !state.overworld.active_crises.is_empty() {
+        skills.push("crisis_response".to_string());
+    }
+    if state.guild.gold < 30.0 {
+        skills.push("resource_scarcity".to_string());
+    }
+    let alive = state.adventurers.iter()
+        .filter(|a| a.status != AdventurerStatus::Dead).count();
+    if alive <= 2 {
+        skills.push("survival".to_string());
+    }
+
+    if let Some(d) = delta {
+        if d.deaths > 0 { skills.push("retreat_decision".to_string()); }
+        if d.gold_diff < -50.0 { skills.push("spending_decision".to_string()); }
+        if d.reputation_diff.abs() > 10.0 { skills.push("reputation_management".to_string()); }
+        if d.quests_completed > 0 && d.quests_failed > 0 { skills.push("risk_assessment".to_string()); }
+    }
+
+    let has_diplo = valid_action_types.iter().any(|t| strategic_bucket(t) == "diplomacy");
+    let has_military = valid_action_types.iter().any(|t| strategic_bucket(t) == "military");
+    if has_diplo && has_military {
+        skills.push("strategic_choice".to_string());
+    }
+
+    skills.sort();
+    skills.dedup();
+    skills
+}
+
+/// Compute state complexity score (0.0-1.0): how "interesting" a state is for learning.
+fn compute_state_complexity(state: &CampaignState, valid_action_count: usize) -> f32 {
+    let mut score = 0.0f32;
+
+    let t = &state.system_trackers;
+    let war_count = state.factions.iter()
+        .filter(|f| f.diplomatic_stance == DiplomaticStance::AtWar)
+        .count();
+    let crisis_count = state.overworld.active_crises.len();
+
+    score += (war_count as f32 * 0.08).min(0.16);
+    score += (crisis_count as f32 * 0.07).min(0.14);
+    score += if state.rival_guild.active { 0.05 } else { 0.0 };
+    score += (state.active_battles.len() as f32 * 0.06).min(0.12);
+    score += if t.active_civil_war_count > 0 { 0.08 } else { 0.0 };
+    score += if t.total_intel_gathered > 10.0 { 0.04 } else { 0.0 };
+    score += if t.active_caravan_routes > 0 { 0.03 } else { 0.0 };
+    score += if t.prisoner_count > 0 { 0.03 } else { 0.0 };
+
+    score += (state.pending_choices.len() as f32 * 0.05).min(0.15);
+    score += ((valid_action_count as f32 - 3.0).max(0.0) * 0.01).min(0.15);
+
+    let hostile_factions = state.factions.iter()
+        .filter(|f| f.diplomatic_stance == DiplomaticStance::Hostile)
+        .count();
+    score += (hostile_factions as f32 * 0.04).min(0.08);
+
+    if state.guild.gold < 30.0 { score += 0.06; }
+    if state.guild.supplies < 10.0 { score += 0.04; }
+
+    let injured = state.adventurers.iter()
+        .filter(|a| a.status != AdventurerStatus::Dead && a.injury > 30.0)
+        .count();
+    score += (injured as f32 * 0.03).min(0.09);
+
+    let low_loyalty = state.adventurers.iter()
+        .filter(|a| a.status != AdventurerStatus::Dead && a.loyalty < 30.0)
+        .count();
+    score += (low_loyalty as f32 * 0.04).min(0.08);
+
+    score += (state.overworld.global_threat_level / 100.0 * 0.1).min(0.1);
+
+    score.clamp(0.0, 1.0)
+}
+
+/// Apply hindsight labels to a trajectory of samples after the campaign is complete.
+pub fn apply_hindsight_labels(
+    samples: &mut [BfsSample],
+    final_outcome: Option<&str>,
+    final_progress: f32,
+) {
+    let won = match final_outcome {
+        Some("Victory") => Some(true),
+        Some("Defeat") => Some(false),
+        _ => None,
+    };
+
+    let n = samples.len();
+    for i in 0..n {
+        samples[i].trajectory_won = won;
+        samples[i].campaign_outcome = Some(final_progress);
+
+        let mut cascade = 0.0f32;
+        let mut count = 0;
+        let current_value = samples[i].leaf_value;
+        for j in (i + 1)..n.min(i + 4) {
+            cascade += samples[j].leaf_value - current_value;
+            count += 1;
+        }
+        samples[i].cascade_score = if count > 0 { cascade / count as f32 } else { 0.0 };
+    }
+}
+
+/// Assign contrastive pair IDs to samples: for each root, pair the best and worst branches.
+pub fn assign_contrastive_pairs(samples: &mut [BfsSample], start_pair_id: u32) -> u32 {
+    let mut root_groups: HashMap<(u64, u64), Vec<usize>> = HashMap::new();
+    for (i, s) in samples.iter().enumerate() {
+        root_groups.entry((s.seed, s.root_tick)).or_default().push(i);
+    }
+
+    let mut pair_id = start_pair_id;
+    for (_key, indices) in &root_groups {
+        if indices.len() < 2 { continue; }
+
+        let best_idx = indices.iter().copied()
+            .max_by(|&a, &b| samples[a].leaf_value.partial_cmp(&samples[b].leaf_value)
+                .unwrap_or(std::cmp::Ordering::Equal));
+        let worst_idx = indices.iter().copied()
+            .min_by(|&a, &b| samples[a].leaf_value.partial_cmp(&samples[b].leaf_value)
+                .unwrap_or(std::cmp::Ordering::Equal));
+
+        if let (Some(best), Some(worst)) = (best_idx, worst_idx) {
+            if best != worst {
+                let spread = samples[best].leaf_value - samples[worst].leaf_value;
+                if spread > 0.1 {
+                    samples[best].contrastive_pair_id = Some(pair_id);
+                    samples[best].is_positive_example = true;
+                    samples[worst].contrastive_pair_id = Some(pair_id);
+                    samples[worst].is_positive_example = false;
+                    pair_id += 1;
+                }
+            }
+        }
+    }
+    pair_id
+}
+
+// ---------------------------------------------------------------------------
 // Sample validation (pass 6)
 // ---------------------------------------------------------------------------
 
@@ -1244,6 +1804,7 @@ pub struct BfsDatasetStats {
     pub phase_histogram: HashMap<String, usize>,
     branch_len_sum: u64,
     branch_len_count: usize,
+    pub tier_histogram: [usize; 5], // index 1-4 used (pass 9)
 }
 
 impl BfsDatasetStats {
@@ -1264,6 +1825,8 @@ impl BfsDatasetStats {
         let branch_len = sample.leaf_tick.saturating_sub(sample.root_tick);
         self.branch_len_sum += branch_len;
         self.branch_len_count += 1;
+        let tier = (sample.curriculum_tier as usize).min(4);
+        if tier >= 1 { self.tier_histogram[tier] += 1; }
     }
 
     pub fn record_spread(&mut self, spread: f32, is_dominant: bool) {
@@ -1322,6 +1885,13 @@ impl BfsDatasetStats {
             if pct < 10.0 && self.valid_samples > 100 {
                 eprintln!("  WARNING: phase '{}' has <10% coverage", phase);
             }
+        }
+        let tier_labels = ["", "beginner", "intermediate", "advanced", "expert"];
+        eprintln!("\nCurriculum tier distribution:");
+        for tier in 1..=4 {
+            let count = self.tier_histogram[tier];
+            let pct = count as f64 / total * 100.0;
+            eprintln!("  Tier {} ({:<12}) {:>5} ({:>5.1}%)", tier, tier_labels[tier], count, pct);
         }
     }
 }
@@ -1657,6 +2227,53 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
     dataset_stats.terminal_boosted = terminal_boosted;
     if balance_removed > 0 {
         eprintln!("Balancing: removed {} overrepresented samples", balance_removed);
+    }
+
+    // Post-processing: assign contrastive pairs (pass 9)
+    let pair_count = assign_contrastive_pairs(&mut all_accumulated_samples, 0);
+    if pair_count > 0 {
+        eprintln!("Contrastive pairs: {} pairs assigned", pair_count);
+    }
+
+    // Post-processing: hindsight labels by trajectory (pass 9)
+    {
+        let mut by_seed: HashMap<u64, Vec<usize>> = HashMap::new();
+        for (i, s) in all_accumulated_samples.iter().enumerate() {
+            by_seed.entry(s.seed).or_default().push(i);
+        }
+        let mut hindsight_count = 0usize;
+        let trajectory_count = by_seed.len();
+        for (_seed, mut indices) in by_seed {
+            indices.sort_by_key(|&i| all_accumulated_samples[i].root_tick);
+            let last_idx = *indices.last().unwrap();
+            let final_outcome = all_accumulated_samples[last_idx].leaf_outcome.clone();
+            let final_progress = all_accumulated_samples[last_idx].leaf_value / 5.0;
+
+            let won = match final_outcome.as_deref() {
+                Some("Victory") => Some(true),
+                Some("Defeat") => Some(false),
+                _ => None,
+            };
+
+            let n = indices.len();
+            for (pos, &idx) in indices.iter().enumerate() {
+                all_accumulated_samples[idx].trajectory_won = won;
+                all_accumulated_samples[idx].campaign_outcome = Some(final_progress);
+
+                let mut cascade = 0.0f32;
+                let mut count = 0;
+                let current_value = all_accumulated_samples[idx].leaf_value;
+                for j in (pos + 1)..n.min(pos + 4) {
+                    cascade += all_accumulated_samples[indices[j]].leaf_value - current_value;
+                    count += 1;
+                }
+                all_accumulated_samples[idx].cascade_score =
+                    if count > 0 { cascade / count as f32 } else { 0.0 };
+                hindsight_count += 1;
+            }
+        }
+        eprintln!("Hindsight labels: applied to {} samples across {} trajectories",
+            hindsight_count, trajectory_count);
     }
 
     // Write all validated, deduped, balanced samples with compact serialization (pass 6)
@@ -2212,12 +2829,19 @@ fn expand_root(
         return (vec![], vec![]);
     }
 
-    let valid_actions = root.state.valid_actions();
-    let grouped = group_actions(&valid_actions);
+    let raw_valid_actions = root.state.valid_actions();
+    // Pass 10: prune irrelevant actions, then cluster for diversity
+    let pruned_actions = prune_irrelevant_actions(&raw_valid_actions, &root.state);
+    let clustered_actions = cluster_similar_actions(&pruned_actions, &root.state);
+    let grouped = group_actions(&clustered_actions);
     let root_tokens = root.state.to_tokens();
     let root_tick = root.state.tick;
     let root_phase = phase_tag(root_tick, root.state.overworld.campaign_progress);
-    let valid_action_types: Vec<String> = grouped.iter().map(|(t, _)| t.clone()).collect();
+    // valid_action_types still reflects ALL valid actions for RL context
+    let valid_action_types: Vec<String> = {
+        let all_grouped = group_actions(&raw_valid_actions);
+        all_grouped.iter().map(|(t, _)| t.clone()).collect()
+    };
 
     let num_action_types = grouped.len();
     if num_action_types == 0 {
@@ -2242,16 +2866,30 @@ fn expand_root(
         .round() as usize;
     let target_branches = target_branches.min(num_action_types);
 
-    // UCB-style action selection (pass 5)
+    // Compute impact estimates for all grouped actions (pass 10)
+    let impact_scores: Vec<f32> = grouped.iter()
+        .map(|(_, action)| estimate_impact(action, &root.state))
+        .collect();
+
+    // UCB-style action selection with impact weighting (pass 5 + pass 10)
     let mut scored_actions: Vec<(f32, usize)> = {
         let shared_guard = shared.lock().unwrap();
         grouped.iter().enumerate().map(|(idx, (action_type, _))| {
             let sv = strategic_value_of(action_type);
             let ucb = shared_guard.ucb_score(action_type, sv);
-            (ucb, idx)
+            // Blend UCB with impact estimate (pass 10)
+            let impact_bonus = impact_scores[idx] * 0.5;
+            (ucb + impact_bonus, idx)
         }).collect()
     };
     scored_actions.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Hierarchical action selection (pass 10): ensure bucket diversity
+    let hierarchical_rng = root.seed.wrapping_mul(6364136223846793005)
+        .wrapping_add(root.state.tick).wrapping_add(wave as u64);
+    let hierarchical_indices = hierarchical_select_actions(
+        &grouped, target_branches, shared, hierarchical_rng,
+    );
 
     // Progressive widening (pass 5)
     let first_wave_k = if num_action_types > 20 {
@@ -2260,10 +2898,31 @@ fn expand_root(
         target_branches
     };
 
-    let mut selected_indices: Vec<usize> = scored_actions.iter()
-        .take(first_wave_k.min(target_branches))
-        .map(|(_, idx)| *idx)
-        .collect();
+    // Merge UCB-scored top-k with hierarchical diversity picks (pass 10)
+    let mut selected_set: HashSet<usize> = HashSet::new();
+    let mut selected_indices: Vec<usize> = Vec::with_capacity(target_branches);
+
+    // First half from UCB scoring (exploitation)
+    let ucb_budget = first_wave_k.min(target_branches) / 2;
+    for &(_, idx) in scored_actions.iter().take(ucb_budget) {
+        if selected_set.insert(idx) {
+            selected_indices.push(idx);
+        }
+    }
+    // Second half from hierarchical bucket-diverse selection (exploration)
+    for idx in hierarchical_indices {
+        if selected_indices.len() >= first_wave_k.min(target_branches) { break; }
+        if selected_set.insert(idx) {
+            selected_indices.push(idx);
+        }
+    }
+    // Fill remainder from UCB if needed
+    for &(_, idx) in &scored_actions {
+        if selected_indices.len() >= first_wave_k.min(target_branches) { break; }
+        if selected_set.insert(idx) {
+            selected_indices.push(idx);
+        }
+    }
 
     let total_ucb: f32 = scored_actions.iter().map(|(s, _)| *s).sum();
 
@@ -2292,7 +2951,21 @@ fn expand_root(
         importance_weight: f32,
         action_strategic_value: f32,
         ucb_idx: usize,
+        // pass 8 fields
+        action_meta: Vec<f32>,
+        action_prereqs: Vec<f32>,
+        action_outcome: Vec<f32>,
+        action_synergy_score: f32,
+        // pass 10 field
+        estimated_impact: f32,
     }
+
+    // Compute curriculum fields once per root (pass 9)
+    let root_curriculum_tier = compute_curriculum_tier(&root.state, num_action_types);
+    let root_state_complexity = compute_state_complexity(&root.state, num_action_types);
+
+    // Track recent actions for synergy (pass 8)
+    let recent_action_types: Vec<String> = Vec::new();
 
     let mut branch_results: Vec<BranchResult> = Vec::new();
 
@@ -2326,6 +2999,15 @@ fn expand_root(
         let selection_prob = if total_ucb > 0.0 { action_ucb / total_ucb } else { 1.0 / num_action_types as f32 };
         let importance_weight = (1.0 / selection_prob.max(0.001)).min(100.0);
 
+        // Pass 8: compute action metadata
+        let meta_feats = action_meta_features(action_type);
+        let ctx = action_context(action, &root.state);
+        let outcome_pred = predict_outcome(action, &root.state);
+        let synergy = action_synergy(&recent_action_types, action_type);
+
+        // Pass 10: impact estimate
+        let action_impact = impact_scores.get(idx).copied().unwrap_or(0.5);
+
         branch_results.push(BranchResult {
             action_type: action_type.clone(),
             action_detail,
@@ -2344,6 +3026,11 @@ fn expand_root(
             importance_weight,
             action_strategic_value: sv,
             ucb_idx: idx,
+            action_meta: meta_feats,
+            action_prereqs: ctx.to_features(),
+            action_outcome: outcome_pred.to_features(),
+            action_synergy_score: synergy,
+            estimated_impact: action_impact,
         });
     }
 
@@ -2392,6 +3079,12 @@ fn expand_root(
                 let selection_prob = if total_ucb > 0.0 { action_ucb / total_ucb } else { 1.0 / num_action_types as f32 };
                 let importance_weight = (1.0 / selection_prob.max(0.001)).min(100.0);
 
+                let meta_feats = action_meta_features(action_type);
+                let ctx = action_context(action, &root.state);
+                let outcome_pred = predict_outcome(action, &root.state);
+                let synergy = action_synergy(&recent_action_types, action_type);
+                let action_impact = impact_scores.get(idx).copied().unwrap_or(0.5);
+
                 branch_results.push(BranchResult {
                     action_type: action_type.clone(),
                     action_detail,
@@ -2410,6 +3103,11 @@ fn expand_root(
                     importance_weight,
                     action_strategic_value: sv,
                     ucb_idx: idx,
+                    action_meta: meta_feats,
+                    action_prereqs: ctx.to_features(),
+                    action_outcome: outcome_pred.to_features(),
+                    action_synergy_score: synergy,
+                    estimated_impact: action_impact,
                 });
             }
             selected_indices.extend(extra_indices);
@@ -2441,9 +3139,12 @@ fn expand_root(
         let value_delta = br.leaf_value - root_value;
         let is_best = best_idx == Some(i);
         let advantage = normalized_advantages[i];
-        let replay_priority = compute_replay_priority(advantage, &br.action_type, &local_action_counts, &root.state);
+        // Weight replay priority by impact (pass 10): high-impact actions get higher priority
+        let impact_weighted_priority = compute_replay_priority(advantage, &br.action_type, &local_action_counts, &root.state)
+            * (0.5 + br.estimated_impact);
         let delta = compute_state_delta(&root.state, &br.branch_state);
         let rel_value = relative_value(br.leaf_value, &root_phase);
+        let teaches = compute_teaches(&root.state, &br.action_type, &Some(delta.clone()), &valid_action_types);
 
         samples.push(BfsSample {
             root_tokens: root_tokens.clone(),
@@ -2471,12 +3172,28 @@ fn expand_root(
             value_delta,
             is_best_action: is_best,
             advantage,
-            replay_priority,
+            replay_priority: impact_weighted_priority,
             intermediate_values: br.intermediate_values,
             baseline_value,
             advantage_vs_baseline: br.leaf_value - baseline_value,
             state_novelty: br.state_novelty,
             importance_weight: br.importance_weight,
+            // Pass 8 fields
+            action_meta: br.action_meta,
+            action_prereqs: br.action_prereqs,
+            action_outcome: br.action_outcome,
+            action_synergy: br.action_synergy_score,
+            // Pass 9 fields
+            curriculum_tier: root_curriculum_tier,
+            teaches,
+            trajectory_won: None,     // set post-hoc via apply_hindsight_labels
+            campaign_outcome: None,   // set post-hoc via apply_hindsight_labels
+            cascade_score: 0.0,       // set post-hoc via apply_hindsight_labels
+            contrastive_pair_id: None, // set post-hoc via assign_contrastive_pairs
+            is_positive_example: false,
+            state_complexity: root_state_complexity,
+            // Pass 10 field
+            estimated_impact: br.estimated_impact,
         });
 
         if !br.terminal {

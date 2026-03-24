@@ -20,6 +20,7 @@
 //! ```
 
 pub mod ability_gen;
+pub mod action_meta;
 pub mod actions;
 pub mod backstory;
 pub mod batch;

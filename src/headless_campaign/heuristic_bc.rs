@@ -10,6 +10,9 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+use super::action_meta::{
+    action_meta_features, action_context, predict_outcome, action_synergy,
+};
 use super::actions::*;
 use super::batch::heuristic_policy;
 use super::config::CampaignConfig;
@@ -40,6 +43,18 @@ pub struct BcSample {
     pub starting_choice: String,
     /// World template (derived from region names).
     pub world_template: String,
+    /// Action metadata features (category, cost, risk, etc.) — 8 floats. (pass 8)
+    #[serde(default)]
+    pub action_meta: Vec<f32>,
+    /// Action prerequisite context — 5 floats. (pass 8)
+    #[serde(default)]
+    pub action_prereqs: Vec<f32>,
+    /// Predicted outcome features — 4 floats. (pass 8)
+    #[serde(default)]
+    pub action_outcome: Vec<f32>,
+    /// Synergy score with recent actions (0-1). (pass 8)
+    #[serde(default)]
+    pub action_synergy: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -412,6 +427,7 @@ fn run_single_bc_campaign(
 
     let world_template = detect_world_template(&state);
     let mut starting_choice_name = String::new();
+    let mut recent_action_types: Vec<String> = Vec::new();
 
     loop {
         if state.tick > max_ticks {
@@ -461,6 +477,18 @@ fn run_single_bc_campaign(
                 action_type_name(va) == action_type
             }).unwrap_or(0);
 
+            // Compute action metadata features for this decision (pass 8)
+            let meta_feats = action_meta_features(&action_type);
+            let ctx = action_context(action, &state);
+            let outcome_pred = predict_outcome(action, &state);
+            let synergy = action_synergy(&recent_action_types, &action_type);
+
+            // Track recent actions for synergy (keep last 10)
+            recent_action_types.push(action_type.clone());
+            if recent_action_types.len() > 10 {
+                recent_action_types.remove(0);
+            }
+
             // Record sample (at sample_rate)
             decision_count += 1;
             if decision_count % sample_rate == 0 {
@@ -474,6 +502,10 @@ fn run_single_bc_campaign(
                     outcome: String::new(), // filled later
                     starting_choice: starting_choice_name.clone(),
                     world_template: world_template.clone(),
+                    action_meta: meta_feats,
+                    action_prereqs: ctx.to_features(),
+                    action_outcome: outcome_pred.to_features(),
+                    action_synergy: synergy,
                 });
             }
         }

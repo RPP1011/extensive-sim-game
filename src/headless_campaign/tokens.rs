@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::action_meta::action_space_summary_token;
 use super::state::*;
 
 /// A single entity token for the V6 entity encoder.
@@ -190,6 +191,9 @@ impl CampaignState {
 
         // Type 9: Aggregate (singleton)
         tokens.push(self.aggregate_token());
+
+        // Type 10: Action space summary (singleton)
+        tokens.push(action_space_summary_token(self));
 
         tokens
     }
