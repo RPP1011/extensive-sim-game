@@ -69,6 +69,13 @@ pub fn generate_name(archetype: &str, effect_type: usize, is_passive: bool, rng:
         13 => { let o = ["feast", "siphon", "leech", "devour", "absorb", "thirst"]; o[(xrng(rng) as usize) % o.len()] }
         14 => { let o = ["execute", "reap", "cull", "finish", "sever", "end"]; o[(xrng(rng) as usize) % o.len()] }
         15 => { let o = ["revive", "rebirth", "renewal", "rise", "resurrect", "awaken"]; o[(xrng(rng) as usize) % o.len()] }
+        17 => { let o = ["stride", "swiftness", "haste", "march", "trek", "passage"]; o[(xrng(rng) as usize) % o.len()] }
+        18 => { let o = ["provision", "sustenance", "ration", "bounty", "harvest", "reserve"]; o[(xrng(rng) as usize) % o.len()] }
+        19 => { let o = ["insight", "fortune", "boon", "windfall", "reward", "tithe"]; o[(xrng(rng) as usize) % o.len()] }
+        20 => { let o = ["sight", "vigil", "watchtower", "survey", "recon", "farsight"]; o[(xrng(rng) as usize) % o.len()] }
+        21 => { let o = ["pact", "accord", "envoy", "parley", "decree", "embassy"]; o[(xrng(rng) as usize) % o.len()] }
+        22 => { let o = ["veil", "subtlety", "concealment", "discretion", "cover", "evasion"]; o[(xrng(rng) as usize) % o.len()] }
+        23 => { let o = ["aura", "rite", "mandate", "charter", "doctrine", "edict"]; o[(xrng(rng) as usize) % o.len()] }
         _ => "technique",
     };
 
@@ -95,7 +102,19 @@ fn categorize_for_name(effect: &Effect) -> usize {
         Effect::Slow { .. } => 6,
         Effect::Knockback { .. } | Effect::Pull { .. } => 7,
         Effect::Dash { .. } => 8,
-        Effect::Buff { .. } => 9,
+        Effect::Buff { stat, .. } => {
+            // Distinguish combat buffs from campaign buffs by stat name
+            match stat.as_str() {
+                "travel_speed" => 17,
+                "supply_efficiency" => 18,
+                "quest_gold_bonus" | "quest_rep_bonus" => 19,
+                "scout_range" => 20,
+                "diplomacy_bonus" => 21,
+                "threat_reduction" => 22,
+                "morale_aura" | "training_boost" | "recruit_bonus" | "passive_income" => 23,
+                _ => 9, // combat buff
+            }
+        }
         Effect::Debuff { .. } => 10,
         Effect::Summon { .. } => 11,
         Effect::Stealth { .. } => 12,
@@ -159,8 +178,11 @@ struct ArchetypeProfile {
     hint: [f32; 5],
     /// Delivery weights: [instant, projectile, channel, zone, tether, trap, chain]
     delivery: [f32; 7],
-    /// Effect type weights (17 categories)
-    effect_weights: [f32; 17],
+    /// Effect type weights (24 categories: 17 combat + 7 non-combat campaign)
+    /// 17=travel_speed, 18=supply_efficiency, 19=quest_reward,
+    /// 20=scout_range, 21=diplomacy_bonus, 22=threat_reduction,
+    /// 23=passive_income/morale_aura/training_boost/recruit_bonus (campaign utility)
+    effect_weights: [f32; 24],
     /// P(second effect)
     second_effect_chance: f32,
     /// P(has area)
@@ -178,7 +200,9 @@ fn profile_for_archetype(archetype: &str) -> ArchetypeProfile {
             cooldown: [8000, 18000],
             hint: [1.0, 3.0, 4.0, 1.0, 0.5],
             delivery: [4.0, 1.0, 0.5, 0.5, 1.0, 0.3, 0.2],
-            effect_weights: [2.0, 0.5, 3.0, 2.0, 1.0, 0.3, 1.0, 1.5, 0.5, 2.0, 0.5, 0.3, 0.1, 0.3, 0.1, 0.1, 0.5],
+            //                combat(17)                                                  | non-combat(7)
+            effect_weights: [2.0, 0.5, 3.0, 2.0, 1.0, 0.3, 1.0, 1.5, 0.5, 2.0, 0.5, 0.3, 0.1, 0.3, 0.1, 0.1, 0.5,
+                             0.2, 0.2, 0.1, 0.1, 0.1, 0.1, 0.6],
             second_effect_chance: 0.4,
             area_chance: 0.3,
             trigger: [0.5, 3.0, 0.3, 0.5, 1.0, 0.5],
@@ -190,7 +214,8 @@ fn profile_for_archetype(archetype: &str) -> ArchetypeProfile {
             cooldown: [5000, 12000],
             hint: [4.0, 1.0, 0.5, 2.0, 0.3],
             delivery: [2.0, 4.0, 0.5, 0.5, 0.3, 1.5, 1.0],
-            effect_weights: [4.0, 0.3, 0.5, 0.5, 0.5, 0.3, 2.0, 0.5, 1.5, 1.0, 1.0, 0.3, 1.5, 0.3, 0.5, 0.1, 0.5],
+            effect_weights: [4.0, 0.3, 0.5, 0.5, 0.5, 0.3, 2.0, 0.5, 1.5, 1.0, 1.0, 0.3, 1.5, 0.3, 0.5, 0.1, 0.5,
+                             1.5, 0.3, 0.2, 1.5, 0.2, 0.3, 0.3],
             second_effect_chance: 0.35,
             area_chance: 0.2,
             trigger: [2.0, 0.5, 1.5, 1.0, 0.5, 0.5],
@@ -202,7 +227,8 @@ fn profile_for_archetype(archetype: &str) -> ArchetypeProfile {
             cooldown: [6000, 15000],
             hint: [3.0, 2.0, 0.5, 2.0, 0.3],
             delivery: [1.5, 2.0, 2.0, 3.0, 0.5, 0.3, 1.0],
-            effect_weights: [3.0, 0.3, 1.0, 1.0, 0.5, 1.0, 1.5, 0.5, 0.5, 2.0, 1.5, 1.0, 0.3, 0.3, 0.3, 0.1, 1.0],
+            effect_weights: [3.0, 0.3, 1.0, 1.0, 0.5, 1.0, 1.5, 0.5, 0.5, 2.0, 1.5, 1.0, 0.3, 0.3, 0.3, 0.1, 1.0,
+                             0.3, 0.2, 0.3, 0.5, 0.3, 0.2, 0.3],
             second_effect_chance: 0.5,
             area_chance: 0.5,
             trigger: [1.0, 1.0, 0.5, 2.0, 1.0, 0.5],
@@ -214,7 +240,8 @@ fn profile_for_archetype(archetype: &str) -> ArchetypeProfile {
             cooldown: [8000, 20000],
             hint: [0.5, 0.5, 1.0, 1.0, 5.0],
             delivery: [3.0, 0.5, 1.0, 1.5, 1.0, 0.2, 0.3],
-            effect_weights: [0.5, 5.0, 3.0, 0.3, 0.2, 0.2, 0.3, 0.2, 0.2, 3.0, 0.3, 0.3, 0.1, 0.5, 0.1, 1.0, 0.5],
+            effect_weights: [0.5, 5.0, 3.0, 0.3, 0.2, 0.2, 0.3, 0.2, 0.2, 3.0, 0.3, 0.3, 0.1, 0.5, 0.1, 1.0, 0.5,
+                             0.2, 0.2, 0.2, 0.1, 0.3, 0.1, 1.0],
             second_effect_chance: 0.4,
             area_chance: 0.35,
             trigger: [0.3, 2.0, 0.2, 1.0, 1.5, 2.0],
@@ -226,7 +253,8 @@ fn profile_for_archetype(archetype: &str) -> ArchetypeProfile {
             cooldown: [4000, 10000],
             hint: [4.0, 1.0, 0.3, 1.5, 0.2],
             delivery: [3.0, 1.5, 0.3, 0.3, 0.5, 1.5, 0.5],
-            effect_weights: [4.0, 0.2, 0.3, 1.0, 0.3, 0.5, 1.0, 0.5, 3.0, 0.5, 2.0, 0.2, 3.0, 1.0, 1.5, 0.1, 0.5],
+            effect_weights: [4.0, 0.2, 0.3, 1.0, 0.3, 0.5, 1.0, 0.5, 3.0, 0.5, 2.0, 0.2, 3.0, 1.0, 1.5, 0.1, 0.5,
+                             0.3, 0.2, 1.2, 0.5, 0.2, 1.0, 0.3],
             second_effect_chance: 0.45,
             area_chance: 0.15,
             trigger: [3.0, 0.5, 2.0, 1.0, 0.5, 0.3],
@@ -238,7 +266,8 @@ fn profile_for_archetype(archetype: &str) -> ArchetypeProfile {
             cooldown: [5000, 12000],
             hint: [5.0, 1.0, 1.0, 0.5, 0.3],
             delivery: [4.0, 0.5, 0.5, 0.3, 0.3, 0.2, 0.5],
-            effect_weights: [5.0, 0.3, 0.5, 1.0, 0.3, 0.3, 0.5, 2.0, 2.0, 1.5, 0.5, 0.3, 0.3, 2.0, 1.0, 0.1, 0.3],
+            effect_weights: [5.0, 0.3, 0.5, 1.0, 0.3, 0.3, 0.5, 2.0, 2.0, 1.5, 0.5, 0.3, 0.3, 2.0, 1.0, 0.1, 0.3,
+                             0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.3],
             second_effect_chance: 0.35,
             area_chance: 0.25,
             trigger: [2.0, 1.5, 1.5, 0.5, 2.0, 0.3],
@@ -250,7 +279,8 @@ fn profile_for_archetype(archetype: &str) -> ArchetypeProfile {
             cooldown: [8000, 18000],
             hint: [2.0, 2.0, 0.5, 2.0, 1.0],
             delivery: [2.0, 1.0, 1.5, 2.0, 2.0, 0.5, 1.0],
-            effect_weights: [2.0, 1.0, 0.5, 0.5, 1.0, 1.5, 0.5, 0.3, 0.3, 0.5, 2.5, 3.0, 0.5, 2.0, 0.5, 0.3, 1.0],
+            effect_weights: [2.0, 1.0, 0.5, 0.5, 1.0, 1.5, 0.5, 0.3, 0.3, 0.5, 2.5, 3.0, 0.5, 2.0, 0.5, 0.3, 1.0,
+                             0.1, 0.2, 0.2, 0.3, 0.2, 0.5, 0.3],
             second_effect_chance: 0.5,
             area_chance: 0.35,
             trigger: [1.0, 1.0, 2.0, 1.0, 1.0, 1.0],
@@ -262,7 +292,8 @@ fn profile_for_archetype(archetype: &str) -> ArchetypeProfile {
             cooldown: [6000, 15000],
             hint: [1.0, 1.0, 1.0, 4.0, 1.5],
             delivery: [3.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5],
-            effect_weights: [1.5, 2.0, 1.5, 0.5, 0.5, 0.5, 1.0, 0.5, 1.0, 3.0, 1.0, 0.5, 1.0, 0.5, 0.3, 0.3, 1.5],
+            effect_weights: [1.5, 2.0, 1.5, 0.5, 0.5, 0.5, 1.0, 0.5, 1.0, 3.0, 1.0, 0.5, 1.0, 0.5, 0.3, 0.3, 1.5,
+                             0.5, 1.0, 0.5, 0.3, 1.5, 0.3, 1.5],
             second_effect_chance: 0.5,
             area_chance: 0.3,
             trigger: [1.0, 1.0, 0.5, 2.0, 0.5, 2.0],
@@ -280,7 +311,7 @@ fn profile_for_archetype(archetype: &str) -> ArchetypeProfile {
 fn apply_history_biases(p: &mut ArchetypeProfile, history: &std::collections::HashMap<String, u32>) {
     let get = |key: &str| -> f32 { *history.get(key).unwrap_or(&0) as f32 };
 
-    // Solo play → boost self-targeting, sustain effects
+    // Solo play → boost self-targeting, sustain, threat reduction
     let solo = get("solo");
     if solo > 0.0 {
         let s = (solo / 10.0).min(1.5); // caps at 15 solo quests
@@ -288,17 +319,27 @@ fn apply_history_biases(p: &mut ArchetypeProfile, history: &std::collections::Ha
         p.effect_weights[1] += s;        // heal
         p.effect_weights[2] += s;        // shield
         p.effect_weights[13] += s * 1.5; // lifesteal
+        p.effect_weights[22] += s * 1.0; // threat_reduction
         p.passive_chance += s * 0.05;
     }
 
-    // Party combat → boost ally targeting, aura/buff effects
+    // Party combat → boost ally targeting, aura/buff, morale
     let party = get("party_combat");
     if party > 0.0 {
         let s = (party / 10.0).min(1.5);
         p.targeting[1] += s * 2.0;       // ally
         p.targeting[3] += s;             // self_aoe
         p.effect_weights[9] += s * 2.0;  // buff
+        p.effect_weights[23] += s * 1.5; // morale_aura/training (campaign utility)
         p.hint[3] += s;                  // utility
+    }
+
+    // Gather quests → boost supply efficiency
+    let gather = get("gather");
+    if gather > 0.0 {
+        let s = (gather / 8.0).min(1.5);
+        p.effect_weights[18] += s * 2.0; // supply_efficiency
+        p.effect_weights[23] += s * 0.5; // passive_income (campaign utility)
     }
 
     // Near death → boost defensive/survival
@@ -322,23 +363,26 @@ fn apply_history_biases(p: &mut ArchetypeProfile, history: &std::collections::Ha
         p.effect_weights[14] += s * 0.5;  // execute
     }
 
-    // Exploration → boost mobility and utility
+    // Exploration → boost mobility, utility, and campaign travel/scout
     let explore = get("exploration");
     if explore > 0.0 {
         let s = (explore / 8.0).min(1.5);
         p.effect_weights[8] += s * 2.0;   // dash
         p.effect_weights[12] += s;         // stealth
+        p.effect_weights[17] += s * 1.5;  // travel_speed
+        p.effect_weights[20] += s * 1.5;  // scout_range
         p.hint[3] += s;                    // utility
         p.range[1] += s;                   // longer range
     }
 
-    // Diplomatic → boost crowd control and debuffs
+    // Diplomatic → boost crowd control, debuffs, and diplomacy bonus
     let diplo = get("diplomatic");
     if diplo > 0.0 {
         let s = (diplo / 5.0).min(1.5);
         p.effect_weights[3] += s;          // stun
         p.effect_weights[6] += s;          // slow
         p.effect_weights[10] += s * 1.5;   // debuff
+        p.effect_weights[21] += s * 2.0;   // diplomacy_bonus
         p.hint[1] += s;                    // crowd_control
     }
 
@@ -595,6 +639,49 @@ fn gen_effect(p: &ArchetypeProfile, level_scale: f32, rng: &mut u64) -> Conditio
         },
         14 => Effect::Execute { hp_threshold_percent: 0.15 + rf(rng) * 0.25 },
         15 => Effect::Resurrect { hp_percent: 0.3 + rf(rng) * 0.4 },
+
+        // --- Non-combat campaign effects (encoded as Buff with campaign stat names) ---
+        17 => Effect::Buff {
+            stat: "travel_speed".into(),
+            factor: ((0.1 + rf(rng) * 0.3) * 20.0).round() / 20.0,
+            duration_ms: if rf(rng) < 0.4 { 0 } else { ((15000 + (rf(rng) * 45000.0) as u32) / 5000) * 5000 },
+        },
+        18 => Effect::Buff {
+            stat: "supply_efficiency".into(),
+            factor: ((0.1 + rf(rng) * 0.25) * 20.0).round() / 20.0,
+            duration_ms: if rf(rng) < 0.5 { 0 } else { ((20000 + (rf(rng) * 40000.0) as u32) / 5000) * 5000 },
+        },
+        19 => Effect::Buff {
+            stat: ["quest_gold_bonus", "quest_rep_bonus"][(xrng(rng) as usize) % 2].into(),
+            factor: ((0.1 + rf(rng) * 0.3) * 20.0).round() / 20.0,
+            duration_ms: 0, // permanent (passive quest reward)
+        },
+        20 => Effect::Buff {
+            stat: "scout_range".into(),
+            factor: ((0.15 + rf(rng) * 0.35) * 20.0).round() / 20.0,
+            duration_ms: if rf(rng) < 0.3 { 0 } else { ((20000 + (rf(rng) * 40000.0) as u32) / 5000) * 5000 },
+        },
+        21 => Effect::Buff {
+            stat: "diplomacy_bonus".into(),
+            factor: ((0.1 + rf(rng) * 0.3) * 20.0).round() / 20.0,
+            duration_ms: if rf(rng) < 0.5 { 0 } else { ((30000 + (rf(rng) * 30000.0) as u32) / 5000) * 5000 },
+        },
+        22 => Effect::Buff {
+            stat: "threat_reduction".into(),
+            factor: ((0.1 + rf(rng) * 0.25) * 20.0).round() / 20.0,
+            duration_ms: if rf(rng) < 0.4 { 0 } else { ((20000 + (rf(rng) * 40000.0) as u32) / 5000) * 5000 },
+        },
+        23 => {
+            // Campaign utility grab bag: morale, training, recruit, passive income
+            let stat = ["morale_aura", "training_boost", "recruit_bonus", "passive_income"]
+                [(xrng(rng) as usize) % 4];
+            Effect::Buff {
+                stat: stat.into(),
+                factor: ((0.1 + rf(rng) * 0.3) * 20.0).round() / 20.0,
+                duration_ms: if rf(rng) < 0.5 { 0 } else { ((20000 + (rf(rng) * 40000.0) as u32) / 5000) * 5000 },
+            }
+        },
+
         _ => Effect::Damage {
             amount: (15.0 * level_scale) as i32,
             amount_per_tick: 0, duration_ms: 0, tick_interval_ms: 0,

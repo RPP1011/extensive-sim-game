@@ -438,13 +438,23 @@ fn to_pascal(name: &str) -> String {
 }
 
 fn pick_stat(effect_index: usize) -> &'static str {
-    // Cycle through common stats for variety
-    match effect_index % 5 {
+    // Cycle through combat + campaign stats for variety
+    match effect_index % 15 {
         0 => "attack_damage",
         1 => "defense",
         2 => "attack_speed",
         3 => "move_speed",
-        _ => "damage_output",
+        4 => "damage_output",
+        5 => "travel_speed",
+        6 => "supply_efficiency",
+        7 => "quest_gold_bonus",
+        8 => "scout_range",
+        9 => "diplomacy_bonus",
+        10 => "threat_reduction",
+        11 => "morale_aura",
+        12 => "training_boost",
+        13 => "recruit_bonus",
+        _ => "passive_income",
     }
 }
 

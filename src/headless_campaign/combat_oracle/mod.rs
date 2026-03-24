@@ -162,6 +162,7 @@ mod tests {
             faction_id: None,
             rallying_to: None,
                     tier_status: Default::default(),
+                    history_tags: Default::default(),
         }
     }
 
