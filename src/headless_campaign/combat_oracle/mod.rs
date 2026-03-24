@@ -6,8 +6,8 @@
 //!
 //! Three implementations:
 //! - `HeuristicOracle`: deterministic formula-based (no training data needed)
-//! - `TacticalBridge`: runs actual combat sim with generated abilities (~0.1ms)
 //! - `MlpOracle`: small trained MLP (future — requires combat sim dataset)
+//! - `TacticalSim`: runs full deterministic combat (see `tactical_bridge`)
 
 pub mod tactical_bridge;
 
@@ -50,7 +50,12 @@ pub struct HeuristicOracle;
 impl HeuristicOracle {
     /// Compute aggregate party power from member stats.
     fn party_power(members: &[&Adventurer]) -> f32 {
-        members
+        Self::party_power_with_bonus(members, 0.0)
+    }
+
+    /// Compute aggregate party power with an additional flat bonus from unlocks.
+    fn party_power_with_bonus(members: &[&Adventurer], unlock_bonus: f32) -> f32 {
+        let base_power: f32 = members
             .iter()
             .map(|a| {
                 let base = a.stats.attack + a.stats.defense + a.stats.ability_power;
@@ -61,7 +66,53 @@ impl HeuristicOracle {
 
                 (base + level_bonus) * hp_factor * condition.max(0.1) * morale_factor
             })
-            .sum()
+            .sum();
+        base_power + unlock_bonus
+    }
+
+    /// Predict with unlock power bonus factored in.
+    pub fn predict_with_unlocks(
+        &self,
+        party_members: &[&Adventurer],
+        enemy_strength: f32,
+        threat_level: f32,
+        unlocks: &[UnlockInstance],
+    ) -> CombatOracleResult {
+        if party_members.is_empty() {
+            return CombatOracleResult {
+                victory_probability: 0.0,
+                expected_hp_remaining: 0.0,
+                expected_ticks: 1,
+                expected_casualties: 0.0,
+            };
+        }
+
+        let unlock_bonus = tactical_bridge::unlock_power_bonus(unlocks);
+        let party_pow = Self::party_power_with_bonus(party_members, unlock_bonus);
+        let enemy_pow = enemy_strength * (threat_level / 50.0).max(0.5);
+        let ratio = party_pow / enemy_pow.max(1.0);
+
+        let win_prob = Self::win_probability(ratio);
+
+        let hp_remaining = if win_prob > 0.5 {
+            (0.3 + 0.5 * (ratio - 1.0).max(0.0).min(1.0)).min(0.95)
+        } else {
+            (0.1 * ratio).min(0.3)
+        };
+
+        let base_duration = 30;
+        let difficulty_factor = (2.0 - ratio).max(0.5).min(3.0);
+        let duration = (base_duration as f32 * difficulty_factor) as u64;
+
+        let casualty_rate = (1.0 - win_prob) * 0.5;
+        let expected_casualties = party_members.len() as f32 * casualty_rate;
+
+        CombatOracleResult {
+            victory_probability: win_prob,
+            expected_hp_remaining: hp_remaining,
+            expected_ticks: duration.max(5),
+            expected_casualties,
+        }
     }
 
     /// Estimate victory probability from power ratio.
@@ -164,8 +215,8 @@ mod tests {
             is_player_character: false,
             faction_id: None,
             rallying_to: None,
-                    tier_status: Default::default(),
-                    history_tags: Default::default(),
+            tier_status: Default::default(),
+            history_tags: Default::default(),
         }
     }
 

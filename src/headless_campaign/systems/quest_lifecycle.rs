@@ -5,7 +5,6 @@
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::combat_oracle::HeuristicOracle;
-use crate::headless_campaign::combat_oracle::CombatOracle;
 use crate::headless_campaign::state::*;
 
 pub fn tick_quest_lifecycle(
@@ -55,17 +54,20 @@ pub fn tick_quest_lifecycle(
 
                         let party_id = quest.dispatched_party_id.unwrap();
 
-                        // Use combat oracle for outcome prediction
+                        // Use combat oracle for outcome prediction.
+                        // Factoring in unlock power makes generated abilities
+                        // affect even the sigmoid oracle's predictions.
                         let oracle = HeuristicOracle;
                         let members: Vec<&Adventurer> = state
                             .adventurers
                             .iter()
                             .filter(|a| a.party_id == Some(party_id))
                             .collect();
-                        let oracle_result = oracle.predict(
+                        let oracle_result = oracle.predict_with_unlocks(
                             &members,
                             quest.request.threat_level,
                             quest.request.threat_level,
+                            &state.unlocks,
                         );
                         let party_health = oracle_result.expected_hp_remaining;
                         // Map win probability to predicted_outcome range (-1 to 1)
