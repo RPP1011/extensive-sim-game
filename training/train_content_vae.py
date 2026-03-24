@@ -141,21 +141,83 @@ def free_bits_kl(mu, logvar, free_bits=0.1):
     return kl_clamped.sum()
 
 
+# Categorical slot ranges in the 142-dim ability vector
+# These use one-hot encoding and need cross-entropy, not MSE
+ABILITY_CATEGORICAL_RANGES = [
+    (0, 3),     # output_type: active/passive/class
+    (3, 11),    # targeting: 8 types
+    (15, 20),   # hint: 5 types
+    (20, 27),   # delivery type: 7 types
+]
+# Per-effect categorical ranges (4 effects × 25 dims starting at 42)
+for eff_i in range(4):
+    base = 42 + eff_i * 25
+    ABILITY_CATEGORICAL_RANGES.append((base, base + 17))       # effect type: 17 categories
+    ABILITY_CATEGORICAL_RANGES.append((base + 19, base + 24))  # area shape: 5 types
+
+# Class categorical ranges in the 75-dim class vector
+CLASS_CATEGORICAL_RANGES = [
+    (5, 21),    # tags multi-hot (16)  — keep as MSE/BCE since multi-hot
+    (21, 32),   # scaling source: 11 types
+]
+
+
 def vae_loss(ability_pred, class_pred, ct_logits, mu, logvar,
              ability_target, class_target, ct_target,
              beta=1.0, free_bits=0.1):
-    """Combined loss: reconstruction + free-bits KL + content type CE."""
+    """Combined loss with CE on categoricals, MSE on continuous slots."""
+    n = mu.size(0)
     ct_loss = F.cross_entropy(ct_logits, ct_target)
 
-    is_ability = (ct_target == 0).float().unsqueeze(1)
-    is_class = (ct_target == 1).float().unsqueeze(1)
+    is_ability = (ct_target == 0).float()
+    is_class = (ct_target == 1).float()
 
-    ability_recon = F.mse_loss(ability_pred * is_ability, ability_target * is_ability, reduction='sum')
-    class_recon = F.mse_loss(class_pred * is_class, class_target * is_class, reduction='sum')
+    # --- Ability loss: CE on categoricals + MSE on continuous ---
+    ab_ce_loss = torch.tensor(0.0, device=mu.device)
+    ab_mse_loss = torch.tensor(0.0, device=mu.device)
+    n_ab = is_ability.sum().clamp(min=1)
 
-    n = mu.size(0)
-    recon_loss = (ability_recon + class_recon) / n
+    if n_ab > 0:
+        ab_mask = is_ability.bool()
+        ab_p = ability_pred[ab_mask]
+        ab_t = ability_target[ab_mask]
 
+        # Cross-entropy on each categorical range
+        categorical_dims = set()
+        for start, end in ABILITY_CATEGORICAL_RANGES:
+            # Target: argmax of the one-hot target
+            target_idx = ab_t[:, start:end].argmax(dim=1)
+            # Prediction: treat as logits
+            logits = ab_p[:, start:end]
+            ab_ce_loss = ab_ce_loss + F.cross_entropy(logits, target_idx)
+            for d in range(start, end):
+                categorical_dims.add(d)
+
+        # MSE on continuous dims only
+        continuous_mask = torch.ones(ability_pred.shape[1], dtype=torch.bool, device=mu.device)
+        for d in categorical_dims:
+            continuous_mask[d] = False
+        ab_mse_loss = F.mse_loss(ab_p[:, continuous_mask], ab_t[:, continuous_mask])
+
+    # --- Class loss: MSE (class slots are mostly continuous) ---
+    cl_loss = torch.tensor(0.0, device=mu.device)
+    n_cl = is_class.sum().clamp(min=1)
+    if n_cl > 0:
+        cl_mask = is_class.bool()
+        cl_p = class_pred[cl_mask]
+        cl_t = class_target[cl_mask]
+
+        # CE on scaling source
+        for start, end in CLASS_CATEGORICAL_RANGES:
+            if end <= cl_t.shape[1]:
+                target_idx = cl_t[:, start:end].argmax(dim=1)
+                logits = cl_p[:, start:end]
+                cl_loss = cl_loss + F.cross_entropy(logits, target_idx)
+
+        # MSE on all class dims (categoricals are also fine with MSE for multi-hot)
+        cl_loss = cl_loss + F.mse_loss(cl_p, cl_t)
+
+    recon_loss = ab_ce_loss + ab_mse_loss * 10.0 + cl_loss  # weight MSE to balance with CE
     kl_loss = free_bits_kl(mu, logvar, free_bits)
 
     total = recon_loss + ct_loss + beta * kl_loss
