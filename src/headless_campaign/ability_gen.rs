@@ -8,6 +8,104 @@
 
 use std::collections::HashMap;
 
+// ---------------------------------------------------------------------------
+// Thematic naming
+// ---------------------------------------------------------------------------
+
+/// Generate a thematic ability name from mechanics + archetype.
+pub fn generate_name(archetype: &str, effect_type: usize, is_passive: bool, rng: &mut u64) -> String {
+    // Archetype-flavored prefixes
+    let prefix = match archetype {
+        "knight" | "guardian" | "paladin" | "tank" => {
+            let opts = ["iron", "steel", "sentinel", "bastion", "fortress", "vanguard", "aegis", "bulwark"];
+            opts[(xrng(rng) as usize) % opts.len()]
+        }
+        "ranger" | "archer" | "scout" => {
+            let opts = ["wild", "swift", "keen", "stalker", "hawk", "wind", "frontier", "pathfinder"];
+            opts[(xrng(rng) as usize) % opts.len()]
+        }
+        "mage" | "sorcerer" | "enchanter" | "caster" => {
+            let opts = ["arcane", "mystic", "elder", "astral", "void", "primal", "ether", "rune"];
+            opts[(xrng(rng) as usize) % opts.len()]
+        }
+        "cleric" | "healer" | "druid" => {
+            let opts = ["sacred", "blessed", "divine", "gentle", "radiant", "serene", "verdant", "dawn"];
+            opts[(xrng(rng) as usize) % opts.len()]
+        }
+        "rogue" | "assassin" => {
+            let opts = ["shadow", "venom", "silent", "phantom", "dusk", "ghost", "razor", "whisper"];
+            opts[(xrng(rng) as usize) % opts.len()]
+        }
+        "berserker" | "warrior" | "fighter" => {
+            let opts = ["blood", "fury", "war", "savage", "brutal", "storm", "rage", "titan"];
+            opts[(xrng(rng) as usize) % opts.len()]
+        }
+        "necromancer" | "warlock" => {
+            let opts = ["dark", "soul", "grave", "blight", "hollow", "death", "hex", "curse"];
+            opts[(xrng(rng) as usize) % opts.len()]
+        }
+        "bard" | "shaman" | "monk" | "artificer" => {
+            let opts = ["echo", "spirit", "harmony", "pulse", "mantra", "chant", "rhythm", "craft"];
+            opts[(xrng(rng) as usize) % opts.len()]
+        }
+        _ => "battle",
+    };
+
+    // Effect-derived suffixes
+    let suffix = match effect_type {
+        0 => { let o = ["strike", "bolt", "blast", "barrage", "rend", "cleave"]; o[(xrng(rng) as usize) % o.len()] }
+        1 => { let o = ["mend", "grace", "restoration", "prayer", "salve", "balm"]; o[(xrng(rng) as usize) % o.len()] }
+        2 => { let o = ["ward", "barrier", "bulwark", "aegis", "shell", "guard"]; o[(xrng(rng) as usize) % o.len()] }
+        3 => { let o = ["lock", "hold", "shackle", "bind", "stasis", "freeze"]; o[(xrng(rng) as usize) % o.len()] }
+        4 => { let o = ["root", "snare", "anchor", "grip", "tangle", "vine"]; o[(xrng(rng) as usize) % o.len()] }
+        5 => { let o = ["silence", "hush", "void", "mute", "seal", "suppress"]; o[(xrng(rng) as usize) % o.len()] }
+        6 => { let o = ["chill", "drag", "weight", "bog", "mire", "crawl"]; o[(xrng(rng) as usize) % o.len()] }
+        7 => { let o = ["push", "repel", "thrust", "slam", "impact", "shove"]; o[(xrng(rng) as usize) % o.len()] }
+        8 => { let o = ["rush", "leap", "charge", "dash", "surge", "flash"]; o[(xrng(rng) as usize) % o.len()] }
+        9 => { let o = ["rally", "empower", "inspire", "fortify", "bolster", "charge"]; o[(xrng(rng) as usize) % o.len()] }
+        10 => { let o = ["curse", "weaken", "corrode", "sap", "drain", "wither"]; o[(xrng(rng) as usize) % o.len()] }
+        11 => { let o = ["call", "summon", "conjure", "invoke", "manifest", "beckon"]; o[(xrng(rng) as usize) % o.len()] }
+        12 => { let o = ["veil", "cloak", "vanish", "fade", "shroud", "eclipse"]; o[(xrng(rng) as usize) % o.len()] }
+        13 => { let o = ["feast", "siphon", "leech", "devour", "absorb", "thirst"]; o[(xrng(rng) as usize) % o.len()] }
+        14 => { let o = ["execute", "reap", "cull", "finish", "sever", "end"]; o[(xrng(rng) as usize) % o.len()] }
+        15 => { let o = ["revive", "rebirth", "renewal", "rise", "resurrect", "awaken"]; o[(xrng(rng) as usize) % o.len()] }
+        _ => "technique",
+    };
+
+    // Passive prefix
+    let passive_prefix = if is_passive {
+        let opts = ["inner", "latent", "dormant", "instinct", "reflex"];
+        format!("{}_", opts[(xrng(rng) as usize) % opts.len()])
+    } else {
+        String::new()
+    };
+
+    format!("{}{}_{}", passive_prefix, prefix, suffix)
+}
+
+/// Map an Effect to its category index for naming.
+fn categorize_for_name(effect: &Effect) -> usize {
+    match effect {
+        Effect::Damage { .. } => 0,
+        Effect::Heal { .. } => 1,
+        Effect::Shield { .. } => 2,
+        Effect::Stun { .. } => 3,
+        Effect::Root { .. } => 4,
+        Effect::Silence { .. } => 5,
+        Effect::Slow { .. } => 6,
+        Effect::Knockback { .. } | Effect::Pull { .. } => 7,
+        Effect::Dash { .. } => 8,
+        Effect::Buff { .. } => 9,
+        Effect::Debuff { .. } => 10,
+        Effect::Summon { .. } => 11,
+        Effect::Stealth { .. } => 12,
+        Effect::Lifesteal { .. } => 13,
+        Effect::Execute { .. } => 14,
+        Effect::Resurrect { .. } => 15,
+        _ => 0,
+    }
+}
+
 use tactical_sim::effects::defs::{AbilityDef, AbilityTargeting, PassiveDef};
 use tactical_sim::effects::effect_enum::Effect;
 use tactical_sim::effects::types::DamageType;
@@ -391,8 +489,12 @@ pub fn generate_ability_with_history(
         None
     };
 
+    // Determine primary effect type for naming
+    let primary_effect_type = effects.first().map(|ce| categorize_for_name(&ce.effect)).unwrap_or(0);
+    let name = generate_name(archetype, primary_effect_type, is_passive, rng);
+
     let def = AbilityDef {
-        name: format!("gen_{}", xrng(rng) % 100000),
+        name,
         targeting,
         range,
         cooldown_ms,
@@ -600,7 +702,7 @@ pub fn dump_synthetic(count: usize, seed: u64, emit_dsl: bool) {
         let level = 1 + (xrng(&mut rng) % 40) as u32;
 
         let (mut def, is_passive) = generate_ability(archetype, level, &mut rng);
-        def.name = format!("{}_L{}", archetype, level);
+        // Name is already set by generate_ability_with_history
 
         if emit_dsl {
             let dsl = if is_passive {
