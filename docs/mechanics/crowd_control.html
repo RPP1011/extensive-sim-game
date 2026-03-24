@@ -142,7 +142,11 @@ hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
 
 <h3>Slow</h3>
 <pre><code>Effect::Slow { factor: f32, duration_ms: u32 }</code></pre>
-<p>Reduces movement speed by the given factor. A <code>factor: 0.5</code> means the unit moves at 50% of its normal speed. Multiple slows don't stack &mdash; only the strongest slow applies.</p>
+<p>Tracked as a status effect with a speed reduction factor. A <code>factor: 0.5</code> represents a 50% slow.</p>
+
+<div class="callout bug">
+  <p><strong>Implementation note:</strong> The Slow status is currently applied and tracked (visible to conditions and triggers) but does <strong>not</strong> mechanically reduce <code>move_speed_per_sec</code>. It functions as a marker for AI and conditional effects. Attack speed debuffs (<code>debuff attack_speed</code>) do work mechanically.</p>
+</div>
 
 <h3>Blind</h3>
 <pre><code>Effect::Blind { miss_chance: f32, duration_ms: u32 }</code></pre>
