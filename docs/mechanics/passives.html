@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Passives &amp; Triggers &mdash; Game Mechanics Wiki</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --surface: #13161d;
+  --surface2: #1c2029;
+  --surface3: #252a36;
+  --border: #2a2f3e;
+  --border-bright: #3d4459;
+  --text: #b8c0cc;
+  --text-muted: #6b7280;
+  --heading: #e2e8f0;
+  --accent: #60a5fa;
+  --accent-dim: #2563eb;
+  --purple: #a78bfa;
+  --purple-dim: #7c3aed;
+  --green: #34d399;
+  --green-dim: #059669;
+  --red: #f87171;
+  --red-dim: #dc2626;
+  --orange: #fbbf24;
+  --orange-dim: #d97706;
+  --cyan: #22d3ee;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.78;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 4rem 2rem 8rem;
+}
+
+header {
+  margin-bottom: 3.5rem;
+  padding-bottom: 2.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.65;
+  max-width: 680px;
+}
+
+h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--heading);
+  margin-top: 4rem;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--purple);
+  margin-top: 2.5rem;
+  margin-bottom: 0.8rem;
+}
+
+p { margin-bottom: 1.1rem; }
+strong { color: var(--heading); font-weight: 600; }
+em { color: var(--text); }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+a:hover { border-bottom-color: var(--accent); }
+
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.2rem 1.5rem;
+  overflow-x: auto;
+  margin: 1.5rem 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.88em;
+}
+
+p code, li code, td code {
+  background: var(--surface2);
+  padding: 0.15em 0.45em;
+  border-radius: 4px;
+  font-size: 0.82em;
+  color: var(--accent);
+}
+
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+  font-family: 'DM Sans', sans-serif;
+}
+
+th {
+  background: var(--surface2);
+  color: var(--heading);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 2px solid var(--border-bright);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+td {
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+tr:hover td { background: var(--surface); }
+
+.callout {
+  background: var(--surface);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: 0 8px 8px 0;
+  padding: 1.1rem 1.4rem;
+  margin: 1.8rem 0;
+  font-size: 0.95rem;
+}
+
+.callout.bug { border-left-color: var(--red-dim); background: #18100f; }
+.callout.success { border-left-color: var(--green-dim); background: #0d1712; }
+.callout p:last-child { margin-bottom: 0; }
+
+ol, ul { margin: 0.8rem 0 1.2rem 1.6rem; }
+li { margin-bottom: 0.4rem; }
+
+hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
+
+.footer-note {
+  font-style: italic;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 2.5rem;
+  margin-top: 4rem;
+}
+
+.breadcrumb {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.breadcrumb a {
+  color: var(--text-muted);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.breadcrumb a:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+@media (max-width: 720px) {
+  .article { padding: 2rem 1.25rem 4rem; }
+  h1 { font-size: 1.9rem; }
+}
+</style>
+</head>
+<body>
+<div class="article">
+
+<p class="breadcrumb"><a href="../index.html">&larr; Docs</a> / <a href="index.html">Mechanics</a></p>
+
+<header>
+<h1>Passives &amp; Triggers</h1>
+<p class="subtitle">
+Data-driven passive abilities that fire automatically when game events occur.
+Passives are defined as plain data and resolved by the simulation engine at hook points.
+</p>
+</header>
+
+<!-- ================================================================== -->
+<h2>PassiveDef</h2>
+
+<p>
+A <code>PassiveDef</code> is the static definition of a passive ability. It is pure data &mdash; no closures
+or callbacks. The simulation reads these definitions at runtime and evaluates them against incoming events.
+</p>
+
+<table>
+<tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>name</code></td><td><code>String</code></td><td>&mdash;</td><td>Human-readable name. Logged in <code>PassiveTriggered</code> events.</td></tr>
+<tr><td><code>trigger</code></td><td><code>Trigger</code></td><td>&mdash;</td><td>When this passive fires. See the comprehensive trigger table below.</td></tr>
+<tr><td><code>cooldown_ms</code></td><td><code>u32</code></td><td>0</td><td>Internal cooldown. After firing, the passive cannot trigger again for this many milliseconds.</td></tr>
+<tr><td><code>effects</code></td><td><code>Vec&lt;ConditionalEffect&gt;</code></td><td>[]</td><td>List of conditional effects to apply when triggered. Each can have its own condition, area, tags, and stacking mode.</td></tr>
+<tr><td><code>range</code></td><td><code>f32</code></td><td>0.0</td><td>Used by <code>Periodic</code> triggers to find the lowest-HP ally within range as the default target.</td></tr>
+</table>
+
+<pre><code>// Example PassiveDef: heal lowest-HP ally every 3 seconds
+PassiveDef {
+    name: "Healing Aura",
+    trigger: Trigger::Periodic { interval_ms: 3000 },
+    cooldown_ms: 0,
+    effects: vec![ConditionalEffect { effect: Heal { amount: 15, .. }, .. }],
+    range: 6.0,
+}</code></pre>
+
+<!-- ================================================================== -->
+<h2>PassiveSlot</h2>
+
+<p>
+<code>PassiveSlot</code> is the runtime wrapper around a <code>PassiveDef</code>, stored on each
+<code>UnitState</code> in the <code>passives</code> vector. It tracks the live cooldown and periodic timer state.
+</p>
+
+<table>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>def</code></td><td><code>PassiveDef</code></td><td>The static passive definition.</td></tr>
+<tr><td><code>cooldown_remaining_ms</code></td><td><code>u32</code></td><td>Remaining cooldown in milliseconds. The passive can only fire when this is 0.</td></tr>
+<tr><td><code>periodic_elapsed_ms</code></td><td><code>u32</code></td><td>For <code>Periodic</code> triggers only: accumulates <code>dt_ms</code> each tick. When it reaches <code>interval_ms</code>, the passive fires and the counter resets.</td></tr>
+</table>
+
+<p>
+The <code>is_ready()</code> method returns <code>true</code> when <code>cooldown_remaining_ms == 0</code>.
+</p>
+
+<!-- ================================================================== -->
+<h2>All Trigger Types</h2>
+
+<p>
+The <code>Trigger</code> enum defines every event that can cause a passive to fire. Triggers are split into
+two categories: <strong>event-driven</strong> triggers (handled by <code>check_passive_triggers</code>) and
+<strong>periodic</strong> triggers (handled by <code>tick_periodic_passives</code>).
+</p>
+
+<h3>Combat Event Triggers</h3>
+
+<table>
+<tr><th>Trigger</th><th>Fields</th><th>Fires When</th><th>Context Target</th></tr>
+<tr><td><code>OnDamageDealt</code></td><td>&mdash;</td><td>This unit deals damage to any target.</td><td>The damaged unit.</td></tr>
+<tr><td><code>OnDamageTaken</code></td><td>&mdash;</td><td>This unit takes damage from any source.</td><td>The source of damage.</td></tr>
+<tr><td><code>OnKill</code></td><td>&mdash;</td><td>This unit kills an enemy (including DoT kills).</td><td>The killed unit.</td></tr>
+<tr><td><code>OnDeath</code></td><td>&mdash;</td><td>This unit dies.</td><td>The killer.</td></tr>
+<tr><td><code>OnAutoAttack</code></td><td>&mdash;</td><td>This unit completes an auto-attack.</td><td>The attacked unit.</td></tr>
+<tr><td><code>OnAbilityUsed</code></td><td>&mdash;</td><td>This unit finishes casting an ability.</td><td>The ability target.</td></tr>
+</table>
+
+<h3>Proximity Triggers</h3>
+
+<table>
+<tr><th>Trigger</th><th>Fields</th><th>Fires When</th><th>Context Target</th></tr>
+<tr><td><code>OnAllyDamaged</code></td><td><code>range: f32</code> (default 5.0)</td><td>An ally within <code>range</code> takes damage.</td><td>The damaged ally.</td></tr>
+<tr><td><code>OnAllyKilled</code></td><td><code>range: f32</code> (default 5.0)</td><td>An ally within <code>range</code> is killed.</td><td>The killed ally.</td></tr>
+</table>
+
+<h3>Health Threshold Triggers</h3>
+
+<table>
+<tr><th>Trigger</th><th>Fields</th><th>Fires When</th><th>Context Target</th></tr>
+<tr><td><code>OnHpBelow</code></td><td><code>percent: f32</code></td><td>This unit's HP drops to or below <code>percent</code>% of max HP.</td><td>The damage source.</td></tr>
+<tr><td><code>OnHpAbove</code></td><td><code>percent: f32</code></td><td>This unit's HP rises to or above <code>percent</code>% of max HP.</td><td>The heal source.</td></tr>
+</table>
+
+<h3>Status Event Triggers</h3>
+
+<table>
+<tr><th>Trigger</th><th>Fields</th><th>Fires When</th><th>Context Target</th></tr>
+<tr><td><code>OnShieldBroken</code></td><td>&mdash;</td><td>This unit's shield is destroyed (amount reaches 0 from damage).</td><td>The damage source.</td></tr>
+<tr><td><code>OnStunExpire</code></td><td>&mdash;</td><td>A <code>Stun</code> status effect on this unit expires.</td><td>The stun source.</td></tr>
+<tr><td><code>OnStatusApplied</code></td><td>&mdash;</td><td>Any status effect is applied to this unit.</td><td>The effect source.</td></tr>
+<tr><td><code>OnStatusExpired</code></td><td>&mdash;</td><td>Any status effect on this unit expires naturally.</td><td>The effect source.</td></tr>
+<tr><td><code>OnStackReached</code></td><td><code>name: String, count: u32</code></td><td>Stack named <code>name</code> reaches or exceeds <code>count</code> on this unit.</td><td>The stack applier.</td></tr>
+</table>
+
+<h3>Defensive Reaction Triggers</h3>
+
+<table>
+<tr><th>Trigger</th><th>Fields</th><th>Fires When</th><th>Context Target</th></tr>
+<tr><td><code>OnHealReceived</code></td><td>&mdash;</td><td>This unit receives healing.</td><td>The healer.</td></tr>
+<tr><td><code>OnResurrect</code></td><td>&mdash;</td><td>This unit is resurrected.</td><td>The resurrector.</td></tr>
+<tr><td><code>OnDodge</code></td><td>&mdash;</td><td>This unit dodges an attack (e.g. via <code>Blind</code> miss).</td><td>The attacker.</td></tr>
+<tr><td><code>OnReflect</code></td><td>&mdash;</td><td>This unit reflects damage back to an attacker.</td><td>The reflected-upon attacker.</td></tr>
+</table>
+
+<h3>Periodic Trigger</h3>
+
+<table>
+<tr><th>Trigger</th><th>Fields</th><th>Fires When</th><th>Context Target</th></tr>
+<tr><td><code>Periodic</code></td><td><code>interval_ms: u32</code></td><td>Every <code>interval_ms</code> milliseconds, unconditionally.</td><td>Lowest-HP ally within <code>range</code>, or self if none found.</td></tr>
+</table>
+
+<!-- ================================================================== -->
+<h2>Trigger Resolution</h2>
+
+<p>
+Passive triggers are resolved by two separate systems depending on their type:
+</p>
+
+<h3>Event-Driven: <code>check_passive_triggers</code></h3>
+
+<p>
+Called after specific game events (damage, kills, heals, status changes, etc.). The function:
+</p>
+
+<ol>
+<li><strong>Depth guard:</strong> Checks <code>passive_trigger_depth</code>. If it is 3 or greater, the function returns immediately to prevent infinite recursion (a passive triggering another passive triggering another, etc.).</li>
+<li><strong>Increments depth:</strong> <code>passive_trigger_depth += 1</code>.</li>
+<li><strong>Iterates all passives</strong> on the triggering unit, checking:
+  <ul>
+  <li>Is the passive off cooldown? (<code>cooldown_remaining_ms == 0</code>)</li>
+  <li>Does the passive's trigger type match the incoming event type?</li>
+  <li>For range-gated triggers (<code>OnAllyDamaged</code>, <code>OnAllyKilled</code>): is the context target within range?</li>
+  <li>For threshold triggers (<code>OnHpBelow</code>, <code>OnHpAbove</code>): does the current value meet the threshold?</li>
+  <li>For <code>OnStackReached</code>: does the stack name match and is the count at or above the threshold?</li>
+  </ul>
+</li>
+<li><strong>On match:</strong> Emits a <code>PassiveTriggered</code> event, sets the passive's cooldown, and applies each <code>ConditionalEffect</code> (evaluating conditions via <code>evaluate_condition_tracked</code>).</li>
+<li><strong>Decrements depth:</strong> <code>passive_trigger_depth -= 1</code>.</li>
+</ol>
+
+<pre><code>// Trigger matching is exhaustive pattern-match:
+(Trigger::OnDamageDealt, Trigger::OnDamageDealt) => true,
+(Trigger::OnHpBelow { percent: threshold },
+ Trigger::OnHpBelow { percent: current_pct }) => current_pct <= threshold,
+(Trigger::OnAllyDamaged { range },
+ Trigger::OnAllyDamaged { .. }) => distance(unit_pos, ally_pos) <= range,
+_ => false,</code></pre>
+
+<div class="callout bug">
+<p><strong>Recursion limit:</strong> The depth cap of 3 means a passive can trigger another passive, which can
+trigger a third, but no further. This prevents infinite chains like "on damage dealt, deal damage" loops.</p>
+</div>
+
+<h3>Periodic: <code>tick_periodic_passives</code></h3>
+
+<p>
+Called once per simulation tick in the main <code>step()</code> loop, after <code>tick_status_effects</code>.
+For each living unit, it iterates passives looking for <code>Trigger::Periodic { interval_ms }</code>:
+</p>
+
+<ol>
+<li>Skip if passive is on cooldown.</li>
+<li>Accumulate: <code>periodic_elapsed_ms += dt_ms</code>.</li>
+<li>If <code>periodic_elapsed_ms >= interval_ms</code>:
+  <ul>
+  <li>Emit <code>PassiveTriggered</code> event.</li>
+  <li>Find the lowest-HP ally within the passive's <code>range</code> as the default target (falls back to self).</li>
+  <li>Apply each <code>ConditionalEffect</code>, resolving area targets if an <code>area</code> is specified.</li>
+  <li>Reset: <code>periodic_elapsed_ms -= interval_ms</code> (preserves sub-interval remainder).</li>
+  <li>Set cooldown: <code>cooldown_remaining_ms = cooldown_ms</code>.</li>
+  </ul>
+</li>
+<li>Otherwise, just store the updated <code>periodic_elapsed_ms</code>.</li>
+</ol>
+
+<h3>Where Triggers Are Fired</h3>
+
+<p>
+The <code>fire_damage_triggers</code> helper in <code>triggers.rs</code> fires multiple trigger types after
+every damage event:
+</p>
+
+<table>
+<tr><th>Trigger Fired</th><th>On Which Unit</th><th>Condition</th></tr>
+<tr><td><code>OnDamageDealt</code></td><td>Attacker</td><td>Attacker is alive.</td></tr>
+<tr><td><code>OnDamageTaken</code></td><td>Target</td><td>Target is alive.</td></tr>
+<tr><td><code>OnAllyDamaged</code></td><td>All teammates of target</td><td>Teammate is alive and within range.</td></tr>
+<tr><td><code>OnHpBelow</code></td><td>Target</td><td>Target survived (HP &gt; 0). Passes current HP percent.</td></tr>
+<tr><td><code>OnShieldBroken</code></td><td>Target</td><td>Shield was broken by this hit.</td></tr>
+<tr><td><code>OnKill</code></td><td>Attacker</td><td>Target's HP reached 0.</td></tr>
+<tr><td><code>OnDeath</code></td><td>Target</td><td>Target's HP reached 0.</td></tr>
+</table>
+
+<!-- ================================================================== -->
+<h2>Passive Cooldowns</h2>
+
+<p>
+Every <code>PassiveDef</code> has a <code>cooldown_ms</code> field (default 0). When a passive fires,
+<code>PassiveSlot.cooldown_remaining_ms</code> is set to this value. The cooldown is decremented each tick
+in <code>tick_hero_cooldowns</code>. While <code>cooldown_remaining_ms &gt; 0</code>, the passive is skipped
+during trigger checks.
+</p>
+
+<p>
+A cooldown of <code>0</code> means the passive can fire every tick (or every time its event occurs). This is
+intentional for effects like "on every auto-attack, apply a stack" but should be used carefully to avoid
+performance issues with high-frequency triggers.
+</p>
+
+<div class="callout success">
+<p><strong>Design tip:</strong> Always set a meaningful cooldown on passives with broad triggers like
+<code>OnDamageTaken</code> or <code>OnDamageDealt</code>. Without a cooldown, a DoT effect ticking every
+100ms would fire the passive 10 times per second.</p>
+</div>
+
+<!-- ================================================================== -->
+<h2>PassiveTriggered Event</h2>
+
+<p>
+Every time a passive fires, the simulation emits a <code>PassiveTriggered</code> event for logging,
+replay, and AI observation:
+</p>
+
+<pre><code>SimEvent::PassiveTriggered {
+    tick: u64,          // Simulation tick when the passive fired
+    unit_id: u32,       // ID of the unit whose passive triggered
+    passive_name: String, // Name from the PassiveDef
+}</code></pre>
+
+<p>
+This event is emitted before the passive's effects are applied, so downstream event handlers can see
+the trigger event followed by the resulting damage/heal/status events in sequence.
+</p>
+
+<hr>
+
+<p class="footer-note">
+See also: <a href="status_effects.html">Status Effects</a> &bull;
+<a href="../effects.html">The Effect System</a> &bull;
+<a href="index.html">Mechanics Index</a>
+</p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Status Effects &mdash; Game Mechanics Wiki</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --surface: #13161d;
+  --surface2: #1c2029;
+  --surface3: #252a36;
+  --border: #2a2f3e;
+  --border-bright: #3d4459;
+  --text: #b8c0cc;
+  --text-muted: #6b7280;
+  --heading: #e2e8f0;
+  --accent: #60a5fa;
+  --accent-dim: #2563eb;
+  --purple: #a78bfa;
+  --purple-dim: #7c3aed;
+  --green: #34d399;
+  --green-dim: #059669;
+  --red: #f87171;
+  --red-dim: #dc2626;
+  --orange: #fbbf24;
+  --orange-dim: #d97706;
+  --cyan: #22d3ee;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.78;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 4rem 2rem 8rem;
+}
+
+header {
+  margin-bottom: 3.5rem;
+  padding-bottom: 2.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.65;
+  max-width: 680px;
+}
+
+h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--heading);
+  margin-top: 4rem;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--purple);
+  margin-top: 2.5rem;
+  margin-bottom: 0.8rem;
+}
+
+p { margin-bottom: 1.1rem; }
+strong { color: var(--heading); font-weight: 600; }
+em { color: var(--text); }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+a:hover { border-bottom-color: var(--accent); }
+
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.2rem 1.5rem;
+  overflow-x: auto;
+  margin: 1.5rem 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.88em;
+}
+
+p code, li code, td code {
+  background: var(--surface2);
+  padding: 0.15em 0.45em;
+  border-radius: 4px;
+  font-size: 0.82em;
+  color: var(--accent);
+}
+
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+  font-family: 'DM Sans', sans-serif;
+}
+
+th {
+  background: var(--surface2);
+  color: var(--heading);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 2px solid var(--border-bright);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+td {
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+tr:hover td { background: var(--surface); }
+
+.callout {
+  background: var(--surface);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: 0 8px 8px 0;
+  padding: 1.1rem 1.4rem;
+  margin: 1.8rem 0;
+  font-size: 0.95rem;
+}
+
+.callout.bug { border-left-color: var(--red-dim); background: #18100f; }
+.callout.success { border-left-color: var(--green-dim); background: #0d1712; }
+.callout p:last-child { margin-bottom: 0; }
+
+ol, ul { margin: 0.8rem 0 1.2rem 1.6rem; }
+li { margin-bottom: 0.4rem; }
+
+hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
+
+.footer-note {
+  font-style: italic;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 2.5rem;
+  margin-top: 4rem;
+}
+
+.breadcrumb {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.breadcrumb a {
+  color: var(--text-muted);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.breadcrumb a:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+@media (max-width: 720px) {
+  .article { padding: 2rem 1.25rem 4rem; }
+  h1 { font-size: 1.9rem; }
+}
+</style>
+</head>
+<body>
+<div class="article">
+
+<p class="breadcrumb"><a href="../index.html">&larr; Docs</a> / <a href="index.html">Mechanics</a></p>
+
+<header>
+<h1>Status Effects</h1>
+<p class="subtitle">
+Every buff, debuff, DoT, HoT, shield, crowd-control effect, and status interaction tracked on a unit at runtime.
+Status effects are the primary mechanism for modifying unit behaviour and stats during combat.
+</p>
+</header>
+
+<!-- ================================================================== -->
+<h2>ActiveStatusEffect</h2>
+
+<p>
+Each live status effect on a unit is stored as an <code>ActiveStatusEffect</code> struct in the unit's
+<code>status_effects</code> vector. The simulation's <code>tick_status_effects</code> function decrements
+<code>remaining_ms</code> every tick and removes expired entries.
+</p>
+
+<table>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>kind</code></td><td><code>StatusKind</code></td><td>Discriminated union describing the effect type and its parameters.</td></tr>
+<tr><td><code>source_id</code></td><td><code>u32</code></td><td>ID of the unit that applied the effect. Used for kill-credit on DoT deaths.</td></tr>
+<tr><td><code>remaining_ms</code></td><td><code>u32</code></td><td>Milliseconds remaining. Decremented by <code>dt_ms</code> each tick; effect is removed when it reaches 0.</td></tr>
+<tr><td><code>tags</code></td><td><code>Tags</code></td><td>Named power-level tags. Compared against the target's <code>resistance_tags</code> to determine if the effect is resisted.</td></tr>
+<tr><td><code>stacking</code></td><td><code>Stacking</code></td><td>How duplicate applications interact: <code>Refresh</code> (reset timer), <code>Extend</code> (add duration), <code>Strongest</code> (keep higher value), or <code>Stack</code> (allow multiple instances).</td></tr>
+</table>
+
+<!-- ================================================================== -->
+<h2>StatusKind &mdash; All Variants</h2>
+
+<p>
+<code>StatusKind</code> is the core enum that determines what a status effect actually does. The simulation
+pattern-matches on it during <code>tick_status_effects</code> to apply per-tick logic (DoT damage, HoT healing,
+shield expiry, etc.) and during intent processing to enforce crowd control.
+</p>
+
+<h3>Core Combat</h3>
+
+<table>
+<tr><th>Variant</th><th>Fields</th><th>Behaviour</th></tr>
+<tr><td><code>Buff</code></td><td><code>stat: String, factor: f32</code></td><td>Multiplies the named stat by <code>factor</code>. Values &gt; 1.0 increase; &lt; 1.0 decrease.</td></tr>
+<tr><td><code>Debuff</code></td><td><code>stat: String, factor: f32</code></td><td>Inverse of Buff &mdash; reduces a named stat by <code>factor</code>.</td></tr>
+<tr><td><code>Dot</code></td><td><code>amount_per_tick, tick_interval_ms, tick_elapsed_ms</code></td><td>Deals <code>amount_per_tick</code> damage every <code>tick_interval_ms</code> ms. Internal <code>tick_elapsed_ms</code> counter tracks sub-interval progress.</td></tr>
+<tr><td><code>Hot</code></td><td><code>amount_per_tick, tick_interval_ms, tick_elapsed_ms</code></td><td>Heals <code>amount_per_tick</code> every <code>tick_interval_ms</code> ms. Same ticking mechanism as DoT.</td></tr>
+<tr><td><code>Shield</code></td><td><code>amount: i32</code></td><td>Absorbs incoming damage. Removed when <code>amount</code> reaches 0 or duration expires.</td></tr>
+<tr><td><code>Stacks</code></td><td><code>name: String, count: u32, max_stacks: u32</code></td><td>Named stack counter, capped at <code>max_stacks</code>. Used by <code>OnStackReached</code> triggers and <code>Detonate</code>.</td></tr>
+<tr><td><code>Duel</code></td><td><code>partner_id: u32</code></td><td>Forces both units to only target each other.</td></tr>
+</table>
+
+<h3>Crowd Control</h3>
+
+<table>
+<tr><th>Variant</th><th>Fields</th><th>Behaviour</th></tr>
+<tr><td><code>Stun</code></td><td>&mdash;</td><td>Prevents all actions. Intent processing skips the unit entirely.</td></tr>
+<tr><td><code>Root</code></td><td>&mdash;</td><td>Prevents movement. <code>MoveTo</code> intents become <code>Hold</code>.</td></tr>
+<tr><td><code>Silence</code></td><td>&mdash;</td><td>Prevents ability casts. <code>CastAbility</code>, <code>CastControl</code>, and <code>UseAbility</code> intents become <code>Hold</code>.</td></tr>
+<tr><td><code>Slow</code></td><td><code>factor: f32</code></td><td>Reduces movement speed by <code>factor</code> (0.0&ndash;1.0).</td></tr>
+<tr><td><code>Fear</code></td><td><code>source_pos: SimVec2</code></td><td>Forces the unit to move away from <code>source_pos</code>. Cancels any active cast.</td></tr>
+<tr><td><code>Taunt</code></td><td><code>taunter_id: u32</code></td><td>Forces attack intents to target the taunter. Removed if the taunter dies.</td></tr>
+<tr><td><code>Polymorph</code></td><td>&mdash;</td><td>Prevents abilities and auto-attacks. Only movement is allowed.</td></tr>
+<tr><td><code>Banish</code></td><td>&mdash;</td><td>Unit is removed from play &mdash; untargetable, cannot act. Cancels casts.</td></tr>
+<tr><td><code>Confuse</code></td><td>&mdash;</td><td>Randomises attack and ability targets among all living units.</td></tr>
+<tr><td><code>Charm</code></td><td><code>original_team: Team</code></td><td>Temporarily switches the unit's team allegiance.</td></tr>
+<tr><td><code>Suppress</code></td><td>&mdash;</td><td>Hard CC similar to stun; cannot be cleansed by normal means.</td></tr>
+<tr><td><code>Grounded</code></td><td>&mdash;</td><td>Prevents dashes, blinks, and movement abilities.</td></tr>
+<tr><td><code>Blind</code></td><td><code>miss_chance: f32</code></td><td>Chance (0.0&ndash;1.0) for auto-attacks to miss entirely.</td></tr>
+</table>
+
+<h3>Damage Modifiers</h3>
+
+<table>
+<tr><th>Variant</th><th>Fields</th><th>Behaviour</th></tr>
+<tr><td><code>Reflect</code></td><td><code>percent: f32</code></td><td>Returns <code>percent</code>% of incoming damage to the attacker.</td></tr>
+<tr><td><code>Lifesteal</code></td><td><code>percent: f32</code></td><td>Heals the unit for <code>percent</code>% of damage dealt.</td></tr>
+<tr><td><code>DamageModify</code></td><td><code>factor: f32</code></td><td>Multiplies all outgoing damage by <code>factor</code>. Values &lt; 1.0 reduce; &gt; 1.0 amplify.</td></tr>
+<tr><td><code>OnHitBuff</code></td><td><code>effects: Vec&lt;ConditionalEffect&gt;</code></td><td>Applies additional effects on each auto-attack hit.</td></tr>
+<tr><td><code>DeathMark</code></td><td><code>accumulated_damage: i32, damage_percent: f32</code></td><td>Accumulates damage taken, then detonates for <code>damage_percent</code>% on expiry.</td></tr>
+</table>
+
+<h3>Healing &amp; Shield</h3>
+
+<table>
+<tr><th>Variant</th><th>Fields</th><th>Behaviour</th></tr>
+<tr><td><code>OverhealShield</code></td><td><code>conversion_percent: f32</code></td><td>Converts excess healing beyond max HP into a shield at <code>conversion_percent</code>%.</td></tr>
+<tr><td><code>AbsorbShield</code></td><td><code>amount: i32, heal_percent: f32</code></td><td>Shield that heals for <code>heal_percent</code>% of damage absorbed when broken or expired.</td></tr>
+</table>
+
+<h3>Complex Mechanics</h3>
+
+<table>
+<tr><th>Variant</th><th>Fields</th><th>Behaviour</th></tr>
+<tr><td><code>Stealth</code></td><td><code>break_on_damage: bool, break_on_ability: bool</code></td><td>Unit becomes untargetable. Broken by the specified actions.</td></tr>
+<tr><td><code>Leash</code></td><td><code>anchor_pos: SimVec2, max_range: f32</code></td><td>Constrains unit movement within <code>max_range</code> of an anchor point.</td></tr>
+<tr><td><code>Link</code></td><td><code>partner_id: u32, share_percent: f32</code></td><td>Shares <code>share_percent</code>% of damage taken with a linked partner.</td></tr>
+<tr><td><code>Redirect</code></td><td><code>protector_id: u32, charges: u32</code></td><td>Redirects the next <code>charges</code> hits to the protector.</td></tr>
+<tr><td><code>Immunity</code></td><td><code>immune_to: Vec&lt;String&gt;</code></td><td>Grants immunity to effects matching the listed tags.</td></tr>
+<tr><td><code>Attached</code></td><td><code>host_id: u32</code></td><td>Unit rides on the host, becoming untargetable and moving with them. Removed if host dies.</td></tr>
+</table>
+
+<!-- ================================================================== -->
+<h2>Buffs</h2>
+
+<p>
+A <strong>Buff</strong> is created by the <code>Effect::Buff</code> variant, which specifies a
+<code>stat</code> name, a multiplicative <code>factor</code>, and a <code>duration_ms</code>.
+When applied, it inserts a <code>StatusKind::Buff { stat, factor }</code> into the target's
+<code>status_effects</code> vector.
+</p>
+
+<pre><code>// Effect definition
+Effect::Buff { stat: "attack_damage", factor: 1.3, duration_ms: 5000 }
+
+// Creates this status on the unit:
+StatusKind::Buff { stat: "attack_damage", factor: 1.3 }
+// with remaining_ms = 5000</code></pre>
+
+<p>
+During combat resolution, code that reads a unit's stats checks for active <code>Buff</code> status effects
+and multiplies the base stat by each matching factor. Multiple buffs to the same stat stack multiplicatively.
+</p>
+
+<!-- ================================================================== -->
+<h2>Debuffs</h2>
+
+<p>
+<strong>Debuffs</strong> work identically to buffs but reduce stats. The <code>Effect::Debuff</code> variant
+produces a <code>StatusKind::Debuff { stat, factor }</code>. A factor of <code>0.7</code> on
+<code>move_speed</code> reduces movement speed to 70% of base.
+</p>
+
+<pre><code>// Reduce target's armor by 40% for 4 seconds
+Effect::Debuff { stat: "armor", factor: 0.6, duration_ms: 4000 }</code></pre>
+
+<!-- ================================================================== -->
+<h2>Damage over Time (DoT)</h2>
+
+<p>
+DoT effects deal periodic damage via the <code>StatusKind::Dot</code> variant. Three internal fields
+control the ticking:
+</p>
+
+<ul>
+<li><code>amount_per_tick</code> &mdash; damage applied each time the timer fires.</li>
+<li><code>tick_interval_ms</code> &mdash; how many milliseconds between ticks (e.g. 500 ms = 2 ticks/sec).</li>
+<li><code>tick_elapsed_ms</code> &mdash; internal accumulator. Each sim tick adds <code>dt_ms</code>; when it reaches <code>tick_interval_ms</code>, damage is applied and the counter resets.</li>
+</ul>
+
+<p>
+The <code>tick_status_effects</code> function handles this. When a DoT tick kills the unit, a
+<code>UnitDied</code> event is emitted and <code>OnDeath</code>/<code>OnKill</code> passive triggers fire
+(credited to <code>source_id</code>).
+</p>
+
+<pre><code>// In tick_status_effects:
+StatusKind::Dot { amount_per_tick, tick_interval_ms, tick_elapsed_ms } => {
+    *tick_elapsed_ms += dt_ms;
+    if *tick_elapsed_ms >= *tick_interval_ms {
+        *tick_elapsed_ms -= *tick_interval_ms;
+        // Apply amount_per_tick damage to unit
+    }
+}</code></pre>
+
+<div class="callout">
+<p><strong>Kill credit:</strong> DoT deaths credit the <code>source_id</code> stored on the <code>ActiveStatusEffect</code>,
+so the original caster receives the kill even if they are no longer alive.</p>
+</div>
+
+<!-- ================================================================== -->
+<h2>Healing over Time (HoT)</h2>
+
+<p>
+HoTs mirror DoTs exactly, using <code>StatusKind::Hot</code> with the same three-field ticking mechanism.
+The only difference is that they add HP (capped at <code>max_hp</code>) instead of subtracting it. When healing
+fires, <code>tick_status_effects</code> emits a <code>HealApplied</code> event and triggers <code>OnHealReceived</code>
+passives on the target.
+</p>
+
+<!-- ================================================================== -->
+<h2>Stacks</h2>
+
+<p>
+The <strong>stack system</strong> lets abilities build up named counters on a target, which other abilities
+can then consume or react to.
+</p>
+
+<h3>ApplyStacks Effect</h3>
+
+<p>
+The <code>Effect::ApplyStacks</code> variant adds stacks to a unit:
+</p>
+
+<table>
+<tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>name</code></td><td><code>String</code></td><td>&mdash;</td><td>Unique identifier for this stack type (e.g. <code>"poison"</code>, <code>"mark"</code>).</td></tr>
+<tr><td><code>count</code></td><td><code>u32</code></td><td>1</td><td>Number of stacks to add per application.</td></tr>
+<tr><td><code>max_stacks</code></td><td><code>u32</code></td><td>4</td><td>Hard cap. Further applications are clamped.</td></tr>
+<tr><td><code>duration_ms</code></td><td><code>u32</code></td><td>0</td><td>Duration for the stack status effect.</td></tr>
+</table>
+
+<p>
+At runtime, stacks are stored as <code>StatusKind::Stacks { name, count, max_stacks }</code> on the
+target's <code>status_effects</code> list.
+</p>
+
+<h3>OnStackReached Trigger</h3>
+
+<p>
+The <code>Trigger::OnStackReached { name, count }</code> passive trigger fires when a unit's named stack
+count reaches or exceeds the specified threshold. This enables "mark-and-detonate" patterns.
+See the <a href="passives.html">Passives</a> page for full trigger documentation.
+</p>
+
+<!-- ================================================================== -->
+<h2>Dispel</h2>
+
+<p>
+The <code>Effect::Dispel</code> removes status effects from a target. It accepts an optional
+<code>target_tags</code> filter:
+</p>
+
+<ul>
+<li>If <code>target_tags</code> is empty, <strong>all</strong> removable status effects are cleared.</li>
+<li>If tags are specified, only effects whose <code>tags</code> contain a matching key are removed.</li>
+</ul>
+
+<pre><code>// Remove all debuffs with the "magic" tag
+Effect::Dispel { target_tags: vec!["magic".into()] }
+
+// Remove all status effects
+Effect::Dispel { target_tags: vec![] }</code></pre>
+
+<!-- ================================================================== -->
+<h2>Immunity</h2>
+
+<p>
+The <code>Effect::Immunity</code> variant grants temporary immunity to effects matching specific tags.
+It creates a <code>StatusKind::Immunity { immune_to }</code> status on the target.
+</p>
+
+<table>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>immune_to</code></td><td><code>Vec&lt;String&gt;</code></td><td>List of tag names. Incoming effects with any matching tag are blocked.</td></tr>
+<tr><td><code>duration_ms</code></td><td><code>u32</code></td><td>How long the immunity lasts.</td></tr>
+</table>
+
+<p>
+When an effect is applied to a unit with an active <code>Immunity</code> status, the sim checks whether any
+of the effect's tags appear in the <code>immune_to</code> list. If so, the effect is discarded and an
+<code>EffectResisted</code> event is emitted.
+</p>
+
+<!-- ================================================================== -->
+<h2>Status Transfer &amp; Clone</h2>
+
+<h3>StatusTransfer</h3>
+
+<p>
+<code>Effect::StatusTransfer</code> moves status effects between the caster and target.
+</p>
+
+<table>
+<tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>steal_buffs</code></td><td><code>bool</code></td><td><code>false</code></td><td>If <code>true</code>, steals buffs from the target and applies them to the caster. If <code>false</code>, transfers debuffs from the caster onto the target.</td></tr>
+</table>
+
+<h3>StatusClone</h3>
+
+<p>
+<code>Effect::StatusClone</code> copies status effects from the target onto the caster (or vice versa),
+up to <code>max_count</code> effects (default: 3). Unlike transfer, the original effects remain on
+the source.
+</p>
+
+<!-- ================================================================== -->
+<h2>Detonate</h2>
+
+<p>
+<code>Effect::Detonate</code> consumes all <code>Stacks</code> status effects on the target and deals burst
+damage based on the consumed stack count.
+</p>
+
+<table>
+<tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>damage_multiplier</code></td><td><code>f32</code></td><td>1.0</td><td>Damage per consumed stack. Total burst = <code>stack_count * damage_multiplier</code>.</td></tr>
+</table>
+
+<p>
+This enables the classic "apply stacks, then detonate" gameplay pattern. Combine with
+<code>ApplyStacks</code> on basic attacks and <code>Detonate</code> on an active ability for a
+mark-and-pop combo.
+</p>
+
+<!-- ================================================================== -->
+<h2>Resistance Tags</h2>
+
+<p>
+Every unit has a <code>resistance_tags: Tags</code> field (a <code>HashMap&lt;String, f32&gt;</code>).
+When an effect is applied, its <code>tags</code> are compared against the target's <code>resistance_tags</code>
+using the <code>check_tags_resisted</code> function:
+</p>
+
+<pre><code>pub fn check_tags_resisted(effect_tags: &Tags, resistance_tags: &Tags) -> bool {
+    for (tag, &power) in effect_tags {
+        if let Some(&resistance) = resistance_tags.get(tag) {
+            if resistance >= power {
+                return true;  // Effect is resisted
+            }
+        }
+    }
+    false
+}</code></pre>
+
+<p>
+If any single resistance tag meets or exceeds the effect's corresponding power level, the entire effect
+is blocked and an <code>EffectResisted</code> event is emitted:
+</p>
+
+<pre><code>SimEvent::EffectResisted {
+    tick,
+    unit_id: target_id,
+    resisted_tag: "immune:stun",   // tag that caused the resist
+}</code></pre>
+
+<div class="callout">
+<p><strong>Example:</strong> An effect with <code>{"CROWD_CONTROL": 80.0}</code> applied to a unit with
+<code>resistance_tags: {"CROWD_CONTROL": 90.0}</code> is resisted (90 &ge; 80). If the resistance were
+only 50.0, the effect would go through.</p>
+</div>
+
+<hr>
+
+<p class="footer-note">
+See also: <a href="passives.html">Passives &amp; Triggers</a> &bull;
+<a href="../effects.html">The Effect System</a> &bull;
+<a href="index.html">Mechanics Index</a>
+</p>
+
+</div>
+</body>
+</html>
