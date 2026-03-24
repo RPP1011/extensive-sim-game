@@ -116,6 +116,11 @@ pub struct CampaignState {
     #[serde(default)]
     pub creation_event_queue: Vec<super::backstory::BackstoryEvent>,
 
+    // --- Buildings ---
+    /// Guild building upgrade tiers (0–3 each). Provides passive bonuses.
+    #[serde(default)]
+    pub guild_buildings: super::systems::buildings::GuildBuildings,
+
     // --- Configuration ---
     /// All tunable balance parameters. Systems read from this.
     pub config: CampaignConfig,
@@ -1478,6 +1483,7 @@ impl CampaignState {
             available_starting_choices: Self::load_or_default_starting_choices(),
             player_character: None,
             creation_event_queue: Vec::new(),
+            guild_buildings: super::systems::buildings::GuildBuildings::default(),
             config: CampaignConfig::default(),
             llm_config: None,
             llm_store: None,

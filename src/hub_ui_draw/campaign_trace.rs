@@ -528,12 +528,9 @@ fn format_world_event(event: &WorldEvent) -> (String, egui::Color32) {
             format!("{} arrived at the King's side", champion_name),
             red,
         ),
-        WorldEvent::BondGrief { adventurer_id, dead_id, bond_strength } => (
-            format!(
-                "Adventurer #{} grieves for #{} (bond {:.0})",
-                adventurer_id, dead_id, bond_strength
-            ),
-            yellow,
+        WorldEvent::BuildingUpgraded { building, new_tier, cost } => (
+            format!("{} upgraded to tier {} (-{:.0}g)", building, new_tier, cost),
+            green,
         ),
     }
 }

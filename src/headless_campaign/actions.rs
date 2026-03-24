@@ -362,6 +362,13 @@ pub enum WorldEvent {
     CampaignMilestone {
         description: String,
     },
+
+    // --- Buildings ---
+    BuildingUpgraded {
+        building: String,
+        new_tier: u8,
+        cost: f32,
+    },
 }
 
 // ---------------------------------------------------------------------------

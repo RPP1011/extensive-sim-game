@@ -21,6 +21,7 @@ pub mod progression_triggers;
 pub mod cooldowns;
 pub mod recruitment;
 pub mod threat;
+pub mod buildings;
 pub mod verify;
 pub mod loot;
 pub mod interception;
