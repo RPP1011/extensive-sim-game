@@ -323,6 +323,8 @@ pub fn instantiate_effect(e: &EffectTemplate, ctx: &TemplateContext) -> Option<C
             journal: Vec::new(),
 
             equipped_items: Vec::new(),
+            nicknames: Vec::new(),
+            secret_past: None,
             }))
         }
         _ => {

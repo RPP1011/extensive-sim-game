@@ -192,6 +192,28 @@ pub fn step_campaign(
     systems::trophies::tick_trophies(state, &mut deltas, &mut events);
     systems::wanted::tick_wanted(state, &mut deltas, &mut events);
 
+    // --- Batch 3 systems ---
+    systems::alliance_blocs::tick_alliance_blocs(state, &mut deltas, &mut events);
+    systems::bloodlines::tick_bloodlines(state, &mut deltas, &mut events);
+    systems::grudges::tick_grudges(state, &mut deltas, &mut events);
+    systems::guild_identity::tick_guild_identity(state, &mut deltas, &mut events);
+    systems::guild_rooms::tick_guild_rooms(state, &mut deltas, &mut events);
+    systems::leadership::tick_leadership(state, &mut deltas, &mut events);
+    systems::nicknames::tick_nicknames(state, &mut deltas, &mut events);
+    systems::oaths::tick_oaths(state, &mut deltas, &mut events);
+    systems::romance::tick_romance(state, &mut deltas, &mut events);
+    systems::seasonal_quests::tick_seasonal_quests(state, &mut deltas, &mut events);
+    systems::smuggling::tick_smuggling(state, &mut deltas, &mut events);
+    systems::vassalage::tick_vassalage(state, &mut deltas, &mut events);
+
+    // --- Batch 4 systems ---
+    systems::awakening::tick_awakening(state, &mut deltas, &mut events);
+    systems::charter::tick_charter(state, &mut deltas, &mut events);
+    systems::folk_hero::tick_folk_hero(state, &mut deltas, &mut events);
+    systems::geography::tick_geography(state, &mut deltas, &mut events);
+    systems::legacy_weapons::tick_legacy_weapons(state, &mut deltas, &mut events);
+    systems::secrets::tick_secrets(state, &mut deltas, &mut events);
+
     // Final economy snapshot
     deltas.gold_after = state.guild.gold;
     deltas.supplies_after = state.guild.supplies;

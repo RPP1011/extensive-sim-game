@@ -167,6 +167,8 @@ pub fn activate_crisis_from_template(
             journal: Vec::new(),
 
             equipped_items: Vec::new(),
+            nicknames: Vec::new(),
+            secret_past: None,
                 };
 
                 champion_ids.push(id);

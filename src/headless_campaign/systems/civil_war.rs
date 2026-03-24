@@ -331,6 +331,7 @@ fn resolve_civil_war(
                     has_guild: false,
                     guild_adventurer_count: 0,
                     recent_actions: Vec::new(),
+                    relation: 0.0,
                 };
 
                 state.factions.push(new_faction);

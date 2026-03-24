@@ -258,6 +258,8 @@ pub fn init_character_creation(
             journal: Vec::new(),
 
             equipped_items: Vec::new(),
+            nicknames: Vec::new(),
+            secret_past: None,
     };
 
     state.adventurers.push(pc);

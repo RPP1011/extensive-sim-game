@@ -457,6 +457,8 @@ fn create_heir(state: &mut CampaignState, marriage: &Marriage) -> super::super::
         journal: Vec::new(),
 
         equipped_items: Vec::new(),
+            nicknames: Vec::new(),
+            secret_past: None,
     }
 }
 
@@ -536,6 +538,8 @@ mod tests {
             journal: Vec::new(),
 
             equipped_items: Vec::new(),
+            nicknames: Vec::new(),
+            secret_past: None,
         };
         state.adventurers.push(adv);
 

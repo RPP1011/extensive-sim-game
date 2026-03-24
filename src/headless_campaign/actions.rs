@@ -737,6 +737,98 @@ pub enum WorldEvent {
     BountyPaidOff { poster_id: u32, adventurer_id: u32, faction_id: usize, amount: f32 },
     BountyHunterDispatched { poster_id: u32, adventurer_id: u32, faction_id: usize, hunter_strength: f32 },
     BountyHunterDefeated { poster_id: u32, adventurer_id: u32, new_bounty: f32 },
+
+    // --- Alliance blocs ---
+    BlocFormed { bloc_id: u32, name: String, member_factions: Vec<usize>, leader_faction_id: usize },
+    BlocCohesionChanged { bloc_id: u32, old_cohesion: f32, new_cohesion: f32, reason: String },
+    BlocDissolved { bloc_id: u32, name: String, reason: String },
+    BlocAttack { bloc_id: u32, target_faction: usize, description: String },
+    GuildJoinedBloc { bloc_id: u32, bloc_name: String },
+
+    // --- Bloodlines ---
+    BloodlineEstablished { bloodline_id: u32, founder_name: String, archetype: String, stat_bonus: f32 },
+    BloodlinePrestigeGrown { bloodline_id: u32, founder_name: String, new_prestige: f32 },
+    DescendantAppeared { bloodline_id: u32, adventurer_id: u32, name: String, founder_name: String, generation: u32 },
+
+    // --- Grudges ---
+    GrudgeFormed { adventurer_id: u32, target: GrudgeTarget, intensity: f32, cause: String },
+    GrudgeIntensified { adventurer_id: u32, target: GrudgeTarget, old_intensity: f32, new_intensity: f32 },
+    GrudgeFaded { adventurer_id: u32, target: GrudgeTarget },
+    VendettaFulfilled { adventurer_id: u32, target: GrudgeTarget },
+
+    // --- Guild identity ---
+    IdentityShift { old: Option<String>, new: Option<String> },
+    IdentityBonusUnlocked { identity: String, bonus: String },
+    IdentityRecruitAttracted { identity: String, recruit_type: String },
+
+    // --- Guild rooms ---
+    RoomBonusApplied { room_type: String, level: u32, boosted: bool },
+
+    // --- Leadership ---
+    LeaderAppointed { adventurer_id: u32, style: String },
+    LeaderDied { adventurer_id: u32 },
+    LeaderRetired { adventurer_id: u32, approval_rating: f32 },
+    ApprovalChanged { adventurer_id: u32, approval_rating: f32 },
+    SuccessionCrisis,
+
+    // --- Nicknames ---
+    NicknameEarned { adventurer_id: u32, title: String, source: String },
+
+    // --- Oaths ---
+    OathSworn { adventurer_id: u32, oath_id: u32, oath_type: String },
+    OathBroken { adventurer_id: u32, oath_id: u32, oath_type: String },
+    OathFulfilled { adventurer_id: u32, oath_id: u32, oath_type: String },
+
+    // --- Romance ---
+    RomanceBegan { adventurer_a: u32, adventurer_b: u32 },
+    RomanceProgressed { adventurer_a: u32, adventurer_b: u32, new_stage: RomanceStage },
+    RomanceStrained { adventurer_a: u32, adventurer_b: u32 },
+    RomanceBrokenUp { adventurer_a: u32, adventurer_b: u32 },
+    RomanticGesture { adventurer_a: u32, adventurer_b: u32 },
+
+    // --- Seasonal quests ---
+    SeasonalQuestAvailable { quest_id: u32, name: String, season: Season },
+    SeasonalQuestCompleted { quest_id: u32, name: String, reward_gold: f32, reward_special: String },
+    SeasonChampionEarned { season: Season, reward: String },
+
+    // --- Smuggling ---
+    SmugglingRouteDiscovered { route_id: u32, start_region: usize, end_region: usize },
+    SmugglingRouteEstablished { route_id: u32, start_region: usize, end_region: usize },
+    SmugglingProfit { gold: f32 },
+    SmugglingBusted { route_id: u32, penalty: f32 },
+    SmugglingRouteSuspended { route_id: u32 },
+
+    // --- Vassalage ---
+    VassalageEstablished { vassal_id: usize, lord_id: usize, vassal_name: String, lord_name: String },
+    TributePaid { vassal_id: usize, lord_id: usize, amount: f32 },
+    VassalRebellion { vassal_id: usize, lord_id: usize, vassal_name: String, lord_name: String },
+
+    // --- Awakening ---
+    AwakeningTriggered { adventurer_id: u32, awakening_type: AwakeningType, description: String },
+
+    // --- Charter ---
+    CharterAmended { description: String },
+    CharterViolation { article: String },
+    LegitimacyChanged { old: f32, new: f32 },
+
+    // --- Folk hero ---
+    FolkFameChanged { region: usize, amount: f32 },
+    FolkTaleCreated { tale: String, region: usize, adventurer_id: u32, fame_impact: f32 },
+    FolkHeroStatus { region: usize, adventurer: u32 },
+
+    // --- Geography ---
+    GeographyChanging { region_id: usize, change_type: GeoChangeType, progress: f32 },
+    GeographyComplete { region_id: usize, change_type: GeoChangeType, effects: Vec<String> },
+
+    // --- Legacy weapons ---
+    LegacyWeaponCreated { weapon_id: u32, wielder_id: u32, name: String },
+    LegacyWeaponInherited { weapon_id: u32, old_wielder_id: u32, new_wielder_id: Option<u32>, weapon_name: String },
+    LegacyWeaponLevelUp { weapon_id: u32, new_level: u32, ability: String },
+    LegacyWeaponNamed { weapon_id: u32, old_name: String, new_name: String },
+
+    // --- Secrets ---
+    SecretRevealed { adventurer_id: u32, secret_type: SecretType, description: String },
+    SuspicionRising { adventurer_id: u32 },
 }
 
 // ---------------------------------------------------------------------------

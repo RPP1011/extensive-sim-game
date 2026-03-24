@@ -350,6 +350,56 @@ pub struct CampaignState {
     #[serde(default)]
     pub archives: GuildArchives,
 
+    // --- Batch 3 systems ---
+    #[serde(default)]
+    pub alliance_blocs: Vec<AllianceBloc>,
+    #[serde(default)]
+    pub next_bloc_id: u32,
+    #[serde(default)]
+    pub bloodlines: Vec<Bloodline>,
+    #[serde(default)]
+    pub grudges: Vec<Grudge>,
+    #[serde(default)]
+    pub next_grudge_id: u32,
+    #[serde(default)]
+    pub guild_identity: GuildIdentityState,
+    #[serde(default)]
+    pub guild_rooms: Vec<super::systems::guild_rooms::GuildRoom>,
+    #[serde(default)]
+    pub guild_leader: Option<GuildLeader>,
+    #[serde(default)]
+    pub succession_crisis: Option<SuccessionCrisis>,
+    #[serde(default)]
+    pub oaths: Vec<Oath>,
+    #[serde(default)]
+    pub next_oath_id: u32,
+    #[serde(default)]
+    pub romances: Vec<Romance>,
+    #[serde(default)]
+    pub seasonal_quests: Vec<SeasonalQuest>,
+    #[serde(default)]
+    pub smuggling_routes: Vec<SmugglingRoute>,
+    #[serde(default)]
+    pub next_smuggling_route_id: u32,
+    #[serde(default)]
+    pub vassal_relations: Vec<VassalRelation>,
+
+    // --- Batch 4 systems ---
+    #[serde(default)]
+    pub awakenings: Vec<Awakening>,
+    #[serde(default)]
+    pub charter: CharterState,
+    #[serde(default)]
+    pub folk_reputation: FolkReputationState,
+    #[serde(default)]
+    pub geography_changes: Vec<GeographyChange>,
+    #[serde(default)]
+    pub next_geo_change_id: u32,
+    #[serde(default)]
+    pub legacy_weapons: Vec<LegacyWeapon>,
+    #[serde(default)]
+    pub next_legacy_weapon_id: u32,
+
     // --- Extended system trackers ---
     /// Aggregate counters for the ~30 campaign subsystems.
     /// Updated by step logic; consumed by tokens, clustering, and value estimation.
@@ -525,6 +575,24 @@ pub struct SystemTrackers {
     pub archives_completed_count: u32,
     /// Number of research topics currently in progress.
     pub archives_active_research: u32,
+
+    // --- Vassalage ---
+    /// Total vassal relations across all factions.
+    pub vassal_count: u32,
+    /// Number of vassal relations involving the guild as lord.
+    pub guild_vassal_count: u32,
+    /// Whether the guild is currently a vassal of another faction.
+    pub guild_is_vassal: bool,
+    /// Mean autonomy of guild vassals (0-100).
+    pub mean_vassal_autonomy: f32,
+
+    // --- Smuggling ---
+    /// Number of active smuggling routes.
+    pub smuggling_active_routes: u32,
+    /// Total profit from smuggling routes.
+    pub smuggling_total_profit: f32,
+    /// Total bust count across all routes.
+    pub smuggling_total_busts: u32,
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -768,6 +836,12 @@ pub struct Adventurer {
     /// Equipped items with durability tracking.
     #[serde(default)]
     pub equipped_items: Vec<InventoryItem>,
+    /// Earned nicknames from deeds.
+    #[serde(default)]
+    pub nicknames: Vec<Nickname>,
+    /// Hidden past that may be revealed.
+    #[serde(default)]
+    pub secret_past: Option<SecretPast>,
 }
 
 /// A leadership role that provides passive buffs while the adventurer is active.
@@ -1305,6 +1379,9 @@ pub struct FactionState {
     pub guild_adventurer_count: u32,
     /// Recent actions taken by this faction (bounded).
     pub recent_actions: Vec<FactionActionRecord>,
+    /// Generic relation score (alias for relationship_to_guild in some systems).
+    #[serde(default)]
+    pub relation: f32,
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1632,6 +1709,8 @@ pub enum ChoiceSource {
     Memorial,
     /// Evacuation decision for a threatened region.
     Evacuation { source_region_id: usize },
+    /// Random event triggered by a system.
+    RandomEvent,
 }
 
 /// A single option in a choice event.
@@ -3769,6 +3848,348 @@ impl Default for GuildArchives {
 }
 
 // ---------------------------------------------------------------------------
+// Batch 3 + 4 system types
+// ---------------------------------------------------------------------------
+
+/// An alliance of factions coordinating as a unified force.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AllianceBloc {
+    pub id: u32,
+    pub name: String,
+    pub member_factions: Vec<usize>,
+    pub leader_faction_id: usize,
+    pub formed_tick: u64,
+    pub strength: f32,
+    pub cohesion: f32,
+}
+
+/// A bloodline established by a legendary adventurer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Bloodline {
+    pub id: u32,
+    pub founder_name: String,
+    pub founder_archetype: String,
+    pub traits: Vec<String>,
+    pub generations: u32,
+    pub active_member_id: Option<u32>,
+    pub stat_bonus: f32,
+    pub prestige: f32,
+    pub established_tick: u64,
+}
+
+/// A personal grudge held by an adventurer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Grudge {
+    pub id: u32,
+    pub adventurer_id: u32,
+    pub target: GrudgeTarget,
+    pub intensity: f32,
+    pub cause: String,
+    pub formed_tick: u64,
+    pub resolved: bool,
+}
+
+/// The target of a grudge.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GrudgeTarget {
+    Faction(usize),
+    Region(usize),
+    Nemesis(u32),
+}
+
+/// Guild identity axes tracking.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct GuildIdentityState {
+    pub martial_identity: f32,
+    pub mercantile_identity: f32,
+    pub scholarly_identity: f32,
+    pub diplomatic_identity: f32,
+    pub shadowy_identity: f32,
+    pub dominant: Option<IdentityType>,
+}
+
+/// Guild identity specialization type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IdentityType {
+    WarriorsGuild,
+    MerchantCompany,
+    ScholarOrder,
+    DiplomaticCorps,
+    ShadowNetwork,
+}
+
+/// The guild's appointed leader.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GuildLeader {
+    pub adventurer_id: u32,
+    pub appointed_tick: u64,
+    pub leadership_style: LeadershipStyle,
+    pub approval_rating: f32,
+    pub decisions_made: u32,
+}
+
+/// Leadership style providing different bonuses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LeadershipStyle {
+    Aggressive,
+    Cautious,
+    Diplomatic,
+    Mercantile,
+    Scholarly,
+    Inspirational,
+}
+
+/// A succession crisis when no leader is available.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SuccessionCrisis {
+    pub crisis_start_tick: u64,
+    pub previous_leader_id: u32,
+}
+
+/// An earned nickname for an adventurer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Nickname {
+    pub title: String,
+    pub earned_tick: u64,
+    pub source: NicknameSource,
+    pub reputation_modifier: f32,
+}
+
+/// Source of a nickname.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NicknameSource {
+    CombatDeed,
+    DiplomaticAchievement,
+    ExplorationFeat,
+    Sacrifice,
+    MysteriousEvent,
+    EconomicFeat,
+    InfamousAct,
+}
+
+/// A binding oath sworn by an adventurer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Oath {
+    pub id: u32,
+    pub adventurer_id: u32,
+    pub oath_type: OathType,
+    pub sworn_tick: u64,
+    pub fulfilled: bool,
+    pub broken: bool,
+    pub bonus_active: bool,
+}
+
+/// Types of oaths adventurers can swear.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum OathType {
+    OathOfVengeance { target_faction: usize },
+    OathOfProtection { ward_id: u32 },
+    OathOfPoverty,
+    OathOfSilence,
+    OathOfService { faction_id: usize },
+    OathOfExploration,
+}
+
+/// A romantic relationship between two adventurers.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Romance {
+    pub adventurer_a: u32,
+    pub adventurer_b: u32,
+    pub stage: RomanceStage,
+    pub strength: f32,
+    pub started_tick: u64,
+}
+
+/// Stages of a romance.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RomanceStage {
+    Attraction,
+    Courting,
+    Together,
+    Strained,
+    BrokenUp,
+}
+
+/// A season-themed quest.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SeasonalQuest {
+    pub id: u32,
+    pub name: String,
+    pub season: Season,
+    pub quest_type: String,
+    pub threat_level: f32,
+    pub reward_gold: f32,
+    pub reward_special: String,
+    pub available_tick: u64,
+    pub expires_tick: u64,
+    pub claimed: bool,
+}
+
+/// A smuggling route for illicit trade.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SmugglingRoute {
+    pub id: u32,
+    pub start_region: usize,
+    pub end_region: usize,
+    pub route_type: SmugglingRouteType,
+    pub profit_per_trip: f32,
+    pub risk: f32,
+    pub active: bool,
+    pub trips_completed: u32,
+    pub busted_count: u32,
+    pub suspended_until: u64,
+}
+
+/// Type of smuggling route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SmugglingRouteType {
+    DungeonPassage,
+    WildernessTrail,
+    FactionBorderCrossing,
+    SeaRoute,
+}
+
+/// A vassal relationship between two factions.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VassalRelation {
+    pub vassal_id: usize,
+    pub lord_id: usize,
+    pub tribute_rate: f32,
+    pub autonomy: f32,
+    pub started_tick: u64,
+}
+
+/// An adventurer awakening/transformation event.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Awakening {
+    pub adventurer_id: u32,
+    pub awakening_type: AwakeningType,
+    pub tick: u64,
+    pub power_boost: f32,
+    pub new_ability: String,
+}
+
+/// Types of awakening transformations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AwakeningType {
+    BattleRage,
+    ArcaneBloom,
+    DivineFavor,
+    ShadowMerge,
+    NatureBond,
+    AncestralCall,
+}
+
+/// Charter state for guild constitution.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CharterState {
+    pub ratified_tick: u64,
+    pub legitimacy: f32,
+    pub articles: Vec<CharterArticle>,
+    pub amendments: u32,
+}
+
+/// An article in the guild charter.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CharterArticle {
+    pub id: u32,
+    pub article_type: ArticleType,
+    pub description: String,
+    pub active: bool,
+}
+
+/// Types of charter articles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ArticleType {
+    MeritPromotion,
+    SharedLoot,
+    NoOffensiveWars,
+    DemocraticLeadership,
+    NoBlackMarket,
+    OpenRecruitment,
+    TithingRule,
+    MercenaryBan,
+}
+
+/// Folk hero reputation tracking.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct FolkReputationState {
+    pub overall_fame: f32,
+    pub regional_fame: std::collections::HashMap<usize, f32>,
+    pub folk_tales: Vec<FolkTale>,
+}
+
+/// A folk tale about the guild.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FolkTale {
+    pub id: u32,
+    pub adventurer_id: u32,
+    pub tale: String,
+    pub region_id: usize,
+    pub fame_impact: f32,
+    pub created_tick: u64,
+}
+
+/// A geography change in progress.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GeographyChange {
+    pub id: u32,
+    pub change_type: GeoChangeType,
+    pub region_id: usize,
+    pub progress: f32,
+    pub started_tick: u64,
+}
+
+/// Types of geography changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GeoChangeType {
+    ForestGrowth,
+    DesertExpansion,
+    RiverFlood,
+    SettlementGrowth,
+    RoadDegradation,
+    WildernessReclaim,
+}
+
+/// A legacy weapon that grows with its wielder.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LegacyWeapon {
+    pub id: u32,
+    pub name: String,
+    pub wielder_id: Option<u32>,
+    pub base_attack: f32,
+    pub bonus_attack: f32,
+    pub kills: u32,
+    pub battles_survived: u32,
+    pub xp: u32,
+    pub level: u32,
+    pub abilities: Vec<String>,
+    pub created_tick: u64,
+}
+
+/// A hidden past for an adventurer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SecretPast {
+    pub secret_type: SecretType,
+    pub revealed: bool,
+    pub reveal_tick: Option<u64>,
+    pub suspicion: f32,
+}
+
+/// Types of secret pasts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SecretType {
+    ExiledNoble,
+    FormerAssassin,
+    RunawayHeir,
+    CursedBloodline,
+    DeepCoverSpy,
+    FallenPaladin,
+    WitnessToCrime,
+    HiddenMage,
+}
+
+// ---------------------------------------------------------------------------
 // Test campaign constructors
 // ---------------------------------------------------------------------------
 
@@ -3823,6 +4244,8 @@ impl CampaignState {
                     personal_goal: None,
                     journal: Vec::new(),
                     equipped_items: Vec::new(),
+                    nicknames: Vec::new(),
+                    secret_past: None,
             },
             Adventurer {
                 id: 2,
@@ -3863,6 +4286,8 @@ impl CampaignState {
                     personal_goal: None,
                     journal: Vec::new(),
                     equipped_items: Vec::new(),
+                    nicknames: Vec::new(),
+                    secret_past: None,
             },
             Adventurer {
                 id: 3,
@@ -3903,6 +4328,8 @@ impl CampaignState {
                     personal_goal: None,
                     journal: Vec::new(),
                     equipped_items: Vec::new(),
+                    nicknames: Vec::new(),
+                    secret_past: None,
             },
             Adventurer {
                 id: 4,
@@ -3943,6 +4370,8 @@ impl CampaignState {
                     personal_goal: None,
                     journal: Vec::new(),
                     equipped_items: Vec::new(),
+                    nicknames: Vec::new(),
+                    secret_past: None,
             },
         ];
 
@@ -4130,6 +4559,31 @@ impl CampaignState {
             wanted_posters: Vec::new(),
             next_poster_id: 1,
             archives: GuildArchives::default(),
+            // --- Batch 3 systems ---
+            alliance_blocs: Vec::new(),
+            next_bloc_id: 1,
+            bloodlines: Vec::new(),
+            grudges: Vec::new(),
+            next_grudge_id: 1,
+            guild_identity: GuildIdentityState::default(),
+            guild_rooms: Vec::new(),
+            guild_leader: None,
+            succession_crisis: None,
+            oaths: Vec::new(),
+            next_oath_id: 1,
+            romances: Vec::new(),
+            seasonal_quests: Vec::new(),
+            smuggling_routes: Vec::new(),
+            next_smuggling_route_id: 1,
+            vassal_relations: Vec::new(),
+            // --- Batch 4 systems ---
+            awakenings: Vec::new(),
+            charter: CharterState::default(),
+            folk_reputation: FolkReputationState::default(),
+            geography_changes: Vec::new(),
+            next_geo_change_id: 1,
+            legacy_weapons: Vec::new(),
+            next_legacy_weapon_id: 1,
             system_trackers: SystemTrackers::default(),
         }
     }
@@ -4187,6 +4641,8 @@ impl CampaignState {
                     personal_goal: None,
                     journal: Vec::new(),
                     equipped_items: Vec::new(),
+                    nicknames: Vec::new(),
+                    secret_past: None,
                     },
                     Adventurer {
                         id: 2, name: "Greta".into(), archetype: "knight".into(), level: 2, xp: 0,
@@ -4207,6 +4663,8 @@ impl CampaignState {
                     personal_goal: None,
                     journal: Vec::new(),
                     equipped_items: Vec::new(),
+                    nicknames: Vec::new(),
+                    secret_past: None,
                     },
                 ],
                 gold_bonus: 150.0, supply_bonus: 30.0, reputation_bonus: 5.0, items: Vec::new(),
@@ -4234,6 +4692,8 @@ impl CampaignState {
                     personal_goal: None,
                     journal: Vec::new(),
                     equipped_items: Vec::new(),
+                    nicknames: Vec::new(),
+                    secret_past: None,
                     },
                 ],
                 gold_bonus: 0.0, supply_bonus: 0.0, reputation_bonus: 10.0, items: Vec::new(),
@@ -4261,6 +4721,8 @@ impl CampaignState {
                     personal_goal: None,
                     journal: Vec::new(),
                     equipped_items: Vec::new(),
+                    nicknames: Vec::new(),
+                    secret_past: None,
                     },
                     Adventurer {
                         id: 2, name: "Brynn".into(), archetype: "mage".into(), level: 1, xp: 0,
@@ -4281,6 +4743,8 @@ impl CampaignState {
                     personal_goal: None,
                     journal: Vec::new(),
                     equipped_items: Vec::new(),
+                    nicknames: Vec::new(),
+                    secret_past: None,
                     },
                     Adventurer {
                         id: 3, name: "Cira".into(), archetype: "cleric".into(), level: 1, xp: 0,
@@ -4301,6 +4765,8 @@ impl CampaignState {
                     personal_goal: None,
                     journal: Vec::new(),
                     equipped_items: Vec::new(),
+                    nicknames: Vec::new(),
+                    secret_past: None,
                     },
                     Adventurer {
                         id: 4, name: "Daven".into(), archetype: "rogue".into(), level: 1, xp: 0,
@@ -4321,6 +4787,8 @@ impl CampaignState {
                     personal_goal: None,
                     journal: Vec::new(),
                     equipped_items: Vec::new(),
+                    nicknames: Vec::new(),
+                    secret_past: None,
                     },
                 ],
                 gold_bonus: 20.0, supply_bonus: 10.0, reputation_bonus: 0.0, items: Vec::new(),

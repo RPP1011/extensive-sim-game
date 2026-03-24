@@ -135,6 +135,8 @@ pub fn tick_recruitment(
         journal: Vec::new(),
 
         equipped_items: Vec::new(),
+            nicknames: Vec::new(),
+            secret_past: None,
     };
 
     events.push(WorldEvent::AdventurerRecovered {

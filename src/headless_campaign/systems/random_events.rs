@@ -363,6 +363,8 @@ fn apply_refugee_influx(state: &mut CampaignState, events: &mut Vec<WorldEvent>)
             journal: Vec::new(),
 
             equipped_items: Vec::new(),
+            nicknames: Vec::new(),
+            secret_past: None,
     };
 
     state.adventurers.push(adventurer);

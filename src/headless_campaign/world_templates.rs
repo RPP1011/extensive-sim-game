@@ -161,6 +161,7 @@ impl WorldTemplate {
                     has_guild: true,
                     guild_adventurer_count: 6,
                     recent_actions: Vec::new(),
+                    relation: 0.0,
                 },
                 FactionState {
                     id: 1,
@@ -175,6 +176,7 @@ impl WorldTemplate {
                     has_guild: false,
                     guild_adventurer_count: 0,
                     recent_actions: Vec::new(),
+                    relation: 0.0,
                 },
             ],
             diplomacy: DiplomacyMatrix {
