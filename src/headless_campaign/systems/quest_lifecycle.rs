@@ -63,11 +63,12 @@ pub fn tick_quest_lifecycle(
                             .iter()
                             .filter(|a| a.party_id == Some(party_id))
                             .collect();
-                        let oracle_result = oracle.predict_with_unlocks(
+                        let oracle_result = oracle.predict_with_unlocks_and_bonds(
                             &members,
                             quest.request.threat_level,
                             quest.request.threat_level,
                             &state.unlocks,
+                            &state.adventurer_bonds,
                         );
                         let party_health = oracle_result.expected_hp_remaining;
                         // Map win probability to predicted_outcome range (-1 to 1)
@@ -330,6 +331,23 @@ pub fn tick_quest_lifecycle(
                     adv.party_id = None;
                 }
             }
+        }
+
+        // --- Bond system integration ---
+        // Quest completion: boost bonds between all party members.
+        if result == QuestResult::Victory {
+            super::bonds::on_quest_completed(state, &member_ids);
+        }
+        // Death grief: apply stress/morale penalties to bonded adventurers.
+        let dead_ids: Vec<u32> = member_ids
+            .iter()
+            .copied()
+            .filter(|&id| {
+                state.adventurers.iter().any(|a| a.id == id && a.status == AdventurerStatus::Dead)
+            })
+            .collect();
+        for dead_id in dead_ids {
+            super::bonds::on_adventurer_died(state, dead_id, events);
         }
 
         // Send party home (or disband if empty)

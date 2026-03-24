@@ -64,6 +64,11 @@ pub struct CampaignState {
     #[serde(default)]
     pub hook_state: super::quest_hooks::HookState,
 
+    // --- Bonds ---
+    /// Adventurer bond matrix. Key = (min_id, max_id), value = bond strength 0-100.
+    #[serde(default)]
+    pub adventurer_bonds: std::collections::HashMap<(u32, u32), f32>,
+
     // --- Narrative ---
     pub event_log: Vec<CampaignEvent>,
     pub npc_relationships: Vec<NpcRelationship>,
@@ -1456,6 +1461,7 @@ impl CampaignState {
             hook_state: super::quest_hooks::HookState::default(),
             unlocks: Vec::new(),
             progression_history: Vec::new(),
+            adventurer_bonds: std::collections::HashMap::new(),
             event_log: Vec::new(),
             npc_relationships,
             rng: seed,

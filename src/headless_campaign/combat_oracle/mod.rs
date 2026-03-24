@@ -89,6 +89,43 @@ impl HeuristicOracle {
 
         let unlock_bonus = tactical_bridge::unlock_power_bonus(unlocks);
         let party_pow = Self::party_power_with_bonus(party_members, unlock_bonus);
+        Self::predict_from_power(party_pow, party_members.len(), enemy_strength, threat_level)
+    }
+
+    /// Predict with unlock power bonus AND adventurer bond bonus factored in.
+    pub fn predict_with_unlocks_and_bonds(
+        &self,
+        party_members: &[&Adventurer],
+        enemy_strength: f32,
+        threat_level: f32,
+        unlocks: &[UnlockInstance],
+        bonds: &std::collections::HashMap<(u32, u32), f32>,
+    ) -> CombatOracleResult {
+        if party_members.is_empty() {
+            return CombatOracleResult {
+                victory_probability: 0.0,
+                expected_hp_remaining: 0.0,
+                expected_ticks: 1,
+                expected_casualties: 0.0,
+            };
+        }
+
+        let unlock_bonus = tactical_bridge::unlock_power_bonus(unlocks);
+        let base_party_pow = Self::party_power_with_bonus(party_members, unlock_bonus);
+        let member_ids: Vec<u32> = party_members.iter().map(|a| a.id).collect();
+        let bond_bonus = crate::headless_campaign::systems::bonds::party_bond_power_bonus(
+            bonds, &member_ids, base_party_pow,
+        );
+        let party_pow = base_party_pow + bond_bonus;
+        Self::predict_from_power(party_pow, party_members.len(), enemy_strength, threat_level)
+    }
+
+    fn predict_from_power(
+        party_pow: f32,
+        party_size: usize,
+        enemy_strength: f32,
+        threat_level: f32,
+    ) -> CombatOracleResult {
         let enemy_pow = enemy_strength * (threat_level / 50.0).max(0.5);
         let ratio = party_pow / enemy_pow.max(1.0);
 
@@ -105,7 +142,7 @@ impl HeuristicOracle {
         let duration = (base_duration as f32 * difficulty_factor) as u64;
 
         let casualty_rate = (1.0 - win_prob) * 0.5;
-        let expected_casualties = party_members.len() as f32 * casualty_rate;
+        let expected_casualties = party_size as f32 * casualty_rate;
 
         CombatOracleResult {
             victory_probability: win_prob,

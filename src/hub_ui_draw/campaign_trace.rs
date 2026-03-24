@@ -528,9 +528,12 @@ fn format_world_event(event: &WorldEvent) -> (String, egui::Color32) {
             format!("{} arrived at the King's side", champion_name),
             red,
         ),
-        WorldEvent::SeasonChanged { new_season } => (
-            format!("Season changed to {:?}", new_season),
-            blue,
+        WorldEvent::BondGrief { adventurer_id, dead_id, bond_strength } => (
+            format!(
+                "Adventurer #{} grieves for #{} (bond {:.0})",
+                adventurer_id, dead_id, bond_strength
+            ),
+            yellow,
         ),
     }
 }

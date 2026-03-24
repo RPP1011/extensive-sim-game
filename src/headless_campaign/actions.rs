@@ -132,9 +132,8 @@ pub enum AbilityTarget {
     Faction(usize),
 }
 
-#[derive(Clone, Debug, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SpendPriority {
-    #[default]
     Balanced,
     SaveForEmergencies,
     InvestInGrowth,
@@ -343,9 +342,11 @@ pub enum WorldEvent {
         faction_id: usize,
     },
 
-    // --- Seasons ---
-    SeasonChanged {
-        new_season: Season,
+    // --- Bonds ---
+    BondGrief {
+        adventurer_id: u32,
+        dead_id: u32,
+        bond_strength: f32,
     },
 
     // --- Campaign ---

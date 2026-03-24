@@ -92,6 +92,9 @@ pub fn step_campaign(
     // Endgame crisis tick
     systems::crisis::tick_crisis(state, &mut deltas, &mut events);
 
+    // Bond system — decay, party bonding
+    systems::bonds::tick_bonds(state, &mut deltas, &mut events);
+
     // Quest hooks — check triggers against game state
     if state.tick % 50 == 0 {
         super::quest_hooks::evaluate_hooks(state, &mut events);
