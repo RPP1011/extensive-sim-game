@@ -513,6 +513,79 @@ passive ArcaneShield {
     }
 
     #[test]
+    fn test_random_ability_slots_all_parse() {
+        // Fuzz test: random slot vectors must ALL produce parseable DSL
+        let mut rng: u64 = 42;
+        let mut failures = Vec::new();
+
+        for i in 0..10_000 {
+            let mut slots = vec![0.0f32; ABILITY_SLOT_DIM];
+            for s in slots.iter_mut() {
+                rng ^= rng << 13;
+                rng ^= rng >> 7;
+                rng ^= rng << 17;
+                *s = (rng as f32 / u64::MAX as f32); // [0, 1)
+            }
+
+            let name = format!("random_ability_{}", i);
+            let dsl_text = slots_to_ability_dsl(&slots, &name);
+
+            match dsl::parse_abilities(&dsl_text) {
+                Ok(_) => {}
+                Err(e) => {
+                    failures.push((i, format!("{}", e), dsl_text));
+                    if failures.len() >= 10 {
+                        break; // don't flood
+                    }
+                }
+            }
+        }
+
+        if !failures.is_empty() {
+            for (i, err, dsl) in &failures {
+                eprintln!("=== FAILURE #{} ===\n{}\nError: {}\n", i, dsl, err);
+            }
+            panic!("{}/10000 random ability slot vectors failed to parse", failures.len());
+        }
+    }
+
+    #[test]
+    fn test_random_class_slots_all_parse() {
+        let mut rng: u64 = 123;
+        let mut failures = Vec::new();
+
+        for i in 0..10_000 {
+            let mut slots = vec![0.0f32; CLASS_SLOT_DIM];
+            for s in slots.iter_mut() {
+                rng ^= rng << 13;
+                rng ^= rng >> 7;
+                rng ^= rng << 17;
+                *s = (rng as f32 / u64::MAX as f32);
+            }
+
+            let name = format!("RandomClass{}", i);
+            let dsl_text = slots_to_class_dsl(&slots, &name);
+
+            match super::super::class_dsl::parse_class(&dsl_text) {
+                Ok(_) => {}
+                Err(e) => {
+                    failures.push((i, e, dsl_text));
+                    if failures.len() >= 10 {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if !failures.is_empty() {
+            for (i, err, dsl) in &failures {
+                eprintln!("=== FAILURE #{} ===\n{}\nError: {}\n", i, dsl, err);
+            }
+            panic!("{}/10000 random class slot vectors failed to parse", failures.len());
+        }
+    }
+
+    #[test]
     fn test_class_roundtrip() {
         let dsl_text = r#"class Knight {
     stat_growth: +2 attack, +3 defense, +1 speed per level
