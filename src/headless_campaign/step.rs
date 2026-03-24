@@ -368,7 +368,10 @@ fn apply_action(
                 return ActionResult::Failed("Not enough gold".into());
             }
             if let Some(party) = state.parties.iter_mut().find(|p| p.id == party_id) {
-                state.guild.gold -= cost;
+                if state.guild.gold < cost {
+                    return ActionResult::Failed("Not enough gold".into());
+                }
+                state.guild.gold = (state.guild.gold - cost).max(0.0);
                 party.supply_level = (party.supply_level + amount).min(100.0);
                 ActionResult::Success(format!(
                     "Purchased {} supplies for party {} (cost: {:.0}g)",
@@ -394,7 +397,10 @@ fn apply_action(
                 if adv.status != AdventurerStatus::Idle {
                     return ActionResult::Failed("Adventurer not idle".into());
                 }
-                state.guild.gold -= state.config.economy.training_cost;
+                if state.guild.gold < state.config.economy.training_cost {
+                    return ActionResult::Failed("Not enough gold".into());
+                }
+                state.guild.gold = (state.guild.gold - state.config.economy.training_cost).max(0.0);
                 match training_type {
                     TrainingType::Combat => adv.stats.attack += 2.0,
                     TrainingType::Exploration => adv.stats.speed += 1.0,
@@ -463,7 +469,10 @@ fn apply_action(
                 return ActionResult::Failed("Not enough gold".into());
             }
             if let Some(party) = state.parties.iter_mut().find(|p| p.id == party_id) {
-                state.guild.gold -= runner_cost;
+                if state.guild.gold < runner_cost {
+                    return ActionResult::Failed("Not enough gold".into());
+                }
+                state.guild.gold = (state.guild.gold - runner_cost).max(0.0);
                 match &payload {
                     RunnerPayload::Supplies(amount) => {
                         party.supply_level = (party.supply_level + amount).min(100.0);
@@ -488,7 +497,7 @@ fn apply_action(
             if state.guild.gold < merc_cost {
                 return ActionResult::Failed("Not enough gold".into());
             }
-            state.guild.gold -= merc_cost;
+            state.guild.gold = (state.guild.gold - merc_cost).max(0.0);
             // Boost the battle's predicted outcome
             if let Some(battle) = state
                 .active_battles
@@ -520,7 +529,7 @@ fn apply_action(
             if cost > 0.0 && state.guild.gold < cost {
                 return ActionResult::Failed("Not enough gold for rescue".into());
             }
-            state.guild.gold -= cost;
+            state.guild.gold = (state.guild.gold - cost).max(0.0);
             if let Some(battle) = state
                 .active_battles
                 .iter_mut()
@@ -549,7 +558,10 @@ fn apply_action(
                 .iter_mut()
                 .find(|l| l.id == location_id)
             {
-                state.guild.gold -= scout_cost;
+                if state.guild.gold < scout_cost {
+                    return ActionResult::Failed("Not enough gold".into());
+                }
+                state.guild.gold = (state.guild.gold - scout_cost).max(0.0);
                 loc.scouted = true;
                 events.push(WorldEvent::ScoutReport {
                     location_id,
@@ -592,7 +604,7 @@ fn apply_action(
                     DiplomacyActionType::ProposeCeasefire => {
                         if faction.diplomatic_stance == DiplomaticStance::AtWar {
                             // Ceasefire costs gold and reputation
-                            state.guild.gold -= 30.0;
+                            state.guild.gold = (state.guild.gold - 30.0).max(0.0);
                             faction.diplomatic_stance = DiplomaticStance::Hostile;
                             faction.at_war_with.retain(|&id| id != state.diplomacy.guild_faction_id);
                             faction.relationship_to_guild =
@@ -680,7 +692,7 @@ fn apply_action(
                 if state.guild.gold < unlock.properties.resource_cost {
                     return ActionResult::Failed("Not enough gold".into());
                 }
-                state.guild.gold -= unlock.properties.resource_cost;
+                state.guild.gold = (state.guild.gold - unlock.properties.resource_cost).max(0.0);
                 unlock.cooldown_remaining_ms = unlock.properties.cooldown_ms;
                 // TODO: Apply ability effect based on target
                 ActionResult::Success(format!("Used ability {}", unlock.name))
@@ -839,8 +851,8 @@ fn apply_action(
             }
 
             // Apply the starting package
-            state.guild.gold += choice.gold_bonus;
-            state.guild.supplies += choice.supply_bonus;
+            state.guild.gold = (state.guild.gold + choice.gold_bonus).max(0.0);
+            state.guild.supplies = (state.guild.supplies + choice.supply_bonus).max(0.0);
             state.guild.reputation = (state.guild.reputation + choice.reputation_bonus).clamp(0.0, 100.0);
 
             // Add adventurers with corrected IDs
@@ -920,14 +932,14 @@ fn apply_choice_effects(
     for effect in effects {
         match effect {
             ChoiceEffect::Gold(amount) => {
-                state.guild.gold += amount;
+                state.guild.gold = (state.guild.gold + amount).max(0.0);
                 events.push(WorldEvent::GoldChanged {
                     amount: *amount,
                     reason: "Choice effect".into(),
                 });
             }
             ChoiceEffect::Supplies(amount) => {
-                state.guild.supplies += amount;
+                state.guild.supplies = (state.guild.supplies + amount).max(0.0);
                 events.push(WorldEvent::SupplyChanged {
                     amount: *amount,
                     reason: "Choice effect".into(),

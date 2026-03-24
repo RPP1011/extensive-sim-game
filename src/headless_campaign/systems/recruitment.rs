@@ -38,7 +38,7 @@ pub fn tick_recruitment(
         return;
     }
 
-    state.guild.gold -= cfg.recruit_cost;
+    state.guild.gold = (state.guild.gold - cfg.recruit_cost).max(0.0);
 
     // Generate a random adventurer from expanded archetype pool
     let archetypes = [
