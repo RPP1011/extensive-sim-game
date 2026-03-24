@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use super::actions::*;
 use super::batch::heuristic_policy;
-use super::config::CampaignConfig;
+use super::config::{CampaignConfig, Difficulty};
 use super::llm::{self, ContentStore, LlmConfig};
 use super::state::*;
 use super::step::step_campaign;
@@ -241,18 +241,28 @@ fn sweep_single_campaign(seed: u64, config: &VaeDatasetConfig) -> Vec<TriggerCon
     campaign_config.campaign_progress.victory_quest_count =
         victory_options[(rng as usize) % victory_options.len()];
 
+    // Cycle difficulty based on seed for balanced coverage
+    let difficulty = Difficulty::ALL[seed as usize % Difficulty::ALL.len()];
+    let diff_cfg = CampaignConfig::with_difficulty(difficulty);
+    // Apply difficulty adjustments on top of the XP/victory variations
+    campaign_config.quest_generation.base_threat = diff_cfg.quest_generation.base_threat;
+    campaign_config.quest_generation.progress_threat_scaling = diff_cfg.quest_generation.progress_threat_scaling;
+    campaign_config.quest_generation.quest_deadline_ms = diff_cfg.quest_generation.quest_deadline_ms;
+    campaign_config.starting_state.gold = diff_cfg.starting_state.gold;
+    campaign_config.starting_state.supplies = diff_cfg.starting_state.supplies;
+    campaign_config.starting_state.early_game_protection_ticks = diff_cfg.starting_state.early_game_protection_ticks;
+    campaign_config.faction_ai.hostile_strength_gain = diff_cfg.faction_ai.hostile_strength_gain;
+    campaign_config.quest_lifecycle.death_chance = diff_cfg.quest_lifecycle.death_chance;
+    campaign_config.quest_lifecycle.defeat_base_injury = diff_cfg.quest_lifecycle.defeat_base_injury;
+    campaign_config.combat.sigmoid_steepness = diff_cfg.combat.sigmoid_steepness;
+    campaign_config.recruitment.max_adventurers = diff_cfg.recruitment.max_adventurers;
+    campaign_config.recruitment.recruit_cost = diff_cfg.recruitment.recruit_cost;
+    campaign_config.recruitment.min_recruit_chance = diff_cfg.recruitment.min_recruit_chance;
+    campaign_config.campaign_progress.crisis_flood_unrest_threshold = diff_cfg.campaign_progress.crisis_flood_unrest_threshold;
+
     // ~30% of campaigns: mark first adventurer as player character (enables PC triggers)
     rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
     let has_pc = (rng % 3) == 0;
-
-    // ~15% of campaigns: weaken the guild to produce defeats
-    rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
-    let hard_mode = (rng % 7) == 0;
-    if hard_mode {
-        campaign_config.combat.sigmoid_steepness = 1.5; // harder fights
-        campaign_config.quest_generation.base_threat *= 1.5;
-        campaign_config.starting_state.gold = 30.0; // less starting gold
-    }
 
     let mut state = CampaignState::with_config(seed, campaign_config);
 

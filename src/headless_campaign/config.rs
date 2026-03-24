@@ -6,6 +6,45 @@
 
 use serde::{Deserialize, Serialize};
 
+// ---------------------------------------------------------------------------
+// Difficulty
+// ---------------------------------------------------------------------------
+
+/// Campaign difficulty level. Controls enemy threat, starting resources,
+/// faction aggression, and adventurer death risk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Difficulty {
+    /// Target ~90%+ win rate. Weaker enemies, more resources.
+    Easy,
+    /// Target ~60-70% win rate. Current defaults.
+    Normal,
+    /// Target ~30-40% win rate. Stronger enemies, fewer resources.
+    Hard,
+    /// Target ~5-15% win rate. Punishing enemies, scarce resources.
+    Brutal,
+}
+
+impl Difficulty {
+    /// All difficulty variants in order.
+    pub const ALL: [Difficulty; 4] = [
+        Difficulty::Easy,
+        Difficulty::Normal,
+        Difficulty::Hard,
+        Difficulty::Brutal,
+    ];
+}
+
+impl std::fmt::Display for Difficulty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Difficulty::Easy => write!(f, "Easy"),
+            Difficulty::Normal => write!(f, "Normal"),
+            Difficulty::Hard => write!(f, "Hard"),
+            Difficulty::Brutal => write!(f, "Brutal"),
+        }
+    }
+}
+
 /// Complete campaign balance configuration.
 ///
 /// Grouped by system. Stored in `CampaignState.config` and passed to all
@@ -650,6 +689,61 @@ impl Default for CampaignConfig {
 // ---------------------------------------------------------------------------
 
 impl CampaignConfig {
+    /// Create a config tuned for the given difficulty level.
+    ///
+    /// | Difficulty | Target Win Rate | Key Changes |
+    /// |---|---|---|
+    /// | Easy | 90%+ | lower threat, more gold/supplies, slower faction growth |
+    /// | Normal | 60-70% | current defaults |
+    /// | Hard | 30-40% | higher threat, less gold, faster faction growth, more deaths |
+    /// | Brutal | 5-15% | extreme threat, minimal resources, small roster, fast crises |
+    pub fn with_difficulty(difficulty: Difficulty) -> Self {
+        let mut cfg = Self::default();
+        match difficulty {
+            Difficulty::Easy => {
+                cfg.quest_generation.base_threat *= 0.6;
+                cfg.quest_generation.quest_deadline_ms =
+                    (cfg.quest_generation.quest_deadline_ms as f64 * 1.5) as u64;
+                cfg.starting_state.gold *= 1.5;
+                cfg.starting_state.supplies *= 1.5;
+                cfg.faction_ai.hostile_strength_gain *= 0.5;
+                cfg.quest_lifecycle.death_chance *= 0.5;
+                cfg.quest_lifecycle.defeat_base_injury *= 0.7;
+                cfg.combat.sigmoid_steepness = 3.0; // more forgiving win curve
+            }
+            Difficulty::Normal => {
+                // defaults are Normal
+            }
+            Difficulty::Hard => {
+                cfg.quest_generation.base_threat *= 1.5;
+                cfg.quest_generation.progress_threat_scaling *= 1.3;
+                cfg.starting_state.gold *= 0.6;
+                cfg.starting_state.supplies *= 0.7;
+                cfg.faction_ai.hostile_strength_gain *= 1.5;
+                cfg.quest_lifecycle.death_chance *= 1.5;
+                cfg.quest_lifecycle.defeat_base_injury *= 1.3;
+                cfg.combat.sigmoid_steepness = 2.0; // steeper = more punishing
+                cfg.campaign_progress.crisis_flood_unrest_threshold *= 0.8;
+            }
+            Difficulty::Brutal => {
+                cfg.quest_generation.base_threat *= 2.0;
+                cfg.quest_generation.progress_threat_scaling *= 1.8;
+                cfg.starting_state.gold *= 0.4;
+                cfg.starting_state.supplies *= 0.5;
+                cfg.faction_ai.hostile_strength_gain *= 2.0;
+                cfg.quest_lifecycle.death_chance *= 2.0;
+                cfg.quest_lifecycle.defeat_base_injury *= 1.5;
+                cfg.combat.sigmoid_steepness = 1.5; // very punishing
+                cfg.recruitment.max_adventurers = 8;
+                cfg.recruitment.recruit_cost *= 1.5;
+                cfg.recruitment.min_recruit_chance *= 0.5;
+                cfg.campaign_progress.crisis_flood_unrest_threshold *= 0.6;
+                cfg.starting_state.early_game_protection_ticks /= 2;
+            }
+        }
+        cfg
+    }
+
     /// Load from a TOML file. Missing fields use defaults.
     pub fn load_from_toml(path: &std::path::Path) -> Result<Self, String> {
         let content =

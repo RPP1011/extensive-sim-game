@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use super::actions::*;
 use super::batch::heuristic_policy;
-use super::config::CampaignConfig;
+use super::config::{CampaignConfig, Difficulty};
 use super::heuristic_bc::action_type_name;
 use super::state::*;
 use super::step::step_campaign;
@@ -53,6 +53,8 @@ pub struct BfsSample {
     pub wave: u32,
     /// Which cluster this leaf was assigned to.
     pub cluster_id: u32,
+    /// Difficulty level of the originating campaign.
+    pub difficulty: Difficulty,
 }
 
 /// A state snapshot used as a BFS root.
@@ -61,6 +63,7 @@ struct RootState {
     state: CampaignState,
     seed: u64,
     wave: u32,
+    difficulty: Difficulty,
 }
 
 /// Configuration for BFS exploration.
@@ -401,7 +404,7 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
         let num_roots = roots.len();
 
         // Expand all roots in parallel
-        let (samples, leaves): (Vec<Vec<BfsSample>>, Vec<Vec<(CampaignState, Vec<f32>, u64)>>) = pool.install(|| {
+        let (samples, leaves): (Vec<Vec<BfsSample>>, Vec<Vec<(CampaignState, Vec<f32>, u64, Difficulty)>>) = pool.install(|| {
             use rayon::prelude::*;
             roots
                 .par_iter()
@@ -411,7 +414,7 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
 
         // Flatten
         let all_samples: Vec<BfsSample> = samples.into_iter().flatten().collect();
-        let all_leaves: Vec<(CampaignState, Vec<f32>, u64)> =
+        let all_leaves: Vec<(CampaignState, Vec<f32>, u64, Difficulty)> =
             leaves.into_iter().flatten().collect();
 
         // Count terminal outcomes in this wave's samples
@@ -458,7 +461,7 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
         // Cluster non-terminal leaves and select medians for next wave
         let leaf_states_features: Vec<(CampaignState, Vec<f32>)> = all_leaves
             .iter()
-            .map(|(s, f, _)| (s.clone(), f.clone()))
+            .map(|(s, f, _, _)| (s.clone(), f.clone()))
             .collect();
 
         let median_indices =
@@ -468,10 +471,11 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
         roots = median_indices
             .iter()
             .filter_map(|&idx| {
-                all_leaves.get(idx).map(|(state, _, seed)| RootState {
+                all_leaves.get(idx).map(|(state, _, seed, diff)| RootState {
                     state: state.clone(),
                     seed: *seed,
                     wave: wave + 1,
+                    difficulty: *diff,
                 })
             })
             .collect();
@@ -635,7 +639,9 @@ fn generate_initial_roots(
 
     for i in 0..campaigns_needed as u64 {
         let seed = config.base_seed.wrapping_add(i * 7919); // spread seeds
-        let mut state = CampaignState::with_config(seed, config.campaign_config.clone());
+        let difficulty = Difficulty::ALL[i as usize % Difficulty::ALL.len()];
+        let campaign_config = CampaignConfig::with_difficulty(difficulty);
+        let mut state = CampaignState::with_config(seed, campaign_config);
         state.llm_config = config.llm_config.clone();
         state.llm_store = llm_store.clone();
         state.vae_model = config.vae_model.clone();
@@ -673,6 +679,7 @@ fn generate_initial_roots(
                     state: state.clone(),
                     seed,
                     wave: 0,
+                    difficulty,
                 });
             }
 
@@ -705,7 +712,7 @@ fn expand_root(
     root: &RootState,
     config: &BfsConfig,
     wave: u32,
-) -> (Vec<BfsSample>, Vec<(CampaignState, Vec<f32>, u64)>) {
+) -> (Vec<BfsSample>, Vec<(CampaignState, Vec<f32>, u64, Difficulty)>) {
     // Skip roots where the campaign is effectively over (value ≈ 0)
     let root_value = estimate_value(&root.state);
     if root_value < 0.05 {
@@ -766,10 +773,11 @@ fn expand_root(
             seed: root.seed,
             wave,
             cluster_id: 0, // filled during clustering
+            difficulty: root.difficulty,
         });
 
         if !terminal {
-            leaves.push((branch_state, leaf_features, root.seed));
+            leaves.push((branch_state, leaf_features, root.seed, root.difficulty));
         }
     }
 
