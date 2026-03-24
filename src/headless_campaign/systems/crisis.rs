@@ -13,6 +13,9 @@ use crate::headless_campaign::crisis_templates::{
 };
 use crate::headless_campaign::state::*;
 
+/// Distance threshold (tiles) at which a guild party intercepts a champion party.
+const INTERCEPTION_RANGE: f32 = 5.0;
+
 /// Tick all active crises. Runs every tick.
 pub fn tick_crisis(
     state: &mut CampaignState,
@@ -361,7 +364,21 @@ fn tick_sleeping_king(
         _ => return Some(crisis),
     };
 
-    // Activate next dormant champion on schedule
+    // Compute the king's destination position (used for spawning and routing)
+    let king_pos = state
+        .overworld
+        .regions
+        .iter()
+        .find(|r| r.owner_faction_id == king_faction_id)
+        .map(|r| {
+            (
+                (r.id as f32 * 20.0) - 30.0,
+                (r.id as f32 * 15.0) - 20.0,
+            )
+        })
+        .unwrap_or((50.0, 50.0));
+
+    // Activate next dormant champion on schedule — create a traveling party
     if state.tick >= next_activation_tick {
         if let Some(champ) = state.adventurers.iter_mut().find(|a| {
             champion_ids.contains(&a.id)
@@ -369,26 +386,35 @@ fn tick_sleeping_king(
                 && a.faction_id != Some(king_faction_id)
                 && a.status != AdventurerStatus::Dead
         }) {
-            let king_pos = state
-                .overworld
-                .regions
-                .iter()
-                .find(|r| r.owner_faction_id == king_faction_id)
-                .map(|r| {
-                    (
-                        (r.id as f32 * 20.0) - 30.0,
-                        (r.id as f32 * 15.0) - 20.0,
-                    )
-                })
-                .unwrap_or((50.0, 50.0));
+            // Spawn position: far from the king, randomized using campaign RNG
+            let spawn_pos = champion_spawn_position(king_pos, &mut state.rng);
 
             let name = champ.name.clone();
+            let champ_id = champ.id;
             champ.rallying_to = Some(RallyTarget {
                 faction_id: king_faction_id,
                 destination: king_pos,
                 speed: 3.0,
             });
             champ.status = AdventurerStatus::Traveling;
+
+            // Create a party for the champion so they physically travel on the map
+            let party_id = state.next_party_id;
+            state.next_party_id += 1;
+            champ.party_id = Some(party_id);
+
+            let party = Party {
+                id: party_id,
+                member_ids: vec![champ_id],
+                position: spawn_pos,
+                destination: Some(king_pos),
+                speed: 3.0,
+                status: PartyStatus::Traveling,
+                supply_level: 100.0,
+                morale: 95.0,
+                quest_id: None,
+            };
+            state.parties.push(party);
 
             events.push(WorldEvent::CampaignMilestone {
                 description: format!(
@@ -401,24 +427,49 @@ fn tick_sleeping_king(
         }
     }
 
-    // Check for arrivals
+    // Check for champion party arrivals — parties that have reached destination
+    // The travel system sets status to OnMission when arrived
     let mut newly_arrived = Vec::new();
     for champ in &mut state.adventurers {
         if !champion_ids.contains(&champ.id) || champ.status == AdventurerStatus::Dead {
             continue;
         }
-        if let Some(ref rally) = champ.rallying_to {
-            if rally.faction_id == king_faction_id {
+        // A champion has arrived if they have a rallying_to set and their party
+        // has reached the destination (travel.rs sets status to OnMission on arrival)
+        if champ.rallying_to.is_some() && champ.party_id.is_some() {
+            let pid = champ.party_id.unwrap();
+            let arrived = state
+                .parties
+                .iter()
+                .find(|p| p.id == pid)
+                .map(|p| p.status == PartyStatus::OnMission)
+                .unwrap_or(false);
+
+            if arrived {
                 champ.faction_id = Some(king_faction_id);
                 champ.rallying_to = None;
                 champ.status = AdventurerStatus::Idle;
-                newly_arrived.push(champ.name.clone());
+                let name = champ.name.clone();
+                let cid = champ.id;
+                champ.party_id = None;
+                newly_arrived.push((name, cid, pid));
             }
         }
     }
 
-    for name in &newly_arrived {
+    // Remove arrived champion parties
+    for &(_, _, pid) in &newly_arrived {
+        state.parties.retain(|p| p.id != pid);
+    }
+
+    for (name, cid, _) in &newly_arrived {
         champions_arrived += 1;
+
+        events.push(WorldEvent::ChampionArrived {
+            champion_id: *cid,
+            champion_name: name.clone(),
+            faction_id: king_faction_id,
+        });
 
         if let Some(faction) = state.factions.iter_mut().find(|f| f.id == king_faction_id) {
             let power_boost = compute_power_boost(&power_formula, champions_arrived);
@@ -457,6 +508,9 @@ fn tick_sleeping_king(
         }
     }
 
+    // Check for interceptions — guild parties near champion parties
+    check_champion_interceptions(state, events, &champion_ids);
+
     // Crisis resolved if king faction destroyed
     let king_alive = state
         .factions
@@ -481,6 +535,155 @@ fn tick_sleeping_king(
         power_formula,
         war_threshold,
     })
+}
+
+/// Pick a spawn position for a champion, placed far from the king's territory.
+/// Uses a point on the opposite side of the map from `king_pos`, with random offset.
+fn champion_spawn_position(king_pos: (f32, f32), rng: &mut u64) -> (f32, f32) {
+    // Mirror the king's position across the map center and add noise
+    let center = (50.0, 50.0);
+    let base_x = 2.0 * center.0 - king_pos.0;
+    let base_y = 2.0 * center.1 - king_pos.1;
+    let offset_x = (lcg_f32(rng) - 0.5) * 40.0; // +-20 tiles
+    let offset_y = (lcg_f32(rng) - 0.5) * 40.0;
+    (base_x + offset_x, base_y + offset_y)
+}
+
+/// Check whether any guild party is close enough to intercept a traveling champion party.
+/// If so, emit a `ChampionIntercepted` event and stop both parties (creates a battle).
+fn check_champion_interceptions(
+    state: &mut CampaignState,
+    events: &mut Vec<WorldEvent>,
+    champion_ids: &[u32],
+) {
+    // Collect champion party info: (party_id, champion_id, position)
+    let champion_parties: Vec<(u32, u32, (f32, f32))> = state
+        .parties
+        .iter()
+        .filter(|p| p.status == PartyStatus::Traveling && p.quest_id.is_none())
+        .filter_map(|p| {
+            if p.member_ids.len() == 1 && champion_ids.contains(&p.member_ids[0]) {
+                // Verify this adventurer is still rallying
+                let is_rallying = state
+                    .adventurers
+                    .iter()
+                    .any(|a| a.id == p.member_ids[0] && a.rallying_to.is_some());
+                if is_rallying {
+                    return Some((p.id, p.member_ids[0], p.position));
+                }
+            }
+            None
+        })
+        .collect();
+
+    if champion_parties.is_empty() {
+        return;
+    }
+
+    // Collect guild party info: (party_id, position) — non-champion, traveling parties
+    let guild_party_id = state.diplomacy.guild_faction_id;
+    let guild_parties: Vec<(u32, (f32, f32))> = state
+        .parties
+        .iter()
+        .filter(|p| {
+            matches!(p.status, PartyStatus::Traveling | PartyStatus::OnMission)
+                && p.quest_id.is_none()
+                && !champion_parties.iter().any(|(cpid, _, _)| *cpid == p.id)
+                // Must be a guild party (check member faction)
+                && p.member_ids.iter().any(|mid| {
+                    state
+                        .adventurers
+                        .iter()
+                        .any(|a| a.id == *mid && a.faction_id.is_none())
+                })
+        })
+        .map(|p| (p.id, p.position))
+        .collect();
+
+    // Also check quest parties — they can intercept if they happen to be nearby
+    let quest_guild_parties: Vec<(u32, (f32, f32))> = state
+        .parties
+        .iter()
+        .filter(|p| {
+            matches!(p.status, PartyStatus::Traveling | PartyStatus::OnMission)
+                && p.quest_id.is_some()
+                && p.member_ids.iter().any(|mid| {
+                    state
+                        .adventurers
+                        .iter()
+                        .any(|a| a.id == *mid && a.faction_id.is_none())
+                })
+        })
+        .map(|p| (p.id, p.position))
+        .collect();
+
+    let all_guild_parties: Vec<(u32, (f32, f32))> = guild_parties
+        .into_iter()
+        .chain(quest_guild_parties)
+        .collect();
+
+    // Check proximity
+    let mut interceptions = Vec::new();
+    for &(champ_party_id, champ_id, champ_pos) in &champion_parties {
+        for &(guild_pid, guild_pos) in &all_guild_parties {
+            let dx = champ_pos.0 - guild_pos.0;
+            let dy = champ_pos.1 - guild_pos.1;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist < INTERCEPTION_RANGE {
+                interceptions.push((guild_pid, champ_party_id, champ_id));
+                break; // only one interception per champion
+            }
+        }
+    }
+
+    // Process interceptions — stop champion parties, create battle events
+    for (guild_pid, champ_party_id, champ_id) in &interceptions {
+        // Stop the champion party
+        if let Some(cp) = state.parties.iter_mut().find(|p| p.id == *champ_party_id) {
+            cp.status = PartyStatus::Fighting;
+            cp.destination = None;
+        }
+        // Stop the guild party too
+        if let Some(gp) = state.parties.iter_mut().find(|p| p.id == *guild_pid) {
+            gp.status = PartyStatus::Fighting;
+        }
+        // Mark the champion as fighting
+        if let Some(champ) = state.adventurers.iter_mut().find(|a| a.id == *champ_id) {
+            champ.status = AdventurerStatus::Fighting;
+        }
+        // Mark guild party members as fighting
+        let guild_member_ids: Vec<u32> = state
+            .parties
+            .iter()
+            .find(|p| p.id == *guild_pid)
+            .map(|p| p.member_ids.clone())
+            .unwrap_or_default();
+        for mid in &guild_member_ids {
+            if let Some(adv) = state.adventurers.iter_mut().find(|a| a.id == *mid) {
+                adv.status = AdventurerStatus::Fighting;
+            }
+        }
+
+        events.push(WorldEvent::ChampionIntercepted {
+            party_id: *guild_pid,
+            champion_party_id: *champ_party_id,
+            champion_id: *champ_id,
+        });
+
+        let champ_name = state
+            .adventurers
+            .iter()
+            .find(|a| a.id == *champ_id)
+            .map(|a| a.name.clone())
+            .unwrap_or_else(|| format!("Champion {}", champ_id));
+
+        events.push(WorldEvent::CampaignMilestone {
+            description: format!(
+                "Guild party intercepted {} en route to the Sleeping King!",
+                champ_name
+            ),
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -815,10 +1018,9 @@ fn tick_decline(
 
     let elapsed = state.tick.saturating_sub(tick_started);
     let base_severity = 1.0 + (elapsed as f32 / severity_growth_rate);
-
-    // Recovery: high reputation and quest completions push back against decline
+    // Recovery: quest completions and reputation push back against decline
     let quest_recovery = (state.completed_quests.len() as f32 * 0.05).min(3.0);
-    let rep_recovery = (state.guild.reputation / 50.0).max(0.0); // rep 50 → 1.0 recovery
+    let rep_recovery = (state.guild.reputation / 50.0).max(0.0);
     let severity = (base_severity - quest_recovery - rep_recovery).max(0.5);
 
     if state.tick % 100 == 0 {

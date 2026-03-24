@@ -89,6 +89,15 @@ pub enum CampaignAction {
 
     /// Respond to a pending choice event by selecting an option index.
     RespondToChoice { choice_id: u32, option_index: usize },
+
+    /// Dispatch a party to intercept a traveling champion (Sleeping King crisis).
+    /// The party will travel to the champion's current position and engage in combat.
+    InterceptChampion {
+        /// The party to send on the interception.
+        party_id: u32,
+        /// The champion adventurer ID to intercept.
+        champion_id: u32,
+    },
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -314,6 +323,23 @@ pub enum WorldEvent {
         option_index: usize,
         label: String,
         was_default: bool,
+    },
+
+    // --- Champions ---
+    /// A guild party has intercepted a traveling champion.
+    ChampionIntercepted {
+        /// The guild party that intercepted.
+        party_id: u32,
+        /// The champion's traveling party.
+        champion_party_id: u32,
+        /// The champion adventurer ID.
+        champion_id: u32,
+    },
+    /// A champion's traveling party arrived at the king's territory.
+    ChampionArrived {
+        champion_id: u32,
+        champion_name: String,
+        faction_id: usize,
     },
 
     // --- Campaign ---
@@ -691,6 +717,53 @@ impl CampaignState {
                                 });
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        // Intercept traveling champion parties (Sleeping King crisis)
+        // Find champion parties (parties whose sole member has rallying_to set)
+        let champion_party_ids: Vec<(u32, u32)> = self
+            .parties
+            .iter()
+            .filter(|p| p.status == PartyStatus::Traveling && p.quest_id.is_none())
+            .filter_map(|p| {
+                // Check if the sole member is a rallying champion
+                if p.member_ids.len() == 1 {
+                    let mid = p.member_ids[0];
+                    if self.adventurers.iter().any(|a| {
+                        a.id == mid && a.rallying_to.is_some()
+                    }) {
+                        return Some((p.id, mid));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if !champion_party_ids.is_empty() {
+            // Any idle guild adventurer can form a party to intercept
+            if !idle_adventurers.is_empty() {
+                for &(_, champion_id) in &champion_party_ids {
+                    // Expose one action per champion — party formation handled at dispatch
+                    actions.push(CampaignAction::InterceptChampion {
+                        party_id: 0, // sentinel: will form a new party
+                        champion_id,
+                    });
+                }
+            }
+            // Existing guild parties can also be redirected
+            for party in &self.parties {
+                if party.quest_id.is_some() {
+                    continue; // don't redirect quest parties
+                }
+                if !champion_party_ids.iter().any(|&(pid, _)| pid == party.id) {
+                    for &(_, champion_id) in &champion_party_ids {
+                        actions.push(CampaignAction::InterceptChampion {
+                            party_id: party.id,
+                            champion_id,
+                        });
                     }
                 }
             }

@@ -520,5 +520,13 @@ fn format_world_event(event: &WorldEvent) -> (String, egui::Color32) {
         },
         WorldEvent::CalamityWarning { description } => (description.clone(), red),
         WorldEvent::CampaignMilestone { description } => (description.clone(), green),
+        WorldEvent::ChampionIntercepted { champion_id, .. } => (
+            format!("Champion {} intercepted!", champion_id),
+            yellow,
+        ),
+        WorldEvent::ChampionArrived { champion_name, .. } => (
+            format!("{} arrived at the King's side", champion_name),
+            red,
+        ),
     }
 }

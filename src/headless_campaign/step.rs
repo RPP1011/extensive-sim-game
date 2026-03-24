@@ -729,6 +729,110 @@ fn apply_action(
             ActionResult::Success(format!("Chose: {}", label))
         }
 
+        CampaignAction::InterceptChampion {
+            party_id,
+            champion_id,
+        } => {
+            // Find the champion's party
+            let champ_party = state
+                .parties
+                .iter()
+                .find(|p| {
+                    p.member_ids.len() == 1
+                        && p.member_ids[0] == champion_id
+                        && p.status == PartyStatus::Traveling
+                });
+            let champ_pos = match champ_party {
+                Some(p) => p.position,
+                None => {
+                    return ActionResult::Failed(format!(
+                        "Champion {} is not traveling on the map",
+                        champion_id
+                    ));
+                }
+            };
+
+            if party_id == 0 {
+                // Form a new party from idle guild adventurers
+                let idle_ids: Vec<u32> = state
+                    .adventurers
+                    .iter()
+                    .filter(|a| {
+                        a.status == AdventurerStatus::Idle
+                            && a.faction_id.is_none()
+                            && a.party_id.is_none()
+                    })
+                    .map(|a| a.id)
+                    .collect();
+
+                if idle_ids.is_empty() {
+                    return ActionResult::Failed("No idle adventurers to form party".into());
+                }
+
+                // Take up to 4 idle adventurers
+                let member_ids: Vec<u32> = idle_ids.into_iter().take(4).collect();
+                let new_party_id = state.next_party_id;
+                state.next_party_id += 1;
+
+                for &mid in &member_ids {
+                    if let Some(adv) = state.adventurers.iter_mut().find(|a| a.id == mid) {
+                        adv.status = AdventurerStatus::Traveling;
+                        adv.party_id = Some(new_party_id);
+                    }
+                }
+
+                let party = Party {
+                    id: new_party_id,
+                    member_ids: member_ids.clone(),
+                    position: state.guild.base.position,
+                    destination: Some(champ_pos),
+                    speed: state.config.quest_lifecycle.party_speed,
+                    status: PartyStatus::Traveling,
+                    supply_level: state.config.quest_lifecycle.party_starting_supply,
+                    morale: state.config.quest_lifecycle.party_starting_morale,
+                    quest_id: None,
+                };
+                state.parties.push(party);
+
+                events.push(WorldEvent::PartyFormed {
+                    party_id: new_party_id,
+                    member_ids,
+                });
+
+                let champ_name = state
+                    .adventurers
+                    .iter()
+                    .find(|a| a.id == champion_id)
+                    .map(|a| a.name.clone())
+                    .unwrap_or_else(|| format!("Champion {}", champion_id));
+
+                ActionResult::Success(format!(
+                    "Party dispatched to intercept {}",
+                    champ_name
+                ))
+            } else {
+                // Redirect an existing party to the champion's position
+                if let Some(party) = state.parties.iter_mut().find(|p| p.id == party_id) {
+                    party.destination = Some(champ_pos);
+                    party.status = PartyStatus::Traveling;
+
+                    let champ_name = state
+                        .adventurers
+                        .iter()
+                        .find(|a| a.id == champion_id)
+                        .map(|a| a.name.clone())
+                        .unwrap_or_else(|| format!("Champion {}", champion_id));
+
+                    ActionResult::Success(format!(
+                        "Party {} redirected to intercept {}",
+                        party_id, champ_name
+                    ))
+                } else {
+                    ActionResult::InvalidAction(format!("Party {} not found", party_id))
+                }
+            }
+        }
+
         CampaignAction::ChooseStartingPackage { choice } => {
             if state.phase == CampaignPhase::Playing {
                 return ActionResult::Failed("Campaign already initialized".into());
