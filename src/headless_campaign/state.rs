@@ -242,6 +242,156 @@ pub struct CampaignState {
     /// Crafting resource stockpile.
     #[serde(default)]
     pub resources: std::collections::HashMap<ResourceType, f32>,
+
+    // --- Extended system trackers ---
+    /// Aggregate counters for the ~30 campaign subsystems.
+    /// Updated by step logic; consumed by tokens, clustering, and value estimation.
+    #[serde(default)]
+    pub system_trackers: SystemTrackers,
+}
+
+// ---------------------------------------------------------------------------
+// Extended system trackers
+// ---------------------------------------------------------------------------
+
+/// Aggregate counters for campaign subsystems that feed the token/clustering/value
+/// pipeline. Each field is a cheap scalar maintained by the step logic. Defaults
+/// to zero so old serialized states remain compatible.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SystemTrackers {
+    // --- Espionage ---
+    /// Number of active spies embedded in factions.
+    pub spy_count: u32,
+    /// Total intel points gathered across the campaign.
+    pub total_intel_gathered: f32,
+    /// Average cover level of active spies (0-100).
+    pub mean_spy_cover: f32,
+
+    // --- Mercenaries ---
+    /// Currently hired mercenaries across all active quests/battles.
+    pub mercenaries_hired: u32,
+    /// Total aggregate mercenary combat strength.
+    pub total_mercenary_strength: f32,
+    /// Average loyalty of hired mercenaries (0-100).
+    pub mean_mercenary_loyalty: f32,
+
+    // --- Black market ---
+    /// Heat level from illicit activity (0-100). High heat attracts enforcement.
+    pub black_market_heat: f32,
+    /// Total profit from black market deals.
+    pub black_market_profit: f32,
+    /// Number of currently active black market deals.
+    pub active_deals: u32,
+
+    // --- Prisoners ---
+    /// Captured enemy combatants held by the guild.
+    pub prisoner_count: u32,
+    /// Captured adventurers (our side) held by enemies.
+    pub captured_adventurer_count: u32,
+
+    // --- Loans ---
+    /// Total outstanding debt from loans.
+    pub total_debt: f32,
+    /// Credit rating (0-100). Higher = better loan terms.
+    pub credit_rating: f32,
+
+    // --- Rumors ---
+    /// Number of active unverified rumors.
+    pub active_rumor_count: u32,
+    /// Number of rumors that have been investigated.
+    pub investigated_rumor_count: u32,
+
+    // --- Civil wars ---
+    /// Number of active civil wars between factions.
+    pub active_civil_war_count: u32,
+    /// Whether the guild is involved in any civil war.
+    pub guild_civil_war_involvement: bool,
+
+    // --- Diplomacy agreements ---
+    /// Number of active trade agreements.
+    pub trade_agreement_count: u32,
+    /// Number of active non-aggression pacts.
+    pub non_aggression_pact_count: u32,
+    /// Number of active mutual defense treaties.
+    pub mutual_defense_count: u32,
+    /// Gold per tick from active trade agreements.
+    pub active_trade_income: f32,
+
+    // --- Rival guild extended ---
+    /// Reputation gap (rival - player). Positive = behind.
+    pub rival_reputation_gap: f32,
+    /// Power gap (rival - player). Positive = behind.
+    pub rival_power_gap: f32,
+    /// Rate at which rival competes for the same quests (0-1).
+    pub rival_quest_competition_rate: f32,
+
+    // --- Caravans ---
+    /// Number of active trade caravan routes.
+    pub active_caravan_routes: u32,
+    /// Total income from caravan trade.
+    pub caravan_trade_income: f32,
+    /// Number of caravans raided this campaign.
+    pub caravans_raided: u32,
+
+    // --- Retirement ---
+    /// Number of adventurers who have retired.
+    pub retired_count: u32,
+    /// Sum of legacy bonuses from retired adventurers.
+    pub total_legacy_bonuses: f32,
+
+    // --- Monster ecology ---
+    /// Total monster population across all regions.
+    pub total_monster_population: f32,
+    /// Highest aggression level among monster groups.
+    pub highest_monster_aggression: f32,
+
+    // --- Festivals ---
+    /// Number of currently active festivals.
+    pub active_festival_count: u32,
+    /// Total festivals attended this campaign.
+    pub festivals_attended: u32,
+
+    // --- Backstory ---
+    /// Fraction of adventurers that have backstory content (0-1).
+    pub has_backstory_ratio: f32,
+    /// Number of rival faction connections from backstories.
+    pub rival_faction_connections: u32,
+
+    // --- Mentorship ---
+    /// Number of active mentor-mentee pairings.
+    pub active_mentorship_count: u32,
+
+    // --- Rivalries ---
+    /// Number of active adventurer rivalries.
+    pub active_rivalry_count: u32,
+    /// Average intensity of active rivalries (0-100).
+    pub mean_rivalry_intensity: f32,
+
+    // --- War exhaustion ---
+    /// Maximum war exhaustion level across all factions at war with us.
+    pub max_war_exhaustion: f32,
+
+    // --- Chronicle ---
+    /// Total chronicle entries written.
+    pub chronicle_entry_count: u32,
+    /// Number of recent tragedy events in the chronicle.
+    pub recent_tragedy_count: u32,
+
+    // --- Deeds ---
+    /// Total heroic deeds earned by adventurers.
+    pub total_deeds_earned: u32,
+
+    // --- Population ---
+    /// Total regional population in guild-controlled territory.
+    pub total_population: f32,
+    /// Average civilian morale across controlled regions.
+    pub mean_population_morale: f32,
+    /// Total tax income from controlled populations.
+    pub total_tax_income: f32,
+
+    // --- Site preparation ---
+    /// Total preparation level across quest sites.
+    pub total_site_preparation: f32,
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2635,6 +2785,7 @@ impl CampaignState {
             regional_cultures: Vec::new(),
             dungeons: Vec::new(),
             resources: std::collections::HashMap::new(),
+            system_trackers: SystemTrackers::default(),
         }
     }
 

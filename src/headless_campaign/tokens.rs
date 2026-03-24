@@ -477,6 +477,74 @@ impl CampaignState {
                 war_count,
                 trade_income_log,
                 territory_ratio,
+                // --- Extended system tracker dimensions (pass 3) ---
+                // Espionage
+                self.system_trackers.spy_count as f32,
+                (self.system_trackers.total_intel_gathered.max(1.0)).ln() / 5.0,
+                self.system_trackers.mean_spy_cover / 100.0,
+                // Mercenaries
+                self.system_trackers.mercenaries_hired as f32,
+                (self.system_trackers.total_mercenary_strength / 50.0).min(1.0),
+                self.system_trackers.mean_mercenary_loyalty / 100.0,
+                // Black market
+                self.system_trackers.black_market_heat / 100.0,
+                (self.system_trackers.black_market_profit.max(1.0)).ln() / 5.0,
+                self.system_trackers.active_deals as f32,
+                // Prisoners
+                self.system_trackers.prisoner_count as f32,
+                self.system_trackers.captured_adventurer_count as f32,
+                // Loans
+                (self.system_trackers.total_debt.max(1.0)).ln() / 5.0,
+                self.system_trackers.credit_rating / 100.0,
+                // Rumors
+                self.system_trackers.active_rumor_count as f32,
+                self.system_trackers.investigated_rumor_count as f32,
+                // Civil wars
+                self.system_trackers.active_civil_war_count as f32,
+                if self.system_trackers.guild_civil_war_involvement { 1.0 } else { 0.0 },
+                // Diplomacy agreements
+                self.system_trackers.trade_agreement_count as f32,
+                self.system_trackers.non_aggression_pact_count as f32,
+                self.system_trackers.mutual_defense_count as f32,
+                (self.system_trackers.active_trade_income.max(1.0)).ln() / 5.0,
+                // Rival guild extended
+                self.system_trackers.rival_reputation_gap / 100.0,
+                self.system_trackers.rival_power_gap / 100.0,
+                self.system_trackers.rival_quest_competition_rate,
+                // Caravans
+                self.system_trackers.active_caravan_routes as f32,
+                (self.system_trackers.caravan_trade_income.max(1.0)).ln() / 5.0,
+                self.system_trackers.caravans_raided as f32,
+                // Retirement
+                self.system_trackers.retired_count as f32,
+                (self.system_trackers.total_legacy_bonuses / 50.0).min(1.0),
+                // Monster ecology
+                (self.system_trackers.total_monster_population / 100.0).min(1.0),
+                self.system_trackers.highest_monster_aggression / 100.0,
+                // Festivals
+                self.system_trackers.active_festival_count as f32,
+                self.system_trackers.festivals_attended as f32,
+                // Backstory
+                self.system_trackers.has_backstory_ratio,
+                self.system_trackers.rival_faction_connections as f32,
+                // Mentorship
+                self.system_trackers.active_mentorship_count as f32,
+                // Rivalries
+                self.system_trackers.active_rivalry_count as f32,
+                self.system_trackers.mean_rivalry_intensity / 100.0,
+                // War exhaustion
+                self.system_trackers.max_war_exhaustion / 100.0,
+                // Chronicle
+                (self.system_trackers.chronicle_entry_count as f32 / 20.0).min(1.0),
+                self.system_trackers.recent_tragedy_count as f32,
+                // Deeds
+                (self.system_trackers.total_deeds_earned as f32 / 20.0).min(1.0),
+                // Population
+                (self.system_trackers.total_population.max(1.0)).ln() / 8.0,
+                self.system_trackers.mean_population_morale / 100.0,
+                (self.system_trackers.total_tax_income.max(1.0)).ln() / 5.0,
+                // Site preparation
+                (self.system_trackers.total_site_preparation / 10.0).min(1.0),
             ],
         }
     }

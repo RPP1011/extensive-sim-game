@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use super::actions::*;
 use super::batch::heuristic_policy;
 use super::config::{CampaignConfig, Difficulty};
-use super::llm::{self, ContentStore, LlmConfig};
+use super::llm::{self, LlmConfig};
 use super::state::*;
 use super::step::step_campaign;
 use super::vae_features;
@@ -175,28 +175,53 @@ pub fn sweep_campaigns(config: &VaeDatasetConfig) -> Vec<TriggerContext> {
     contexts
 }
 
+/// Personality modes for diverse policy — creates varied playstyle data.
+#[derive(Clone, Copy, Debug)]
+enum PolicyPersonality {
+    Standard,
+    Greedy,
+    Cautious,
+    Random,
+}
+
+impl PolicyPersonality {
+    fn from_seed(seed: u64) -> Self {
+        match seed % 4 {
+            0 => Self::Standard,
+            1 => Self::Greedy,
+            2 => Self::Cautious,
+            _ => Self::Random,
+        }
+    }
+}
+
+/// Inline xorshift step for the VAE dataset policy.
+fn xorshift_vae(rng: &mut u64) {
+    *rng ^= *rng << 13;
+    *rng ^= *rng >> 7;
+    *rng ^= *rng << 17;
+}
+
 /// Diversity-aware policy for dataset sweeps.
-/// Randomizes character creation choices and starting packages based on seed
-/// so each campaign produces different trait combos, backstories, and compositions.
-fn diverse_policy(state: &CampaignState, rng: &mut u64) -> Option<CampaignAction> {
+/// Features personality modes, deliberate bad choices, and undersampled action boosting.
+fn diverse_policy(
+    state: &CampaignState,
+    rng: &mut u64,
+    personality: PolicyPersonality,
+    action_counts: &mut std::collections::HashMap<String, u64>,
+) -> Option<CampaignAction> {
     if state.phase != CampaignPhase::Playing {
-        // Randomize backstory/creation choices
         if let Some(choice) = state.pending_choices.first() {
-            *rng ^= *rng << 13;
-            *rng ^= *rng >> 7;
-            *rng ^= *rng << 17;
+            xorshift_vae(rng);
             let option_index = (*rng as usize) % choice.options.len().max(1);
             return Some(CampaignAction::RespondToChoice {
                 choice_id: choice.id,
                 option_index,
             });
         }
-        // Randomize starting package
         if state.phase == CampaignPhase::ChoosingStartingPackage {
             if !state.available_starting_choices.is_empty() {
-                *rng ^= *rng << 13;
-                *rng ^= *rng >> 7;
-                *rng ^= *rng << 17;
+                xorshift_vae(rng);
                 let idx = (*rng as usize) % state.available_starting_choices.len();
                 return Some(CampaignAction::ChooseStartingPackage {
                     choice: state.available_starting_choices[idx].clone(),
@@ -206,11 +231,8 @@ fn diverse_policy(state: &CampaignState, rng: &mut u64) -> Option<CampaignAction
         return None;
     }
 
-    // During play, use the standard heuristic but randomize choice responses
     if let Some(choice) = state.pending_choices.first() {
-        *rng ^= *rng << 13;
-        *rng ^= *rng >> 7;
-        *rng ^= *rng << 17;
+        xorshift_vae(rng);
         let option_index = (*rng as usize) % choice.options.len().max(1);
         return Some(CampaignAction::RespondToChoice {
             choice_id: choice.id,
@@ -218,8 +240,133 @@ fn diverse_policy(state: &CampaignState, rng: &mut u64) -> Option<CampaignAction
         });
     }
 
-    // Fall back to heuristic for gameplay decisions
+    // 10% chance: make deliberately bad choices (negative training examples)
+    xorshift_vae(rng);
+    if *rng % 100 < 10 {
+        let valid = state.valid_actions();
+        if !valid.is_empty() {
+            xorshift_vae(rng);
+            let idx = (*rng as usize) % valid.len();
+            let action = valid[idx].clone();
+            let atype = super::heuristic_bc::action_type_name(&action);
+            *action_counts.entry(atype).or_default() += 1;
+            return Some(action);
+        }
+    }
+
+    // Personality-driven action selection
+    let action = match personality {
+        PolicyPersonality::Standard => heuristic_policy(state),
+        PolicyPersonality::Greedy => greedy_policy(state, rng),
+        PolicyPersonality::Cautious => cautious_policy(state, rng),
+        PolicyPersonality::Random => random_policy(state, rng),
+    };
+
+    // Boost undersampled action types
+    if let Some(ref a) = action {
+        let atype = super::heuristic_bc::action_type_name(a);
+        let chosen_count = action_counts.get(&atype).copied().unwrap_or(0);
+        *action_counts.entry(atype).or_default() += 1;
+
+        xorshift_vae(rng);
+        if chosen_count > 50 && *rng % 100 < 15 {
+            let valid = state.valid_actions();
+            let mut best: Option<CampaignAction> = None;
+            let mut best_count = u64::MAX;
+            for va in &valid {
+                let vtype = super::heuristic_bc::action_type_name(va);
+                let c = action_counts.get(&vtype).copied().unwrap_or(0);
+                if c < best_count { best_count = c; best = Some(va.clone()); }
+            }
+            if let Some(b) = best {
+                let btype = super::heuristic_bc::action_type_name(&b);
+                *action_counts.entry(btype).or_default() += 1;
+                return Some(b);
+            }
+        }
+    }
+
+    action
+}
+
+/// Greedy policy: maximize quest throughput.
+fn greedy_policy(state: &CampaignState, _rng: &mut u64) -> Option<CampaignAction> {
+    if let Some(req) = state.request_board.first() {
+        if state.active_quests.len() < state.guild.active_quest_capacity {
+            return Some(CampaignAction::AcceptQuest { request_id: req.id });
+        }
+    }
+    for quest in &state.active_quests {
+        if quest.status == ActiveQuestStatus::Preparing && !quest.assigned_pool.is_empty() {
+            return Some(CampaignAction::DispatchQuest { quest_id: quest.id });
+        }
+    }
+    let idle: Vec<u32> = state.adventurers.iter()
+        .filter(|a| a.status == AdventurerStatus::Idle).map(|a| a.id).collect();
+    for quest in &state.active_quests {
+        if quest.status == ActiveQuestStatus::Preparing {
+            for &adv_id in &idle {
+                if !quest.assigned_pool.contains(&adv_id) {
+                    return Some(CampaignAction::AssignToPool { adventurer_id: adv_id, quest_id: quest.id });
+                }
+            }
+        }
+    }
+    if state.guild.gold >= state.config.economy.mercenary_cost {
+        for quest in &state.active_quests {
+            if matches!(quest.status, ActiveQuestStatus::InProgress | ActiveQuestStatus::InCombat) {
+                return Some(CampaignAction::HireMercenary { quest_id: quest.id });
+            }
+        }
+    }
     heuristic_policy(state)
+}
+
+/// Cautious policy: rest often, train, avoid risky quests.
+fn cautious_policy(state: &CampaignState, rng: &mut u64) -> Option<CampaignAction> {
+    let has_stressed = state.adventurers.iter()
+        .any(|a| a.status != AdventurerStatus::Dead && (a.stress > 30.0 || a.injury > 20.0));
+    if has_stressed || !state.pending_progression.is_empty() {
+        return Some(CampaignAction::Rest);
+    }
+    if state.guild.gold >= state.config.economy.training_cost {
+        let idle: Vec<u32> = state.adventurers.iter()
+            .filter(|a| a.status == AdventurerStatus::Idle).map(|a| a.id).collect();
+        if !idle.is_empty() {
+            xorshift_vae(rng);
+            let ai = (*rng as usize) % idle.len();
+            let types = [TrainingType::Combat, TrainingType::Survival];
+            xorshift_vae(rng);
+            let ti = (*rng as usize) % types.len();
+            return Some(CampaignAction::TrainAdventurer {
+                adventurer_id: idle[ai], training_type: types[ti],
+            });
+        }
+    }
+    for faction in &state.factions {
+        if faction.diplomatic_stance == DiplomaticStance::Hostile {
+            return Some(CampaignAction::DiplomaticAction {
+                faction_id: faction.id, action_type: DiplomacyActionType::ImproveRelations,
+            });
+        }
+    }
+    if state.guild.gold >= state.config.economy.scout_cost {
+        for loc in &state.overworld.locations {
+            if !loc.scouted {
+                return Some(CampaignAction::HireScout { location_id: loc.id });
+            }
+        }
+    }
+    heuristic_policy(state)
+}
+
+/// Random policy: uniform random selection from valid actions.
+fn random_policy(state: &CampaignState, rng: &mut u64) -> Option<CampaignAction> {
+    let valid = state.valid_actions();
+    if valid.is_empty() { return None; }
+    xorshift_vae(rng);
+    let idx = (*rng as usize) % valid.len();
+    Some(valid[idx].clone())
 }
 
 /// Run one campaign, returning trigger contexts.
@@ -275,8 +422,13 @@ fn sweep_single_campaign(seed: u64, config: &VaeDatasetConfig) -> Vec<TriggerCon
     let mut contexts = Vec::new();
     let mut seen_triggers: std::collections::HashSet<String> = std::collections::HashSet::new();
 
+    // Select personality mode for this campaign based on seed
+    let personality = PolicyPersonality::from_seed(rng);
+    // Track action type counts for undersampled action boosting
+    let mut action_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+
     for _ in 0..config.max_ticks {
-        let action = diverse_policy(&state, &mut rng);
+        let action = diverse_policy(&state, &mut rng, personality, &mut action_counts);
 
         // Check for new progression items BEFORE stepping
         // (they get added during step by progression_triggers)
