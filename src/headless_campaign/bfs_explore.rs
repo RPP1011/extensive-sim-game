@@ -631,7 +631,17 @@ fn generate_initial_roots(
             let action = diverse_root_policy(&state, &mut rng);
             let result = step_campaign(&mut state, action);
 
-            if state.tick > 0 && state.tick % config.root_sample_interval == 0 {
+            // Only sample roots from mid-game (tick 600-8000) where decisions matter
+            let min_tick = config.root_sample_interval * 3; // skip early game
+            let max_tick = config.trajectory_max_ticks as u64 * 2 / 3; // skip late game
+            let has_tension = state.guild.gold < 150.0
+                || state.adventurers.iter().any(|a| a.injury > 30.0)
+                || !state.active_quests.is_empty()
+                || !state.overworld.active_crises.is_empty()
+                || state.overworld.global_threat_level > 30.0
+                || state.completed_quests.len() >= 3;
+
+            if state.tick >= min_tick && state.tick <= max_tick && state.tick % config.root_sample_interval == 0 && has_tension {
                 roots.push(RootState {
                     state: state.clone(),
                     seed,
@@ -683,11 +693,13 @@ fn expand_root(
         let action_detail = format!("{:?}", action);
         step_campaign(&mut branch_state, Some(action.clone()));
 
-        // Advance ticks_per_branch with heuristic policy
+        // Advance ticks_per_branch with diverse policy for realistic follow-up
         let mut terminal = false;
         let mut outcome_str = None;
+        let mut branch_rng = root.seed.wrapping_mul(6364136223846793005)
+            .wrapping_add(root.state.tick);
         for _ in 0..config.ticks_per_branch {
-            let h_action = heuristic_policy(&branch_state);
+            let h_action = diverse_root_policy(&branch_state, &mut branch_rng);
             let result = step_campaign(&mut branch_state, h_action);
             if let Some(outcome) = result.outcome {
                 outcome_str = Some(format!("{:?}", outcome));
