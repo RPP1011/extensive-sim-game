@@ -660,7 +660,14 @@ fn generate_initial_roots(
 
     for i in 0..campaigns_needed as u64 {
         let seed = config.base_seed.wrapping_add(i * 7919); // spread seeds
-        let difficulty = Difficulty::ALL[i as usize % Difficulty::ALL.len()];
+        // Weight toward harder difficulties — they produce more decisive training data
+        // Distribution: 15% Easy, 25% Normal, 35% Hard, 25% Brutal
+        let difficulty = match i as usize % 20 {
+            0..=2 => Difficulty::Easy,
+            3..=7 => Difficulty::Normal,
+            8..=14 => Difficulty::Hard,
+            _ => Difficulty::Brutal,
+        };
         let campaign_config = CampaignConfig::with_difficulty(difficulty);
         let mut state = CampaignState::with_config(seed, campaign_config);
         state.llm_config = config.llm_config.clone();
