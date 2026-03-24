@@ -108,42 +108,48 @@ fn faction_at_war(
 ) -> String {
     let strength = state.factions[fi].military_strength;
 
-    // War costs strength — can't attack forever
-    if strength < 15.0 {
+    // War costs resources — factions need minimum strength to keep attacking
+    if strength < 20.0 {
         // Too weak to attack — forced ceasefire
         state.factions[fi].diplomatic_stance = DiplomaticStance::Hostile;
         state.factions[fi].at_war_with.retain(|&id| id != guild_faction_id);
         return "Forced ceasefire — military exhausted".into();
     }
 
-    // Attack costs strength
-    let attack_cost = strength * 0.05; // Lose 5% strength per attack
+    // Attack costs a flat amount + small percentage (stronger armies sustain longer)
+    let attack_cost = 3.0 + strength * 0.03;
     state.factions[fi].military_strength -= attack_cost;
 
-    // Find guild region to attack
-    if let Some(region) = state
-        .overworld
-        .regions
-        .iter_mut()
-        .find(|r| r.owner_faction_id == guild_faction_id && r.control > 5.0)
-    {
+    // Find guild region to attack (prefer weakest control first)
+    let target_idx = state.overworld.regions.iter()
+        .enumerate()
+        .filter(|(_, r)| r.owner_faction_id == guild_faction_id && r.control > 0.0)
+        .min_by(|(_, a), (_, b)| a.control.partial_cmp(&b.control).unwrap())
+        .map(|(i, _)| i);
+
+    if let Some(idx) = target_idx {
         let attack_power = strength * cfg.attack_power_fraction;
+        let region = &mut state.overworld.regions[idx];
         region.control = (region.control - attack_power).max(0.0);
-        region.unrest = (region.unrest + attack_power * 0.3).min(100.0);
+        region.unrest = (region.unrest + attack_power * 0.5).min(100.0);
 
         if region.control <= 0.0 {
-            let old_owner = region.owner_faction_id;
+            // Conquest! Faction gains power from captured territory
             region.owner_faction_id = fi;
             region.control = cfg.territory_capture_control;
-            format!("Captured region {} (strength now {:.0})", region.name, state.factions[fi].military_strength)
+            region.unrest = 20.0;
+            // War spoils: conquering boosts military strength (modest)
+            state.factions[fi].military_strength += 5.0;
+            format!("Captured region {} — strength grows to {:.0}!",
+                region.name, state.factions[fi].military_strength)
         } else {
-            format!("Attacked region {} (control {:.0}, strength now {:.0})",
+            format!("Attacked region {} (control {:.0}, strength {:.0})",
                 region.name, region.control, state.factions[fi].military_strength)
         }
     } else {
-        // No targets — recruit instead
+        // All territory conquered — faction rebuilds
         state.factions[fi].military_strength += cfg.hostile_strength_gain;
-        "No targets — rebuilding forces".into()
+        "No remaining targets — consolidating power".into()
     }
 }
 

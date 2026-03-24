@@ -193,10 +193,12 @@ pub fn parse_location_type(s: &str) -> super::state::LocationType {
 /// Compute power boost based on the formula string and champion count.
 pub fn compute_power_boost(formula: &str, champions_arrived: u32) -> f32 {
     let n = champions_arrived as f32;
+    // Capped quadratic: threatening but not invincible
+    // At 7 champions: 10*49 = 490 (was 25*49 = 1225 per champion)
     match formula {
-        "quadratic" => 25.0 * n * n,
-        "linear" => 50.0 * n,
-        "exponential" => 25.0 * 2.0f32.powf(n - 1.0),
-        _ => 25.0 * n * n, // default to quadratic
+        "quadratic" => (10.0 * n * n).min(500.0),
+        "linear" => (30.0 * n).min(300.0),
+        "exponential" => (15.0 * 2.0f32.powf(n - 1.0)).min(500.0),
+        _ => (10.0 * n * n).min(500.0),
     }
 }
