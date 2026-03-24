@@ -441,3 +441,30 @@ pub fn generate_batch(
 
     results
 }
+
+/// Generate synthetic abilities and write slot vectors to JSONL on stdout.
+pub fn dump_synthetic(count: usize, seed: u64) {
+    use std::io::Write;
+    let archetypes = [
+        "knight", "ranger", "mage", "cleric", "rogue",
+        "paladin", "berserker", "necromancer", "bard", "druid",
+        "warlock", "monk", "assassin", "guardian", "shaman",
+        "artificer", "tank", "warrior", "fighter",
+    ];
+
+    let batch = generate_batch(&archetypes.iter().map(|s| *s).collect::<Vec<_>>(), 40, count, seed);
+    let stdout = std::io::stdout();
+    let mut out = std::io::BufWriter::new(stdout.lock());
+
+    for (slots, arch, level, is_passive) in &batch {
+        let record = serde_json::json!({
+            "slots": slots,
+            "archetype": arch,
+            "level": level,
+            "is_passive": is_passive,
+        });
+        writeln!(out, "{}", record).ok();
+    }
+
+    eprintln!("Generated {} synthetic abilities", batch.len());
+}
