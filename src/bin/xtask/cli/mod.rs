@@ -199,6 +199,9 @@ pub struct BfsExploreArgs {
     /// LLM candidates per generation (best-of-N, default: 3)
     #[arg(long, default_value_t = 3)]
     pub llm_candidates: usize,
+    /// Path to VAE model weights JSON (enables instant content generation)
+    #[arg(long)]
+    pub vae_model: Option<String>,
 }
 
 #[derive(Debug, Parser)]

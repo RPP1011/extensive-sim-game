@@ -88,6 +88,8 @@ pub struct BfsConfig {
     pub output_path: String,
     /// Optional LLM config for content generation.
     pub llm_config: Option<super::llm::LlmConfig>,
+    /// Optional VAE model for instant content generation.
+    pub vae_model: Option<std::sync::Arc<super::vae_inference::ContentVaeWeights>>,
 }
 
 impl Default for BfsConfig {
@@ -104,6 +106,7 @@ impl Default for BfsConfig {
             threads: 0,
             output_path: "generated/bfs_explore.jsonl".into(),
             llm_config: None,
+            vae_model: None,
         }
     }
 }
@@ -558,6 +561,7 @@ fn generate_initial_roots(
         let mut state = CampaignState::with_config(seed, config.campaign_config.clone());
         state.llm_config = config.llm_config.clone();
         state.llm_store = llm_store.clone();
+        state.vae_model = config.vae_model.clone();
         let mut rng = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
 
         // Run heuristic trajectory with diverse character creation

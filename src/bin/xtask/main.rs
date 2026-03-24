@@ -90,6 +90,21 @@ fn main() -> ExitCode {
                 None
             };
 
+            let vae_model = if let Some(ref path) = args.vae_model {
+                match bevy_game::headless_campaign::vae_inference::ContentVaeWeights::load(path) {
+                    Ok(w) => {
+                        eprintln!("VAE: loaded from {} ({:?})", path, w);
+                        Some(std::sync::Arc::new(w))
+                    }
+                    Err(e) => {
+                        eprintln!("VAE: failed to load {}: {}", path, e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
             let config = bevy_game::headless_campaign::bfs_explore::BfsConfig {
                 max_waves: args.max_waves,
                 ticks_per_branch: args.ticks_per_branch,
@@ -102,6 +117,7 @@ fn main() -> ExitCode {
                 threads: args.threads,
                 output_path: args.output,
                 llm_config,
+                vae_model,
             };
             bevy_game::headless_campaign::bfs_explore::run_bfs_exploration(&config);
             ExitCode::SUCCESS
