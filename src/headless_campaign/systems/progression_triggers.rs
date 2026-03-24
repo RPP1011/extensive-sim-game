@@ -242,26 +242,46 @@ fn try_add_progression(
 // Content generators — LLM with template fallback
 // ---------------------------------------------------------------------------
 
-/// Generate ability content: try LLM first, fall back to template.
+/// Generate ability content: try VAE first, then LLM, fall back to template.
 /// Takes archetype/level from snapshot to avoid stale adventurer lookups.
 fn generate_ability(state: &CampaignState, adv_id: u32, trigger: &str, archetype: &str, level: u32) -> String {
+    // Try VAE model first (instant, ~0.1ms)
+    if let Some(ref vae) = state.vae_model {
+        let input = super::super::vae_features::assemble_input(
+            state, adv_id, trigger, ProgressionKind::Ability,
+        );
+        let name = format!("{}_{}", archetype, trigger);
+        return vae.generate_ability(&input, &name);
+    }
+
+    // Try LLM (slow, ~8s)
     if let (Some(ref llm_cfg), Some(ref store)) = (&state.llm_config, &state.llm_store) {
         let context = content_prompts::ability_prompt(state, adv_id, trigger);
         if let Some(content) = llm::generate_ability(llm_cfg, store, &context) {
             return content;
         }
     }
+
     generate_ability_template(archetype, level)
 }
 
-/// Generate class content: try LLM first, fall back to template.
+/// Generate class content: try VAE first, then LLM, fall back to template.
 fn generate_class(state: &CampaignState, adv_id: u32, trigger: &str, archetype: &str, level: u32, fame: f32) -> String {
+    if let Some(ref vae) = state.vae_model {
+        let input = super::super::vae_features::assemble_input(
+            state, adv_id, trigger, ProgressionKind::ClassOffer,
+        );
+        let name = format!("{}Class", archetype.chars().next().unwrap().to_uppercase().to_string() + &archetype[1..]);
+        return vae.generate_class(&input, &name);
+    }
+
     if let (Some(ref llm_cfg), Some(ref store)) = (&state.llm_config, &state.llm_store) {
         let context = content_prompts::class_prompt(state, adv_id, trigger);
         if let Some(content) = llm::generate_class(llm_cfg, store, &context) {
             return content;
         }
     }
+
     generate_class_template(archetype, level, fame)
 }
 

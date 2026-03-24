@@ -124,6 +124,10 @@ pub struct CampaignState {
     /// Arc so it survives Clone (BFS branches share the same store).
     #[serde(skip)]
     pub llm_store: Option<std::sync::Arc<super::llm::ContentStore>>,
+    /// Optional VAE model for content generation (replaces LLM + templates).
+    /// Arc so cloned states share the same weights.
+    #[serde(skip)]
+    pub vae_model: Option<std::sync::Arc<super::vae_inference::ContentVaeWeights>>,
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1355,6 +1359,7 @@ impl CampaignState {
             config: CampaignConfig::default(),
             llm_config: None,
             llm_store: None,
+            vae_model: None,
         }
     }
 
