@@ -19,6 +19,7 @@
 //! }
 //! ```
 
+pub mod ability_gen;
 pub mod actions;
 pub mod backstory;
 pub mod batch;

@@ -182,14 +182,12 @@ def vae_loss(ability_pred, class_pred, ct_logits, mu, logvar,
         ab_p = ability_pred[ab_mask]
         ab_t = ability_target[ab_mask]
 
-        # Cross-entropy on each categorical range
+        # Cross-entropy on each categorical range with label smoothing
         categorical_dims = set()
         for start, end in ABILITY_CATEGORICAL_RANGES:
-            # Target: argmax of the one-hot target
             target_idx = ab_t[:, start:end].argmax(dim=1)
-            # Prediction: treat as logits
             logits = ab_p[:, start:end]
-            ab_ce_loss = ab_ce_loss + F.cross_entropy(logits, target_idx)
+            ab_ce_loss = ab_ce_loss + F.cross_entropy(logits, target_idx, label_smoothing=0.1)
             for d in range(start, end):
                 categorical_dims.add(d)
 
@@ -290,7 +288,7 @@ def train(args):
     param_count = sum(p.numel() for p in model.parameters())
     print(f"Parameters: {param_count:,} ({args.layers} layers, hidden={args.hidden_dim})")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     # Beta annealing
@@ -298,6 +296,7 @@ def train(args):
     beta_warmup = args.epochs // 5
 
     best_val_loss = float('inf')
+    patience_counter = 0
     history = []
 
     for epoch in range(1, args.epochs + 1):
@@ -383,9 +382,10 @@ def train(args):
                   f"val={val_total:.4f} recon={val_recon:.4f} kl={val_kl:.4f} ct_acc={val_ct_acc:.3f} "
                   f"β={beta:.3f} lr={scheduler.get_last_lr()[0]:.6f}")
 
-        # Save best
+        # Save best + early stopping
         if val_total < best_val_loss:
             best_val_loss = val_total
+            patience_counter = 0
             os.makedirs(args.output_dir, exist_ok=True)
             torch.save({
                 "model_state": model.state_dict(),
@@ -401,6 +401,11 @@ def train(args):
                 "epoch": epoch,
                 "val_loss": val_total,
             }, os.path.join(args.output_dir, "content_vae_best.pt"))
+        else:
+            patience_counter += 1
+            if args.patience > 0 and patience_counter >= args.patience:
+                print(f"Early stopping at epoch {epoch} (no improvement for {args.patience} epochs)")
+                break
 
     # Save final + history
     os.makedirs(args.output_dir, exist_ok=True)
@@ -436,10 +441,12 @@ def main():
     parser.add_argument("--latent-dim", type=int, default=32)
     parser.add_argument("--hidden-dim", type=int, default=512)
     parser.add_argument("--layers", type=int, default=4)
-    parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--beta", type=float, default=0.5, help="KL weight (annealed from 0)")
     parser.add_argument("--free-bits", type=float, default=0.1, help="Min KL per latent dim (nats)")
+    parser.add_argument("--patience", type=int, default=30, help="Early stopping patience (0=disabled)")
     parser.add_argument("--log-interval", type=int, default=10)
     args = parser.parse_args()
     train(args)
