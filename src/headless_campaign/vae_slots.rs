@@ -16,9 +16,9 @@ use super::state::{EquipmentSlot, InventoryItem, QuestRequest, QuestType};
 // ---------------------------------------------------------------------------
 
 /// Maximum effects per ability (pad/truncate to this).
-const MAX_EFFECTS: usize = 4;
+pub const MAX_EFFECTS: usize = 4;
 /// Dims per effect slot.
-const EFFECT_SLOT_DIM: usize = 25;
+pub const EFFECT_SLOT_DIM: usize = 25;
 /// Maximum scaling rules per class.
 const MAX_SCALING_RULES: usize = 3;
 /// Maximum abilities per class.
