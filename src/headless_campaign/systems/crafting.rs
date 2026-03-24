@@ -293,6 +293,7 @@ pub fn tick_crafting(
                 slot: recipe.output_slot,
                 quality: recipe.output_quality,
                 stat_bonuses,
+                durability: 100.0,
             });
 
             events.push(WorldEvent::ItemCrafted {

@@ -601,6 +601,7 @@ mod tests {
             quality: 0.8,
             stat_bonuses: super::super::state::StatBonuses {
                 hp_bonus: 10.0,
+                    durability: 100.0,
                 attack_bonus: 5.0,
                 defense_bonus: 0.0,
                 speed_bonus: 2.0,

@@ -223,6 +223,7 @@ fn apply_wandering_merchant(state: &mut CampaignState, events: &mut Vec<WorldEve
                         slot,
                         quality,
                         stat_bonuses: Default::default(),
+                    durability: 100.0,
                     }),
                 ],
             },
@@ -352,6 +353,16 @@ fn apply_refugee_influx(state: &mut CampaignState, events: &mut Vec<WorldEvent>)
             deeds: Vec::new(),
             hobbies: Vec::new(),
             disease_status: crate::headless_campaign::state::DiseaseStatus::Healthy,
+
+            mood_state: crate::headless_campaign::state::MoodState::default(),
+
+            fears: Vec::new(),
+
+            personal_goal: None,
+
+            journal: Vec::new(),
+
+            equipped_items: Vec::new(),
     };
 
     state.adventurers.push(adventurer);

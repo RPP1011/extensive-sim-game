@@ -719,5 +719,7 @@ fn format_world_event(event: &WorldEvent) -> (String, egui::Color32) {
             format!("Region {} {} milestone: {:.0}", region_id, culture, level), green),
         WorldEvent::NearVictoryEscalation => (
             "Near victory — enemies escalating!".into(), red),
+        // --- Second integration systems (catch-all for display) ---
+        _ => (format!("{:?}", event), gray),
     }
 }

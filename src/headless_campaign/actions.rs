@@ -548,6 +548,195 @@ pub enum WorldEvent {
 
     // --- Near-victory escalation ---
     NearVictoryEscalation,
+
+    // --- Archives ---
+    KnowledgeGained { amount: f32, source: String },
+    ResearchCompleted { topic: String },
+
+    // --- Auction ---
+    AuctionStarted { items: Vec<String> },
+    AuctionBidPlaced { item: String, amount: f32 },
+    AuctionWon { item: String, winner: String, price: f32 },
+    AuctionLost { item: String, winner: String },
+
+    // --- Bounties ---
+    BountyPosted { description: String, reward: f32 },
+    BountyCompleted { description: String, reward_gold: f32 },
+    BountyExpired { description: String },
+
+    // --- Companions ---
+    CompanionAcquired { adventurer_id: u32, species: super::state::CompanionSpecies, name: String },
+    CompanionLost { name: String, reason: String },
+    CompanionBondMilestone { adventurer_id: u32, name: String, level: i32 },
+
+    // --- Contracts ---
+    ContractOffered { contract_id: u32, commissioner: String, reward_gold: f32 },
+    ContractCompleted { contract_id: u32, reward_gold: f32, reward_reputation: f32 },
+    ContractFailed { contract_id: u32, penalty_gold: f32, penalty_reputation: f32 },
+
+    // --- Corruption ---
+    EmbezzlementDiscovered { gold_lost: f32 },
+    CorruptionScandal { reputation_lost: f32 },
+
+    // --- Counter-espionage ---
+    EnemyAgentDetected { agent_id: u32, faction_id: usize, infiltration_level: f32 },
+    EnemyAgentCaptured { agent_id: u32, faction_id: usize, intel_gained: f32 },
+    EnemyAgentExpelled { agent_id: u32, faction_id: usize },
+    GuildIntelLeaked { faction_id: usize, combat_bonus_pct: f32 },
+    SabotagePrevented { agent_id: u32, description: String, prevented: bool },
+
+    // --- Economic competition ---
+    TradeWarDeclared { aggressor_faction_id: usize, target_faction_id: usize, aggressor_share: f32, description: String },
+    TradeWarResolved { winner_faction_id: usize, loser_faction_id: usize, rivalry_type: String, description: String },
+    EmbargoImposed { imposer_faction_id: usize, target_faction_id: usize, description: String },
+    PriceWarStarted { faction_a: usize, faction_b: usize, description: String },
+    MarketDominanceShift { faction_id: usize, market_share: f32, description: String },
+
+    // --- Equipment durability ---
+    EquipmentDegraded { adventurer_id: u32, item: String, durability: f32 },
+    EquipmentBroken { adventurer_id: u32, item: String },
+    EquipmentRepaired { adventurer_id: u32, item: String },
+
+    // --- Evacuation ---
+    EvacuationOrdered { source_region_id: usize, destination_region_id: usize, evacuees: u32, cost: f32 },
+    EvacuationCompleted { source_region_id: usize, destination_region_id: usize, evacuees: u32, supplies_saved: f32 },
+    EvacuationFailed { region_id: usize, reason: String, population_lost: u32 },
+    CiviliansRescued { count: u32, region_id: usize },
+
+    // --- Exploration ---
+    TileExplored { percentage: f32 },
+    ExplorationMilestone { percentage: u32 },
+    LandmarkDiscovered { name: String, reward: String },
+
+    // --- Faction tech ---
+    FactionTechAdvanced { faction: usize, tech: String, level: f32 },
+    FactionTechMilestone { faction: usize, tech: String, capability: String },
+
+    // --- Fears ---
+    FearDeveloped { adventurer_id: u32, fear_type: super::state::FearType, severity: f32 },
+    FearTriggered { adventurer_id: u32, fear_type: super::state::FearType, severity: f32 },
+    FearOvercome { adventurer_id: u32, fear_type: super::state::FearType, new_severity: f32, times_overcome: u32 },
+    FearConquered { adventurer_id: u32, fear_type: super::state::FearType },
+
+    // --- Food ---
+    PartyStarving { party_id: u32 },
+
+    // --- Infrastructure ---
+    InfrastructureCompleted { infra_id: u32, infra_type: String, region_a: usize, region_b: usize },
+    InfrastructureDamaged { infra_id: u32, infra_type: String, amount: f32, cause: String },
+
+    // --- Insurance ---
+    InsurancePurchased { policy_id: u32, policy_type: String, premium_per_tick: f32 },
+    InsuranceLapsed { policy_id: u32, policy_type: String },
+    InsuranceClaimed { policy_id: u32, payout: f32, reason: String },
+    InsuranceCanceled { policy_id: u32 },
+
+    // --- Intel reports ---
+    IntelReportGenerated { report_type: super::state::ReportType, summary: String },
+
+    // --- Intrigue ---
+    IntrigueStarted { intrigue_id: u32, faction_id: usize, intrigue_type: String, description: String },
+    IntrigueResolved { intrigue_id: u32, faction_id: usize, outcome: String },
+
+    // --- Journals ---
+    JournalEntryWritten { adventurer_id: u32, entry_type: super::state::JournalType, sentiment: f32 },
+
+    // --- Last stand ---
+    LastStandTriggered { adventurer_name: String, description: String },
+    LastStandResolved { outcome: super::state::LastStandOutcome, description: String },
+
+    // --- Marriages ---
+    MarriageArranged { marriage_id: u32, adventurer_id: u32, faction_id: usize, noble_name: String, dowry: f32 },
+    MarriageCrisis { marriage_id: u32, adventurer_id: u32, faction_id: usize, reason: String },
+    HeirBorn { marriage_id: u32, adventurer_id: u32, heir_name: String },
+    Divorced { marriage_id: u32, adventurer_id: u32, faction_id: usize, relation_penalty: f32 },
+
+    // --- Memorials ---
+    FuneralHeld { adventurer_id: u32, adventurer_name: String, memorial_type: String },
+    MemorialCreated { memorial_id: u32, adventurer_name: String, memorial_type: String, description: String },
+    MemorialMorale { adventurer_id: u32, morale_delta: f32, source: String },
+
+    // --- Messengers ---
+    MessengerSent { target: u32 },
+    MessengerArrived { target: u32 },
+    MessengerLost { target: u32 },
+
+    // --- Moods ---
+    MoodChanged { adventurer_id: u32, old_mood: super::state::Mood, new_mood: super::state::Mood, cause: super::state::MoodCause },
+
+    // --- Personal goals ---
+    PersonalGoalAssigned { adventurer_id: u32, goal: super::state::GoalType },
+    PersonalGoalFulfilled { adventurer_id: u32, goal: super::state::GoalType },
+    PersonalGoalAbandoned { adventurer_id: u32, goal: super::state::GoalType },
+
+    // --- Quest chains ---
+    QuestChainStarted { chain_id: u32, chain_name: String, theme: String, total_steps: u32 },
+    QuestChainStepCompleted { chain_id: u32, chain_name: String, step: u32, total_steps: u32, description: String },
+    QuestChainCompleted { chain_id: u32, chain_name: String, total_steps: u32, gold_reward: f32, artifact_name: String },
+    QuestChainFailed { chain_id: u32, chain_name: String, step: u32, reason: String },
+
+    // --- Religion ---
+    TempleDevotion { temple_name: String, change: f32 },
+    BlessingExpired { temple_name: String },
+
+    // --- Reputation decay ---
+    ReputationDecayed { amount: f32, reason: String },
+    ReputationMaintained { cost: f32 },
+    ReputationTrajectoryChanged { trend: super::state::ReputationTrend },
+
+    // --- Reputation stories ---
+    StoryCreated { text: String, impact: f32 },
+    StorySpread { story_text: String, region_name: String },
+    StoryFaded { text: String },
+
+    // --- Skill challenges ---
+    SkillChallengePresented { challenge_id: u32, skill_type: super::state::SkillType, difficulty: f32, quest_id: Option<u32>, adventurer_id: u32 },
+    SkillChallengeSucceeded { challenge_id: u32, adventurer_id: u32, skill_type: super::state::SkillType },
+    SkillChallengeFailed { challenge_id: u32, adventurer_id: u32, skill_type: super::state::SkillType },
+    CriticalSuccess { challenge_id: u32, adventurer_id: u32, skill_type: super::state::SkillType },
+    CriticalFailure { challenge_id: u32, adventurer_id: u32, skill_type: super::state::SkillType },
+
+    // --- Supply lines ---
+    SupplyLineInterdicted { supply_line_id: u32, faction_id: usize, source_region_id: usize, destination_region_id: usize },
+    SupplyLineRestored { supply_line_id: u32, source_region_id: usize, destination_region_id: usize },
+    EnemySupplyDisrupted { faction_id: usize, supply_line_id: u32 },
+
+    // --- Terrain events ---
+    TerrainEventStarted { event_id: u32, event_type: String, affected_regions: Vec<usize>, severity: f32, duration: u64 },
+    TerrainEventEnded { event_id: u32, event_type: String, affected_regions: Vec<usize> },
+    TerrainDamage { event_id: u32, description: String, region_id: usize },
+    TerrainDiscovery { event_id: u32, description: String, region_id: usize },
+
+    // --- Timed events ---
+    TimedEventAppeared { event_id: u32, name: String, description: String, deadline_tick: u64 },
+    TimedEventExpired { name: String },
+    TimedEventResponded { event_id: u32, name: String, gold_gained: f32, reputation_gained: f32, speed_bonus: f32 },
+    TimedEventTrap { event_id: u32, name: String, gold_lost: f32 },
+
+    // --- Trade goods ---
+    SupplyShortage { good_type: String, region_id: usize },
+    TradeProfitMade { good_type: String, profit: f32, source_region: usize, dest_region: usize },
+
+    // --- Traveling merchants ---
+    MerchantArrived { merchant_id: u32, name: String, specialty: String, num_items: usize },
+    MerchantDeparted { merchant_id: u32, name: String },
+    RareMerchantSpotted { merchant_id: u32, name: String, specialty: String },
+    MerchantPurchase { merchant_id: u32, item_name: String, price: f32 },
+
+    // --- Treasure hunts ---
+    TreasureMapFound { map_id: u32, name: String, num_steps: u32 },
+    TreasureStepCompleted { map_id: u32, step_index: u32, clue: String, reward: f32 },
+    TreasureHuntCompleted { map_id: u32, total_reward: f32, artifact_name: String },
+
+    // --- Trophies ---
+    TrophyEarned { name: String, bonus_description: String },
+    TrophyBonusApplied { total_bonuses: String },
+
+    // --- Wanted ---
+    WantedPosterIssued { poster_id: u32, adventurer_id: u32, faction_id: usize, bounty_amount: f32, reason: String },
+    BountyPaidOff { poster_id: u32, adventurer_id: u32, faction_id: usize, amount: f32 },
+    BountyHunterDispatched { poster_id: u32, adventurer_id: u32, faction_id: usize, hunter_strength: f32 },
+    BountyHunterDefeated { poster_id: u32, adventurer_id: u32, new_bounty: f32 },
 }
 
 // ---------------------------------------------------------------------------

@@ -313,6 +313,16 @@ pub fn instantiate_effect(e: &EffectTemplate, ctx: &TemplateContext) -> Option<C
             deeds: Vec::new(),
             hobbies: Vec::new(),
             disease_status: crate::headless_campaign::state::DiseaseStatus::Healthy,
+
+            mood_state: crate::headless_campaign::state::MoodState::default(),
+
+            fears: Vec::new(),
+
+            personal_goal: None,
+
+            journal: Vec::new(),
+
+            equipped_items: Vec::new(),
             }))
         }
         _ => {

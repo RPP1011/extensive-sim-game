@@ -402,6 +402,7 @@ pub fn tick_quest_lifecycle(
             completed_at_ms: elapsed,
             party_id,
             casualties,
+            threat_level: quest.request.threat_level,
         });
 
         // Remove associated battle

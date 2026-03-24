@@ -152,6 +152,46 @@ pub fn step_campaign(
     systems::difficulty_scaling::tick_difficulty_scaling(state, &mut deltas, &mut events);
     systems::culture::tick_culture(state, &mut deltas, &mut events);
 
+    // --- Second integration systems ---
+    systems::archives::tick_archives(state, &mut deltas, &mut events);
+    systems::auction::tick_auction(state, &mut deltas, &mut events);
+    systems::bounties::tick_bounties(state, &mut deltas, &mut events);
+    systems::companions::tick_companions(state, &mut deltas, &mut events);
+    systems::contracts::tick_contracts(state, &mut deltas, &mut events);
+    systems::corruption::tick_corruption(state, &mut deltas, &mut events);
+    systems::counter_espionage::tick_counter_espionage(state, &mut deltas, &mut events);
+    systems::economic_competition::tick_economic_competition(state, &mut deltas, &mut events);
+    systems::equipment_durability::tick_equipment_durability(state, &mut deltas, &mut events);
+    systems::evacuation::tick_evacuations(state, &mut deltas, &mut events);
+    systems::exploration::tick_exploration(state, &mut deltas, &mut events);
+    systems::faction_tech::tick_faction_tech(state, &mut deltas, &mut events);
+    systems::fears::tick_fears(state, &mut deltas, &mut events);
+    systems::food::tick_food(state, &mut deltas, &mut events);
+    systems::infrastructure::tick_infrastructure(state, &mut deltas, &mut events);
+    systems::insurance::tick_insurance(state, &mut deltas, &mut events);
+    systems::intel_reports::tick_intel_reports(state, &mut deltas, &mut events);
+    systems::intrigue::tick_intrigue(state, &mut deltas, &mut events);
+    systems::journals::tick_journals(state, &mut deltas, &mut events);
+    // last_stand::check_last_stand is called from tick_battles, not per-tick
+    systems::marriages::tick_marriages(state, &mut deltas, &mut events);
+    systems::memorials::tick_memorials(state, &mut deltas, &mut events);
+    systems::messengers::tick_messengers(state, &mut deltas, &mut events);
+    systems::moods::tick_moods(state, &mut deltas, &mut events);
+    systems::personal_goals::tick_personal_goals(state, &mut deltas, &mut events);
+    systems::quest_chains::tick_quest_chains(state, &mut deltas, &mut events);
+    systems::religion::tick_religion(state, &mut deltas, &mut events);
+    systems::reputation_decay::tick_reputation_decay(state, &mut deltas, &mut events);
+    systems::reputation_stories::tick_reputation_stories(state, &mut deltas, &mut events);
+    systems::skill_challenges::tick_skill_challenges(state, &mut deltas, &mut events);
+    systems::supply_lines::tick_supply_lines(state, &mut deltas, &mut events);
+    systems::terrain_events::tick_terrain_events(state, &mut deltas, &mut events);
+    systems::timed_events::tick_timed_events(state, &mut deltas, &mut events);
+    systems::trade_goods::tick_trade_goods(state, &mut deltas, &mut events);
+    systems::traveling_merchants::tick_traveling_merchants(state, &mut deltas, &mut events);
+    systems::treasure_hunts::tick_treasure_hunts(state, &mut deltas, &mut events);
+    systems::trophies::tick_trophies(state, &mut deltas, &mut events);
+    systems::wanted::tick_wanted(state, &mut deltas, &mut events);
+
     // Final economy snapshot
     deltas.gold_after = state.guild.gold;
     deltas.supplies_after = state.guild.supplies;
@@ -392,6 +432,7 @@ fn apply_action(
                     supply_level: state.config.quest_lifecycle.party_starting_supply,
                     morale: state.config.quest_lifecycle.party_starting_morale,
                     quest_id: Some(quest_id),
+                food_level: 100.0,
                 };
 
                 quest.status = ActiveQuestStatus::Dispatched;
@@ -887,6 +928,7 @@ fn apply_action(
                     supply_level: state.config.quest_lifecycle.party_starting_supply,
                     morale: state.config.quest_lifecycle.party_starting_morale,
                     quest_id: None,
+                food_level: 100.0,
                 };
                 state.parties.push(party);
 
@@ -1099,6 +1141,26 @@ fn apply_choice_effects(
                     tick: state.tick,
                     description: text.clone(),
                 });
+            }
+            ChoiceEffect::BeginEvacuation { source_region_id, destination_region_id } => {
+                let evac_id = state.next_evacuation_id;
+                state.next_evacuation_id += 1;
+                state.evacuations.push(Evacuation {
+                    id: evac_id,
+                    source_region_id: *source_region_id,
+                    destination_region_id: *destination_region_id,
+                    evacuees: 0,
+                    supplies_saved: 0.0,
+                    started_tick: state.tick,
+                    completed: false,
+                    cost: 0.0,
+                });
+            }
+            ChoiceEffect::NoEvacuationPenalty { region_id } => {
+                // No evacuation chosen — penalty handled by evacuation system
+                if let Some(region) = state.overworld.regions.iter_mut().find(|r| r.id == *region_id) {
+                    region.civilian_morale = (region.civilian_morale - 20.0).max(0.0);
+                }
             }
         }
     }

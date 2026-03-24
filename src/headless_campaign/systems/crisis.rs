@@ -157,6 +157,16 @@ pub fn activate_crisis_from_template(
             deeds: Vec::new(),
             hobbies: Vec::new(),
             disease_status: crate::headless_campaign::state::DiseaseStatus::Healthy,
+
+            mood_state: crate::headless_campaign::state::MoodState::default(),
+
+            fears: Vec::new(),
+
+            personal_goal: None,
+
+            journal: Vec::new(),
+
+            equipped_items: Vec::new(),
                 };
 
                 champion_ids.push(id);
@@ -417,6 +427,7 @@ fn tick_sleeping_king(
                 supply_level: 100.0,
                 morale: 95.0,
                 quest_id: None,
+                food_level: 100.0,
             };
             state.parties.push(party);
 
