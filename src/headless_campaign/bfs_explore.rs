@@ -235,16 +235,31 @@ fn state_features(state: &CampaignState) -> Vec<f32> {
     let threat = state.overworld.global_threat_level / 20.0;
     let pending_choices = state.pending_choices.len() as f32;
     let unlocks = state.unlocks.len() as f32;
-    let mean_stress = if alive > 0.0 {
+    let (mean_stress, mean_injury, mean_morale) = if alive > 0.0 {
+        let advs: Vec<_> = state.adventurers.iter()
+            .filter(|a| a.status != AdventurerStatus::Dead)
+            .collect();
+        (
+            advs.iter().map(|a| a.stress).sum::<f32>() / alive / 20.0,
+            advs.iter().map(|a| a.injury).sum::<f32>() / alive / 20.0,
+            advs.iter().map(|a| a.morale).sum::<f32>() / alive / 20.0,
+        )
+    } else { (0.0, 0.0, 0.0) };
+
+    let mean_level = if alive > 0.0 {
         state.adventurers.iter()
             .filter(|a| a.status != AdventurerStatus::Dead)
-            .map(|a| a.stress)
-            .sum::<f32>() / alive
-    } else { 0.0 } / 20.0;
+            .map(|a| a.level as f32).sum::<f32>() / alive / 10.0
+    } else { 0.0 };
+
+    let crises = state.overworld.active_crises.len() as f32;
+    let supplies = (state.guild.supplies / 20.0).min(5.0);
+    let quests_done = (state.completed_quests.len() as f32 / 5.0).min(10.0);
 
     vec![
         alive, idle, gold_bucket, rep, active_quests, active_battles,
         parties, progress, threat, pending_choices, unlocks, mean_stress,
+        mean_injury, mean_morale, mean_level, crises, supplies, quests_done,
     ]
 }
 
@@ -634,12 +649,19 @@ fn generate_initial_roots(
             // Only sample roots from mid-game (tick 600-8000) where decisions matter
             let min_tick = config.root_sample_interval * 3; // skip early game
             let max_tick = config.trajectory_max_ticks as u64 * 2 / 3; // skip late game
-            let has_tension = state.guild.gold < 150.0
+            // Skip dead/lost states — no strategic decisions possible
+            let alive = state.adventurers.iter()
+                .filter(|a| a.status != AdventurerStatus::Dead).count();
+            let is_viable = alive >= 2 && state.guild.gold > 10.0;
+
+            let has_tension = is_viable && (
+                state.guild.gold < 150.0
                 || state.adventurers.iter().any(|a| a.injury > 30.0)
                 || !state.active_quests.is_empty()
                 || !state.overworld.active_crises.is_empty()
                 || state.overworld.global_threat_level > 30.0
-                || state.completed_quests.len() >= 3;
+                || state.completed_quests.len() >= 3
+            );
 
             if state.tick >= min_tick && state.tick <= max_tick && state.tick % config.root_sample_interval == 0 && has_tension {
                 roots.push(RootState {
@@ -679,6 +701,12 @@ fn expand_root(
     config: &BfsConfig,
     wave: u32,
 ) -> (Vec<BfsSample>, Vec<(CampaignState, Vec<f32>, u64)>) {
+    // Skip roots where the campaign is effectively over (value ≈ 0)
+    let root_value = estimate_value(&root.state);
+    if root_value < 0.05 {
+        return (vec![], vec![]);
+    }
+
     let valid_actions = root.state.valid_actions();
     let grouped = group_actions(&valid_actions);
     let root_tokens = root.state.to_tokens();
