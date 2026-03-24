@@ -6,6 +6,7 @@
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::combat_oracle::HeuristicOracle;
 use crate::headless_campaign::state::*;
+use super::loot::process_quest_loot;
 
 pub fn tick_quest_lifecycle(
     state: &mut CampaignState,
@@ -370,6 +371,17 @@ pub fn tick_quest_lifecycle(
         } else {
             QuestReward::default()
         };
+
+        // Generate and equip loot on victory
+        if result == QuestResult::Victory {
+            process_quest_loot(
+                state,
+                quest.request.quest_type,
+                threat,
+                quest.request.reward.potential_loot,
+                &member_ids,
+            );
+        }
 
         events.push(WorldEvent::QuestCompleted {
             quest_id: quest.id,
