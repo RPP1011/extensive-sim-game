@@ -138,6 +138,11 @@ pub struct CampaignState {
     /// Arc so cloned states share the same weights.
     #[serde(skip)]
     pub vae_model: Option<std::sync::Arc<super::vae_inference::ContentVaeWeights>>,
+
+    // --- Rival guild ---
+    /// AI-controlled competing guild. Activates at tick 2000.
+    #[serde(default)]
+    pub rival_guild: RivalGuildState,
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1257,6 +1262,48 @@ impl StartingChoice {
 }
 
 // ---------------------------------------------------------------------------
+// Rival guild
+// ---------------------------------------------------------------------------
+
+/// State for an AI-controlled competing guild.
+///
+/// Creates urgency and strategic tension by competing for quests,
+/// faction favor, and recruits.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct RivalGuildState {
+    /// Display name (e.g. "The Iron Company").
+    pub name: String,
+    /// Rival's gold reserves (abstract).
+    pub gold: f32,
+    /// 0–100, competes with player reputation.
+    pub reputation: f32,
+    /// Abstract adventurer headcount (not individual units).
+    pub adventurer_count: u32,
+    /// Aggregate combat power.
+    pub power_level: f32,
+    /// Total quests the rival has completed.
+    pub quests_completed: u32,
+    /// Faction relations, parallel to `CampaignState::factions`.
+    pub faction_relations: Vec<f32>,
+    /// Whether the rival is active. False until tick 2000 (grace period).
+    pub active: bool,
+    /// Behavioral personality affecting quest/faction priorities.
+    pub personality: RivalPersonality,
+}
+
+/// Personality archetype for the rival guild AI.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RivalPersonality {
+    /// Prioritizes combat quests, builds military power, may sabotage.
+    #[default]
+    Aggressive,
+    /// Prioritizes faction relations, avoids direct conflict.
+    Diplomatic,
+    /// Analyzes what the player neglects and focuses on those areas.
+    Opportunistic,
+}
+
+// ---------------------------------------------------------------------------
 // RNG helper
 // ---------------------------------------------------------------------------
 
@@ -1496,6 +1543,7 @@ impl CampaignState {
             llm_config: None,
             llm_store: None,
             vae_model: None,
+            rival_guild: RivalGuildState::default(),
         }
     }
 

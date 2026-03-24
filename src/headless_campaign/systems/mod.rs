@@ -24,6 +24,7 @@ pub mod random_events;
 pub mod threat;
 pub mod buildings;
 pub mod scouting;
+pub mod rival_guild;
 pub mod verify;
 pub mod loot;
 pub mod interception;

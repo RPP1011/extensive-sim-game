@@ -109,6 +109,7 @@ pub fn step_campaign(
         super::quest_hooks::evaluate_hooks(state, &mut events);
     }
     systems::threat::tick_threat(state, &mut deltas, &mut events);
+    systems::rival_guild::tick_rival_guild(state, &mut deltas, &mut events);
 
     // Progression triggers — detect when content should be generated
     systems::progression_triggers::tick_progression_triggers(state, &mut deltas, &mut events);
