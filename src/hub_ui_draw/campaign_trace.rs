@@ -518,6 +518,10 @@ fn format_world_event(event: &WorldEvent) -> (String, egui::Color32) {
             let prefix = if *was_default { "Auto-chose" } else { "Chose" };
             (format!("{}: {}", prefix, label), egui::Color32::from_rgb(180, 160, 220))
         },
+        WorldEvent::RandomEvent { name, description } => (
+            format!("[{}] {}", name, description),
+            yellow,
+        ),
         WorldEvent::CalamityWarning { description } => (description.clone(), red),
         WorldEvent::CampaignMilestone { description } => (description.clone(), green),
         WorldEvent::ChampionIntercepted { champion_id, .. } => (
@@ -531,6 +535,14 @@ fn format_world_event(event: &WorldEvent) -> (String, egui::Color32) {
         WorldEvent::BuildingUpgraded { building, new_tier, cost } => (
             format!("{} upgraded to tier {} (-{:.0}g)", building, new_tier, cost),
             green,
+        ),
+        WorldEvent::BondGrief { adventurer_id, dead_id, bond_strength } => (
+            format!("Adventurer {} grieves for {} (bond: {:.0})", adventurer_id, dead_id, bond_strength),
+            red,
+        ),
+        WorldEvent::SeasonChanged { new_season } => (
+            format!("Season changed to {:?}", new_season),
+            yellow,
         ),
     }
 }

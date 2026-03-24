@@ -355,6 +355,12 @@ pub enum WorldEvent {
         new_season: super::state::Season,
     },
 
+    // --- Random World Events ---
+    RandomEvent {
+        name: String,
+        description: String,
+    },
+
     // --- Campaign ---
     CalamityWarning {
         description: String,

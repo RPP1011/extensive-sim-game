@@ -92,6 +92,9 @@ pub fn step_campaign(
     // Guild buildings auto-upgrade
     systems::buildings::tick_buildings(state, &mut deltas, &mut events);
 
+    // Random world events (every 500 ticks)
+    systems::random_events::tick_random_events(state, &mut deltas, &mut events);
+
     // Endgame crisis tick
     systems::crisis::tick_crisis(state, &mut deltas, &mut events);
 
