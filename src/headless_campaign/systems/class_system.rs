@@ -11,8 +11,8 @@ use crate::headless_campaign::state::{
     ClassTemplate, ConsolidationOffer, GrantedSkill, SkillRarity,
 };
 
-/// Class system fires every 100 ticks (10 s game time).
-const CLASS_TICK_INTERVAL: u64 = 100;
+/// Class system fires every 50 ticks (5 s game time) — fast enough for early class development.
+const CLASS_TICK_INTERVAL: u64 = 50;
 
 /// Consolidation check fires every 500 ticks.
 const CONSOLIDATION_INTERVAL: u64 = 500;
@@ -110,17 +110,17 @@ const BEHAVIOR_DIM_NAMES: &[&str] = &[
 
 fn base_templates() -> Vec<ClassTemplate> {
     vec![
-        ct("Warrior", &[("melee_combat", 0.4), ("damage_absorbed", 0.3)], 0.5, &["combat"]),
-        ct("Ranger", &[("ranged_combat", 0.4), ("areas_explored", 0.3)], 0.5, &["combat", "exploration"]),
-        ct("Healer", &[("healing_given", 0.5), ("allies_supported", 0.3)], 0.5, &["support"]),
-        ct("Diplomat", &[("diplomacy_actions", 0.5), ("units_commanded", 0.2)], 0.5, &["social"]),
-        ct("Merchant", &[("trades_completed", 0.5), ("diplomacy_actions", 0.2)], 0.5, &["economy"]),
-        ct("Scholar", &[("research_performed", 0.5), ("areas_explored", 0.2)], 0.5, &["knowledge"]),
-        ct("Rogue", &[("stealth_actions", 0.4), ("melee_combat", 0.2)], 0.5, &["stealth", "combat"]),
-        ct("Artisan", &[("items_crafted", 0.5), ("trades_completed", 0.2)], 0.5, &["crafting"]),
-        ct("Commander", &[("units_commanded", 0.4), ("melee_combat", 0.2)], 0.5, &["leadership"]),
-        ct("Scout", &[("areas_explored", 0.4), ("stealth_actions", 0.3)], 0.5, &["exploration", "stealth"]),
-        ct("Guardian", &[("damage_absorbed", 0.4), ("allies_supported", 0.3)], 0.5, &["defense"]),
+        ct("Warrior", &[("melee_combat", 0.4), ("damage_absorbed", 0.3)], 0.25, &["combat"]),
+        ct("Ranger", &[("ranged_combat", 0.4), ("areas_explored", 0.3)], 0.25, &["combat", "exploration"]),
+        ct("Healer", &[("healing_given", 0.5), ("allies_supported", 0.3)], 0.25, &["support"]),
+        ct("Diplomat", &[("diplomacy_actions", 0.5), ("units_commanded", 0.2)], 0.25, &["social"]),
+        ct("Merchant", &[("trades_completed", 0.5), ("diplomacy_actions", 0.2)], 0.25, &["economy"]),
+        ct("Scholar", &[("research_performed", 0.5), ("areas_explored", 0.2)], 0.25, &["knowledge"]),
+        ct("Rogue", &[("stealth_actions", 0.4), ("melee_combat", 0.2)], 0.25, &["stealth", "combat"]),
+        ct("Artisan", &[("items_crafted", 0.5), ("trades_completed", 0.2)], 0.25, &["crafting"]),
+        ct("Commander", &[("units_commanded", 0.4), ("melee_combat", 0.2)], 0.25, &["leadership"]),
+        ct("Scout", &[("areas_explored", 0.4), ("stealth_actions", 0.3)], 0.25, &["exploration", "stealth"]),
+        ct("Guardian", &[("damage_absorbed", 0.4), ("allies_supported", 0.3)], 0.25, &["defense"]),
     ]
 }
 
@@ -236,6 +236,75 @@ pub fn tick_class_system(
 
 /// Scan recent WorldEvents and increment appropriate behavior counters.
 fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
+    // Seed behavior from archetype if adventurer has zero accumulated behavior.
+    // This ensures classes can develop early rather than requiring hundreds of ticks.
+    for adv in &mut state.adventurers {
+        if adv.status == AdventurerStatus::Dead { continue; }
+        let total = adv.behavior_ledger.melee_combat + adv.behavior_ledger.ranged_combat
+            + adv.behavior_ledger.healing_given + adv.behavior_ledger.diplomacy_actions
+            + adv.behavior_ledger.trades_completed + adv.behavior_ledger.items_crafted
+            + adv.behavior_ledger.areas_explored + adv.behavior_ledger.units_commanded
+            + adv.behavior_ledger.stealth_actions + adv.behavior_ledger.research_performed
+            + adv.behavior_ledger.damage_absorbed + adv.behavior_ledger.allies_supported;
+        if total < 1.0 {
+            // Seed based on archetype — gives a head start toward the matching class
+            let seed_amount = 30.0;
+            match adv.archetype.as_str() {
+                "knight" | "warrior" | "berserker" => {
+                    adv.behavior_ledger.melee_combat += seed_amount;
+                    adv.behavior_ledger.damage_absorbed += seed_amount * 0.5;
+                }
+                "ranger" | "archer" | "hunter" => {
+                    adv.behavior_ledger.ranged_combat += seed_amount;
+                    adv.behavior_ledger.areas_explored += seed_amount * 0.5;
+                }
+                "mage" | "wizard" | "sorcerer" | "warlock" => {
+                    adv.behavior_ledger.research_performed += seed_amount;
+                    adv.behavior_ledger.ranged_combat += seed_amount * 0.3;
+                }
+                "cleric" | "priest" | "healer" | "druid" => {
+                    adv.behavior_ledger.healing_given += seed_amount;
+                    adv.behavior_ledger.allies_supported += seed_amount * 0.5;
+                }
+                "rogue" | "thief" | "assassin" => {
+                    adv.behavior_ledger.stealth_actions += seed_amount;
+                    adv.behavior_ledger.melee_combat += seed_amount * 0.3;
+                }
+                "paladin" | "guardian" | "tank" => {
+                    adv.behavior_ledger.damage_absorbed += seed_amount;
+                    adv.behavior_ledger.allies_supported += seed_amount * 0.5;
+                }
+                "bard" | "diplomat" => {
+                    adv.behavior_ledger.diplomacy_actions += seed_amount;
+                    adv.behavior_ledger.allies_supported += seed_amount * 0.3;
+                }
+                "monk" => {
+                    adv.behavior_ledger.melee_combat += seed_amount * 0.7;
+                    adv.behavior_ledger.damage_absorbed += seed_amount * 0.3;
+                }
+                _ => {
+                    // Unknown archetype: small spread across all axes
+                    adv.behavior_ledger.melee_combat += 5.0;
+                    adv.behavior_ledger.areas_explored += 5.0;
+                    adv.behavior_ledger.allies_supported += 5.0;
+                }
+            }
+            // Also seed recent window so the first class check can fire
+            adv.behavior_ledger.recent_melee_combat = adv.behavior_ledger.melee_combat;
+            adv.behavior_ledger.recent_ranged_combat = adv.behavior_ledger.ranged_combat;
+            adv.behavior_ledger.recent_healing_given = adv.behavior_ledger.healing_given;
+            adv.behavior_ledger.recent_diplomacy_actions = adv.behavior_ledger.diplomacy_actions;
+            adv.behavior_ledger.recent_trades_completed = adv.behavior_ledger.trades_completed;
+            adv.behavior_ledger.recent_items_crafted = adv.behavior_ledger.items_crafted;
+            adv.behavior_ledger.recent_areas_explored = adv.behavior_ledger.areas_explored;
+            adv.behavior_ledger.recent_units_commanded = adv.behavior_ledger.units_commanded;
+            adv.behavior_ledger.recent_stealth_actions = adv.behavior_ledger.stealth_actions;
+            adv.behavior_ledger.recent_research_performed = adv.behavior_ledger.research_performed;
+            adv.behavior_ledger.recent_damage_absorbed = adv.behavior_ledger.damage_absorbed;
+            adv.behavior_ledger.recent_allies_supported = adv.behavior_ledger.allies_supported;
+        }
+    }
+
     // Build per-adventurer increments from the events generated this tick.
     // We scan the events vec which contains events from this tick's earlier systems.
     for ev in events.iter() {
@@ -277,7 +346,7 @@ fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEven
                         continue;
                     }
                     if adv.archetype == "diplomat" || adv.archetype == "bard" {
-                        adv.behavior_ledger.diplomacy_actions += 1.0;
+                        adv.behavior_ledger.diplomacy_actions += 3.0;
                         adv.behavior_ledger.recent_diplomacy_actions += 1.0;
                     }
                 }
@@ -291,8 +360,8 @@ fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEven
                         continue;
                     }
                     if adv.archetype == "merchant" {
-                        adv.behavior_ledger.trades_completed += 1.0;
-                        adv.behavior_ledger.recent_trades_completed += 1.0;
+                        adv.behavior_ledger.trades_completed += 3.0;
+                        adv.behavior_ledger.recent_trades_completed += 3.0;
                     }
                 }
             }
@@ -303,8 +372,8 @@ fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEven
                         continue;
                     }
                     if adv.archetype == "artisan" || adv.archetype == "blacksmith" {
-                        adv.behavior_ledger.items_crafted += 1.0;
-                        adv.behavior_ledger.recent_items_crafted += 1.0;
+                        adv.behavior_ledger.items_crafted += 3.0;
+                        adv.behavior_ledger.recent_items_crafted += 3.0;
                     }
                 }
             }
@@ -331,16 +400,16 @@ fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEven
                 // Credit the first member as the leader/commander
                 if let Some(&leader_id) = member_ids.first() {
                     if let Some(adv) = state.adventurers.iter_mut().find(|a| a.id == leader_id) {
-                        adv.behavior_ledger.units_commanded += 1.0;
-                        adv.behavior_ledger.recent_units_commanded += 1.0;
+                        adv.behavior_ledger.units_commanded += 3.0;
+                        adv.behavior_ledger.recent_units_commanded += 3.0;
                     }
                 }
             }
             // Stealth/espionage
             WorldEvent::IntelGathered { spy_id, .. } => {
                 if let Some(adv) = state.adventurers.iter_mut().find(|a| a.id == *spy_id) {
-                    adv.behavior_ledger.stealth_actions += 1.0;
-                    adv.behavior_ledger.recent_stealth_actions += 1.0;
+                    adv.behavior_ledger.stealth_actions += 3.0;
+                    adv.behavior_ledger.recent_stealth_actions += 3.0;
                 }
             }
             WorldEvent::HeistSucceeded { .. } | WorldEvent::HeistPhaseAdvanced { .. } => {
@@ -349,8 +418,8 @@ fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEven
                         continue;
                     }
                     if adv.archetype == "rogue" || adv.archetype == "thief" || adv.archetype == "assassin" {
-                        adv.behavior_ledger.stealth_actions += 1.0;
-                        adv.behavior_ledger.recent_stealth_actions += 1.0;
+                        adv.behavior_ledger.stealth_actions += 3.0;
+                        adv.behavior_ledger.recent_stealth_actions += 3.0;
                     }
                 }
             }
@@ -361,8 +430,8 @@ fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEven
                         continue;
                     }
                     if adv.archetype == "mage" || adv.archetype == "scholar" || adv.archetype == "sage" {
-                        adv.behavior_ledger.research_performed += 1.0;
-                        adv.behavior_ledger.recent_research_performed += 1.0;
+                        adv.behavior_ledger.research_performed += 3.0;
+                        adv.behavior_ledger.recent_research_performed += 3.0;
                     }
                 }
             }
@@ -376,8 +445,8 @@ fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEven
             // Support/buff
             WorldEvent::MentorshipCompleted { mentor_id, .. } => {
                 if let Some(adv) = state.adventurers.iter_mut().find(|a| a.id == *mentor_id) {
-                    adv.behavior_ledger.allies_supported += 1.0;
-                    adv.behavior_ledger.recent_allies_supported += 1.0;
+                    adv.behavior_ledger.allies_supported += 3.0;
+                    adv.behavior_ledger.recent_allies_supported += 3.0;
                 }
             }
             WorldEvent::SkillTransferred { from_id, .. } => {
