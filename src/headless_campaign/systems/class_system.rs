@@ -11,14 +11,15 @@ use crate::headless_campaign::state::{
     ClassTemplate, ConsolidationOffer, GrantedSkill, SkillRarity,
 };
 
-/// Class system fires every turn (3 s game time) — fast enough for early class development.
-const CLASS_TICK_INTERVAL: u64 = 1;
+/// Class system fires every 100 turns (~5 minutes game time).
+/// The world evaluates what you've been doing periodically, not every second.
+const CLASS_TICK_INTERVAL: u64 = 100;
 
-/// Consolidation check fires every 17 turns (~51 s game time).
-const CONSOLIDATION_INTERVAL: u64 = 17;
+/// Consolidation check fires every 600 turns (~30 minutes game time).
+const CONSOLIDATION_INTERVAL: u64 = 600;
 
-/// Reactive narrative (shame, crisis, erosion, chronicle) fires every 7 turns (~21 s).
-const REACTIVE_NARRATIVE_INTERVAL: u64 = 7;
+/// Reactive narrative (shame, crisis, erosion, chronicle) fires every 300 turns (~15 min).
+const REACTIVE_NARRATIVE_INTERVAL: u64 = 300;
 
 /// Minimum level on both classes before consolidation is offered.
 const CONSOLIDATION_MIN_LEVEL: u32 = 10;
@@ -26,8 +27,8 @@ const CONSOLIDATION_MIN_LEVEL: u32 = 10;
 /// Probability of auto-accepting a consolidation offer.
 const CONSOLIDATION_ACCEPT_PROB: f32 = 0.70;
 
-/// Turns before a consolidation offer expires (~100 seconds).
-const CONSOLIDATION_DEADLINE_TICKS: u32 = 33;
+/// Turns before a consolidation offer expires (~30 minutes).
+const CONSOLIDATION_DEADLINE_TICKS: u32 = 600;
 
 /// Minimum class level for evolution.
 const EVOLUTION_MIN_LEVEL: u32 = 20;
@@ -291,15 +292,15 @@ pub fn tick_class_system(
         generate_class_chronicle(state, events);
     }
 
-    // Mirror offers & oath-locked classes every 300 ticks
-    if state.tick % 10 == 0 {
+    // Mirror offers & oath-locked classes every 500 turns (~25 min)
+    if state.tick % 500 == 0 {
         check_mirror_offers(state, events);
         check_oath_locked_classes(state, events);
         track_heroic_acts(state, events);
     }
 
-    // Rival-reflected & folk hero divergence every 500 ticks
-    if state.tick % 17 == 0 {
+    // Rival-reflected & folk hero divergence every 1000 turns (~50 min)
+    if state.tick % 1000 == 0 {
         check_rival_classes(state, events);
         check_folk_hero_divergence(state, events);
     }
@@ -3138,8 +3139,8 @@ fn check_world_gated_classes(state: &mut CampaignState, events: &mut Vec<WorldEv
 // Crisis Escape Valve Consolidation (idea 4.10)
 // ---------------------------------------------------------------------------
 
-/// Emergency consolidation deadline (much shorter than normal, ~21 seconds).
-const EMERGENCY_CONSOLIDATION_DEADLINE: u32 = 7;
+/// Emergency consolidation deadline (much shorter than normal, ~5 minutes).
+const EMERGENCY_CONSOLIDATION_DEADLINE: u32 = 100;
 
 /// When tension > 0.9 and adventurer holds 2+ classes, offer emergency consolidation.
 /// If refused and tension stays > 0.9, 20% chance of negative class mutation.
