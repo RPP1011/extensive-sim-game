@@ -504,6 +504,53 @@ pub struct CampaignState {
     /// Updated by step logic; consumed by tokens, clustering, and value estimation.
     #[serde(default)]
     pub system_trackers: SystemTrackers,
+
+    // --- Tiered Skill Effects (Phase 10) ---
+    /// Beast lore active — monster weaknesses revealed after first encounter.
+    #[serde(default)]
+    pub beast_lore_active: bool,
+    /// Sapper eye active — fortification weaknesses assessed.
+    #[serde(default)]
+    pub sapper_eye_active: bool,
+    /// Active market monopolies: (commodity_index, holder_id, remaining_ticks).
+    #[serde(default)]
+    pub market_monopolies: Vec<(u32, u32, u32)>,
+    /// Active trade routes from skill effects: (holder_id, income_per_tick, remaining_ticks).
+    #[serde(default)]
+    pub active_trade_routes: Vec<(u32, f32, u32)>,
+    /// Named threat identified — guild-wide combat bonus.
+    #[serde(default)]
+    pub named_threat_bonus: bool,
+    /// Remaining ticks of accelerated study (research speed doubled).
+    #[serde(default)]
+    pub accelerated_study_ticks: u32,
+    /// Golden touch active — quest loot doubled.
+    #[serde(default)]
+    pub golden_touch_active: bool,
+    /// Prophetic visions remaining to reveal.
+    #[serde(default)]
+    pub prophetic_visions_remaining: u32,
+    /// Threat clock slowdown factor from PredictiveModel skill.
+    #[serde(default)]
+    pub threat_clock_slowdown: f32,
+    /// Forbidden knowledge active — hidden class requirements revealed.
+    #[serde(default)]
+    pub forbidden_knowledge_active: bool,
+    /// Passive trade empire income per tick.
+    #[serde(default)]
+    pub trade_empire_income: f32,
+    /// Marked prey types — guild-wide combat bonus against these.
+    #[serde(default)]
+    pub marked_prey_types: Vec<String>,
+    /// Living legend holder adventurer ID.
+    #[serde(default)]
+    pub living_legend_holder: Option<u32>,
+    /// Wealth of Nations active — gold generation doubled.
+    #[serde(default)]
+    pub wealth_of_nations_active: bool,
+    /// Omniscience active — all hidden information revealed.
+    #[serde(default)]
+    pub omniscience_active: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -788,6 +835,9 @@ pub struct GuildState {
     /// Guild food supply (rations + quality food).
     #[serde(default)]
     pub food_supply: FoodSupply,
+    /// Recruitment quality bonus from skill effects (SubvertLoyalty, Phase 10).
+    #[serde(default)]
+    pub recruitment_bonus: f32,
 }
 
 /// Dynamic market price multipliers. Prices inflate with demand.
@@ -872,6 +922,9 @@ pub struct InventoryItem {
     /// Current durability (0-100). Items break at 0.
     #[serde(default = "default_durability")]
     pub durability: f32,
+    /// Whether the true value of this item has been revealed (Appraise skill).
+    #[serde(default)]
+    pub appraised: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -1006,6 +1059,10 @@ pub struct Adventurer {
     /// Classes earned from behavior. Multiple classes, each leveling independently.
     #[serde(default)]
     pub classes: Vec<ClassInstance>,
+
+    /// Tiered skill effect tracking state (Phase 10).
+    #[serde(default)]
+    pub skill_state: SkillEffectState,
 }
 
 /// A leadership role that provides passive buffs while the adventurer is active.
@@ -1187,6 +1244,9 @@ pub struct GrantedSkill {
     /// Whether this skill was empowered by tag overlap (idea 3.10).
     #[serde(default)]
     pub empowered: bool,
+    /// Tiered skill effect — the actual power granted by this skill (Phase 10).
+    #[serde(default)]
+    pub skill_effect: Option<SkillEffect>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -1197,6 +1257,212 @@ pub enum SkillRarity {
     Rare,
     Capstone,
     Unique,
+}
+
+// ---------------------------------------------------------------------------
+// Tiered Skill Effects (Phase 10)
+// ---------------------------------------------------------------------------
+
+/// Non-combat powers granted by the class system. These are POWERS, not stat buffs.
+/// Skills are constrained by specificity and narrative consequence, not resource costs.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum SkillEffect {
+    // --- Always-on passives (T1+) ---
+    /// Reveal true value of items/goods before trading.
+    Appraise,
+    /// Reduce wound healing time for self and party.
+    FieldTriage { heal_rate_multiplier: f32 },
+    /// See faction diplomatic stance before committing.
+    ReadTheRoom,
+    /// Move through hostile territory undetected.
+    ShadowStep { duration_ticks: u32 },
+    /// Boost party morale passively.
+    InspiringPresence { morale_boost: f32 },
+    /// Identify monster weaknesses after one encounter.
+    BeastLore,
+    /// Sense ambushes before they trigger.
+    BattleInstinct,
+    /// Learn from observed events 2x faster.
+    QuickStudy,
+    /// Forage supplies while traveling (passive).
+    Forage { supply_per_tick: f32 },
+    /// Track enemies through any terrain.
+    TrackPrey,
+    /// Repair gear without a workshop.
+    FieldRepair,
+    /// Move silently past patrols.
+    SilentMovement,
+    /// Detect traps before triggering them.
+    TrapSense,
+    /// Stabilize dying allies automatically.
+    StabilizeAlly,
+    /// Assess structural weaknesses of fortifications.
+    SapperEye,
+
+    // --- Active powers (T2-T3) ---
+    /// Become sole buyer of one commodity.
+    CornerTheMarket { commodity_index: u32, duration_ticks: u32 },
+    /// Forge a new trade route between regions.
+    ForgeTradeRoute { duration_ticks: u32, income_per_tick: f32 },
+    /// Force a diplomatic meeting with any faction.
+    DemandAudience,
+    /// Travel through hostile territory as if friendly.
+    GhostWalk { duration_ticks: u32 },
+    /// Identify and name an unknown threat, granting guild-wide combat bonus.
+    NameTheNameless,
+    /// Double research/archive speed temporarily.
+    AcceleratedStudy { duration_ticks: u32 },
+    /// Plant false intel in a rival faction's spy network.
+    Disinformation { target_faction: u32, duration_ticks: u32 },
+    /// Recruit from a hostile faction's population.
+    SubvertLoyalty { target_faction: u32 },
+    /// Force all enemies to target you for duration.
+    WarCry { duration_ticks: u32 },
+    /// Cleanse one disease or poison instantly.
+    Purify,
+    /// Always get the better end of a deal.
+    SilverTongue,
+    /// Read any language or inscription.
+    Decipher,
+    /// Set up a concealed camp that enemies cannot find.
+    HiddenCamp { duration_ticks: u32 },
+    /// Craft a masterwork item from lesser materials.
+    MasterworkCraft,
+    /// Rally broken morale in the field.
+    RallyingCry { morale_restore: f32 },
+    /// Survive one killing blow per quest with 1 HP.
+    Unbreakable,
+    /// Create a distraction allowing party to reposition.
+    Distraction { duration_ticks: u32 },
+    /// Forge documents to bypass faction restrictions.
+    Forgery,
+    /// Coordinate two units to attack simultaneously.
+    CoordinatedStrike,
+    /// Establish a safe house in hostile territory.
+    SafeHouse { region_id: u32, duration_ticks: u32 },
+
+    // --- Powerful actives (T4-T5) ---
+    /// Halt an active battle through sheer diplomatic force.
+    CeasefireDeclaration,
+    /// Bond life force to party — they're stronger while you live.
+    BloodOath { party_stat_bonus: f32 },
+    /// Plant doubt in faction leadership, destabilizing their politics.
+    WhisperOfSuccession { target_faction: u32, instability: f32 },
+    /// Create a sanctuary zone where no combat can occur.
+    Sanctuary { region_id: u32, duration_ticks: u32 },
+    /// See upcoming world events before they happen.
+    PropheticVision { events_revealed: u32 },
+    /// Force all factions to renegotiate a specific treaty.
+    TreatyBreaker,
+    /// Redirect all damage from one ally to yourself.
+    TakeTheBlow { target_adventurer: u32, duration_ticks: u32 },
+    /// When outnumbered, party becomes immovable (CONDITIONAL).
+    HoldTheLine,
+    /// Attack all adjacent enemies simultaneously.
+    BladeStorm,
+    /// Double loot from completed quests.
+    GoldenTouch,
+    /// Make a region immune to disease spread.
+    PlagueWard { region_id: u32, duration_ticks: u32 },
+    /// Revive a fallen adventurer mid-quest.
+    Resurrection,
+    /// Reduce threat clock growth rate.
+    PredictiveModel,
+    /// Unlock hidden class requirements.
+    ForbiddenKnowledge,
+    /// Passive income from all guild trade routes.
+    TradeEmpire { income_per_tick: f32 },
+    /// Steal an enemy's tactical plans before battle.
+    IntelGathering,
+    /// Upgrade all equipment in the party by one tier.
+    MasterArmorer,
+    /// Command allied NPCs to follow complex orders.
+    FieldCommand { duration_ticks: u32 },
+    /// Fortify a position, granting massive defense bonus.
+    Fortify { region_id: u32, duration_ticks: u32 },
+
+    // --- Legendary (T6) ---
+    /// Permanently grant guild-wide bonus against a named enemy type.
+    MarkPrey { enemy_type: String },
+    /// Claim a region through sheer force of reputation.
+    ClaimByRight { region_id: u32 },
+    /// Dissolve an alliance between two factions.
+    ShatterAlliance { faction_a: u32, faction_b: u32 },
+    /// Erase yourself from all faction records.
+    Vanish,
+    /// When an ally is about to die, time stops and you act (CONDITIONAL).
+    ImmortalMoment,
+    /// Force enemy leader into 1v1 duel.
+    ChampionsChallenge,
+    /// Set the price of one commodity for extended duration.
+    MarketMaker { commodity_index: u32, duration_ticks: u32 },
+    /// One adventurer becomes immune to aging and disease.
+    LifeEternal,
+    /// Alter one chronicle entry retroactively.
+    RewriteTheRecord,
+    /// Reveal all hidden information in a region.
+    AllSeeingEye { region_id: u32 },
+    /// Build a legendary artifact from gathered components.
+    ForgeArtifact,
+
+    // --- Mythic capstone (T7) ---
+    /// While you live, all guild members gain +1 level in primary class.
+    LivingLegend,
+    /// Rewrite one chronicle entry and make it retroactively true.
+    RewriteHistory,
+    /// Permanently end one ongoing conflict.
+    TheLastWord,
+    /// Guild gold generation doubled permanently.
+    WealthOfNations,
+    /// Reveal all hidden information in the campaign.
+    Omniscience,
+}
+
+/// Per-adventurer state tracking for tiered skill effects (Phase 10).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SkillEffectState {
+    /// Ticks of stealth remaining (ShadowStep, GhostWalk, SilentMovement).
+    pub stealth_remaining_ticks: u32,
+    /// Immune to ambushes (BattleInstinct).
+    pub ambush_immunity: bool,
+    /// XP gain multiplier (QuickStudy). Default 1.0.
+    pub xp_multiplier: f32,
+    /// Tracking active — enemies visible through terrain (TrackPrey).
+    pub tracking_active: bool,
+    /// Trap detection active (TrapSense).
+    pub trap_detection: bool,
+    /// Survive one killing blow with 1 HP (Unbreakable).
+    pub unbreakable_active: bool,
+    /// Ticks remaining where enemies are forced to target this adventurer (WarCry).
+    pub taunt_remaining_ticks: u32,
+    /// Active diseases (for Purify skill to clear).
+    pub diseases: Vec<String>,
+    /// Bonus combat power from skill effects (BloodOath, HoldTheLine).
+    pub combat_power_bonus: f32,
+    /// Erased from all faction records (Vanish).
+    pub vanished: bool,
+    /// Immune to aging and disease (LifeEternal).
+    pub immortal: bool,
+}
+
+/// Situational conditions for conditional skills (20% of skills).
+/// Conditional skills punch above their weight — a Lv30 conditional equals Lv60 normal power.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum SkillCondition {
+    /// Party is outnumbered in battle.
+    Outnumbered,
+    /// Party member below 10% HP.
+    AllyDying,
+    /// Any crisis system active.
+    CrisisActive,
+    /// Faction at war.
+    AtWar,
+    /// Specific faction is hostile.
+    FactionHostile(u32),
+    /// Adventurer has no party.
+    Alone,
+    /// Adventurer below 20% HP.
+    NearDeath,
 }
 
 /// A pending offer to merge two classes into a consolidated form.
@@ -1746,6 +2012,9 @@ pub struct FactionState {
     /// Tick when the guild last destroyed a patrol from this faction.
     #[serde(default)]
     pub last_patrol_loss_tick: u64,
+    /// Skill effect modifiers applied by class skill powers (Phase 10).
+    #[serde(default)]
+    pub skill_modifiers: FactionSkillModifiers,
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1760,6 +2029,19 @@ pub enum DiplomaticStance {
     AtWar,
     /// Allied — shares intel, provides military aid, joint operations.
     Coalition,
+}
+
+/// Skill effect modifiers on a faction (Phase 10).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct FactionSkillModifiers {
+    /// Whether this faction is actively at war (for SkillCondition::AtWar).
+    pub at_war: bool,
+    /// Diplomatic stance revealed to the player (ReadTheRoom skill).
+    pub stance_revealed: bool,
+    /// Espionage effectiveness (0.0–1.0), reduced by Disinformation.
+    pub espionage_effectiveness: f32,
+    /// Political instability (0.0–1.0), increased by WhisperOfSuccession.
+    pub instability: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -3093,6 +3375,8 @@ fn default_civilian_morale() -> f32 { 50.0 }
 fn default_tax_rate() -> f32 { 0.1 }
 fn default_food_level() -> f32 { 100.0 }
 fn default_durability() -> f32 { 100.0 }
+fn default_xp_mult() -> f32 { 1.0 }
+fn default_espionage_eff() -> f32 { 1.0 }
 fn default_next_treasure_map_id() -> u32 { 1 }
 fn default_next_enemy_agent_id() -> u32 { 1 }
 
@@ -4939,6 +5223,7 @@ impl CampaignState {
                     total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
             },
             Adventurer {
                 id: 2,
@@ -4988,6 +5273,7 @@ impl CampaignState {
                     total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
             },
             Adventurer {
                 id: 3,
@@ -5037,6 +5323,7 @@ impl CampaignState {
                     total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
             },
             Adventurer {
                 id: 4,
@@ -5086,6 +5373,7 @@ impl CampaignState {
                     total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
             },
         ];
 
@@ -5124,6 +5412,7 @@ impl CampaignState {
                 guild_tier: GuildTier::default(),
                 resources: std::collections::HashMap::new(),
                 food_supply: FoodSupply::default(),
+                recruitment_bonus: 0.0,
             },
             overworld: OverworldState {
                 regions,
@@ -5338,6 +5627,23 @@ impl CampaignState {
             campaign_skills_granted: Vec::new(),
             world_gated_class_flags: std::collections::HashMap::new(),
             system_trackers: SystemTrackers::default(),
+
+            // Phase 10: Tiered Skill Effects
+            beast_lore_active: false,
+            sapper_eye_active: false,
+            market_monopolies: Vec::new(),
+            active_trade_routes: Vec::new(),
+            named_threat_bonus: false,
+            accelerated_study_ticks: 0,
+            golden_touch_active: false,
+            prophetic_visions_remaining: 0,
+            threat_clock_slowdown: 0.0,
+            forbidden_knowledge_active: false,
+            trade_empire_income: 0.0,
+            marked_prey_types: Vec::new(),
+            living_legend_holder: None,
+            wealth_of_nations_active: false,
+            omniscience_active: false,
         }
     }
 
@@ -5403,6 +5709,7 @@ impl CampaignState {
                     total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
                     },
                     Adventurer {
                         id: 2, name: "Greta".into(), archetype: "knight".into(), level: 2, xp: 0,
@@ -5432,6 +5739,7 @@ impl CampaignState {
                     total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
                     },
                 ],
                 gold_bonus: 150.0, supply_bonus: 30.0, reputation_bonus: 5.0, items: Vec::new(),
@@ -5468,6 +5776,7 @@ impl CampaignState {
                     total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
                     },
                 ],
                 gold_bonus: 0.0, supply_bonus: 0.0, reputation_bonus: 10.0, items: Vec::new(),
@@ -5504,6 +5813,7 @@ impl CampaignState {
                     total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
                     },
                     Adventurer {
                         id: 2, name: "Brynn".into(), archetype: "mage".into(), level: 1, xp: 0,
@@ -5533,6 +5843,7 @@ impl CampaignState {
                     total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
                     },
                     Adventurer {
                         id: 3, name: "Cira".into(), archetype: "cleric".into(), level: 1, xp: 0,
@@ -5562,6 +5873,7 @@ impl CampaignState {
                     total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
                     },
                     Adventurer {
                         id: 4, name: "Daven".into(), archetype: "rogue".into(), level: 1, xp: 0,
@@ -5591,6 +5903,7 @@ impl CampaignState {
                     total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
                     },
                 ],
                 gold_bonus: 20.0, supply_bonus: 10.0, reputation_bonus: 0.0, items: Vec::new(),

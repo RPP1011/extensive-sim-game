@@ -632,6 +632,12 @@ pub fn predict_outcome(action: &CampaignAction, state: &CampaignState) -> Action
             expected_risk: 0.7,
             expected_duration: 100,
         },
+        CampaignAction::UseClassSkill { .. } => ActionOutcome {
+            expected_gold_change: 0.0,
+            expected_reputation_change: 2.0,
+            expected_risk: 0.1,
+            expected_duration: 0,
+        },
     }
 }
 

@@ -306,6 +306,7 @@ pub fn tick_crafting(
                 quality: boosted_quality,
                 stat_bonuses,
                 durability: 100.0,
+                appraised: false,
             });
 
             events.push(WorldEvent::ItemCrafted {

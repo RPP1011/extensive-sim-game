@@ -5,6 +5,7 @@
 //! quadratic XP curves, and skills are granted at level thresholds.
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
+use crate::headless_campaign::skill_templates::select_skill_template;
 use crate::headless_campaign::state::{
     lcg_f32, Adventurer, AdventurerStatus, BattleStatus, BehaviorLedger, CampaignState, ClassInstance,
     ClassTemplate, ConsolidationOffer, GrantedSkill, SkillRarity,
@@ -48,8 +49,44 @@ const STAGNATION_FREEZE: u32 = 1000;
 /// XP trickle between overlapping classes (15%).
 const RESONANCE_TRICKLE: f32 = 0.15;
 
-/// Level thresholds at which skills are granted.
-const SKILL_THRESHOLDS: &[u32] = &[3, 5, 7, 10, 15, 20, 25];
+/// Level thresholds at which skills are granted (25 grants across 100 levels).
+const SKILL_THRESHOLDS: &[u32] = &[
+    3, 5, 7, 10, 13,           // T1 Novice: 5 skills
+    17, 21, 25,                 // T2 Journeyman: 3 skills
+    30, 35, 40,                 // T3 Adept: 3 skills
+    45, 50, 55, 60,             // T4 Expert: 4 skills
+    65, 70, 75, 80,             // T5 Master: 4 skills
+    85, 90, 95,                 // T6 Legendary: 3 skills
+    100,                        // T7 Mythic: 1 capstone
+];
+
+/// Map level threshold to skill rarity.
+fn rarity_for_threshold(level: u32) -> SkillRarity {
+    match level {
+        0..=13 => SkillRarity::Common,
+        14..=25 => SkillRarity::Common,
+        26..=40 => SkillRarity::Uncommon,
+        41..=60 => SkillRarity::Rare,
+        61..=80 => SkillRarity::Rare,
+        81..=95 => SkillRarity::Capstone,
+        96..=100 => SkillRarity::Unique,
+        _ => SkillRarity::Common,
+    }
+}
+
+/// Map level threshold to skill tier (1-7).
+fn tier_for_threshold(level: u32) -> u32 {
+    match level {
+        0..=13 => 1,
+        14..=25 => 2,
+        26..=40 => 3,
+        41..=60 => 4,
+        61..=80 => 5,
+        81..=95 => 6,
+        96..=100 => 7,
+        _ => 1,
+    }
+}
 
 /// Mentorship observation credit fraction (25% of mentor's earned behavior).
 const MENTORSHIP_OBSERVATION_FRACTION: f32 = 0.25;
@@ -831,6 +868,7 @@ fn check_capstone_resolution(state: &mut CampaignState, events: &mut Vec<WorldEv
                     affinity_tags: affinity_tags_for_class(&class.class_name),
                     empowered: false,
                     inheritance_status: String::new(),
+                    skill_effect: None,
                 });
 
                 events.push(WorldEvent::CapstoneResolved {
@@ -1012,13 +1050,7 @@ fn check_skill_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                         .iter()
                         .any(|s| s.granted_at_level == threshold)
                 {
-                    let rarity = match threshold {
-                        3 | 5 => SkillRarity::Common,
-                        7 | 10 => SkillRarity::Uncommon,
-                        15 | 20 => SkillRarity::Rare,
-                        25 => SkillRarity::Capstone,
-                        _ => SkillRarity::Common,
-                    };
+                    let rarity = rarity_for_threshold(threshold);
                     let rarity_str = match &rarity {
                         SkillRarity::Common => "Common",
                         SkillRarity::Uncommon => "Uncommon",
@@ -1027,9 +1059,36 @@ fn check_skill_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                         SkillRarity::Unique => "Unique",
                     };
 
-                    // Feature 3 (idea 3.5): Capstone synthesis at level 25
-                    let (skill_name, effect) = if threshold == 25 {
-                        generate_capstone_skill(&ledger_snapshot, &class.class_name)
+                    // Phase 10: Use template selection for skill name + effect.
+                    // Capstone synthesis at level 25 or T7 (100) still uses
+                    // generate_capstone_skill as a fallback.
+                    let tier = tier_for_threshold(threshold);
+                    let existing_names: Vec<String> = class
+                        .skills_granted
+                        .iter()
+                        .map(|s| s.skill_name.clone())
+                        .collect();
+                    let template = select_skill_template(
+                        &class.class_name,
+                        &affinity_tags_for_class(&class.class_name)
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect::<Vec<_>>(),
+                        tier,
+                        &ledger_snapshot,
+                        &existing_names,
+                        &mut state.rng,
+                    );
+
+                    let (skill_name, effect, skill_effect) = if let Some(tmpl) = template {
+                        (
+                            tmpl.name.to_string(),
+                            tmpl.description.to_string(),
+                            Some(tmpl.effect.clone()),
+                        )
+                    } else if threshold >= 85 {
+                        let (sn, eff) = generate_capstone_skill(&ledger_snapshot, &class.class_name);
+                        (sn, eff, None)
                     } else {
                         let sn = format!(
                             "{} {} Lv{}",
@@ -1041,7 +1100,7 @@ fn check_skill_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                             threshold,
                             class.class_name
                         );
-                        (sn, eff)
+                        (sn, eff, None)
                     };
 
                     // Idea 3.6: skip if this skill is suppressed
@@ -1109,6 +1168,7 @@ fn check_skill_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                         affinity_tags,
                         empowered,
                         inheritance_status: String::new(),
+                        skill_effect,
                     });
 
                     let class_name_clone = class.class_name.clone();
@@ -3406,6 +3466,7 @@ fn check_campaign_skill_hooks(state: &mut CampaignState, events: &mut Vec<WorldE
                     inheritance_status: String::new(),
                     affinity_tags: affinity_tags_for_class(&class.class_name),
                     empowered: false,
+                    skill_effect: None,
                 });
             }
         }

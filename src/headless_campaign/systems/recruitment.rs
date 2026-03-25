@@ -155,6 +155,7 @@ pub fn tick_recruitment(
             total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
     };
 
     events.push(WorldEvent::AdventurerRecovered {

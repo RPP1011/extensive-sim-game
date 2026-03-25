@@ -168,6 +168,7 @@ impl WorldTemplate {
                     patrol_losses: 0,
                     escalation_cooldown: 0,
                     last_patrol_loss_tick: 0,
+                    skill_modifiers: Default::default(),
                 },
                 FactionState {
                     id: 1,
@@ -189,6 +190,7 @@ impl WorldTemplate {
                     patrol_losses: 0,
                     escalation_cooldown: 0,
                     last_patrol_loss_tick: 0,
+                    skill_modifiers: Default::default(),
                 },
             ],
             diplomacy: DiplomacyMatrix {

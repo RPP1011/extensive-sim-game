@@ -37,6 +37,8 @@ pub mod llm;
 pub mod mcts;
 pub mod quest_gen;
 pub mod quest_hooks;
+pub mod skill_effects;
+pub mod skill_templates;
 pub mod state;
 pub mod step;
 pub mod tokens;

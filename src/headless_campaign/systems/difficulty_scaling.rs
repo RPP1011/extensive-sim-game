@@ -366,6 +366,7 @@ fn apply_relief(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
             total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
                 };
 
                 state.adventurers.push(adventurer);

@@ -256,6 +256,7 @@ pub fn action_type_name(action: &CampaignAction) -> String {
         CampaignAction::ProposeCoalition { .. } => "ProposeCoalition".into(),
         CampaignAction::RequestCoalitionAid { .. } => "RequestCoalitionAid".into(),
         CampaignAction::InterceptChampion { .. } => "InterceptChampion".into(),
+        CampaignAction::UseClassSkill { .. } => "UseClassSkill".into(),
     }
 }
 

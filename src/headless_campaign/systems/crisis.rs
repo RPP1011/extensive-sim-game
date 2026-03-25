@@ -176,6 +176,7 @@ pub fn activate_crisis_from_template(
             total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
                 };
 
                 champion_ids.push(id);

@@ -381,6 +381,7 @@ mod tests {
             quality: 80.0,
             stat_bonuses: StatBonuses::default(),
             durability: 100.0,
+            appraised: false,
         });
         state.adventurers[0].equipment.weapon = Some(999);
 

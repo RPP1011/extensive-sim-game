@@ -295,6 +295,7 @@ fn resolve_auctions(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                     quality: item.quality,
                     stat_bonuses: auction_stat_bonuses(&item),
                     durability: 100.0,
+                    appraised: false,
                 };
 
                 state.guild.inventory.push(inv_item);

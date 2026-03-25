@@ -230,6 +230,7 @@ pub fn generate_loot(
         quality,
         stat_bonuses,
         durability: 100.0,
+        appraised: false,
     })
 }
 
@@ -484,6 +485,7 @@ mod tests {
             quality: 0.2,
             stat_bonuses: compute_stat_bonuses(EquipmentSlot::Weapon, 0.2),
             durability: 100.0,
+            appraised: false,
         };
 
         let strong_item = InventoryItem {
@@ -493,6 +495,7 @@ mod tests {
             quality: 0.9,
             stat_bonuses: compute_stat_bonuses(EquipmentSlot::Weapon, 0.9),
             durability: 100.0,
+            appraised: false,
         };
 
         // Equip weak item first

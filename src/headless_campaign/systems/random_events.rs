@@ -224,6 +224,7 @@ fn apply_wandering_merchant(state: &mut CampaignState, events: &mut Vec<WorldEve
                         quality,
                         stat_bonuses: Default::default(),
                     durability: 100.0,
+                    appraised: false,
                     }),
                 ],
             },
@@ -372,6 +373,7 @@ fn apply_refugee_influx(state: &mut CampaignState, events: &mut Vec<WorldEvent>)
             total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
     };
 
     state.adventurers.push(adventurer);

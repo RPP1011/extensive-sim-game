@@ -88,13 +88,14 @@ The system watches what you do and responds.
 - [x] leadership → recruitment quality (recruitment.rs)
 - [x] Party-level quest duration reduction (quest_lifecycle.rs)
 
-## Phase 10: Tiered Ability Framework [TODO]
-- [ ] Expand SKILL_THRESHOLDS to 25 grants across 100 levels
-- [ ] SkillEffect enum — non-combat powers that bend existing systems
-- [ ] SkillCondition enum — situational constraints, not resource costs
-- [ ] Template pools per class per tier in skill_templates.rs
-- [ ] apply_skill_effect() dispatcher in skill_effects.rs
-- [ ] Wire into UseAbility handler in step.rs
+## Phase 10: Tiered Ability Framework [DONE]
+- [x] Expand SKILL_THRESHOLDS to 25 grants across 100 levels
+- [x] SkillEffect enum — non-combat powers that bend existing systems (~45 variants)
+- [x] SkillCondition enum — situational constraints, not resource costs (7 conditions)
+- [x] Template pools per class per tier in skill_templates.rs (~120 templates across 11 families)
+- [x] apply_skill_effect() dispatcher in skill_effects.rs (all variants implemented)
+- [x] Wire into UseClassSkill action in step.rs
+- [x] BFS action metadata for UseClassSkill
 - [ ] Combat ability scaling via generate_tiered_ability()
 - [ ] BFS valid_actions filtering by skill conditions
 

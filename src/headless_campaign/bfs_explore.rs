@@ -784,6 +784,7 @@ fn estimate_impact(action: &CampaignAction, state: &CampaignState) -> f32 {
                 .any(|a| a.status != AdventurerStatus::Dead && a.injury > 30.0);
             if has_injured { 0.5 } else { 0.15 }
         }
+        CampaignAction::UseClassSkill { .. } => 0.6,
         CampaignAction::Wait => 0.05,
     };
 
@@ -1004,6 +1005,7 @@ fn action_expected_duration(action: &CampaignAction) -> u64 {
         CampaignAction::ChooseStartingPackage { .. } => 1,
         CampaignAction::RespondToChoice { .. } => 1,
         CampaignAction::InterceptChampion { .. } => 150,
+        CampaignAction::UseClassSkill { .. } => 5,
     }
 }
 

@@ -98,6 +98,13 @@ pub enum CampaignAction {
         /// The champion adventurer ID to intercept.
         champion_id: u32,
     },
+
+    /// Use a class skill (Phase 10 tiered ability framework).
+    UseClassSkill {
+        adventurer_id: u32,
+        skill_name: String,
+        target: AbilityTarget,
+    },
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -973,6 +980,10 @@ pub enum WorldEvent {
 
     // --- Hybrid Class Unlock (idea 2.7) ---
     HybridClassUnlocked { adventurer_id: u32, parent_a: String, parent_b: String, hybrid_name: String },
+
+    // --- Tiered Skill Effects (Phase 10) ---
+    ClassSkillUsed { adventurer_id: u32, skill_name: String, effect_description: String },
+    ClassSkillConditionNotMet { adventurer_id: u32, skill_name: String, condition: String },
 }
 
 // ---------------------------------------------------------------------------

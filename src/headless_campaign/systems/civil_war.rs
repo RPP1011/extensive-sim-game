@@ -338,6 +338,7 @@ fn resolve_civil_war(
                     patrol_losses: 0,
                     escalation_cooldown: 0,
                     last_patrol_loss_tick: 0,
+                    skill_modifiers: Default::default(),
                 };
 
                 state.factions.push(new_faction);

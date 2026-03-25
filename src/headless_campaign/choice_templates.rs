@@ -332,6 +332,7 @@ pub fn instantiate_effect(e: &EffectTemplate, ctx: &TemplateContext) -> Option<C
             total_potions_consumed: 0,
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
+            skill_state: Default::default(),
             }))
         }
         _ => {

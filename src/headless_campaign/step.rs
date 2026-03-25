@@ -909,6 +909,37 @@ fn apply_action(
             ActionResult::Success(format!("Chose: {}", label))
         }
 
+        CampaignAction::UseClassSkill {
+            adventurer_id,
+            skill_name,
+            target: _,
+        } => {
+            // Find the skill effect on the adventurer's class skills.
+            let skill_data = state
+                .adventurers
+                .iter()
+                .find(|a| a.id == adventurer_id)
+                .and_then(|adv| {
+                    adv.classes
+                        .iter()
+                        .flat_map(|c| &c.skills_granted)
+                        .find(|s| s.skill_name == skill_name)
+                })
+                .and_then(|s| s.skill_effect.clone());
+
+            if let Some(effect) = skill_data {
+                let desc = super::skill_effects::apply_skill_effect(
+                    state, &effect, adventurer_id, events,
+                );
+                ActionResult::Success(desc)
+            } else {
+                ActionResult::InvalidAction(format!(
+                    "Skill '{}' not found or has no effect on adventurer {}",
+                    skill_name, adventurer_id
+                ))
+            }
+        }
+
         CampaignAction::InterceptChampion {
             party_id,
             champion_id,

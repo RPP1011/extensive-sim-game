@@ -191,6 +191,7 @@ pub fn buy_from_merchant(
         quality,
         stat_bonuses,
         durability: 100.0,
+        appraised: false,
     });
 
     events.push(WorldEvent::MerchantPurchase {

@@ -387,6 +387,7 @@ fn advance_active_hunts(
                     speed_bonus: 10.0,
                 },
                 durability: 100.0,
+                appraised: false,
             };
             state.guild.inventory.push(artifact);
 
