@@ -938,6 +938,41 @@ pub enum WorldEvent {
     CrisisClassGranted { adventurer_id: u32, class_name: String, crisis_type: String },
     ClassFractured { adventurer_id: u32, original_class: String, replacement: String },
     ClassChronicleEntry { adventurer_id: u32, entry: String },
+    CampaignSkillGranted { adventurer_id: u32, skill_name: String, trigger_system: String },
+    CapstoneSkillAnnounced { adventurer_id: u32, skill_name: String, class_name: String },
+
+    // --- Mirror Offers ---
+    MirrorOfferResolved { adventurer_id: u32, chosen: String, rejected: String },
+
+    // --- Rival-Reflected Classes ---
+    RivalClassGranted { adventurer_id: u32, class_name: String, rival_id: u32 },
+
+    // --- Oath-Locked Classes ---
+    OathLockedClassGranted { adventurer_id: u32, class_name: String, oath_type: String },
+    OathLockedClassRevoked { adventurer_id: u32, class_name: String },
+
+    // --- Folk Hero Divergence ---
+    FolkHeroDivergenceClass { adventurer_id: u32, legend_class: String, reality_class: String },
+
+    // --- World-Event-Gated Classes (idea 4.6) ---
+    WorldGatedClassUnlocked { adventurer_id: u32, class_name: String, world_event: String },
+
+    // --- Emergency Consolidation (idea 4.10) ---
+    EmergencyConsolidation { adventurer_id: u32, proposed_name: String },
+
+    // --- Negative Class Mutation (idea 4.10) ---
+    NegativeClassMutation { adventurer_id: u32, original_class: String, diminished_class: String },
+
+    // --- Unique / Mentorship / Witness classes ---
+    UniqueClassGenerated { adventurer_id: u32, class_name: String },
+    MentorshipObservationCredit { observer_id: u32, mentor_id: u32, domain: String },
+    WitnessXpBoost { adventurer_id: u32, class_name: String, multiplier: f32 },
+
+    // --- Capstone Events (idea 2.5) ---
+    CapstoneResolved { adventurer_id: u32, class_name: String, challenge: String },
+
+    // --- Hybrid Class Unlock (idea 2.7) ---
+    HybridClassUnlocked { adventurer_id: u32, parent_a: String, parent_b: String, hybrid_name: String },
 }
 
 // ---------------------------------------------------------------------------

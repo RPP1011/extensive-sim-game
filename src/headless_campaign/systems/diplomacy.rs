@@ -9,6 +9,7 @@
 
 use crate::headless_campaign::actions::{agreement_type_name, StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
+use super::class_system::effective_noncombat_stats;
 
 /// Diplomacy cadence: every 200 ticks.
 const DIPLOMACY_INTERVAL: u64 = 200;
@@ -162,10 +163,18 @@ fn ai_propose_agreements(state: &mut CampaignState, events: &mut Vec<WorldEvent>
     let n = state.factions.len();
     let guild_fid = state.diplomacy.guild_faction_id;
 
+    // Compute guild-wide diplomacy bonus from adventurer classes
+    let guild_diplomacy_bonus: f32 = state
+        .adventurers
+        .iter()
+        .filter(|a| a.status != AdventurerStatus::Dead && a.faction_id.is_none())
+        .map(|a| effective_noncombat_stats(a).0) // diplomacy component
+        .sum();
+
     for fi in 0..n {
         for fj in (fi + 1)..n {
             // Determine the relationship between factions fi and fj.
-            let relation = if fi == guild_fid {
+            let base_relation = if fi == guild_fid {
                 state.factions[fj].relationship_to_guild
             } else if fj == guild_fid {
                 state.factions[fi].relationship_to_guild
@@ -178,6 +187,13 @@ fn ai_propose_agreements(state: &mut CampaignState, events: &mut Vec<WorldEvent>
                 } else {
                     0.0
                 }
+            };
+
+            // Adventurer diplomacy stats boost effective relation for guild proposals
+            let relation = if fi == guild_fid || fj == guild_fid {
+                base_relation * (1.0 + guild_diplomacy_bonus * 0.02)
+            } else {
+                base_relation
             };
 
             // Skip factions at war

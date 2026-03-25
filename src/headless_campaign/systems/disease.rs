@@ -6,6 +6,7 @@
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
+use super::class_system::effective_noncombat_stats;
 
 /// How often to tick the disease system (in ticks).
 const DISEASE_INTERVAL: u64 = 200;
@@ -62,6 +63,20 @@ pub fn tick_disease(
 
     // --- Phase 4: Infect adventurers in diseased regions ---
     infect_adventurers(state, events);
+
+    // --- Phase 4b: Medicine bonus increases containment ---
+    // Guild adventurers with medicine stats help contain diseases faster
+    let guild_medicine: f32 = state
+        .adventurers
+        .iter()
+        .filter(|a| a.status != AdventurerStatus::Dead && a.faction_id.is_none())
+        .map(|a| effective_noncombat_stats(a).3) // medicine component
+        .sum();
+    if guild_medicine > 0.0 {
+        for disease in &mut state.diseases {
+            disease.containment += guild_medicine * 0.03;
+        }
+    }
 
     // --- Phase 5: Check for containment / natural end ---
     resolve_diseases(state, events);
@@ -301,8 +316,12 @@ fn infect_adventurers(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                 continue;
             }
 
+            // Medicine stat reduces infection chance
+            let medicine_bonus = effective_noncombat_stats(adv).3;
+            let adjusted_chance = infection_chance / (1.0 + medicine_bonus * 0.03);
+
             let roll = lcg_f32(&mut state.rng);
-            if roll < infection_chance {
+            if roll < adjusted_chance {
                 if let Some(adv) = state.adventurers.iter_mut().find(|a| a.id == mid) {
                     let severity = state
                         .diseases

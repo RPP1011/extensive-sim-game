@@ -4,7 +4,8 @@
 //! market price inflation/decay, investment returns, and supply chain penalties.
 
 use crate::headless_campaign::actions::{SpendPriority, StepDeltas, WorldEvent};
-use crate::headless_campaign::state::{CampaignState, CAMPAIGN_TICK_MS};
+use crate::headless_campaign::state::{AdventurerStatus, CampaignState, CAMPAIGN_TICK_MS};
+use super::class_system::effective_noncombat_stats;
 
 pub fn tick_economy(
     state: &mut CampaignState,
@@ -146,6 +147,15 @@ fn tick_trade_income(state: &mut CampaignState, dt_sec: f32) {
         let stability = 1.0 - (region.unrest / 100.0).min(1.0);
         trade_income += region.control * rate * stability * war_disruption * dt_sec;
     }
+
+    // Commerce bonus from adventurer class stats: +0.5 gold per trade tick per commerce point
+    let commerce_bonus: f32 = state
+        .adventurers
+        .iter()
+        .filter(|a| a.status != AdventurerStatus::Dead && a.faction_id.is_none())
+        .map(|a| effective_noncombat_stats(a).1) // commerce component
+        .sum();
+    trade_income += commerce_bonus * 0.5 * dt_sec;
 
     state.guild.gold += trade_income;
     state.guild.total_trade_income += trade_income;

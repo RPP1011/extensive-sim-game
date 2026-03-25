@@ -7,6 +7,7 @@
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
+use super::class_system::effective_noncombat_stats;
 
 // ---------------------------------------------------------------------------
 // Recipe table
@@ -260,28 +261,39 @@ pub fn tick_crafting(
             let item_id = state.next_event_id;
             state.next_event_id += 1;
 
+            // Crafting bonus from adventurer class stats improves quality and stats
+            let crafting_bonus: f32 = state
+                .adventurers
+                .iter()
+                .filter(|a| a.status != AdventurerStatus::Dead && a.faction_id.is_none())
+                .map(|a| effective_noncombat_stats(a).2) // crafting component
+                .sum::<f32>()
+                .min(30.0); // Cap at +30 to prevent runaway quality
+            let boosted_stat = recipe.stat_bonus + crafting_bonus * 0.5;
+            let boosted_quality = recipe.output_quality + crafting_bonus;
+
             let stat_bonuses = match recipe.output_slot {
                 EquipmentSlot::Weapon => StatBonuses {
-                    attack_bonus: recipe.stat_bonus,
+                    attack_bonus: boosted_stat,
                     ..Default::default()
                 },
                 EquipmentSlot::Offhand | EquipmentSlot::Chest => StatBonuses {
-                    defense_bonus: recipe.stat_bonus,
+                    defense_bonus: boosted_stat,
                     ..Default::default()
                 },
                 EquipmentSlot::Boots => StatBonuses {
-                    speed_bonus: recipe.stat_bonus,
+                    speed_bonus: boosted_stat,
                     ..Default::default()
                 },
                 EquipmentSlot::Accessory => StatBonuses {
-                    hp_bonus: recipe.stat_bonus * 5.0,
+                    hp_bonus: boosted_stat * 5.0,
                     ..Default::default()
                 },
             };
 
-            let quality_label = if recipe.output_quality >= 70.0 {
+            let quality_label = if boosted_quality >= 70.0 {
                 "Rare"
-            } else if recipe.output_quality >= 50.0 {
+            } else if boosted_quality >= 50.0 {
                 "Uncommon"
             } else {
                 "Common"
@@ -291,7 +303,7 @@ pub fn tick_crafting(
                 id: item_id,
                 name: recipe.name.to_string(),
                 slot: recipe.output_slot,
-                quality: recipe.output_quality,
+                quality: boosted_quality,
                 stat_bonuses,
                 durability: 100.0,
             });

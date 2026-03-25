@@ -5,6 +5,7 @@
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
+use super::class_system::effective_noncombat_stats;
 
 pub fn tick_recruitment(
     state: &mut CampaignState,
@@ -91,6 +92,16 @@ pub fn tick_recruitment(
         _            => ( 70.0, 10.0, 10.0, 10.0, 10.0),
     };
 
+    // Leadership bonus from existing adventurers improves recruit quality
+    let leadership_bonus: f32 = state
+        .adventurers
+        .iter()
+        .filter(|a| a.status != AdventurerStatus::Dead && a.faction_id.is_none())
+        .map(|a| effective_noncombat_stats(a).6) // leadership component
+        .sum::<f32>()
+        .min(20.0); // Cap at +20 to prevent runaway stats
+    let quality_mult = 1.0 + leadership_bonus * 0.01; // +1% stats per leadership point
+
     let adventurer = Adventurer {
         id,
         name: name.clone(),
@@ -98,11 +109,11 @@ pub fn tick_recruitment(
         level,
         xp: 0,
         stats: AdventurerStats {
-            max_hp: hp + level as f32 * state.config.recruitment.hp_per_level,
-            attack: atk + level as f32 * state.config.recruitment.attack_per_level,
-            defense: def + level as f32 * state.config.recruitment.defense_per_level,
-            speed: spd,
-            ability_power: ap + level as f32 * state.config.recruitment.ability_power_per_level,
+            max_hp: (hp + level as f32 * state.config.recruitment.hp_per_level) * quality_mult,
+            attack: (atk + level as f32 * state.config.recruitment.attack_per_level) * quality_mult,
+            defense: (def + level as f32 * state.config.recruitment.defense_per_level) * quality_mult,
+            speed: spd * quality_mult,
+            ability_power: (ap + level as f32 * state.config.recruitment.ability_power_per_level) * quality_mult,
         },
         equipment: Equipment::default(),
         traits: Vec::new(),

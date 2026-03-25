@@ -5,6 +5,7 @@
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
+use super::class_system::effective_noncombat_stats;
 
 /// Cadence: runs every 200 ticks.
 const ESPIONAGE_INTERVAL: u64 = 200;
@@ -45,13 +46,16 @@ pub fn tick_espionage(
     let mut updates: Vec<(usize, bool, f32)> = Vec::new();
 
     for (idx, spy) in state.spies.iter().enumerate() {
-        // Look up adventurer level and archetype for modifiers
-        let (adv_level, is_rogue) = state
+        // Look up adventurer level, archetype, and stealth stat for modifiers
+        let (adv_level, is_rogue, stealth_bonus) = state
             .adventurers
             .iter()
             .find(|a| a.id == spy.adventurer_id)
-            .map(|a| (a.level, a.archetype.to_lowercase().contains("rogue")))
-            .unwrap_or((1, false));
+            .map(|a| {
+                let stealth = effective_noncombat_stats(a).5;
+                (a.level, a.archetype.to_lowercase().contains("rogue"), stealth)
+            })
+            .unwrap_or((1, false, 0.0));
 
         // Intel gathering: base + level bonus + rogue bonus
         let level_modifier = 1.0 + (adv_level as f32 - 1.0) * 0.1; // +10% per level above 1
@@ -78,10 +82,11 @@ pub fn tick_espionage(
 
         let new_cover = (spy.cover - cover_decay).max(0.0);
 
-        // Discovery check
+        // Discovery check — stealth stat reduces discovery probability
         let caught = if new_cover < DISCOVERY_THRESHOLD {
             let roll = lcg_f32(&mut state.rng);
-            roll < DISCOVERY_CHANCE
+            let adjusted_chance = (DISCOVERY_CHANCE - stealth_bonus * 0.02).max(0.01);
+            roll < adjusted_chance
         } else {
             false
         };

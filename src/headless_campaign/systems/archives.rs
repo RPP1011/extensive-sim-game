@@ -9,6 +9,7 @@
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
+use super::class_system::effective_noncombat_stats;
 
 /// How often the archives system ticks (in ticks).
 const ARCHIVES_INTERVAL: u64 = 500;
@@ -141,6 +142,15 @@ pub fn tick_archives(
         knowledge_gained *= LIBRARIAN_KNOWLEDGE_MULTIPLIER;
     }
 
+    // Scholarship bonus from adventurer class stats adds to knowledge gain
+    let scholarship_bonus: f32 = state
+        .adventurers
+        .iter()
+        .filter(|a| a.status != AdventurerStatus::Dead && a.faction_id.is_none())
+        .map(|a| effective_noncombat_stats(a).4) // scholarship component
+        .sum();
+    knowledge_gained += scholarship_bonus;
+
     if knowledge_gained > 0.0 {
         state.archives.knowledge_points += knowledge_gained;
         events.push(WorldEvent::KnowledgeGained {
@@ -173,11 +183,13 @@ pub fn tick_archives(
     }
 
     // --- Phase 4: Advance research on active topics ---
-    let research_rate = if has_librarian {
+    let base_rate = if has_librarian {
         BASE_RESEARCH_RATE * LIBRARIAN_RESEARCH_MULTIPLIER
     } else {
         BASE_RESEARCH_RATE
     };
+    // Scholarship bonus also accelerates research progress
+    let research_rate = base_rate + scholarship_bonus * 0.1;
 
     let mut completed_names: Vec<String> = Vec::new();
     for topic in &mut state.archives.research_topics {

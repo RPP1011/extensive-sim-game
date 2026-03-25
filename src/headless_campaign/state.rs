@@ -490,6 +490,15 @@ pub struct CampaignState {
     #[serde(default)]
     pub unique_class_holders: std::collections::HashMap<String, u32>,
 
+    /// Tracks campaign-system-triggered skills already granted: (adventurer_id, skill_name).
+    #[serde(default)]
+    pub campaign_skills_granted: Vec<(u32, String)>,
+
+    /// World-event-gated class eligibility flags (idea 4.6).
+    /// Maps flag name (e.g. "civil_war_peaceful") to the tick the event occurred.
+    #[serde(default)]
+    pub world_gated_class_flags: std::collections::HashMap<String, u64>,
+
     // --- Extended system trackers ---
     /// Aggregate counters for the ~30 campaign subsystems.
     /// Updated by step logic; consumed by tokens, clustering, and value estimation.
@@ -1086,10 +1095,31 @@ pub struct BehaviorLedger {
     /// Count of near-death experiences (HP dropped below 10%).
     #[serde(default)]
     pub near_death_count: u32,
+    /// Co-active tick counts between class pairs (idea 2.7).
+    /// Key = (class_a, class_b) sorted, value = tick count.
+    #[serde(default)]
+    pub co_active_ticks: std::collections::HashMap<(String, String), u32>,
+
+    // --- Mirror Offers tracking ---
+    /// Classes permanently locked out via mirror-offer rejection.
+    #[serde(default)]
+    pub rejected_classes: Vec<String>,
+
+    // --- Witnessed vs Unwitnessed Acts ---
+    /// Heroic acts performed while in a party (visible to others).
+    #[serde(default)]
+    pub witnessed_heroic_acts: u32,
+    /// Heroic acts performed while alone (no party).
+    #[serde(default)]
+    pub unwitnessed_heroic_acts: u32,
+
+    /// One-time landmark achievements for rare class prerequisites.
+    #[serde(default)]
+    pub landmark_achievements: Vec<String>,
 }
 
 /// A single class held by an adventurer. Adventurers can hold multiple.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ClassInstance {
     pub class_name: String,
     pub level: u32,
@@ -1100,6 +1130,39 @@ pub struct ClassInstance {
     pub acquired_tick: u32,
     /// Identity coherence — decays when actions contradict class archetype.
     pub identity_coherence: f32,
+    /// Whether this class requires a capstone event to advance beyond level 20.
+    #[serde(default)]
+    pub capstone_required: bool,
+    /// XP accumulated while capstone-gated (released when capstone earned).
+    #[serde(default)]
+    pub xp_overflow: f32,
+
+    /// Which rival triggered this class (for rival-reflected classes).
+    #[serde(default)]
+    pub rival_class_source: Option<u32>,
+    /// Skills suppressed by other granted skills (idea 3.6).
+    #[serde(default)]
+    pub suppressed_skills: Vec<String>,
+
+    /// Exclusion cooldown — ticks remaining before this class family stops blocking others.
+    #[serde(default)]
+    pub exclusion_cooldown: u32,
+
+    // --- Non-combat stat growth rates (set from class template when granted) ---
+    #[serde(default)]
+    pub stat_growth_diplomacy: f32,
+    #[serde(default)]
+    pub stat_growth_commerce: f32,
+    #[serde(default)]
+    pub stat_growth_crafting: f32,
+    #[serde(default)]
+    pub stat_growth_medicine: f32,
+    #[serde(default)]
+    pub stat_growth_scholarship: f32,
+    #[serde(default)]
+    pub stat_growth_stealth: f32,
+    #[serde(default)]
+    pub stat_growth_leadership: f32,
 }
 
 /// A skill granted by the class system at a level threshold.
@@ -1113,6 +1176,17 @@ pub struct GrantedSkill {
     pub ability_dsl: Option<String>,
     /// Non-combat effect description.
     pub effect_description: String,
+
+    /// Skill inheritance status during consolidation (idea 4.8).
+    /// Values: "core", "vestigial", "lost", or "" (not from consolidation).
+    #[serde(default)]
+    pub inheritance_status: String,
+    /// Affinity tags for skill interaction bonuses (idea 3.10).
+    #[serde(default)]
+    pub affinity_tags: Vec<String>,
+    /// Whether this skill was empowered by tag overlap (idea 3.10).
+    #[serde(default)]
+    pub empowered: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -1137,6 +1211,9 @@ pub struct ConsolidationOffer {
     pub offered_tick: u32,
     pub deadline_tick: u32,
     pub times_refused: u32,
+    /// Jaccard similarity of the two classes' skill tag sets (idea 4.4).
+    #[serde(default)]
+    pub overlap_score: f32,
 }
 
 /// Template for matching behavior patterns to class grants.
@@ -5258,6 +5335,8 @@ impl CampaignState {
             consolidation_offers: Vec::new(),
             class_chronicle_entries: Vec::new(),
             unique_class_holders: std::collections::HashMap::new(),
+            campaign_skills_granted: Vec::new(),
+            world_gated_class_flags: std::collections::HashMap::new(),
             system_trackers: SystemTrackers::default(),
         }
     }

@@ -6,6 +6,7 @@
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::combat_oracle::HeuristicOracle;
 use crate::headless_campaign::state::*;
+use super::class_system::effective_noncombat_stats;
 use super::loot::process_quest_loot;
 
 pub fn tick_quest_lifecycle(
@@ -95,8 +96,33 @@ pub fn tick_quest_lifecycle(
                         ));
                     }
                 } else {
-                    // Non-combat quests complete after a duration proportional to threat
-                    let duration = (quest.request.threat_level * state.config.quest_lifecycle.non_combat_duration_multiplier) as u64;
+                    // Non-combat quests complete after a duration proportional to threat.
+                    // Party's relevant non-combat stats reduce effective duration.
+                    let base_duration = quest.request.threat_level
+                        * state.config.quest_lifecycle.non_combat_duration_multiplier;
+
+                    // Sum relevant stat from party members based on quest type
+                    let party_bonus: f32 = if let Some(pid) = quest.dispatched_party_id {
+                        state.adventurers.iter()
+                            .filter(|a| a.party_id == Some(pid) && a.status != AdventurerStatus::Dead)
+                            .map(|a| {
+                                let (dip, com, _cra, _med, sch, ste, _lea) = effective_noncombat_stats(a);
+                                match quest.request.quest_type {
+                                    QuestType::Diplomatic => dip,
+                                    QuestType::Gather     => com,
+                                    QuestType::Exploration => ste + sch * 0.5,
+                                    QuestType::Escort     => dip * 0.5 + com * 0.5,
+                                    _ => 0.0,
+                                }
+                            })
+                            .sum()
+                    } else {
+                        0.0
+                    };
+
+                    // Each point of relevant stat reduces duration by 2% (capped at 50% reduction)
+                    let speed_factor = (1.0 - party_bonus * 0.02).clamp(0.5, 1.0);
+                    let duration = (base_duration * speed_factor) as u64;
                     if quest.elapsed_ms > duration {
                         completed_indices.push((i, QuestResult::Victory));
                     }
