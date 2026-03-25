@@ -760,6 +760,81 @@ impl CampaignState {
                     if alive > 0.0 { multi / alive } else { 0.0 }
                 }, // multi-class ratio
                 0.0, // evolution count (placeholder)
+                // Class progression detail (6 features)
+                {
+                    // classes_with_ability_dsl: how many skills have actual combat DSL
+                    let with_dsl = self.adventurers.iter()
+                        .flat_map(|a| a.classes.iter())
+                        .flat_map(|c| c.skills_granted.iter())
+                        .filter(|s| s.ability_dsl.is_some())
+                        .count() as f32;
+                    (with_dsl / 50.0).min(1.0)
+                },
+                {
+                    // skill_rarity_distribution: fraction of skills that are Uncommon+
+                    let total_skills = self.adventurers.iter()
+                        .flat_map(|a| a.classes.iter())
+                        .flat_map(|c| c.skills_granted.iter())
+                        .count() as f32;
+                    let rare_plus = self.adventurers.iter()
+                        .flat_map(|a| a.classes.iter())
+                        .flat_map(|c| c.skills_granted.iter())
+                        .filter(|s| !matches!(s.rarity, SkillRarity::Common))
+                        .count() as f32;
+                    if total_skills > 0.0 { rare_plus / total_skills } else { 0.0 }
+                },
+                {
+                    // starter_class_count: how many starter classes exist
+                    let starters = ["Laborer", "Hunter", "Traveler", "Apprentice", "Farmhand",
+                                     "Militia", "Peddler", "Herbalist", "Scribe", "Pickpocket",
+                                     "Errand Runner", "Stablehand"];
+                    let count = self.adventurers.iter()
+                        .flat_map(|a| a.classes.iter())
+                        .filter(|c| starters.contains(&c.class_name.as_str()))
+                        .count() as f32;
+                    (count / 20.0).min(1.0)
+                },
+                {
+                    // evolved_class_count: non-starter, non-shame classes
+                    let starters = ["Laborer", "Hunter", "Traveler", "Apprentice", "Farmhand",
+                                     "Militia", "Peddler", "Herbalist", "Scribe", "Pickpocket",
+                                     "Errand Runner", "Stablehand"];
+                    let shame = ["Coward", "Oathbreaker", "Deserter"];
+                    let count = self.adventurers.iter()
+                        .flat_map(|a| a.classes.iter())
+                        .filter(|c| !starters.contains(&c.class_name.as_str()) && !shame.contains(&c.class_name.as_str()))
+                        .count() as f32;
+                    (count / 20.0).min(1.0)
+                },
+                {
+                    // behavior_specialization: fraction of behavior axes active
+                    let alive: Vec<_> = self.adventurers.iter()
+                        .filter(|a| a.status != AdventurerStatus::Dead).collect();
+                    if alive.is_empty() { 0.0 } else {
+                        let axes: Vec<f32> = (0..12).map(|axis| {
+                            alive.iter().map(|a| {
+                                let l = &a.behavior_ledger;
+                                match axis {
+                                    0 => l.melee_combat, 1 => l.ranged_combat, 2 => l.healing_given,
+                                    3 => l.diplomacy_actions, 4 => l.trades_completed, 5 => l.items_crafted,
+                                    6 => l.areas_explored, 7 => l.units_commanded, 8 => l.stealth_actions,
+                                    9 => l.research_performed, 10 => l.damage_absorbed, _ => l.allies_supported,
+                                }
+                            }).sum::<f32>()
+                        }).collect();
+                        let nonzero = axes.iter().filter(|&&v| v > 0.1).count() as f32;
+                        (nonzero / 12.0).min(1.0)
+                    }
+                },
+                {
+                    // class_level_distribution: fraction of classes above level 5 (T2+)
+                    let all_classes: Vec<_> = self.adventurers.iter()
+                        .flat_map(|a| a.classes.iter()).collect();
+                    if all_classes.is_empty() { 0.0 } else {
+                        let above_5 = all_classes.iter().filter(|c| c.level >= 5).count() as f32;
+                        above_5 / all_classes.len() as f32
+                    }
+                },
             ],
         }
     }

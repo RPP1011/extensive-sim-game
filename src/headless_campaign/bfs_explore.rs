@@ -164,6 +164,9 @@ pub struct BfsSample {
     /// Estimated impact of this action on the state (0-1). (pass 10)
     #[serde(default)]
     pub estimated_impact: f32,
+    /// Class system diagnostics flags (comma-separated).
+    #[serde(default)]
+    pub diagnostics: String,
 }
 
 /// State delta between root and leaf — captures what changed during a branch. (pass 2)
@@ -187,6 +190,21 @@ pub struct StateDelta {
     pub progress_diff: f32,
     /// Threat level difference.
     pub threat_diff: f32,
+    /// Number of classes granted during the branch.
+    #[serde(default)]
+    pub classes_granted: u32,
+    /// Number of non-starter, non-shame classes (evolved classes).
+    #[serde(default)]
+    pub classes_evolved: u32,
+    /// Number of skills granted during the branch.
+    #[serde(default)]
+    pub skills_granted_count: u32,
+    /// Skills that have ability_dsl or skill_effect (not placeholders).
+    #[serde(default)]
+    pub skills_with_effect: u32,
+    /// Max class level across all leaf adventurer classes.
+    #[serde(default)]
+    pub max_class_level: u32,
 }
 
 /// A state snapshot used as a BFS root.
@@ -2181,6 +2199,20 @@ pub fn dataset_balance_report(samples: &[BfsSample]) {
     let terminal = victories + defeats;
     eprintln!("\nTerminal states: {} ({:.1}%) — {} victories, {} defeats",
         terminal, terminal as f64 / total as f64 * 100.0, victories, defeats);
+
+    // Class system diagnostics
+    let mut diag_counts: HashMap<&str, usize> = HashMap::new();
+    for s in samples {
+        for d in s.diagnostics.split(',').filter(|s| !s.is_empty()) {
+            *diag_counts.entry(d).or_insert(0) += 1;
+        }
+    }
+    if !diag_counts.is_empty() {
+        eprintln!("\nClass system diagnostics:");
+        for (diag, count) in &diag_counts {
+            eprintln!("  {}: {} samples ({:.1}%)", diag, count, *count as f64 / total as f64 * 100.0);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2795,6 +2827,44 @@ fn compute_state_delta(root: &CampaignState, leaf: &CampaignState) -> StateDelta
         .filter(|a| a.status == AdventurerStatus::Dead).count() as u32;
     let leaf_dead = leaf.adventurers.iter()
         .filter(|a| a.status == AdventurerStatus::Dead).count() as u32;
+    // Class progression fields
+    let starters = ["Laborer", "Hunter", "Traveler", "Apprentice", "Farmhand",
+                     "Militia", "Peddler", "Herbalist", "Scribe", "Pickpocket",
+                     "Errand Runner", "Stablehand"];
+    let shame = ["Coward", "Oathbreaker", "Deserter"];
+
+    let root_class_count: u32 = root.adventurers.iter()
+        .flat_map(|a| a.classes.iter()).count() as u32;
+    let leaf_class_count: u32 = leaf.adventurers.iter()
+        .flat_map(|a| a.classes.iter()).count() as u32;
+    let classes_granted = leaf_class_count.saturating_sub(root_class_count);
+
+    let classes_evolved = leaf.adventurers.iter()
+        .flat_map(|a| a.classes.iter())
+        .filter(|c| !starters.contains(&c.class_name.as_str()) && !shame.contains(&c.class_name.as_str()))
+        .count() as u32;
+
+    let root_skill_count: u32 = root.adventurers.iter()
+        .flat_map(|a| a.classes.iter())
+        .flat_map(|c| c.skills_granted.iter())
+        .count() as u32;
+    let leaf_skill_count: u32 = leaf.adventurers.iter()
+        .flat_map(|a| a.classes.iter())
+        .flat_map(|c| c.skills_granted.iter())
+        .count() as u32;
+    let skills_granted_count = leaf_skill_count.saturating_sub(root_skill_count);
+
+    let skills_with_effect = leaf.adventurers.iter()
+        .flat_map(|a| a.classes.iter())
+        .flat_map(|c| c.skills_granted.iter())
+        .filter(|s| s.ability_dsl.is_some() || s.skill_effect.is_some())
+        .count() as u32;
+
+    let max_class_level = leaf.adventurers.iter()
+        .flat_map(|a| a.classes.iter())
+        .map(|c| c.level)
+        .max().unwrap_or(0);
+
     StateDelta {
         gold_diff: leaf.guild.gold - root.guild.gold,
         reputation_diff: leaf.guild.reputation - root.guild.reputation,
@@ -2805,6 +2875,11 @@ fn compute_state_delta(root: &CampaignState, leaf: &CampaignState) -> StateDelta
         deaths: leaf_dead.saturating_sub(root_dead),
         progress_diff: leaf.overworld.campaign_progress - root.overworld.campaign_progress,
         threat_diff: leaf.overworld.global_threat_level - root.overworld.global_threat_level,
+        classes_granted,
+        classes_evolved,
+        skills_granted_count,
+        skills_with_effect,
+        max_class_level,
     }
 }
 
@@ -3354,6 +3429,39 @@ fn expand_root(
         let rel_value = relative_value(br.leaf_value, &root_phase);
         let teaches = compute_teaches(&root.state, &br.action_type, &Some(delta.clone()), &valid_action_types);
 
+        // Compute class system diagnostics
+        let diagnostics = {
+            let leaf = &br.branch_state;
+            let mut diag = Vec::new();
+            let total_skills = leaf.adventurers.iter()
+                .flat_map(|a| a.classes.iter())
+                .flat_map(|c| c.skills_granted.iter())
+                .count();
+            let skills_with_dsl = leaf.adventurers.iter()
+                .flat_map(|a| a.classes.iter())
+                .flat_map(|c| c.skills_granted.iter())
+                .filter(|s| s.ability_dsl.is_some())
+                .count();
+            if total_skills > 0 && skills_with_dsl == 0 {
+                diag.push("all_skills_placeholder");
+            }
+            let max_stag = leaf.adventurers.iter()
+                .flat_map(|a| a.classes.iter())
+                .map(|c| c.stagnation_ticks)
+                .max().unwrap_or(0);
+            if max_stag >= 5000 {
+                diag.push("severe_stagnation");
+            }
+            let max_level = leaf.adventurers.iter()
+                .flat_map(|a| a.classes.iter())
+                .map(|c| c.level)
+                .max().unwrap_or(0);
+            if max_level <= 1 && leaf.tick > 2000 {
+                diag.push("no_class_progression");
+            }
+            diag.join(",")
+        };
+
         samples.push(BfsSample {
             root_tokens: root_tokens.clone(),
             action_type: br.action_type,
@@ -3402,6 +3510,7 @@ fn expand_root(
             state_complexity: root_state_complexity,
             // Pass 10 field
             estimated_impact: br.estimated_impact,
+            diagnostics,
         });
 
         if !br.terminal {
