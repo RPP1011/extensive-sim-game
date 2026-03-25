@@ -51,11 +51,11 @@ const RESONANCE_TRICKLE: f32 = 0.15;
 
 /// Level thresholds at which skills are granted (25 grants across 100 levels).
 const SKILL_THRESHOLDS: &[u32] = &[
-    3, 5, 7, 10, 13,           // T1 Novice: 5 skills
-    17, 21, 25,                 // T2 Journeyman: 3 skills
-    30, 35, 40,                 // T3 Adept: 3 skills
-    45, 50, 55, 60,             // T4 Expert: 4 skills
-    65, 70, 75, 80,             // T5 Master: 4 skills
+    2, 3, 4,                    // T1 Novice: 3 skills (quick start)
+    5, 6, 7,                    // T2 Journeyman: 3 skills (reachable in BFS)
+    10, 13, 17,                 // T3 Adept: 3 skills
+    21, 25, 30, 35,             // T4 Expert: 4 skills
+    40, 50, 60, 70,             // T5 Master: 4 skills
     85, 90, 95,                 // T6 Legendary: 3 skills
     100,                        // T7 Mythic: 1 capstone
 ];
@@ -63,13 +63,13 @@ const SKILL_THRESHOLDS: &[u32] = &[
 /// Map level threshold to skill rarity.
 fn rarity_for_threshold(level: u32) -> SkillRarity {
     match level {
-        0..=13 => SkillRarity::Common,
-        14..=25 => SkillRarity::Common,
-        26..=40 => SkillRarity::Uncommon,
-        41..=60 => SkillRarity::Rare,
-        61..=80 => SkillRarity::Rare,
-        81..=95 => SkillRarity::Capstone,
-        96..=100 => SkillRarity::Unique,
+        0..=4 => SkillRarity::Common,       // T1
+        5..=7 => SkillRarity::Common,       // T2 (still common but broader)
+        8..=17 => SkillRarity::Uncommon,    // T3
+        18..=35 => SkillRarity::Rare,       // T4
+        36..=70 => SkillRarity::Rare,       // T5
+        71..=95 => SkillRarity::Capstone,   // T6
+        96..=100 => SkillRarity::Unique,    // T7
         _ => SkillRarity::Common,
     }
 }
@@ -77,13 +77,13 @@ fn rarity_for_threshold(level: u32) -> SkillRarity {
 /// Map level threshold to skill tier (1-7).
 fn tier_for_threshold(level: u32) -> u32 {
     match level {
-        0..=13 => 1,
-        14..=25 => 2,
-        26..=40 => 3,
-        41..=60 => 4,
-        61..=80 => 5,
-        81..=95 => 6,
-        96..=100 => 7,
+        0..=4 => 1,     // T1 Novice
+        5..=7 => 2,     // T2 Journeyman
+        8..=17 => 3,    // T3 Adept
+        18..=35 => 4,   // T4 Expert
+        36..=70 => 5,   // T5 Master
+        71..=95 => 6,   // T6 Legendary
+        96..=100 => 7,  // T7 Mythic
         _ => 1,
     }
 }
