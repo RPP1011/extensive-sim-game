@@ -96,7 +96,7 @@ The system watches what you do and responds.
 - [x] apply_skill_effect() dispatcher in skill_effects.rs (all variants implemented)
 - [x] Wire into UseClassSkill action in step.rs
 - [x] BFS action metadata for UseClassSkill
-- [ ] Combat ability scaling via generate_tiered_ability() (deferred — non-combat abilities working)
+- [x] Combat ability scaling via generate_tiered_ability()
 - [x] BFS valid_actions filtering by skill conditions
 
 ## Design Principles
