@@ -50,7 +50,7 @@ fn all_templates() -> Vec<SkillTemplate> {
     });
     t.push(SkillTemplate {
         name: "War Cry",
-        tier: 2,
+        tier: 1,
         class_tags: &["Warrior", "Commander"],
         effect: SkillEffect::WarCry { duration_ticks: 50 },
         conditional: false,
@@ -133,7 +133,7 @@ fn all_templates() -> Vec<SkillTemplate> {
     });
     t.push(SkillTemplate {
         name: "Hidden Camp",
-        tier: 2,
+        tier: 1,
         class_tags: &["Ranger", "Scout"],
         effect: SkillEffect::HiddenCamp { duration_ticks: 200 },
         conditional: false,
@@ -142,7 +142,7 @@ fn all_templates() -> Vec<SkillTemplate> {
     });
     t.push(SkillTemplate {
         name: "Forage",
-        tier: 2,
+        tier: 1,
         class_tags: &["Ranger"],
         effect: SkillEffect::Forage { supply_per_tick: 0.05 },
         conditional: false,
@@ -189,7 +189,7 @@ fn all_templates() -> Vec<SkillTemplate> {
     });
     t.push(SkillTemplate {
         name: "Purify",
-        tier: 2,
+        tier: 1,
         class_tags: &["Healer"],
         effect: SkillEffect::Purify,
         conditional: false,
@@ -263,7 +263,7 @@ fn all_templates() -> Vec<SkillTemplate> {
     });
     t.push(SkillTemplate {
         name: "Demand Audience",
-        tier: 2,
+        tier: 1,
         class_tags: &["Diplomat"],
         effect: SkillEffect::DemandAudience,
         conditional: false,
@@ -272,7 +272,7 @@ fn all_templates() -> Vec<SkillTemplate> {
     });
     t.push(SkillTemplate {
         name: "Silver Tongue",
-        tier: 2,
+        tier: 1,
         class_tags: &["Diplomat", "Merchant"],
         effect: SkillEffect::SilverTongue,
         conditional: false,
@@ -402,7 +402,7 @@ fn all_templates() -> Vec<SkillTemplate> {
     });
     t.push(SkillTemplate {
         name: "Decipher",
-        tier: 2,
+        tier: 1,
         class_tags: &["Scholar"],
         effect: SkillEffect::Decipher,
         conditional: false,
@@ -411,7 +411,7 @@ fn all_templates() -> Vec<SkillTemplate> {
     });
     t.push(SkillTemplate {
         name: "Accelerated Study",
-        tier: 2,
+        tier: 1,
         class_tags: &["Scholar"],
         effect: SkillEffect::AcceleratedStudy { duration_ticks: 200 },
         conditional: false,
@@ -494,7 +494,7 @@ fn all_templates() -> Vec<SkillTemplate> {
     });
     t.push(SkillTemplate {
         name: "Forgery",
-        tier: 2,
+        tier: 1,
         class_tags: &["Rogue"],
         effect: SkillEffect::Forgery,
         conditional: false,
@@ -503,7 +503,7 @@ fn all_templates() -> Vec<SkillTemplate> {
     });
     t.push(SkillTemplate {
         name: "Distraction",
-        tier: 2,
+        tier: 1,
         class_tags: &["Rogue"],
         effect: SkillEffect::Distraction { duration_ticks: 50 },
         conditional: false,
@@ -606,7 +606,7 @@ fn all_templates() -> Vec<SkillTemplate> {
     // === COMMANDER ===
     t.push(SkillTemplate {
         name: "Rallying Cry",
-        tier: 2,
+        tier: 1,
         class_tags: &["Commander"],
         effect: SkillEffect::RallyingCry { morale_restore: 25.0 },
         conditional: false,
