@@ -129,17 +129,17 @@ fn starter_templates() -> Vec<ClassTemplate> {
 
 fn base_templates() -> Vec<ClassTemplate> {
     vec![
-        ct("Warrior", &[("melee_combat", 0.4), ("damage_absorbed", 0.3)], 0.30, &["combat"]),
-        ct("Ranger", &[("ranged_combat", 0.4), ("areas_explored", 0.3)], 0.30, &["combat", "exploration"]),
-        ct("Healer", &[("healing_given", 0.5), ("allies_supported", 0.3)], 0.30, &["support"]),
-        ct("Diplomat", &[("diplomacy_actions", 0.5), ("units_commanded", 0.2)], 0.30, &["social"]),
-        ct("Merchant", &[("trades_completed", 0.5), ("diplomacy_actions", 0.2)], 0.30, &["economy"]),
-        ct("Scholar", &[("research_performed", 0.5), ("areas_explored", 0.2)], 0.30, &["knowledge"]),
-        ct("Rogue", &[("stealth_actions", 0.4), ("melee_combat", 0.2)], 0.30, &["stealth", "combat"]),
-        ct("Artisan", &[("items_crafted", 0.5), ("trades_completed", 0.2)], 0.30, &["crafting"]),
-        ct("Commander", &[("units_commanded", 0.4), ("melee_combat", 0.2)], 0.30, &["leadership"]),
-        ct("Scout", &[("areas_explored", 0.4), ("stealth_actions", 0.3)], 0.30, &["exploration", "stealth"]),
-        ct("Guardian", &[("damage_absorbed", 0.4), ("allies_supported", 0.3)], 0.30, &["defense"]),
+        ct("Warrior", &[("melee_combat", 0.4), ("damage_absorbed", 0.3)], 0.18, &["combat"]),
+        ct("Ranger", &[("ranged_combat", 0.4), ("areas_explored", 0.3)], 0.18, &["combat", "exploration"]),
+        ct("Healer", &[("healing_given", 0.5), ("allies_supported", 0.3)], 0.18, &["support"]),
+        ct("Diplomat", &[("diplomacy_actions", 0.5), ("units_commanded", 0.2)], 0.18, &["social"]),
+        ct("Merchant", &[("trades_completed", 0.5), ("diplomacy_actions", 0.2)], 0.18, &["economy"]),
+        ct("Scholar", &[("research_performed", 0.5), ("areas_explored", 0.2)], 0.18, &["knowledge"]),
+        ct("Rogue", &[("stealth_actions", 0.4), ("melee_combat", 0.2)], 0.18, &["stealth", "combat"]),
+        ct("Artisan", &[("items_crafted", 0.5), ("trades_completed", 0.2)], 0.18, &["crafting"]),
+        ct("Commander", &[("units_commanded", 0.4), ("melee_combat", 0.2)], 0.18, &["leadership"]),
+        ct("Scout", &[("areas_explored", 0.4), ("stealth_actions", 0.3)], 0.18, &["exploration", "stealth"]),
+        ct("Guardian", &[("damage_absorbed", 0.4), ("allies_supported", 0.3)], 0.18, &["defense"]),
     ]
 }
 
