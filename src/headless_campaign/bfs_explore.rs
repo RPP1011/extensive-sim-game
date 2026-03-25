@@ -75,10 +75,13 @@ pub struct BfsSample {
     /// Which cluster this leaf was assigned to.
     pub cluster_id: u32,
     /// Difficulty level of the originating campaign.
+    #[serde(default)]
     pub difficulty: Difficulty,
     /// Heuristic value at the root (for computing spread).
+    #[serde(default)]
     pub root_value: f32,
     /// Game phase tag (early/mid/late).
+    #[serde(default)]
     pub phase_tag: String,
     /// All valid action types at the root state (so RL agent knows alternatives). (pass 2)
     #[serde(default)]
@@ -1640,9 +1643,9 @@ fn distance(a: &[f32], b: &[f32]) -> f32 {
 
 /// Classify tick into game phase for coverage tracking.
 fn phase_tag(tick: u64, progress: f32) -> String {
-    if progress < 0.2 || tick < 2000 {
+    if tick < 2400 {
         "early".to_string()
-    } else if progress < 0.6 || tick < 8000 {
+    } else if tick < 12000 {
         "mid".to_string()
     } else {
         "late".to_string()

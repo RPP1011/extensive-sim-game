@@ -9,6 +9,7 @@ mod model_cmd;
 mod content_gen_cmd;
 mod ascii_gen_cmd;
 mod mcts_bootstrap_cmd;
+mod bfs_analyze;
 mod vae_dataset_cmd;
 
 use std::process::ExitCode;
@@ -57,6 +58,10 @@ fn main() -> ExitCode {
                 sample_rate: args.sample_rate,
             };
             bevy_game::headless_campaign::heuristic_bc::run_bc_generation(&config);
+            ExitCode::SUCCESS
+        }
+        TaskCommand::BfsAnalyze(args) => {
+            bfs_analyze::run(&args.path);
             ExitCode::SUCCESS
         }
         TaskCommand::BfsExplore(args) => {

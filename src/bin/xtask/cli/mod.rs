@@ -45,6 +45,8 @@ pub enum TaskCommand {
     VaeExtractSlots(VaeExtractSlotsArgs),
     /// Build VAE training data from existing ability DSL files (no LLM needed)
     VaeGtDataset(VaeGtDatasetArgs),
+    /// Analyze a BFS exploration JSONL output file
+    BfsAnalyze(BfsAnalyzeArgs),
     /// Generate synthetic abilities via grammar walker
     SynthAbilities {
         #[arg(long, default_value_t = 100000)] count: usize,
@@ -52,6 +54,13 @@ pub enum TaskCommand {
         /// Emit DSL text instead of slot JSONL
         #[arg(long)] dsl: bool,
     },
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Analyze a BFS exploration JSONL output file and print a structured report")]
+pub struct BfsAnalyzeArgs {
+    /// Path to the BFS JSONL output file
+    pub path: String,
 }
 
 #[derive(Debug, Parser)]

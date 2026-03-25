@@ -12,11 +12,12 @@ use serde::{Deserialize, Serialize};
 
 /// Campaign difficulty level. Controls enemy threat, starting resources,
 /// faction aggression, and adventurer death risk.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Difficulty {
     /// Target ~90%+ win rate. Weaker enemies, more resources.
     Easy,
     /// Target ~60-70% win rate. Current defaults.
+    #[default]
     Normal,
     /// Target ~30-40% win rate. Stronger enemies, fewer resources.
     Hard,

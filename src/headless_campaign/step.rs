@@ -1089,6 +1089,7 @@ fn check_campaign_outcome(state: &CampaignState) -> Option<CampaignOutcome> {
 
     // Defeat: no adventurers left
     if alive == 0 {
+        eprintln!("[DEFEAT] tick {}: all adventurers dead", state.tick);
         return Some(CampaignOutcome::Defeat);
     }
 
@@ -1099,6 +1100,8 @@ fn check_campaign_outcome(state: &CampaignState) -> Option<CampaignOutcome> {
         .filter(|a| matches!(a.status, AdventurerStatus::Idle | AdventurerStatus::Assigned))
         .count();
     if state.guild.gold < state.config.starting_state.bankrupt_gold_threshold && available == 0 && state.active_quests.is_empty() {
+        eprintln!("[DEFEAT] tick {}: bankrupt (gold={:.0}, available={}, quests={})",
+            state.tick, state.guild.gold, available, state.active_quests.len());
         return Some(CampaignOutcome::Defeat);
     }
 
@@ -1111,6 +1114,7 @@ fn check_campaign_outcome(state: &CampaignState) -> Option<CampaignOutcome> {
             .filter(|r| r.owner_faction_id == state.diplomacy.guild_faction_id)
             .count();
         if guild_regions == 0 {
+            eprintln!("[DEFEAT] tick {}: all territory lost", state.tick);
             return Some(CampaignOutcome::Defeat);
         }
     }
