@@ -959,6 +959,7 @@ fn check_capstone_resolution(state: &mut CampaignState, events: &mut Vec<WorldEv
                     empowered: false,
                     inheritance_status: String::new(),
                     skill_effect: None,
+                    skill_condition: None,
                 });
 
                 events.push(WorldEvent::CapstoneResolved {
@@ -1170,15 +1171,16 @@ fn check_skill_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                         &mut state.rng,
                     );
 
-                    let (skill_name, effect, skill_effect) = if let Some(tmpl) = template {
+                    let (skill_name, effect, skill_effect, skill_condition) = if let Some(ref tmpl) = template {
                         (
                             tmpl.name.to_string(),
                             tmpl.description.to_string(),
                             Some(tmpl.effect.clone()),
+                            tmpl.condition.clone(),
                         )
                     } else if threshold >= 85 {
                         let (sn, eff) = generate_capstone_skill(&ledger_snapshot, &class.class_name);
-                        (sn, eff, None)
+                        (sn, eff, None, None)
                     } else {
                         let sn = format!(
                             "{} {} Lv{}",
@@ -1190,7 +1192,7 @@ fn check_skill_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                             threshold,
                             class.class_name
                         );
-                        (sn, eff, None)
+                        (sn, eff, None, None)
                     };
 
                     // Idea 3.6: skip if this skill is suppressed
@@ -1259,6 +1261,7 @@ fn check_skill_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                         empowered,
                         inheritance_status: String::new(),
                         skill_effect,
+                        skill_condition,
                     });
 
                     let class_name_clone = class.class_name.clone();
@@ -3557,6 +3560,7 @@ fn check_campaign_skill_hooks(state: &mut CampaignState, events: &mut Vec<WorldE
                     affinity_tags: affinity_tags_for_class(&class.class_name),
                     empowered: false,
                     skill_effect: None,
+                    skill_condition: None,
                 });
             }
         }

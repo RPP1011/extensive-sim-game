@@ -1247,6 +1247,9 @@ pub struct GrantedSkill {
     /// Tiered skill effect — the actual power granted by this skill (Phase 10).
     #[serde(default)]
     pub skill_effect: Option<SkillEffect>,
+    /// Condition required for this skill to be activatable (conditional skills punch above weight).
+    #[serde(default)]
+    pub skill_condition: Option<SkillCondition>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]

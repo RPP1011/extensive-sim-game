@@ -1453,9 +1453,15 @@ impl CampaignState {
             for class in &adv.classes {
                 for skill in &class.skills_granted {
                     if let Some(ref effect) = skill.skill_effect {
-                        // Skip always-on passives (T1) — they don't need player activation
+                        // Skip always-on passives — they don't need player activation
                         if is_passive_skill_effect(effect) {
                             continue;
+                        }
+                        // Check condition if skill is conditional (punches above weight)
+                        if let Some(ref cond) = skill.skill_condition {
+                            if !super::skill_effects::condition_met(self, adv.id, cond) {
+                                continue; // condition not met, skip
+                            }
                         }
                         // Default target: self
                         actions.push(CampaignAction::UseClassSkill {
