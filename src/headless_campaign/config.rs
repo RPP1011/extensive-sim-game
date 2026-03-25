@@ -717,7 +717,7 @@ impl Default for StartingStateConfig {
             active_quest_capacity: 3,
             global_threat_level: 20.0,
             bankrupt_gold_threshold: 10.0,
-            early_game_protection_ticks: 1000,
+            early_game_protection_ticks: 5000, // ~4 hours of game time before territory loss = defeat
         }
     }
 }
