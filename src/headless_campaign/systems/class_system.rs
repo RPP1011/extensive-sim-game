@@ -108,19 +108,36 @@ const BEHAVIOR_DIM_NAMES: &[&str] = &[
 // Class templates
 // ---------------------------------------------------------------------------
 
+fn starter_templates() -> Vec<ClassTemplate> {
+    vec![
+        ct("Laborer", &[("melee_combat", 0.2), ("damage_absorbed", 0.2)], 0.1, &["physical", "common"]),
+        ct("Hunter", &[("ranged_combat", 0.2), ("areas_explored", 0.2)], 0.1, &["outdoor", "common"]),
+        ct("Traveler", &[("areas_explored", 0.3), ("diplomacy_actions", 0.1)], 0.1, &["wanderer", "common"]),
+        ct("Apprentice", &[("research_performed", 0.2), ("items_crafted", 0.2)], 0.1, &["learning", "common"]),
+        ct("Farmhand", &[("allies_supported", 0.2), ("trades_completed", 0.1)], 0.1, &["rural", "common"]),
+        ct("Militia", &[("melee_combat", 0.3), ("damage_absorbed", 0.1)], 0.1, &["defense", "common"]),
+        ct("Peddler", &[("trades_completed", 0.3), ("diplomacy_actions", 0.1)], 0.1, &["trade", "common"]),
+        ct("Herbalist", &[("healing_given", 0.2), ("research_performed", 0.1)], 0.1, &["medicine", "common"]),
+        ct("Scribe", &[("research_performed", 0.3), ("diplomacy_actions", 0.1)], 0.1, &["knowledge", "common"]),
+        ct("Pickpocket", &[("stealth_actions", 0.3), ("trades_completed", 0.1)], 0.1, &["street", "common"]),
+        ct("Errand Runner", &[("areas_explored", 0.2), ("allies_supported", 0.2)], 0.1, &["service", "common"]),
+        ct("Stablehand", &[("allies_supported", 0.3), ("damage_absorbed", 0.1)], 0.1, &["animal", "common"]),
+    ]
+}
+
 fn base_templates() -> Vec<ClassTemplate> {
     vec![
-        ct("Warrior", &[("melee_combat", 0.4), ("damage_absorbed", 0.3)], 0.25, &["combat"]),
-        ct("Ranger", &[("ranged_combat", 0.4), ("areas_explored", 0.3)], 0.25, &["combat", "exploration"]),
-        ct("Healer", &[("healing_given", 0.5), ("allies_supported", 0.3)], 0.25, &["support"]),
-        ct("Diplomat", &[("diplomacy_actions", 0.5), ("units_commanded", 0.2)], 0.25, &["social"]),
-        ct("Merchant", &[("trades_completed", 0.5), ("diplomacy_actions", 0.2)], 0.25, &["economy"]),
-        ct("Scholar", &[("research_performed", 0.5), ("areas_explored", 0.2)], 0.25, &["knowledge"]),
-        ct("Rogue", &[("stealth_actions", 0.4), ("melee_combat", 0.2)], 0.25, &["stealth", "combat"]),
-        ct("Artisan", &[("items_crafted", 0.5), ("trades_completed", 0.2)], 0.25, &["crafting"]),
-        ct("Commander", &[("units_commanded", 0.4), ("melee_combat", 0.2)], 0.25, &["leadership"]),
-        ct("Scout", &[("areas_explored", 0.4), ("stealth_actions", 0.3)], 0.25, &["exploration", "stealth"]),
-        ct("Guardian", &[("damage_absorbed", 0.4), ("allies_supported", 0.3)], 0.25, &["defense"]),
+        ct("Warrior", &[("melee_combat", 0.4), ("damage_absorbed", 0.3)], 0.45, &["combat"]),
+        ct("Ranger", &[("ranged_combat", 0.4), ("areas_explored", 0.3)], 0.45, &["combat", "exploration"]),
+        ct("Healer", &[("healing_given", 0.5), ("allies_supported", 0.3)], 0.45, &["support"]),
+        ct("Diplomat", &[("diplomacy_actions", 0.5), ("units_commanded", 0.2)], 0.45, &["social"]),
+        ct("Merchant", &[("trades_completed", 0.5), ("diplomacy_actions", 0.2)], 0.45, &["economy"]),
+        ct("Scholar", &[("research_performed", 0.5), ("areas_explored", 0.2)], 0.45, &["knowledge"]),
+        ct("Rogue", &[("stealth_actions", 0.4), ("melee_combat", 0.2)], 0.45, &["stealth", "combat"]),
+        ct("Artisan", &[("items_crafted", 0.5), ("trades_completed", 0.2)], 0.45, &["crafting"]),
+        ct("Commander", &[("units_commanded", 0.4), ("melee_combat", 0.2)], 0.45, &["leadership"]),
+        ct("Scout", &[("areas_explored", 0.4), ("stealth_actions", 0.3)], 0.45, &["exploration", "stealth"]),
+        ct("Guardian", &[("damage_absorbed", 0.4), ("allies_supported", 0.3)], 0.45, &["defense"]),
     ]
 }
 
@@ -248,7 +265,7 @@ fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEven
             + adv.behavior_ledger.damage_absorbed + adv.behavior_ledger.allies_supported;
         if total < 1.0 {
             // Seed based on archetype — gives a head start toward the matching class
-            let seed_amount = 30.0;
+            let seed_amount = 10.0;
             match adv.archetype.as_str() {
                 "knight" | "warrior" | "berserker" => {
                     adv.behavior_ledger.melee_combat += seed_amount;
@@ -342,52 +359,71 @@ fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEven
                     }
                 }
             }
-            // Healing
+            // Healing — credit idle adventurers (they're tending the wounded at the guild hall)
+            // and the recovered adventurer themselves (self-care counts)
             WorldEvent::AdventurerRecovered { adventurer_id } => {
+                // The recovered adventurer gets some healing_given (self-care)
                 if let Some(adv) = state.adventurers.iter_mut().find(|a| a.id == *adventurer_id) {
-                    // The healer is whoever supported this recovery; credit the adventurer
                     adv.behavior_ledger.healing_given += 0.5;
                     adv.behavior_ledger.recent_healing_given += 0.5;
                 }
-            }
-            // Diplomacy
-            WorldEvent::AgreementFormed { .. }
-            | WorldEvent::WarCeasefire { .. }
-            | WorldEvent::FactionRelationChanged { .. } => {
-                // Credit adventurers on diplomatic missions (Diplomat archetype or idle)
+                // Idle adventurers at the guild are helping with recovery
                 for adv in &mut state.adventurers {
-                    if adv.status == AdventurerStatus::Dead {
-                        continue;
-                    }
-                    if adv.archetype == "diplomat" || adv.archetype == "bard" {
-                        adv.behavior_ledger.diplomacy_actions += 3.0;
-                        adv.behavior_ledger.recent_diplomacy_actions += 1.0;
+                    if adv.status == AdventurerStatus::Dead { continue; }
+                    if adv.status == AdventurerStatus::Idle && adv.id != *adventurer_id {
+                        adv.behavior_ledger.healing_given += 1.0;
+                        adv.behavior_ledger.recent_healing_given += 1.0;
+                        adv.behavior_ledger.allies_supported += 0.5;
+                        adv.behavior_ledger.recent_allies_supported += 0.5;
                     }
                 }
             }
-            // Trade/economy
+            // Diplomacy — guild-wide events credit idle adventurers (they're at the guild
+            // hall facilitating). A warrior who spends downtime negotiating should earn [Peddler].
+            WorldEvent::AgreementFormed { .. }
+            | WorldEvent::WarCeasefire { .. }
+            | WorldEvent::FactionRelationChanged { .. } => {
+                for adv in &mut state.adventurers {
+                    if adv.status == AdventurerStatus::Dead { continue; }
+                    if adv.status == AdventurerStatus::Idle {
+                        adv.behavior_ledger.diplomacy_actions += 2.0;
+                        adv.behavior_ledger.recent_diplomacy_actions += 2.0;
+                    }
+                }
+            }
+            // Trade/economy — ALL adventurers get credit when the guild trades.
+            // A knight who keeps selling loot should become a [Peddler].
             WorldEvent::CaravanCompleted { .. }
             | WorldEvent::TradeProfitMade { .. }
             | WorldEvent::MerchantPurchase { .. } => {
                 for adv in &mut state.adventurers {
-                    if adv.status == AdventurerStatus::Dead {
-                        continue;
-                    }
-                    if adv.archetype == "merchant" {
-                        adv.behavior_ledger.trades_completed += 3.0;
-                        adv.behavior_ledger.recent_trades_completed += 3.0;
+                    if adv.status == AdventurerStatus::Dead { continue; }
+                    // Idle adventurers at the guild hall handle trade
+                    if adv.status == AdventurerStatus::Idle {
+                        adv.behavior_ledger.trades_completed += 2.0;
+                        adv.behavior_ledger.recent_trades_completed += 2.0;
                     }
                 }
             }
-            // Crafting
+            // Quest completion — active adventurers get trade credit for loot sale
+            WorldEvent::QuestCompleted { .. } => {
+                for adv in &mut state.adventurers {
+                    if adv.status == AdventurerStatus::Dead { continue; }
+                    if adv.status == AdventurerStatus::Fighting || adv.status == AdventurerStatus::OnMission {
+                        adv.behavior_ledger.trades_completed += 1.0;
+                        adv.behavior_ledger.recent_trades_completed += 1.0;
+                        adv.behavior_ledger.allies_supported += 0.5;
+                        adv.behavior_ledger.recent_allies_supported += 0.5;
+                    }
+                }
+            }
+            // Crafting — anyone involved in crafting, not just artisan archetype
             WorldEvent::ItemCrafted { .. } => {
                 for adv in &mut state.adventurers {
-                    if adv.status == AdventurerStatus::Dead {
-                        continue;
-                    }
-                    if adv.archetype == "artisan" || adv.archetype == "blacksmith" {
-                        adv.behavior_ledger.items_crafted += 3.0;
-                        adv.behavior_ledger.recent_items_crafted += 3.0;
+                    if adv.status == AdventurerStatus::Dead { continue; }
+                    if adv.status == AdventurerStatus::Idle {
+                        adv.behavior_ledger.items_crafted += 1.5;
+                        adv.behavior_ledger.recent_items_crafted += 1.5;
                     }
                 }
             }
@@ -427,25 +463,22 @@ fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEven
                 }
             }
             WorldEvent::HeistSucceeded { .. } | WorldEvent::HeistPhaseAdvanced { .. } => {
+                // Everyone involved in a heist gets stealth credit
                 for adv in &mut state.adventurers {
-                    if adv.status == AdventurerStatus::Dead {
-                        continue;
-                    }
-                    if adv.archetype == "rogue" || adv.archetype == "thief" || adv.archetype == "assassin" {
-                        adv.behavior_ledger.stealth_actions += 3.0;
-                        adv.behavior_ledger.recent_stealth_actions += 3.0;
+                    if adv.status == AdventurerStatus::Dead { continue; }
+                    if adv.status != AdventurerStatus::Idle {
+                        adv.behavior_ledger.stealth_actions += 2.0;
+                        adv.behavior_ledger.recent_stealth_actions += 2.0;
                     }
                 }
             }
-            // Research/archives
+            // Research/archives — idle adventurers at the guild study and learn
             WorldEvent::ResearchCompleted { .. } | WorldEvent::KnowledgeGained { .. } => {
                 for adv in &mut state.adventurers {
-                    if adv.status == AdventurerStatus::Dead {
-                        continue;
-                    }
-                    if adv.archetype == "mage" || adv.archetype == "scholar" || adv.archetype == "sage" {
-                        adv.behavior_ledger.research_performed += 3.0;
-                        adv.behavior_ledger.recent_research_performed += 3.0;
+                    if adv.status == AdventurerStatus::Dead { continue; }
+                    if adv.status == AdventurerStatus::Idle {
+                        adv.behavior_ledger.research_performed += 1.5;
+                        adv.behavior_ledger.recent_research_performed += 1.5;
                     }
                 }
             }
@@ -591,12 +624,36 @@ fn score_template(fp: &[f32; 12], template: &ClassTemplate) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
+// Starter class evolution mapping
+// ---------------------------------------------------------------------------
+
+/// Returns the base class a starter class evolves into, if any.
+fn starter_evolves_to(starter: &str) -> Option<&'static str> {
+    match starter {
+        "Laborer" => Some("Warrior"),
+        "Hunter" => Some("Ranger"),
+        "Militia" => Some("Warrior"),
+        "Peddler" => Some("Merchant"),
+        "Herbalist" => Some("Healer"),
+        "Scribe" => Some("Scholar"),
+        "Pickpocket" => Some("Rogue"),
+        "Apprentice" => Some("Artisan"),
+        "Farmhand" => Some("Guardian"),
+        "Traveler" => Some("Scout"),
+        "Errand Runner" => Some("Commander"),
+        "Stablehand" => Some("Ranger"),
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Class acquisition
 // ---------------------------------------------------------------------------
 
 fn check_class_acquisition(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
-    let templates: Vec<ClassTemplate> = base_templates()
+    let templates: Vec<ClassTemplate> = starter_templates()
         .into_iter()
+        .chain(base_templates())
         .chain(rare_templates())
         .chain(public_class_templates())
         .chain(hidden_class_templates())
@@ -676,24 +733,78 @@ fn check_class_acquisition(state: &mut CampaignState, events: &mut Vec<WorldEven
                     }
                 }
 
-                let mut ci = ClassInstance {
-                    class_name: tmpl.class_name.clone(),
-                    level: 1,
-                    xp: 0.0,
-                    xp_to_next: 15.0, // 1^2 * 15
-                    stagnation_ticks: 0,
-                    skills_granted: Vec::new(),
-                    acquired_tick: tick,
-                    identity_coherence: 1.0,
-                    exclusion_cooldown: 1 * 100, // level * 100 ticks
-                    ..Default::default()
+                // --- Starter class evolution: if a starter class evolves to this
+                // base class, replace it rather than stacking ---
+                let evolved_from: Option<(String, f32, Vec<GrantedSkill>)> = {
+                    let mut found = None;
+                    for existing in adv.classes.iter() {
+                        if let Some(target) = starter_evolves_to(&existing.class_name) {
+                            if target == tmpl.class_name {
+                                // Transfer XP at 50% rate, keep skills
+                                found = Some((
+                                    existing.class_name.clone(),
+                                    existing.xp * 0.5,
+                                    existing.skills_granted.clone(),
+                                ));
+                                break;
+                            }
+                        }
+                    }
+                    found
                 };
-                populate_noncombat_growth(&mut ci);
-                adv.classes.push(ci);
-                events.push(WorldEvent::ClassGranted {
-                    adventurer_id: adv.id,
-                    class_name: tmpl.class_name.clone(),
-                });
+
+                if let Some((from_class, transferred_xp, old_skills)) = evolved_from {
+                    // Remove the starter class
+                    adv.classes.retain(|c| c.class_name != from_class);
+
+                    let mut ci = ClassInstance {
+                        class_name: tmpl.class_name.clone(),
+                        level: 1,
+                        xp: transferred_xp,
+                        xp_to_next: 15.0,
+                        stagnation_ticks: 0,
+                        skills_granted: old_skills,
+                        acquired_tick: tick,
+                        identity_coherence: 1.0,
+                        exclusion_cooldown: 1 * 100,
+                        ..Default::default()
+                    };
+                    populate_noncombat_growth(&mut ci);
+                    adv.classes.push(ci);
+
+                    let chronicle = format!(
+                        "The [{}] fought through enough battles. They are [{}] now.",
+                        from_class, tmpl.class_name
+                    );
+                    events.push(WorldEvent::ClassEvolutionFromStarter {
+                        adventurer_id: adv.id,
+                        from_class,
+                        to_class: tmpl.class_name.clone(),
+                    });
+                    events.push(WorldEvent::ClassChronicleEntry {
+                        adventurer_id: adv.id,
+                        entry: chronicle,
+                    });
+                } else {
+                    let mut ci = ClassInstance {
+                        class_name: tmpl.class_name.clone(),
+                        level: 1,
+                        xp: 0.0,
+                        xp_to_next: 15.0, // 1^2 * 15
+                        stagnation_ticks: 0,
+                        skills_granted: Vec::new(),
+                        acquired_tick: tick,
+                        identity_coherence: 1.0,
+                        exclusion_cooldown: 1 * 100, // level * 100 ticks
+                        ..Default::default()
+                    };
+                    populate_noncombat_growth(&mut ci);
+                    adv.classes.push(ci);
+                    events.push(WorldEvent::ClassGranted {
+                        adventurer_id: adv.id,
+                        class_name: tmpl.class_name.clone(),
+                    });
+                }
             }
         }
 
@@ -2012,6 +2123,19 @@ fn default_noncombat_growth(class_name: &str) -> (f32, f32, f32, f32, f32, f32, 
         "Commander" | "Warlord" | "Banner Knight" => (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0),
         "Scout"                     => (0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0),
         "Guardian" | "Silent Guardian" => (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+        // Starter classes — humble, modest growth
+        "Laborer"       => (0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0),
+        "Hunter"        => (0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0),
+        "Traveler"      => (0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        "Apprentice"    => (0.0, 0.0, 0.5, 0.0, 0.5, 0.0, 0.0),
+        "Farmhand"      => (0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0),
+        "Militia"       => (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5),
+        "Peddler"       => (0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        "Herbalist"     => (0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0),
+        "Scribe"        => (0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0),
+        "Pickpocket"    => (0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0),
+        "Errand Runner" => (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5),
+        "Stablehand"    => (0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0),
         "Warrior" | "Ranger" | "Spellblade" => (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
         "Champion" | "People's Blade" => (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
         "Paragon" | "Nameless Savior" => (0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0),

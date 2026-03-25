@@ -737,6 +737,148 @@ fn all_templates() -> Vec<SkillTemplate> {
         description: "When an ally is dying, perform emergency resurrection.",
     });
 
+    // === STARTER CLASSES (humble T1 skills) ===
+
+    // --- Laborer ---
+    t.push(SkillTemplate {
+        name: "Strong Back",
+        tier: 1,
+        class_tags: &["Laborer"],
+        effect: SkillEffect::Forage { supply_per_tick: 0.02 },
+        conditional: false,
+        condition: None,
+        description: "Carry more supplies than most — years of hauling pay off.",
+    });
+    t.push(SkillTemplate {
+        name: "Endurance",
+        tier: 1,
+        class_tags: &["Laborer"],
+        effect: SkillEffect::FieldTriage { heal_rate_multiplier: 1.1 },
+        conditional: false,
+        condition: None,
+        description: "Reduce fatigue from long marches. Not dramatic, just sturdy.",
+    });
+
+    // --- Hunter ---
+    t.push(SkillTemplate {
+        name: "Track Game",
+        tier: 1,
+        class_tags: &["Hunter"],
+        effect: SkillEffect::Forage { supply_per_tick: 0.03 },
+        conditional: false,
+        condition: None,
+        description: "Find food in the wild. Not tracking monsters — tracking rabbits.",
+    });
+    t.push(SkillTemplate {
+        name: "Keen Eyes",
+        tier: 1,
+        class_tags: &["Hunter"],
+        effect: SkillEffect::TrapSense,
+        conditional: false,
+        condition: None,
+        description: "Spot threats before stumbling into them. A hunter's habit.",
+    });
+
+    // --- Militia ---
+    t.push(SkillTemplate {
+        name: "Shield Wall",
+        tier: 1,
+        class_tags: &["Militia"],
+        effect: SkillEffect::InspiringPresence { morale_boost: 0.05 },
+        conditional: false,
+        condition: None,
+        description: "Basic formation defense. Stand together, don't break.",
+    });
+    t.push(SkillTemplate {
+        name: "Stand Ground",
+        tier: 1,
+        class_tags: &["Militia"],
+        effect: SkillEffect::FieldRepair,
+        conditional: false,
+        condition: None,
+        description: "Hold your position and patch your gear between fights.",
+    });
+
+    // --- Peddler ---
+    t.push(SkillTemplate {
+        name: "Haggle",
+        tier: 1,
+        class_tags: &["Peddler"],
+        effect: SkillEffect::SilverTongue,
+        conditional: false,
+        condition: None,
+        description: "Talk the price down on anything. Small margins add up.",
+    });
+    t.push(SkillTemplate {
+        name: "Appraise",
+        tier: 1,
+        class_tags: &["Peddler"],
+        effect: SkillEffect::Appraise,
+        conditional: false,
+        condition: None,
+        description: "Know what something is worth before you trade for it.",
+    });
+
+    // --- Herbalist ---
+    t.push(SkillTemplate {
+        name: "Poultice",
+        tier: 1,
+        class_tags: &["Herbalist"],
+        effect: SkillEffect::FieldTriage { heal_rate_multiplier: 1.2 },
+        conditional: false,
+        condition: None,
+        description: "Basic wound care with gathered herbs. Nothing fancy.",
+    });
+    t.push(SkillTemplate {
+        name: "Identify Plant",
+        tier: 1,
+        class_tags: &["Herbalist"],
+        effect: SkillEffect::Forage { supply_per_tick: 0.03 },
+        conditional: false,
+        condition: None,
+        description: "Know which plants heal and which plants kill. Important distinction.",
+    });
+
+    // --- Scribe ---
+    t.push(SkillTemplate {
+        name: "Record Keeping",
+        tier: 1,
+        class_tags: &["Scribe"],
+        effect: SkillEffect::QuickStudy,
+        conditional: false,
+        condition: None,
+        description: "Keep careful notes. Learn from what you write down.",
+    });
+    t.push(SkillTemplate {
+        name: "Translate",
+        tier: 1,
+        class_tags: &["Scribe"],
+        effect: SkillEffect::Decipher,
+        conditional: false,
+        condition: None,
+        description: "Read inscriptions others walk past. Languages are just patterns.",
+    });
+
+    // --- Pickpocket ---
+    t.push(SkillTemplate {
+        name: "Sleight of Hand",
+        tier: 1,
+        class_tags: &["Pickpocket"],
+        effect: SkillEffect::SilentMovement,
+        conditional: false,
+        condition: None,
+        description: "Quick fingers, quiet movements. Steal small items unnoticed.",
+    });
+    t.push(SkillTemplate {
+        name: "Blend In",
+        tier: 1,
+        class_tags: &["Pickpocket"],
+        effect: SkillEffect::ShadowStep { duration_ticks: 30 },
+        conditional: false,
+        condition: None,
+        description: "Disappear into a crowd. Nobody remembers your face.",
+    });
+
     // === REWRITE HISTORY (shared T7) ===
     t.push(SkillTemplate {
         name: "Rewrite History",

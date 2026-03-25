@@ -1003,6 +1003,9 @@ pub enum WorldEvent {
     // --- Tiered Skill Effects (Phase 10) ---
     ClassSkillUsed { adventurer_id: u32, skill_name: String, effect_description: String },
     ClassSkillConditionNotMet { adventurer_id: u32, skill_name: String, condition: String },
+
+    // --- Starter Class Evolution ---
+    ClassEvolutionFromStarter { adventurer_id: u32, from_class: String, to_class: String },
 }
 
 // ---------------------------------------------------------------------------
