@@ -158,6 +158,32 @@ pub fn agreement_type_name(agreement: &super::state::DiplomaticAgreement) -> &'s
 }
 
 // ---------------------------------------------------------------------------
+// Skill effect classification
+// ---------------------------------------------------------------------------
+
+/// Returns true for always-on passive skill effects (T1) that don't need
+/// explicit player activation via UseClassSkill.
+pub fn is_passive_skill_effect(effect: &super::state::SkillEffect) -> bool {
+    use super::state::SkillEffect;
+    matches!(effect,
+        SkillEffect::Appraise
+        | SkillEffect::FieldTriage { .. }
+        | SkillEffect::ReadTheRoom
+        | SkillEffect::InspiringPresence { .. }
+        | SkillEffect::BeastLore
+        | SkillEffect::BattleInstinct
+        | SkillEffect::QuickStudy
+        | SkillEffect::Forage { .. }
+        | SkillEffect::TrackPrey
+        | SkillEffect::FieldRepair
+        | SkillEffect::SilentMovement
+        | SkillEffect::TrapSense
+        | SkillEffect::StabilizeAlly
+        | SkillEffect::SapperEye
+    )
+}
+
+// ---------------------------------------------------------------------------
 // Action costs (gold)
 // ---------------------------------------------------------------------------
 
@@ -1420,6 +1446,29 @@ impl CampaignState {
                         actions.push(CampaignAction::InterceptChampion {
                             party_id: party.id,
                             champion_id,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Use class skills — generate UseClassSkill for adventurers with active skill effects
+        for adv in &self.adventurers {
+            if adv.status == AdventurerStatus::Dead {
+                continue;
+            }
+            for class in &adv.classes {
+                for skill in &class.skills_granted {
+                    if let Some(ref effect) = skill.skill_effect {
+                        // Skip always-on passives (T1) — they don't need player activation
+                        if is_passive_skill_effect(effect) {
+                            continue;
+                        }
+                        // Default target: self
+                        actions.push(CampaignAction::UseClassSkill {
+                            adventurer_id: adv.id,
+                            skill_name: skill.skill_name.clone(),
+                            target: AbilityTarget::Adventurer(adv.id),
                         });
                     }
                 }

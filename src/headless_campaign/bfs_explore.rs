@@ -1070,7 +1070,10 @@ fn piecewise_supply_norm(supplies: f32) -> f32 {
 }
 
 /// Quick heuristic value for a campaign state.
-/// Higher = better. Range roughly 0-5 with multiplicative factors for spread.
+/// Higher = better. Range roughly 0-5.
+///
+/// Value philosophy: class progression and playstyle diversity are primary
+/// signals; quest completion and economy are supporting means, not ends.
 fn estimate_value(state: &CampaignState) -> f32 {
     let adventurers: Vec<_> = state.adventurers.iter()
         .filter(|a| a.status != AdventurerStatus::Dead)
@@ -1081,6 +1084,9 @@ fn estimate_value(state: &CampaignState) -> f32 {
         return 0.0;
     }
 
+    // ---------------------------------------------------------------
+    // Health / roster multipliers (unchanged — these gate everything)
+    // ---------------------------------------------------------------
     let mean_health = adventurers.iter()
         .map(|a| {
             let injury_penalty = a.injury / 100.0;
@@ -1090,11 +1096,103 @@ fn estimate_value(state: &CampaignState) -> f32 {
         })
         .sum::<f32>() / alive;
 
+    let deserted = state.adventurers.iter()
+        .filter(|a| a.status == AdventurerStatus::Dead).count() as f32;
+    let roster_factor = (alive / (alive + deserted).max(1.0)).powf(0.5);
+    let health_factor = mean_health.powf(1.5);
+
+    // ---------------------------------------------------------------
+    // PRIMARY: Class progression depth (~40% weight)
+    // ---------------------------------------------------------------
+    let class_progression = {
+        let total_classes: f32 = adventurers.iter()
+            .map(|a| a.classes.len() as f32).sum();
+        let mean_class_level = if total_classes > 0.0 {
+            adventurers.iter()
+                .flat_map(|a| a.classes.iter())
+                .map(|c| c.level as f32)
+                .sum::<f32>() / total_classes
+        } else { 0.0 };
+        let max_class_level = adventurers.iter()
+            .flat_map(|a| a.classes.iter())
+            .map(|c| c.level as f32)
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or(0.0);
+        let total_skills: f32 = adventurers.iter()
+            .flat_map(|a| a.classes.iter())
+            .map(|c| c.skills_granted.len() as f32)
+            .sum();
+        let rare_skills: f32 = adventurers.iter()
+            .flat_map(|a| a.classes.iter())
+            .flat_map(|c| c.skills_granted.iter())
+            .filter(|s| matches!(s.rarity, SkillRarity::Rare | SkillRarity::Capstone | SkillRarity::Unique))
+            .count() as f32;
+
+        (total_classes / 10.0).min(1.0) * 0.3
+        + (mean_class_level / 15.0).min(1.0) * 0.3
+        + (max_class_level / 25.0).min(1.0) * 0.2
+        + (total_skills / 20.0).min(1.0) * 0.3
+        + rare_skills * 0.15
+    };
+
+    // ---------------------------------------------------------------
+    // PRIMARY: Class diversity across the guild (~20% weight)
+    // ---------------------------------------------------------------
+    let class_diversity = {
+        let mut unique_names: HashSet<&str> = HashSet::new();
+        for adv in &adventurers {
+            for c in &adv.classes {
+                unique_names.insert(&c.class_name);
+            }
+        }
+        let unique = unique_names.len() as f32;
+        let multi_class_adventurers = adventurers.iter()
+            .filter(|a| a.classes.len() >= 2)
+            .count() as f32;
+
+        (unique / 8.0).min(1.0) * 0.5
+        + (multi_class_adventurers / alive.max(1.0)) * 0.3
+    };
+
+    // ---------------------------------------------------------------
+    // PRIMARY: System engagement breadth (~20% weight)
+    // ---------------------------------------------------------------
+    let system_engagement = {
+        let t = &state.system_trackers;
+        let mut systems_active = 0u32;
+        if t.total_intel_gathered > 0.0 { systems_active += 1; } // espionage
+        if t.total_mercenary_strength > 0.0 { systems_active += 1; } // mercs
+        if t.active_caravan_routes > 0 { systems_active += 1; } // trade
+        if t.trade_agreement_count > 0 { systems_active += 1; } // diplomacy
+        if t.mutual_defense_count > 0 { systems_active += 1; } // alliances
+        if t.total_deeds_earned > 0 { systems_active += 1; } // narrative
+        if !state.consolidation_offers.is_empty() || !state.unique_class_holders.is_empty() {
+            systems_active += 1; // class system depth
+        }
+        if !state.signal_towers.is_empty() { systems_active += 1; } // signal towers
+        if !state.demonic_pacts.is_empty() { systems_active += 1; } // supernatural
+        if state.system_trackers.discoveries_made > 0 { systems_active += 1; } // research
+        // Count non-combat behavior diversity
+        let behavior_axes_active = adventurers.iter()
+            .map(|a| {
+                let l = &a.behavior_ledger;
+                let axes = [l.melee_combat, l.ranged_combat, l.healing_given, l.diplomacy_actions,
+                    l.trades_completed, l.items_crafted, l.areas_explored, l.units_commanded,
+                    l.stealth_actions, l.research_performed, l.damage_absorbed, l.allies_supported];
+                axes.iter().filter(|&&v| v > 10.0).count()
+            })
+            .max().unwrap_or(0) as f32;
+
+        (systems_active as f32 / 8.0).min(1.0) * 0.4
+        + (behavior_axes_active / 6.0).min(1.0) * 0.3
+    };
+
+    // ---------------------------------------------------------------
+    // SECONDARY: Quest & economy (~20% weight)
+    // ---------------------------------------------------------------
     let gold_score = piecewise_gold_norm(state.guild.gold);
     let supply_score = piecewise_supply_norm(state.guild.supplies);
     let rep_score = state.guild.reputation / 100.0;
-
-    let progress = state.overworld.campaign_progress;
     let quests_won = state.completed_quests.iter()
         .filter(|q| q.result == QuestResult::Victory).count() as f32;
     let quests_lost = state.completed_quests.iter()
@@ -1104,46 +1202,21 @@ fn estimate_value(state: &CampaignState) -> f32 {
     } else {
         0.5
     };
+    let quest_economy = {
+        let quest_score = (quests_won / 15.0).min(1.0) * 0.3 + win_rate * 0.2;
+        let econ = gold_score * 0.3 + supply_score * 0.1 + rep_score * 0.1;
+        quest_score + econ
+    };
 
-    let threat = (state.overworld.global_threat_level / 100.0).clamp(0.0, 1.0);
-    let crisis_pressure = (state.overworld.active_crises.len() as f32 * 0.25).min(1.0);
-
-    let idle = adventurers.iter()
-        .filter(|a| a.status == AdventurerStatus::Idle)
-        .count() as f32;
-    let _capacity = (idle / alive.max(1.0)).clamp(0.0, 1.0);
-    let quest_load = (state.active_quests.len() as f32 / state.guild.active_quest_capacity.max(1) as f32)
-        .clamp(0.0, 1.0);
-
-    let mean_level = adventurers.iter().map(|a| a.level as f32).sum::<f32>() / alive;
-    let level_score = (mean_level / 20.0).min(1.0);
-
-    let injured_count = adventurers.iter()
-        .filter(|a| a.injury > 40.0).count() as f32;
-    let deserted = state.adventurers.iter()
-        .filter(|a| a.status == AdventurerStatus::Dead).count() as f32;
-
-    let roster_factor = (alive / (alive + deserted).max(1.0)).powf(0.5);
-    let health_factor = mean_health.powf(1.5);
-    let economy_factor = (gold_score * 0.6 + supply_score * 0.2 + rep_score * 0.2).powf(0.8);
-
-    let progress_score = progress * 2.0 + (quests_won / 25.0).min(1.0) + win_rate;
-
-    let war_penalty = state.factions.iter()
-        .filter(|f| f.diplomatic_stance == DiplomaticStance::AtWar)
-        .map(|f| {
-            let strength_ratio = f.military_strength / 50.0;
-            strength_ratio.min(3.0) * 0.3
-        })
-        .sum::<f32>();
-
+    // ---------------------------------------------------------------
+    // SUPPORTING: Territory, buildings, bonds, coalitions, trade
+    // ---------------------------------------------------------------
     let guild_faction_id = state.diplomacy.guild_faction_id;
     let guild_regions = state.overworld.regions.iter()
         .filter(|r| r.owner_faction_id == guild_faction_id)
         .count() as f32;
     let total_regions = state.overworld.regions.len().max(1) as f32;
     let territory_score = guild_regions / total_regions;
-    let territory_penalty = if territory_score < 0.5 { (1.0 - territory_score) * 0.8 } else { 0.0 };
 
     let mean_visibility = if state.overworld.regions.is_empty() {
         0.5
@@ -1152,15 +1225,6 @@ fn estimate_value(state: &CampaignState) -> f32 {
             / state.overworld.regions.len() as f32
     };
     let scouting_bonus = (mean_visibility - 0.3).max(0.0) * 0.4;
-
-    let rival_penalty = if state.rival_guild.active {
-        let rep_gap = (state.rival_guild.reputation - state.guild.reputation) / 100.0;
-        let quest_gap = (state.rival_guild.quests_completed as f32
-            - state.completed_quests.len() as f32) / 20.0;
-        (rep_gap.max(0.0) * 0.4 + quest_gap.max(0.0) * 0.3).min(1.0)
-    } else {
-        0.0
-    };
 
     let buildings = &state.guild_buildings;
     let total_building_tiers = (buildings.training_grounds
@@ -1190,44 +1254,93 @@ fn estimate_value(state: &CampaignState) -> f32 {
         _ => 0.0,
     };
 
+    // ---------------------------------------------------------------
+    // Milestone bonuses (class system depth events)
+    // ---------------------------------------------------------------
+    let milestone_bonus = {
+        // +0.3 per consolidation event
+        let consolidation = state.consolidation_offers.len() as f32 * 0.3;
+        // +0.5 per crisis class granted (Unique rarity holders)
+        let crisis_classes = state.unique_class_holders.len() as f32 * 0.5;
+        // +0.2 per world-gated class flag earned
+        let world_gated = state.world_gated_class_flags.len() as f32 * 0.2;
+        // +0.1 per shame class (interesting for BFS diversity)
+        let shame_classes: f32 = adventurers.iter()
+            .flat_map(|a| a.classes.iter())
+            .filter(|c| {
+                // Shame classes are typically granted from consecutive retreats / desertions
+                // Heuristic: class name contains shame-related keywords
+                let n = c.class_name.to_lowercase();
+                n.contains("coward") || n.contains("deserter") || n.contains("shame")
+                    || n.contains("craven") || n.contains("oathbreaker")
+            })
+            .count() as f32 * 0.1;
+        consolidation + crisis_classes + world_gated + shame_classes
+    };
+
+    // ---------------------------------------------------------------
+    // Combine primary signals
+    // ---------------------------------------------------------------
+    let base = class_progression * 2.0
+        + class_diversity * 1.5
+        + system_engagement * 1.0
+        + quest_economy * 0.8
+        + territory_score * 0.3
+        + scouting_bonus + building_bonus + bond_bonus
+        + coalition_bonus + trade_bonus + season_modifier
+        + milestone_bonus;
+
+    // ---------------------------------------------------------------
+    // Penalties (kept from before, territory_penalty reduced)
+    // ---------------------------------------------------------------
+    let threat = (state.overworld.global_threat_level / 100.0).clamp(0.0, 1.0);
+    let crisis_pressure = (state.overworld.active_crises.len() as f32 * 0.25).min(1.0);
+    let injured_count = adventurers.iter()
+        .filter(|a| a.injury > 40.0).count() as f32;
+
+    let war_penalty = state.factions.iter()
+        .filter(|f| f.diplomatic_stance == DiplomaticStance::AtWar)
+        .map(|f| {
+            let strength_ratio = f.military_strength / 50.0;
+            strength_ratio.min(3.0) * 0.3
+        })
+        .sum::<f32>();
+
+    // Reduced territory penalty (territory is supporting, not primary)
+    let territory_penalty = if territory_score < 0.5 { (1.0 - territory_score) * 0.3 } else { 0.0 };
+
+    let rival_penalty = if state.rival_guild.active {
+        let rep_gap = (state.rival_guild.reputation - state.guild.reputation) / 100.0;
+        let quest_gap = (state.rival_guild.quests_completed as f32
+            - state.completed_quests.len() as f32) / 20.0;
+        (rep_gap.max(0.0) * 0.4 + quest_gap.max(0.0) * 0.3).min(1.0)
+    } else {
+        0.0
+    };
+
     let desertion_risk = adventurers.iter()
         .filter(|a| a.loyalty < 30.0)
         .count() as f32 * 0.1;
 
-    // --- Extended system tracker value contributions (pass 3) ---
+    // Extended system tracker penalties (pass 3)
     let t = &state.system_trackers;
-    let espionage_bonus = (t.total_intel_gathered / 100.0).min(0.3);
-    let merc_bonus = (t.total_mercenary_strength / 100.0).min(0.25);
     let debt_penalty = (t.total_debt / 200.0).min(0.4);
     let monster_penalty = (t.highest_monster_aggression / 100.0 * 0.3).min(0.3)
         + (t.total_monster_population / 200.0 * 0.2).min(0.2);
-    let prisoner_bonus = (t.prisoner_count as f32 * 0.05).min(0.2);
     let captured_penalty = t.captured_adventurer_count as f32 * 0.1;
-    let caravan_bonus = (t.active_caravan_routes as f32 * 0.06
-        + t.caravan_trade_income / 100.0).min(0.3);
-    let civil_war_value = if t.guild_civil_war_involvement {
-        -(t.active_civil_war_count as f32 * 0.15).min(0.3)
-    } else {
-        (t.active_civil_war_count as f32 * 0.05).min(0.15)
-    };
     let bm_risk = (t.black_market_heat / 100.0 * 0.2).min(0.2);
-    let agreement_bonus = ((t.trade_agreement_count + t.non_aggression_pact_count
-        + t.mutual_defense_count) as f32 * 0.04).min(0.25);
-    let legacy_bonus = (t.total_legacy_bonuses / 100.0).min(0.2);
     let war_exhaust_penalty = (t.max_war_exhaustion / 100.0 * 0.25).min(0.25);
-    let narrative_bonus = ((t.total_deeds_earned as f32) / 30.0).min(0.1);
-    let pop_bonus = (t.total_population / 1000.0 * t.mean_population_morale / 100.0).min(0.2);
 
-    // --- Stuckness penalty (pass 2, enhanced pass 11) ---
+    // Stuckness penalty (pass 2, enhanced pass 11)
     let quests_total = quests_won + quests_lost;
-    let _ticks_per_quest = if quests_total > 0.0 {
+    let ticks_per_quest = if quests_total > 0.0 {
         state.tick as f32 / quests_total
     } else {
         state.tick as f32
     };
     let mut stuck_penalty = if state.tick > 5000 && quests_total < 1.0 {
         0.5
-    } else if _ticks_per_quest > 3000.0 && state.tick > 3000 {
+    } else if ticks_per_quest > 3000.0 && state.tick > 3000 {
         0.2
     } else {
         0.0
@@ -1247,19 +1360,12 @@ fn estimate_value(state: &CampaignState) -> f32 {
     let threat_penalty = threat * 0.5 + crisis_pressure * 0.4;
     let bankruptcy_penalty = if state.guild.gold < 20.0 { 0.5 } else { 0.0 };
 
-    let base = progress_score + level_score * 0.5 + quest_load * 0.3
-        + territory_score * 0.5
-        + scouting_bonus + building_bonus + bond_bonus
-        + coalition_bonus + trade_bonus + season_modifier
-        // Pass 3 additions:
-        + espionage_bonus + merc_bonus + prisoner_bonus + caravan_bonus
-        + civil_war_value + agreement_bonus + legacy_bonus
-        + narrative_bonus + pop_bonus;
+    let economy_factor = (gold_score * 0.6 + supply_score * 0.2 + rep_score * 0.2).powf(0.8);
+
     let v = base * roster_factor * health_factor * economy_factor
         - injured_penalty - threat_penalty - bankruptcy_penalty
         - war_penalty - territory_penalty - rival_penalty - desertion_risk
         - stuck_penalty
-        // Pass 3 penalties:
         - debt_penalty - monster_penalty - captured_penalty - bm_risk
         - war_exhaust_penalty;
 
