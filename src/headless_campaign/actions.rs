@@ -161,25 +161,18 @@ pub fn agreement_type_name(agreement: &super::state::DiplomaticAgreement) -> &'s
 // Skill effect classification
 // ---------------------------------------------------------------------------
 
-/// Returns true for always-on passive skill effects (T1) that don't need
-/// explicit player activation via UseClassSkill.
+/// Returns true for always-on passive skill effects that don't need
+/// explicit player activation. Keep this list SMALL — most skills
+/// should be activatable for BFS decision diversity.
 pub fn is_passive_skill_effect(effect: &super::state::SkillEffect) -> bool {
     use super::state::SkillEffect;
     matches!(effect,
-        SkillEffect::Appraise
-        | SkillEffect::FieldTriage { .. }
-        | SkillEffect::ReadTheRoom
-        | SkillEffect::InspiringPresence { .. }
-        | SkillEffect::BeastLore
-        | SkillEffect::BattleInstinct
-        | SkillEffect::QuickStudy
-        | SkillEffect::Forage { .. }
-        | SkillEffect::TrackPrey
-        | SkillEffect::FieldRepair
-        | SkillEffect::SilentMovement
-        | SkillEffect::TrapSense
-        | SkillEffect::StabilizeAlly
-        | SkillEffect::SapperEye
+        SkillEffect::Appraise           // always-on: know item values
+        | SkillEffect::ReadTheRoom      // always-on: sense faction intent
+        | SkillEffect::BeastLore        // always-on: recognize monsters
+        | SkillEffect::BattleInstinct   // always-on: sense ambushes
+        | SkillEffect::TrapSense        // always-on: detect traps
+        | SkillEffect::SilentMovement   // always-on: move quietly
     )
 }
 
