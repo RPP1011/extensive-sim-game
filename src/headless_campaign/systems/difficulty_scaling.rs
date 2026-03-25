@@ -364,6 +364,8 @@ fn apply_relief(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
             withdrawal_severity: 0.0,
             ticks_since_last_potion: 0,
             total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
                 };
 
                 state.adventurers.push(adventurer);

@@ -6,7 +6,7 @@
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::{
-    AdventurerStatus, CampaignState, DiplomaticStance, DiseaseStatus, Marriage, MoodState, lcg_f32, lcg_next,
+    AdventurerStatus, BehaviorLedger, CampaignState, DiplomaticStance, DiseaseStatus, Marriage, MoodState, lcg_f32, lcg_next,
 };
 
 /// Maximum number of active marriages the guild can maintain.
@@ -464,6 +464,8 @@ fn create_heir(state: &mut CampaignState, marriage: &Marriage) -> super::super::
             withdrawal_severity: 0.0,
             ticks_since_last_potion: 0,
             total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
     }
 }
 
@@ -550,6 +552,8 @@ mod tests {
             withdrawal_severity: 0.0,
             ticks_since_last_potion: 0,
             total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
         };
         state.adventurers.push(adv);
 

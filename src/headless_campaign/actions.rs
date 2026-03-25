@@ -924,6 +924,12 @@ pub enum WorldEvent {
     DemonicPactAccepted { adventurer_id: u32, pact_id: u32 },
     DemonicCollectorArrived { adventurer_id: u32 },
     DemonicDebtEscalated { adventurer_id: u32, debt_level: f32, effect: String },
+
+    // --- Class system ---
+    ClassGranted { adventurer_id: u32, class_name: String },
+    ClassLevelUp { adventurer_id: u32, class_name: String, new_level: u32 },
+    SkillGrantedByClass { adventurer_id: u32, skill_name: String, rarity: String, class_name: String },
+    ClassStagnated { adventurer_id: u32, class_name: String },
 }
 
 // ---------------------------------------------------------------------------

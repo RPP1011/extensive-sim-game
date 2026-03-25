@@ -233,6 +233,7 @@ pub fn step_campaign(
     systems::signal_towers::tick_signal_towers(state, &mut deltas, &mut events);
     systems::currency_debasement::tick_currency_debasement(state, &mut deltas, &mut events);
     systems::demonic_pacts::tick_demonic_pacts(state, &mut deltas, &mut events);
+    systems::class_system::tick_class_system(state, &mut deltas, &mut events);
 
     // Final economy snapshot
     deltas.gold_after = state.guild.gold;

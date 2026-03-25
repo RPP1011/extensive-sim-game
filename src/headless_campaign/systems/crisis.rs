@@ -174,6 +174,8 @@ pub fn activate_crisis_from_template(
             withdrawal_severity: 0.0,
             ticks_since_last_potion: 0,
             total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
                 };
 
                 champion_ids.push(id);

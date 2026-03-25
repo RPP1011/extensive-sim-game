@@ -976,6 +976,14 @@ pub struct Adventurer {
     /// Lifetime count of potions consumed.
     #[serde(default)]
     pub total_potions_consumed: u32,
+
+    // --- TWI-style class system ---
+    /// TWI-style behavior ledger — tracks what this adventurer actually does.
+    #[serde(default)]
+    pub behavior_ledger: BehaviorLedger,
+    /// Classes earned from behavior. Multiple classes, each leveling independently.
+    #[serde(default)]
+    pub classes: Vec<ClassInstance>,
 }
 
 /// A leadership role that provides passive buffs while the adventurer is active.
@@ -1016,6 +1024,92 @@ pub struct RallyTarget {
     pub destination: (f32, f32),
     /// Travel speed (tiles/sec).
     pub speed: f32,
+}
+
+// ---------------------------------------------------------------------------
+// TWI-style class system
+// ---------------------------------------------------------------------------
+
+/// Tracks what an adventurer actually DOES over time. The class system watches this.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct BehaviorLedger {
+    // Lifetime counters
+    pub melee_combat: f32,
+    pub ranged_combat: f32,
+    pub healing_given: f32,
+    pub diplomacy_actions: f32,
+    pub trades_completed: f32,
+    pub items_crafted: f32,
+    pub areas_explored: f32,
+    pub units_commanded: f32,
+    pub stealth_actions: f32,
+    pub research_performed: f32,
+    pub damage_absorbed: f32,
+    pub allies_supported: f32,
+    // Recent window (last 200 ticks) — same fields but only recent activity
+    pub recent_melee_combat: f32,
+    pub recent_ranged_combat: f32,
+    pub recent_healing_given: f32,
+    pub recent_diplomacy_actions: f32,
+    pub recent_trades_completed: f32,
+    pub recent_items_crafted: f32,
+    pub recent_areas_explored: f32,
+    pub recent_units_commanded: f32,
+    pub recent_stealth_actions: f32,
+    pub recent_research_performed: f32,
+    pub recent_damage_absorbed: f32,
+    pub recent_allies_supported: f32,
+}
+
+/// A single class held by an adventurer. Adventurers can hold multiple.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ClassInstance {
+    pub class_name: String,
+    pub level: u32,
+    pub xp: f32,
+    pub xp_to_next: f32,
+    pub stagnation_ticks: u32,
+    pub skills_granted: Vec<GrantedSkill>,
+    pub acquired_tick: u32,
+    /// Identity coherence — decays when actions contradict class archetype.
+    pub identity_coherence: f32,
+}
+
+/// A skill granted by the class system at a level threshold.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GrantedSkill {
+    pub skill_name: String,
+    pub granted_at_level: u32,
+    pub rarity: SkillRarity,
+    pub from_class: String,
+    /// Ability DSL text if this skill has a combat effect.
+    pub ability_dsl: Option<String>,
+    /// Non-combat effect description.
+    pub effect_description: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub enum SkillRarity {
+    #[default]
+    Common,
+    Uncommon,
+    Rare,
+    Capstone,
+    Unique,
+}
+
+/// Template for matching behavior patterns to class grants.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ClassTemplate {
+    pub class_name: String,
+    /// Required behavior thresholds (weighted score must exceed this).
+    pub behavior_weights: Vec<(String, f32)>,
+    /// Minimum weighted score to qualify.
+    pub threshold: f32,
+    /// Tags for this class.
+    pub tags: Vec<String>,
+    /// How rare this class is (affects threshold scaling).
+    pub rarity: SkillRarity,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -4725,6 +4819,8 @@ impl CampaignState {
                     withdrawal_severity: 0.0,
                     ticks_since_last_potion: 0,
                     total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
             },
             Adventurer {
                 id: 2,
@@ -4772,6 +4868,8 @@ impl CampaignState {
                     withdrawal_severity: 0.0,
                     ticks_since_last_potion: 0,
                     total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
             },
             Adventurer {
                 id: 3,
@@ -4819,6 +4917,8 @@ impl CampaignState {
                     withdrawal_severity: 0.0,
                     ticks_since_last_potion: 0,
                     total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
             },
             Adventurer {
                 id: 4,
@@ -4866,6 +4966,8 @@ impl CampaignState {
                     withdrawal_severity: 0.0,
                     ticks_since_last_potion: 0,
                     total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
             },
         ];
 
@@ -5176,6 +5278,8 @@ impl CampaignState {
                     withdrawal_severity: 0.0,
                     ticks_since_last_potion: 0,
                     total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
                     },
                     Adventurer {
                         id: 2, name: "Greta".into(), archetype: "knight".into(), level: 2, xp: 0,
@@ -5203,6 +5307,8 @@ impl CampaignState {
                     withdrawal_severity: 0.0,
                     ticks_since_last_potion: 0,
                     total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
                     },
                 ],
                 gold_bonus: 150.0, supply_bonus: 30.0, reputation_bonus: 5.0, items: Vec::new(),
@@ -5237,6 +5343,8 @@ impl CampaignState {
                     withdrawal_severity: 0.0,
                     ticks_since_last_potion: 0,
                     total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
                     },
                 ],
                 gold_bonus: 0.0, supply_bonus: 0.0, reputation_bonus: 10.0, items: Vec::new(),
@@ -5271,6 +5379,8 @@ impl CampaignState {
                     withdrawal_severity: 0.0,
                     ticks_since_last_potion: 0,
                     total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
                     },
                     Adventurer {
                         id: 2, name: "Brynn".into(), archetype: "mage".into(), level: 1, xp: 0,
@@ -5298,6 +5408,8 @@ impl CampaignState {
                     withdrawal_severity: 0.0,
                     ticks_since_last_potion: 0,
                     total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
                     },
                     Adventurer {
                         id: 3, name: "Cira".into(), archetype: "cleric".into(), level: 1, xp: 0,
@@ -5325,6 +5437,8 @@ impl CampaignState {
                     withdrawal_severity: 0.0,
                     ticks_since_last_potion: 0,
                     total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
                     },
                     Adventurer {
                         id: 4, name: "Daven".into(), archetype: "rogue".into(), level: 1, xp: 0,
@@ -5352,6 +5466,8 @@ impl CampaignState {
                     withdrawal_severity: 0.0,
                     ticks_since_last_potion: 0,
                     total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
                     },
                 ],
                 gold_bonus: 20.0, supply_bonus: 10.0, reputation_bonus: 0.0, items: Vec::new(),
