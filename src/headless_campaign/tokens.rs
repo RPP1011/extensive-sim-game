@@ -664,6 +664,102 @@ impl CampaignState {
                 (self.pending_choices.len() as f32 / 5.0).min(1.0), // pending choices norm
                 (self.mentor_assignments.len() as f32 / 5.0).min(1.0), // training queue (mentors) norm
                 (self.system_trackers.active_liaisons as f32 / 5.0).min(1.0), // active liaisons norm
+                // Class System (15 features)
+                {
+                    let total: f32 = self.adventurers.iter()
+                        .filter(|a| a.status != AdventurerStatus::Dead)
+                        .map(|a| a.classes.len() as f32).sum();
+                    (total / 50.0).min(1.0)
+                }, // total classes granted
+                {
+                    let all_classes: Vec<_> = self.adventurers.iter()
+                        .filter(|a| a.status != AdventurerStatus::Dead)
+                        .flat_map(|a| a.classes.iter()).collect();
+                    if all_classes.is_empty() { 0.0 } else {
+                        all_classes.iter().map(|c| c.level as f32).sum::<f32>()
+                            / all_classes.len() as f32 / 25.0
+                    }
+                }, // mean class level / 25
+                {
+                    self.adventurers.iter()
+                        .filter(|a| a.status != AdventurerStatus::Dead)
+                        .flat_map(|a| a.classes.iter())
+                        .map(|c| c.level as f32)
+                        .fold(0.0f32, f32::max) / 30.0
+                }, // max class level / 30
+                {
+                    let total: f32 = self.adventurers.iter()
+                        .filter(|a| a.status != AdventurerStatus::Dead)
+                        .flat_map(|a| a.classes.iter())
+                        .map(|c| c.skills_granted.len() as f32).sum();
+                    (total / 100.0).min(1.0)
+                }, // total skills granted
+                {
+                    let mut names: std::collections::HashSet<&str> = std::collections::HashSet::new();
+                    for a in self.adventurers.iter().filter(|a| a.status != AdventurerStatus::Dead) {
+                        for c in &a.classes { names.insert(&c.class_name); }
+                    }
+                    (names.len() as f32 / 20.0).min(1.0)
+                }, // unique class count
+                {
+                    let shame = self.adventurers.iter()
+                        .flat_map(|a| a.classes.iter())
+                        .filter(|c| c.class_name == "Coward" || c.class_name == "Oathbreaker" || c.class_name == "Deserter")
+                        .count() as f32;
+                    (shame / 10.0).min(1.0)
+                }, // shame class count
+                {
+                    let crisis = self.unique_class_holders.len() as f32;
+                    (crisis / 5.0).min(1.0)
+                }, // crisis/unique class count
+                (self.consolidation_offers.len() as f32 / 10.0).min(1.0), // consolidation offers
+                {
+                    let all_classes: Vec<_> = self.adventurers.iter()
+                        .flat_map(|a| a.classes.iter()).collect();
+                    if all_classes.is_empty() { 1.0 } else {
+                        all_classes.iter().map(|c| c.identity_coherence).sum::<f32>()
+                            / all_classes.len() as f32
+                    }
+                }, // mean identity coherence (0-1)
+                {
+                    let all_classes: Vec<_> = self.adventurers.iter()
+                        .flat_map(|a| a.classes.iter()).collect();
+                    if all_classes.is_empty() { 0.0 } else {
+                        all_classes.iter().map(|c| c.stagnation_ticks as f32).sum::<f32>()
+                            / all_classes.len() as f32 / 1000.0
+                    }
+                }, // mean stagnation / 1000
+                {
+                    let total_classes: f32 = self.adventurers.iter()
+                        .flat_map(|a| a.classes.iter()).count() as f32;
+                    let mut names: std::collections::HashSet<&str> = std::collections::HashSet::new();
+                    for a in &self.adventurers { for c in &a.classes { names.insert(&c.class_name); } }
+                    if total_classes > 0.0 { names.len() as f32 / total_classes } else { 0.0 }
+                }, // class diversity ratio
+                {
+                    let alive: Vec<_> = self.adventurers.iter()
+                        .filter(|a| a.status != AdventurerStatus::Dead).collect();
+                    if alive.is_empty() { 0.0 } else {
+                        let sum: f32 = alive.iter().map(|a| {
+                            a.behavior_ledger.melee_combat + a.behavior_ledger.ranged_combat
+                            + a.behavior_ledger.healing_given + a.behavior_ledger.diplomacy_actions
+                            + a.behavior_ledger.trades_completed + a.behavior_ledger.items_crafted
+                            + a.behavior_ledger.areas_explored + a.behavior_ledger.units_commanded
+                            + a.behavior_ledger.stealth_actions + a.behavior_ledger.research_performed
+                            + a.behavior_ledger.damage_absorbed + a.behavior_ledger.allies_supported
+                        }).sum();
+                        (sum / alive.len() as f32 / 1000.0).min(1.0)
+                    }
+                }, // mean behavior intensity
+                {
+                    let alive = self.adventurers.iter()
+                        .filter(|a| a.status != AdventurerStatus::Dead).count() as f32;
+                    let multi = self.adventurers.iter()
+                        .filter(|a| a.status != AdventurerStatus::Dead && a.classes.len() >= 2)
+                        .count() as f32;
+                    if alive > 0.0 { multi / alive } else { 0.0 }
+                }, // multi-class ratio
+                0.0, // evolution count (placeholder)
             ],
         }
     }
