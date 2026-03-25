@@ -8,7 +8,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the food system ticks (every 100 campaign ticks).
-const FOOD_TICK_INTERVAL: u64 = 100;
+const FOOD_TICK_INTERVAL: u64 = 3;
 
 /// Food consumption per party member per food tick.
 const FOOD_PER_MEMBER: f32 = 1.0;

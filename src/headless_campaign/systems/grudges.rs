@@ -31,13 +31,13 @@ const GRUDGE_REGION_STRESS: f32 = 3.0;
 const RECKLESS_THRESHOLD: f32 = 70.0;
 
 /// Ticks between grudge decay steps.
-const DECAY_INTERVAL: u64 = 500;
+const DECAY_INTERVAL: u64 = 17;
 
 /// Intensity lost per decay step.
 const DECAY_AMOUNT: f32 = 1.0;
 
 /// Ticks after which an unresolved grudge causes bitterness.
-const BITTERNESS_THRESHOLD: u64 = 5000;
+const BITTERNESS_THRESHOLD: u64 = 167;
 
 /// Morale penalty for bitterness (applied once when crossing threshold).
 const BITTERNESS_MORALE_PENALTY: f32 = 5.0;
@@ -211,7 +211,7 @@ pub fn tick_grudges(
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % 300 != 0 {
+    if state.tick % 10 != 0 {
         return;
     }
 

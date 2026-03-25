@@ -8,7 +8,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the bounty system ticks (in campaign ticks).
-const BOUNTY_INTERVAL: u64 = 300;
+const BOUNTY_INTERVAL: u64 = 10;
 
 /// Maximum active (unclaimed + claimed-but-incomplete) bounties.
 const MAX_ACTIVE_BOUNTIES: usize = 6;
@@ -109,7 +109,7 @@ fn auto_complete_bounties(state: &mut CampaignState, events: &mut Vec<WorldEvent
                     .iter()
                     .filter(|q| {
                         q.result == QuestResult::Victory
-                            && q.completed_at_ms > bounty.posted_tick * CAMPAIGN_TICK_MS as u64
+                            && q.completed_at_ms > bounty.posted_tick * CAMPAIGN_TURN_SECS as u64 * 1000
                     })
                     .count() as u32;
                 recent_victories >= *count
@@ -153,7 +153,7 @@ fn auto_complete_bounties(state: &mut CampaignState, events: &mut Vec<WorldEvent
                 state.completed_quests.iter().any(|q| {
                     q.quest_type == QuestType::Escort
                         && q.result == QuestResult::Victory
-                        && q.completed_at_ms > bounty.posted_tick * CAMPAIGN_TICK_MS as u64
+                        && q.completed_at_ms > bounty.posted_tick * CAMPAIGN_TURN_SECS as u64 * 1000
                 })
             }
         };

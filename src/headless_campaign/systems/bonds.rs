@@ -87,7 +87,7 @@ pub fn tick_bonds(
     _deltas: &mut StepDeltas,
     _events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % 50 != 0 {
+    if state.tick % 1 != 0 {
         return;
     }
 

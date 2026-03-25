@@ -7,7 +7,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Cadence: every 500 ticks.
-const TICK_CADENCE: u64 = 500;
+const TICK_CADENCE: u64 = 17;
 
 /// Evaluate guild reputation and update the tier if it has changed.
 pub fn tick_guild_tiers(

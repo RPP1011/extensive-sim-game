@@ -10,7 +10,7 @@ use crate::headless_campaign::state::{
 };
 
 /// How often to tick legacy weapons (in ticks).
-const LEGACY_WEAPON_INTERVAL: u64 = 500;
+const LEGACY_WEAPON_INTERVAL: u64 = 17;
 
 /// Chance for an adventurer reaching level 5+ with equipped weapon to forge a legacy weapon.
 const CREATION_CHANCE: f32 = 0.05;

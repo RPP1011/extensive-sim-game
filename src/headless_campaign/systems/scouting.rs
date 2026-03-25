@@ -23,7 +23,7 @@ const PARTY_TRAVEL_BOOST: f32 = 0.1;
 pub const HIRE_SCOUT_BOOST: f32 = 0.4;
 
 /// Cadence: runs every 50 ticks.
-const SCOUTING_INTERVAL: u64 = 50;
+const SCOUTING_INTERVAL: u64 = 1;
 
 pub fn tick_scouting(
     state: &mut CampaignState,

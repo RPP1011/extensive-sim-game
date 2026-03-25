@@ -319,7 +319,7 @@ struct FuzzRunResult {
 /// per campaign to avoid memory blowup from noisy violations.
 fn fuzz_single(seed: u64, config: &FuzzConfig) -> FuzzRunResult {
     const MAX_FINDINGS_PER_CAMPAIGN: usize = 20;
-    const INVARIANT_CHECK_INTERVAL: u64 = 100;
+    const INVARIANT_CHECK_INTERVAL: u64 = 3;
 
     let use_random = {
         let mut r = seed;

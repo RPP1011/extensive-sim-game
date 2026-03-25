@@ -9,7 +9,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to roll for a random event (in ticks).
-const EVENT_INTERVAL: u64 = 500;
+const EVENT_INTERVAL: u64 = 17;
 
 /// Base probability of an event firing each roll.
 const BASE_CHANCE: f32 = 0.15;

@@ -9,7 +9,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often migration triggers are checked (in ticks).
-const MIGRATION_INTERVAL: u64 = 200;
+const MIGRATION_INTERVAL: u64 = 7;
 
 /// Progress increment per tick (reaches 1.0 in 10 ticks = 1 second game time).
 const PROGRESS_PER_TICK: f32 = 0.1;
@@ -163,7 +163,7 @@ fn generate_refugee_quests(
         },
         distance,
         target_position: dest_pos,
-        deadline_ms: state.elapsed_ms + 5000 * CAMPAIGN_TICK_MS as u64,
+        deadline_ms: state.elapsed_ms + 167 * CAMPAIGN_TURN_SECS as u64 * 1000,
         description: format!(
             "{}: {} refugees need help in the region.",
             type_label, refugee_count

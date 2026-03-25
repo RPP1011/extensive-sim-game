@@ -7,7 +7,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Tick cadence for economic competition (every 500 ticks).
-const TICK_CADENCE: u64 = 500;
+const TICK_CADENCE: u64 = 17;
 
 /// Market share threshold above which a faction is considered dominant.
 const DOMINANCE_THRESHOLD: f32 = 0.40;
@@ -397,7 +397,7 @@ fn apply_rivalry_effects(state: &mut CampaignState, events: &mut Vec<WorldEvent>
                 .unwrap_or_else(|| format!("Faction {}", md.faction_id));
 
             // Only emit periodically to avoid spam.
-            if state.tick % 2000 == 0 {
+            if state.tick % 67 == 0 {
                 events.push(WorldEvent::MarketDominanceShift {
                     faction_id: md.faction_id,
                     market_share: md.market_share,

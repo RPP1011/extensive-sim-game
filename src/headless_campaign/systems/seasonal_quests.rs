@@ -9,7 +9,7 @@ use crate::headless_campaign::state::*;
 use crate::headless_campaign::systems::seasons::TICKS_PER_SEASON;
 
 /// How often to check for seasonal quest generation/expiry (in ticks).
-const CHECK_INTERVAL: u64 = 500;
+const CHECK_INTERVAL: u64 = 17;
 
 /// Tick seasonal quests: generate on season change, expire old ones, check champion bonus.
 pub fn tick_seasonal_quests(

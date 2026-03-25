@@ -13,7 +13,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::{CampaignState, PrepType, SitePreparation};
 
 /// Cadence: runs every 100 ticks.
-const SITE_PREP_INTERVAL: u64 = 100;
+const SITE_PREP_INTERVAL: u64 = 3;
 
 /// Level increase per tick when a party is assigned.
 const GROWTH_PER_TICK: f32 = 2.0;

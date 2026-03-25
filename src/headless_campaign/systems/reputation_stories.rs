@@ -10,7 +10,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the reputation stories system ticks (in ticks).
-const STORY_INTERVAL: u64 = 500;
+const STORY_INTERVAL: u64 = 17;
 
 /// Maximum number of active stories at once.
 const MAX_ACTIVE_STORIES: usize = 10;
@@ -63,7 +63,7 @@ fn generate_stories(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
         .completed_quests
         .iter()
         .filter(|q| {
-            let quest_tick = q.completed_at_ms / CAMPAIGN_TICK_MS as u64;
+            let quest_tick = q.completed_at_ms / (CAMPAIGN_TURN_SECS as u64 * 1000);
             quest_tick >= recent_cutoff
         })
         .map(|q| {

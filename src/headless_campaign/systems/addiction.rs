@@ -7,7 +7,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::{AdventurerStatus, CampaignState, lcg_f32};
 
 /// Addiction tick cadence (every 100 ticks = 10 seconds game time).
-const ADDICTION_TICK_INTERVAL: u64 = 100;
+const ADDICTION_TICK_INTERVAL: u64 = 3;
 
 /// Dependency increase per healing potion consumed.
 const HEALING_POTION_DEPENDENCY: f32 = 0.03;

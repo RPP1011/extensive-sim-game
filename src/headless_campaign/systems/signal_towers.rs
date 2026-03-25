@@ -17,7 +17,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Cadence: runs every 200 ticks.
-const SIGNAL_TOWER_INTERVAL: u64 = 200;
+const SIGNAL_TOWER_INTERVAL: u64 = 7;
 
 /// Chance that a battle in a tower's region destroys the tower (0–1).
 const BATTLE_DAMAGE_CHANCE: f32 = 0.30;
@@ -26,10 +26,10 @@ const BATTLE_DAMAGE_CHANCE: f32 = 0.30;
 const REPAIR_COST: f32 = 25.0;
 
 /// Ticks required to complete a repair.
-const REPAIR_TICKS: u64 = 300;
+const REPAIR_TICKS: u64 = 10;
 
 /// Ticks a compromised tower feeds false signals before detection.
-const COMPROMISE_DURATION: u64 = 500;
+const COMPROMISE_DURATION: u64 = 17;
 
 /// Chance per tick that an enemy spy compromises an operational tower (0–1).
 const COMPROMISE_CHANCE: f32 = 0.05;

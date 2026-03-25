@@ -23,7 +23,7 @@ const LOST_CHANCE_HOSTILE: f32 = 0.05;
 const WATCHTOWER_DELAY_REDUCTION_PER_TIER: f32 = 0.10;
 
 /// Cadence: runs every 50 ticks.
-const MESSENGER_INTERVAL: u64 = 50;
+const MESSENGER_INTERVAL: u64 = 1;
 
 /// Deliver pending orders whose arrival_tick has passed.
 /// Also rolls for messenger loss in hostile territory.

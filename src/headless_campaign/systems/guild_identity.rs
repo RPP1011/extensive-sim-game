@@ -13,7 +13,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the identity system ticks (in ticks).
-const IDENTITY_INTERVAL: u64 = 500;
+const IDENTITY_INTERVAL: u64 = 17;
 
 /// Influence gain per matching action detected in the window.
 const ACTION_INFLUENCE_GAIN: f32 = 2.0;
@@ -41,7 +41,7 @@ pub fn tick_guild_identity(
 
     let old_dominant = state.guild_identity.dominant;
     let window_start_ms =
-        state.elapsed_ms.saturating_sub(IDENTITY_INTERVAL * CAMPAIGN_TICK_MS as u64);
+        state.elapsed_ms.saturating_sub(IDENTITY_INTERVAL * CAMPAIGN_TURN_SECS as u64 * 1000);
 
     // --- Phase 1: Tally identity-relevant actions in the window ---
     let mut martial: f32 = 0.0;

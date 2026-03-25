@@ -9,7 +9,7 @@ use crate::headless_campaign::state::*;
 use super::class_system::effective_noncombat_stats;
 
 /// How often to tick the disease system (in ticks).
-const DISEASE_INTERVAL: u64 = 200;
+const DISEASE_INTERVAL: u64 = 7;
 
 /// Base outbreak chance per qualifying region per tick.
 const OUTBREAK_CHANCE: f32 = 0.02;

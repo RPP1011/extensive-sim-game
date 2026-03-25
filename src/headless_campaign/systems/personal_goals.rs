@@ -10,7 +10,7 @@ use crate::headless_campaign::state::{
 };
 
 /// How often to tick personal goals (in ticks).
-const GOAL_INTERVAL: u64 = 300;
+const GOAL_INTERVAL: u64 = 10;
 
 /// Loyalty bonus on goal fulfillment.
 const FULFILLMENT_LOYALTY: f32 = 20.0;

@@ -9,10 +9,10 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to check for new festivals and expire old ones (in ticks).
-const FESTIVAL_INTERVAL: u64 = 500;
+const FESTIVAL_INTERVAL: u64 = 17;
 
 /// How long each festival lasts (in ticks).
-const FESTIVAL_DURATION: u64 = 500;
+const FESTIVAL_DURATION: u64 = 17;
 
 /// Relation boost for attending a festival.
 const ATTEND_RELATION_BOOST: f32 = 5.0;
@@ -170,7 +170,7 @@ fn spawn_festivals(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
             },
         ],
         default_option: 1,
-        deadline_ms: Some(state.elapsed_ms + FESTIVAL_DURATION as u64 * CAMPAIGN_TICK_MS as u64),
+        deadline_ms: Some(state.elapsed_ms + FESTIVAL_DURATION as u64 * CAMPAIGN_TURN_SECS as u64 * 1000),
         created_at_ms: state.elapsed_ms,
     });
 

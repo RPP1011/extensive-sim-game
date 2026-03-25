@@ -10,10 +10,10 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the heist system ticks (in ticks).
-const HEIST_INTERVAL: u64 = 300;
+const HEIST_INTERVAL: u64 = 10;
 
 /// Ticks each phase lasts before advancing.
-const PHASE_DURATION: u64 = 500;
+const PHASE_DURATION: u64 = 17;
 
 /// Maximum number of concurrent active heists.
 const MAX_ACTIVE_HEISTS: usize = 2;

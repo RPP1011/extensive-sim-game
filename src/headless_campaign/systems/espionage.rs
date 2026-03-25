@@ -8,7 +8,7 @@ use crate::headless_campaign::state::*;
 use super::class_system::effective_noncombat_stats;
 
 /// Cadence: runs every 200 ticks.
-const ESPIONAGE_INTERVAL: u64 = 200;
+const ESPIONAGE_INTERVAL: u64 = 7;
 
 /// Base intel gathered per espionage tick.
 const BASE_INTEL_PER_TICK: f32 = 5.0;

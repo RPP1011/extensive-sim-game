@@ -13,13 +13,13 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the folk hero system ticks (in ticks).
-const FOLK_HERO_INTERVAL: u64 = 500;
+const FOLK_HERO_INTERVAL: u64 = 17;
 
 /// Maximum number of active folk tales.
 const MAX_FOLK_TALES: usize = 20;
 
 /// Ticks before a folk tale fades from memory.
-const TALE_LIFETIME: u64 = 5000;
+const TALE_LIFETIME: u64 = 167;
 
 /// Fame threshold for positive regional effects.
 const FAME_POSITIVE_THRESHOLD: f32 = 50.0;
@@ -99,7 +99,7 @@ fn compute_fame_deltas(state: &CampaignState) -> FameDeltas {
 
     // Defending settlements — completed quests with victories in recent window
     for quest in &state.completed_quests {
-        let quest_tick = quest.completed_at_ms / CAMPAIGN_TICK_MS as u64;
+        let quest_tick = quest.completed_at_ms / (CAMPAIGN_TURN_SECS as u64 * 1000);
         if quest_tick >= recent_cutoff {
             match quest.result {
                 QuestResult::Victory => {
@@ -180,7 +180,7 @@ fn compute_fame_deltas(state: &CampaignState) -> FameDeltas {
 
     // Civilian casualties from battles (approximated by recent quest casualties)
     for quest in &state.completed_quests {
-        let quest_tick = quest.completed_at_ms / CAMPAIGN_TICK_MS as u64;
+        let quest_tick = quest.completed_at_ms / (CAMPAIGN_TURN_SECS as u64 * 1000);
         if quest_tick >= recent_cutoff && quest.casualties > 1 {
             let region = quest_region(state, quest);
             if region < region_count {

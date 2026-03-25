@@ -9,7 +9,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the awakening system ticks (in ticks).
-const AWAKENING_INTERVAL: u64 = 1000;
+const AWAKENING_INTERVAL: u64 = 33;
 
 /// Base chance of awakening when conditions are met (1%).
 const AWAKENING_CHANCE: f32 = 0.01;

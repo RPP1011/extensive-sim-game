@@ -12,7 +12,7 @@ use crate::headless_campaign::state::{
 };
 
 /// How often to tick negotiations (in ticks).
-const NEGOTIATION_TICK_INTERVAL: u64 = 200;
+const NEGOTIATION_TICK_INTERVAL: u64 = 7;
 
 /// Minimum guild reputation with a faction to initiate negotiation.
 const MIN_REPUTATION_TO_NEGOTIATE: f32 = 30.0;

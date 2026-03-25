@@ -9,10 +9,10 @@ use crate::headless_campaign::state::*;
 use crate::headless_campaign::systems::trade_goods::player_trade_price;
 
 /// How often the price controls system ticks (in ticks).
-const PRICE_CONTROL_INTERVAL: u64 = 500;
+const PRICE_CONTROL_INTERVAL: u64 = 17;
 
 /// How long a price control lasts before automatic expiry (in ticks).
-const CONTROL_EXPIRY_TICKS: u64 = 2000;
+const CONTROL_EXPIRY_TICKS: u64 = 67;
 
 /// Supply reduction per tick when a price ceiling is binding.
 const CEILING_SUPPLY_REDUCTION: f32 = 0.10;

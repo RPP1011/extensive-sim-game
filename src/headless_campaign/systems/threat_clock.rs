@@ -9,10 +9,10 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the threat clock advances (in ticks).
-const CLOCK_INTERVAL: u64 = 100;
+const CLOCK_INTERVAL: u64 = 3;
 
 /// How often growth_rate accelerates (in ticks).
-const GROWTH_ACCELERATION_INTERVAL: u64 = 1000;
+const GROWTH_ACCELERATION_INTERVAL: u64 = 33;
 
 /// Growth rate acceleration per interval.
 const GROWTH_ACCELERATION: f32 = 0.0001;
@@ -28,7 +28,7 @@ const GROWTH_RATE_REDUCTION: f32 = 0.0002;
 const MIN_GROWTH_RATE: f32 = 0.001;
 
 /// Tick at which the threat clock activates.
-const ACTIVATION_TICK: u64 = 500;
+const ACTIVATION_TICK: u64 = 17;
 
 /// Tick the world threat clock.
 ///

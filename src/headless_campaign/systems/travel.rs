@@ -4,14 +4,14 @@
 //! Emits `PartyArrived` when a party reaches its destination.
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
-use crate::headless_campaign::state::{AdventurerStatus, CampaignState, PartyStatus, CAMPAIGN_TICK_MS};
+use crate::headless_campaign::state::{AdventurerStatus, CampaignState, PartyStatus, CAMPAIGN_TURN_SECS};
 
 pub fn tick_travel(
     state: &mut CampaignState,
     deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    let dt_sec = CAMPAIGN_TICK_MS as f32 / 1000.0;
+    let dt_sec = CAMPAIGN_TURN_SECS as f32;
 
     for party in &mut state.parties {
         if party.status != PartyStatus::Traveling && party.status != PartyStatus::Returning {

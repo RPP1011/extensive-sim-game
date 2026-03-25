@@ -9,13 +9,13 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the auction system ticks (in campaign ticks).
-const AUCTION_TICK_INTERVAL: u64 = 500;
+const AUCTION_TICK_INTERVAL: u64 = 17;
 
 /// How often a new auction is created (in campaign ticks).
-const NEW_AUCTION_INTERVAL: u64 = 2000;
+const NEW_AUCTION_INTERVAL: u64 = 67;
 
 /// How long an auction lasts before resolution (in campaign ticks).
-const AUCTION_DURATION: u64 = 500;
+const AUCTION_DURATION: u64 = 17;
 
 /// Chance of an artifact-quality item per auction item slot.
 const ARTIFACT_CHANCE: f32 = 0.10;

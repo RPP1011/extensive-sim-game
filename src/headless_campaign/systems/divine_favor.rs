@@ -12,7 +12,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the divine favor system ticks (in ticks).
-const DIVINE_FAVOR_INTERVAL: u64 = 200;
+const DIVINE_FAVOR_INTERVAL: u64 = 7;
 
 /// Favor gained per temple of this order.
 const FAVOR_PER_TEMPLE: f32 = 0.5;

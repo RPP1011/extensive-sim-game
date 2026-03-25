@@ -8,7 +8,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Cadence: tick every 50 ticks (5 seconds game time).
-const CARAVAN_TICK_INTERVAL: u64 = 50;
+const CARAVAN_TICK_INTERVAL: u64 = 1;
 
 /// Distance (tiles) at which hostile parties can intercept caravans.
 const RAID_RANGE: f32 = 3.0;

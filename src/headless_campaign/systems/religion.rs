@@ -9,13 +9,13 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the religion system ticks (in ticks).
-const RELIGION_INTERVAL: u64 = 500;
+const RELIGION_INTERVAL: u64 = 17;
 
 /// Devotion cost to request a blessing.
 pub const BLESSING_DEVOTION_COST: f32 = 30.0;
 
 /// How long a blessing lasts (in ticks).
-pub const BLESSING_DURATION: u64 = 1000;
+pub const BLESSING_DURATION: u64 = 33;
 
 /// Devotion decay per religion tick.
 const DEVOTION_DECAY: f32 = 1.0;

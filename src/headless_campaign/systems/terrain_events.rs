@@ -8,7 +8,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to roll for a terrain event (in ticks).
-const TERRAIN_EVENT_INTERVAL: u64 = 500;
+const TERRAIN_EVENT_INTERVAL: u64 = 17;
 
 /// Base probability of a terrain event firing each roll.
 const TERRAIN_EVENT_CHANCE: f32 = 0.03;

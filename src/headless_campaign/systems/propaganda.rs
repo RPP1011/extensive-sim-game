@@ -11,7 +11,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Cadence: propaganda effects apply every 200 ticks.
-const TICK_CADENCE: u64 = 200;
+const TICK_CADENCE: u64 = 7;
 
 /// Run the propaganda system for one tick.
 ///

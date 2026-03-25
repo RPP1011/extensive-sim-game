@@ -16,7 +16,7 @@ pub fn tick_interception(
     events: &mut Vec<WorldEvent>,
 ) {
     // Only check every 10 ticks for performance (1 second cadence)
-    if state.tick % 10 != 0 {
+    if state.tick % 1 != 0 {
         return;
     }
 

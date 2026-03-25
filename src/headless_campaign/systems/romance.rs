@@ -17,7 +17,7 @@ use crate::headless_campaign::systems::bonds::{bond_key, bond_strength};
 const MAX_ROMANCES: usize = 3;
 
 /// Ticks of separation before a romance becomes strained.
-const SEPARATION_STRAIN_TICKS: u64 = 2000;
+const SEPARATION_STRAIN_TICKS: u64 = 67;
 
 /// Ticks after breakup during which both refuse to be in the same party.
 const BREAKUP_COOLDOWN_TICKS: u64 = 1500;
@@ -98,7 +98,7 @@ pub fn tick_romance(
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % 300 != 0 {
+    if state.tick % 10 != 0 {
         return;
     }
 

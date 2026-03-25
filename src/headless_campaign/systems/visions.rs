@@ -9,7 +9,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to roll for visions (in ticks).
-const VISION_INTERVAL: u64 = 500;
+const VISION_INTERVAL: u64 = 17;
 
 /// Base probability per eligible adventurer per roll.
 const VISION_CHANCE: f32 = 0.10;
@@ -18,7 +18,7 @@ const VISION_CHANCE: f32 = 0.10;
 const MAX_ACTIVE_VISIONS: usize = 3;
 
 /// Ticks before an unfulfilled vision fades away.
-const VISION_FADE_TICKS: u64 = 2000;
+const VISION_FADE_TICKS: u64 = 67;
 
 /// Roll for prophetic visions and check fulfillment of existing visions.
 pub fn tick_visions(

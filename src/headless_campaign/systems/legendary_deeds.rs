@@ -13,7 +13,7 @@ pub fn tick_legendary_deeds(
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % 200 != 0 || state.tick == 0 {
+    if state.tick % 7 != 0 || state.tick == 0 {
         return;
     }
 

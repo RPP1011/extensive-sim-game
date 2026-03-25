@@ -23,7 +23,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Cadence: reputation decay applies every 200 ticks.
-const TICK_CADENCE: u64 = 200;
+const TICK_CADENCE: u64 = 7;
 
 /// Base reputation decay per tick.
 const BASE_DECAY: f32 = 0.1;
@@ -32,16 +32,16 @@ const BASE_DECAY: f32 = 0.1;
 const REPUTATION_FLOOR: f32 = 10.0;
 
 /// Ticks without a quest completion before decay doubles.
-const INACTIVITY_THRESHOLD: u64 = 2000;
+const INACTIVITY_THRESHOLD: u64 = 67;
 
 /// Corruption threshold above which scandal penalty applies.
 const CORRUPTION_THRESHOLD: f32 = 50.0;
 
 /// How many recent ticks to look back for battle losses.
-const RECENT_LOSS_WINDOW: u64 = 1000;
+const RECENT_LOSS_WINDOW: u64 = 33;
 
 /// How many recent ticks to look back for quest completions (for reducer).
-const RECENT_QUEST_WINDOW: u64 = 500;
+const RECENT_QUEST_WINDOW: u64 = 17;
 
 /// Reputation trajectory thresholds.
 const TRAJECTORY_RISING_THRESHOLD: f32 = 0.5;
@@ -77,7 +77,7 @@ pub fn tick_reputation_decay(
     let last_quest_tick = state
         .completed_quests
         .iter()
-        .map(|q| q.completed_at_ms / CAMPAIGN_TICK_MS as u64)
+        .map(|q| q.completed_at_ms / (CAMPAIGN_TURN_SECS as u64 * 1000))
         .max()
         .unwrap_or(0);
     let ticks_since_quest = state.tick.saturating_sub(last_quest_tick);
@@ -112,7 +112,7 @@ pub fn tick_reputation_decay(
         .completed_quests
         .iter()
         .filter(|q| {
-            let q_tick = q.completed_at_ms / CAMPAIGN_TICK_MS as u64;
+            let q_tick = q.completed_at_ms / (CAMPAIGN_TURN_SECS as u64 * 1000);
             state.tick.saturating_sub(q_tick) < RECENT_LOSS_WINDOW
                 && q.result == QuestResult::Defeat
         })
@@ -141,7 +141,7 @@ pub fn tick_reputation_decay(
         .completed_quests
         .iter()
         .filter(|q| {
-            let q_tick = q.completed_at_ms / CAMPAIGN_TICK_MS as u64;
+            let q_tick = q.completed_at_ms / (CAMPAIGN_TURN_SECS as u64 * 1000);
             state.tick.saturating_sub(q_tick) < RECENT_QUEST_WINDOW
                 && q.result == QuestResult::Victory
         })
@@ -297,7 +297,7 @@ mod tests {
             quest_type: QuestType::Delivery,
             result: QuestResult::Victory,
             reward_applied: QuestReward { gold: 10.0, xp: 0.0, reputation: 0.0 },
-            completed_at_ms: (state.tick - 10) * CAMPAIGN_TICK_MS as u64,
+            completed_at_ms: (state.tick - 10) * CAMPAIGN_TURN_SECS as u64 * 1000,
             party_id: 1,
             casualties: 0,
                 threat_level: 0.0,

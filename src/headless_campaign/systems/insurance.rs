@@ -8,7 +8,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to process insurance (in ticks).
-const INSURANCE_INTERVAL: u64 = 200;
+const INSURANCE_INTERVAL: u64 = 7;
 
 /// Base premium per tick for each insurance type.
 const BASE_PREMIUM_CARAVAN: f32 = 0.8;
@@ -24,7 +24,7 @@ const DEFAULT_COVERAGE: f32 = 0.75;
 const DEFAULT_MAX_CLAIMS: u32 = 3;
 
 /// Policy duration in ticks (5000 ticks = ~8 min game time).
-const POLICY_DURATION_TICKS: u64 = 5000;
+const POLICY_DURATION_TICKS: u64 = 167;
 
 /// Base cost to purchase a new policy.
 pub const INSURANCE_PURCHASE_COST: f32 = 25.0;
@@ -93,7 +93,7 @@ fn process_claims(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
         .iter()
         .filter(|q| {
             q.result == QuestResult::Defeat
-                && q.completed_at_ms / CAMPAIGN_TICK_MS as u64 > lookback_start
+                && q.completed_at_ms / (CAMPAIGN_TURN_SECS as u64 * 1000) > lookback_start
         })
         .map(|q| q.reward_applied.gold + q.reward_applied.reputation * 0.5)
         .sum();
@@ -143,7 +143,7 @@ fn process_claims(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
         .filter(|q| {
             q.quest_type == QuestType::Escort
                 && q.result == QuestResult::Defeat
-                && q.completed_at_ms / CAMPAIGN_TICK_MS as u64 > lookback_start
+                && q.completed_at_ms / (CAMPAIGN_TURN_SECS as u64 * 1000) > lookback_start
         })
         .map(|q| q.reward_applied.gold.max(50.0)) // Minimum cargo value of 50
         .sum();
@@ -195,7 +195,7 @@ fn process_claims(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
         .filter(|q| {
             (q.quest_type == QuestType::Gather || q.quest_type == QuestType::Escort)
                 && q.result == QuestResult::Defeat
-                && q.completed_at_ms / CAMPAIGN_TICK_MS as u64 > lookback_start
+                && q.completed_at_ms / (CAMPAIGN_TURN_SECS as u64 * 1000) > lookback_start
         })
         .map(|q| q.reward_applied.gold.max(30.0))
         .sum();

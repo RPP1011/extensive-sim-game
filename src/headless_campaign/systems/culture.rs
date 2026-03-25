@@ -15,7 +15,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the culture system ticks (in ticks).
-const CULTURE_INTERVAL: u64 = 500;
+const CULTURE_INTERVAL: u64 = 17;
 
 /// Influence gain per completed quest of a matching type in the region.
 const QUEST_INFLUENCE_GAIN: f32 = 3.0;
@@ -52,7 +52,7 @@ pub fn tick_culture(
 
     // --- Phase 1: Tally guild activity per region from recent completed quests ---
     // We look at quests completed in the last CULTURE_INTERVAL ticks.
-    let window_start_ms = state.elapsed_ms.saturating_sub(CULTURE_INTERVAL * CAMPAIGN_TICK_MS as u64);
+    let window_start_ms = state.elapsed_ms.saturating_sub(CULTURE_INTERVAL * CAMPAIGN_TURN_SECS as u64 * 1000);
     let mut region_activity: Vec<[f32; 4]> = vec![[0.0; 4]; num_regions];
 
     for quest in &state.completed_quests {

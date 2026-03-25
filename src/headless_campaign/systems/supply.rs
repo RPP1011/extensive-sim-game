@@ -4,14 +4,14 @@
 //! Emits `PartySupplyLow` when supply drops below 20%.
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
-use crate::headless_campaign::state::{CampaignState, PartyStatus, CAMPAIGN_TICK_MS};
+use crate::headless_campaign::state::{CampaignState, PartyStatus, CAMPAIGN_TURN_SECS};
 
 pub fn tick_supply(
     state: &mut CampaignState,
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    let dt_sec = CAMPAIGN_TICK_MS as f32 / 1000.0;
+    let dt_sec = CAMPAIGN_TURN_SECS as f32;
     let drain_rate = state.config.supply.drain_per_member_per_sec;
     let low_threshold = state.config.supply.low_threshold;
 

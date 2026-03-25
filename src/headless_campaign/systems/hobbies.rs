@@ -10,10 +10,10 @@ use crate::headless_campaign::state::{
 };
 
 /// How often to tick hobbies (in ticks).
-const HOBBY_INTERVAL: u64 = 200;
+const HOBBY_INTERVAL: u64 = 7;
 
 /// How many ticks an adventurer must be idle before picking a hobby.
-const IDLE_THRESHOLD: u64 = 500;
+const IDLE_THRESHOLD: u64 = 17;
 
 /// Skill gain per hobby tick for idle adventurers.
 const SKILL_GAIN_PER_TICK: f32 = 2.0;

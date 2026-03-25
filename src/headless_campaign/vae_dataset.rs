@@ -526,8 +526,8 @@ fn diverse_policy(
         });
     }
 
-    // Every 500 ticks, try to exercise systems that haven't fired yet
-    if state.tick > 0 && state.tick % 500 == 0 {
+    // Every 17 turns, try to exercise systems that haven't fired yet
+    if state.tick > 0 && state.tick % 17 == 0 {
         // Need a mutable copy of the state for the exerciser to inspect
         // (we only read state, mutation happens through returned action)
         if let Some(action) = exercise_dormant_systems(

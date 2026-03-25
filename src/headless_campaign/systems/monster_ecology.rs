@@ -28,7 +28,7 @@ const CARAVAN_ATTACK_AGGRESSION: f32 = 60.0;
 /// Population reduction from settlement attacks.
 const SETTLEMENT_ATTACK_POP_COST: f32 = 5.0;
 /// Tick cadence for this system.
-const ECOLOGY_TICK_INTERVAL: u64 = 200;
+const ECOLOGY_TICK_INTERVAL: u64 = 7;
 
 /// Tick the monster ecology system. Runs every 200 ticks.
 pub fn tick_monster_ecology(

@@ -9,7 +9,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the demonic pacts system ticks (in ticks).
-const PACT_INTERVAL: u64 = 200;
+const PACT_INTERVAL: u64 = 7;
 
 /// Chance per eligible adventurer per cycle to be offered a pact.
 const OFFER_CHANCE: f32 = 0.05;

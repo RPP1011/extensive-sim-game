@@ -8,7 +8,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often corruption ticks (in ticks).
-const CORRUPTION_INTERVAL: u64 = 200;
+const CORRUPTION_INTERVAL: u64 = 7;
 
 /// Tick the corruption system. Called every tick; internally gates on interval.
 pub fn tick_corruption(

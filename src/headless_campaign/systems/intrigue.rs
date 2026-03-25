@@ -9,16 +9,16 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to check for new intrigues and resolve existing ones.
-const INTRIGUE_INTERVAL: u64 = 500;
+const INTRIGUE_INTERVAL: u64 = 17;
 
 /// Base chance per qualifying faction per tick of spawning an intrigue.
 const BASE_INTRIGUE_CHANCE: f32 = 0.05;
 
 /// Minimum ticks before an intrigue resolves.
-const MIN_RESOLUTION_TICKS: u64 = 1000;
+const MIN_RESOLUTION_TICKS: u64 = 33;
 
 /// Maximum ticks before an intrigue resolves.
-const MAX_RESOLUTION_TICKS: u64 = 2000;
+const MAX_RESOLUTION_TICKS: u64 = 67;
 
 /// Maximum concurrent active (unresolved) intrigues.
 const MAX_ACTIVE_INTRIGUES: usize = 5;
@@ -373,8 +373,8 @@ fn build_intrigue_choice(
     // Default option is always the last one (stay neutral).
     let default_option = options.len() - 1;
 
-    // Deadline: 5000 ticks (~500s game time) to decide.
-    let deadline_ms = Some(state.elapsed_ms + 5000 * CAMPAIGN_TICK_MS as u64);
+    // Deadline: ~167 turns (~500s game time) to decide.
+    let deadline_ms = Some(state.elapsed_ms + 167 * CAMPAIGN_TURN_SECS as u64 * 1000);
 
     ChoiceEvent {
         id: choice_id,

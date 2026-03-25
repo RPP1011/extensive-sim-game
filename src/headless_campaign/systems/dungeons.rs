@@ -8,7 +8,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Cadence: runs every 300 ticks.
-const DUNGEON_INTERVAL: u64 = 300;
+const DUNGEON_INTERVAL: u64 = 10;
 
 /// Monster strength regeneration per tick (capped at base strength).
 const MONSTER_REGEN_RATE: f32 = 1.0;

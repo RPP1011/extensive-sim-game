@@ -1,14 +1,20 @@
 //! Campaign state for headless simulation.
 //!
 //! All types are `Clone + Debug` for MCTS tree search (cheap state cloning,
-//! deterministic stepping). The game world advances via fixed 100ms ticks.
+//! deterministic stepping). The game world advances via 3-second campaign turns.
+//! Combat uses its own 100ms tick rate separately.
 
 use serde::{Deserialize, Serialize};
 
 use super::config::CampaignConfig;
 
 /// Fixed tick duration in milliseconds, matching the combat sim.
+/// Kept for elapsed_ms calculations and backward compatibility.
 pub const CAMPAIGN_TICK_MS: u32 = 100;
+
+/// Campaign turn duration in seconds. Each campaign tick = 3 seconds of game time.
+/// A 20-hour campaign = ~24,000 turns. Combat uses CAMPAIGN_TICK_MS (100ms) separately.
+pub const CAMPAIGN_TURN_SECS: u32 = 3;
 
 // ---------------------------------------------------------------------------
 // Top-level state
@@ -23,7 +29,7 @@ pub struct CampaignState {
     // --- Time ---
     /// Monotonic tick counter (increments by 1 each step).
     pub tick: u64,
-    /// Total elapsed game time in milliseconds (`tick * CAMPAIGN_TICK_MS`).
+    /// Total elapsed game time in milliseconds (`tick * CAMPAIGN_TURN_SECS * 1000`).
     pub elapsed_ms: u64,
 
     // --- Guild ---

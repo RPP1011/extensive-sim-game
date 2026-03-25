@@ -14,10 +14,10 @@ use crate::headless_campaign::state::{
 const MAX_ACTIVE_CONTRACTS: usize = 5;
 
 /// How often to tick contracts (in ticks).
-const CONTRACT_TICK_INTERVAL: u64 = 300;
+const CONTRACT_TICK_INTERVAL: u64 = 10;
 
 /// How often to refresh available contracts (in ticks).
-const CONTRACT_REFRESH_INTERVAL: u64 = 1000;
+const CONTRACT_REFRESH_INTERVAL: u64 = 33;
 
 /// Run the contracts system. Called every tick; gates internally on cadence.
 pub fn tick_contracts(
@@ -144,10 +144,10 @@ fn generate_single_contract(state: &mut CampaignState, guild_tier: u32) -> Contr
     let penalty_gold = reward_gold * 0.3;
     let penalty_reputation = reward_reputation * 0.5;
 
-    // Deadline: 2000-5000 ticks from now, shorter at higher tier
-    let base_deadline = 5000 - (guild_tier as u64 * 500);
-    let deadline_variance = lcg_next(&mut state.rng) as u64 % 2000;
-    let deadline_tick = state.tick + base_deadline.saturating_sub(deadline_variance).max(1500);
+    // Deadline: 67-167 turns from now (~3-8 minutes), shorter at higher tier
+    let base_deadline = 167 - (guild_tier as u64 * 17);
+    let deadline_variance = lcg_next(&mut state.rng) as u64 % 67;
+    let deadline_tick = state.tick + base_deadline.saturating_sub(deadline_variance).max(50);
 
     Contract {
         id,

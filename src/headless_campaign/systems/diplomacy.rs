@@ -12,10 +12,10 @@ use crate::headless_campaign::state::*;
 use super::class_system::effective_noncombat_stats;
 
 /// Diplomacy cadence: every 200 ticks.
-const DIPLOMACY_INTERVAL: u64 = 200;
+const DIPLOMACY_INTERVAL: u64 = 7;
 
 /// Duration of a trade agreement in ticks.
-const TRADE_DURATION: u64 = 5000;
+const TRADE_DURATION: u64 = 167;
 /// Duration of a non-aggression pact in ticks.
 const NAP_DURATION: u64 = 8000;
 /// Duration of a military alliance in ticks.

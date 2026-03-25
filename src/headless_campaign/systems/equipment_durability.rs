@@ -10,7 +10,7 @@ use crate::headless_campaign::state::{
 };
 
 /// How often to tick equipment durability (in ticks).
-const DURABILITY_INTERVAL: u64 = 200;
+const DURABILITY_INTERVAL: u64 = 7;
 
 /// Durability lost per combat battle for weapons/armor.
 const COMBAT_DEGRADATION: f32 = 5.0;

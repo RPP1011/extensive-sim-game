@@ -10,7 +10,7 @@ use crate::headless_campaign::state::{
 };
 
 /// Tick interval for reputation updates.
-const REPUTATION_TICK_INTERVAL: u64 = 300;
+const REPUTATION_TICK_INTERVAL: u64 = 10;
 
 /// Reputation drift rate per tick toward 0.
 const DRIFT_RATE: f32 = 0.5;

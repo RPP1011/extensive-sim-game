@@ -9,7 +9,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to check for new timed events (in ticks).
-const EVENT_INTERVAL: u64 = 200;
+const EVENT_INTERVAL: u64 = 7;
 
 /// Base probability of an event firing each roll (5%).
 const BASE_CHANCE: f32 = 0.05;
@@ -78,8 +78,8 @@ pub fn tick_timed_events(
     // --- Pick event type ---
     let event_type = pick_event_type(&mut state.rng);
 
-    // --- Determine duration (200-500 ticks) ---
-    let duration = 200 + (lcg_next(&mut state.rng) % 301) as u64;
+    // --- Determine duration (7-17 turns, ~21-51 seconds) ---
+    let duration = 7 + (lcg_next(&mut state.rng) % 11) as u64;
     let deadline_tick = state.tick + duration;
 
     // --- Determine difficulty (0.2 - 1.0) ---

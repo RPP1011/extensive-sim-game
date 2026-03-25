@@ -163,7 +163,7 @@ pub fn tick_quest_lifecycle(
         }
 
         // Accumulate elapsed time
-        state.active_quests[i].elapsed_ms += CAMPAIGN_TICK_MS as u64;
+        state.active_quests[i].elapsed_ms += CAMPAIGN_TURN_SECS as u64 * 1000;
     }
 
     // Create new battles

@@ -10,7 +10,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::{lcg_f32, CampaignState};
 
 /// How often to evaluate debt exposure and cascade risk (in ticks).
-const CASCADE_INTERVAL: u64 = 500;
+const CASCADE_INTERVAL: u64 = 17;
 
 /// Number of defaults in a single cycle that triggers a credit freeze.
 const CREDIT_FREEZE_THRESHOLD: usize = 2;

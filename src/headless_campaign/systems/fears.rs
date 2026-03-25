@@ -8,7 +8,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to tick the fear system (in ticks).
-const FEAR_INTERVAL: u64 = 300;
+const FEAR_INTERVAL: u64 = 10;
 
 /// Chance of developing Darkness fear after near-death in dungeon.
 const DARKNESS_FEAR_CHANCE: f32 = 0.30;

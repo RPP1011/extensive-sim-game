@@ -9,7 +9,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Cadence: runs every 100 ticks.
-const EXPLORATION_INTERVAL: u64 = 100;
+const EXPLORATION_INTERVAL: u64 = 3;
 
 /// Tile cell size in world units. The overworld is divided into a grid of
 /// cells this wide/tall for exploration tracking.

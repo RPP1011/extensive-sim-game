@@ -12,7 +12,7 @@ use crate::headless_campaign::state::*;
 use super::class_system::effective_noncombat_stats;
 
 /// How often the archives system ticks (in ticks).
-const ARCHIVES_INTERVAL: u64 = 500;
+const ARCHIVES_INTERVAL: u64 = 17;
 
 /// Knowledge gained per quest completed in the window.
 const QUEST_COMPLETION_KNOWLEDGE: f32 = 5.0;
@@ -76,7 +76,7 @@ pub fn tick_archives(
 
     // Quest completions in the last interval window.
     let window_start_ms =
-        state.elapsed_ms.saturating_sub(ARCHIVES_INTERVAL * CAMPAIGN_TICK_MS as u64);
+        state.elapsed_ms.saturating_sub(ARCHIVES_INTERVAL * CAMPAIGN_TURN_SECS as u64 * 1000);
 
     let quest_completions = state
         .completed_quests

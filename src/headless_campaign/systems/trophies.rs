@@ -10,7 +10,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to apply passive trophy bonuses (in ticks).
-const TROPHY_TICK_INTERVAL: u64 = 500;
+const TROPHY_TICK_INTERVAL: u64 = 17;
 
 /// Maximum trophies the hall can hold.
 const MAX_TROPHIES: usize = 10;
@@ -49,7 +49,7 @@ fn check_trophy_triggers(state: &mut CampaignState, events: &mut Vec<WorldEvent>
     let mut candidates: Vec<TrophyCandidate> = Vec::new();
 
     let tick_window_start = state.tick.saturating_sub(TROPHY_TICK_INTERVAL);
-    let tick_window_start_ms = tick_window_start * CAMPAIGN_TICK_MS as u64;
+    let tick_window_start_ms = tick_window_start * CAMPAIGN_TURN_SECS as u64 * 1000;
     let current_tick = state.tick;
 
     // --- NemesisSkull: high-threat combat quest victories ---

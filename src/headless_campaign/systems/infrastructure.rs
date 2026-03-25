@@ -17,7 +17,7 @@ use crate::headless_campaign::state::{
 };
 
 /// Cadence: runs every 200 ticks.
-const INFRA_TICK_INTERVAL: u64 = 200;
+const INFRA_TICK_INTERVAL: u64 = 7;
 
 /// Maintenance cost per level per tick (gold).
 const MAINTENANCE_PER_LEVEL: f32 = 0.02;

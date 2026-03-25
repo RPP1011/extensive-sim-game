@@ -49,7 +49,7 @@ pub fn tick_rivalries(
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % 300 != 0 {
+    if state.tick % 10 != 0 {
         return;
     }
 

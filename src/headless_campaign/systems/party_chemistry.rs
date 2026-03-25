@@ -101,7 +101,7 @@ pub fn tick_party_chemistry(
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % 200 != 0 {
+    if state.tick % 7 != 0 {
         return;
     }
 

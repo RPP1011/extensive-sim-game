@@ -135,7 +135,7 @@ pub fn max_room_count(state: &CampaignState) -> usize {
 // ---------------------------------------------------------------------------
 
 /// Guild rooms tick interval (500 ticks = 50s game time).
-const GUILD_ROOMS_TICK_INTERVAL: u64 = 500;
+const GUILD_ROOMS_TICK_INTERVAL: u64 = 17;
 
 pub fn tick_guild_rooms(
     state: &mut CampaignState,

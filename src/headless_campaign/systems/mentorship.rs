@@ -15,16 +15,16 @@ use crate::headless_campaign::systems::bonds::bond_key;
 const BASE_MENTOR_XP: f32 = 5.0;
 
 /// Ticks of mentorship before a history tag transfers.
-const TAG_TRANSFER_THRESHOLD: u64 = 500;
+const TAG_TRANSFER_THRESHOLD: u64 = 17;
 
 /// Maximum mentorship duration in ticks.
-const MAX_MENTORSHIP_TICKS: u64 = 2000;
+const MAX_MENTORSHIP_TICKS: u64 = 67;
 
 /// Maximum active mentorships per mentor.
 pub const MAX_APPRENTICES_PER_MENTOR: usize = 2;
 
 /// Tick cadence.
-const MENTORSHIP_CADENCE: u64 = 100;
+const MENTORSHIP_CADENCE: u64 = 3;
 
 /// Main tick function. Called every 100 ticks.
 ///

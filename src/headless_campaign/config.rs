@@ -109,7 +109,7 @@ pub struct QuestGenerationConfig {
 impl Default for QuestGenerationConfig {
     fn default() -> Self {
         Self {
-            base_arrival_interval_ticks: 150,
+            base_arrival_interval_ticks: 20, // ~1 minute between quest arrivals at rep 50
             reputation_scaling_center: 50.0,
             reputation_factor_min: 0.5,
             reputation_factor_max: 2.0,
@@ -125,7 +125,7 @@ impl Default for QuestGenerationConfig {
             rep_per_threat: 0.1,
             max_rep_reward: 5.0,
             gather_supply_reward: 15.0,
-            quest_deadline_ms: 120_000,
+            quest_deadline_ms: 900_000, // 300 turns * 3s = 15 minutes
         }
     }
 }

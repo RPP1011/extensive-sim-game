@@ -14,7 +14,7 @@ use crate::headless_campaign::state::*;
 
 /// Quest branch checks run every tick to catch quests in Preparing status.
 /// NPC/world event checks run at a slower cadence.
-const WORLD_EVENT_INTERVAL: u64 = 300;
+const WORLD_EVENT_INTERVAL: u64 = 10;
 
 /// Maximum simultaneous pending choices.
 const MAX_PENDING_CHOICES: usize = 3;

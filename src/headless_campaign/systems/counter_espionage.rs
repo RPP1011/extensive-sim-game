@@ -8,7 +8,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Cadence: runs every 200 ticks.
-const COUNTER_ESPIONAGE_INTERVAL: u64 = 200;
+const COUNTER_ESPIONAGE_INTERVAL: u64 = 7;
 
 /// Chance (0–1) per hostile faction per tick to plant an agent.
 const PLANT_CHANCE: f32 = 0.03;

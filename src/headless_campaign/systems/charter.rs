@@ -14,7 +14,7 @@ pub fn tick_charter(
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % 500 != 0 || state.tick == 0 {
+    if state.tick % 17 != 0 || state.tick == 0 {
         return;
     }
 

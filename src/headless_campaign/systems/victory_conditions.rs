@@ -13,8 +13,8 @@
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
-/// How often to check victory progress (in ticks).
-const VICTORY_CHECK_INTERVAL: u64 = 200;
+/// How often to check victory progress (in turns, ~21 seconds).
+const VICTORY_CHECK_INTERVAL: u64 = 7;
 
 /// Tick the victory conditions system.
 ///
@@ -75,19 +75,19 @@ fn compute_progress(state: &CampaignState, condition: VictoryCondition) -> f32 {
             (state.overworld.campaign_progress * 100.0).clamp(0.0, 100.0)
         }
         VictoryCondition::EconomicDominance => {
-            let target = 5000.0_f32;
+            let target = 50_000.0_f32; // 10x harder for longer campaigns
             (state.victory_progress.total_gold_earned / target * 100.0).clamp(0.0, 100.0)
         }
         VictoryCondition::DiplomaticUnity => {
             if state.factions.is_empty() {
                 return 0.0;
             }
-            // All non-guild factions must have relation > 60.
+            // All non-guild factions must have relation > 75 (stricter for longer campaign).
             let qualifying = state
                 .factions
                 .iter()
                 .filter(|f| f.id != state.diplomacy.guild_faction_id)
-                .filter(|f| f.relationship_to_guild > 60.0)
+                .filter(|f| f.relationship_to_guild > 75.0)
                 .count();
             let total_non_guild = state
                 .factions
@@ -113,15 +113,16 @@ fn compute_progress(state: &CampaignState, condition: VictoryCondition) -> f32 {
                 .clamp(0.0, 100.0)
         }
         VictoryCondition::CulturalHegemony => {
-            // Two sub-goals each worth 50%:
-            // 1. Any adventurer at Legend tier (tier 5)
-            // 2. All 6 buildings at tier 3
+            // Three sub-goals:
+            // 1. Any adventurer at Legend tier (tier 5) — 30%
+            // 2. All 6 buildings at tier 3 — 30%
+            // 3. Any adventurer with a class at level 40+ — 40%
             let has_legend = state
                 .adventurers
                 .iter()
                 .any(|a| a.tier_status.tier >= 5 && a.status != AdventurerStatus::Dead);
-            let legend_pct = if has_legend { 50.0 } else {
-                // Partial: highest tier / 5 * 50
+            let legend_pct = if has_legend { 30.0 } else {
+                // Partial: highest tier / 5 * 30
                 let max_tier = state
                     .adventurers
                     .iter()
@@ -129,19 +130,28 @@ fn compute_progress(state: &CampaignState, condition: VictoryCondition) -> f32 {
                     .map(|a| a.tier_status.tier)
                     .max()
                     .unwrap_or(0);
-                (max_tier as f32 / 5.0 * 50.0).clamp(0.0, 50.0)
+                (max_tier as f32 / 5.0 * 30.0).clamp(0.0, 30.0)
             };
+
+            let max_class_level = state
+                .adventurers
+                .iter()
+                .filter(|a| a.status != AdventurerStatus::Dead)
+                .flat_map(|a| a.classes.iter().map(|c| c.level))
+                .max()
+                .unwrap_or(0);
+            let class_pct = (max_class_level as f32 / 40.0 * 40.0).clamp(0.0, 40.0);
 
             let b = &state.guild_buildings;
             let total_tiers = (b.training_grounds + b.watchtower + b.trade_post
                 + b.barracks + b.infirmary + b.war_room) as f32;
             let max_total = 18.0; // 6 buildings * 3 max tier
-            let building_pct = (total_tiers / max_total * 50.0).clamp(0.0, 50.0);
+            let building_pct = (total_tiers / max_total * 30.0).clamp(0.0, 30.0);
 
-            (legend_pct + building_pct).clamp(0.0, 100.0)
+            (legend_pct + building_pct + class_pct).clamp(0.0, 100.0)
         }
         VictoryCondition::QuestMaster => {
-            let target = 50.0_f32;
+            let target = 150.0_f32; // 3x harder for longer campaigns
             let completed = state.victory_progress.quests_completed as f32;
             (completed / target * 100.0).clamp(0.0, 100.0)
         }

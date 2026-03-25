@@ -8,7 +8,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to tick skill challenges (in ticks).
-const CHALLENGE_INTERVAL: u64 = 200;
+const CHALLENGE_INTERVAL: u64 = 7;
 
 /// Chance per active quest of generating a skill challenge each tick.
 const CHALLENGE_CHANCE: f32 = 0.30;

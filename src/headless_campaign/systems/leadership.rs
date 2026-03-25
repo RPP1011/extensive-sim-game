@@ -9,10 +9,10 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to run leadership logic (in ticks).
-const LEADERSHIP_INTERVAL: u64 = 500;
+const LEADERSHIP_INTERVAL: u64 = 17;
 
 /// Duration of succession crisis in ticks.
-const SUCCESSION_CRISIS_TICKS: u64 = 300;
+const SUCCESSION_CRISIS_TICKS: u64 = 10;
 
 /// Approval threshold below which a leader voluntarily retires.
 const LOW_APPROVAL_THRESHOLD: f32 = 20.0;

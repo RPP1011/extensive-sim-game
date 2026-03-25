@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::f64;
 
 use super::actions::CampaignAction;
-use super::state::{CampaignOutcome, CampaignPhase, CampaignState, CAMPAIGN_TICK_MS};
+use super::state::{CampaignOutcome, CampaignPhase, CampaignState};
 use super::step::step_campaign;
 
 pub use rollout::heuristic_rollout_policy;

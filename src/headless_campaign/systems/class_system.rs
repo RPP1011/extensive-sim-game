@@ -11,14 +11,14 @@ use crate::headless_campaign::state::{
     ClassTemplate, ConsolidationOffer, GrantedSkill, SkillRarity,
 };
 
-/// Class system fires every 50 ticks (5 s game time) — fast enough for early class development.
-const CLASS_TICK_INTERVAL: u64 = 50;
+/// Class system fires every turn (3 s game time) — fast enough for early class development.
+const CLASS_TICK_INTERVAL: u64 = 1;
 
-/// Consolidation check fires every 500 ticks.
-const CONSOLIDATION_INTERVAL: u64 = 500;
+/// Consolidation check fires every 17 turns (~51 s game time).
+const CONSOLIDATION_INTERVAL: u64 = 17;
 
-/// Reactive narrative (shame, crisis, erosion, chronicle) fires every 200 ticks.
-const REACTIVE_NARRATIVE_INTERVAL: u64 = 200;
+/// Reactive narrative (shame, crisis, erosion, chronicle) fires every 7 turns (~21 s).
+const REACTIVE_NARRATIVE_INTERVAL: u64 = 7;
 
 /// Minimum level on both classes before consolidation is offered.
 const CONSOLIDATION_MIN_LEVEL: u32 = 10;
@@ -26,8 +26,8 @@ const CONSOLIDATION_MIN_LEVEL: u32 = 10;
 /// Probability of auto-accepting a consolidation offer.
 const CONSOLIDATION_ACCEPT_PROB: f32 = 0.70;
 
-/// Ticks before a consolidation offer expires.
-const CONSOLIDATION_DEADLINE_TICKS: u32 = 1000;
+/// Turns before a consolidation offer expires (~100 seconds).
+const CONSOLIDATION_DEADLINE_TICKS: u32 = 33;
 
 /// Minimum class level for evolution.
 const EVOLUTION_MIN_LEVEL: u32 = 20;
@@ -292,14 +292,14 @@ pub fn tick_class_system(
     }
 
     // Mirror offers & oath-locked classes every 300 ticks
-    if state.tick % 300 == 0 {
+    if state.tick % 10 == 0 {
         check_mirror_offers(state, events);
         check_oath_locked_classes(state, events);
         track_heroic_acts(state, events);
     }
 
     // Rival-reflected & folk hero divergence every 500 ticks
-    if state.tick % 500 == 0 {
+    if state.tick % 17 == 0 {
         check_rival_classes(state, events);
         check_folk_hero_divergence(state, events);
     }
@@ -818,7 +818,7 @@ fn check_class_acquisition(state: &mut CampaignState, events: &mut Vec<WorldEven
                         class_name: tmpl.class_name.clone(),
                         level: 1,
                         xp: transferred_xp,
-                        xp_to_next: 15.0,
+                        xp_to_next: 150.0,
                         stagnation_ticks: 0,
                         skills_granted: old_skills,
                         acquired_tick: tick,
@@ -847,7 +847,7 @@ fn check_class_acquisition(state: &mut CampaignState, events: &mut Vec<WorldEven
                         class_name: tmpl.class_name.clone(),
                         level: 1,
                         xp: 0.0,
-                        xp_to_next: 15.0, // 1^2 * 15
+                        xp_to_next: 150.0, // level 1 * 150
                         stagnation_ticks: 0,
                         skills_granted: Vec::new(),
                         acquired_tick: tick,
@@ -891,7 +891,7 @@ fn check_class_acquisition(state: &mut CampaignState, events: &mut Vec<WorldEven
                     } else { "Wandering Enigma".to_string() };
                     adv.classes.push(ClassInstance {
                         class_name: unique_name.clone(), level: 1, xp: 0.0,
-                        xp_to_next: 15.0, stagnation_ticks: 0, skills_granted: Vec::new(),
+                        xp_to_next: 150.0, stagnation_ticks: 0, skills_granted: Vec::new(),
                         acquired_tick: tick, identity_coherence: 1.0,
                         exclusion_cooldown: 0, ..Default::default()
                     });
@@ -942,7 +942,7 @@ fn process_class_xp(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
             // Find template for XP scoring
             let tmpl = templates.iter().find(|t| t.class_name == class.class_name);
             let raw_xp = if let Some(tmpl) = tmpl {
-                score_template(&fp, tmpl) * 50.0
+                score_template(&fp, tmpl) * 10.0
             } else {
                 // For unique/generated classes without templates, use the total
                 // behavior magnitude as XP source (they level from ANY activity)
@@ -1001,7 +1001,7 @@ fn process_class_xp(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                 while class.xp >= class.xp_to_next {
                     class.xp -= class.xp_to_next;
                     class.level += 1;
-                    class.xp_to_next = (class.level * class.level) as f32 * 15.0;
+                    class.xp_to_next = class.level as f32 * 150.0;
                     events.push(WorldEvent::ClassLevelUp {
                         adventurer_id: adv.id,
                         class_name: class.class_name.clone(),
@@ -1098,7 +1098,7 @@ fn check_capstone_resolution(state: &mut CampaignState, events: &mut Vec<WorldEv
                 while class.xp >= class.xp_to_next {
                     class.xp -= class.xp_to_next;
                     class.level += 1;
-                    class.xp_to_next = (class.level * class.level) as f32 * 15.0;
+                    class.xp_to_next = class.level as f32 * 150.0;
                     events.push(WorldEvent::ClassLevelUp {
                         adventurer_id: adv.id,
                         class_name: class.class_name.clone(),
@@ -1242,7 +1242,7 @@ fn check_hybrid_unlock(state: &mut CampaignState, events: &mut Vec<WorldEvent>) 
                 class_name: grant.hybrid_name.clone(),
                 level: 1,
                 xp: 0.0,
-                xp_to_next: 50.0, // 2x speed (halved XP requirements)
+                xp_to_next: 75.0, // 2x speed (halved XP requirements)
                 stagnation_ticks: 0,
                 skills_granted: inherited_skills,
                 acquired_tick: tick,
@@ -1881,7 +1881,7 @@ fn check_consolidation_offers(state: &mut CampaignState, events: &mut Vec<WorldE
                 class_name: final_name.clone(),
                 level: new_level,
                 xp: 0.0,
-                xp_to_next: (new_level * new_level) as f32 * 25.0,
+                xp_to_next: new_level as f32 * 150.0,
                 stagnation_ticks: 0,
                 skills_granted: inherited_skills,
                 acquired_tick: tick,
@@ -1949,7 +1949,7 @@ fn check_evolution(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
             // Grant +50% effective stat growth by adding 50% of current level as bonus levels
             let bonus_levels = class.level / 2;
             class.level += bonus_levels;
-            class.xp_to_next = (class.level * class.level) as f32 * 15.0;
+            class.xp_to_next = class.level as f32 * 150.0;
             class.acquired_tick = tick; // Mark evolution tick
 
             events.push(WorldEvent::ClassEvolved {
@@ -2033,7 +2033,7 @@ fn check_shame_classes(state: &mut CampaignState, events: &mut Vec<WorldEvent>) 
                 class_name: "Coward".to_string(),
                 level: 1,
                 xp: 0.0,
-                xp_to_next: 100.0,
+                xp_to_next: 150.0,
                 stagnation_ticks: 0,
                 skills_granted: Vec::new(),
                 acquired_tick: tick,
@@ -2058,7 +2058,7 @@ fn check_shame_classes(state: &mut CampaignState, events: &mut Vec<WorldEvent>) 
                 class_name: "Oathbreaker".to_string(),
                 level: 1,
                 xp: 0.0,
-                xp_to_next: 100.0,
+                xp_to_next: 150.0,
                 stagnation_ticks: 0,
                 skills_granted: Vec::new(),
                 acquired_tick: tick,
@@ -2080,7 +2080,7 @@ fn check_shame_classes(state: &mut CampaignState, events: &mut Vec<WorldEvent>) 
                 class_name: "Deserter".to_string(),
                 level: 1,
                 xp: 0.0,
-                xp_to_next: 100.0,
+                xp_to_next: 150.0,
                 stagnation_ticks: 0,
                 skills_granted: Vec::new(),
                 acquired_tick: tick,
@@ -2383,7 +2383,7 @@ fn check_crisis_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) 
                 class_name: grant.class_name.clone(),
                 level: 1,
                 xp: 0.0,
-                xp_to_next: 100.0,
+                xp_to_next: 150.0,
                 stagnation_ticks: 0,
                 skills_granted: Vec::new(),
                 acquired_tick: tick,
@@ -2559,7 +2559,7 @@ fn check_identity_erosion(state: &mut CampaignState, events: &mut Vec<WorldEvent
                     class_name: frac.replacement.clone(),
                     level: (old_level / 2).max(1),
                     xp: 0.0,
-                    xp_to_next: ((old_level / 2).max(1).pow(2)) as f32 * 100.0,
+                    xp_to_next: (old_level / 2).max(1) as f32 * 150.0,
                     stagnation_ticks: 0,
                     skills_granted: Vec::new(),
                     acquired_tick: tick,
@@ -3102,7 +3102,7 @@ fn check_world_gated_classes(state: &mut CampaignState, events: &mut Vec<WorldEv
                 class_name: grant.class_name.clone(),
                 level: 1,
                 xp: 0.0,
-                xp_to_next: 100.0,
+                xp_to_next: 150.0,
                 stagnation_ticks: 0,
                 skills_granted: Vec::new(),
                 acquired_tick: tick_u32,
@@ -3138,8 +3138,8 @@ fn check_world_gated_classes(state: &mut CampaignState, events: &mut Vec<WorldEv
 // Crisis Escape Valve Consolidation (idea 4.10)
 // ---------------------------------------------------------------------------
 
-/// Emergency consolidation deadline (much shorter than normal).
-const EMERGENCY_CONSOLIDATION_DEADLINE: u32 = 200;
+/// Emergency consolidation deadline (much shorter than normal, ~21 seconds).
+const EMERGENCY_CONSOLIDATION_DEADLINE: u32 = 7;
 
 /// When tension > 0.9 and adventurer holds 2+ classes, offer emergency consolidation.
 /// If refused and tension stays > 0.9, 20% chance of negative class mutation.
@@ -3184,7 +3184,7 @@ fn check_crisis_escape_valve(state: &mut CampaignState, events: &mut Vec<WorldEv
         // Check if there's already a pending emergency offer
         let has_pending = state.consolidation_offers.iter().any(|o| {
             o.adventurer_id == adv.id
-                && o.deadline_tick <= o.offered_tick + EMERGENCY_CONSOLIDATION_DEADLINE + 50
+                && o.deadline_tick <= o.offered_tick + EMERGENCY_CONSOLIDATION_DEADLINE + 2
         });
 
         if !has_pending {
@@ -3311,7 +3311,7 @@ fn check_crisis_escape_valve(state: &mut CampaignState, events: &mut Vec<WorldEv
                     class_name: diminished.clone(),
                     level: (old_level / 2).max(1),
                     xp: 0.0,
-                    xp_to_next: ((old_level / 2).max(1).pow(2)) as f32 * 100.0,
+                    xp_to_next: (old_level / 2).max(1) as f32 * 150.0,
                     stagnation_ticks: 0,
                     skills_granted: Vec::new(),
                     acquired_tick: tick,

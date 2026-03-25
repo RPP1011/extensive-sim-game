@@ -14,7 +14,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Cadence: runs every 500 ticks.
-const DEAD_ZONE_INTERVAL: u64 = 500;
+const DEAD_ZONE_INTERVAL: u64 = 17;
 
 /// Extraction pressure added per completed quest in a region.
 const QUEST_PRESSURE: f32 = 0.02;

@@ -11,7 +11,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to check for new weather and apply ongoing effects (in ticks).
-const WEATHER_INTERVAL: u64 = 200;
+const WEATHER_INTERVAL: u64 = 7;
 
 // ---------------------------------------------------------------------------
 // Season-dependent weather probabilities

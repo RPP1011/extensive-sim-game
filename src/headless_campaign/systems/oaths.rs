@@ -9,13 +9,13 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Cadence: runs every 300 ticks.
-const OATH_INTERVAL: u64 = 300;
+const OATH_INTERVAL: u64 = 10;
 
 /// Common quality threshold — items with quality > this are "above common".
 const COMMON_QUALITY_THRESHOLD: f32 = 30.0;
 
 /// Ticks an OathOfExploration adventurer has to visit a new region.
-const EXPLORATION_DEADLINE_TICKS: u64 = 2000;
+const EXPLORATION_DEADLINE_TICKS: u64 = 67;
 
 /// Loyalty threshold for voluntary oath proposals.
 const OATH_PROPOSAL_LOYALTY: f32 = 70.0;
@@ -136,7 +136,7 @@ pub fn tick_oaths(
                     .completed_quests
                     .iter()
                     .filter(|q| {
-                        q.completed_at_ms >= oath.sworn_tick * CAMPAIGN_TICK_MS as u64
+                        q.completed_at_ms >= oath.sworn_tick * CAMPAIGN_TURN_SECS as u64 * 1000
                             && q.result == QuestResult::Victory
                     })
                     .count();
@@ -437,7 +437,7 @@ mod tests {
                 quest_type: QuestType::Combat,
                 result: QuestResult::Victory,
                 reward_applied: QuestReward::default(),
-                completed_at_ms: state.tick * CAMPAIGN_TICK_MS as u64,
+                completed_at_ms: state.tick * CAMPAIGN_TURN_SECS as u64 * 1000,
                 party_id: 0,
                 casualties: 0,
                 threat_level: 50.0,

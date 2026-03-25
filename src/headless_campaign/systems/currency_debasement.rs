@@ -10,7 +10,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the currency debasement system ticks (in ticks).
-const DEBASEMENT_INTERVAL: u64 = 400;
+const DEBASEMENT_INTERVAL: u64 = 13;
 
 /// Amount purity drops per debasement cycle.
 const PURITY_DROP_PER_CYCLE: f32 = 0.05;

@@ -9,7 +9,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to evaluate geography changes (in ticks).
-const GEOGRAPHY_INTERVAL: u64 = 1000;
+const GEOGRAPHY_INTERVAL: u64 = 33;
 
 /// Maximum concurrent geography changes across the world.
 const MAX_ACTIVE_CHANGES: usize = 8;

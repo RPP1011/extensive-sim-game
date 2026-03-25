@@ -9,10 +9,10 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to check for merchant arrivals/departures (in ticks).
-const MERCHANT_INTERVAL: u64 = 500;
+const MERCHANT_INTERVAL: u64 = 17;
 
 /// How long a merchant stays at the guild (in ticks).
-const MERCHANT_STAY_DURATION: u64 = 500;
+const MERCHANT_STAY_DURATION: u64 = 17;
 
 /// Chance of a rare legendary merchant appearing (0.0–1.0).
 const RARE_MERCHANT_CHANCE: f32 = 0.05;

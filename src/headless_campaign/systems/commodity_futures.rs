@@ -10,7 +10,7 @@ use crate::headless_campaign::state::*;
 use crate::headless_campaign::systems::trade_goods::player_trade_price;
 
 /// How often the futures market ticks (settle + generate).
-const FUTURES_TICK_INTERVAL: u64 = 500;
+const FUTURES_TICK_INTERVAL: u64 = 17;
 
 /// Maximum number of active contracts the guild can hold.
 const MAX_ACTIVE_CONTRACTS: usize = 5;
@@ -22,7 +22,7 @@ const CONTRACTS_OFFERED_PER_CYCLE: usize = 3;
 const MAX_PREMIUM_FRACTION: f32 = 0.3;
 
 /// How many ticks until a newly offered contract settles.
-const SETTLEMENT_HORIZON: u64 = 500;
+const SETTLEMENT_HORIZON: u64 = 17;
 
 pub fn tick_commodity_futures(
     state: &mut CampaignState,

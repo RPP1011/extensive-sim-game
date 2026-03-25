@@ -14,12 +14,12 @@ pub fn tick_mercenaries(
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % 200 != 0 || state.tick == 0 {
+    if state.tick % 7 != 0 || state.tick == 0 {
         return;
     }
 
     // --- Rotate available mercenary pool every 1000 ticks ---
-    if state.tick % 1000 == 0 {
+    if state.tick % 33 == 0 {
         generate_available_mercenaries(state);
     }
 

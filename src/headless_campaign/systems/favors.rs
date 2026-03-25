@@ -10,7 +10,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the favor system ticks (in campaign ticks).
-const FAVOR_INTERVAL: u64 = 500;
+const FAVOR_INTERVAL: u64 = 17;
 
 /// Relation penalty when a favor request expires without being completed.
 const EXPIRE_RELATION_PENALTY: f32 = 5.0;
@@ -30,8 +30,8 @@ pub const INTEL_COST: f32 = 15.0;
 pub const TRADE_DEAL_COST: f32 = 20.0;
 pub const DIPLOMATIC_SUPPORT_COST: f32 = 25.0;
 
-/// Duration of trade deal buff (in ticks).
-pub const TRADE_DEAL_DURATION_TICKS: u64 = 5000;
+/// Duration of trade deal buff (in turns). ~8.5 minutes at 3s/turn.
+pub const TRADE_DEAL_DURATION_TICKS: u64 = 167;
 
 /// Relation boost from diplomatic support call-in.
 pub const DIPLOMATIC_SUPPORT_RELATION_BOOST: f32 = 15.0;

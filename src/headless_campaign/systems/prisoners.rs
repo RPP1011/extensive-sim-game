@@ -23,7 +23,7 @@ pub fn tick_prisoners(
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % 200 != 0 || state.tick == 0 {
+    if state.tick % 7 != 0 || state.tick == 0 {
         return;
     }
 
@@ -116,7 +116,7 @@ pub fn tick_prisoners(
                     },
                 ],
                 default_option: 1,
-                deadline_ms: Some(state.elapsed_ms + 2000 * CAMPAIGN_TICK_MS as u64),
+                deadline_ms: Some(state.elapsed_ms + 67 * CAMPAIGN_TURN_SECS as u64 * 1000),
                 created_at_ms: state.elapsed_ms,
             };
 

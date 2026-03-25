@@ -9,7 +9,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often plague vector propagation fires (in ticks).
-const PLAGUE_VECTOR_INTERVAL: u64 = 400;
+const PLAGUE_VECTOR_INTERVAL: u64 = 13;
 
 /// Base chance per tick of a new plague spawning.
 const PLAGUE_SPAWN_CHANCE: f32 = 0.02;

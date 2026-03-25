@@ -390,11 +390,11 @@ impl Default for BfsConfig {
     fn default() -> Self {
         Self {
             max_waves: 0, // 0 = run until completion
-            ticks_per_branch: 200, // ~20s game time per branch
+            ticks_per_branch: 50, // ~2.5 minutes game time per branch
             clusters_per_wave: 20,
             initial_roots: 50,
-            trajectory_max_ticks: 15000,
-            root_sample_interval: 300,
+            trajectory_max_ticks: 30000, // ~25 hours of game time
+            root_sample_interval: 500, // sample every ~25 minutes of game time
             campaign_config: CampaignConfig::default(),
             base_seed: 2026,
             threads: 0,
@@ -3031,7 +3031,7 @@ fn run_branch(
         .wrapping_add(root.state.tick)
         .wrapping_add(action_hash);
 
-    let tpb = config.ticks_per_branch.max(200);
+    let tpb = config.ticks_per_branch.max(20);
     let checkpoints = [tpb / 4, tpb / 2, tpb * 3 / 4];
     let mut intermediate_values = Vec::with_capacity(3);
     let mut tick_count = 0u64;

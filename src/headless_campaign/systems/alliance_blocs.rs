@@ -8,7 +8,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Cadence: every 500 ticks.
-const BLOC_INTERVAL: u64 = 500;
+const BLOC_INTERVAL: u64 = 17;
 
 /// Maximum number of active blocs allowed at any time.
 const MAX_BLOCS: usize = 2;

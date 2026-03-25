@@ -28,7 +28,7 @@ const MARRIAGE_RELATION_BONUS: f32 = 20.0;
 const ONGOING_RELATION_BONUS: f32 = 2.0;
 
 /// Ticks after marriage before heir chance activates.
-const HEIR_GESTATION_TICKS: u64 = 2000;
+const HEIR_GESTATION_TICKS: u64 = 67;
 
 /// Chance of heir per tick_marriages check after gestation period (10%).
 const HEIR_CHANCE: f32 = 0.10;
@@ -56,7 +56,7 @@ pub fn tick_marriages(
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % 500 != 0 {
+    if state.tick % 17 != 0 {
         return;
     }
 

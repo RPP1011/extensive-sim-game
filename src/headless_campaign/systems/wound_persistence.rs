@@ -8,7 +8,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::{AdventurerStatus, CampaignState, WoundType};
 
 /// Heal interval in ticks (every 100 ticks = ~10 seconds of game time).
-const WOUND_HEAL_INTERVAL: u64 = 100;
+const WOUND_HEAL_INTERVAL: u64 = 3;
 
 /// Per-tick heal rate when Idle.
 const HEAL_RATE_IDLE: f32 = 0.01;

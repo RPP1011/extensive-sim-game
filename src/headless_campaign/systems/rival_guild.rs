@@ -33,10 +33,10 @@ const RIVAL_NAMES: &[&str] = &[
 ];
 
 /// Grace period: rival guild activates at this tick.
-const ACTIVATION_TICK: u64 = 2000;
+const ACTIVATION_TICK: u64 = 67;
 
-/// Rival guild ticks every this many ticks.
-const TICK_CADENCE: u64 = 200;
+/// Rival guild ticks every 7 turns (~21 seconds).
+const TICK_CADENCE: u64 = 7;
 
 /// Run the rival guild AI for one tick.
 ///
@@ -234,7 +234,7 @@ fn rival_reputation_growth(state: &mut CampaignState, events: &mut Vec<WorldEven
 
     if rival_rep > player_rep && (rival_rep - player_rep).abs() > 5.0 {
         // Only emit warning occasionally (every 1000 ticks).
-        if state.tick % 1000 == 0 {
+        if state.tick % 33 == 0 {
             events.push(WorldEvent::CampaignMilestone {
                 description: format!(
                     "{} has a higher reputation ({:.0}) than your guild ({:.0}). \
@@ -287,7 +287,7 @@ fn rival_faction_influence(state: &mut CampaignState, events: &mut Vec<WorldEven
         let rival_rel = state.rival_guild.faction_relations[i];
         let player_rel = state.factions[i].relationship_to_guild;
 
-        if rival_rel > 70.0 && rival_rel > player_rel + 20.0 && state.tick % 2000 == 0 {
+        if rival_rel > 70.0 && rival_rel > player_rel + 20.0 && state.tick % 67 == 0 {
             events.push(WorldEvent::CampaignMilestone {
                 description: format!(
                     "{} has strong influence over the {} faction. \

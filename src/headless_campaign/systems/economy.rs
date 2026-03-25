@@ -4,7 +4,7 @@
 //! market price inflation/decay, investment returns, and supply chain penalties.
 
 use crate::headless_campaign::actions::{SpendPriority, StepDeltas, WorldEvent};
-use crate::headless_campaign::state::{AdventurerStatus, CampaignState, CAMPAIGN_TICK_MS};
+use crate::headless_campaign::state::{AdventurerStatus, CampaignState, CAMPAIGN_TURN_SECS};
 use super::class_system::effective_noncombat_stats;
 
 pub fn tick_economy(
@@ -12,7 +12,7 @@ pub fn tick_economy(
     deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    let dt_sec = CAMPAIGN_TICK_MS as f32 / 1000.0;
+    let dt_sec = CAMPAIGN_TURN_SECS as f32;
     deltas.gold_before = state.guild.gold;
     deltas.supplies_before = state.guild.supplies;
     deltas.reputation_before = state.guild.reputation;

@@ -9,7 +9,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often (in ticks) the difficulty system evaluates and adjusts.
-const SCALING_INTERVAL: u64 = 300;
+const SCALING_INTERVAL: u64 = 10;
 
 /// Rate at which current_pressure moves toward target_pressure per tick.
 const PRESSURE_SMOOTHING: f32 = 2.0;

@@ -1048,7 +1048,7 @@ fn tick_decline(
     let rep_recovery = (state.guild.reputation / 50.0).max(0.0);
     let severity = (base_severity - quest_recovery - rep_recovery).max(0.5);
 
-    if state.tick % 100 == 0 {
+    if state.tick % 3 == 0 {
         state.guild.gold = (state.guild.gold - severity * gold_drain_per_tick).max(0.0);
         state.guild.supplies = (state.guild.supplies - severity * supply_drain_per_tick).max(0.0);
 

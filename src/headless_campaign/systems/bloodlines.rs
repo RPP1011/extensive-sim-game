@@ -12,7 +12,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to check bloodline events (in ticks).
-const BLOODLINE_INTERVAL: u64 = 1000;
+const BLOODLINE_INTERVAL: u64 = 33;
 
 /// Minimum adventurer level to establish a bloodline on retirement/death.
 const MIN_BLOODLINE_LEVEL: u32 = 8;

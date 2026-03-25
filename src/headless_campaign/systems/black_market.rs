@@ -8,10 +8,10 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the black market ticks (in ticks).
-const BLACK_MARKET_INTERVAL: u64 = 500;
+const BLACK_MARKET_INTERVAL: u64 = 17;
 
 /// How often deals refresh (in ticks).
-const DEAL_REFRESH_INTERVAL: u64 = 1000;
+const DEAL_REFRESH_INTERVAL: u64 = 33;
 
 /// Heat decay per tick interval when not dealing.
 const HEAT_DECAY_PER_TICK: f32 = 2.0;

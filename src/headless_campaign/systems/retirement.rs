@@ -8,7 +8,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to check for retirement eligibility (in ticks).
-const RETIREMENT_INTERVAL: u64 = 500;
+const RETIREMENT_INTERVAL: u64 = 17;
 
 /// Minimum level required for retirement.
 const MIN_RETIREMENT_LEVEL: u32 = 10;

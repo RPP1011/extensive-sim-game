@@ -11,13 +11,13 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the treasure hunt system ticks.
-const TICK_INTERVAL: u64 = 200;
+const TICK_INTERVAL: u64 = 7;
 
 /// Maximum number of active (started) treasure hunts.
 const MAX_ACTIVE_HUNTS: usize = 3;
 
 /// Ticks before an unstarted map expires.
-const MAP_EXPIRY_TICKS: u64 = 5000;
+const MAP_EXPIRY_TICKS: u64 = 167;
 
 /// Chance of a treasure map dropping on quest completion (threat > 40).
 const MAP_DROP_CHANCE: f32 = 0.05;

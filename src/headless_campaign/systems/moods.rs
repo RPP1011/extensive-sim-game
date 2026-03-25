@@ -10,14 +10,14 @@ use crate::headless_campaign::state::{
 };
 
 /// Mood tick cadence (every 200 ticks = 20 seconds game time).
-const MOOD_TICK_INTERVAL: u64 = 200;
+const MOOD_TICK_INTERVAL: u64 = 7;
 
 /// Duration range for mood decay (ticks). Moods last 500-1000 ticks.
-const MOOD_MIN_DURATION: u64 = 500;
-const MOOD_MAX_DURATION: u64 = 1000;
+const MOOD_MIN_DURATION: u64 = 17;
+const MOOD_MAX_DURATION: u64 = 33;
 
 /// Grieving morale drain duration (ticks).
-const GRIEF_DURATION: u64 = 500;
+const GRIEF_DURATION: u64 = 17;
 
 pub fn tick_moods(
     state: &mut CampaignState,

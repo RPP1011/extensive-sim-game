@@ -7,7 +7,7 @@ use super::actions::*;
 use super::state::*;
 use super::systems;
 
-/// Advance the campaign by one fixed tick (100ms).
+/// Advance the campaign by one turn (3 seconds of game time).
 ///
 /// Optionally applies a player action before ticking the world.
 /// Returns a detailed result with events, deltas, and any violations.
@@ -62,7 +62,7 @@ pub fn step_campaign(
 
     // --- Advance tick ---
     state.tick += 1;
-    state.elapsed_ms = state.tick * CAMPAIGN_TICK_MS as u64;
+    state.elapsed_ms = state.tick * CAMPAIGN_TURN_SECS as u64 * 1000;
 
     // --- Auto-resolve expired choices ---
     resolve_expired_choices(state, &mut events);
@@ -104,8 +104,8 @@ pub fn step_campaign(
     // Scouting / fog-of-war (every 50 ticks)
     systems::scouting::tick_scouting(state, &mut deltas, &mut events);
 
-    // Quest hooks — check triggers against game state
-    if state.tick % 50 == 0 {
+    // Quest hooks — check triggers against game state (every 10 turns = 30 seconds)
+    if state.tick % 10 == 0 {
         super::quest_hooks::evaluate_hooks(state, &mut events);
     }
     systems::threat::tick_threat(state, &mut deltas, &mut events);

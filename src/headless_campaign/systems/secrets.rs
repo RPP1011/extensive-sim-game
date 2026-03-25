@@ -12,7 +12,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to tick the secrets system (in ticks).
-const SECRETS_INTERVAL: u64 = 500;
+const SECRETS_INTERVAL: u64 = 17;
 
 /// Chance that a new recruit gets a secret past (15%).
 const SECRET_ASSIGNMENT_CHANCE: f32 = 0.15;

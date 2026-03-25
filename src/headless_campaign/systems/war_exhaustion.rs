@@ -12,7 +12,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Cadence: every 100 ticks.
-const WAR_EXHAUSTION_INTERVAL: u64 = 100;
+const WAR_EXHAUSTION_INTERVAL: u64 = 3;
 
 /// Base exhaustion gain per tick while at war.
 const BASE_EXHAUSTION_PER_TICK: f32 = 0.5;

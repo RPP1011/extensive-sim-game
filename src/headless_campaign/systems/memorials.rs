@@ -9,16 +9,16 @@ use crate::headless_campaign::state::*;
 use crate::headless_campaign::systems::bonds::bond_key;
 
 /// How often to run the memorial system (in ticks).
-const MEMORIAL_INTERVAL: u64 = 300;
+const MEMORIAL_INTERVAL: u64 = 10;
 
 /// Auto-resolve pending funerals after this many ticks.
-const AUTO_FUNERAL_DELAY: u64 = 500;
+const AUTO_FUNERAL_DELAY: u64 = 17;
 
 /// Maximum number of memorials kept (oldest non-monument replaced).
 const MAX_MEMORIALS: usize = 5;
 
 /// Morale duration for temporary funeral effects (ticks).
-const TEMP_MORALE_DURATION: u64 = 500;
+const TEMP_MORALE_DURATION: u64 = 17;
 
 // ---------------------------------------------------------------------------
 // Tick entry point

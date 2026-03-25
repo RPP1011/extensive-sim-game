@@ -21,7 +21,7 @@ pub fn tick_chronicle(
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % 100 != 0 {
+    if state.tick % 3 != 0 {
         return;
     }
 

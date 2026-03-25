@@ -9,7 +9,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Cadence: one report every 1000 ticks.
-const INTEL_INTERVAL: u64 = 1000;
+const INTEL_INTERVAL: u64 = 33;
 
 /// Maximum number of reports kept in state.
 const MAX_REPORTS: usize = 5;

@@ -29,7 +29,7 @@ pub fn tick_journals(
     _deltas: &mut StepDeltas,
     events: &mut Vec<WorldEvent>,
 ) {
-    if state.tick % 500 != 0 {
+    if state.tick % 17 != 0 {
         return;
     }
 

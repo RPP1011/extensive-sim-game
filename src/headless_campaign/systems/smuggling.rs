@@ -9,7 +9,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often smuggling routes tick (in ticks).
-const SMUGGLING_INTERVAL: u64 = 300;
+const SMUGGLING_INTERVAL: u64 = 10;
 
 /// Gold penalty when a route is busted (multiplier on profit_per_trip).
 const BUST_GOLD_PENALTY_MULT: f32 = 3.0;
@@ -21,7 +21,7 @@ const BUST_REPUTATION_LOSS: f32 = 5.0;
 const BUST_RELATION_LOSS: f32 = 10.0;
 
 /// Ticks a route is suspended after being busted.
-const SUSPENSION_TICKS: u64 = 1000;
+const SUSPENSION_TICKS: u64 = 33;
 
 /// Maximum number of active smuggling routes.
 const MAX_ACTIVE_ROUTES: usize = 3;

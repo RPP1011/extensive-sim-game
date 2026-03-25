@@ -58,5 +58,5 @@ mod systems;
 mod tests;
 
 pub use actions::{CampaignAction, CampaignStepResult, WorldEvent, ActionResult, StepDeltas};
-pub use state::{CampaignState, CampaignOutcome, CAMPAIGN_TICK_MS};
+pub use state::{CampaignState, CampaignOutcome, CAMPAIGN_TICK_MS, CAMPAIGN_TURN_SECS};
 pub use step::step_campaign;

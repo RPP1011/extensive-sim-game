@@ -9,7 +9,7 @@ use crate::headless_campaign::content_prompts;
 use crate::headless_campaign::llm;
 use crate::headless_campaign::state::*;
 
-const TRIGGER_CHECK_INTERVAL: u64 = 50;
+const TRIGGER_CHECK_INTERVAL: u64 = 1;
 
 pub fn tick_progression_triggers(
     state: &mut CampaignState,

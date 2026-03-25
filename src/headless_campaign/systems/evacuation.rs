@@ -8,13 +8,13 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to tick the evacuation system (in ticks).
-const EVACUATION_INTERVAL: u64 = 200;
+const EVACUATION_INTERVAL: u64 = 7;
 
 /// Cost in gold to order an evacuation.
 pub const EVACUATION_COST: f32 = 30.0;
 
 /// Duration of an evacuation in ticks.
-const EVACUATION_DURATION: u64 = 300;
+const EVACUATION_DURATION: u64 = 10;
 
 /// Monster population threshold that triggers a swarm warning.
 const MONSTER_SWARM_THRESHOLD: f32 = 90.0;
@@ -204,7 +204,7 @@ fn detect_triggers(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
             reason, region_name, dest_name, EVACUATION_COST
         );
 
-        let deadline_ms = state.elapsed_ms + (400 * CAMPAIGN_TICK_MS as u64);
+        let deadline_ms = state.elapsed_ms + (13 * CAMPAIGN_TURN_SECS as u64 * 1000);
 
         state.pending_choices.push(ChoiceEvent {
             id: choice_id,

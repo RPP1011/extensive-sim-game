@@ -9,7 +9,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often faction tech advances (in ticks).
-const TECH_INTERVAL: u64 = 500;
+const TECH_INTERVAL: u64 = 17;
 
 /// Advance faction technology levels based on each faction's situation.
 pub fn tick_faction_tech(

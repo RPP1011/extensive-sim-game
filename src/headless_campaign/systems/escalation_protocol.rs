@@ -8,13 +8,13 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often (in ticks) the escalation system evaluates.
-const ESCALATION_INTERVAL: u64 = 400;
+const ESCALATION_INTERVAL: u64 = 13;
 
 /// Patrol losses decay by 1 per this many ticks of no new attacks.
-const LOSS_DECAY_INTERVAL: u64 = 1000;
+const LOSS_DECAY_INTERVAL: u64 = 33;
 
 /// If the guild stops attacking for this many ticks, escalation drops by 1.
-const DE_ESCALATION_THRESHOLD: u64 = 2000;
+const DE_ESCALATION_THRESHOLD: u64 = 67;
 
 /// Maximum escalation level.
 const MAX_ESCALATION: u32 = 5;

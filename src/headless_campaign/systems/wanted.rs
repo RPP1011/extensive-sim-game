@@ -11,10 +11,10 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Cadence: wanted system ticks every 300 ticks.
-const TICK_CADENCE: u64 = 300;
+const TICK_CADENCE: u64 = 10;
 
 /// Posters expire after this many ticks.
-const POSTER_EXPIRY_TICKS: u64 = 5000;
+const POSTER_EXPIRY_TICKS: u64 = 167;
 
 /// Faction relation threshold above which posters are removed diplomatically.
 const DIPLOMACY_REMOVAL_THRESHOLD: f32 = 30.0;
@@ -72,7 +72,7 @@ fn check_battle_triggers(state: &mut CampaignState, events: &mut Vec<WorldEvent>
     // Look at recently completed quests with victories that have a faction.
     // We use completed_quests and check for ones completed this cadence window.
     let window_start = state.tick.saturating_sub(TICK_CADENCE);
-    let window_start_ms = window_start * CAMPAIGN_TICK_MS as u64;
+    let window_start_ms = window_start * CAMPAIGN_TURN_SECS as u64 * 1000;
 
     let recent_victories: Vec<(u32, Option<usize>)> = state
         .completed_quests
@@ -151,7 +151,7 @@ fn check_battle_triggers(state: &mut CampaignState, events: &mut Vec<WorldEvent>
 /// Check recently completed quests that were against a faction.
 fn check_quest_triggers(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
     let window_start = state.tick.saturating_sub(TICK_CADENCE);
-    let window_start_ms = window_start * CAMPAIGN_TICK_MS as u64;
+    let window_start_ms = window_start * CAMPAIGN_TURN_SECS as u64 * 1000;
 
     // Find recently completed quests that targeted a faction
     let recent_quests: Vec<(u32, usize)> = state

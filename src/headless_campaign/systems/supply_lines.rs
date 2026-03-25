@@ -10,7 +10,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// Cadence: tick every 200 ticks (20 seconds game time).
-const SUPPLY_LINE_TICK_INTERVAL: u64 = 200;
+const SUPPLY_LINE_TICK_INTERVAL: u64 = 7;
 
 /// Base chance per tick that an unprotected supply line gets interdicted
 /// by a hostile faction with military presence along the route.
@@ -300,7 +300,7 @@ fn apply_interdiction_effects(state: &mut CampaignState) {
         .collect();
 
     // Double supply drain for interdicted parties (applied as extra drain)
-    let dt_sec = CAMPAIGN_TICK_MS as f32 / 1000.0;
+    let dt_sec = CAMPAIGN_TURN_SECS as f32;
     let drain_rate = state.config.supply.drain_per_member_per_sec;
 
     for party in &mut state.parties {

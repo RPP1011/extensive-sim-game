@@ -8,7 +8,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the trade goods system ticks.
-const TRADE_TICK_INTERVAL: u64 = 200;
+const TRADE_TICK_INTERVAL: u64 = 7;
 
 /// Maximum price multiplier (price = base_price * demand/supply, capped here).
 const MAX_PRICE_MULTIPLIER: f32 = 5.0;

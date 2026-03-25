@@ -1,4 +1,4 @@
-//! Seasonal weather system — cycles every 5000 ticks (~8 min game time).
+//! Seasonal weather system — cycles every 1200 turns (~1 hour game time).
 //!
 //! Affects travel speed, supply consumption, threat level, recruitment
 //! chance, and adventurer morale via `SeasonModifiers`.
@@ -8,8 +8,9 @@
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
-/// Ticks per season cycle (Spring → Summer → Autumn → Winter).
-pub const TICKS_PER_SEASON: u64 = 5000;
+/// Turns per season cycle (Spring → Summer → Autumn → Winter).
+/// At 3s/turn: 1200 turns = 1 hour of game time per season, 4 hours per year.
+pub const TICKS_PER_SEASON: u64 = 1200;
 
 /// Multipliers and per-tick offsets for the current season.
 #[derive(Clone, Copy, Debug)]

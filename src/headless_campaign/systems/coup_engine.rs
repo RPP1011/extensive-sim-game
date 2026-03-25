@@ -11,7 +11,7 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often the coup engine evaluates risk (in ticks).
-const COUP_CHECK_INTERVAL: u64 = 300;
+const COUP_CHECK_INTERVAL: u64 = 10;
 
 /// Risk threshold above which a coup can fire.
 const COUP_RISK_THRESHOLD: f32 = 0.7;

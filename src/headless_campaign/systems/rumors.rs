@@ -7,13 +7,13 @@ use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::*;
 
 /// How often to check for new rumors (in ticks).
-const RUMOR_INTERVAL: u64 = 300;
+const RUMOR_INTERVAL: u64 = 10;
 
 /// Chance per returning party to bring a rumor (30%).
 const RUMOR_CHANCE: f32 = 0.30;
 
 /// Rumors expire after this many ticks if not acted on.
-const RUMOR_EXPIRY_TICKS: u64 = 2000;
+const RUMOR_EXPIRY_TICKS: u64 = 67;
 
 /// Maximum active (unrevealed) rumors at once.
 const MAX_ACTIVE_RUMORS: usize = 5;

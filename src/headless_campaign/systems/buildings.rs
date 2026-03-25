@@ -175,7 +175,7 @@ impl GuildBuildings {
 // ---------------------------------------------------------------------------
 
 /// Building tick interval in campaign ticks (100 ticks = 10s game time).
-const BUILDING_TICK_INTERVAL: u64 = 100;
+const BUILDING_TICK_INTERVAL: u64 = 3;
 
 /// Run the buildings system: auto-upgrade buildings when gold is available.
 ///
