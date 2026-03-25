@@ -829,6 +829,101 @@ pub enum WorldEvent {
     // --- Secrets ---
     SecretRevealed { adventurer_id: u32, secret_type: SecretType, description: String },
     SuspicionRising { adventurer_id: u32 },
+
+    // --- Commodity futures ---
+    FuturesContractSettled { contract_id: u32, profit: f32 },
+    FuturesContractOffered { contract_id: u32, good_type: String, strike_price: f32 },
+
+    // --- Coup Engine ---
+    CoupAttempted { faction_id: usize, success: bool, new_leader_id: usize },
+    CoupRiskRising { faction_id: usize, risk_level: f32 },
+
+    // --- Divine Favor ---
+    DivineFavorChanged { order_idx: usize, new_favor: f32, reason: String },
+    MiracleGranted { order_idx: usize, miracle_type: String, beneficiary: String },
+    DivineDispleasure { order_idx: usize, effect: String },
+
+    // --- Wounds ---
+    WoundSustained { adventurer_id: u32, wound_type: WoundType, severity: f32 },
+    WoundHealed { adventurer_id: u32, wound_type: WoundType },
+
+    // --- Plague vectors ---
+    PlagueSpread { disease_name: String, from_region: u32, to_region: u32 },
+    PlagueContained { disease_name: String },
+    PlagueDeaths { region_id: u32, deaths: u32 },
+
+    // --- Price controls ---
+    PriceControlEnacted { good_type: String, ceiling: Option<f32>, floor: Option<f32> },
+    PriceControlViolation { good_type: String, actual_price: f32, controlled_price: f32 },
+    BlackMarketSurge { good_type: String, premium_pct: f32 },
+
+    // --- Defection Cascade ---
+    DefectionOccurred { adventurer_id: u32, from_faction: usize, to_faction: usize },
+    DefectionCascade { trigger_id: u32, cascade_ids: Vec<u32>, faction_id: usize },
+
+    // --- Heist planning ---
+    HeistPhaseAdvanced { heist_id: u32, new_phase: HeistPhase },
+    HeistSucceeded { heist_id: u32, loot_value: f32 },
+    HeistFailed { heist_id: u32, captured_ids: Vec<u32> },
+
+    // --- Contract Negotiation ---
+    NegotiationStarted { quest_id: u32, original_reward: f32 },
+    NegotiationCounterOffer { quest_id: u32, new_reward: f32, round: u32 },
+    NegotiationAccepted { quest_id: u32, final_reward: f32 },
+    NegotiationFailed { quest_id: u32, reason: String },
+
+    // --- Escalation Protocol ---
+    EscalationIncreased { faction_id: usize, new_level: u32 },
+    EliteSquadDispatched { faction_id: usize, squad_power: f32 },
+    EscalationDecrease { faction_id: usize, new_level: u32 },
+
+    // --- Dead Zones ---
+    DeadZoneExpanding { region_id: usize, level: f32 },
+    DeadZoneSpreading { from_region: usize, to_region: usize },
+    DeadZoneRecovering { region_id: usize, new_level: f32 },
+
+    // --- Addiction ---
+    AddictionDeveloped { adventurer_id: u32, dependency_level: f32 },
+    WithdrawalOnset { adventurer_id: u32, severity: f32 },
+    AddictionOvercome { adventurer_id: u32 },
+
+    // --- Party chemistry ---
+    ChemistryForged { adv_id_1: u32, adv_id_2: u32, score: f32 },
+    LegendaryTeamFormed { party_id: u32, mean_chemistry: f32 },
+    ChemistryBroken { adv_id_1: u32, adv_id_2: u32, reason: String },
+
+    // --- Threat Clock ---
+    /// The world threat clock advanced; optionally crossed a threshold.
+    ThreatClockAdvanced { power: f32, threshold_crossed: Option<f32> },
+    /// A threshold was crossed, producing a world effect.
+    ThreatManifested { threat_type: super::state::WorldThreat, effect: String },
+    /// The threat was disrupted by guild action.
+    ThreatDisrupted { power_reduction: f32, new_power: f32 },
+    /// The threat clock was activated for the first time.
+    WorldThreatActivated { threat_type: super::state::WorldThreat },
+
+    // --- Bankruptcy cascade ---
+    FactionDefaulted { faction_id: u32, total_debt: f32 },
+    CascadeTriggered { chain_length: u32, total_losses: f32 },
+    CreditFreeze { duration_ticks: u32 },
+
+    // --- Currency debasement ---
+    CurrencyDebased { faction_id: u32, new_purity: f32 },
+    InflationSpike { faction_id: u32, rate: f32 },
+    DebasementDetected { faction_id: u32, by_whom: String },
+    DebasementExposed { faction_id: u32, reputation_impact: f32 },
+
+    // --- Signal towers ---
+    TowerDestroyed { tower_id: u32, region_id: u32 },
+    TowerCompromised { tower_id: u32, by_faction: usize },
+    FalseSignalDetected { tower_id: u32 },
+    SignalRelayed { from_tower: u32, to_tower: u32, signal_type: super::state::SignalType },
+
+    // --- Demonic pacts ---
+    DemonicPactOffered { adventurer_id: u32, power: f32 },
+    DemonicPactAccepted { adventurer_id: u32, pact_id: u32 },
+    DemonicCollectorArrived { adventurer_id: u32 },
+    DemonicDebtEscalated { adventurer_id: u32, debt_level: f32, effect: String },
 }
 
 // ---------------------------------------------------------------------------

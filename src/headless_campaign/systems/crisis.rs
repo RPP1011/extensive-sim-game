@@ -169,6 +169,11 @@ pub fn activate_crisis_from_template(
             equipped_items: Vec::new(),
             nicknames: Vec::new(),
             secret_past: None,
+            wounds: Vec::new(),
+            potion_dependency: 0.0,
+            withdrawal_severity: 0.0,
+            ticks_since_last_potion: 0,
+            total_potions_consumed: 0,
                 };
 
                 champion_ids.push(id);

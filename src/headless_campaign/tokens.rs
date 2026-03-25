@@ -549,6 +549,121 @@ impl CampaignState {
                 (self.system_trackers.total_tax_income.max(1.0)).ln() / 5.0,
                 // Site preparation
                 (self.system_trackers.total_site_preparation / 10.0).min(1.0),
+                // --- Pass 4: expanded system coverage ---
+                // Disease/Health (3 features)
+                self.diseases.len() as f32 / 5.0_f32.max(1.0),  // active disease count, norm by 5
+                (self.system_trackers.infected_adventurer_count as f32
+                    / (self.adventurers.len().max(1) as f32)).min(1.0), // infected ratio
+                {
+                    let n = self.diseases.len();
+                    if n == 0 { 0.0 }
+                    else {
+                        (self.diseases.iter().map(|d| d.severity).sum::<f32>() / n as f32 / 100.0).min(1.0)
+                    }
+                }, // mean disease severity (0-1)
+                // Crafting/Equipment (3 features)
+                (self.guild.inventory.len() as f32 / 50.0).min(1.0), // inventory item count norm
+                {
+                    // Mean equipment durability across all adventurers' equipped items
+                    let (total_dur, count) = self.adventurers.iter()
+                        .flat_map(|a| a.equipped_items.iter())
+                        .fold((0.0_f32, 0u32), |(sum, cnt), item| (sum + item.durability, cnt + 1));
+                    if count == 0 { 1.0 } else { (total_dur / count as f32 / 100.0).min(1.0) }
+                }, // mean equip durability (0-1)
+                (self.system_trackers.active_crafting_projects as f32 / 5.0).min(1.0),
+                // Regional Strategy (3 features)
+                {
+                    let guild_fid = self.diplomacy.guild_faction_id;
+                    let controlled = self.overworld.regions.iter()
+                        .filter(|r| r.owner_faction_id == guild_fid).count() as f32;
+                    controlled / self.overworld.regions.len().max(1) as f32
+                }, // controlled region ratio (0-1)
+                {
+                    let n = self.overworld.regions.len();
+                    if n == 0 { 0.0 }
+                    else {
+                        self.overworld.regions.iter().map(|r| r.threat_level).sum::<f32>()
+                            / n as f32 / 100.0
+                    }
+                }, // mean regional threat (0-1)
+                {
+                    // Territory contestation: fraction of regions with high unrest (>50)
+                    let n = self.overworld.regions.len();
+                    if n == 0 { 0.0 }
+                    else {
+                        self.overworld.regions.iter()
+                            .filter(|r| r.unrest > 50.0).count() as f32 / n as f32
+                    }
+                }, // contestation ratio (0-1)
+                // Religion (3 features)
+                {
+                    // Total devotion across all temples, norm by temple count * 100
+                    let n = self.temples.len();
+                    if n == 0 { 0.0 }
+                    else {
+                        (self.temples.iter().map(|t| t.devotion).sum::<f32>()
+                            / (n as f32 * 100.0)).min(1.0)
+                    }
+                }, // mean devotion (0-1)
+                (self.temples.len() as f32 / 10.0).min(1.0), // temple count norm
+                {
+                    let active = self.temples.iter().filter(|t| t.blessing_active).count();
+                    let n = self.temples.len();
+                    if n == 0 { 0.0 } else { active as f32 / n as f32 }
+                }, // active blessings ratio (0-1)
+                // Crime/Underworld (3 features)
+                (self.system_trackers.total_crimes_committed as f32 / 20.0).min(1.0),
+                {
+                    // Wanted level: sum of bounty amounts on guild adventurers
+                    let total_bounty: f32 = self.wanted_posters.iter()
+                        .map(|w| w.bounty_amount).sum();
+                    (total_bounty / 500.0).min(1.0)
+                }, // wanted level norm (0-1)
+                (self.system_trackers.active_heist_count as f32 / 5.0).min(1.0),
+                // Knowledge/Research (3 features)
+                (self.archives.knowledge_points / 500.0).min(1.0), // archive score norm
+                {
+                    let active = self.archives.research_topics.iter()
+                        .filter(|t| t.progress < 1.0).count();
+                    (active as f32 / 5.0).min(1.0)
+                }, // active research projects norm
+                (self.system_trackers.discoveries_made as f32 / 20.0).min(1.0),
+                // Weather/Environment (3 features)
+                {
+                    // Season severity: winter=1.0, summer=0.0, spring/autumn=0.5
+                    match self.overworld.season {
+                        Season::Spring => 0.3,
+                        Season::Summer => 0.1,
+                        Season::Autumn => 0.5,
+                        Season::Winter => 1.0,
+                    }
+                }, // season severity (0-1)
+                (self.overworld.active_weather.len() as f32 / 5.0).min(1.0), // active weather events norm
+                {
+                    // Terrain stability: fraction of regions NOT affected by terrain events
+                    let affected: std::collections::HashSet<usize> = self.terrain_events.iter()
+                        .flat_map(|e| e.affected_regions.iter().copied())
+                        .collect();
+                    let n = self.overworld.regions.len();
+                    if n == 0 { 1.0 }
+                    else { 1.0 - (affected.len() as f32 / n as f32).min(1.0) }
+                }, // terrain stability (0-1, higher = more stable)
+                // Victory Progress (3 features)
+                self.victory_progress.percent.min(1.0), // overall victory progress (0-1)
+                (self.victory_progress.quests_completed as f32 / 50.0).min(1.0), // quest completion norm
+                (self.victory_progress.total_gold_earned / 5000.0).min(1.0), // gold earning norm
+                // Exploration (3 features)
+                self.exploration.exploration_percentage.min(1.0), // map exploration (0-1)
+                (self.exploration.landmarks_discovered.len() as f32 / 20.0).min(1.0), // landmarks norm
+                {
+                    let max_depth = self.dungeons.iter()
+                        .map(|d| d.depth).max().unwrap_or(0);
+                    (max_depth as f32 / 10.0).min(1.0)
+                }, // max dungeon depth norm (0-1)
+                // Guild Operations (3 features)
+                (self.pending_choices.len() as f32 / 5.0).min(1.0), // pending choices norm
+                (self.mentor_assignments.len() as f32 / 5.0).min(1.0), // training queue (mentors) norm
+                (self.system_trackers.active_liaisons as f32 / 5.0).min(1.0), // active liaisons norm
             ],
         }
     }

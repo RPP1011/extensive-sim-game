@@ -332,6 +332,12 @@ fn resolve_civil_war(
                     guild_adventurer_count: 0,
                     recent_actions: Vec::new(),
                     relation: 0.0,
+                    coup_risk: 0.0,
+                    coup_cooldown: 0,
+                    escalation_level: 0,
+                    patrol_losses: 0,
+                    escalation_cooldown: 0,
+                    last_patrol_loss_tick: 0,
                 };
 
                 state.factions.push(new_faction);

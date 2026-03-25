@@ -214,6 +214,26 @@ pub fn step_campaign(
     systems::legacy_weapons::tick_legacy_weapons(state, &mut deltas, &mut events);
     systems::secrets::tick_secrets(state, &mut deltas, &mut events);
 
+    // --- Batch 5 systems ---
+    systems::commodity_futures::tick_commodity_futures(state, &mut deltas, &mut events);
+    systems::coup_engine::tick_coup_engine(state, &mut deltas, &mut events);
+    systems::divine_favor::tick_divine_favor(state, &mut deltas, &mut events);
+    systems::wound_persistence::tick_wound_persistence(state, &mut deltas, &mut events);
+    systems::plague_vectors::tick_plague_vectors(state, &mut deltas, &mut events);
+    systems::price_controls::tick_price_controls(state, &mut deltas, &mut events);
+    systems::defection_cascade::tick_defection_cascade(state, &mut deltas, &mut events);
+    systems::heist_planning::tick_heist_planning(state, &mut deltas, &mut events);
+    systems::contract_negotiation::tick_contract_negotiation(state, &mut deltas, &mut events);
+    systems::escalation_protocol::tick_escalation_protocol(state, &mut deltas, &mut events);
+    systems::dead_zones::tick_dead_zones(state, &mut deltas, &mut events);
+    systems::addiction::tick_addiction(state, &mut deltas, &mut events);
+    systems::party_chemistry::tick_party_chemistry(state, &mut deltas, &mut events);
+    systems::threat_clock::tick_threat_clock(state, &mut deltas, &mut events);
+    systems::bankruptcy_cascade::tick_bankruptcy_cascade(state, &mut deltas, &mut events);
+    systems::signal_towers::tick_signal_towers(state, &mut deltas, &mut events);
+    systems::currency_debasement::tick_currency_debasement(state, &mut deltas, &mut events);
+    systems::demonic_pacts::tick_demonic_pacts(state, &mut deltas, &mut events);
+
     // Final economy snapshot
     deltas.gold_after = state.guild.gold;
     deltas.supplies_after = state.guild.supplies;

@@ -149,27 +149,34 @@ pub fn passive_to_slots(def: &PassiveDef) -> Vec<f32> {
 // ---------------------------------------------------------------------------
 
 /// Total dimension of a class slot vector.
-pub const CLASS_SLOT_DIM: usize = 5   // stat_growth
+pub const CLASS_SLOT_DIM: usize = 12  // stat_growth (5 combat + 7 non-combat)
     + 16                                // tags multi-hot
-    + 11                                // scaling source one-hot
+    + 17                                // scaling source one-hot (11 combat + 6 non-combat)
     + MAX_SCALING_RULES * 8             // 3 × 8 = 24
     + MAX_CLASS_ABILITIES * 2           // 5 × 2 = 10
     + MAX_CLASS_REQUIREMENTS * 2        // 4 × 2 = 8
     + 1;                                // consolidates_at
-// Total: 5+16+11+24+10+8+1 = 75
 
 /// Convert a ClassDef into a flat slot vector.
 pub fn class_to_slots(def: &ClassDef) -> Vec<f32> {
     let mut v = vec![0.0f32; CLASS_SLOT_DIM];
     let mut o = 0;
 
-    // stat_growth (5)
+    // stat_growth (12: 5 combat + 7 non-combat)
     v[o] = def.stat_growth.attack / 5.0;
     v[o + 1] = def.stat_growth.defense / 5.0;
     v[o + 2] = def.stat_growth.speed / 5.0;
     v[o + 3] = def.stat_growth.max_hp / 5.0;
     v[o + 4] = def.stat_growth.ability_power / 5.0;
-    o += 5;
+    v[o + 5] = def.stat_growth.diplomacy / 5.0;
+    v[o + 6] = def.stat_growth.commerce / 5.0;
+    v[o + 7] = def.stat_growth.crafting / 5.0;
+    v[o + 8] = def.stat_growth.medicine / 5.0;
+    v[o + 9] = def.stat_growth.scholarship / 5.0;
+    v[o + 10] = def.stat_growth.stealth / 5.0;
+    v[o + 11] = def.stat_growth.leadership / 5.0;
+    o += 12;
+
 
     // tags multi-hot (16)
     for tag in &def.tags {
@@ -178,12 +185,12 @@ pub fn class_to_slots(def: &ClassDef) -> Vec<f32> {
     }
     o += 16;
 
-    // scaling source (11) — use first scaling block's source
+    // scaling source (17) — use first scaling block's source
     if let Some(sb) = def.scalings.first() {
         let idx = scaling_source_index(&sb.source);
-        if idx < 11 { v[o + idx] = 1.0; }
+        if idx < 17 { v[o + idx] = 1.0; }
     }
-    o += 11;
+    o += 17;
 
     // scaling rules (3 × 8)
     if let Some(sb) = def.scalings.first() {
@@ -459,6 +466,12 @@ fn scaling_source_index(source: &str) -> usize {
         "gold" => 8,
         "reputation" => 9,
         "threat_level" => 10,
+        "trade_income" => 11,
+        "diplomatic_relations" => 12,
+        "crafting_output" => 13,
+        "research_progress" => 14,
+        "guild_morale" => 15,
+        "supply_level" => 16,
         _ => 0,
     }
 }
@@ -494,6 +507,14 @@ fn encode_scaling_rule(rule: &ScalingRule, out: &mut [f32]) {
         ScalingBonus::ConditionalMechanic { value, .. } => {
             out[5] = 1.0;
             out[7] = *value;
+        }
+        ScalingBonus::TradeBonus { percent }
+        | ScalingBonus::DiplomacyBonus { percent }
+        | ScalingBonus::CraftingBonus { percent }
+        | ScalingBonus::HealingBonus { percent }
+        | ScalingBonus::ResearchBonus { percent } => {
+            out[3] = 1.0; // treat as percent-type bonus
+            out[7] = *percent / 100.0;
         }
     }
 }
@@ -559,9 +580,11 @@ mod tests {
     fn test_class_slot_dim() {
         let def = ClassDef {
             name: "Test".into(),
+
             stat_growth: StatGrowth {
                 attack: 2.0, defense: 1.0, speed: 3.0,
                 max_hp: 0.0, ability_power: 1.0,
+                ..StatGrowth::default()
             },
             tags: vec!["ranged".into(), "nature".into()],
             scalings: vec![],

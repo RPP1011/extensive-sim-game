@@ -400,6 +400,83 @@ pub struct CampaignState {
     #[serde(default)]
     pub next_legacy_weapon_id: u32,
 
+    // --- Commodity futures ---
+    #[serde(default)]
+    pub futures_contracts: Vec<FuturesContract>,
+    #[serde(default)]
+    pub next_futures_contract_id: u32,
+    #[serde(default)]
+    pub futures_profit_total: f32,
+
+    // --- Divine favor ---
+    #[serde(default)]
+    pub divine_favor: Vec<DivineFavorEntry>,
+
+    // --- Price controls ---
+    /// Council-enacted price ceilings/floors on commodities.
+    #[serde(default)]
+    pub price_controls: Vec<PriceControl>,
+
+    // --- Defection cascade ---
+    /// History of adventurer defections between factions.
+    #[serde(default)]
+    pub defection_events: Vec<DefectionEvent>,
+
+    // --- Heist planning ---
+    #[serde(default)]
+    pub active_heists: Vec<HeistPlan>,
+    #[serde(default)]
+    pub next_heist_id: u32,
+
+    // --- Party chemistry ---
+    /// Chemistry scores between adventurer pairs. Key = (min_id, max_id), value = [0.0, 1.0].
+    #[serde(default)]
+    pub party_chemistry: std::collections::HashMap<(u32, u32), f32>,
+    /// Best-ever chemistry scores for chronicle/narrative purposes.
+    #[serde(default)]
+    pub best_chemistry: std::collections::HashMap<(u32, u32), f32>,
+
+    // --- Dead zones ---
+    /// Per-region dead zone level (0.0 = healthy, 1.0 = fully dead).
+    /// Indexed by region id. Lazily initialized to match region count.
+    #[serde(default)]
+    pub dead_zone_level: Vec<f32>,
+    /// Per-region extraction pressure from questing/harvesting.
+    /// Accumulates from activity, decays naturally over time.
+    #[serde(default)]
+    pub extraction_pressure: Vec<f32>,
+
+    // --- World threat clock ---
+    /// Global escalating threat that accumulates power unless disrupted.
+    #[serde(default)]
+    pub world_threat_clock: WorldThreatClock,
+
+    // --- Plague vectors ---
+    #[serde(default)]
+    pub plague_vectors: Vec<PlagueVector>,
+
+    // --- Contract negotiation ---
+    #[serde(default)]
+    pub negotiation_rounds: Vec<NegotiationState>,
+
+    // --- Bankruptcy cascade ---
+    #[serde(default)]
+    pub bankruptcy_cascade: super::systems::bankruptcy_cascade::BankruptcyCascadeState,
+
+    // --- Currency debasement ---
+    #[serde(default)]
+    pub currency_integrity: Vec<CurrencyState>,
+
+    // --- Signal towers ---
+    #[serde(default)]
+    pub signal_towers: Vec<SignalTower>,
+
+    // --- Demonic pacts ---
+    #[serde(default)]
+    pub demonic_pacts: Vec<DemonicPact>,
+    #[serde(default)]
+    pub next_pact_id: u32,
+
     // --- Extended system trackers ---
     /// Aggregate counters for the ~30 campaign subsystems.
     /// Updated by step logic; consumed by tokens, clustering, and value estimation.
@@ -593,6 +670,46 @@ pub struct SystemTrackers {
     pub smuggling_total_profit: f32,
     /// Total bust count across all routes.
     pub smuggling_total_busts: u32,
+
+    // --- Disease/Health ---
+    /// Total adventurers currently infected with a disease.
+    pub infected_adventurer_count: u32,
+    /// Sum of severity across all active diseases.
+    pub total_disease_severity: f32,
+
+    // --- Crafting/Equipment ---
+    /// Number of active crafting projects (pending orders for equipment).
+    pub active_crafting_projects: u32,
+
+    // --- Crime/Underworld ---
+    /// Cumulative crime events committed by the guild.
+    pub total_crimes_committed: u32,
+    /// Active heists / smuggling operations in progress.
+    pub active_heist_count: u32,
+
+    // --- Knowledge/Research ---
+    /// Total discoveries (completed research topics).
+    pub discoveries_made: u32,
+
+    // --- Victory Progress ---
+    /// Progress toward the active victory condition (0-1).
+    pub victory_percent: f32,
+
+    // --- Exploration ---
+    /// Maximum dungeon depth reached across all dungeons.
+    pub max_dungeon_depth: u32,
+
+    // --- Guild Operations ---
+    /// Number of adventurers currently in training (mentor assignments).
+    pub training_queue_length: u32,
+    /// Number of active faction liaisons (favor requests + faction favor relations).
+    pub active_liaisons: u32,
+
+    // --- Heist planning ---
+    /// Total loot value from successful heists.
+    pub heist_total_loot: f32,
+    /// Number of heists that have failed.
+    pub heist_failures: u32,
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -842,6 +959,23 @@ pub struct Adventurer {
     /// Hidden past that may be revealed.
     #[serde(default)]
     pub secret_past: Option<SecretPast>,
+    /// Persistent wounds from battles that heal over time.
+    #[serde(default)]
+    pub wounds: Vec<PersistentWound>,
+
+    // --- Addiction ---
+    /// Alchemical potion dependency level (0.0–1.0).
+    #[serde(default)]
+    pub potion_dependency: f32,
+    /// Current withdrawal intensity (0.0–1.0).
+    #[serde(default)]
+    pub withdrawal_severity: f32,
+    /// Ticks since last potion was consumed (incremented per addiction tick).
+    #[serde(default)]
+    pub ticks_since_last_potion: u32,
+    /// Lifetime count of potions consumed.
+    #[serde(default)]
+    pub total_potions_consumed: u32,
 }
 
 /// A leadership role that provides passive buffs while the adventurer is active.
@@ -1382,6 +1516,24 @@ pub struct FactionState {
     /// Generic relation score (alias for relationship_to_guild in some systems).
     #[serde(default)]
     pub relation: f32,
+    /// Running coup-risk score for this faction (0.0–1.0).
+    #[serde(default)]
+    pub coup_risk: f32,
+    /// Cooldown ticks remaining before another coup can trigger.
+    #[serde(default)]
+    pub coup_cooldown: u32,
+    /// Escalation protocol level (0=normal, 5=maximum threat).
+    #[serde(default)]
+    pub escalation_level: u32,
+    /// Count of patrols destroyed by the guild.
+    #[serde(default)]
+    pub patrol_losses: u32,
+    /// Cooldown ticks before escalation can change again.
+    #[serde(default)]
+    pub escalation_cooldown: u32,
+    /// Tick when the guild last destroyed a patrol from this faction.
+    #[serde(default)]
+    pub last_patrol_loss_tick: u64,
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -4190,6 +4342,328 @@ pub enum SecretType {
 }
 
 // ---------------------------------------------------------------------------
+// Commodity Futures
+// ---------------------------------------------------------------------------
+
+/// A commodity futures contract — an agreement to buy/sell a trade good
+/// at a fixed strike price, settling at a future tick.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FuturesContract {
+    pub contract_id: u32,
+    pub good_type: TradeGoodType,
+    pub quantity: f32,
+    pub strike_price: f32,
+    pub settlement_tick: u64,
+    /// If true, guild profits when market price > strike price (long).
+    /// If false, guild profits when market price < strike price (short).
+    pub is_buy: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Divine Favor
+// ---------------------------------------------------------------------------
+
+/// Per-order divine favor tracking for the divine favor economy.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DivineFavorEntry {
+    pub order: ReligiousOrder,
+    #[serde(default)]
+    pub divine_favor: f32,
+    #[serde(default)]
+    pub miracles_granted: u32,
+    #[serde(default)]
+    pub displeasure_events: u32,
+    #[serde(default)]
+    pub recent_sacrifices: u32,
+    #[serde(default)]
+    pub shrine_visits: u32,
+}
+
+impl DivineFavorEntry {
+    pub fn new(order: ReligiousOrder) -> Self {
+        Self {
+            order,
+            divine_favor: 0.0,
+            miracles_granted: 0,
+            displeasure_events: 0,
+            recent_sacrifices: 0,
+            shrine_visits: 0,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Persistent Wounds
+// ---------------------------------------------------------------------------
+
+/// A wound sustained in battle that persists and heals over time.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PersistentWound {
+    pub wound_type: WoundType,
+    /// How severe the wound is (0.0–1.0). Higher = longer to heal.
+    pub severity: f32,
+    /// Accumulated healing progress. Wound heals when `heal_progress >= severity`.
+    pub heal_progress: f32,
+}
+
+/// Types of persistent wounds, each penalizing a different stat.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WoundType {
+    /// -15% attack.
+    BrokenArm,
+    /// -20% movement speed (travel time).
+    Limp,
+    /// +10 stress per tick.
+    BattleFatigue,
+    /// -10% max HP.
+    DeepCut,
+    /// -15% morale recovery rate.
+    Concussion,
+}
+
+impl WoundType {
+    /// All wound type variants, for random selection.
+    pub const ALL: [WoundType; 5] = [
+        WoundType::BrokenArm,
+        WoundType::Limp,
+        WoundType::BattleFatigue,
+        WoundType::DeepCut,
+        WoundType::Concussion,
+    ];
+}
+
+// ---------------------------------------------------------------------------
+// Plague Vectors
+// ---------------------------------------------------------------------------
+
+/// A plague vector spreading between population centers via trade and migration.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlagueVector {
+    pub disease_name: String,
+    pub origin_region: u32,
+    pub infected_regions: Vec<u32>,
+    pub virulence: f32,
+    pub mortality: f32,
+    pub tick_started: u32,
+}
+
+// ---------------------------------------------------------------------------
+// Price Controls
+// ---------------------------------------------------------------------------
+
+/// A council-enacted price control on a commodity.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PriceControl {
+    /// The trade good type this control applies to (e.g. "grain", "ore").
+    pub good_type: String,
+    /// Maximum allowed price. When market price exceeds this, shortages occur.
+    pub ceiling: Option<f32>,
+    /// Minimum allowed price. When market price falls below this, subsidies drain treasury.
+    pub floor: Option<f32>,
+    /// Tick when the control was enacted. Expires after 2000 ticks.
+    pub enacted_tick: u32,
+}
+
+// ---------------------------------------------------------------------------
+// Defection Cascade
+// ---------------------------------------------------------------------------
+
+/// Record of an adventurer defecting from one faction to another.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DefectionEvent {
+    pub adventurer_id: u32,
+    pub from_faction: u32,
+    pub to_faction: u32,
+    /// Number of additional adventurers who defected in the cascade.
+    pub cascade_count: u32,
+    pub tick: u32,
+}
+
+// ---------------------------------------------------------------------------
+// Heist Planning
+// ---------------------------------------------------------------------------
+
+/// Phase of a heist operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HeistPhase {
+    Planning,
+    Scouting,
+    Infiltration,
+    Execution,
+    Escape,
+}
+
+impl HeistPhase {
+    /// Return the next phase in the heist pipeline.
+    pub fn next(self) -> HeistPhase {
+        match self {
+            HeistPhase::Planning => HeistPhase::Scouting,
+            HeistPhase::Scouting => HeistPhase::Infiltration,
+            HeistPhase::Infiltration => HeistPhase::Execution,
+            HeistPhase::Execution => HeistPhase::Escape,
+            HeistPhase::Escape => HeistPhase::Escape, // terminal
+        }
+    }
+}
+
+/// An in-progress heist operation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HeistPlan {
+    pub heist_id: u32,
+    pub target_faction: usize,
+    pub phase: HeistPhase,
+    /// Accumulated preparation quality (0.0–1.0).
+    pub prep_score: f32,
+    /// Adventurer IDs assigned to this heist crew.
+    pub crew_ids: Vec<u32>,
+    /// Estimated gold reward on success.
+    pub reward_estimate: f32,
+    /// Risk level (0.0–1.0). Higher = more dangerous.
+    pub risk_level: f32,
+    /// Tick when the current phase started.
+    pub started_tick: u64,
+}
+
+// ---------------------------------------------------------------------------
+// Contract Negotiation
+// ---------------------------------------------------------------------------
+
+/// Tracks the state of an ongoing quest reward negotiation with a faction.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NegotiationState {
+    /// The quest being negotiated.
+    pub quest_id: u32,
+    /// Original gold reward before negotiation.
+    pub original_reward: f32,
+    /// Current offer (may differ from original after counter-offers).
+    pub current_offer: f32,
+    /// Number of negotiation rounds elapsed.
+    pub rounds: u32,
+    /// Maximum rounds before auto-resolution.
+    pub max_rounds: u32,
+    /// Faction patience (0.0–1.0). Depleted by counter-offers.
+    pub faction_patience: f32,
+    /// The faction being negotiated with.
+    pub faction_id: usize,
+}
+
+// ---------------------------------------------------------------------------
+// World Threat Clock
+// ---------------------------------------------------------------------------
+
+/// A world-ending entity that accumulates power over time unless disrupted.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorldThreatClock {
+    /// The type of world-ending threat.
+    pub threat_type: WorldThreat,
+    /// Current power level (0.0 to 1.0).
+    pub power: f32,
+    /// How much power grows per clock tick.
+    pub growth_rate: f32,
+    /// Number of times the guild has disrupted this threat.
+    pub disruptions: u32,
+    /// Number of threshold warnings issued so far.
+    pub warnings_issued: u32,
+    /// Whether the clock is actively ticking.
+    pub active: bool,
+}
+
+impl Default for WorldThreatClock {
+    fn default() -> Self {
+        Self {
+            threat_type: WorldThreat::AncientLich,
+            power: 0.0,
+            growth_rate: 0.003,
+            disruptions: 0,
+            warnings_issued: 0,
+            active: false,
+        }
+    }
+}
+
+/// Types of world-ending threats.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorldThreat {
+    AncientLich,
+    DemonLord,
+    VoidRift,
+    DragonAwakening,
+    BlightHeart,
+}
+
+// ---------------------------------------------------------------------------
+// Currency Debasement
+// ---------------------------------------------------------------------------
+
+/// Per-faction currency integrity state.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CurrencyState {
+    pub faction_id: u32,
+    /// Purity of the faction's coinage (1.0 = pure, 0.0 = completely debased).
+    pub purity: f32,
+    /// Inflation rate derived from debasement: (1.0 - purity) * factor.
+    pub inflation_rate: f32,
+    /// Whether the guild has detected this faction's debasement.
+    pub debasement_detected: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Signal Towers
+// ---------------------------------------------------------------------------
+
+/// A signal tower in a region that relays beacon codes.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SignalTower {
+    pub tower_id: u32,
+    /// Region this tower is located in (as region id).
+    pub region_id: u32,
+    /// Whether the tower is operational.
+    pub operational: bool,
+    /// Whether the tower has been compromised by enemy espionage.
+    pub compromised: bool,
+    /// Tick when the tower was compromised (for detection timer).
+    pub compromised_at: Option<u64>,
+    /// Tick when repair was initiated (None = not repairing).
+    pub repair_started_at: Option<u64>,
+    /// Faction that owns this tower.
+    pub owner_faction: usize,
+    /// Signal relay range (in region hops). 1 = adjacent only.
+    pub range: u32,
+}
+
+/// Types of signals relayed between towers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SignalType {
+    /// Genuine early warning of incoming threat.
+    EarlyWarning,
+    /// False alert planted by enemy espionage.
+    FalseAlert,
+    /// Tower has been repaired and is back online.
+    Repaired,
+}
+
+// ---------------------------------------------------------------------------
+// Demonic Pacts
+// ---------------------------------------------------------------------------
+
+/// A contract with a demon, granting power in exchange for accumulating debt.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DemonicPact {
+    pub pact_id: u32,
+    pub adventurer_id: u32,
+    /// Combat power bonus granted (percentage, e.g. 20.0 = +20%).
+    pub power_granted: f32,
+    /// Accumulated debt (0.0–1.0+). Escalating consequences at thresholds.
+    pub debt: f32,
+    /// Debt growth per tick cycle.
+    pub interest_rate: f32,
+    /// Tick when the pact was created.
+    pub created_tick: u32,
+    /// Whether this pact has been renounced (power lost, debt frozen).
+    pub renounced: bool,
+}
+
+// ---------------------------------------------------------------------------
 // Test campaign constructors
 // ---------------------------------------------------------------------------
 
@@ -4246,6 +4720,11 @@ impl CampaignState {
                     equipped_items: Vec::new(),
                     nicknames: Vec::new(),
                     secret_past: None,
+                    wounds: Vec::new(),
+                    potion_dependency: 0.0,
+                    withdrawal_severity: 0.0,
+                    ticks_since_last_potion: 0,
+                    total_potions_consumed: 0,
             },
             Adventurer {
                 id: 2,
@@ -4288,6 +4767,11 @@ impl CampaignState {
                     equipped_items: Vec::new(),
                     nicknames: Vec::new(),
                     secret_past: None,
+                    wounds: Vec::new(),
+                    potion_dependency: 0.0,
+                    withdrawal_severity: 0.0,
+                    ticks_since_last_potion: 0,
+                    total_potions_consumed: 0,
             },
             Adventurer {
                 id: 3,
@@ -4330,6 +4814,11 @@ impl CampaignState {
                     equipped_items: Vec::new(),
                     nicknames: Vec::new(),
                     secret_past: None,
+                    wounds: Vec::new(),
+                    potion_dependency: 0.0,
+                    withdrawal_severity: 0.0,
+                    ticks_since_last_potion: 0,
+                    total_potions_consumed: 0,
             },
             Adventurer {
                 id: 4,
@@ -4372,6 +4861,11 @@ impl CampaignState {
                     equipped_items: Vec::new(),
                     nicknames: Vec::new(),
                     secret_past: None,
+                    wounds: Vec::new(),
+                    potion_dependency: 0.0,
+                    withdrawal_severity: 0.0,
+                    ticks_since_last_potion: 0,
+                    total_potions_consumed: 0,
             },
         ];
 
@@ -4584,6 +5078,40 @@ impl CampaignState {
             next_geo_change_id: 1,
             legacy_weapons: Vec::new(),
             next_legacy_weapon_id: 1,
+            // --- Commodity futures ---
+            futures_contracts: Vec::new(),
+            next_futures_contract_id: 1,
+            futures_profit_total: 0.0,
+            // --- Divine favor ---
+            divine_favor: Vec::new(),
+            // --- Price controls ---
+            price_controls: Vec::new(),
+            // --- Defection cascade ---
+            defection_events: Vec::new(),
+            // --- Heist planning ---
+            active_heists: Vec::new(),
+            next_heist_id: 1,
+            // --- Party chemistry ---
+            party_chemistry: std::collections::HashMap::new(),
+            best_chemistry: std::collections::HashMap::new(),
+            // --- Dead zones ---
+            dead_zone_level: Vec::new(),
+            extraction_pressure: Vec::new(),
+            // --- World threat clock ---
+            world_threat_clock: WorldThreatClock::default(),
+            // --- Plague vectors ---
+            plague_vectors: Vec::new(),
+            // --- Contract negotiation ---
+            negotiation_rounds: Vec::new(),
+            // --- Bankruptcy cascade ---
+            bankruptcy_cascade: Default::default(),
+            // --- Currency debasement ---
+            currency_integrity: Vec::new(),
+            // --- Signal towers ---
+            signal_towers: Vec::new(),
+            // --- Demonic pacts ---
+            demonic_pacts: Vec::new(),
+            next_pact_id: 1,
             system_trackers: SystemTrackers::default(),
         }
     }
@@ -4643,6 +5171,11 @@ impl CampaignState {
                     equipped_items: Vec::new(),
                     nicknames: Vec::new(),
                     secret_past: None,
+                    wounds: Vec::new(),
+                    potion_dependency: 0.0,
+                    withdrawal_severity: 0.0,
+                    ticks_since_last_potion: 0,
+                    total_potions_consumed: 0,
                     },
                     Adventurer {
                         id: 2, name: "Greta".into(), archetype: "knight".into(), level: 2, xp: 0,
@@ -4665,6 +5198,11 @@ impl CampaignState {
                     equipped_items: Vec::new(),
                     nicknames: Vec::new(),
                     secret_past: None,
+                    wounds: Vec::new(),
+                    potion_dependency: 0.0,
+                    withdrawal_severity: 0.0,
+                    ticks_since_last_potion: 0,
+                    total_potions_consumed: 0,
                     },
                 ],
                 gold_bonus: 150.0, supply_bonus: 30.0, reputation_bonus: 5.0, items: Vec::new(),
@@ -4694,6 +5232,11 @@ impl CampaignState {
                     equipped_items: Vec::new(),
                     nicknames: Vec::new(),
                     secret_past: None,
+                    wounds: Vec::new(),
+                    potion_dependency: 0.0,
+                    withdrawal_severity: 0.0,
+                    ticks_since_last_potion: 0,
+                    total_potions_consumed: 0,
                     },
                 ],
                 gold_bonus: 0.0, supply_bonus: 0.0, reputation_bonus: 10.0, items: Vec::new(),
@@ -4723,6 +5266,11 @@ impl CampaignState {
                     equipped_items: Vec::new(),
                     nicknames: Vec::new(),
                     secret_past: None,
+                    wounds: Vec::new(),
+                    potion_dependency: 0.0,
+                    withdrawal_severity: 0.0,
+                    ticks_since_last_potion: 0,
+                    total_potions_consumed: 0,
                     },
                     Adventurer {
                         id: 2, name: "Brynn".into(), archetype: "mage".into(), level: 1, xp: 0,
@@ -4745,6 +5293,11 @@ impl CampaignState {
                     equipped_items: Vec::new(),
                     nicknames: Vec::new(),
                     secret_past: None,
+                    wounds: Vec::new(),
+                    potion_dependency: 0.0,
+                    withdrawal_severity: 0.0,
+                    ticks_since_last_potion: 0,
+                    total_potions_consumed: 0,
                     },
                     Adventurer {
                         id: 3, name: "Cira".into(), archetype: "cleric".into(), level: 1, xp: 0,
@@ -4767,6 +5320,11 @@ impl CampaignState {
                     equipped_items: Vec::new(),
                     nicknames: Vec::new(),
                     secret_past: None,
+                    wounds: Vec::new(),
+                    potion_dependency: 0.0,
+                    withdrawal_severity: 0.0,
+                    ticks_since_last_potion: 0,
+                    total_potions_consumed: 0,
                     },
                     Adventurer {
                         id: 4, name: "Daven".into(), archetype: "rogue".into(), level: 1, xp: 0,
@@ -4789,6 +5347,11 @@ impl CampaignState {
                     equipped_items: Vec::new(),
                     nicknames: Vec::new(),
                     secret_past: None,
+                    wounds: Vec::new(),
+                    potion_dependency: 0.0,
+                    withdrawal_severity: 0.0,
+                    ticks_since_last_potion: 0,
+                    total_potions_consumed: 0,
                     },
                 ],
                 gold_bonus: 20.0, supply_bonus: 10.0, reputation_bonus: 0.0, items: Vec::new(),

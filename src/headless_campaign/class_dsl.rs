@@ -35,6 +35,7 @@ pub struct ClassDef {
     pub stat_growth: StatGrowth,
     /// Tags defining which contextual ability pools this class can learn from.
     /// The LFM generates contextual abilities tagged with these during gameplay.
+    /// Use tags to express role blurriness (e.g. a Battle Medic has tags: combat, healing, frontline).
     pub tags: Vec<String>,
     pub scalings: Vec<ScalingBlock>,
     /// Guaranteed abilities unlocked at specific levels.
@@ -45,11 +46,20 @@ pub struct ClassDef {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct StatGrowth {
+    // Combat stats
     pub attack: f32,
     pub defense: f32,
     pub speed: f32,
     pub max_hp: f32,
     pub ability_power: f32,
+    // Non-combat stats
+    pub diplomacy: f32,
+    pub commerce: f32,
+    pub crafting: f32,
+    pub medicine: f32,
+    pub scholarship: f32,
+    pub stealth: f32,
+    pub leadership: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -91,6 +101,16 @@ pub enum ScalingBonus {
     Aura { stat: String, value: f32 },
     /// Conditional mechanic (e.g. last_stand below 20% hp)
     ConditionalMechanic { name: String, trigger: String, value: f32 },
+    /// Trade/commerce bonus
+    TradeBonus { percent: f32 },
+    /// Diplomacy modifier
+    DiplomacyBonus { percent: f32 },
+    /// Crafting speed/quality bonus
+    CraftingBonus { percent: f32 },
+    /// Healing effectiveness outside combat
+    HealingBonus { percent: f32 },
+    /// Research/scholarship speed bonus
+    ResearchBonus { percent: f32 },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -249,12 +269,26 @@ fn parse_stat_growth(line: &str, line_num: usize) -> Result<StatGrowth, ParseErr
             "speed" => growth.speed = val,
             "hp" | "max_hp" => growth.max_hp = val,
             "ability_power" | "ap" => growth.ability_power = val,
+            "diplomacy" => growth.diplomacy = val,
+            "commerce" | "trade" => growth.commerce = val,
+            "crafting" | "craft" => growth.crafting = val,
+            "medicine" | "healing" => growth.medicine = val,
+            "scholarship" | "lore" => growth.scholarship = val,
+            "stealth" | "subterfuge" => growth.stealth = val,
+            "leadership" | "command" => growth.leadership = val,
             "all" => {
                 growth.attack = val;
                 growth.defense = val;
                 growth.speed = val;
                 growth.max_hp = val;
                 growth.ability_power = val;
+                growth.diplomacy = val;
+                growth.commerce = val;
+                growth.crafting = val;
+                growth.medicine = val;
+                growth.scholarship = val;
+                growth.stealth = val;
+                growth.leadership = val;
             }
             _ => {
                 return Err(ParseError {
@@ -367,6 +401,26 @@ fn parse_condition(cond: &str, line_num: usize) -> Result<ScalingCondition, Pars
 
 fn parse_bonus(bonus: &str, line_num: usize) -> Result<ScalingBonus, ParseError> {
     let bonus = bonus.trim();
+
+    // Named non-combat bonuses: "trade +N%", "diplomacy +N%", etc.
+    let noncombat_prefixes: &[(&str, fn(f32) -> ScalingBonus)] = &[
+        ("trade +", |p| ScalingBonus::TradeBonus { percent: p }),
+        ("diplomacy +", |p| ScalingBonus::DiplomacyBonus { percent: p }),
+        ("crafting +", |p| ScalingBonus::CraftingBonus { percent: p }),
+        ("healing +", |p| ScalingBonus::HealingBonus { percent: p }),
+        ("research +", |p| ScalingBonus::ResearchBonus { percent: p }),
+    ];
+    for &(prefix, constructor) in noncombat_prefixes {
+        if bonus.starts_with(prefix) {
+            let rest = &bonus[prefix.len()..];
+            let val_str = rest.trim_end_matches('%').trim();
+            let percent: f32 = val_str.parse().map_err(|_| ParseError {
+                line: line_num,
+                message: format!("invalid percent in bonus: {}", bonus),
+            })?;
+            return Ok(constructor(percent));
+        }
+    }
 
     // "+N% stat"
     if bonus.starts_with('+') && bonus.contains('%') {
@@ -566,9 +620,12 @@ pub fn validate_class(def: &ClassDef) -> Vec<String> {
         errors.push("class name is empty".into());
     }
 
-    // Check stat growth isn't absurd
+    // Check stat growth isn't absurd (sum of ALL stats including non-combat)
     let total_growth = def.stat_growth.attack + def.stat_growth.defense
-        + def.stat_growth.speed + def.stat_growth.max_hp + def.stat_growth.ability_power;
+        + def.stat_growth.speed + def.stat_growth.max_hp + def.stat_growth.ability_power
+        + def.stat_growth.diplomacy + def.stat_growth.commerce + def.stat_growth.crafting
+        + def.stat_growth.medicine + def.stat_growth.scholarship + def.stat_growth.stealth
+        + def.stat_growth.leadership;
     if total_growth > 50.0 {
         errors.push(format!("stat growth per level ({}) seems too high (max 50)", total_growth));
     }
@@ -581,6 +638,9 @@ pub fn validate_class(def: &ClassDef) -> Vec<String> {
         "party_alive_count", "party_size", "faction_strength", "coalition_strength",
         "crisis_severity", "fame", "territory_control", "adventurer_count",
         "gold", "reputation", "threat_level",
+        // Non-combat sources
+        "trade_income", "diplomatic_relations", "crafting_output",
+        "research_progress", "guild_morale", "supply_level",
     ];
     for block in &def.scalings {
         if !valid_sources.contains(&block.source.as_str()) {
@@ -760,5 +820,110 @@ class Broken {
         let def = parse_class(input).expect("should parse");
         let errors = validate_class(&def);
         assert!(!errors.is_empty(), "should flag absurd growth");
+    }
+
+    #[test]
+    fn test_parse_merchant_class() {
+        let input = r#"
+class Merchant {
+    stat_growth: +1 defense, +3 commerce, +2 diplomacy, +1 leadership per level
+    tags: trade, negotiation, appraisal, economic
+
+    scaling trade_income {
+        when gold > 500: trade +15%
+        always: +5% commerce
+    }
+
+    abilities {
+        level 1: appraise "Identify item values accurately"
+        level 5: negotiate "Better quest reward terms"
+        level 10: trade_empire "Passive income generation"
+    }
+
+    requirements: level 3, quests 5
+}
+"#;
+        let def = parse_class(input).expect("should parse merchant");
+        assert_eq!(def.name, "Merchant");
+        assert_eq!(def.stat_growth.commerce, 3.0);
+        assert_eq!(def.stat_growth.attack, 0.0);
+        assert!(def.tags.contains(&"trade".to_string()));
+        assert!(def.tags.contains(&"economic".to_string()));
+    }
+
+    #[test]
+    fn test_parse_battle_medic() {
+        let input = r#"
+class BattleMedic {
+    stat_growth: +2 attack, +2 defense, +3 medicine, +1 ability_power per level
+    tags: combat, healing, frontline, support
+
+    scaling party_alive_count {
+        always: healing +20%
+        when party_members >= 3: +10% defense
+    }
+
+    abilities {
+        level 1: field_triage "Heal allies mid-combat"
+        level 5: combat_stims "Boost ally attack temporarily"
+    }
+
+    requirements: level 5
+}
+"#;
+        let def = parse_class(input).expect("should parse battle medic");
+        assert!(def.tags.contains(&"combat".to_string()));
+        assert!(def.tags.contains(&"healing".to_string()));
+        assert_eq!(def.stat_growth.medicine, 3.0);
+        assert_eq!(def.stat_growth.attack, 2.0);
+    }
+
+    #[test]
+    fn test_noncombat_class_zero_combat_growth_valid() {
+        let input = r#"
+class Scholar {
+    stat_growth: +4 scholarship, +2 lore per level
+}
+"#;
+        let def = parse_class(input).expect("should parse scholar");
+        assert_eq!(def.stat_growth.scholarship, 6.0);
+        assert_eq!(def.stat_growth.attack, 0.0);
+        assert_eq!(def.stat_growth.defense, 0.0);
+
+        let errors = validate_class(&def);
+        assert!(errors.is_empty(), "zero combat growth should be valid: {:?}", errors);
+    }
+
+    #[test]
+    fn test_stat_aliases() {
+        let input = r#"
+class Spy {
+    stat_growth: +2 subterfuge, +1 trade, +1 craft, +1 healing, +1 command per level
+}
+"#;
+        let def = parse_class(input).expect("should parse aliases");
+        assert_eq!(def.stat_growth.stealth, 2.0);
+        assert_eq!(def.stat_growth.commerce, 1.0);
+        assert_eq!(def.stat_growth.crafting, 1.0);
+        assert_eq!(def.stat_growth.medicine, 1.0);
+        assert_eq!(def.stat_growth.leadership, 1.0);
+    }
+
+    #[test]
+    fn test_all_includes_noncombat() {
+        let input = r#"
+class Polymath {
+    stat_growth: +1 all per level
+}
+"#;
+        let def = parse_class(input).expect("should parse");
+        assert_eq!(def.stat_growth.attack, 1.0);
+        assert_eq!(def.stat_growth.diplomacy, 1.0);
+        assert_eq!(def.stat_growth.commerce, 1.0);
+        assert_eq!(def.stat_growth.crafting, 1.0);
+        assert_eq!(def.stat_growth.medicine, 1.0);
+        assert_eq!(def.stat_growth.scholarship, 1.0);
+        assert_eq!(def.stat_growth.stealth, 1.0);
+        assert_eq!(def.stat_growth.leadership, 1.0);
     }
 }

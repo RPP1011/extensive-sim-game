@@ -632,11 +632,32 @@ fn cluster_similar_actions(actions: &[CampaignAction], state: &CampaignState) ->
         sampled
     }
 
-    for &a in &sample_k(&dispatch_quests, 3) { result.push(a.clone()); }
+    // Dispatch quests: sample 5 with diversity bonus
+    let dispatch_sampled = sample_k(&dispatch_quests, 5);
+    for &a in &dispatch_sampled { result.push(a.clone()); }
+    // Diversity bonus: if all sampled quests target the same quest_id, force 1 different
+    if dispatch_sampled.len() >= 2 && dispatch_quests.len() > dispatch_sampled.len() {
+        let first_id = match dispatch_sampled[0] {
+            CampaignAction::DispatchQuest { quest_id } => Some(*quest_id),
+            _ => None,
+        };
+        let all_same = first_id.is_some() && dispatch_sampled.iter().all(|a| {
+            matches!(a, CampaignAction::DispatchQuest { quest_id } if Some(*quest_id) == first_id)
+        });
+        if all_same {
+            // Find a quest with a different id
+            if let Some(&diff) = dispatch_quests.iter().find(|a| {
+                matches!(a, CampaignAction::DispatchQuest { quest_id } if Some(*quest_id) != first_id)
+            }) {
+                result.push(diff.clone());
+            }
+        }
+    }
+
     for &a in &spend_priorities { result.push(a.clone()); }
     for &a in &sample_k(&assign_pool, 3) { result.push(a.clone()); }
     for &a in &sample_k(&unassign_pool, 2) { result.push(a.clone()); }
-    for &a in &sample_k(&diplomacy, 4) { result.push(a.clone()); }
+    for &a in &sample_k(&diplomacy, 6) { result.push(a.clone()); }
     for &a in &sample_k(&train, 2) { result.push(a.clone()); }
     for &a in &sample_k(&equip, 2) { result.push(a.clone()); }
     for &a in &sample_k(&hire_scout, 2) { result.push(a.clone()); }
@@ -1020,6 +1041,32 @@ fn compute_replay_priority(
 // Leaf value estimation
 // ---------------------------------------------------------------------------
 
+/// Piecewise normalization for gold that preserves small-value signals.
+/// [0,50] → [0, 0.4] survival band, [50,200] → [0.4, 0.7] growth band,
+/// [200+] → [0.7, 1.0] abundance (log-compressed).
+fn piecewise_gold_norm(gold: f32) -> f32 {
+    if gold <= 50.0 {
+        gold / 50.0 * 0.4 // [0, 0.4] survival band
+    } else if gold <= 200.0 {
+        0.4 + (gold - 50.0) / 150.0 * 0.3 // [0.4, 0.7] growth band
+    } else {
+        0.7 + (gold - 200.0).ln().min(5.0) / 5.0 * 0.3 // [0.7, 1.0] abundance
+    }
+}
+
+/// Piecewise normalization for supplies, analogous to gold normalization.
+/// [0,30] → [0, 0.4] survival band, [30,100] → [0.4, 0.7] growth band,
+/// [100+] → [0.7, 1.0] abundance (log-compressed).
+fn piecewise_supply_norm(supplies: f32) -> f32 {
+    if supplies <= 30.0 {
+        supplies / 30.0 * 0.4 // [0, 0.4] survival band
+    } else if supplies <= 100.0 {
+        0.4 + (supplies - 30.0) / 70.0 * 0.3 // [0.4, 0.7] growth band
+    } else {
+        0.7 + (supplies - 100.0).ln().min(5.0) / 5.0 * 0.3 // [0.7, 1.0] abundance
+    }
+}
+
 /// Quick heuristic value for a campaign state.
 /// Higher = better. Range roughly 0-5 with multiplicative factors for spread.
 fn estimate_value(state: &CampaignState) -> f32 {
@@ -1041,8 +1088,8 @@ fn estimate_value(state: &CampaignState) -> f32 {
         })
         .sum::<f32>() / alive;
 
-    let gold_score = (state.guild.gold / 200.0).clamp(0.0, 1.0);
-    let supply_score = (state.guild.supplies / 100.0).clamp(0.0, 1.0);
+    let gold_score = piecewise_gold_norm(state.guild.gold);
+    let supply_score = piecewise_supply_norm(state.guild.supplies);
     let rep_score = state.guild.reputation / 100.0;
 
     let progress = state.overworld.campaign_progress;
@@ -1169,20 +1216,30 @@ fn estimate_value(state: &CampaignState) -> f32 {
     let narrative_bonus = ((t.total_deeds_earned as f32) / 30.0).min(0.1);
     let pop_bonus = (t.total_population / 1000.0 * t.mean_population_morale / 100.0).min(0.2);
 
-    // --- Stuckness penalty (pass 2) ---
+    // --- Stuckness penalty (pass 2, enhanced pass 11) ---
     let quests_total = quests_won + quests_lost;
     let _ticks_per_quest = if quests_total > 0.0 {
         state.tick as f32 / quests_total
     } else {
         state.tick as f32
     };
-    let stuck_penalty = if state.tick > 5000 && quests_total < 1.0 {
+    let mut stuck_penalty = if state.tick > 5000 && quests_total < 1.0 {
         0.5
     } else if _ticks_per_quest > 3000.0 && state.tick > 3000 {
         0.2
     } else {
         0.0
     };
+    // Extra penalty when all valid actions are Wait/Rest (no meaningful choices)
+    {
+        let valid = state.valid_actions();
+        let all_trivial = !valid.is_empty() && valid.iter().all(|a| {
+            matches!(a, CampaignAction::Wait | CampaignAction::Rest)
+        });
+        if all_trivial {
+            stuck_penalty += 0.3;
+        }
+    }
 
     let injured_penalty = injured_count * 0.15;
     let threat_penalty = threat * 0.5 + crisis_pressure * 0.4;
@@ -1302,7 +1359,7 @@ fn state_features(state: &CampaignState) -> Vec<f32> {
     // --- Extended system tracker dimensions for clustering (pass 3) ---
     let t = &state.system_trackers;
     let spy_intel = (t.total_intel_gathered / 50.0).min(5.0);
-    let merc_strength = (t.total_mercenary_strength / 50.0).min(3.0);
+    let merc_strength = (t.total_mercenary_strength / 100.0).min(3.0);
     let bm_heat = t.black_market_heat / 20.0;
     let prisoners = t.prisoner_count as f32;
     let debt_bucket = (t.total_debt / 50.0).floor().min(5.0);
@@ -1313,7 +1370,7 @@ fn state_features(state: &CampaignState) -> Vec<f32> {
     let rival_rep_gap = t.rival_reputation_gap / 20.0;
     let caravans = t.active_caravan_routes as f32;
     let retired = t.retired_count as f32;
-    let monster_pop = (t.total_monster_population / 50.0).min(5.0);
+    let monster_pop = (t.total_monster_population / 200.0).min(5.0);
     let monster_aggro = t.highest_monster_aggression / 20.0;
     let festivals = t.active_festival_count as f32;
     let mentorships = t.active_mentorship_count as f32;
@@ -2652,6 +2709,8 @@ fn generate_initial_roots(
     let mut mid_count = 0usize;
     let mut late_count = 0usize;
     let target_per_phase = config.initial_roots / 3;
+    // Ensure at least 30% of roots come from early game (tick < 3000)
+    let early_target = (config.initial_roots * 3 / 10).max(1);
 
     for i in 0..campaigns_needed as u64 {
         let seed = config.base_seed.wrapping_add(i * 7919);
@@ -2676,8 +2735,10 @@ fn generate_initial_roots(
                 .filter(|a| a.status != AdventurerStatus::Dead).count();
             let is_viable = alive >= 2 && state.guild.gold > 5.0;
             let phase = phase_tag(state.tick, state.overworld.campaign_progress);
+            let is_early = phase == "early";
+            // Allow more room for early-game roots (30% target guarantee)
             let phase_has_room = match phase.as_str() {
-                "early" => early_count < target_per_phase * 2,
+                "early" => early_count < early_target * 2,
                 "mid" => mid_count < target_per_phase * 2,
                 "late" => late_count < target_per_phase * 2,
                 _ => true,
@@ -2692,21 +2753,35 @@ fn generate_initial_roots(
             let has_war = state.factions.iter().any(|f| f.diplomatic_stance == DiplomaticStance::AtWar);
             let has_low_loyalty = state.adventurers.iter()
                 .any(|a| a.status != AdventurerStatus::Dead && a.loyalty < 30.0);
-            let has_tension = is_viable && (
-                has_quest_board || has_active_quest || has_battle
-                || has_injured || has_crisis || has_pending_choice
-                || has_rival || has_war || has_low_loyalty
-                || state.guild.gold < 150.0
-                || state.overworld.global_threat_level > 30.0
-                || state.completed_quests.len() >= 3
-            );
+            // Lower tension threshold for early game: accept more low-tension states
+            // to avoid starving early-game data. Early game only requires viability
+            // plus at least one non-trivial condition (or just being early with room).
+            let has_tension = if is_early && early_count < early_target {
+                // Relaxed: accept early states if viable, even with low tension
+                is_viable && (
+                    has_quest_board || has_active_quest || has_pending_choice
+                    || state.tick >= 100 // accept almost any early state after tick 100
+                )
+            } else {
+                is_viable && (
+                    has_quest_board || has_active_quest || has_battle
+                    || has_injured || has_crisis || has_pending_choice
+                    || has_rival || has_war || has_low_loyalty
+                    || state.guild.gold < 150.0
+                    || state.overworld.global_threat_level > 30.0
+                    || state.completed_quests.len() >= 3
+                )
+            };
             let is_crisis_state = has_crisis || has_war || has_battle
                 || (state.overworld.global_threat_level > 60.0);
             let on_cadence = state.tick % config.root_sample_interval == 0;
             let crisis_sample = is_crisis_state && state.tick % (config.root_sample_interval / 3).max(1) == 0;
-            let min_tick = config.root_sample_interval;
+            // Early-game: sample more frequently to compensate for shorter phase window
+            let early_boost = is_early && early_count < early_target
+                && state.tick % (config.root_sample_interval / 2).max(1) == 0;
+            let min_tick = if is_early { config.root_sample_interval / 2 } else { config.root_sample_interval };
             if state.tick >= min_tick && has_tension && phase_has_room
-                && (on_cadence || crisis_sample)
+                && (on_cadence || crisis_sample || early_boost)
             {
                 roots.push(RootState { state: state.clone(), seed, wave: 0, difficulty });
                 match phase.as_str() {
@@ -2720,7 +2795,9 @@ fn generate_initial_roots(
         }
     }
 
-    eprintln!("  Root phase distribution: early={}, mid={}, late={}", early_count, mid_count, late_count);
+    let total_roots = early_count + mid_count + late_count;
+    let early_pct = if total_roots > 0 { early_count as f32 / total_roots as f32 * 100.0 } else { 0.0 };
+    eprintln!("  Root phase distribution: early={} ({:.1}%), mid={}, late={}", early_count, early_pct, mid_count, late_count);
 
     if roots.len() > config.initial_roots * 2 {
         let features: Vec<(CampaignState, Vec<f32>)> = roots
@@ -2747,7 +2824,7 @@ fn find_baseline_action(grouped: &[(String, CampaignAction)]) -> Option<&(String
 }
 
 /// Run a single branch: apply action, advance ticks_per_branch.
-/// Returns (terminal, outcome_str, branch_state, intermediate_values, action_sequence).
+/// Returns (terminal, outcome_str, branch_state, intermediate_values, action_sequence, max_consecutive_waits).
 fn run_branch(
     root: &RootState,
     action: &CampaignAction,
@@ -2755,7 +2832,7 @@ fn run_branch(
     config: &BfsConfig,
     rollout_mode: RolloutMode,
     initial_bucket: &str,
-) -> (bool, Option<String>, CampaignState, Vec<f32>, Vec<String>) {
+) -> (bool, Option<String>, CampaignState, Vec<f32>, Vec<String>, u32) {
     let mut branch_state = root.state.clone();
     step_campaign(&mut branch_state, Some(action.clone()));
 
@@ -2771,6 +2848,8 @@ fn run_branch(
     let mut intermediate_values = Vec::with_capacity(3);
     let mut tick_count = 0u64;
     let mut action_sequence = vec![action_type.to_string()];
+    let mut consecutive_waits = 0u32;
+    let mut max_consecutive_waits = 0u32;
 
     for _ in 0..tpb {
         let h_action = strategic_rollout_action(&branch_state, &mut branch_rng, rollout_mode, initial_bucket);
@@ -2778,6 +2857,14 @@ fn run_branch(
             if let Some(ref ha) = h_action {
                 action_sequence.push(action_type_name(ha));
             }
+        }
+        // Track consecutive Wait actions for stuckness detection
+        match &h_action {
+            Some(CampaignAction::Wait) | Some(CampaignAction::Rest) => {
+                consecutive_waits += 1;
+                max_consecutive_waits = max_consecutive_waits.max(consecutive_waits);
+            }
+            _ => { consecutive_waits = 0; }
         }
         let result = step_campaign(&mut branch_state, h_action);
         tick_count += 1;
@@ -2800,12 +2887,13 @@ fn run_branch(
     }
     while intermediate_values.len() < 3 { intermediate_values.push(estimate_value(&branch_state)); }
 
-    (terminal, outcome_str, branch_state, intermediate_values, action_sequence)
+    (terminal, outcome_str, branch_state, intermediate_values, action_sequence, max_consecutive_waits)
 }
 
-/// Compute leaf value from branch outcome.
-fn leaf_value_from_outcome(terminal: bool, outcome_str: &Option<String>, branch_state: &CampaignState) -> f32 {
-    if terminal {
+/// Compute leaf value from branch outcome, with stuckness penalty for
+/// consecutive Wait/Rest sequences > 3 in the rollout.
+fn leaf_value_from_outcome(terminal: bool, outcome_str: &Option<String>, branch_state: &CampaignState, max_consecutive_waits: u32) -> f32 {
+    let raw = if terminal {
         match outcome_str.as_deref() {
             Some("Victory") => 5.0,
             Some("Defeat") => 0.0,
@@ -2813,6 +2901,13 @@ fn leaf_value_from_outcome(terminal: bool, outcome_str: &Option<String>, branch_
         }
     } else {
         estimate_value(branch_state)
+    };
+    // Penalize branches that got stuck in long Wait/Rest loops
+    if max_consecutive_waits > 3 {
+        let penalty = ((max_consecutive_waits - 3) as f32 * 0.1).min(0.5);
+        (raw - penalty).max(0.0)
+    } else {
+        raw
     }
 }
 
@@ -2850,10 +2945,10 @@ fn expand_root(
 
     // Counterfactual baseline (pass 5)
     let baseline_value = if let Some(baseline_entry) = find_baseline_action(&grouped) {
-        let (terminal, outcome_str, branch_state, _, _) = run_branch(
+        let (terminal, outcome_str, branch_state, _, _, mcw) = run_branch(
             root, &baseline_entry.1, &baseline_entry.0, config, RolloutMode::Mixed, "wait",
         );
-        leaf_value_from_outcome(terminal, &outcome_str, &branch_state)
+        leaf_value_from_outcome(terminal, &outcome_str, &branch_state, mcw)
     } else {
         root_value
     };
@@ -2981,9 +3076,9 @@ fn expand_root(
         let rollout_mode = RolloutMode::from_action(action_type, &mut mode_rng);
         let initial_bucket = strategic_bucket(action_type);
 
-        let (terminal, outcome_str, branch_state, intermediate_values, action_sequence) =
+        let (terminal, outcome_str, branch_state, intermediate_values, action_sequence, mcw) =
             run_branch(root, action, action_type, config, rollout_mode, initial_bucket);
-        let leaf_value = leaf_value_from_outcome(terminal, &outcome_str, &branch_state);
+        let leaf_value = leaf_value_from_outcome(terminal, &outcome_str, &branch_state, mcw);
 
         let leaf_tokens = branch_state.to_tokens();
         let leaf_features = state_features(&branch_state);
@@ -3062,9 +3157,9 @@ fn expand_root(
                 let rollout_mode = RolloutMode::from_action(action_type, &mut mode_rng);
                 let initial_bucket = strategic_bucket(action_type);
 
-                let (terminal, outcome_str, branch_state, intermediate_values, action_sequence) =
+                let (terminal, outcome_str, branch_state, intermediate_values, action_sequence, mcw) =
                     run_branch(root, action, action_type, config, rollout_mode, initial_bucket);
-                let leaf_value = leaf_value_from_outcome(terminal, &outcome_str, &branch_state);
+                let leaf_value = leaf_value_from_outcome(terminal, &outcome_str, &branch_state, mcw);
                 let leaf_tokens = branch_state.to_tokens();
                 let leaf_features = state_features(&branch_state);
 
