@@ -886,21 +886,17 @@ fn process_class_xp(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
             // Find template for XP scoring
             let tmpl = templates.iter().find(|t| t.class_name == class.class_name);
             let raw_xp = if let Some(tmpl) = tmpl {
-                score_template(&fp, tmpl) * 10.0
+                score_template(&fp, tmpl) * 50.0
             } else {
                 // For unique/generated classes without templates, use the total
                 // behavior magnitude as XP source (they level from ANY activity)
                 let total_behavior: f32 = fp.iter().sum();
                 total_behavior * 5.0
             };
-            // Apply stagnation penalty
-            let penalty = if class.stagnation_ticks >= STAGNATION_FREEZE {
-                0.0
-            } else if class.stagnation_ticks >= STAGNATION_HALF {
-                0.5
-            } else {
-                1.0
-            };
+            // Stagnation penalty disabled — was causing death spiral where
+            // classes froze at level 1 and never progressed. Revisit once
+            // behavior event frequency is high enough to sustain XP flow.
+            let penalty = 1.0;
             let wmult = witness_mults.get(adv_idx)
                 .and_then(|v| v.get(i))
                 .copied()
