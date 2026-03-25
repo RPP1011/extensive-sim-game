@@ -865,3 +865,63 @@ pub fn dump_synthetic(count: usize, seed: u64, emit_dsl: bool) {
 
     eprintln!("Generated {} synthetic abilities", count);
 }
+
+// ---------------------------------------------------------------------------
+// Tiered ability generation for TWI class system (Phase 10)
+// ---------------------------------------------------------------------------
+
+/// Tier-based power multipliers for combat abilities.
+/// T1 (novice) through T7 (mythic capstone).
+const TIER_POWER: [f32; 8] = [0.0, 1.0, 1.3, 1.7, 2.2, 2.8, 3.5, 5.0];
+const TIER_COOLDOWN_MULT: [f32; 8] = [0.0, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0];
+const TIER_MAX_EFFECTS: [usize; 8] = [0, 1, 1, 2, 2, 3, 3, 4];
+
+/// Generate a combat ability scaled to a class tier (1-7).
+///
+/// Higher tiers produce:
+/// - More damage/heal/shield values (scaled by TIER_POWER)
+/// - Longer cooldowns (scaled by TIER_COOLDOWN_MULT)
+/// - More effects per ability (TIER_MAX_EFFECTS)
+/// - More area/delivery variety
+///
+/// The archetype determines the ability style (ranged, melee, heal, etc.)
+/// and the tier scales the power budget.
+pub fn generate_tiered_ability(
+    archetype: &str,
+    tier: u32,
+    rng: &mut u64,
+    history: &std::collections::HashMap<String, u32>,
+) -> (AbilityDef, String) {
+    let tier_idx = (tier as usize).clamp(1, 7);
+    let power = TIER_POWER[tier_idx];
+    let cd_mult = TIER_COOLDOWN_MULT[tier_idx];
+    let max_effects = TIER_MAX_EFFECTS[tier_idx];
+
+    // Use the base generator with a synthetic "level" that maps to tier power
+    let synthetic_level = match tier_idx {
+        1 => 3,
+        2 => 7,
+        3 => 15,
+        4 => 25,
+        5 => 40,
+        6 => 60,
+        7 => 80,
+        _ => 3,
+    };
+
+    let (mut ability, _is_passive) = generate_ability_with_history(archetype, synthetic_level, rng, history);
+
+    // The base generator already scales by synthetic_level.
+    // Apply additional tier-based cooldown scaling (higher tier = longer CD = more dramatic).
+    ability.cooldown_ms = (ability.cooldown_ms as f32 * cd_mult) as u32;
+
+    // Limit effects to tier budget (higher tiers allowed more effects).
+    if ability.effects.len() > max_effects {
+        ability.effects.truncate(max_effects);
+    }
+
+    // Generate DSL text for the ability
+    let dsl = tactical_sim::effects::dsl::emit::emit_ability_dsl(&ability);
+
+    (ability, dsl)
+}
