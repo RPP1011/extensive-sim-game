@@ -195,6 +195,46 @@ fn ct_rare(name: &str, weights: &[(&str, f32)], threshold: f32, tags: &[&str], r
 }
 
 // ---------------------------------------------------------------------------
+// Helpers for grammar-walked ability generation
+// ---------------------------------------------------------------------------
+
+/// Map class names to ability_gen archetype names for procedural generation.
+fn class_to_archetype(class_name: &str) -> String {
+    match class_name {
+        "Warrior" | "Militia" | "Laborer" | "Farmhand" => "knight".to_string(),
+        "Ranger" | "Hunter" | "Scout" | "Stablehand" => "ranger".to_string(),
+        "Healer" | "Herbalist" => "cleric".to_string(),
+        "Scholar" | "Scribe" | "Apprentice" => "mage".to_string(),
+        "Rogue" | "Pickpocket" => "rogue".to_string(),
+        "Commander" | "Errand Runner" => "paladin".to_string(),
+        "Diplomat" | "Peddler" | "Merchant" | "Traveler" => "bard".to_string(),
+        "Artisan" => "artificer".to_string(),
+        "Guardian" => "guardian".to_string(),
+        _ => "knight".to_string(), // default fallback
+    }
+}
+
+impl BehaviorLedger {
+    /// Convert behavior counters to history tags for ability generation biasing.
+    pub fn to_history_tags(&self) -> std::collections::HashMap<String, u32> {
+        let mut tags = std::collections::HashMap::new();
+        if self.melee_combat > 10.0 { tags.insert("melee".to_string(), self.melee_combat as u32); }
+        if self.ranged_combat > 10.0 { tags.insert("ranged".to_string(), self.ranged_combat as u32); }
+        if self.healing_given > 10.0 { tags.insert("healing".to_string(), self.healing_given as u32); }
+        if self.diplomacy_actions > 10.0 { tags.insert("diplomatic".to_string(), self.diplomacy_actions as u32); }
+        if self.trades_completed > 10.0 { tags.insert("trade".to_string(), self.trades_completed as u32); }
+        if self.items_crafted > 10.0 { tags.insert("crafting".to_string(), self.items_crafted as u32); }
+        if self.areas_explored > 10.0 { tags.insert("exploration".to_string(), self.areas_explored as u32); }
+        if self.units_commanded > 10.0 { tags.insert("leadership".to_string(), self.units_commanded as u32); }
+        if self.stealth_actions > 10.0 { tags.insert("stealth".to_string(), self.stealth_actions as u32); }
+        if self.research_performed > 10.0 { tags.insert("scholarly".to_string(), self.research_performed as u32); }
+        if self.damage_absorbed > 10.0 { tags.insert("tanking".to_string(), self.damage_absorbed as u32); }
+        if self.allies_supported > 10.0 { tags.insert("support".to_string(), self.allies_supported as u32); }
+        tags
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Main tick
 // ---------------------------------------------------------------------------
 
@@ -1261,50 +1301,34 @@ fn check_skill_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                         SkillRarity::Unique => "Unique",
                     };
 
-                    // Phase 10: Use template selection for skill name + effect.
-                    // Capstone synthesis at level 25 or T7 (100) still uses
-                    // generate_capstone_skill as a fallback.
+                    // Use the grammar walker to procedurally generate a unique ability
+                    // based on the adventurer's class archetype, tier, and behavior history.
                     let tier = tier_for_threshold(threshold);
-                    let existing_names: Vec<String> = class
-                        .skills_granted
-                        .iter()
-                        .map(|s| s.skill_name.clone())
-                        .collect();
-                    let template = select_skill_template(
-                        &class.class_name,
-                        &affinity_tags_for_class(&class.class_name)
-                            .iter()
-                            .map(|s| s.to_string())
-                            .collect::<Vec<_>>(),
+                    let history = ledger_snapshot.to_history_tags();
+                    let archetype_for_gen = class_to_archetype(&class.class_name);
+                    let (ability_def, dsl_text) = crate::headless_campaign::ability_gen::generate_tiered_ability(
+                        &archetype_for_gen,
                         tier,
-                        &ledger_snapshot,
-                        &existing_names,
                         &mut state.rng,
+                        &history,
                     );
 
-                    let (skill_name, effect, skill_effect, skill_condition) = if let Some(ref tmpl) = template {
-                        (
-                            tmpl.name.to_string(),
-                            tmpl.description.to_string(),
-                            Some(tmpl.effect.clone()),
-                            tmpl.condition.clone(),
-                        )
-                    } else if threshold >= 85 {
-                        let (sn, eff) = generate_capstone_skill(&ledger_snapshot, &class.class_name);
-                        (sn, eff, None, None)
+                    // Name the skill from the generated ability
+                    let skill_name = if !ability_def.name.is_empty() {
+                        ability_def.name.clone()
                     } else {
-                        let sn = format!(
-                            "{} {} Lv{}",
-                            class.class_name, rarity_str, threshold
-                        );
-                        let eff = format!(
-                            "A {} skill earned at level {} of the {} class.",
-                            rarity_str.to_lowercase(),
-                            threshold,
-                            class.class_name
-                        );
-                        (sn, eff, None, None)
+                        format!("{} Lv{} Skill", class.class_name, threshold)
                     };
+                    let effect = if !dsl_text.is_empty() {
+                        dsl_text.clone()
+                    } else {
+                        format!("A tier {} ability from the {} class.", tier, class.class_name)
+                    };
+                    // Store the DSL text as the skill effect description;
+                    // the actual combat effect is in ability_dsl
+                    let skill_effect: Option<crate::headless_campaign::state::SkillEffect> = None;
+                    let skill_condition: Option<crate::headless_campaign::state::SkillCondition> = None;
+                    let ability_dsl_text = Some(dsl_text);
 
                     // Idea 3.6: skip if this skill is suppressed
                     if class.suppressed_skills.contains(&skill_name) {
@@ -1378,7 +1402,7 @@ fn check_skill_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                         granted_at_level: threshold,
                         rarity,
                         from_class: class.class_name.clone(),
-                        ability_dsl: None,
+                        ability_dsl: ability_dsl_text,
                         effect_description: effect,
                         affinity_tags,
                         empowered,
