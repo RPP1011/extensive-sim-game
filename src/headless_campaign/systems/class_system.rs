@@ -680,7 +680,7 @@ fn check_class_acquisition(state: &mut CampaignState, events: &mut Vec<WorldEven
                     class_name: tmpl.class_name.clone(),
                     level: 1,
                     xp: 0.0,
-                    xp_to_next: 25.0, // 1^2 * 25
+                    xp_to_next: 15.0, // 1^2 * 15
                     stagnation_ticks: 0,
                     skills_granted: Vec::new(),
                     acquired_tick: tick,
@@ -722,7 +722,7 @@ fn check_class_acquisition(state: &mut CampaignState, events: &mut Vec<WorldEven
                     } else { "Wandering Enigma".to_string() };
                     adv.classes.push(ClassInstance {
                         class_name: unique_name.clone(), level: 1, xp: 0.0,
-                        xp_to_next: 25.0, stagnation_ticks: 0, skills_granted: Vec::new(),
+                        xp_to_next: 15.0, stagnation_ticks: 0, skills_granted: Vec::new(),
                         acquired_tick: tick, identity_coherence: 1.0,
                         exclusion_cooldown: 0, ..Default::default()
                     });
@@ -835,7 +835,7 @@ fn process_class_xp(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                 while class.xp >= class.xp_to_next {
                     class.xp -= class.xp_to_next;
                     class.level += 1;
-                    class.xp_to_next = (class.level * class.level) as f32 * 25.0;
+                    class.xp_to_next = (class.level * class.level) as f32 * 15.0;
                     events.push(WorldEvent::ClassLevelUp {
                         adventurer_id: adv.id,
                         class_name: class.class_name.clone(),
@@ -932,7 +932,7 @@ fn check_capstone_resolution(state: &mut CampaignState, events: &mut Vec<WorldEv
                 while class.xp >= class.xp_to_next {
                     class.xp -= class.xp_to_next;
                     class.level += 1;
-                    class.xp_to_next = (class.level * class.level) as f32 * 25.0;
+                    class.xp_to_next = (class.level * class.level) as f32 * 15.0;
                     events.push(WorldEvent::ClassLevelUp {
                         adventurer_id: adv.id,
                         class_name: class.class_name.clone(),
@@ -1786,7 +1786,7 @@ fn check_evolution(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
             // Grant +50% effective stat growth by adding 50% of current level as bonus levels
             let bonus_levels = class.level / 2;
             class.level += bonus_levels;
-            class.xp_to_next = (class.level * class.level) as f32 * 25.0;
+            class.xp_to_next = (class.level * class.level) as f32 * 15.0;
             class.acquired_tick = tick; // Mark evolution tick
 
             events.push(WorldEvent::ClassEvolved {
