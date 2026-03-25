@@ -409,6 +409,7 @@ fn strategic_bucket(action_type: &str) -> &'static str {
         "Wait" => "wait",
         "RespondToChoice" => "choice",
         "StartingChoice" => "setup",
+        _ if action_type.starts_with("UseClassSkill") => "class_skill",
         _ => "other",
     }
 }
@@ -601,6 +602,7 @@ fn cluster_similar_actions(actions: &[CampaignAction], state: &CampaignState) ->
     let mut equip: Vec<&CampaignAction> = Vec::new();
     let mut hire_scout: Vec<&CampaignAction> = Vec::new();
     let mut abilities: Vec<&CampaignAction> = Vec::new();
+    let mut class_skills: Vec<&CampaignAction> = Vec::new();
     let mut purchase: Vec<&CampaignAction> = Vec::new();
     let mut other: Vec<&CampaignAction> = Vec::new();
 
@@ -617,6 +619,7 @@ fn cluster_similar_actions(actions: &[CampaignAction], state: &CampaignState) ->
             CampaignAction::EquipGear { .. } => equip.push(action),
             CampaignAction::HireScout { .. } => hire_scout.push(action),
             CampaignAction::UseAbility { .. } => abilities.push(action),
+            CampaignAction::UseClassSkill { .. } => class_skills.push(action),
             CampaignAction::PurchaseSupplies { .. } => purchase.push(action),
             _ => other.push(action),
         }
@@ -671,6 +674,8 @@ fn cluster_similar_actions(actions: &[CampaignAction], state: &CampaignState) ->
     for &a in &sample_k(&sorted_abilities, 3) { result.push(a.clone()); }
 
     for &a in &sample_k(&purchase, 2) { result.push(a.clone()); }
+    // Class skills: sample up to 5 diverse skills for BFS exploration
+    for &a in &sample_k(&class_skills, 5) { result.push(a.clone()); }
     for &a in &other { result.push(a.clone()); }
 
     result
