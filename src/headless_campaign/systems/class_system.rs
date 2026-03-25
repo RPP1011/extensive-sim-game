@@ -42,9 +42,11 @@ const EVOLUTION_MIN_QUESTS: f32 = 20.0;
 const RECENT_DECAY: f32 = 0.95;
 
 /// Stagnation threshold where XP gain is halved.
-const STAGNATION_HALF: u32 = 500;
+/// Set high enough that normal event gaps don't trigger it.
+/// With class tick every 50 game ticks, 5000 stagnation = 250,000 game ticks of no activity.
+const STAGNATION_HALF: u32 = 5000;
 /// Stagnation threshold where XP gain is frozen.
-const STAGNATION_FREEZE: u32 = 1000;
+const STAGNATION_FREEZE: u32 = 10000;
 
 /// XP trickle between overlapping classes (15%).
 const RESONANCE_TRICKLE: f32 = 0.15;
@@ -1511,11 +1513,11 @@ fn update_stagnation(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
         }
         for class in &mut adv.classes {
             // stagnation_ticks is reset to 0 in process_class_xp when XP is gained;
-            // here we increment for classes that got no XP this tick.
-            if class.stagnation_ticks > 0 {
+            // here we increment for classes that got no XP this tick, but slowly.
+            // Only increment every 10th class tick to avoid death-spiral where
+            // stagnation → no XP → more stagnation → frozen forever.
+            if class.stagnation_ticks > 0 && state.tick % (CLASS_TICK_INTERVAL * 10) == 0 {
                 class.stagnation_ticks += 1;
-            } else {
-                // Will be set to 1 next tick if no XP is gained
             }
 
             // Emit stagnation events at thresholds
