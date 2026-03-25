@@ -276,17 +276,31 @@ fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEven
                 }
                 "bard" | "diplomat" => {
                     adv.behavior_ledger.diplomacy_actions += seed_amount;
-                    adv.behavior_ledger.allies_supported += seed_amount * 0.3;
+                    adv.behavior_ledger.allies_supported += seed_amount * 0.5;
                 }
                 "monk" => {
                     adv.behavior_ledger.melee_combat += seed_amount * 0.7;
                     adv.behavior_ledger.damage_absorbed += seed_amount * 0.3;
                 }
+                "necromancer" | "warlock" => {
+                    adv.behavior_ledger.research_performed += seed_amount;
+                    adv.behavior_ledger.stealth_actions += seed_amount * 0.3;
+                }
+                "shaman" => {
+                    adv.behavior_ledger.healing_given += seed_amount * 0.5;
+                    adv.behavior_ledger.research_performed += seed_amount * 0.3;
+                    adv.behavior_ledger.allies_supported += seed_amount * 0.2;
+                }
+                "artificer" => {
+                    adv.behavior_ledger.items_crafted += seed_amount;
+                    adv.behavior_ledger.research_performed += seed_amount * 0.3;
+                }
                 _ => {
-                    // Unknown archetype: small spread across all axes
-                    adv.behavior_ledger.melee_combat += 5.0;
-                    adv.behavior_ledger.areas_explored += 5.0;
-                    adv.behavior_ledger.allies_supported += 5.0;
+                    // Unknown archetype: spread across non-combat axes for diversity
+                    adv.behavior_ledger.diplomacy_actions += seed_amount * 0.3;
+                    adv.behavior_ledger.trades_completed += seed_amount * 0.3;
+                    adv.behavior_ledger.areas_explored += seed_amount * 0.2;
+                    adv.behavior_ledger.allies_supported += seed_amount * 0.2;
                 }
             }
             // Also seed recent window so the first class check can fire
