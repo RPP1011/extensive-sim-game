@@ -743,6 +743,8 @@ fn process_class_xp(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
     let templates: Vec<ClassTemplate> = base_templates()
         .into_iter()
         .chain(rare_templates())
+        .chain(public_class_templates())
+        .chain(hidden_class_templates())
         .collect();
 
     // --- Witness XP Multiplier pre-pass (idea 2.9) ---
@@ -767,24 +769,29 @@ fn process_class_xp(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
         let mut xp_gains = vec![0.0f32; num_classes];
 
         for (i, class) in adv.classes.iter().enumerate() {
-            // Find template
+            // Find template for XP scoring
             let tmpl = templates.iter().find(|t| t.class_name == class.class_name);
-            if let Some(tmpl) = tmpl {
-                let raw_xp = score_template(&fp, tmpl) * 10.0;
-                // Apply stagnation penalty
-                let penalty = if class.stagnation_ticks >= STAGNATION_FREEZE {
-                    0.0
-                } else if class.stagnation_ticks >= STAGNATION_HALF {
-                    0.5
-                } else {
-                    1.0
-                };
-                let wmult = witness_mults.get(adv_idx)
-                    .and_then(|v| v.get(i))
-                    .copied()
-                    .unwrap_or(1.0);
-                xp_gains[i] = raw_xp * penalty * wmult;
-            }
+            let raw_xp = if let Some(tmpl) = tmpl {
+                score_template(&fp, tmpl) * 10.0
+            } else {
+                // For unique/generated classes without templates, use the total
+                // behavior magnitude as XP source (they level from ANY activity)
+                let total_behavior: f32 = fp.iter().sum();
+                total_behavior * 5.0
+            };
+            // Apply stagnation penalty
+            let penalty = if class.stagnation_ticks >= STAGNATION_FREEZE {
+                0.0
+            } else if class.stagnation_ticks >= STAGNATION_HALF {
+                0.5
+            } else {
+                1.0
+            };
+            let wmult = witness_mults.get(adv_idx)
+                .and_then(|v| v.get(i))
+                .copied()
+                .unwrap_or(1.0);
+            xp_gains[i] = raw_xp * penalty * wmult;
         }
 
         // Class resonance: trickle XP between classes with overlapping tags
