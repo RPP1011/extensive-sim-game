@@ -853,8 +853,9 @@ fn check_class_acquisition(state: &mut CampaignState, events: &mut Vec<WorldEven
 // ---------------------------------------------------------------------------
 
 fn process_class_xp(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
-    let templates: Vec<ClassTemplate> = base_templates()
+    let templates: Vec<ClassTemplate> = starter_templates()
         .into_iter()
+        .chain(base_templates())
         .chain(rare_templates())
         .chain(public_class_templates())
         .chain(hidden_class_templates())
