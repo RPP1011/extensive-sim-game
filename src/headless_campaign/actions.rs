@@ -934,6 +934,10 @@ pub enum WorldEvent {
     ClassEvolved { adventurer_id: u32, from_class: String, to_class: String },
     ConsolidationOffered { adventurer_id: u32, proposed_name: String },
     ConsolidationRefused { adventurer_id: u32, proposed_name: String },
+    ShameClassGranted { adventurer_id: u32, class_name: String, reason: String },
+    CrisisClassGranted { adventurer_id: u32, class_name: String, crisis_type: String },
+    ClassFractured { adventurer_id: u32, original_class: String, replacement: String },
+    ClassChronicleEntry { adventurer_id: u32, entry: String },
 }
 
 // ---------------------------------------------------------------------------

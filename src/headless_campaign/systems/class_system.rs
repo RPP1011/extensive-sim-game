@@ -6,8 +6,8 @@
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::{
-    lcg_f32, AdventurerStatus, BehaviorLedger, CampaignState, ClassInstance, ClassTemplate,
-    ConsolidationOffer, GrantedSkill, SkillRarity,
+    lcg_f32, AdventurerStatus, BattleStatus, BehaviorLedger, CampaignState, ClassInstance,
+    ClassTemplate, ConsolidationOffer, GrantedSkill, SkillRarity,
 };
 
 /// Class system fires every 100 ticks (10 s game time).
@@ -15,6 +15,9 @@ const CLASS_TICK_INTERVAL: u64 = 100;
 
 /// Consolidation check fires every 500 ticks.
 const CONSOLIDATION_INTERVAL: u64 = 500;
+
+/// Reactive narrative (shame, crisis, erosion, chronicle) fires every 200 ticks.
+const REACTIVE_NARRATIVE_INTERVAL: u64 = 200;
 
 /// Minimum level on both classes before consolidation is offered.
 const CONSOLIDATION_MIN_LEVEL: u32 = 10;
@@ -121,6 +124,14 @@ pub fn tick_class_system(
     if state.tick % CONSOLIDATION_INTERVAL == 0 {
         check_consolidation_offers(state, events);
         check_evolution(state, events);
+    }
+
+    // Phase 7: Reactive narrative runs every 200 ticks
+    if state.tick % REACTIVE_NARRATIVE_INTERVAL == 0 {
+        check_shame_classes(state, events);
+        check_crisis_grants(state, events);
+        check_identity_erosion(state, events);
+        generate_class_chronicle(state, events);
     }
 }
 
@@ -941,4 +952,684 @@ fn check_evolution(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
             });
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7: Shame Classes
+// ---------------------------------------------------------------------------
+
+/// Shame class stat bonus suppression factor (20% reduction).
+const SHAME_SUPPRESSION: f32 = 0.20;
+
+/// Track shameful behavior patterns and auto-grant negative classes.
+fn check_shame_classes(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
+    let tick = state.tick as u32;
+
+    // Scan recent events for retreat/desertion signals and update ledger counters.
+    for ev in events.iter() {
+        match ev {
+            WorldEvent::BattleEnded {
+                result: BattleStatus::Retreat,
+                ..
+            } => {
+                // Credit all fighting adventurers with a consecutive retreat.
+                // (We iterate adventurers below, but need to mark them here.)
+                for adv in &mut state.adventurers {
+                    if adv.status == AdventurerStatus::Fighting
+                        || adv.status == AdventurerStatus::Injured
+                    {
+                        adv.behavior_ledger.consecutive_retreats += 1;
+                    }
+                }
+            }
+            WorldEvent::BattleEnded {
+                result: BattleStatus::Victory,
+                ..
+            } => {
+                // Victory resets consecutive retreats for all combatants.
+                for adv in &mut state.adventurers {
+                    if adv.status == AdventurerStatus::Fighting {
+                        adv.behavior_ledger.consecutive_retreats = 0;
+                    }
+                }
+            }
+            WorldEvent::AdventurerDeserted { adventurer_id, .. } => {
+                if let Some(adv) =
+                    state.adventurers.iter_mut().find(|a| a.id == *adventurer_id)
+                {
+                    adv.behavior_ledger.party_desertions += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Check broken oaths across all adventurers.
+    let broken_oath_adventurers: Vec<u32> = state
+        .oaths
+        .iter()
+        .filter(|o| o.broken)
+        .map(|o| o.adventurer_id)
+        .collect();
+
+    // Now check each adventurer for shame class eligibility.
+    for adv in &mut state.adventurers {
+        if adv.status == AdventurerStatus::Dead {
+            continue;
+        }
+
+        // [Coward]: fled 3+ consecutive battles
+        if adv.behavior_ledger.consecutive_retreats >= 3
+            && !adv.classes.iter().any(|c| c.class_name == "Coward")
+        {
+            adv.classes.push(ClassInstance {
+                class_name: "Coward".to_string(),
+                level: 1,
+                xp: 0.0,
+                xp_to_next: 100.0,
+                stagnation_ticks: 0,
+                skills_granted: Vec::new(),
+                acquired_tick: tick,
+                identity_coherence: 1.0,
+            });
+            events.push(WorldEvent::ShameClassGranted {
+                adventurer_id: adv.id,
+                class_name: "Coward".to_string(),
+                reason: format!(
+                    "Fled {} consecutive battles",
+                    adv.behavior_ledger.consecutive_retreats
+                ),
+            });
+        }
+
+        // [Oathbreaker]: broke a sworn oath
+        if broken_oath_adventurers.contains(&adv.id)
+            && !adv.classes.iter().any(|c| c.class_name == "Oathbreaker")
+        {
+            adv.classes.push(ClassInstance {
+                class_name: "Oathbreaker".to_string(),
+                level: 1,
+                xp: 0.0,
+                xp_to_next: 100.0,
+                stagnation_ticks: 0,
+                skills_granted: Vec::new(),
+                acquired_tick: tick,
+                identity_coherence: 1.0,
+            });
+            events.push(WorldEvent::ShameClassGranted {
+                adventurer_id: adv.id,
+                class_name: "Oathbreaker".to_string(),
+                reason: "Broke a sworn oath".to_string(),
+            });
+        }
+
+        // [Deserter]: left a party during an active quest 3+ times
+        if adv.behavior_ledger.party_desertions >= 3
+            && !adv.classes.iter().any(|c| c.class_name == "Deserter")
+        {
+            adv.classes.push(ClassInstance {
+                class_name: "Deserter".to_string(),
+                level: 1,
+                xp: 0.0,
+                xp_to_next: 100.0,
+                stagnation_ticks: 0,
+                skills_granted: Vec::new(),
+                acquired_tick: tick,
+                identity_coherence: 1.0,
+            });
+            events.push(WorldEvent::ShameClassGranted {
+                adventurer_id: adv.id,
+                class_name: "Deserter".to_string(),
+                reason: format!(
+                    "Deserted party {} times during active quests",
+                    adv.behavior_ledger.party_desertions
+                ),
+            });
+        }
+    }
+}
+
+/// Check if a class is a shame class. Shame classes cannot be removed and
+/// suppress stat bonuses from other classes by 20%.
+fn is_shame_class(name: &str) -> bool {
+    matches!(name, "Coward" | "Oathbreaker" | "Deserter")
+}
+
+/// Returns the shame suppression factor for an adventurer.
+/// 1.0 = no shame classes, 0.8 per shame class held.
+pub fn shame_suppression_factor(classes: &[ClassInstance]) -> f32 {
+    let shame_count = classes.iter().filter(|c| is_shame_class(&c.class_name)).count();
+    if shame_count == 0 {
+        1.0
+    } else {
+        (1.0 - SHAME_SUPPRESSION).powi(shame_count as i32)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7: Crisis Moment Grants
+// ---------------------------------------------------------------------------
+
+/// Check for crisis-worthy moments and grant unique unrepeatable classes.
+fn check_crisis_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
+    let tick = state.tick as u32;
+
+    // Update tension accumulators based on dangerous situations.
+    for ev in events.iter() {
+        match ev {
+            // Being in battle while outnumbered or at low HP raises tension.
+            WorldEvent::BattleStarted { .. } => {
+                for adv in &mut state.adventurers {
+                    if adv.status == AdventurerStatus::Fighting {
+                        adv.behavior_ledger.tension_accumulator += 0.1;
+                    }
+                }
+            }
+            // Ally death in same party raises tension sharply.
+            WorldEvent::AdventurerDied { adventurer_id, .. } => {
+                // Find the dead adventurer's party, raise tension for party members.
+                let party_id = state
+                    .adventurers
+                    .iter()
+                    .find(|a| a.id == *adventurer_id)
+                    .and_then(|a| a.party_id);
+                if let Some(pid) = party_id {
+                    for adv in &mut state.adventurers {
+                        if adv.party_id == Some(pid)
+                            && adv.id != *adventurer_id
+                            && adv.status != AdventurerStatus::Dead
+                        {
+                            adv.behavior_ledger.tension_accumulator += 0.3;
+                        }
+                    }
+                }
+            }
+            // Injury (near death) raises tension.
+            WorldEvent::AdventurerInjured {
+                adventurer_id,
+                injury_level,
+            } => {
+                if *injury_level > 80.0 {
+                    if let Some(adv) =
+                        state.adventurers.iter_mut().find(|a| a.id == *adventurer_id)
+                    {
+                        adv.behavior_ledger.tension_accumulator += 0.2;
+                        adv.behavior_ledger.near_death_count += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Natural tension decay — slowly returns to 0.
+    for adv in &mut state.adventurers {
+        if adv.status == AdventurerStatus::Dead {
+            continue;
+        }
+        adv.behavior_ledger.tension_accumulator =
+            (adv.behavior_ledger.tension_accumulator - 0.02).max(0.0);
+    }
+
+    // Check crisis grant conditions for each adventurer.
+    // Collect grants first to avoid borrow issues.
+    struct CrisisGrant {
+        adv_id: u32,
+        class_name: String,
+        crisis_type: String,
+    }
+    let mut grants: Vec<CrisisGrant> = Vec::new();
+
+    for adv in &state.adventurers {
+        if adv.status == AdventurerStatus::Dead {
+            continue;
+        }
+        // Must have tension above 0.8
+        if adv.behavior_ledger.tension_accumulator < 0.8 {
+            continue;
+        }
+
+        let fp = behavioral_fingerprint(&adv.behavior_ledger);
+
+        // [The Last Wall]: held position while outnumbered — high damage_absorbed + low HP
+        if !state.unique_class_holders.contains_key("The Last Wall")
+            && !adv.classes.iter().any(|c| c.class_name == "The Last Wall")
+            && fp[10] > 0.15 // damage_absorbed fingerprint
+            && adv.injury > 60.0
+            && adv.status == AdventurerStatus::Fighting
+        {
+            grants.push(CrisisGrant {
+                adv_id: adv.id,
+                class_name: "The Last Wall".to_string(),
+                crisis_type: "held_position_outnumbered".to_string(),
+            });
+            continue; // Only one crisis class per tick per adventurer
+        }
+
+        // [Mercy in Iron]: healed allies while near death
+        if !state.unique_class_holders.contains_key("Mercy in Iron")
+            && !adv.classes.iter().any(|c| c.class_name == "Mercy in Iron")
+            && fp[2] > 0.15 // healing_given fingerprint
+            && adv.injury > 70.0
+        {
+            grants.push(CrisisGrant {
+                adv_id: adv.id,
+                class_name: "Mercy in Iron".to_string(),
+                crisis_type: "healed_while_near_death".to_string(),
+            });
+            continue;
+        }
+
+        // [Risen Commander]: led a victory after losing party members
+        if !state.unique_class_holders.contains_key("Risen Commander")
+            && !adv.classes.iter().any(|c| c.class_name == "Risen Commander")
+            && fp[7] > 0.1 // units_commanded fingerprint
+            && adv.behavior_ledger.tension_accumulator > 0.9
+        {
+            // Check if there were recent ally deaths (tension would be spiked from AdventurerDied)
+            let recent_ally_deaths = events.iter().any(|e| {
+                matches!(e, WorldEvent::AdventurerDied { .. })
+            });
+            let recent_victory = events.iter().any(|e| {
+                matches!(
+                    e,
+                    WorldEvent::BattleEnded {
+                        result: BattleStatus::Victory,
+                        ..
+                    }
+                )
+            });
+            if recent_ally_deaths && recent_victory {
+                grants.push(CrisisGrant {
+                    adv_id: adv.id,
+                    class_name: "Risen Commander".to_string(),
+                    crisis_type: "led_victory_after_loss".to_string(),
+                });
+                continue;
+            }
+        }
+
+        // [The Unkillable]: survived 3+ near-death experiences
+        if !state.unique_class_holders.contains_key("The Unkillable")
+            && !adv.classes.iter().any(|c| c.class_name == "The Unkillable")
+            && adv.behavior_ledger.near_death_count >= 3
+        {
+            grants.push(CrisisGrant {
+                adv_id: adv.id,
+                class_name: "The Unkillable".to_string(),
+                crisis_type: "survived_near_death".to_string(),
+            });
+        }
+    }
+
+    // Apply grants
+    for grant in grants {
+        // Double-check uniqueness (another grant in same tick could collide)
+        if state.unique_class_holders.contains_key(&grant.class_name) {
+            continue;
+        }
+
+        state
+            .unique_class_holders
+            .insert(grant.class_name.clone(), grant.adv_id);
+
+        if let Some(adv) = state
+            .adventurers
+            .iter_mut()
+            .find(|a| a.id == grant.adv_id)
+        {
+            adv.classes.push(ClassInstance {
+                class_name: grant.class_name.clone(),
+                level: 1,
+                xp: 0.0,
+                xp_to_next: 100.0,
+                stagnation_ticks: 0,
+                skills_granted: Vec::new(),
+                acquired_tick: tick,
+                identity_coherence: 1.0,
+            });
+
+            // Reset tension after a crisis grant
+            adv.behavior_ledger.tension_accumulator = 0.0;
+        }
+
+        events.push(WorldEvent::CrisisClassGranted {
+            adventurer_id: grant.adv_id,
+            class_name: grant.class_name,
+            crisis_type: grant.crisis_type,
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7: Identity Erosion
+// ---------------------------------------------------------------------------
+
+/// Coherence decay rate per tick when actions contradict class.
+const COHERENCE_DECAY: f32 = 0.02;
+/// Coherence recovery rate per tick when actions align with class.
+const COHERENCE_RECOVER: f32 = 0.01;
+
+/// Map from class name to the behavioral fingerprint indices that align with it.
+/// Returns (aligned_indices, contradicting_indices).
+fn class_alignment_indices(class_name: &str) -> (Vec<usize>, Vec<usize>) {
+    match class_name {
+        "Healer" => (
+            vec![2, 11], // healing_given, allies_supported
+            vec![0, 1],  // melee_combat, ranged_combat (dealing damage)
+        ),
+        "Guardian" => (
+            vec![10, 11], // damage_absorbed, allies_supported
+            vec![8],      // stealth_actions (guardians don't sneak)
+        ),
+        "Diplomat" => (
+            vec![3],     // diplomacy_actions
+            vec![0, 1],  // melee/ranged combat
+        ),
+        "Warrior" => (
+            vec![0, 10], // melee_combat, damage_absorbed
+            vec![3],     // diplomacy_actions
+        ),
+        "Ranger" => (
+            vec![1, 6], // ranged_combat, areas_explored
+            vec![],
+        ),
+        "Rogue" => (
+            vec![8, 0], // stealth_actions, melee_combat
+            vec![3],    // diplomacy_actions
+        ),
+        "Merchant" => (
+            vec![4, 3], // trades_completed, diplomacy_actions
+            vec![0],    // melee_combat
+        ),
+        "Scholar" => (
+            vec![9, 6], // research_performed, areas_explored
+            vec![0],    // melee_combat
+        ),
+        "Commander" => (
+            vec![7, 0], // units_commanded, melee_combat
+            vec![],
+        ),
+        "Scout" => (
+            vec![6, 8], // areas_explored, stealth_actions
+            vec![],
+        ),
+        "Artisan" => (
+            vec![5, 4], // items_crafted, trades_completed
+            vec![0],    // melee_combat
+        ),
+        _ => (vec![], vec![]), // Unknown/consolidated classes — no erosion
+    }
+}
+
+/// Fractured class replacement mapping.
+fn fractured_replacement(class_name: &str) -> &str {
+    match class_name {
+        "Healer" => "Mender of Last Resort",
+        "Guardian" => "Broken Shield",
+        "Diplomat" => "Failed Envoy",
+        "Warrior" => "Battered Veteran",
+        "Ranger" => "Lost Wanderer",
+        "Rogue" => "Exposed Shadow",
+        "Merchant" => "Bankrupt Trader",
+        "Scholar" => "Scattered Mind",
+        "Commander" => "Fallen Officer",
+        "Scout" => "Blinded Scout",
+        "Artisan" => "Clumsy Hands",
+        _ => "Fractured Echo",
+    }
+}
+
+/// Check class identity coherence — decay when actions contradict, recover when aligned.
+fn check_identity_erosion(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
+    let tick = state.tick as u32;
+
+    // Collect fractures to apply after iteration.
+    struct Fracture {
+        adv_id: u32,
+        class_idx: usize,
+        original: String,
+        replacement: String,
+    }
+    let mut fractures: Vec<Fracture> = Vec::new();
+
+    for adv in &mut state.adventurers {
+        if adv.status == AdventurerStatus::Dead {
+            continue;
+        }
+
+        let fp = behavioral_fingerprint(&adv.behavior_ledger);
+
+        for (idx, class) in adv.classes.iter_mut().enumerate() {
+            // Skip shame classes and crisis classes — they don't erode.
+            if is_shame_class(&class.class_name) {
+                continue;
+            }
+
+            let (aligned, contradicting) = class_alignment_indices(&class.class_name);
+
+            // If no alignment data, skip (consolidated/evolved/unknown classes).
+            if aligned.is_empty() && contradicting.is_empty() {
+                continue;
+            }
+
+            let aligned_activity: f32 = aligned.iter().map(|&i| fp[i]).sum();
+            let contradicting_activity: f32 = contradicting.iter().map(|&i| fp[i]).sum();
+
+            if contradicting_activity > aligned_activity && contradicting_activity > 0.05 {
+                // Actions contradict class — decay coherence.
+                class.identity_coherence =
+                    (class.identity_coherence - COHERENCE_DECAY).max(0.0);
+            } else if aligned_activity > 0.05 {
+                // Actions align — recover coherence.
+                class.identity_coherence =
+                    (class.identity_coherence + COHERENCE_RECOVER).min(1.0);
+            }
+
+            // Check for fracture.
+            if class.identity_coherence <= 0.0 {
+                let replacement = fractured_replacement(&class.class_name).to_string();
+                fractures.push(Fracture {
+                    adv_id: adv.id,
+                    class_idx: idx,
+                    original: class.class_name.clone(),
+                    replacement,
+                });
+            }
+        }
+    }
+
+    // Apply fractures (replace the class).
+    for frac in fractures {
+        if let Some(adv) = state
+            .adventurers
+            .iter_mut()
+            .find(|a| a.id == frac.adv_id)
+        {
+            if frac.class_idx < adv.classes.len()
+                && adv.classes[frac.class_idx].class_name == frac.original
+            {
+                let old_level = adv.classes[frac.class_idx].level;
+                // Replace with diminished version at half the level.
+                adv.classes[frac.class_idx] = ClassInstance {
+                    class_name: frac.replacement.clone(),
+                    level: (old_level / 2).max(1),
+                    xp: 0.0,
+                    xp_to_next: ((old_level / 2).max(1).pow(2)) as f32 * 100.0,
+                    stagnation_ticks: 0,
+                    skills_granted: Vec::new(),
+                    acquired_tick: tick,
+                    identity_coherence: 0.5, // Starts at half coherence
+                };
+
+                events.push(WorldEvent::ClassFractured {
+                    adventurer_id: frac.adv_id,
+                    original_class: frac.original.clone(),
+                    replacement: frac.replacement.clone(),
+                });
+
+                // Generate chronicle entry for fracture.
+                let entry = format!(
+                    "The class [{}] has shattered. What remains is [{}] — a diminished echo of what was. \
+                     The system remembers, even if they wish to forget.",
+                    frac.original, frac.replacement
+                );
+                state.class_chronicle_entries.push(entry.clone());
+                events.push(WorldEvent::ClassChronicleEntry {
+                    adventurer_id: frac.adv_id,
+                    entry,
+                });
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7: Chronicle Entries
+// ---------------------------------------------------------------------------
+
+/// Generate chronicle-style entries for significant class events.
+fn generate_class_chronicle(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
+    // Scan the events for significant class events and generate chronicle entries.
+    // We iterate a snapshot of events to avoid borrow issues.
+    let event_snapshot: Vec<WorldEvent> = events.clone();
+
+    for ev in &event_snapshot {
+        match ev {
+            WorldEvent::ClassGranted {
+                adventurer_id,
+                class_name,
+            } => {
+                let name = adventurer_name(state, *adventurer_id);
+                let entry = format!(
+                    "We have seen what {} does. A class forms: [{}]. Level 1. The beginning.",
+                    name, class_name
+                );
+                state.class_chronicle_entries.push(entry.clone());
+                events.push(WorldEvent::ClassChronicleEntry {
+                    adventurer_id: *adventurer_id,
+                    entry,
+                });
+            }
+            WorldEvent::ClassLevelUp {
+                adventurer_id,
+                class_name,
+                new_level,
+            } => {
+                // Only chronicle level 10+
+                if *new_level >= 10 {
+                    let name = adventurer_name(state, *adventurer_id);
+                    let entry = format!(
+                        "{} has reached level {} in [{}]. The system takes note. Power consolidates.",
+                        name, new_level, class_name
+                    );
+                    state.class_chronicle_entries.push(entry.clone());
+                    events.push(WorldEvent::ClassChronicleEntry {
+                        adventurer_id: *adventurer_id,
+                        entry,
+                    });
+                }
+            }
+            WorldEvent::ClassConsolidated {
+                adventurer_id,
+                from_a,
+                from_b,
+                into,
+            } => {
+                let name = adventurer_name(state, *adventurer_id);
+                let entry = format!(
+                    "Two paths have merged. [{}] and [{}] dissolve into [{}]. {} walks a narrower, deeper road.",
+                    from_a, from_b, into, name
+                );
+                state.class_chronicle_entries.push(entry.clone());
+                events.push(WorldEvent::ClassChronicleEntry {
+                    adventurer_id: *adventurer_id,
+                    entry,
+                });
+            }
+            WorldEvent::ShameClassGranted {
+                adventurer_id,
+                class_name,
+                reason,
+            } => {
+                let name = adventurer_name(state, *adventurer_id);
+                let entry = format!(
+                    "A mark of shame. [{}] is branded upon {}. Reason: {}. \
+                     This cannot be undone. Only buried.",
+                    class_name, name, reason
+                );
+                state.class_chronicle_entries.push(entry.clone());
+                events.push(WorldEvent::ClassChronicleEntry {
+                    adventurer_id: *adventurer_id,
+                    entry,
+                });
+            }
+            WorldEvent::CrisisClassGranted {
+                adventurer_id,
+                class_name,
+                crisis_type,
+            } => {
+                let name = adventurer_name(state, *adventurer_id);
+                let entry = match crisis_type.as_str() {
+                    "held_position_outnumbered" => format!(
+                        "This one has fought beyond reason. We have been watching. \
+                         A name is forming. {} is now [{}].",
+                        name, class_name
+                    ),
+                    "healed_while_near_death" => format!(
+                        "Even broken, this one mends others. We have been watching. \
+                         A name is forming. {} is now [{}].",
+                        name, class_name
+                    ),
+                    "led_victory_after_loss" => format!(
+                        "They fell, and still this one commanded. We have been watching. \
+                         A name is forming. {} is now [{}].",
+                        name, class_name
+                    ),
+                    "survived_near_death" => format!(
+                        "Death has reached for this one and missed. Three times now. \
+                         We have been watching. A name is forming. {} is now [{}].",
+                        name, class_name
+                    ),
+                    _ => format!(
+                        "A crisis moment. {} earns [{}]. The system acknowledges.",
+                        name, class_name
+                    ),
+                };
+                state.class_chronicle_entries.push(entry.clone());
+                events.push(WorldEvent::ClassChronicleEntry {
+                    adventurer_id: *adventurer_id,
+                    entry,
+                });
+            }
+            WorldEvent::ClassEvolved {
+                adventurer_id,
+                from_class,
+                to_class,
+            } => {
+                let name = adventurer_name(state, *adventurer_id);
+                let entry = format!(
+                    "[{}] evolves. {} is now [{}]. The old name fades. The new one burns brighter.",
+                    from_class, name, to_class
+                );
+                state.class_chronicle_entries.push(entry.clone());
+                events.push(WorldEvent::ClassChronicleEntry {
+                    adventurer_id: *adventurer_id,
+                    entry,
+                });
+            }
+            // ClassFractured chronicle entries are already generated in check_identity_erosion
+            _ => {}
+        }
+    }
+}
+
+/// Helper to look up an adventurer's name by ID.
+fn adventurer_name(state: &CampaignState, id: u32) -> String {
+    state
+        .adventurers
+        .iter()
+        .find(|a| a.id == id)
+        .map(|a| a.name.clone())
+        .unwrap_or_else(|| format!("Adventurer #{}", id))
 }
