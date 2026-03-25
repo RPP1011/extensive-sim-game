@@ -2860,7 +2860,7 @@ fn compute_state_delta(root: &CampaignState, leaf: &CampaignState) -> StateDelta
     let skills_with_effect = leaf.adventurers.iter()
         .flat_map(|a| a.classes.iter())
         .flat_map(|c| c.skills_granted.iter())
-        .filter(|s| s.ability_dsl.is_some() || s.skill_effect.is_some())
+        .filter(|s| s.ability_dsl.as_ref().map_or(false, |d| !d.is_empty()) || s.skill_effect.is_some() || s.skill_effect.is_some())
         .count() as u32;
 
     let max_class_level = leaf.adventurers.iter()
@@ -3443,7 +3443,7 @@ fn expand_root(
             let skills_with_dsl = leaf.adventurers.iter()
                 .flat_map(|a| a.classes.iter())
                 .flat_map(|c| c.skills_granted.iter())
-                .filter(|s| s.ability_dsl.is_some())
+                .filter(|s| s.ability_dsl.as_ref().map_or(false, |d| !d.is_empty()) || s.skill_effect.is_some())
                 .count();
             if total_skills > 0 && skills_with_dsl == 0 {
                 diag.push("all_skills_placeholder");
