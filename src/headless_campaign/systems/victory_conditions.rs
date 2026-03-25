@@ -58,11 +58,15 @@ pub fn tick_victory_conditions(
         apply_near_victory_escalation(state);
     }
 
-    // Check for victory
-    if new_percent >= 100.0 {
+    // Check for victory — requires minimum 15,000 turns (~12 hours game time)
+    // and at least one adventurer at level 30+ (mid-late game progression)
+    let min_turns_met = state.tick >= 15_000;
+    let has_high_level = state.adventurers.iter().any(|a| {
+        a.status != AdventurerStatus::Dead
+            && a.classes.iter().any(|c| c.level >= 30)
+    });
+    if new_percent >= 100.0 && min_turns_met && has_high_level {
         events.push(WorldEvent::VictoryAchieved { condition: format!("{:?}", condition) });
-        // Signal victory by setting campaign_progress to 1.0.
-        // The existing check_campaign_outcome in step.rs picks this up.
         state.overworld.campaign_progress = 1.0;
     }
 }
