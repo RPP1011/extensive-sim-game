@@ -930,6 +930,10 @@ pub enum WorldEvent {
     ClassLevelUp { adventurer_id: u32, class_name: String, new_level: u32 },
     SkillGrantedByClass { adventurer_id: u32, skill_name: String, rarity: String, class_name: String },
     ClassStagnated { adventurer_id: u32, class_name: String },
+    ClassConsolidated { adventurer_id: u32, from_a: String, from_b: String, into: String },
+    ClassEvolved { adventurer_id: u32, from_class: String, to_class: String },
+    ConsolidationOffered { adventurer_id: u32, proposed_name: String },
+    ConsolidationRefused { adventurer_id: u32, proposed_name: String },
 }
 
 // ---------------------------------------------------------------------------

@@ -477,6 +477,11 @@ pub struct CampaignState {
     #[serde(default)]
     pub next_pact_id: u32,
 
+    // --- Class consolidation ---
+    /// Pending consolidation offers (merge two classes into one).
+    #[serde(default)]
+    pub consolidation_offers: Vec<ConsolidationOffer>,
+
     // --- Extended system trackers ---
     /// Aggregate counters for the ~30 campaign subsystems.
     /// Updated by step logic; consumed by tokens, clustering, and value estimation.
@@ -1096,6 +1101,20 @@ pub enum SkillRarity {
     Rare,
     Capstone,
     Unique,
+}
+
+/// A pending offer to merge two classes into a consolidated form.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConsolidationOffer {
+    pub adventurer_id: u32,
+    pub class_a: String,
+    pub class_b: String,
+    pub proposed_name: String,
+    pub proposed_tags: Vec<String>,
+    pub rarity: SkillRarity,
+    pub offered_tick: u32,
+    pub deadline_tick: u32,
+    pub times_refused: u32,
 }
 
 /// Template for matching behavior patterns to class grants.
@@ -5214,6 +5233,7 @@ impl CampaignState {
             // --- Demonic pacts ---
             demonic_pacts: Vec::new(),
             next_pact_id: 1,
+            consolidation_offers: Vec::new(),
             system_trackers: SystemTrackers::default(),
         }
     }

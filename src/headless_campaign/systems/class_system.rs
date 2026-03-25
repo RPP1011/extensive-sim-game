@@ -6,12 +6,33 @@
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::state::{
-    AdventurerStatus, BehaviorLedger, CampaignState, ClassInstance, ClassTemplate, GrantedSkill,
-    SkillRarity,
+    lcg_f32, AdventurerStatus, BehaviorLedger, CampaignState, ClassInstance, ClassTemplate,
+    ConsolidationOffer, GrantedSkill, SkillRarity,
 };
 
 /// Class system fires every 100 ticks (10 s game time).
 const CLASS_TICK_INTERVAL: u64 = 100;
+
+/// Consolidation check fires every 500 ticks.
+const CONSOLIDATION_INTERVAL: u64 = 500;
+
+/// Minimum level on both classes before consolidation is offered.
+const CONSOLIDATION_MIN_LEVEL: u32 = 10;
+
+/// Probability of auto-accepting a consolidation offer.
+const CONSOLIDATION_ACCEPT_PROB: f32 = 0.70;
+
+/// Ticks before a consolidation offer expires.
+const CONSOLIDATION_DEADLINE_TICKS: u32 = 1000;
+
+/// Minimum class level for evolution.
+const EVOLUTION_MIN_LEVEL: u32 = 20;
+
+/// Minimum battles for evolution eligibility.
+const EVOLUTION_MIN_BATTLES: f32 = 50.0;
+
+/// Minimum quests-related activity for evolution.
+const EVOLUTION_MIN_QUESTS: f32 = 20.0;
 
 /// Exponential decay factor for recent-window fields each tick.
 const RECENT_DECAY: f32 = 0.95;
@@ -95,6 +116,12 @@ pub fn tick_class_system(
     check_skill_grants(state, events);
     update_stagnation(state, events);
     decay_recent_window(state);
+
+    // Consolidation & evolution run on a slower cadence
+    if state.tick % CONSOLIDATION_INTERVAL == 0 {
+        check_consolidation_offers(state, events);
+        check_evolution(state, events);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -585,5 +612,333 @@ fn decay_recent_window(state: &mut CampaignState) {
         l.recent_research_performed *= RECENT_DECAY;
         l.recent_damage_absorbed *= RECENT_DECAY;
         l.recent_allies_supported *= RECENT_DECAY;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Consolidation
+// ---------------------------------------------------------------------------
+
+/// Generate a merged class name from two parent class names.
+fn generate_consolidated_name(class_a: &str, class_b: &str) -> String {
+    // Deterministic name generation from parent class pairs.
+    // Uses a prefix from one class and the other class name, or a special
+    // merged name for well-known combinations.
+    match (class_a, class_b) {
+        ("Warrior", "Scholar") | ("Scholar", "Warrior") => "Runic Warrior".to_string(),
+        ("Warrior", "Mage") | ("Mage", "Warrior") => "Spellsword".to_string(),
+        ("Healer", "Rogue") | ("Rogue", "Healer") => "Shadow Medic".to_string(),
+        ("Healer", "Warrior") | ("Warrior", "Healer") => "Battle Medic".to_string(),
+        ("Ranger", "Rogue") | ("Rogue", "Ranger") => "Stalker".to_string(),
+        ("Ranger", "Warrior") | ("Warrior", "Ranger") => "Warden".to_string(),
+        ("Commander", "Warrior") | ("Warrior", "Commander") => "War Marshal".to_string(),
+        ("Commander", "Diplomat") | ("Diplomat", "Commander") => "Grand Strategist".to_string(),
+        ("Merchant", "Rogue") | ("Rogue", "Merchant") => "Fence Master".to_string(),
+        ("Merchant", "Diplomat") | ("Diplomat", "Merchant") => "Trade Envoy".to_string(),
+        ("Scout", "Ranger") | ("Ranger", "Scout") => "Pathfinder".to_string(),
+        ("Scout", "Rogue") | ("Rogue", "Scout") => "Infiltrator".to_string(),
+        ("Guardian", "Healer") | ("Healer", "Guardian") => "Paladin".to_string(),
+        ("Guardian", "Commander") | ("Commander", "Guardian") => "Bulwark Captain".to_string(),
+        ("Artisan", "Scholar") | ("Scholar", "Artisan") => "Artificer".to_string(),
+        ("Artisan", "Merchant") | ("Merchant", "Artisan") => "Master Crafter".to_string(),
+        ("Scholar", "Healer") | ("Healer", "Scholar") => "Sage Physician".to_string(),
+        ("Scholar", "Diplomat") | ("Diplomat", "Scholar") => "Loremaster".to_string(),
+        _ => {
+            // Generic: pick a prefix from class_a and append class_b
+            let prefix = match class_a {
+                "Warrior" => "Battle",
+                "Ranger" => "Wild",
+                "Healer" => "Blessed",
+                "Diplomat" => "Silver",
+                "Merchant" => "Gilded",
+                "Scholar" => "Sage",
+                "Rogue" => "Shadow",
+                "Artisan" => "Forged",
+                "Commander" => "Iron",
+                "Scout" => "Swift",
+                "Guardian" => "Stone",
+                _ => "Ascended",
+            };
+            format!("{} {}", prefix, class_b)
+        }
+    }
+}
+
+/// Map for class evolution names.
+fn evolution_name(class_name: &str) -> &str {
+    match class_name {
+        "Warrior" => "Champion",
+        "Ranger" => "Huntmaster",
+        "Healer" => "Archon",
+        "Diplomat" => "Grand Ambassador",
+        "Merchant" => "Trade Prince",
+        "Scholar" => "Archmage",
+        "Rogue" => "Phantom",
+        "Artisan" => "Grand Artisan",
+        "Commander" => "High Marshal",
+        "Scout" => "Wayfinder",
+        "Guardian" => "Aegis",
+        "Spellblade" => "Mystic Blademaster",
+        "Plague Doctor" => "Grand Apothecary",
+        "Shadowmerchant" => "Black Market Baron",
+        "Warlord" => "Conqueror",
+        _ => "Exalted",
+    }
+}
+
+/// Upgrade rarity by one tier for refusal banking.
+fn next_rarity(r: &SkillRarity) -> SkillRarity {
+    match r {
+        SkillRarity::Common => SkillRarity::Uncommon,
+        SkillRarity::Uncommon => SkillRarity::Rare,
+        SkillRarity::Rare => SkillRarity::Capstone,
+        SkillRarity::Capstone | SkillRarity::Unique => SkillRarity::Unique,
+    }
+}
+
+fn check_consolidation_offers(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
+    let tick = state.tick as u32;
+
+    // First, resolve expired offers as refusals
+    let mut refused: Vec<ConsolidationOffer> = Vec::new();
+    state.consolidation_offers.retain(|offer| {
+        if tick >= offer.deadline_tick {
+            refused.push(offer.clone());
+            false
+        } else {
+            true
+        }
+    });
+    for offer in &refused {
+        events.push(WorldEvent::ConsolidationRefused {
+            adventurer_id: offer.adventurer_id,
+            proposed_name: offer.proposed_name.clone(),
+        });
+    }
+
+    // Collect adventurer IDs and their qualifying class pairs
+    struct CandidatePair {
+        adv_id: u32,
+        class_a: String,
+        class_b: String,
+        level_a: u32,
+        level_b: u32,
+        tags_a: Vec<String>,
+        tags_b: Vec<String>,
+    }
+
+    let templates: Vec<ClassTemplate> = base_templates()
+        .into_iter()
+        .chain(rare_templates())
+        .collect();
+
+    let mut candidates: Vec<CandidatePair> = Vec::new();
+
+    for adv in &state.adventurers {
+        if adv.status == AdventurerStatus::Dead {
+            continue;
+        }
+        // Check all pairs of classes on this adventurer
+        for i in 0..adv.classes.len() {
+            for j in (i + 1)..adv.classes.len() {
+                let ca = &adv.classes[i];
+                let cb = &adv.classes[j];
+                if ca.level >= CONSOLIDATION_MIN_LEVEL && cb.level >= CONSOLIDATION_MIN_LEVEL {
+                    // Check if there's already a pending offer for this pair
+                    let already_pending = state.consolidation_offers.iter().any(|o| {
+                        o.adventurer_id == adv.id
+                            && ((o.class_a == ca.class_name && o.class_b == cb.class_name)
+                                || (o.class_a == cb.class_name && o.class_b == ca.class_name))
+                    });
+                    if already_pending {
+                        continue;
+                    }
+
+                    let tags_a = templates
+                        .iter()
+                        .find(|t| t.class_name == ca.class_name)
+                        .map(|t| t.tags.clone())
+                        .unwrap_or_default();
+                    let tags_b = templates
+                        .iter()
+                        .find(|t| t.class_name == cb.class_name)
+                        .map(|t| t.tags.clone())
+                        .unwrap_or_default();
+
+                    candidates.push(CandidatePair {
+                        adv_id: adv.id,
+                        class_a: ca.class_name.clone(),
+                        class_b: cb.class_name.clone(),
+                        level_a: ca.level,
+                        level_b: cb.level,
+                        tags_a,
+                        tags_b,
+                    });
+                }
+            }
+        }
+    }
+
+    // Create offers for each candidate pair
+    for cand in candidates {
+        let proposed_name = generate_consolidated_name(&cand.class_a, &cand.class_b);
+
+        // Check refusal history — if this pair was refused before, upgrade rarity
+        let times_refused = refused
+            .iter()
+            .filter(|o| {
+                o.adventurer_id == cand.adv_id
+                    && ((o.class_a == cand.class_a && o.class_b == cand.class_b)
+                        || (o.class_a == cand.class_b && o.class_b == cand.class_a))
+            })
+            .map(|o| o.times_refused + 1)
+            .max()
+            .unwrap_or(0);
+
+        let mut rarity = SkillRarity::Uncommon;
+        for _ in 0..times_refused {
+            rarity = next_rarity(&rarity);
+        }
+
+        // Combine tags from both parents
+        let mut combined_tags = cand.tags_a.clone();
+        for tag in &cand.tags_b {
+            if !combined_tags.contains(tag) {
+                combined_tags.push(tag.clone());
+            }
+        }
+
+        let offer = ConsolidationOffer {
+            adventurer_id: cand.adv_id,
+            class_a: cand.class_a.clone(),
+            class_b: cand.class_b.clone(),
+            proposed_name: proposed_name.clone(),
+            proposed_tags: combined_tags.clone(),
+            rarity: rarity.clone(),
+            offered_tick: tick,
+            deadline_tick: tick + CONSOLIDATION_DEADLINE_TICKS,
+            times_refused,
+        };
+
+        events.push(WorldEvent::ConsolidationOffered {
+            adventurer_id: cand.adv_id,
+            proposed_name: proposed_name.clone(),
+        });
+
+        // Auto-accept with 70% probability
+        let roll = lcg_f32(&mut state.rng);
+        if roll < CONSOLIDATION_ACCEPT_PROB {
+            // Accept: perform consolidation
+            let new_level = cand.level_a.max(cand.level_b) + 2;
+
+            // Gather top 2 skills from each parent before removing them
+            let adv = state
+                .adventurers
+                .iter_mut()
+                .find(|a| a.id == cand.adv_id)
+                .unwrap();
+
+            let mut inherited_skills: Vec<GrantedSkill> = Vec::new();
+
+            // Collect skills from class_a (top 2 by level granted)
+            if let Some(ca) = adv.classes.iter().find(|c| c.class_name == cand.class_a) {
+                let mut skills: Vec<&GrantedSkill> = ca.skills_granted.iter().collect();
+                skills.sort_by(|a, b| b.granted_at_level.cmp(&a.granted_at_level));
+                for s in skills.into_iter().take(2) {
+                    inherited_skills.push(s.clone());
+                }
+            }
+            // Collect skills from class_b (top 2 by level granted)
+            if let Some(cb) = adv.classes.iter().find(|c| c.class_name == cand.class_b) {
+                let mut skills: Vec<&GrantedSkill> = cb.skills_granted.iter().collect();
+                skills.sort_by(|a, b| b.granted_at_level.cmp(&a.granted_at_level));
+                for s in skills.into_iter().take(2) {
+                    inherited_skills.push(s.clone());
+                }
+            }
+
+            // Remove both parent classes
+            adv.classes
+                .retain(|c| c.class_name != cand.class_a && c.class_name != cand.class_b);
+
+            // Create new consolidated class
+            adv.classes.push(ClassInstance {
+                class_name: proposed_name.clone(),
+                level: new_level,
+                xp: 0.0,
+                xp_to_next: (new_level * new_level) as f32 * 100.0,
+                stagnation_ticks: 0,
+                skills_granted: inherited_skills,
+                acquired_tick: tick,
+                identity_coherence: 1.0,
+            });
+
+            events.push(WorldEvent::ClassConsolidated {
+                adventurer_id: cand.adv_id,
+                from_a: cand.class_a,
+                from_b: cand.class_b,
+                into: proposed_name,
+            });
+        } else {
+            // Refused — store for future banking
+            state.consolidation_offers.push(offer);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Evolution
+// ---------------------------------------------------------------------------
+
+fn check_evolution(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
+    let tick = state.tick as u32;
+
+    for adv in &mut state.adventurers {
+        if adv.status == AdventurerStatus::Dead {
+            continue;
+        }
+
+        // Achievement counters from behavior ledger
+        let battles = adv.behavior_ledger.melee_combat + adv.behavior_ledger.ranged_combat;
+        let quests = adv.behavior_ledger.areas_explored
+            + adv.behavior_ledger.trades_completed
+            + adv.behavior_ledger.diplomacy_actions;
+
+        if battles < EVOLUTION_MIN_BATTLES || quests < EVOLUTION_MIN_QUESTS {
+            continue;
+        }
+
+        // Check each class for evolution eligibility
+        let mut evolutions: Vec<(usize, String, String)> = Vec::new();
+        for (i, class) in adv.classes.iter().enumerate() {
+            if class.level >= EVOLUTION_MIN_LEVEL {
+                let evolved = evolution_name(&class.class_name);
+                // Don't evolve if already evolved (name already changed)
+                if evolved != "Exalted" || class.class_name == "Exalted" {
+                    // Skip if already holding the evolved name
+                    if class.class_name == evolved {
+                        continue;
+                    }
+                }
+                evolutions.push((i, class.class_name.clone(), evolved.to_string()));
+            }
+        }
+
+        for (idx, from_name, to_name) in evolutions {
+            // Apply evolution: rename and boost stat growth (+50% via level bump)
+            let class = &mut adv.classes[idx];
+            class.class_name = to_name.clone();
+            // Grant +50% effective stat growth by adding 50% of current level as bonus levels
+            let bonus_levels = class.level / 2;
+            class.level += bonus_levels;
+            class.xp_to_next = (class.level * class.level) as f32 * 100.0;
+            class.acquired_tick = tick; // Mark evolution tick
+
+            events.push(WorldEvent::ClassEvolved {
+                adventurer_id: adv.id,
+                from_class: from_name,
+                to_class: to_name,
+            });
+        }
     }
 }
