@@ -199,19 +199,35 @@ fn ct_rare(name: &str, weights: &[(&str, f32)], threshold: f32, tags: &[&str], r
 // ---------------------------------------------------------------------------
 
 /// Map class names to ability_gen archetype names for procedural generation.
+/// For novel "Wandering X-Y" classes, parse the behavior axes from the name.
 fn class_to_archetype(class_name: &str) -> String {
+    // Known class → archetype mapping
     match class_name {
-        "Warrior" | "Militia" | "Laborer" | "Farmhand" => "knight".to_string(),
-        "Ranger" | "Hunter" | "Scout" | "Stablehand" => "ranger".to_string(),
-        "Healer" | "Herbalist" => "cleric".to_string(),
-        "Scholar" | "Scribe" | "Apprentice" => "mage".to_string(),
-        "Rogue" | "Pickpocket" => "rogue".to_string(),
-        "Commander" | "Errand Runner" => "paladin".to_string(),
-        "Diplomat" | "Peddler" | "Merchant" | "Traveler" => "bard".to_string(),
-        "Artisan" => "artificer".to_string(),
-        "Guardian" => "guardian".to_string(),
-        _ => "knight".to_string(), // default fallback
+        "Warrior" | "Militia" | "Laborer" | "Farmhand" => return "knight".to_string(),
+        "Ranger" | "Hunter" | "Scout" | "Stablehand" => return "ranger".to_string(),
+        "Healer" | "Herbalist" => return "cleric".to_string(),
+        "Scholar" | "Scribe" | "Apprentice" => return "mage".to_string(),
+        "Rogue" | "Pickpocket" => return "rogue".to_string(),
+        "Commander" | "Errand Runner" => return "paladin".to_string(),
+        "Diplomat" | "Peddler" | "Merchant" | "Traveler" => return "bard".to_string(),
+        "Artisan" => return "artificer".to_string(),
+        "Guardian" => return "guardian".to_string(),
+        _ => {}
     }
+    // For novel classes like "Wandering Combat-Exploration", parse the
+    // primary behavior axis from the name and map to matching archetype
+    let lower = class_name.to_lowercase();
+    if lower.contains("combat") || lower.contains("melee") { return "knight".to_string(); }
+    if lower.contains("ranged") || lower.contains("exploration") { return "ranger".to_string(); }
+    if lower.contains("healing") || lower.contains("support") { return "cleric".to_string(); }
+    if lower.contains("research") || lower.contains("scholar") { return "mage".to_string(); }
+    if lower.contains("stealth") { return "rogue".to_string(); }
+    if lower.contains("command") || lower.contains("leader") { return "paladin".to_string(); }
+    if lower.contains("trade") || lower.contains("diplomacy") { return "bard".to_string(); }
+    if lower.contains("craft") { return "artificer".to_string(); }
+    if lower.contains("defense") || lower.contains("guardian") { return "guardian".to_string(); }
+    // True default — use the most common archetype
+    "knight".to_string()
 }
 
 impl BehaviorLedger {
