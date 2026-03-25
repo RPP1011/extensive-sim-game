@@ -802,6 +802,7 @@ fn check_class_acquisition(state: &mut CampaignState, events: &mut Vec<WorldEven
                     };
                     populate_noncombat_growth(&mut ci);
                     adv.classes.push(ci);
+                    eprintln!("[CLASS] Class granted: [{}] to adv {} (archetype: {})", tmpl.class_name, adv.id, adv.archetype);
                     events.push(WorldEvent::ClassGranted {
                         adventurer_id: adv.id,
                         class_name: tmpl.class_name.clone(),
@@ -1360,6 +1361,18 @@ fn check_skill_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                     }
 
                     let rarity_clone = rarity.clone();
+                    let class_name_clone = class.class_name.clone();
+
+                    let has_effect = skill_effect.is_some();
+                    let is_passive = match &skill_effect {
+                        Some(ref e) => crate::headless_campaign::actions::is_passive_skill_effect(e),
+                        None => false,
+                    };
+                    eprintln!(
+                        "[CLASS] Skill granted: [{}] ({}) to adv {} from [{}] at lv{} | has_effect={} passive={}",
+                        display_name, rarity_str, adv_id, class_name_clone, threshold, has_effect, is_passive
+                    );
+
                     class.skills_granted.push(GrantedSkill {
                         skill_name: display_name.clone(),
                         granted_at_level: threshold,
@@ -1373,8 +1386,6 @@ fn check_skill_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                         skill_effect,
                         skill_condition,
                     });
-
-                    let class_name_clone = class.class_name.clone();
 
                     events.push(WorldEvent::SkillGrantedByClass {
                         adventurer_id: adv_id,
