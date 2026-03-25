@@ -409,14 +409,14 @@ fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEven
                     adv.behavior_ledger.healing_given += 0.5;
                     adv.behavior_ledger.recent_healing_given += 0.5;
                 }
-                // Idle adventurers at the guild are helping with recovery
+                // Idle adventurers at the guild are helping with recovery (passive, low credit)
                 for adv in &mut state.adventurers {
                     if adv.status == AdventurerStatus::Dead { continue; }
                     if adv.status == AdventurerStatus::Idle && adv.id != *adventurer_id {
-                        adv.behavior_ledger.healing_given += 1.0;
-                        adv.behavior_ledger.recent_healing_given += 1.0;
-                        adv.behavior_ledger.allies_supported += 0.5;
-                        adv.behavior_ledger.recent_allies_supported += 0.5;
+                        adv.behavior_ledger.healing_given += 0.3;
+                        adv.behavior_ledger.recent_healing_given += 0.3;
+                        adv.behavior_ledger.allies_supported += 0.1;
+                        adv.behavior_ledger.recent_allies_supported += 0.1;
                     }
                 }
             }
@@ -428,22 +428,21 @@ fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEven
                 for adv in &mut state.adventurers {
                     if adv.status == AdventurerStatus::Dead { continue; }
                     if adv.status == AdventurerStatus::Idle {
-                        adv.behavior_ledger.diplomacy_actions += 2.0;
-                        adv.behavior_ledger.recent_diplomacy_actions += 2.0;
+                        // Passive credit — low enough not to swamp primary behavior
+                        adv.behavior_ledger.diplomacy_actions += 0.5;
+                        adv.behavior_ledger.recent_diplomacy_actions += 0.5;
                     }
                 }
             }
-            // Trade/economy — ALL adventurers get credit when the guild trades.
-            // A knight who keeps selling loot should become a [Peddler].
+            // Trade/economy — idle adventurers get small passive credit.
             WorldEvent::CaravanCompleted { .. }
             | WorldEvent::TradeProfitMade { .. }
             | WorldEvent::MerchantPurchase { .. } => {
                 for adv in &mut state.adventurers {
                     if adv.status == AdventurerStatus::Dead { continue; }
-                    // Idle adventurers at the guild hall handle trade
                     if adv.status == AdventurerStatus::Idle {
-                        adv.behavior_ledger.trades_completed += 2.0;
-                        adv.behavior_ledger.recent_trades_completed += 2.0;
+                        adv.behavior_ledger.trades_completed += 0.5;
+                        adv.behavior_ledger.recent_trades_completed += 0.5;
                     }
                 }
             }
@@ -452,20 +451,20 @@ fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEven
                 for adv in &mut state.adventurers {
                     if adv.status == AdventurerStatus::Dead { continue; }
                     if adv.status == AdventurerStatus::Fighting || adv.status == AdventurerStatus::OnMission {
-                        adv.behavior_ledger.trades_completed += 1.0;
-                        adv.behavior_ledger.recent_trades_completed += 1.0;
-                        adv.behavior_ledger.allies_supported += 0.5;
-                        adv.behavior_ledger.recent_allies_supported += 0.5;
+                        adv.behavior_ledger.trades_completed += 0.3;
+                        adv.behavior_ledger.recent_trades_completed += 0.3;
+                        adv.behavior_ledger.allies_supported += 0.2;
+                        adv.behavior_ledger.recent_allies_supported += 0.2;
                     }
                 }
             }
-            // Crafting — anyone involved in crafting, not just artisan archetype
+            // Crafting — idle adventurers get small passive credit
             WorldEvent::ItemCrafted { .. } => {
                 for adv in &mut state.adventurers {
                     if adv.status == AdventurerStatus::Dead { continue; }
                     if adv.status == AdventurerStatus::Idle {
-                        adv.behavior_ledger.items_crafted += 1.5;
-                        adv.behavior_ledger.recent_items_crafted += 1.5;
+                        adv.behavior_ledger.items_crafted += 0.3;
+                        adv.behavior_ledger.recent_items_crafted += 0.3;
                     }
                 }
             }
@@ -519,8 +518,8 @@ fn update_behavior_ledgers(state: &mut CampaignState, events: &mut Vec<WorldEven
                 for adv in &mut state.adventurers {
                     if adv.status == AdventurerStatus::Dead { continue; }
                     if adv.status == AdventurerStatus::Idle {
-                        adv.behavior_ledger.research_performed += 1.5;
-                        adv.behavior_ledger.recent_research_performed += 1.5;
+                        adv.behavior_ledger.research_performed += 0.3;
+                        adv.behavior_ledger.recent_research_performed += 0.3;
                     }
                 }
             }
