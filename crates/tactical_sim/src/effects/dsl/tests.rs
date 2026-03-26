@@ -413,3 +413,307 @@ fn parse_all_lol_heroes() {
     assert!(count > 0, "no .ability files found in lol_heroes");
     eprintln!("Successfully parsed {count} LoL hero .ability files");
 }
+
+/// Roundtrip test for programmatically generated AbilityDefs covering all
+/// delivery types, effect types, and area types that ability_gen.rs can produce.
+#[test]
+fn roundtrip_generated_abilities() {
+    use crate::effects::defs::AbilityDef;
+    use crate::effects::effect_enum::Effect;
+    use crate::effects::types::*;
+    use crate::effects::dsl::emit::emit_ability_dsl;
+
+    fn xrng(rng: &mut u64) -> u64 {
+        *rng ^= *rng << 13;
+        *rng ^= *rng >> 7;
+        *rng ^= *rng << 17;
+        *rng
+    }
+    fn rf(rng: &mut u64) -> f32 {
+        (xrng(rng) as f32) / (u64::MAX as f32)
+    }
+
+    // All effect types the generator can produce
+    let make_effects: Vec<Box<dyn Fn(&mut u64) -> Effect>> = vec![
+        Box::new(|rng| Effect::Damage {
+            amount: (10.0 + rf(rng) * 40.0) as i32,
+            amount_per_tick: 0, duration_ms: 0, tick_interval_ms: 0,
+            scaling_stat: None, scaling_percent: 0.0,
+            damage_type: DamageType::Physical, bonus: vec![],
+        }),
+        Box::new(|rng| Effect::Heal {
+            amount: (8.0 + rf(rng) * 30.0) as i32,
+            amount_per_tick: 0, duration_ms: 0, tick_interval_ms: 0,
+            scaling_stat: None, scaling_percent: 0.0, bonus: vec![],
+        }),
+        Box::new(|rng| Effect::Shield {
+            amount: (15.0 + rf(rng) * 25.0) as i32,
+            duration_ms: 3000 + (rf(rng) * 5000.0) as u32,
+        }),
+        Box::new(|rng| Effect::Stun { duration_ms: 500 + (rf(rng) * 2000.0) as u32 }),
+        Box::new(|rng| Effect::Root { duration_ms: 500 + (rf(rng) * 2000.0) as u32 }),
+        Box::new(|rng| Effect::Silence { duration_ms: 500 + (rf(rng) * 2000.0) as u32 }),
+        Box::new(|rng| Effect::Slow {
+            factor: ((0.2 + rf(rng) * 0.5) * 20.0).round() / 20.0,
+            duration_ms: ((1000 + (rf(rng) * 3000.0) as u32) / 250) * 250,
+        }),
+        Box::new(|rng| Effect::Knockback {
+            distance: ((1.0 + rf(rng) * 3.0) * 2.0).round() / 2.0,
+        }),
+        Box::new(|rng| Effect::Dash {
+            to_target: rf(rng) < 0.5,
+            distance: ((3.0 + rf(rng) * 4.0) * 2.0).round() / 2.0,
+            to_position: false,
+            is_blink: rf(rng) < 0.2,
+        }),
+        Box::new(|rng| Effect::Buff {
+            stat: "attack_damage".into(),
+            factor: ((0.1 + rf(rng) * 0.3) * 20.0).round() / 20.0,
+            duration_ms: ((3000 + (rf(rng) * 7000.0) as u32) / 500) * 500,
+        }),
+        Box::new(|rng| Effect::Debuff {
+            stat: "defense".into(),
+            factor: ((0.1 + rf(rng) * 0.25) * 20.0).round() / 20.0,
+            duration_ms: ((2000 + (rf(rng) * 5000.0) as u32) / 500) * 500,
+        }),
+        Box::new(|rng| Effect::Summon {
+            template: "minion".into(),
+            count: 1 + (rf(rng) * 2.0) as u32,
+            hp_percent: 0.3 + rf(rng) * 0.5,
+            clone: false, clone_damage_percent: 0.0, directed: false,
+        }),
+        Box::new(|rng| Effect::Stealth {
+            duration_ms: 2000 + (rf(rng) * 4000.0) as u32,
+            break_on_damage: rf(rng) < 0.6,
+            break_on_ability: rf(rng) < 0.3,
+        }),
+        Box::new(|rng| Effect::Lifesteal {
+            percent: 0.1 + rf(rng) * 0.3,
+            duration_ms: 3000 + (rf(rng) * 5000.0) as u32,
+        }),
+        Box::new(|rng| Effect::Execute {
+            hp_threshold_percent: 0.15 + rf(rng) * 0.25,
+        }),
+        Box::new(|rng| Effect::Resurrect {
+            hp_percent: 0.3 + rf(rng) * 0.4,
+        }),
+        // Campaign buffs
+        Box::new(|rng| Effect::Buff {
+            stat: "travel_speed".into(),
+            factor: ((0.1 + rf(rng) * 0.3) * 20.0).round() / 20.0,
+            duration_ms: 0,
+        }),
+    ];
+
+    // All delivery types
+    let deliveries: Vec<Option<Delivery>> = vec![
+        None, // instant
+        Some(Delivery::Projectile {
+            speed: 10.0, pierce: false, width: 0.75,
+            on_hit: vec![], on_arrival: vec![],
+        }),
+        Some(Delivery::Projectile {
+            speed: 8.0, pierce: true, width: 0.5,
+            on_hit: vec![], on_arrival: vec![],
+        }),
+        Some(Delivery::Channel { duration_ms: 2000, tick_interval_ms: 500 }),
+        Some(Delivery::Zone { duration_ms: 5000, tick_interval_ms: 500 }),
+        Some(Delivery::Tether { max_range: 6.0, tick_interval_ms: 500, on_complete: vec![] }),
+        Some(Delivery::Trap { duration_ms: 15000, trigger_radius: 2.0, arm_time_ms: 500 }),
+        Some(Delivery::Chain { bounces: 3, bounce_range: 5.0, falloff: 0.8, on_hit: vec![] }),
+    ];
+
+    // Areas
+    let areas: Vec<Option<Area>> = vec![
+        None,
+        Some(Area::SingleTarget),
+        Some(Area::Circle { radius: 3.0 }),
+        Some(Area::Cone { radius: 4.5, angle_deg: 60.0 }),
+        Some(Area::Line { length: 6.0, width: 1.0 }),
+        Some(Area::Spread { radius: 4.0, max_targets: 3 }),
+    ];
+
+    let mut total = 0;
+    let mut failures = Vec::new();
+    let mut rng = 12345u64;
+
+    for (ei, make_eff) in make_effects.iter().enumerate() {
+        for (di, delivery) in deliveries.iter().enumerate() {
+            for (ai, area) in areas.iter().enumerate() {
+                let effect = make_eff(&mut rng);
+                let ce = ConditionalEffect {
+                    effect,
+                    condition: None,
+                    area: area.clone(),
+                    tags: Tags::new(),
+                    stacking: Stacking::Refresh,
+                    chance: 1.0,
+                    else_effects: vec![],
+                };
+
+                let def = AbilityDef {
+                    name: format!("Test_e{ei}_d{di}_a{ai}"),
+                    targeting: AbilityTargeting::TargetEnemy,
+                    range: 5.0,
+                    cooldown_ms: 8000,
+                    cast_time_ms: 300,
+                    ai_hint: "damage".into(),
+                    effects: vec![ce],
+                    delivery: delivery.clone(),
+                    ..Default::default()
+                };
+
+                let dsl = emit_ability_dsl(&def);
+                total += 1;
+
+                match parse_abilities(&dsl) {
+                    Ok((parsed, _)) => {
+                        if parsed.len() != 1 {
+                            failures.push(format!(
+                                "e{}:d{}:a{} — got {} abilities:\n{}",
+                                ei, di, ai, parsed.len(), dsl
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        failures.push(format!(
+                            "e{}:d{}:a{} — {}\nDSL:\n{}",
+                            ei, di, ai, e, dsl
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // Also test with unrounded float values and edge cases
+    let edge_case_effects: Vec<ConditionalEffect> = vec![
+        // Blink with to_target
+        ConditionalEffect {
+            effect: Effect::Dash { to_target: true, distance: 7.0, to_position: false, is_blink: true },
+            condition: None, area: None, tags: Tags::new(),
+            stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![],
+        },
+        // Lifesteal with imprecise float
+        ConditionalEffect {
+            effect: Effect::Lifesteal { percent: 0.27341, duration_ms: 4523 },
+            condition: None, area: None, tags: Tags::new(),
+            stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![],
+        },
+        // Execute with fractional threshold
+        ConditionalEffect {
+            effect: Effect::Execute { hp_threshold_percent: 0.35 },
+            condition: None, area: None, tags: Tags::new(),
+            stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![],
+        },
+        // Stealth with break flags
+        ConditionalEffect {
+            effect: Effect::Stealth { duration_ms: 3000, break_on_damage: true, break_on_ability: true },
+            condition: None, area: None, tags: Tags::new(),
+            stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![],
+        },
+        // Resurrect
+        ConditionalEffect {
+            effect: Effect::Resurrect { hp_percent: 0.55 },
+            condition: None, area: None, tags: Tags::new(),
+            stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![],
+        },
+    ];
+
+    // Test edge cases with all delivery types
+    for (ei, ce) in edge_case_effects.iter().enumerate() {
+        for (di, delivery) in deliveries.iter().enumerate() {
+            let def = AbilityDef {
+                name: format!("Edge_e{ei}_d{di}"),
+                targeting: AbilityTargeting::TargetEnemy,
+                range: 5.0,
+                cooldown_ms: 8000,
+                cast_time_ms: 300,
+                ai_hint: "damage".into(),
+                effects: vec![ce.clone()],
+                delivery: delivery.clone(),
+                ..Default::default()
+            };
+
+            let dsl = emit_ability_dsl(&def);
+            total += 1;
+
+            match parse_abilities(&dsl) {
+                Ok((parsed, _)) => {
+                    if parsed.len() != 1 {
+                        failures.push(format!(
+                            "edge:e{}:d{} — got {} abilities:\n{}",
+                            ei, di, parsed.len(), dsl
+                        ));
+                    }
+                }
+                Err(e) => {
+                    failures.push(format!(
+                        "edge:e{}:d{} — {}\nDSL:\n{}",
+                        ei, di, e, dsl
+                    ));
+                }
+            }
+        }
+    }
+
+    // Test with unrounded delivery parameters (like ability_gen produces)
+    let messy_deliveries: Vec<Option<Delivery>> = vec![
+        Some(Delivery::Tether { max_range: 5.7942, tick_interval_ms: 500, on_complete: vec![] }),
+        Some(Delivery::Trap { duration_ms: 17965, trigger_radius: 1.7942, arm_time_ms: 1357 }),
+        Some(Delivery::Chain { bounces: 4, bounce_range: 4.698, falloff: 0.754, on_hit: vec![] }),
+        Some(Delivery::Channel { duration_ms: 2743, tick_interval_ms: 387 }),
+        Some(Delivery::Zone { duration_ms: 5234, tick_interval_ms: 723 }),
+    ];
+
+    for (di, delivery) in messy_deliveries.iter().enumerate() {
+        let def = AbilityDef {
+            name: format!("Messy_d{di}"),
+            targeting: AbilityTargeting::TargetEnemy,
+            range: 5.0,
+            cooldown_ms: 8000,
+            cast_time_ms: 300,
+            ai_hint: "damage".into(),
+            effects: vec![ConditionalEffect {
+                effect: Effect::Damage {
+                    amount: 25, amount_per_tick: 0, duration_ms: 0, tick_interval_ms: 0,
+                    scaling_stat: None, scaling_percent: 0.0,
+                    damage_type: DamageType::Physical, bonus: vec![],
+                },
+                condition: None, area: None, tags: Tags::new(),
+                stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![],
+            }],
+            delivery: delivery.clone(),
+            ..Default::default()
+        };
+
+        let dsl = emit_ability_dsl(&def);
+        total += 1;
+
+        match parse_abilities(&dsl) {
+            Ok((parsed, _)) => {
+                if parsed.len() != 1 {
+                    failures.push(format!(
+                        "messy:d{} — got {} abilities:\n{}",
+                        di, parsed.len(), dsl
+                    ));
+                }
+            }
+            Err(e) => {
+                failures.push(format!(
+                    "messy:d{} — {}\nDSL:\n{}",
+                    di, e, dsl
+                ));
+            }
+        }
+    }
+
+    if !failures.is_empty() {
+        panic!(
+            "\n=== ROUNDTRIP FAILURES: {}/{} ===\n{}",
+            failures.len(), total,
+            failures.join("\n---\n")
+        );
+    }
+    eprintln!("All {total} generated abilities roundtripped successfully");
+}

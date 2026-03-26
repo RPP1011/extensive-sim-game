@@ -103,6 +103,7 @@ pub(crate) fn fmt_f32(v: f32) -> String {
     if v == v.floor() && v.abs() < 10000.0 {
         format!("{:.1}", v)
     } else {
-        format!("{v}")
+        // Round to 2 decimal places for clean DSL output
+        format!("{:.2}", v)
     }
 }

@@ -872,7 +872,11 @@ pub fn dump_synthetic(count: usize, seed: u64, emit_dsl: bool) {
 
 /// Tier-based power multipliers for combat abilities.
 /// T1 (novice) through T7 (mythic capstone).
-const TIER_POWER: [f32; 8] = [0.0, 1.0, 1.3, 1.7, 2.2, 2.8, 3.5, 5.0];
+/// Tier power multipliers. These scale base damage/heal/shield values.
+/// T1 (novice) abilities do base damage. T7 (mythic/endgame) abilities
+/// should one-shot or nearly one-shot level 50 heroes (HP ~1000-2000).
+/// Base ability damage is ~20-30, so T7 at 50x = 1000-1500 per ability.
+const TIER_POWER: [f32; 8] = [0.0, 1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 50.0];
 const TIER_COOLDOWN_MULT: [f32; 8] = [0.0, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0];
 const TIER_MAX_EFFECTS: [usize; 8] = [0, 1, 1, 2, 2, 3, 3, 4];
 
@@ -911,8 +915,18 @@ pub fn generate_tiered_ability(
 
     let (mut ability, _is_passive) = generate_ability_with_history(archetype, synthetic_level, rng, history);
 
-    // The base generator already scales by synthetic_level.
-    // Apply additional tier-based cooldown scaling (higher tier = longer CD = more dramatic).
+    // Scale damage/heal/shield values by tier power multiplier
+    use tactical_sim::effects::types::Effect;
+    for cond_effect in &mut ability.effects {
+        match &mut cond_effect.effect {
+            Effect::Damage { amount, .. } => *amount = (*amount as f32 * power) as i32,
+            Effect::Heal { amount, .. } => *amount = (*amount as f32 * power) as i32,
+            Effect::Shield { amount, .. } => *amount = (*amount as f32 * power) as i32,
+            _ => {}
+        }
+    }
+
+    // Apply tier-based cooldown scaling (higher tier = longer CD = more dramatic).
     ability.cooldown_ms = (ability.cooldown_ms as f32 * cd_mult) as u32;
 
     // Limit effects to tier budget (higher tiers allowed more effects).
@@ -925,3 +939,6 @@ pub fn generate_tiered_ability(
 
     (ability, dsl)
 }
+
+// Roundtrip test lives in tactical_sim crate:
+// crates/tactical_sim/src/effects/dsl/tests.rs::roundtrip_generated_abilities

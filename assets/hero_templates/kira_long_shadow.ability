@@ -1,86 +1,226 @@
-// Warrior abilities
-
-ability Whirlwind {
-    target: self_aoe
-    cooldown: 8s, cast: 400ms
-    hint: damage
-
-    damage 40 in circle(2.5) [PHYSICAL: 50]
-    damage 10 in circle(2.5) when hit_count_above(2) [PHYSICAL: 50]
+ability phantom_concealment {
+target: enemy, range: 3.50
+cooldown: 17500ms, cast: 45ms
+hint: damage
+deliver chain { bounces: 4, range: 4.70, falloff: 0.75 } {
+on_hit {
+buff threat_reduction 0.30 for 55s
+damage 1095
+}
+}
 }
 
-ability ShieldWall {
-    target: self
-    cooldown: 15s, cast: 200ms
-    hint: defense
-
-    shield 60 for 5s
+ability inner_dusk_shroud {
+target: direction, range: 3.0
+cooldown: 12500ms
+hint: damage
+stealth for 3924ms
 }
 
-ability HeroicCharge {
-    target: enemy, range: 5.0
-    cooldown: 10s, cast: 0ms
-    hint: crowd_control
-
-    dash to_target
-    damage 35 [PHYSICAL: 50]
-    stun 1500ms [CROWD_CONTROL: 70]
+ability phantom_sight {
+target: enemy, range: 2.0
+cooldown: 20s, cast: 142ms
+hint: crowd_control
+deliver zone { duration: 5548ms, tick: 607ms } {
+on_hit {
+buff scout_range 0.20 for 40s
+}
+}
 }
 
-ability SunderArmor {
-    target: enemy, range: 1.5
-    cooldown: 6s, cast: 200ms
-    hint: damage
-
-    damage 20 [PHYSICAL: 40]
-    damage_modify 1.3 for 4s
+ability whisper_evasion {
+target: enemy, range: 2.50
+cooldown: 12500ms, cast: 211ms
+hint: damage
+deliver trap { duration: 24605ms, radius: 1.93, arm_time: 1079ms }
+buff threat_reduction 0.20 for 30s
 }
 
-ability IntimidatingShout {
-    target: self_aoe
-    cooldown: 18s, cast: 300ms
-    hint: crowd_control
-
-    fear 2s in circle(3.0) [CROWD_CONTROL: 70]
+ability venom_subtlety {
+target: enemy, range: 1.50
+cooldown: 20s, cast: 390ms
+hint: damage
+deliver projectile { speed: 11.0, width: 0.50 } {
+on_hit {
+buff threat_reduction 0.25 for 20s
+stun 966ms
+}
+}
 }
 
-ability BattleCry {
-    target: self_aoe
-    cooldown: 15s, cast: 300ms
-    hint: utility
-
-    buff damage_output 0.2 for 5s in circle(4.0)
+ability dusk_weight {
+target: self, range: 2.50
+cooldown: 15s, cast: 133ms
+hint: crowd_control
+slow 0.20 for 3750ms in line(5.0, 1.0)
+debuff defense 0.20 for 5500ms in spread(4.0, 3)
 }
 
-ability Slam {
-    target: enemy, range: 1.5
-    cooldown: 5s, cast: 500ms
-    hint: damage
-
-    damage 45 [PHYSICAL: 55]
-    stun 1s [CROWD_CONTROL: 50]
+ability dormant_ghost_bog {
+target: self_aoe, range: 1.50
+cooldown: 17500ms
+hint: damage
+slow 0.70 for 3750ms
+debuff attack_damage 0.35 for 5s
+blink 6.50 to_target
 }
 
-ability Overpower {
-    target: enemy, range: 1.5
-    cooldown: 7s, cast: 600ms
-    hint: damage
-
-    damage 60 [PHYSICAL: 50]
-    damage 30 when target_is_stunned [PHYSICAL: 50]
+ability inner_silent_vanish {
+target: enemy, range: 2.50
+cooldown: 20s
+hint: utility
+stealth for 3290ms break_on_damage break_on_ability in circle(3.50)
+buff defense 0.10 for 6500ms
 }
 
-passive IronSkin {
-    trigger: on_damage_taken
-    cooldown: 5s
-
-    shield 20 for 3s
+ability phantom_charge {
+target: enemy, range: 3.0
+cooldown: 20s, cast: 223ms
+hint: damage
+deliver chain { bounces: 3, range: 4.77, falloff: 0.73 } {
+on_hit {
+dash 6.0
+damage 3660
+}
+}
 }
 
-passive LastStand {
-    trigger: on_hp_below(25%)
-    cooldown: 45s
+ability phantom_hold {
+target: enemy, range: 4.0
+cooldown: 12500ms, cast: 404ms
+hint: damage
+stun 1935ms
+damage 2805
+}
 
-    heal 50
-    buff damage_output 0.3 for 5s
+ability instinct_venom_rend {
+target: ground, range: 2.0
+cooldown: 20s
+hint: damage
+damage 2040
+knockback 3.50
+}
+
+ability inner_venom_cover {
+target: enemy, range: 3.50
+cooldown: 17500ms
+hint: damage
+buff threat_reduction 0.10 for 55s
+}
+
+ability dormant_razor_leech {
+target: enemy, range: 3.50
+cooldown: 22500ms
+hint: damage
+lifesteal 0.14 for 6011ms in circle(4.0)
+}
+
+ability ghost_barrage {
+target: enemy, range: 2.0
+cooldown: 27s, cast: 435ms
+hint: damage
+deliver chain { bounces: 5, range: 4.13, falloff: 0.72 } {
+on_hit {
+damage 7860
+}
+}
+}
+
+ability silent_end {
+target: enemy, range: 2.0
+cooldown: 15s, cast: 489ms
+hint: defense
+deliver projectile { speed: 14.0, width: 0.50 } {
+on_hit {
+execute 0%
+}
+}
+}
+
+ability ghost_aegis {
+target: enemy, range: 2.0
+cooldown: 18s, cast: 453ms
+hint: damage
+shield 4500 for 3939ms
+}
+
+ability ghost_leap {
+target: direction, range: 2.0
+cooldown: 12s, cast: 270ms
+hint: damage
+dash 5.50
+execute 0%
+}
+
+ability whisper_beckon {
+target: enemy, range: 2.50
+cooldown: 21s, cast: 377ms
+hint: utility
+deliver trap { duration: 16274ms, radius: 3.15, arm_time: 795ms }
+summon "minion" x2
+}
+
+ability phantom_eclipse {
+target: enemy, range: 2.0
+cooldown: 24s, cast: 76ms
+hint: utility
+deliver tether { range: 4.18, tick: 500ms } {
+on_hit {
+stealth for 4271ms break_on_damage
+}
+}
+}
+
+ability phantom_farsight {
+target: self, range: 3.0
+cooldown: 21s, cast: 210ms
+hint: damage
+deliver projectile { speed: 8.0, width: 0.25 } {
+on_hit {
+buff scout_range 0.30 for 0ms
+}
+}
+}
+
+ability ghost_subtlety {
+target: self_aoe, range: 2.50
+cooldown: 27s, cast: 435ms
+hint: damage
+deliver zone { duration: 6655ms, tick: 619ms } {
+on_hit {
+buff threat_reduction 0.30 for 40s
+}
+}
+}
+
+ability razor_veil {
+target: direction, range: 1.50
+cooldown: 24s, cast: 382ms
+hint: damage
+stealth for 3951ms break_on_damage
+}
+
+ability instinct_dusk_rend {
+target: enemy, range: 4.0
+cooldown: 15s
+hint: damage
+damage 3090 in cone(3.50, 49.0)
+stealth for 5105ms
+}
+
+ability shadow_haste {
+target: enemy, range: 2.0
+cooldown: 21s, cast: 25ms
+hint: utility
+deliver trap { duration: 27769ms, radius: 3.17, arm_time: 1096ms }
+buff travel_speed 0.10 for 25s in circle(4.0)
+damage 8910
+}
+
+ability razor_crawl {
+target: self, range: 3.50
+cooldown: 21s, cast: 464ms
+hint: damage
+unstoppable
+slow 0.30 for 1s
 }

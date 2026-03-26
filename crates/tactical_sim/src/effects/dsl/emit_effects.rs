@@ -59,14 +59,13 @@ pub(super) fn emit_effect(effect: &Effect) -> String {
             format!("debuff {stat} {} for {}", fmt_f32(*factor), fmt_duration(*duration_ms))
         }
         Effect::Duel { duration_ms } => format!("duel {}", fmt_duration(*duration_ms)),
-        Effect::Summon { template, count, hp_percent, clone, directed, .. } => {
+        Effect::Summon { template, count, clone, directed, .. } => {
             let mut s = format!("summon \"{template}\"");
             if *count > 1 { s.push_str(&format!(" x{count}")); }
             if *clone { s.push_str(" clone"); }
             if *directed { s.push_str(" directed"); }
-            if (*hp_percent - 100.0).abs() > 0.1 {
-                s.push_str(&format!(" hp:{}%", *hp_percent as i32));
-            }
+            // Note: hp_percent is not emitted because the parser does not
+            // support the `hp:N%` syntax (lowering always defaults to 100%).
             s
         }
         Effect::CommandSummons { speed } => format!("command_summons speed:{}", fmt_f32(*speed)),
