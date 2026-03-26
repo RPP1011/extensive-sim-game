@@ -1,50 +1,97 @@
-ability dormant_blessed_rise {
-target: self_aoe, range: 3.5
-cooldown: 20s
-hint: heal
-buff passive_income 0.4 for 25s
+// Mage abilities
+
+ability Fireball {
+    target: enemy, range: 5.0
+    cooldown: 5s, cast: 500ms
+    hint: damage
+
+    deliver projectile { speed: 8.0, width: 0.3 } {
+        on_hit {
+            damage 55 [FIRE: 60]
+        }
+        on_arrival {
+            damage 15 in circle(2.0)
+        }
+    }
 }
-ability serene_salve {
-target: ally, range: 5.0
-cooldown: 45s, cast: 152ms
-hint: heal
-deliver chain { bounces: 2, range: 4.5754876, falloff: 0.8429849 } {
+
+ability FrostNova {
+    target: self_aoe
+    cooldown: 10s, cast: 300ms
+    hint: crowd_control
+
+    damage 20 in circle(3.0)
+    stun 2s in circle(3.0) [CROWD_CONTROL: 80, ICE: 60]
 }
-heal 116 in line(6.0, 1.5)
+
+ability ArcaneMissiles {
+    target: enemy, range: 5.0
+    cooldown: 4s, cast: 200ms
+    hint: damage
+
+    deliver chain { bounces: 3, range: 3.0, falloff: 0.8 } {
+        on_hit {
+            damage 35 [MAGIC: 50]
+        }
+    }
 }
-ability sacred_bounty {
-target: self, range: 4.5
-cooldown: 30s, cast: 433ms
-hint: heal
-buff supply_efficiency 0.15 for 45s in cone(4.5, 51.0)
-heal 154
+
+ability Blizzard {
+    target: ground, range: 6.0
+    cooldown: 12s, cast: 400ms
+    hint: damage
+
+    deliver zone { duration: 4s, tick: 1s } {
+        on_hit {
+            damage 15 in circle(3.0) [ICE: 50]
+            slow 0.3 for 1.5s in circle(3.0)
+        }
+    }
 }
-ability sacred_shroud {
-target: ally, range: 4.0
-cooldown: 37500ms, cast: 235ms
-hint: utility
-deliver channel { duration: 2832ms, tick: 300ms } {
+
+ability Meteor {
+    target: ground, range: 6.0
+    cooldown: 18s, cast: 800ms
+    hint: damage
+
+    damage 80 in circle(2.5) [FIRE: 70]
 }
-heal 152 in cone(5.5, 52.0)
+
+ability Blink {
+    target: self
+    cooldown: 10s, cast: 0ms
+    hint: utility
+
+    dash 3.0
+    damage 15 in circle(2.0) [MAGIC: 40]
 }
-ability divine_charge {
-target: ally, range: 5.0
-cooldown: 20s, cast: 162ms
-hint: heal
-deliver zone { duration: 5049ms, tick: 708ms } {
+
+ability Polymorph {
+    target: enemy, range: 5.0
+    cooldown: 15s, cast: 300ms
+    hint: crowd_control
+
+    polymorph 3s [CROWD_CONTROL: 80]
 }
-buff move_speed 0.2 for 8s
+
+ability ManaShield {
+    target: self
+    cooldown: 14s, cast: 200ms
+    hint: defense
+
+    shield 50 for 5s
 }
-ability dormant_sacred_aegis {
-target: ally, range: 4.0
-cooldown: 27500ms
-hint: crowd_control
-shield 83 for 5088ms
+
+passive ArcaneShield {
+    trigger: on_hp_below(50%)
+    cooldown: 30s
+
+    shield 40 for 4s
 }
-ability serene_fortify {
-target: ally, range: 5.0
-cooldown: 27500ms, cast: 11ms
-hint: utility
-deliver tether { range: 5.4451475, tick: 500ms } {
+
+passive ArcaneMastery {
+    trigger: on_ability_used
+    cooldown: 8s
+
+    buff cooldown_reduction 0.15 for 3s
 }
-buff move_speed 0.4 for 5s

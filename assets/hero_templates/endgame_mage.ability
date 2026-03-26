@@ -1,50 +1,79 @@
-ability arcane_weight {
-target: self_aoe, range: 8.0
-cooldown: 32500ms, cast: 362ms
-hint: crowd_control
-deliver zone { duration: 7277ms, tick: 989ms } {
+// Arcanist abilities
+
+ability FireRing {
+    target: ground, range: 6.0
+    cooldown: 6s, cast: 300ms
+    hint: damage
+    zone_tag: "fire"
+
+    deliver zone { duration: 5s, tick: 500ms } {
+        on_hit {
+            damage 15 in circle(2.5) [FIRE: 50]
+        }
+    }
 }
-slow 0.6 for 1750ms
+
+ability FrostField {
+    target: ground, range: 6.0
+    cooldown: 7s, cast: 300ms
+    hint: crowd_control
+    zone_tag: "frost"
+
+    deliver zone { duration: 5s, tick: 500ms } {
+        on_hit {
+            slow 0.4 for 1500ms in circle(2.5) [CROWD_CONTROL: 40]
+            damage 8 in circle(2.5) [MAGIC: 40]
+        }
+    }
 }
-ability elder_bog {
-target: ground, range: 6.5
-cooldown: 15s, cast: 499ms
-hint: damage
-deliver projectile { speed: 14.0, pierce, width: 0.75 } {
+
+ability LightningStorm {
+    target: ground, range: 6.0
+    cooldown: 8s, cast: 400ms
+    hint: damage
+    zone_tag: "lightning"
+
+    deliver zone { duration: 4s, tick: 500ms } {
+        on_hit {
+            damage 20 in circle(2.0) [MAGIC: 45]
+        }
+    }
 }
-slow 0.4 for 3s
-stun 622ms in spread(5.5, 2)
+
+ability ArcaneBolt {
+    target: enemy, range: 5.0
+    cooldown: 3s, cast: 400ms
+    hint: damage
+
+    damage 40 [MAGIC: 50]
 }
-ability latent_mystic_invoke {
-target: ground, range: 7.0
-cooldown: 15s
-hint: damage
-stun 2017ms
+
+ability ArcaneShield {
+    target: self
+    cooldown: 14s, cast: 200ms
+    hint: defense
+
+    shield 50 for 5s
 }
-ability rune_rush {
-target: ally, range: 7.0
-cooldown: 30s, cast: 254ms
-hint: utility
-deliver tether { range: 5.0829635, tick: 500ms } {
+
+ability Blink {
+    target: self
+    cooldown: 10s, cast: 0ms
+    hint: utility
+
+    dash 4.0
 }
-dash 5.0 to_target in cone(5.0, 56.0)
-root 984ms
+
+passive ElementalMastery {
+    trigger: on_ability_used
+    cooldown: 8s
+
+    buff damage_output 0.15 for 3s
 }
-ability rune_bolster {
-target: direction, range: 5.5
-cooldown: 22500ms, cast: 206ms
-hint: crowd_control
-deliver zone { duration: 6880ms, tick: 670ms } {
+
+passive ArcaneBarrier {
+    trigger: on_damage_taken
+    cooldown: 10s
+
+    shield 20 for 3s
 }
-buff attack_speed 0.35 for 9s
-}
-ability mystic_barrage {
-target: self_aoe, range: 5.0
-cooldown: 30s, cast: 461ms
-hint: damage
-deliver zone { duration: 4570ms, tick: 599ms } {
-}
-damage 73
-}
-ability rune_call {
-target: ground, range: 7.5

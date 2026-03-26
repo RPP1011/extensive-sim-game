@@ -90,20 +90,105 @@ pub fn emit_ability_dsl(def: &AbilityDef) -> String {
         lines.push(String::new());
     }
 
-    // Delivery
     if let Some(ref delivery) = def.delivery {
-        emit_delivery(delivery, &mut lines, 1);
-    }
-
-    // Top-level effects
-    for eff in &def.effects {
-        emit_conditional_effect(eff, &mut lines, 1);
+        // When there's a delivery, effects go inside an on_hit block within the delivery
+        emit_delivery_with_effects(delivery, &def.effects, &mut lines, 1);
+    } else {
+        // No delivery — effects are top-level
+        for eff in &def.effects {
+            emit_conditional_effect(eff, &mut lines, 1);
+        }
     }
 
     lines.push("}".to_string());
     lines.join("\n")
 }
 
+/// Emit a delivery block with the ability's effects nested inside on_hit.
+fn emit_delivery_with_effects(
+    delivery: &Delivery,
+    effects: &[ConditionalEffect],
+    lines: &mut Vec<String>,
+    indent: usize,
+) {
+    let pad = "    ".repeat(indent);
+    let inner_pad = "    ".repeat(indent + 1);
+    let effect_pad = "    ".repeat(indent + 2);
+
+    match delivery {
+        Delivery::Instant => {
+            // No delivery wrapper — just emit effects directly
+            for eff in effects {
+                emit_conditional_effect(eff, lines, indent);
+            }
+        }
+        Delivery::Trap { duration_ms, trigger_radius, arm_time_ms } => {
+            let mut params = vec![
+                format!("duration: {}", fmt_duration(*duration_ms)),
+                format!("radius: {}", fmt_f32(*trigger_radius)),
+            ];
+            if *arm_time_ms > 0 {
+                params.push(format!("arm_time: {}", fmt_duration(*arm_time_ms)));
+            }
+            lines.push(format!("{pad}deliver trap {{ {} }}", params.join(", ")));
+            // Effects after trap (top-level, no nesting for traps)
+            for eff in effects {
+                emit_conditional_effect(eff, lines, indent);
+            }
+        }
+        _ => {
+            // For projectile, zone, channel, tether, chain — nest effects in on_hit
+            emit_delivery_header(delivery, lines, indent);
+            if !effects.is_empty() {
+                lines.push(format!("{inner_pad}on_hit {{"));
+                for eff in effects {
+                    emit_conditional_effect(eff, lines, indent + 2);
+                }
+                lines.push(format!("{inner_pad}}}"));
+            }
+            lines.push(format!("{pad}}}"));
+        }
+    }
+}
+
+/// Emit just the delivery header (opening brace, no closing).
+fn emit_delivery_header(delivery: &Delivery, lines: &mut Vec<String>, indent: usize) {
+    let pad = "    ".repeat(indent);
+    match delivery {
+        Delivery::Projectile { speed, pierce, width, .. } => {
+            let mut params = vec![format!("speed: {}", fmt_f32(*speed))];
+            if *pierce { params.push("pierce".to_string()); }
+            if *width > 0.0 { params.push(format!("width: {}", fmt_f32(*width))); }
+            lines.push(format!("{pad}deliver projectile {{ {} }} {{", params.join(", ")));
+        }
+        Delivery::Channel { duration_ms, tick_interval_ms } => {
+            lines.push(format!("{pad}deliver channel {{ duration: {}, tick: {} }} {{",
+                fmt_duration(*duration_ms), fmt_duration(*tick_interval_ms)));
+        }
+        Delivery::Zone { duration_ms, tick_interval_ms } => {
+            lines.push(format!("{pad}deliver zone {{ duration: {}, tick: {} }} {{",
+                fmt_duration(*duration_ms), fmt_duration(*tick_interval_ms)));
+        }
+        Delivery::Tether { max_range, tick_interval_ms, .. } => {
+            let mut params = vec![format!("range: {}", fmt_f32(*max_range))];
+            if *tick_interval_ms > 0 {
+                params.push(format!("tick: {}", fmt_duration(*tick_interval_ms)));
+            }
+            lines.push(format!("{pad}deliver tether {{ {} }} {{", params.join(", ")));
+        }
+        Delivery::Chain { bounces, bounce_range, falloff, .. } => {
+            let mut params = vec![
+                format!("bounces: {bounces}"),
+                format!("range: {}", fmt_f32(*bounce_range)),
+            ];
+            if *falloff > 0.0 { params.push(format!("falloff: {}", fmt_f32(*falloff))); }
+            lines.push(format!("{pad}deliver chain {{ {} }} {{", params.join(", ")));
+        }
+        _ => {}
+    }
+}
+
+#[allow(dead_code)]
 fn emit_delivery(delivery: &Delivery, lines: &mut Vec<String>, indent: usize) {
     let pad = "    ".repeat(indent);
     match delivery {
