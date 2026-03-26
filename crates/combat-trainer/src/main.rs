@@ -60,8 +60,8 @@ fn main() {
     // -----------------------------------------------------------------------
     let n_envs = 32;
     let n_steps = 128; // steps per env per rollout
-    let total_steps = 1_000_000;
-    let checkpoint_interval = 50; // iterations between checkpoints
+    let total_steps = 10_000_000;
+    let checkpoint_interval = 100; // iterations between checkpoints
 
     // -----------------------------------------------------------------------
     // Create vectorized environments
@@ -115,8 +115,8 @@ fn main() {
     eprintln!("{:-<80}", "");
 
     for iter in 0..n_iters {
-        // Linear LR annealing
-        let lr = config.lr * (1.0 - iter as f64 / n_iters as f64);
+        // Linear LR annealing with floor (don't go below 1e-5)
+        let lr = (config.lr * (1.0 - iter as f64 / n_iters as f64)).max(1e-5);
 
         // Collect rollout with action masking
         let rollout = masked_ppo_collect::<NdArray, _, _>(
