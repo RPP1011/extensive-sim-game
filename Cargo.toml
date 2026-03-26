@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/ability_operator", "crates/tactical_sim"]
+members = [".", "crates/ability_operator", "crates/tactical_sim", "crates/combat-trainer"]
 
 [package]
 name = "bevy_game"

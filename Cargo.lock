@@ -2399,6 +2399,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "combat-trainer"
+version = "0.1.0"
+dependencies = [
+ "burn",
+ "rand 0.10.0",
+ "rl4burn 0.2.0",
+ "tactical_sim",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "combine"
 version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7188,13 +7199,35 @@ dependencies = [
 [[package]]
 name = "rl4burn"
 version = "0.2.0"
+dependencies = [
+ "rl4burn-algo 0.2.0",
+ "rl4burn-collect 0.2.0",
+ "rl4burn-core 0.2.0",
+ "rl4burn-envs 0.2.0",
+ "rl4burn-nn 0.2.0",
+]
+
+[[package]]
+name = "rl4burn"
+version = "0.2.0"
 source = "git+https://github.com/RPP1011/rl4burn#f37828291854b8ab8f859ab2dc64ac46d4c600a9"
 dependencies = [
- "rl4burn-algo",
- "rl4burn-collect",
- "rl4burn-core",
- "rl4burn-envs",
- "rl4burn-nn",
+ "rl4burn-algo 0.2.0 (git+https://github.com/RPP1011/rl4burn)",
+ "rl4burn-collect 0.2.0 (git+https://github.com/RPP1011/rl4burn)",
+ "rl4burn-core 0.2.0 (git+https://github.com/RPP1011/rl4burn)",
+ "rl4burn-envs 0.2.0 (git+https://github.com/RPP1011/rl4burn)",
+ "rl4burn-nn 0.2.0 (git+https://github.com/RPP1011/rl4burn)",
+]
+
+[[package]]
+name = "rl4burn-algo"
+version = "0.2.0"
+dependencies = [
+ "burn",
+ "rand 0.10.0",
+ "rl4burn-collect 0.2.0",
+ "rl4burn-core 0.2.0",
+ "rl4burn-nn 0.2.0",
 ]
 
 [[package]]
@@ -7204,9 +7237,20 @@ source = "git+https://github.com/RPP1011/rl4burn#f37828291854b8ab8f859ab2dc64ac4
 dependencies = [
  "burn",
  "rand 0.10.0",
- "rl4burn-collect",
- "rl4burn-core",
- "rl4burn-nn",
+ "rl4burn-collect 0.2.0 (git+https://github.com/RPP1011/rl4burn)",
+ "rl4burn-core 0.2.0 (git+https://github.com/RPP1011/rl4burn)",
+ "rl4burn-nn 0.2.0 (git+https://github.com/RPP1011/rl4burn)",
+]
+
+[[package]]
+name = "rl4burn-collect"
+version = "0.2.0"
+dependencies = [
+ "burn",
+ "contracts",
+ "rand 0.10.0",
+ "rl4burn-core 0.2.0",
+ "rl4burn-nn 0.2.0",
 ]
 
 [[package]]
@@ -7217,8 +7261,15 @@ dependencies = [
  "burn",
  "contracts",
  "rand 0.10.0",
- "rl4burn-core",
- "rl4burn-nn",
+ "rl4burn-core 0.2.0 (git+https://github.com/RPP1011/rl4burn)",
+ "rl4burn-nn 0.2.0 (git+https://github.com/RPP1011/rl4burn)",
+]
+
+[[package]]
+name = "rl4burn-core"
+version = "0.2.0"
+dependencies = [
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -7233,10 +7284,27 @@ dependencies = [
 [[package]]
 name = "rl4burn-envs"
 version = "0.2.0"
+dependencies = [
+ "rand 0.10.0",
+ "rl4burn-core 0.2.0",
+]
+
+[[package]]
+name = "rl4burn-envs"
+version = "0.2.0"
 source = "git+https://github.com/RPP1011/rl4burn#f37828291854b8ab8f859ab2dc64ac46d4c600a9"
 dependencies = [
  "rand 0.10.0",
- "rl4burn-core",
+ "rl4burn-core 0.2.0 (git+https://github.com/RPP1011/rl4burn)",
+]
+
+[[package]]
+name = "rl4burn-nn"
+version = "0.2.0"
+dependencies = [
+ "burn",
+ "rand 0.10.0",
+ "rand_distr 0.6.0",
 ]
 
 [[package]]
@@ -8041,7 +8109,7 @@ dependencies = [
  "contracts",
  "crossbeam-channel",
  "proptest",
- "rl4burn",
+ "rl4burn 0.2.0 (git+https://github.com/RPP1011/rl4burn)",
  "serde",
  "serde_json",
  "toml 0.8.23",

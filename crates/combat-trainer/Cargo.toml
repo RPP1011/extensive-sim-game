@@ -1,0 +1,15 @@
+[package]
+name = "combat-trainer"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "combat-trainer"
+path = "src/main.rs"
+
+[dependencies]
+rl4burn = { path = "../../../rl4burn/rl4burn" }
+tactical_sim = { path = "../tactical_sim" }
+burn = { version = "0.20", features = ["ndarray", "autodiff"] }
+rand = "0.10"
+toml = "0.8"
