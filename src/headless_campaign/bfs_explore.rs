@@ -1641,15 +1641,10 @@ fn distance(a: &[f32], b: &[f32]) -> f32 {
 // Game phase tagging
 // ---------------------------------------------------------------------------
 
-/// Classify tick into game phase for coverage tracking.
-fn phase_tag(tick: u64, progress: f32) -> String {
-    if tick < 2400 {
-        "early".to_string()
-    } else if tick < 12000 {
-        "mid".to_string()
-    } else {
-        "late".to_string()
-    }
+/// Deprecated: phase is just a function of tick, no need for a separate tag.
+/// Kept for backward compat in serialized BfsSamples.
+fn phase_tag(_tick: u64, _progress: f32) -> String {
+    String::new()
 }
 
 // ---------------------------------------------------------------------------
@@ -2188,14 +2183,19 @@ pub fn dataset_balance_report(samples: &[BfsSample]) {
         eprintln!("  {:<30} {:>5} ({:>5.1}%){}", name, count, pct,
             if pct > 20.0 { " [OVER-REPRESENTED]" } else { "" });
     }
-    let mut phase_counts: HashMap<&str, usize> = HashMap::new();
-    for s in samples { *phase_counts.entry(&s.phase_tag).or_insert(0) += 1; }
-    eprintln!("\nPhase distribution:");
-    for phase in &["early", "mid", "late"] {
-        let count = phase_counts.get(phase).copied().unwrap_or(0);
+    // Tick distribution (no phase tags — tick IS the phase)
+    let ticks: Vec<u64> = samples.iter().map(|s| s.root_tick).collect();
+    let min_tick = ticks.iter().copied().min().unwrap_or(0);
+    let max_tick = ticks.iter().copied().max().unwrap_or(0);
+    eprintln!("\nTick distribution: {} - {} (range {})", min_tick, max_tick, max_tick - min_tick);
+    // Bucket by 5000-tick ranges
+    let mut tick_buckets: HashMap<u64, usize> = HashMap::new();
+    for &t in &ticks { *tick_buckets.entry(t / 5000).or_insert(0) += 1; }
+    let mut sorted_buckets: Vec<_> = tick_buckets.iter().collect();
+    sorted_buckets.sort_by_key(|(&k, _)| k);
+    for (&bucket, &count) in &sorted_buckets {
         let pct = count as f64 / total as f64 * 100.0;
-        eprintln!("  {:<8} {:>5} ({:>5.1}%){}", phase, count, pct,
-            if pct < 10.0 { " [UNDER-REPRESENTED]" } else { "" });
+        eprintln!("  tick {:>5}-{:<5} {:>5} ({:>5.1}%)", bucket * 5000, (bucket + 1) * 5000, count, pct);
     }
     let victories = samples.iter().filter(|s| s.leaf_outcome.as_deref() == Some("Victory")).count();
     let defeats = samples.iter().filter(|s| s.leaf_outcome.as_deref() == Some("Defeat")).count();
@@ -2279,7 +2279,6 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
     let mut total_defeats = 0u64;
 
     let mut global_action_types: HashSet<String> = HashSet::new();
-    let mut phase_counts: HashMap<String, usize> = HashMap::new();
     let mut all_accumulated_samples: Vec<BfsSample> = Vec::new();
 
     // Shared state for UCB and novelty across waves (pass 5)
@@ -2333,7 +2332,6 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
 
         for s in &valid_samples {
             global_action_types.insert(s.action_type.clone());
-            *phase_counts.entry(s.phase_tag.clone()).or_insert(0) += 1;
             dataset_stats.record(s);
         }
 
@@ -2502,8 +2500,6 @@ pub fn run_bfs_exploration(config: &BfsConfig) -> BfsStats {
     stats.total_defeats = total_defeats as usize;
     stats.waves_completed = wave;
     stats.unique_action_types = global_action_types.len();
-    stats.phase_coverage = phase_counts;
-
     eprintln!("\n=== BFS Exploration Complete ===");
     eprintln!("Waves: {}", wave);
     eprintln!("Total samples (after QA): {}", stats.total_samples);
@@ -2896,12 +2892,6 @@ fn generate_initial_roots(
 ) -> Vec<RootState> {
     let mut roots = Vec::new();
     let campaigns_needed = (config.initial_roots / 3).max(10);
-    let mut early_count = 0usize;
-    let mut mid_count = 0usize;
-    let mut late_count = 0usize;
-    let target_per_phase = config.initial_roots / 3;
-    // Ensure at least 30% of roots come from early game (tick < 3000)
-    let early_target = (config.initial_roots * 3 / 10).max(1);
 
     for i in 0..campaigns_needed as u64 {
         let seed = config.base_seed.wrapping_add(i * 7919);
@@ -2918,68 +2908,33 @@ fn generate_initial_roots(
         state.vae_model = config.vae_model.clone();
         let mut rng = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
 
-        let extended_max = config.trajectory_max_ticks;
-        for _tick in 0..extended_max {
+        for _tick in 0..config.trajectory_max_ticks {
             let action = diverse_root_policy(&state, &mut rng);
             let result = step_campaign(&mut state, action);
             let alive = state.adventurers.iter()
                 .filter(|a| a.status != AdventurerStatus::Dead).count();
             let is_viable = alive >= 2 && state.guild.gold > 5.0;
-            let phase = phase_tag(state.tick, state.overworld.campaign_progress);
-            let is_early = phase == "early";
-            // Allow more room for early-game roots (30% target guarantee)
-            let phase_has_room = match phase.as_str() {
-                "early" => early_count < early_target * 2,
-                "mid" => mid_count < target_per_phase * 2,
-                "late" => late_count < target_per_phase * 2,
-                _ => true,
-            };
-            let has_quest_board = !state.request_board.is_empty();
-            let has_active_quest = !state.active_quests.is_empty();
-            let has_battle = !state.active_battles.is_empty();
-            let has_injured = state.adventurers.iter().any(|a| a.injury > 30.0);
-            let has_crisis = !state.overworld.active_crises.is_empty();
-            let has_pending_choice = !state.pending_choices.is_empty();
-            let has_rival = state.rival_guild.active;
-            let has_war = state.factions.iter().any(|f| f.diplomatic_stance == DiplomaticStance::AtWar);
-            let has_low_loyalty = state.adventurers.iter()
-                .any(|a| a.status != AdventurerStatus::Dead && a.loyalty < 30.0);
-            // Lower tension threshold for early game: accept more low-tension states
-            // to avoid starving early-game data. Early game only requires viability
-            // plus at least one non-trivial condition (or just being early with room).
-            // Accept any viable state — with 3-second turns and long campaigns,
-            // we need roots across the full timeline. The old "tension" check was
-            // too restrictive and caused campaigns to only produce early-game roots.
-            let has_tension = is_viable;
-            let is_crisis_state = has_crisis || has_war || has_battle
-                || (state.overworld.global_threat_level > 60.0);
-            let on_cadence = state.tick % config.root_sample_interval == 0;
-            let crisis_sample = is_crisis_state && state.tick % (config.root_sample_interval / 3).max(1) == 0;
-            // Early-game: sample more frequently to compensate for shorter phase window
-            let early_boost = is_early && early_count < early_target
-                && state.tick % (config.root_sample_interval / 2).max(1) == 0;
-            let min_tick = if is_early { config.root_sample_interval / 2 } else { config.root_sample_interval };
-            if state.tick >= min_tick && has_tension && phase_has_room
-                && (on_cadence || crisis_sample || early_boost)
-            {
+
+            // Sample roots on cadence if the state is viable. No phase balancing —
+            // the tick itself tells you where in the campaign this is.
+            let on_cadence = state.tick >= config.root_sample_interval
+                && state.tick % config.root_sample_interval == 0;
+            if on_cadence && is_viable {
                 roots.push(RootState { state: state.clone(), seed, wave: 0, difficulty });
-                match phase.as_str() {
-                    "early" => early_count += 1,
-                    "mid" => mid_count += 1,
-                    "late" => late_count += 1,
-                    _ => {}
-                }
             }
             if result.outcome.is_some() {
-                eprintln!("[BFS] Trajectory ended at tick {} with outcome {:?} (seed {})", state.tick, result.outcome, seed);
+                eprintln!("[BFS] Trajectory ended at tick {} with {:?} (seed {})", state.tick, result.outcome, seed);
                 break;
             }
         }
     }
 
-    let total_roots = early_count + mid_count + late_count;
-    let early_pct = if total_roots > 0 { early_count as f32 / total_roots as f32 * 100.0 } else { 0.0 };
-    eprintln!("  Root phase distribution: early={} ({:.1}%), mid={}, late={}", early_count, early_pct, mid_count, late_count);
+    // Log tick distribution of roots
+    if !roots.is_empty() {
+        let min_t = roots.iter().map(|r| r.state.tick).min().unwrap_or(0);
+        let max_t = roots.iter().map(|r| r.state.tick).max().unwrap_or(0);
+        eprintln!("  {} roots, tick range {}-{}", roots.len(), min_t, max_t);
+    }
 
     if roots.len() > config.initial_roots * 2 {
         let features: Vec<(CampaignState, Vec<f32>)> = roots

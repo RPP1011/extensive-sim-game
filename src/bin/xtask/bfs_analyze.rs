@@ -160,11 +160,6 @@ fn print_overview(samples: &[BfsSample]) {
     let val_max = values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let val_mean = values.iter().sum::<f32>() / n as f32;
 
-    let mut phase_counts: HashMap<&str, usize> = HashMap::new();
-    for s in samples {
-        *phase_counts.entry(s.phase_tag.as_str()).or_default() += 1;
-    }
-
     let victories = samples
         .iter()
         .filter(|s| {
@@ -190,33 +185,19 @@ fn print_overview(samples: &[BfsSample]) {
         val_min, val_max, val_mean
     );
 
-    let phase_str: Vec<String> = ["early", "mid", "late"]
-        .iter()
-        .filter_map(|&p| {
-            let count = phase_counts.get(p).copied().unwrap_or(0);
-            if count > 0 {
-                Some(format!("{}={:.0}%", p, count as f64 / n as f64 * 100.0))
-            } else {
-                None
-            }
-        })
-        .collect();
-    // Also include any phases not in the standard set
-    for (phase, count) in &phase_counts {
-        if !["early", "mid", "late"].contains(phase) && *count > 0 {
-            // already covered below
-        }
+    // Tick distribution by 5000-tick buckets (no phase tags)
+    let mut tick_buckets: HashMap<u64, usize> = HashMap::new();
+    for s in samples.iter() {
+        *tick_buckets.entry(s.root_tick / 5000).or_default() += 1;
     }
-    println!("Phase: {}", phase_str.join(" "));
-    // Show any non-standard phases
-    for (phase, count) in &phase_counts {
-        if !["early", "mid", "late"].contains(phase) {
-            println!(
-                "  (other phase '{}': {:.0}%)",
-                phase,
-                *count as f64 / n as f64 * 100.0
-            );
-        }
+    let mut sorted: Vec<_> = tick_buckets.iter().collect();
+    sorted.sort_by_key(|(&k, _)| k);
+    print!("Ticks:");
+    for (&bucket, &count) in &sorted {
+        print!(" {}-{}={:.0}%", bucket * 5000, (bucket + 1) * 5000, count as f64 / n as f64 * 100.0);
+    }
+    println!();
+    {
     }
     println!("Terminal: {} victories, {} defeats", victories, defeats);
     println!();
