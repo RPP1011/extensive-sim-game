@@ -1,0 +1,166 @@
+ability divine_shell {
+target: ally, range: 5.0
+cooldown: 30s, cast: 18ms
+hint: heal
+deliver zone { duration: 7319ms, tick: 732ms } {
+on_hit {
+shield 78 for 7224ms in line(5.0, 0.5)
+}
+}
+}
+
+ability radiant_guard {
+target: ally, range: 4.5
+cooldown: 27500ms, cast: 290ms
+hint: heal
+shield 169 for 6993ms
+}
+
+ability blessed_reward {
+target: self, range: 5.5
+cooldown: 40s, cast: 475ms
+hint: heal
+buff quest_rep_bonus 0.15 for 0ms
+}
+
+ability blessed_charge {
+target: self_aoe, range: 4.0
+cooldown: 45s, cast: 178ms
+hint: heal
+buff defense 0.3 for 7500ms
+damage 73
+}
+
+ability instinct_gentle_hold {
+target: self, range: 6.0
+cooldown: 30s
+hint: heal
+stun 1322ms
+}
+
+ability sacred_mute {
+target: ally, range: 4.0
+cooldown: 47500ms, cast: 459ms
+hint: heal
+deliver tether { range: 4.298453, tick: 500ms } {
+on_hit {
+silence 806ms
+resurrect 0%
+}
+}
+}
+
+ability sacred_snare {
+target: ally, range: 5.5
+cooldown: 22500ms, cast: 330ms
+hint: heal
+deliver tether { range: 5.397529, tick: 500ms } {
+on_hit {
+root 1645ms in cone(3.0, 67.0)
+buff attack_damage 0.35 for 3s
+}
+}
+}
+
+ability dawn_charge {
+target: direction, range: 5.0
+cooldown: 47500ms, cast: 31ms
+hint: heal
+unstoppable
+buff defense 0.1 for 9500ms
+}
+
+ability divine_hold {
+target: enemy, range: 5.5
+cooldown: 27500ms, cast: 114ms
+hint: heal
+deliver zone { duration: 5449ms, tick: 937ms } {
+on_hit {
+stun 1044ms in circle(2.0)
+buff scout_range 0.5 for 25s
+}
+}
+}
+
+ability serene_grace {
+target: ally, range: 6.0
+cooldown: 42500ms, cast: 287ms
+hint: heal
+deliver projectile { speed: 6.0, width: 0.75 } {
+on_hit {
+heal 41 in line(5.0, 1.5)
+}
+}
+}
+
+ability radiant_empower {
+target: ally, range: 4.5
+cooldown: 22500ms, cast: 436ms
+hint: heal
+buff damage_output 0.35 for 4s
+buff damage_output 0.3 for 3s in line(7.0, 0.5)
+}
+
+ability instinct_verdant_bulwark {
+target: self_aoe, range: 5.5
+cooldown: 35s
+hint: heal
+shield 154 for 6317ms in cone(4.0, 62.0)
+silence 797ms in line(7.5, 0.5)
+}
+
+ability dawn_grace {
+target: self, range: 4.0
+cooldown: 47500ms, cast: 80ms
+hint: heal
+heal 139
+}
+
+ability radiant_salve {
+target: self, range: 4.5
+cooldown: 27s, cast: 466ms
+hint: heal
+heal 94
+buff attack_speed 0.3 for 3s
+}
+
+ability sacred_dash {
+target: self, range: 3.5
+cooldown: 45s, cast: 314ms
+hint: utility
+deliver chain { bounces: 3, range: 5.2150793, falloff: 0.77417636 } {
+on_hit {
+blink 5.5 to_target
+}
+}
+}
+
+ability radiant_shell {
+target: self_aoe, range: 3.5
+cooldown: 57s, cast: 130ms
+hint: heal
+deliver zone { duration: 7957ms, tick: 971ms } {
+on_hit {
+shield 216 for 6987ms
+}
+}
+}
+
+ability divine_prayer {
+target: self_aoe, range: 3.0
+cooldown: 45s, cast: 193ms
+hint: heal
+unstoppable
+heal 225
+}
+
+ability dawn_ration {
+target: self_aoe, range: 5.5
+cooldown: 33s, cast: 102ms
+hint: heal
+deliver channel { duration: 2391ms, tick: 572ms } {
+on_hit {
+buff supply_efficiency 0.25 for 0ms in circle(4.5)
+}
+}
+}

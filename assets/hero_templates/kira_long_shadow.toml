@@ -4,6 +4,8 @@ name = "Kira of the Long Shadow"
 [stats]
 hp = 8000
 move_speed = 5.0
+armor = 150.0
+magic_resist = 100.0
 
 [stats.tags]
 PHYSICAL = 90.0

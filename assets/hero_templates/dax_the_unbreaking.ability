@@ -1,0 +1,997 @@
+ability fury_rend {
+target: enemy, range: 3.0
+cooldown: 25s, cast: 158ms
+hint: defense
+damage 3225
+shield 1740 for 3268ms
+}
+
+ability instinct_titan_barrage {
+target: enemy, range: 2.50
+cooldown: 22500ms
+hint: crowd_control
+damage 1350
+dash 4.50
+}
+
+ability storm_wither {
+target: self, range: 2.0
+cooldown: 20s, cast: 267ms
+hint: damage
+deliver trap { duration: 17965ms, radius: 1.79, arm_time: 1357ms }
+debuff attack_damage 0.35 for 3500ms
+}
+
+ability rage_devour {
+target: enemy, range: 1.50
+cooldown: 20s, cast: 184ms
+hint: damage
+lifesteal 0.23 for 4003ms
+}
+
+ability brutal_restoration {
+target: self, range: 2.50
+cooldown: 12500ms, cast: 439ms
+hint: damage
+heal 1350
+damage 2925
+}
+
+ability rage_bolt {
+target: enemy, range: 2.50
+cooldown: 17500ms, cast: 297ms
+hint: damage
+deliver projectile { speed: 10.0, pierce, width: 0.75 } {
+on_hit {
+damage 2055
+}
+}
+}
+
+ability storm_manifest {
+target: enemy, range: 2.0
+cooldown: 17500ms, cast: 361ms
+hint: damage
+summon "minion"
+dash 4.0
+}
+
+ability inner_titan_bolt {
+target: self_aoe, range: 2.50
+cooldown: 15s
+hint: heal
+unstoppable
+damage 2475
+}
+
+ability brutal_inspire {
+target: enemy, range: 2.50
+cooldown: 17500ms, cast: 418ms
+hint: defense
+deliver zone { duration: 5927ms, tick: 551ms } {
+on_hit {
+buff attack_speed 0.15 for 4s
+}
+}
+}
+
+ability titan_rite {
+target: enemy, range: 2.0
+cooldown: 20s, cast: 303ms
+hint: damage
+deliver tether { range: 5.22, tick: 500ms } {
+on_hit {
+buff morale_aura 0.20 for 0ms in line(8.0, 1.0)
+damage 1185
+}
+}
+}
+
+ability savage_weight {
+target: self_aoe, range: 3.0
+cooldown: 20s, cast: 345ms
+hint: crowd_control
+slow 0.50 for 3250ms
+}
+
+ability titan_sever {
+target: ground, range: 1.50
+cooldown: 27500ms, cast: 68ms
+hint: defense
+execute 0% in line(8.0, 0.50)
+dash 3.50 in cone(5.50, 71.0)
+}
+
+ability instinct_rage_thrust {
+target: enemy, range: 2.0
+cooldown: 15s
+hint: damage
+knockback 3.0 in line(6.0, 1.50)
+}
+
+ability fury_leech {
+target: self, range: 3.0
+cooldown: 30s, cast: 422ms
+hint: damage
+lifesteal 0.33 for 5787ms
+}
+
+ability titan_hold {
+target: enemy, range: 2.0
+cooldown: 27s, cast: 444ms
+hint: defense
+deliver zone { duration: 7985ms, tick: 548ms } {
+on_hit {
+stun 2203ms
+}
+}
+}
+
+ability war_absorb {
+target: ally, range: 1.50
+cooldown: 15s, cast: 11ms
+hint: crowd_control
+unstoppable
+lifesteal 0.14 for 5147ms
+}
+
+ability dormant_storm_slam {
+target: enemy, range: 1.50
+cooldown: 15s
+hint: defense
+knockback 2.0
+damage 9570 in cone(3.50, 59.0)
+knockback 3.0 in line(9.0, 0.50)
+}
+
+ability war_lock {
+target: enemy, range: 2.0
+cooldown: 33s, cast: 381ms
+hint: damage
+deliver channel { duration: 2729ms, tick: 399ms } {
+on_hit {
+stun 722ms
+}
+}
+}
+
+ability reflex_brutal_reap {
+target: ground, range: 2.0
+cooldown: 33s
+hint: damage
+execute 0%
+}
+
+ability titan_blast {
+target: direction, range: 2.50
+cooldown: 24s, cast: 217ms
+hint: damage
+damage 4950
+}
+
+ability reflex_fury_slam {
+target: enemy, range: 2.50
+cooldown: 21s
+hint: damage
+knockback 3.0
+}
+
+ability fury_impact {
+target: enemy, range: 2.50
+cooldown: 18s, cast: 146ms
+hint: damage
+knockback 2.50
+knockback 1.50
+}
+
+ability inner_storm_cleave {
+target: enemy, range: 2.50
+cooldown: 24s
+hint: defense
+damage 6750
+lifesteal 0.27 for 6527ms
+}
+
+ability aegis_ward {
+target: self, range: 2.50
+cooldown: 48s, cast: 137ms
+hint: defense
+shield 6750 for 5928ms
+damage 2490 in line(5.50, 1.0)
+}
+
+ability latent_rage_barrage {
+target: self_aoe, range: 2.50
+cooldown: 17500ms
+hint: damage
+damage 2835 in line(9.0, 0.50)
+summon "minion"
+}
+
+ability instinct_war_rend {
+target: enemy, range: 2.50
+cooldown: 17500ms
+hint: defense
+unstoppable
+damage 2850 in line(8.50, 1.0)
+knockback 2.50
+}
+
+ability dormant_titan_impact {
+target: enemy, range: 2.50
+cooldown: 22500ms
+hint: defense
+knockback 1.50
+}
+
+ability savage_impact {
+target: enemy, range: 2.0
+cooldown: 20s, cast: 96ms
+hint: damage
+deliver zone { duration: 4994ms, tick: 762ms } {
+on_hit {
+knockback 2.0
+}
+}
+}
+
+ability savage_strike {
+target: ground, range: 1.50
+cooldown: 12500ms, cast: 68ms
+hint: damage
+deliver tether { range: 6.48, tick: 500ms } {
+on_hit {
+damage 2430
+}
+}
+}
+
+ability savage_push {
+target: enemy, range: 2.0
+cooldown: 25s, cast: 91ms
+hint: damage
+knockback 2.0
+knockback 1.0 in cone(4.0, 50.0)
+}
+
+ability instinct_rage_conjure {
+target: direction, range: 2.0
+cooldown: 12500ms
+hint: damage
+summon "minion" x2
+dash 6.50 to_target in cone(4.0, 52.0)
+}
+
+ability blood_shove {
+target: ground, range: 1.50
+cooldown: 25s, cast: 132ms
+hint: damage
+knockback 1.0
+}
+
+ability titan_rise {
+target: enemy, range: 1.50
+cooldown: 20s, cast: 206ms
+hint: defense
+resurrect 0%
+}
+
+ability fury_veil {
+target: enemy, range: 2.0
+cooldown: 12500ms, cast: 393ms
+hint: damage
+buff threat_reduction 0.15 for 50s
+}
+
+ability rage_slam {
+target: ground, range: 2.50
+cooldown: 22500ms, cast: 278ms
+hint: crowd_control
+knockback 3.50
+damage 2160
+}
+
+ability storm_end {
+target: enemy, range: 2.50
+cooldown: 20s, cast: 366ms
+hint: damage
+deliver channel { duration: 4241ms, tick: 422ms } {
+on_hit {
+execute 0%
+damage 1095 in spread(4.0, 3)
+}
+}
+}
+
+ability war_slam {
+target: self, range: 1.50
+cooldown: 22500ms, cast: 369ms
+hint: damage
+deliver channel { duration: 2063ms, tick: 280ms } {
+on_hit {
+knockback 3.50
+}
+}
+}
+
+ability dormant_blood_thrust {
+target: self, range: 2.50
+cooldown: 30s
+hint: damage
+knockback 2.50
+}
+
+ability dormant_savage_devour {
+target: enemy, range: 2.50
+cooldown: 33s
+hint: crowd_control
+lifesteal 0.18 for 4125ms
+lifesteal 0.29 for 4506ms
+}
+
+ability fury_void {
+target: self_aoe, range: 2.0
+cooldown: 21s, cast: 54ms
+hint: defense
+deliver tether { range: 7.74, tick: 500ms } {
+on_hit {
+silence 2045ms
+}
+}
+}
+
+ability titan_prayer {
+target: self, range: 3.0
+cooldown: 24s, cast: 110ms
+hint: damage
+unstoppable
+heal 6300
+shield 4020 for 7746ms
+}
+
+ability dormant_brutal_feast {
+target: ally, range: 2.0
+cooldown: 27s
+hint: damage
+lifesteal 0.29 for 6452ms
+lifesteal 0.17 for 6152ms in circle(4.0)
+}
+
+ability brutal_bolt {
+target: enemy, range: 2.50
+cooldown: 24s, cast: 363ms
+hint: damage
+deliver chain { bounces: 3, range: 5.99, falloff: 0.79 } {
+on_hit {
+damage 5580
+}
+}
+}
+
+ability storm_charge {
+target: ground, range: 3.0
+cooldown: 18s, cast: 53ms
+hint: utility
+blink 3.0 to_target in line(8.50, 1.0)
+knockback 4.0
+}
+
+ability blood_push {
+target: ally, range: 2.50
+cooldown: 15s, cast: 180ms
+hint: crowd_control
+deliver chain { bounces: 3, range: 5.14, falloff: 0.88 } {
+on_hit {
+knockback 2.50
+stealth for 4351ms break_on_ability
+}
+}
+}
+
+ability inner_venom_ward {
+target: enemy, range: 3.50
+cooldown: 27s
+hint: damage
+shield 7350 for 4178ms
+buff threat_reduction 0.25 for 25s
+}
+
+ability gentle_ward {
+target: enemy, range: 5.0
+cooldown: 47500ms, cast: 14ms
+hint: utility
+deliver projectile { speed: 14.0, width: 0.75 } {
+on_hit {
+shield 2460 for 6527ms
+stealth for 5706ms
+}
+}
+}
+
+ability harmony_ward {
+target: self, range: 5.50
+cooldown: 30s, cast: 248ms
+hint: utility
+deliver zone { duration: 7474ms, tick: 624ms } {
+on_hit {
+shield 3540 for 3878ms
+heal 7680
+dash 5.0
+}
+}
+}
+
+ability war_siphon {
+target: self, range: 3.0
+cooldown: 22500ms, cast: 143ms
+hint: crowd_control
+deliver zone { duration: 6622ms, tick: 632ms } {
+on_hit {
+lifesteal 0.19 for 4669ms
+}
+}
+}
+
+ability titan_veil {
+target: ground, range: 1.50
+cooldown: 27500ms, cast: 374ms
+hint: damage
+stealth for 2109ms
+buff training_boost 0.35 for 35s
+}
+
+ability savage_dash {
+target: enemy, range: 1.50
+cooldown: 17500ms, cast: 428ms
+hint: damage
+deliver projectile { speed: 10.0, pierce, width: 0.75 } {
+on_hit {
+dash 5.0
+}
+}
+}
+
+ability brutal_repel {
+target: enemy, range: 2.0
+cooldown: 22500ms, cast: 245ms
+hint: utility
+deliver channel { duration: 2865ms, tick: 618ms } {
+on_hit {
+knockback 1.50
+}
+}
+}
+
+ability war_thrust {
+target: self_aoe, range: 2.0
+cooldown: 27500ms, cast: 195ms
+hint: damage
+knockback 4.0
+}
+
+ability storm_impact {
+target: enemy, range: 2.0
+cooldown: 20s, cast: 68ms
+hint: damage
+knockback 2.50 in spread(5.0, 2)
+}
+
+ability storm_barrage {
+target: self, range: 2.50
+cooldown: 20s, cast: 3ms
+hint: damage
+damage 2805
+}
+
+ability savage_rend {
+target: ally, range: 3.0
+cooldown: 15s, cast: 79ms
+hint: damage
+deliver chain { bounces: 4, range: 5.85, falloff: 0.89 } {
+on_hit {
+damage 3585
+damage 2520
+}
+}
+}
+
+ability savage_embassy {
+target: enemy, range: 2.0
+cooldown: 12500ms, cast: 32ms
+hint: crowd_control
+deliver tether { range: 4.23, tick: 500ms } {
+on_hit {
+buff diplomacy_bonus 0.40 for 0ms
+}
+}
+}
+
+ability rage_curse {
+target: direction, range: 2.50
+cooldown: 15s, cast: 450ms
+hint: utility
+debuff attack_damage 0.10 for 6500ms
+}
+
+ability blood_blast {
+target: self, range: 2.0
+cooldown: 17500ms, cast: 38ms
+hint: damage
+unstoppable
+deliver projectile { speed: 6.0, pierce, width: 0.50 } {
+on_hit {
+damage 2400
+}
+}
+}
+
+ability war_bolt {
+target: self_aoe, range: 1.50
+cooldown: 12500ms, cast: 421ms
+hint: heal
+deliver projectile { speed: 13.0, width: 0.75 } {
+on_hit {
+damage 3645 in line(6.0, 1.50)
+buff passive_income 0.20 for 0ms
+}
+}
+}
+
+ability fury_shove {
+target: enemy, range: 3.0
+cooldown: 33s, cast: 309ms
+hint: defense
+deliver projectile { speed: 10.0, width: 0.50 } {
+on_hit {
+knockback 2.50
+}
+}
+}
+
+ability savage_barrage {
+target: enemy, range: 1.50
+cooldown: 33s, cast: 485ms
+hint: utility
+deliver projectile { speed: 8.0, width: 1.0 } {
+on_hit {
+damage 9330
+}
+}
+}
+
+ability instinct_war_impact {
+target: self, range: 2.0
+cooldown: 27s
+hint: damage
+knockback 1.50
+lifesteal 0.22 for 7688ms
+}
+
+ability war_barrage {
+target: enemy, range: 1.50
+cooldown: 21s, cast: 141ms
+hint: damage
+deliver chain { bounces: 3, range: 4.01, falloff: 0.79 } {
+on_hit {
+damage 9090
+stun 2063ms
+}
+}
+}
+
+ability inner_war_hold {
+target: enemy, range: 1.50
+cooldown: 18s
+hint: defense
+stun 2244ms
+}
+
+ability war_rally {
+target: enemy, range: 3.0
+cooldown: 33s, cast: 341ms
+hint: defense
+deliver projectile { speed: 12.0, width: 0.50 } {
+on_hit {
+buff attack_damage 0.30 for 8s
+knockback 2.0
+}
+}
+}
+
+ability latent_storm_mire {
+target: enemy, range: 2.0
+cooldown: 33s
+hint: defense
+slow 0.45 for 1750ms
+}
+
+ability brutal_cleave {
+target: enemy, range: 2.0
+cooldown: 27s, cast: 6ms
+hint: damage
+damage 9870
+}
+
+ability instinct_radiant_ward {
+target: ally, range: 5.50
+cooldown: 20s
+hint: defense
+shield 1305 for 4875ms in circle(4.0)
+}
+
+ability latent_storm_absorb {
+target: enemy, range: 2.50
+cooldown: 27500ms
+hint: damage
+lifesteal 0.12 for 7611ms
+}
+
+ability instinct_storm_crawl {
+target: direction, range: 2.50
+cooldown: 27500ms
+hint: damage
+slow 0.25 for 3250ms
+execute 0%
+}
+
+ability storm_fortune {
+target: enemy, range: 3.0
+cooldown: 22500ms, cast: 265ms
+hint: damage
+buff quest_rep_bonus 0.25 for 0ms in line(8.50, 0.50)
+}
+
+ability fury_thrust {
+target: enemy, range: 2.50
+cooldown: 20s, cast: 173ms
+hint: defense
+knockback 1.0 in cone(5.0, 76.0)
+}
+
+ability blood_hold {
+target: enemy, range: 2.0
+cooldown: 20s, cast: 93ms
+hint: damage
+stun 655ms in line(7.0, 0.50)
+}
+
+ability latent_storm_surge {
+target: enemy, range: 2.0
+cooldown: 12500ms
+hint: damage
+dash 4.50 to_target
+}
+
+ability rage_strike {
+target: self_aoe, range: 2.50
+cooldown: 25s, cast: 273ms
+hint: damage
+damage 2580
+stun 1432ms
+}
+
+ability dormant_storm_siphon {
+target: enemy, range: 2.0
+cooldown: 22500ms
+hint: damage
+lifesteal 0.38 for 3284ms
+}
+
+ability savage_call {
+target: enemy, range: 2.50
+cooldown: 12500ms, cast: 239ms
+hint: crowd_control
+summon "minion" x2
+shield 1410 for 3197ms in line(5.50, 1.0)
+}
+
+ability war_veil {
+target: enemy, range: 1.50
+cooldown: 20s, cast: 390ms
+hint: damage
+deliver projectile { speed: 6.0, width: 0.50 } {
+on_hit {
+stealth for 2849ms break_on_damage
+buff defense 0.40 for 3s
+}
+}
+}
+
+ability savage_bolt {
+target: enemy, range: 2.50
+cooldown: 15s, cast: 428ms
+hint: damage
+deliver tether { range: 7.11, tick: 500ms } {
+on_hit {
+damage 1170
+}
+}
+}
+
+ability inner_storm_freeze {
+target: enemy, range: 2.0
+cooldown: 25s
+hint: defense
+stun 2476ms
+}
+
+ability war_cleave {
+target: enemy, range: 2.0
+cooldown: 15s, cast: 17ms
+hint: heal
+deliver channel { duration: 2415ms, tick: 397ms } {
+on_hit {
+damage 5850
+}
+}
+}
+
+ability savage_finish {
+target: enemy, range: 2.50
+cooldown: 21s, cast: 286ms
+hint: damage
+deliver trap { duration: 25181ms, radius: 2.71, arm_time: 1394ms }
+execute 0% in circle(3.50)
+}
+
+ability latent_brutal_strike {
+target: enemy, range: 1.50
+cooldown: 15s
+hint: damage
+damage 3150
+damage 9630
+}
+
+ability savage_bind {
+target: enemy, range: 2.50
+cooldown: 27s, cast: 8ms
+hint: damage
+stun 2376ms
+damage 3690
+}
+
+ability savage_repel {
+target: direction, range: 2.50
+cooldown: 33s, cast: 486ms
+hint: heal
+knockback 1.50
+}
+
+ability reflex_storm_sap {
+target: self, range: 1.50
+cooldown: 33s
+hint: defense
+debuff move_speed 0.25 for 5s in circle(2.0)
+}
+
+ability inner_blood_shell {
+target: ground, range: 2.0
+cooldown: 27s
+hint: damage
+shield 6600 for 5700ms
+}
+
+ability dormant_rage_surge {
+target: enemy, range: 2.50
+cooldown: 18s
+hint: crowd_control
+dash 3.50 to_target
+summon "minion" x2 in line(6.0, 1.0)
+}
+
+ability brutal_surge {
+target: ground, range: 2.50
+cooldown: 21s, cast: 424ms
+hint: damage
+blink 6.50
+lifesteal 0.20 for 4663ms
+}
+
+ability sacred_ward {
+target: self, range: 3.50
+cooldown: 42500ms, cast: 416ms
+hint: heal
+shield 2445 for 7665ms in line(6.50, 1.0)
+}
+
+ability storm_execute {
+target: enemy, range: 3.0
+cooldown: 27500ms, cast: 9ms
+hint: defense
+unstoppable
+execute 0%
+}
+
+ability dormant_war_devour {
+target: self, range: 2.50
+cooldown: 25s
+hint: damage
+lifesteal 0.30 for 3967ms
+}
+
+ability savage_feast {
+target: enemy, range: 3.0
+cooldown: 17500ms, cast: 446ms
+hint: damage
+unstoppable
+deliver channel { duration: 2805ms, tick: 343ms } {
+on_hit {
+lifesteal 0.16 for 5072ms in spread(5.0, 3)
+}
+}
+}
+
+ability brutal_leap {
+target: enemy, range: 3.0
+cooldown: 12500ms, cast: 253ms
+hint: damage
+deliver trap { duration: 11518ms, radius: 3.42, arm_time: 844ms }
+dash 5.50
+lifesteal 0.11 for 4281ms in circle(3.50)
+shield 1140 for 6645ms in line(6.0, 0.50)
+}
+
+ability savage_empower {
+target: enemy, range: 3.0
+cooldown: 27500ms, cast: 368ms
+hint: damage
+buff attack_speed 0.35 for 6500ms
+damage 1515
+}
+
+ability rage_shackle {
+target: enemy, range: 1.50
+cooldown: 12500ms, cast: 387ms
+hint: damage
+stun 1611ms in circle(3.0)
+}
+
+ability savage_seal {
+target: enemy, range: 2.50
+cooldown: 22500ms, cast: 106ms
+hint: damage
+silence 773ms
+buff attack_damage 0.15 for 9s
+}
+
+ability storm_strike {
+target: enemy, range: 2.50
+cooldown: 17500ms, cast: 183ms
+hint: crowd_control
+deliver zone { duration: 7359ms, tick: 866ms } {
+on_hit {
+damage 1950
+buff damage_output 0.40 for 6s
+}
+}
+}
+
+ability rage_charge {
+target: enemy, range: 2.0
+cooldown: 12500ms, cast: 351ms
+hint: damage
+buff attack_speed 0.35 for 5500ms in spread(3.0, 3)
+}
+
+ability fury_envoy {
+target: enemy, range: 2.50
+cooldown: 12500ms, cast: 150ms
+hint: utility
+buff diplomacy_bonus 0.30 for 0ms in circle(3.50)
+damage 1860 in cone(3.0, 83.0)
+}
+
+ability brutal_survey {
+target: enemy, range: 3.0
+cooldown: 20s, cast: 278ms
+hint: defense
+buff scout_range 0.35 for 35s
+buff attack_speed 0.30 for 6500ms in line(4.50, 0.50)
+}
+
+ability blood_strike {
+target: self_aoe, range: 2.50
+cooldown: 20s, cast: 122ms
+hint: utility
+deliver projectile { speed: 6.0, width: 0.50 } {
+on_hit {
+damage 2085
+}
+}
+}
+
+ability war_shove {
+target: direction, range: 2.50
+cooldown: 21s, cast: 44ms
+hint: damage
+deliver channel { duration: 3165ms, tick: 538ms } {
+on_hit {
+knockback 2.0
+}
+}
+}
+
+ability storm_thrust {
+target: self, range: 2.0
+cooldown: 18s, cast: 433ms
+hint: damage
+deliver trap { duration: 28618ms, radius: 2.46, arm_time: 1039ms }
+knockback 4.0
+}
+
+ability brutal_slam {
+target: enemy, range: 2.0
+cooldown: 24s, cast: 329ms
+hint: defense
+knockback 1.50
+}
+
+ability rage_finish {
+target: ground, range: 3.0
+cooldown: 18s, cast: 292ms
+hint: damage
+execute 0%
+lifesteal 0.39 for 7590ms
+}
+
+ability brutal_push {
+target: direction, range: 2.0
+cooldown: 15s, cast: 313ms
+hint: damage
+deliver chain { bounces: 4, range: 5.37, falloff: 0.76 } {
+on_hit {
+knockback 1.50 in line(9.50, 0.50)
+}
+}
+}
+
+ability latent_storm_void {
+target: ground, range: 2.0
+cooldown: 21s
+hint: damage
+unstoppable
+silence 1361ms
+}
+
+ability reflex_war_barrage {
+target: self_aoe, range: 1.50
+cooldown: 30s
+hint: damage
+damage 7200
+damage 3090
+}
+
+ability savage_weaken {
+target: enemy, range: 2.50
+cooldown: 18s, cast: 36ms
+hint: damage
+debuff attack_speed 0.20 for 4500ms
+execute 0%
+}
+
+ability fury_thirst {
+target: enemy, range: 2.0
+cooldown: 33s, cast: 208ms
+hint: defense
+lifesteal 0.38 for 3505ms
+buff scout_range 0.20 for 55s
+}
+
+ability inner_aegis_ward {
+target: enemy, range: 2.0
+cooldown: 33s
+hint: crowd_control
+shield 6780 for 6273ms
+}
+
+ability astral_ward {
+target: enemy, range: 6.50
+cooldown: 24s, cast: 58ms
+hint: damage
+deliver zone { duration: 7978ms, tick: 987ms } {
+on_hit {
+shield 4500 for 3957ms
+buff attack_damage 0.40 for 3500ms
+}
+}
+}

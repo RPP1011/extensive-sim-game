@@ -1,0 +1,206 @@
+ability craft_aegis {
+target: ally, range: 4.5
+cooldown: 17500ms, cast: 64ms
+hint: utility
+deliver trap { duration: 17933ms, radius: 1.7487903, arm_time: 1292ms }
+shield 171 for 6718ms
+stealth for 4446ms break_on_ability
+}
+
+ability dormant_rhythm_chill {
+target: self, range: 5.0
+cooldown: 27500ms
+hint: crowd_control
+slow 0.55 for 3s
+resurrect 0% in line(7.0, 0.5)
+}
+
+ability instinct_chant_thrust {
+target: enemy, range: 5.0
+cooldown: 22500ms
+hint: heal
+knockback 3.0 in spread(5.0, 4)
+}
+
+ability rhythm_chill {
+target: self, range: 5.5
+cooldown: 15s, cast: 94ms
+hint: utility
+slow 0.3 for 1750ms
+}
+
+ability instinct_mantra_strike {
+target: ground, range: 5.0
+cooldown: 25s
+hint: utility
+damage 73 in circle(2.5)
+heal 71
+}
+
+ability harmony_barrage {
+target: self, range: 4.0
+cooldown: 15s, cast: 267ms
+hint: crowd_control
+deliver projectile { speed: 11.0, pierce, width: 0.5 } {
+on_hit {
+damage 183
+}
+}
+}
+
+ability inner_craft_bolster {
+target: ally, range: 3.5
+cooldown: 20s
+hint: utility
+buff attack_speed 0.35 for 4s
+damage 73 in cone(5.5, 68.0)
+}
+
+ability reflex_chant_shroud {
+target: ally, range: 3.5
+cooldown: 22500ms
+hint: damage
+unstoppable
+stealth for 4528ms break_on_damage
+damage 73 in circle(4.5)
+}
+
+ability spirit_evasion {
+target: self_aoe, range: 5.0
+cooldown: 22500ms, cast: 253ms
+hint: utility
+deliver projectile { speed: 10.0, width: 0.75 } {
+on_hit {
+buff threat_reduction 0.1 for 0ms
+buff threat_reduction 0.35 for 20s in circle(2.5)
+resurrect 0% in spread(5.5, 3)
+}
+}
+}
+
+ability harmony_drain {
+target: ally, range: 4.0
+cooldown: 27500ms, cast: 67ms
+hint: utility
+deliver projectile { speed: 12.0, width: 0.5 } {
+on_hit {
+debuff move_speed 0.15 for 4s
+}
+}
+}
+
+ability echo_crawl {
+target: self, range: 3.0
+cooldown: 35s, cast: 164ms
+hint: damage
+slow 0.55 for 1500ms
+heal 64
+}
+
+ability harmony_accord {
+target: direction, range: 4.5
+cooldown: 20s, cast: 178ms
+hint: heal
+deliver channel { duration: 1776ms, tick: 576ms } {
+on_hit {
+buff diplomacy_bonus 0.3 for 55s
+}
+}
+}
+
+ability instinct_spirit_mend {
+target: ally, range: 3.5
+cooldown: 30s
+hint: crowd_control
+heal 154
+damage 73
+}
+
+ability pulse_windfall {
+target: enemy, range: 4.5
+cooldown: 39s, cast: 214ms
+hint: heal
+buff quest_gold_bonus 0.15 for 0ms
+}
+
+ability craft_charge {
+target: enemy, range: 5.5
+cooldown: 18s, cast: 493ms
+hint: damage
+deliver channel { duration: 3809ms, tick: 508ms } {
+on_hit {
+buff defense 0.15 for 6500ms
+buff diplomacy_bonus 0.15 for 45s
+}
+}
+}
+
+ability rhythm_rally {
+target: ground, range: 5.0
+cooldown: 39s, cast: 197ms
+hint: utility
+buff attack_speed 0.1 for 6s in spread(6.0, 3)
+buff diplomacy_bonus 0.4 for 55s
+}
+
+ability reflex_pulse_fade {
+target: self_aoe, range: 5.0
+cooldown: 21s
+hint: heal
+stealth for 5414ms break_on_ability
+buff travel_speed 0.25 for 0ms
+}
+
+ability dormant_craft_shackle {
+target: enemy, range: 4.5
+cooldown: 24s
+hint: utility
+stun 890ms in circle(3.5)
+}
+
+ability latent_pulse_bolt {
+target: enemy, range: 4.5
+cooldown: 30s
+hint: defense
+damage 204 in line(9.5, 1.0)
+buff attack_damage 0.35 for 7500ms
+}
+
+ability spirit_bog {
+target: self_aoe, range: 5.0
+cooldown: 33s, cast: 404ms
+hint: utility
+deliver chain { bounces: 4, range: 5.216755, falloff: 0.8826154 } {
+on_hit {
+slow 0.65 for 3500ms in spread(6.0, 3)
+}
+}
+}
+
+ability chant_vanish {
+target: enemy, range: 3.5
+cooldown: 30s, cast: 172ms
+hint: utility
+stealth for 4234ms break_on_damage break_on_ability
+slow 0.5 for 2s
+}
+
+ability rhythm_doctrine {
+target: self, range: 4.5
+cooldown: 39s, cast: 280ms
+hint: defense
+deliver tether { range: 7.371998, tick: 500ms } {
+on_hit {
+buff training_boost 0.3 for 50s
+stun 1400ms in cone(4.0, 67.0)
+}
+}
+}
+
+ability harmony_aura {
+target: self, range: 3.5
+cooldown: 42s, cast: 2ms
+hint: utility
+deliver trap { duration: 16108ms, radius: 3.0678444, arm_time: 887ms }
+buff recruit_bonus 0.1 for 30s
+}

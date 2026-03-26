@@ -1,0 +1,17 @@
+[hero]
+name = "Ashenveil"
+
+[stats]
+hp = 6000
+move_speed = 2.5
+armor = 100.0
+magic_resist = 250.0
+
+[stats.tags]
+MAGIC = 95.0
+
+[attack]
+damage = 150
+range = 7.0
+cooldown = 900
+cast_time = 300

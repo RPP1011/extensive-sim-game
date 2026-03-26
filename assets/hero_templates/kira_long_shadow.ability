@@ -137,13 +137,6 @@ execute 0%
 }
 }
 
-ability ghost_aegis {
-target: enemy, range: 2.0
-cooldown: 18s, cast: 453ms
-hint: damage
-shield 4500 for 3939ms
-}
-
 ability ghost_leap {
 target: direction, range: 2.0
 cooldown: 12s, cast: 270ms
@@ -223,4 +216,799 @@ cooldown: 21s, cast: 464ms
 hint: damage
 unstoppable
 slow 0.30 for 1s
+}
+
+ability dusk_eclipse {
+target: ally, range: 3.0
+cooldown: 22500ms, cast: 168ms
+hint: damage
+deliver channel { duration: 3451ms, tick: 561ms } {
+on_hit {
+stealth for 2784ms
+}
+}
+}
+
+ability silent_reap {
+target: enemy, range: 3.50
+cooldown: 20s, cast: 70ms
+hint: damage
+execute 0%
+}
+
+ability instinct_whisper_reward {
+target: self, range: 3.50
+cooldown: 15s
+hint: damage
+buff quest_rep_bonus 0.20 for 0ms
+debuff defense 0.10 for 6500ms
+knockback 3.50
+}
+
+ability shadow_mire {
+target: ally, range: 3.0
+cooldown: 22500ms, cast: 417ms
+hint: damage
+deliver trap { duration: 11668ms, radius: 2.49, arm_time: 951ms }
+slow 0.30 for 2250ms
+dash 3.50 to_target
+}
+
+ability latent_venom_fortune {
+target: ground, range: 1.50
+cooldown: 22500ms
+hint: crowd_control
+buff quest_gold_bonus 0.25 for 0ms
+dash 5.0 to_target
+}
+
+ability instinct_shadow_cover {
+target: enemy, range: 2.0
+cooldown: 10s
+hint: damage
+buff threat_reduction 0.20 for 30s
+}
+
+ability reflex_ghost_rush {
+target: self_aoe, range: 3.0
+cooldown: 15s
+hint: heal
+dash 5.50 to_target
+slow 0.40 for 2250ms
+}
+
+ability instinct_silent_barrage {
+target: direction, range: 2.50
+cooldown: 12500ms
+hint: utility
+damage 3345
+stealth for 3727ms break_on_damage
+}
+
+ability venom_thirst {
+target: self, range: 3.0
+cooldown: 15s, cast: 300ms
+hint: damage
+deliver projectile { speed: 8.0, width: 0.25 } {
+on_hit {
+lifesteal 0.39 for 4622ms in line(4.50, 1.50)
+}
+}
+}
+
+ability silent_fade {
+target: ground, range: 2.0
+cooldown: 10s, cast: 172ms
+hint: damage
+stealth for 4828ms break_on_damage
+debuff attack_speed 0.30 for 5500ms
+}
+
+ability reflex_razor_cull {
+target: enemy, range: 2.0
+cooldown: 10s
+hint: damage
+execute 0%
+}
+
+ability razor_barrage {
+target: enemy, range: 2.50
+cooldown: 17500ms, cast: 456ms
+hint: damage
+damage 2355
+}
+
+ability ghost_strike {
+target: enemy, range: 3.50
+cooldown: 12500ms, cast: 427ms
+hint: damage
+deliver chain { bounces: 2, range: 5.00, falloff: 0.83 } {
+on_hit {
+damage 3450
+debuff defense 0.35 for 2500ms
+}
+}
+}
+
+ability ghost_reward {
+target: enemy, range: 3.0
+cooldown: 15s, cast: 204ms
+hint: heal
+buff quest_rep_bonus 0.10 for 0ms
+execute 0%
+}
+
+ability ghost_sap {
+target: enemy, range: 3.50
+cooldown: 18s, cast: 20ms
+hint: damage
+unstoppable
+deliver chain { bounces: 4, range: 5.93, falloff: 0.88 } {
+on_hit {
+debuff attack_speed 0.20 for 2s
+}
+}
+}
+
+ability shadow_root {
+target: enemy, range: 2.50
+cooldown: 21s, cast: 372ms
+hint: utility
+root 1294ms
+debuff attack_speed 0.30 for 3500ms
+}
+
+ability dusk_wither {
+target: enemy, range: 3.0
+cooldown: 18s, cast: 429ms
+hint: defense
+unstoppable
+deliver zone { duration: 7495ms, tick: 646ms } {
+on_hit {
+debuff move_speed 0.25 for 3500ms
+}
+}
+}
+
+ability ghost_wither {
+target: ally, range: 3.50
+cooldown: 18s, cast: 379ms
+hint: crowd_control
+deliver projectile { speed: 11.0, width: 0.75 } {
+on_hit {
+debuff attack_speed 0.15 for 3s in cone(5.50, 77.0)
+damage 2220
+}
+}
+}
+
+ability whisper_repel {
+target: self, range: 4.0
+cooldown: 15s, cast: 73ms
+hint: damage
+deliver channel { duration: 4294ms, tick: 449ms } {
+on_hit {
+knockback 2.0
+}
+}
+}
+
+ability phantom_push {
+target: enemy, range: 3.50
+cooldown: 15s, cast: 156ms
+hint: damage
+deliver trap { duration: 21170ms, radius: 1.98, arm_time: 1123ms }
+knockback 2.50
+}
+
+ability phantom_summon {
+target: enemy, range: 2.0
+cooldown: 18s, cast: 224ms
+hint: damage
+summon "minion"
+stun 880ms
+slow 0.30 for 1750ms
+}
+
+ability razor_aura {
+target: enemy, range: 3.50
+cooldown: 27s, cast: 124ms
+hint: utility
+buff recruit_bonus 0.10 for 40s
+buff threat_reduction 0.30 for 0ms
+}
+
+ability dormant_whisper_leap {
+target: enemy, range: 3.0
+cooldown: 24s
+hint: utility
+dash 5.50 to_target
+}
+
+ability ghost_veil {
+target: self, range: 2.0
+cooldown: 12s, cast: 130ms
+hint: utility
+unstoppable
+deliver trap { duration: 10559ms, radius: 1.86, arm_time: 1069ms }
+stealth for 4943ms break_on_damage
+}
+
+ability phantom_cleave {
+target: enemy, range: 2.0
+cooldown: 17500ms, cast: 102ms
+hint: damage
+deliver chain { bounces: 4, range: 4.53, falloff: 0.89 } {
+on_hit {
+damage 3165
+}
+}
+}
+
+ability phantom_barrage {
+target: enemy, range: 4.0
+cooldown: 12500ms, cast: 390ms
+hint: crowd_control
+deliver projectile { speed: 6.0, width: 0.75 } {
+on_hit {
+damage 2910
+}
+}
+}
+
+ability whisper_cloak {
+target: enemy, range: 2.0
+cooldown: 15s, cast: 102ms
+hint: damage
+deliver trap { duration: 24027ms, radius: 3.37, arm_time: 850ms }
+stealth for 4761ms break_on_ability
+}
+
+ability dormant_ghost_windfall {
+target: enemy, range: 2.0
+cooldown: 12500ms
+hint: crowd_control
+buff quest_rep_bonus 0.25 for 0ms
+lifesteal 0.13 for 7947ms in line(8.0, 0.50)
+}
+
+ability shadow_cull {
+target: enemy, range: 3.0
+cooldown: 10s, cast: 173ms
+hint: damage
+deliver zone { duration: 6829ms, tick: 570ms } {
+on_hit {
+execute 0%
+damage 2565 in line(6.50, 1.0)
+}
+}
+}
+
+ability dusk_tithe {
+target: enemy, range: 4.0
+cooldown: 17500ms, cast: 140ms
+hint: damage
+buff quest_rep_bonus 0.30 for 0ms
+execute 0% in spread(5.0, 2)
+}
+
+ability shadow_barrage {
+target: enemy, range: 2.0
+cooldown: 17500ms, cast: 42ms
+hint: damage
+deliver projectile { speed: 10.0, pierce, width: 0.75 } {
+on_hit {
+damage 1185
+}
+}
+}
+
+ability reflex_dusk_leap {
+target: enemy, range: 2.0
+cooldown: 12500ms
+hint: crowd_control
+dash 6.0 to_target
+buff quest_gold_bonus 0.20 for 0ms
+}
+
+ability venom_farsight {
+target: enemy, range: 2.0
+cooldown: 20s, cast: 100ms
+hint: utility
+deliver trap { duration: 21869ms, radius: 2.12, arm_time: 1388ms }
+buff scout_range 0.30 for 0ms
+damage 2115
+}
+
+ability silent_weaken {
+target: enemy, range: 1.50
+cooldown: 15s, cast: 428ms
+hint: damage
+debuff move_speed 0.15 for 3500ms
+}
+
+ability latent_dusk_strike {
+target: enemy, range: 3.50
+cooldown: 17500ms
+hint: utility
+damage 3135
+damage 2490
+}
+
+ability dormant_venom_drag {
+target: direction, range: 3.50
+cooldown: 12500ms
+hint: damage
+slow 0.30 for 1250ms
+debuff attack_damage 0.20 for 4500ms
+root 1904ms
+}
+
+ability dusk_drain {
+target: ally, range: 1.50
+cooldown: 17500ms, cast: 374ms
+hint: utility
+deliver trap { duration: 18198ms, radius: 2.03, arm_time: 888ms }
+debuff attack_damage 0.25 for 5s
+execute 0%
+}
+
+ability dusk_barrage {
+target: enemy, range: 3.50
+cooldown: 24s, cast: 414ms
+hint: damage
+damage 4230
+execute 0%
+}
+
+ability venom_fade {
+target: direction, range: 1.50
+cooldown: 18s, cast: 213ms
+hint: damage
+deliver zone { duration: 6721ms, tick: 502ms } {
+on_hit {
+stealth for 5446ms
+}
+}
+}
+
+ability whisper_blast {
+target: enemy, range: 3.50
+cooldown: 18s, cast: 164ms
+hint: utility
+damage 2280
+damage 3810
+debuff move_speed 0.35 for 2s
+}
+
+ability silent_wither {
+target: ground, range: 3.0
+cooldown: 21s, cast: 113ms
+hint: damage
+debuff move_speed 0.30 for 3500ms
+}
+
+ability ghost_rite {
+target: direction, range: 2.0
+cooldown: 15s, cast: 5ms
+hint: damage
+buff morale_aura 0.30 for 40s in circle(2.50)
+dash 5.0 to_target
+}
+
+ability latent_silent_devour {
+target: enemy, range: 1.50
+cooldown: 12s
+hint: damage
+lifesteal 0.30 for 5214ms in spread(4.0, 4)
+}
+
+ability inner_razor_fade {
+target: enemy, range: 2.0
+cooldown: 12s
+hint: damage
+stealth for 5419ms break_on_damage
+}
+
+ability inner_shadow_charge {
+target: self, range: 4.0
+cooldown: 24s
+hint: damage
+dash 4.0 to_target
+blink 5.0
+}
+
+ability ghost_vanish {
+target: self, range: 3.50
+cooldown: 21s, cast: 235ms
+hint: damage
+deliver trap { duration: 12860ms, radius: 2.44, arm_time: 974ms }
+stealth for 5561ms break_on_damage
+}
+
+ability inner_venom_cloak {
+target: self_aoe, range: 2.0
+cooldown: 22500ms
+hint: damage
+stealth for 3897ms
+}
+
+ability instinct_ghost_guard {
+target: self, range: 3.50
+cooldown: 22500ms
+hint: crowd_control
+shield 1395 for 7916ms in circle(2.0)
+dash 4.50 to_target
+}
+
+ability silent_crawl {
+target: enemy, range: 3.50
+cooldown: 20s, cast: 412ms
+hint: damage
+slow 0.70 for 2500ms
+}
+
+ability venom_blast {
+target: ally, range: 3.0
+cooldown: 20s, cast: 195ms
+hint: damage
+damage 1785
+}
+
+ability reflex_ghost_recon {
+target: enemy, range: 3.0
+cooldown: 15s
+hint: damage
+buff scout_range 0.25 for 0ms
+}
+
+ability venom_charge {
+target: ground, range: 1.50
+cooldown: 22500ms, cast: 361ms
+hint: damage
+deliver projectile { speed: 13.0, pierce, width: 0.50 } {
+on_hit {
+dash 4.50
+buff scout_range 0.45 for 0ms
+}
+}
+}
+
+ability reflex_ghost_vanish {
+target: ground, range: 4.0
+cooldown: 22500ms
+hint: utility
+stealth for 5969ms break_on_damage
+}
+
+ability shadow_corrode {
+target: enemy, range: 4.0
+cooldown: 12500ms, cast: 8ms
+hint: crowd_control
+deliver tether { range: 4.90, tick: 500ms } {
+on_hit {
+debuff defense 0.20 for 6500ms
+}
+}
+}
+
+ability whisper_bolt {
+target: enemy, range: 3.50
+cooldown: 22500ms, cast: 247ms
+hint: damage
+damage 1290 in cone(5.0, 55.0)
+dash 6.0
+}
+
+ability silent_eclipse {
+target: enemy, range: 3.50
+cooldown: 10s, cast: 380ms
+hint: damage
+stealth for 2533ms break_on_damage
+}
+
+ability whisper_rend {
+target: direction, range: 2.50
+cooldown: 20s, cast: 76ms
+hint: defense
+damage 2805
+}
+
+ability ghost_eclipse {
+target: enemy, range: 2.0
+cooldown: 15s, cast: 281ms
+hint: crowd_control
+stealth for 3428ms break_on_damage
+}
+
+ability ghost_blast {
+target: self_aoe, range: 3.0
+cooldown: 21s, cast: 74ms
+hint: crowd_control
+deliver chain { bounces: 4, range: 5.31, falloff: 0.74 } {
+on_hit {
+damage 8940 in circle(3.0)
+damage 2250
+}
+}
+}
+
+ability phantom_rush {
+target: direction, range: 2.50
+cooldown: 18s, cast: 428ms
+hint: heal
+deliver trap { duration: 21228ms, radius: 3.40, arm_time: 1057ms }
+dash 6.0 to_target
+}
+
+ability latent_whisper_lock {
+target: enemy, range: 3.50
+cooldown: 18s
+hint: damage
+stun 1362ms
+dash 7.0 to_target
+}
+
+ability instinct_shadow_cloak {
+target: enemy, range: 3.50
+cooldown: 24s
+hint: utility
+stealth for 3430ms break_on_damage
+stun 2183ms
+silence 2264ms in spread(4.0, 4)
+}
+
+ability silent_dash {
+target: enemy, range: 3.50
+cooldown: 12s, cast: 458ms
+hint: defense
+dash 4.50 to_target
+}
+
+ability inner_dusk_dash {
+target: enemy, range: 3.50
+cooldown: 21s
+hint: damage
+dash 4.50
+}
+
+ability dusk_surge {
+target: enemy, range: 2.0
+cooldown: 18s, cast: 242ms
+hint: damage
+dash 3.50
+buff quest_gold_bonus 0.35 for 0ms
+slow 0.40 for 1750ms
+}
+
+ability dormant_shadow_concealment {
+target: enemy, range: 3.50
+cooldown: 24s
+hint: crowd_control
+unstoppable
+buff threat_reduction 0.20 for 0ms
+}
+
+ability ghost_bolt {
+target: enemy, range: 3.0
+cooldown: 15s, cast: 235ms
+hint: damage
+deliver projectile { speed: 6.0, width: 0.75 } {
+on_hit {
+damage 7680
+stun 1628ms
+}
+}
+}
+
+ability whisper_shroud {
+target: enemy, range: 3.50
+cooldown: 15s, cast: 341ms
+hint: utility
+deliver projectile { speed: 11.0, pierce, width: 0.25 } {
+on_hit {
+stealth for 2422ms
+}
+}
+}
+
+ability whisper_charge {
+target: self, range: 3.0
+cooldown: 10s, cast: 120ms
+hint: damage
+blink 3.50 to_target
+}
+
+ability phantom_insight {
+target: direction, range: 2.0
+cooldown: 12500ms, cast: 213ms
+hint: utility
+deliver projectile { speed: 10.0, width: 0.25 } {
+on_hit {
+buff quest_rep_bonus 0.35 for 0ms
+execute 0% in line(8.0, 0.50)
+}
+}
+}
+
+ability venom_bolster {
+target: enemy, range: 2.0
+cooldown: 17500ms, cast: 354ms
+hint: damage
+deliver trap { duration: 17287ms, radius: 3.40, arm_time: 930ms }
+buff move_speed 0.15 for 9500ms in spread(3.0, 2)
+}
+
+ability silent_farsight {
+target: direction, range: 3.0
+cooldown: 20s, cast: 395ms
+hint: utility
+deliver channel { duration: 3137ms, tick: 331ms } {
+on_hit {
+buff scout_range 0.35 for 0ms
+lifesteal 0.37 for 3556ms
+}
+}
+}
+
+ability inner_venom_dash {
+target: enemy, range: 3.50
+cooldown: 17500ms
+hint: damage
+dash 6.50 to_target
+}
+
+ability shadow_veil {
+target: enemy, range: 3.50
+cooldown: 10s, cast: 225ms
+hint: damage
+deliver projectile { speed: 9.0, pierce, width: 0.50 } {
+on_hit {
+stealth for 4031ms break_on_damage break_on_ability
+}
+}
+}
+
+ability reflex_phantom_fade {
+target: self, range: 2.50
+cooldown: 17500ms
+hint: utility
+stealth for 4430ms
+}
+
+ability whisper_mire {
+target: self, range: 2.0
+cooldown: 17500ms, cast: 113ms
+hint: damage
+slow 0.25 for 1250ms
+blink 4.0 to_target in line(8.0, 1.0)
+}
+
+ability dormant_whisper_cleave {
+target: self, range: 1.50
+cooldown: 10s
+hint: damage
+damage 1095
+}
+
+ability latent_phantom_bolt {
+target: enemy, range: 2.0
+cooldown: 12500ms
+hint: damage
+damage 3045
+}
+
+ability reflex_dusk_insight {
+target: ground, range: 2.0
+cooldown: 27s
+hint: damage
+buff quest_rep_bonus 0.15 for 0ms
+}
+
+ability venom_cleave {
+target: enemy, range: 3.50
+cooldown: 21s, cast: 199ms
+hint: utility
+deliver trap { duration: 16839ms, radius: 2.90, arm_time: 648ms }
+damage 7890
+execute 0%
+}
+
+ability silent_curse {
+target: enemy, range: 3.0
+cooldown: 18s, cast: 76ms
+hint: crowd_control
+deliver projectile { speed: 12.0, pierce, width: 0.75 } {
+on_hit {
+debuff defense 0.25 for 4s
+blink 6.50 to_target in spread(4.0, 3)
+dash 6.0 in spread(4.0, 4)
+}
+}
+}
+
+ability dusk_vanish {
+target: enemy, range: 2.50
+cooldown: 24s, cast: 4ms
+hint: utility
+deliver projectile { speed: 11.0, width: 0.25 } {
+on_hit {
+stealth for 4429ms
+debuff move_speed 0.25 for 5500ms
+}
+}
+}
+
+ability phantom_cloak {
+target: enemy, range: 2.0
+cooldown: 27s, cast: 328ms
+hint: damage
+stealth for 5222ms break_on_damage break_on_ability
+buff diplomacy_bonus 0.10 for 0ms
+}
+
+ability phantom_windfall {
+target: self, range: 2.50
+cooldown: 27s, cast: 215ms
+hint: damage
+deliver trap { duration: 19599ms, radius: 1.94, arm_time: 985ms }
+buff quest_rep_bonus 0.30 for 0ms
+}
+
+ability whisper_strike {
+target: self, range: 4.0
+cooldown: 21s, cast: 113ms
+hint: damage
+deliver chain { bounces: 3, range: 4.10, falloff: 0.76 } {
+on_hit {
+damage 3090 in spread(3.0, 4)
+dash 5.50
+damage 9360
+}
+}
+}
+
+ability phantom_discretion {
+target: enemy, range: 3.0
+cooldown: 15s, cast: 383ms
+hint: crowd_control
+deliver tether { range: 5.33, tick: 500ms } {
+on_hit {
+buff threat_reduction 0.25 for 45s
+}
+}
+}
+
+ability whisper_decree {
+target: direction, range: 2.0
+cooldown: 21s, cast: 348ms
+hint: crowd_control
+buff diplomacy_bonus 0.30 for 50s
+}
+
+ability venom_bolt {
+target: enemy, range: 2.0
+cooldown: 27s, cast: 411ms
+hint: utility
+deliver trap { duration: 13054ms, radius: 2.40, arm_time: 1436ms }
+damage 2100 in line(8.50, 1.0)
+}
+
+ability shadow_bolt {
+target: enemy, range: 3.0
+cooldown: 18s, cast: 76ms
+hint: damage
+deliver channel { duration: 4485ms, tick: 736ms } {
+on_hit {
+damage 3210 in line(4.50, 0.50)
+stealth for 2208ms
+}
+}
+}
+
+ability phantom_strike {
+target: enemy, range: 2.0
+cooldown: 18s, cast: 235ms
+hint: damage
+damage 8280
 }

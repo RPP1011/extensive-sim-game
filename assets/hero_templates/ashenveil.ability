@@ -1,0 +1,919 @@
+ability astral_tangle {
+target: enemy, range: 6.0
+cooldown: 15s, cast: 311ms
+hint: crowd_control
+deliver chain { bounces: 3, range: 4.37, falloff: 0.87 } {
+on_hit {
+root 1968ms in cone(4.0, 47.0)
+}
+}
+}
+
+ability ether_inspire {
+target: ground, range: 6.50
+cooldown: 35s, cast: 89ms
+hint: damage
+deliver channel { duration: 4352ms, tick: 502ms } {
+on_hit {
+buff attack_speed 0.30 for 8500ms
+slow 0.50 for 2750ms
+}
+}
+}
+
+ability elder_empower {
+target: enemy, range: 7.50
+cooldown: 35s, cast: 399ms
+hint: utility
+deliver tether { range: 6.16, tick: 500ms } {
+on_hit {
+buff attack_speed 0.20 for 7500ms
+}
+}
+}
+
+ability arcane_snare {
+target: ground, range: 6.50
+cooldown: 17500ms, cast: 487ms
+hint: damage
+deliver channel { duration: 4498ms, tick: 419ms } {
+on_hit {
+root 886ms
+damage 1605
+}
+}
+}
+
+ability ether_cleave {
+target: enemy, range: 6.50
+cooldown: 27500ms, cast: 186ms
+hint: damage
+deliver zone { duration: 4724ms, tick: 938ms } {
+on_hit {
+damage 1095 in circle(3.50)
+buff damage_output 0.20 for 8500ms in cone(4.50, 43.0)
+}
+}
+}
+
+ability mystic_parley {
+target: enemy, range: 6.0
+cooldown: 35s, cast: 468ms
+hint: utility
+buff diplomacy_bonus 0.10 for 40s in cone(4.50, 54.0)
+}
+
+ability elder_beckon {
+target: enemy, range: 8.0
+cooldown: 15s, cast: 363ms
+hint: utility
+deliver channel { duration: 2160ms, tick: 367ms } {
+on_hit {
+summon "minion"
+execute 0% in circle(4.0)
+}
+}
+}
+
+ability dormant_mystic_barrage {
+target: self_aoe, range: 7.0
+cooldown: 32500ms
+hint: crowd_control
+damage 1095 in spread(5.0, 4)
+knockback 3.50 in cone(3.50, 58.0)
+}
+
+ability inner_arcane_strike {
+target: enemy, range: 6.0
+cooldown: 32500ms
+hint: crowd_control
+damage 3360
+lifesteal 0.17 for 6209ms
+}
+
+ability ether_beckon {
+target: ally, range: 5.50
+cooldown: 27500ms, cast: 343ms
+hint: crowd_control
+deliver chain { bounces: 5, range: 4.12, falloff: 0.85 } {
+on_hit {
+summon "minion"
+}
+}
+}
+
+ability latent_ether_balm {
+target: enemy, range: 7.0
+cooldown: 30s
+hint: damage
+heal 2325
+}
+
+ability dormant_astral_mire {
+target: enemy, range: 5.0
+cooldown: 15s
+hint: damage
+slow 0.55 for 1500ms
+}
+
+ability astral_bolt {
+target: ground, range: 6.0
+cooldown: 35s, cast: 459ms
+hint: crowd_control
+deliver channel { duration: 2648ms, tick: 697ms } {
+on_hit {
+damage 1170
+}
+}
+}
+
+ability mystic_wither {
+target: self_aoe, range: 8.0
+cooldown: 42s, cast: 162ms
+hint: defense
+debuff attack_damage 0.25 for 2s
+shield 3330 for 6357ms
+}
+
+ability astral_rend {
+target: enemy, range: 7.0
+cooldown: 42s, cast: 327ms
+hint: damage
+damage 2550 in line(9.50, 1.50)
+shield 7770 for 3012ms
+}
+
+ability elder_fortify {
+target: self, range: 6.0
+cooldown: 36s, cast: 117ms
+hint: crowd_control
+deliver zone { duration: 5558ms, tick: 996ms } {
+on_hit {
+buff attack_damage 0.20 for 5500ms
+}
+}
+}
+
+ability ether_weight {
+target: self_aoe, range: 8.0
+cooldown: 21s, cast: 15ms
+hint: damage
+deliver channel { duration: 4049ms, tick: 446ms } {
+on_hit {
+slow 0.50 for 3s in circle(4.50)
+root 1400ms
+}
+}
+}
+
+ability mystic_stride {
+target: ground, range: 7.50
+cooldown: 42s, cast: 193ms
+hint: crowd_control
+deliver zone { duration: 4763ms, tick: 988ms } {
+on_hit {
+buff travel_speed 0.15 for 0ms
+debuff attack_speed 0.10 for 2s
+}
+}
+}
+
+ability primal_charge {
+target: enemy, range: 7.0
+cooldown: 18s, cast: 106ms
+hint: damage
+deliver channel { duration: 2601ms, tick: 523ms } {
+on_hit {
+buff damage_output 0.35 for 6500ms
+slow 0.30 for 2500ms
+summon "minion" in cone(4.50, 61.0)
+}
+}
+}
+
+ability rune_blast {
+target: ground, range: 6.0
+cooldown: 21s, cast: 461ms
+hint: damage
+deliver trap { duration: 24827ms, radius: 2.27, arm_time: 1136ms }
+damage 4740 in circle(2.0)
+damage 2310
+shield 4410 for 4136ms
+}
+
+ability primal_accord {
+target: self_aoe, range: 6.0
+cooldown: 30s, cast: 422ms
+hint: damage
+deliver channel { duration: 2175ms, tick: 520ms } {
+on_hit {
+buff diplomacy_bonus 0.35 for 0ms
+buff quest_rep_bonus 0.40 for 0ms
+}
+}
+}
+
+ability primal_beckon {
+target: ground, range: 7.0
+cooldown: 21s, cast: 158ms
+hint: crowd_control
+deliver zone { duration: 7317ms, tick: 674ms } {
+on_hit {
+summon "minion" x2
+silence 2337ms in cone(4.0, 78.0)
+damage 8100
+}
+}
+}
+
+ability mystic_rally {
+target: enemy, range: 6.50
+cooldown: 32500ms, cast: 171ms
+hint: damage
+deliver channel { duration: 2657ms, tick: 704ms } {
+on_hit {
+buff defense 0.40 for 5500ms
+knockback 1.50
+}
+}
+}
+
+ability latent_primal_barrier {
+target: self_aoe, range: 7.50
+cooldown: 20s
+hint: defense
+shield 1815 for 6198ms in spread(4.0, 3)
+}
+
+ability latent_rune_cleave {
+target: self, range: 8.0
+cooldown: 20s
+hint: utility
+damage 2280 in cone(6.0, 74.0)
+lifesteal 0.21 for 7316ms
+}
+
+ability elder_rend {
+target: self, range: 6.50
+cooldown: 35s, cast: 223ms
+hint: utility
+deliver projectile { speed: 6.0, width: 0.75 } {
+on_hit {
+damage 1095
+}
+}
+}
+
+ability elder_drag {
+target: enemy, range: 8.0
+cooldown: 22500ms, cast: 71ms
+hint: defense
+deliver channel { duration: 4426ms, tick: 658ms } {
+on_hit {
+slow 0.40 for 1250ms in cone(5.50, 71.0)
+slow 0.55 for 3250ms
+}
+}
+}
+
+ability void_fortify {
+target: enemy, range: 6.0
+cooldown: 32500ms, cast: 462ms
+hint: utility
+deliver chain { bounces: 4, range: 5.27, falloff: 0.80 } {
+on_hit {
+buff defense 0.35 for 3s
+}
+}
+}
+
+ability ether_hold {
+target: self, range: 7.0
+cooldown: 17500ms, cast: 46ms
+hint: utility
+stun 1494ms
+}
+
+ability ether_envoy {
+target: self_aoe, range: 6.0
+cooldown: 18s, cast: 198ms
+hint: utility
+deliver trap { duration: 10245ms, radius: 2.82, arm_time: 1171ms }
+buff diplomacy_bonus 0.30 for 0ms
+}
+
+ability ether_charter {
+target: ground, range: 7.50
+cooldown: 39s, cast: 486ms
+hint: utility
+deliver tether { range: 6.87, tick: 500ms } {
+on_hit {
+buff passive_income 0.25 for 45s
+}
+}
+}
+
+ability ether_mandate {
+target: direction, range: 6.0
+cooldown: 21s, cast: 315ms
+hint: crowd_control
+deliver channel { duration: 2703ms, tick: 323ms } {
+on_hit {
+buff recruit_bonus 0.10 for 0ms
+buff move_speed 0.30 for 7500ms
+}
+}
+}
+
+ability rune_survey {
+target: ally, range: 5.50
+cooldown: 42s, cast: 460ms
+hint: damage
+deliver projectile { speed: 14.0, width: 0.50 } {
+on_hit {
+buff scout_range 0.30 for 50s in cone(5.50, 77.0)
+}
+}
+}
+
+ability elder_bolster {
+target: ground, range: 7.50
+cooldown: 33s, cast: 287ms
+hint: crowd_control
+deliver tether { range: 4.34, tick: 500ms } {
+on_hit {
+buff move_speed 0.30 for 8500ms
+knockback 3.50
+damage 7020 in spread(4.50, 3)
+}
+}
+}
+
+ability astral_blast {
+target: self_aoe, range: 6.50
+cooldown: 30s, cast: 209ms
+hint: crowd_control
+deliver zone { duration: 7419ms, tick: 553ms } {
+on_hit {
+damage 3090
+buff quest_rep_bonus 0.25 for 0ms
+}
+}
+}
+
+ability ether_bolt {
+target: self_aoe, range: 8.0
+cooldown: 21s, cast: 8ms
+hint: crowd_control
+deliver zone { duration: 5611ms, tick: 766ms } {
+on_hit {
+damage 3090
+}
+}
+}
+
+ability ether_watchtower {
+target: self, range: 6.50
+cooldown: 32500ms, cast: 175ms
+hint: damage
+deliver zone { duration: 7541ms, tick: 908ms } {
+on_hit {
+buff scout_range 0.20 for 20s in circle(4.50)
+}
+}
+}
+
+ability rune_rally {
+target: ground, range: 8.0
+cooldown: 32500ms, cast: 359ms
+hint: damage
+buff attack_speed 0.15 for 9s
+buff diplomacy_bonus 0.20 for 0ms
+}
+
+ability arcane_charge {
+target: self_aoe, range: 5.0
+cooldown: 17500ms, cast: 173ms
+hint: damage
+buff move_speed 0.15 for 6500ms in cone(4.0, 78.0)
+summon "minion"
+}
+
+ability primal_mandate {
+target: enemy, range: 6.50
+cooldown: 35s, cast: 395ms
+hint: defense
+unstoppable
+deliver projectile { speed: 14.0, width: 1.0 } {
+on_hit {
+buff training_boost 0.30 for 20s
+}
+}
+}
+
+ability astral_inspire {
+target: ground, range: 5.50
+cooldown: 22500ms, cast: 409ms
+hint: damage
+unstoppable
+deliver chain { bounces: 2, range: 5.15, falloff: 0.87 } {
+on_hit {
+buff move_speed 0.30 for 7s
+}
+}
+}
+
+ability rune_mire {
+target: direction, range: 7.50
+cooldown: 17500ms, cast: 349ms
+hint: crowd_control
+deliver trap { duration: 29360ms, radius: 2.38, arm_time: 719ms }
+slow 0.30 for 1250ms
+damage 1095
+slow 0.45 for 3750ms in circle(2.0)
+}
+
+ability mystic_envoy {
+target: self, range: 7.50
+cooldown: 15s, cast: 225ms
+hint: heal
+deliver projectile { speed: 9.0, width: 1.0 } {
+on_hit {
+buff diplomacy_bonus 0.15 for 0ms
+}
+}
+}
+
+ability dormant_rune_flash {
+target: ground, range: 5.50
+cooldown: 15s
+hint: crowd_control
+dash 7.0 in line(8.0, 1.50)
+}
+
+ability rune_crawl {
+target: enemy, range: 6.0
+cooldown: 17500ms, cast: 212ms
+hint: damage
+unstoppable
+deliver zone { duration: 5712ms, tick: 501ms } {
+on_hit {
+slow 0.40 for 1s
+silence 2097ms
+}
+}
+}
+
+ability astral_execute {
+target: ground, range: 7.0
+cooldown: 30s, cast: 68ms
+hint: damage
+deliver projectile { speed: 12.0, width: 0.50 } {
+on_hit {
+execute 0%
+buff damage_output 0.25 for 3500ms in line(9.50, 0.50)
+damage 2310
+}
+}
+}
+
+ability primal_bolt {
+target: ground, range: 6.50
+cooldown: 22500ms, cast: 431ms
+hint: utility
+deliver zone { duration: 7053ms, tick: 889ms } {
+on_hit {
+damage 2685
+dash 5.50 to_target in cone(3.50, 79.0)
+}
+}
+}
+
+ability elder_blast {
+target: enemy, range: 5.50
+cooldown: 39s, cast: 82ms
+hint: crowd_control
+deliver zone { duration: 7871ms, tick: 719ms } {
+on_hit {
+damage 8100
+silence 525ms
+}
+}
+}
+
+ability arcane_weaken {
+target: enemy, range: 7.50
+cooldown: 27s, cast: 437ms
+hint: damage
+deliver channel { duration: 2128ms, tick: 577ms } {
+on_hit {
+debuff attack_damage 0.15 for 3s in line(6.0, 1.50)
+}
+}
+}
+
+ability primal_fortify {
+target: self, range: 7.0
+cooldown: 21s, cast: 242ms
+hint: damage
+deliver channel { duration: 2991ms, tick: 650ms } {
+on_hit {
+buff attack_speed 0.20 for 3500ms
+slow 0.25 for 2750ms
+}
+}
+}
+
+ability astral_fortify {
+target: self, range: 8.0
+cooldown: 36s, cast: 34ms
+hint: crowd_control
+deliver channel { duration: 3614ms, tick: 653ms } {
+on_hit {
+buff move_speed 0.20 for 3s
+}
+}
+}
+
+ability dormant_ether_thrust {
+target: enemy, range: 7.0
+cooldown: 30s
+hint: utility
+knockback 2.0
+buff scout_range 0.35 for 45s in spread(5.0, 3)
+}
+
+ability astral_barrage {
+target: self, range: 6.0
+cooldown: 18s, cast: 214ms
+hint: defense
+deliver channel { duration: 1849ms, tick: 643ms } {
+on_hit {
+damage 3090 in cone(5.50, 67.0)
+damage 9600 in circle(2.50)
+}
+}
+}
+
+ability primal_rend {
+target: enemy, range: 6.50
+cooldown: 24s, cast: 257ms
+hint: defense
+deliver projectile { speed: 13.0, width: 0.50 } {
+on_hit {
+damage 3090
+}
+}
+}
+
+ability dormant_elder_rend {
+target: enemy, range: 5.0
+cooldown: 18s
+hint: utility
+damage 4650 in line(4.0, 1.0)
+}
+
+ability void_empower {
+target: ground, range: 8.0
+cooldown: 24s, cast: 343ms
+hint: crowd_control
+buff attack_damage 0.20 for 6500ms in cone(5.50, 82.0)
+lifesteal 0.27 for 7610ms in spread(5.0, 4)
+}
+
+ability astral_cleave {
+target: enemy, range: 7.50
+cooldown: 25s, cast: 4ms
+hint: damage
+deliver channel { duration: 4198ms, tick: 551ms } {
+on_hit {
+damage 1320 in cone(4.50, 48.0)
+buff quest_gold_bonus 0.15 for 0ms
+}
+}
+}
+
+ability instinct_mystic_parley {
+target: direction, range: 5.0
+cooldown: 30s
+hint: damage
+buff diplomacy_bonus 0.25 for 55s in line(8.50, 0.50)
+}
+
+ability astral_chill {
+target: direction, range: 6.50
+cooldown: 27500ms, cast: 258ms
+hint: damage
+deliver projectile { speed: 9.0, width: 0.75 } {
+on_hit {
+slow 0.40 for 2250ms
+resurrect 0%
+resurrect 0% in spread(5.0, 4)
+}
+}
+}
+
+ability mystic_decree {
+target: self_aoe, range: 6.0
+cooldown: 30s, cast: 410ms
+hint: utility
+deliver zone { duration: 5993ms, tick: 602ms } {
+on_hit {
+buff diplomacy_bonus 0.40 for 45s
+slow 0.30 for 3750ms
+}
+}
+}
+
+ability ether_drain {
+target: enemy, range: 6.50
+cooldown: 32500ms, cast: 79ms
+hint: utility
+debuff defense 0.25 for 2s
+buff move_speed 0.20 for 8500ms in cone(4.50, 76.0)
+slow 0.35 for 2500ms
+}
+
+ability ether_strike {
+target: ground, range: 6.50
+cooldown: 22500ms, cast: 110ms
+hint: crowd_control
+deliver channel { duration: 3649ms, tick: 274ms } {
+on_hit {
+damage 3075
+execute 0% in spread(5.0, 4)
+}
+}
+}
+
+ability rune_bog {
+target: self_aoe, range: 6.50
+cooldown: 27500ms, cast: 334ms
+hint: utility
+deliver projectile { speed: 6.0, width: 0.50 } {
+on_hit {
+slow 0.65 for 3500ms
+}
+}
+}
+
+ability dormant_elder_lock {
+target: ground, range: 5.0
+cooldown: 20s
+hint: crowd_control
+unstoppable
+stun 1874ms
+damage 3630
+}
+
+ability primal_empower {
+target: ground, range: 6.50
+cooldown: 15s, cast: 178ms
+hint: damage
+buff move_speed 0.10 for 3s
+}
+
+ability elder_aura {
+target: self_aoe, range: 7.50
+cooldown: 17500ms, cast: 78ms
+hint: damage
+deliver zone { duration: 7415ms, tick: 687ms } {
+on_hit {
+buff recruit_bonus 0.25 for 0ms in circle(4.50)
+damage 1095
+}
+}
+}
+
+ability rune_barrage {
+target: enemy, range: 7.50
+cooldown: 25s, cast: 373ms
+hint: defense
+deliver projectile { speed: 12.0, width: 1.0 } {
+on_hit {
+damage 840 in line(9.50, 1.0)
+damage 1095
+}
+}
+}
+
+ability dormant_rune_tithe {
+target: ground, range: 5.0
+cooldown: 24s
+hint: damage
+buff quest_rep_bonus 0.35 for 0ms
+}
+
+ability inner_arcane_finish {
+target: self, range: 7.50
+cooldown: 18s
+hint: utility
+execute 0%
+buff scout_range 0.35 for 0ms
+}
+
+ability void_beckon {
+target: enemy, range: 7.0
+cooldown: 36s, cast: 208ms
+hint: utility
+deliver channel { duration: 4482ms, tick: 477ms } {
+on_hit {
+summon "minion" x2 in spread(4.0, 4)
+}
+}
+}
+
+ability mystic_blast {
+target: ground, range: 8.0
+cooldown: 27s, cast: 325ms
+hint: damage
+deliver projectile { speed: 14.0, width: 0.75 } {
+on_hit {
+damage 2430
+}
+}
+}
+
+ability primal_wither {
+target: direction, range: 7.0
+cooldown: 30s, cast: 67ms
+hint: damage
+deliver zone { duration: 5114ms, tick: 984ms } {
+on_hit {
+debuff defense 0.35 for 2s in spread(5.50, 3)
+damage 5280
+}
+}
+}
+
+ability rune_strike {
+target: enemy, range: 5.50
+cooldown: 24s, cast: 215ms
+hint: damage
+damage 3090 in circle(4.0)
+shield 7320 for 5336ms
+}
+
+ability instinct_arcane_charge {
+target: self_aoe, range: 8.0
+cooldown: 42s
+hint: damage
+buff move_speed 0.15 for 8s
+silence 778ms
+}
+
+ability rune_rend {
+target: enemy, range: 6.0
+cooldown: 32500ms, cast: 217ms
+hint: utility
+unstoppable
+deliver chain { bounces: 3, range: 5.95, falloff: 0.72 } {
+on_hit {
+damage 870
+}
+}
+}
+
+ability primal_root {
+target: enemy, range: 5.50
+cooldown: 32500ms, cast: 199ms
+hint: damage
+deliver zone { duration: 5218ms, tick: 722ms } {
+on_hit {
+root 1055ms in cone(5.0, 58.0)
+}
+}
+}
+
+ability ether_suppress {
+target: ground, range: 7.0
+cooldown: 15s, cast: 165ms
+hint: defense
+deliver zone { duration: 7420ms, tick: 626ms } {
+on_hit {
+silence 1710ms
+slow 0.40 for 2250ms
+}
+}
+}
+
+ability primal_inspire {
+target: ground, range: 7.50
+cooldown: 35s, cast: 142ms
+hint: damage
+deliver projectile { speed: 12.0, width: 0.50 } {
+on_hit {
+buff move_speed 0.35 for 3s in spread(5.50, 4)
+}
+}
+}
+
+ability rune_absorb {
+target: ally, range: 7.50
+cooldown: 20s, cast: 81ms
+hint: crowd_control
+deliver zone { duration: 6786ms, tick: 744ms } {
+on_hit {
+lifesteal 0.13 for 3193ms
+summon "minion" in circle(2.50)
+debuff attack_speed 0.15 for 5500ms in cone(4.50, 46.0)
+}
+}
+}
+
+ability ether_fortify {
+target: self, range: 7.50
+cooldown: 15s, cast: 91ms
+hint: damage
+deliver zone { duration: 5917ms, tick: 707ms } {
+on_hit {
+buff attack_damage 0.20 for 5s in spread(3.0, 3)
+}
+}
+}
+
+ability mystic_drag {
+target: self_aoe, range: 7.0
+cooldown: 20s, cast: 280ms
+hint: utility
+deliver channel { duration: 4317ms, tick: 305ms } {
+on_hit {
+slow 0.20 for 2250ms in line(8.0, 1.0)
+buff supply_efficiency 0.25 for 50s
+}
+}
+}
+
+ability mystic_inspire {
+target: ally, range: 7.50
+cooldown: 22500ms, cast: 247ms
+hint: utility
+deliver projectile { speed: 9.0, width: 0.50 } {
+on_hit {
+buff attack_damage 0.20 for 8s
+}
+}
+}
+
+ability dormant_primal_beckon {
+target: self_aoe, range: 6.0
+cooldown: 17500ms
+hint: utility
+summon "minion" x2
+buff attack_damage 0.30 for 3s
+}
+
+ability arcane_devour {
+target: enemy, range: 5.0
+cooldown: 20s, cast: 171ms
+hint: crowd_control
+deliver projectile { speed: 14.0, width: 1.0 } {
+on_hit {
+lifesteal 0.33 for 5095ms in cone(5.0, 76.0)
+}
+}
+}
+
+ability instinct_primal_charge {
+target: enemy, range: 7.50
+cooldown: 42s
+hint: crowd_control
+buff defense 0.40 for 3500ms in line(5.50, 1.0)
+damage 8910 in cone(4.50, 61.0)
+}
+
+ability elder_eclipse {
+target: enemy, range: 6.0
+cooldown: 42s, cast: 172ms
+hint: utility
+deliver channel { duration: 2912ms, tick: 357ms } {
+on_hit {
+stealth for 2722ms break_on_damage break_on_ability in line(6.0, 1.0)
+stealth for 2069ms break_on_damage break_on_ability
+}
+}
+}
+
+ability latent_astral_drain {
+target: ground, range: 6.0
+cooldown: 36s
+hint: damage
+debuff move_speed 0.35 for 4500ms in spread(3.50, 4)
+stun 1338ms
+}
+
+ability reflex_ether_curse {
+target: ground, range: 6.0
+cooldown: 30s
+hint: utility
+debuff defense 0.10 for 2s
+damage 3090 in circle(4.0)
+}
+
+ability void_barrier {
+target: self_aoe, range: 7.50
+cooldown: 18s, cast: 148ms
+hint: heal
+shield 7290 for 4339ms in circle(3.50)
+silence 2242ms
+}

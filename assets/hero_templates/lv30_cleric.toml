@@ -1,0 +1,15 @@
+[hero]
+name = "Level 30 Cleric"
+
+[stats]
+hp = 600
+move_speed = 2.3
+
+[stats.tags]
+MAGIC = 25.0
+
+[attack]
+damage = 20
+range = 4.0
+cooldown = 1000
+cast_time = 300

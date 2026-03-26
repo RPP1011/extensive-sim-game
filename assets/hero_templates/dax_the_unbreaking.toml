@@ -2,14 +2,16 @@
 name = "Dax the Unbreaking"
 
 [stats]
-hp = 4100
-move_speed = 2.8
+hp = 15000
+move_speed = 2.2
+armor = 250.0
+magic_resist = 150.0
 
 [stats.tags]
-PHYSICAL = 80.0
+PHYSICAL = 90.0
 
 [attack]
-damage = 160
-range = 1.5
-cooldown = 600
-cast_time = 150
+damage = 200
+range = 1.8
+cooldown = 700
+cast_time = 200

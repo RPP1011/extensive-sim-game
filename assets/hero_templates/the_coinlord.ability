@@ -1,0 +1,182 @@
+ability echo_flash {
+target: self_aoe, range: 3.5
+cooldown: 30s, cast: 98ms
+hint: utility
+deliver channel { duration: 4294ms, tick: 735ms } {
+on_hit {
+dash 4.0
+buff move_speed 0.4 for 6500ms
+}
+}
+}
+
+ability spirit_anchor {
+target: ally, range: 3.0
+cooldown: 32500ms, cast: 96ms
+hint: utility
+deliver zone { duration: 5959ms, tick: 766ms } {
+on_hit {
+root 1524ms
+root 1294ms
+}
+}
+}
+
+ability pulse_doctrine {
+target: ally, range: 5.0
+cooldown: 17500ms, cast: 99ms
+hint: utility
+deliver zone { duration: 7518ms, tick: 601ms } {
+on_hit {
+buff training_boost 0.35 for 0ms
+heal 101 in circle(3.5)
+damage 73
+}
+}
+}
+
+ability harmony_inspire {
+target: self, range: 4.0
+cooldown: 20s, cast: 255ms
+hint: heal
+buff damage_output 0.3 for 5500ms
+summon "minion" x2 hp:0%
+damage 202
+}
+
+ability pulse_fade {
+target: self_aoe, range: 4.5
+cooldown: 15s, cast: 139ms
+hint: utility
+deliver projectile { speed: 11.0, width: 0.5 } {
+on_hit {
+stealth for 5044ms break_on_damage in cone(6.0, 89.0)
+}
+}
+}
+
+ability instinct_chant_charge {
+target: self, range: 5.5
+cooldown: 32500ms
+hint: defense
+buff attack_damage 0.15 for 9500ms
+buff move_speed 0.3 for 5s
+}
+
+ability pulse_grip {
+target: ally, range: 5.0
+cooldown: 15s, cast: 291ms
+hint: utility
+deliver projectile { speed: 12.0, width: 0.5 } {
+on_hit {
+root 2016ms
+debuff attack_damage 0.25 for 6500ms
+}
+}
+}
+
+ability pulse_fortune {
+target: ground, range: 5.0
+cooldown: 32500ms, cast: 405ms
+hint: utility
+buff quest_rep_bonus 0.1 for 0ms in cone(4.5, 66.0)
+}
+
+ability latent_mantra_blast {
+target: ally, range: 4.5
+cooldown: 35s
+hint: utility
+damage 121 in cone(4.5, 71.0)
+}
+
+ability craft_reserve {
+target: enemy, range: 5.0
+cooldown: 17500ms, cast: 35ms
+hint: defense
+buff supply_efficiency 0.2 for 25s
+debuff move_speed 0.1 for 3s in circle(2.0)
+}
+
+ability harmony_guard {
+target: enemy, range: 4.0
+cooldown: 30s, cast: 454ms
+hint: defense
+shield 187 for 5293ms
+}
+
+ability reflex_harmony_boon {
+target: self_aoe, range: 3.0
+cooldown: 15s
+hint: defense
+buff quest_rep_bonus 0.35 for 0ms
+}
+
+ability reflex_echo_balm {
+target: ally, range: 4.0
+cooldown: 30s
+hint: heal
+heal 56
+}
+
+ability mantra_dash {
+target: self_aoe, range: 5.5
+cooldown: 30s, cast: 297ms
+hint: utility
+blink 6.0
+heal 228
+}
+
+ability spirit_tithe {
+target: ally, range: 5.5
+cooldown: 18s, cast: 495ms
+hint: utility
+deliver tether { range: 7.1487236, tick: 500ms } {
+on_hit {
+buff quest_gold_bonus 0.3 for 0ms
+}
+}
+}
+
+ability craft_mend {
+target: self, range: 3.0
+cooldown: 33s, cast: 395ms
+hint: crowd_control
+heal 180 in circle(4.0)
+}
+
+ability inner_harmony_accord {
+target: ally, range: 3.5
+cooldown: 39s
+hint: utility
+buff diplomacy_bonus 0.2 for 0ms
+}
+
+ability chant_empower {
+target: enemy, range: 5.0
+cooldown: 30s, cast: 360ms
+hint: damage
+deliver projectile { speed: 14.0, width: 1.0 } {
+on_hit {
+buff move_speed 0.25 for 9500ms
+heal 135 in cone(5.0, 59.0)
+}
+}
+}
+
+ability latent_craft_grip {
+target: self_aoe, range: 3.5
+cooldown: 30s
+hint: utility
+root 2135ms
+}
+
+ability pulse_inspire {
+target: ground, range: 4.5
+cooldown: 21s, cast: 432ms
+hint: heal
+deliver zone { duration: 3977ms, tick: 599ms } {
+on_hit {
+buff attack_speed 0.25 for 4500ms in cone(3.5, 55.0)
+}
+}
+}

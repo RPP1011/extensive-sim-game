@@ -1,0 +1,977 @@
+ability bastion_rend {
+target: enemy, range: 2.50
+cooldown: 20s, cast: 352ms
+hint: crowd_control
+deliver zone { duration: 3512ms, tick: 733ms } {
+on_hit {
+damage 2160
+}
+}
+}
+
+ability fortress_impact {
+target: ally, range: 2.0
+cooldown: 22500ms, cast: 337ms
+hint: crowd_control
+knockback 2.0
+damage 3315
+heal 975
+}
+
+ability vanguard_hold {
+target: self_aoe, range: 3.0
+cooldown: 32500ms, cast: 31ms
+hint: defense
+unstoppable
+stun 1284ms in line(4.0, 1.0)
+knockback 2.50
+}
+
+ability bastion_slam {
+target: ground, range: 2.0
+cooldown: 30s, cast: 111ms
+hint: defense
+deliver projectile { speed: 9.0, pierce, width: 0.50 } {
+on_hit {
+knockback 1.50 in spread(5.50, 4)
+}
+}
+}
+
+ability sentinel_bolt {
+target: self, range: 2.0
+cooldown: 22500ms, cast: 61ms
+hint: defense
+damage 1095
+}
+
+ability inner_steel_hold {
+target: self, range: 2.0
+cooldown: 35s
+hint: defense
+stun 1473ms
+}
+
+ability sentinel_wither {
+target: ally, range: 2.50
+cooldown: 32500ms, cast: 468ms
+hint: defense
+deliver tether { range: 7.80, tick: 500ms } {
+on_hit {
+debuff attack_damage 0.20 for 3s
+shield 2340 for 5749ms
+}
+}
+}
+
+ability iron_manifest {
+target: self, range: 2.0
+cooldown: 30s, cast: 170ms
+hint: crowd_control
+summon "minion"
+shield 1305 for 3369ms
+}
+
+ability sentinel_bulwark {
+target: self, range: 2.50
+cooldown: 22500ms, cast: 127ms
+hint: defense
+shield 2610 for 6650ms in spread(5.50, 3)
+}
+
+ability reflex_iron_empower {
+target: direction, range: 2.0
+cooldown: 32500ms
+hint: crowd_control
+buff move_speed 0.25 for 3500ms in line(9.0, 1.0)
+}
+
+ability steel_root {
+target: self, range: 2.50
+cooldown: 25s, cast: 18ms
+hint: utility
+root 1272ms
+root 2043ms
+}
+
+ability inner_steel_tangle {
+target: ally, range: 2.0
+cooldown: 35s
+hint: crowd_control
+root 837ms
+}
+
+ability steel_charge {
+target: enemy, range: 2.0
+cooldown: 32500ms, cast: 496ms
+hint: defense
+deliver tether { range: 6.90, tick: 500ms } {
+on_hit {
+buff damage_output 0.30 for 9500ms
+silence 1834ms in cone(3.50, 51.0)
+}
+}
+}
+
+ability steel_bind {
+target: enemy, range: 2.50
+cooldown: 48s, cast: 213ms
+hint: defense
+deliver projectile { speed: 11.0, width: 0.75 } {
+on_hit {
+stun 1333ms
+}
+}
+}
+
+ability bastion_edict {
+target: ally, range: 1.50
+cooldown: 33s, cast: 250ms
+hint: crowd_control
+buff recruit_bonus 0.40 for 0ms
+root 775ms in circle(4.0)
+}
+
+ability fortress_bind {
+target: self, range: 3.0
+cooldown: 51s, cast: 355ms
+hint: defense
+stun 877ms
+}
+
+ability fortress_bog {
+target: self, range: 2.0
+cooldown: 24s, cast: 460ms
+hint: defense
+deliver projectile { speed: 8.0, width: 0.25 } {
+on_hit {
+slow 0.50 for 3s
+}
+}
+}
+
+ability sentinel_shackle {
+target: self_aoe, range: 2.0
+cooldown: 51s, cast: 116ms
+hint: defense
+stun 2169ms in cone(4.0, 70.0)
+}
+
+ability dormant_bulwark_cleave {
+target: enemy, range: 2.50
+cooldown: 30s
+hint: crowd_control
+damage 5460
+}
+
+ability iron_salve {
+target: ally, range: 2.50
+cooldown: 48s, cast: 89ms
+hint: heal
+deliver zone { duration: 4356ms, tick: 511ms } {
+on_hit {
+heal 6570
+buff move_speed 0.20 for 4s in line(8.0, 0.50)
+}
+}
+}
+
+ability ghost_aegis {
+target: enemy, range: 2.0
+cooldown: 18s, cast: 453ms
+hint: damage
+shield 4500 for 3939ms
+}
+
+ability instinct_verdant_bulwark {
+target: self_aoe, range: 5.50
+cooldown: 35s
+hint: heal
+shield 2310 for 6317ms in cone(4.0, 62.0)
+silence 797ms in line(7.50, 0.50)
+}
+
+ability craft_aegis {
+target: ally, range: 4.50
+cooldown: 17500ms, cast: 64ms
+hint: utility
+deliver trap { duration: 17933ms, radius: 1.75, arm_time: 1292ms }
+shield 2565 for 6718ms
+stealth for 4446ms break_on_ability
+}
+
+ability bulwark_empower {
+target: enemy, range: 1.50
+cooldown: 22500ms, cast: 298ms
+hint: defense
+buff attack_speed 0.25 for 9s
+root 1906ms
+}
+
+ability bulwark_hold {
+target: self, range: 2.50
+cooldown: 27500ms, cast: 492ms
+hint: damage
+stun 946ms
+shield 2325 for 6834ms
+}
+
+ability steel_guard {
+target: self, range: 2.0
+cooldown: 30s, cast: 51ms
+hint: utility
+deliver tether { range: 6.05, tick: 500ms } {
+on_hit {
+shield 1590 for 3486ms
+damage 1095 in circle(4.50)
+}
+}
+}
+
+ability bulwark_charge {
+target: ally, range: 2.0
+cooldown: 40s, cast: 77ms
+hint: defense
+deliver projectile { speed: 9.0, width: 0.50 } {
+on_hit {
+dash 7.0 in line(4.0, 0.50)
+}
+}
+}
+
+ability sentinel_inspire {
+target: enemy, range: 2.0
+cooldown: 35s, cast: 127ms
+hint: damage
+deliver tether { range: 7.00, tick: 500ms } {
+on_hit {
+buff move_speed 0.30 for 8s
+}
+}
+}
+
+ability vanguard_shackle {
+target: self, range: 2.0
+cooldown: 32500ms, cast: 48ms
+hint: crowd_control
+deliver projectile { speed: 7.0, pierce, width: 0.75 } {
+on_hit {
+stun 765ms
+}
+}
+}
+
+ability sentinel_rally {
+target: self, range: 1.50
+cooldown: 37500ms, cast: 371ms
+hint: defense
+buff attack_damage 0.35 for 3500ms
+}
+
+ability latent_bulwark_guard {
+target: self, range: 1.50
+cooldown: 37500ms
+hint: crowd_control
+shield 2565 for 5945ms in circle(2.0)
+buff supply_efficiency 0.30 for 40s in spread(4.50, 4)
+}
+
+ability sentinel_lock {
+target: enemy, range: 2.50
+cooldown: 25s, cast: 209ms
+hint: crowd_control
+deliver projectile { speed: 12.0, width: 0.75 } {
+on_hit {
+stun 2043ms
+execute 0% in cone(3.50, 73.0)
+}
+}
+}
+
+ability aegis_embassy {
+target: self, range: 3.0
+cooldown: 37500ms, cast: 450ms
+hint: utility
+buff diplomacy_bonus 0.25 for 0ms in line(8.50, 0.50)
+damage 1575
+}
+
+ability sentinel_blast {
+target: self_aoe, range: 2.50
+cooldown: 30s, cast: 312ms
+hint: defense
+damage 1740
+}
+
+ability aegis_barrier {
+target: ground, range: 2.50
+cooldown: 22500ms, cast: 471ms
+hint: heal
+deliver tether { range: 7.59, tick: 500ms } {
+on_hit {
+shield 2760 for 7555ms
+}
+}
+}
+
+ability vanguard_freeze {
+target: direction, range: 2.0
+cooldown: 42500ms, cast: 265ms
+hint: utility
+deliver projectile { speed: 11.0, pierce, width: 1.0 } {
+on_hit {
+stun 1165ms
+shield 1260 for 5304ms
+}
+}
+}
+
+ability inner_vanguard_stasis {
+target: self, range: 2.0
+cooldown: 51s
+hint: defense
+stun 1134ms
+stun 2259ms in circle(3.50)
+}
+
+ability vanguard_mend {
+target: self, range: 2.0
+cooldown: 48s, cast: 129ms
+hint: crowd_control
+deliver projectile { speed: 13.0, width: 1.0 } {
+on_hit {
+heal 5250 in spread(4.50, 2)
+}
+}
+}
+
+ability inner_steel_rite {
+target: self, range: 2.0
+cooldown: 24s
+hint: crowd_control
+buff morale_aura 0.40 for 50s
+}
+
+ability aegis_snare {
+target: self, range: 1.50
+cooldown: 51s, cast: 303ms
+hint: defense
+root 1221ms
+knockback 2.0
+}
+
+ability steel_shackle {
+target: enemy, range: 1.50
+cooldown: 51s, cast: 117ms
+hint: defense
+stun 1421ms
+slow 0.30 for 1500ms
+}
+
+ability aegis_freeze {
+target: ally, range: 3.0
+cooldown: 30s, cast: 193ms
+hint: crowd_control
+deliver projectile { speed: 6.0, pierce, width: 0.25 } {
+on_hit {
+stun 1216ms
+}
+}
+}
+
+ability vanguard_rally {
+target: enemy, range: 1.50
+cooldown: 48s, cast: 478ms
+hint: defense
+buff attack_speed 0.40 for 4500ms
+shield 4950 for 7979ms
+}
+
+ability bastion_fortify {
+target: enemy, range: 1.50
+cooldown: 45s, cast: 346ms
+hint: crowd_control
+deliver tether { range: 5.44, tick: 500ms } {
+on_hit {
+buff attack_speed 0.35 for 5500ms in circle(1.50)
+stun 1748ms
+}
+}
+}
+
+ability inner_mystic_aegis {
+target: ground, range: 8.0
+cooldown: 35s
+hint: utility
+shield 1530 for 6102ms
+slow 0.25 for 2750ms in line(10.0, 1.0)
+}
+
+ability elder_aegis {
+target: self_aoe, range: 6.50
+cooldown: 25s, cast: 397ms
+hint: utility
+deliver zone { duration: 5662ms, tick: 555ms } {
+on_hit {
+shield 2085 for 6622ms
+}
+}
+}
+
+ability arcane_aegis {
+target: self_aoe, range: 5.50
+cooldown: 42s, cast: 409ms
+hint: crowd_control
+deliver channel { duration: 3436ms, tick: 477ms } {
+on_hit {
+shield 4560 for 4968ms
+buff threat_reduction 0.25 for 0ms
+}
+}
+}
+
+ability verdant_aegis {
+target: ally, range: 3.50
+cooldown: 27500ms, cast: 24ms
+hint: heal
+deliver projectile { speed: 13.0, width: 0.50 } {
+on_hit {
+shield 1665 for 5877ms
+}
+}
+}
+
+ability aegis_silence {
+target: enemy, range: 2.0
+cooldown: 42500ms, cast: 228ms
+hint: crowd_control
+silence 1107ms in line(4.50, 0.50)
+}
+
+ability reflex_aegis_thirst {
+target: self, range: 2.50
+cooldown: 30s
+hint: defense
+lifesteal 0.34 for 3097ms
+buff recruit_bonus 0.20 for 40s in circle(2.50)
+}
+
+ability bastion_bolster {
+target: enemy, range: 2.0
+cooldown: 40s, cast: 20ms
+hint: defense
+buff move_speed 0.40 for 3500ms
+}
+
+ability vanguard_shell {
+target: enemy, range: 3.0
+cooldown: 30s, cast: 156ms
+hint: damage
+shield 2070 for 6815ms
+}
+
+ability instinct_bastion_ration {
+target: ally, range: 1.50
+cooldown: 27500ms
+hint: crowd_control
+buff supply_efficiency 0.25 for 0ms
+stun 1814ms
+}
+
+ability latent_fortress_strike {
+target: self, range: 3.0
+cooldown: 27500ms
+hint: damage
+damage 1095
+lifesteal 0.13 for 3434ms
+buff diplomacy_bonus 0.20 for 30s
+}
+
+ability inner_bastion_charge {
+target: enemy, range: 3.0
+cooldown: 27500ms
+hint: defense
+buff damage_output 0.35 for 8500ms in circle(4.50)
+shield 1710 for 5953ms in spread(3.50, 4)
+}
+
+ability vanguard_haste {
+target: self, range: 3.0
+cooldown: 30s, cast: 70ms
+hint: crowd_control
+unstoppable
+deliver zone { duration: 5673ms, tick: 951ms } {
+on_hit {
+buff travel_speed 0.15 for 0ms
+silence 2220ms
+dash 5.0
+}
+}
+}
+
+ability vanguard_leap {
+target: self_aoe, range: 3.0
+cooldown: 35s, cast: 216ms
+hint: damage
+blink 6.50
+}
+
+ability fortress_cleave {
+target: self_aoe, range: 2.50
+cooldown: 25s, cast: 13ms
+hint: crowd_control
+damage 825
+root 921ms
+}
+
+ability vanguard_slam {
+target: enemy, range: 2.0
+cooldown: 40s, cast: 374ms
+hint: defense
+deliver projectile { speed: 13.0, width: 0.75 } {
+on_hit {
+knockback 2.50
+}
+}
+}
+
+ability iron_weight {
+target: self, range: 2.0
+cooldown: 22500ms, cast: 392ms
+hint: defense
+slow 0.35 for 1250ms in cone(4.0, 78.0)
+}
+
+ability bastion_aegis {
+target: self, range: 2.0
+cooldown: 40s, cast: 412ms
+hint: defense
+deliver projectile { speed: 10.0, width: 0.25 } {
+on_hit {
+shield 1665 for 6661ms
+debuff defense 0.20 for 2500ms in circle(3.0)
+}
+}
+}
+
+ability iron_slam {
+target: self, range: 2.50
+cooldown: 33s, cast: 320ms
+hint: damage
+deliver trap { duration: 12244ms, radius: 3.50, arm_time: 1041ms }
+knockback 3.0
+}
+
+ability dormant_bulwark_chill {
+target: enemy, range: 2.50
+cooldown: 30s
+hint: defense
+slow 0.50 for 3750ms
+damage 10110 in spread(4.50, 4)
+}
+
+ability bastion_strike {
+target: self, range: 2.0
+cooldown: 39s, cast: 157ms
+hint: defense
+damage 5790
+buff travel_speed 0.40 for 25s in line(6.50, 1.50)
+}
+
+ability sentinel_guard {
+target: ally, range: 3.0
+cooldown: 27s, cast: 108ms
+hint: crowd_control
+deliver zone { duration: 6199ms, tick: 640ms } {
+on_hit {
+shield 3690 for 7850ms
+buff defense 0.35 for 6s
+}
+}
+}
+
+ability aegis_lock {
+target: enemy, range: 1.50
+cooldown: 42s, cast: 280ms
+hint: defense
+stun 797ms
+}
+
+ability iron_wither {
+target: self_aoe, range: 2.0
+cooldown: 42s, cast: 368ms
+hint: crowd_control
+debuff move_speed 0.30 for 6s
+}
+
+ability aegis_wither {
+target: enemy, range: 2.50
+cooldown: 27s, cast: 372ms
+hint: damage
+debuff attack_speed 0.25 for 2500ms
+}
+
+ability latent_rhythm_aegis {
+target: self, range: 6.0
+cooldown: 39s
+hint: utility
+shield 6960 for 5952ms
+summon "minion"
+buff attack_speed 0.20 for 9s in spread(6.0, 2)
+}
+
+ability reflex_vanguard_slam {
+target: ground, range: 2.0
+cooldown: 37500ms
+hint: crowd_control
+knockback 1.50
+summon "minion"
+}
+
+ability dormant_iron_stasis {
+target: enemy, range: 2.0
+cooldown: 32500ms
+hint: defense
+stun 1849ms
+}
+
+ability iron_dash {
+target: ground, range: 2.0
+cooldown: 42500ms, cast: 293ms
+hint: crowd_control
+dash 4.0 in line(4.50, 1.0)
+damage 1830
+buff damage_output 0.35 for 4500ms
+}
+
+ability reflex_bastion_lock {
+target: enemy, range: 2.0
+cooldown: 35s
+hint: damage
+stun 1268ms
+}
+
+ability aegis_bind {
+target: ally, range: 2.0
+cooldown: 35s, cast: 108ms
+hint: crowd_control
+stun 1696ms in cone(3.50, 41.0)
+buff defense 0.35 for 8s
+}
+
+ability iron_bolster {
+target: enemy, range: 1.50
+cooldown: 25s, cast: 495ms
+hint: crowd_control
+buff move_speed 0.35 for 7500ms in circle(4.0)
+}
+
+ability iron_barrage {
+target: enemy, range: 2.0
+cooldown: 27500ms, cast: 336ms
+hint: crowd_control
+deliver zone { duration: 3126ms, tick: 644ms } {
+on_hit {
+damage 1095 in spread(5.0, 4)
+}
+}
+}
+
+ability aegis_rend {
+target: self, range: 1.50
+cooldown: 42500ms, cast: 32ms
+hint: defense
+unstoppable
+deliver projectile { speed: 6.0, pierce, width: 1.0 } {
+on_hit {
+damage 1920
+stun 1636ms
+}
+}
+}
+
+ability sentinel_push {
+target: self, range: 3.0
+cooldown: 20s, cast: 40ms
+hint: defense
+knockback 3.0
+buff defense 0.30 for 7500ms
+}
+
+ability bastion_empower {
+target: self, range: 2.50
+cooldown: 25s, cast: 443ms
+hint: defense
+buff attack_damage 0.25 for 7s
+}
+
+ability sentinel_balm {
+target: ground, range: 2.50
+cooldown: 35s, cast: 324ms
+hint: crowd_control
+heal 1755
+}
+
+ability iron_drag {
+target: ground, range: 2.50
+cooldown: 40s, cast: 393ms
+hint: defense
+deliver tether { range: 7.52, tick: 500ms } {
+on_hit {
+slow 0.65 for 2750ms
+}
+}
+}
+
+ability reflex_bastion_shell {
+target: enemy, range: 2.0
+cooldown: 27500ms
+hint: utility
+shield 2205 for 7458ms
+buff damage_output 0.20 for 8s
+}
+
+ability latent_vanguard_corrode {
+target: direction, range: 2.50
+cooldown: 42s
+hint: damage
+debuff attack_damage 0.15 for 5500ms
+}
+
+ability fortress_hold {
+target: direction, range: 2.50
+cooldown: 51s, cast: 41ms
+hint: defense
+stun 1055ms
+stealth for 2426ms
+}
+
+ability vanguard_bolt {
+target: enemy, range: 2.0
+cooldown: 24s, cast: 153ms
+hint: damage
+unstoppable
+damage 5610
+damage 6060 in line(8.0, 1.0)
+}
+
+ability aegis_mire {
+target: self, range: 3.0
+cooldown: 36s, cast: 189ms
+hint: damage
+slow 0.60 for 3750ms in spread(6.0, 3)
+}
+
+ability sentinel_impact {
+target: ground, range: 3.0
+cooldown: 36s, cast: 356ms
+hint: defense
+knockback 3.0
+}
+
+ability latent_bastion_fortify {
+target: self, range: 1.50
+cooldown: 30s
+hint: defense
+buff attack_damage 0.25 for 9s in line(7.0, 1.50)
+root 1773ms
+}
+
+ability bulwark_aura {
+target: self_aoe, range: 2.0
+cooldown: 51s, cast: 122ms
+hint: defense
+buff morale_aura 0.20 for 25s
+}
+
+ability serene_bulwark {
+target: self, range: 4.50
+cooldown: 47500ms, cast: 270ms
+hint: heal
+deliver zone { duration: 4122ms, tick: 753ms } {
+on_hit {
+shield 2130 for 6563ms
+silence 2160ms
+shield 2145 for 4770ms
+}
+}
+}
+
+ability inner_sacred_bulwark {
+target: self, range: 4.50
+cooldown: 24s
+hint: damage
+shield 7530 for 3013ms
+resurrect 0%
+}
+
+ability chant_aegis {
+target: ground, range: 4.0
+cooldown: 36s, cast: 288ms
+hint: utility
+deliver trap { duration: 14107ms, radius: 2.46, arm_time: 1270ms }
+shield 7200 for 7312ms in circle(3.0)
+summon "minion" x2 in spread(5.0, 4)
+}
+
+ability bulwark_rally {
+target: self, range: 2.0
+cooldown: 27500ms, cast: 466ms
+hint: defense
+deliver chain { bounces: 5, range: 4.99, falloff: 0.81 } {
+on_hit {
+buff defense 0.10 for 7s
+heal 1500
+}
+}
+}
+
+ability vanguard_empower {
+target: enemy, range: 1.50
+cooldown: 37500ms, cast: 372ms
+hint: heal
+buff move_speed 0.20 for 3s
+}
+
+ability fortress_aegis {
+target: enemy, range: 2.50
+cooldown: 32500ms, cast: 46ms
+hint: crowd_control
+shield 2475 for 5331ms in circle(2.50)
+}
+
+ability steel_rush {
+target: self, range: 2.50
+cooldown: 40s, cast: 336ms
+hint: defense
+dash 3.50 to_target
+stun 980ms
+}
+
+ability instinct_vanguard_aegis {
+target: ally, range: 2.50
+cooldown: 22500ms
+hint: damage
+shield 2310 for 5722ms in circle(2.50)
+}
+
+ability aegis_decree {
+target: enemy, range: 2.50
+cooldown: 35s, cast: 188ms
+hint: utility
+buff diplomacy_bonus 0.20 for 0ms
+shield 2505 for 5445ms
+damage 1095
+}
+
+ability steel_sap {
+target: ally, range: 1.50
+cooldown: 27500ms, cast: 383ms
+hint: crowd_control
+debuff defense 0.25 for 5s
+}
+
+ability bastion_grip {
+target: enemy, range: 2.50
+cooldown: 25s, cast: 425ms
+hint: damage
+root 563ms
+}
+
+ability sentinel_shell {
+target: self, range: 1.50
+cooldown: 37500ms, cast: 420ms
+hint: crowd_control
+shield 1695 for 3145ms
+buff damage_output 0.25 for 8s
+}
+
+ability bulwark_cull {
+target: direction, range: 2.0
+cooldown: 27500ms, cast: 316ms
+hint: defense
+deliver zone { duration: 7324ms, tick: 842ms } {
+on_hit {
+execute 0%
+damage 2940 in line(5.50, 1.0)
+shield 2055 for 4666ms
+}
+}
+}
+
+ability reflex_bastion_inspire {
+target: enemy, range: 3.0
+cooldown: 36s
+hint: defense
+buff defense 0.35 for 7s
+shield 3150 for 5702ms
+}
+
+ability fortress_tangle {
+target: enemy, range: 3.0
+cooldown: 42s, cast: 258ms
+hint: crowd_control
+deliver zone { duration: 6282ms, tick: 528ms } {
+on_hit {
+root 1887ms in circle(2.0)
+}
+}
+}
+
+ability steel_empower {
+target: enemy, range: 2.50
+cooldown: 48s, cast: 372ms
+hint: crowd_control
+deliver projectile { speed: 9.0, width: 1.0 } {
+on_hit {
+buff damage_output 0.40 for 3500ms
+}
+}
+}
+
+ability bastion_bind {
+target: direction, range: 2.50
+cooldown: 51s, cast: 35ms
+hint: crowd_control
+deliver projectile { speed: 13.0, width: 0.50 } {
+on_hit {
+stun 1914ms
+}
+}
+}
+
+ability bastion_guard {
+target: enemy, range: 2.0
+cooldown: 51s, cast: 403ms
+hint: crowd_control
+shield 8130 for 7583ms
+}
+
+ability inner_fortress_push {
+target: self, range: 3.0
+cooldown: 48s
+hint: defense
+knockback 3.0
+slow 0.50 for 3250ms
+}
+
+ability vanguard_mandate {
+target: self_aoe, range: 2.0
+cooldown: 33s, cast: 268ms
+hint: utility
+deliver zone { duration: 7755ms, tick: 795ms } {
+on_hit {
+buff passive_income 0.40 for 25s
+buff attack_speed 0.35 for 8s
+stun 1061ms
+}
+}
+}
+
+ability shadow_bulwark {
+target: self, range: 2.0
+cooldown: 12500ms, cast: 326ms
+hint: damage
+deliver trap { duration: 19823ms, radius: 2.08, arm_time: 889ms }
+shield 1860 for 6053ms
+}

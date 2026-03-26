@@ -1,0 +1,15 @@
+[hero]
+name = "Level 30 Mage"
+
+[stats]
+hp = 400
+move_speed = 2.5
+
+[stats.tags]
+MAGIC = 35.0
+
+[attack]
+damage = 25
+range = 6.0
+cooldown = 900
+cast_time = 300

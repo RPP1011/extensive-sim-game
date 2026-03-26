@@ -2,14 +2,16 @@
 name = "Sera Ironfang"
 
 [stats]
-hp = 3200
-move_speed = 2.3
+hp = 12000
+move_speed = 2.0
+armor = 300.0
+magic_resist = 200.0
 
 [stats.tags]
-PHYSICAL = 60.0
+PHYSICAL = 70.0
 
 [attack]
-damage = 82
-range = 1.3
+damage = 120
+range = 1.5
 cooldown = 800
-cast_time = 200
+cast_time = 250

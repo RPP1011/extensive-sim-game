@@ -1,0 +1,15 @@
+[hero]
+name = "Level 30 Ranger"
+
+[stats]
+hp = 500
+move_speed = 3.0
+
+[stats.tags]
+PHYSICAL = 25.0
+
+[attack]
+damage = 30
+range = 5.5
+cooldown = 800
+cast_time = 200
