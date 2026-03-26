@@ -1119,9 +1119,20 @@ fn check_campaign_outcome(state: &CampaignState) -> Option<CampaignOutcome> {
         }
     }
 
-    // Victory: campaign progress >= 1.0
+    // Victory: campaign progress >= 1.0 BUT requires minimum progression
+    // to prevent trivially short campaigns
     if state.overworld.campaign_progress >= 1.0 {
-        return Some(CampaignOutcome::Victory);
+        let min_turns_met = state.tick >= 15_000;
+        let has_high_level = state.adventurers.iter().any(|a| {
+            a.status != AdventurerStatus::Dead
+                && a.classes.iter().any(|c| c.level >= 30)
+        });
+        if min_turns_met && has_high_level {
+            return Some(CampaignOutcome::Victory);
+        }
+        // Progress hit 1.0 but campaign isn't mature enough — clamp it back
+        // so the campaign keeps running
+        // (Don't actually clamp campaign_progress since threat.rs sets it each tick)
     }
 
     None

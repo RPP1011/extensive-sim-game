@@ -2947,22 +2947,10 @@ fn generate_initial_roots(
             // Lower tension threshold for early game: accept more low-tension states
             // to avoid starving early-game data. Early game only requires viability
             // plus at least one non-trivial condition (or just being early with room).
-            let has_tension = if is_early && early_count < early_target {
-                // Relaxed: accept early states if viable, even with low tension
-                is_viable && (
-                    has_quest_board || has_active_quest || has_pending_choice
-                    || state.tick >= 100 // accept almost any early state after tick 100
-                )
-            } else {
-                is_viable && (
-                    has_quest_board || has_active_quest || has_battle
-                    || has_injured || has_crisis || has_pending_choice
-                    || has_rival || has_war || has_low_loyalty
-                    || state.guild.gold < 150.0
-                    || state.overworld.global_threat_level > 30.0
-                    || state.completed_quests.len() >= 3
-                )
-            };
+            // Accept any viable state — with 3-second turns and long campaigns,
+            // we need roots across the full timeline. The old "tension" check was
+            // too restrictive and caused campaigns to only produce early-game roots.
+            let has_tension = is_viable;
             let is_crisis_state = has_crisis || has_war || has_battle
                 || (state.overworld.global_threat_level > 60.0);
             let on_cadence = state.tick % config.root_sample_interval == 0;
@@ -2982,7 +2970,10 @@ fn generate_initial_roots(
                     _ => {}
                 }
             }
-            if result.outcome.is_some() { break; }
+            if result.outcome.is_some() {
+                eprintln!("[BFS] Trajectory ended at tick {} with outcome {:?} (seed {})", state.tick, result.outcome, seed);
+                break;
+            }
         }
     }
 
