@@ -1386,14 +1386,32 @@ fn estimate_value(state: &CampaignState) -> f32 {
     let threat_penalty = threat * 0.5 + crisis_pressure * 0.4;
     let bankruptcy_penalty = if state.guild.gold < 20.0 { 0.5 } else { 0.0 };
 
-    let economy_factor = (gold_score * 0.6 + supply_score * 0.2 + rep_score * 0.2).powf(0.8);
+    // Economy is additive, not multiplicative — a bankrupt guild with great
+    // class progression should still have positive value
+    let economy_bonus = gold_score * 0.3 + supply_score * 0.1 + rep_score * 0.1;
 
-    let v = base * roster_factor * health_factor * economy_factor
-        - injured_penalty - threat_penalty - bankruptcy_penalty
-        - war_penalty - territory_penalty - rival_penalty - desertion_risk
-        - stuck_penalty
-        - debt_penalty - monster_penalty - captured_penalty - bm_risk
-        - war_exhaust_penalty;
+    let total_penalties = injured_penalty + threat_penalty + bankruptcy_penalty
+        + war_penalty + territory_penalty + rival_penalty + desertion_risk
+        + stuck_penalty + debt_penalty + monster_penalty + captured_penalty + bm_risk
+        + war_exhaust_penalty;
+
+    // No multiplicative factors — everything is additive. Multiplicative health/economy
+    // factors were zeroing out the entire value when adventurers were injured or broke.
+    let health_bonus = (mean_health - 0.3).max(0.0) * 0.5; // bonus for healthy guild
+    let roster_bonus = (roster_factor - 0.5).max(0.0) * 0.3; // bonus for intact roster
+    let v = base + economy_bonus + health_bonus + roster_bonus - total_penalties;
+
+    // Debug: log first few value computations
+    static DEBUG_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let count = DEBUG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if count < 5 {
+        eprintln!("[VALUE] tick={} base={:.2} econ={:.2} roster={:.2} health={:.2} penalties={:.2} -> v={:.2}",
+            state.tick, base, economy_bonus, roster_factor, health_factor, total_penalties, v);
+        eprintln!("  class_prog={:.2} class_div={:.2} sys_engage={:.2} quest_econ={:.2}",
+            class_progression, class_diversity, system_engagement, quest_economy);
+        eprintln!("  stuck={:.2} threat={:.2} war={:.2} terr={:.2} bankrupt={:.2}",
+            stuck_penalty, threat_penalty, war_penalty, territory_penalty, bankruptcy_penalty);
+    }
 
     v.clamp(0.0, 5.0)
 }
@@ -3057,7 +3075,8 @@ fn expand_root(
     shared: &Mutex<BfsSharedState>,
 ) -> (Vec<BfsSample>, Vec<(CampaignState, Vec<f32>, f32, u64, Difficulty)>) {
     let root_value = estimate_value(&root.state);
-    if root_value < 0.05 {
+    if root_value < 0.01 {
+        eprintln!("[BFS] Skipping root at tick {} with value {:.3} (too low)", root.state.tick, root_value);
         return (vec![], vec![]);
     }
 
@@ -3077,6 +3096,8 @@ fn expand_root(
 
     let num_action_types = grouped.len();
     if num_action_types == 0 {
+        eprintln!("[BFS] Root at tick {} has 0 action types (raw={}, pruned={}, clustered={})",
+            root.state.tick, raw_valid_actions.len(), pruned_actions.len(), clustered_actions.len());
         return (vec![], vec![]);
     }
 
