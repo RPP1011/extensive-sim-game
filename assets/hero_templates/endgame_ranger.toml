@@ -1,0 +1,15 @@
+[hero]
+name = "Endgame Ranger"
+
+[stats]
+hp = 850
+move_speed = 3.5
+
+[stats.tags]
+PHYSICAL = 40.0
+
+[attack]
+damage = 55
+range = 5.5
+cooldown = 800
+cast_time = 250

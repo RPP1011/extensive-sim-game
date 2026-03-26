@@ -1,0 +1,15 @@
+[hero]
+name = "Kira of the Long Shadow"
+
+[stats]
+hp = 70
+move_speed = 4.0
+
+[stats.tags]
+PHYSICAL = 70.0
+
+[attack]
+damage = 234
+range = 1.2
+cooldown = 700
+cast_time = 150

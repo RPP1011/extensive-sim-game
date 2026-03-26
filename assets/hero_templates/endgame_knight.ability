@@ -1,0 +1,44 @@
+ability fortress_rally {
+target: enemy, range: 1.5
+cooldown: 32500ms, cast: 262ms
+hint: heal
+deliver projectile { speed: 11.0, width: 0.75 } {
+}
+buff defense 0.1 for 6s
+shield 179 for 3263ms
+}
+ability iron_charge {
+target: enemy, range: 2.5
+cooldown: 22500ms, cast: 447ms
+hint: crowd_control
+blink 7.0 to_target
+}
+ability aegis_charge {
+target: ally, range: 2.5
+cooldown: 32500ms, cast: 386ms
+hint: crowd_control
+deliver projectile { speed: 12.0, width: 0.25 } {
+}
+buff move_speed 0.2 for 8s
+buff damage_output 0.1 for 3s
+}
+ability latent_bulwark_cleave {
+target: self, range: 2.0
+cooldown: 25s
+hint: crowd_control
+damage 73
+}
+ability instinct_vanguard_freeze {
+target: direction, range: 2.0
+cooldown: 25s
+hint: crowd_control
+stun 1758ms in spread(4.5, 3)
+}
+ability bastion_shell {
+target: enemy, range: 2.0
+cooldown: 25s, cast: 411ms
+hint: defense
+deliver projectile { speed: 9.0, width: 0.5 } {
+}
+shield 165 for 6372ms in circle(4.5)
+}

@@ -1,0 +1,15 @@
+[hero]
+name = "Endgame Mage"
+
+[stats]
+hp = 700
+move_speed = 2.8
+
+[stats.tags]
+MAGIC = 60.0
+
+[attack]
+damage = 45
+range = 6.0
+cooldown = 900
+cast_time = 300

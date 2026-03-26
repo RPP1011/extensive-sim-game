@@ -1,0 +1,50 @@
+ability ghost_cull {
+target: enemy, range: 3.5
+cooldown: 15s, cast: 137ms
+hint: utility
+stun 671ms
+}
+ability phantom_reward {
+target: self, range: 2.0
+cooldown: 15s, cast: 423ms
+hint: damage
+deliver channel { duration: 3226ms, tick: 624ms } {
+}
+buff quest_rep_bonus 0.15 for 0ms
+buff threat_reduction 0.1 for 25s in circle(3.5)
+}
+ability venom_rend {
+target: enemy, range: 2.0
+cooldown: 22500ms, cast: 278ms
+hint: damage
+deliver chain { bounces: 2, range: 5.882247, falloff: 0.77102304 } {
+}
+damage 167
+}
+ability dusk_charge {
+target: ground, range: 3.5
+cooldown: 17500ms, cast: 249ms
+hint: utility
+deliver trap { duration: 14389ms, radius: 2.790462, arm_time: 1321ms }
+}
+ability whisper_vine {
+target: self_aoe, range: 3.0
+cooldown: 15s, cast: 348ms
+hint: utility
+root 2045ms in circle(3.0)
+lifesteal 0.100669704 for 3099ms
+}
+ability latent_venom_reap {
+target: enemy, range: 3.5
+cooldown: 22500ms
+hint: damage
+debuff move_speed 0.3 for 5s
+damage 76
+}
+ability dusk_surge {
+target: enemy, range: 2.5
+cooldown: 20s, cast: 466ms
+hint: damage
+deliver channel { duration: 3658ms, tick: 404ms } {
+}
+dash 5.5 to_target

@@ -1,0 +1,80 @@
+[bastion_rend] (T5, cd=20s, range=2.5)
+ability bastion_rend {
+target: enemy, range: 2.5
+cooldown: 20s, cast: 352ms
+hint: crowd_control
+deliver zone { duration: 3512ms, tick: 733ms } {
+}
+damage 144
+}
+[fortress_impact] (T5, cd=22s, range=2.0)
+ability fortress_impact {
+target: ally, range: 2.0
+cooldown: 22500ms, cast: 337ms
+hint: crowd_control
+knockback 2.0
+damage 221
+heal 65
+}
+[vanguard_hold] (T5, cd=32s, range=3.0)
+ability vanguard_hold {
+target: self_aoe, range: 3.0
+cooldown: 32500ms, cast: 31ms
+hint: defense
+unstoppable
+stun 1284ms in line(4.0, 1.0)
+knockback 2.5
+}
+[bastion_slam] (T5, cd=30s, range=2.0)
+ability bastion_slam {
+target: ground, range: 2.0
+cooldown: 30s, cast: 111ms
+hint: defense
+deliver projectile { speed: 9.0, pierce, width: 0.5 } {
+}
+knockback 1.5 in spread(5.5, 4)
+}
+[sentinel_bolt] (T5, cd=22s, range=2.0)
+ability sentinel_bolt {
+target: self, range: 2.0
+cooldown: 22500ms, cast: 61ms
+hint: defense
+damage 73
+}
+[inner_steel_hold] (T5, cd=35s, range=2.0)
+ability inner_steel_hold {
+target: self, range: 2.0
+cooldown: 35s
+hint: defense
+stun 1473ms
+}
+[sentinel_wither] (T5, cd=32s, range=2.5)
+ability sentinel_wither {
+target: ally, range: 2.5
+cooldown: 32500ms, cast: 468ms
+hint: defense
+deliver tether { range: 7.7953672, tick: 500ms } {
+}
+debuff attack_damage 0.2 for 3s
+shield 156 for 5749ms
+}
+[iron_manifest] (T5, cd=30s, range=2.0)
+ability iron_manifest {
+target: self, range: 2.0
+cooldown: 30s, cast: 170ms
+hint: crowd_control
+summon "minion" hp:0%
+shield 87 for 3369ms
+}
+[sentinel_bulwark] (T5, cd=22s, range=2.5)
+ability sentinel_bulwark {
+target: self, range: 2.5
+cooldown: 22500ms, cast: 127ms
+hint: defense
+shield 174 for 6650ms in spread(5.5, 3)
+}
+[reflex_iron_empower] (T5, cd=32s, range=2.0)
+ability reflex_iron_empower {
+target: direction, range: 2.0
+cooldown: 32500ms
+hint: crowd_control

@@ -1,0 +1,15 @@
+[hero]
+name = "Endgame Cleric"
+
+[stats]
+hp = 1200
+move_speed = 2.3
+
+[stats.tags]
+MAGIC = 40.0
+
+[attack]
+damage = 30
+range = 4.0
+cooldown = 1000
+cast_time = 300

@@ -1,0 +1,50 @@
+ability arcane_weight {
+target: self_aoe, range: 8.0
+cooldown: 32500ms, cast: 362ms
+hint: crowd_control
+deliver zone { duration: 7277ms, tick: 989ms } {
+}
+slow 0.6 for 1750ms
+}
+ability elder_bog {
+target: ground, range: 6.5
+cooldown: 15s, cast: 499ms
+hint: damage
+deliver projectile { speed: 14.0, pierce, width: 0.75 } {
+}
+slow 0.4 for 3s
+stun 622ms in spread(5.5, 2)
+}
+ability latent_mystic_invoke {
+target: ground, range: 7.0
+cooldown: 15s
+hint: damage
+stun 2017ms
+}
+ability rune_rush {
+target: ally, range: 7.0
+cooldown: 30s, cast: 254ms
+hint: utility
+deliver tether { range: 5.0829635, tick: 500ms } {
+}
+dash 5.0 to_target in cone(5.0, 56.0)
+root 984ms
+}
+ability rune_bolster {
+target: direction, range: 5.5
+cooldown: 22500ms, cast: 206ms
+hint: crowd_control
+deliver zone { duration: 6880ms, tick: 670ms } {
+}
+buff attack_speed 0.35 for 9s
+}
+ability mystic_barrage {
+target: self_aoe, range: 5.0
+cooldown: 30s, cast: 461ms
+hint: damage
+deliver zone { duration: 4570ms, tick: 599ms } {
+}
+damage 73
+}
+ability rune_call {
+target: ground, range: 7.5

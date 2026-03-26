@@ -1,0 +1,80 @@
+[phantom_concealment] (T5, cd=17s, range=3.5)
+ability phantom_concealment {
+target: enemy, range: 3.5
+cooldown: 17500ms, cast: 45ms
+hint: damage
+deliver chain { bounces: 4, range: 4.6981072, falloff: 0.75420815 } {
+}
+buff threat_reduction 0.3 for 55s
+damage 73
+}
+[inner_dusk_shroud] (T5, cd=12s, range=3.0)
+ability inner_dusk_shroud {
+target: direction, range: 3.0
+cooldown: 12500ms
+hint: damage
+stealth for 3924ms
+}
+[phantom_sight] (T5, cd=20s, range=2.0)
+ability phantom_sight {
+target: enemy, range: 2.0
+cooldown: 20s, cast: 142ms
+hint: crowd_control
+deliver zone { duration: 5548ms, tick: 607ms } {
+}
+buff scout_range 0.2 for 40s
+}
+[whisper_evasion] (T5, cd=12s, range=2.5)
+ability whisper_evasion {
+target: enemy, range: 2.5
+cooldown: 12500ms, cast: 211ms
+hint: damage
+deliver trap { duration: 24605ms, radius: 1.9300594, arm_time: 1079ms }
+buff threat_reduction 0.2 for 30s
+}
+[venom_subtlety] (T5, cd=20s, range=1.5)
+ability venom_subtlety {
+target: enemy, range: 1.5
+cooldown: 20s, cast: 390ms
+hint: damage
+deliver projectile { speed: 11.0, width: 0.5 } {
+}
+buff threat_reduction 0.25 for 20s
+stun 966ms
+}
+[dusk_weight] (T5, cd=15s, range=2.5)
+ability dusk_weight {
+target: self, range: 2.5
+cooldown: 15s, cast: 133ms
+hint: crowd_control
+slow 0.2 for 3750ms in line(5.0, 1.0)
+debuff defense 0.2 for 5500ms in spread(4.0, 3)
+}
+[dormant_ghost_bog] (T5, cd=17s, range=1.5)
+ability dormant_ghost_bog {
+target: self_aoe, range: 1.5
+cooldown: 17500ms
+hint: damage
+slow 0.7 for 3750ms
+debuff attack_damage 0.35 for 5s
+blink 6.5 to_target
+}
+[inner_silent_vanish] (T5, cd=20s, range=2.5)
+ability inner_silent_vanish {
+target: enemy, range: 2.5
+cooldown: 20s
+hint: utility
+stealth for 3290ms break_on_damage break_on_ability in circle(3.5)
+buff defense 0.1 for 6500ms
+}
+[phantom_charge] (T5, cd=20s, range=3.0)
+ability phantom_charge {
+target: enemy, range: 3.0
+cooldown: 20s, cast: 223ms
+hint: damage
+deliver chain { bounces: 3, range: 4.7724094, falloff: 0.7299736 } {
+}
+dash 6.0
+damage 244
+}
+[phantom_hold] (T5, cd=12s, range=4.0)

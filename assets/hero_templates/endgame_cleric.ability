@@ -1,0 +1,50 @@
+ability dormant_blessed_rise {
+target: self_aoe, range: 3.5
+cooldown: 20s
+hint: heal
+buff passive_income 0.4 for 25s
+}
+ability serene_salve {
+target: ally, range: 5.0
+cooldown: 45s, cast: 152ms
+hint: heal
+deliver chain { bounces: 2, range: 4.5754876, falloff: 0.8429849 } {
+}
+heal 116 in line(6.0, 1.5)
+}
+ability sacred_bounty {
+target: self, range: 4.5
+cooldown: 30s, cast: 433ms
+hint: heal
+buff supply_efficiency 0.15 for 45s in cone(4.5, 51.0)
+heal 154
+}
+ability sacred_shroud {
+target: ally, range: 4.0
+cooldown: 37500ms, cast: 235ms
+hint: utility
+deliver channel { duration: 2832ms, tick: 300ms } {
+}
+heal 152 in cone(5.5, 52.0)
+}
+ability divine_charge {
+target: ally, range: 5.0
+cooldown: 20s, cast: 162ms
+hint: heal
+deliver zone { duration: 5049ms, tick: 708ms } {
+}
+buff move_speed 0.2 for 8s
+}
+ability dormant_sacred_aegis {
+target: ally, range: 4.0
+cooldown: 27500ms
+hint: crowd_control
+shield 83 for 5088ms
+}
+ability serene_fortify {
+target: ally, range: 5.0
+cooldown: 27500ms, cast: 11ms
+hint: utility
+deliver tether { range: 5.4451475, tick: 500ms } {
+}
+buff move_speed 0.4 for 5s

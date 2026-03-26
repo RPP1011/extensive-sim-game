@@ -1,0 +1,10 @@
+[scenario]
+name = "4v1_vs_dax_the_unbreaking"
+seed = 100
+hero_count = 4
+enemy_count = 0
+difficulty = 1
+max_ticks = 6000
+room_type = "Boss"
+hero_templates = ["knight", "ranger", "cleric", "mage"]
+enemy_hero_templates = ["dax_the_unbreaking"]

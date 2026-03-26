@@ -819,7 +819,7 @@ fn check_class_acquisition(state: &mut CampaignState, events: &mut Vec<WorldEven
                         class_name: tmpl.class_name.clone(),
                         level: 1,
                         xp: transferred_xp,
-                        xp_to_next: 150.0,
+                        xp_to_next: 4.0,
                         stagnation_ticks: 0,
                         skills_granted: old_skills,
                         acquired_tick: tick,
@@ -848,7 +848,7 @@ fn check_class_acquisition(state: &mut CampaignState, events: &mut Vec<WorldEven
                         class_name: tmpl.class_name.clone(),
                         level: 1,
                         xp: 0.0,
-                        xp_to_next: 150.0, // level 1 * 150
+                        xp_to_next: 4.0, // level 1 * 150
                         stagnation_ticks: 0,
                         skills_granted: Vec::new(),
                         acquired_tick: tick,
@@ -892,7 +892,7 @@ fn check_class_acquisition(state: &mut CampaignState, events: &mut Vec<WorldEven
                     } else { "Wandering Enigma".to_string() };
                     adv.classes.push(ClassInstance {
                         class_name: unique_name.clone(), level: 1, xp: 0.0,
-                        xp_to_next: 150.0, stagnation_ticks: 0, skills_granted: Vec::new(),
+                        xp_to_next: 4.0, stagnation_ticks: 0, skills_granted: Vec::new(),
                         acquired_tick: tick, identity_coherence: 1.0,
                         exclusion_cooldown: 0, ..Default::default()
                     });
@@ -1002,7 +1002,7 @@ fn process_class_xp(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                 while class.xp >= class.xp_to_next {
                     class.xp -= class.xp_to_next;
                     class.level += 1;
-                    class.xp_to_next = class.level as f32 * 150.0;
+                    class.xp_to_next = class.level as f32 * 4.0;
                     events.push(WorldEvent::ClassLevelUp {
                         adventurer_id: adv.id,
                         class_name: class.class_name.clone(),
@@ -1099,7 +1099,7 @@ fn check_capstone_resolution(state: &mut CampaignState, events: &mut Vec<WorldEv
                 while class.xp >= class.xp_to_next {
                     class.xp -= class.xp_to_next;
                     class.level += 1;
-                    class.xp_to_next = class.level as f32 * 150.0;
+                    class.xp_to_next = class.level as f32 * 4.0;
                     events.push(WorldEvent::ClassLevelUp {
                         adventurer_id: adv.id,
                         class_name: class.class_name.clone(),
@@ -1882,7 +1882,7 @@ fn check_consolidation_offers(state: &mut CampaignState, events: &mut Vec<WorldE
                 class_name: final_name.clone(),
                 level: new_level,
                 xp: 0.0,
-                xp_to_next: new_level as f32 * 150.0,
+                xp_to_next: new_level as f32 * 4.0,
                 stagnation_ticks: 0,
                 skills_granted: inherited_skills,
                 acquired_tick: tick,
@@ -1950,7 +1950,7 @@ fn check_evolution(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
             // Grant +50% effective stat growth by adding 50% of current level as bonus levels
             let bonus_levels = class.level / 2;
             class.level += bonus_levels;
-            class.xp_to_next = class.level as f32 * 150.0;
+            class.xp_to_next = class.level as f32 * 4.0;
             class.acquired_tick = tick; // Mark evolution tick
 
             events.push(WorldEvent::ClassEvolved {
@@ -2034,7 +2034,7 @@ fn check_shame_classes(state: &mut CampaignState, events: &mut Vec<WorldEvent>) 
                 class_name: "Coward".to_string(),
                 level: 1,
                 xp: 0.0,
-                xp_to_next: 150.0,
+                xp_to_next: 4.0,
                 stagnation_ticks: 0,
                 skills_granted: Vec::new(),
                 acquired_tick: tick,
@@ -2059,7 +2059,7 @@ fn check_shame_classes(state: &mut CampaignState, events: &mut Vec<WorldEvent>) 
                 class_name: "Oathbreaker".to_string(),
                 level: 1,
                 xp: 0.0,
-                xp_to_next: 150.0,
+                xp_to_next: 4.0,
                 stagnation_ticks: 0,
                 skills_granted: Vec::new(),
                 acquired_tick: tick,
@@ -2081,7 +2081,7 @@ fn check_shame_classes(state: &mut CampaignState, events: &mut Vec<WorldEvent>) 
                 class_name: "Deserter".to_string(),
                 level: 1,
                 xp: 0.0,
-                xp_to_next: 150.0,
+                xp_to_next: 4.0,
                 stagnation_ticks: 0,
                 skills_granted: Vec::new(),
                 acquired_tick: tick,
@@ -2384,7 +2384,7 @@ fn check_crisis_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) 
                 class_name: grant.class_name.clone(),
                 level: 1,
                 xp: 0.0,
-                xp_to_next: 150.0,
+                xp_to_next: 4.0,
                 stagnation_ticks: 0,
                 skills_granted: Vec::new(),
                 acquired_tick: tick,
@@ -2560,7 +2560,7 @@ fn check_identity_erosion(state: &mut CampaignState, events: &mut Vec<WorldEvent
                     class_name: frac.replacement.clone(),
                     level: (old_level / 2).max(1),
                     xp: 0.0,
-                    xp_to_next: (old_level / 2).max(1) as f32 * 150.0,
+                    xp_to_next: (old_level / 2).max(1) as f32 * 4.0,
                     stagnation_ticks: 0,
                     skills_granted: Vec::new(),
                     acquired_tick: tick,
@@ -3103,7 +3103,7 @@ fn check_world_gated_classes(state: &mut CampaignState, events: &mut Vec<WorldEv
                 class_name: grant.class_name.clone(),
                 level: 1,
                 xp: 0.0,
-                xp_to_next: 150.0,
+                xp_to_next: 4.0,
                 stagnation_ticks: 0,
                 skills_granted: Vec::new(),
                 acquired_tick: tick_u32,
@@ -3312,7 +3312,7 @@ fn check_crisis_escape_valve(state: &mut CampaignState, events: &mut Vec<WorldEv
                     class_name: diminished.clone(),
                     level: (old_level / 2).max(1),
                     xp: 0.0,
-                    xp_to_next: (old_level / 2).max(1) as f32 * 150.0,
+                    xp_to_next: (old_level / 2).max(1) as f32 * 4.0,
                     stagnation_ticks: 0,
                     skills_granted: Vec::new(),
                     acquired_tick: tick,
