@@ -47,6 +47,8 @@ pub enum TaskCommand {
     VaeGtDataset(VaeGtDatasetArgs),
     /// Analyze a BFS exploration JSONL output file
     BfsAnalyze(BfsAnalyzeArgs),
+    /// Generate Sleeping King champion candidates with grammar-walked abilities
+    ChampionGen(ChampionGenArgs),
     /// Generate synthetic abilities via grammar walker
     SynthAbilities {
         #[arg(long, default_value_t = 100000)] count: usize,
@@ -61,6 +63,17 @@ pub enum TaskCommand {
 pub struct BfsAnalyzeArgs {
     /// Path to the BFS JSONL output file
     pub path: String,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Generate Sleeping King champion candidates with grammar-walked abilities")]
+pub struct ChampionGenArgs {
+    /// RNG seed for ability generation
+    #[arg(long, default_value_t = 2026)]
+    pub seed: u64,
+    /// Number of candidates per slot
+    #[arg(long, default_value_t = 3)]
+    pub candidates: usize,
 }
 
 #[derive(Debug, Parser)]

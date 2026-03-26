@@ -10,6 +10,7 @@ mod content_gen_cmd;
 mod ascii_gen_cmd;
 mod mcts_bootstrap_cmd;
 mod bfs_analyze;
+mod champion_gen;
 mod vae_dataset_cmd;
 
 use std::process::ExitCode;
@@ -62,6 +63,13 @@ fn main() -> ExitCode {
         }
         TaskCommand::BfsAnalyze(args) => {
             bfs_analyze::run(&args.path);
+            ExitCode::SUCCESS
+        }
+        TaskCommand::ChampionGen(args) => {
+            champion_gen::run(champion_gen::ChampionGenArgs {
+                seed: args.seed,
+                candidates_per_slot: args.candidates,
+            });
             ExitCode::SUCCESS
         }
         TaskCommand::BfsExplore(args) => {
