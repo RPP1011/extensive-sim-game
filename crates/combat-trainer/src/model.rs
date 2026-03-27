@@ -1,4 +1,8 @@
-//! Actor-critic MLP for combat AI.
+//! Actor-critic MLP for combat AI (parameter-shared IPPO).
+//!
+//! One network shared across all heroes. Each hero gets its own
+//! 210-dim observation and produces 14 action logits independently.
+//! Coordination emerges from seeing ally states in the observation.
 
 use burn::nn::{Linear, LinearConfig};
 use burn::prelude::*;
@@ -12,12 +16,15 @@ const HIDDEN1: usize = 128;
 const HIDDEN2: usize = 64;
 const NUM_ACTIONS: usize = 14;
 
-/// Simple two-layer MLP actor-critic.
+/// Parameter-shared MLP actor-critic (IPPO).
 ///
 /// ```text
-/// obs (210) -> shared1 (128, relu) -> shared2 (64, relu) -> actor (14 logits)
-///                                                        -> critic (1 value)
+/// hero_obs (210) -> shared1 (128, relu) -> shared2 (64, relu) -> actor (14 logits)
+///                                                              -> critic (1 value)
 /// ```
+///
+/// The same network runs for each hero in the party. Heroes see each other
+/// through the 7-entity observation slots, enabling emergent coordination.
 #[derive(Module, Debug)]
 pub struct CombatPolicy<B: Backend> {
     shared1: Linear<B>,

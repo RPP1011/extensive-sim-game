@@ -90,7 +90,7 @@ fn main() {
         .with_clip_eps(0.2)
         .with_lr(3e-4);
 
-    let action_dist = ActionDist::Discrete(14);
+    let action_dist = ActionDist::Discrete(14); // shared policy, one hero at a time
     let steps_per_iter = config.n_steps * n_envs;
     let n_iters = total_steps / steps_per_iter;
 
@@ -102,14 +102,14 @@ fn main() {
     let mut recent_rewards: Vec<f32> = Vec::new();
     let window = 100;
 
-    eprintln!("=== Combat AI Training (PPO + Action Masking) ===");
+    eprintln!("=== IPPO Combat AI Training (Parameter-Shared PPO) ===");
     eprintln!();
     eprintln!(
         "Training for {} steps ({} envs, {} iters, {} steps/iter)",
         total_steps, n_envs, n_iters, steps_per_iter,
     );
     eprintln!(
-        "Obs dim: 210, Action space: Discrete(14), Minibatch: {}",
+        "Obs dim: 210 (per hero), Action: Discrete(14), Heroes: round-robin, Minibatch: {}",
         config.minibatch_size,
     );
     eprintln!("{:-<80}", "");

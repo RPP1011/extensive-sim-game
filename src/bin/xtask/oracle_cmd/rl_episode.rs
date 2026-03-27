@@ -52,7 +52,7 @@ pub(crate) fn run_rl_episode(
     scenario_action_mask: Option<&str>,
 ) -> RlEpisode {
     use bevy_game::ai::core::{is_alive, step, distance, move_towards, Team, UnitIntent, FIXED_TICK_MS};
-    use bevy_game::ai::core::ability_eval::{extract_game_state, extract_game_state_v2, extract_game_state_v2_spatial, extract_game_state_v2_with_objectives, ZoneObjective};
+    use bevy_game::ai::core::ability_eval::{extract_game_state_v2, extract_game_state_v2_spatial, extract_game_state_v2_with_objectives, ZoneObjective};
     use bevy_game::ai::core::self_play::actions::{action_mask, intent_to_action};
     use bevy_game::ai::effects::dsl::emit::emit_ability_dsl;
     use bevy_game::ai::goap::spatial::VisibilityMap;
@@ -233,7 +233,6 @@ pub(crate) fn run_rl_episode(
                             _ => extract_game_state_v2(&sim, unit),
                         }
                     };
-                    let game_state = extract_game_state(&sim, unit);
                     let token_infos = build_token_infos(
                         &sim, uid, &gs_v2.entity_types, &gs_v2.positions,
                     );
@@ -266,7 +265,7 @@ pub(crate) fn run_rl_episode(
                     };
                     steps.push(RlStep {
                         tick, unit_id: uid,
-                        game_state: game_state.to_vec(),
+                        game_state: vec![],
                         action, log_prob: 0.0,
                         mask: mask_arr.to_vec(),
                         step_reward: step_r,
@@ -345,7 +344,6 @@ pub(crate) fn run_rl_episode(
                 if let Policy::BurnServerV6(client) = policy {
                     use bevy_game::ai::core::burn_model::inference::{InferenceRequest, InferenceClient};
                     use bevy_game::ai::core::{UnitIntent, Team};
-                    use bevy_game::ai::core::ability_eval::extract_game_state;
 
                     let h_dim = client.h_dim();
                     let req = InferenceRequest {
@@ -411,10 +409,9 @@ pub(crate) fn run_rl_episode(
                         intents.push(UnitIntent { unit_id: uid, action: final_intent });
 
                         if record {
-                            let game_state = extract_game_state(&sim, unit);
                             steps.push(RlStep {
                                 tick, unit_id: uid,
-                                game_state: game_state.to_vec(),
+                                game_state: vec![],
                                 action: combat_type, log_prob: result.lp_combat + result.lp_pointer,
                                 mask: mask_vec.clone(), step_reward: step_r,
                                 entities: Some(gs_v2.entities.clone()),

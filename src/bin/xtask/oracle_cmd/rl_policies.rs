@@ -20,7 +20,7 @@ pub(crate) fn apply_random_policy(
     nav: Option<&bevy_game::ai::pathing::GridNav>,
 ) {
     use bevy_game::ai::core::{Team, UnitIntent};
-    use bevy_game::ai::core::ability_eval::{extract_game_state, extract_game_state_v2, extract_game_state_v2_spatial};
+    use bevy_game::ai::core::ability_eval::{extract_game_state_v2, extract_game_state_v2_spatial};
     use bevy_game::ai::core::self_play::actions::{
         move_dir_to_intent, combat_action_to_intent, build_token_infos,
         NUM_MOVE_DIRS, COMBAT_TYPE_ATTACK, COMBAT_TYPE_HOLD,
@@ -111,10 +111,9 @@ pub(crate) fn apply_random_policy(
     }
 
     if let Some(gs_v2) = gs_v2 {
-        let game_state = extract_game_state(sim, unit);
         steps.push(RlStep {
             tick, unit_id: uid,
-            game_state: game_state.to_vec(),
+            game_state: vec![],
             action: combat_type, log_prob: 0.0,
             mask: mask_vec.to_vec(), step_reward: step_r,
             entities: Some(gs_v2.entities), entity_types: Some(gs_v2.entity_types),
@@ -151,7 +150,6 @@ pub(crate) fn apply_v5_policy(
     steps: &mut Vec<RlStep>,
 ) {
     use bevy_game::ai::core::UnitIntent;
-    use bevy_game::ai::core::ability_eval::extract_game_state;
     use bevy_game::ai::core::self_play::actions::{
         move_dir_to_intent, combat_action_to_intent, build_token_infos,
         NUM_MOVE_DIRS, COMBAT_TYPE_ATTACK, COMBAT_TYPE_HOLD,
@@ -220,11 +218,10 @@ pub(crate) fn apply_v5_policy(
     intents.push(UnitIntent { unit_id: uid, action: final_intent });
 
     if record {
-        let game_state = extract_game_state(sim, unit);
         let composite_lp = move_lp + combat_lp + target_lp;
         steps.push(RlStep {
             tick, unit_id: uid,
-            game_state: game_state.to_vec(),
+            game_state: vec![],
             action: combat_type, log_prob: composite_lp,
             mask: mask_vec.to_vec(), step_reward: step_r,
             entities: Some(gs_v2.entities.clone()),

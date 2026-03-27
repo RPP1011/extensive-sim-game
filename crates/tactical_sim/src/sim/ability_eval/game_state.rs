@@ -1,4 +1,3 @@
-use contracts::*;
 use crate::sim::{distance, is_alive, SimState, Team, UnitState};
 use crate::effects::effect_enum::Effect;
 use crate::goap::spatial::VisibilityMap;
@@ -98,8 +97,6 @@ use serde::{Serialize, Deserialize};
 //   7: exists        — 1.0 if slot occupied, 0.0 if padding
 
 pub const ENTITY_FEATURE_DIM: usize = 34;
-/// Legacy 30-dim entity features (without spatial summary).
-pub const ENTITY_FEATURE_DIM_LEGACY: usize = 30;
 pub const MAX_ENEMIES: usize = 3;
 pub const MAX_ALLIES: usize = 3;
 pub const NUM_ENTITY_SLOTS: usize = 1 + MAX_ENEMIES + MAX_ALLIES; // 7
@@ -108,112 +105,17 @@ pub const THREAT_FEATURE_DIM: usize = 8;
 pub const POSITION_FEATURE_DIM: usize = 8;
 pub const MAX_POSITION_TOKENS: usize = 8;
 
-/// Legacy dimension without threat slots (for backwards compatibility).
-/// NOTE: Uses ENTITY_FEATURE_DIM_LEGACY (30) for backward compat with flat 210-dim format.
-pub const GAME_STATE_DIM: usize = NUM_ENTITY_SLOTS * ENTITY_FEATURE_DIM_LEGACY; // 210
-
-/// Extract rich game state features for entity encoder (legacy 30-dim format).
-///
-/// Returns a flat 210-dim vector: [self(30), enemy0(30), enemy1(30), enemy2(30),
-/// ally0(30), ally1(30), ally2(30)].
-///
-/// Enemies sorted by distance (nearest first), allies sorted by HP% (lowest first).
-#[ensures(ret.len() == GAME_STATE_DIM)]
-#[ensures(ret.iter().all(|v| v.is_finite()))]
-pub fn extract_game_state(state: &SimState, unit: &UnitState) -> Vec<f32> {
-    let mut features = Vec::with_capacity(GAME_STATE_DIM);
-
-    // Self entity (legacy 30-dim)
-    features.extend_from_slice(&rich_entity_features_base(state, unit, unit, true));
-
-    // Enemies: sorted by distance, up to 3
-    let mut enemies: Vec<&UnitState> = state.units.iter()
-        .filter(|u| u.team != unit.team && is_alive(u))
-        .collect();
-    enemies.sort_by(|a, b| {
-        distance(unit.position, a.position)
-            .partial_cmp(&distance(unit.position, b.position))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    for i in 0..MAX_ENEMIES {
-        if let Some(enemy) = enemies.get(i) {
-            features.extend_from_slice(&rich_entity_features_base(state, unit, enemy, false));
-        } else {
-            features.extend_from_slice(&EMPTY_ENTITY_LEGACY);
-        }
-    }
-
-    // Allies (excluding self): sorted by HP% ascending (most wounded first)
-    let mut allies: Vec<&UnitState> = state.units.iter()
-        .filter(|u| u.team == unit.team && is_alive(u) && u.id != unit.id)
-        .collect();
-    allies.sort_by(|a, b| {
-        let ha = a.hp as f32 / a.max_hp.max(1) as f32;
-        let hb = b.hp as f32 / b.max_hp.max(1) as f32;
-        ha.partial_cmp(&hb).unwrap_or(std::cmp::Ordering::Equal)
-    });
-    for i in 0..MAX_ALLIES {
-        if let Some(ally) = allies.get(i) {
-            features.extend_from_slice(&rich_entity_features_base(state, unit, ally, false));
-        } else {
-            features.extend_from_slice(&EMPTY_ENTITY_LEGACY);
-        }
-    }
-
-    features
-}
-
 pub(super) const EMPTY_ENTITY: [f32; ENTITY_FEATURE_DIM] = [0.0; ENTITY_FEATURE_DIM];
-pub(super) const EMPTY_ENTITY_LEGACY: [f32; ENTITY_FEATURE_DIM_LEGACY] = [0.0; ENTITY_FEATURE_DIM_LEGACY];
 pub(super) const EMPTY_THREAT: [f32; THREAT_FEATURE_DIM] = [0.0; THREAT_FEATURE_DIM];
 
-/// Extract 34-dim entity features including 4 spatial summary features.
-/// If `spatial` is None, the 4 spatial features are zero-filled.
+/// Extract 34-dim entity features with spatial features zeroed.
+/// Use `rich_entity_features_spatial()` to fill in the 4 spatial features.
 pub(super) fn rich_entity_features(
     state: &SimState,
     caster: &UnitState,
     unit: &UnitState,
     is_self: bool,
 ) -> [f32; ENTITY_FEATURE_DIM] {
-    let base = rich_entity_features_base(state, caster, unit, is_self);
-    let mut feats = [0.0f32; ENTITY_FEATURE_DIM];
-    feats[..ENTITY_FEATURE_DIM_LEGACY].copy_from_slice(&base);
-    // Spatial summary features are zero-filled by default.
-    // Use rich_entity_features_spatial() for spatial-aware extraction.
-    feats
-}
-
-/// Extract 34-dim entity features with spatial summary from VisibilityMap.
-pub(super) fn rich_entity_features_spatial(
-    state: &SimState,
-    caster: &UnitState,
-    unit: &UnitState,
-    is_self: bool,
-    vis_map: &VisibilityMap,
-    nav: &GridNav,
-) -> [f32; ENTITY_FEATURE_DIM] {
-    let base = rich_entity_features_base(state, caster, unit, is_self);
-    let summary = vis_map.visibility_summary(nav, unit.position);
-    let mut feats = [0.0f32; ENTITY_FEATURE_DIM];
-    feats[..ENTITY_FEATURE_DIM_LEGACY].copy_from_slice(&base);
-    feats[30] = summary.visible_corner_count as f32 / 16.0;
-    feats[31] = (summary.avg_passage_width / 10.0).min(1.0);
-    feats[32] = if summary.min_passage_width < f32::MAX {
-        (summary.min_passage_width / 10.0).min(1.0)
-    } else {
-        0.0
-    };
-    feats[33] = (summary.avg_corner_distance / 20.0).min(1.0);
-    feats
-}
-
-/// Core 30-dim entity features (without spatial summary).
-fn rich_entity_features_base(
-    state: &SimState,
-    caster: &UnitState,
-    unit: &UnitState,
-    is_self: bool,
-) -> [f32; ENTITY_FEATURE_DIM_LEGACY] {
     let max_hp = unit.max_hp.max(1) as f32;
 
     // Zone proximity
@@ -277,7 +179,34 @@ fn rich_entity_features_base(
         // Cumulative (28-29)
         unit.total_damage_done as f32 / 1000.0,
         1.0, // exists
+        // Spatial summary (30-33) — zeroed; use rich_entity_features_spatial() to fill
+        0.0,
+        0.0,
+        0.0,
+        0.0,
     ]
+}
+
+/// Extract 34-dim entity features with spatial summary from VisibilityMap.
+pub(super) fn rich_entity_features_spatial(
+    state: &SimState,
+    caster: &UnitState,
+    unit: &UnitState,
+    is_self: bool,
+    vis_map: &VisibilityMap,
+    nav: &GridNav,
+) -> [f32; ENTITY_FEATURE_DIM] {
+    let mut feats = rich_entity_features(state, caster, unit, is_self);
+    let summary = vis_map.visibility_summary(nav, unit.position);
+    feats[30] = summary.visible_corner_count as f32 / 16.0;
+    feats[31] = (summary.avg_passage_width / 10.0).min(1.0);
+    feats[32] = if summary.min_passage_width < f32::MAX {
+        (summary.min_passage_width / 10.0).min(1.0)
+    } else {
+        0.0
+    };
+    feats[33] = (summary.avg_corner_distance / 20.0).min(1.0);
+    feats
 }
 
 /// Summary of a unit's strongest ability/heal/CC derived from AbilitySlot DSL effects.
@@ -444,7 +373,7 @@ pub(super) fn max_cc_duration_from_effects(effects: &[crate::effects::types::Con
 /// A game state snapshot labeled with the final fight outcome.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutcomeSample {
-    /// Flat entity features: [self(30), enemy0(30)..enemy2(30), ally0(30)..ally2(30)]
+    /// Flat entity features: [self(34), enemy0(34)..enemy2(34), ally0(34)..ally2(34)]
     pub game_state: Vec<f32>,
     /// 1.0 = hero team wins, 0.0 = enemy team wins
     pub hero_wins: f32,
@@ -480,11 +409,45 @@ pub fn generate_outcome_dataset(
     for tick in 0..max_ticks {
         let intents = generate_intents(&sim, &mut squad_ai, FIXED_TICK_MS);
 
-        // Sample game state from each hero's perspective
+        // Sample game state from each hero's perspective (34-dim per entity slot)
         if tick % sample_interval == 0 {
             let hero_states: Vec<Vec<f32>> = sim.units.iter()
                 .filter(|u| u.team == Team::Hero && is_alive(u))
-                .map(|u| extract_game_state(&sim, u))
+                .map(|u| {
+                    let mut features = Vec::with_capacity(NUM_ENTITY_SLOTS * ENTITY_FEATURE_DIM);
+                    features.extend_from_slice(&rich_entity_features(&sim, u, u, true));
+                    let mut enemies: Vec<&UnitState> = sim.units.iter()
+                        .filter(|e| e.team != u.team && is_alive(e))
+                        .collect();
+                    enemies.sort_by(|a, b| {
+                        distance(u.position, a.position)
+                            .partial_cmp(&distance(u.position, b.position))
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    for i in 0..MAX_ENEMIES {
+                        if let Some(enemy) = enemies.get(i) {
+                            features.extend_from_slice(&rich_entity_features(&sim, u, enemy, false));
+                        } else {
+                            features.extend_from_slice(&EMPTY_ENTITY);
+                        }
+                    }
+                    let mut allies: Vec<&UnitState> = sim.units.iter()
+                        .filter(|a| a.team == u.team && is_alive(a) && a.id != u.id)
+                        .collect();
+                    allies.sort_by(|a, b| {
+                        let ha = a.hp as f32 / a.max_hp.max(1) as f32;
+                        let hb = b.hp as f32 / b.max_hp.max(1) as f32;
+                        ha.partial_cmp(&hb).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    for i in 0..MAX_ALLIES {
+                        if let Some(ally) = allies.get(i) {
+                            features.extend_from_slice(&rich_entity_features(&sim, u, ally, false));
+                        } else {
+                            features.extend_from_slice(&EMPTY_ENTITY);
+                        }
+                    }
+                    features
+                })
                 .collect();
             if !hero_states.is_empty() {
                 snapshots.push((tick, hero_states));

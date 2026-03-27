@@ -7,7 +7,8 @@
       "Bash(cargo)",
       "Bash(cargo*)",
       "Bash(xdpyinfo:*)",
-      "Bash(dpkg:*)"
+      "Bash(dpkg:*)",
+      "Bash(grep -n \"GAME_STATE_DIM\\\\|ENTITY_FEATURE_DIM\\\\|NUM_ENTITY_SLOTS\" /home/ricky/Projects/game/crates/tactical_sim/src/sim/ability_eval/*.rs)"
     ]
   },
   "enableAllProjectMcpServers": false
