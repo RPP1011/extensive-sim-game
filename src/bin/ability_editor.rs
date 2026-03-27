@@ -9,7 +9,6 @@
 //!
 //! Requires: generated/ability_vae_weights.json from training/train_ability_vae.py
 
-use std::collections::HashMap;
 use std::sync::Mutex;
 use tack::{TackConfig, TackUi};
 
@@ -180,18 +179,14 @@ fn main() {
     let decoder = Mutex::new(decoder);
 
     TackConfig::new("Ability Editor", move |ui: &mut TackUi| {
-        ui.title("Ability Editor");
+        // Archetype selector at top
+        ui.subheader("Archetype");
+        let arch_idx = ui.selectbox("archetype", ARCHETYPE_NAMES);
+        let archetype = ARCHETYPE_NAMES[arch_idx];
 
         if !has_vae {
             ui.warning("VAE weights not found. Run train_ability_vae.py first.");
         }
-
-        ui.divider();
-
-        // Archetype selector
-        ui.subheader("Archetype");
-        let arch_idx = ui.selectbox("archetype", ARCHETYPE_NAMES);
-        let archetype = ARCHETYPE_NAMES[arch_idx];
 
         ui.divider();
 
@@ -201,7 +196,7 @@ fn main() {
 
         ui.divider();
 
-        // Decode and show ability
+        // Decode
         let dec = decoder.lock().unwrap();
         let slots = if let Some(ref d) = *dec {
             d.decode(&z, arch_idx)
@@ -210,31 +205,33 @@ fn main() {
         };
         drop(dec);
 
-        ui.header("Generated Ability");
         let dsl = slots_to_dsl(&slots, archetype);
-        ui.code(&dsl);
 
-        ui.divider();
+        // Two columns: left = slot stats, right = DSL output
+        ui.two_columns(|left, right| {
+            // Left column: slot vector stats
+            left.header("Slot Vector");
+            let nonzero = slots.iter().filter(|&&v| v.abs() > 0.05).count();
+            left.caption(&format!("{} active dims out of {}", nonzero, SLOT_DIM));
 
-        // Slot stats
-        ui.subheader("Slot Vector");
-        let nonzero = slots.iter().filter(|&&v| v.abs() > 0.05).count();
-        ui.caption(&format!("{} active dims out of {}", nonzero, SLOT_DIM));
+            let mut top: Vec<(usize, f32)> = slots.iter().enumerate()
+                .map(|(i, &v)| (i, v.abs()))
+                .filter(|(_, v)| *v > 0.05)
+                .collect();
+            top.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            top.truncate(15);
 
-        // Top active dims
-        let mut top: Vec<(usize, f32)> = slots.iter().enumerate()
-            .map(|(i, &v)| (i, v.abs()))
-            .filter(|(_, v)| *v > 0.05)
-            .collect();
-        top.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-        top.truncate(10);
+            for (idx, val) in &top {
+                let bar = "█".repeat((val * 15.0).min(30.0) as usize);
+                left.caption(&format!("[{:>3}] {:>5.2} {}", idx, val, bar));
+            }
 
-        for (idx, val) in &top {
-            let bar = "█".repeat((val * 15.0).min(30.0) as usize);
-            ui.caption(&format!("  [{:>3}] {:.2} {}", idx, val, bar));
-        }
+            // Right column: DSL output
+            right.header("Generated Ability DSL");
+            right.code(&dsl);
+        });
     })
-    .size(1200.0, 900.0)
+    .size(1400.0, 900.0)
     .run()
     .unwrap();
 }
