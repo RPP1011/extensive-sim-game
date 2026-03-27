@@ -14,6 +14,7 @@ burn-gpu = ["tactical_sim/burn-gpu"]
 burn-cpu = ["tactical_sim/burn-cpu"]
 
 [dependencies]
+tack = { path = "../tack" }
 tactical_sim = { path = "crates/tactical_sim" }
 bevy = { version = "0.13.2", features = ["jpeg"] }
 bevy_egui = "0.27"
@@ -32,3 +33,4 @@ ureq = { version = "3", features = ["json"] }
 
 [dev-dependencies]
 proptest = "1.6"
+
