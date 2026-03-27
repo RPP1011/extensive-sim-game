@@ -190,6 +190,30 @@ fn main() {
 
         ui.divider();
 
+        // Randomize and reset buttons
+        ui.horizontal(|hui| {
+            if hui.button("🎲 Randomize") {
+                let seed = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos() as u64;
+                let mut rng = seed;
+                for i in 0..LATENT_DIM {
+                    // Simple LCG for random values in [-2, 2]
+                    rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    let val = ((rng >> 33) as f64 / (1u64 << 31) as f64) * 4.0 - 2.0;
+                    hui.set_f64(&format!("z__dim_{}", i), val);
+                }
+            }
+            if hui.button("🔄 Reset") {
+                for i in 0..LATENT_DIM {
+                    hui.set_f64(&format!("z__dim_{}", i), 0.0);
+                }
+            }
+        });
+
+        ui.divider();
+
         // Latent sliders
         ui.subheader("Latent Dimensions");
         let z = ui.latent_sliders("z", LATENT_DIM, (-3.0, 3.0), None);
