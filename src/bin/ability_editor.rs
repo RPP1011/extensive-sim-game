@@ -214,29 +214,31 @@ fn main() {
 
         ui.divider();
 
-        // Latent sliders
-        ui.subheader("Latent Dimensions");
-        let z = ui.latent_sliders("z", LATENT_DIM, (-3.0, 3.0), None);
-
-        ui.divider();
-
-        // Decode
-        let dec = decoder.lock().unwrap();
-        let slots = if let Some(ref d) = *dec {
-            d.decode(&z, arch_idx)
-        } else {
-            vec![0.0f32; SLOT_DIM]
-        };
-        drop(dec);
-
-        let dsl = slots_to_dsl(&slots, archetype);
-
-        // Two columns: left = slot stats, right = DSL output
+        // Two columns side by side: left = latent sliders, right = DSL output
         ui.two_columns(|left, right| {
-            // Left column: slot vector stats
-            left.header("Slot Vector");
+            // Left column: latent sliders
+            left.subheader("Latent Dimensions");
+            let z = left.latent_sliders("z", LATENT_DIM, (-3.0, 3.0), None);
+
+            // Decode
+            let dec = decoder.lock().unwrap();
+            let slots = if let Some(ref d) = *dec {
+                d.decode(&z, arch_idx)
+            } else {
+                vec![0.0f32; SLOT_DIM]
+            };
+            drop(dec);
+
+            // Right column: DSL output + slot stats
+            right.header("Generated Ability DSL");
+            let dsl = slots_to_dsl(&slots, archetype);
+            right.code(&dsl);
+
+            right.divider();
+
+            right.subheader("Slot Vector");
             let nonzero = slots.iter().filter(|&&v| v.abs() > 0.05).count();
-            left.caption(&format!("{} active dims out of {}", nonzero, SLOT_DIM));
+            right.caption(&format!("{} active dims out of {}", nonzero, SLOT_DIM));
 
             let mut top: Vec<(usize, f32)> = slots.iter().enumerate()
                 .map(|(i, &v)| (i, v.abs()))
@@ -247,12 +249,8 @@ fn main() {
 
             for (idx, val) in &top {
                 let bar = "█".repeat((val * 15.0).min(30.0) as usize);
-                left.caption(&format!("[{:>3}] {:>5.2} {}", idx, val, bar));
+                right.caption(&format!("[{:>3}] {:>5.2} {}", idx, val, bar));
             }
-
-            // Right column: DSL output
-            right.header("Generated Ability DSL");
-            right.code(&dsl);
         });
     })
     .size(1400.0, 900.0)
