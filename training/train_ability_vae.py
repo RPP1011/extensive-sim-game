@@ -28,15 +28,16 @@ from torch.utils.data import DataLoader, TensorDataset
 # ---------------------------------------------------------------------------
 
 SLOT_DIM = 142
-LATENT_DIM = 32
-HIDDEN_DIM = 128
+LATENT_DIM = 64           # PCA shows need ~69 for 90% variance
+HIDDEN_DIM = 256           # wider hidden for 64-dim latent
 NUM_ARCHETYPES = 19
 BATCH_SIZE = 256
-EPOCHS = 200
-LR = 1e-3
-KL_WEIGHT_MAX = 0.1      # β-VAE weight (ramps up over training)
-KL_WARMUP_EPOCHS = 20     # epochs to ramp KL from 0 to max
+EPOCHS = 300
+LR = 3e-4                 # lower LR for stability
+KL_WEIGHT_MAX = 0.005     # much lower β — prioritize reconstruction
+KL_WARMUP_EPOCHS = 50     # slow warmup
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+STANDARDIZE = True         # per-dimension standardization
 
 # ---------------------------------------------------------------------------
 # Model
@@ -45,30 +46,35 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 class AbilityVAE(nn.Module):
     """Conditional VAE for ability slot vectors.
 
-    Encoder: slots (142) + archetype (19 one-hot) → hidden → μ, σ (32 each)
-    Decoder: z (32) + archetype (19 one-hot) → hidden → slots (142)
+    Encoder: slots (142) + archetype (19 one-hot) → hidden → μ, σ (64 each)
+    Decoder: z (64) + archetype (19 one-hot) → hidden → slots (142)
+
+    Uses 3 hidden layers for better nonlinear reconstruction.
     """
 
     def __init__(self):
         super().__init__()
-        input_dim = SLOT_DIM + NUM_ARCHETYPES  # 142 + 19 = 161
+        input_dim = SLOT_DIM + NUM_ARCHETYPES
 
-        # Encoder
+        # Encoder (3 layers)
         self.enc1 = nn.Linear(input_dim, HIDDEN_DIM)
         self.enc2 = nn.Linear(HIDDEN_DIM, HIDDEN_DIM)
-        self.enc_mu = nn.Linear(HIDDEN_DIM, LATENT_DIM)
-        self.enc_logvar = nn.Linear(HIDDEN_DIM, LATENT_DIM)
+        self.enc3 = nn.Linear(HIDDEN_DIM, HIDDEN_DIM // 2)
+        self.enc_mu = nn.Linear(HIDDEN_DIM // 2, LATENT_DIM)
+        self.enc_logvar = nn.Linear(HIDDEN_DIM // 2, LATENT_DIM)
 
-        # Decoder
-        decoder_input = LATENT_DIM + NUM_ARCHETYPES  # 32 + 19 = 51
-        self.dec1 = nn.Linear(decoder_input, HIDDEN_DIM)
-        self.dec2 = nn.Linear(HIDDEN_DIM, HIDDEN_DIM)
+        # Decoder (3 layers)
+        decoder_input = LATENT_DIM + NUM_ARCHETYPES
+        self.dec1 = nn.Linear(decoder_input, HIDDEN_DIM // 2)
+        self.dec2 = nn.Linear(HIDDEN_DIM // 2, HIDDEN_DIM)
+        self.dec3 = nn.Linear(HIDDEN_DIM, HIDDEN_DIM)
         self.dec_out = nn.Linear(HIDDEN_DIM, SLOT_DIM)
 
     def encode(self, x, archetype_onehot):
         h = torch.cat([x, archetype_onehot], dim=-1)
         h = F.relu(self.enc1(h))
         h = F.relu(self.enc2(h))
+        h = F.relu(self.enc3(h))
         return self.enc_mu(h), self.enc_logvar(h)
 
     def reparameterize(self, mu, logvar):
@@ -80,7 +86,8 @@ class AbilityVAE(nn.Module):
         h = torch.cat([z, archetype_onehot], dim=-1)
         h = F.relu(self.dec1(h))
         h = F.relu(self.dec2(h))
-        return self.dec_out(h)  # no activation — slots can be > 1
+        h = F.relu(self.dec3(h))
+        return self.dec_out(h)
 
     def forward(self, x, archetype_onehot):
         mu, logvar = self.encode(x, archetype_onehot)
@@ -102,13 +109,19 @@ class AbilityVAE(nn.Module):
 # ---------------------------------------------------------------------------
 
 def vae_loss(recon, target, mu, logvar, kl_weight):
-    # Reconstruction: MSE on slot values
+    # Reconstruction: MSE (data is standardized so all dims equally weighted)
     recon_loss = F.mse_loss(recon, target, reduction='mean')
+
+    # Sparsity penalty: penalize reconstruction being nonzero where target is zero
+    # (in standardized space, zero = the mean, so check target near zero)
+    zero_mask = (target.abs() < 0.1).float()
+    sparsity_loss = (recon.abs() * zero_mask).mean() * 0.1
 
     # KL divergence
     kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
 
-    return recon_loss + kl_weight * kl_loss, recon_loss, kl_loss
+    total = recon_loss + sparsity_loss + kl_weight * kl_loss
+    return total, recon_loss, kl_loss
 
 
 # ---------------------------------------------------------------------------
@@ -116,17 +129,29 @@ def vae_loss(recon, target, mu, logvar, kl_weight):
 # ---------------------------------------------------------------------------
 
 def load_dataset(path):
-    """Load ability dataset from npz file."""
+    """Load ability dataset from npz file with per-dimension standardization."""
     data = np.load(path)
-    slots = torch.tensor(data['slots'], dtype=torch.float32)
+    slots_raw = data['slots']
     archetypes = torch.tensor(data['archetypes'], dtype=torch.long)
     levels = torch.tensor(data['levels'], dtype=torch.float32)
 
-    # Create archetype one-hot
+    if STANDARDIZE:
+        # Per-dimension standardization so all effects get equal weight
+        means = slots_raw.mean(axis=0)
+        stds = slots_raw.std(axis=0)
+        stds[stds < 1e-6] = 1.0  # avoid division by zero for constant dims
+        slots_standardized = (slots_raw - means) / stds
+        slots = torch.tensor(slots_standardized, dtype=torch.float32)
+        # Save scaler params for inference
+        scaler_params = {'means': means.tolist(), 'stds': stds.tolist()}
+    else:
+        slots = torch.tensor(slots_raw, dtype=torch.float32)
+        scaler_params = None
+
     onehot = torch.zeros(len(archetypes), NUM_ARCHETYPES)
     onehot.scatter_(1, archetypes.unsqueeze(1), 1.0)
 
-    return slots, onehot, levels
+    return slots, onehot, levels, scaler_params
 
 
 # ---------------------------------------------------------------------------
@@ -149,8 +174,10 @@ def train():
         print("Then convert to npz with the analysis script.")
         sys.exit(1)
 
-    slots, archetypes, levels = load_dataset(dataset_path)
+    slots, archetypes, levels, scaler_params = load_dataset(dataset_path)
     print(f"Loaded {len(slots)} abilities")
+    if scaler_params:
+        print(f"Standardized: per-dimension mean/std normalization")
 
     # Train/val split (90/10)
     n = len(slots)
@@ -295,6 +322,12 @@ def train():
     weights = {}
     for name, param in model.named_parameters():
         weights[name] = param.detach().cpu().numpy().tolist()
+    # Include scaler params for de-standardization in the editor
+    if scaler_params:
+        weights['_scaler_means'] = scaler_params['means']
+        weights['_scaler_stds'] = scaler_params['stds']
+    weights['_latent_dim'] = LATENT_DIM
+    weights['_slot_dim'] = SLOT_DIM
     with open(export_path, 'w') as f:
         json.dump(weights, f)
     print(f"\nExported weights to {export_path}")
