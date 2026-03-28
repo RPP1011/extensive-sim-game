@@ -4,3 +4,4 @@ pub mod guided_sample;
 pub mod text_encoder;
 pub mod quality;
 pub mod grokfast;
+pub mod tree_decoder;

@@ -23,6 +23,10 @@ path = "src/bin/generate_dataset.rs"
 name = "train-e2e"
 path = "src/bin/train_e2e.rs"
 
+[[bin]]
+name = "train-tree"
+path = "src/bin/train_tree.rs"
+
 [features]
 default = ["gpu"]
 gpu = ["burn/tch", "burn/autodiff"]

@@ -1,0 +1,60 @@
+{
+  "capture_index": 5,
+  "render_frame": 50,
+  "global_turn": 0,
+  "active_mission_id": 0,
+  "active_mission_name": "Sabotage: Emberwell Reliquary",
+  "missions": [
+    {
+      "id": 0,
+      "mission_name": "Sabotage: Emberwell Reliquary",
+      "active": true,
+      "mission_active": true,
+      "result": "InProgress",
+      "turns_remaining": 30,
+      "reactor_integrity": 100.0,
+      "sabotage_progress": 0.0,
+      "sabotage_goal": 100.0,
+      "alert_level": 4.0,
+      "room_index": 0,
+      "room_name": "Moon Gate Vault",
+      "tactical_mode": "Balanced",
+      "command_cooldown_turns": 0,
+      "assigned_hero_id": null
+    },
+    {
+      "id": 1,
+      "mission_name": "Containment: Hollowspire Breach",
+      "active": false,
+      "mission_active": true,
+      "result": "InProgress",
+      "turns_remaining": 26,
+      "reactor_integrity": 93.0,
+      "sabotage_progress": 18.0,
+      "sabotage_goal": 100.0,
+      "alert_level": 16.0,
+      "room_index": 1,
+      "room_name": "Floodgate Walk",
+      "tactical_mode": "Defensive",
+      "command_cooldown_turns": 0,
+      "assigned_hero_id": null
+    },
+    {
+      "id": 2,
+      "mission_name": "Rescue: Ashfen Convoy",
+      "active": false,
+      "mission_active": true,
+      "result": "InProgress",
+      "turns_remaining": 24,
+      "reactor_integrity": 90.0,
+      "sabotage_progress": 28.0,
+      "sabotage_goal": 100.0,
+      "alert_level": 22.0,
+      "room_index": 2,
+      "room_name": "Reliquary Fork",
+      "tactical_mode": "Aggressive",
+      "command_cooldown_turns": 0,
+      "assigned_hero_id": null
+    }
+  ]
+}

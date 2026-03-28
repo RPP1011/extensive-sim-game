@@ -183,6 +183,7 @@ pub fn tick_npc_economy(
     tick_gold_flow(state);  // NPC-to-NPC commodity transactions
     tick_services(state);   // NPC-to-NPC service transactions (healing, repair)
     tick_local_prices(state);
+    apply_monster_damage_to_settlements(state, events);
     apply_travel_danger(state, events);
 
     // Cadenced subsystems (every decision_interval_ticks)
@@ -1249,6 +1250,193 @@ fn tick_services(state: &mut CampaignState) {
             state.adventurers[patient_idx].gold -= payment;
             state.adventurers[healer_idx].gold += payment;
             state.adventurers[patient_idx].injury = (state.adventurers[patient_idx].injury - healer_level * 0.5).max(0.0);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Settlement Threats — connect monster ecology to NPC economy
+// ---------------------------------------------------------------------------
+
+/// When monster populations in a region are high enough to attack (population > 80),
+/// the monster_ecology system emits MonsterAttack events and reduces region control.
+/// This function translates that into real damage to settlements: stockpile raiding,
+/// NPC injuries/deaths, and combat behavior generation for defenders.
+///
+/// Also applies faction war damage to settlements when factions attack.
+fn apply_monster_damage_to_settlements(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
+    // Read actual monster populations per region.
+    // Settlements in regions with high monster populations get attacked.
+    struct RegionThreat {
+        region_id: usize,
+        total_population: f32,
+        max_aggression: f32,
+    }
+    let mut region_threats: Vec<RegionThreat> = Vec::new();
+    for pop in &state.monster_populations {
+        if let Some(rt) = region_threats.iter_mut().find(|r| r.region_id == pop.region_id) {
+            rt.total_population += pop.population;
+            rt.max_aggression = rt.max_aggression.max(pop.aggression);
+        } else {
+            region_threats.push(RegionThreat {
+                region_id: pop.region_id,
+                total_population: pop.population,
+                max_aggression: pop.aggression,
+            });
+        }
+    }
+
+    // Also factor in faction hostility: factions at war increase danger.
+    let guild_fid = state.diplomacy.guild_faction_id;
+    for faction in &state.factions {
+        if faction.at_war_with.contains(&guild_fid) || matches!(faction.diplomatic_stance, crate::headless_campaign::state::DiplomaticStance::AtWar) {
+            // Hostile faction's territory has extra threat.
+            for region in &state.overworld.regions {
+                if region.owner_faction_id == faction.id {
+                    if let Some(rt) = region_threats.iter_mut().find(|r| r.region_id == region.id) {
+                        rt.total_population += faction.military_strength * 0.5;
+                        rt.max_aggression = rt.max_aggression.max(80.0);
+                    } else {
+                        region_threats.push(RegionThreat {
+                            region_id: region.id,
+                            total_population: faction.military_strength * 0.5,
+                            max_aggression: 80.0,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Update settlement threat_level as a DESCRIPTIVE value from actual hostile actors.
+    for loc in &mut state.overworld.locations {
+        if loc.location_type != LocationType::Settlement { continue; }
+        // Find which region this settlement is in (approximate by faction owner).
+        let region_threat = loc.faction_owner
+            .and_then(|fid| {
+                state.overworld.regions.iter()
+                    .find(|r| r.owner_faction_id == fid)
+                    .map(|r| r.id)
+            })
+            .and_then(|rid| region_threats.iter().find(|rt| rt.region_id == rid))
+            .map(|rt| rt.total_population * 0.5 + rt.max_aggression * 0.3)
+            .unwrap_or(0.0);
+        // Blend: 80% from hostile actors, 20% from base terrain danger.
+        loc.threat_level = region_threat * 0.8 + loc.threat_level * 0.2;
+    }
+
+    // Now apply actual attacks to settlements in threatened regions.
+    struct SettlementSnap {
+        loc_id: usize,
+        region_threat_pop: f32,
+        region_aggression: f32,
+        safety: f32,
+        pop: usize,
+    }
+    let snaps: Vec<SettlementSnap> = state.overworld.locations.iter()
+        .filter(|l| l.location_type == LocationType::Settlement && !l.resident_ids.is_empty())
+        .filter_map(|l| {
+            let rt = l.faction_owner
+                .and_then(|fid| state.overworld.regions.iter().find(|r| r.owner_faction_id == fid).map(|r| r.id))
+                .and_then(|rid| region_threats.iter().find(|rt| rt.region_id == rid));
+            rt.map(|rt| SettlementSnap {
+                loc_id: l.id,
+                region_threat_pop: rt.total_population,
+                region_aggression: rt.max_aggression,
+                safety: l.safety_level,
+                pop: l.resident_ids.len(),
+            })
+        })
+        .collect();
+
+    let mut killed: Vec<u32> = Vec::new();
+
+    for snap in &snaps {
+        // Attacks only happen when monster population is high AND aggressive.
+        if snap.region_threat_pop < 40.0 || snap.region_aggression < 30.0 { continue; }
+
+        // Attack probability from actual hostile actor pressure.
+        let pressure = (snap.region_threat_pop / 100.0) * (snap.region_aggression / 100.0);
+        let attack_chance = pressure * 0.05; // max ~5% per tick at full pressure
+        let roll = crate::headless_campaign::state::lcg_f32(&mut state.rng);
+        if roll >= attack_chance { continue; }
+
+        let severity = pressure; // 0.0-1.0
+
+        // Defense check: safety_level vs monster threat.
+        let effective_threat = snap.region_threat_pop * 0.5;
+        let defense_ratio = if effective_threat > 0.0 { snap.safety / effective_threat } else { 1.0 };
+
+        if defense_ratio >= 1.0 {
+            // Defended — minor losses, defenders gain combat XP.
+            settlement_defense_behavior(state, snap.loc_id, severity * 30.0);
+            if let Some(loc) = state.overworld.locations.iter_mut().find(|l| l.id == snap.loc_id) {
+                loc.stockpile.food = (loc.stockpile.food - severity * 5.0).max(0.0);
+            }
+        } else if defense_ratio >= 0.3 {
+            // Partial defense.
+            let damage_mult = 1.0 - defense_ratio;
+            if let Some(loc) = state.overworld.locations.iter_mut().find(|l| l.id == snap.loc_id) {
+                let raid = severity * 20.0 * damage_mult;
+                loc.stockpile.food = (loc.stockpile.food - raid * 2.0).max(0.0);
+                loc.stockpile.iron = (loc.stockpile.iron - raid).max(0.0);
+                loc.stockpile.wood = (loc.stockpile.wood - raid).max(0.0);
+                loc.stockpile.equipment = (loc.stockpile.equipment - raid * 0.5).max(0.0);
+
+                let resident_ids = loc.resident_ids.clone();
+                let injury_count = ((snap.pop as f32) * damage_mult * 0.15).ceil() as usize;
+                for _ in 0..injury_count.min(resident_ids.len()) {
+                    let idx = (crate::headless_campaign::state::lcg_next(&mut state.rng) as usize) % resident_ids.len();
+                    let adv_id = resident_ids[idx];
+                    if let Some(adv) = state.adventurers.iter_mut().find(|a| a.id == adv_id) {
+                        if adv.status != AdventurerStatus::Dead {
+                            adv.injury = (adv.injury + severity * 20.0).min(100.0);
+                            adv.stress = (adv.stress + severity * 15.0).min(100.0);
+                        }
+                    }
+                }
+            }
+            settlement_defense_behavior(state, snap.loc_id, severity * 50.0);
+        } else {
+            // Overwhelmed.
+            if let Some(loc) = state.overworld.locations.iter_mut().find(|l| l.id == snap.loc_id) {
+                let raid = severity * 40.0;
+                loc.stockpile.food = (loc.stockpile.food - raid * 3.0).max(0.0);
+                loc.stockpile.iron = (loc.stockpile.iron - raid * 2.0).max(0.0);
+                loc.stockpile.wood = (loc.stockpile.wood - raid * 2.0).max(0.0);
+                loc.stockpile.herbs = (loc.stockpile.herbs - raid).max(0.0);
+                loc.stockpile.equipment = (loc.stockpile.equipment - raid).max(0.0);
+                loc.stockpile.medicine = (loc.stockpile.medicine - raid).max(0.0);
+                loc.treasury = (loc.treasury - raid).max(0.0);
+
+                let resident_ids = loc.resident_ids.clone();
+                let casualty_count = ((snap.pop as f32) * severity * 0.1).ceil() as usize;
+                for _ in 0..casualty_count.min(resident_ids.len()) {
+                    let idx = (crate::headless_campaign::state::lcg_next(&mut state.rng) as usize) % resident_ids.len();
+                    let adv_id = resident_ids[idx];
+                    if killed.contains(&adv_id) { continue; }
+                    if let Some(adv) = state.adventurers.iter_mut().find(|a| a.id == adv_id) {
+                        if adv.status == AdventurerStatus::Dead { continue; }
+                        adv.injury = (adv.injury + severity * 30.0).min(100.0);
+                        adv.stress = 100.0;
+                        if adv.injury > 80.0 {
+                            let death_roll = crate::headless_campaign::state::lcg_f32(&mut state.rng);
+                            if death_roll < 0.15 * severity {
+                                adv.status = AdventurerStatus::Dead;
+                                killed.push(adv_id);
+                            }
+                        }
+                    }
+                }
+            }
+            settlement_defense_behavior(state, snap.loc_id, severity * 80.0);
+        }
+    }
+
+    // Clean up dead NPCs from resident lists.
+    if !killed.is_empty() {
+        for loc in &mut state.overworld.locations {
+            loc.resident_ids.retain(|id| !killed.contains(id));
         }
     }
 }
