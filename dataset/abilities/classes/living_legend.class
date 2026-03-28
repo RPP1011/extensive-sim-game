@@ -1,0 +1,21 @@
+class Living_Legend {
+    stat_growth: +3 attack, +3 ability_power, +2 defense, +2 max_hp per level
+
+    tags: inspiration, aura, leadership, fame, legend
+
+    scaling party_alive_count {
+        when party_members >= 1: +15% attack, +15% ability_power
+        when party_members >= 3: aura attack +5, aura defense +5
+        always: +10% max_hp
+    }
+
+    abilities {
+        level 60: presence_of_legend "Enemies hesitate to attack you; weaker foes may flee on sight"
+        level 70: inspire_greatness "One ally temporarily gains access to abilities above their level"
+        level 80: name_of_power "Speak your name and all allies rally; full morale restore and stat surge"
+        level 90: defy_fate "Refuse a death, yours or an ally's; it simply does not happen"
+        level 100: they_will_remember "Every action you take in this battle becomes a story that permanently strengthens everyone who hears it"
+    }
+
+    requirements: level 60, classes: Hero or Commander
+}

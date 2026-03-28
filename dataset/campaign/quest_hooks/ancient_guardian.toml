@@ -1,0 +1,57 @@
+# A dormant guardian construct awakens in ruins.
+
+name = "Ancient Guardian"
+priority = 7
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "LocationScouted"
+location_type = "Ruin"
+
+[[conditions]]
+type = "MinAdventurers"
+count = 4
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "The exploring party triggered something. A stone colossus, dormant for centuries, grinds to life in the heart of {location_name}. Its eyes glow with ancient light. It blocks the path forward."
+deadline_secs = 60.0
+default_option = 1
+
+[[choice.options]]
+label = "Fight It"
+description = "Bring everything. This is a construct of the old world — powerful, relentless, but not invincible."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Steel meets stone. The colossus fights with mechanical precision and terrible strength."
+
+[[choice.options]]
+label = "Find the Control Rune"
+description = "It's a construct — it has a master. Find the control mechanism and shut it down."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "While the colossus searches, a rogue slips past and finds glowing runes on the back wall."
+
+[[choice.options]]
+label = "Retreat"
+description = "This thing survived centuries. The guild can come back better prepared."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The party withdraws. The colossus watches them go, then returns to its vigil."

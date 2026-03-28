@@ -1,0 +1,47 @@
+[[events]]
+id = "parley"
+name = "Parley Requested"
+phase = "approach"
+
+[events.trigger]
+type = "Always"
+threshold = 0.0
+
+[events.choice]
+prompt = "A white flag rises above the walls. The defenders wish to negotiate. Their envoy waits between the lines."
+deadline_secs = 30.0
+
+[[events.choice.options]]
+label = "Hear Their Terms"
+description = "Meet the envoy. Perhaps the settlement can be taken without blood."
+[[events.choice.options.effects]]
+type = "negotiation"
+surrender_chance = 0.2
+tribute_chance = 0.3
+delay_chance = 0.5
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Two chairs, a table, and a jug of wine between the lines. Words are cheaper than lives, and sometimes sharper than swords."
+
+[[events.choice.options]]
+label = "Demand Unconditional Surrender"
+description = "No negotiation. They surrender completely or face the storm."
+[[events.choice.options.effects]]
+type = "negotiation"
+surrender_chance = 0.1
+morale_effect_defender = -0.1
+morale_effect_attacker = 0.05
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The terms are simple: everything. The envoy pales and rides back inside. The answer comes in the form of arrows from the walls."
+
+[[events.choice.options]]
+label = "Refuse to Parley"
+description = "Talking wastes time. The siege continues."
+[[events.choice.options.effects]]
+type = "siege_progress"
+ticks_cost = 0
+morale_effect_defender = 0.05
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The commander doesn't even look at the white flag. 'Load the trebuchets,' he says. The message is clear enough."

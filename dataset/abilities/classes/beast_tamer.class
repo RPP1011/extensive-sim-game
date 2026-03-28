@@ -1,0 +1,20 @@
+class Beast_Tamer {
+    stat_growth: +2 attack, +2 ability_power, +1 speed, +1 max_hp per level
+
+    tags: beasts, summoning, bonding, wilderness, monster_allies
+
+    scaling party_alive_count {
+        when party_members >= 1: +10% attack
+        always: +5% ability_power
+    }
+
+    abilities {
+        level 40: alpha_bond "Tame a wild monster permanently; it fights as a loyal companion"
+        level 45: pack_leader "All tamed beasts gain bonus stats and coordinate attacks"
+        level 50: beast_speech "Communicate with any creature; negotiate with intelligent monsters"
+        level 60: chimera_bond "Merge two tamed beasts into a single more powerful creature"
+        level 80: lord_of_beasts "Command every beast in the region; armies of monsters answer your call"
+    }
+
+    requirements: level 40, classes: Hunter + Summoner
+}

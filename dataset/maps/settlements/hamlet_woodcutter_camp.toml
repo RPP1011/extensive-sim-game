@@ -1,0 +1,30 @@
+name = "Stumpfield"
+type = "hamlet"
+population = 95
+prosperity = 30.0
+
+[defenses]
+wall_type = "none"
+wall_hp = 0
+gate_count = 0
+tower_count = 0
+garrison_capacity = 0
+moat = false
+
+[[districts]]
+name = "Lumber Camp"
+type = "industrial"
+buildings = ["sawpit", "log_pile", "bunkhouse", "cookfire"]
+population_pct = 100.0
+wealth = 25.0
+threat = 15.0
+
+[economy]
+primary_exports = ["timber", "charcoal", "pitch"]
+primary_imports = ["food", "metal", "cloth"]
+trade_routes = 1
+market_size = "small"
+
+[narrative]
+description = "Loggers clear the forest edge, sending timber downriver. The work is brutal but steady, and the forest always grows back."
+flavor = ["The crack of falling trees", "Sawdust in the air", "Stumps as far as you can see"]

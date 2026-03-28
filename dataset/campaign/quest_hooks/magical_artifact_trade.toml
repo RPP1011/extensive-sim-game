@@ -1,0 +1,59 @@
+name = "Artifact Black Market"
+priority = 6
+repeatable = true
+cooldown_ticks = 7000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 7500
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Word reaches the guild of a black market dealer selling magical artifacts — some stolen, some excavated, all powerful. The location changes every week, but tonight, it's in the cellar beneath the old mill."
+deadline_secs = 60.0
+default_option = 1
+
+[[choice.options]]
+label = "Buy Something (55g)"
+description = "Browse the wares and pick up something useful. Don't ask where it came from."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -55.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "In a candlelit cellar, you examine a table of glowing objects. One of them calls to you."
+
+[[choice.options]]
+label = "Raid the Market"
+description = "Shut it down. Seize everything. The law is the law."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 30.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild bursts through the cellar door. Dealers scatter. Artifacts are seized."
+
+[[choice.options]]
+label = "Sell Information"
+description = "Tip off the authorities for a finder's fee. Let them handle it."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 15.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The city guard handles the raid. The guild collects a modest tip without getting its hands dirty."

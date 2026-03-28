@@ -1,0 +1,71 @@
+ability RevealThreats {
+    target: global
+    cooldown: 2000t
+    hint: utility
+
+    reveal 3
+}
+
+ability PropheticVision {
+    target: global
+    cooldown: 5000t
+    hint: utility
+
+    prophecy 5
+}
+
+ability BeastLore {
+    target: self
+    cooldown: 500t
+    hint: utility
+
+    beast_lore
+}
+
+ability ReadTheRoom {
+    target: faction
+    cooldown: 200t
+    hint: utility
+
+    read_the_room
+}
+
+ability AllSeeingEye {
+    target: global
+    cooldown: 10000t
+    hint: utility
+
+    all_seeing_eye
+}
+
+ability Decipher {
+    target: self
+    cooldown: 300t
+    hint: utility
+
+    decipher
+}
+
+ability TrapSense {
+    target: party
+    cooldown: 100t
+    hint: utility
+
+    trap_sense
+}
+
+ability SapperEye {
+    target: location
+    cooldown: 500t
+    hint: utility
+
+    sapper_eye
+}
+
+ability IntelGathering {
+    target: faction
+    cooldown: 1500t
+    hint: utility
+
+    intel_gathering
+}

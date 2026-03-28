@@ -4,7 +4,7 @@ mod weights;
 mod weights_math;
 mod weights_base;
 mod weights_actor_critic_v5;
-mod tokenizer_vocab;
+pub mod tokenizer_vocab;
 pub mod tokenizer;
 
 pub use weights_base::EmbeddingRegistry;

@@ -1,0 +1,38 @@
+name = "Oasis Springs"
+type = "village"
+population = 350
+prosperity = 45.0
+
+[defenses]
+wall_type = "wooden_palisade"
+wall_hp = 250
+gate_count = 1
+tower_count = 2
+garrison_capacity = 10
+moat = false
+
+[[districts]]
+name = "Spring Quarter"
+type = "commercial"
+buildings = ["caravanserai", "water_seller", "spice_market"]
+population_pct = 35.0
+wealth = 55.0
+threat = 15.0
+
+[[districts]]
+name = "Dwellings"
+type = "residential"
+buildings = ["mud_brick_houses", "cistern", "shrine"]
+population_pct = 65.0
+wealth = 30.0
+threat = 5.0
+
+[economy]
+primary_exports = ["water", "dates", "spices"]
+primary_imports = ["timber", "metal", "grain"]
+trade_routes = 3
+market_size = "medium"
+
+[narrative]
+description = "Life in the desert revolves around the spring. Caravans detour for days to refill here, making the village richer than its size suggests."
+flavor = ["Palm trees shade the spring", "Camels groan in the heat", "The water tastes faintly of minerals"]

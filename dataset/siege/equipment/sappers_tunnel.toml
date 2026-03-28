@@ -1,0 +1,29 @@
+[[equipment]]
+id = "sappers_tunnel"
+name = "Sapper's Tunnel"
+category = "breaching"
+tier = 3
+
+[equipment.stats]
+gate_damage_per_tick = 0.0
+wall_damage_per_tick = 8.0
+range = 0.0
+crew_required = 12
+move_speed = 0.0
+hp = 0
+armor = 0
+dig_rate = 1.0
+collapse_chance_per_tick = 0.002
+
+[equipment.requirements]
+min_tech_level = 3
+construction_cost = 150
+construction_ticks = 1500
+resources = ["timber", "tools"]
+
+[equipment.counters]
+vulnerable_to = ["counter_mine", "flood_tunnel", "tremor_sense"]
+strong_against = ["stone_wall", "castle_wall", "reinforced_stone"]
+
+[equipment.narrative]
+description = "They dig in shifts, shoring the tunnel with timber as they go. When they reach the foundations, they pack the cavity with oil and straw. One torch, and the wall above becomes its own destruction."

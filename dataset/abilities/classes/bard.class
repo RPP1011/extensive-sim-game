@@ -1,0 +1,21 @@
+class Bard {
+    stat_growth: +2 ability_power, +2 speed, +1 attack per level
+
+    tags: performance, storytelling, morale, inspiration, music
+
+    scaling party_alive_count {
+        when party_members >= 2: +10% ability_power
+        when party_members >= 4: aura speed +2
+        always: +5% speed
+    }
+
+    abilities {
+        level 1: inspiring_song "Boost party morale and grant minor attack buff"
+        level 5: cutting_words "Demoralize an enemy, reducing their next action's effectiveness"
+        level 10: ballad_of_heroes "Allies gain bonus damage when fighting alongside each other"
+        level 20: epic_tale "Tell a story so compelling that combat pauses for 5 seconds"
+        level 40: song_of_legends "Sing a song that makes every ally fight as if they were one level higher per second of performance"
+    }
+
+    requirements: level 1
+}

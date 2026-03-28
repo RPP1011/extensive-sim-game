@@ -1,0 +1,81 @@
+// Tier 1: Extended shield variants
+
+ability ArcaneWard {
+    target: ally, range: 5.0
+    cooldown: 7s, cast: 200ms
+    hint: defense
+
+    shield 30 for 4s
+}
+
+ability BoneShield {
+    target: self
+    cooldown: 10s, cast: 100ms
+    hint: defense
+
+    shield 45 for 5s
+}
+
+ability FrostArmor {
+    target: self
+    cooldown: 15s, cast: 300ms
+    hint: defense
+
+    shield 65 for 6s
+}
+
+ability SacredBarrier {
+    target: ally, range: 4.0
+    cooldown: 8s, cast: 200ms
+    hint: defense
+
+    shield 35 for 4s
+}
+
+ability IronBark {
+    target: ally, range: 3.5
+    cooldown: 10s, cast: 300ms
+    hint: defense
+
+    shield 50 for 5s
+}
+
+ability ManaShield {
+    target: self
+    cooldown: 8s, cast: 100ms
+    hint: defense
+
+    shield 35 for 3s
+}
+
+ability ThinBarrier {
+    target: ally, range: 6.0
+    cooldown: 4s, cast: 100ms
+    hint: defense
+
+    shield 15 for 3s
+}
+
+ability FortifiedWall {
+    target: self
+    cooldown: 18s, cast: 400ms
+    hint: defense
+
+    shield 80 for 6s
+}
+
+ability SpiritGuard {
+    target: ally, range: 4.0
+    cooldown: 6s, cast: 200ms
+    hint: defense
+
+    shield 28 for 3s
+}
+
+ability StoneShell {
+    target: self
+    cooldown: 12s, cast: 200ms
+    hint: defense
+
+    shield 55 for 5s
+}

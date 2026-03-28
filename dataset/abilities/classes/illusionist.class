@@ -1,0 +1,20 @@
+class Illusionist {
+    stat_growth: +3 ability_power, +2 speed, +1 defense per level
+
+    tags: arcane, illusion, deception, misdirection, stealth
+
+    scaling enemy_count {
+        when enemy_count >= 2: +10% ability_power
+        always: +10% speed
+    }
+
+    abilities {
+        level 1: mirror_image "Create a decoy that draws enemy attacks"
+        level 5: confusion "Target enemy attacks a random unit for 3 seconds"
+        level 10: invisibility "Turn an ally invisible until they attack"
+        level 20: mass_hallucination "All enemies see phantom threats and scatter"
+        level 40: perfect_copy "Create an exact duplicate of any unit on the battlefield that lasts 15 seconds"
+    }
+
+    requirements: level 1
+}

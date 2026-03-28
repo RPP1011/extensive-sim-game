@@ -1,0 +1,31 @@
+# Who goes on the next quest.
+
+category = "quest_branch"
+trigger = "quest_party_select"
+prompt = "The quest demands a party of {party_size}. Who should go?"
+deadline_secs = 90.0
+default_option = 0
+
+[[options]]
+label = "Best Available"
+description = "Send the strongest fighters. Maximum chance of success."
+
+[[options.effects]]
+type = "narrative"
+text = "The guild's finest gear up. If they can't handle it, nobody can."
+
+[[options]]
+label = "Training Opportunity"
+description = "Send newer members with one veteran. They learn faster in the field."
+
+[[options.effects]]
+type = "narrative"
+text = "Green recruits march alongside a grizzled veteran. Trial by fire."
+
+[[options]]
+label = "Specialist Team"
+description = "Pick members specifically suited to this quest type."
+
+[[options.effects]]
+type = "narrative"
+text = "Every member chosen for a specific role. A surgical team, not a blunt instrument."

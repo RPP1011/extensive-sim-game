@@ -1,0 +1,20 @@
+class Miner {
+    stat_growth: +2 max_hp, +2 defense, +1 attack per level
+
+    tags: excavation, geology, underground, gems, resource_extraction
+
+    scaling hp_percent {
+        when hp_percent > 50: +10% defense
+        always: +5% max_hp
+    }
+
+    abilities {
+        level 1: prospect "Detect ore veins and valuable minerals in the surrounding area"
+        level 5: gem_appraisal "Accurately assess the quality and value of any gemstone"
+        level 10: tunnel_sense "Navigate underground without getting lost; detect cave-ins before they happen"
+        level 20: motherlode "Discover a rich deposit of rare materials at any mining site"
+        level 40: heart_of_the_mountain "Commune with the earth itself; it reveals all treasures buried within and reshapes tunnels at your command"
+    }
+
+    requirements: level 1
+}

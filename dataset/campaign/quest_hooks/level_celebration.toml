@@ -1,0 +1,53 @@
+# Guild celebrates a major level-up.
+
+name = "Level-Up Celebration"
+priority = 3
+repeatable = true
+cooldown_ticks = 5000
+
+[trigger]
+type = "AdventurerLevelUp"
+min_level = 3
+
+[choice]
+category = "character"
+trigger = "hook"
+prompt = "{adventurer_name} has reached level {level}! The guild gathers to celebrate. How should the milestone be marked?"
+deadline_secs = 60.0
+default_option = 1
+
+[[choice.options]]
+label = "Throw a Party (15g)"
+description = "Feast and drinks for everyone. Morale boost across the guild."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Ale flows and songs are sung. {adventurer_name} is hoisted on shoulders. The guild feels like family."
+
+[[choice.options]]
+label = "Gift New Equipment (20g)"
+description = "A practical celebration. Better gear for the newly leveled adventurer."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A new blade, polished to a mirror shine. {adventurer_name}'s eyes light up."
+
+[[choice.options]]
+label = "Acknowledge and Move On"
+description = "A firm handshake and back to work. The guild has no time for parties."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A nod and a 'well done.' The work continues."

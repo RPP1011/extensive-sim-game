@@ -1,0 +1,54 @@
+name = "Siege Bombardment"
+phase_index = 2
+duration_range = [300, 1500]
+
+[description]
+text = "The siege engines speak. Stones arc over the killing ground and crash against walls that have stood for generations. Dust rises. The defenders huddle and endure."
+
+[attacker_actions]
+available = ["bombard_walls", "bombard_towers", "bombard_gate", "fire_bombardment", "target_defenses", "continue_sapping", "psychological_warfare"]
+priority = "destruction"
+
+[defender_actions]
+available = ["repair_walls", "counter_battery", "sally_out", "reinforce_gate", "move_reserves", "treat_wounded", "shore_foundations"]
+priority = "survival"
+
+[events]
+[[events.possible]]
+name = "Wall Breach"
+probability = 0.2
+trigger = "wall_hp_below_30"
+effect = "breach_event"
+description = "A section of wall crumbles under sustained bombardment. The breach is narrow but passable."
+
+[[events.possible]]
+name = "Tower Collapse"
+probability = 0.15
+trigger = "tower_hp_below_20"
+effect = "tower_destroyed"
+description = "A tower shudders, cracks, and falls inward, taking its garrison with it."
+
+[[events.possible]]
+name = "Ammunition Shortage"
+probability = 0.1
+trigger = "ticks_elapsed > 800"
+effect = "attacker_ammo_low"
+description = "The stone piles are running low. The trebuchet crews eye each other's reserves."
+
+[[events.possible]]
+name = "Lucky Shot"
+probability = 0.05
+trigger = "always"
+effect = "critical_damage"
+description = "A trebuchet stone strikes the gate mechanism. The portcullis jams half-open."
+
+[[events.possible]]
+name = "Counter-Battery Fire"
+probability = 0.1
+trigger = "defender_has_artillery"
+effect = "attacker_equipment_damaged"
+description = "The defenders' own catapult finds the range. A siege engine splinters."
+
+[transition]
+to_next_phase = "siege_assault"
+conditions = ["wall_breached", "OR", "gate_damaged > 50%", "OR", "ticks_elapsed > 1200"]

@@ -1,0 +1,39 @@
+# How to scout a new location.
+
+category = "quest_branch"
+trigger = "scouting_decision"
+prompt = "A new location needs scouting before the main expedition. What approach?"
+deadline_secs = 60.0
+default_option = 1
+
+[[options]]
+label = "Full Reconnaissance (20g)"
+description = "Multiple scouts, multiple days. Thorough but slow."
+
+[[options.effects]]
+type = "gold"
+amount = -20.0
+
+[[options.effects]]
+type = "narrative"
+text = "Scouts fan out in every direction. The location is mapped in detail."
+
+[[options]]
+label = "Quick Look"
+description = "One scout, one day. Fast but limited information."
+
+[[options.effects]]
+type = "narrative"
+text = "A single scout does a quick circuit and reports back."
+
+[[options]]
+label = "Magical Scrying (15g)"
+description = "Use divination magic to scout remotely. Good overview but no ground truth."
+
+[[options.effects]]
+type = "gold"
+amount = -15.0
+
+[[options.effects]]
+type = "narrative"
+text = "Through a crystal, the location reveals itself — shapes, threats, and treasures blurred by distance."

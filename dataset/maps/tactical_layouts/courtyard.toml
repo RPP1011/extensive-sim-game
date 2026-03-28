@@ -1,0 +1,70 @@
+name = "Castle Courtyard"
+map_type = "castle_interior"
+width = 24
+height = 20
+
+[terrain]
+layout = """
+WWWWWWWWWWWWWWWWWWWWWWWW
+W......................W
+W..HH..........HH.....W
+W..HH..........HH.....W
+W......................W
+W......RRRRRRRR........W
+W......R......R........W
+W..HH..R......R..HH...W
+W..HH..R......R..HH...W
+W......R......R........W
+W......R......R........W
+W..HH..R......R..HH...W
+W..HH..R......R..HH...W
+W......R......R........W
+W......RRRRRRRR........W
+W......................W
+W..HH..........HH.....W
+W..HH..........HH.....W
+W......................W
+WWWWWWWWWWGGGGWWWWWWWWWW
+"""
+
+[[spawn_zones]]
+name = "courtyard_guard"
+team = 0
+rect = [7, 6, 16, 14]
+
+[[spawn_zones]]
+name = "intruders"
+team = 1
+rect = [8, 18, 15, 19]
+
+[[cover_positions]]
+position = [3, 2]
+type = "full"
+
+[[cover_positions]]
+position = [16, 2]
+type = "full"
+
+[[cover_positions]]
+position = [3, 7]
+type = "full"
+
+[[cover_positions]]
+position = [19, 7]
+type = "full"
+
+[[cover_positions]]
+position = [3, 11]
+type = "full"
+
+[[cover_positions]]
+position = [19, 11]
+type = "full"
+
+[[cover_positions]]
+position = [3, 16]
+type = "full"
+
+[[cover_positions]]
+position = [16, 16]
+type = "full"

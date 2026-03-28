@@ -1,0 +1,15 @@
+name = "The Fracture"
+description = "A powerful faction splits in two, dragging the region into civil war. Every guild must choose a side or be crushed between them"
+crisis_type = "civil_war"
+world_templates = []
+trigger_threshold = 0.65
+priority = 9
+allow_simultaneous = false
+
+[config]
+type = "CivilWar"
+faction_split_threshold = 80.0
+escalation_interval_ticks = 4000
+collateral_damage_per_tick = 0.4
+forced_alignment_deadline_ticks = 10000
+neutral_penalty_per_tick = 0.3

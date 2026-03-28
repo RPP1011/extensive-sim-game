@@ -1,0 +1,86 @@
+name = "Crownhaven"
+type = "city"
+population = 15000
+prosperity = 75.0
+
+[defenses]
+wall_type = "fortified"
+wall_hp = 1500
+gate_count = 4
+tower_count = 12
+garrison_capacity = 300
+moat = true
+
+[[districts]]
+name = "Palace Hill"
+type = "noble"
+buildings = ["governors_palace", "council_hall", "grand_garden", "noble_estates"]
+population_pct = 8.0
+wealth = 95.0
+threat = 5.0
+
+[[districts]]
+name = "Grand Market"
+type = "commercial"
+buildings = ["market_hall", "auction_house", "bank", "jeweler", "silk_trader", "spice_merchant"]
+population_pct = 15.0
+wealth = 80.0
+threat = 15.0
+
+[[districts]]
+name = "Cathedral Quarter"
+type = "religious"
+buildings = ["cathedral", "seminary", "hospital", "orphanage"]
+population_pct = 10.0
+wealth = 65.0
+threat = 5.0
+
+[[districts]]
+name = "Scholars Row"
+type = "academic"
+buildings = ["university", "library", "observatory", "printing_house"]
+population_pct = 8.0
+wealth = 60.0
+threat = 5.0
+
+[[districts]]
+name = "Crafters Ward"
+type = "industrial"
+buildings = ["blacksmith", "tannery", "weaver", "potter", "glassblower"]
+population_pct = 15.0
+wealth = 45.0
+threat = 10.0
+
+[[districts]]
+name = "Commons"
+type = "residential"
+buildings = ["tenements", "bakery", "well", "public_bath", "theater"]
+population_pct = 25.0
+wealth = 30.0
+threat = 10.0
+
+[[districts]]
+name = "Dockside"
+type = "harbor"
+buildings = ["great_dock", "warehouse", "customs_house", "shipyard", "sailors_quarter"]
+population_pct = 12.0
+wealth = 55.0
+threat = 25.0
+
+[[districts]]
+name = "The Warrens"
+type = "slums"
+buildings = ["hovels", "black_market", "thieves_den", "flophouse"]
+population_pct = 7.0
+wealth = 10.0
+threat = 40.0
+
+[economy]
+primary_exports = ["manufactured_goods", "books", "fine_crafts", "luxury_goods"]
+primary_imports = ["raw_materials", "food", "timber", "stone"]
+trade_routes = 8
+market_size = "regional_hub"
+
+[narrative]
+description = "The jewel of the eastern coast. Three centuries of wealth have built a city of marble and ambition, where fortunes are made and lost before breakfast."
+flavor = ["Bells from the cathedral carry across the harbor", "Street vendors hawk exotic wares", "The university debates spill into taverns"]

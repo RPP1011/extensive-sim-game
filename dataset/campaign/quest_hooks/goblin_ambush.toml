@@ -1,0 +1,65 @@
+# Combat encounter: goblin ambush on a supply route.
+
+name = "Goblin Ambush"
+priority = 5
+repeatable = true
+cooldown_ticks = 4000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 4000
+
+[[conditions]]
+type = "MinAdventurers"
+count = 2
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Scouts report a band of goblins has set up an ambush point along the main supply route. Caravans are being hit daily. What should the guild do?"
+deadline_secs = 60.0
+default_option = 1
+
+[[choice.options]]
+label = "Hunt Them Down"
+description = "Send a squad to clear the nest. Costs 15g for supplies but eliminates the threat permanently."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 6.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild tracks the goblins to their warren and puts an end to the raids."
+
+[[choice.options]]
+label = "Fortify the Route"
+description = "Set up guard posts along the road. Ongoing cost but protects trade."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -25.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Guard towers rise along the trade road. The goblins learn to avoid guild territory."
+
+[[choice.options]]
+label = "Reroute Caravans"
+description = "Find an alternate path. Slower deliveries but no combat risk."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Caravans take the long way around. It costs time, but nobody dies."

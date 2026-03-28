@@ -1,0 +1,57 @@
+# A master trainer offers services to the guild.
+
+name = "Master Trainer Visit"
+priority = 5
+repeatable = true
+cooldown_ticks = 6000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 6500
+
+[choice]
+category = "progression"
+trigger = "hook"
+prompt = "A renowned weapons master is passing through the region and offers to train guild members for a week. The cost is significant, but the skills gained could save lives."
+deadline_secs = 90.0
+default_option = 1
+
+[[choice.options]]
+label = "Full Training (50g)"
+description = "Every able member trains intensively. Expensive but transforms the guild's combat ability."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -50.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Dawn to dusk, steel rings in the training yard. By week's end, the guild is sharper."
+
+[[choice.options]]
+label = "Select Few (20g)"
+description = "Send only the most promising. Focused investment."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Three adventurers train under the master's watchful eye. They return changed."
+
+[[choice.options]]
+label = "Offer Lodging Instead"
+description = "Trade room and board for informal lessons. No gold cost but less structured."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Over meals and drinks, the master shares stories and techniques. Learning happens in its own time."

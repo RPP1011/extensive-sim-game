@@ -1,0 +1,29 @@
+name = "The Windswept Plateau"
+terrain = "highland_plateau"
+climate = "temperate_dry"
+size = "medium"
+
+[generation]
+settlement_density = 0.15
+road_connectivity = 0.4
+wilderness_danger = 0.45
+resource_richness = 0.4
+
+[settlement_distribution]
+hamlet_pct = 40
+village_pct = 30
+town_pct = 15
+city_pct = 5
+fortress_pct = 10
+
+[terrain_features]
+rivers = 1
+mountains = false
+forests = false
+coast = false
+lakes = 2
+
+[narrative]
+description = "High grassland where the wind never stops and the sky stretches forever. Horse clans roam between scattered settlements, trading and raiding by turns."
+threats = ["horse_raiders", "thunderstorms", "grass_fires", "dire_wolves"]
+opportunities = ["horse_breeding", "grassland_herbs", "sky_metal_deposits"]

@@ -1,0 +1,55 @@
+name = "The Descent into Kheldurath"
+description = "A dwarven underground city. The attackers must push through narrow tunnels, fortified chokepoints, and traps. The defenders know every stone."
+difficulty = "very_hard"
+
+[settlement]
+template = "underground_city"
+wall_type = "castle_wall"
+wall_hp = 4000
+gate_type = "iron_gate"
+gate_hp = 1500
+towers = 0
+garrison = 50
+terrain = "underground"
+tunnel_network = true
+chokepoints = 4
+trap_density = "high"
+
+[attacker]
+army_size = 150
+siege_equipment = ["battering_ram", "petard", "sappers_tunnel", "siege_crossbow"]
+supply_ticks = 1500
+reinforcement_chance = 0.1
+morale = 0.6
+commander_level = 28
+no_cavalry = true
+no_ranged_siege = true
+
+[defender]
+garrison_strength = 50
+adventurer_slots = 6
+supplies_ticks = 5000
+reinforcement_chance = 0.2
+morale = 0.95
+special_defenses = ["murder_holes", "caltrops", "barricade", "boiling_oil", "portcullis"]
+commander_level = 35
+tunnel_knowledge = true
+trap_mastery = true
+
+[victory_conditions]
+attacker_wins = ["all_chokepoints_cleared", "citadel_captured"]
+defender_wins = ["attacker_retreat", "attacker_casualties > 60%", "tunnel_collapse_blocks_entry"]
+time_limit_ticks = 6000
+
+[power_context]
+defender_avg_level = 30
+attacker_avg_level = 22
+wall_effective_level = 55
+has_wards = true
+ward_type = "ancient_ward"
+high_level_threat = "none"
+
+[narrative]
+opening = "The entrance is a mouth in the mountainside, carved with runes that promise death to invaders. Inside, the dwarves of Kheldurath wait in the dark, where every shadow hides a blade."
+attacker_victory = "The great halls of Kheldurath echo with foreign boots. The forges grow cold. A city that stood for a thousand years falls to invaders who were willing to pay the price in blood."
+defender_victory = "The tunnels are choked with the dead. The invaders retreat into the sunlight, broken. Kheldurath seals its gates and begins counting its losses in the quiet dark."

@@ -2,7 +2,7 @@
 //!
 //! Tiers provide flat bonuses + scaling coefficients. Levels are the
 //! accumulated scaling value within a tier. Tiers are loaded from
-//! `assets/unit_tiers/*.toml`.
+//! `dataset/campaign/unit_tiers/*.toml`.
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
@@ -157,7 +157,7 @@ static TIERS: std::sync::OnceLock<Vec<TierTemplate>> = std::sync::OnceLock::new(
 
 pub fn get_or_load_tiers() -> &'static Vec<TierTemplate> {
     TIERS.get_or_init(|| {
-        let dir = std::path::Path::new("assets/unit_tiers");
+        let dir = std::path::Path::new("dataset/campaign/unit_tiers");
         let mut tiers = load_tiers_from_dir(dir);
         tiers.sort_by_key(|t| t.tier_index);
         if !tiers.is_empty() {

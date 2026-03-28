@@ -1,0 +1,47 @@
+# Guild shifts to war footing.
+
+category = "strategic"
+trigger = "war_declaration"
+prompt = "War has been declared. The guild must reorganize for sustained combat operations."
+deadline_secs = 60.0
+default_option = 0
+
+[[options]]
+label = "Total Mobilization"
+description = "Every member fights. Maximum strength, maximum risk."
+
+[[options.effects]]
+type = "supplies"
+amount = -25.0
+
+[[options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[options.effects]]
+type = "narrative"
+text = "Even the cooks pick up swords. The guild fights with everything it has."
+
+[[options]]
+label = "Professional Core"
+description = "Front-line fighters go to war. Support staff maintains the guild."
+
+[[options.effects]]
+type = "supplies"
+amount = -15.0
+
+[[options.effects]]
+type = "narrative"
+text = "A disciplined war party marches out. The guild continues to function behind them."
+
+[[options]]
+label = "Mercenary Supplement (50g)"
+description = "Hire mercenaries to bolster the ranks. Expensive but preserves guild members."
+
+[[options.effects]]
+type = "gold"
+amount = -50.0
+
+[[options.effects]]
+type = "narrative"
+text = "Sellswords arrive, hungry for coin and blood. The guild's own people stay safer."

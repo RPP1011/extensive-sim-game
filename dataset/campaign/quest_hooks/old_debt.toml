@@ -1,0 +1,61 @@
+# Someone comes to collect on an old debt.
+
+name = "Old Debt Called In"
+priority = 6
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "GuildReputation"
+min_reputation = 30.0
+
+[choice]
+category = "diplomacy"
+trigger = "hook"
+prompt = "A messenger arrives bearing a sealed document — a debt from the guild's founding days, owed to a merchant house. The amount is 80 gold, and they want payment now. The debt is legitimate."
+deadline_secs = 60.0
+default_option = 1
+
+[[choice.options]]
+label = "Pay in Full (80g)"
+description = "Honor the debt immediately. Clean books, clean conscience."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -80.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The debt is paid. The merchant bows. The guild's honor remains spotless."
+
+[[choice.options]]
+label = "Negotiate Terms (40g)"
+description = "Pay half now, half in services rendered. Both sides compromise."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -40.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A payment plan is agreed upon. Not ideal for either party, but workable."
+
+[[choice.options]]
+label = "Challenge the Debt"
+description = "Question the document's authenticity. Risky but could save 80 gold."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Lawyers are consulted. The debt may or may not hold up in court. Either way, the merchant is furious."

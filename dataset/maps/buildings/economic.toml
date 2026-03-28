@@ -1,0 +1,180 @@
+[[buildings]]
+id = "general_store"
+name = "General Store"
+category = "commercial"
+construction_cost = 80
+construction_ticks = 400
+maintenance_cost = 3
+
+[buildings.effects]
+trade_bonus = 0.1
+supply_range = 1
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "hamlet"
+required_resources = []
+
+[buildings.narrative]
+description = "A little bit of everything, and never quite enough of anything you need."
+
+[[buildings]]
+id = "market_hall"
+name = "Market Hall"
+category = "commercial"
+construction_cost = 200
+construction_ticks = 800
+maintenance_cost = 8
+
+[buildings.effects]
+trade_bonus = 0.25
+supply_range = 2
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "town"
+required_resources = ["timber", "stone"]
+
+[buildings.narrative]
+description = "A covered hall where merchants gather to haggle. The acoustics amplify every argument."
+
+[[buildings]]
+id = "warehouse"
+name = "Warehouse"
+category = "commercial"
+construction_cost = 150
+construction_ticks = 600
+maintenance_cost = 5
+
+[buildings.effects]
+storage_capacity = 500
+trade_bonus = 0.05
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "village"
+required_resources = ["timber"]
+
+[buildings.narrative]
+description = "Dry, secure, and rat-proof. Well, mostly rat-proof."
+
+[[buildings]]
+id = "bank"
+name = "Bank"
+category = "commercial"
+construction_cost = 400
+construction_ticks = 1200
+maintenance_cost = 15
+
+[buildings.effects]
+trade_bonus = 0.3
+tax_income = 0.1
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "city"
+required_resources = ["stone", "metal"]
+
+[buildings.narrative]
+description = "Where gold goes to sleep. The vaults are deeper than the cellar, and the interest rates deeper still."
+
+[[buildings]]
+id = "auction_house"
+name = "Auction House"
+category = "commercial"
+construction_cost = 250
+construction_ticks = 900
+maintenance_cost = 10
+
+[buildings.effects]
+trade_bonus = 0.2
+luxury_income = 0.15
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "town"
+required_resources = ["timber", "stone"]
+
+[buildings.narrative]
+description = "Fortunes change hands with the fall of a gavel. The auctioneer's voice carries above the crowd."
+
+[[buildings]]
+id = "tavern"
+name = "Tavern"
+category = "social"
+construction_cost = 60
+construction_ticks = 300
+maintenance_cost = 3
+
+[buildings.effects]
+morale_bonus = 0.1
+information_gathering = 0.15
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "hamlet"
+required_resources = []
+
+[buildings.narrative]
+description = "Cold ale, hot food, warm fire. The three pillars of civilization."
+
+[[buildings]]
+id = "inn"
+name = "Inn"
+category = "social"
+construction_cost = 100
+construction_ticks = 500
+maintenance_cost = 4
+
+[buildings.effects]
+morale_bonus = 0.1
+trade_bonus = 0.05
+healing_rate = 0.05
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "village"
+required_resources = ["timber"]
+
+[buildings.narrative]
+description = "A roof over your head and a door that locks. Luxury, by adventuring standards."
+
+[[buildings]]
+id = "theater"
+name = "Theater"
+category = "social"
+construction_cost = 300
+construction_ticks = 1000
+maintenance_cost = 12
+
+[buildings.effects]
+morale_bonus = 0.2
+culture_output = 0.15
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "city"
+required_resources = ["stone", "timber"]
+
+[buildings.narrative]
+description = "Where tragedies are performed and comedies happen in the audience."
+
+[[buildings]]
+id = "arena"
+name = "Arena"
+category = "social"
+construction_cost = 500
+construction_ticks = 1500
+maintenance_cost = 20
+
+[buildings.effects]
+morale_bonus = 0.25
+training_speed = 0.1
+garrison_bonus = 10
+
+[buildings.requirements]
+min_settlement_type = "city"
+required_resources = ["stone"]
+
+[buildings.narrative]
+description = "Blood and sand. The crowd's roar is the only judge that matters."

@@ -1,0 +1,65 @@
+# A faction invites the guild to a diplomatic feast.
+
+name = "Faction Feast"
+priority = 5
+repeatable = true
+cooldown_ticks = 6000
+
+[trigger]
+type = "FactionRelation"
+direction = "above"
+threshold = 30.0
+
+[choice]
+category = "diplomacy"
+trigger = "hook"
+prompt = "{faction_name} has invited the guild to a grand feast celebrating the harvest. The invitation is equal parts hospitality and political maneuvering. Attending means playing their game — but declining could insult them."
+deadline_secs = 90.0
+default_option = 0
+
+[[choice.options]]
+label = "Attend with Gifts (25g)"
+description = "Bring fine wine and exotic goods. Make an impression."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -25.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 15.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild master raises a toast to friendship. {faction_name} nods approvingly."
+
+[[choice.options]]
+label = "Attend Empty-Handed"
+description = "Show up, eat their food, smile politely. Free meal, modest goodwill."
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "You attend and make pleasant conversation. Nothing memorable, nothing offensive."
+
+[[choice.options]]
+label = "Send Regrets"
+description = "Decline politely. They'll understand. Probably."
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A polite letter is sent. The feast goes on without you."

@@ -1,0 +1,70 @@
+name = "Ashenmoor"
+type = "city"
+population = 8000
+prosperity = 50.0
+
+[defenses]
+wall_type = "stone_wall"
+wall_hp = 1200
+gate_count = 3
+tower_count = 8
+garrison_capacity = 200
+moat = false
+
+[[districts]]
+name = "Smelter Row"
+type = "industrial"
+buildings = ["great_foundry", "smelter", "coal_yard", "slag_heap"]
+population_pct = 20.0
+wealth = 55.0
+threat = 15.0
+
+[[districts]]
+name = "Trade Quarter"
+type = "commercial"
+buildings = ["metal_exchange", "tavern", "inn", "provisioner"]
+population_pct = 15.0
+wealth = 50.0
+threat = 10.0
+
+[[districts]]
+name = "Ironside"
+type = "residential"
+buildings = ["worker_housing", "bathhouse", "shrine", "brewery"]
+population_pct = 30.0
+wealth = 25.0
+threat = 15.0
+
+[[districts]]
+name = "The Pits"
+type = "slums"
+buildings = ["hovels", "fighting_pit", "fence", "unlicensed_alchemist"]
+population_pct = 15.0
+wealth = 10.0
+threat = 45.0
+
+[[districts]]
+name = "Garrison"
+type = "military"
+buildings = ["fortress_barracks", "armory", "siege_workshop", "training_ground"]
+population_pct = 10.0
+wealth = 40.0
+threat = 5.0
+
+[[districts]]
+name = "Old Temple"
+type = "religious"
+buildings = ["temple", "crypt", "bell_tower"]
+population_pct = 10.0
+wealth = 35.0
+threat = 10.0
+
+[economy]
+primary_exports = ["steel", "weapons", "armor", "siege_equipment"]
+primary_imports = ["food", "timber", "cloth", "luxury_goods"]
+trade_routes = 5
+market_size = "large"
+
+[narrative]
+description = "A city of smoke and steel. The foundries run day and night, and the workers' coughs echo through the streets. But the blades they forge are the finest in the realm."
+flavor = ["Ash falls like grey snow", "The sky glows orange at night", "Everything tastes of soot"]

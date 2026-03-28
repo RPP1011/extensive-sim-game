@@ -1,0 +1,63 @@
+name = "Castle Great Hall"
+map_type = "castle_interior"
+width = 24
+height = 20
+
+[terrain]
+layout = """
+WWWWWWWWWWWWWWWWWWWWWWWW
+W......................W
+W..PPPP..PPPP..PPPP....W
+W..P..P..P..P..P..P....W
+W..PPPP..PPPP..PPPP....W
+W......................W
+W....CCCCCCCCCCCC......W
+W....C..........C......W
+W....C..........C......W
+W....C....TT....C......W
+W....C....TT....C......W
+W....C..........C......W
+W....C..........C......W
+W....CCCCGGCCCCCC......W
+W......................W
+W..SS..........SS......W
+W..SS..........SS......W
+W......................W
+WWWWWWWWGGGGWWWWWWWWWWWW
+........................
+"""
+
+[[spawn_zones]]
+name = "throne_guard"
+team = 0
+rect = [5, 6, 16, 13]
+
+[[spawn_zones]]
+name = "attackers"
+team = 1
+rect = [2, 17, 22, 19]
+
+[[objectives]]
+type = "capture_throne"
+position = [11, 10]
+hp = 0
+
+[[cover_positions]]
+position = [3, 2]
+type = "full"
+
+[[cover_positions]]
+position = [8, 2]
+type = "full"
+
+[[cover_positions]]
+position = [13, 2]
+type = "full"
+
+[[cover_positions]]
+position = [3, 15]
+type = "half"
+
+[[cover_positions]]
+position = [18, 15]
+type = "half"

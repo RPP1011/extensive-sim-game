@@ -1,0 +1,81 @@
+name = "Diplomatic Corps"
+description = "A bard, a cleric, and a rogue — all skilled in negotiation and persuasion. They'd rather talk their way out of trouble than fight, and they're surprisingly good at it. Strong faction bonuses, weak in combat."
+gold_bonus = 40.0
+supply_bonus = 10.0
+reputation_bonus = 20.0
+items = []
+
+[[adventurers]]
+id = 1
+name = "Ambassador Lyric"
+archetype = "bard"
+level = 3
+xp = 0
+traits = ["diplomat_born", "merchant_mind"]
+status = "Idle"
+loyalty = 65.0
+stress = 5.0
+fatigue = 3.0
+injury = 0.0
+resolve = 55.0
+morale = 75.0
+guild_relationship = 50.0
+
+[adventurers.stats]
+max_hp = 50.0
+attack = 6.0
+defense = 5.0
+speed = 10.0
+ability_power = 14.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 2
+name = "Prelate Voss"
+archetype = "cleric"
+level = 3
+xp = 0
+traits = ["diplomat_born"]
+status = "Idle"
+loyalty = 70.0
+stress = 3.0
+fatigue = 2.0
+injury = 0.0
+resolve = 60.0
+morale = 80.0
+guild_relationship = 55.0
+
+[adventurers.stats]
+max_hp = 55.0
+attack = 4.0
+defense = 9.0
+speed = 8.0
+ability_power = 16.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 3
+name = "Silvertongue Fen"
+archetype = "rogue"
+level = 2
+xp = 0
+traits = ["merchant_mind"]
+status = "Idle"
+loyalty = 45.0
+stress = 10.0
+fatigue = 5.0
+injury = 0.0
+resolve = 45.0
+morale = 60.0
+guild_relationship = 35.0
+
+[adventurers.stats]
+max_hp = 48.0
+attack = 12.0
+defense = 5.0
+speed = 14.0
+ability_power = 6.0
+
+[adventurers.equipment]

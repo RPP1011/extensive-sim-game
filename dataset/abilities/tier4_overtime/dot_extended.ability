@@ -1,0 +1,113 @@
+// Tier 4: Extended DoT variants
+
+ability Ignite {
+    target: enemy, range: 4.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 8/1s for 4s [FIRE: 45]
+}
+
+ability Corruption {
+    target: enemy, range: 5.0
+    cooldown: 8s, cast: 200ms
+    hint: damage
+
+    damage 10/1s for 5s [DARK: 50]
+}
+
+ability PoisonSting {
+    target: enemy, range: 4.0
+    cooldown: 5s, cast: 100ms
+    hint: damage
+
+    damage 6/1s for 4s [POISON: 40]
+}
+
+ability Immolate {
+    target: enemy, range: 3.0
+    cooldown: 7s, cast: 300ms
+    hint: damage
+
+    damage 12/1s for 4s [FIRE: 50]
+}
+
+ability CurseOfAgony {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: damage
+
+    damage 8/1s for 6s [DARK: 45]
+}
+
+ability AcidBurn {
+    target: enemy, range: 4.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 7/1s for 5s [POISON: 45]
+}
+
+ability FrostBurn {
+    target: enemy, range: 5.0
+    cooldown: 7s, cast: 200ms
+    hint: damage
+
+    damage 9/1s for 4s [ICE: 45]
+}
+
+ability HolyFlame {
+    target: enemy, range: 4.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 8/1s for 4s [HOLY: 40]
+}
+
+ability Bleed {
+    target: enemy, range: 1.5
+    cooldown: 4s, cast: 100ms
+    hint: damage
+
+    damage 5/1s for 4s [PHYSICAL: 35]
+}
+
+ability DeepWound {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 10/1s for 4s [PHYSICAL: 45]
+}
+
+ability NecroticWound {
+    target: enemy, range: 3.0
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 12/1s for 5s [DARK: 50]
+}
+
+ability VenomCloud {
+    target: enemy, range: 5.0
+    cooldown: 7s, cast: 200ms
+    hint: damage
+
+    damage 7/1s for 6s [POISON: 40]
+}
+
+ability SoulFire {
+    target: enemy, range: 5.0
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 15/1s for 3s [DARK: 55]
+}
+
+ability ScaldingBlast {
+    target: enemy, range: 4.0
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    damage 6/1s for 3s [FIRE: 35]
+}

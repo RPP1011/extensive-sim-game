@@ -496,6 +496,10 @@ mod tests {
             journal: Vec::new(),
 
             equipped_items: Vec::new(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: Default::default(),
+            ticks_since_income: 0,
         };
 
         // Quest in a different region should not increment
@@ -569,6 +573,10 @@ mod tests {
             journal: Vec::new(),
 
             equipped_items: Vec::new(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: Default::default(),
+            ticks_since_income: 0,
         };
 
         // Wrong faction — no increment

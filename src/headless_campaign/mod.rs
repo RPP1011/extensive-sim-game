@@ -37,9 +37,19 @@ pub mod llm;
 pub mod mcts;
 pub mod quest_gen;
 pub mod quest_hooks;
+/// DEPRECATED: Legacy `SkillEffect` dispatch. Use `unified_dispatch` instead.
 pub mod skill_effects;
+/// DEPRECATED: Legacy `SkillEffect` templates. New skills should be `.ability` files
+/// in `dataset/abilities/campaign/` loaded via the unified DSL.
 pub mod skill_templates;
 pub mod state;
+/// Unified campaign effect dispatch using `tactical_sim::effects::Effect`.
+/// This is the replacement for `skill_effects.rs`. Migration path:
+/// 1. Change `GrantedSkill.skill_effect` from `Option<SkillEffect>` to `Option<Effect>`
+/// 2. Update `skill_templates.rs` to construct `Effect` variants (or load from .ability files)
+/// 3. Replace `apply_skill_effect()` calls with `campaign_apply_effect()`
+/// 4. Remove `skill_effects.rs` and the `SkillEffect` enum
+pub mod unified_dispatch;
 pub mod step;
 pub mod tokens;
 pub mod unit_tiers;
@@ -60,3 +70,5 @@ mod tests;
 pub use actions::{CampaignAction, CampaignStepResult, WorldEvent, ActionResult, StepDeltas};
 pub use state::{CampaignState, CampaignOutcome, CAMPAIGN_TICK_MS, CAMPAIGN_TURN_SECS};
 pub use step::step_campaign;
+pub use step::step_world;
+pub use step::seed_world_population;

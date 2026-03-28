@@ -1,0 +1,10 @@
+[scenario]
+name = "lv30_24v4_all_combat_champions"
+seed = 2400
+hero_count = 24
+enemy_count = 0
+difficulty = 1
+max_ticks = 15000
+room_type = "Boss"
+hero_templates = ["lv30_ranger", "lv30_cleric", "lv30_mage", "lv30_warrior", "lv30_ranger", "lv30_cleric", "lv30_mage", "lv30_warrior", "lv30_ranger", "lv30_cleric", "lv30_mage", "lv30_warrior", "lv30_ranger", "lv30_cleric", "lv30_mage", "lv30_warrior", "lv30_ranger", "lv30_cleric", "lv30_mage", "lv30_warrior", "lv30_ranger", "lv30_cleric", "lv30_mage", "lv30_warrior"]
+enemy_hero_templates = ["dax_the_unbreaking", "sera_ironfang", "kira_long_shadow", "ashenveil"]

@@ -1,0 +1,50 @@
+name = "Cavern Ambush"
+map_type = "dungeon"
+width = 30
+height = 16
+
+[terrain]
+layout = """
+WWWWWWWW......WWWWWWWW........
+WWW......................WWWWW.
+WW........................WWWW
+W..........^^..^^..........WWW
+W......RRRRRRRRRRRRRR......WWW
+W......R............R.........
+.......R............R.........
+.......R....~~......R.........
+.......R....~~......R.........
+.......R............R.........
+W......R............R......WWW
+W......RRRRRRRRRRRRRR......WWW
+W..........^^..^^..........WWW
+WW........................WWWW
+WWW......................WWWWW
+WWWWWWWW......WWWWWWWW........
+"""
+
+[[spawn_zones]]
+name = "cave_dwellers"
+team = 0
+rect = [7, 5, 22, 10]
+
+[[spawn_zones]]
+name = "explorers"
+team = 1
+rect = [0, 5, 5, 10]
+
+[[cover_positions]]
+position = [10, 3]
+type = "half"
+
+[[cover_positions]]
+position = [16, 3]
+type = "half"
+
+[[cover_positions]]
+position = [10, 12]
+type = "half"
+
+[[cover_positions]]
+position = [16, 12]
+type = "half"

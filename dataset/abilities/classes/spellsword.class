@@ -1,0 +1,21 @@
+class Spellsword {
+    stat_growth: +3 attack, +3 ability_power, +1 speed per level
+
+    tags: melee, arcane, hybrid, blade_magic, consolidation
+
+    scaling hp_percent {
+        when hp_percent > 50: +10% ability_power
+        when hp_percent < 50: +10% attack
+        always: +5% speed
+    }
+
+    abilities {
+        level 40: spell_edge "Every melee strike triggers a spell effect; every spell cast triggers a phantom blade strike"
+        level 45: mana_blade "Conjure a weapon made of pure magic that scales with both attack and ability power"
+        level 50: arcane_riposte "When hit by either spell or blade, counter with the opposite"
+        level 60: dual_mastery "Simultaneously cast a spell and execute a weapon technique"
+        level 80: unity_of_arts "Blade and spell become one; all damage draws from the higher of attack or ability power"
+    }
+
+    requirements: level 40, classes: Knight + Mage
+}

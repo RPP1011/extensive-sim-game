@@ -1,0 +1,78 @@
+# Two factions begin an economic war that affects the guild.
+
+name = "Trade War"
+priority = 6
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "FactionRelation"
+direction = "below"
+threshold = -20.0
+
+[choice]
+category = "diplomacy"
+trigger = "hook"
+prompt = "Two factions have begun an economic war — tariffs, embargoes, and price manipulation. Supply lines are disrupted and costs are rising. The guild is caught in the crossfire."
+deadline_secs = 90.0
+default_option = 1
+
+[[choice.options]]
+label = "Mediate"
+description = "Broker a trade agreement between the factions. Costs diplomatic capital."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 12.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 10.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 1
+delta = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild sits both sides at a table. Grudgingly, terms are agreed upon."
+
+[[choice.options]]
+label = "Side with the Stronger"
+description = "Pick the winning side and profit from the alliance."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 25.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 15.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 1
+delta = -20.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild throws its weight behind the stronger faction. Business is business."
+
+[[choice.options]]
+label = "Stay Neutral"
+description = "Trade with both sides equally. Accept higher prices as the cost of independence."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild maintains its independence, paying premium prices to remain above the fray."

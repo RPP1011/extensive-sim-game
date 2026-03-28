@@ -1,0 +1,29 @@
+name = "The Iron Marches"
+terrain = "plains"
+climate = "temperate"
+size = "large"
+
+[generation]
+settlement_density = 0.3
+road_connectivity = 0.7
+wilderness_danger = 0.4
+resource_richness = 0.5
+
+[settlement_distribution]
+hamlet_pct = 40
+village_pct = 30
+town_pct = 20
+city_pct = 8
+fortress_pct = 2
+
+[terrain_features]
+rivers = 2
+mountains = false
+forests = true
+coast = false
+lakes = 1
+
+[narrative]
+description = "Rolling grasslands dotted with farming communities. The old imperial road runs straight through, connecting the major towns."
+threats = ["bandits", "goblin_raids", "wild_beasts"]
+opportunities = ["fertile_land", "trade_routes", "ancient_ruins"]

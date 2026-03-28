@@ -1,0 +1,77 @@
+name = "The Ward Breaker"
+description = "Ancient wards protect modest walls. The wards suppress abilities, deflect projectiles, and laugh at conventional siege. The attackers need a strategy specifically designed to crack the wards before the walls become relevant."
+difficulty = "hard"
+
+[settlement]
+template = "warded_town"
+wall_type = "stone_wall"
+wall_hp = 2000
+gate_type = "iron_gate"
+gate_hp = 1500
+towers = 4
+tower_type = "stone_tower"
+garrison = 30
+terrain = "highland"
+
+[settlement.wards]
+type = "ancient_ward"
+ward_hp = 5000
+ward_level = 50
+anti_magic_radius = 10.0
+ability_damage_reduction = 0.7
+projectile_deflection = 0.5
+self_repairing = true
+repair_rate = 10
+
+[attacker]
+army_size = 100
+siege_equipment = ["ward_breaker", "arcane_cannon", "trebuchet", "battering_ram", "mantlet"]
+supply_ticks = 2000
+reinforcement_chance = 0.2
+morale = 0.7
+commander_level = 25
+
+[attacker.ward_strategy]
+# The ward_breaker does 200 damage per tick to wards specifically
+# The arcane_cannon bypasses ward_level checks (anti-ward weapon)
+# Conventional siege (trebuchet) is deflected 50% by the ward
+# Ward self-repairs at 10 HP/tick, so you need sustained DPS > 10 to make progress
+# Total ward-breaking DPS needed: 200 (ward_breaker) + arcane_cannon
+# Time to crack: ~25 ticks of sustained fire
+# But the garrison isn't idle — sorties to destroy the ward_breaker are likely
+description = "Crack the wards first, then the walls are just stone"
+
+[defender]
+garrison_strength = 30
+adventurer_slots = 4
+supplies_ticks = 3000
+reinforcement_chance = 0.4
+morale = 0.9
+special_defenses = ["boiling_oil", "arrow_slits", "murder_holes"]
+commander_level = 28
+
+[power_context]
+defender_avg_level = 22
+attacker_avg_level = 18
+wall_effective_level = 50
+has_wards = true
+ward_type = "ancient_ward"
+high_level_threat = "none"
+
+# Power scaling analysis:
+# Without cracking wards: ability damage reduced 70%, projectiles deflected 50%
+# Attackers at level 18 vs wall effective level 50: (18/50)^2 = 0.13x damage
+# Even if they reach the wall, they're doing 13% normal damage
+# With wards broken: wall is just 2000 HP stone at effective level 25
+# (18/25)^2 = 0.52x — still reduced, but workable with siege equipment
+# Siege equipment ignores level scaling, so trebuchet does full damage post-ward
+
+[victory_conditions]
+attacker_wins = ["wards_broken_and_wall_breached", "gate_destroyed", "defender_surrender"]
+defender_wins = ["attacker_retreat", "ward_breaker_destroyed", "attacker_starved"]
+time_limit_ticks = 4000
+
+[narrative]
+opening = "The walls are old stone, nothing special. But the shimmer in the air above them — that's what makes the siege commander's jaw tighten. Ancient wards, older than the town itself, older than the kingdom. The catapult stones bounce off the air ten feet from the wall. 'Bring up the ward breaker,' he orders."
+attacker_victory = "The ward shatters like glass, and for a moment, the sky splits with light. Then it's dark, and the walls are just walls. The trebuchet stones find their mark. The gate buckles. The town that thought itself invulnerable learns the difference between ancient and eternal."
+defender_victory = "The ward breaker burns. A daring sortie in the pre-dawn dark, and the one weapon that mattered is kindling. The wards hum and repair themselves, and the army outside stares at walls they cannot touch. Some things are ancient for a reason."

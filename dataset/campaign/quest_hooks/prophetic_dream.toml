@@ -1,0 +1,49 @@
+# An adventurer has a prophetic dream.
+
+name = "Prophetic Dream"
+priority = 6
+repeatable = true
+cooldown_ticks = 9000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 9000
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "{adventurer_name} wakes screaming, drenched in sweat. They saw a vision — a great darkness rising from beneath the earth, and the guild consumed by fire. Three days later, the same dream. Then a third time. The details are always identical."
+deadline_secs = 90.0
+default_option = 1
+
+[[choice.options]]
+label = "Investigate the Vision (25g)"
+description = "Hire a seer to interpret the dream. Take it seriously."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -25.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A blind seer listens to the dream, face pale. 'This is not imagination,' she says. 'This is a warning.'"
+
+[[choice.options]]
+label = "Prepare Defenses"
+description = "Whether the dream is true or not, extra precautions can't hurt."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild fortifies its perimeter, just in case. Better paranoid than dead."
+
+[[choice.options]]
+label = "Dismiss It"
+description = "Dreams are dreams. The guild doesn't make policy based on nightmares."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer_name} is told to sleep it off. The dreams continue, but the guild moves on."

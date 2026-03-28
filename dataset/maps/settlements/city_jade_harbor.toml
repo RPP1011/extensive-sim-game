@@ -1,0 +1,78 @@
+name = "Jade Harbor"
+type = "city"
+population = 12000
+prosperity = 80.0
+
+[defenses]
+wall_type = "fortified"
+wall_hp = 1400
+gate_count = 3
+tower_count = 10
+garrison_capacity = 250
+moat = false
+
+[[districts]]
+name = "Merchant Prince Quarter"
+type = "noble"
+buildings = ["trade_palace", "merchant_estates", "private_docks", "garden_terrace"]
+population_pct = 10.0
+wealth = 95.0
+threat = 5.0
+
+[[districts]]
+name = "Great Bazaar"
+type = "commercial"
+buildings = ["bazaar", "silk_exchange", "spice_warehouse", "gem_dealer", "tea_house", "bank"]
+population_pct = 20.0
+wealth = 85.0
+threat = 15.0
+
+[[districts]]
+name = "Harbor Front"
+type = "harbor"
+buildings = ["deep_water_dock", "drydock", "naval_yard", "lighthouse", "customs_fortress"]
+population_pct = 15.0
+wealth = 70.0
+threat = 20.0
+
+[[districts]]
+name = "Artisan Quarter"
+type = "industrial"
+buildings = ["jade_carver", "silk_weaver", "perfumer", "lacquer_workshop"]
+population_pct = 12.0
+wealth = 60.0
+threat = 5.0
+
+[[districts]]
+name = "Foreign Quarter"
+type = "residential"
+buildings = ["embassy_row", "foreign_temples", "translation_house", "exotic_inn"]
+population_pct = 13.0
+wealth = 50.0
+threat = 15.0
+
+[[districts]]
+name = "Old City"
+type = "residential"
+buildings = ["traditional_houses", "public_garden", "ancestral_shrine", "tea_garden"]
+population_pct = 20.0
+wealth = 40.0
+threat = 5.0
+
+[[districts]]
+name = "Tide Quarter"
+type = "slums"
+buildings = ["stilt_shacks", "smuggler_cave", "rat_catcher", "seaweed_farm"]
+population_pct = 10.0
+wealth = 10.0
+threat = 35.0
+
+[economy]
+primary_exports = ["jade", "silk", "spices", "tea", "porcelain"]
+primary_imports = ["iron", "timber", "wool", "grain"]
+trade_routes = 10
+market_size = "regional_hub"
+
+[narrative]
+description = "Where east meets west across the Jade Sea. Every dock speaks a different language, every warehouse holds a different fortune. The merchant princes rule here, not kings."
+flavor = ["Jade wind chimes in every doorway", "The smell of a hundred spices", "Ships from lands you've never heard of"]

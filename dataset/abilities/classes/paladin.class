@@ -1,0 +1,21 @@
+class Paladin {
+    stat_growth: +2 attack, +2 defense, +2 ability_power, +1 max_hp per level
+
+    tags: melee, holy, healing, protection, devotion
+
+    scaling party_alive_count {
+        when party_members > 0: +10% ability_power
+        when party_members >= 2: aura max_hp +5
+        always: +5% defense
+    }
+
+    abilities {
+        level 1: smite "Holy-infused strike that deals bonus damage to undead"
+        level 5: lay_on_hands "Heal a single ally for a significant amount"
+        level 10: divine_shield "Become invulnerable for 3 seconds"
+        level 20: consecrate "Blessed ground that heals allies and burns enemies"
+        level 40: final_stand "When an ally would die, they are instead healed to full once per battle"
+    }
+
+    requirements: level 1
+}

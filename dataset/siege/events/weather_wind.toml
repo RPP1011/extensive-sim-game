@@ -1,0 +1,46 @@
+[[events]]
+id = "weather_wind"
+name = "Strong Winds"
+phase = "bombardment"
+
+[events.trigger]
+type = "WeatherChange"
+threshold = 0.0
+
+[events.choice]
+prompt = "A fierce wind picks up, howling across the siege field. It catches banners and topples tents. Fire spreads faster. Projectiles drift."
+deadline_secs = 20.0
+
+[[events.choice.options]]
+label = "Fire Bombardment"
+description = "Use the wind to spread fire. Launch incendiaries downwind into the settlement."
+[[events.choice.options.effects]]
+type = "fire_attack"
+fire_spread_multiplier = 3.0
+accuracy_penalty = 0.3
+settlement_fire_chance = 0.5
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Pitch-wrapped stones arc into the wind. Where they land, fires bloom and the wind carries them hungrily from rooftop to rooftop."
+
+[[events.choice.options]]
+label = "Secure Camp Against Fire"
+description = "The wind is a double-edged sword. Protect your own positions."
+[[events.choice.options.effects]]
+type = "siege_progress"
+ticks_cost = 50
+camp_fire_resistance = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Water barrels are positioned, fire lines cleared. The wind howls but the camp is ready. Better safe than burning."
+
+[[events.choice.options]]
+label = "Adjust Bombardment Angle"
+description = "Compensate for wind and continue normal bombardment at reduced accuracy."
+[[events.choice.options.effects]]
+type = "weather_modifier"
+duration = 200
+accuracy_penalty = 0.15
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The trebuchet crews wrestle with the wind, adjusting aim by feel and experience. Some stones fly wide. Enough find their mark."

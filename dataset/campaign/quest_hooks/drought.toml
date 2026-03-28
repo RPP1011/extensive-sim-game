@@ -1,0 +1,57 @@
+# A prolonged drought threatens the region.
+
+name = "Drought"
+priority = 7
+repeatable = true
+cooldown_ticks = 10000
+
+[trigger]
+type = "SeasonChange"
+season = "Summer"
+
+[choice]
+category = "world_event"
+trigger = "hook"
+prompt = "Three months without rain. Wells are running dry, crops wither in the fields, and tempers flare. The region's water supply is running out. Factions begin hoarding what remains."
+deadline_secs = 90.0
+default_option = 0
+
+[[choice.options]]
+label = "Find Water (30g)"
+description = "Send explorers to find underground springs or divert a river."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Dowsers and engineers fan out. Three days later, a shout — water bubbles up from fresh-dug stone."
+
+[[choice.options]]
+label = "Ration Water"
+description = "Enforce strict water rationing. Unpopular but necessary."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = -3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Guards stand at every well. Rations are measured by the cup. The guild endures the resentment."
+
+[[choice.options]]
+label = "Buy Water from Merchants (50g)"
+description = "Import water at exorbitant prices. Solves the problem but empties the treasury."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -50.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Wagon after wagon of barrels rolls in. The price is criminal, but no one goes thirsty."

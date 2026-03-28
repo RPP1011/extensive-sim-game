@@ -1,0 +1,50 @@
+[[events]]
+id = "tunnel_discovered"
+name = "Sapper Tunnel Discovered"
+phase = "surround"
+
+[events.trigger]
+type = "SapperProgress"
+threshold = 0.5
+
+[events.choice]
+prompt = "The defenders have detected the sapper tunnel! They're digging a counter-mine to intercept. Underground, the sappers hear the sound of picks above them."
+deadline_secs = 20.0
+
+[[events.choice.options]]
+label = "Abandon the Tunnel"
+description = "Pull the sappers out before the defenders break through. Lose the progress."
+[[events.choice.options.effects]]
+type = "siege_progress"
+sapper_progress_lost = true
+sappers_saved = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The sappers crawl backward through the dark, leaving their tools behind. The tunnel is lost, but the men are not."
+
+[[events.choice.options]]
+label = "Fight Underground"
+description = "Hold the tunnel. Fight the counter-miners in the dark."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "underground_fight"
+attacker_count = 6
+defender_count = 6
+visibility = 0.2
+terrain = "tunnel"
+[[events.choice.options.effects]]
+type = "narrative"
+text = "In the dark beneath the walls, men fight with short swords and daggers. The tunnel is barely wide enough for two. It is the worst kind of combat."
+
+[[events.choice.options]]
+label = "Collapse It On Them"
+description = "Detonate the charges early. The wall takes some damage, the counter-miners take more."
+[[events.choice.options.effects]]
+type = "siege_progress"
+wall_damage = 300
+defender_casualties = 4
+sapper_casualties = 2
+tunnel_destroyed = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Fire meets timber meets earth. The ground shakes. A section of wall sags drunkenly. Underground, silence."

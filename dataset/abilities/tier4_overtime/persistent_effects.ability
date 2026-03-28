@@ -1,0 +1,100 @@
+// Tier 4: Persistent buff/debuff/shield over time
+
+ability RegenerativeShield {
+    target: ally, range: 4.0
+    cooldown: 10s, cast: 300ms
+    hint: defense
+
+    shield 30 for 5s
+    heal 6/1s for 5s [HOLY: 30]
+}
+
+ability ProlongedAgony {
+    target: enemy, range: 5.0
+    cooldown: 8s, cast: 200ms
+    hint: damage
+
+    damage 5/1s for 6s [DARK: 40]
+    slow 0.2 for 6s [DARK: 30]
+}
+
+ability LingeringCurse {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: utility
+
+    debuff damage_output 0.85 for 6s [DARK: 40]
+    damage 4/1s for 6s [DARK: 35]
+}
+
+ability SteadyResolve {
+    target: self
+    cooldown: 12s, cast: 200ms
+    hint: defense
+
+    shield 40 for 6s
+    buff damage_output 0.1 for 6s
+}
+
+ability CorrosiveSpit {
+    target: enemy, range: 4.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 6/1s for 4s [POISON: 40]
+    debuff move_speed 0.2 for 4s [POISON: 30]
+}
+
+ability EmpoweredAura {
+    target: self
+    cooldown: 15s, cast: 300ms
+    hint: utility
+
+    buff damage_output 0.15 for 8s
+    buff attack_speed 0.15 for 8s
+}
+
+ability FrostAura {
+    target: enemy, range: 3.0
+    cooldown: 8s, cast: 200ms
+    hint: damage
+
+    damage 5/1s for 5s [ICE: 35]
+    slow 0.25 for 5s [ICE: 35]
+}
+
+ability HealingWard {
+    target: ground, range: 5.0
+    cooldown: 12s, cast: 400ms
+    hint: heal
+
+    deliver zone { duration: 6s, tick: 1s } {
+        on_hit {
+            heal 10 in circle(3.0) [HOLY: 30]
+        }
+    }
+}
+
+ability PoisonPool {
+    target: ground, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: damage
+
+    deliver zone { duration: 5s, tick: 1s } {
+        on_hit {
+            damage 8 in circle(2.5) [POISON: 40]
+        }
+    }
+}
+
+ability FlamePillar {
+    target: ground, range: 5.0
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    deliver zone { duration: 4s, tick: 1s } {
+        on_hit {
+            damage 12 in circle(2.0) [FIRE: 45]
+        }
+    }
+}

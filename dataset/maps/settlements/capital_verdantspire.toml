@@ -1,0 +1,86 @@
+name = "Verdantspire"
+type = "capital"
+population = 25000
+prosperity = 80.0
+
+[defenses]
+wall_type = "citadel"
+wall_hp = 2500
+gate_count = 4
+tower_count = 16
+garrison_capacity = 1000
+moat = false
+
+[[districts]]
+name = "Elder Grove"
+type = "noble"
+buildings = ["tree_palace", "council_grove", "spirit_garden", "elder_library"]
+population_pct = 5.0
+wealth = 95.0
+threat = 5.0
+
+[[districts]]
+name = "Canopy Quarter"
+type = "residential"
+buildings = ["treehouse_homes", "hanging_gardens", "sky_bridges", "rain_catchers"]
+population_pct = 25.0
+wealth = 50.0
+threat = 5.0
+
+[[districts]]
+name = "Root Market"
+type = "commercial"
+buildings = ["living_market", "herbalist_guild", "wood_shaper", "beast_handler", "apothecary"]
+population_pct = 15.0
+wealth = 65.0
+threat = 10.0
+
+[[districts]]
+name = "Druid Circle"
+type = "religious"
+buildings = ["sacred_grove", "moon_pool", "beast_sanctuary", "nature_shrine"]
+population_pct = 8.0
+wealth = 60.0
+threat = 5.0
+
+[[districts]]
+name = "Ranger Lodge"
+type = "military"
+buildings = ["ranger_headquarters", "beast_pens", "archery_range", "scout_tower"]
+population_pct = 10.0
+wealth = 45.0
+threat = 5.0
+
+[[districts]]
+name = "Undergrowth"
+type = "industrial"
+buildings = ["lumber_mill", "charcoal_maker", "mushroom_farm", "root_cellar"]
+population_pct = 12.0
+wealth = 35.0
+threat = 10.0
+
+[[districts]]
+name = "Scholar's Bough"
+type = "academic"
+buildings = ["nature_academy", "cartography_hall", "beast_lore_library"]
+population_pct = 7.0
+wealth = 55.0
+threat = 5.0
+
+[[districts]]
+name = "Ground Level"
+type = "residential"
+buildings = ["surface_houses", "well", "bakery", "brewery"]
+population_pct = 18.0
+wealth = 25.0
+threat = 15.0
+
+[economy]
+primary_exports = ["rare_herbs", "living_wood", "trained_beasts", "nature_magic"]
+primary_imports = ["metal", "stone", "manufactured_goods", "grain"]
+trade_routes = 6
+market_size = "regional_hub"
+
+[narrative]
+description = "A city grown within and around ancient trees taller than castle towers. The elders say the trees chose this place, and the people simply followed."
+flavor = ["Sunlight filters through the canopy", "Bridges of living wood connect the treehouses", "Birds nest in the palace roof"]

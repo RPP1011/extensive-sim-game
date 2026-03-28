@@ -1,0 +1,21 @@
+class Commander {
+    stat_growth: +1 attack, +2 defense, +2 max_hp, +1 speed per level
+
+    tags: leadership, strategy, formations, military, tactics
+
+    scaling party_alive_count {
+        when party_members >= 2: +10% defense
+        when party_members >= 4: aura attack +3
+        always: aura defense +2
+    }
+
+    abilities {
+        level 1: rally "Restore morale to shaken allies"
+        level 5: formation_order "Grant a formation bonus to the entire party"
+        level 10: tactical_retreat "Disengage the party from combat without penalty"
+        level 20: flanking_maneuver "Reposition all allies simultaneously for positional advantage"
+        level 40: generals_gambit "Issue a single order that overrides all AI behavior for 10 seconds with perfect coordination"
+    }
+
+    requirements: level 1
+}

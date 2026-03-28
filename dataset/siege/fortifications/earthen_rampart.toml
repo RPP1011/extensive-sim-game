@@ -1,0 +1,48 @@
+[[fortifications]]
+id = "earthen_rampart"
+name = "Earthen Rampart"
+tier = 1
+
+[fortifications.stats]
+wall_hp = 800
+height = 3.0
+thickness = 4.0
+defender_cover = 0.5
+ranged_bonus = 0.15
+climb_difficulty = 0.5
+
+[fortifications.construction]
+cost = 30
+ticks = 500
+resources = ["earth"]
+builder_class_bonus = 0.6
+
+[fortifications.weaknesses]
+trebuchet_multiplier = 0.8
+sapper_multiplier = 0.5
+fire_resistant = true
+magic_resistant = false
+rain_damage_per_tick = 0.5
+
+[fortifications.power_scaling]
+effective_level = 8
+builder_class_bonus = true
+enchantable = false
+age_scaling = 0.005
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 0.0
+ability_damage_reduction = 0.0
+projectile_deflection = 0.0
+ward_hp = 0
+ward_level = 0
+
+[fortifications.garrison_bonus]
+defender_multiplier = 2.0
+ranged_accuracy_bonus = 0.1
+melee_disadvantage = 0.2
+cover_rating = 0.4
+
+[fortifications.narrative]
+description = "Packed earth and ditches, the oldest fortification known. What it lacks in height it makes up in sheer mass. Trebuchet stones sink into it and stick. Sappers find only more dirt."

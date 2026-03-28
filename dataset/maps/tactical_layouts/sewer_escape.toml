@@ -1,0 +1,47 @@
+name = "Sewer Escape"
+map_type = "dungeon"
+width = 24
+height = 16
+
+[terrain]
+layout = """
+WWWWWWWWWWWWWWWWWWWWWWWW
+W..~~..WWWW..~~..WWWWWW
+W..~~..W..W..~~..W...WW
+W......WGGW......WGGWWW
+W......W..W......W...WW
+WWGWWWWW..WWGWWWWW...WW
+W..W..~~..W..W..~~...WW
+W..W..~~..W..W..~~...WW
+WWWWWWGWWWWWWWWWGWWWWWWW
+W..~~..............~~..W
+W..~~..............~~..W
+W......RRRRRRRR........W
+W......R......R........W
+W......RRRGRRRR........W
+W....................W.W
+WWWWWWWWWWGGGGWWWWWWWWWW
+"""
+
+[[spawn_zones]]
+name = "escapees"
+team = 0
+rect = [1, 1, 6, 7]
+
+[[spawn_zones]]
+name = "pursuers"
+team = 1
+rect = [4, 10, 18, 14]
+
+[[objectives]]
+type = "escape"
+position = [11, 15]
+hp = 400
+
+[[cover_positions]]
+position = [4, 9]
+type = "half"
+
+[[cover_positions]]
+position = [18, 9]
+type = "half"

@@ -1,0 +1,122 @@
+// Tier 7: Abilities using targeting filters
+// These filter which units in an area are affected.
+
+ability CommandTheArmy {
+    target: global
+    cooldown: 30s
+    hint: leadership
+
+    buff damage_output 0.3 for 10s in circle(20.0) targeting under_command
+}
+
+ability HealTheWounded {
+    target: self_aoe
+    cooldown: 15s, cast: 300ms
+    hint: heal
+
+    heal 50 in circle(10.0) targeting injured
+}
+
+ability InspireLoyalOnes {
+    target: self_aoe
+    cooldown: 20s, cast: 200ms
+    hint: utility
+
+    buff attack_speed 0.25 for 8s in circle(8.0) targeting loyalty_above(70)
+}
+
+ability ClassicFormation {
+    target: self_aoe
+    cooldown: 25s, cast: 400ms
+    hint: defense
+
+    buff armor 0.3 for 10s in circle(6.0) targeting has_class("knight")
+    buff damage_output 0.2 for 10s in circle(6.0) targeting has_class("ranger")
+}
+
+ability VeteransCharge {
+    target: self_aoe
+    cooldown: 18s, cast: 200ms
+    hint: damage
+
+    buff damage_output 0.25 for 6s in circle(8.0) targeting level_above(10)
+}
+
+ability ReinforceTheHealthy {
+    target: self_aoe
+    cooldown: 12s, cast: 200ms
+    hint: defense
+
+    shield 40 for 6s in circle(8.0) targeting healthy
+}
+
+ability CurseDisloyalOnes {
+    target: self_aoe
+    cooldown: 20s, cast: 500ms
+    hint: crowd_control
+
+    debuff damage_output 0.3 for 8s in circle(10.0) targeting loyalty_below(30)
+}
+
+ability MageEmpowerment {
+    target: self_aoe
+    cooldown: 22s, cast: 300ms
+    hint: utility
+
+    buff damage_output 0.35 for 8s in circle(7.0) targeting has_class("mage")
+    free_cast 2 in circle(7.0) targeting has_class("mage")
+}
+
+ability ClericsBlessing {
+    target: self_aoe
+    cooldown: 20s, cast: 400ms
+    hint: heal
+
+    heal 30 in circle(8.0) targeting has_class("cleric")
+    buff attack_speed 0.2 for 6s in circle(8.0) targeting has_class("cleric")
+}
+
+ability TriageProtocol {
+    target: self_aoe
+    cooldown: 10s, cast: 200ms
+    hint: heal
+
+    heal 60 in circle(6.0) targeting injured
+    shield 20 for 4s in circle(6.0) targeting injured
+}
+
+ability EliteStrike {
+    target: self_aoe
+    cooldown: 15s, cast: 100ms
+    hint: damage
+
+    buff damage_output 0.4 for 5s in circle(5.0) targeting level_above(15)
+    buff attack_speed 0.3 for 5s in circle(5.0) targeting level_above(15)
+}
+
+ability PurgeTheAfflicted {
+    target: self_aoe
+    cooldown: 18s, cast: 300ms
+    hint: utility
+
+    dispel in circle(8.0) targeting has_status("poison")
+    heal 25 in circle(8.0) targeting has_status("poison")
+}
+
+ability FactionRally {
+    target: self_aoe
+    cooldown: 25s, cast: 400ms
+    hint: leadership
+
+    buff damage_output 0.2 for 10s in circle(12.0) targeting faction("allied")
+    buff armor 0.15 for 10s in circle(12.0) targeting faction("allied")
+}
+
+ability RookieTraining {
+    target: self_aoe
+    cooldown: 20s, cast: 500ms
+    hint: utility
+
+    buff damage_output 0.3 for 10s in circle(6.0) targeting level_below(5)
+    buff armor 0.2 for 10s in circle(6.0) targeting level_below(5)
+}

@@ -1,0 +1,73 @@
+// Tier 8: Periodic passives
+
+passive Regeneration {
+    trigger: periodic(3s)
+    cooldown: 3s
+
+    heal 8
+}
+
+passive NaturalResilience {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    shield 10 for 4s
+}
+
+passive PulsatingAura {
+    trigger: periodic(4s)
+    cooldown: 4s
+
+    damage 8 in circle(2.0) [MAGIC: 25]
+}
+
+passive SteadyRecovery {
+    trigger: periodic(4s)
+    cooldown: 4s
+
+    heal 10
+}
+
+passive FrostPulse {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    damage 6 in circle(2.5) [ICE: 25]
+    slow 0.15 for 1500ms in circle(2.5) [ICE: 20]
+}
+
+passive RadiantPresence {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    heal 6 in circle(3.0) [HOLY: 20]
+}
+
+passive DarkAura {
+    trigger: periodic(4s)
+    cooldown: 4s
+
+    damage 5 in circle(2.0) [DARK: 25]
+}
+
+passive CorrosiveAura {
+    trigger: periodic(5s)
+    cooldown: 5s
+
+    damage 4 in circle(2.5) [POISON: 25]
+    debuff move_speed 0.1 for 2s in circle(2.5)
+}
+
+passive FireAura {
+    trigger: periodic(4s)
+    cooldown: 4s
+
+    damage 7 in circle(2.0) [FIRE: 25]
+}
+
+passive MendingPresence {
+    trigger: periodic(3s)
+    cooldown: 3s
+
+    heal 5 in circle(3.0)
+}

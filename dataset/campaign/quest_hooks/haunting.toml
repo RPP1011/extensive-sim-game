@@ -1,0 +1,55 @@
+# The guild hall is haunted by a restless spirit.
+
+name = "Guild Hall Haunting"
+priority = 5
+repeatable = false
+
+[trigger]
+type = "QuestComplete"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Something is wrong in the guild hall. Doors slam at midnight. Cold spots appear in summer. A transparent figure has been seen drifting through the armory. The adventurers are spooked — morale is dropping fast."
+deadline_secs = 75.0
+default_option = 0
+
+[[choice.options]]
+label = "Exorcism (30g)"
+description = "Hire a priest to cleanse the hall. Permanent solution."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Incense burns, prayers echo through empty corridors. The temperature rises. The spirit passes on."
+
+[[choice.options]]
+label = "Communicate"
+description = "The spirit might have a reason for lingering. Find out what it wants."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A medium conducts a seance. The spirit speaks: it was a guild member, and it has unfinished business."
+
+[[choice.options]]
+label = "Ignore It"
+description = "Ghosts can't hurt you. Probably. The guild has real problems to worry about."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = -3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The haunting continues. Adventurers start sleeping with the lights on."

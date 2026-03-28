@@ -1,0 +1,64 @@
+// Tier 10: Storm Shaman Kit — lightning damage with chain bounces and totems
+
+ability LightningBolt {
+    target: enemy, range: 6.0
+    cooldown: 3s, cast: 200ms
+    hint: damage
+
+    damage 30 [MAGIC: 45]
+}
+
+ability ChainLightning3 {
+    target: enemy, range: 6.0
+    cooldown: 7s, cast: 300ms
+    hint: damage
+
+    deliver chain { bounces: 3, range: 3.5, falloff: 0.2 } {
+        on_hit {
+            damage 28 [MAGIC: 45]
+        }
+    }
+}
+
+ability HealingTotem {
+    target: ground, range: 5.0
+    cooldown: 14s, cast: 300ms
+    hint: heal
+
+    deliver zone { duration: 6s, tick: 1s } {
+        on_hit {
+            heal 10 in circle(3.0)
+        }
+    }
+}
+
+ability WindShear {
+    target: enemy, range: 5.0
+    cooldown: 8s, cast: 100ms
+    hint: crowd_control
+
+    damage 20 [MAGIC: 35]
+    silence 2s [MAGIC: 45]
+    knockback 2.0
+}
+
+ability ThunderGodWrath {
+    target: self_aoe
+    cooldown: 50s, cast: 600ms
+    hint: damage
+
+    damage 70 in circle(4.0) [MAGIC: 60]
+    stun 1500ms in circle(4.0) [MAGIC: 50]
+    deliver chain { bounces: 4, range: 4.0, falloff: 0.1 } {
+        on_hit {
+            damage 40 [MAGIC: 50]
+        }
+    }
+}
+
+passive StaticCharge {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    damage 10 [MAGIC: 30]
+}

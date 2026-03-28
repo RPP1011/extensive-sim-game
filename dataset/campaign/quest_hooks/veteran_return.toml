@@ -1,0 +1,52 @@
+# A legendary retired adventurer offers to return.
+
+name = "The Veteran Returns"
+priority = 6
+repeatable = false
+
+[trigger]
+type = "ThreatLevel"
+min_threat = 55.0
+
+[choice]
+category = "character"
+trigger = "hook"
+prompt = "Old Garak — the legendary adventurer who retired five years ago — walks into the guild hall. Gray-haired now, scarred, but his eyes still hold fire. 'I hear you need help,' he says. 'I can still swing a sword.'"
+deadline_secs = 90.0
+default_option = 0
+
+[[choice.options]]
+label = "Welcome Back"
+description = "A veteran like Garak is worth ten recruits. His experience alone is invaluable."
+
+[[choice.options.effects]]
+type = "add_adventurer"
+quality = "legendary"
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Garak hangs his sword by his old bunk. The younger adventurers stare in awe."
+
+[[choice.options]]
+label = "Advisory Role Only"
+description = "His fighting days are done, but his strategic mind is sharp. Trainer and advisor."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Garak takes a seat at the strategy table. His first piece of advice saves three lives."
+
+[[choice.options]]
+label = "Decline Gently"
+description = "He's earned his rest. The guild can't risk losing a legend to a young man's fight."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Garak nods, understanding. He leaves a gift — his old shield — and walks back into retirement."

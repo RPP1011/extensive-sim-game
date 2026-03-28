@@ -1,0 +1,344 @@
+# Exploration achievements — scouting, dungeon delving, and discovery
+
+[[achievements]]
+id = "first_scout"
+name = "Into the Unknown"
+description = "Scout your first location."
+category = "exploration"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "LocationScouted"
+count = 1
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "The map has its first mark. So many blank spaces remain."
+
+[[achievements]]
+id = "five_locations"
+name = "Trailblazer"
+description = "Scout 5 different locations."
+category = "exploration"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "LocationScouted"
+count = 5
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "Five pins on the map. The world is opening up."
+
+[[achievements]]
+id = "ten_locations"
+name = "Pathfinder"
+description = "Scout 10 different locations."
+category = "exploration"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "LocationScouted"
+count = 10
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Your scouts know roads that don't appear on any merchant's map."
+
+[[achievements]]
+id = "twentyfive_locations"
+name = "Cartographer"
+description = "Scout 25 different locations."
+category = "exploration"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "LocationScouted"
+count = 25
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "The guild's map is becoming more valuable than its gold."
+
+[[achievements]]
+id = "hidden_passage"
+name = "Secret Keeper"
+description = "Discover a hidden passage in a dungeon."
+category = "exploration"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "LocationScouted"
+condition = "hidden_passage"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "The wall moved. Behind it, something forgotten."
+
+[[achievements]]
+id = "full_region"
+name = "Leave No Stone"
+description = "Explore every location in a region."
+category = "exploration"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "LocationScouted"
+condition = "region_complete"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Every cave, every ruin, every overgrown path. You know this land."
+
+[[achievements]]
+id = "find_ruin"
+name = "Echoes of the Past"
+description = "Discover a ruin."
+category = "exploration"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "LocationScouted"
+condition = "location_type_ruin"
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "Broken walls and old bones. Someone built something here, once."
+
+[[achievements]]
+id = "find_dungeon"
+name = "Descent"
+description = "Discover a dungeon entrance."
+category = "exploration"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "LocationScouted"
+condition = "location_type_dungeon"
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "The darkness below beckons. Bring torches."
+
+[[achievements]]
+id = "find_settlement"
+name = "Signs of Life"
+description = "Discover a settlement."
+category = "exploration"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "LocationScouted"
+condition = "location_type_settlement"
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "Smoke on the horizon. People. Trade. Rumors."
+
+[[achievements]]
+id = "survive_ambush"
+name = "Ambush Survivor"
+description = "Survive an ambush while exploring."
+category = "exploration"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "ambush_survived"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "They thought they had the drop on you. They were wrong."
+
+[[achievements]]
+id = "stealth_traverse"
+name = "Ghost"
+description = "Navigate through hostile territory without being detected."
+category = "exploration"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "undetected_traverse"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "They never knew you were there. The best scouts leave no trace."
+
+[[achievements]]
+id = "map_edge"
+name = "Edge of the World"
+description = "Reach the edge of the known map."
+category = "exploration"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "LocationScouted"
+condition = "map_edge"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "Beyond here, the maps say nothing. That's where it gets interesting."
+
+[[achievements]]
+id = "all_location_types"
+name = "Seen It All"
+description = "Discover every type of location."
+category = "exploration"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "LocationScouted"
+condition = "all_location_types"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Ruins, dungeons, settlements, shrines, wilds. You've walked them all."
+
+[[achievements]]
+id = "first_dungeon_clear"
+name = "Dungeon Crawler"
+description = "Complete your first dungeon."
+category = "exploration"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "dungeon_cleared"
+count = 1
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "First dungeon cleared. The loot is nice, but the experience is better."
+
+[[achievements]]
+id = "five_dungeons"
+name = "Delver"
+description = "Complete 5 dungeons."
+category = "exploration"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "dungeon_cleared"
+count = 5
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Five dungeons deep and still hungry for more."
+
+[[achievements]]
+id = "ten_dungeons"
+name = "Underdark Veteran"
+description = "Complete 10 dungeons."
+category = "exploration"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "dungeon_cleared"
+count = 10
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "The darkness below holds no more surprises. Only treasure."
+
+[[achievements]]
+id = "survive_trap"
+name = "Watch Your Step"
+description = "Trigger and survive a dungeon trap."
+category = "exploration"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "trap_survived"
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "Click. The floor shifted. But you're still standing."
+
+[[achievements]]
+id = "disarm_trap"
+name = "Defused"
+description = "Successfully disarm a trap before it triggers."
+category = "exploration"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "SkillUsed"
+condition = "trap_disarmed"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "The mechanism went slack in their hands. Crisis averted."
+
+[[achievements]]
+id = "three_rooms_no_rest"
+name = "Iron March"
+description = "Clear 3 dungeon rooms without resting."
+category = "exploration"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "three_rooms_no_rest"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "No time to rest. The next room won't clear itself."
+
+[[achievements]]
+id = "night_exploration"
+name = "Nightwalker"
+description = "Scout a location during a night phase."
+category = "exploration"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "LocationScouted"
+condition = "night_phase"
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "The brave explore by day. The wise explore by night."

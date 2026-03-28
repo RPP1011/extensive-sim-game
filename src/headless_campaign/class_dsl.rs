@@ -716,7 +716,7 @@ static CLASSES: std::sync::OnceLock<Vec<ClassDef>> = std::sync::OnceLock::new();
 
 pub fn get_or_load_classes() -> &'static Vec<ClassDef> {
     CLASSES.get_or_init(|| {
-        let dir = std::path::Path::new("assets/classes");
+        let dir = std::path::Path::new("dataset/abilities/classes");
         let classes = load_classes_from_dir(dir);
         if !classes.is_empty() {
             eprintln!("Classes: loaded {} from {}", classes.len(), dir.display());

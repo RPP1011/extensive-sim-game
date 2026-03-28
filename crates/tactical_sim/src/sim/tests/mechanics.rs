@@ -82,7 +82,7 @@ fn passive_triggers_on_damage_taken() {
         name: "Iron Skin".into(), trigger: Trigger::OnDamageTaken, cooldown_ms: 5000,
         effects: vec![ConditionalEffect {
             effect: Effect::Shield { amount: 20, duration_ms: 3000 },
-            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::Refresh, chance: 0.0, else_effects: vec![],
+            condition: None, area: None, tags: HashMap::new(), stacking: Stacking::Refresh, chance: 0.0, else_effects: vec![], targeting_filter: None,
         }],
         range: 0.0,
     }));

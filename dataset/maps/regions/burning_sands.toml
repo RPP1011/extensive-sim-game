@@ -1,0 +1,29 @@
+name = "The Burning Sands"
+terrain = "desert"
+climate = "arid"
+size = "large"
+
+[generation]
+settlement_density = 0.05
+road_connectivity = 0.2
+wilderness_danger = 0.6
+resource_richness = 0.3
+
+[settlement_distribution]
+hamlet_pct = 20
+village_pct = 30
+town_pct = 25
+city_pct = 10
+fortress_pct = 15
+
+[terrain_features]
+rivers = 0
+mountains = false
+forests = false
+coast = false
+lakes = 0
+
+[narrative]
+description = "Endless dunes baking under a merciless sun. Life clusters around oases, and caravans risk everything crossing between them."
+threats = ["sandstorms", "desert_predators", "raiders", "dehydration"]
+opportunities = ["oasis_control", "caravan_trade", "buried_cities"]

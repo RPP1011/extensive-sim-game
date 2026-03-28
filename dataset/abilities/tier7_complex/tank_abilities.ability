@@ -1,0 +1,82 @@
+// Tier 7: Complex tank/defender abilities
+
+ability FortressStance {
+    target: self
+    cooldown: 16s, cast: 100ms
+    hint: defense
+
+    shield 60 for 6s
+    taunt 3s in circle(3.5) [CROWD_CONTROL: 55]
+    slow 0.2 for 3s in circle(3.5)
+}
+
+ability UnstoppableCharge {
+    target: enemy, range: 6.0
+    cooldown: 12s, cast: 0ms
+    hint: crowd_control
+
+    dash to_target
+    damage 30 [PHYSICAL: 45]
+    stun 1500ms [CROWD_CONTROL: 60]
+    knockback 2.0 in circle(2.0) [KNOCKBACK: 40]
+}
+
+ability BulwarkSlam {
+    target: self_aoe
+    cooldown: 10s, cast: 300ms
+    hint: crowd_control
+
+    damage 25 in circle(2.5) [PHYSICAL: 40]
+    stun 1s in circle(2.5) [CROWD_CONTROL: 50]
+    shield 30 for 3s
+}
+
+ability ProvokeAll {
+    target: self_aoe
+    cooldown: 14s, cast: 100ms
+    hint: crowd_control
+
+    taunt 2500ms in circle(4.0) [CROWD_CONTROL: 55]
+    shield 40 for 3s
+    buff damage_output 0.1 for 3s
+}
+
+ability IronFortitude {
+    target: self
+    cooldown: 20s, cast: 200ms
+    hint: defense
+
+    shield 80 for 6s
+    heal 10/1s for 6s
+    debuff move_speed 0.3 for 6s
+}
+
+ability GuardianLeap {
+    target: ally, range: 6.0
+    cooldown: 12s, cast: 0ms
+    hint: defense
+
+    dash to_target
+    shield 40 for 4s
+    taunt 2s in circle(3.0) [CROWD_CONTROL: 50]
+}
+
+ability RetaliationStrike {
+    target: self_aoe
+    cooldown: 8s, cast: 200ms
+    hint: damage
+
+    damage 35 in circle(2.0) [PHYSICAL: 45]
+    heal 15
+    shield 20 for 3s
+}
+
+ability AncientGuard {
+    target: self
+    cooldown: 18s, cast: 300ms
+    hint: defense
+
+    shield 70 for 5s
+    heal 8/1s for 5s
+    slow 0.3 for 3s in circle(3.0)
+}

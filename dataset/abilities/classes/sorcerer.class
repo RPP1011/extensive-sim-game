@@ -1,0 +1,21 @@
+class Sorcerer {
+    stat_growth: +5 ability_power, +1 speed per level
+
+    tags: arcane, elemental, destruction, raw_power, channeling
+
+    scaling hp_percent {
+        when hp_percent > 75: +10% ability_power
+        when hp_percent < 25: +20% ability_power
+        always: +5% ability_power
+    }
+
+    abilities {
+        level 1: fire_bolt "Hurl a bolt of flame at a single target"
+        level 5: chain_lightning "Lightning arcs between up to three enemies"
+        level 10: frost_nova "Freeze all nearby enemies in place"
+        level 20: meteor "Call down a flaming rock that devastates an area"
+        level 40: unleash "Remove all limits on spellcasting for 10 seconds; spells cost health instead of mana"
+    }
+
+    requirements: level 1
+}

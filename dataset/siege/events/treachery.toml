@@ -1,0 +1,55 @@
+[[events]]
+id = "treachery"
+name = "Insider Opens Gate"
+phase = "surround"
+
+[events.trigger]
+type = "DefenderMoraleBelow"
+threshold = 0.3
+
+[events.choice]
+prompt = "A messenger slips out of the settlement under cover of darkness. Someone inside is willing to open a postern gate — for a price."
+deadline_secs = 30.0
+
+[[events.choice.options]]
+label = "Accept the Deal"
+description = "Pay the traitor. Send a strike team through the postern gate at midnight."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "postern_infiltration"
+attacker_count = 8
+stealth_bonus = 0.4
+objective = "open_main_gate"
+[[events.choice.options.effects]]
+type = "gold_cost"
+amount = 500
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The postern gate creaks open in the small hours. Eight shadows slip inside. If they reach the main gate winch, the city falls. If it's a trap, eight soldiers die for nothing."
+
+[[events.choice.options]]
+label = "Refuse — It Could Be a Trap"
+description = "Too convenient. The defenders might be luring men into a kill zone."
+[[events.choice.options.effects]]
+type = "siege_progress"
+ticks_cost = 0
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The commander shakes his head. Trust bought with gold is worth exactly what you pay for it. The siege continues the honest way."
+
+[[events.choice.options]]
+label = "Accept but Prepare for a Trap"
+description = "Send the strike team, but have reserves ready in case it goes wrong."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "postern_infiltration"
+attacker_count = 8
+attacker_reserve = 20
+stealth_bonus = 0.2
+trap_mitigation = 0.5
+[[events.choice.options.effects]]
+type = "gold_cost"
+amount = 500
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The strike team enters. Behind them, the reserves wait in darkness, ready for anything. Trust, but verify — with swords."

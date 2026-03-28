@@ -1,0 +1,61 @@
+# A powerful boss creature has been located in its lair.
+
+name = "Boss Lair Discovered"
+priority = 7
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "LocationScouted"
+location_type = "Dungeon"
+
+[[conditions]]
+type = "MinAdventurers"
+count = 4
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Deep within {location_name}, scouts have identified a creature of terrible power — a boss-class monster guarding a hoard of treasure. The threat level is {threat}. This is no ordinary delve."
+deadline_secs = 120.0
+default_option = 2
+
+[[choice.options]]
+label = "Full Assault (60g)"
+description = "Equip the party with potions, scrolls, and enchanted weapons. Maximum firepower for maximum reward."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -60.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild marshals its finest warriors and most potent supplies. This creature will fall."
+
+[[choice.options]]
+label = "Lure It Out"
+description = "Set a trap at the lair entrance. Cheaper but the boss fights on open ground — unpredictable."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Bait is set. The ground shakes as something stirs in the darkness below."
+
+[[choice.options]]
+label = "Seal the Entrance"
+description = "Collapse the tunnels and walk away. The treasure stays buried, but so does the monster."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Stone and rubble fill the entrance. Whatever lived down there won't be coming up. Probably."

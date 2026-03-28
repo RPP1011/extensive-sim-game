@@ -1,0 +1,47 @@
+[[fortifications]]
+id = "reinforced_gate"
+name = "Reinforced Gate"
+tier = 2
+type = "gate"
+
+[fortifications.stats]
+gate_hp = 800
+height = 3.5
+thickness = 0.5
+open_speed = 8
+barricade_bonus = 0.3
+
+[fortifications.construction]
+cost = 120
+ticks = 300
+resources = ["timber", "iron"]
+builder_class_bonus = 0.4
+
+[fortifications.weaknesses]
+ram_multiplier = 1.5
+fire_resistant = false
+fire_damage_multiplier = 1.5
+petard_multiplier = 1.5
+
+[fortifications.power_scaling]
+effective_level = 15
+builder_class_bonus = true
+enchantable = true
+age_scaling = 0.005
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 0.0
+ability_damage_reduction = 0.0
+projectile_deflection = 0.0
+ward_hp = 0
+ward_level = 0
+
+[fortifications.garrison_bonus]
+defender_multiplier = 2.0
+ranged_accuracy_bonus = 0.0
+melee_disadvantage = 0.2
+cover_rating = 0.3
+
+[fortifications.narrative]
+description = "The wood is sheathed in iron plates, the hinges bolted deep into stone. It groans under the ram but holds. And holds. And holds."

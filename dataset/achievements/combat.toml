@@ -1,0 +1,511 @@
+# Combat achievements — milestones for tactical combat encounters
+
+[[achievements]]
+id = "first_blood"
+name = "First Blood"
+description = "Win your first combat encounter."
+category = "combat"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+count = 1
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "The guild draws its first blood. There will be more."
+
+[[achievements]]
+id = "ten_victories"
+name = "Blooded"
+description = "Win 10 combat encounters."
+category = "combat"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+count = 10
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "Ten fights, ten wins. The rookies are becoming veterans."
+
+[[achievements]]
+id = "fifty_victories"
+name = "Veteran Commander"
+description = "Win 50 combat encounters."
+category = "combat"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+count = 50
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Fifty victories. The guild's reputation precedes it."
+
+[[achievements]]
+id = "hundred_victories"
+name = "Centurion"
+description = "Win 100 combat encounters."
+category = "combat"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+count = 100
+
+[achievements.reward]
+rl_bonus = 1.0
+narrative = "A hundred battles won. Songs are sung about guilds like yours."
+
+[[achievements]]
+id = "five_hundred_victories"
+name = "Legend of the Blade"
+description = "Win 500 combat encounters."
+category = "combat"
+tier = "legendary"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+count = 500
+
+[achievements.reward]
+rl_bonus = 2.0
+narrative = "Five hundred. The name is spoken in whispers now."
+
+[[achievements]]
+id = "flawless_victory"
+name = "Flawless"
+description = "Win a combat encounter without any party member taking damage."
+category = "combat"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "no_damage_taken"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Not a scratch. They never even got close."
+
+[[achievements]]
+id = "outnumbered_2to1"
+name = "Against the Odds"
+description = "Win a fight while outnumbered 2:1."
+category = "combat"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "outnumbered_2to1"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Two for every one of yours, and still they fell."
+
+[[achievements]]
+id = "outnumbered_3to1"
+name = "Defiance"
+description = "Win a fight while outnumbered 3:1."
+category = "combat"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "outnumbered_3to1"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Three to one. The bards will get it wrong and say it was five."
+
+[[achievements]]
+id = "kill_with_physical"
+name = "Steel Speaks"
+description = "Kill an enemy with PHYSICAL damage."
+category = "combat"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "kill_damage_type_physical"
+
+[achievements.reward]
+rl_bonus = 0.02
+narrative = "Cold steel. The simplest answer."
+
+[[achievements]]
+id = "kill_with_magic"
+name = "Arcane Verdict"
+description = "Kill an enemy with MAGIC damage."
+category = "combat"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "kill_damage_type_magic"
+
+[achievements.reward]
+rl_bonus = 0.02
+narrative = "Magic ends all arguments."
+
+[[achievements]]
+id = "kill_with_fire"
+name = "Burn Notice"
+description = "Kill an enemy with FIRE damage."
+category = "combat"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "kill_damage_type_fire"
+
+[achievements.reward]
+rl_bonus = 0.02
+narrative = "Fire solves most problems. Creates a few, too."
+
+[[achievements]]
+id = "kill_with_ice"
+name = "Cold Comfort"
+description = "Kill an enemy with ICE damage."
+category = "combat"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "kill_damage_type_ice"
+
+[achievements.reward]
+rl_bonus = 0.02
+narrative = "Frozen solid, then shattered."
+
+[[achievements]]
+id = "kill_with_dark"
+name = "Embrace the Void"
+description = "Kill an enemy with DARK damage."
+category = "combat"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "kill_damage_type_dark"
+
+[achievements.reward]
+rl_bonus = 0.02
+narrative = "The darkness takes what it is owed."
+
+[[achievements]]
+id = "kill_with_holy"
+name = "Judgment"
+description = "Kill an enemy with HOLY damage."
+category = "combat"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "kill_damage_type_holy"
+
+[achievements.reward]
+rl_bonus = 0.02
+narrative = "Light burns the wicked. Or the unlucky."
+
+[[achievements]]
+id = "kill_with_poison"
+name = "Slow Death"
+description = "Kill an enemy with POISON damage."
+category = "combat"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "kill_damage_type_poison"
+
+[achievements.reward]
+rl_bonus = 0.02
+narrative = "They were dead the moment they were cut. They just didn't know it yet."
+
+[[achievements]]
+id = "all_damage_types"
+name = "Full Spectrum"
+description = "Kill enemies with all seven damage types across your career."
+category = "combat"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AchievementEarned"
+condition = "all_damage_type_kills"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Every element, every school, every method. Your guild knows them all."
+
+[[achievements]]
+id = "aoe_stun_3"
+name = "Crowd Control"
+description = "Land an AoE stun hitting 3 or more enemies."
+category = "combat"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "SkillUsed"
+condition = "aoe_stun_3_plus"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Three stunned in one blow. Textbook."
+
+[[achievements]]
+id = "speed_kill_10s"
+name = "Blitz"
+description = "Win a combat encounter in under 10 seconds."
+category = "combat"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "duration_under_100_ticks"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "They blinked and it was over."
+
+[[achievements]]
+id = "speed_kill_30s"
+name = "Swift Justice"
+description = "Win a combat encounter in under 30 seconds."
+category = "combat"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "duration_under_300_ticks"
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "Efficient. Decisive. Done."
+
+[[achievements]]
+id = "no_casualties"
+name = "Bring Them Home"
+description = "Win a fight with all party members alive."
+category = "combat"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "all_alive"
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "Everyone walks out. That's the only victory that matters."
+
+[[achievements]]
+id = "comeback_10pct"
+name = "Back from the Brink"
+description = "Win a fight after a party member dropped below 10% HP."
+category = "combat"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "member_below_10pct_survived"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "One foot in the grave and they pulled themselves out."
+
+[[achievements]]
+id = "cc_chain_3"
+name = "Lockdown"
+description = "Chain 3 or more CC abilities on a single target."
+category = "combat"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "SkillUsed"
+condition = "cc_chain_3_plus"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Stunned, rooted, silenced. They never had a chance to fight back."
+
+[[achievements]]
+id = "dot_kill"
+name = "Patience Pays"
+description = "Kill an enemy with a damage-over-time tick."
+category = "combat"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "kill_by_dot"
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "The poison did the work. All you had to do was wait."
+
+[[achievements]]
+id = "shield_500"
+name = "Bulwark"
+description = "Block 500 or more damage with shields in a single fight."
+category = "combat"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "shield_absorbed_500"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "The shield held. Barely, but it held."
+
+[[achievements]]
+id = "heal_1000"
+name = "Lifeline"
+description = "Heal 1000 or more HP across your party in a single fight."
+category = "combat"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "healing_1000"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Your healers earned their keep today."
+
+[[achievements]]
+id = "full_kit_usage"
+name = "Full Arsenal"
+description = "Use every ability in a unit's kit during a single fight."
+category = "combat"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "all_abilities_used"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "Every trick, every skill, every last card played."
+
+[[achievements]]
+id = "basic_attacks_only"
+name = "No Tricks"
+description = "Win a fight using only basic attacks."
+category = "combat"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "no_abilities_used"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "No magic, no skills. Just steel and will."
+
+[[achievements]]
+id = "champion_slayer"
+name = "Champion Slayer"
+description = "Defeat a champion-tier enemy."
+category = "combat"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "enemy_tier_champion"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Champions fall. Even the ones they said couldn't."
+
+[[achievements]]
+id = "legendary_slayer"
+name = "Godkiller"
+description = "Defeat a legendary-tier enemy."
+category = "combat"
+tier = "legendary"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "enemy_tier_legendary"
+
+[achievements.reward]
+rl_bonus = 2.0
+narrative = "Legends die too. You proved it."
+
+[[achievements]]
+id = "first_wipe"
+name = "Lessons Learned"
+description = "Lose your first combat encounter."
+category = "combat"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatLost"
+count = 1
+
+[achievements.reward]
+rl_bonus = 0.02
+narrative = "Defeat is the best teacher, if you survive the lesson."

@@ -1,0 +1,29 @@
+name = "The Emerald Canopy"
+terrain = "jungle"
+climate = "tropical"
+size = "large"
+
+[generation]
+settlement_density = 0.08
+road_connectivity = 0.15
+wilderness_danger = 0.75
+resource_richness = 0.8
+
+[settlement_distribution]
+hamlet_pct = 45
+village_pct = 30
+town_pct = 15
+city_pct = 5
+fortress_pct = 5
+
+[terrain_features]
+rivers = 5
+mountains = false
+forests = true
+coast = false
+lakes = 2
+
+[narrative]
+description = "Triple-canopy jungle where the sun never reaches the ground. Ancient civilizations built temple cities that the jungle has reclaimed."
+threats = ["venomous_creatures", "disease", "territorial_tribes", "carnivorous_plants"]
+opportunities = ["rare_woods", "exotic_beasts", "lost_temples", "unique_herbs"]

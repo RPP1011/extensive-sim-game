@@ -1,0 +1,54 @@
+name = "Siege Storm"
+phase_index = 5
+duration_range = [100, 500]
+
+[description]
+text = "The walls are lost. Fighting spills into the streets. House by house, block by block, the attackers push inward. The defenders fall back toward the citadel, if there is one."
+
+[attacker_actions]
+available = ["street_fighting", "secure_gatehouse", "open_gates", "push_to_citadel", "suppress_pockets", "prevent_escape", "loot"]
+priority = "conquest"
+
+[defender_actions]
+available = ["street_barricades", "ambush", "retreat_to_citadel", "scorched_earth", "guerrilla_resistance", "negotiate_surrender", "last_stand"]
+priority = "delay"
+
+[events]
+[[events.possible]]
+name = "Citadel Retreat"
+probability = 0.3
+trigger = "citadel_exists"
+effect = "defender_retreats_to_citadel"
+description = "The garrison pulls back to the inner fortress. The siege within a siege begins."
+
+[[events.possible]]
+name = "Gate Opened"
+probability = 0.25
+trigger = "gatehouse_taken"
+effect = "main_army_enters"
+description = "The gates swing open from the inside. The full army pours in. The defense collapses."
+
+[[events.possible]]
+name = "Civilian Uprising"
+probability = 0.1
+trigger = "settlement_population_hostile"
+effect = "defender_reinforced"
+description = "The townsfolk take up whatever weapons they can find. They fight for their homes."
+
+[[events.possible]]
+name = "Fire Spreads"
+probability = 0.15
+trigger = "fire_in_settlement"
+effect = "area_denial_both_sides"
+description = "Fire leaps from building to building. The fighting pauses as both sides flee the flames."
+
+[[events.possible]]
+name = "Hidden Passage"
+probability = 0.08
+trigger = "ancient_settlement"
+effect = "defender_escape"
+description = "Defenders slip away through passages known only to long-time residents. They live to fight another day."
+
+[transition]
+to_next_phase = "siege_fall"
+conditions = ["citadel_fallen", "OR", "defender_surrender", "OR", "defender_routed"]

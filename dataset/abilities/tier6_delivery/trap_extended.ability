@@ -1,0 +1,129 @@
+// Tier 6: Extended trap delivery
+
+ability FrostTrap {
+    target: ground, range: 5.0
+    cooldown: 14s, cast: 300ms
+    hint: crowd_control
+
+    deliver trap { duration: 30s, trigger_radius: 1.5 } {
+        on_hit {
+            slow 0.6 for 3s [ICE: 50]
+            damage 20 [ICE: 40]
+        }
+    }
+}
+
+ability ExplosiveTrap {
+    target: ground, range: 5.0
+    cooldown: 12s, cast: 300ms
+    hint: damage
+
+    deliver trap { duration: 25s, trigger_radius: 1.5 } {
+        on_hit {
+            damage 50 in circle(2.0) [FIRE: 55]
+        }
+    }
+}
+
+ability PoisonTrap {
+    target: ground, range: 4.0
+    cooldown: 10s, cast: 200ms
+    hint: damage
+
+    deliver trap { duration: 30s, trigger_radius: 1.5 } {
+        on_hit {
+            damage 6/1s for 5s [POISON: 45]
+            slow 0.3 for 3s [POISON: 35]
+        }
+    }
+}
+
+ability BindingTrap {
+    target: ground, range: 5.0
+    cooldown: 15s, cast: 300ms
+    hint: crowd_control
+
+    deliver trap { duration: 30s, trigger_radius: 1.0 } {
+        on_hit {
+            root 2500ms [CROWD_CONTROL: 55]
+        }
+    }
+}
+
+ability StunTrap {
+    target: ground, range: 4.0
+    cooldown: 16s, cast: 300ms
+    hint: crowd_control
+
+    deliver trap { duration: 25s, trigger_radius: 1.5 } {
+        on_hit {
+            stun 2s [CROWD_CONTROL: 60]
+            damage 25 [MAGIC: 40]
+        }
+    }
+}
+
+ability SilenceMine {
+    target: ground, range: 5.0
+    cooldown: 14s, cast: 300ms
+    hint: crowd_control
+
+    deliver trap { duration: 30s, trigger_radius: 1.5 } {
+        on_hit {
+            silence 3s [MAGIC: 55]
+            damage 20 [MAGIC: 40]
+        }
+    }
+}
+
+ability FlameSnare {
+    target: ground, range: 4.0
+    cooldown: 12s, cast: 200ms
+    hint: damage
+
+    deliver trap { duration: 25s, trigger_radius: 1.5 } {
+        on_hit {
+            damage 35 [FIRE: 50]
+            damage 8/1s for 3s [FIRE: 40]
+        }
+    }
+}
+
+ability NightmareSnare {
+    target: ground, range: 5.0
+    cooldown: 16s, cast: 300ms
+    hint: crowd_control
+
+    deliver trap { duration: 30s, trigger_radius: 1.5 } {
+        on_hit {
+            fear 2s [FEAR: 55, DARK: 45]
+            damage 25 [DARK: 40]
+        }
+    }
+}
+
+ability HolyWard {
+    target: ground, range: 5.0
+    cooldown: 14s, cast: 300ms
+    hint: heal
+
+    deliver trap { duration: 30s, trigger_radius: 2.0 } {
+        on_hit {
+            heal 40 in circle(2.5) [HOLY: 40]
+            shield 20 for 3s in circle(2.5)
+        }
+    }
+}
+
+ability ArcaneSnare {
+    target: ground, range: 5.0
+    cooldown: 12s, cast: 200ms
+    hint: crowd_control
+
+    deliver trap { duration: 25s, trigger_radius: 1.5 } {
+        on_hit {
+            root 2s [MAGIC: 50]
+            damage 30 [MAGIC: 45]
+        }
+    }
+}

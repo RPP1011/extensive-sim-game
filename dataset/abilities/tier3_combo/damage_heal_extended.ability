@@ -1,0 +1,73 @@
+// Tier 3: Extended damage + heal combos (life steal style)
+
+ability DrainLife {
+    target: enemy, range: 4.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 30 [DARK: 45]
+    heal 20
+}
+
+ability SiphonEssence {
+    target: enemy, range: 3.0
+    cooldown: 7s, cast: 300ms
+    hint: damage
+
+    damage 35 [DARK: 50]
+    heal 25
+}
+
+ability HolyRetribution {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 30 [HOLY: 45]
+    heal 15 in self
+}
+
+ability BloodDrain {
+    target: enemy, range: 3.0
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 40 [DARK: 50]
+    heal 30
+}
+
+ability DevourMagic {
+    target: enemy, range: 4.0
+    cooldown: 8s, cast: 200ms
+    hint: damage
+
+    damage 25 [MAGIC: 40]
+    heal 20
+}
+
+ability LifeTap {
+    target: enemy, range: 2.0
+    cooldown: 4s, cast: 100ms
+    hint: damage
+
+    damage 18 [DARK: 35]
+    heal 12
+}
+
+ability SoulRend {
+    target: enemy, range: 3.0
+    cooldown: 7s, cast: 200ms
+    hint: damage
+
+    damage 35 [DARK: 45]
+    heal 20
+}
+
+ability SearingAbsorb {
+    target: enemy, range: 4.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 28 [FIRE: 40]
+    heal 15
+}

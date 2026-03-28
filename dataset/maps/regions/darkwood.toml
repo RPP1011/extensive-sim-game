@@ -1,0 +1,29 @@
+name = "The Darkwood"
+terrain = "dark_forest"
+climate = "temperate"
+size = "large"
+
+[generation]
+settlement_density = 0.08
+road_connectivity = 0.2
+wilderness_danger = 0.7
+resource_richness = 0.6
+
+[settlement_distribution]
+hamlet_pct = 45
+village_pct = 30
+town_pct = 15
+city_pct = 5
+fortress_pct = 5
+
+[terrain_features]
+rivers = 2
+mountains = false
+forests = true
+coast = false
+lakes = 1
+
+[narrative]
+description = "Ancient forest where the trees grow so thick that noon looks like twilight. The woodcutters stay to the edges — deeper in, the forest belongs to older things."
+threats = ["dire_beasts", "fey_creatures", "bandits", "enchantments"]
+opportunities = ["rare_timber", "magical_herbs", "fey_bargains", "hidden_groves"]

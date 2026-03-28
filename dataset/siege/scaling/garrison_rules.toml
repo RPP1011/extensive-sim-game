@@ -1,0 +1,23 @@
+[garrison]
+description = "Defenders on/behind fortifications receive significant bonuses"
+
+[garrison.force_multiplier]
+# A Level 20 soldier on a stone wall fights like a Level 60 in open field
+# Formula: effective_level = unit_level * defender_multiplier
+# This is why sieges are costly — you need overwhelming force or siege equipment
+description = "Defenders fight at multiplied effectiveness"
+
+[garrison.ranged_combat]
+elevation_accuracy = 0.3        # +30% accuracy shooting down from walls
+elevation_damage = 0.15         # +15% damage from height
+cover_from_below = 0.7          # 70% damage reduction from ground-level attacks
+
+[garrison.melee_at_walls]
+attacker_penalty = 0.5          # attackers at wall base fight at 50% effectiveness
+ladder_penalty = 0.7            # attackers on ladders fight at 30% effectiveness
+breach_penalty = 0.8            # attackers in a breach fight at 80% (less penalty)
+
+[garrison.sally_out]
+surprise_bonus = 0.2            # +20% damage on first strike when sallying
+morale_bonus = 0.1              # defenders sallying get morale boost
+return_penalty = 0.0            # no penalty for retreating back inside

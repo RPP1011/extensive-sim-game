@@ -1,0 +1,57 @@
+// Tier 10: Death Knight Kit — dark melee with diseases and self-sustain
+
+ability PlagueStrike {
+    target: enemy, range: 1.5
+    cooldown: 4s, cast: 100ms
+    hint: damage
+
+    damage 25 [DARK: 40]
+    damage 5/1s for 4s [POISON: 35]
+}
+
+ability DeathGrip {
+    target: enemy, range: 6.0
+    cooldown: 10s, cast: 200ms
+    hint: crowd_control
+
+    pull 5.0
+    damage 15 [DARK: 35]
+    taunt 2s [CROWD_CONTROL: 45]
+}
+
+ability DeathStrike {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 40 [DARK: 45]
+    heal 25
+}
+
+ability AntiMagicShell {
+    target: self
+    cooldown: 14s, cast: 0ms
+    hint: defense
+
+    shield 50 for 4s
+    silence 1s in circle(2.0) [DARK: 35]
+}
+
+ability ArmyOfDead {
+    target: self_aoe
+    cooldown: 50s, cast: 600ms
+    hint: damage
+
+    summon "ghoul"
+    summon "ghoul"
+    damage 30 in circle(3.0) [DARK: 45]
+    slow 0.3 for 3s in circle(3.0) [DARK: 35]
+    buff damage_output 0.2 for 8s
+}
+
+passive DarkConversion {
+    trigger: on_damage_dealt
+    cooldown: 4s
+
+    heal 10 [DARK: 20]
+}

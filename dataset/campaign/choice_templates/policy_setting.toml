@@ -1,0 +1,56 @@
+# Guild policy decision.
+
+category = "strategic"
+trigger = "policy_review"
+prompt = "The guild's operating policies are up for review. What approach should define the next season?"
+deadline_secs = 120.0
+default_option = 1
+
+[[options]]
+label = "Aggressive Expansion"
+description = "Take more quests, push harder, accept more risk. Growth at all costs."
+
+[[options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[options.effects]]
+type = "narrative"
+text = "The guild's pace doubles. More quests, more danger, more reward."
+
+[[options]]
+label = "Cautious Stability"
+description = "Steady pace, manageable risk, build reserves. Sustainable growth."
+
+[[options.effects]]
+type = "supplies"
+amount = 10.0
+
+[[options.effects]]
+type = "narrative"
+text = "The guild adopts a measured approach. No heroics, no disasters."
+
+[[options]]
+label = "Diplomatic Focus"
+description = "Prioritize alliances and trade. Let reputation do the heavy lifting."
+
+[[options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 5.0
+
+[[options.effects]]
+type = "narrative"
+text = "Letters go out. Meetings are held. The guild builds bridges instead of breaking skulls."
+
+[[options]]
+label = "Training Intensive"
+description = "Reduce active questing. Focus on training and preparation."
+
+[[options.effects]]
+type = "gold"
+amount = -15.0
+
+[[options.effects]]
+type = "narrative"
+text = "The quest board goes quiet. The training yard gets loud."

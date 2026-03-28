@@ -1,0 +1,409 @@
+# Economy achievements — trade, resources, and financial milestones
+
+[[achievements]]
+id = "first_gold"
+name = "Opening Account"
+description = "Earn your first gold."
+category = "economy"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "GoldChanged"
+condition = "total_earned_1"
+
+[achievements.reward]
+rl_bonus = 0.02
+narrative = "One gold coin. Everyone starts somewhere."
+
+[[achievements]]
+id = "hundred_gold"
+name = "Nest Egg"
+description = "Accumulate 100 gold total earnings."
+category = "economy"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "GoldChanged"
+condition = "total_earned_100"
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "A hundred gold. Enough to be taken seriously."
+
+[[achievements]]
+id = "five_hundred_gold"
+name = "Moneyed"
+description = "Accumulate 500 gold total earnings."
+category = "economy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "GoldChanged"
+condition = "total_earned_500"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Five hundred gold. The guild can afford mistakes now."
+
+[[achievements]]
+id = "thousand_gold"
+name = "Golden Hoard"
+description = "Accumulate 1000 gold total earnings."
+category = "economy"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "GoldChanged"
+condition = "total_earned_1000"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "A thousand gold. Dragons have been slain for less."
+
+[[achievements]]
+id = "five_thousand_gold"
+name = "Gilded"
+description = "Accumulate 5000 gold total earnings."
+category = "economy"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "GoldChanged"
+condition = "total_earned_5000"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Five thousand gold. Your guild's wealth rivals minor nobility."
+
+[[achievements]]
+id = "trade_every_faction"
+name = "Universal Trader"
+description = "Complete at least one trade with every faction."
+category = "economy"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TradeCompleted"
+condition = "all_factions_traded"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Every faction knows the color of your coin."
+
+[[achievements]]
+id = "corner_market"
+name = "Corner the Market"
+description = "Control the supply of a commodity so completely that you set the price."
+category = "economy"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TradeCompleted"
+condition = "market_cornered"
+
+[achievements.reward]
+rl_bonus = 1.0
+narrative = "They need it. You have it. The price is whatever you say it is."
+
+[[achievements]]
+id = "trade_route"
+name = "Road of Gold"
+description = "Establish a trade route between two settlements."
+category = "economy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TradeCompleted"
+condition = "route_established"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Wagons rolling, gold flowing. Commerce is the blood of civilization."
+
+[[achievements]]
+id = "survive_poverty"
+name = "Lean Times"
+description = "Survive with fewer than 5 gold for 100 consecutive ticks."
+category = "economy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TickCount"
+condition = "gold_below_5_for_100"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "Scraping by on nothing. The guild learned to make do."
+
+[[achievements]]
+id = "supplies_200"
+name = "Well Stocked"
+description = "Accumulate 200 or more supplies."
+category = "economy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ResourceThreshold"
+condition = "supplies_200"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "The storeroom is full. Let winter come."
+
+[[achievements]]
+id = "buy_sell_profit"
+name = "Merchant's Instinct"
+description = "Buy an item and sell it later for a profit."
+category = "economy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TradeCompleted"
+condition = "resold_for_profit"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "Buy low, sell high. The oldest trick in the book still works."
+
+[[achievements]]
+id = "fund_expedition"
+name = "Patron"
+description = "Spend 100 gold on a single expedition."
+category = "economy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "GoldChanged"
+condition = "spent_100_once"
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "Big investment, big expectations. Don't disappoint."
+
+[[achievements]]
+id = "sustained_wealth"
+name = "Steady Hand"
+description = "Maintain positive gold balance for 1000 consecutive ticks."
+category = "economy"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TickCount"
+condition = "gold_positive_1000"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "A thousand ticks in the black. Financial discipline is its own reward."
+
+[[achievements]]
+id = "bankruptcy_recovery"
+name = "Phoenix Ledger"
+description = "Recover from bankruptcy (negative gold) to 500+ gold."
+category = "economy"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "GoldChanged"
+condition = "bankrupt_to_500"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "From ruin to riches. The creditors stopped laughing."
+
+[[achievements]]
+id = "successful_bribe"
+name = "Greased Palms"
+description = "Successfully bribe an NPC."
+category = "economy"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "bribe_success"
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "Everyone has a price. You found theirs."
+
+[[achievements]]
+id = "rare_commodity"
+name = "Rare Find"
+description = "Discover a rare commodity."
+category = "economy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TradeCompleted"
+condition = "rare_commodity_found"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "This isn't on any manifest. The right buyer will pay dearly."
+
+[[achievements]]
+id = "three_trade_routes"
+name = "Trade Empire"
+description = "Maintain active trade routes with 3 or more factions simultaneously."
+category = "economy"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TradeCompleted"
+condition = "three_simultaneous_routes"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Three routes, three revenue streams. The guild is an economic force."
+
+[[achievements]]
+id = "first_trade"
+name = "Open for Business"
+description = "Complete your first trade."
+category = "economy"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TradeCompleted"
+count = 1
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "Coin changed hands. The market is open."
+
+[[achievements]]
+id = "spend_wisely"
+name = "Return on Investment"
+description = "Spend 50+ gold on an expedition and earn back double."
+category = "economy"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "expedition_doubled_investment"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Fifty gold spent, a hundred earned. That's how empires are built."
+
+[[achievements]]
+id = "no_gold_quest"
+name = "Broke but Bold"
+description = "Complete a quest with 0 gold in the treasury."
+category = "economy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "zero_gold"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "No coin, no problem. Courage spends anywhere."
+
+[[achievements]]
+id = "supply_crisis_survived"
+name = "Rationed"
+description = "Survive a supply shortage without losing any adventurers."
+category = "economy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ResourceThreshold"
+condition = "supply_shortage_survived"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Half rations and hard looks, but nobody left."
+
+[[achievements]]
+id = "ten_trades"
+name = "Regular Customer"
+description = "Complete 10 trades."
+category = "economy"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TradeCompleted"
+count = 10
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "Ten trades done. The merchants know your name."
+
+[[achievements]]
+id = "fifty_trades"
+name = "Master Dealer"
+description = "Complete 50 trades."
+category = "economy"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TradeCompleted"
+count = 50
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Fifty deals sealed. Your word is bond in every market."
+
+[[achievements]]
+id = "reputation_100"
+name = "Famous"
+description = "Reach 100 reputation."
+category = "economy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ResourceThreshold"
+condition = "reputation_100"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Your name precedes you. Doors open, invitations arrive."

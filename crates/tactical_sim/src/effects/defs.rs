@@ -20,6 +20,15 @@ pub enum AbilityTargeting {
     Vector,
     /// Hits all enemies on the map regardless of range. Used by Karthus R, Soraka R.
     Global,
+
+    // --- Campaign Targeting ---
+    TargetFaction,
+    TargetRegion,
+    TargetMarket,
+    TargetParty,
+    TargetGuild,
+    TargetAdventurer,
+    TargetLocation,
 }
 
 impl Default for AbilityTargeting {
@@ -90,6 +99,13 @@ pub struct AbilityDef {
     /// Evolution: permanently replace this ability's def when evolved.
     #[serde(default)]
     pub evolve_into: Option<Box<AbilityDef>>,
+
+    /// Number of participants required to cast this ability (0 or 1 = normal, 2+ = combination).
+    #[serde(default)]
+    pub requires_participants: u32,
+    /// Required class for at least one participant (empty = no requirement).
+    #[serde(default)]
+    pub requires_class: String,
 }
 
 // ---------------------------------------------------------------------------

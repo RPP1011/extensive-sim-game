@@ -1,0 +1,61 @@
+[[events]]
+id = "champion_duel"
+name = "Champion Duel"
+phase = "assault"
+
+[events.trigger]
+type = "ChampionPresent"
+threshold = 0.0
+
+[events.choice]
+prompt = "A warrior stands atop the wall, armor gleaming, and calls out a challenge. Single combat, champion against champion. The army watches."
+deadline_secs = 25.0
+
+[[events.choice.options]]
+label = "Accept the Challenge"
+description = "Send your best fighter. A victory here could break the defenders' spirit."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "champion_duel_arena"
+attacker_count = 1
+defender_count = 1
+attacker_quality = "champion"
+defender_quality = "champion"
+[[events.choice.options.effects]]
+type = "morale_swing"
+winner_morale_boost = 0.3
+loser_morale_drain = 0.25
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Two warriors meet in the space between the armies. For a moment, the siege stops. There is only the ring of steel and the roar of thousands watching."
+
+[[events.choice.options]]
+label = "Decline — Answer with Arrows"
+description = "Honor is a luxury. Put a ballista bolt through the challenger."
+[[events.choice.options.effects]]
+type = "defender_casualties"
+count = 1
+quality = "champion"
+morale_effect_attacker = -0.1
+morale_effect_defender = 0.15
+reputation_loss = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The ballista coughs. The champion on the wall folds around the bolt and falls. The defenders scream their outrage. The siege just got personal."
+
+[[events.choice.options]]
+label = "Counter-Challenge"
+description = "Accept, but change the terms. Three champions against three. Even the odds."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "champion_melee"
+attacker_count = 3
+defender_count = 3
+attacker_quality = "champion"
+[[events.choice.options.effects]]
+type = "morale_swing"
+winner_morale_boost = 0.2
+loser_morale_drain = 0.2
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Three against three. The crowd roars as blades clash. This isn't just a duel — it's a preview of what happens when the walls fall."

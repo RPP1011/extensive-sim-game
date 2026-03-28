@@ -1,0 +1,61 @@
+# An enchanted spring with healing properties is found.
+
+name = "Enchanted Spring"
+priority = 5
+repeatable = false
+
+[trigger]
+type = "LocationScouted"
+location_type = "Outpost"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Deep in the forest near {location_name}, adventurers find a spring that glows faintly blue. Animals drink from it and their wounds close. A healing spring — incredibly rare and incredibly valuable."
+deadline_secs = 90.0
+default_option = 0
+
+[[choice.options]]
+label = "Claim and Guard"
+description = "Build a shrine and post guards. Exclusive guild access to healing waters."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A stone shrine rises around the spring. Guild members bathe their wounds in its waters."
+
+[[choice.options]]
+label = "Share with the Region"
+description = "Make it public knowledge. Massive goodwill from every faction."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 15.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Word spreads. Pilgrims and the wounded travel from across the region. The guild's generosity is legend."
+
+[[choice.options]]
+label = "Bottle and Sell"
+description = "Harvest the water and sell it. Profitable but may drain the spring."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 40.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = -3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Crates of glowing bottles are sold at premium prices. The spring flows a little weaker each day."

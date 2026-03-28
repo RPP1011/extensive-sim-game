@@ -1,0 +1,63 @@
+ability CornerTheMarket {
+    target: market
+    cooldown: 5000t
+    hint: economy
+
+    corner_market "grain" for 500t
+}
+
+ability ForgeTradeRoute {
+    target: region
+    cooldown: 3000t
+    hint: economy
+
+    forge_trade_route 5.0 for 1000t
+}
+
+ability Appraise {
+    target: self
+    cooldown: 100t
+    hint: economy
+
+    appraise
+}
+
+ability GoldenTouch {
+    target: guild
+    cooldown: 2000t
+    hint: economy
+
+    golden_touch for 500t
+}
+
+ability TradeEmbargo {
+    target: faction
+    cooldown: 3000t
+    hint: economy
+
+    trade_embargo for 800t
+}
+
+ability SilverTongue {
+    target: self
+    cooldown: 500t
+    hint: economy
+
+    silver_tongue
+}
+
+ability MarketMaker {
+    target: market
+    cooldown: 5000t
+    hint: economy
+
+    market_maker for 1000t
+}
+
+ability TradeEmpire {
+    target: guild
+    cooldown: 10000t
+    hint: economy
+
+    trade_empire 2.0
+}

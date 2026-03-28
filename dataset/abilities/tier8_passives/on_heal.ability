@@ -1,0 +1,44 @@
+// Tier 8: Passives triggered on heal
+
+passive HealingAura {
+    trigger: on_heal
+    cooldown: 5s
+
+    heal 8 in circle(3.0) [HOLY: 20]
+}
+
+passive ShieldOnHeal {
+    trigger: on_heal
+    cooldown: 6s
+
+    shield 15 for 3s
+}
+
+passive EmpoweredHealing {
+    trigger: on_heal
+    cooldown: 8s
+
+    buff damage_output 0.1 for 4s
+}
+
+passive RestoringLight {
+    trigger: on_heal
+    cooldown: 5s
+
+    heal 5/1s for 3s [HOLY: 20]
+}
+
+passive VitalSurge {
+    trigger: on_heal
+    cooldown: 7s
+
+    buff move_speed 0.2 for 3s
+    shield 10 for 3s
+}
+
+passive OverflowingLife {
+    trigger: on_heal
+    cooldown: 6s
+
+    heal 10 in circle(2.5)
+}

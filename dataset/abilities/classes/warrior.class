@@ -1,0 +1,21 @@
+class Warrior {
+    stat_growth: +3 attack, +2 defense, +3 max_hp per level
+
+    tags: melee, aggression, endurance, brawling, warfare
+
+    scaling hp_percent {
+        when hp_percent < 50: +20% attack
+        when hp_percent < 25: +10% speed
+        always: +5% max_hp
+    }
+
+    abilities {
+        level 1: power_strike "A heavy blow that staggers the target"
+        level 5: battle_cry "Boosts attack of all nearby allies"
+        level 10: second_wind "Recovers a burst of health mid-combat"
+        level 20: relentless_advance "Cannot be slowed or rooted while charging"
+        level 40: weight_of_blows "Strikes once with the weight of every blow you've ever landed"
+    }
+
+    requirements: level 1
+}

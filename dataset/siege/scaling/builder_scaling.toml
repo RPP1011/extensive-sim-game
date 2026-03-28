@@ -1,0 +1,28 @@
+[builder_class_scaling]
+description = "A fortification's effective level scales with the builder's class level"
+
+# Formula: fort_effective_level = base_level + (builder_level * scaling_factor)
+# A Level 40 [Builder] constructing a stone wall (base 25):
+#   effective_level = 25 + (40 * 0.5) = 45
+# A Level 1 laborer constructing the same wall:
+#   effective_level = 25 + (1 * 0.5) = 25.5
+
+[builder_class_scaling.formula]
+scaling_factor = 0.5
+max_bonus = 50                  # cap on builder bonus
+applies_to = ["walls", "gates", "towers"]
+
+[builder_class_scaling.special_abilities]
+# [Builder] abilities that enhance construction:
+# Level 10: "Structural Insight" — identifies optimal placement, +10% HP
+# Level 25: "Masterwork Construction" — +25% HP, +1 tier appearance
+# Level 40: "Enduring Foundation" — wall gains age_scaling bonus immediately
+# Level 60: "Legendary Architecture" — wall becomes a Named fortification
+# Level 80: "World-Class Fortification" — ward slots doubled, self-repairing
+
+[builder_class_scaling.other_classes]
+# Non-builder classes can construct, but at penalties:
+# No class bonus: effective_level = base_level (no scaling)
+# [Mason]: scaling_factor = 0.3
+# [Engineer]: scaling_factor = 0.4 (good with siege, decent with walls)
+# [Enchanter]: doesn't build walls, but can add wards (ward_level = class_level)

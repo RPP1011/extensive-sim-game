@@ -1,0 +1,47 @@
+ability Purify {
+    target: adventurer
+    cooldown: 500t
+    hint: heal
+
+    purify
+}
+
+ability MasterArmorer {
+    target: party
+    cooldown: 5000t
+    hint: utility
+
+    master_armorer
+}
+
+ability MasterworkCraft {
+    target: guild
+    cooldown: 3000t
+    hint: utility
+
+    masterwork_craft
+}
+
+ability AcceleratedStudy {
+    target: self
+    cooldown: 2000t
+    hint: utility
+
+    accelerated_study for 500t
+}
+
+ability Disinformation {
+    target: faction
+    cooldown: 2000t
+    hint: diplomacy
+
+    disinformation for 500t
+}
+
+ability TakeTheBlow {
+    target: adventurer
+    cooldown: 1000t
+    hint: defense
+
+    take_the_blow for 300t
+}

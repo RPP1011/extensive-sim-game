@@ -1,0 +1,49 @@
+[[events]]
+id = "desertion_wave"
+name = "Mass Desertion"
+phase = "surround"
+
+[events.trigger]
+type = "MoraleBelow"
+threshold = 0.25
+side = "attacker"
+
+[events.choice]
+prompt = "Soldiers are slipping away in the night. Entire squads have vanished. If this continues, the siege force won't have the numbers to maintain the encirclement."
+deadline_secs = 20.0
+
+[[events.choice.options]]
+label = "Double the Watch"
+description = "Post sentries to catch deserters. Costs manpower but stops the bleeding."
+[[events.choice.options.effects]]
+type = "army_modifier"
+desertion_rate = 0.1
+troop_commitment = 10
+morale_drain = 0.05
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Guards patrol the camp perimeter facing inward, the absurdity not lost on anyone. The army guards itself from itself."
+
+[[events.choice.options]]
+label = "Inspire the Troops"
+description = "Address the army. Promise loot, glory, vengeance — whatever motivates them."
+[[events.choice.options.effects]]
+type = "morale_check"
+rally_chance = 0.6
+morale_boost_success = 0.2
+desertions_stopped_chance = 0.5
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The commander speaks of what waits behind those walls. Gold. Revenge. Honor. Some soldiers straighten. Others stare at the ground and think of home."
+
+[[events.choice.options]]
+label = "Contract the Siege Lines"
+description = "Fewer soldiers means smaller perimeter. Tighten the noose rather than trying to hold everything."
+[[events.choice.options.effects]]
+type = "siege_modifier"
+encirclement_quality = 0.6
+escape_chance_defender = 0.3
+siege_effectiveness = 0.8
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The siege lines pull inward. Gaps open in the encirclement. The defenders notice. Messages might slip through. But the army that remains is concentrated and manageable."

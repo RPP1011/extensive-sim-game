@@ -1,0 +1,65 @@
+// Tier 2: AoE buff/debuff abilities
+
+ability RallyingCry {
+    target: self_aoe
+    cooldown: 15s, cast: 200ms
+    hint: utility
+
+    buff damage_output 0.2 for 5s in circle(4.0)
+}
+
+ability CommandingPresence {
+    target: self_aoe
+    cooldown: 14s, cast: 200ms
+    hint: utility
+
+    buff attack_speed 0.25 for 5s in circle(3.5)
+}
+
+ability WindsOfHaste {
+    target: self_aoe
+    cooldown: 12s, cast: 200ms
+    hint: utility
+
+    buff move_speed 0.3 for 4s in circle(4.0)
+}
+
+ability CurseOfLethargy {
+    target: ground, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: utility
+
+    debuff move_speed 0.3 for 3s in circle(3.0) [DARK: 40]
+}
+
+ability WeakeningAura {
+    target: self_aoe
+    cooldown: 12s, cast: 200ms
+    hint: utility
+
+    debuff damage_output 0.8 for 4s in circle(3.0)
+}
+
+ability MarkOfVulnerability {
+    target: ground, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: utility
+
+    damage_modify 1.25 for 4s in circle(2.5)
+}
+
+ability ProtectiveAura {
+    target: self_aoe
+    cooldown: 14s, cast: 300ms
+    hint: defense
+
+    shield 25 for 4s in circle(3.5)
+}
+
+ability FortifyingShout {
+    target: self_aoe
+    cooldown: 16s, cast: 200ms
+    hint: defense
+
+    shield 35 for 5s in circle(3.0)
+}

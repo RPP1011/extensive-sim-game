@@ -1,0 +1,43 @@
+# How to distribute loot from a quest.
+
+category = "quest_branch"
+trigger = "post_quest_loot"
+prompt = "The quest yielded valuable loot. How should it be divided?"
+deadline_secs = 60.0
+default_option = 0
+
+[[options]]
+label = "Equal Shares"
+description = "Everyone gets an equal cut. Fair but top performers feel undervalued."
+
+[[options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[options.effects]]
+type = "narrative"
+text = "The loot is divided evenly. Democracy in action."
+
+[[options]]
+label = "Merit-Based"
+description = "Best performers get the best loot. Motivating but breeds competition."
+
+[[options.effects]]
+type = "narrative"
+text = "The MVPs get first pick. Grumbling from the back row."
+
+[[options]]
+label = "Guild Treasury"
+description = "Everything goes to the guild. Individual needs come second."
+
+[[options.effects]]
+type = "gold"
+amount = 20.0
+
+[[options.effects]]
+type = "reputation"
+amount = -2.0
+
+[[options.effects]]
+type = "narrative"
+text = "The loot vanishes into the guild vault. The adventurers exchange glances."

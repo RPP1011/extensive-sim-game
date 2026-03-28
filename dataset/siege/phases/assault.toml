@@ -1,0 +1,56 @@
+name = "Siege Assault"
+phase_index = 3
+duration_range = [100, 400]
+
+[description]
+text = "The order is given. Ladders go up, the ram rolls forward, siege towers lurch into motion. This is the moment the siege has been building toward — the direct assault on the walls."
+
+[attacker_actions]
+available = ["escalade", "ram_gate", "deploy_siege_tower", "send_sappers", "use_petard", "diversionary_attack", "champion_assault"]
+priority = "attack"
+
+[defender_actions]
+available = ["pour_boiling_oil", "push_ladders", "defend_gate", "defend_breach", "deploy_reserves", "fire_arrows", "activate_murder_holes"]
+priority = "defense"
+
+[events]
+[[events.possible]]
+name = "Ladder Repelled"
+probability = 0.3
+trigger = "escalade_active"
+effect = "attacker_casualties"
+description = "Defenders push the ladders back. Men fall screaming. The assault on this section falters."
+
+[[events.possible]]
+name = "Gatehouse Held"
+probability = 0.2
+trigger = "ram_active"
+effect = "assault_stalled"
+description = "Boiling oil pours down. The ram crew breaks and runs, leaving the ram smoking in front of the gate."
+
+[[events.possible]]
+name = "Foothold Gained"
+probability = 0.15
+trigger = "siege_tower_deployed"
+effect = "wall_section_contested"
+description = "Soldiers pour from the siege tower onto the battlements. For the first time, the fighting is on the walls."
+
+[[events.possible]]
+name = "Champion Duel"
+probability = 0.1
+trigger = "champion_present"
+effect = "champion_duel_event"
+description = "A champion on the walls issues a challenge. The outcome could swing the morale of both sides."
+
+[[events.possible]]
+name = "Heroic Stand"
+probability = 0.08
+trigger = "defender_outnumbered"
+effect = "morale_boost_defender"
+description = "A single defender holds a breach alone, buying time for reinforcements. Stories will be told of this."
+
+[transition]
+to_next_phase = "siege_breach"
+conditions = ["wall_breached_and_entered", "OR", "gate_destroyed"]
+to_fallback_phase = "siege_bombardment"
+fallback_conditions = ["assault_repelled", "AND", "attacker_casualties > 30%"]

@@ -1,0 +1,20 @@
+class Shadow_Dancer {
+    stat_growth: +3 speed, +2 attack, +2 ability_power per level
+
+    tags: stealth, performance, shadow, dance, misdirection
+
+    scaling enemy_count {
+        when enemy_count >= 2: +15% speed
+        always: +10% attack
+    }
+
+    abilities {
+        level 40: dance_of_shadows "Move between enemies unseen, striking each once before they can react"
+        level 45: encore "Immediately repeat the last ability you used at no cost"
+        level 50: standing_ovation "Mesmerize all enemies for 5 seconds with an impossible performance"
+        level 60: shadow_chorus "Create shadow copies of yourself that each use a different ally's abilities"
+        level 80: final_act "Disappear entirely; for 10 seconds you cannot be targeted but deal triple damage"
+    }
+
+    requirements: level 40, classes: Rogue + Bard
+}

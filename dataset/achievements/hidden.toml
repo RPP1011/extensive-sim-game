@@ -1,0 +1,239 @@
+# Hidden achievements — easter eggs and surprises, all hidden until earned
+
+[[achievements]]
+id = "level_1_vs_20"
+name = "David and Goliath"
+description = "Win a fight with a party of all level 1 adventurers against a level 20+ enemy."
+category = "hidden"
+tier = "platinum"
+hidden = true
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "all_level_1_vs_level_20"
+
+[achievements.reward]
+rl_bonus = 1.0
+narrative = "They had no business winning that fight. They won anyway."
+
+[[achievements]]
+id = "twi_name"
+name = "I Know That Name"
+description = "Have an adventurer who shares a name with a famous figure."
+category = "hidden"
+tier = "bronze"
+hidden = true
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerRecruited"
+condition = "twi_character_name"
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "That name rings a bell. A loud one."
+
+[[achievements]]
+id = "never_give_up"
+name = "Never Give Up"
+description = "Lose 5 fights in a row, then win the 6th."
+category = "hidden"
+tier = "gold"
+hidden = true
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "five_losses_then_win"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Five defeats. Five times they got back up. The sixth time, everything clicked."
+
+[[achievements]]
+id = "mono_class"
+name = "One Trick Guild"
+description = "Have every adventurer in the guild be the same class."
+category = "hidden"
+tier = "gold"
+hidden = true
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "all_same_class"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "All [Knights]. Or all [Mages]. It shouldn't work, but here you are."
+
+[[achievements]]
+id = "fast_bankruptcy_recovery"
+name = "Bounce Back"
+description = "Go bankrupt and recover to positive gold within 500 ticks."
+category = "hidden"
+tier = "gold"
+hidden = true
+repeatable = false
+
+[achievements.trigger]
+type = "GoldChanged"
+condition = "bankrupt_recovery_500"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "From nothing to something in record time. The creditors are impressed."
+
+[[achievements]]
+id = "pacifist_win"
+name = "Pacifist"
+description = "Win a fight using only healing and support abilities."
+category = "hidden"
+tier = "platinum"
+hidden = true
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "only_healing_abilities"
+
+[achievements.reward]
+rl_bonus = 1.0
+narrative = "You healed your way to victory. The enemy gave up from frustration."
+
+[[achievements]]
+id = "plot_armor"
+name = "Plot Armor"
+description = "Have an adventurer survive at 1 HP three or more times."
+category = "hidden"
+tier = "gold"
+hidden = true
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "survived_1hp_three_times"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Three times at death's door. They must be the main character."
+
+[[achievements]]
+id = "broke_quest"
+name = "Penniless Hero"
+description = "Complete a quest with exactly 0 gold."
+category = "hidden"
+tier = "silver"
+hidden = true
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "exactly_zero_gold"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "Not a coin to their name, and still they answered the call."
+
+[[achievements]]
+id = "achievement_hunter"
+name = "Achievement Hunter"
+description = "Discover every hidden achievement."
+category = "hidden"
+tier = "legendary"
+hidden = true
+repeatable = false
+
+[achievements.trigger]
+type = "AchievementEarned"
+condition = "all_hidden_discovered"
+
+[achievements.reward]
+rl_bonus = 2.0
+narrative = "Every secret, every easter egg. You found them all."
+
+[[achievements]]
+id = "solo_dungeon"
+name = "Lone Wolf"
+description = "Have a single adventurer solo a dungeon."
+category = "hidden"
+tier = "platinum"
+hidden = true
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "solo_dungeon_clear"
+
+[achievements.reward]
+rl_bonus = 1.0
+narrative = "One adventurer, one dungeon. They walked in alone and walked out richer."
+
+[[achievements]]
+id = "overkill"
+name = "Overkill"
+description = "Deal 10x an enemy's max HP in a single hit."
+category = "hidden"
+tier = "gold"
+hidden = true
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "damage_10x_maxhp"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "That wasn't a kill. That was a statement."
+
+[[achievements]]
+id = "full_heal_to_death"
+name = "Ironic"
+description = "Heal an adventurer to full, then lose them in the same fight."
+category = "hidden"
+tier = "silver"
+hidden = true
+repeatable = false
+
+[achievements.trigger]
+type = "CombatLost"
+condition = "healed_full_then_died"
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "Full health one moment. Gone the next. War doesn't care about your healing."
+
+[[achievements]]
+id = "all_debuffs"
+name = "Status Effect Collector"
+description = "Have a single adventurer suffering from 5+ different debuffs simultaneously."
+category = "hidden"
+tier = "silver"
+hidden = true
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "five_simultaneous_debuffs"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "Poisoned, stunned, burning, cursed, and slowed. And they're still standing?"
+
+[[achievements]]
+id = "exactly_one_hp_win"
+name = "Photo Finish"
+description = "Win a fight with your last surviving adventurer at exactly 1 HP."
+category = "hidden"
+tier = "platinum"
+hidden = true
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "last_alive_1hp"
+
+[achievements.reward]
+rl_bonus = 1.0
+narrative = "One hit point. One adventurer. One victory. You can't script this."

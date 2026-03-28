@@ -1,0 +1,65 @@
+// Tier 2: Extended AoE heal variants
+
+ability PrayerOfMending {
+    target: self_aoe
+    cooldown: 10s, cast: 400ms
+    hint: heal
+
+    heal 30 in circle(4.0) [HOLY: 40]
+}
+
+ability TranquilMist {
+    target: ground, range: 5.0
+    cooldown: 8s, cast: 300ms
+    hint: heal
+
+    heal 25 in circle(3.0)
+}
+
+ability RadiantBurst {
+    target: self_aoe
+    cooldown: 6s, cast: 200ms
+    hint: heal
+
+    heal 20 in circle(3.0) [HOLY: 35]
+}
+
+ability SpiritLink {
+    target: self_aoe
+    cooldown: 12s, cast: 300ms
+    hint: heal
+
+    heal 40 in circle(3.5) [HOLY: 45]
+}
+
+ability NaturesEmbrace {
+    target: ground, range: 5.0
+    cooldown: 8s, cast: 300ms
+    hint: heal
+
+    heal 30 in circle(3.5)
+}
+
+ability HealingRain {
+    target: ground, range: 6.0
+    cooldown: 10s, cast: 400ms
+    hint: heal
+
+    heal 35 in circle(3.0) [MAGIC: 40]
+}
+
+ability WarmingLight {
+    target: self_aoe
+    cooldown: 7s, cast: 200ms
+    hint: heal
+
+    heal 22 in circle(3.0) [HOLY: 30]
+}
+
+ability LifeBloom {
+    target: ground, range: 4.0
+    cooldown: 9s, cast: 300ms
+    hint: heal
+
+    heal 35 in circle(2.5)
+}

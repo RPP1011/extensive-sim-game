@@ -1,6 +1,6 @@
 //! Backstory loading and character creation wiring.
 //!
-//! Loads backstory event chains from `assets/backstory/{origin}/` TOML files,
+//! Loads backstory event chains from `dataset/campaign/backstory/{origin}/` TOML files,
 //! converts them to `ChoiceEvent`s, and queues them during the
 //! `CharacterCreation` phase. Each choice accumulates effects onto the
 //! player character being built.
@@ -157,7 +157,7 @@ static BACKSTORIES: std::sync::OnceLock<Vec<BackstoryChain>> = std::sync::OnceLo
 
 pub fn get_or_load_backstories() -> &'static Vec<BackstoryChain> {
     BACKSTORIES.get_or_init(|| {
-        let dir = std::path::Path::new("assets/backstory");
+        let dir = std::path::Path::new("dataset/campaign/backstory");
         let chains = load_backstory_chains(dir);
         if !chains.is_empty() {
             eprintln!(
@@ -268,6 +268,12 @@ pub fn init_character_creation(
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: crate::headless_campaign::state::EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
     };
 
     state.adventurers.push(pc);

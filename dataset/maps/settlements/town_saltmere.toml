@@ -1,0 +1,54 @@
+name = "Saltmere"
+type = "town"
+population = 2800
+prosperity = 55.0
+
+[defenses]
+wall_type = "stone_wall"
+wall_hp = 600
+gate_count = 2
+tower_count = 4
+garrison_capacity = 45
+moat = true
+
+[[districts]]
+name = "Salt Works"
+type = "industrial"
+buildings = ["salt_pans", "evaporation_pools", "packing_house", "warehouse"]
+population_pct = 20.0
+wealth = 60.0
+threat = 10.0
+
+[[districts]]
+name = "Harbor"
+type = "harbor"
+buildings = ["dock", "shipwright", "customs_house", "chandler"]
+population_pct = 20.0
+wealth = 55.0
+threat = 20.0
+
+[[districts]]
+name = "Town Center"
+type = "commercial"
+buildings = ["market_hall", "tavern", "inn", "bank"]
+population_pct = 25.0
+wealth = 50.0
+threat = 10.0
+
+[[districts]]
+name = "Residences"
+type = "residential"
+buildings = ["houses", "well", "shrine", "apothecary"]
+population_pct = 35.0
+wealth = 30.0
+threat = 5.0
+
+[economy]
+primary_exports = ["salt", "preserved_fish", "brine"]
+primary_imports = ["timber", "metal", "grain", "spices"]
+trade_routes = 4
+market_size = "large"
+
+[narrative]
+description = "Salt made this town rich and salt keeps it powerful. Every trade caravan needs preservatives, and Saltmere controls the only coastal salt flats for a hundred miles."
+flavor = ["White crystals crust every surface", "The air tastes of brine", "Salt caravans depart at dawn"]

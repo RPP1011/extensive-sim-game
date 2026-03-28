@@ -1,0 +1,18 @@
+name = "The Dragon Awakens"
+description = "An ancient dragon stirs from millennia of slumber. Its shadow covers entire regions. Nothing in living memory compares"
+crisis_type = "dragon"
+world_templates = []
+trigger_threshold = 0.9
+priority = 10
+allow_simultaneous = false
+
+[config]
+type = "Dragon"
+dragon_name = "Khezraviax the Undying"
+initial_threat = 100.0
+threat_growth_per_tick = 0.5
+devastation_radius = 50.0
+devastation_interval_ticks = 5000
+lair_location_type = "Dungeon"
+required_level_to_face = 60
+rally_faction_threshold = 3

@@ -1,0 +1,55 @@
+name = "Dragon Sighting"
+priority = 9
+repeatable = true
+cooldown_ticks = 15000
+
+[trigger]
+type = "ThreatLevel"
+min_threat = 60.0
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "A dragon has been spotted circling the mountains to the north. Not a wyvern, not a drake — a true dragon, ancient and vast. Its shadow covers entire fields. The region holds its breath."
+deadline_secs = 120.0
+default_option = 2
+
+[[choice.options]]
+label = "Seek the Dragon (80g)"
+description = "Find its lair, assess the threat, and attempt communication. Dragons can be reasoned with — sometimes."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -80.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The bravest party the guild has ever assembled marches toward the mountains."
+
+[[choice.options]]
+label = "Fortify and Pray"
+description = "Build anti-air defenses and hope it flies past."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -25.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Ballistae are mounted on rooftops. The guild watches the sky."
+
+[[choice.options]]
+label = "Offer Tribute (100g)"
+description = "Leave a pile of gold at the mountain's base. Dragons respect tribute."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -100.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Gold is left at the dragon's doorstep. By morning, it's gone. The dragon circles once more, then disappears."

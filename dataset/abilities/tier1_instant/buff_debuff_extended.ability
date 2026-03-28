@@ -1,0 +1,113 @@
+// Tier 1: Extended buff/debuff variants
+
+ability Bloodlust {
+    target: ally, range: 4.0
+    cooldown: 12s, cast: 200ms
+    hint: utility
+
+    buff attack_speed 0.4 for 6s
+}
+
+ability BattleCry {
+    target: self
+    cooldown: 15s, cast: 100ms
+    hint: utility
+
+    buff damage_output 0.35 for 5s
+}
+
+ability Invigorate {
+    target: ally, range: 5.0
+    cooldown: 8s, cast: 200ms
+    hint: utility
+
+    buff move_speed 0.4 for 5s
+}
+
+ability ArcaneInfusion {
+    target: ally, range: 4.0
+    cooldown: 10s, cast: 300ms
+    hint: utility
+
+    buff damage_output 0.2 for 6s
+}
+
+ability SharpenBlade {
+    target: self
+    cooldown: 8s, cast: 100ms
+    hint: utility
+
+    buff damage_output 0.15 for 8s
+}
+
+ability FocusMind {
+    target: self
+    cooldown: 10s, cast: 200ms
+    hint: utility
+
+    buff attack_speed 0.25 for 5s
+}
+
+ability CurseOfWeakness {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 200ms
+    hint: utility
+
+    debuff damage_output 0.7 for 5s [DARK: 45]
+}
+
+ability ExhaustingTouch {
+    target: enemy, range: 2.0
+    cooldown: 8s, cast: 200ms
+    hint: utility
+
+    debuff attack_speed 0.3 for 4s
+}
+
+ability LeadenWeight {
+    target: enemy, range: 4.0
+    cooldown: 6s, cast: 200ms
+    hint: utility
+
+    debuff move_speed 0.4 for 3s [ICE: 35]
+}
+
+ability Vulnerability {
+    target: enemy, range: 5.0
+    cooldown: 12s, cast: 300ms
+    hint: utility
+
+    damage_modify 1.3 for 4s
+}
+
+ability ExposedFlank {
+    target: enemy, range: 4.0
+    cooldown: 8s, cast: 200ms
+    hint: utility
+
+    damage_modify 1.2 for 6s
+}
+
+ability FrostCurse {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 200ms
+    hint: utility
+
+    debuff move_speed 0.5 for 5s [ICE: 45]
+}
+
+ability PoisonWeaken {
+    target: enemy, range: 4.0
+    cooldown: 8s, cast: 200ms
+    hint: utility
+
+    debuff damage_output 0.8 for 6s [POISON: 40]
+}
+
+ability Swiftfoot {
+    target: self
+    cooldown: 6s, cast: 0ms
+    hint: utility
+
+    buff move_speed 0.5 for 3s
+}

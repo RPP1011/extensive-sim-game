@@ -1,0 +1,51 @@
+[[events]]
+id = "sappers_success"
+name = "Sapper Tunnel Complete"
+phase = "bombardment"
+
+[events.trigger]
+type = "SapperProgress"
+threshold = 1.0
+
+[events.choice]
+prompt = "The sappers have reached the wall foundations! The tunnel is packed with combustibles. One spark and a section of wall collapses."
+deadline_secs = 20.0
+
+[[events.choice.options]]
+label = "Detonate Immediately"
+description = "Blow the wall now and launch the assault in the chaos."
+[[events.choice.options.effects]]
+type = "wall_collapse"
+wall_damage = 1500
+breach_width = 3.0
+defender_casualties_range = [3, 8]
+dust_cloud_ticks = 50
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The ground heaves. The wall buckles, cracks, and a section the length of a house slides inward in a cascade of dust and stone. For a moment, there is silence. Then the horns sound the charge."
+
+[[events.choice.options]]
+label = "Wait for Coordinated Assault"
+description = "Time the detonation with the main assault for maximum confusion."
+[[events.choice.options.effects]]
+type = "wall_collapse"
+wall_damage = 1500
+breach_width = 3.0
+assault_coordination_bonus = 0.3
+ticks_delay = 100
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The sappers wait in the dark, torch in hand, until they hear the horns above. Then the fire. Then the roar of collapsing stone. Then everything at once."
+
+[[events.choice.options]]
+label = "Extend Tunnel to Gate Mechanism"
+description = "Push further to undermine the gate rather than the wall. Higher risk but opens the gate."
+[[events.choice.options.effects]]
+type = "siege_progress"
+ticks_cost = 200
+gate_damage = 1200
+collapse_chance = 0.15
+sapper_casualties_if_collapse = 12
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The sappers press on past the wall, digging toward the gatehouse. The tunnel groans. Every moment risks a collapse that would bury them all."

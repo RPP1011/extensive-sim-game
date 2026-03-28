@@ -1,0 +1,120 @@
+// Tier 7: Abilities using scales_with for external scaling
+// These abilities scale with campaign-level stats.
+
+ability KingdomsStrength {
+    target: self
+    cooldown: 30s
+    hint: utility
+
+    buff damage_output 0.01 for 10s scales_with kingdom_size
+}
+
+ability StrengthInNumbers {
+    target: self_aoe
+    cooldown: 10s, cast: 200ms
+    hint: defense
+
+    buff armor 5 for 8s in circle(8.0) scales_with party_size
+}
+
+ability GuildPurse {
+    target: self
+    cooldown: 25s
+    hint: utility
+
+    shield 10 for 8s scales_with guild_gold
+}
+
+ability LegionStrike {
+    target: enemy, range: 3.0
+    cooldown: 12s, cast: 300ms
+    hint: damage
+
+    damage 5 [PHYSICAL: 40] scales_with army_size
+}
+
+ability ReputedPresence {
+    target: self_aoe
+    cooldown: 20s, cast: 200ms
+    hint: utility
+
+    buff damage_output 0.005 for 8s in circle(6.0) scales_with guild_reputation
+}
+
+ability VeteranCommand {
+    target: self_aoe
+    cooldown: 15s, cast: 300ms
+    hint: damage
+
+    buff attack_speed 0.02 for 6s in circle(5.0) scales_with caster_level
+}
+
+ability ExpeditionaryForce {
+    target: self_aoe
+    cooldown: 18s, cast: 200ms
+    hint: utility
+
+    buff move_speed 0.01 for 10s in circle(8.0) scales_with adventurer_count
+}
+
+ability ImperialDecree {
+    target: global
+    cooldown: 45s, cast: 500ms
+    hint: leadership
+
+    buff damage_output 0.005 for 12s in circle(20.0) scales_with kingdom_size
+    buff armor 0.005 for 12s in circle(20.0) scales_with kingdom_size
+}
+
+ability GoldHoardShield {
+    target: self
+    cooldown: 20s
+    hint: defense
+
+    shield 1 for 6s scales_with guild_gold
+    buff armor 0.001 for 6s scales_with guild_gold
+}
+
+ability CompanyMorale {
+    target: self_aoe
+    cooldown: 12s, cast: 200ms
+    hint: utility
+
+    heal 2 in circle(6.0) scales_with party_size
+    buff damage_output 0.02 for 6s in circle(6.0) scales_with party_size
+}
+
+ability LegionHeal {
+    target: self_aoe
+    cooldown: 15s, cast: 400ms
+    hint: heal
+
+    heal 1 in circle(8.0) [HOLY: 30] scales_with army_size
+}
+
+ability ScaledSmite {
+    target: enemy, range: 5.0
+    cooldown: 8s, cast: 200ms
+    hint: damage
+
+    damage 10 [MAGIC: 45] scales_with caster_level
+    damage 3 [MAGIC: 30] scales_with guild_reputation
+}
+
+ability WarlordsPresence {
+    target: self_aoe
+    cooldown: 30s, cast: 300ms
+    hint: utility
+
+    buff damage_output 0.01 for 10s in circle(10.0) scales_with army_size
+    buff armor 0.005 for 10s in circle(10.0) scales_with kingdom_size
+}
+
+ability BountifulHarvest {
+    target: self_aoe
+    cooldown: 20s, cast: 500ms
+    hint: heal
+
+    heal 3 in circle(6.0) scales_with adventurer_count
+    shield 2 for 5s in circle(6.0) scales_with adventurer_count
+}

@@ -1,0 +1,49 @@
+[[events]]
+id = "plague_dead"
+name = "Diseased Dead Launched Over Walls"
+phase = "bombardment"
+
+[events.trigger]
+type = "DiseasePresent"
+threshold = 0.0
+side = "attacker"
+
+[events.choice]
+prompt = "The siege camp's dead are piling up from disease. A cruel commander suggests using the trebuchet to send them over the walls."
+deadline_secs = 25.0
+
+[[events.choice.options]]
+label = "Launch the Dead"
+description = "Horrifying, but effective. Disease will spread inside the settlement."
+[[events.choice.options.effects]]
+type = "biological_warfare"
+defender_disease_chance = 0.6
+defender_morale_drain = 0.25
+reputation_loss = true
+war_crime = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The trebuchet arm rises with its terrible cargo. What comes down inside the walls is worse than any stone. The screaming begins."
+
+[[events.choice.options]]
+label = "Refuse"
+description = "Some lines should not be crossed. Burn the dead properly."
+[[events.choice.options.effects]]
+type = "army_modifier"
+morale_boost = 0.05
+disease_contained = true
+reputation_preserved = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The commander stares at the officer who suggested it. 'Burn them,' he says quietly. 'With dignity. We're soldiers, not monsters.'"
+
+[[events.choice.options]]
+label = "Dump the Dead in Sight of the Walls"
+description = "Display them as a warning without the biological warfare. Psychological pressure."
+[[events.choice.options.effects]]
+type = "morale_modifier"
+defender_morale_drain = 0.1
+reputation_loss_minor = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The bodies are stacked where the garrison can see them. It's a grim message: this is what awaits. The defenders look away, but the image lingers."

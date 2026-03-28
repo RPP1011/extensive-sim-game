@@ -1,0 +1,23 @@
+[[tactics]]
+id = "turtle"
+name = "Turtle"
+side = "defender"
+category = "patience"
+
+[tactics.requirements]
+supplies_ticks_min = 2000
+wall_hp_min_percent = 0.5
+
+[tactics.effects]
+siege_duration_multiplier = 1.5
+defender_casualty_multiplier = 0.3
+supply_consumption = 0.7
+repair_rate = 1.5
+morale_drain = 0.1
+passive = true
+
+[tactics.counters]
+countered_by = ["starve_out", "bombardment_tactic", "sapper_approach", "fire_siege"]
+
+[tactics.narrative]
+description = "The garrison pulls back from the walls, exposing only the minimum force needed. Repairs happen behind the line. Supplies are rationed carefully. They're not trying to win — they're trying to outlast."

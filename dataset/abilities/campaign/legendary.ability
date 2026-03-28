@@ -1,0 +1,42 @@
+ability LivingLegend {
+    target: self
+    cooldown: 20000t
+    hint: leadership
+
+    living_legend
+    inspire 0.5 for 5000t
+}
+
+ability RewriteHistory {
+    target: global
+    cooldown: 30000t
+    hint: utility
+
+    rewrite_history
+}
+
+ability TheLastWord {
+    target: self
+    cooldown: 30000t
+    hint: utility
+
+    the_last_word when near_death
+}
+
+ability WealthOfNations {
+    target: guild
+    cooldown: 30000t
+    hint: economy
+
+    wealth_of_nations
+    trade_empire 5.0
+}
+
+ability Omniscience {
+    target: global
+    cooldown: 30000t
+    hint: utility
+
+    omniscience
+    all_seeing_eye
+}

@@ -1,0 +1,49 @@
+[[fortifications]]
+id = "portcullis"
+name = "Portcullis"
+tier = 3
+type = "gate"
+
+[fortifications.stats]
+gate_hp = 1000
+height = 4.0
+thickness = 0.3
+open_speed = 3
+drop_speed = 1
+can_trap_attackers = true
+secondary_gate = true
+
+[fortifications.construction]
+cost = 200
+ticks = 500
+resources = ["iron", "stone"]
+builder_class_bonus = 0.3
+
+[fortifications.weaknesses]
+ram_multiplier = 1.2
+fire_resistant = true
+petard_multiplier = 1.0
+lift_mechanism_vulnerable = true
+
+[fortifications.power_scaling]
+effective_level = 28
+builder_class_bonus = true
+enchantable = true
+age_scaling = 0.005
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 0.0
+ability_damage_reduction = 0.0
+projectile_deflection = 0.0
+ward_hp = 0
+ward_level = 0
+
+[fortifications.garrison_bonus]
+defender_multiplier = 3.5
+ranged_accuracy_bonus = 0.0
+melee_disadvantage = 0.5
+cover_rating = 0.4
+
+[fortifications.narrative]
+description = "Iron teeth drop from the ceiling with a crash that shakes the gatehouse. Any attacker caught between the portcullis and the main gate finds himself in a stone box with murder holes above. The defenders call it the trap. The name is precise."

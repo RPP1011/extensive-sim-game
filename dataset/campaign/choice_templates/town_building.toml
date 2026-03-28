@@ -1,0 +1,67 @@
+# Town improvement decision.
+
+category = "strategic"
+trigger = "town_development"
+prompt = "The settlement can support one new structure. What should be built?"
+deadline_secs = 120.0
+default_option = 0
+
+[[options]]
+label = "Training Grounds (60g)"
+description = "A dedicated facility for combat training. Permanent improvement to adventurer growth."
+
+[[options.effects]]
+type = "gold"
+amount = -60.0
+
+[[options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[options.effects]]
+type = "narrative"
+text = "The training grounds take shape — sparring rings, archery butts, obstacle courses."
+
+[[options]]
+label = "Market Hall (45g)"
+description = "A proper trading post. Better prices on supplies and equipment."
+
+[[options.effects]]
+type = "gold"
+amount = -45.0
+
+[[options.effects]]
+type = "supplies"
+amount = 15.0
+
+[[options.effects]]
+type = "narrative"
+text = "Merchants set up permanent stalls. Competition drives prices down."
+
+[[options]]
+label = "Watchtower (30g)"
+description = "Early warning against threats. Defense improvement."
+
+[[options.effects]]
+type = "gold"
+amount = -30.0
+
+[[options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[options.effects]]
+type = "narrative"
+text = "The tower rises above the rooftops. Nothing approaches unseen."
+
+[[options]]
+label = "Inn (35g)"
+description = "Attracts travelers, adventurers, and rumors. Information hub."
+
+[[options.effects]]
+type = "gold"
+amount = -35.0
+
+[[options.effects]]
+type = "narrative"
+text = "The inn opens its doors. Within a week, it's the region's gossip headquarters."

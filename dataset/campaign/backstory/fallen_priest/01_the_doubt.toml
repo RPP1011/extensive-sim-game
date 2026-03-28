@@ -1,0 +1,34 @@
+name = "The Doubt"
+world_template = "Frontier"
+sequence = 1
+default_option = 2
+prompt = "The temple burned, and you let it burn. Not by choice — by paralysis. When the raiders came, your prayers brought no divine fire, no holy shield. Just silence. Your congregation screamed, and the god you'd served for twenty years said nothing. Standing in the ashes, you removed your holy symbol and walked away."
+
+[[options]]
+label = "Rage Against the Divine"
+description = "If the gods won't protect their faithful, then the faithful must protect themselves. Your training becomes a weapon — not divine, but human."
+pc_traits = [{ trait = "battle_scarred" }]
+pc_stats = { attack = 4.0, ability_power = -2.0 }
+effects = [
+    { type = "narrative", text = "The holy symbol melts in a forge fire. You watch it pool and harden into something sharp." },
+    { type = "reputation", amount = 3.0 },
+]
+
+[[options]]
+label = "Seek New Faith"
+description = "One god failed you. There are others. Older ones, stranger ones, hungrier ones."
+pc_traits = [{ trait = "scholar" }]
+pc_stats = { ability_power = 4.0 }
+effects = [
+    { type = "narrative", text = "Forbidden texts. Heretical prayers. Something answers — not the same voice, but a voice." },
+]
+
+[[options]]
+label = "Walk in Silence"
+description = "Neither faith nor fury. Just keep walking and see what emerges from the numbness."
+pc_traits = [{ trait = "pragmatist" }]
+pc_stats = { resolve = 3.0, defense = 2.0 }
+effects = [
+    { type = "narrative", text = "You walk. Days blur into weeks. The silence inside becomes a kind of armor." },
+    { type = "reputation", amount = 5.0 },
+]

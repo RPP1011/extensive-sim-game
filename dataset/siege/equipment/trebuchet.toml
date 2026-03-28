@@ -1,0 +1,32 @@
+[[equipment]]
+id = "trebuchet"
+name = "Trebuchet"
+category = "ranged"
+tier = 4
+
+[equipment.stats]
+gate_damage_per_tick = 10.0
+wall_damage_per_tick = 20.0
+range = 20.0
+crew_required = 10
+move_speed = 0.0
+hp = 500
+armor = 15
+fire_rate = 0.05
+accuracy = 0.5
+splash_radius = 3.0
+troop_damage = 50.0
+can_fire_incendiary = true
+
+[equipment.requirements]
+min_tech_level = 4
+construction_cost = 400
+construction_ticks = 1000
+resources = ["timber", "iron", "rope", "counterweight_stone"]
+
+[equipment.counters]
+vulnerable_to = ["sally_out", "counter_battery", "arcane_cannon"]
+strong_against = ["stone_wall", "reinforced_stone", "castle_wall", "stone_tower"]
+
+[equipment.narrative]
+description = "The counterweight drops and the world holds its breath. Then the arm whips up and the stone flies — not like a bird, but like a judgment. Where it lands, walls become rubble and rubble becomes dust."

@@ -1,0 +1,65 @@
+# Enemy forces raid a supply depot.
+
+name = "Supply Depot Raid"
+priority = 7
+repeatable = true
+cooldown_ticks = 5000
+
+[trigger]
+type = "ThreatLevel"
+min_threat = 45.0
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "Raiders hit the eastern supply depot at dawn — a coordinated strike that caught the guards off balance. Half the stored grain is gone, and the depot is burning."
+deadline_secs = 45.0
+default_option = 0
+
+[[choice.options]]
+label = "Pursue the Raiders"
+description = "Track them down and recover what was stolen. They can't have gotten far."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Fresh tracks in the mud. The pursuit begins."
+
+[[choice.options]]
+label = "Rebuild and Fortify"
+description = "Write off the losses and make sure it doesn't happen again."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Stone walls replace wooden ones. The new depot won't be so easy to crack."
+
+[[choice.options]]
+label = "Emergency Resupply (35g)"
+description = "Buy replacement supplies at premium prices. The garrison needs to eat."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -35.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 20.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Emergency shipments arrive within the day. The guild pays through the nose."

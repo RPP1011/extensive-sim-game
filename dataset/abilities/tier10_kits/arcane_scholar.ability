@@ -1,0 +1,59 @@
+// Tier 10: Arcane Scholar Kit — utility mage with shields, silences, and burst
+
+ability ArcaneBolt2 {
+    target: enemy, range: 7.0
+    cooldown: 3s, cast: 200ms
+    hint: damage
+
+    damage 22 [MAGIC: 40]
+}
+
+ability Counterspell {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 100ms
+    hint: crowd_control
+
+    silence 2500ms [MAGIC: 55]
+    damage 15 [MAGIC: 35]
+}
+
+ability ArcaneShield {
+    target: ally, range: 5.0
+    cooldown: 8s, cast: 200ms
+    hint: defense
+
+    shield 35 for 4s
+    buff damage_output 0.1 for 4s
+}
+
+ability MissileBarrage {
+    target: enemy, range: 7.0
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 50 [MAGIC: 55]
+            damage 20 in circle(2.0) [MAGIC: 40]
+        }
+    }
+}
+
+ability PowerOverwhelming {
+    target: self
+    cooldown: 45s, cast: 300ms
+    hint: damage
+
+    buff damage_output 0.4 for 6s
+    shield 50 for 6s
+    damage 40 in circle(3.0) [MAGIC: 50]
+    silence 1500ms in circle(3.0) [MAGIC: 45]
+}
+
+passive ArcaneResonance {
+    trigger: on_ability_use
+    cooldown: 6s
+
+    damage 10 [MAGIC: 25]
+    shield 8 for 2s
+}

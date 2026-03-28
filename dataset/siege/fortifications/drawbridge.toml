@@ -1,0 +1,50 @@
+[[fortifications]]
+id = "drawbridge"
+name = "Drawbridge"
+tier = 3
+type = "gate"
+
+[fortifications.stats]
+gate_hp = 600
+height = 0.0
+thickness = 0.4
+open_speed = 10
+moat_crossing = true
+raised_blocks_approach = true
+width = 3.0
+
+[fortifications.construction]
+cost = 250
+ticks = 600
+resources = ["timber", "iron", "chain"]
+builder_class_bonus = 0.4
+
+[fortifications.weaknesses]
+ram_multiplier = 0.0
+fire_resistant = false
+fire_damage_multiplier = 2.0
+chain_cuttable = true
+mechanism_jammable = true
+
+[fortifications.power_scaling]
+effective_level = 20
+builder_class_bonus = true
+enchantable = true
+age_scaling = 0.005
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 0.0
+ability_damage_reduction = 0.0
+projectile_deflection = 0.0
+ward_hp = 0
+ward_level = 0
+
+[fortifications.garrison_bonus]
+defender_multiplier = 2.5
+ranged_accuracy_bonus = 0.0
+melee_disadvantage = 0.3
+cover_rating = 0.3
+
+[fortifications.narrative]
+description = "When it rises, the moat becomes impassable. The chains creak, the bridge lifts like a jaw closing, and the fortress seals itself off from the world. Attackers eye the chains and think about bolt-cutters."

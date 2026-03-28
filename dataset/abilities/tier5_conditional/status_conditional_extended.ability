@@ -1,0 +1,87 @@
+// Tier 5: Extended status conditional abilities
+
+ability Shatter {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 45 when target_has(slow) [ICE: 55]
+}
+
+ability Detonate {
+    target: enemy, range: 4.0
+    cooldown: 7s, cast: 200ms
+    hint: damage
+
+    damage 50 when target_has(root) [FIRE: 55]
+}
+
+ability DarkHarvest {
+    target: enemy, range: 3.0
+    cooldown: 8s, cast: 200ms
+    hint: damage
+
+    damage 40 when target_has(silence) [DARK: 50]
+    heal 25 when target_has(silence)
+}
+
+ability IceLance {
+    target: enemy, range: 6.0
+    cooldown: 4s, cast: 100ms
+    hint: damage
+
+    damage 20 [ICE: 35]
+    damage 30 when target_has(slow) [ICE: 45]
+}
+
+ability GlacialSmash {
+    target: enemy, range: 1.5
+    cooldown: 7s, cast: 300ms
+    hint: damage
+
+    damage 30 [ICE: 40]
+    stun 1500ms when target_has(slow) [ICE: 50]
+}
+
+ability ExploitWeakness {
+    target: enemy, range: 1.5
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    damage 35 when target_has(stun) [PHYSICAL: 50]
+}
+
+ability PredatoryStrike {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 100ms
+    hint: damage
+
+    damage 30 [PHYSICAL: 40]
+    damage 25 when target_has(root) [PHYSICAL: 45]
+}
+
+ability Immolation {
+    target: enemy, range: 3.0
+    cooldown: 7s, cast: 200ms
+    hint: damage
+
+    damage 10/1s for 4s [FIRE: 45]
+    damage 35 when target_has(stun) [FIRE: 55]
+}
+
+ability VoidCollapse {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: damage
+
+    damage 60 when target_has(silence) [DARK: 60]
+}
+
+ability BlessedSmite {
+    target: enemy, range: 4.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 25 [HOLY: 40]
+    damage 25 when target_has(root) [HOLY: 45]
+}

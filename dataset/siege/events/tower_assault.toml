@@ -1,0 +1,51 @@
+[[events]]
+id = "tower_assault"
+name = "Siege Tower Reaches Walls"
+phase = "assault"
+
+[events.trigger]
+type = "SiegeTowerContact"
+threshold = 0.0
+
+[events.choice]
+prompt = "The siege tower lurches against the wall with a grinding crash. The drawbridge drops. The first soldiers stare across at the defenders on the battlements."
+deadline_secs = 20.0
+
+[[events.choice.options]]
+label = "Mass Assault"
+description = "Flood the walls with soldiers. Accept the casualties to establish a foothold."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "battlement_assault"
+attacker_bonus = 0.1
+defender_bonus = 0.2
+attacker_reinforcement_rate = 0.5
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Men pour across the drawbridge three abreast. The first wave dies. The second wave stumbles over them. The third wave fights."
+
+[[events.choice.options]]
+label = "Send Champions First"
+description = "Send your best fighters across to clear a section. Fewer casualties if they survive."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "champion_battlement"
+attacker_count = 4
+attacker_quality = "elite"
+defender_bonus = 0.1
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The best fighters go first. Named adventurers, leveled warriors. They cross the bridge into the teeth of the defense and carve a space for those behind."
+
+[[events.choice.options]]
+label = "Simultaneous Escalade"
+description = "Throw ladders up on both sides of the tower to split the defense."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "multi_point_assault"
+attacker_bonus = 0.2
+defender_penalty = 0.3
+attacker_casualty_multiplier = 1.5
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Ladders slam against the walls on either side. The defenders can't be everywhere. Something has to give."

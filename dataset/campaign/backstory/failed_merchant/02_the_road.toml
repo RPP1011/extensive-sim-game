@@ -1,0 +1,35 @@
+name = "The Road"
+world_template = "Archipelago"
+sequence = 2
+default_option = 0
+prompt = "With nothing but your wits and whatever you salvaged, you take to the road. Every town holds both opportunity and risk — you owe money in half of them. A caravan heading west offers passage. A ship heading south promises new markets. Or you could stay local and try to rebuild from the ground up."
+
+[[options]]
+label = "Join the Caravan"
+description = "Travel with traders heading west. Learn new routes, make new contacts. Fresh start in a fresh market."
+pc_traits = [{ trait = "explorer" }]
+pc_stats = { speed = 2.0, defense = 1.0 }
+effects = [
+    { type = "narrative", text = "The caravan rolls west. New faces, new opportunities. You keep your past to yourself." },
+    { type = "supplies", amount = 5.0 },
+]
+
+[[options]]
+label = "Take the Ship South"
+description = "Cross the water. Distance dissolves debt. Whatever waits on the other shore, at least it's not creditors."
+pc_traits = [{ trait = "pragmatist" }]
+pc_stats = { speed = 3.0 }
+effects = [
+    { type = "gold", amount = -15.0 },
+    { type = "narrative", text = "The gangplank rises behind you. The coast shrinks. You're not running — you're relocating. There's a difference." },
+]
+
+[[options]]
+label = "Rebuild Locally"
+description = "You know this market. Every contact, every angle. Start small, think big."
+pc_traits = [{ trait = "merchant_mind" }]
+pc_stats = { resolve = 3.0 }
+effects = [
+    { type = "reputation", amount = 5.0 },
+    { type = "narrative", text = "A market stall. Borrowed goods. Day one of the rebuild. Your hands remember the work." },
+]

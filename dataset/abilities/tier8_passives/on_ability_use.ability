@@ -1,0 +1,59 @@
+// Tier 8: Passives triggered on ability use
+
+passive ArcaneEcho {
+    trigger: on_ability_use
+    cooldown: 6s
+
+    damage 12 [MAGIC: 30]
+}
+
+passive SpellShield {
+    trigger: on_ability_use
+    cooldown: 8s
+
+    shield 15 for 3s
+}
+
+passive AfterImage {
+    trigger: on_ability_use
+    cooldown: 10s
+
+    stealth 1s
+}
+
+passive ElementalFeedback {
+    trigger: on_ability_use
+    cooldown: 5s
+
+    heal 10
+}
+
+passive CastingMomentum {
+    trigger: on_ability_use
+    cooldown: 6s
+
+    buff move_speed 0.15 for 2s
+}
+
+passive EmpoweredCast {
+    trigger: on_ability_use
+    cooldown: 8s
+
+    buff damage_output 0.15 for 3s
+}
+
+passive ManaSurge {
+    trigger: on_ability_use
+    cooldown: 7s
+
+    damage 10 in circle(2.0) [MAGIC: 30]
+    heal 8
+}
+
+passive QuickRecovery {
+    trigger: on_ability_use
+    cooldown: 6s
+
+    heal 8
+    buff attack_speed 0.1 for 3s
+}

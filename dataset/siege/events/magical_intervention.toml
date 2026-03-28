@@ -1,0 +1,48 @@
+[[events]]
+id = "magical_intervention"
+name = "Magical Intervention"
+phase = "bombardment"
+
+[events.trigger]
+type = "MageTowerActive"
+threshold = 0.0
+
+[events.choice]
+prompt = "The mage tower pulses with light. A [Mage] on the walls is preparing a large-scale spell. The air crackles with barely-contained power."
+deadline_secs = 15.0
+
+[[events.choice.options]]
+label = "Ward Breaker — Disrupt the Spell"
+description = "If you have a ward breaker, use it now to interrupt the casting."
+[[events.choice.options.effects]]
+type = "counter_magic"
+disruption_chance = 0.7
+requires = "ward_breaker"
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The [Archmage] raises the null-stone and speaks the un-words. The spell on the walls gutters, flickers, and collapses. The mage staggers, drained."
+
+[[events.choice.options]]
+label = "Scatter Formations"
+description = "Spread troops out to minimize the spell's impact."
+[[events.choice.options.effects]]
+type = "army_modifier"
+casualty_reduction = 0.5
+formation_broken = true
+ticks_to_reform = 100
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Horns sound the scatter. Soldiers dive for cover. When the spell hits, it devastates the ground but finds fewer targets."
+
+[[events.choice.options]]
+label = "Rush the Tower"
+description = "Kill the mage before they finish the spell. All-or-nothing."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "tower_rush"
+attacker_bonus = 0.0
+time_limit = 50
+failure_consequence = "massive_spell_damage"
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The assault force sprints for the tower. They have seconds. The mage's eyes glow brighter. The spell builds. It's a race between steel and sorcery."

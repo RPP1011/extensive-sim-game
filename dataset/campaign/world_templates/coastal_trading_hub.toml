@@ -1,0 +1,181 @@
+# Coastal Trading Hub — Naval, pirate, merchant factions.
+# 5 regions, 3 factions, 6 locations, 3 NPCs.
+
+name = "Coastal Trading Hub"
+global_threat_level = 20.0
+
+[[regions]]
+id = 0
+name = "Port Verdance"
+owner_faction_id = 0
+neighbors = [1, 2]
+unrest = 8.0
+control = 85.0
+threat_level = 10.0
+
+[[regions]]
+id = 1
+name = "The Merchant Quarter"
+owner_faction_id = 0
+neighbors = [0, 2, 3]
+unrest = 12.0
+control = 80.0
+threat_level = 15.0
+
+[[regions]]
+id = 2
+name = "Smuggler's Cove"
+owner_faction_id = 1
+neighbors = [0, 1, 3, 4]
+unrest = 35.0
+control = 45.0
+threat_level = 40.0
+
+[[regions]]
+id = 3
+name = "The Outer Reefs"
+owner_faction_id = 2
+neighbors = [1, 2, 4]
+unrest = 40.0
+control = 35.0
+threat_level = 55.0
+
+[[regions]]
+id = 4
+name = "Deadman's Isle"
+owner_faction_id = 2
+neighbors = [2, 3]
+unrest = 60.0
+control = 25.0
+threat_level = 70.0
+
+[[locations]]
+id = 0
+name = "Harbor Master's Tower"
+position = [0.0, 0.0]
+location_type = "Settlement"
+threat_level = 5.0
+resource_availability = 85.0
+faction_owner = 0
+scouted = true
+
+[[locations]]
+id = 1
+name = "Grand Bazaar"
+position = [10.0, 5.0]
+location_type = "Settlement"
+threat_level = 8.0
+resource_availability = 90.0
+faction_owner = 0
+scouted = true
+
+[[locations]]
+id = 2
+name = "The Sunken Galleon"
+position = [-20.0, 15.0]
+location_type = "Dungeon"
+threat_level = 50.0
+resource_availability = 55.0
+scouted = false
+
+[[locations]]
+id = 3
+name = "Lighthouse Ruins"
+position = [25.0, -10.0]
+location_type = "Ruin"
+threat_level = 35.0
+resource_availability = 30.0
+scouted = false
+
+[[locations]]
+id = 4
+name = "Pirate Fortress"
+position = [-30.0, -25.0]
+location_type = "Outpost"
+threat_level = 65.0
+resource_availability = 50.0
+faction_owner = 2
+scouted = false
+
+[[locations]]
+id = 5
+name = "Fishing Village"
+position = [15.0, -15.0]
+location_type = "Settlement"
+threat_level = 12.0
+resource_availability = 60.0
+faction_owner = 0
+scouted = true
+
+[[factions]]
+id = 0
+name = "Maritime Guild"
+relationship_to_guild = 50.0
+military_strength = 55.0
+max_military_strength = 80.0
+territory_size = 2
+diplomatic_stance = "Friendly"
+coalition_member = false
+at_war_with = []
+has_guild = true
+guild_adventurer_count = 7
+recent_actions = []
+
+[[factions]]
+id = 1
+name = "The Free Traders"
+relationship_to_guild = 10.0
+military_strength = 45.0
+max_military_strength = 70.0
+territory_size = 1
+diplomatic_stance = "Neutral"
+coalition_member = false
+at_war_with = []
+has_guild = false
+guild_adventurer_count = 0
+recent_actions = []
+
+[[factions]]
+id = 2
+name = "Crimson Sails"
+relationship_to_guild = -45.0
+military_strength = 85.0
+max_military_strength = 130.0
+territory_size = 2
+diplomatic_stance = "Hostile"
+coalition_member = false
+at_war_with = [0]
+has_guild = false
+guild_adventurer_count = 0
+recent_actions = []
+
+[diplomacy]
+relations = [[0, 15, -30], [15, 0, -5], [-30, -5, 0]]
+guild_faction_id = 0
+
+[[npc_relationships]]
+npc_id = 700
+npc_name = "Admiral Kestrel"
+npc_type = "FactionLeader"
+relationship_score = 55.0
+last_interaction_ms = 0
+rescue_available = false
+rescue_cost = 0.0
+
+[[npc_relationships]]
+npc_id = 701
+npc_name = "Barnacle Jack"
+npc_type = "Mercenary"
+relationship_score = 20.0
+last_interaction_ms = 0
+rescue_available = false
+rescue_cost = 75.0
+
+[[npc_relationships]]
+npc_id = 702
+npc_name = "Silk Mei"
+npc_type = "Merchant"
+relationship_score = 40.0
+last_interaction_ms = 0
+rescue_available = true
+rescue_cost = 45.0

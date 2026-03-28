@@ -1,0 +1,23 @@
+[[tactics]]
+id = "sapper_approach"
+name = "Sapper Approach"
+side = "attacker"
+category = "engineering"
+
+[tactics.requirements]
+min_army_ratio = 1.0
+siege_equipment_available = ["sappers_tunnel"]
+terrain_allows_tunneling = true
+
+[tactics.effects]
+siege_duration_multiplier = 1.5
+casualty_rate_multiplier = 0.5
+wall_bypass_chance = 0.6
+stealth_bonus = 0.3
+requires_patience = true
+
+[tactics.counters]
+countered_by = ["counter_mine", "flood_tunnel", "tremor_sense", "rocky_ground"]
+
+[tactics.narrative]
+description = "Beneath the earth, where the walls don't reach. Sappers dig in silence, shoring timber against collapse, inching toward the foundations. The defenders hear nothing until the ground gives way beneath them."

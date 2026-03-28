@@ -1,0 +1,29 @@
+[[equipment]]
+id = "siege_hook"
+name = "Siege Hook"
+category = "breaching"
+tier = 2
+
+[equipment.stats]
+gate_damage_per_tick = 0.0
+wall_damage_per_tick = 3.0
+range = 0.0
+crew_required = 6
+move_speed = 0.5
+hp = 200
+armor = 10
+pull_force = 5.0
+targets_battlements = true
+
+[equipment.requirements]
+min_tech_level = 2
+construction_cost = 60
+construction_ticks = 150
+resources = ["timber", "iron", "rope"]
+
+[equipment.counters]
+vulnerable_to = ["boiling_oil", "fire_arrows", "cut_ropes"]
+strong_against = ["wooden_palisade", "earthen_rampart", "battlements"]
+
+[equipment.narrative]
+description = "An iron claw on a long pole, worked by a team hauling rope. They catch the parapet stones and pull, pull, pull until something gives. Sometimes the stones. Sometimes the rope. Sometimes the men."

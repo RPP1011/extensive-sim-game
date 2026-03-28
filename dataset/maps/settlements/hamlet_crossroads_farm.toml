@@ -1,0 +1,30 @@
+name = "Crossroads Farm"
+type = "hamlet"
+population = 80
+prosperity = 25.0
+
+[defenses]
+wall_type = "none"
+wall_hp = 0
+gate_count = 0
+tower_count = 0
+garrison_capacity = 0
+moat = false
+
+[[districts]]
+name = "Farmstead"
+type = "agricultural"
+buildings = ["farmhouse", "barn", "well", "chicken_coop"]
+population_pct = 100.0
+wealth = 20.0
+threat = 5.0
+
+[economy]
+primary_exports = ["grain", "eggs", "hay"]
+primary_imports = ["tools", "salt", "cloth"]
+trade_routes = 1
+market_size = "small"
+
+[narrative]
+description = "A family farmstead at a lonely crossroads. Travelers stop for water and directions, sometimes staying for a meal."
+flavor = ["Roosters crow at dawn", "The scarecrow leans drunkenly", "Wagon ruts mark the crossroads"]

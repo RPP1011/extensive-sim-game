@@ -1,0 +1,21 @@
+class Innkeeper {
+    stat_growth: +1 defense, +1 max_hp, +1 ability_power per level
+
+    tags: hospitality, morale, cooking, shelter, community
+
+    scaling party_alive_count {
+        when party_members >= 2: +10% max_hp
+        when party_members >= 4: aura max_hp +5
+        always: +5% defense
+    }
+
+    abilities {
+        level 1: warm_hearth "Rest at your inn fully restores the party"
+        level 5: memorable_meal "Cook a meal that grants a combat buff lasting one battle"
+        level 10: safe_haven "Your inn cannot be attacked during rest events"
+        level 20: regulars "Attract loyal patrons who provide rumors, quests, and aid"
+        level 40: legendary_inn "Your inn becomes a landmark; heroes seek it out, granting recruitment options and rare visitors"
+    }
+
+    requirements: level 1
+}

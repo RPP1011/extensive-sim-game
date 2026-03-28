@@ -1,0 +1,178 @@
+// Tier 6: Extended projectile delivery
+
+ability FireArrow {
+    target: enemy, range: 7.0
+    cooldown: 4s, cast: 200ms
+    hint: damage
+
+    deliver projectile { speed: 8.0 } {
+        on_hit {
+            damage 30 [FIRE: 45]
+        }
+    }
+}
+
+ability FrostBoltProjectile {
+    target: enemy, range: 6.0
+    cooldown: 4s, cast: 200ms
+    hint: damage
+
+    deliver projectile { speed: 7.0 } {
+        on_hit {
+            damage 25 [ICE: 40]
+            slow 0.3 for 2s [ICE: 35]
+        }
+    }
+}
+
+ability ShadowOrb {
+    target: enemy, range: 6.0
+    cooldown: 5s, cast: 300ms
+    hint: damage
+
+    deliver projectile { speed: 6.0 } {
+        on_hit {
+            damage 35 [DARK: 50]
+        }
+    }
+}
+
+ability HolyBolt {
+    target: enemy, range: 6.0
+    cooldown: 4s, cast: 200ms
+    hint: damage
+
+    deliver projectile { speed: 8.0 } {
+        on_hit {
+            damage 28 [HOLY: 40]
+        }
+    }
+}
+
+ability PoisonDartProjectile {
+    target: enemy, range: 7.0
+    cooldown: 3s, cast: 100ms
+    hint: damage
+
+    deliver projectile { speed: 9.0 } {
+        on_hit {
+            damage 12 [POISON: 30]
+            damage 5/1s for 4s [POISON: 35]
+        }
+    }
+}
+
+ability ArcaneBolt {
+    target: enemy, range: 7.0
+    cooldown: 3s, cast: 200ms
+    hint: damage
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 22 [MAGIC: 40]
+        }
+    }
+}
+
+ability ConcussiveShot {
+    target: enemy, range: 6.0
+    cooldown: 8s, cast: 200ms
+    hint: crowd_control
+
+    deliver projectile { speed: 8.0 } {
+        on_hit {
+            damage 18 [PHYSICAL: 35]
+            stun 1200ms [CROWD_CONTROL: 50]
+        }
+    }
+}
+
+ability EntanglingShot {
+    target: enemy, range: 6.0
+    cooldown: 7s, cast: 200ms
+    hint: crowd_control
+
+    deliver projectile { speed: 7.0 } {
+        on_hit {
+            damage 15 [PHYSICAL: 30]
+            root 1500ms [CROWD_CONTROL: 45]
+        }
+    }
+}
+
+ability BindingOrb {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: crowd_control
+
+    deliver projectile { speed: 5.0 } {
+        on_hit {
+            root 2s [MAGIC: 50]
+            silence 1500ms [MAGIC: 45]
+        }
+    }
+}
+
+ability SearingBolt {
+    target: enemy, range: 6.0
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    deliver projectile { speed: 7.0 } {
+        on_hit {
+            damage 30 [FIRE: 45]
+            damage 5/1s for 3s [FIRE: 35]
+        }
+    }
+}
+
+ability VoidMissile {
+    target: enemy, range: 7.0
+    cooldown: 6s, cast: 300ms
+    hint: damage
+
+    deliver projectile { speed: 6.0 } {
+        on_hit {
+            damage 40 [DARK: 50]
+            debuff damage_output 0.85 for 3s [DARK: 35]
+        }
+    }
+}
+
+ability GlacialArrow {
+    target: enemy, range: 7.0
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    deliver projectile { speed: 8.0 } {
+        on_hit {
+            damage 25 [ICE: 40]
+            slow 0.4 for 2500ms [ICE: 40]
+        }
+    }
+}
+
+ability LightningSpear {
+    target: enemy, range: 6.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    deliver projectile { speed: 9.0 } {
+        on_hit {
+            damage 35 [MAGIC: 45]
+        }
+    }
+}
+
+ability CorrosiveBolt {
+    target: enemy, range: 5.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    deliver projectile { speed: 6.0 } {
+        on_hit {
+            damage 20 [POISON: 40]
+            damage 7/1s for 4s [POISON: 40]
+        }
+    }
+}

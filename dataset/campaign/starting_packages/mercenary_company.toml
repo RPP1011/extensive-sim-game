@@ -1,0 +1,106 @@
+name = "Mercenary Company"
+description = "Four hardened sellswords. They fight like demons, drink like fish, and their loyalty extends exactly as far as the coin purse. High combat stats, low morale, zero reputation."
+gold_bonus = 60.0
+supply_bonus = 15.0
+reputation_bonus = -10.0
+items = []
+
+[[adventurers]]
+id = 1
+name = "Scarface Hagen"
+archetype = "warrior"
+level = 4
+xp = 0
+traits = ["battle_scarred", "pragmatist"]
+status = "Idle"
+loyalty = 30.0
+stress = 20.0
+fatigue = 10.0
+injury = 5.0
+resolve = 55.0
+morale = 45.0
+guild_relationship = 15.0
+
+[adventurers.stats]
+max_hp = 85.0
+attack = 18.0
+defense = 12.0
+speed = 10.0
+ability_power = 3.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 2
+name = "Red Marta"
+archetype = "warrior"
+level = 3
+xp = 0
+traits = ["battle_scarred"]
+status = "Idle"
+loyalty = 35.0
+stress = 18.0
+fatigue = 8.0
+injury = 0.0
+resolve = 50.0
+morale = 50.0
+guild_relationship = 20.0
+
+[adventurers.stats]
+max_hp = 80.0
+attack = 16.0
+defense = 10.0
+speed = 11.0
+ability_power = 4.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 3
+name = "Nails"
+archetype = "rogue"
+level = 3
+xp = 0
+traits = ["pragmatist"]
+status = "Idle"
+loyalty = 25.0
+stress = 22.0
+fatigue = 12.0
+injury = 0.0
+resolve = 40.0
+morale = 40.0
+guild_relationship = 10.0
+
+[adventurers.stats]
+max_hp = 60.0
+attack = 20.0
+defense = 6.0
+speed = 15.0
+ability_power = 5.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 4
+name = "Tombstone"
+archetype = "ranger"
+level = 3
+xp = 0
+traits = ["explorer"]
+status = "Idle"
+loyalty = 30.0
+stress = 15.0
+fatigue = 8.0
+injury = 3.0
+resolve = 45.0
+morale = 48.0
+guild_relationship = 15.0
+
+[adventurers.stats]
+max_hp = 65.0
+attack = 14.0
+defense = 8.0
+speed = 13.0
+ability_power = 6.0
+
+[adventurers.equipment]

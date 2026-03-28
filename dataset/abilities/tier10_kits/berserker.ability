@@ -1,0 +1,56 @@
+// Tier 10: Berserker Kit — high damage melee with self-buffs and execute
+
+ability RecklessSwing {
+    target: enemy, range: 1.5
+    cooldown: 3s, cast: 100ms
+    hint: damage
+
+    damage 30 [PHYSICAL: 40]
+}
+
+ability Whirlwind2 {
+    target: self_aoe
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 25 in circle(2.5) [PHYSICAL: 45]
+    buff attack_speed 0.15 for 3s
+}
+
+ability Enrage {
+    target: self
+    cooldown: 12s, cast: 0ms
+    hint: utility
+
+    buff damage_output 0.3 for 6s
+    buff attack_speed 0.3 for 6s
+    heal 20
+}
+
+ability ExecuteStrike {
+    target: enemy, range: 1.5
+    cooldown: 8s, cast: 200ms
+    hint: damage
+
+    damage 40 [PHYSICAL: 45]
+    damage 60 when hp_below(0.3) [PHYSICAL: 55]
+}
+
+ability Rampage2 {
+    target: self_aoe
+    cooldown: 40s, cast: 0ms
+    hint: damage
+
+    buff damage_output 0.4 for 8s
+    buff attack_speed 0.4 for 8s
+    buff move_speed 0.3 for 8s
+    damage 30 in circle(2.0) [PHYSICAL: 45]
+}
+
+passive BloodFrenzy {
+    trigger: on_kill
+    cooldown: 3s
+
+    heal 25
+    buff attack_speed 0.3 for 4s
+}

@@ -1,0 +1,52 @@
+[[fortifications]]
+id = "mage_tower"
+name = "Mage Tower"
+tier = 5
+type = "tower"
+
+[fortifications.stats]
+tower_hp = 1200
+height = 12.0
+garrison_slots = 3
+ranged_bonus = 0.5
+vision_radius = 25.0
+fire_arc = 360
+mana_regeneration = 5.0
+spell_amplification = 0.3
+anti_magic_detection = true
+scrying_capable = true
+
+[fortifications.construction]
+cost = 1500
+ticks = 3000
+resources = ["stone", "arcane_crystal", "enchanted_mortar"]
+requires_class = "[Mage]"
+
+[fortifications.weaknesses]
+trebuchet_multiplier = 1.5
+fire_resistant = true
+ward_breaker_multiplier = 3.0
+mana_starve_vulnerable = true
+
+[fortifications.power_scaling]
+effective_level = 55
+builder_class_bonus = false
+enchantable = true
+age_scaling = 0.01
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 8.0
+ability_damage_reduction = 0.5
+projectile_deflection = 0.3
+ward_hp = 2000
+ward_level = 30
+
+[fortifications.garrison_bonus]
+defender_multiplier = 4.0
+ranged_accuracy_bonus = 0.45
+melee_disadvantage = 0.3
+cover_rating = 0.65
+
+[fortifications.narrative]
+description = "The tower hums. Even non-magical folk can feel it — a vibration in the teeth, a pressure behind the eyes. From its peak, a single [Mage] can rain destruction across the entire siege field. Besiegers learn quickly: kill the mage, or nothing else matters."

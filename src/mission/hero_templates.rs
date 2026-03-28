@@ -126,12 +126,12 @@ pub fn hero_toml_to_unit(toml: &HeroToml, id: u32, team: Team, position: SimVec2
 /// Returns a map from template name to HeroToml.
 pub fn load_embedded_templates() -> HashMap<HeroTemplate, HeroToml> {
     let templates = [
-        (HeroTemplate::Warrior, include_str!("../../assets/hero_templates/warrior.toml")),
-        (HeroTemplate::Ranger, include_str!("../../assets/hero_templates/ranger.toml")),
-        (HeroTemplate::Mage, include_str!("../../assets/hero_templates/mage.toml")),
-        (HeroTemplate::Cleric, include_str!("../../assets/hero_templates/cleric.toml")),
-        (HeroTemplate::Rogue, include_str!("../../assets/hero_templates/rogue.toml")),
-        (HeroTemplate::Paladin, include_str!("../../assets/hero_templates/paladin.toml")),
+        (HeroTemplate::Warrior, include_str!("../../dataset/abilities/hero_templates/warrior.toml")),
+        (HeroTemplate::Ranger, include_str!("../../dataset/abilities/hero_templates/ranger.toml")),
+        (HeroTemplate::Mage, include_str!("../../dataset/abilities/hero_templates/mage.toml")),
+        (HeroTemplate::Cleric, include_str!("../../dataset/abilities/hero_templates/cleric.toml")),
+        (HeroTemplate::Rogue, include_str!("../../dataset/abilities/hero_templates/rogue.toml")),
+        (HeroTemplate::Paladin, include_str!("../../dataset/abilities/hero_templates/paladin.toml")),
     ];
 
     templates

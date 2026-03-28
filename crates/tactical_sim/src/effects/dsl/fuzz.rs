@@ -143,6 +143,8 @@ pub(super) mod tests {
                 Effect::ProjectileBlock { .. } => "ProjectileBlock",
                 Effect::Attach { .. } => "Attach",
                 Effect::EvolveAbility { .. } => "EvolveAbility",
+                // Campaign effects — catch-all
+                _ => "CampaignEffect",
             };
             self.effects.insert(name);
         }
@@ -225,6 +227,8 @@ pub(super) mod tests {
                 Condition::TargetDistanceAbove { .. } => "TargetDistanceAbove",
                 Condition::CasterResourceBelow { .. } => "CasterResourceBelow",
                 Condition::CasterResourceAbove { .. } => "CasterResourceAbove",
+                // Campaign conditions — catch-all
+                _ => "CampaignCondition",
             };
             self.conditions.insert(name);
             for child in children {
@@ -254,6 +258,8 @@ pub(super) mod tests {
                 Trigger::OnAllyKilled { .. } => "OnAllyKilled",
                 Trigger::OnAutoAttack => "OnAutoAttack",
                 Trigger::OnStackReached { .. } => "OnStackReached",
+                // Campaign triggers — catch-all
+                _ => "CampaignTrigger",
             });
         }
 
@@ -267,6 +273,8 @@ pub(super) mod tests {
                 AbilityTargeting::Direction => "Direction",
                 AbilityTargeting::Vector => "Vector",
                 AbilityTargeting::Global => "Global",
+                // Campaign targeting — catch-all
+                _ => "CampaignTargeting",
             });
         }
 

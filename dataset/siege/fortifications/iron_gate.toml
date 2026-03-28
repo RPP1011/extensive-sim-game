@@ -1,0 +1,47 @@
+[[fortifications]]
+id = "iron_gate"
+name = "Iron Gate"
+tier = 4
+type = "gate"
+
+[fortifications.stats]
+gate_hp = 1500
+height = 4.0
+thickness = 0.8
+open_speed = 15
+barricade_bonus = 0.5
+
+[fortifications.construction]
+cost = 400
+ticks = 800
+resources = ["iron", "stone"]
+builder_class_bonus = 0.3
+
+[fortifications.weaknesses]
+ram_multiplier = 1.0
+fire_resistant = true
+petard_multiplier = 1.2
+sapper_multiplier = 0.8
+
+[fortifications.power_scaling]
+effective_level = 35
+builder_class_bonus = true
+enchantable = true
+age_scaling = 0.01
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 2.0
+ability_damage_reduction = 0.15
+projectile_deflection = 0.0
+ward_hp = 300
+ward_level = 15
+
+[fortifications.garrison_bonus]
+defender_multiplier = 3.0
+ranged_accuracy_bonus = 0.0
+melee_disadvantage = 0.35
+cover_rating = 0.5
+
+[fortifications.narrative]
+description = "Solid iron, three inches thick, set into a stone archway built to distribute the force of any blow. The ram bounces off. The petard dents it. The sappers weep."

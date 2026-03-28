@@ -7,6 +7,172 @@ use super::actions::*;
 use super::state::*;
 use super::systems;
 
+/// Step just the world simulation — no player, no phase gate, no quests.
+/// Used to pre-generate a living world before the campaign starts.
+/// Runs: NPC economy, factions, population, threats, seasons, caravans,
+/// class system, and other world-level systems.
+///
+/// Call `seed_world_population` first to populate the world with NPCs.
+pub fn step_world(state: &mut CampaignState) -> Vec<WorldEvent> {
+    let mut events = Vec::new();
+    let mut deltas = StepDeltas::default();
+
+    state.tick += 1;
+    state.elapsed_ms = state.tick * CAMPAIGN_TURN_SECS as u64 * 1000;
+
+    // World-level systems only (no quest dispatch, no player actions)
+    systems::seasons::tick_seasons(state, &mut deltas, &mut events);
+    systems::travel::tick_travel(state, &mut deltas, &mut events);
+    // Note: tick_economy (guild passive income) is NOT run during world pre-gen.
+    // The NPC commodity economy replaces it.
+    systems::npc_economy::tick_npc_economy(state, &mut deltas, &mut events);
+    systems::faction_ai::tick_faction_ai(state, &mut deltas, &mut events);
+    systems::population::tick_population(state, &mut deltas, &mut events);
+    systems::threat::tick_threat(state, &mut deltas, &mut events);
+    systems::caravans::tick_caravans(state, &mut deltas, &mut events);
+    systems::trade_goods::tick_trade_goods(state, &mut deltas, &mut events);
+    systems::infrastructure::tick_infrastructure(state, &mut deltas, &mut events);
+    systems::migration::tick_migration(state, &mut deltas, &mut events);
+    systems::recruitment::tick_recruitment(state, &mut deltas, &mut events);
+    systems::disease::tick_disease(state, &mut deltas, &mut events);
+    systems::weather::tick_weather(state, &mut deltas, &mut events);
+    systems::crisis::tick_crisis(state, &mut deltas, &mut events);
+    systems::monster_ecology::tick_monster_ecology(state, &mut deltas, &mut events);
+    systems::random_events::tick_random_events(state, &mut deltas, &mut events);
+    systems::threat_clock::tick_threat_clock(state, &mut deltas, &mut events);
+    systems::escalation_protocol::tick_escalation_protocol(state, &mut deltas, &mut events);
+    systems::class_system::tick_class_system(state, &mut deltas, &mut events);
+
+    events
+}
+
+/// Seed a world with NPCs before running `step_world`. Creates `count`
+/// adventurers distributed across settlements with varied archetypes and levels.
+pub fn seed_world_population(state: &mut CampaignState, count: usize) {
+    use super::state::*;
+
+    let archetypes = [
+        "knight", "ranger", "mage", "cleric", "rogue", "paladin",
+        "berserker", "bard", "monk", "guardian", "druid", "warlock",
+    ];
+    let names = [
+        "Alaric", "Brynn", "Cira", "Daven", "Elara", "Finn", "Greta", "Holt",
+        "Ivy", "Jorik", "Kessa", "Lorn", "Maren", "Nyx", "Orin", "Petra",
+        "Quinn", "Rowan", "Sera", "Thorn", "Una", "Vael", "Wren", "Xara",
+    ];
+
+    let settlement_ids: Vec<usize> = state.overworld.locations.iter()
+        .filter(|l| l.location_type == LocationType::Settlement)
+        .map(|l| l.id)
+        .collect();
+    if settlement_ids.is_empty() { return; }
+
+    let base_id = state.adventurers.iter().map(|a| a.id).max().unwrap_or(0) + 1;
+
+    for i in 0..count {
+        let id = base_id + i as u32;
+        let name_idx = lcg_next(&mut state.rng) as usize % names.len();
+        let arch_idx = lcg_next(&mut state.rng) as usize % archetypes.len();
+        // Level distribution: mostly low, some mid, rare high.
+        // 60% level 1-5, 25% level 6-15, 10% level 16-30, 5% level 31-50
+        let roll = lcg_f32(&mut state.rng);
+        let level = if roll < 0.60 {
+            1 + (lcg_next(&mut state.rng) % 5) as u32
+        } else if roll < 0.85 {
+            6 + (lcg_next(&mut state.rng) % 10) as u32
+        } else if roll < 0.95 {
+            16 + (lcg_next(&mut state.rng) % 15) as u32
+        } else {
+            31 + (lcg_next(&mut state.rng) % 20) as u32
+        };
+        let loc_id = settlement_ids[i % settlement_ids.len()];
+
+        let hp = 50.0 + level as f32 * 5.0;
+        let atk = 8.0 + level as f32 * 2.0;
+        let def = 6.0 + level as f32 * 1.5;
+
+        let adv = Adventurer {
+            id,
+            name: format!("{}-{}", names[name_idx], id),
+            archetype: archetypes[arch_idx].to_string(),
+            level,
+            xp: 0,
+            stats: AdventurerStats { max_hp: hp, attack: atk, defense: def, speed: 5.0, ability_power: 5.0 },
+            equipment: Equipment::default(),
+            traits: Vec::new(),
+            status: AdventurerStatus::Idle,
+            loyalty: 60.0 + (lcg_f32(&mut state.rng) * 30.0),
+            stress: lcg_f32(&mut state.rng) * 20.0,
+            fatigue: lcg_f32(&mut state.rng) * 10.0,
+            injury: 0.0,
+            resolve: 40.0 + (lcg_f32(&mut state.rng) * 40.0),
+            morale: 50.0 + (lcg_f32(&mut state.rng) * 30.0),
+            party_id: None,
+            guild_relationship: 50.0,
+            leadership_role: None,
+            is_player_character: false,
+            faction_id: None,
+            rallying_to: None,
+            tier_status: Default::default(),
+            history_tags: Default::default(),
+            backstory: None,
+            deeds: Vec::new(),
+            hobbies: Vec::new(),
+            disease_status: DiseaseStatus::Healthy,
+            mood_state: MoodState::default(),
+            fears: Vec::new(),
+            personal_goal: None,
+            journal: Vec::new(),
+            equipped_items: Vec::new(),
+            nicknames: Vec::new(),
+            secret_past: None,
+            wounds: Vec::new(),
+            potion_dependency: 0.0,
+            withdrawal_severity: 0.0,
+            ticks_since_last_potion: 0,
+            total_potions_consumed: 0,
+            behavior_ledger: BehaviorLedger::default(),
+            classes: Vec::new(),
+            skill_state: SkillEffectState::default(),
+            gold: lcg_f32(&mut state.rng) * 50.0,
+            home_location_id: Some(loc_id),
+            economic_intent: EconomicIntent::Working,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
+        };
+        state.adventurers.push(adv);
+
+        // Register as resident at their home location.
+        if let Some(loc) = state.overworld.locations.iter_mut().find(|l| l.id == loc_id) {
+            loc.resident_ids.push(id);
+        }
+    }
+
+    // Seed initial stockpiles at each settlement based on resident count.
+    for loc in &mut state.overworld.locations {
+        if loc.location_type != LocationType::Settlement {
+            continue;
+        }
+        let pop = loc.resident_ids.len() as f32;
+        if pop <= 0.0 { continue; }
+
+        // Generous initial stockpiles — enough to survive ~200 ticks
+        // while information and trade networks bootstrap.
+        loc.stockpile.food = 200.0 * pop;
+        loc.stockpile.iron = 30.0 * pop;
+        loc.stockpile.wood = 40.0 * pop;
+        loc.stockpile.herbs = 20.0 * pop;
+        loc.stockpile.hide = 15.0 * pop;
+        loc.stockpile.crystal = 10.0 * pop;
+        loc.stockpile.equipment = 3.0 * pop;
+        loc.stockpile.medicine = 10.0 * pop;
+
+        // Seed treasury
+        loc.treasury = pop * 3.0;
+    }
+}
+
 /// Advance the campaign by one turn (3 seconds of game time).
 ///
 /// Optionally applies a player action before ticking the world.
@@ -77,6 +243,7 @@ pub fn step_campaign(
     systems::quest_lifecycle::tick_quest_lifecycle(state, &mut deltas, &mut events);
     systems::quest_expiry::tick_quest_expiry(state, &mut deltas, &mut events);
     systems::economy::tick_economy(state, &mut deltas, &mut events);
+    systems::npc_economy::tick_npc_economy(state, &mut deltas, &mut events);
     systems::cooldowns::tick_cooldowns(state, &mut deltas, &mut events);
 
     // Cadenced systems (check tick modulo internally)
@@ -476,6 +643,8 @@ fn apply_action(
                     morale: state.config.quest_lifecycle.party_starting_morale,
                     quest_id: Some(quest_id),
                 food_level: 100.0,
+                autonomous: false,
+                party_type: AutonomousPartyType::PlayerDispatched,
                 };
 
                 quest.status = ActiveQuestStatus::Dispatched;
@@ -915,6 +1084,9 @@ fn apply_action(
             target: _,
         } => {
             // Find the skill effect on the adventurer's class skills.
+            // TODO: Migrate to unified_dispatch::campaign_apply_effect() once
+            // GrantedSkill stores Effect instead of SkillEffect.
+            #[allow(deprecated)]
             let skill_data = state
                 .adventurers
                 .iter()
@@ -1003,6 +1175,8 @@ fn apply_action(
                     morale: state.config.quest_lifecycle.party_starting_morale,
                     quest_id: None,
                 food_level: 100.0,
+                autonomous: false,
+                party_type: AutonomousPartyType::PlayerDispatched,
                 };
                 state.parties.push(party);
 

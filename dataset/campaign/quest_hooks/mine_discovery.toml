@@ -1,0 +1,56 @@
+# A mineral deposit is discovered.
+
+name = "Mine Discovery"
+priority = 6
+repeatable = false
+
+[trigger]
+type = "LocationScouted"
+location_type = "Ruin"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Prospectors have found a rich vein of iron ore — possibly mithril — in the hills near {location_name}. Mining it would require a significant investment, but the returns could fund the guild for years."
+deadline_secs = 120.0
+default_option = 1
+
+[[choice.options]]
+label = "Establish a Mine (80g)"
+description = "Full mining operation. Massive upfront cost but steady long-term income."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -80.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Picks ring against stone. The first loads of ore emerge from the earth, glittering in the sun."
+
+[[choice.options]]
+label = "Sell Mining Rights (40g)"
+description = "Let someone else do the work. Immediate gold, no ongoing costs."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 40.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A mining consortium pays handsomely for the location. Easy money."
+
+[[choice.options]]
+label = "Claim and Hold"
+description = "Stake a claim but don't develop yet. Keep the option open."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Guild markers are driven into the hillside. The vein waits for better times."

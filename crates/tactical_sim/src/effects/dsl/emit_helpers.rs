@@ -75,6 +75,17 @@ pub(super) fn emit_condition(cond: &Condition) -> String {
         Condition::CasterResourceAbove { percent } => {
             format!("caster_resource_above({}%)", *percent as i32)
         }
+        // --- Campaign Conditions ---
+        Condition::FactionHostile => "faction_hostile".to_string(),
+        Condition::AtWar => "at_war".to_string(),
+        Condition::CrisisActive => "crisis_active".to_string(),
+        Condition::GoldAbove { amount } => format!("gold_above({})", fmt_f32(*amount)),
+        Condition::GoldBelow { amount } => format!("gold_below({})", fmt_f32(*amount)),
+        Condition::Outnumbered => "outnumbered".to_string(),
+        Condition::AllyInjured => "ally_injured".to_string(),
+        Condition::Alone => "alone".to_string(),
+        Condition::NearDeath => "near_death".to_string(),
+
         Condition::And { conditions } => {
             let inner: Vec<String> = conditions.iter().map(emit_condition).collect();
             format!("and({})", inner.join(", "))
@@ -89,14 +100,45 @@ pub(super) fn emit_condition(cond: &Condition) -> String {
     }
 }
 
+pub(super) fn emit_target_filter(filter: &super::super::types::TargetFilter) -> String {
+    use super::super::types::TargetFilter;
+    match filter {
+        TargetFilter::UnderCommand => "targeting under_command".to_string(),
+        TargetFilter::LoyaltyAbove { threshold } => format!("targeting loyalty_above({})", fmt_f32(*threshold)),
+        TargetFilter::LoyaltyBelow { threshold } => format!("targeting loyalty_below({})", fmt_f32(*threshold)),
+        TargetFilter::HasClass { class_name } => format!("targeting has_class(\"{}\")", class_name),
+        TargetFilter::LevelAbove { level } => format!("targeting level_above({})", level),
+        TargetFilter::LevelBelow { level } => format!("targeting level_below({})", level),
+        TargetFilter::HasStatus { status } => format!("targeting has_status(\"{}\")", status),
+        TargetFilter::FactionMember { faction } => format!("targeting faction(\"{}\")", faction),
+        TargetFilter::Injured => "targeting injured".to_string(),
+        TargetFilter::Healthy => "targeting healthy".to_string(),
+    }
+}
+
 pub(crate) fn fmt_duration(ms: u32) -> String {
-    if ms == 0 {
+    if ms == u32::MAX {
+        "while_alive".to_string()
+    } else if ms == 0 {
         "0ms".to_string()
     } else if ms % 1000 == 0 {
         format!("{}s", ms / 1000)
     } else {
         format!("{ms}ms")
     }
+}
+
+/// Format a duration with the `for` prefix, or bare `while_alive` for permanent auras.
+pub(crate) fn fmt_for_duration(ms: u32) -> String {
+    if ms == u32::MAX {
+        "while_alive".to_string()
+    } else {
+        format!("for {}", fmt_duration(ms))
+    }
+}
+
+pub(crate) fn fmt_tick_duration(ticks: u32) -> String {
+    format!("{}t", ticks)
 }
 
 pub(crate) fn fmt_f32(v: f32) -> String {

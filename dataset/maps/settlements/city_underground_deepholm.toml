@@ -1,0 +1,78 @@
+name = "Deepholm"
+type = "city"
+population = 10000
+prosperity = 60.0
+
+[defenses]
+wall_type = "fortified"
+wall_hp = 2000
+gate_count = 2
+tower_count = 0
+garrison_capacity = 400
+moat = false
+
+[[districts]]
+name = "Crystal Throne"
+type = "noble"
+buildings = ["crystal_palace", "council_cavern", "gem_vault"]
+population_pct = 5.0
+wealth = 90.0
+threat = 5.0
+
+[[districts]]
+name = "Great Cavern"
+type = "commercial"
+buildings = ["underground_market", "gem_exchange", "mushroom_bazaar", "echo_tavern"]
+population_pct = 15.0
+wealth = 65.0
+threat = 10.0
+
+[[districts]]
+name = "Forge Caverns"
+type = "industrial"
+buildings = ["deep_forge", "gem_cutter", "stone_mason", "lava_smelter"]
+population_pct = 15.0
+wealth = 55.0
+threat = 10.0
+
+[[districts]]
+name = "Fungal Gardens"
+type = "agricultural"
+buildings = ["mushroom_farm", "moss_garden", "underground_lake", "fish_pool"]
+population_pct = 15.0
+wealth = 35.0
+threat = 5.0
+
+[[districts]]
+name = "Living Quarters"
+type = "residential"
+buildings = ["carved_apartments", "communal_bath", "shrine", "echo_hall"]
+population_pct = 30.0
+wealth = 30.0
+threat = 5.0
+
+[[districts]]
+name = "Deep Watch"
+type = "military"
+buildings = ["tunnel_barracks", "choke_points", "rockfall_traps", "deep_patrol"]
+population_pct = 10.0
+wealth = 40.0
+threat = 5.0
+
+[[districts]]
+name = "The Underdark"
+type = "slums"
+buildings = ["squatter_tunnels", "blind_fish_market", "exile_quarter"]
+population_pct = 10.0
+wealth = 10.0
+threat = 35.0
+
+[economy]
+primary_exports = ["gemstones", "rare_metals", "underground_fungi", "stone_crafts"]
+primary_imports = ["surface_food", "timber", "cloth", "sunlight_crystals"]
+trade_routes = 3
+market_size = "large"
+
+[narrative]
+description = "A vast city carved from living rock, lit by bioluminescent fungi and crystal lamps. The dwarves here have never seen the sun, and they prefer it that way."
+flavor = ["Blue-green light from the fungi", "The constant drip of water", "Echoes carry for miles"]

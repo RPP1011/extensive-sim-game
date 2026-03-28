@@ -8,10 +8,17 @@
 //! - 20% are conditional, punching above their weight (Lv30 conditional = Lv60 normal)
 //! - No resource costs — constrained by specificity and narrative consequence
 //! - Non-combat skills are POWERS, not stat buffs
+//!
+//! DEPRECATED: These hand-coded templates use the legacy `SkillEffect` enum.
+//! New campaign skills should be defined as `.ability` files in
+//! `dataset/abilities/campaign/` using the unified DSL and loaded at runtime.
+//! See `unified_dispatch.rs` for the replacement dispatch mechanism.
 
+#[allow(deprecated)]
 use crate::headless_campaign::state::{BehaviorLedger, SkillCondition, SkillEffect};
 
 /// A skill template from the pool, selected at level-up time.
+#[allow(deprecated)]
 pub struct SkillTemplate {
     pub name: &'static str,
     pub tier: u32,
@@ -26,6 +33,7 @@ pub struct SkillTemplate {
 // Template pool — ~120 templates across 11 class families x 7 tiers
 // ---------------------------------------------------------------------------
 
+#[allow(deprecated)]
 fn all_templates() -> Vec<SkillTemplate> {
     let mut t = Vec::with_capacity(130);
 
@@ -904,6 +912,7 @@ fn all_templates() -> Vec<SkillTemplate> {
 /// 3. Score remaining by dot product of template's implied behavior with ledger
 /// 4. 20% chance to pick a conditional template if available
 /// 5. Select top-scoring with lcg_f32 randomness
+#[allow(deprecated)]
 pub fn select_skill_template(
     class_name: &str,
     class_tags: &[String],

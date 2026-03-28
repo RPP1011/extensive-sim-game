@@ -1,0 +1,54 @@
+name = "Canyon Pass Ambush"
+map_type = "siege_defense"
+width = 24
+height = 20
+
+[terrain]
+layout = """
+WWWWWW..........WWWWWWWW
+WWWW..............WWWWWW
+WWW................WWWWW
+WW..................WWWW
+W....................WWW
+W......................W
+W......RRRRRRRR........W
+W......R......R........W
+W......R......R........W
+WWWW...R......R...WWWWW
+WWWW...R......R...WWWWW
+W......R......R........W
+W......R......R........W
+W......RRRRRRRR........W
+W......................W
+W....................WWW
+WW..................WWWW
+WWW................WWWWW
+WWWW..............WWWWWW
+WWWWWW..........WWWWWWWW
+"""
+
+[[spawn_zones]]
+name = "canyon_defenders"
+team = 0
+rect = [7, 7, 16, 12]
+
+[[spawn_zones]]
+name = "canyon_attackers"
+team = 1
+rect = [6, 0, 17, 3]
+
+[[cover_positions]]
+position = [3, 5]
+type = "full"
+
+[[cover_positions]]
+position = [20, 5]
+type = "full"
+
+[[cover_positions]]
+position = [3, 14]
+type = "full"
+
+[[cover_positions]]
+position = [20, 14]
+type = "full"

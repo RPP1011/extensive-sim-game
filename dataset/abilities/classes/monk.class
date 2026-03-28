@@ -1,0 +1,21 @@
+class Monk {
+    stat_growth: +2 attack, +3 speed, +1 defense, +1 max_hp per level
+
+    tags: melee, unarmed, discipline, meditation, spiritual
+
+    scaling hp_percent {
+        when hp_percent > 75: +10% speed
+        when hp_percent > 90: +10% attack
+        always: +5% speed
+    }
+
+    abilities {
+        level 1: flurry_of_blows "Rapid unarmed strikes that each deal light damage"
+        level 5: deflect "Redirect a ranged attack back at the attacker"
+        level 10: inner_peace "Regenerate health slowly while not attacking"
+        level 20: quivering_palm "A delayed strike that detonates 5 seconds later for massive damage"
+        level 40: empty_mind "Enter a state where you dodge every attack for 5 seconds, then strike all enemies once"
+    }
+
+    requirements: level 1
+}

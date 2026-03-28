@@ -1,0 +1,35 @@
+name = "The Reckoning"
+world_template = "Frontier"
+sequence = 3
+default_option = 0
+prompt = "You find the raiders who burned your temple. They're camped in a ravine, drunk on stolen wine, wearing stolen vestments as joke costumes. Six of them. You're alone. The old you would have prayed for guidance. The new you has a knife."
+
+[[options]]
+label = "Justice, Not Vengeance"
+description = "Report their location to the local garrison. Let the law handle it."
+pc_traits = [{ trait = "diplomat_born" }]
+pc_stats = { resolve = 2.0 }
+effects = [
+    { type = "reputation", amount = 8.0 },
+    { type = "narrative", text = "Soldiers arrive at dawn. The raiders are arrested. It doesn't feel like closure, but it feels like the right thing." },
+]
+
+[[options]]
+label = "Night Raid"
+description = "Six against one, but you have surprise and the righteous fury of a priest who lost everything."
+pc_traits = [{ trait = "battle_scarred" }]
+pc_stats = { attack = 3.0, injury = 12.0 }
+effects = [
+    { type = "gold", amount = 25.0 },
+    { type = "narrative", text = "You move through the camp like a shadow with a grudge. When the sun rises, six men lie still." },
+]
+
+[[options]]
+label = "Forgive and Move On"
+description = "Vengeance won't rebuild the temple or bring back the dead. Let them go. Let it all go."
+pc_traits = [{ trait = "disciplined" }]
+pc_stats = { resolve = 5.0 }
+effects = [
+    { type = "reputation", amount = 12.0 },
+    { type = "narrative", text = "You walk past the ravine without stopping. The weight on your shoulders lifts — not entirely, but enough to breathe." },
+]

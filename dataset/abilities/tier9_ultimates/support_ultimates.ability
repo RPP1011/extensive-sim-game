@@ -1,0 +1,86 @@
+// Tier 9: High-impact support/heal ultimates
+
+ability Tranquility {
+    target: self_aoe
+    cooldown: 60s, cast: 400ms
+    hint: heal
+
+    heal 60 in circle(5.0) [HOLY: 55]
+    heal 15/1s for 5s in circle(5.0) [HOLY: 45]
+    shield 30 for 5s in circle(5.0)
+}
+
+ability DivineShield {
+    target: ally, range: 5.0
+    cooldown: 45s, cast: 200ms
+    hint: defense
+
+    shield 120 for 6s
+    heal 50 [HOLY: 50]
+    heal 10/1s for 6s [HOLY: 35]
+}
+
+ability MassResurrection {
+    target: self_aoe
+    cooldown: 60s, cast: 800ms
+    hint: heal
+
+    heal 80 in circle(5.0) [HOLY: 60]
+    shield 40 for 5s in circle(5.0)
+    buff damage_output 0.2 for 6s in circle(5.0)
+}
+
+ability AvatarOfLight {
+    target: self
+    cooldown: 50s, cast: 300ms
+    hint: heal
+
+    heal 60
+    shield 60 for 6s
+    buff damage_output 0.25 for 6s
+    buff move_speed 0.3 for 6s
+}
+
+ability LifeSpiral {
+    target: ground, range: 6.0
+    cooldown: 50s, cast: 600ms
+    hint: heal
+
+    deliver zone { duration: 6s, tick: 1s } {
+        on_hit {
+            heal 20 in circle(4.0) [HOLY: 40]
+            shield 8 for 2s in circle(4.0)
+        }
+    }
+}
+
+ability SpiritStorm {
+    target: self_aoe
+    cooldown: 55s, cast: 500ms
+    hint: heal
+
+    heal 50 in circle(4.0) [HOLY: 50]
+    heal 12/1s for 5s in circle(4.0) [HOLY: 40]
+    buff attack_speed 0.2 for 5s in circle(4.0)
+    buff move_speed 0.15 for 5s in circle(4.0)
+}
+
+ability UnyieldingBulwark {
+    target: self_aoe
+    cooldown: 50s, cast: 200ms
+    hint: defense
+
+    shield 60 for 6s in circle(4.0)
+    taunt 3s in circle(5.0) [CROWD_CONTROL: 55]
+    heal 30 in circle(4.0) [HOLY: 40]
+}
+
+ability GlacialFortress {
+    target: self_aoe
+    cooldown: 45s, cast: 400ms
+    hint: defense
+
+    shield 50 for 5s in circle(3.5)
+    slow 0.5 for 4s in circle(4.0) [ICE: 50]
+    damage 40 in circle(4.0) [ICE: 45]
+}

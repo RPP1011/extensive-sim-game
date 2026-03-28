@@ -1,0 +1,38 @@
+name = "Deephollow"
+type = "village"
+population = 280
+prosperity = 30.0
+
+[defenses]
+wall_type = "wooden_palisade"
+wall_hp = 200
+gate_count = 1
+tower_count = 1
+garrison_capacity = 10
+moat = false
+
+[[districts]]
+name = "Surface Camp"
+type = "residential"
+buildings = ["houses", "tavern", "general_store"]
+population_pct = 40.0
+wealth = 25.0
+threat = 10.0
+
+[[districts]]
+name = "The Depths"
+type = "industrial"
+buildings = ["mine_entrance", "ore_sorter", "underground_shelter"]
+population_pct = 60.0
+wealth = 40.0
+threat = 25.0
+
+[economy]
+primary_exports = ["gemstones", "rare_minerals"]
+primary_imports = ["food", "timber", "rope"]
+trade_routes = 1
+market_size = "small"
+
+[narrative]
+description = "Built over a network of natural caves, half the village lives underground. The gems they pull from the deep keep merchants coming despite the remoteness."
+flavor = ["Lantern light from cave mouths", "The ground feels hollow underfoot", "Miners emerge blinking at noon"]

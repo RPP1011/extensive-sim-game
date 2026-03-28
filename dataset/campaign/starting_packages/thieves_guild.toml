@@ -1,0 +1,81 @@
+name = "Thieves' Guild Remnant"
+description = "The old thieves' guild was destroyed. Three survivors — all rogues or assassins — want to go legitimate. Sort of. They brought the treasury with them. Heavy starting gold, light on morals."
+gold_bonus = 100.0
+supply_bonus = 5.0
+reputation_bonus = -15.0
+items = []
+
+[[adventurers]]
+id = 1
+name = "Fingers Malone"
+archetype = "rogue"
+level = 4
+xp = 0
+traits = ["pragmatist", "merchant_mind"]
+status = "Idle"
+loyalty = 30.0
+stress = 20.0
+fatigue = 8.0
+injury = 0.0
+resolve = 40.0
+morale = 50.0
+guild_relationship = 20.0
+
+[adventurers.stats]
+max_hp = 55.0
+attack = 18.0
+defense = 5.0
+speed = 16.0
+ability_power = 4.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 2
+name = "Shade"
+archetype = "assassin"
+level = 3
+xp = 0
+traits = ["pragmatist"]
+status = "Idle"
+loyalty = 25.0
+stress = 18.0
+fatigue = 10.0
+injury = 5.0
+resolve = 45.0
+morale = 45.0
+guild_relationship = 15.0
+
+[adventurers.stats]
+max_hp = 50.0
+attack = 20.0
+defense = 4.0
+speed = 17.0
+ability_power = 5.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 3
+name = "Lucky"
+archetype = "rogue"
+level = 2
+xp = 0
+traits = ["merchant_mind"]
+status = "Idle"
+loyalty = 35.0
+stress = 15.0
+fatigue = 6.0
+injury = 0.0
+resolve = 35.0
+morale = 55.0
+guild_relationship = 25.0
+
+[adventurers.stats]
+max_hp = 48.0
+attack = 14.0
+defense = 5.0
+speed = 15.0
+ability_power = 5.0
+
+[adventurers.equipment]

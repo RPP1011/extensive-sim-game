@@ -1,0 +1,20 @@
+class Archer {
+    stat_growth: +3 attack, +2 speed, +1 defense per level
+
+    tags: ranged, precision, kiting, marksmanship, awareness
+
+    scaling enemy_count {
+        when enemy_count >= 3: +10% attack
+        always: +5% speed
+    }
+
+    abilities {
+        level 1: aimed_shot "Deals bonus damage at long range"
+        level 5: quick_retreat "Leap backward when an enemy closes distance"
+        level 10: pinning_shot "Roots an enemy in place for 3 seconds"
+        level 20: arrow_rain "Volley that blankets an area with suppressive fire"
+        level 40: heartseeker "An arrow that finds the gap in any armor, ignoring all defense"
+    }
+
+    requirements: level 1
+}

@@ -1,0 +1,21 @@
+class Healer {
+    stat_growth: +4 ability_power, +2 max_hp per level
+
+    tags: holy, healing, restoration, support, compassion
+
+    scaling party_alive_count {
+        when party_members > 0: +15% ability_power
+        when party_members >= 3: +10% max_hp
+        always: aura max_hp +3
+    }
+
+    abilities {
+        level 1: mending_touch "Heal a single ally for a moderate amount"
+        level 5: purify "Remove a debuff or status effect from an ally"
+        level 10: healing_circle "Sustained area that heals all allies within it"
+        level 20: revitalize "Fully restore one ally's health over 5 seconds"
+        level 40: miracle "Resurrect a fallen ally at full health, once per battle"
+    }
+
+    requirements: level 1
+}

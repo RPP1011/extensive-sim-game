@@ -1,0 +1,45 @@
+# An adventurer spontaneously develops a new skill.
+
+name = "Skill Awakening"
+priority = 6
+repeatable = true
+cooldown_ticks = 7000
+
+[trigger]
+type = "AdventurerLevelUp"
+min_level = 5
+
+[choice]
+category = "progression"
+trigger = "hook"
+prompt = "In the middle of a training session, {adventurer_name} does something impossible — a technique no one taught them. Raw potential crystallizing into a new Skill. The other adventurers stare."
+deadline_secs = 90.0
+default_option = 0
+
+[[choice.options]]
+label = "Nurture the Skill (25g)"
+description = "Provide training materials and a mentor to develop the new ability properly."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -25.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Under careful guidance, the wild talent is shaped into something reliable and devastating."
+
+[[choice.options]]
+label = "Let It Develop Naturally"
+description = "Don't interfere. Raw skills can be unpredictable but also uniquely powerful."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The skill grows wild, like a vine without a trellis. Unpredictable, but full of potential."
+
+[[choice.options]]
+label = "Suppress It"
+description = "Uncontrolled skills are dangerous. Better to focus on fundamentals."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer_name} is taught to rein in the new ability. Discipline over raw talent."

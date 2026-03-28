@@ -1,0 +1,55 @@
+# How to allocate a windfall of resources.
+
+category = "strategic"
+trigger = "resource_windfall"
+prompt = "The guild has a surplus of {resource_amount}g. How should it be allocated?"
+deadline_secs = 90.0
+default_option = 1
+
+[[options]]
+label = "Invest in Infrastructure"
+description = "Build improvements to the guild hall. Long-term payoff."
+
+[[options.effects]]
+type = "gold"
+amount = -40.0
+
+[[options.effects]]
+type = "narrative"
+text = "Hammers ring as the guild hall expands. More bunks, better defenses, a proper armory."
+
+[[options]]
+label = "Equipment Upgrades"
+description = "Buy better gear for everyone. Immediate combat improvement."
+
+[[options.effects]]
+type = "gold"
+amount = -30.0
+
+[[options.effects]]
+type = "narrative"
+text = "New steel gleams in the armory. The adventurers approve."
+
+[[options]]
+label = "Save for Emergencies"
+description = "Put it in the treasury. A rainy day fund is never a bad idea."
+
+[[options.effects]]
+type = "narrative"
+text = "The gold goes in the vault. Discipline over indulgence."
+
+[[options]]
+label = "Distribute as Bonuses"
+description = "Give every adventurer a share. Morale boost."
+
+[[options.effects]]
+type = "gold"
+amount = -25.0
+
+[[options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[options.effects]]
+type = "narrative"
+text = "Coin purses grow heavier. Smiles grow wider."

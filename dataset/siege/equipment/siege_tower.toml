@@ -1,0 +1,29 @@
+[[equipment]]
+id = "siege_tower"
+name = "Siege Tower"
+category = "breaching"
+tier = 3
+
+[equipment.stats]
+gate_damage_per_tick = 0.0
+wall_damage_per_tick = 0.0
+range = 0.0
+crew_required = 20
+move_speed = 0.15
+hp = 800
+armor = 30
+troop_capacity = 12
+wall_height_max = 6.0
+
+[equipment.requirements]
+min_tech_level = 3
+construction_cost = 300
+construction_ticks = 800
+resources = ["timber", "iron", "leather"]
+
+[equipment.counters]
+vulnerable_to = ["fire_arrows", "trebuchet", "flame_barrier"]
+strong_against = ["stone_wall", "reinforced_stone"]
+
+[equipment.narrative]
+description = "It rolls forward like a wooden cliff, creaking and groaning. Inside, soldiers climb ladders in the dark, waiting for the drawbridge to drop and the killing to begin."

@@ -1,0 +1,54 @@
+name = "Harbor Raid"
+map_type = "harbor_raid"
+width = 35
+height = 18
+
+[terrain]
+layout = """
+HHHH..HH..HHHH..HH..HHHH.........
+HHHH..HH..HHHH..HH..HHHH.........
+..........RRRRRRRR.....RRRR........
+..RRRRRRRRRR....RRRRRRRR..RRRR....
+..R..............................R.
+..R..WWWWWW....WWWWWW....WWWWWW.R.
+..R..W....W....W....W....W....W.R.
+..R..WWWWWW....WWWWWW....WWWWWW.R.
+..R..............................R.
+..RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR.
+..................................P
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~P
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~P
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~P
+~~~~~~~~~~~~~~DDDDDD~~~~~~~~~~~~~~P
+~~~~~~~~~~~~~DD....DD~~~~~~~~~~~~~P
+~~~~~~~~~~~~~D......D~~~~~~~~~~~~~P
+~~~~~~~~~~~~~DD....DD~~~~~~~~~~~~~P
+"""
+
+[[spawn_zones]]
+name = "town_defenders"
+team = 0
+rect = [0, 0, 25, 8]
+
+[[spawn_zones]]
+name = "raiders"
+team = 1
+rect = [10, 14, 24, 17]
+
+[[objectives]]
+type = "raid_warehouse"
+position = [14, 6]
+hp = 300
+
+[[objectives]]
+type = "raid_warehouse"
+position = [22, 6]
+hp = 300
+
+[[cover_positions]]
+position = [4, 4]
+type = "full"
+
+[[cover_positions]]
+position = [18, 4]
+type = "half"

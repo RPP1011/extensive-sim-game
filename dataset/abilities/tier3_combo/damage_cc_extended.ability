@@ -1,0 +1,127 @@
+// Tier 3: Damage + CC combos
+
+ability FrostStrike {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 30 [ICE: 45]
+    slow 0.4 for 2s [ICE: 40]
+}
+
+ability ShieldBash {
+    target: enemy, range: 1.5
+    cooldown: 8s, cast: 200ms
+    hint: crowd_control
+
+    damage 25 [PHYSICAL: 40]
+    stun 1200ms [CROWD_CONTROL: 55]
+}
+
+ability VenomStrike {
+    target: enemy, range: 1.5
+    cooldown: 5s, cast: 100ms
+    hint: damage
+
+    damage 20 [POISON: 40]
+    slow 0.3 for 2500ms [POISON: 35]
+}
+
+ability HolySmash {
+    target: enemy, range: 1.5
+    cooldown: 7s, cast: 300ms
+    hint: damage
+
+    damage 35 [HOLY: 50]
+    stun 1s [CROWD_CONTROL: 50]
+}
+
+ability ShadowStrike {
+    target: enemy, range: 2.0
+    cooldown: 6s, cast: 100ms
+    hint: damage
+
+    damage 30 [DARK: 45]
+    silence 1500ms [DARK: 40]
+}
+
+ability ConcussiveBlow {
+    target: enemy, range: 1.5
+    cooldown: 5s, cast: 200ms
+    hint: crowd_control
+
+    damage 20 [PHYSICAL: 35]
+    stun 800ms [CROWD_CONTROL: 40]
+}
+
+ability LightningLash {
+    target: enemy, range: 4.0
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    damage 28 [MAGIC: 45]
+    root 1s [CROWD_CONTROL: 40]
+}
+
+ability FlameLock {
+    target: enemy, range: 4.0
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 35 [FIRE: 50]
+    root 1500ms [FIRE: 40]
+}
+
+ability IceSlam {
+    target: enemy, range: 1.5
+    cooldown: 7s, cast: 300ms
+    hint: crowd_control
+
+    damage 30 [ICE: 45]
+    stun 1500ms [ICE: 50]
+}
+
+ability ThunderPunch {
+    target: enemy, range: 1.5
+    cooldown: 5s, cast: 100ms
+    hint: damage
+
+    damage 25 [MAGIC: 40]
+    knockback 2.0 [KNOCKBACK: 40]
+}
+
+ability PetrifyingTouch {
+    target: enemy, range: 2.0
+    cooldown: 10s, cast: 300ms
+    hint: crowd_control
+
+    damage 20 [MAGIC: 40]
+    stun 2s [CROWD_CONTROL: 60]
+}
+
+ability BindingShot {
+    target: enemy, range: 6.0
+    cooldown: 8s, cast: 200ms
+    hint: crowd_control
+
+    damage 22 [PHYSICAL: 35]
+    root 2s [CROWD_CONTROL: 50]
+}
+
+ability ToxicBite {
+    target: enemy, range: 1.5
+    cooldown: 4s, cast: 100ms
+    hint: damage
+
+    damage 18 [POISON: 35]
+    slow 0.5 for 2s [POISON: 40]
+}
+
+ability SilencingStrike {
+    target: enemy, range: 1.5
+    cooldown: 7s, cast: 200ms
+    hint: crowd_control
+
+    damage 25 [PHYSICAL: 40]
+    silence 2s [CROWD_CONTROL: 50]
+}

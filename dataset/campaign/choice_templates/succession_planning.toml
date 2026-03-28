@@ -1,0 +1,51 @@
+# Guild leadership succession planning.
+
+category = "strategic"
+trigger = "succession_event"
+prompt = "The guild master is stepping down. Who should lead next?"
+deadline_secs = 120.0
+default_option = 0
+
+[[options]]
+label = "Most Experienced"
+description = "The veteran with the most quests completed. Proven leadership."
+
+[[options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[options.effects]]
+type = "narrative"
+text = "The old guard nods. Experience is rewarded. The guild's traditions continue."
+
+[[options]]
+label = "Most Popular"
+description = "The adventurer everyone likes. Morale soars under popular leadership."
+
+[[options.effects]]
+type = "narrative"
+text = "Cheers erupt at the announcement. The new leader is beloved — hopefully also competent."
+
+[[options]]
+label = "Outside Hire"
+description = "Bring in a leader from outside. Fresh perspective, no baggage."
+
+[[options.effects]]
+type = "gold"
+amount = -30.0
+
+[[options.effects]]
+type = "narrative"
+text = "A stranger takes the chair. The guild watches, skeptical but curious."
+
+[[options]]
+label = "Council Rule"
+description = "No single leader. A council of senior members shares authority."
+
+[[options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[options.effects]]
+type = "narrative"
+text = "Three chairs at the head table instead of one. Democracy is messy but resilient."

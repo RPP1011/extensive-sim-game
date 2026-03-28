@@ -1,0 +1,29 @@
+name = "The Silver Delta"
+terrain = "river_delta"
+climate = "temperate"
+size = "medium"
+
+[generation]
+settlement_density = 0.4
+road_connectivity = 0.5
+wilderness_danger = 0.3
+resource_richness = 0.7
+
+[settlement_distribution]
+hamlet_pct = 30
+village_pct = 30
+town_pct = 25
+city_pct = 12
+fortress_pct = 3
+
+[terrain_features]
+rivers = 8
+mountains = false
+forests = false
+coast = true
+lakes = 3
+
+[narrative]
+description = "Where the Silver River splits into a thousand channels before meeting the sea. The silt makes everything grow, and the waterways carry trade to every settlement."
+threats = ["flooding", "river_pirates", "crocodiles", "malaria"]
+opportunities = ["fertile_farmland", "river_trade", "fishing", "clay_deposits"]

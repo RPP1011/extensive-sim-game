@@ -1,0 +1,21 @@
+class Blademaster {
+    stat_growth: +4 attack, +2 speed, +1 defense per level
+
+    tags: melee, weapon_mastery, multi_target, discipline, swordsmanship
+
+    scaling enemy_count {
+        when enemy_count >= 2: +10% attack
+        when enemy_count >= 4: +15% speed
+        always: +5% attack
+    }
+
+    abilities {
+        level 20: whirlwind_slash "Strike all adjacent enemies in a single spinning cut"
+        level 25: weapon_switch "Instantly swap fighting style mid-combat for situational advantage"
+        level 30: steel_tempest "A line of cutting wind that damages everything in its path"
+        level 40: thousand_cuts "Attack a single target so many times in one second they cannot react"
+        level 50: blade_domain "For 10 seconds, any enemy that moves within range is automatically struck"
+    }
+
+    requirements: level 20, classes: Warrior or Duelist
+}

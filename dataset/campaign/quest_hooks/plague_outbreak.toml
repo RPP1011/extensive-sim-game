@@ -1,0 +1,61 @@
+# A disease begins spreading through the region.
+
+name = "Plague Outbreak"
+priority = 9
+repeatable = true
+cooldown_ticks = 12000
+
+[trigger]
+type = "ThreatLevel"
+min_threat = 25.0
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "The coughing starts in the slums and spreads fast. Within days, a quarter of the settlement is bedridden. The guild's own members show symptoms. Healers are overwhelmed."
+deadline_secs = 60.0
+default_option = 0
+
+[[choice.options]]
+label = "Quarantine and Treat (45g)"
+description = "Establish quarantine zones and hire every available healer. Expensive but thorough."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -45.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 12.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild hall becomes a hospital. Healers work through the night. Slowly, the fever breaks."
+
+[[choice.options]]
+label = "Isolate the Guild"
+description = "Seal the guild hall and protect your own. The town fends for itself."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = -8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild locks its doors. Outside, the sick beg for help that doesn't come."
+
+[[choice.options]]
+label = "Seek a Cure (35g)"
+description = "Send adventurers to find rare herbs or a healer with the right knowledge."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -35.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A desperate quest for a cure begins. Every hour counts."

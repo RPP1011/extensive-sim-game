@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::types::{ConditionalEffect, DamageType, ScalingTerm};
 
 // ---------------------------------------------------------------------------
-// WHAT — Effect types (52 total)
+// WHAT — Effect types (68 total)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -288,6 +288,351 @@ pub enum Effect {
         ability_index: usize,
     },
 
+    // =======================================================================
+    // Campaign Effects — targeting factions, regions, economy, etc.
+    // These no-op in the combat sim; dispatched by campaign_apply_effect().
+    // =======================================================================
+
+    // --- Economy ---
+    CornerMarket {
+        #[serde(default)]
+        commodity: String,
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    ForgeTradeRoute {
+        #[serde(default)]
+        income_per_tick: f32,
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    Appraise,
+    GoldenTouch {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    TradeEmbargo {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    SilverTongue,
+
+    // --- Diplomacy ---
+    DemandAudience,
+    CeasefireDeclaration {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    Destabilize {
+        #[serde(default)]
+        instability: f32,
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    BrokerAlliance {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    SubvertLoyalty,
+    TreatyBreaker,
+    ShatterAlliance,
+
+    // --- Information ---
+    Reveal {
+        #[serde(default)]
+        count: u32,
+    },
+    PropheticVision {
+        #[serde(default)]
+        count: u32,
+    },
+    BeastLore,
+    ReadTheRoom,
+    AllSeeingEye,
+    Decipher,
+    TrapSense,
+    SapperEye,
+
+    // --- Leadership ---
+    Rally {
+        #[serde(default)]
+        morale_restore: f32,
+    },
+    Inspire {
+        #[serde(default)]
+        morale_boost: f32,
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    FieldCommand {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    CoordinatedStrike,
+    WarCry {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    RallyingCry {
+        #[serde(default)]
+        morale_restore: f32,
+    },
+
+    // --- Stealth / Movement ---
+    GhostWalk {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    ShadowStep {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    SilentMovement,
+    HiddenCamp {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    Vanish,
+    Distraction {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+
+    // --- Territory ---
+    ClaimTerritory,
+    Fortify {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    Sanctuary {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    PlagueWard {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    SafeHouse {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+
+    // --- Supernatural / Body ---
+    BloodOath {
+        #[serde(default)]
+        stat_bonus: f32,
+    },
+    Unbreakable,
+    LifeEternal,
+    Purify,
+    NameTheNameless,
+    ForbiddenKnowledge,
+
+    // --- Passive Skill-State ---
+    FieldTriage {
+        #[serde(default)]
+        heal_rate_multiplier: f32,
+    },
+    InspiringPresence {
+        #[serde(default)]
+        morale_boost: f32,
+    },
+    BattleInstinct,
+    QuickStudy,
+    Forage {
+        #[serde(default)]
+        supply_per_tick: f32,
+    },
+    TrackPrey,
+    FieldRepair,
+    StabilizeAlly,
+
+    // --- Higher Tier ---
+    Disinformation {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    AcceleratedStudy {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    TakeTheBlow {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    HoldTheLine,
+    Forgery,
+    MasterworkCraft,
+    IntelGathering,
+    MasterArmorer,
+    MarketMaker {
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    ForgeArtifact,
+    TradeEmpire {
+        #[serde(default)]
+        income_per_tick: f32,
+    },
+
+    // --- Legendary / Mythic ---
+    LivingLegend,
+    RewriteHistory,
+    TheLastWord,
+    WealthOfNations,
+    Omniscience,
+    ImmortalMoment,
+    ClaimByRight,
+    RewriteTheRecord,
+
+    // =======================================================================
+    // Meta-Effects — abilities that modify other abilities
+    // =======================================================================
+
+    /// Reset all ability cooldowns to 0.
+    RefreshCooldowns,
+    /// Reset a specific ability's cooldown (by index).
+    RefreshCooldown {
+        #[serde(default)]
+        ability_index: u32,
+    },
+    /// Next N ability casts have multiplied effectiveness.
+    Amplify {
+        #[serde(default = "default_amplify_multiplier")]
+        multiplier: f32,
+        #[serde(default = "default_charges")]
+        charges: u32,
+    },
+    /// Next ability cast fires twice.
+    Echo {
+        #[serde(default = "default_charges")]
+        charges: u32,
+    },
+    /// Extend all active buff/debuff durations by N ms.
+    ExtendDurations {
+        #[serde(default)]
+        amount_ms: u32,
+    },
+    /// Next ability has 0 cast time.
+    InstantCast {
+        #[serde(default = "default_charges")]
+        charges: u32,
+    },
+    /// Next ability costs 0 resources.
+    FreeCast {
+        #[serde(default = "default_charges")]
+        charges: u32,
+    },
+    /// Block the next enemy ability entirely.
+    SpellShield {
+        #[serde(default = "default_charges")]
+        charges: u32,
+    },
+    /// Increase target's ability costs by multiplier for duration.
+    ManaBurn {
+        #[serde(default = "default_cost_multiplier")]
+        cost_multiplier: f32,
+        #[serde(default)]
+        duration_ms: u32,
+    },
+    /// Lock target out of abilities for duration (like silence but uncleansable).
+    CooldownLock {
+        #[serde(default)]
+        duration_ms: u32,
+    },
+
+    // =======================================================================
+    // Recursive Effects — abilities that reference or contain other abilities
+    // =======================================================================
+
+    /// Trigger a named ability when this effect lands.
+    OnHitCast {
+        #[serde(default)]
+        ability_name: String,
+    },
+    /// Grant a temporary ability to the target for duration (by name reference).
+    GrantAbility {
+        #[serde(default)]
+        ability_name: String,
+        #[serde(default)]
+        duration_ms: u32,
+    },
+    /// Copy the last ability used by the target and make it available once.
+    CastCopy,
+    /// After N casts of this ability, evolve it permanently.
+    EvolveAfter {
+        #[serde(default)]
+        cast_count: u32,
+    },
+
+    // =======================================================================
+    // Campaign Primitives — composable building blocks
+    // =======================================================================
+
+    /// Modify a numeric property on any entity.
+    /// `entity`: "adventurer", "party", "guild", "faction", "region"
+    /// `property`: "morale", "gold", "supplies", "military_strength", etc.
+    /// `op`: "add", "multiply", "set"
+    ModifyStat {
+        #[serde(default)]
+        entity: String,
+        #[serde(default)]
+        property: String,
+        #[serde(default = "default_modify_op")]
+        op: String,
+        #[serde(default)]
+        amount: f32,
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    /// Set a boolean flag on an entity.
+    SetFlag {
+        #[serde(default)]
+        entity: String,
+        #[serde(default)]
+        flag: String,
+        #[serde(default = "default_flag_value")]
+        value: bool,
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    /// Reveal hidden information.
+    /// `scope`: "faction_stance", "enemy_weaknesses", "upcoming_events", "map", "all"
+    RevealInfo {
+        #[serde(default)]
+        target_type: String,
+        #[serde(default)]
+        scope: String,
+    },
+    /// Create a new entity or modifier.
+    /// `entity_type`: "location", "trade_route", "agreement", "item", "region_modifier"
+    CreateEntity {
+        #[serde(default)]
+        entity_type: String,
+        #[serde(default)]
+        subtype: String,
+        #[serde(default)]
+        duration_ticks: u32,
+    },
+    /// Remove/destroy something.
+    /// `target_type`: "disease", "agreement", "war_state", "buff", "event"
+    DestroyEntity {
+        #[serde(default)]
+        target_type: String,
+    },
+    /// Transfer a property value between two entities.
+    /// E.g. transfer adventurer from faction to guild, or damage from ally to self.
+    TransferValue {
+        #[serde(default)]
+        from_entity: String,
+        #[serde(default)]
+        to_entity: String,
+        #[serde(default)]
+        property: String,
+        #[serde(default)]
+        amount: f32,
+    },
+
 }
 
 fn default_summon_count() -> u32 {
@@ -334,4 +679,19 @@ fn default_max_stacks() -> u32 {
 }
 fn default_clone_damage_percent() -> f32 {
     75.0
+}
+fn default_amplify_multiplier() -> f32 {
+    1.5
+}
+fn default_charges() -> u32 {
+    1
+}
+fn default_cost_multiplier() -> f32 {
+    2.0
+}
+fn default_modify_op() -> String {
+    "add".to_string()
+}
+fn default_flag_value() -> bool {
+    true
 }

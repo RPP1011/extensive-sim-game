@@ -1,0 +1,50 @@
+ability RallyingCry {
+    target: party
+    cooldown: 500t
+    hint: leadership
+
+    rally 0.5
+}
+
+ability InspiringPresence {
+    target: party
+    cooldown: 300t
+    hint: leadership
+
+    inspire 0.2 for 500t
+}
+
+ability FieldCommand {
+    target: party
+    cooldown: 1000t
+    hint: leadership
+
+    field_command for 300t
+}
+
+ability CoordinatedStrike {
+    target: party
+    cooldown: 800t
+    hint: leadership
+
+    coordinated_strike
+}
+
+// Hybrid: combat + campaign
+ability WarCry {
+    target: self_aoe
+    cooldown: 15s
+    hint: leadership
+
+    buff damage_output 0.2 for 5s
+    rally 0.3
+    taunt 2s in circle(4.0)
+}
+
+ability HoldTheLine {
+    target: party
+    cooldown: 3000t
+    hint: leadership
+
+    hold_the_line when outnumbered
+}

@@ -1,0 +1,59 @@
+name = "Noble Patronage Offer"
+priority = 6
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "GuildReputation"
+min_reputation = 35.0
+
+[choice]
+category = "diplomacy"
+trigger = "hook"
+prompt = "A wealthy noble offers to become the guild's patron — steady funding in exchange for exclusive services and political loyalty. The gold would solve many problems, but the strings attached are silk-wrapped chains."
+deadline_secs = 120.0
+default_option = 1
+
+[[choice.options]]
+label = "Accept Full Patronage"
+description = "Guaranteed income. The guild serves the noble's interests in exchange."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 60.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The contract is signed. Gold flows in, but so do the noble's demands."
+
+[[choice.options]]
+label = "Limited Arrangement (30g)"
+description = "Accept funding with restrictions on what the noble can ask for."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 30.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A carefully worded contract limits the noble's influence. Partial funding, partial freedom."
+
+[[choice.options]]
+label = "Decline"
+description = "The guild answers to no one. Independence is non-negotiable."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The noble is politely refused. They're not used to hearing 'no.' It stings."

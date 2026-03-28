@@ -1,0 +1,55 @@
+// Tier 10: Blood Warlock Kit — dark drain/DoT caster with self-healing
+
+ability ShadowBoltCast {
+    target: enemy, range: 6.0
+    cooldown: 3s, cast: 200ms
+    hint: damage
+
+    damage 28 [DARK: 40]
+}
+
+ability DrainSoul {
+    target: enemy, range: 4.0
+    cooldown: 6s, cast: 300ms
+    hint: damage
+
+    damage 30 [DARK: 45]
+    heal 20
+    damage 5/1s for 3s [DARK: 35]
+}
+
+ability CurseOfExhaustion {
+    target: enemy, range: 5.0
+    cooldown: 8s, cast: 200ms
+    hint: utility
+
+    debuff move_speed 0.4 for 4s [DARK: 40]
+    debuff damage_output 0.85 for 4s [DARK: 35]
+}
+
+ability SeedOfCorruption {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: damage
+
+    damage 8/1s for 5s [DARK: 45]
+    damage 40 in circle(2.5) when hp_below(0.3) [DARK: 50]
+}
+
+ability DarkRitual {
+    target: self
+    cooldown: 45s, cast: 400ms
+    hint: utility
+
+    buff damage_output 0.35 for 8s
+    heal 50
+    shield 40 for 5s
+    damage 15 in circle(2.5) [DARK: 40]
+}
+
+passive DarkPactPassive {
+    trigger: on_damage_dealt
+    cooldown: 4s
+
+    heal 8 [DARK: 20]
+}

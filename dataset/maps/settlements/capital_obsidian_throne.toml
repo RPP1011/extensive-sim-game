@@ -1,0 +1,94 @@
+name = "Obsidian Throne"
+type = "capital"
+population = 18000
+prosperity = 65.0
+
+[defenses]
+wall_type = "citadel"
+wall_hp = 3500
+gate_count = 2
+tower_count = 20
+garrison_capacity = 1500
+moat = true
+
+[[districts]]
+name = "Black Palace"
+type = "noble"
+buildings = ["obsidian_palace", "throne_hall", "torture_chamber", "royal_vault"]
+population_pct = 3.0
+wealth = 100.0
+threat = 15.0
+
+[[districts]]
+name = "Iron Quarter"
+type = "military"
+buildings = ["legion_barracks", "gladiator_pit", "war_forge", "execution_square"]
+population_pct = 15.0
+wealth = 50.0
+threat = 10.0
+
+[[districts]]
+name = "Slave Market"
+type = "commercial"
+buildings = ["slave_auction", "chain_smithy", "flesh_merchant", "overseer_office"]
+population_pct = 8.0
+wealth = 70.0
+threat = 30.0
+
+[[districts]]
+name = "Temple of Ashes"
+type = "religious"
+buildings = ["dark_temple", "sacrifice_altar", "bone_crypt", "oracle_pit"]
+population_pct = 5.0
+wealth = 55.0
+threat = 25.0
+
+[[districts]]
+name = "Merchant Ring"
+type = "commercial"
+buildings = ["war_goods_market", "poison_dealer", "exotic_beast_trader", "mercenary_hall"]
+population_pct = 12.0
+wealth = 65.0
+threat = 20.0
+
+[[districts]]
+name = "Forge District"
+type = "industrial"
+buildings = ["volcanic_forge", "obsidian_works", "smelter", "weapon_foundry"]
+population_pct = 12.0
+wealth = 55.0
+threat = 15.0
+
+[[districts]]
+name = "Upper Terraces"
+type = "noble"
+buildings = ["warlord_estates", "pleasure_garden", "fighting_arena"]
+population_pct = 7.0
+wealth = 75.0
+threat = 10.0
+
+[[districts]]
+name = "Lower Warrens"
+type = "slums"
+buildings = ["hovels", "sewer_tunnels", "rebel_hideout", "rat_farm"]
+population_pct = 20.0
+wealth = 5.0
+threat = 45.0
+
+[[districts]]
+name = "Worker Blocks"
+type = "residential"
+buildings = ["labor_housing", "gruel_hall", "communal_well", "punishment_post"]
+population_pct = 18.0
+wealth = 10.0
+threat = 20.0
+
+[economy]
+primary_exports = ["obsidian_weapons", "slaves", "war_beasts", "volcanic_glass"]
+primary_imports = ["food", "timber", "luxury_goods", "prisoners"]
+trade_routes = 5
+market_size = "regional_hub"
+
+[narrative]
+description = "Built on volcanic rock, ruled by fear. The Obsidian Throne has never fallen to siege — but it has fallen to its own tyrants, again and again."
+flavor = ["Black glass towers catch no light", "Screams from the arena", "The ground is warm underfoot"]

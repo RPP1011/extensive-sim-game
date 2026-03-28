@@ -958,7 +958,17 @@ fn process_class_xp(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                 .and_then(|v| v.get(i))
                 .copied()
                 .unwrap_or(1.0);
-            xp_gains[i] = raw_xp * penalty * wmult;
+            // Adversity multiplier: worse situations accelerate growth (counterleveling).
+            let loc_threat = adv.home_location_id
+                .and_then(|lid| state.overworld.locations.iter().find(|l| l.id == lid))
+                .map(|l| l.threat_level)
+                .unwrap_or(0.0);
+            let loc_demand = adv.home_location_id
+                .and_then(|lid| state.overworld.locations.iter().find(|l| l.id == lid))
+                .map(|l| l.service_demand)
+                .unwrap_or([0.0; 8]);
+            let adv_mult = super::npc_economy::adversity_multiplier(adv, loc_threat, &loc_demand);
+            xp_gains[i] = raw_xp * penalty * wmult * adv_mult;
         }
 
         // Class resonance: trickle XP between classes with overlapping tags
@@ -1342,6 +1352,10 @@ fn check_skill_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                     };
                     // Store the DSL text as the skill effect description;
                     // the actual combat effect is in ability_dsl
+                    // TODO: SkillEffect is deprecated — DSL-generated skills already use
+                    // ability_dsl_text instead; this None assignment can be removed when
+                    // GrantedSkill.skill_effect field is removed.
+                    #[allow(deprecated)]
                     let skill_effect: Option<crate::headless_campaign::state::SkillEffect> = None;
                     let skill_condition: Option<crate::headless_campaign::state::SkillCondition> = None;
                     let ability_dsl_text = Some(dsl_text);
@@ -1404,6 +1418,9 @@ fn check_skill_grants(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
                     let class_name_clone = class.class_name.clone();
 
                     let has_effect = skill_effect.is_some();
+                    // TODO: Migrate to unified Effect passivity check once
+                    // SkillEffect is removed from GrantedSkill.
+                    #[allow(deprecated)]
                     let is_passive = match &skill_effect {
                         Some(ref e) => crate::headless_campaign::actions::is_passive_skill_effect(e),
                         None => false,
@@ -1752,6 +1769,13 @@ fn check_consolidation_offers(state: &mut CampaignState, events: &mut Vec<WorldE
                 let ca = &adv.classes[i];
                 let cb = &adv.classes[j];
                 if ca.level >= CONSOLIDATION_MIN_LEVEL && cb.level >= CONSOLIDATION_MIN_LEVEL {
+                    // Prevent consolidation spam: two already-consolidated classes
+                    // cannot consolidate with each other. At least one parent must
+                    // be a base/starter class (not itself a consolidation product).
+                    if ca.consolidated_from.is_some() && cb.consolidated_from.is_some() {
+                        continue;
+                    }
+
                     // Check if there's already a pending offer for this pair
                     let already_pending = state.consolidation_offers.iter().any(|o| {
                         o.adventurer_id == adv.id
@@ -1887,6 +1911,7 @@ fn check_consolidation_offers(state: &mut CampaignState, events: &mut Vec<WorldE
                 skills_granted: inherited_skills,
                 acquired_tick: tick,
                 identity_coherence: 1.0,
+                consolidated_from: Some((cand.class_a.clone(), cand.class_b.clone())),
                 ..Default::default()
             };
             populate_noncombat_growth(&mut ci);
@@ -3200,6 +3225,11 @@ fn check_crisis_escape_valve(state: &mut CampaignState, events: &mut Vec<WorldEv
             if non_shame.len() >= 2 {
                 let (_, ca) = non_shame[0];
                 let (_, cb) = non_shame[1];
+
+                // Prevent consolidation spam in emergency path too
+                if ca.consolidated_from.is_some() && cb.consolidated_from.is_some() {
+                    continue;
+                }
 
                 let tags_a = templates
                     .iter()

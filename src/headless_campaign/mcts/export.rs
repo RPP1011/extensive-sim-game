@@ -48,7 +48,7 @@ pub struct MctsExportSample {
 /// Derive the world template name for a given seed, mirroring
 /// `CampaignState::load_world_template` logic.
 fn world_template_name_for_seed(seed: u64) -> String {
-    let dir = std::path::Path::new("assets/world_templates");
+    let dir = std::path::Path::new("dataset/campaign/world_templates");
     if dir.exists() {
         if let Ok(templates) = WorldTemplate::load_from_dir(dir) {
             if !templates.is_empty() {

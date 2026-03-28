@@ -116,7 +116,7 @@ pub fn load_audio_assets_system(
 ) {
     // Ensure the directory exists so artists can drop files in without
     // needing to create it manually.  Failure is silently ignored.
-    let _ = std::fs::create_dir_all("assets/audio");
+    let _ = std::fs::create_dir_all("dataset/audio");
 
     handles.hub_music = Some(asset_server.load("audio/hub_music.ogg"));
     handles.combat_music_base = Some(asset_server.load("audio/combat_music_base.ogg"));

@@ -1,0 +1,38 @@
+name = "The Bankruptcy"
+world_template = "Archipelago"
+sequence = 1
+default_option = 1
+prompt = "The ledger doesn't lie. Three bad investments, a pirated shipment, and a partner who vanished with the emergency fund. Your trading company — ten years of your life — is bankrupt. Creditors circle. Your warehouse is being seized tomorrow. You have tonight to salvage what you can."
+
+[[options]]
+label = "Salvage the Inventory"
+description = "Load everything you can carry into a cart before dawn. It's technically yours until the seizure order takes effect."
+pc_traits = [{ trait = "merchant_mind" }]
+pc_stats = { speed = 2.0 }
+effects = [
+    { type = "gold", amount = 50.0 },
+    { type = "supplies", amount = 15.0 },
+    { type = "narrative", text = "You work through the night, loading crates by candlelight. By dawn, the warehouse is empty and you're on the road." },
+]
+
+[[options]]
+label = "Negotiate with Creditors"
+description = "Face them honestly. Present a restructuring plan. Maybe some can be turned into investors."
+pc_traits = [{ trait = "diplomat_born" }]
+pc_stats = { resolve = 3.0 }
+effects = [
+    { type = "gold", amount = 20.0 },
+    { type = "reputation", amount = 8.0 },
+    { type = "narrative", text = "You stand before angry creditors and speak the truth. Some storm out. A few stay to listen." },
+]
+
+[[options]]
+label = "Burn the Books"
+description = "Destroy the evidence. Start fresh with no paper trail. Morally bankrupt, but financially clean."
+pc_traits = [{ trait = "pragmatist" }]
+pc_stats = { speed = 3.0 }
+effects = [
+    { type = "gold", amount = 30.0 },
+    { type = "reputation", amount = -10.0 },
+    { type = "narrative", text = "Ledgers catch fire. Years of records become ash. You walk away lighter, if not cleaner." },
+]

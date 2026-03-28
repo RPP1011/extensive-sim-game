@@ -1,0 +1,49 @@
+[[events]]
+id = "earthquake"
+name = "Earthquake"
+phase = "bombardment"
+
+[events.trigger]
+type = "Random"
+threshold = 0.03
+
+[events.choice]
+prompt = "The ground shakes! An earthquake rocks the settlement. Walls crack, towers sway, and men on both sides are thrown from their feet."
+deadline_secs = 15.0
+
+[[events.choice.options]]
+label = "Assault Immediately"
+description = "The walls are weakened. Strike now before they can repair."
+[[events.choice.options.effects]]
+type = "force_phase_transition"
+to_phase = "siege_assault"
+wall_damage = 800
+tower_damage = 500
+defender_disorganized = true
+attacker_disorganized = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Both sides reel from the quake, but the army recovers first. The walls are cracked, the towers listing. The horns sound before the dust settles."
+
+[[events.choice.options]]
+label = "Wait and Assess Damage"
+description = "The quake may have weakened your siege works too. Survey the damage."
+[[events.choice.options.effects]]
+type = "siege_progress"
+wall_damage = 800
+attacker_equipment_check = true
+ticks_cost = 100
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Engineers inspect everything. The walls are cracked — but so is the trebuchet's foundation. Nature played no favorites."
+
+[[events.choice.options]]
+label = "Offer Terms"
+description = "An earthquake is a sign. Use the moment of shared vulnerability to negotiate."
+[[events.choice.options.effects]]
+type = "negotiation"
+surrender_chance = 0.3
+morale_effect = "superstitious_fear"
+[[events.choice.options.effects]]
+type = "narrative"
+text = "'The gods themselves have spoken,' the envoy says, gesturing at the cracked walls. Inside, the garrison stares at their damaged fortifications and wonders."

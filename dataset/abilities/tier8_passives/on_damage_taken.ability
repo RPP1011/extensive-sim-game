@@ -1,0 +1,90 @@
+// Tier 8: Passives triggered on taking damage
+
+passive ThornMail {
+    trigger: on_damage_taken
+    cooldown: 3s
+
+    damage 10 [PHYSICAL: 30]
+}
+
+passive ReactiveShield {
+    trigger: on_damage_taken
+    cooldown: 8s
+
+    shield 20 for 3s
+}
+
+passive MoltenArmor {
+    trigger: on_damage_taken
+    cooldown: 4s
+
+    damage 12 [FIRE: 35]
+}
+
+passive AdaptiveHeal {
+    trigger: on_damage_taken
+    cooldown: 6s
+
+    heal 15
+}
+
+passive FrostRetaliation {
+    trigger: on_damage_taken
+    cooldown: 5s
+
+    damage 8 [ICE: 30]
+    slow 0.2 for 1500ms [ICE: 25]
+}
+
+passive ShadowReflex {
+    trigger: on_damage_taken
+    cooldown: 10s
+
+    stealth 1500ms
+}
+
+passive IronSkin {
+    trigger: on_damage_taken
+    cooldown: 8s
+
+    shield 25 for 4s
+    buff damage_output 0.1 for 4s
+}
+
+passive VenomSpines {
+    trigger: on_damage_taken
+    cooldown: 4s
+
+    damage 4/1s for 3s [POISON: 30]
+}
+
+passive EnragedDefense {
+    trigger: on_damage_taken
+    cooldown: 6s
+
+    heal 10
+    buff attack_speed 0.15 for 3s
+}
+
+passive ArcaneBacklash {
+    trigger: on_damage_taken
+    cooldown: 5s
+
+    damage 15 [MAGIC: 35]
+    slow 0.15 for 1500ms [MAGIC: 25]
+}
+
+passive StoneSkin {
+    trigger: on_damage_taken
+    cooldown: 10s
+
+    shield 30 for 3s
+}
+
+passive DivineFavor {
+    trigger: on_damage_taken
+    cooldown: 8s
+
+    heal 20 [HOLY: 30]
+    shield 10 for 3s
+}

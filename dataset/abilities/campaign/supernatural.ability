@@ -1,0 +1,64 @@
+ability BloodOath {
+    target: party
+    cooldown: 10000t
+    hint: utility
+
+    blood_oath 0.15
+    buff damage_output 0.15 for 5000t
+}
+
+ability Unbreakable {
+    target: self
+    cooldown: 5000t
+    hint: defense
+
+    unbreakable
+}
+
+ability LifeEternal {
+    target: self
+    cooldown: 20000t
+    hint: defense
+
+    life_eternal
+}
+
+ability NameTheNameless {
+    target: global
+    cooldown: 10000t
+    hint: utility
+
+    name_the_nameless
+}
+
+ability ForbiddenKnowledge {
+    target: self
+    cooldown: 8000t
+    hint: utility
+
+    forbidden_knowledge
+}
+
+ability ImmortalMoment {
+    target: self
+    cooldown: 20000t
+    hint: defense
+
+    immortal_moment when near_death
+}
+
+ability ForgeArtifact {
+    target: guild
+    cooldown: 15000t
+    hint: utility
+
+    forge_artifact
+}
+
+ability RewriteTheRecord {
+    target: global
+    cooldown: 20000t
+    hint: utility
+
+    rewrite_the_record
+}

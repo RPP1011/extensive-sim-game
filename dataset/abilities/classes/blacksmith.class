@@ -1,0 +1,20 @@
+class Blacksmith {
+    stat_growth: +2 attack, +2 defense, +1 max_hp per level
+
+    tags: crafting, metallurgy, repair, forging, equipment
+
+    scaling party_alive_count {
+        when party_members >= 1: +5% attack
+        always: +5% defense
+    }
+
+    abilities {
+        level 1: field_repair "Restore damaged equipment between battles"
+        level 5: sharpen "Temporarily increase an ally's weapon damage"
+        level 10: reinforce_armor "Permanently add defense to a piece of equipment"
+        level 20: masterwork "Craft equipment one tier above available materials"
+        level 40: forge_legend "Create a named weapon with unique properties from rare materials"
+    }
+
+    requirements: level 1
+}

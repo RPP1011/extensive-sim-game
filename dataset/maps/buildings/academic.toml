@@ -1,0 +1,102 @@
+[[buildings]]
+id = "library"
+name = "Library"
+category = "academic"
+construction_cost = 200
+construction_ticks = 800
+maintenance_cost = 8
+
+[buildings.effects]
+knowledge_output = 0.15
+culture_output = 0.1
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "town"
+required_resources = ["timber", "paper"]
+
+[buildings.narrative]
+description = "Rows of shelves, the smell of old parchment, and a librarian who will kill you if you fold a page."
+
+[[buildings]]
+id = "academy"
+name = "Academy"
+category = "academic"
+construction_cost = 400
+construction_ticks = 1500
+maintenance_cost = 15
+
+[buildings.effects]
+knowledge_output = 0.2
+training_speed = 0.15
+culture_output = 0.1
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "town"
+required_resources = ["stone", "timber"]
+
+[buildings.narrative]
+description = "Where the children of merchants learn to read and the children of nobles learn to pretend they already could."
+
+[[buildings]]
+id = "observatory"
+name = "Observatory"
+category = "academic"
+construction_cost = 350
+construction_ticks = 1200
+maintenance_cost = 12
+
+[buildings.effects]
+knowledge_output = 0.15
+vision_range = 2
+early_warning = true
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "town"
+required_resources = ["stone", "glass", "metal"]
+
+[buildings.narrative]
+description = "A tower with a clear view of the heavens. The astronomers track stars, the military tracks enemy movements."
+
+[[buildings]]
+id = "alchemist_lab"
+name = "Alchemist Laboratory"
+category = "academic"
+construction_cost = 250
+construction_ticks = 900
+maintenance_cost = 12
+
+[buildings.effects]
+potion_production = 0.2
+knowledge_output = 0.1
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "town"
+required_resources = ["glass", "herbs", "metal"]
+
+[buildings.narrative]
+description = "Bubbling flasks, strange smells, and occasional explosions. The neighbors have learned to duck."
+
+[[buildings]]
+id = "university"
+name = "University"
+category = "academic"
+construction_cost = 700
+construction_ticks = 2500
+maintenance_cost = 25
+
+[buildings.effects]
+knowledge_output = 0.3
+culture_output = 0.2
+training_speed = 0.2
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "city"
+required_resources = ["stone", "timber", "paper"]
+
+[buildings.narrative]
+description = "The greatest minds of the realm gather here to argue about things no one else cares about. Occasionally they discover something useful."

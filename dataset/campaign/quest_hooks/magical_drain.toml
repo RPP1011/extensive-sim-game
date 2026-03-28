@@ -1,0 +1,59 @@
+name = "Mana Drain"
+priority = 8
+repeatable = true
+cooldown_ticks = 9000
+
+[trigger]
+type = "ThreatLevel"
+min_threat = 35.0
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "Mages across the region are falling ill — their mana pools draining, their spells failing. Something is specifically targeting magic users. Non-mages are unaffected."
+deadline_secs = 75.0
+default_option = 0
+
+[[choice.options]]
+label = "Investigate the Source (35g)"
+description = "Send non-mage investigators to trace the phenomenon to its origin."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -35.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Mundane scouts begin tracing the pattern. Whatever is doing this has a center point."
+
+[[choice.options]]
+label = "Protect Guild Mages"
+description = "Ward your own mages and let the region handle itself."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Guild mages are moved to warded rooms. Their power flickers but holds."
+
+[[choice.options]]
+label = "Exploit the Weakness"
+description = "Enemy mages are affected too. Strike while magic users are weakened."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = -3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "While mages everywhere falter, the guild's fighters press the advantage."

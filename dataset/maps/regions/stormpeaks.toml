@@ -1,0 +1,29 @@
+name = "The Stormpeaks"
+terrain = "mountains"
+climate = "alpine"
+size = "medium"
+
+[generation]
+settlement_density = 0.1
+road_connectivity = 0.3
+wilderness_danger = 0.7
+resource_richness = 0.7
+
+[settlement_distribution]
+hamlet_pct = 30
+village_pct = 20
+town_pct = 15
+city_pct = 5
+fortress_pct = 30
+
+[terrain_features]
+rivers = 1
+mountains = true
+forests = false
+coast = false
+lakes = 0
+
+[narrative]
+description = "Jagged peaks wreathed in perpetual storms. The passes are treacherous, but the mines are rich beyond measure."
+threats = ["avalanches", "wyverns", "stone_giants", "blizzards"]
+opportunities = ["rare_metals", "mountain_passes", "dwarven_ruins"]

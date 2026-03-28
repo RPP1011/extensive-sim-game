@@ -1,0 +1,15 @@
+name = "The Empty Throne"
+description = "The faction leader dies without an heir. Rivals tear the faction apart from within while neighbors circle like vultures"
+crisis_type = "succession"
+world_templates = []
+trigger_threshold = 0.55
+priority = 7
+allow_simultaneous = true
+
+[config]
+type = "Succession"
+claimant_count = 3
+instability_growth_per_tick = 0.2
+diplomatic_collapse_rate = 5.0
+intervention_cost = 80.0
+resolution_ticks = 12000

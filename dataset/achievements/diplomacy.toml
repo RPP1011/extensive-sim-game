@@ -1,0 +1,409 @@
+# Diplomacy achievements — faction relations, negotiations, and social maneuvering
+
+[[achievements]]
+id = "first_friendly"
+name = "Common Ground"
+description = "Reach Friendly relations with a faction."
+category = "diplomacy"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "FactionRelationChanged"
+condition = "friendly_1"
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "One faction calls you friend. It's a start."
+
+[[achievements]]
+id = "three_friendly"
+name = "Diplomat"
+description = "Reach Friendly relations with 3 factions."
+category = "diplomacy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "FactionRelationChanged"
+condition = "friendly_3"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Three allies. You're building something."
+
+[[achievements]]
+id = "all_friendly"
+name = "Beloved"
+description = "Reach Friendly relations with every faction."
+category = "diplomacy"
+tier = "legendary"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "FactionRelationChanged"
+condition = "friendly_all"
+
+[achievements.reward]
+rl_bonus = 2.0
+narrative = "Every faction, every leader, every border. All open to you."
+
+[[achievements]]
+id = "broker_ceasefire"
+name = "Peacemaker"
+description = "Broker a ceasefire between two warring factions."
+category = "diplomacy"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "ceasefire_brokered"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "They put down their swords because you asked. That's real power."
+
+[[achievements]]
+id = "betray_ally"
+name = "Necessary Betrayal"
+description = "Betray an allied faction and survive the consequences."
+category = "diplomacy"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "FactionRelationChanged"
+condition = "ally_betrayed_survived"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "They'll never trust you again. But you're still standing."
+
+[[achievements]]
+id = "form_coalition"
+name = "United Front"
+description = "Form a coalition of 3 or more factions."
+category = "diplomacy"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "coalition_formed"
+
+[achievements.reward]
+rl_bonus = 1.0
+narrative = "Three banners flying together. Your enemies should be worried."
+
+[[achievements]]
+id = "hostile_to_friendly"
+name = "Hearts and Minds"
+description = "Turn a Hostile faction to Friendly."
+category = "diplomacy"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "FactionRelationChanged"
+condition = "hostile_to_friendly"
+
+[achievements.reward]
+rl_bonus = 1.0
+narrative = "From enemy to ally. That took patience, cunning, and no small amount of gold."
+
+[[achievements]]
+id = "survive_war_declaration"
+name = "Casus Belli"
+description = "Have war declared on you and survive."
+category = "diplomacy"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "war_survived"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "They declared war. You're still here. They're reconsidering."
+
+[[achievements]]
+id = "crisis_negotiation"
+name = "Crisis Diplomat"
+description = "Successfully negotiate during an active crisis."
+category = "diplomacy"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "crisis_negotiation_success"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "When the world was burning, you talked instead of fought."
+
+[[achievements]]
+id = "recruit_npc"
+name = "Join Us"
+description = "Recruit an NPC adventurer to your guild."
+category = "diplomacy"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerRecruited"
+count = 1
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "A new face at the guild table. Welcome aboard."
+
+[[achievements]]
+id = "three_bonds"
+name = "Band of Brothers"
+description = "Form bonds between 3 or more pairs of adventurers."
+category = "diplomacy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "bonds_3"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Shared meals, shared battles, shared scars. They fight for each other now."
+
+[[achievements]]
+id = "prevent_civil_war"
+name = "Held Together"
+description = "Prevent a faction civil war through intervention."
+category = "diplomacy"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "civil_war_prevented"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "A kingdom almost tore itself apart. You held the seams."
+
+[[achievements]]
+id = "play_both_sides"
+name = "Double Agent"
+description = "Improve relations with both sides of an active conflict."
+category = "diplomacy"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "FactionRelationChanged"
+condition = "improved_both_conflict_sides"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Both sides think you're on theirs. The truth is you're on yours."
+
+[[achievements]]
+id = "diplomatic_feast"
+name = "Set the Table"
+description = "Host a diplomatic feast."
+category = "diplomacy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "feast_hosted"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "Good food, strong drink, and careful words. More deals are made at tables than battlefields."
+
+[[achievements]]
+id = "establish_embassy"
+name = "Permanent Presence"
+description = "Establish an embassy with a faction."
+category = "diplomacy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "embassy_established"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Your flag flies in their city. That means something."
+
+[[achievements]]
+id = "spy_undetected"
+name = "Eyes Everywhere"
+description = "Spy on a faction without getting caught."
+category = "diplomacy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "spy_undetected"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Their secrets are yours. They'll never know."
+
+[[achievements]]
+id = "caught_spying_talked_out"
+name = "Silver Tongue"
+description = "Get caught spying and talk your way out of consequences."
+category = "diplomacy"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "caught_spying_escaped"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Caught red-handed and walked out smiling. That takes talent."
+
+[[achievements]]
+id = "faction_quest_complete"
+name = "Favor Earned"
+description = "Complete a quest for a faction."
+category = "diplomacy"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "faction_quest"
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "A favor done. A favor owed. The ledger of power."
+
+[[achievements]]
+id = "five_faction_quests"
+name = "Reliable"
+description = "Complete faction quests for 5 different factions."
+category = "diplomacy"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "five_different_faction_quests"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Five factions trust you with their problems. That's influence."
+
+[[achievements]]
+id = "mutual_defense_pact"
+name = "Shield Brothers"
+description = "Establish a mutual defense pact with a faction."
+category = "diplomacy"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "defense_pact"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "An attack on one is an attack on both. Your enemies just doubled their problems."
+
+[[achievements]]
+id = "diplomatic_incident"
+name = "Incident Report"
+description = "Cause a diplomatic incident."
+category = "diplomacy"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "FactionRelationChanged"
+condition = "diplomatic_incident"
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "That could have gone better. Significantly better."
+
+[[achievements]]
+id = "recover_from_incident"
+name = "Damage Control"
+description = "Recover faction relations after a diplomatic incident."
+category = "diplomacy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "FactionRelationChanged"
+condition = "incident_recovered"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Apologies were made. Gifts were sent. The bridge is rebuilt."
+
+[[achievements]]
+id = "war_to_peace"
+name = "Swords to Plowshares"
+description = "End a war through diplomacy rather than total victory."
+category = "diplomacy"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "war_ended_diplomatically"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "The war ended at a table, not a battlefield. That's the harder victory."
+
+[[achievements]]
+id = "trade_after_war"
+name = "Business Is Business"
+description = "Establish a trade route with a faction you previously fought."
+category = "diplomacy"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TradeCompleted"
+condition = "traded_with_former_enemy"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Yesterday's enemy, today's customer. Gold heals all wounds."

@@ -108,6 +108,14 @@ impl AbilityTokenizer {
                 continue;
             }
 
+            // Campaign tick duration: digits followed by "t"
+            if let Some((ticks, end)) = try_parse_tick_duration(&text, pos) {
+                tokens.push(bucket_tick_duration(ticks).to_string());
+                pos = end;
+                expect_name = false;
+                continue;
+            }
+
             // Percentage: digits followed by %
             if let Some((val, end)) = try_parse_percent(&text, pos) {
                 tokens.push(bucket_number(val / 100.0).to_string());
@@ -199,7 +207,7 @@ mod tests {
     #[test]
     fn test_vocab_size() {
         let tok = AbilityTokenizer::new();
-        assert_eq!(tok.vocab_size(), 252);
+        assert_eq!(tok.vocab_size(), 397);
     }
 
     #[test]

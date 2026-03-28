@@ -1,13 +1,13 @@
 //! Data-driven world templates for campaign initialization.
 //!
 //! Instead of always starting with the same 3 regions / 2 factions / 4 locations,
-//! campaigns can load a [`WorldTemplate`] from TOML files in `assets/world_templates/`.
+//! campaigns can load a [`WorldTemplate`] from TOML files in `dataset/campaign/world_templates/`.
 
 use serde::{Deserialize, Serialize};
 
 use super::state::{
-    DiplomacyMatrix, DiplomaticStance, FactionState, Location, LocationType, NpcRelationship,
-    NpcType, Region,
+    CommodityStockpile, DiplomacyMatrix, DiplomaticStance, FactionState, Location, LocationType,
+    NpcRelationship, NpcType, Region, BASE_PRICES,
 };
 
 /// A complete world configuration that can be loaded from a TOML file.
@@ -115,6 +115,15 @@ impl WorldTemplate {
                     resource_availability: 70.0,
                     faction_owner: Some(0),
                     scouted: true,
+                    resident_ids: Vec::new(),
+                    service_demand: [0.0; 8],
+                    cost_of_living: 1.0,
+                    safety_level: 0.0,
+                    min_viable_threat: 0.0,
+                    treasury: 0.0,
+                    tax_rate: 0.15,
+                    stockpile: CommodityStockpile::default(),
+                    local_prices: BASE_PRICES,
                 },
                 Location {
                     id: 1,
@@ -125,6 +134,15 @@ impl WorldTemplate {
                     resource_availability: 30.0,
                     faction_owner: None,
                     scouted: false,
+                    resident_ids: Vec::new(),
+                    service_demand: [0.0; 8],
+                    cost_of_living: 1.0,
+                    safety_level: 0.0,
+                    min_viable_threat: 0.0,
+                    treasury: 0.0,
+                    tax_rate: 0.15,
+                    stockpile: CommodityStockpile::default(),
+                    local_prices: BASE_PRICES,
                 },
                 Location {
                     id: 2,
@@ -135,6 +153,15 @@ impl WorldTemplate {
                     resource_availability: 85.0,
                     faction_owner: Some(0),
                     scouted: true,
+                    resident_ids: Vec::new(),
+                    service_demand: [0.0; 8],
+                    cost_of_living: 1.0,
+                    safety_level: 0.0,
+                    min_viable_threat: 0.0,
+                    treasury: 0.0,
+                    tax_rate: 0.15,
+                    stockpile: CommodityStockpile::default(),
+                    local_prices: BASE_PRICES,
                 },
                 Location {
                     id: 3,
@@ -145,6 +172,15 @@ impl WorldTemplate {
                     resource_availability: 40.0,
                     faction_owner: None,
                     scouted: false,
+                    resident_ids: Vec::new(),
+                    service_demand: [0.0; 8],
+                    cost_of_living: 1.0,
+                    safety_level: 0.0,
+                    min_viable_threat: 0.0,
+                    treasury: 0.0,
+                    tax_rate: 0.15,
+                    stockpile: CommodityStockpile::default(),
+                    local_prices: BASE_PRICES,
                 },
             ],
             factions: vec![

@@ -3,13 +3,20 @@
 //! Each SkillEffect variant maps to a concrete mutation of CampaignState.
 //! T1-T3 effects are fully implemented. T4+ effects emit events and have
 //! simplified mechanics that bend existing systems.
+//!
+//! DEPRECATED: This module dispatches the legacy `SkillEffect` enum.
+//! New code should use the unified `Effect` enum from `tactical_sim::effects`
+//! with `campaign_apply_effect()` in `crate::headless_campaign::unified_dispatch`.
+//! All effects in this file have corresponding variants in the unified Effect enum.
 
 use crate::headless_campaign::actions::WorldEvent;
+#[allow(deprecated)]
 use crate::headless_campaign::state::{
     lcg_f32, AdventurerStatus, CampaignState, SkillCondition, SkillEffect,
 };
 
 /// Check whether a skill condition is currently met.
+#[allow(deprecated)]
 pub fn condition_met(
     state: &CampaignState,
     caster_id: u32,
@@ -82,6 +89,10 @@ pub fn condition_met(
 }
 
 /// Apply a skill effect to the campaign state. Returns a description of what happened.
+///
+/// TODO: Migrate callers to use `unified_dispatch::campaign_apply_effect()` with
+/// `tactical_sim::effects::Effect` instead of the legacy `SkillEffect` enum.
+#[allow(deprecated)]
 pub fn apply_skill_effect(
     state: &mut CampaignState,
     effect: &SkillEffect,

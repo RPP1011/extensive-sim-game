@@ -1,7 +1,7 @@
 //! Data-driven crisis templates loaded from TOML files.
 //!
 //! Crisis content (names, champion rosters, escalation rates, etc.) lives in
-//! `assets/crises/*.toml`. The Rust code in `systems/crisis.rs` and
+//! `dataset/campaign/crises/*.toml`. The Rust code in `systems/crisis.rs` and
 //! `systems/threat.rs` is pure mechanics — all content comes from these templates.
 
 use serde::{Deserialize, Serialize};
@@ -143,12 +143,12 @@ impl CrisisTemplate {
 /// Global cache of loaded crisis templates.
 static CRISIS_TEMPLATES: OnceLock<Vec<CrisisTemplate>> = OnceLock::new();
 
-/// Load crisis templates from `assets/crises/`, caching the result.
+/// Load crisis templates from `dataset/campaign/crises/`, caching the result.
 ///
 /// Returns an empty slice if the directory doesn't exist or has no valid files.
 pub fn get_or_load_crises() -> &'static [CrisisTemplate] {
     CRISIS_TEMPLATES.get_or_init(|| {
-        let dir = std::path::Path::new("assets/crises");
+        let dir = std::path::Path::new("dataset/campaign/crises");
         if dir.exists() {
             match CrisisTemplate::load_from_dir(dir) {
                 Ok(templates) => templates,

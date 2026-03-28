@@ -1,0 +1,48 @@
+[[fortifications]]
+id = "reinforced_stone"
+name = "Reinforced Stone Wall"
+tier = 4
+
+[fortifications.stats]
+wall_hp = 3000
+height = 5.0
+thickness = 3.0
+defender_cover = 0.85
+ranged_bonus = 0.35
+climb_difficulty = 0.95
+arrow_slit_slots = 4
+
+[fortifications.construction]
+cost = 900
+ticks = 3500
+resources = ["stone", "mortar", "iron"]
+builder_class_bonus = 0.4
+
+[fortifications.weaknesses]
+trebuchet_multiplier = 1.5
+sapper_multiplier = 1.2
+fire_resistant = true
+magic_resistant = false
+
+[fortifications.power_scaling]
+effective_level = 35
+builder_class_bonus = true
+enchantable = true
+age_scaling = 0.01
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 2.0
+ability_damage_reduction = 0.2
+projectile_deflection = 0.1
+ward_hp = 500
+ward_level = 15
+
+[fortifications.garrison_bonus]
+defender_multiplier = 3.5
+ranged_accuracy_bonus = 0.25
+melee_disadvantage = 0.4
+cover_rating = 0.7
+
+[fortifications.narrative]
+description = "Iron bands run through the stonework like veins through flesh. The joints are reinforced with iron clamps. Engineers built this wall to survive what stone alone cannot."

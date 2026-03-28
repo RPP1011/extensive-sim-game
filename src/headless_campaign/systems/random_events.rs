@@ -374,6 +374,12 @@ fn apply_refugee_influx(state: &mut CampaignState, events: &mut Vec<WorldEvent>)
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: crate::headless_campaign::state::EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
     };
 
     state.adventurers.push(adventurer);
@@ -718,6 +724,15 @@ fn apply_ancient_ruin(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
         resource_availability: 60.0 + (lcg_next(&mut state.rng) % 31) as f32,
         faction_owner: None,
         scouted: true,
+        resident_ids: Vec::new(),
+        service_demand: [0.0; 8],
+        cost_of_living: 1.0,
+        safety_level: 0.0,
+        min_viable_threat: 0.0,
+        treasury: 0.0,
+        tax_rate: 0.15,
+        stockpile: crate::headless_campaign::state::CommodityStockpile::default(),
+        local_prices: [1.0, 3.0, 2.0, 2.5, 2.0, 5.0, 10.0, 8.0],
     });
 
     events.push(WorldEvent::RandomEvent {

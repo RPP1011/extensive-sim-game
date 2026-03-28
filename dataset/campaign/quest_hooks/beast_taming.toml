@@ -1,0 +1,57 @@
+# A rare beast is spotted that could be tamed.
+
+name = "Rare Beast Sighting"
+priority = 5
+repeatable = true
+cooldown_ticks = 9000
+
+[trigger]
+type = "LocationScouted"
+location_type = "Outpost"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Rangers report a rare griffin nesting on the cliffs near {location_name}. Griffins are notoriously difficult to tame, but a guild with a bonded griffin would be the envy of the region."
+deadline_secs = 90.0
+default_option = 1
+
+[[choice.options]]
+label = "Attempt Taming (40g)"
+description = "Hire a beast handler and invest in the attempt. A griffin mount would be transformative."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -40.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The beast handler approaches the nest with raw meat and steady nerves. The griffin watches with golden eyes."
+
+[[choice.options]]
+label = "Observe from Distance"
+description = "Study the griffin's patterns. Understanding is the first step to taming."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Scouts maintain a respectful distance, cataloging the griffin's habits and territory."
+
+[[choice.options]]
+label = "Protect the Nest"
+description = "Mark the area as protected. A friendly griffin is almost as good as a tamed one."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The nest is declared guild-protected territory. The griffin continues its life, undisturbed."

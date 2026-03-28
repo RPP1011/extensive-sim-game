@@ -63,7 +63,13 @@ pub struct EffectNode {
     pub chance: Option<f64>,
     pub scaling: Vec<ScalingNode>,
     pub duration: Option<u32>,
+    /// Campaign tick duration (from `for Nt` syntax).
+    pub duration_ticks: Option<u32>,
     pub children: Vec<EffectNode>,
+    /// Raw targeting predicate name (e.g. "under_command", "has_class").
+    pub targeting_filter: Option<String>,
+    /// Args for the targeting predicate.
+    pub targeting_args: Vec<Arg>,
 }
 
 /// A positional argument to an effect.
@@ -71,6 +77,8 @@ pub struct EffectNode {
 pub enum Arg {
     Number(f64),
     Duration(u32),
+    /// Campaign tick-based duration (e.g. `500t`).
+    TickDuration(u32),
     Ident(String),
     StringLit(String),
     /// `X/tick` or `X/Ns` — periodic amount with optional explicit interval.
@@ -97,6 +105,21 @@ impl Arg {
             Arg::Number(n) => Some(*n as u32),
             Arg::Duration(ms) => Some(*ms),
             _ => None,
+        }
+    }
+
+    pub fn as_ticks(&self) -> Option<u32> {
+        match self {
+            Arg::TickDuration(t) => Some(*t),
+            Arg::Number(n) => Some(*n as u32),
+            _ => None,
+        }
+    }
+
+    pub fn as_f32(&self) -> f32 {
+        match self {
+            Arg::Number(n) => *n as f32,
+            _ => 0.0,
         }
     }
 

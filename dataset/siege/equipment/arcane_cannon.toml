@@ -1,0 +1,35 @@
+[[equipment]]
+id = "arcane_cannon"
+name = "Arcane Cannon"
+category = "special"
+tier = 5
+
+[equipment.stats]
+gate_damage_per_tick = 25.0
+wall_damage_per_tick = 30.0
+range = 25.0
+crew_required = 3
+move_speed = 0.1
+hp = 400
+armor = 25
+fire_rate = 0.08
+accuracy = 0.95
+splash_radius = 2.0
+troop_damage = 70.0
+mana_cost_per_shot = 50
+ignores_magic_resistance = false
+bypasses_physical_armor = true
+
+[equipment.requirements]
+min_tech_level = 5
+construction_cost = 800
+construction_ticks = 500
+resources = ["mithril", "arcane_crystal", "enchanted_timber"]
+requires_class = "[Mage]"
+
+[equipment.counters]
+vulnerable_to = ["ward_breaker", "anti_magic_field", "sally_out"]
+strong_against = ["magical_ward", "castle_wall", "citadel", "mage_tower"]
+
+[equipment.narrative]
+description = "Runes spiral along the barrel, glowing brighter as the [Mage] channels. The blast that follows is not fire, not lightning, but something older. The wall doesn't break. It unmakes."

@@ -1,0 +1,47 @@
+[[fortifications]]
+id = "stone_wall"
+name = "Stone Wall"
+tier = 3
+
+[fortifications.stats]
+wall_hp = 2000
+height = 4.0
+thickness = 2.0
+defender_cover = 0.8
+ranged_bonus = 0.3
+climb_difficulty = 0.9
+
+[fortifications.construction]
+cost = 500
+ticks = 2000
+resources = ["stone", "mortar"]
+builder_class_bonus = 0.5
+
+[fortifications.weaknesses]
+trebuchet_multiplier = 2.0
+sapper_multiplier = 1.5
+fire_resistant = true
+magic_resistant = false
+
+[fortifications.power_scaling]
+effective_level = 25
+builder_class_bonus = true
+enchantable = true
+age_scaling = 0.01
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 0.0
+ability_damage_reduction = 0.0
+projectile_deflection = 0.0
+ward_hp = 0
+ward_level = 0
+
+[fortifications.garrison_bonus]
+defender_multiplier = 3.0
+ranged_accuracy_bonus = 0.2
+melee_disadvantage = 0.35
+cover_rating = 0.6
+
+[fortifications.narrative]
+description = "Quarried granite, mortared tight. A wall like this has stood for centuries. It will take more than anger to bring it down."

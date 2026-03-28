@@ -1,0 +1,30 @@
+name = "Peak Shrine"
+type = "hamlet"
+population = 40
+prosperity = 20.0
+
+[defenses]
+wall_type = "none"
+wall_hp = 0
+gate_count = 0
+tower_count = 0
+garrison_capacity = 0
+moat = false
+
+[[districts]]
+name = "Shrine Grounds"
+type = "religious"
+buildings = ["mountain_shrine", "hermit_cell", "meditation_cave"]
+population_pct = 100.0
+wealth = 15.0
+threat = 10.0
+
+[economy]
+primary_exports = ["blessings", "mountain_herbs"]
+primary_imports = ["food", "cloth", "candles"]
+trade_routes = 0
+market_size = "small"
+
+[narrative]
+description = "A lonely shrine near the summit, tended by a handful of monks. Pilgrims make the climb seeking wisdom or penance."
+flavor = ["Thin air and clear skies", "Prayer flags snap in the wind", "Silence like a living thing"]

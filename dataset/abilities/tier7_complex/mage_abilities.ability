@@ -1,0 +1,89 @@
+// Tier 7: Complex mage/caster abilities
+
+ability MeteorStrike {
+    target: ground, range: 7.0
+    cooldown: 14s, cast: 600ms
+    hint: damage
+
+    damage 70 in circle(2.5) [FIRE: 60]
+    damage 10/1s for 3s in circle(2.5) [FIRE: 45]
+    stun 1s in circle(2.5) [CROWD_CONTROL: 45]
+}
+
+ability GlacialPrison {
+    target: enemy, range: 5.0
+    cooldown: 12s, cast: 300ms
+    hint: crowd_control
+
+    damage 30 [ICE: 45]
+    root 2s [ICE: 55]
+    slow 0.5 for 3s [ICE: 45]
+}
+
+ability ArcaneExplosion {
+    target: self_aoe
+    cooldown: 8s, cast: 200ms
+    hint: damage
+
+    damage 40 in circle(3.0) [MAGIC: 50]
+    silence 1200ms in circle(3.0) [MAGIC: 40]
+    knockback 2.0 in circle(3.0)
+}
+
+ability ChainedBolts {
+    target: enemy, range: 6.0
+    cooldown: 10s, cast: 300ms
+    hint: damage
+
+    damage 35 [MAGIC: 50]
+    deliver chain { bounces: 3, range: 3.5, falloff: 0.15 } {
+        on_hit {
+            damage 20 [MAGIC: 40]
+            slow 0.2 for 1500ms [MAGIC: 30]
+        }
+    }
+}
+
+ability FrostfireBolt {
+    target: enemy, range: 6.0
+    cooldown: 7s, cast: 300ms
+    hint: damage
+
+    deliver projectile { speed: 7.0 } {
+        on_hit {
+            damage 35 [FIRE: 45]
+            damage 5/1s for 3s [FIRE: 35]
+            slow 0.3 for 2s [ICE: 35]
+        }
+    }
+}
+
+ability TimeLapse {
+    target: self
+    cooldown: 16s, cast: 0ms
+    hint: utility
+
+    blink 4.0
+    heal 30
+    shield 25 for 3s
+}
+
+ability SpellSteal {
+    target: enemy, range: 5.0
+    cooldown: 12s, cast: 200ms
+    hint: damage
+
+    damage 25 [MAGIC: 40]
+    silence 2s [MAGIC: 50]
+    buff damage_output 0.2 for 4s
+}
+
+ability VoidRupture {
+    target: ground, range: 6.0
+    cooldown: 12s, cast: 400ms
+    hint: damage
+
+    damage 50 in circle(2.0) [DARK: 55]
+    silence 1500ms in circle(2.0) [DARK: 45]
+    damage 8/1s for 3s in circle(2.0) [DARK: 40]
+}

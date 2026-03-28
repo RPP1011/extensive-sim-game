@@ -1,0 +1,51 @@
+name = "City Gate Assault"
+map_type = "siege_assault"
+width = 40
+height = 12
+
+[terrain]
+layout = """
+WWWWWWWWTWTWTWTWTWTWTWTWTWTWTWTWTWTWTWTWTW
+W......................................W
+W...HH....HH....RRRRRR....HH....HH...W
+W...HH....HH....R....R....HH....HH...W
+W.........RRRRRRRR....RRRRRRRR........W
+W....HH...R..............R...HH.......W
+W....HH...R..............R...HH.......W
+WWWWWWWWWWGGGGGGGGGGGGGGGGWWWWWWWWWWWWWW
+..............RRRRRR..............
+..........RRRR......RRRR..........
+.....RRRRR..............RRRRR.....
+......................................
+"""
+
+[[spawn_zones]]
+name = "defenders"
+team = 0
+rect = [2, 1, 38, 6]
+
+[[spawn_zones]]
+name = "attackers"
+team = 1
+rect = [5, 9, 35, 11]
+
+[[objectives]]
+type = "breach_gate"
+position = [20, 7]
+hp = 1000
+
+[[cover_positions]]
+position = [5, 2]
+type = "full"
+
+[[cover_positions]]
+position = [15, 2]
+type = "full"
+
+[[cover_positions]]
+position = [25, 2]
+type = "full"
+
+[[cover_positions]]
+position = [35, 2]
+type = "full"

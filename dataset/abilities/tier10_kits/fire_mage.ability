@@ -1,0 +1,58 @@
+// Tier 10: Fire Mage Kit — burst damage caster with DoTs and AoE
+
+ability Scorch2 {
+    target: enemy, range: 6.0
+    cooldown: 3s, cast: 200ms
+    hint: damage
+
+    damage 25 [FIRE: 40]
+    damage 4/1s for 3s [FIRE: 30]
+}
+
+ability Pyroblast {
+    target: enemy, range: 6.0
+    cooldown: 8s, cast: 600ms
+    hint: damage
+
+    deliver projectile { speed: 6.0 } {
+        on_hit {
+            damage 70 [FIRE: 60]
+            damage 10/1s for 3s [FIRE: 45]
+        }
+    }
+}
+
+ability FlameStrike {
+    target: ground, range: 6.0
+    cooldown: 10s, cast: 400ms
+    hint: damage
+
+    damage 45 in circle(2.5) [FIRE: 55]
+    damage 8/1s for 3s in circle(2.5) [FIRE: 40]
+}
+
+ability Combustion {
+    target: self
+    cooldown: 45s, cast: 0ms
+    hint: utility
+
+    buff damage_output 0.35 for 6s
+    buff attack_speed 0.25 for 6s
+    damage 10 in circle(2.0) [FIRE: 35]
+}
+
+ability BlazingBarrier {
+    target: self
+    cooldown: 15s, cast: 0ms
+    hint: defense
+
+    shield 40 for 5s
+    damage 6/1s for 5s in circle(2.0) [FIRE: 30]
+}
+
+passive Ignition {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    damage 6/1s for 3s [FIRE: 30]
+}

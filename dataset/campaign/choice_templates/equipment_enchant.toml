@@ -1,0 +1,43 @@
+# Equipment enchantment opportunity.
+
+category = "quest_branch"
+trigger = "enchantment_available"
+prompt = "An enchanter offers to improve one piece of equipment. What gets the treatment?"
+deadline_secs = 90.0
+default_option = 0
+
+[[options]]
+label = "Weapon Enchantment (40g)"
+description = "Sharper, faster, deadlier. The front-line fighter's dream."
+
+[[options.effects]]
+type = "gold"
+amount = -40.0
+
+[[options.effects]]
+type = "narrative"
+text = "Runes glow along the blade. It hums with contained power."
+
+[[options]]
+label = "Armor Enchantment (35g)"
+description = "Lighter, tougher, self-repairing. Keep your tank alive longer."
+
+[[options.effects]]
+type = "gold"
+amount = -35.0
+
+[[options.effects]]
+type = "narrative"
+text = "The armor shifts and settles, moving like a second skin. Blows that would have dented it now slide off."
+
+[[options]]
+label = "Accessory Enchantment (25g)"
+description = "A ring or amulet with a persistent buff. Subtle but constant."
+
+[[options.effects]]
+type = "gold"
+amount = -25.0
+
+[[options.effects]]
+type = "narrative"
+text = "A simple ring glows faintly. Its wearer feels stronger, faster, more aware."

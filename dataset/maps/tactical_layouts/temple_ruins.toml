@@ -1,0 +1,57 @@
+name = "Ruined Temple"
+map_type = "dungeon"
+width = 24
+height = 18
+
+[terrain]
+layout = """
+^^..WWWWWWWWWWWWWWWW..^^
+....W..............W....
+....W..PP....PP....W....
+....W..PP....PP....W....
+....W..............W....
+^^..WWWW......WWWW..^^.
+..........RR............
+..........RR............
+....^^....RR....^^......
+..........RR............
+..........RR............
+^^..WWWW......WWWW..^^.
+....W..............W....
+....W....TTTT......W....
+....W....T..T......W....
+....W....T..T......W....
+....W..............W....
+^^..WWWWWWGGWWWWWWWW..^^
+"""
+
+[[spawn_zones]]
+name = "cultists"
+team = 0
+rect = [5, 1, 18, 4]
+
+[[spawn_zones]]
+name = "adventurers"
+team = 1
+rect = [5, 13, 18, 16]
+
+[[objectives]]
+type = "destroy_altar"
+position = [11, 3]
+hp = 400
+
+[[cover_positions]]
+position = [6, 2]
+type = "full"
+
+[[cover_positions]]
+position = [14, 2]
+type = "full"
+
+[[cover_positions]]
+position = [4, 8]
+type = "destructible"
+
+[[cover_positions]]
+position = [18, 8]
+type = "destructible"

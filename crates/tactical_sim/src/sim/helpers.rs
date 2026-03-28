@@ -324,6 +324,10 @@ fn resolve_stat_ref(stat: &StatRef, caster_idx: usize, target_id: u32, state: &S
                 })
                 .unwrap_or(0.0)
         }
+        // Campaign stat refs — not resolved in tactical sim, return 0.0
+        StatRef::KingdomSize | StatRef::ArmySize | StatRef::FactionTerritory
+        | StatRef::GuildReputation | StatRef::AdventurerCount | StatRef::LoyaltyAverage
+        | StatRef::PartySize | StatRef::GuildGold | StatRef::CasterLevel => 0.0,
     }
 }
 

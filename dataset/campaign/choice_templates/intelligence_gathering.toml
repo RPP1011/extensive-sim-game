@@ -1,0 +1,51 @@
+# How to gather information about a threat.
+
+category = "strategic"
+trigger = "intel_required"
+prompt = "The guild needs intelligence on {target}. How should information be gathered?"
+deadline_secs = 60.0
+default_option = 0
+
+[[options]]
+label = "Scout Mission (15g)"
+description = "Send scouts to observe from a distance. Safe but limited information."
+
+[[options.effects]]
+type = "gold"
+amount = -15.0
+
+[[options.effects]]
+type = "narrative"
+text = "Scouts deploy under cover of darkness. Eyes and ears in the field."
+
+[[options]]
+label = "Bribe Informants (25g)"
+description = "Pay locals for information. Fast but unreliable."
+
+[[options.effects]]
+type = "gold"
+amount = -25.0
+
+[[options.effects]]
+type = "narrative"
+text = "Gold loosens tongues. The information flows, though its quality varies."
+
+[[options]]
+label = "Interrogate Prisoners"
+description = "If the guild holds any captives, they might talk. No cost but ethically questionable."
+
+[[options.effects]]
+type = "reputation"
+amount = -3.0
+
+[[options.effects]]
+type = "narrative"
+text = "A door closes. Questions are asked. Answers are given — eventually."
+
+[[options]]
+label = "Open Source Intelligence"
+description = "Tavern gossip, merchant reports, traveler accounts. Free but slow."
+
+[[options.effects]]
+type = "narrative"
+text = "Ears perk up in every tavern and marketplace. Patterns emerge from the chatter."

@@ -1,0 +1,20 @@
+class Priest {
+    stat_growth: +3 ability_power, +1 defense, +1 max_hp per level
+
+    tags: divine, blessings, ceremonies, faith, spiritual
+
+    scaling party_alive_count {
+        when party_members >= 2: +10% ability_power
+        always: aura ability_power +1
+    }
+
+    abilities {
+        level 1: bless "Grant an ally divine favor, increasing all stats slightly"
+        level 5: sanctuary "Create a zone where no violence can occur for 5 seconds"
+        level 10: divine_ward "Protect an ally from the next harmful effect"
+        level 20: consecration "Bless an area; allies heal and undead take damage within it"
+        level 40: divine_intervention "Call upon your deity to alter the outcome of a single event"
+    }
+
+    requirements: level 1
+}

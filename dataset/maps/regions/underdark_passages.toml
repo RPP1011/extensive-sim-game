@@ -1,0 +1,29 @@
+name = "The Underdark Passages"
+terrain = "underground_caverns"
+climate = "subterranean"
+size = "large"
+
+[generation]
+settlement_density = 0.06
+road_connectivity = 0.25
+wilderness_danger = 0.9
+resource_richness = 0.8
+
+[settlement_distribution]
+hamlet_pct = 25
+village_pct = 25
+town_pct = 20
+city_pct = 15
+fortress_pct = 15
+
+[terrain_features]
+rivers = 3
+mountains = false
+forests = false
+coast = false
+lakes = 5
+
+[narrative]
+description = "Miles beneath the surface, vast caverns connect in a network that spans the continent. Civilizations thrive here that have never seen the sky."
+threats = ["cave_ins", "deep_horrors", "fungal_plagues", "raiding_parties"]
+opportunities = ["gemstones", "rare_fungi", "deep_metals", "ancient_vaults"]

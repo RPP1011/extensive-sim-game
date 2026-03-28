@@ -1,0 +1,111 @@
+// Tier 8: Aura passives using while_alive duration
+// These provide permanent effects while the unit is alive.
+
+passive AuraOfTheBrave {
+    trigger: on_damage_taken
+    cooldown: 5s
+
+    immunity "fear" in circle(8.0) for while_alive
+}
+
+passive AuraOfFortitude {
+    trigger: on_damage_taken
+    cooldown: 3s
+
+    buff armor 0.2 for while_alive in circle(6.0)
+}
+
+passive DamageAura {
+    trigger: periodic(2s)
+    cooldown: 2s
+
+    damage 5 in circle(3.0) while_alive [FIRE: 30]
+}
+
+passive HealingPresence {
+    trigger: periodic(3s)
+    cooldown: 3s
+
+    heal 8 in circle(5.0) while_alive [HOLY: 25]
+}
+
+passive SwiftnessAura {
+    trigger: on_damage_taken
+    cooldown: 5s
+
+    buff move_speed 0.15 for while_alive in circle(7.0)
+}
+
+passive ArmorAura {
+    trigger: on_damage_taken
+    cooldown: 4s
+
+    buff armor 0.15 for while_alive in circle(6.0)
+}
+
+passive FearImmunityAura {
+    trigger: on_damage_taken
+    cooldown: 5s
+
+    immunity "fear" in circle(6.0) for while_alive
+    immunity "silence" in circle(6.0) for while_alive
+}
+
+passive ThornsAura {
+    trigger: periodic(2s)
+    cooldown: 2s
+
+    reflect 0.15 for while_alive in circle(4.0)
+}
+
+passive FrostAura {
+    trigger: periodic(3s)
+    cooldown: 3s
+
+    slow 0.1 for while_alive in circle(4.0) [ICE: 20]
+}
+
+passive LifeStealAura {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    lifesteal 0.1 for while_alive in circle(5.0)
+}
+
+passive DarkPresence {
+    trigger: periodic(2s)
+    cooldown: 2s
+
+    damage 3 in circle(3.5) while_alive [DARK: 25]
+    debuff move_speed 0.05 for while_alive in circle(3.5)
+}
+
+passive InspiringBanner {
+    trigger: on_damage_taken
+    cooldown: 6s
+
+    buff damage_output 0.1 for while_alive in circle(7.0)
+    buff attack_speed 0.1 for while_alive in circle(7.0)
+}
+
+passive PoisonMiasma {
+    trigger: periodic(3s)
+    cooldown: 3s
+
+    damage 4 in circle(3.0) while_alive [POISON: 30]
+}
+
+passive HolyRadiance {
+    trigger: periodic(4s)
+    cooldown: 4s
+
+    heal 6 in circle(6.0) while_alive [HOLY: 20]
+    shield 5 for while_alive in circle(6.0)
+}
+
+passive WeakeningAura {
+    trigger: on_damage_taken
+    cooldown: 5s
+
+    debuff damage_output 0.1 for while_alive in circle(5.0)
+}

@@ -1,0 +1,50 @@
+[[events]]
+id = "spy_network"
+name = "Spy Network Activated"
+phase = "approach"
+
+[events.trigger]
+type = "IntelligenceCheck"
+threshold = 0.0
+
+[events.choice]
+prompt = "Your agents inside the settlement send word. They can provide intelligence, sabotage defenses, or attempt to open a gate. Each option carries risk of exposure."
+deadline_secs = 25.0
+
+[[events.choice.options]]
+label = "Gather Intelligence"
+description = "Learn the garrison's strength, supply levels, and weak points. Low risk."
+[[events.choice.options.effects]]
+type = "intelligence"
+reveal_garrison_strength = true
+reveal_supply_level = true
+reveal_weak_points = true
+exposure_chance = 0.1
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The report comes in chalk marks on a stone dropped over the wall. Numbers, positions, the location of the supply stores. Knowledge is the first weapon."
+
+[[events.choice.options]]
+label = "Sabotage Defenses"
+description = "Agents weaken a section of wall or disable murder holes. Medium risk."
+[[events.choice.options.effects]]
+type = "sabotage"
+wall_damage = 300
+equipment_disabled = "murder_holes"
+exposure_chance = 0.4
+[[events.choice.options.effects]]
+type = "narrative"
+text = "In the dead of night, hands work at the mortar between stones. By morning, a section of wall is weaker than it looks. The garrison won't know until it's too late."
+
+[[events.choice.options]]
+label = "Open the Gate"
+description = "The most dangerous option. If it works, the siege is over. If it fails, the agents die."
+[[events.choice.options.effects]]
+type = "gate_sabotage"
+success_chance = 0.3
+gate_opened = true
+exposure_chance = 0.9
+agents_lost_on_failure = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Everything rides on one moment. A bar lifted, a gate pushed open, a signal fire lit. The agents know they probably won't survive either outcome."

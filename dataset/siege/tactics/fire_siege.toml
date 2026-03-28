@@ -1,0 +1,25 @@
+[[tactics]]
+id = "fire_siege"
+name = "Fire Siege"
+side = "attacker"
+category = "destruction"
+
+[tactics.requirements]
+min_army_ratio = 1.0
+siege_equipment_available = ["fire_arrows"]
+target_has_wood = true
+wind_favorable = true
+
+[tactics.effects]
+siege_duration_multiplier = 0.6
+casualty_rate_multiplier = 0.8
+settlement_damage_multiplier = 3.0
+defender_morale_drain = 0.4
+civilian_casualties = true
+reputation_risk = true
+
+[tactics.counters]
+countered_by = ["stone_construction", "rain_weather", "fire_brigades", "wet_hides"]
+
+[tactics.narrative]
+description = "If you can't go through the walls, burn what's behind them. Fire arrows arc over the defenses, and the settlement begins to glow. It's effective, ruthless, and leaves nothing worth conquering."

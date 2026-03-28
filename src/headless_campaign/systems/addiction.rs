@@ -215,6 +215,10 @@ mod tests {
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: Default::default(),
+            ticks_since_income: 0,
         }
     }
 

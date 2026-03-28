@@ -1,0 +1,66 @@
+# Winter forces the guild to survive a siege situation.
+
+name = "Winter Siege"
+priority = 8
+repeatable = true
+cooldown_ticks = 10000
+
+[trigger]
+type = "SeasonChange"
+season = "Winter"
+
+[[conditions]]
+type = "MinAdventurers"
+count = 3
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "The first blizzard hits hard. Roads become impassable, supply lines freeze, and something hungry howls in the whiteout. The guild must survive until the thaw. Supplies are finite."
+deadline_secs = 90.0
+default_option = 0
+
+[[choice.options]]
+label = "Ration Strictly"
+description = "Half portions for everyone. Miserable but the supplies will last."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Belts tighten. Meals shrink. The guild endures on discipline and thin soup."
+
+[[choice.options]]
+label = "Hunt Through the Storm (20g)"
+description = "Send hunters into the blizzard. Dangerous but could bring back enough meat to feast."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Hunters vanish into white. Hours later, they return dragging frozen carcasses. Tonight, the guild eats."
+
+[[choice.options]]
+label = "Raid Enemy Stores"
+description = "Desperate times. Hostile faction outposts have supplies you need."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 25.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 1
+delta = -15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Under cover of snow, guild members hit an enemy supply cache. War crimes or survival — perspective matters."

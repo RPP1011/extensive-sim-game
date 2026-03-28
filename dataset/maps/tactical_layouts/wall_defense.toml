@@ -1,0 +1,53 @@
+name = "Wall Section Defense"
+map_type = "wall_defense"
+width = 40
+height = 10
+
+[terrain]
+layout = """
+RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
+..T.........T.........T.........T......
+WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW
+WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW
+........................................
+........................................
+..^^....^^....^^....^^....^^....^^......
+........................................
+........................................
+........................................
+"""
+
+[[spawn_zones]]
+name = "wall_defenders"
+team = 0
+rect = [0, 0, 39, 1]
+
+[[spawn_zones]]
+name = "siege_attackers"
+team = 1
+rect = [0, 6, 39, 9]
+
+[[objectives]]
+type = "breach_wall"
+position = [20, 2]
+hp = 2000
+
+[[cover_positions]]
+position = [2, 6]
+type = "destructible"
+
+[[cover_positions]]
+position = [10, 6]
+type = "destructible"
+
+[[cover_positions]]
+position = [18, 6]
+type = "destructible"
+
+[[cover_positions]]
+position = [26, 6]
+type = "destructible"
+
+[[cover_positions]]
+position = [34, 6]
+type = "destructible"

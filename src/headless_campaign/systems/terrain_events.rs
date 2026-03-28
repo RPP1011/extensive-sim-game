@@ -322,6 +322,15 @@ fn apply_earthquake(
                 resource_availability: 40.0 + (lcg_next(&mut state.rng) % 30) as f32,
                 faction_owner: None,
                 scouted: true,
+                resident_ids: Vec::new(),
+                service_demand: [0.0; 8],
+                cost_of_living: 1.0,
+                safety_level: 0.0,
+                min_viable_threat: 0.0,
+                treasury: 0.0,
+                tax_rate: 0.15,
+                stockpile: crate::headless_campaign::state::CommodityStockpile::default(),
+                local_prices: [1.0, 3.0, 2.0, 2.5, 2.0, 5.0, 10.0, 8.0],
             });
 
             events.push(WorldEvent::TerrainDiscovery {
@@ -509,6 +518,15 @@ fn apply_volcanic_eruption(
             resource_availability: 80.0 + (lcg_next(&mut state.rng) % 21) as f32,
             faction_owner: None,
             scouted: true,
+            resident_ids: Vec::new(),
+            service_demand: [0.0; 8],
+            cost_of_living: 1.0,
+            safety_level: 0.0,
+            min_viable_threat: 0.0,
+            treasury: 0.0,
+            tax_rate: 0.15,
+            stockpile: crate::headless_campaign::state::CommodityStockpile::default(),
+            local_prices: [1.0, 3.0, 2.0, 2.5, 2.0, 5.0, 10.0, 8.0],
         });
 
         events.push(WorldEvent::TerrainDiscovery {
@@ -551,6 +569,15 @@ fn apply_sinkhole(
             resource_availability: 50.0 + (lcg_next(&mut state.rng) % 30) as f32,
             faction_owner: None,
             scouted: true,
+            resident_ids: Vec::new(),
+            service_demand: [0.0; 8],
+            cost_of_living: 1.0,
+            safety_level: 0.0,
+            min_viable_threat: 0.0,
+            treasury: 0.0,
+            tax_rate: 0.15,
+            stockpile: crate::headless_campaign::state::CommodityStockpile::default(),
+            local_prices: [1.0, 3.0, 2.0, 2.5, 2.0, 5.0, 10.0, 8.0],
         });
 
         // Minor unrest from the ground literally collapsing

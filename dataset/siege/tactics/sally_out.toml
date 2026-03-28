@@ -1,0 +1,23 @@
+[[tactics]]
+id = "sally_out"
+name = "Sally Out"
+side = "defender"
+category = "aggression"
+
+[tactics.requirements]
+garrison_strength_min = 15
+morale_minimum = 0.7
+gate_functional = true
+
+[tactics.effects]
+siege_duration_multiplier = 0.7
+defender_casualty_multiplier = 1.5
+attacker_equipment_damage = 0.3
+surprise_bonus = 0.2
+risks_garrison = true
+
+[tactics.counters]
+countered_by = ["prepared_defense", "cavalry_screen", "feint_and_flank"]
+
+[tactics.narrative]
+description = "The gates burst open and the garrison charges out, targeting siege equipment and supply stores. It's a gamble — lose the sortie and the garrison is crippled. Win it and the siege stalls."

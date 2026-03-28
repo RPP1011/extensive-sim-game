@@ -1,0 +1,21 @@
+class Warmonger {
+    stat_growth: +3 attack, +2 defense, +2 max_hp per level
+
+    tags: melee, intimidation, debuff, warfare, dominance
+
+    scaling enemy_count {
+        when enemy_count >= 3: +10% defense
+        when enemy_count >= 5: +15% attack
+        always: aura attack +2
+    }
+
+    abilities {
+        level 20: demoralizing_shout "All enemies suffer reduced attack for 8 seconds"
+        level 25: crippling_blow "Strike that permanently reduces target speed until healed"
+        level 30: war_presence "Enemies near you have reduced accuracy"
+        level 40: break_their_spirit "Target enemy flees for 5 seconds, ignoring orders"
+        level 50: tide_of_war "Reverse all buffs and debuffs on the battlefield"
+    }
+
+    requirements: level 20, classes: Warrior or Knight
+}

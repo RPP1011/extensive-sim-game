@@ -1,0 +1,31 @@
+[[equipment]]
+id = "petard"
+name = "Petard"
+category = "breaching"
+tier = 4
+
+[equipment.stats]
+gate_damage_per_tick = 0.0
+wall_damage_per_tick = 0.0
+gate_damage_on_detonate = 800.0
+wall_damage_on_detonate = 400.0
+range = 0.0
+crew_required = 2
+move_speed = 0.8
+hp = 50
+armor = 0
+single_use = true
+crew_death_chance = 0.4
+
+[equipment.requirements]
+min_tech_level = 4
+construction_cost = 200
+construction_ticks = 100
+resources = ["black_powder", "iron"]
+
+[equipment.counters]
+vulnerable_to = ["fire_arrows", "sally_out", "archer_focus"]
+strong_against = ["wooden_gate", "reinforced_gate", "iron_gate", "portcullis"]
+
+[equipment.narrative]
+description = "A bell-shaped bomb, carried by volunteers who know exactly what 'volunteer' means in this context. They sprint for the gate, set the charge, and pray they can outrun the blast."

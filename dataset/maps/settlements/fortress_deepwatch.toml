@@ -1,0 +1,46 @@
+name = "Deepwatch Bastion"
+type = "fortress"
+population = 800
+prosperity = 35.0
+
+[defenses]
+wall_type = "fortified"
+wall_hp = 2500
+gate_count = 1
+tower_count = 6
+garrison_capacity = 400
+moat = false
+
+[[districts]]
+name = "Upper Fortress"
+type = "military"
+buildings = ["command_tower", "signal_room", "officer_quarters"]
+population_pct = 25.0
+wealth = 45.0
+threat = 5.0
+
+[[districts]]
+name = "Underground Garrison"
+type = "military"
+buildings = ["deep_barracks", "underground_armory", "tunnel_watch", "mushroom_farm"]
+population_pct = 50.0
+wealth = 30.0
+threat = 10.0
+
+[[districts]]
+name = "Surface Works"
+type = "industrial"
+buildings = ["blacksmith", "supply_depot", "well", "stables"]
+population_pct = 25.0
+wealth = 25.0
+threat = 5.0
+
+[economy]
+primary_exports = ["intelligence", "patrol_reports"]
+primary_imports = ["food", "weapons", "medicine", "lamp_oil"]
+trade_routes = 1
+market_size = "small"
+
+[narrative]
+description = "Built over a deep cavern system, this fortress watches the underground. When things crawl up from below, Deepwatch holds the line."
+flavor = ["Echoes from the deep", "Soldiers with haunted eyes", "The walls are scratched from the inside"]

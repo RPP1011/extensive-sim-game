@@ -1,0 +1,78 @@
+name = "Stormbreak"
+type = "city"
+population = 9500
+prosperity = 55.0
+
+[defenses]
+wall_type = "fortified"
+wall_hp = 1600
+gate_count = 2
+tower_count = 10
+garrison_capacity = 350
+moat = true
+
+[[districts]]
+name = "Citadel"
+type = "military"
+buildings = ["inner_fortress", "war_room", "champion_hall", "siege_armory"]
+population_pct = 10.0
+wealth = 60.0
+threat = 5.0
+
+[[districts]]
+name = "Warrior Quarter"
+type = "military"
+buildings = ["barracks", "arena", "weapons_market", "training_ground"]
+population_pct = 15.0
+wealth = 45.0
+threat = 10.0
+
+[[districts]]
+name = "Storm Market"
+type = "commercial"
+buildings = ["market_hall", "tavern", "provisioner", "horse_trader"]
+population_pct = 15.0
+wealth = 50.0
+threat = 15.0
+
+[[districts]]
+name = "Temple of Storms"
+type = "religious"
+buildings = ["storm_temple", "oracle_tower", "lightning_shrine"]
+population_pct = 8.0
+wealth = 55.0
+threat = 10.0
+
+[[districts]]
+name = "Ironclad District"
+type = "industrial"
+buildings = ["weapon_forge", "armor_forge", "siege_workshop", "charcoal_kiln"]
+population_pct = 12.0
+wealth = 50.0
+threat = 10.0
+
+[[districts]]
+name = "Commons"
+type = "residential"
+buildings = ["houses", "well", "bakery", "brewery", "cobbler"]
+population_pct = 30.0
+wealth = 25.0
+threat = 10.0
+
+[[districts]]
+name = "Refugee Camp"
+type = "slums"
+buildings = ["tents", "soup_kitchen", "makeshift_shrine"]
+population_pct = 10.0
+wealth = 5.0
+threat = 30.0
+
+[economy]
+primary_exports = ["mercenaries", "weapons", "war_beasts", "military_training"]
+primary_imports = ["food", "luxury_goods", "raw_metals", "horses"]
+trade_routes = 4
+market_size = "large"
+
+[narrative]
+description = "A military city forged by centuries of border warfare. Every citizen trains with a weapon, and the arena matches draw crowds from across the continent."
+flavor = ["Steel clashing in the training yards", "Battle standards on every building", "The arena crowd roars"]

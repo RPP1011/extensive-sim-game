@@ -193,6 +193,16 @@ pub fn evaluate_condition(
                 false
             }
         }
+        // Campaign conditions — always false in combat sim
+        Condition::FactionHostile
+        | Condition::AtWar
+        | Condition::CrisisActive
+        | Condition::GoldAbove { .. }
+        | Condition::GoldBelow { .. }
+        | Condition::Outnumbered
+        | Condition::AllyInjured
+        | Condition::Alone
+        | Condition::NearDeath => false,
     }
 }
 

@@ -1,0 +1,38 @@
+name = "Miner's Hollow"
+type = "hamlet"
+population = 120
+prosperity = 35.0
+
+[defenses]
+wall_type = "none"
+wall_hp = 0
+gate_count = 0
+tower_count = 0
+garrison_capacity = 5
+moat = false
+
+[[districts]]
+name = "The Hollow"
+type = "industrial"
+buildings = ["mine_entrance", "smelting_hut", "tool_shed", "bunkhouse"]
+population_pct = 60.0
+wealth = 40.0
+threat = 15.0
+
+[[districts]]
+name = "Camp"
+type = "residential"
+buildings = ["houses", "cookfire", "well"]
+population_pct = 40.0
+wealth = 20.0
+threat = 5.0
+
+[economy]
+primary_exports = ["iron_ore", "copper"]
+primary_imports = ["food", "timber", "rope"]
+trade_routes = 1
+market_size = "small"
+
+[narrative]
+description = "A cluster of rough shelters around a productive mine shaft. The miners are tough, suspicious of strangers, and fiercely protective of their claim."
+flavor = ["Pickaxes ring against stone", "Dust coats everything", "Lanterns glow in the tunnel mouth"]

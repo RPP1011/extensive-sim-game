@@ -1,0 +1,46 @@
+[[events]]
+id = "civilian_revolt"
+name = "Civilian Revolt"
+phase = "storm"
+
+[events.trigger]
+type = "CivilianMoraleBelow"
+threshold = 0.2
+
+[events.choice]
+prompt = "The civilians inside the settlement have turned against the garrison! Mobs surge through the streets, some trying to open the gates, others just trying to survive."
+deadline_secs = 20.0
+
+[[events.choice.options]]
+label = "Exploit the Chaos"
+description = "The garrison is fighting on two fronts. Push the assault while they're distracted."
+[[events.choice.options.effects]]
+type = "tactical_modifier"
+defender_penalty = 0.3
+civilian_shield_risk = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Inside the walls, garrison soldiers fight civilians in the streets while attackers pour over the walls. The defense collapses into chaos."
+
+[[events.choice.options]]
+label = "Promise the Civilians Safety"
+description = "Send word: surrender and be spared. Turn the population into an ally."
+[[events.choice.options.effects]]
+type = "morale_modifier"
+civilian_cooperation = 0.6
+gate_opening_chance = 0.3
+reputation_gain = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Arrows carry messages over the walls: 'Open the gates and no civilian will be harmed.' Inside, the mob surges toward the gatehouse."
+
+[[events.choice.options]]
+label = "Wait — Let the Garrison Handle It"
+description = "The defenders are weakened whether the revolt succeeds or not. Conserve strength."
+[[events.choice.options.effects]]
+type = "siege_progress"
+ticks_cost = 100
+defender_strength_reduction = 0.15
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The army watches the fires inside the walls and listens to the screaming. The garrison is bleeding itself trying to hold order. Time is on the attacker's side."

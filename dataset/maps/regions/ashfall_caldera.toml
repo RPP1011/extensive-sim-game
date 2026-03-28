@@ -1,0 +1,29 @@
+name = "Ashfall Caldera"
+terrain = "volcanic"
+climate = "hot"
+size = "small"
+
+[generation]
+settlement_density = 0.08
+road_connectivity = 0.3
+wilderness_danger = 0.85
+resource_richness = 0.9
+
+[settlement_distribution]
+hamlet_pct = 20
+village_pct = 20
+town_pct = 20
+city_pct = 15
+fortress_pct = 25
+
+[terrain_features]
+rivers = 0
+mountains = true
+forests = false
+coast = false
+lakes = 1
+
+[narrative]
+description = "A volcanic landscape of black rock and lava flows. The obsidian here is prized, and the volcanic soil is impossibly fertile between eruptions."
+threats = ["eruptions", "lava_flows", "fire_elementals", "toxic_fumes"]
+opportunities = ["obsidian", "volcanic_gems", "geothermal_forges", "fertile_ash_soil"]

@@ -561,6 +561,8 @@ pub fn generate_ability_with_history(
         swap_form: None,
         form: None,
         evolve_into: None,
+        requires_participants: 0,
+        requires_class: String::new(),
     };
 
     (def, is_passive)
@@ -713,6 +715,7 @@ fn gen_effect(p: &ArchetypeProfile, level_scale: f32, rng: &mut u64) -> Conditio
         stacking: Stacking::Refresh,
         chance: 1.0,
         else_effects: vec![],
+        targeting_filter: None,
     }
 }
 

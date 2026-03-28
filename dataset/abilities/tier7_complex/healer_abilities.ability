@@ -1,0 +1,81 @@
+// Tier 7: Complex healer/support abilities
+
+ability DivineIntervention {
+    target: ally, range: 5.0
+    cooldown: 14s, cast: 300ms
+    hint: heal
+
+    heal 50 [HOLY: 50]
+    shield 30 for 4s
+    buff damage_output 0.15 for 4s
+}
+
+ability Purification {
+    target: ally, range: 4.0
+    cooldown: 10s, cast: 200ms
+    hint: heal
+
+    heal 35 [HOLY: 40]
+    heal 8/1s for 4s [HOLY: 30]
+    shield 20 for 3s
+}
+
+ability SpiritBond {
+    target: ally, range: 5.0
+    cooldown: 12s, cast: 300ms
+    hint: heal
+
+    heal 40 [HOLY: 45]
+    buff move_speed 0.25 for 4s
+    heal 6/1s for 5s [HOLY: 30]
+}
+
+ability BeaconOfLight {
+    target: self_aoe
+    cooldown: 16s, cast: 400ms
+    hint: heal
+
+    heal 30 in circle(4.0) [HOLY: 40]
+    shield 20 for 4s in circle(4.0)
+    heal 5/1s for 4s in circle(4.0) [HOLY: 25]
+}
+
+ability GuardianSpirit {
+    target: ally, range: 4.0
+    cooldown: 15s, cast: 200ms
+    hint: defense
+
+    shield 50 for 5s
+    heal 10/1s for 5s [HOLY: 35]
+    buff damage_output 0.1 for 5s
+}
+
+ability AtonementBolt {
+    target: enemy, range: 5.0
+    cooldown: 5s, cast: 200ms
+    hint: heal
+
+    damage 25 [HOLY: 40]
+    heal 20 in self
+    heal 10 in circle(4.0)
+}
+
+ability TranquilityBurst {
+    target: self_aoe
+    cooldown: 14s, cast: 400ms
+    hint: heal
+
+    heal 25 in circle(4.0)
+    heal 8/1s for 4s in circle(4.0)
+    buff move_speed 0.15 for 4s in circle(4.0)
+}
+
+ability LifeBloom3 {
+    target: ally, range: 4.0
+    cooldown: 8s, cast: 200ms
+    hint: heal
+
+    heal 15
+    heal 10/1s for 5s
+    heal 30 when hp_below(0.3)
+}

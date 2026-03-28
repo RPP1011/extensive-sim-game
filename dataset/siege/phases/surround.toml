@@ -1,0 +1,47 @@
+name = "Siege Surround"
+phase_index = 1
+duration_range = [200, 800]
+
+[description]
+text = "The army completes its encirclement. No one enters or leaves the settlement. The noose tightens, and inside the walls, the counting of supplies begins in earnest."
+
+[attacker_actions]
+available = ["complete_encirclement", "build_siege_works", "dig_trenches", "build_siege_equipment", "probe_defenses", "psychological_warfare", "intercept_messengers"]
+priority = "encirclement"
+
+[defender_actions]
+available = ["ration_supplies", "train_militia", "reinforce_weak_points", "smuggle_messengers", "sally_out", "counter_mine", "prepare_defenses"]
+priority = "conservation"
+
+[events]
+[[events.possible]]
+name = "Spy Discovered"
+probability = 0.1
+trigger = "always"
+effect = "intelligence_event"
+description = "A spy is caught trying to slip through the lines. Whose spy, and what did they learn?"
+
+[[events.possible]]
+name = "Disease Outbreak"
+probability = 0.08
+trigger = "ticks_elapsed > 200"
+effect = "disease_event"
+description = "Sickness spreads through the cramped siege camp. Sanitation was an afterthought."
+
+[[events.possible]]
+name = "Tunnel Detected"
+probability = 0.12
+trigger = "sappers_active"
+effect = "counter_mine_encounter"
+description = "Defenders hear digging beneath the walls. They start their own tunnel to intercept."
+
+[[events.possible]]
+name = "Smuggler Run"
+probability = 0.15
+trigger = "encirclement_incomplete"
+effect = "defender_resupply"
+description = "A brave or foolish trader slips through a gap in the siege lines with a cart of supplies."
+
+[transition]
+to_next_phase = "siege_bombardment"
+conditions = ["siege_equipment_complete", "AND", "positions_established"]

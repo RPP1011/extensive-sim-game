@@ -1,0 +1,59 @@
+# An opportunity to recruit an informant in a rival faction.
+
+name = "Spy Recruitment"
+priority = 6
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "FactionRelation"
+direction = "below"
+threshold = -10.0
+
+[choice]
+category = "diplomacy"
+trigger = "hook"
+prompt = "A disgruntled officer from {faction_name} has reached out through back channels. They're willing to feed intelligence to the guild — for a price. This could be invaluable or a trap."
+deadline_secs = 90.0
+default_option = 1
+
+[[choice.options]]
+label = "Recruit the Spy (50g)"
+description = "Pay the asking price. If genuine, the intelligence is worth ten times the gold."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -50.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Dead drops are established. Coded messages begin flowing. The guild sees behind enemy lines."
+
+[[choice.options]]
+label = "Verify First (20g)"
+description = "Test them with small requests before committing. Slower but safer."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Small tasks, careful checks. Trust is earned one verified report at a time."
+
+[[choice.options]]
+label = "Report Them"
+description = "Turn the spy over to {faction_name} as a gesture of good faith."
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 1
+delta = 15.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The officer is handed over in chains. {faction_name} is impressed by the guild's honor."

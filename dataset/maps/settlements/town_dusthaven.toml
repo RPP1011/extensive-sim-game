@@ -1,0 +1,54 @@
+name = "Dusthaven"
+type = "town"
+population = 1800
+prosperity = 35.0
+
+[defenses]
+wall_type = "stone_wall"
+wall_hp = 500
+gate_count = 2
+tower_count = 4
+garrison_capacity = 40
+moat = false
+
+[[districts]]
+name = "Bazaar"
+type = "commercial"
+buildings = ["desert_bazaar", "water_market", "camel_trader", "tent_maker"]
+population_pct = 25.0
+wealth = 45.0
+threat = 20.0
+
+[[districts]]
+name = "Old Quarter"
+type = "residential"
+buildings = ["sandstone_houses", "underground_cistern", "mosque", "public_fountain"]
+population_pct = 45.0
+wealth = 25.0
+threat = 10.0
+
+[[districts]]
+name = "Caravan Yard"
+type = "commercial"
+buildings = ["caravanserai", "stable", "warehouse", "guide_office"]
+population_pct = 15.0
+wealth = 40.0
+threat = 15.0
+
+[[districts]]
+name = "Watch Fort"
+type = "military"
+buildings = ["desert_fort", "lookout_tower", "armory"]
+population_pct = 15.0
+wealth = 30.0
+threat = 5.0
+
+[economy]
+primary_exports = ["caravan_services", "desert_crafts", "dried_meat"]
+primary_imports = ["water", "timber", "metal", "fruit"]
+trade_routes = 3
+market_size = "medium"
+
+[narrative]
+description = "Where the desert trade routes cross. Everything is covered in fine sand — the buildings, the goods, the people. Water is the real currency."
+flavor = ["Sand hisses against stone walls", "Camels groan in the yard", "Stars blaze in the desert sky"]

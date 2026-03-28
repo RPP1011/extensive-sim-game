@@ -1,6 +1,6 @@
 //! Champion 3D Model Loader and Animation Controller
 //!
-//! Loads LoL champion glTF models from `assets/lol_models/` and drives
+//! Loads LoL champion glTF models from `dataset/lol_champions/` and drives
 //! animations based on sim events during replay playback.
 
 use std::collections::HashMap;
@@ -17,7 +17,7 @@ use super::types::*;
 // ---------------------------------------------------------------------------
 
 /// Maps champion name -> ability name -> animation clip name (e.g., "spell1").
-/// Loaded from `assets/lol_models/anim_map.json`.
+/// Loaded from `dataset/lol_champions/anim_map.json`.
 #[derive(Resource, Default)]
 pub struct ChampionAnimMap {
     /// champion_name -> { ability_name -> anim_clip_name }
@@ -98,7 +98,7 @@ pub struct ChampionAnimClips {
 
 /// Load the anim_map.json at startup.
 pub fn load_anim_map_system(mut anim_map: ResMut<ChampionAnimMap>) {
-    let path = "assets/lol_models/anim_map.json";
+    let path = "dataset/lol_champions/anim_map.json";
     let Ok(content) = std::fs::read_to_string(path) else {
         warn!("Could not load animation map from {path}");
         return;

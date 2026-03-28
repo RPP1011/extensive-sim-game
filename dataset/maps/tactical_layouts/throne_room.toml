@@ -1,0 +1,63 @@
+name = "Throne Room Showdown"
+map_type = "throne_room"
+width = 20
+height = 16
+
+[terrain]
+layout = """
+WWWWWWWWWWWWWWWWWWWW
+W..................W
+W..PP..TTTT..PP....W
+W..PP..T..T..PP....W
+W......T..T........W
+W......TTTT........W
+W..................W
+W..CC..........CC..W
+W..CC..........CC..W
+W..................W
+W..CC..........CC..W
+W..CC..........CC..W
+W..................W
+W..................W
+WWWWWWWWGGGGWWWWWWWW
+....................
+"""
+
+[[spawn_zones]]
+name = "royal_guard"
+team = 0
+rect = [5, 1, 14, 6]
+
+[[spawn_zones]]
+name = "usurpers"
+team = 1
+rect = [2, 12, 17, 15]
+
+[[objectives]]
+type = "capture_throne"
+position = [9, 3]
+hp = 0
+
+[[cover_positions]]
+position = [3, 2]
+type = "full"
+
+[[cover_positions]]
+position = [14, 2]
+type = "full"
+
+[[cover_positions]]
+position = [3, 7]
+type = "half"
+
+[[cover_positions]]
+position = [16, 7]
+type = "half"
+
+[[cover_positions]]
+position = [3, 10]
+type = "half"
+
+[[cover_positions]]
+position = [16, 10]
+type = "half"

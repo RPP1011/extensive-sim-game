@@ -1,0 +1,22 @@
+[[tactics]]
+id = "champion_duel_challenge"
+name = "Champion Duel Challenge"
+side = "attacker"
+category = "morale"
+
+[tactics.requirements]
+champion_available = true
+champion_level_min = 25
+
+[tactics.effects]
+siege_duration_multiplier = 0.1
+casualty_rate_multiplier = 0.0
+morale_swing_potential = 0.5
+honor_bound = true
+single_combat = true
+
+[tactics.counters]
+countered_by = ["decline_challenge", "archer_treachery", "champion_defense"]
+
+[tactics.narrative]
+description = "A single warrior rides to the gate and issues the ancient challenge. Champion against champion. If they accept and lose, the garrison's heart breaks. If they accept and win, the army's does."

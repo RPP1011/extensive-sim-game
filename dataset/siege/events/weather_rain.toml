@@ -1,0 +1,49 @@
+[[events]]
+id = "weather_rain"
+name = "Heavy Rain"
+phase = "bombardment"
+
+[events.trigger]
+type = "WeatherChange"
+threshold = 0.0
+
+[events.choice]
+prompt = "Dark clouds roll in and rain hammers down. The siege field turns to mud. Wooden equipment soaks through. Bowstrings go slack."
+deadline_secs = 20.0
+
+[[events.choice.options]]
+label = "Continue Operations"
+description = "Push through the rain. Slower progress but no pause."
+[[events.choice.options.effects]]
+type = "weather_modifier"
+duration = 300
+move_speed_penalty = 0.4
+fire_arrow_disabled = true
+accuracy_penalty = 0.2
+siege_equipment_speed = 0.5
+earthen_wall_damage = 0.5
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The rain turns the siege field to a swamp. Siege towers sink to their axles. Archers curse their useless bowstrings. But the trebuchets still throw stone."
+
+[[events.choice.options]]
+label = "Halt and Cover Equipment"
+description = "Protect the siege engines from water damage. Wait for clear skies."
+[[events.choice.options.effects]]
+type = "siege_progress"
+ticks_cost = 200
+equipment_preserved = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Tarps go over the trebuchets. The army huddles in tents and waits for the sky to clear. Inside the walls, the defenders repair damage in the downpour."
+
+[[events.choice.options]]
+label = "Use the Rain as Cover"
+description = "Visibility is low. Send sappers forward under the rain's concealment."
+[[events.choice.options.effects]]
+type = "siege_progress"
+sapper_progress_bonus = 0.5
+detection_chance = 0.1
+[[events.choice.options.effects]]
+type = "narrative"
+text = "In the driving rain, visibility drops to nothing. The sappers crawl forward, invisible and silent beneath the storm."

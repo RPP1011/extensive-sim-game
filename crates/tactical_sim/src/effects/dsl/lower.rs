@@ -48,6 +48,22 @@ pub(super) fn lower_condition(node: &ConditionNode) -> Result<Condition, String>
                     let count = args.first().map(|a| cond_arg_to_f32(a) as u32).unwrap_or(0);
                     Ok(Condition::HitCountAbove { count })
                 }
+                // --- Campaign Conditions ---
+                "faction_hostile" => Ok(Condition::FactionHostile),
+                "at_war" => Ok(Condition::AtWar),
+                "crisis_active" => Ok(Condition::CrisisActive),
+                "gold_above" => {
+                    let amount = args.first().map(|a| cond_arg_to_f32(a)).unwrap_or(0.0);
+                    Ok(Condition::GoldAbove { amount })
+                }
+                "gold_below" => {
+                    let amount = args.first().map(|a| cond_arg_to_f32(a)).unwrap_or(0.0);
+                    Ok(Condition::GoldBelow { amount })
+                }
+                "outnumbered" => Ok(Condition::Outnumbered),
+                "ally_injured" => Ok(Condition::AllyInjured),
+                "alone" => Ok(Condition::Alone),
+                "near_death" => Ok(Condition::NearDeath),
                 _ => Err(format!("unknown condition: {name}")),
             }
         }
@@ -192,6 +208,13 @@ fn apply_ability_prop(def: &mut AbilityDef, prop: &Property) -> Result<(), Strin
                 "direction" => AbilityTargeting::Direction,
                 "vector" => AbilityTargeting::Vector,
                 "global" => AbilityTargeting::Global,
+                "faction" => AbilityTargeting::TargetFaction,
+                "region" => AbilityTargeting::TargetRegion,
+                "market" => AbilityTargeting::TargetMarket,
+                "party" => AbilityTargeting::TargetParty,
+                "guild" => AbilityTargeting::TargetGuild,
+                "adventurer" => AbilityTargeting::TargetAdventurer,
+                "location" => AbilityTargeting::TargetLocation,
                 other => return Err(format!("unknown targeting: {other}")),
             };
         }
@@ -210,6 +233,12 @@ fn apply_ability_prop(def: &mut AbilityDef, prop: &Property) -> Result<(), Strin
         "unstoppable" => def.unstoppable = true,
         "form" => def.form = Some(prop.value.as_string()?),
         "swap_form" => def.swap_form = Some(prop.value.as_string()?),
+        "requires" | "requires_participants" => {
+            def.requires_participants = prop.value.as_f64()? as u32;
+        }
+        "requires_class" => {
+            def.requires_class = prop.value.as_string()?;
+        }
         other => return Err(format!("unknown ability property: {other}")),
     }
     Ok(())
@@ -287,6 +316,10 @@ fn parse_trigger_string(s: &str) -> Result<Trigger, String> {
                 let count = parts[1].parse::<u32>().map_err(|e| format!("bad count: {e}"))?;
                 Ok(Trigger::OnStackReached { name, count })
             }
+            "periodic_tick" => {
+                let ticks = parse_trigger_arg_ticks(args_str)?;
+                Ok(Trigger::PeriodicTick { interval_ticks: ticks })
+            }
             _ => Err(format!("unknown trigger: {name}")),
         }
     } else {
@@ -305,6 +338,13 @@ fn parse_trigger_string(s: &str) -> Result<Trigger, String> {
             "on_dodge" => Ok(Trigger::OnDodge),
             "on_reflect" => Ok(Trigger::OnReflect),
             "on_auto_attack" => Ok(Trigger::OnAutoAttack),
+            // --- Campaign Triggers ---
+            "on_trade" => Ok(Trigger::OnTrade),
+            "on_quest_complete" => Ok(Trigger::OnQuestComplete),
+            "on_faction_change" => Ok(Trigger::OnFactionChange),
+            "on_level_up" => Ok(Trigger::OnLevelUp),
+            "on_crisis_start" => Ok(Trigger::OnCrisisStart),
+            "on_ability_use" => Ok(Trigger::OnAbilityUse),
             _ => Err(format!("unknown trigger: {s}")),
         }
     }
@@ -323,6 +363,15 @@ fn parse_trigger_kwarg_f32(s: &str, key: &str) -> Result<f32, String> {
         val_str.parse::<f32>().map_err(|e| format!("bad {key}: {e}"))
     } else {
         s.parse::<f32>().map_err(|e| format!("bad {key}: {e}"))
+    }
+}
+
+fn parse_trigger_arg_ticks(s: &str) -> Result<u32, String> {
+    let s = s.trim();
+    if let Some(stripped) = s.strip_suffix('t') {
+        stripped.trim().parse::<u32>().map_err(|e| format!("bad tick count: {e}"))
+    } else {
+        s.parse::<u32>().map_err(|e| format!("bad tick count: {e}"))
     }
 }
 

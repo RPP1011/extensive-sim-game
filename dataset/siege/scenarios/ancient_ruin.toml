@@ -1,0 +1,53 @@
+name = "The Defense of the Shattered Bastion"
+description = "Adventurers defend ancient ruins against a superior force. The walls are broken but the lingering enchantments make them unpredictable. Something in the ruins doesn't want anyone here."
+difficulty = "medium"
+
+[settlement]
+template = "ancient_ruins"
+wall_type = "ancient_ruin_wall"
+wall_hp = 1800
+gate_type = "reinforced_gate"
+gate_hp = 600
+towers = 1
+tower_type = "stone_tower"
+garrison = 12
+terrain = "ruins"
+lingering_magic = true
+trap_density = "medium"
+unstable_ground = true
+
+[attacker]
+army_size = 50
+siege_equipment = ["catapult", "battering_ram", "siege_ladder"]
+supply_ticks = 1000
+reinforcement_chance = 0.15
+morale = 0.7
+commander_level = 15
+
+[defender]
+garrison_strength = 12
+adventurer_slots = 6
+supplies_ticks = 800
+reinforcement_chance = 0.3
+morale = 0.75
+special_defenses = ["caltrops", "barricade"]
+commander_level = 18
+ruin_knowledge = true
+
+[victory_conditions]
+attacker_wins = ["all_defenders_eliminated", "ruins_captured"]
+defender_wins = ["attacker_retreat", "attacker_casualties > 40%", "ancient_guardian_awakened"]
+time_limit_ticks = 2500
+
+[power_context]
+defender_avg_level = 20
+attacker_avg_level = 12
+wall_effective_level = 50
+has_wards = true
+ward_type = "ancient_ward"
+high_level_threat = "none"
+
+[narrative]
+opening = "The ruins are older than any living memory. Walls that should have crumbled still stand, held together by magic that predates the current age. A band of adventurers has claimed them as a base. An army wants them gone."
+attacker_victory = "The ruins fall to mortal hands. The lingering magic fades as the last defender falls. Whatever the ancients left behind now belongs to the victors — for better or worse."
+defender_victory = "The ruins hold. Perhaps the adventurers were lucky. Perhaps the ancient enchantments fought alongside them. Either way, the army learns that some places don't want to be conquered."

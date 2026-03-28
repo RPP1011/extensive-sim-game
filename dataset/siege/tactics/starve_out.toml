@@ -1,0 +1,23 @@
+[[tactics]]
+id = "starve_out"
+name = "Starve Them Out"
+side = "attacker"
+category = "patience"
+
+[tactics.requirements]
+min_army_ratio = 1.5
+supply_advantage = true
+encirclement_complete = true
+
+[tactics.effects]
+siege_duration_multiplier = 2.0
+casualty_rate_multiplier = 0.2
+defender_morale_drain = 0.5
+supply_consumption = 0.8
+attacker_morale_drain = 0.15
+
+[tactics.counters]
+countered_by = ["sally_out", "smuggle_supplies", "call_for_aid", "guerrilla"]
+
+[tactics.narrative]
+description = "Time is the cheapest weapon. The army settles in, blocking every road and path. Nothing enters. Nothing leaves. Inside the walls, the counting of grain becomes the most important activity."

@@ -1,0 +1,43 @@
+# How to handle a bounty reward.
+
+category = "quest_branch"
+trigger = "bounty_collected"
+prompt = "The bounty has been collected — {bounty_gold}g for the target's capture. How should the reward be handled?"
+deadline_secs = 60.0
+default_option = 0
+
+[[options]]
+label = "Split Evenly"
+description = "Everyone who participated gets an equal share."
+
+[[options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[options.effects]]
+type = "narrative"
+text = "Fair shares for fair work. The team is satisfied."
+
+[[options]]
+label = "Performance Bonus"
+description = "The one who landed the final blow gets a larger share."
+
+[[options.effects]]
+type = "narrative"
+text = "The MVP gets extra coin. Motivation for next time."
+
+[[options]]
+label = "Guild Treasury"
+description = "All bounty gold goes to the guild fund."
+
+[[options.effects]]
+type = "gold"
+amount = 10.0
+
+[[options.effects]]
+type = "reputation"
+amount = -2.0
+
+[[options.effects]]
+type = "narrative"
+text = "The bounty disappears into the guild vault."

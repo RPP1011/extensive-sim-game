@@ -1,0 +1,23 @@
+[[tactics]]
+id = "escalade_tactic"
+name = "Escalade"
+side = "attacker"
+category = "aggression"
+
+[tactics.requirements]
+min_army_ratio = 3.0
+siege_equipment_available = ["siege_ladder"]
+morale_minimum = 0.7
+wall_height_max = 5.0
+
+[tactics.effects]
+siege_duration_multiplier = 0.2
+casualty_rate_multiplier = 3.0
+surprise_bonus = 0.2
+multi_point_attack = true
+
+[tactics.counters]
+countered_by = ["boiling_oil", "active_defense", "murder_holes", "high_walls"]
+
+[tactics.narrative]
+description = "Dozens of ladders hit the walls simultaneously. The defenders can't be everywhere. For every ladder pushed back, two more go up. It's a numbers game paid for in blood."

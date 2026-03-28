@@ -1,0 +1,73 @@
+// Tier 3: Extended damage + mobility combos
+
+ability LeapSlam {
+    target: enemy, range: 4.0
+    cooldown: 8s, cast: 0ms
+    hint: damage
+
+    dash to_target
+    damage 30 [PHYSICAL: 45]
+}
+
+ability ShadowStab {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 0ms
+    hint: damage
+
+    blink 5.0
+    damage 40 [DARK: 50]
+}
+
+ability FlameCharge {
+    target: enemy, range: 4.0
+    cooldown: 7s, cast: 0ms
+    hint: damage
+
+    dash to_target
+    damage 25 [FIRE: 40]
+}
+
+ability VaultStrike {
+    target: enemy, range: 5.0
+    cooldown: 8s, cast: 0ms
+    hint: damage
+
+    dash to_target
+    damage 35 [PHYSICAL: 45]
+}
+
+ability FrostLeap {
+    target: enemy, range: 4.0
+    cooldown: 8s, cast: 0ms
+    hint: damage
+
+    dash to_target
+    damage 25 [ICE: 40]
+}
+
+ability ThunderDive {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 0ms
+    hint: damage
+
+    dash to_target
+    damage 40 [MAGIC: 50]
+}
+
+ability StrikingRetreat {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 100ms
+    hint: damage
+
+    damage 25 [PHYSICAL: 40]
+    dash 3.0
+}
+
+ability FlickerStrike {
+    target: enemy, range: 6.0
+    cooldown: 9s, cast: 0ms
+    hint: damage
+
+    blink 6.0
+    damage 35 [MAGIC: 45]
+}

@@ -1,0 +1,24 @@
+[[tactics]]
+id = "guerrilla"
+name = "Guerrilla Warfare"
+side = "defender"
+category = "aggression"
+
+[tactics.requirements]
+terrain_knowledge = true
+hidden_exits = true
+morale_minimum = 0.5
+
+[tactics.effects]
+siege_duration_multiplier = 1.5
+attacker_supply_drain = 0.3
+attacker_morale_drain = 0.2
+attacker_casualty_multiplier = 1.3
+defender_casualty_multiplier = 0.5
+supply_line_disruption = true
+
+[tactics.counters]
+countered_by = ["forest_clearing", "cavalry_patrols", "bribe_locals"]
+
+[tactics.narrative]
+description = "They come at night, from tunnels and hidden paths. A supply wagon burns. A patrol disappears. Sentries are found with their throats cut at dawn. The army is besieging the fortress, but the fortress is besieging the army."

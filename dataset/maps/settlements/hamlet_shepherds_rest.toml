@@ -1,0 +1,30 @@
+name = "Shepherd's Rest"
+type = "hamlet"
+population = 55
+prosperity = 15.0
+
+[defenses]
+wall_type = "none"
+wall_hp = 0
+gate_count = 0
+tower_count = 0
+garrison_capacity = 0
+moat = false
+
+[[districts]]
+name = "Pastures"
+type = "agricultural"
+buildings = ["shepherd_hut", "sheep_pen", "well", "cheese_cave"]
+population_pct = 100.0
+wealth = 15.0
+threat = 10.0
+
+[economy]
+primary_exports = ["wool", "cheese", "mutton"]
+primary_imports = ["grain", "tools", "salt"]
+trade_routes = 1
+market_size = "small"
+
+[narrative]
+description = "Highland shepherds gather here during lambing season. The rest of the year it's just wind and grass."
+flavor = ["Bleating carries across the hills", "The cheese cave smells ancient", "Dogs watch the flock"]

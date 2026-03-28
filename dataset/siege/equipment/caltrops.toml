@@ -1,0 +1,32 @@
+[[equipment]]
+id = "caltrops"
+name = "Caltrops"
+category = "defensive"
+tier = 1
+
+[equipment.stats]
+gate_damage_per_tick = 0.0
+wall_damage_per_tick = 0.0
+range = 0.0
+crew_required = 0
+move_speed = 0.0
+hp = 0
+armor = 0
+troop_damage = 5.0
+slow_multiplier = 0.4
+area_radius = 3.0
+duration = -1
+
+[equipment.requirements]
+min_tech_level = 1
+construction_cost = 15
+construction_ticks = 20
+resources = ["iron"]
+charges = 10
+
+[equipment.counters]
+vulnerable_to = ["heavy_boots", "flying_units", "sweep_teams"]
+strong_against = ["cavalry_charge", "siege_tower", "battering_ram", "troop_rush"]
+
+[equipment.narrative]
+description = "Four iron spikes welded so one always points up. Scattered across the approach, invisible in grass or mud. The first sign is usually a scream."

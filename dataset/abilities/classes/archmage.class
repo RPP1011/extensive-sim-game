@@ -1,0 +1,20 @@
+class Archmage {
+    stat_growth: +5 ability_power, +1 defense, +1 max_hp per level
+
+    tags: arcane, ritual, mastery, ancient_knowledge, raw_power
+
+    scaling hp_percent {
+        when hp_percent > 50: +15% ability_power
+        always: +10% ability_power
+    }
+
+    abilities {
+        level 20: grand_spell "Cast any known spell at double power"
+        level 25: spell_weave "Cast two spells simultaneously"
+        level 30: mana_well "Generate a pool of mana that all allies can draw from"
+        level 40: ritual_of_ruin "Channel for 5 seconds, then obliterate everything in an area"
+        level 50: rewrite_reality "Alter one fundamental rule of the battlefield for 15 seconds"
+    }
+
+    requirements: level 20, classes: Mage or Sorcerer
+}

@@ -1,0 +1,44 @@
+name = "Dock Defense"
+map_type = "harbor_raid"
+width = 30
+height = 14
+
+[terrain]
+layout = """
+HHHH..HH..HHHH..HH..HHHH....
+HHHH..HH..HHHH..HH..HHHH....
+..............................
+RRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
+..............................
+WWWWWW....WWWWWW....WWWWWW...
+..........................PPPP
+..........................PPPP
+~~~~~~~~~~~~~~~~~~~~~~~~~~PPPP
+~~~~~~~~~~~~~~~~~~~~~~~~~~PPPP
+~~~~~~~~~~~~~~~~~~~~~~~~~~PPPP
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"""
+
+[[spawn_zones]]
+name = "dock_garrison"
+team = 0
+rect = [0, 0, 29, 4]
+
+[[spawn_zones]]
+name = "sea_raiders"
+team = 1
+rect = [20, 6, 29, 10]
+
+[[cover_positions]]
+position = [2, 5]
+type = "full"
+
+[[cover_positions]]
+position = [12, 5]
+type = "full"
+
+[[cover_positions]]
+position = [22, 5]
+type = "full"

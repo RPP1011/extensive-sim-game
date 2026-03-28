@@ -1,0 +1,21 @@
+class Sword_Saint {
+    stat_growth: +5 attack, +3 speed, +2 defense per level
+
+    tags: melee, transcendence, blade_mastery, perfection, legend
+
+    scaling hp_percent {
+        when hp_percent > 75: +20% attack
+        when hp_percent > 90: +20% speed
+        always: +10% attack
+    }
+
+    abilities {
+        level 60: perfect_form "Every strike is a critical hit for 10 seconds"
+        level 70: cut_anything "Your blade ignores all defense, armor, shields, and magical barriers"
+        level 80: blade_domain_absolute "Nothing moves within your range without your permission"
+        level 90: draw_cut "Sheathe and strike; if you are faster than your target, they die"
+        level 100: single_stroke "You have practiced one cut your entire life. It cannot be survived."
+    }
+
+    requirements: level 60, classes: Blademaster or Duelist
+}

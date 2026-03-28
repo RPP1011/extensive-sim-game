@@ -1,0 +1,48 @@
+[[fortifications]]
+id = "stone_tower"
+name = "Stone Tower"
+tier = 3
+type = "tower"
+
+[fortifications.stats]
+tower_hp = 1500
+height = 8.0
+garrison_slots = 8
+ranged_bonus = 0.4
+vision_radius = 15.0
+fire_arc = 360
+flanking_fire = true
+
+[fortifications.construction]
+cost = 400
+ticks = 1500
+resources = ["stone", "mortar", "iron"]
+builder_class_bonus = 0.4
+
+[fortifications.weaknesses]
+trebuchet_multiplier = 1.5
+fire_resistant = true
+sapper_multiplier = 1.2
+
+[fortifications.power_scaling]
+effective_level = 30
+builder_class_bonus = true
+enchantable = true
+age_scaling = 0.01
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 3.0
+ability_damage_reduction = 0.2
+projectile_deflection = 0.15
+ward_hp = 500
+ward_level = 15
+
+[fortifications.garrison_bonus]
+defender_multiplier = 3.5
+ranged_accuracy_bonus = 0.35
+melee_disadvantage = 0.3
+cover_rating = 0.7
+
+[fortifications.narrative]
+description = "Round or square, the stone tower anchors a section of wall. Its height gives archers command of the approach, and its mass can absorb punishment that would shatter a wooden structure. The garrison inside fights from behind arrow slits, nearly untouchable."

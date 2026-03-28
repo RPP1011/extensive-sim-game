@@ -1,0 +1,21 @@
+class The_Undying {
+    stat_growth: +3 max_hp, +3 defense, +2 attack, +1 speed per level
+
+    tags: immortality, regeneration, death_defiance, endurance, legend
+
+    scaling hp_percent {
+        when hp_percent < 50: +25% defense, +15% attack
+        when hp_percent < 10: +50% attack
+        always: +10% max_hp
+    }
+
+    abilities {
+        level 60: death_denied "Regenerate from any wound over 10 seconds, even severed limbs"
+        level 70: stand_again "When reduced to zero health, return to 25% after 3 seconds"
+        level 80: beyond_pain "Damage no longer causes flinch, stagger, or any combat penalty"
+        level 90: refuse_to_fall "You cannot drop below 1 HP for 15 seconds"
+        level 100: eternal "You have died before. It did not take. Resurrect at full health once per battle with all cooldowns reset."
+    }
+
+    requirements: level 60, classes: Guardian or Berserker
+}

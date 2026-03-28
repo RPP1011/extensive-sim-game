@@ -1,0 +1,67 @@
+name = "Prisoner Rescue"
+priority = 8
+repeatable = true
+cooldown_ticks = 6000
+
+[trigger]
+type = "ThreatLevel"
+min_threat = 45.0
+
+[[conditions]]
+type = "MinAdventurers"
+count = 3
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "A guild ally is being held prisoner in an enemy fortress. They'll be executed in three days. Rescue is possible but the fortress is well-guarded."
+deadline_secs = 60.0
+default_option = 0
+
+[[choice.options]]
+label = "Stealth Rescue (30g)"
+description = "Small team, dark night, careful planning. Get in, get the prisoner, get out."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 12.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Three shadows slip over the fortress walls under a moonless sky."
+
+[[choice.options]]
+label = "Assault (50g)"
+description = "Hit the fortress hard and fast. More noise but more firepower."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -50.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The gates shatter. The guild pours in with steel and fury."
+
+[[choice.options]]
+label = "Negotiate Release (80g)"
+description = "Pay the ransom. Lives are worth more than gold."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -80.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A bag of gold for a life. The prisoner walks free, shaken but alive."

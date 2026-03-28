@@ -1,0 +1,70 @@
+name = "Silversand"
+type = "city"
+population = 7500
+prosperity = 70.0
+
+[defenses]
+wall_type = "stone_wall"
+wall_hp = 1000
+gate_count = 3
+tower_count = 8
+garrison_capacity = 150
+moat = false
+
+[[districts]]
+name = "Crystal Spire"
+type = "academic"
+buildings = ["mage_academy", "arcane_library", "enchantment_tower", "alchemy_hall"]
+population_pct = 12.0
+wealth = 85.0
+threat = 10.0
+
+[[districts]]
+name = "Enchanter's Row"
+type = "commercial"
+buildings = ["enchanted_goods", "potion_shop", "scroll_seller", "component_dealer"]
+population_pct = 15.0
+wealth = 75.0
+threat = 10.0
+
+[[districts]]
+name = "Silver Quarter"
+type = "noble"
+buildings = ["mage_estates", "council_tower", "meditation_garden"]
+population_pct = 10.0
+wealth = 80.0
+threat = 5.0
+
+[[districts]]
+name = "Mundane Quarter"
+type = "residential"
+buildings = ["houses", "tavern", "bakery", "well", "market"]
+population_pct = 30.0
+wealth = 35.0
+threat = 5.0
+
+[[districts]]
+name = "Experiment Grounds"
+type = "industrial"
+buildings = ["golem_workshop", "summoning_circle", "blast_range", "containment_ward"]
+population_pct = 8.0
+wealth = 50.0
+threat = 30.0
+
+[[districts]]
+name = "Servant Quarter"
+type = "residential"
+buildings = ["dormitories", "laundry", "kitchen_hall", "shrine"]
+population_pct = 25.0
+wealth = 15.0
+threat = 5.0
+
+[economy]
+primary_exports = ["enchanted_items", "potions", "scrolls", "magical_components"]
+primary_imports = ["food", "rare_reagents", "gemstones", "exotic_materials"]
+trade_routes = 5
+market_size = "large"
+
+[narrative]
+description = "A city ruled by mages, built on beaches of silver-white sand. The towers glow at night with arcane experiments, and reality sometimes bends near the academy."
+flavor = ["Lights that aren't fire", "The air hums with power", "Apprentices sweep the streets with brooms that sweep themselves"]

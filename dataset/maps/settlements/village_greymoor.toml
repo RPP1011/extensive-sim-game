@@ -1,0 +1,46 @@
+name = "Greymoor"
+type = "village"
+population = 520
+prosperity = 30.0
+
+[defenses]
+wall_type = "wooden_palisade"
+wall_hp = 250
+gate_count = 1
+tower_count = 2
+garrison_capacity = 15
+moat = true
+
+[[districts]]
+name = "Dry Ground"
+type = "residential"
+buildings = ["stilt_houses", "smokehouse", "shrine"]
+population_pct = 50.0
+wealth = 20.0
+threat = 10.0
+
+[[districts]]
+name = "Bog Works"
+type = "industrial"
+buildings = ["peat_cutter", "herbalist", "dye_works"]
+population_pct = 30.0
+wealth = 35.0
+threat = 20.0
+
+[[districts]]
+name = "Landing"
+type = "harbor"
+buildings = ["punt_dock", "fish_trap", "reed_weaver"]
+population_pct = 20.0
+wealth = 25.0
+threat = 25.0
+
+[economy]
+primary_exports = ["peat", "dyes", "medicinal_herbs"]
+primary_imports = ["grain", "metal", "stone"]
+trade_routes = 1
+market_size = "small"
+
+[narrative]
+description = "A swamp village where the ground squelches underfoot and houses stand on stilts. The locals know paths through the bog that no outsider could follow."
+flavor = ["Mist clings to the water", "Frogs chorus at night", "The peat smoke smells sweet"]

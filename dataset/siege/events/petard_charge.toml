@@ -1,0 +1,52 @@
+[[events]]
+id = "petard_charge"
+name = "Petard Charge"
+phase = "assault"
+
+[events.trigger]
+type = "PetardAvailable"
+threshold = 0.0
+
+[events.choice]
+prompt = "The petard team volunteers to rush the gate under covering fire. Two soldiers carrying enough black powder to level a gatehouse."
+deadline_secs = 15.0
+
+[[events.choice.options]]
+label = "Full Covering Fire"
+description = "Every archer and ballista suppresses the walls while the petard team sprints."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "petard_rush"
+suppression_bonus = 0.5
+petard_success_chance = 0.7
+crew_survival_chance = 0.3
+[[events.choice.options.effects]]
+type = "narrative"
+text = "A storm of arrows blackens the sky. Under it, two men run faster than they've ever run, a bell-shaped bomb swinging between them. The gate fills their vision."
+
+[[events.choice.options]]
+label = "Night Approach"
+description = "Wait for darkness. Stealth instead of firepower."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "petard_stealth"
+stealth_bonus = 0.4
+petard_success_chance = 0.5
+crew_survival_chance = 0.5
+ticks_delay = 200
+[[events.choice.options.effects]]
+type = "narrative"
+text = "They crawl through the darkness on their bellies, the bomb wrapped in cloth to muffle it. Each heartbeat is an earthquake. Each breath is a thunderclap."
+
+[[events.choice.options]]
+label = "Diversionary Attack First"
+description = "Hit another section of wall to draw defenders away from the gate."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "petard_with_diversion"
+diversion_cost = 10
+petard_success_chance = 0.65
+crew_survival_chance = 0.4
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Ladders slam against the east wall. The garrison rushes to meet them. At the gate, two shadows set their charge and light the fuse."

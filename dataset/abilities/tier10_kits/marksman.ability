@@ -1,0 +1,68 @@
+// Tier 10: Marksman Kit — long range physical damage with traps
+
+ability SteadyShot {
+    target: enemy, range: 8.0
+    cooldown: 3s, cast: 200ms
+    hint: damage
+
+    deliver projectile { speed: 10.0 } {
+        on_hit {
+            damage 28 [PHYSICAL: 40]
+        }
+    }
+}
+
+ability AimedShot {
+    target: enemy, range: 8.0
+    cooldown: 8s, cast: 600ms
+    hint: damage
+
+    deliver projectile { speed: 8.0 } {
+        on_hit {
+            damage 65 [PHYSICAL: 55]
+            slow 0.3 for 2s
+        }
+    }
+}
+
+ability ExplosiveShot {
+    target: enemy, range: 7.0
+    cooldown: 10s, cast: 200ms
+    hint: damage
+
+    deliver projectile { speed: 8.0 } {
+        on_hit {
+            damage 35 in circle(2.0) [FIRE: 45]
+            damage 8/1s for 3s [FIRE: 35]
+        }
+    }
+}
+
+ability FreezingTrap {
+    target: ground, range: 4.0
+    cooldown: 14s, cast: 200ms
+    hint: crowd_control
+
+    deliver trap { duration: 30s, trigger_radius: 1.5 } {
+        on_hit {
+            root 2500ms [ICE: 50]
+            damage 20 [ICE: 35]
+        }
+    }
+}
+
+ability RapidFire {
+    target: self
+    cooldown: 40s, cast: 0ms
+    hint: utility
+
+    buff attack_speed 0.5 for 6s
+    buff damage_output 0.2 for 6s
+}
+
+passive Headshot {
+    trigger: on_damage_dealt
+    cooldown: 8s
+
+    damage 20 [PHYSICAL: 40]
+}

@@ -1,0 +1,23 @@
+[[tactics]]
+id = "bombardment_tactic"
+name = "Sustained Bombardment"
+side = "attacker"
+category = "engineering"
+
+[tactics.requirements]
+min_army_ratio = 1.0
+siege_equipment_available = ["trebuchet", "catapult"]
+ammunition_available = true
+
+[tactics.effects]
+siege_duration_multiplier = 1.2
+casualty_rate_multiplier = 0.4
+wall_damage_multiplier = 2.0
+defender_morale_drain = 0.3
+equipment_wear = 0.5
+
+[tactics.counters]
+countered_by = ["sally_out", "counter_battery", "magical_ward"]
+
+[tactics.narrative]
+description = "Day after day, the stones fly. The wall chips, cracks, crumbles. The defenders repair by night what the trebuchets destroy by day. It's a war of attrition between stone and stone, and the trebuchets always win eventually."

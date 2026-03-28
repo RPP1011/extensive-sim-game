@@ -1,0 +1,145 @@
+// Tier 2: Extended AoE damage variants
+
+ability Fireball {
+    target: ground, range: 6.0
+    cooldown: 5s, cast: 300ms
+    hint: damage
+
+    damage 35 in circle(2.5) [FIRE: 50]
+}
+
+ability IceStorm {
+    target: ground, range: 5.0
+    cooldown: 8s, cast: 400ms
+    hint: damage
+
+    damage 45 in circle(3.0) [ICE: 55]
+}
+
+ability ChainLightning {
+    target: enemy, range: 6.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 30 in circle(2.0) [MAGIC: 45]
+}
+
+ability Earthquake {
+    target: self_aoe
+    cooldown: 10s, cast: 500ms
+    hint: damage
+
+    damage 50 in circle(3.5) [PHYSICAL: 55]
+}
+
+ability HolyNova {
+    target: self_aoe
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 30 in circle(3.0) [HOLY: 45]
+}
+
+ability ShadowExplosion {
+    target: ground, range: 5.0
+    cooldown: 7s, cast: 300ms
+    hint: damage
+
+    damage 40 in circle(2.5) [DARK: 50]
+}
+
+ability PoisonCloud {
+    target: ground, range: 5.0
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 25 in circle(3.0) [POISON: 45]
+}
+
+ability MeteorShard {
+    target: ground, range: 7.0
+    cooldown: 10s, cast: 500ms
+    hint: damage
+
+    damage 60 in circle(2.0) [FIRE: 60]
+}
+
+ability ThunderStrike {
+    target: ground, range: 6.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 35 in circle(2.0) [MAGIC: 50]
+}
+
+ability VoidEruption {
+    target: ground, range: 5.0
+    cooldown: 9s, cast: 400ms
+    hint: damage
+
+    damage 55 in circle(2.5) [DARK: 55]
+}
+
+ability FlameWave {
+    target: direction, range: 5.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 35 in line(5.0, 1.5) [FIRE: 45]
+}
+
+ability FrostBeam {
+    target: direction, range: 6.0
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    damage 30 in line(6.0, 1.0) [ICE: 45]
+}
+
+ability ShadowCleave {
+    target: direction, range: 3.0
+    cooldown: 4s, cast: 200ms
+    hint: damage
+
+    damage 30 in line(3.0, 2.0) [DARK: 40]
+}
+
+ability ArcaneBarrage {
+    target: direction, range: 7.0
+    cooldown: 7s, cast: 300ms
+    hint: damage
+
+    damage 40 in line(7.0, 1.0) [MAGIC: 50]
+}
+
+ability GroundSlam {
+    target: direction, range: 4.0
+    cooldown: 6s, cast: 300ms
+    hint: damage
+
+    damage 40 in line(4.0, 2.5) [PHYSICAL: 50]
+}
+
+ability DivineRay {
+    target: direction, range: 6.0
+    cooldown: 7s, cast: 400ms
+    hint: damage
+
+    damage 45 in line(6.0, 1.5) [HOLY: 50]
+}
+
+ability Shockwave {
+    target: self_aoe
+    cooldown: 7s, cast: 200ms
+    hint: damage
+
+    damage 30 in circle(2.5) [PHYSICAL: 45]
+}
+
+ability BurningGround {
+    target: ground, range: 5.0
+    cooldown: 9s, cast: 400ms
+    hint: damage
+
+    damage 50 in circle(2.0) [FIRE: 55]
+}

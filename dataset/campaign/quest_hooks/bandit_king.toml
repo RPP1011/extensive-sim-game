@@ -1,0 +1,63 @@
+name = "Bandit King"
+priority = 7
+repeatable = true
+cooldown_ticks = 6000
+
+[trigger]
+type = "ThreatLevel"
+min_threat = 55.0
+
+[[conditions]]
+type = "MinAdventurers"
+count = 4
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "A bandit warlord has united the scattered gangs under one banner. What was nuisance raiding is now organized warfare. The Bandit King demands tribute — or promises blood."
+deadline_secs = 90.0
+default_option = 1
+
+[[choice.options]]
+label = "Hire Assassins (60g)"
+description = "Send killers to cut the head off the snake. Expensive but surgical."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -60.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A pair of shadows depart under moonlight. The Bandit King's days are numbered."
+
+[[choice.options]]
+label = "Rally the Militia"
+description = "Arm the locals and fight together. Cheaper but messier."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Pitchforks become spears. The farmers become soldiers. The region fights back."
+
+[[choice.options]]
+label = "Pay Tribute (40g)"
+description = "Gold for peace. It works until it doesn't."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -40.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The tribute is delivered. The raids stop. For now."

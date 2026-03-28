@@ -142,3 +142,4 @@ pub mod signal_towers;
 pub mod currency_debasement;
 pub mod demonic_pacts;
 pub mod class_system;
+pub mod npc_economy;

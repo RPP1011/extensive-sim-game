@@ -1,0 +1,47 @@
+name = "Siege Fall"
+phase_index = 6
+duration_range = [50, 200]
+
+[description]
+text = "It is over. The settlement has fallen. What happens next depends on who won, and how much blood was spilled getting here."
+
+[attacker_actions]
+available = ["accept_surrender", "occupy", "loot", "execute_garrison", "mercy", "install_governor", "repair_walls", "treat_wounded"]
+priority = "consolidation"
+
+[defender_actions]
+available = ["surrender", "negotiate_terms", "last_stand", "escape", "sabotage", "hide"]
+priority = "survival"
+
+[events]
+[[events.possible]]
+name = "Mercy Shown"
+probability = 0.3
+trigger = "attacker_morale_high"
+effect = "reputation_gain"
+description = "The commander orders restraint. The garrison is allowed to surrender with honor. The city is spared the worst."
+
+[[events.possible]]
+name = "Sack"
+probability = 0.2
+trigger = "attacker_casualties_high"
+effect = "reputation_loss"
+description = "The army has bled for this city. They intend to be paid in kind. The sacking begins."
+
+[[events.possible]]
+name = "Hidden Treasure"
+probability = 0.1
+trigger = "always"
+effect = "loot_event"
+description = "In the citadel vaults, something unexpected — gold, artifacts, or something far more dangerous."
+
+[[events.possible]]
+name = "Remaining Resistance"
+probability = 0.15
+trigger = "defender_guerrilla"
+effect = "ongoing_resistance"
+description = "The city is taken but not tamed. Resistance fighters melt into the population. The occupation will be difficult."
+
+[transition]
+to_next_phase = "siege_complete"
+conditions = ["occupation_established", "OR", "army_departed"]

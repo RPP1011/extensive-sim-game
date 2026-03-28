@@ -1,0 +1,111 @@
+// Tier 9: High-impact damage ultimates
+
+ability Cataclysm {
+    target: ground, range: 7.0
+    cooldown: 60s, cast: 1s
+    hint: damage
+
+    damage 150 in circle(4.0) [FIRE: 70]
+    damage 20/1s for 4s in circle(4.0) [FIRE: 55]
+    stun 1500ms in circle(4.0) [CROWD_CONTROL: 55]
+}
+
+ability AbsoluteZero {
+    target: self_aoe
+    cooldown: 50s, cast: 800ms
+    hint: damage
+
+    damage 120 in circle(3.5) [ICE: 65]
+    stun 2s in circle(3.5) [ICE: 60]
+    slow 0.6 for 4s in circle(3.5) [ICE: 50]
+}
+
+ability VoidCataclysm {
+    target: ground, range: 6.0
+    cooldown: 55s, cast: 800ms
+    hint: damage
+
+    damage 130 in circle(3.0) [DARK: 65]
+    silence 3s in circle(3.0) [DARK: 55]
+    damage 15/1s for 4s in circle(3.0) [DARK: 50]
+}
+
+ability DivineWrath {
+    target: ground, range: 7.0
+    cooldown: 45s, cast: 600ms
+    hint: damage
+
+    damage 100 in circle(3.5) [HOLY: 60]
+    stun 1500ms in circle(3.5) [CROWD_CONTROL: 50]
+    damage_modify 1.3 for 5s in circle(3.5)
+}
+
+ability ArmageddonStrike {
+    target: enemy, range: 1.5
+    cooldown: 40s, cast: 400ms
+    hint: damage
+
+    damage 180 [PHYSICAL: 70]
+    stun 2s [CROWD_CONTROL: 60]
+    damage 15/1s for 3s [PHYSICAL: 50]
+}
+
+ability ThunderGod {
+    target: self_aoe
+    cooldown: 50s, cast: 600ms
+    hint: damage
+
+    damage 80 in circle(4.0) [MAGIC: 60]
+    stun 1200ms in circle(4.0) [MAGIC: 50]
+    buff damage_output 0.3 for 6s
+    buff attack_speed 0.3 for 6s
+}
+
+ability PlagueStorm {
+    target: ground, range: 6.0
+    cooldown: 55s, cast: 800ms
+    hint: damage
+
+    deliver zone { duration: 6s, tick: 1s } {
+        on_hit {
+            damage 25 in circle(4.0) [POISON: 55]
+            slow 0.4 for 1500ms in circle(4.0) [POISON: 45]
+        }
+    }
+}
+
+ability MeteorShower {
+    target: ground, range: 7.0
+    cooldown: 60s, cast: 1s
+    hint: damage
+
+    deliver zone { duration: 5s, tick: 1s } {
+        on_hit {
+            damage 30 in circle(3.5) [FIRE: 55]
+        }
+    }
+}
+
+ability ChainedDevastation {
+    target: enemy, range: 6.0
+    cooldown: 45s, cast: 500ms
+    hint: damage
+
+    damage 60 [MAGIC: 55]
+    deliver chain { bounces: 5, range: 4.0, falloff: 0.1 } {
+        on_hit {
+            damage 50 [MAGIC: 50]
+            stun 800ms [CROWD_CONTROL: 40]
+        }
+    }
+}
+
+ability Annihilate {
+    target: direction, range: 8.0
+    cooldown: 50s, cast: 800ms
+    hint: damage
+
+    damage 120 in line(8.0, 2.0) [DARK: 65]
+    silence 2s in line(8.0, 2.0) [DARK: 50]
+    knockback 3.0 in line(8.0, 2.0)
+}

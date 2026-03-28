@@ -1,0 +1,47 @@
+[[events]]
+id = "wall_breach"
+name = "Wall Breach"
+phase = "bombardment"
+
+[events.trigger]
+type = "WallHpBelow"
+threshold = 0.3
+
+[events.choice]
+prompt = "A section of the {wall_type} crumbles under bombardment! The breach is narrow but passable."
+deadline_secs = 30.0
+
+[[events.choice.options]]
+label = "Storm the Breach"
+description = "Send troops through immediately. High casualties but momentum."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "wall_breach"
+attacker_bonus = 0.0
+defender_bonus = 0.3
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Warriors pour through the gap in the wall, meeting steel with steel. The rubble is slick with blood before the first minute is done."
+
+[[events.choice.options]]
+label = "Widen with Artillery"
+description = "Continue bombardment to widen the breach. Costs time but reduces defender advantage."
+[[events.choice.options.effects]]
+type = "siege_progress"
+wall_damage = 500
+ticks_cost = 200
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The trebuchets focus their fire. Stone cascades inward. The breach widens from a doorway to a highway."
+
+[[events.choice.options]]
+label = "Send Sappers Through"
+description = "Elite sappers infiltrate through the rubble. Small team, high risk, high reward."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "sapper_infiltration"
+attacker_count = 4
+stealth_bonus = 0.5
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Four shadows slip through the rubble under cover of darkness. If they reach the gatehouse mechanism, the siege is over."

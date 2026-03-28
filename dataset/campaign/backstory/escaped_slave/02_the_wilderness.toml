@@ -1,0 +1,35 @@
+name = "The Wilderness"
+world_template = "Frontier"
+sequence = 2
+default_option = 1
+prompt = "Freedom tastes like hunger and cold rain. You've been on the move for a week, sleeping in ditches, eating what the forest offers. The consortium has posted a bounty — your face is on every tavern board. A crossroads ahead: a village with smoke rising from chimneys, and a forest path leading deeper into nowhere."
+
+[[options]]
+label = "Risk the Village"
+description = "You need food, medicine, and information. The village is small — maybe they haven't seen the bounty notice yet."
+pc_traits = [{ trait = "pragmatist" }]
+pc_stats = { speed = 2.0 }
+effects = [
+    { type = "gold", amount = 15.0 },
+    { type = "narrative", text = "The innkeeper studies your face but says nothing. A hot meal and a bed. In the morning, you find a coin purse by the door — charity or guilt, you don't care which." },
+]
+
+[[options]]
+label = "Live Wild"
+description = "You survived the quarry. A forest is nothing. Hunt, forage, and keep moving until the search parties give up."
+pc_traits = [{ trait = "explorer" }]
+pc_stats = { defense = 2.0, resolve = 2.0 }
+effects = [
+    { type = "supplies", amount = 10.0 },
+    { type = "narrative", text = "Weeks in the wild sharpen you into something feral and capable. You learn to read the land like a book." },
+]
+
+[[options]]
+label = "Confront the Bounty Hunters"
+description = "They'll find you eventually. Better to face them on your terms. Set an ambush and end this."
+pc_traits = [{ trait = "battle_scarred" }]
+pc_stats = { attack = 3.0, injury = 10.0 }
+effects = [
+    { type = "reputation", amount = 5.0 },
+    { type = "narrative", text = "Three bounty hunters walk into your trap. Two walk out. They don't come looking again." },
+]

@@ -1,0 +1,16 @@
+name = "The Tear Between Worlds"
+description = "Reality fractures. Creatures from beyond pour through rifts that open without warning, bringing alien threats no one has ever fought before"
+crisis_type = "rift"
+world_templates = []
+trigger_threshold = 0.85
+priority = 9
+allow_simultaneous = false
+
+[config]
+type = "DimensionalRift"
+rift_spawn_interval_ticks = 5000
+initial_rift_count = 1
+max_rifts = 5
+threat_per_rift = 25.0
+seal_cost_per_rift = 80.0
+instability_growth_per_tick = 0.3

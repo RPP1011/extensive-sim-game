@@ -1,0 +1,148 @@
+// Tier 7: Banish, charm, polymorph, suppress, and rare CC abilities
+
+ability VoidBanishment {
+    target: enemy, range: 5.0
+    cooldown: 20s, cast: 500ms
+    hint: crowd_control
+
+    banish 3s [DARK: 60]
+}
+
+ability DimensionalRift {
+    target: enemy, range: 6.0
+    cooldown: 25s, cast: 800ms
+    hint: crowd_control
+
+    banish 4s [MAGIC: 65]
+    damage 40 [MAGIC: 45]
+}
+
+ability TemporalExile {
+    target: enemy, range: 4.0
+    cooldown: 18s, cast: 400ms
+    hint: crowd_control
+
+    banish 2500ms [MAGIC: 55]
+    slow 0.4 for 3s [MAGIC: 40]
+}
+
+ability SelfPreservation {
+    target: self
+    cooldown: 30s
+    hint: defense
+
+    banish 2s
+    heal 50 [HOLY: 30]
+}
+
+ability PhaseLock {
+    target: enemy, range: 5.0
+    cooldown: 22s, cast: 600ms
+    hint: crowd_control
+
+    banish 3s [DARK: 55]
+    silence 2s [DARK: 45]
+    damage 30 [DARK: 40]
+}
+
+ability EnchantingGaze {
+    target: enemy, range: 4.0
+    cooldown: 16s, cast: 300ms
+    hint: crowd_control
+
+    charm 2s [MAGIC: 55]
+    damage 20 [MAGIC: 40]
+}
+
+ability SirensSong {
+    target: self_aoe
+    cooldown: 22s, cast: 600ms
+    hint: crowd_control
+
+    charm 2500ms in circle(4.0) [MAGIC: 60]
+    slow 0.3 for 3s in circle(4.0) [MAGIC: 40]
+}
+
+ability HeartSeeker {
+    target: enemy, range: 5.0
+    cooldown: 14s, cast: 200ms
+    hint: crowd_control
+
+    charm 1500ms [MAGIC: 50]
+    debuff armor 0.2 for 4s
+}
+
+ability PolymorphBeast {
+    target: enemy, range: 4.0
+    cooldown: 18s, cast: 400ms
+    hint: crowd_control
+
+    polymorph 3s [MAGIC: 60]
+}
+
+ability MassPolymorph {
+    target: ground, range: 6.0
+    cooldown: 30s, cast: 800ms
+    hint: crowd_control
+
+    polymorph 2s in circle(3.0) [MAGIC: 65]
+}
+
+ability SheepBlast {
+    target: enemy, range: 5.0
+    cooldown: 15s, cast: 300ms
+    hint: crowd_control
+
+    polymorph 2s [MAGIC: 55]
+    damage 30 [MAGIC: 40]
+    slow 0.3 for 2s
+}
+
+ability DominatingGrip {
+    target: enemy, range: 3.0
+    cooldown: 20s, cast: 200ms
+    hint: crowd_control
+
+    suppress 2500ms [DARK: 60]
+    damage 15/500ms for 2500ms [DARK: 45]
+}
+
+ability AbsoluteAuthority {
+    target: enemy, range: 4.0
+    cooldown: 25s, cast: 400ms
+    hint: crowd_control
+
+    suppress 3s [DARK: 65]
+    damage 60 [DARK: 50]
+    silence 2s [DARK: 45]
+}
+
+ability InfernalChains {
+    target: enemy, range: 3.0
+    cooldown: 16s, cast: 300ms
+    hint: crowd_control
+
+    suppress 2s [DARK: 55]
+    damage 40 [FIRE: 45]
+    leash 3.0 for 2s
+}
+
+ability MindShatter {
+    target: enemy, range: 4.0
+    cooldown: 18s, cast: 500ms
+    hint: crowd_control
+
+    confuse 3s [DARK: 55]
+    damage 35 [DARK: 45]
+    debuff damage_output 0.2 for 4s
+}
+
+ability GroundSlam {
+    target: self_aoe
+    cooldown: 14s, cast: 200ms
+    hint: crowd_control
+
+    grounded 3s in circle(4.0) [PHYSICAL: 50]
+    damage 40 in circle(4.0) [PHYSICAL: 45]
+    slow 0.3 for 3s in circle(4.0)
+}

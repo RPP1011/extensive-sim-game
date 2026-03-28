@@ -1,0 +1,49 @@
+# A guild member is ready for a leadership position.
+
+name = "Member Promotion"
+priority = 4
+repeatable = true
+cooldown_ticks = 6000
+
+[trigger]
+type = "AdventurerLevelUp"
+min_level = 8
+
+[choice]
+category = "character"
+trigger = "hook"
+prompt = "{adventurer_name} has proven themselves time and again. Level {level}, veteran of dozens of quests. It's time to decide their future within the guild hierarchy."
+deadline_secs = 120.0
+default_option = 0
+
+[[choice.options]]
+label = "Squad Leader"
+description = "Give them command of a team. Their experience guides newer members."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer_name} pins on the squad leader badge. New recruits look up at their new boss."
+
+[[choice.options]]
+label = "Specialist"
+description = "Let them focus on what they do best. Mastery over management."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer_name} dives deeper into their craft, honing skills others can only envy."
+
+[[choice.options]]
+label = "Send to Advanced Training (35g)"
+description = "Invest in their growth. They return stronger but it takes time and gold."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -35.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer_name} departs for the training grounds. When they return, they'll be formidable."

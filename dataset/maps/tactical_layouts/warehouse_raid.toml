@@ -1,0 +1,61 @@
+name = "Warehouse District Raid"
+map_type = "street_fight"
+width = 28
+height = 16
+
+[terrain]
+layout = """
+WWWWWW..WWWWWW..WWWWWW..WWWW
+W....W..W....W..W....W..W..W
+W....W..W....W..W....W..W..W
+W....G..W....G..W....G..W..G
+W....W..W....W..W....W..W..W
+WWWWWW..WWWWWW..WWWWWW..WWWW
+............................
+RRRRRRRRRRRRRRRRRRRRRRRRRRRR
+............................
+WWWWWW..WWWWWW..WWWWWW..WWWW
+W....W..W....W..W....W..W..W
+W....G..W....G..W....G..W..G
+W....W..W....W..W....W..W..W
+W....W..W....W..W....W..W..W
+WWWWWW..WWWWWW..WWWWWW..WWWW
+............................
+"""
+
+[[spawn_zones]]
+name = "warehouse_guards"
+team = 0
+rect = [1, 1, 26, 4]
+
+[[spawn_zones]]
+name = "thieves"
+team = 1
+rect = [0, 13, 27, 15]
+
+[[objectives]]
+type = "raid_warehouse"
+position = [3, 2]
+hp = 200
+
+[[objectives]]
+type = "raid_warehouse"
+position = [11, 2]
+hp = 200
+
+[[objectives]]
+type = "raid_warehouse"
+position = [19, 2]
+hp = 200
+
+[[cover_positions]]
+position = [7, 6]
+type = "half"
+
+[[cover_positions]]
+position = [15, 6]
+type = "half"
+
+[[cover_positions]]
+position = [23, 6]
+type = "half"

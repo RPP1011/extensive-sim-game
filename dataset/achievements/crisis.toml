@@ -1,0 +1,307 @@
+# Crisis & endgame achievements — surviving crises and campaign completion
+
+[[achievements]]
+id = "first_crisis"
+name = "Trial by Fire"
+description = "Survive your first crisis."
+category = "crisis"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CrisisResolved"
+count = 1
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "The first crisis came and went. The guild still stands."
+
+[[achievements]]
+id = "sleeping_king_champion"
+name = "Wake-Up Call"
+description = "Defeat the Sleeping King's first champion."
+category = "crisis"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "sleeping_king_champion"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "The champion fell. Somewhere deep underground, something stirred."
+
+[[achievements]]
+id = "sleeping_king_all"
+name = "Silenced Court"
+description = "Defeat all of the Sleeping King's champions."
+category = "crisis"
+tier = "legendary"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "all_sleeping_king_champions"
+
+[achievements.reward]
+rl_bonus = 2.0
+narrative = "Every champion, broken. The Sleeping King has no one left to send."
+
+[[achievements]]
+id = "breach_survived"
+name = "Hold the Line"
+description = "Survive a Breach crisis."
+category = "crisis"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CrisisResolved"
+condition = "breach"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "The Breach opened and things came through. You pushed them back."
+
+[[achievements]]
+id = "plague_no_losses"
+name = "Quarantine"
+description = "Survive a Plague crisis without losing any adventurers."
+category = "crisis"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CrisisResolved"
+condition = "plague_no_deaths"
+
+[achievements.reward]
+rl_bonus = 1.0
+narrative = "The plague came. Everyone lived. Your [Healer] deserves a raise."
+
+[[achievements]]
+id = "crisis_diplomacy"
+name = "Words Over Swords"
+description = "End a crisis through diplomacy instead of combat."
+category = "crisis"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CrisisResolved"
+condition = "resolved_diplomatically"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "The crisis ended at a negotiating table. The hardest victories leave no bodies."
+
+[[achievements]]
+id = "triple_crisis"
+name = "Perfect Storm"
+description = "Survive 3 simultaneous active crises."
+category = "crisis"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CrisisStarted"
+condition = "three_simultaneous"
+
+[achievements.reward]
+rl_bonus = 1.0
+narrative = "Plague, Breach, and war. All at once. And you're still here."
+
+[[achievements]]
+id = "endgame_boss"
+name = "Boss Slayer"
+description = "Defeat an endgame boss."
+category = "crisis"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "endgame_boss"
+
+[achievements.reward]
+rl_bonus = 1.0
+narrative = "The thing that was supposed to end everything just ended instead."
+
+[[achievements]]
+id = "campaign_victory"
+name = "Victory"
+description = "Win the campaign."
+category = "crisis"
+tier = "legendary"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "campaign_won"
+
+[achievements.reward]
+rl_bonus = 2.0
+narrative = "The guild's story is told in taverns across the land. You won."
+
+[[achievements]]
+id = "speed_run"
+name = "Speedrunner"
+description = "Win the campaign in under 15000 ticks."
+category = "crisis"
+tier = "legendary"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "campaign_won_under_15000"
+
+[achievements.reward]
+rl_bonus = 2.0
+narrative = "Fifteen thousand ticks. Most guilds haven't finished recruiting by then."
+
+[[achievements]]
+id = "minimalist"
+name = "Skeleton Crew"
+description = "Win the campaign with fewer than 6 adventurers ever recruited."
+category = "crisis"
+tier = "legendary"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "campaign_won_under_6_recruits"
+
+[achievements.reward]
+rl_bonus = 2.0
+narrative = "Five or fewer. Quality over quantity, taken to its extreme."
+
+[[achievements]]
+id = "deathless_run"
+name = "Deathless"
+description = "Win the campaign without any adventurer dying."
+category = "crisis"
+tier = "legendary"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "campaign_won_no_deaths"
+
+[achievements.reward]
+rl_bonus = 2.0
+narrative = "Not one death. Not one. That's not luck. That's mastery."
+
+[[achievements]]
+id = "never_bankrupt"
+name = "Fiscal Discipline"
+description = "Win the campaign without ever going bankrupt."
+category = "crisis"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "campaign_won_never_bankrupt"
+
+[achievements.reward]
+rl_bonus = 1.0
+narrative = "Always in the black. The accountant deserves a medal."
+
+[[achievements]]
+id = "diplomat_victory"
+name = "World Peace"
+description = "Win the campaign with all factions at Friendly relations."
+category = "crisis"
+tier = "legendary"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "campaign_won_all_friendly"
+
+[achievements.reward]
+rl_bonus = 2.0
+narrative = "Every faction, every border, every grudge. All resolved. The diplomat's dream."
+
+[[achievements]]
+id = "combat_only"
+name = "Blood and Iron"
+description = "Win the campaign without ever trading."
+category = "crisis"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "campaign_won_no_trades"
+
+[achievements.reward]
+rl_bonus = 1.0
+narrative = "No markets, no merchants, no deals. Everything was taken by force."
+
+[[achievements]]
+id = "five_crises"
+name = "Crisis Veteran"
+description = "Survive 5 crises."
+category = "crisis"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CrisisResolved"
+count = 5
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Five crises survived. The guild knows the drill."
+
+[[achievements]]
+id = "ten_crises"
+name = "Unbreakable"
+description = "Survive 10 crises."
+category = "crisis"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CrisisResolved"
+count = 10
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Ten crises. The guild bends but never breaks."
+
+[[achievements]]
+id = "crisis_back_to_back"
+name = "No Rest"
+description = "Survive two crises that overlap."
+category = "crisis"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CrisisResolved"
+condition = "overlapping_crises"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "One crisis ended while another raged. There was no time to breathe."

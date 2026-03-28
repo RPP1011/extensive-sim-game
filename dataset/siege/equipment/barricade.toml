@@ -1,0 +1,30 @@
+[[equipment]]
+id = "barricade"
+name = "Barricade"
+category = "defensive"
+tier = 1
+
+[equipment.stats]
+gate_damage_per_tick = 0.0
+wall_damage_per_tick = 0.0
+range = 0.0
+crew_required = 0
+move_speed = 0.0
+hp = 300
+armor = 15
+blocks_movement = true
+cover_bonus = 0.5
+deployable_inside = true
+
+[equipment.requirements]
+min_tech_level = 1
+construction_cost = 30
+construction_ticks = 80
+resources = ["timber"]
+
+[equipment.counters]
+vulnerable_to = ["fire_arrows", "battering_ram", "heavy_infantry"]
+strong_against = ["cavalry_charge", "troop_rush", "escalade"]
+
+[equipment.narrative]
+description = "Furniture, wagons, timber, stones — anything heavy, piled across the breach. It won't hold forever. It doesn't need to. It just needs to hold long enough."

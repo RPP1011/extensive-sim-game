@@ -1,0 +1,32 @@
+[[equipment]]
+id = "ballista"
+name = "Ballista"
+category = "ranged"
+tier = 2
+
+[equipment.stats]
+gate_damage_per_tick = 3.0
+wall_damage_per_tick = 2.0
+range = 15.0
+crew_required = 3
+move_speed = 0.4
+hp = 200
+armor = 10
+fire_rate = 0.2
+accuracy = 0.85
+splash_radius = 0.0
+troop_damage = 80.0
+anti_personnel = true
+
+[equipment.requirements]
+min_tech_level = 2
+construction_cost = 90
+construction_ticks = 250
+resources = ["timber", "iron", "sinew"]
+
+[equipment.counters]
+vulnerable_to = ["sally_out", "mantlet", "pavise"]
+strong_against = ["siege_tower", "troop_formations", "champions"]
+
+[equipment.narrative]
+description = "A bolt three feet long and thick as a man's wrist. It punches through shield, armor, and the man behind both. The ballista crew doesn't cheer. They just reload."

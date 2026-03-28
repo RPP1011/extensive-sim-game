@@ -1,0 +1,47 @@
+[[events]]
+id = "disease"
+name = "Disease in Siege Camp"
+phase = "surround"
+
+[events.trigger]
+type = "TicksElapsed"
+threshold = 500
+
+[events.choice]
+prompt = "Sickness spreads through the siege camp. Soldiers are too weak to fight. The latrines are too close to the water supply, and now everyone is paying for it."
+deadline_secs = 30.0
+
+[[events.choice.options]]
+label = "Quarantine the Sick"
+description = "Isolate infected soldiers. Slower spread but reduced fighting strength."
+[[events.choice.options.effects]]
+type = "army_modifier"
+strength_reduction = 0.15
+disease_spread_rate = 0.3
+ticks_to_recover = 400
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Tents are roped off. The sick are separated from the healthy. It's not pleasant, but it's better than letting the whole army rot."
+
+[[events.choice.options]]
+label = "Push Through — Assault Now"
+description = "Attack before the disease gets worse. Sick soldiers can still fight, barely."
+[[events.choice.options.effects]]
+type = "force_phase_transition"
+to_phase = "siege_assault"
+attacker_penalty = 0.2
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Better to die fighting than to die shivering in a tent. The army lurches forward, green-faced and grim, and the walls loom above."
+
+[[events.choice.options]]
+label = "Deploy Healers"
+description = "Commit [Healer] class units to treat the camp. Costs mana and healer availability."
+[[events.choice.options.effects]]
+type = "army_modifier"
+strength_reduction = 0.05
+healer_unavailable_ticks = 200
+disease_spread_rate = 0.1
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The [Healers] work themselves to exhaustion, burning through mana and potions. The disease retreats, but the healers won't be available if the fighting starts."

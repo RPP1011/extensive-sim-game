@@ -1,0 +1,35 @@
+[[equipment]]
+id = "flame_barrier"
+name = "Flame Barrier"
+category = "special"
+tier = 3
+
+[equipment.stats]
+gate_damage_per_tick = 0.0
+wall_damage_per_tick = 0.0
+range = 10.0
+crew_required = 0
+move_speed = 0.0
+hp = 0
+armor = 0
+blocks_movement = false
+fire_damage_per_tick = 15.0
+barrier_width = 8.0
+barrier_depth = 1.5
+duration = 200
+mana_cost_to_cast = 60
+ignite_chance = 0.5
+
+[equipment.requirements]
+min_tech_level = 3
+construction_cost = 0
+construction_ticks = 5
+resources = []
+requires_class = "[Pyromancer]"
+
+[equipment.counters]
+vulnerable_to = ["frost_wall", "ward_breaker", "rain_weather"]
+strong_against = ["siege_tower", "battering_ram", "siege_ladder", "mantlet", "troop_rush"]
+
+[equipment.narrative]
+description = "A line of fire erupts across the approach, head-high and hungry. Wooden siege equipment catches instantly. Soldiers recoil from the heat. The [Pyromancer] holds their hands steady, feeding the flames with will and mana."

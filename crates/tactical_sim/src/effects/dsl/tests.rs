@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::effects::defs::AbilityTargeting;
-use crate::effects::types::{Area, Delivery};
+use crate::effects::types::{Area, Delivery, TargetFilter};
 
 #[test]
 fn parse_simple_ability() {
@@ -282,7 +282,7 @@ ability ManaShield {
 
 #[test]
 fn parse_full_mage_kit() {
-    let input = include_str!("../../../../../assets/hero_templates/mage.ability");
+    let input = include_str!("../../../../../dataset/abilities/hero_templates/mage.ability");
     let (abilities, passives) = parse_abilities(input).unwrap();
     assert_eq!(abilities.len(), 8, "mage should have 8 abilities");
     assert_eq!(passives.len(), 2, "mage should have 2 passives");
@@ -389,7 +389,7 @@ ability MultiShot {
 #[test]
 fn parse_all_lol_heroes() {
     let lol_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/lol_heroes");
+        .join("../../dataset/abilities/lol_heroes");
     let mut count = 0;
     let mut errors = Vec::new();
 
@@ -549,6 +549,7 @@ fn roundtrip_generated_abilities() {
                     stacking: Stacking::Refresh,
                     chance: 1.0,
                     else_effects: vec![],
+                    targeting_filter: None,
                 };
 
                 let def = AbilityDef {
@@ -592,31 +593,31 @@ fn roundtrip_generated_abilities() {
         ConditionalEffect {
             effect: Effect::Dash { to_target: true, distance: 7.0, to_position: false, is_blink: true },
             condition: None, area: None, tags: Tags::new(),
-            stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![],
+            stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![], targeting_filter: None,
         },
         // Lifesteal with imprecise float
         ConditionalEffect {
             effect: Effect::Lifesteal { percent: 0.27341, duration_ms: 4523 },
             condition: None, area: None, tags: Tags::new(),
-            stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![],
+            stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![], targeting_filter: None,
         },
         // Execute with fractional threshold
         ConditionalEffect {
             effect: Effect::Execute { hp_threshold_percent: 0.35 },
             condition: None, area: None, tags: Tags::new(),
-            stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![],
+            stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![], targeting_filter: None,
         },
         // Stealth with break flags
         ConditionalEffect {
             effect: Effect::Stealth { duration_ms: 3000, break_on_damage: true, break_on_ability: true },
             condition: None, area: None, tags: Tags::new(),
-            stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![],
+            stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![], targeting_filter: None,
         },
         // Resurrect
         ConditionalEffect {
             effect: Effect::Resurrect { hp_percent: 0.55 },
             condition: None, area: None, tags: Tags::new(),
-            stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![],
+            stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![], targeting_filter: None,
         },
     ];
 
@@ -681,7 +682,7 @@ fn roundtrip_generated_abilities() {
                     damage_type: DamageType::Physical, bonus: vec![],
                 },
                 condition: None, area: None, tags: Tags::new(),
-                stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![],
+                stacking: Stacking::Refresh, chance: 1.0, else_effects: vec![], targeting_filter: None,
             }],
             delivery: delivery.clone(),
             ..Default::default()
@@ -716,4 +717,372 @@ fn roundtrip_generated_abilities() {
         );
     }
     eprintln!("All {total} generated abilities roundtripped successfully");
+}
+
+// ---------------------------------------------------------------------------
+// Aura (while_alive) and scales_with tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn parse_while_alive_aura() {
+    let input = r#"
+ability AuraOfTheBrave {
+    target: self_aoe
+    cooldown: 0s
+    hint: defense
+
+    immunity "fear" in circle(10.0) while_alive
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    assert_eq!(abilities.len(), 1);
+    let a = &abilities[0];
+    assert_eq!(a.name, "AuraOfTheBrave");
+    assert_eq!(a.effects.len(), 1);
+    let eff = &a.effects[0];
+    match &eff.effect {
+        crate::effects::effect_enum::Effect::Immunity { duration_ms, immune_to } => {
+            assert_eq!(*duration_ms, u32::MAX, "while_alive should set duration to u32::MAX");
+            assert_eq!(immune_to, &["fear"]);
+        }
+        other => panic!("expected Immunity, got: {other:?}"),
+    }
+    assert!(matches!(eff.area.as_ref().unwrap(), Area::Circle { radius } if (*radius - 10.0).abs() < 0.01));
+}
+
+#[test]
+fn parse_while_alive_buff() {
+    let input = r#"
+ability InspiringAura {
+    target: self_aoe
+    cooldown: 0s
+    hint: utility
+
+    buff damage_output 0.1 in circle(8.0) while_alive
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    let eff = &abilities[0].effects[0];
+    match &eff.effect {
+        crate::effects::effect_enum::Effect::Buff { stat, factor, duration_ms } => {
+            assert_eq!(stat, "damage_output");
+            assert!((*factor - 0.1).abs() < 0.01);
+            assert_eq!(*duration_ms, u32::MAX);
+        }
+        other => panic!("expected Buff, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_scales_with() {
+    let input = r#"
+ability KingsBlessing {
+    target: self_aoe
+    cooldown: 0s
+    hint: utility
+
+    buff armor 2 for 10s in circle(8.0) scales_with party_size
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    let eff = &abilities[0].effects[0];
+    match &eff.effect {
+        crate::effects::effect_enum::Effect::Buff { stat, factor, duration_ms } => {
+            assert_eq!(stat, "armor");
+            assert!((*factor - 2.0).abs() < 0.01);
+            assert_eq!(*duration_ms, 10000);
+        }
+        other => panic!("expected Buff, got: {other:?}"),
+    }
+    // Scaling won't be on Buff (only on Damage/Heal), but it should parse without error
+}
+
+#[test]
+fn parse_scales_with_on_damage() {
+    let input = r#"
+ability PowerStrike {
+    target: enemy
+    range: 3.0
+    cooldown: 5s
+    hint: damage
+
+    damage 10 scales_with caster_level
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    let eff = &abilities[0].effects[0];
+    match &eff.effect {
+        crate::effects::effect_enum::Effect::Damage { amount, bonus, .. } => {
+            assert_eq!(*amount, 10);
+            assert_eq!(bonus.len(), 1);
+            assert!(matches!(bonus[0].stat, crate::effects::types::StatRef::CasterLevel));
+            assert!((bonus[0].percent - 100.0).abs() < 0.01);
+        }
+        other => panic!("expected Damage, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_while_alive_and_scales_with_combined() {
+    let input = r#"
+ability KingdomAura {
+    target: self_aoe
+    cooldown: 0s
+    hint: utility
+
+    buff damage_output 0.01 while_alive scales_with kingdom_size
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    let eff = &abilities[0].effects[0];
+    match &eff.effect {
+        crate::effects::effect_enum::Effect::Buff { duration_ms, .. } => {
+            assert_eq!(*duration_ms, u32::MAX, "should be while_alive");
+        }
+        other => panic!("expected Buff, got: {other:?}"),
+    }
+    // Scaling is parsed but only applies to Damage/Heal effects during lowering
+}
+
+#[test]
+fn roundtrip_while_alive() {
+    // Parse, emit, re-parse, and verify while_alive survives the roundtrip
+    let input = r#"
+ability AuraOfCourage {
+    target: self_aoe
+    cooldown: 0s
+    hint: defense
+
+    immunity "fear" in circle(10.0) while_alive
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    let emitted = crate::effects::dsl::emit::emit_ability_dsl(&abilities[0]);
+    eprintln!("Emitted:\n{emitted}");
+    let (reparsed, _) = parse_abilities(&emitted).unwrap();
+    let eff = &reparsed[0].effects[0];
+    match &eff.effect {
+        crate::effects::effect_enum::Effect::Immunity { duration_ms, .. } => {
+            assert_eq!(*duration_ms, u32::MAX, "while_alive should survive roundtrip");
+        }
+        other => panic!("expected Immunity, got: {other:?}"),
+    }
+}
+
+#[test]
+fn roundtrip_scales_with() {
+    let input = r#"
+ability LevelStrike {
+    target: enemy
+    range: 3.0
+    cooldown: 5s
+    hint: damage
+
+    damage 10 scales_with caster_level
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    let emitted = crate::effects::dsl::emit::emit_ability_dsl(&abilities[0]);
+    eprintln!("Emitted:\n{emitted}");
+    let (reparsed, _) = parse_abilities(&emitted).unwrap();
+    let eff = &reparsed[0].effects[0];
+    match &eff.effect {
+        crate::effects::effect_enum::Effect::Damage { bonus, .. } => {
+            assert_eq!(bonus.len(), 1);
+            assert!(matches!(bonus[0].stat, crate::effects::types::StatRef::CasterLevel));
+        }
+        other => panic!("expected Damage, got: {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Targeting filter tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn parse_targeting_under_command() {
+    let input = r#"
+ability CommandBuff {
+    target: self_aoe
+    cooldown: 10s
+    hint: utility
+
+    buff damage_output 0.3 for 10s in circle(8.0) targeting under_command
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    assert_eq!(abilities.len(), 1);
+    let eff = &abilities[0].effects[0];
+    assert!(matches!(&eff.targeting_filter, Some(TargetFilter::UnderCommand)));
+}
+
+#[test]
+fn parse_targeting_has_class() {
+    let input = r#"
+ability KnightBless {
+    target: ally
+    range: 6.0
+    cooldown: 8s
+    hint: utility
+
+    buff defense 0.2 for 5s in circle(6.0) targeting has_class("knight")
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    let eff = &abilities[0].effects[0];
+    match &eff.targeting_filter {
+        Some(TargetFilter::HasClass { class_name }) => assert_eq!(class_name, "knight"),
+        other => panic!("expected HasClass, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_targeting_loyalty_above() {
+    let input = r#"
+ability LoyalRally {
+    target: self_aoe
+    cooldown: 15s
+    hint: leadership
+
+    heal 20 in circle(10.0) targeting loyalty_above(75)
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    let eff = &abilities[0].effects[0];
+    match &eff.targeting_filter {
+        Some(TargetFilter::LoyaltyAbove { threshold }) => assert!((*threshold - 75.0).abs() < 0.01),
+        other => panic!("expected LoyaltyAbove, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_targeting_injured() {
+    let input = r#"
+ability BattlefieldMedic {
+    target: self_aoe
+    cooldown: 12s
+    hint: heal
+
+    heal 30 in circle(8.0) targeting injured
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    let eff = &abilities[0].effects[0];
+    assert!(matches!(&eff.targeting_filter, Some(TargetFilter::Injured)));
+}
+
+#[test]
+fn parse_targeting_with_condition_and_tags() {
+    let input = r#"
+ability HolySmite {
+    target: enemy
+    range: 5.0
+    cooldown: 6s
+    hint: damage
+
+    damage 40 in circle(4.0) [HOLY: 80] when target_hp_below(50%) targeting has_status("undead")
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    let eff = &abilities[0].effects[0];
+    assert!(eff.condition.is_some());
+    assert!(!eff.tags.is_empty());
+    match &eff.targeting_filter {
+        Some(TargetFilter::HasStatus { status }) => assert_eq!(status, "undead"),
+        other => panic!("expected HasStatus, got: {other:?}"),
+    }
+}
+
+#[test]
+fn roundtrip_targeting_filter() {
+    let input = r#"
+ability CommandBuff {
+    target: self_aoe
+    cooldown: 10s
+    hint: utility
+
+    buff damage_output 0.3 for 10s in circle(8.0) targeting under_command
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    let emitted = crate::effects::dsl::emit::emit_ability_dsl(&abilities[0]);
+    eprintln!("Emitted:\n{emitted}");
+    let (reparsed, _) = parse_abilities(&emitted).unwrap();
+    let eff = &reparsed[0].effects[0];
+    assert!(matches!(&eff.targeting_filter, Some(TargetFilter::UnderCommand)));
+}
+
+#[test]
+fn roundtrip_targeting_has_class() {
+    let input = r#"
+ability KnightBless {
+    target: ally
+    range: 6.0
+    cooldown: 8s
+    hint: utility
+
+    buff defense 0.2 for 5s in circle(6.0) targeting has_class("knight")
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    let emitted = crate::effects::dsl::emit::emit_ability_dsl(&abilities[0]);
+    eprintln!("Emitted:\n{emitted}");
+    let (reparsed, _) = parse_abilities(&emitted).unwrap();
+    match &reparsed[0].effects[0].targeting_filter {
+        Some(TargetFilter::HasClass { class_name }) => assert_eq!(class_name, "knight"),
+        other => panic!("expected HasClass after roundtrip, got: {other:?}"),
+    }
+}
+
+#[test]
+fn no_targeting_filter_when_absent() {
+    let input = r#"
+ability Fireball {
+    target: enemy
+    range: 5.0
+    cooldown: 5s
+    hint: damage
+
+    damage 55
+}
+"#;
+    let (abilities, _) = parse_abilities(input).unwrap();
+    let eff = &abilities[0].effects[0];
+    assert!(eff.targeting_filter.is_none());
+}
+
+#[test]
+fn parse_new_dataset_abilities() {
+    let base_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../dataset/abilities");
+
+    let new_files = &[
+        "tier8_passives/aura_passives.ability",
+        "tier7_complex/targeting_filter.ability",
+        "tier7_complex/scaling_abilities.ability",
+        "tier7_complex/banish_abilities.ability",
+        "tier9_ultimates/combination_ultimates.ability",
+    ];
+
+    let mut count = 0;
+    let mut errors = Vec::new();
+
+    for file in new_files {
+        let path = base_dir.join(file);
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|_| panic!("cannot read {}", path.display()));
+        match parse_abilities(&content) {
+            Ok((a, p)) => {
+                count += 1;
+                eprintln!("  OK: {file} — {} abilities, {} passives", a.len(), p.len());
+            }
+            Err(e) => errors.push(format!("{file}: {e}")),
+        }
+    }
+
+    if !errors.is_empty() {
+        panic!("{} / {} new .ability files failed to parse:\n{}",
+            errors.len(), count + errors.len(), errors.join("\n"));
+    }
+    eprintln!("Successfully parsed all {count} new .ability files");
 }

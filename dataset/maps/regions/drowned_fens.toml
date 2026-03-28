@@ -1,0 +1,29 @@
+name = "The Drowned Fens"
+terrain = "swamp"
+climate = "humid"
+size = "medium"
+
+[generation]
+settlement_density = 0.1
+road_connectivity = 0.2
+wilderness_danger = 0.65
+resource_richness = 0.4
+
+[settlement_distribution]
+hamlet_pct = 50
+village_pct = 30
+town_pct = 15
+city_pct = 0
+fortress_pct = 5
+
+[terrain_features]
+rivers = 4
+mountains = false
+forests = false
+coast = true
+lakes = 3
+
+[narrative]
+description = "A maze of waterways, bogs, and reed beds. The locals navigate by landmarks invisible to outsiders, and the swamp swallows the unwary."
+threats = ["disease", "bog_creatures", "quicksand", "will_o_wisps"]
+opportunities = ["medicinal_herbs", "rare_dyes", "hidden_refuges"]

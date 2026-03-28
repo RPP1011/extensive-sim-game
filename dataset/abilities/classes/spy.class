@@ -1,0 +1,20 @@
+class Spy {
+    stat_growth: +2 speed, +2 attack, +1 defense per level
+
+    tags: infiltration, intelligence, sabotage, disguise, espionage
+
+    scaling enemy_count {
+        when enemy_count >= 1: +10% speed
+        always: +5% attack
+    }
+
+    abilities {
+        level 1: gather_intel "Learn enemy composition and strength before engagement"
+        level 5: false_identity "Disguise yourself to pass through hostile territory"
+        level 10: sabotage "Disable enemy equipment or fortifications before battle"
+        level 20: double_agent "Turn an enemy unit to fight for you for one battle"
+        level 40: shadow_network "Establish a spy ring; know every faction move in the region before it happens"
+    }
+
+    requirements: level 1
+}

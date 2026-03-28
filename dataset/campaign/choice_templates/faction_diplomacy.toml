@@ -1,0 +1,54 @@
+# Faction demands tribute or alliance.
+
+category = "diplomacy"
+trigger = "faction_demand"
+prompt = "{faction_name} demands a show of loyalty from the guild. How do you respond?"
+deadline_secs = 90.0
+default_option = 1
+
+[[options]]
+label = "Pay Tribute (30g)"
+description = "Gold keeps the peace. Submit to their demand."
+
+[[options.effects]]
+type = "gold"
+amount = -30.0
+
+[[options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 10.0
+
+[[options.effects]]
+type = "narrative"
+text = "The tribute is delivered with a forced smile. Peace has its price."
+
+[[options]]
+label = "Offer Services Instead"
+description = "Complete a task for them rather than paying gold."
+
+[[options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 8.0
+
+[[options.effects]]
+type = "narrative"
+text = "A quest is accepted in lieu of gold. The guild's blade serves another master, temporarily."
+
+[[options]]
+label = "Refuse"
+description = "The guild bows to no one. Accept the consequences."
+
+[[options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = -15.0
+
+[[options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[options.effects]]
+type = "narrative"
+text = "The refusal is delivered firmly. {faction_name} expected compliance. They didn't get it."

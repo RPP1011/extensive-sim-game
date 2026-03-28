@@ -1,0 +1,159 @@
+[[buildings]]
+id = "barracks"
+name = "Barracks"
+category = "military"
+construction_cost = 150
+construction_ticks = 600
+maintenance_cost = 8
+
+[buildings.effects]
+garrison_bonus = 20
+training_speed = 0.1
+morale_bonus = 0.05
+
+[buildings.requirements]
+min_settlement_type = "village"
+required_resources = ["timber", "stone"]
+
+[buildings.narrative]
+description = "Rows of bunks, racks of weapons, and the smell of boot polish. Home sweet home for the garrison."
+
+[[buildings]]
+id = "armory"
+name = "Armory"
+category = "military"
+construction_cost = 200
+construction_ticks = 800
+maintenance_cost = 10
+
+[buildings.effects]
+equipment_quality = 0.15
+garrison_bonus = 5
+repair_speed = 1.5
+
+[buildings.requirements]
+min_settlement_type = "village"
+required_resources = ["metal"]
+
+[buildings.narrative]
+description = "Every blade oiled, every shield polished, every spear straight. The armorer takes pride in readiness."
+
+[[buildings]]
+id = "training_yard"
+name = "Training Yard"
+category = "military"
+construction_cost = 100
+construction_ticks = 400
+maintenance_cost = 5
+
+[buildings.effects]
+training_speed = 0.2
+garrison_bonus = 5
+morale_bonus = 0.05
+
+[buildings.requirements]
+min_settlement_type = "village"
+required_resources = []
+
+[buildings.narrative]
+description = "Straw dummies, archery targets, and a patch of mud for wrestling. Soldiers are made here."
+
+[[buildings]]
+id = "siege_workshop"
+name = "Siege Workshop"
+category = "military"
+construction_cost = 400
+construction_ticks = 1200
+maintenance_cost = 15
+
+[buildings.effects]
+siege_capability = 1.0
+equipment_quality = 0.1
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "town"
+required_resources = ["timber", "metal", "rope"]
+
+[buildings.narrative]
+description = "Trebuchets, battering rams, siege towers. The engineers here build things designed to break other things."
+
+[[buildings]]
+id = "watchtower"
+name = "Watchtower"
+category = "military"
+construction_cost = 80
+construction_ticks = 350
+maintenance_cost = 3
+
+[buildings.effects]
+vision_range = 3
+garrison_bonus = 3
+early_warning = true
+
+[buildings.requirements]
+min_settlement_type = "hamlet"
+required_resources = ["timber"]
+
+[buildings.narrative]
+description = "Tall enough to see trouble coming, sturdy enough to survive what arrives."
+
+[[buildings]]
+id = "gatehouse"
+name = "Gatehouse"
+category = "military"
+construction_cost = 300
+construction_ticks = 1000
+maintenance_cost = 10
+
+[buildings.effects]
+wall_hp_bonus = 200
+garrison_bonus = 10
+defense_bonus = 0.15
+
+[buildings.requirements]
+min_settlement_type = "town"
+required_resources = ["stone", "metal"]
+
+[buildings.narrative]
+description = "Murder holes above, portcullis below, and archers on either side. Welcome to the city."
+
+[[buildings]]
+id = "stables"
+name = "Stables"
+category = "military"
+construction_cost = 120
+construction_ticks = 500
+maintenance_cost = 6
+
+[buildings.effects]
+cavalry_capacity = 20
+movement_speed = 0.15
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "village"
+required_resources = ["timber"]
+
+[buildings.narrative]
+description = "Hay, oats, and the warm smell of horses. The stable master knows every mount by name."
+
+[[buildings]]
+id = "war_college"
+name = "War College"
+category = "military"
+construction_cost = 500
+construction_ticks = 1500
+maintenance_cost = 20
+
+[buildings.effects]
+training_speed = 0.3
+tactical_bonus = 0.2
+garrison_bonus = 10
+
+[buildings.requirements]
+min_settlement_type = "city"
+required_resources = ["stone", "timber"]
+
+[buildings.narrative]
+description = "Where officers learn to think before they fight, and soldiers learn to fight before they think."

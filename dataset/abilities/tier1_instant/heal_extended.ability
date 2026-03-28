@@ -1,0 +1,97 @@
+// Tier 1: Extended heal variants
+
+ability FlashHeal {
+    target: ally, range: 5.0
+    cooldown: 3s, cast: 100ms
+    hint: heal
+
+    heal 18 [HOLY: 25]
+}
+
+ability NaturesBlessing {
+    target: ally, range: 4.5
+    cooldown: 6s, cast: 300ms
+    hint: heal
+
+    heal 45
+}
+
+ability SurgicalMend {
+    target: ally, range: 5.0
+    cooldown: 4s, cast: 200ms
+    hint: heal
+
+    heal 30 [HOLY: 35]
+}
+
+ability DarkPact {
+    target: self
+    cooldown: 8s, cast: 100ms
+    hint: heal
+
+    heal 50 [DARK: 40]
+}
+
+ability SiphonLife {
+    target: self
+    cooldown: 5s, cast: 200ms
+    hint: heal
+
+    heal 35 [DARK: 30]
+}
+
+ability LayOnHands {
+    target: ally, range: 1.5
+    cooldown: 15s, cast: 600ms
+    hint: heal
+
+    heal 90 [HOLY: 55]
+}
+
+ability HealingTouch {
+    target: ally, range: 3.0
+    cooldown: 5s, cast: 400ms
+    hint: heal
+
+    heal 50
+}
+
+ability TidalBlessing {
+    target: ally, range: 5.0
+    cooldown: 4s, cast: 200ms
+    hint: heal
+
+    heal 28 [MAGIC: 30]
+}
+
+ability VerdantMend {
+    target: ally, range: 4.0
+    cooldown: 3s, cast: 200ms
+    hint: heal
+
+    heal 22
+}
+
+ability SolarFlare {
+    target: ally, range: 6.0
+    cooldown: 7s, cast: 300ms
+    hint: heal
+
+    heal 55 [HOLY: 45]
+}
+
+ability LifeSpring {
+    target: self
+    cooldown: 10s, cast: 400ms
+    hint: heal
+
+    heal 70
+}
+
+ability QuickPatch {
+    target: ally, range: 5.0
+    cooldown: 3s, cast: 0ms
+    hint: heal
+
+    heal 15 [HOLY: 20]
+}

@@ -1,0 +1,15 @@
+name = "The Starving Time"
+description = "Crop failures and trade disruptions create a regional famine. Factions hoard food, prices soar, and the desperate turn to violence"
+crisis_type = "famine"
+world_templates = []
+trigger_threshold = 0.7
+priority = 7
+allow_simultaneous = true
+
+[config]
+type = "Famine"
+supply_drain_per_tick = 0.8
+gold_inflation_multiplier = 2.5
+unrest_growth_per_tick = 0.3
+faction_hoarding_threshold = 40.0
+relief_cost_per_region = 50.0

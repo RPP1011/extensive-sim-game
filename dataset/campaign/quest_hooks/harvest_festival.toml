@@ -1,0 +1,70 @@
+# Annual harvest festival with guild participation.
+
+name = "Harvest Festival"
+priority = 4
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "SeasonChange"
+season = "Autumn"
+
+[choice]
+category = "world_event"
+trigger = "hook"
+prompt = "The harvest is in, and the countryside erupts in celebration. Farmers bring their best produce, merchants set up stalls, and the smell of roasting meat fills the air. The guild is expected to participate."
+deadline_secs = 60.0
+default_option = 0
+
+[[choice.options]]
+label = "Sponsor the Festival (35g)"
+description = "Fund the whole event. Massive goodwill from every faction."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -35.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 12.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild's banner flies over the festival grounds. Everyone knows who made this possible."
+
+[[choice.options]]
+label = "Participate Modestly"
+description = "Join the celebration without bankrolling it. Show face, eat food, mingle."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Guild members enjoy the festival like everyone else. Good times, no fanfare."
+
+[[choice.options]]
+label = "Provide Security (10g)"
+description = "Guard the festival from bandits and pickpockets. Practical contribution."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 6.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Guild adventurers patrol the grounds. Not a single incident mars the celebration."

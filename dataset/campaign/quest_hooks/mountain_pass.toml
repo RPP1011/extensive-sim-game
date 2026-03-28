@@ -1,0 +1,48 @@
+# A mountain pass is discovered connecting regions.
+
+name = "Mountain Pass"
+priority = 6
+repeatable = false
+
+[trigger]
+type = "LocationScouted"
+location_type = "Outpost"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Rangers have found a navigable mountain pass connecting the lowlands to the highlands beyond. The route is treacherous — narrow ledges, rockfall zones, and signs of wyvern nests — but it could cut travel time in half."
+deadline_secs = 90.0
+default_option = 1
+
+[[choice.options]]
+label = "Secure the Pass (50g)"
+description = "Build waypoints and clear hazards. A major investment that pays dividends forever."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -50.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Work crews begin the grueling task of making the pass safe for regular travel."
+
+[[choice.options]]
+label = "Scout Only"
+description = "Map the route but don't commit resources. Knowledge for free."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The pass is mapped but remains wild. Only the bravest would attempt it unprepared."
+
+[[choice.options]]
+label = "Secret Route"
+description = "Keep the discovery classified. A hidden escape route is worth more than a trade road."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Only guild leadership knows about the pass. It remains the guild's secret advantage."

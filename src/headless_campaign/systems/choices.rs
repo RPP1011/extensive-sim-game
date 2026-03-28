@@ -1,7 +1,7 @@
 //! Choice event generation — every 500 ticks (~50s).
 //!
 //! Generates branching decisions by instantiating templates loaded from
-//! `assets/choice_templates/`. Templates are TOML files with variable
+//! `dataset/campaign/choice_templates/`. Templates are TOML files with variable
 //! substitution for quest names, NPC names, threat levels, etc.
 
 use std::collections::HashMap;

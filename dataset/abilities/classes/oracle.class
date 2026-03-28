@@ -1,0 +1,20 @@
+class Oracle {
+    stat_growth: +4 ability_power, +2 speed per level
+
+    tags: divination, prophecy, foresight, fate, knowledge
+
+    scaling party_alive_count {
+        when party_members >= 1: +10% ability_power
+        always: +10% speed
+    }
+
+    abilities {
+        level 20: foresight "See the next 3 enemy actions before they happen"
+        level 25: foretell "Predict and negate one enemy ability before it is cast"
+        level 30: twist_fate "Reroll any single outcome that just occurred"
+        level 40: prophecy "Declare an outcome; reality bends to make it more likely"
+        level 50: inevitable "Choose one enemy; they will die within 30 seconds regardless of healing"
+    }
+
+    requirements: level 20, classes: Mage or Healer
+}

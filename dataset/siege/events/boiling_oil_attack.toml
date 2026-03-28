@@ -1,0 +1,45 @@
+[[events]]
+id = "boiling_oil_attack"
+name = "Boiling Oil Poured"
+phase = "assault"
+
+[events.trigger]
+type = "AttackerNearWall"
+threshold = 1.0
+
+[events.choice]
+prompt = "The defenders tip the cauldrons! Boiling oil cascades down onto the troops below. Screams fill the air."
+deadline_secs = 15.0
+
+[[events.choice.options]]
+label = "Push Through"
+description = "Accept the losses and keep attacking. Momentum matters more than casualties."
+[[events.choice.options.effects]]
+type = "attacker_casualties"
+count_range = [5, 12]
+morale_loss = 0.15
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The oil burns and men burn with it. But the rest keep coming, stepping over the fallen, because stopping means dying too."
+
+[[events.choice.options]]
+label = "Pull Back and Regroup"
+description = "Retreat from the wall and wait for the cauldrons to empty."
+[[events.choice.options.effects]]
+type = "siege_progress"
+ticks_cost = 150
+morale_loss = 0.05
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The troops pull back out of range. The oil runs out eventually. It always does. The question is whether the attackers' nerve runs out first."
+
+[[events.choice.options]]
+label = "Target the Cauldrons"
+description = "Direct archers and siege weapons to destroy the oil apparatus."
+[[events.choice.options.effects]]
+type = "siege_progress"
+ticks_cost = 80
+equipment_destroyed = "boiling_oil"
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Ballista bolts punch through the cauldron supports. One tips backward, spilling burning oil across the battlements. The defenders scatter."

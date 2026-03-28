@@ -1,0 +1,82 @@
+// Tier 7: Complex assassin/rogue abilities
+
+ability Ambush {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 0ms
+    hint: damage
+
+    stealth 1s
+    dash to_target
+    damage 55 [PHYSICAL: 55]
+    stun 1s [CROWD_CONTROL: 45]
+}
+
+ability ShadowDance {
+    target: self
+    cooldown: 14s, cast: 0ms
+    hint: utility
+
+    stealth 3s
+    buff damage_output 0.3 for 3s
+    buff move_speed 0.3 for 3s
+}
+
+ability FanOfKnives {
+    target: self_aoe
+    cooldown: 8s, cast: 100ms
+    hint: damage
+
+    damage 25 in circle(3.0) [PHYSICAL: 45]
+    slow 0.3 for 2s in circle(3.0)
+    damage 4/1s for 3s in circle(3.0) [POISON: 35]
+}
+
+ability DeathMark {
+    target: enemy, range: 1.5
+    cooldown: 12s, cast: 100ms
+    hint: damage
+
+    damage 30 [DARK: 45]
+    damage_modify 1.3 for 4s
+    damage 8/1s for 4s [DARK: 40]
+}
+
+ability Eviscerate {
+    target: enemy, range: 1.5
+    cooldown: 8s, cast: 200ms
+    hint: damage
+
+    damage 60 [PHYSICAL: 55]
+    damage 10/1s for 3s [PHYSICAL: 40]
+    slow 0.2 for 2s
+}
+
+ability CloakAndDagger {
+    target: enemy, range: 6.0
+    cooldown: 12s, cast: 0ms
+    hint: damage
+
+    blink 6.0
+    damage 45 [PHYSICAL: 50]
+    silence 1500ms [CROWD_CONTROL: 45]
+}
+
+ability QuickBlade {
+    target: enemy, range: 1.5
+    cooldown: 4s, cast: 0ms
+    hint: damage
+
+    damage 20 [PHYSICAL: 35]
+    buff attack_speed 0.2 for 2s
+    dash 2.0
+}
+
+ability PoisonedBlade {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 100ms
+    hint: damage
+
+    damage 25 [PHYSICAL: 40]
+    damage 6/1s for 4s [POISON: 40]
+    debuff move_speed 0.2 for 3s [POISON: 30]
+}

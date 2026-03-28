@@ -1,0 +1,59 @@
+name = "Cursed Land"
+priority = 7
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "LocationScouted"
+location_type = "Ruin"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "The farmland around {location_name} has turned black. Crops wither, animals flee, and anyone who sleeps there wakes screaming. The curse radiates from the ruins like heat from a forge."
+deadline_secs = 90.0
+default_option = 0
+
+[[choice.options]]
+label = "Break the Curse (45g)"
+description = "Hire a curse-breaker to identify and dispel the source."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -45.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A curse-breaker walks the dead land, tracing ley lines of corruption to their source."
+
+[[choice.options]]
+label = "Evacuate the Area"
+description = "Move everyone out of the affected zone. The land is lost."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Families pack what they can carry. Behind them, the black spreads."
+
+[[choice.options]]
+label = "Quarantine and Study"
+description = "Fence off the area and study the curse from a safe distance."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Warning posts go up. Scholars observe from the boundary, taking notes."

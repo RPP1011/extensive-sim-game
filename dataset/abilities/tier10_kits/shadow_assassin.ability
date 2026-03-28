@@ -1,0 +1,58 @@
+// Tier 10: Shadow Assassin Kit — stealth burst damage with resets
+
+ability ShadowStrike2 {
+    target: enemy, range: 5.0
+    cooldown: 8s, cast: 0ms
+    hint: damage
+
+    stealth 1s
+    dash to_target
+    damage 45 [DARK: 50]
+}
+
+ability Backstab {
+    target: enemy, range: 1.5
+    cooldown: 4s, cast: 0ms
+    hint: damage
+
+    damage 35 [PHYSICAL: 45]
+    damage 25 when target_has(stun) [PHYSICAL: 40]
+}
+
+ability ShadowVeil {
+    target: self
+    cooldown: 14s, cast: 0ms
+    hint: utility
+
+    stealth 3s
+    buff damage_output 0.3 for 3s
+    buff move_speed 0.25 for 3s
+}
+
+ability CheapShot {
+    target: enemy, range: 1.5
+    cooldown: 10s, cast: 0ms
+    hint: crowd_control
+
+    damage 20 [PHYSICAL: 35]
+    stun 1500ms [CROWD_CONTROL: 55]
+}
+
+ability DeathsEmbrace {
+    target: enemy, range: 5.0
+    cooldown: 40s, cast: 0ms
+    hint: damage
+
+    blink 5.0
+    damage 80 [DARK: 60]
+    silence 2s [DARK: 50]
+    damage 10/1s for 3s [DARK: 45]
+}
+
+passive ShadowHarvest {
+    trigger: on_kill
+    cooldown: 3s
+
+    stealth 2s
+    heal 20
+}

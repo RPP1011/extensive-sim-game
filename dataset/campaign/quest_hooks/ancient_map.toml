@@ -1,0 +1,56 @@
+# An ancient map is found pointing to treasure.
+
+name = "Ancient Map Fragment"
+priority = 6
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "QuestComplete"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Among the spoils of the last quest, someone finds a fragment of ancient parchment — a map, drawn in faded ink, marking a location deep in the wilderness. The script is old, possibly pre-Walled era."
+deadline_secs = 90.0
+default_option = 1
+
+[[choice.options]]
+label = "Follow the Map (30g)"
+description = "Outfit an expedition immediately. If this leads to a ruin, the payoff could be enormous."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild mounts an expedition into uncharted territory, following faded lines on ancient parchment."
+
+[[choice.options]]
+label = "Research the Script (10g)"
+description = "Have a scholar translate the text first. Slower but you'll know what you're walking into."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A scholar peers at the parchment through a magnifying glass, muttering about dead languages."
+
+[[choice.options]]
+label = "Sell It (25g)"
+description = "Maps like this fetch good prices from collectors. Quick gold, no risk."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 25.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A collector's eyes widen at the parchment. Gold changes hands. The mystery goes unsolved."

@@ -1,0 +1,30 @@
+[[equipment]]
+id = "supply_wagon"
+name = "Supply Wagon"
+category = "support"
+tier = 1
+
+[equipment.stats]
+gate_damage_per_tick = 0.0
+wall_damage_per_tick = 0.0
+range = 0.0
+crew_required = 2
+move_speed = 0.4
+hp = 150
+armor = 5
+supply_capacity = 500
+extends_supply_ticks = 300
+ammunition_capacity = 200
+
+[equipment.requirements]
+min_tech_level = 1
+construction_cost = 40
+construction_ticks = 80
+resources = ["timber"]
+
+[equipment.counters]
+vulnerable_to = ["sally_out", "guerrilla", "fire_arrows", "cavalry_raid"]
+strong_against = ["starvation", "ammunition_shortage"]
+
+[equipment.narrative]
+description = "Oxen and wheels and the unglamorous cargo that wins wars: grain, arrows, pitch, bandages. An army besieging a fortress is itself besieged by hunger. These wagons hold the line."

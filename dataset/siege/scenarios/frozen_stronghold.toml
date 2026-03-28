@@ -1,0 +1,56 @@
+name = "The Winter Siege of Frostwatch"
+description = "A northern fortress besieged in winter. The cold is the third army. Ice walls regenerate, but the attackers freeze in the open."
+difficulty = "hard"
+
+[settlement]
+template = "northern_fortress"
+wall_type = "ice_wall"
+wall_hp = 1200
+outer_wall_type = "stone_wall"
+outer_wall_hp = 2000
+gate_type = "iron_gate"
+gate_hp = 1200
+towers = 4
+tower_type = "stone_tower"
+garrison = 35
+terrain = "arctic"
+cold_damage_per_tick = 1.0
+ice_wall_regeneration = 1.0
+
+[attacker]
+army_size = 100
+siege_equipment = ["trebuchet", "battering_ram", "fire_arrows", "flame_barrier"]
+supply_ticks = 1200
+reinforcement_chance = 0.1
+morale = 0.6
+commander_level = 22
+cold_attrition_per_tick = 0.5
+frostbite_chance = 0.1
+
+[defender]
+garrison_strength = 35
+adventurer_slots = 5
+supplies_ticks = 3000
+reinforcement_chance = 0.3
+morale = 0.85
+special_defenses = ["frost_wall", "arrow_slits", "murder_holes"]
+commander_level = 28
+cold_resistance = true
+
+[victory_conditions]
+attacker_wins = ["gate_destroyed", "wall_breached_and_stormed", "defender_surrender"]
+defender_wins = ["attacker_retreat", "attacker_frozen_out", "reinforcements_arrive", "spring_arrives"]
+time_limit_ticks = 4000
+
+[power_context]
+defender_avg_level = 24
+attacker_avg_level = 18
+wall_effective_level = 38
+has_wards = true
+ward_type = "basic_dampening"
+high_level_threat = "none"
+
+[narrative]
+opening = "The breath freezes before it leaves the mouth. The army camps in the snow, fires guttering in the wind, while Frostwatch gleams behind walls of living ice. The defenders are warm. The attackers are not."
+attacker_victory = "Fire melts ice. The flame barriers carve through Frostwatch's frozen defenses and the army pours in, frostbitten but victorious."
+defender_victory = "The army retreats south, leaving frozen dead in the snow like mile markers. Frostwatch's ice walls grow back overnight. By spring, there is no trace of the siege at all."

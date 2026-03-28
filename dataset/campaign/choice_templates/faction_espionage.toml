@@ -1,0 +1,43 @@
+# Espionage opportunity against a faction.
+
+category = "diplomacy"
+trigger = "espionage_opportunity"
+prompt = "An opportunity to spy on {faction_name} has presented itself. How far should the guild go?"
+deadline_secs = 90.0
+default_option = 1
+
+[[options]]
+label = "Full Infiltration (40g)"
+description = "Plant a deep agent. High risk, high reward intelligence."
+
+[[options.effects]]
+type = "gold"
+amount = -40.0
+
+[[options.effects]]
+type = "narrative"
+text = "A guild member adopts a new identity and vanishes into {faction_name} territory."
+
+[[options]]
+label = "Information Buy (20g)"
+description = "Pay for second-hand intelligence. Less risk, less detail."
+
+[[options.effects]]
+type = "gold"
+amount = -20.0
+
+[[options.effects]]
+type = "narrative"
+text = "Documents change hands in a back alley. The information is useful, if incomplete."
+
+[[options]]
+label = "Stay Clean"
+description = "Espionage is a dirty business. The guild maintains its honor."
+
+[[options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[options.effects]]
+type = "narrative"
+text = "The guild decides against espionage. Integrity has its own value."

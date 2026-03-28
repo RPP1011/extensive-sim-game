@@ -1,0 +1,61 @@
+# A shipwreck is found with potential salvage.
+
+name = "Shipwreck Salvage"
+priority = 4
+repeatable = true
+cooldown_ticks = 6000
+
+[trigger]
+type = "LocationScouted"
+location_type = "Ruin"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "A trading vessel has run aground on the coast — hull split, mast shattered, cargo scattered across the rocks. Seabirds wheel overhead. No survivors visible, but the cargo hold is mostly intact."
+deadline_secs = 60.0
+default_option = 0
+
+[[choice.options]]
+label = "Salvage Everything"
+description = "Strip the wreck clean. Maximum profit but takes time and manpower."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 30.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 20.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild picks the wreck clean over two days. Useful timber, saleable cargo, and a few surprises."
+
+[[choice.options]]
+label = "Quick Grab"
+description = "Take what's easy to carry and move on. Other scavengers will get the rest."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A quick sweep yields some coin and supplies. The rest is left for the tide."
+
+[[choice.options]]
+label = "Report to Authorities"
+description = "The rightful owners might pay a finder's fee. Reputation over profit."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The merchant guild sends thanks and a small purse. Your name carries weight now."

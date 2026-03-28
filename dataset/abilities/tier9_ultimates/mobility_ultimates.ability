@@ -1,0 +1,68 @@
+// Tier 9: High-impact mobility/assassination ultimates
+
+ability ShadowAssault {
+    target: enemy, range: 8.0
+    cooldown: 40s, cast: 0ms
+    hint: damage
+
+    stealth 2s
+    blink 8.0
+    damage 100 [PHYSICAL: 60]
+    stun 1500ms [CROWD_CONTROL: 55]
+    buff damage_output 0.3 for 4s
+}
+
+ability OmniSlash {
+    target: enemy, range: 5.0
+    cooldown: 45s, cast: 0ms
+    hint: damage
+
+    dash to_target
+    damage 50 [PHYSICAL: 55]
+    damage 50 [PHYSICAL: 55]
+    damage 50 [PHYSICAL: 55]
+}
+
+ability PhantomDance {
+    target: self
+    cooldown: 35s, cast: 0ms
+    hint: utility
+
+    stealth 4s
+    buff move_speed 0.5 for 4s
+    buff damage_output 0.4 for 4s
+    buff attack_speed 0.3 for 4s
+}
+
+ability VoidWalk {
+    target: self
+    cooldown: 40s, cast: 0ms
+    hint: utility
+
+    blink 8.0
+    stealth 3s
+    shield 50 for 4s
+    heal 40
+}
+
+ability SkywardStrike {
+    target: ground, range: 7.0
+    cooldown: 35s, cast: 0ms
+    hint: damage
+
+    dash 7.0
+    damage 80 in circle(2.5) [PHYSICAL: 55]
+    stun 1500ms in circle(2.5) [CROWD_CONTROL: 50]
+    slow 0.4 for 3s in circle(3.0)
+}
+
+ability InfernalDive {
+    target: enemy, range: 6.0
+    cooldown: 40s, cast: 0ms
+    hint: damage
+
+    dash to_target
+    damage 90 [FIRE: 60]
+    damage 15/1s for 4s [FIRE: 50]
+    knockback 3.0 in circle(2.0) [KNOCKBACK: 45]
+}

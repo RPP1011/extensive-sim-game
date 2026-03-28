@@ -1,0 +1,33 @@
+[[equipment]]
+id = "summoned_earth_elemental"
+name = "Summoned Earth Elemental"
+category = "special"
+tier = 4
+
+[equipment.stats]
+gate_damage_per_tick = 20.0
+wall_damage_per_tick = 15.0
+range = 0.0
+crew_required = 0
+move_speed = 0.3
+hp = 1200
+armor = 50
+troop_damage = 35.0
+duration = 500
+mana_cost_to_summon = 200
+immune_to_arrows = true
+immune_to_fire = true
+
+[equipment.requirements]
+min_tech_level = 4
+construction_cost = 0
+construction_ticks = 50
+resources = []
+requires_class = "[Geomancer]"
+
+[equipment.counters]
+vulnerable_to = ["ward_breaker", "anti_magic_field", "arcane_cannon"]
+strong_against = ["wooden_gate", "reinforced_gate", "wooden_palisade", "earthen_rampart"]
+
+[equipment.narrative]
+description = "The ground splits and something pulls itself free — a torso of granite, arms of packed clay, eyes like deep wells. It walks toward the wall with the inevitability of a landslide, and the defenders realize their arrows are meaningless."

@@ -1,0 +1,57 @@
+// Tier 10: Wind Dancer Kit — high mobility skirmisher with evasion
+
+ability GaleCut {
+    target: enemy, range: 2.0
+    cooldown: 3s, cast: 0ms
+    hint: damage
+
+    damage 22 [PHYSICAL: 35]
+    buff move_speed 0.15 for 2s
+}
+
+ability ZephyrDash {
+    target: self
+    cooldown: 5s, cast: 0ms
+    hint: utility
+
+    dash 3.0
+    buff move_speed 0.3 for 2s
+}
+
+ability CycloneKick {
+    target: enemy, range: 1.5
+    cooldown: 7s, cast: 100ms
+    hint: crowd_control
+
+    damage 30 [PHYSICAL: 40]
+    knockback 3.0 [KNOCKBACK: 45]
+    slow 0.3 for 2s
+}
+
+ability WhirlwindStrike {
+    target: self_aoe
+    cooldown: 8s, cast: 200ms
+    hint: damage
+
+    damage 35 in circle(2.5) [PHYSICAL: 45]
+    dash 2.0
+}
+
+ability TempestFury {
+    target: self_aoe
+    cooldown: 40s, cast: 0ms
+    hint: damage
+
+    buff move_speed 0.5 for 6s
+    buff attack_speed 0.4 for 6s
+    damage 25 in circle(2.5) [PHYSICAL: 40]
+    damage 25 in circle(2.5) [PHYSICAL: 40]
+    knockback 2.0 in circle(2.5) [KNOCKBACK: 35]
+}
+
+passive WindWalker {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    buff move_speed 0.2 for 2s
+}

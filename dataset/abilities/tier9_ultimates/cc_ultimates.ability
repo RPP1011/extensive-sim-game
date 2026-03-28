@@ -1,0 +1,80 @@
+// Tier 9: High-impact crowd control ultimates
+
+ability BlackHole {
+    target: ground, range: 6.0
+    cooldown: 60s, cast: 600ms
+    hint: crowd_control
+
+    pull 4.0 in circle(4.0)
+    stun 2500ms in circle(3.0) [CROWD_CONTROL: 65]
+    damage 80 in circle(3.0) [DARK: 55]
+}
+
+ability TimeStop {
+    target: self_aoe
+    cooldown: 50s, cast: 300ms
+    hint: crowd_control
+
+    stun 3s in circle(4.0) [MAGIC: 65]
+    damage 50 in circle(4.0) [MAGIC: 50]
+}
+
+ability Petrify {
+    target: ground, range: 5.0
+    cooldown: 45s, cast: 500ms
+    hint: crowd_control
+
+    stun 3s in circle(3.0) [MAGIC: 70]
+    damage 40 in circle(3.0) [MAGIC: 45]
+    slow 0.5 for 3s in circle(4.0) [MAGIC: 45]
+}
+
+ability WorldQuake {
+    target: self_aoe
+    cooldown: 55s, cast: 800ms
+    hint: crowd_control
+
+    stun 2s in circle(5.0) [PHYSICAL: 60]
+    damage 60 in circle(5.0) [PHYSICAL: 55]
+    knockback 3.0 in circle(5.0) [KNOCKBACK: 50]
+}
+
+ability MassEntangle {
+    target: ground, range: 6.0
+    cooldown: 40s, cast: 400ms
+    hint: crowd_control
+
+    root 3s in circle(4.0) [CROWD_CONTROL: 60]
+    damage 30 in circle(4.0)
+    slow 0.4 for 3s in circle(4.0)
+}
+
+ability NightmareRealm {
+    target: ground, range: 5.0
+    cooldown: 50s, cast: 600ms
+    hint: crowd_control
+
+    fear 3s in circle(3.5) [FEAR: 65, DARK: 55]
+    damage 50 in circle(3.5) [DARK: 50]
+    silence 2s in circle(3.5) [DARK: 45]
+}
+
+ability GravityCollapse {
+    target: ground, range: 6.0
+    cooldown: 45s, cast: 500ms
+    hint: crowd_control
+
+    pull 5.0 in circle(5.0)
+    root 2s in circle(3.0) [MAGIC: 55]
+    damage 60 in circle(3.0) [MAGIC: 50]
+}
+
+ability SupremeCommand {
+    target: self_aoe
+    cooldown: 40s, cast: 200ms
+    hint: crowd_control
+
+    taunt 4s in circle(5.0) [CROWD_CONTROL: 65]
+    shield 80 for 4s
+    damage 30 in circle(5.0) [PHYSICAL: 40]
+}

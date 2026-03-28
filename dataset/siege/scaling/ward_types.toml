@@ -1,0 +1,93 @@
+[[wards]]
+id = "basic_dampening"
+name = "Dampening Ward"
+description = "Reduces magical damage against the fortification. Common on stone walls in mage-heavy regions."
+tier = 1
+ward_level = 10
+ward_hp = 500
+ability_damage_reduction = 0.3
+anti_magic_radius = 2.0
+projectile_deflection = 0.0
+maintenance_cost = 5
+requires_class = "Enchanter"
+min_class_level = 10
+
+[[wards]]
+id = "arcane_barrier"
+name = "Arcane Barrier"
+description = "A shimmering wall of force that deflects projectiles and weakens spells. Requires constant maintenance by a skilled enchanter."
+tier = 2
+ward_level = 25
+ward_hp = 1500
+ability_damage_reduction = 0.5
+anti_magic_radius = 5.0
+projectile_deflection = 0.3
+maintenance_cost = 15
+requires_class = "Enchanter"
+min_class_level = 25
+
+[[wards]]
+id = "ancient_ward"
+name = "Ancient Ward"
+description = "Wards laid down centuries ago by [Archmages] whose names are forgotten. They don't need maintenance — they feed on the ambient magic of the land."
+tier = 3
+ward_level = 50
+ward_hp = 5000
+ability_damage_reduction = 0.7
+anti_magic_radius = 10.0
+projectile_deflection = 0.5
+maintenance_cost = 0
+self_repairing = true
+repair_rate = 10
+requires_class = "none"
+min_class_level = 0
+lore = "No living enchanter could replicate this. The technique died with the age of heroes."
+
+[[wards]]
+id = "divine_protection"
+name = "Divine Protection"
+description = "A [Priest] of extraordinary level has blessed these walls. The divine protection turns aside not just spells but ill intent itself."
+tier = 3
+ward_level = 60
+ward_hp = 3000
+ability_damage_reduction = 0.8
+anti_magic_radius = 8.0
+projectile_deflection = 0.4
+undead_damage_multiplier = 3.0
+maintenance_cost = 0
+requires_class = "Priest"
+min_class_level = 50
+lore = "The walls glow faintly at night. Undead won't approach within a hundred paces."
+
+[[wards]]
+id = "living_ward"
+name = "Living Ward"
+description = "A [Druid] has woven the wall into the earth itself. Roots and vines reinforce the stone, and the wall heals its own wounds."
+tier = 2
+ward_level = 30
+ward_hp = 2000
+ability_damage_reduction = 0.3
+anti_magic_radius = 3.0
+projectile_deflection = 0.0
+self_repairing = true
+repair_rate = 25
+fire_vulnerability = 2.0
+maintenance_cost = 0
+requires_class = "Druid"
+min_class_level = 30
+
+[[wards]]
+id = "runic_fortress"
+name = "Runic Fortress Ward"
+description = "Every stone is carved with runes of power. The wall doesn't just resist — it strikes back, reflecting a portion of magical attacks."
+tier = 4
+ward_level = 75
+ward_hp = 8000
+ability_damage_reduction = 0.9
+anti_magic_radius = 15.0
+projectile_deflection = 0.7
+spell_reflection = 0.2
+maintenance_cost = 50
+requires_class = "Archmage"
+min_class_level = 60
+lore = "Attackers who cast spells at these walls often find their own magic turned against them."

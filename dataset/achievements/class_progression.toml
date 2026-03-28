@@ -1,0 +1,460 @@
+# Class progression achievements — class earning, skills, and TWI-style class system
+
+[[achievements]]
+id = "first_class"
+name = "Classed"
+description = "Have an adventurer earn their first class."
+category = "class_progression"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+count = 1
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "The System recognized them. A class, earned through action."
+
+[[achievements]]
+id = "tier_2_class"
+name = "Advanced"
+description = "Have an adventurer earn a Tier 2 class."
+category = "class_progression"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "tier_2"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Tier 2. The System doesn't give these away. They're earned in blood and sweat."
+
+[[achievements]]
+id = "non_combat_class"
+name = "More Than Fighting"
+description = "Have an adventurer earn a non-combat class."
+category = "class_progression"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "non_combat"
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "Not every class needs a sword. Some need a ledger, a quill, or a ladle."
+
+[[achievements]]
+id = "earn_merchant"
+name = "[Merchant]"
+description = "Have someone earn the [Merchant] class."
+category = "class_progression"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "class_merchant"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "The System sees a trader. Skills for appraisal, negotiation, inventory. Useful in ways swords aren't."
+
+[[achievements]]
+id = "earn_scholar"
+name = "[Scholar]"
+description = "Have someone earn the [Scholar] class."
+category = "class_progression"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "class_scholar"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Knowledge is a weapon. The [Scholar] knows which library has the sharpest one."
+
+[[achievements]]
+id = "earn_diplomat"
+name = "[Diplomat]"
+description = "Have someone earn the [Diplomat] class."
+category = "class_progression"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "class_diplomat"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Words instead of swords. A [Diplomat] can end wars before they start."
+
+[[achievements]]
+id = "earn_cook"
+name = "[Cook]"
+description = "Have someone earn the [Cook] class."
+category = "class_progression"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "class_cook"
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "An army marches on its stomach. A [Cook] keeps that army happy."
+
+[[achievements]]
+id = "earn_healer"
+name = "[Healer]"
+description = "Have someone earn the [Healer] class."
+category = "class_progression"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "class_healer"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "The one who keeps everyone else alive. Worth more than any sword."
+
+[[achievements]]
+id = "level_20_any"
+name = "Journeyman"
+description = "Reach level 20 in any class."
+category = "class_progression"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerLevelUp"
+condition = "class_level_20"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "Level 20. Past apprentice, past beginner. A real professional."
+
+[[achievements]]
+id = "level_40_any"
+name = "Expert"
+description = "Reach level 40 in any class."
+category = "class_progression"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerLevelUp"
+condition = "class_level_40"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Level 40. The skills come naturally now. Instinct, not thought."
+
+[[achievements]]
+id = "level_60_any"
+name = "Master"
+description = "Reach level 60 in any class."
+category = "class_progression"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerLevelUp"
+condition = "class_level_60"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Level 60. Others travel far to study under someone at this level."
+
+[[achievements]]
+id = "level_80_any"
+name = "Grandmaster"
+description = "Reach level 80 in any class."
+category = "class_progression"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerLevelUp"
+condition = "class_level_80"
+
+[achievements.reward]
+rl_bonus = 1.0
+narrative = "Level 80. A handful of people alive share this distinction."
+
+[[achievements]]
+id = "level_100_class"
+name = "Perfection"
+description = "Reach level 100 in a class."
+category = "class_progression"
+tier = "legendary"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerLevelUp"
+condition = "class_level_100"
+
+[achievements.reward]
+rl_bonus = 2.0
+narrative = "Level 100. The absolute pinnacle. The System has nothing more to teach."
+
+[[achievements]]
+id = "first_skill_use"
+name = "Skill Discovered"
+description = "Use a class skill for the first time."
+category = "class_progression"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "SkillUsed"
+count = 1
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "The skill activated. Something clicked, and the world bent to their will."
+
+[[achievements]]
+id = "non_combat_skill_solve"
+name = "Lateral Thinking"
+description = "Use a non-combat class skill to solve a problem."
+category = "class_progression"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "SkillUsed"
+condition = "non_combat_skill_problem_solved"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "The [Merchant] appraised the trap's value. The [Scholar] read the ancient lock. Not everything needs a hammer."
+
+[[achievements]]
+id = "consolidate_classes"
+name = "Convergence"
+description = "Consolidate two classes into one."
+category = "class_progression"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "consolidation"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Two became one. The new class is something the world hasn't seen before."
+
+[[achievements]]
+id = "three_non_combat"
+name = "Guild Services"
+description = "Have 3 or more different non-combat classes represented in your guild."
+category = "class_progression"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "three_non_combat_classes"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "A [Cook], a [Merchant], a [Scholar]. The guild runs on more than swords."
+
+[[achievements]]
+id = "corner_market_skill"
+name = "Market Manipulation"
+description = "Use [Corner the Market] successfully."
+category = "class_progression"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "SkillUsed"
+condition = "corner_the_market"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "The [Merchant] smiled. The price tripled. Everyone else scrambled."
+
+[[achievements]]
+id = "ghost_walk_skill"
+name = "Invisible Passage"
+description = "Use [Ghost Walk] to avoid a fight."
+category = "class_progression"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "SkillUsed"
+condition = "ghost_walk_avoid"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "They walked right through. The guards saw nothing."
+
+[[achievements]]
+id = "blood_oath_survive"
+name = "Sworn and Standing"
+description = "Use [Blood Oath] and survive the consequences."
+category = "class_progression"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "SkillUsed"
+condition = "blood_oath_survived"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "The oath was sealed in blood. They kept their word. The System accepted."
+
+[[achievements]]
+id = "triple_class"
+name = "Renaissance"
+description = "Have an adventurer with 3 or more classes simultaneously."
+category = "class_progression"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "three_classes_one_adventurer"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Three classes in one person. Spread thin, or incredibly versatile."
+
+[[achievements]]
+id = "legendary_class"
+name = "Legendary Class"
+description = "Have an adventurer earn a Legendary-tier class."
+category = "class_progression"
+tier = "legendary"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "tier_legendary"
+
+[achievements.reward]
+rl_bonus = 2.0
+narrative = "The System grants Legendary classes once in a generation. This is that moment."
+
+[[achievements]]
+id = "tier_6_ability"
+name = "Power Incarnate"
+description = "Use a Tier 6 ability."
+category = "class_progression"
+tier = "legendary"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "SkillUsed"
+condition = "tier_6"
+
+[achievements.reward]
+rl_bonus = 2.0
+narrative = "Tier 6. Reality rewrites itself around the caster. The world remembers."
+
+[[achievements]]
+id = "five_combat_classes"
+name = "War College"
+description = "Have 5 different combat classes represented in your guild."
+category = "class_progression"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "five_combat_classes"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Knight, Mage, Rogue, Ranger, Cleric. Every angle covered."
+
+[[achievements]]
+id = "cross_class_combo"
+name = "Synergy"
+description = "Combine skills from two different classes in a single encounter."
+category = "class_progression"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "SkillUsed"
+condition = "cross_class_combo"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "The [Knight]'s shield and the [Mage]'s fire. Together, devastating."
+
+[[achievements]]
+id = "earn_crafter"
+name = "[Crafter]"
+description = "Have someone earn the [Crafter] class."
+category = "class_progression"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "class_crafter"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Hands that build instead of break. A [Crafter] makes the guild self-sufficient."
+
+[[achievements]]
+id = "class_skill_10"
+name = "Skilled"
+description = "Have an adventurer learn 10 class skills."
+category = "class_progression"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "SkillUsed"
+condition = "ten_skills_learned"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Ten skills deep. They have an answer for everything."

@@ -1,0 +1,35 @@
+# Who should mentor a new recruit.
+
+category = "character"
+trigger = "new_recruit_mentorship"
+prompt = "{recruit_name} is new and needs a mentor. Who should guide them?"
+deadline_secs = 90.0
+default_option = 0
+
+[[options]]
+label = "Veteran Fighter"
+description = "Pair them with the toughest fighter. Hard lessons, fast growth."
+
+[[options.effects]]
+type = "narrative"
+text = "The veteran doesn't coddle. {recruit_name} learns through bruises and blisters."
+
+[[options]]
+label = "Experienced Mage"
+description = "Arcane knowledge and magical theory. Good for any class, not just casters."
+
+[[options.effects]]
+type = "narrative"
+text = "Books and scrolls pile up. {recruit_name} learns the theory behind the practice."
+
+[[options]]
+label = "Guild Master Personally"
+description = "Take them under your wing. Slower for you, faster for them."
+
+[[options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[options.effects]]
+type = "narrative"
+text = "The guild master and {recruit_name} are seen together constantly. The recruit blooms."

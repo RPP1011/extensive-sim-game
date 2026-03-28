@@ -1,0 +1,49 @@
+[[fortifications]]
+id = "signal_tower"
+name = "Signal Tower"
+tier = 2
+type = "tower"
+
+[fortifications.stats]
+tower_hp = 600
+height = 10.0
+garrison_slots = 2
+ranged_bonus = 0.2
+vision_radius = 30.0
+fire_arc = 360
+signal_range = 50.0
+reinforcement_speed_bonus = 0.2
+early_warning = true
+
+[fortifications.construction]
+cost = 150
+ticks = 500
+resources = ["stone", "timber"]
+builder_class_bonus = 0.4
+
+[fortifications.weaknesses]
+trebuchet_multiplier = 2.0
+fire_resistant = false
+
+[fortifications.power_scaling]
+effective_level = 10
+builder_class_bonus = true
+enchantable = false
+age_scaling = 0.0
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 0.0
+ability_damage_reduction = 0.0
+projectile_deflection = 0.0
+ward_hp = 0
+ward_level = 0
+
+[fortifications.garrison_bonus]
+defender_multiplier = 1.5
+ranged_accuracy_bonus = 0.15
+melee_disadvantage = 0.1
+cover_rating = 0.3
+
+[fortifications.narrative]
+description = "Tall and slender, built for sight rather than strength. Its bonfire can be seen for leagues, calling allies, warning neighbors. In a siege, the first thing the attackers try to do is put out that fire."

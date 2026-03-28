@@ -1,0 +1,36 @@
+// Abilities that are granted by other abilities (referenced by name)
+
+ability ChainBolt {
+    target: enemy, range: 4.0
+    cooldown: 0s, cast: 0ms
+    hint: damage
+
+    damage 20 [MAGIC: 40]
+}
+
+ability BannerStrike {
+    target: enemy, range: 2.0
+    cooldown: 2s, cast: 100ms
+    hint: damage
+
+    damage 45 [PHYSICAL: 55]
+    buff attack_speed 0.15 for 3s
+}
+
+ability MasteryProc {
+    target: enemy, range: 3.0
+    cooldown: 0s, cast: 0ms
+    hint: damage
+
+    damage 15 [MAGIC: 35]
+    heal 10
+}
+
+ability StudentCounter {
+    target: enemy, range: 1.5
+    cooldown: 3s, cast: 0ms
+    hint: damage
+
+    damage 25 [PHYSICAL: 45]
+    slow 0.2 for 1.5s
+}

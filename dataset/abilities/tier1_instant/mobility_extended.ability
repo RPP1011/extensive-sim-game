@@ -1,0 +1,105 @@
+// Tier 1: Extended mobility variants
+
+ability ShadowStep {
+    target: self
+    cooldown: 8s, cast: 0ms
+    hint: utility
+
+    blink 4.0
+}
+
+ability PhaseShift {
+    target: self
+    cooldown: 12s, cast: 0ms
+    hint: utility
+
+    blink 6.0
+}
+
+ability QuickStep {
+    target: self
+    cooldown: 4s, cast: 0ms
+    hint: utility
+
+    dash 1.5
+}
+
+ability LeapingStrike {
+    target: enemy, range: 4.0
+    cooldown: 7s, cast: 0ms
+    hint: utility
+
+    dash to_target
+}
+
+ability SwiftRetreat {
+    target: self
+    cooldown: 10s, cast: 0ms
+    hint: utility
+
+    dash 4.0
+}
+
+ability TacticalRoll {
+    target: self
+    cooldown: 5s, cast: 0ms
+    hint: utility
+
+    dash 2.5
+}
+
+ability VoidSlip {
+    target: self
+    cooldown: 14s, cast: 0ms
+    hint: utility
+
+    blink 5.0
+}
+
+ability HookShot {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 200ms
+    hint: crowd_control
+
+    pull 4.0
+}
+
+ability GrapplingChain {
+    target: enemy, range: 6.0
+    cooldown: 12s, cast: 300ms
+    hint: crowd_control
+
+    pull 5.0
+}
+
+ability PowerfulShove {
+    target: enemy, range: 1.5
+    cooldown: 8s, cast: 200ms
+    hint: crowd_control
+
+    knockback 4.0 [PHYSICAL: 50]
+}
+
+ability WindDash {
+    target: self
+    cooldown: 6s, cast: 0ms
+    hint: utility
+
+    dash 3.5
+}
+
+ability FlickerStep {
+    target: self
+    cooldown: 3s, cast: 0ms
+    hint: utility
+
+    blink 2.0
+}
+
+ability BullRush {
+    target: enemy, range: 4.0
+    cooldown: 8s, cast: 0ms
+    hint: utility
+
+    dash to_target
+}

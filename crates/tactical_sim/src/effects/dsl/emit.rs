@@ -6,7 +6,7 @@ use crate::effects::defs::{AbilityDef, AbilityTargeting};
 use crate::effects::types::*;
 
 use super::emit_effects::{emit_effect, emit_scaling};
-use super::emit_helpers::{emit_area, emit_tags, emit_condition, fmt_duration, fmt_f32};
+use super::emit_helpers::{emit_area, emit_tags, emit_condition, emit_target_filter, fmt_duration, fmt_f32};
 
 /// Convert an AbilityDef to its DSL text representation.
 pub fn emit_ability_dsl(def: &AbilityDef) -> String {
@@ -25,6 +25,13 @@ pub fn emit_ability_dsl(def: &AbilityDef) -> String {
         AbilityTargeting::Direction => "direction",
         AbilityTargeting::Vector => "vector",
         AbilityTargeting::Global => "global",
+        AbilityTargeting::TargetFaction => "faction",
+        AbilityTargeting::TargetRegion => "region",
+        AbilityTargeting::TargetMarket => "market",
+        AbilityTargeting::TargetParty => "party",
+        AbilityTargeting::TargetGuild => "guild",
+        AbilityTargeting::TargetAdventurer => "adventurer",
+        AbilityTargeting::TargetLocation => "location",
     };
     if def.range > 0.0 {
         lines.push(format!("    target: {target}, range: {}", fmt_f32(def.range)));
@@ -83,6 +90,14 @@ pub fn emit_ability_dsl(def: &AbilityDef) -> String {
     // Zone tag
     if let Some(ref tag) = def.zone_tag {
         lines.push(format!("    zone_tag: {tag}"));
+    }
+
+    // Combination skill requirements
+    if def.requires_participants > 1 {
+        lines.push(format!("    requires_participants: {}", def.requires_participants));
+    }
+    if !def.requires_class.is_empty() {
+        lines.push(format!("    requires_class: {}", def.requires_class));
     }
 
     // Blank line before effects
@@ -302,6 +317,11 @@ fn emit_conditional_effect(ce: &ConditionalEffect, lines: &mut Vec<String>, inde
         }
     }
 
+    // Targeting filter
+    if let Some(ref filter) = ce.targeting_filter {
+        parts.push(emit_target_filter(filter));
+    }
+
     // Scaling (from effect)
     let scaling = emit_scaling(&ce.effect);
     if !scaling.is_empty() {
@@ -342,6 +362,7 @@ mod tests {
                 stacking: Stacking::default(),
                 chance: 0.0,
                 else_effects: vec![],
+                targeting_filter: None,
             }],
             ..Default::default()
         };
@@ -362,7 +383,7 @@ mod tests {
         let mut roundtripped = 0;
         let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let candidates = [
-            manifest.join("../../assets/hero_templates"),
+            manifest.join("../../dataset/abilities/hero_templates"),
             manifest.join("../../dataset/hero_templates"),
         ];
         for dir in &candidates {

@@ -1,0 +1,23 @@
+[[tactics]]
+id = "feint_and_flank"
+name = "Feint and Flank"
+side = "attacker"
+category = "deception"
+
+[tactics.requirements]
+min_army_ratio = 1.5
+commander_level_min = 20
+multiple_approach_routes = true
+
+[tactics.effects]
+siege_duration_multiplier = 0.8
+casualty_rate_multiplier = 0.7
+defender_repositioning_penalty = 0.4
+surprise_bonus = 0.3
+requires_good_intelligence = true
+
+[tactics.counters]
+countered_by = ["signal_tower", "reserve_garrison", "scout_network"]
+
+[tactics.narrative]
+description = "The drums beat on the east side. The banners mass. The defenders rush to meet the threat. On the west side, in silence, the real assault begins. Misdirection is the commander's finest weapon."

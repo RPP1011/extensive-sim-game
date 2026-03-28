@@ -1,0 +1,36 @@
+name = "The Test"
+world_template = "Frontier"
+sequence = 2
+default_option = 1
+prompt = "A child is dying in a roadside village. The local healer has failed. The villagers see your robes — faded, torn, but recognizable — and beg for a miracle. You haven't prayed since the temple. You don't know if anything will answer."
+
+[[options]]
+label = "Pray"
+description = "Kneel. Speak the old words. Open yourself to whatever remains of your connection to the divine."
+pc_traits = [{ trait = "healer" }]
+pc_stats = { ability_power = 3.0 }
+effects = [
+    { type = "reputation", amount = 10.0 },
+    { type = "narrative", text = "The words come. Halting, rusty, desperate. And something flickers — not a miracle, but enough. The child's fever breaks by morning." },
+]
+
+[[options]]
+label = "Use Medicine"
+description = "Forget divinity. You trained as a healer before you were ordained. The body doesn't care about theology."
+pc_traits = [{ trait = "pragmatist" }]
+pc_stats = { defense = 2.0, speed = 1.0 }
+effects = [
+    { type = "gold", amount = -10.0 },
+    { type = "reputation", amount = 5.0 },
+    { type = "narrative", text = "Herbs, poultices, steady hands. Science where faith failed. The child recovers. The villagers call it a miracle anyway." },
+]
+
+[[options]]
+label = "Walk Away"
+description = "You can't help. You proved that at the temple. Don't give them false hope."
+pc_traits = [{ trait = "battle_scarred" }]
+pc_stats = { resolve = 3.0 }
+effects = [
+    { type = "reputation", amount = -5.0 },
+    { type = "narrative", text = "The mother's eyes follow you down the road. You don't look back. You can't." },
+]

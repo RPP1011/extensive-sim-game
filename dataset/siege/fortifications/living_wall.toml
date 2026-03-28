@@ -1,0 +1,54 @@
+[[fortifications]]
+id = "living_wall"
+name = "Living Wall"
+tier = 4
+
+[fortifications.stats]
+wall_hp = 2500
+height = 6.0
+thickness = 3.0
+defender_cover = 0.75
+ranged_bonus = 0.2
+climb_difficulty = 0.7
+regeneration_per_tick = 2.0
+entangle_chance = 0.3
+entangle_slow = 0.2
+grows_over_time = true
+growth_rate = 0.5
+
+[fortifications.construction]
+cost = 400
+ticks = 3000
+resources = ["seeds", "druid_blessing"]
+requires_class = "[Druid]"
+
+[fortifications.weaknesses]
+trebuchet_multiplier = 1.0
+sapper_multiplier = 0.5
+fire_resistant = false
+magic_resistant = true
+fire_damage_multiplier = 2.5
+season_dependent = true
+
+[fortifications.power_scaling]
+effective_level = 35
+builder_class_bonus = false
+enchantable = true
+age_scaling = 0.02
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 3.0
+ability_damage_reduction = 0.2
+projectile_deflection = 0.0
+ward_hp = 800
+ward_level = 20
+
+[fortifications.garrison_bonus]
+defender_multiplier = 3.0
+ranged_accuracy_bonus = 0.1
+melee_disadvantage = 0.35
+cover_rating = 0.55
+
+[fortifications.narrative]
+description = "Thorns thick as arms, roots deep as wells, branches that reach and grip. The [Druid] sang it from the earth over months, and now it breathes, grows, heals. It doesn't just stop attackers. It eats them."

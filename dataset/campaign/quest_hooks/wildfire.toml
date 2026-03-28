@@ -1,0 +1,61 @@
+# A wildfire threatens the region.
+
+name = "Wildfire"
+priority = 8
+repeatable = true
+cooldown_ticks = 10000
+
+[trigger]
+type = "SeasonChange"
+season = "Summer"
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "Smoke rises on the horizon. A wildfire, driven by dry winds, races toward settlements and farmland. There's maybe a day before it reaches populated areas."
+deadline_secs = 45.0
+default_option = 0
+
+[[choice.options]]
+label = "Firebreak"
+description = "Send everyone to dig firebreaks and clear vegetation. Backbreaking work but it saves everything."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Every able body digs. The fire roars to the break and dies. The settlement stands."
+
+[[choice.options]]
+label = "Evacuate"
+description = "Save the people, abandon the buildings. Lives over property."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Columns of refugees stream away from the smoke. Behind them, everything burns."
+
+[[choice.options]]
+label = "Magical Intervention (40g)"
+description = "Hire water mages to fight fire with magic. Expensive but may save everything."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -40.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Rain falls from a cloudless sky. The fire hisses and dies under the deluge."

@@ -1,0 +1,21 @@
+class Enchanter {
+    stat_growth: +4 ability_power, +1 speed, +1 defense per level
+
+    tags: arcane, buff, debuff, support, manipulation
+
+    scaling party_alive_count {
+        when party_members >= 2: +10% ability_power
+        when party_members >= 4: +15% ability_power
+        always: aura ability_power +1
+    }
+
+    abilities {
+        level 1: empower "Boost an ally's attack for 10 seconds"
+        level 5: weaken "Reduce an enemy's defense for 10 seconds"
+        level 10: haste "Grant an ally dramatically increased speed"
+        level 20: mass_enchant "Apply a buff to all allies simultaneously"
+        level 40: rewrite "Permanently alter one stat on a target, ally or enemy, for the rest of the battle"
+    }
+
+    requirements: level 1
+}

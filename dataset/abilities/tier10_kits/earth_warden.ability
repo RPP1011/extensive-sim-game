@@ -1,0 +1,59 @@
+// Tier 10: Earth Warden Kit — nature tank with crowd control and shields
+
+ability RockThrow {
+    target: enemy, range: 5.0
+    cooldown: 4s, cast: 200ms
+    hint: damage
+
+    deliver projectile { speed: 6.0 } {
+        on_hit {
+            damage 28 [PHYSICAL: 40]
+            slow 0.2 for 2s
+        }
+    }
+}
+
+ability Stoneskin {
+    target: self
+    cooldown: 12s, cast: 100ms
+    hint: defense
+
+    shield 55 for 5s
+    slow 0.2 for 3s in circle(2.0)
+}
+
+ability Fissure {
+    target: direction, range: 5.0
+    cooldown: 10s, cast: 400ms
+    hint: crowd_control
+
+    damage 35 in line(5.0, 1.5) [PHYSICAL: 45]
+    stun 1500ms in line(5.0, 1.5) [CROWD_CONTROL: 55]
+}
+
+ability NaturesBarrier {
+    target: self_aoe
+    cooldown: 14s, cast: 300ms
+    hint: defense
+
+    shield 30 for 4s in circle(3.5)
+    heal 15 in circle(3.5)
+}
+
+ability Avalanche {
+    target: ground, range: 6.0
+    cooldown: 45s, cast: 800ms
+    hint: damage
+
+    damage 80 in circle(3.5) [PHYSICAL: 60]
+    stun 2s in circle(3.5) [CROWD_CONTROL: 55]
+    slow 0.5 for 4s in circle(4.0)
+    knockback 2.0 in circle(3.5) [KNOCKBACK: 40]
+}
+
+passive EarthsResilience {
+    trigger: on_damage_taken
+    cooldown: 8s
+
+    shield 20 for 3s
+}

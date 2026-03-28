@@ -377,6 +377,14 @@ fn targeting_index(t: &AbilityTargeting) -> usize {
         AbilityTargeting::Direction => 5,
         AbilityTargeting::Vector => 6,
         AbilityTargeting::Global => 7,
+        // Campaign targeting — indices 8-14
+        AbilityTargeting::TargetFaction => 8,
+        AbilityTargeting::TargetRegion => 9,
+        AbilityTargeting::TargetMarket => 10,
+        AbilityTargeting::TargetParty => 11,
+        AbilityTargeting::TargetGuild => 12,
+        AbilityTargeting::TargetAdventurer => 13,
+        AbilityTargeting::TargetLocation => 14,
     }
 }
 

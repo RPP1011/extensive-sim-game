@@ -1,0 +1,20 @@
+class Hunter {
+    stat_growth: +2 attack, +2 speed, +1 defense per level
+
+    tags: tracking, wilderness, beast_lore, survival, monster_hunting
+
+    scaling enemy_count {
+        when enemy_count >= 1: +10% attack
+        always: +5% speed
+    }
+
+    abilities {
+        level 1: beast_lore "Know the habits, weaknesses, and abilities of any creature"
+        level 5: snare "Set a trap that immobilizes the first enemy to trigger it"
+        level 10: predator_sense "Detect all creatures within a wide radius, even hidden ones"
+        level 20: trophy_hunter "Gain a permanent small stat bonus for each unique monster type slain"
+        level 40: apex_predator "You are recognized as the dominant threat; weaker monsters flee and stronger ones respect your territory"
+    }
+
+    requirements: level 1
+}

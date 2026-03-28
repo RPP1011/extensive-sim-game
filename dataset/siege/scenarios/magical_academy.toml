@@ -1,0 +1,54 @@
+name = "The Siege of the Obsidian Collegium"
+description = "A magical academy with powerful wards and mage defenders. Conventional siege equipment is nearly useless. This siege is won with anti-magic or not at all."
+difficulty = "very_hard"
+
+[settlement]
+template = "magical_academy"
+wall_type = "magical_ward"
+wall_hp = 1500
+inner_wall_type = "castle_wall"
+inner_wall_hp = 3000
+gate_type = "magical_barrier"
+gate_hp = 2000
+towers = 2
+tower_type = "mage_tower"
+garrison = 20
+terrain = "highland"
+
+[attacker]
+army_size = 60
+siege_equipment = ["ward_breaker", "arcane_cannon", "siege_crossbow", "mantlet"]
+supply_ticks = 1500
+reinforcement_chance = 0.2
+morale = 0.65
+commander_level = 30
+anti_magic_required = true
+
+[defender]
+garrison_strength = 20
+adventurer_slots = 4
+supplies_ticks = 2500
+reinforcement_chance = 0.5
+morale = 0.9
+special_defenses = ["magical_ward", "magical_barrier", "flame_barrier", "frost_wall"]
+commander_level = 35
+mage_count = 8
+mana_pool = 2000
+
+[victory_conditions]
+attacker_wins = ["wards_broken", "mana_depleted", "garrison_defeated"]
+defender_wins = ["attacker_retreat", "attacker_casualties > 50%", "mana_sustained"]
+time_limit_ticks = 4000
+
+[power_context]
+defender_avg_level = 35
+attacker_avg_level = 22
+wall_effective_level = 65
+has_wards = true
+ward_type = "runic_fortress"
+high_level_threat = "none"
+
+[narrative]
+opening = "The wards shimmer like heat haze, turning aside arrows and stones alike. Behind them, the mages of the Obsidian Collegium prepare spells that can scour an army from the face of the earth. This siege will not be won with catapults."
+attacker_victory = "The wards fall. The mages fight with spell and staff, but they are few and the army is many. The Collegium's libraries burn, and a century of magical knowledge goes with them."
+defender_victory = "The army breaks against the wards like waves against a cliff. The mages stand atop their tower and watch the retreat, exhausted but unbowed. The Collegium stands."

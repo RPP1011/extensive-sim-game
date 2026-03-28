@@ -37,11 +37,11 @@ fn assert_roundtrip(toml_file: &str, dsl_file: &str, hero_name: &str) {
 #[test]
 fn roundtrip_mage_matches_toml() {
     // Parse both TOML and DSL versions, compare key fields
-    let toml_str = include_str!("../../../../../assets/hero_templates/mage.toml");
+    let toml_str = include_str!("../../../../../dataset/abilities/hero_templates/mage.toml");
     let toml_hero: crate::effects::defs::HeroToml =
         toml::from_str(toml_str).expect("TOML parse failed");
 
-    let dsl_str = include_str!("../../../../../assets/hero_templates/mage.ability");
+    let dsl_str = include_str!("../../../../../dataset/abilities/hero_templates/mage.ability");
     let (dsl_abilities, dsl_passives) = parse_abilities(dsl_str).unwrap();
 
     assert_eq!(toml_hero.abilities.len(), dsl_abilities.len(),
@@ -69,8 +69,8 @@ fn roundtrip_mage_matches_toml() {
 #[test]
 fn roundtrip_warrior() {
     assert_roundtrip(
-        include_str!("../../../../../assets/hero_templates/warrior.toml"),
-        include_str!("../../../../../assets/hero_templates/warrior.ability"),
+        include_str!("../../../../../dataset/abilities/hero_templates/warrior.toml"),
+        include_str!("../../../../../dataset/abilities/hero_templates/warrior.ability"),
         "Warrior",
     );
 }
@@ -78,8 +78,8 @@ fn roundtrip_warrior() {
 #[test]
 fn roundtrip_ranger() {
     assert_roundtrip(
-        include_str!("../../../../../assets/hero_templates/ranger.toml"),
-        include_str!("../../../../../assets/hero_templates/ranger.ability"),
+        include_str!("../../../../../dataset/abilities/hero_templates/ranger.toml"),
+        include_str!("../../../../../dataset/abilities/hero_templates/ranger.ability"),
         "Ranger",
     );
 }
@@ -87,8 +87,8 @@ fn roundtrip_ranger() {
 #[test]
 fn roundtrip_necromancer() {
     assert_roundtrip(
-        include_str!("../../../../../assets/hero_templates/necromancer.toml"),
-        include_str!("../../../../../assets/hero_templates/necromancer.ability"),
+        include_str!("../../../../../dataset/abilities/hero_templates/necromancer.toml"),
+        include_str!("../../../../../dataset/abilities/hero_templates/necromancer.ability"),
         "Necromancer",
     );
 }
@@ -96,8 +96,8 @@ fn roundtrip_necromancer() {
 #[test]
 fn roundtrip_arcanist() {
     assert_roundtrip(
-        include_str!("../../../../../assets/hero_templates/arcanist.toml"),
-        include_str!("../../../../../assets/hero_templates/arcanist.ability"),
+        include_str!("../../../../../dataset/abilities/hero_templates/arcanist.toml"),
+        include_str!("../../../../../dataset/abilities/hero_templates/arcanist.ability"),
         "Arcanist",
     );
 }

@@ -1,0 +1,49 @@
+# A hidden passage is discovered during exploration.
+
+name = "Hidden Passage"
+priority = 5
+repeatable = true
+cooldown_ticks = 6000
+
+[trigger]
+type = "LocationScouted"
+location_type = "Ruin"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "While exploring {location_name}, an adventurer's torch reveals a hidden passage behind a crumbling wall. Cool air flows from the darkness beyond — something lies deeper."
+deadline_secs = 90.0
+default_option = 1
+
+[[choice.options]]
+label = "Immediate Exploration"
+description = "Push through now while the passage is fresh. No time to prepare."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Torches raised, the party squeezes through the gap into the unknown."
+
+[[choice.options]]
+label = "Mark and Return Prepared"
+description = "Note the location, return with proper gear and a full team."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The passage is carefully mapped. The guild will return ready for anything."
+
+[[choice.options]]
+label = "Collapse It"
+description = "Some doors are better left closed. Seal it permanently."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Rubble fills the gap. Whatever was on the other side stays there."

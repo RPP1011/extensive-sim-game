@@ -1,0 +1,54 @@
+name = "The Fall of Verdant Hold"
+description = "A jungle fortress surrounded by dense vegetation. The terrain favors the defenders with natural concealment and difficult approach paths."
+difficulty = "medium"
+
+[settlement]
+template = "jungle_fort"
+wall_type = "living_wall"
+wall_hp = 2500
+gate_type = "reinforced_gate"
+gate_hp = 800
+towers = 3
+tower_type = "wooden_tower"
+garrison = 30
+terrain = "jungle"
+concealment_bonus = 0.3
+disease_risk = 0.2
+
+[attacker]
+army_size = 70
+siege_equipment = ["catapult", "fire_arrows", "siege_ladder", "siege_hook"]
+supply_ticks = 1000
+reinforcement_chance = 0.15
+morale = 0.65
+commander_level = 18
+jungle_penalty = 0.3
+
+[defender]
+garrison_strength = 30
+adventurer_slots = 4
+supplies_ticks = 2500
+reinforcement_chance = 0.4
+morale = 0.85
+special_defenses = ["caltrops", "barricade", "arrow_slits"]
+commander_level = 20
+terrain_knowledge = true
+guerrilla_bonus = 0.3
+
+[victory_conditions]
+attacker_wins = ["wall_breached_and_stormed", "gate_destroyed", "defender_surrender"]
+defender_wins = ["attacker_retreat", "attacker_disease > 40%", "reinforcements_arrive"]
+time_limit_ticks = 3000
+
+[power_context]
+defender_avg_level = 18
+attacker_avg_level = 14
+wall_effective_level = 35
+has_wards = true
+ward_type = "living_ward"
+high_level_threat = "none"
+
+[narrative]
+opening = "The jungle swallows the army whole. Insects, heat, disease — the green itself fights the invaders. And somewhere in that green, a fortress grown from the living forest waits."
+attacker_victory = "Fire. In the end, the jungle burns and the living wall with it. Verdant Hold is ash and ember, and the jungle will take decades to reclaim its own."
+defender_victory = "The jungle does what the garrison couldn't alone. Fever, snakes, and ambushes bleed the army white. They retreat, cursing the green hell that defeated them."

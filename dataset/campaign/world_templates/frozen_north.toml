@@ -1,0 +1,162 @@
+# Frozen North — Harsh winters, viking-inspired factions.
+# 4 regions, 3 factions, 5 locations, 3 NPCs.
+
+name = "Frozen North"
+global_threat_level = 30.0
+
+[[regions]]
+id = 0
+name = "Hearthstone"
+owner_faction_id = 0
+neighbors = [1, 2]
+unrest = 8.0
+control = 80.0
+threat_level = 15.0
+
+[[regions]]
+id = 1
+name = "The Frost Wastes"
+owner_faction_id = 1
+neighbors = [0, 2, 3]
+unrest = 25.0
+control = 55.0
+threat_level = 45.0
+
+[[regions]]
+id = 2
+name = "Glacial Shore"
+owner_faction_id = 1
+neighbors = [0, 1, 3]
+unrest = 20.0
+control = 60.0
+threat_level = 35.0
+
+[[regions]]
+id = 3
+name = "The Evernight"
+owner_faction_id = 2
+neighbors = [1, 2]
+unrest = 55.0
+control = 35.0
+threat_level = 70.0
+
+[[locations]]
+id = 0
+name = "Longfire Hall"
+position = [0.0, 0.0]
+location_type = "Settlement"
+threat_level = 10.0
+resource_availability = 55.0
+faction_owner = 0
+scouted = true
+
+[[locations]]
+id = 1
+name = "Ice-Breaker Dock"
+position = [15.0, -10.0]
+location_type = "Settlement"
+threat_level = 15.0
+resource_availability = 60.0
+faction_owner = 0
+scouted = true
+
+[[locations]]
+id = 2
+name = "The Frozen Barrow"
+position = [-20.0, 15.0]
+location_type = "Dungeon"
+threat_level = 60.0
+resource_availability = 45.0
+scouted = false
+
+[[locations]]
+id = 3
+name = "Mammoth Graveyard"
+position = [-10.0, 30.0]
+location_type = "Ruin"
+threat_level = 50.0
+resource_availability = 55.0
+scouted = false
+
+[[locations]]
+id = 4
+name = "Whalebone Outpost"
+position = [25.0, 10.0]
+location_type = "Outpost"
+threat_level = 30.0
+resource_availability = 40.0
+faction_owner = 1
+scouted = false
+
+[[factions]]
+id = 0
+name = "The Hearthkeepers"
+relationship_to_guild = 45.0
+military_strength = 55.0
+max_military_strength = 80.0
+territory_size = 2
+diplomatic_stance = "Friendly"
+coalition_member = false
+at_war_with = []
+has_guild = true
+guild_adventurer_count = 5
+recent_actions = []
+
+[[factions]]
+id = 1
+name = "Frost Wolves"
+relationship_to_guild = -5.0
+military_strength = 70.0
+max_military_strength = 110.0
+territory_size = 1
+diplomatic_stance = "Neutral"
+coalition_member = false
+at_war_with = []
+has_guild = false
+guild_adventurer_count = 0
+recent_actions = []
+
+[[factions]]
+id = 2
+name = "Nightwalker Horde"
+relationship_to_guild = -50.0
+military_strength = 95.0
+max_military_strength = 140.0
+territory_size = 1
+diplomatic_stance = "Hostile"
+coalition_member = false
+at_war_with = [0]
+has_guild = false
+guild_adventurer_count = 0
+recent_actions = []
+
+[diplomacy]
+relations = [[0, -5, -35], [-5, 0, -10], [-35, -10, 0]]
+guild_faction_id = 0
+
+[[npc_relationships]]
+npc_id = 600
+npc_name = "Jarl Svenna"
+npc_type = "FactionLeader"
+relationship_score = 50.0
+last_interaction_ms = 0
+rescue_available = false
+rescue_cost = 0.0
+
+[[npc_relationships]]
+npc_id = 601
+npc_name = "One-Arm Torbjorn"
+npc_type = "Mercenary"
+relationship_score = 30.0
+last_interaction_ms = 0
+rescue_available = false
+rescue_cost = 65.0
+
+[[npc_relationships]]
+npc_id = 602
+npc_name = "Ylva the Skald"
+npc_type = "Merchant"
+relationship_score = 40.0
+last_interaction_ms = 0
+rescue_available = true
+rescue_cost = 35.0

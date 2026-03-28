@@ -1,0 +1,22 @@
+[[tactics]]
+id = "direct_assault"
+name = "Direct Assault"
+side = "attacker"
+category = "aggression"
+
+[tactics.requirements]
+min_army_ratio = 2.0
+siege_equipment_available = ["siege_ladder", "battering_ram"]
+morale_minimum = 0.6
+
+[tactics.effects]
+siege_duration_multiplier = 0.3
+casualty_rate_multiplier = 2.5
+defender_morale_drain = 0.3
+momentum_bonus = 0.2
+
+[tactics.counters]
+countered_by = ["active_defense", "boiling_oil", "murder_holes", "turtle"]
+
+[tactics.narrative]
+description = "No subtlety. No waiting. Ladders up, ram forward, and pray your numbers hold. It's the oldest tactic and the bloodiest, but when it works, it works fast."

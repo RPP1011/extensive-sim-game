@@ -1,0 +1,23 @@
+[[tactics]]
+id = "scorched_earth"
+name = "Scorched Earth"
+side = "defender"
+category = "desperation"
+
+[tactics.requirements]
+morale_minimum = 0.4
+settlement_being_overrun = true
+
+[tactics.effects]
+siege_duration_multiplier = 0.5
+settlement_destruction = 0.8
+attacker_supply_denial = true
+defender_casualty_multiplier = 0.6
+reputation_loss = true
+nothing_to_conquer = true
+
+[tactics.counters]
+countered_by = ["rapid_assault", "fire_brigades"]
+
+[tactics.narrative]
+description = "If we can't hold it, neither can they. The defenders put the torch to their own stores, their own buildings, their own walls. The attackers win a ruin and nothing more."

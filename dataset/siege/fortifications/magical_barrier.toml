@@ -1,0 +1,51 @@
+[[fortifications]]
+id = "magical_barrier"
+name = "Magical Barrier"
+tier = 5
+type = "gate"
+
+[fortifications.stats]
+gate_hp = 2000
+height = 5.0
+thickness = 0.0
+open_speed = 1
+mana_cost_per_tick = 3.0
+blocks_physical = true
+blocks_magical = true
+passable_by_keyholder = true
+
+[fortifications.construction]
+cost = 800
+ticks = 100
+resources = ["arcane_crystal", "mana_well"]
+requires_class = "[Archmage]"
+
+[fortifications.weaknesses]
+ram_multiplier = 0.0
+fire_resistant = true
+ward_breaker_multiplier = 5.0
+mana_starve_vulnerable = true
+dispel_vulnerable = true
+
+[fortifications.power_scaling]
+effective_level = 60
+builder_class_bonus = false
+enchantable = false
+age_scaling = 0.0
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 8.0
+ability_damage_reduction = 0.6
+projectile_deflection = 0.5
+ward_hp = 3000
+ward_level = 40
+
+[fortifications.garrison_bonus]
+defender_multiplier = 2.5
+ranged_accuracy_bonus = 0.0
+melee_disadvantage = 0.3
+cover_rating = 0.5
+
+[fortifications.narrative]
+description = "There is no gate. There is a shimmer in the air, a pressure against the skin, and then nothing will move forward. Swords bounce. Arrows shatter. Only the right word, spoken by the right voice, opens the way."

@@ -1,0 +1,36 @@
+[package]
+name = "ability-vae"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "train-ability-vae"
+path = "src/main.rs"
+
+[[bin]]
+name = "train-diffusion"
+path = "src/bin/train_diffusion.rs"
+
+[[bin]]
+name = "train-text-encoder"
+path = "src/bin/train_text_encoder.rs"
+
+[[bin]]
+name = "generate-dataset"
+path = "src/bin/generate_dataset.rs"
+
+[[bin]]
+name = "train-e2e"
+path = "src/bin/train_e2e.rs"
+
+[features]
+default = ["gpu"]
+gpu = ["burn/tch", "burn/autodiff"]
+cpu = ["burn/ndarray", "burn/autodiff"]
+
+[dependencies]
+tactical_sim = { path = "../tactical_sim" }
+burn = { version = "0.20", default-features = false, features = ["std"] }
+rand = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

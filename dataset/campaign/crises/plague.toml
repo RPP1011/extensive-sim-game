@@ -1,0 +1,16 @@
+name = "The Red Cough"
+description = "A virulent plague spreads through settlements, weakening adventurers and collapsing trade networks"
+crisis_type = "plague"
+world_templates = []
+trigger_threshold = 0.6
+priority = 8
+allow_simultaneous = true
+
+[config]
+type = "Plague"
+infection_rate = 0.15
+mortality_rate = 0.05
+adventurer_debuff_percent = 30.0
+spread_interval_ticks = 3000
+quarantine_cost_per_tick = 2.0
+cure_discovery_threshold = 15000

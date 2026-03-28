@@ -1,0 +1,51 @@
+[[events]]
+id = "sortie"
+name = "Defender Sortie"
+phase = "surround"
+
+[events.trigger]
+type = "DefenderMoraleAbove"
+threshold = 0.6
+
+[events.choice]
+prompt = "The gates burst open and defenders charge out in a surprise sortie! They're heading for the siege equipment."
+deadline_secs = 20.0
+
+[[events.choice.options]]
+label = "Rally and Defend Equipment"
+description = "Scramble to protect the siege engines. Lose the trebuchets and the siege stalls."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "siege_camp_defense"
+attacker_bonus = -0.1
+defender_bonus = 0.2
+objective = "protect_siege_equipment"
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The camp guards are outnumbered but fighting for the army's lifeline. If the trebuchets burn, this siege will take months longer."
+
+[[events.choice.options]]
+label = "Let Them Come — Spring the Trap"
+description = "The sortie is predictable. Let them commit, then cut them off from the gate."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "sortie_ambush"
+attacker_bonus = 0.3
+defender_bonus = -0.1
+objective = "surround_sortie"
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The cavalry waits behind the hill. When the sortie is fully committed, they ride to cut the retreat. The hunters become the hunted."
+
+[[events.choice.options]]
+label = "Counter-Charge the Open Gate"
+description = "If the gate is open for the sortie, it's open for everyone. Rush the gate while it's unbarred."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "gate_rush"
+attacker_bonus = 0.1
+defender_bonus = 0.0
+high_risk = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "A gamble. The fastest soldiers sprint for the open gate. If they get through before the portcullis drops, the siege could end today."

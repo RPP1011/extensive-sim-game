@@ -1,0 +1,102 @@
+[[buildings]]
+id = "shrine"
+name = "Shrine"
+category = "religious"
+construction_cost = 40
+construction_ticks = 200
+maintenance_cost = 1
+
+[buildings.effects]
+morale_bonus = 0.05
+healing_rate = 0.02
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "hamlet"
+required_resources = []
+
+[buildings.narrative]
+description = "A small stone altar beneath an ancient tree. Someone always leaves fresh flowers."
+
+[[buildings]]
+id = "temple"
+name = "Temple"
+category = "religious"
+construction_cost = 250
+construction_ticks = 1000
+maintenance_cost = 10
+
+[buildings.effects]
+morale_bonus = 0.15
+healing_rate = 0.1
+culture_output = 0.1
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "village"
+required_resources = ["stone"]
+
+[buildings.narrative]
+description = "Columns and incense, prayers and donations. The gods are listening, or so the priests say."
+
+[[buildings]]
+id = "cathedral"
+name = "Cathedral"
+category = "religious"
+construction_cost = 800
+construction_ticks = 3000
+maintenance_cost = 25
+
+[buildings.effects]
+morale_bonus = 0.25
+healing_rate = 0.2
+culture_output = 0.2
+garrison_bonus = 5
+
+[buildings.requirements]
+min_settlement_type = "city"
+required_resources = ["stone", "glass", "gold"]
+
+[buildings.narrative]
+description = "A monument to faith that took three generations to build. The stained glass tells stories older than the kingdom."
+
+[[buildings]]
+id = "monastery"
+name = "Monastery"
+category = "religious"
+construction_cost = 300
+construction_ticks = 1200
+maintenance_cost = 8
+
+[buildings.effects]
+healing_rate = 0.15
+knowledge_output = 0.1
+food_production = 0.05
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "village"
+required_resources = ["stone"]
+
+[buildings.narrative]
+description = "Silent halls, copied manuscripts, and surprisingly good beer. The monks keep to themselves."
+
+[[buildings]]
+id = "hospital"
+name = "Hospital"
+category = "religious"
+construction_cost = 200
+construction_ticks = 800
+maintenance_cost = 10
+
+[buildings.effects]
+healing_rate = 0.25
+plague_resistance = 0.3
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "town"
+required_resources = ["stone", "herbs"]
+
+[buildings.narrative]
+description = "Clean beds, herbal remedies, and priests who know anatomy. More survive than don't."

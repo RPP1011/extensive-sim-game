@@ -1,0 +1,47 @@
+ability GhostWalk {
+    target: party
+    cooldown: 3000t
+    hint: utility
+
+    ghost_walk for 200t
+}
+
+ability ShadowStep {
+    target: self
+    cooldown: 1000t
+    hint: utility
+
+    shadow_step for 100t
+}
+
+ability SilentMovement {
+    target: party
+    cooldown: 500t
+    hint: utility
+
+    silent_movement
+}
+
+ability HiddenCamp {
+    target: party
+    cooldown: 2000t
+    hint: utility
+
+    hidden_camp for 500t
+}
+
+ability Vanish {
+    target: self
+    cooldown: 5000t
+    hint: utility
+
+    vanish
+}
+
+ability Distraction {
+    target: party
+    cooldown: 1000t
+    hint: utility
+
+    distraction for 150t
+}

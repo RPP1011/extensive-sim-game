@@ -1,0 +1,21 @@
+class Guardian {
+    stat_growth: +1 attack, +4 defense, +4 max_hp per level
+
+    tags: melee, protection, fortification, selflessness, endurance
+
+    scaling party_alive_count {
+        when party_members > 0: +15% defense
+        when party_members >= 3: +10% max_hp
+        always: aura defense +3
+    }
+
+    abilities {
+        level 1: interpose "Step between an ally and an incoming attack"
+        level 5: fortress_stance "Roots in place, doubles defense"
+        level 10: guardian_mark "Marked enemy deals reduced damage to allies"
+        level 20: unshakeable "Immune to knockback, stun, and displacement"
+        level 40: living_wall "All damage to nearby allies redirects to you at half value"
+    }
+
+    requirements: level 1
+}

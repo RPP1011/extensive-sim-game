@@ -1,0 +1,382 @@
+[[named_fortifications]]
+id = "the_unbroken_wall"
+name = "The Unbroken Wall"
+effective_level = 90
+wall_hp = 20000
+height = 15.0
+thickness = 8.0
+self_repairing = true
+repair_rate = 50
+siege_damage_reflection = 0.3
+description = "It has never fallen. Not to the Demon King's horde, not to the Golem Armies, not to the Dragonflights. Every siege that has been laid against it has broken, and the wall remains without a single crack in its stone. Scholars argue whether it is enchanted or simply that well-built. The [Builders] who raised it are dust, but their work endures."
+lore = "The attackers brought a battering ram the size of a ship's mast. The wall broke the ram."
+
+[named_fortifications.power_scaling]
+builder_class_bonus = false
+enchantable = false
+age_scaling = 0.0
+level_damage_reduction = true
+
+[named_fortifications.wards]
+anti_magic_radius = 12.0
+ability_damage_reduction = 0.8
+projectile_deflection = 0.6
+ward_hp = 10000
+ward_level = 70
+self_repairing = true
+repair_rate = 20
+
+[named_fortifications.garrison_bonus]
+defender_multiplier = 5.0
+ranged_accuracy_bonus = 0.4
+melee_disadvantage = 0.7
+cover_rating = 0.95
+
+[named_fortifications.unique_properties]
+reflects_siege_damage = true
+siege_reflection_percent = 0.3
+cannot_be_breached_by_below_level = 60
+morale_aura_radius = 20.0
+morale_bonus_defenders = 0.3
+morale_penalty_attackers = 0.2
+
+[[named_fortifications]]
+id = "the_bleeding_gate"
+name = "The Bleeding Gate"
+effective_level = 60
+gate_hp = 5000
+height = 6.0
+thickness = 1.0
+description = "The iron is stained red, and it is not rust. Those who touch the gate with hostile intent feel their strength drain away. Blood seeps from its surface when battle is near, as if it anticipates the violence. The [Necromancer] who forged it was executed, but no one has been able to destroy his work."
+lore = "A [Knight] in full plate laid his hand on the gate to push it open. They found him an hour later, white as parchment, barely alive. The gate hadn't moved."
+
+[named_fortifications.power_scaling]
+builder_class_bonus = false
+enchantable = false
+age_scaling = 0.0
+level_damage_reduction = true
+
+[named_fortifications.wards]
+anti_magic_radius = 5.0
+ability_damage_reduction = 0.5
+projectile_deflection = 0.2
+ward_hp = 3000
+ward_level = 40
+
+[named_fortifications.garrison_bonus]
+defender_multiplier = 3.5
+ranged_accuracy_bonus = 0.0
+melee_disadvantage = 0.6
+cover_rating = 0.5
+
+[named_fortifications.unique_properties]
+hp_drain_on_contact = true
+drain_per_tick = 15
+drain_radius = 2.0
+heals_gate_from_drain = true
+heal_percent = 0.5
+immune_to_undead = true
+
+[[named_fortifications]]
+id = "stormwatch_ramparts"
+name = "Stormwatch Ramparts"
+effective_level = 70
+wall_hp = 12000
+height = 10.0
+thickness = 5.0
+description = "Built on a cliff overlooking the sea, the ramparts crackle with captured lightning. Storm clouds gather above the walls even on clear days. Siege engines brought within range are struck by bolts from the sky — not random lightning, but aimed strikes that find the tallest wooden structure and reduce it to splinters."
+lore = "Three trebuchets. That's how many the last army brought. The first was struck before it was assembled. The second fired once. The third never made it off the supply wagon."
+
+[named_fortifications.power_scaling]
+builder_class_bonus = false
+enchantable = false
+age_scaling = 0.0
+level_damage_reduction = true
+
+[named_fortifications.wards]
+anti_magic_radius = 10.0
+ability_damage_reduction = 0.6
+projectile_deflection = 0.4
+ward_hp = 6000
+ward_level = 50
+
+[named_fortifications.garrison_bonus]
+defender_multiplier = 4.5
+ranged_accuracy_bonus = 0.4
+melee_disadvantage = 0.5
+cover_rating = 0.85
+
+[named_fortifications.unique_properties]
+lightning_strikes_siege = true
+lightning_damage = 500
+lightning_cooldown_ticks = 50
+lightning_range = 25.0
+lightning_accuracy = 0.9
+targets_wooden_first = true
+storm_aura_slow = 0.2
+
+[[named_fortifications]]
+id = "the_whispering_walls"
+name = "The Whispering Walls"
+effective_level = 50
+wall_hp = 8000
+height = 6.0
+thickness = 3.0
+description = "The walls talk. Not loudly — a susurrus at the edge of hearing, a murmur that the garrison has learned to interpret. Approaching forces are detected miles away. Invisible creatures are revealed the moment they enter the wall's awareness. Tunnelers are heard before their picks strike stone."
+lore = "The spy was the best in the kingdom. She crept past three sentry lines without a sound. The walls told the garrison her name, her mission, and the contents of her pockets."
+
+[named_fortifications.power_scaling]
+builder_class_bonus = false
+enchantable = false
+age_scaling = 0.01
+level_damage_reduction = true
+
+[named_fortifications.wards]
+anti_magic_radius = 5.0
+ability_damage_reduction = 0.3
+projectile_deflection = 0.2
+ward_hp = 3000
+ward_level = 30
+
+[named_fortifications.garrison_bonus]
+defender_multiplier = 3.5
+ranged_accuracy_bonus = 0.3
+melee_disadvantage = 0.4
+cover_rating = 0.7
+
+[named_fortifications.unique_properties]
+reveals_invisible = true
+reveal_radius = 30.0
+detects_tunneling = true
+tunnel_detection_radius = 50.0
+early_warning_radius = 100.0
+prevents_surprise_attacks = true
+identifies_individuals = true
+
+[[named_fortifications]]
+id = "the_adamantine_keep"
+name = "The Adamantine Keep"
+effective_level = 85
+wall_hp = 25000
+height = 12.0
+thickness = 6.0
+description = "Dwarven-forged adamantine alloy bonded to granite. The metal doesn't rust, doesn't scratch, doesn't yield. Mining picks shatter against it. Spells slide off like water. The dwarves who built it consider it their finest work, and they don't say that lightly. It cost more than some kingdoms are worth."
+lore = "A [Siege Engineer] examined the wall for a week. His report was one sentence: 'Find another way in.'"
+
+[named_fortifications.power_scaling]
+builder_class_bonus = false
+enchantable = false
+age_scaling = 0.0
+level_damage_reduction = true
+
+[named_fortifications.wards]
+anti_magic_radius = 8.0
+ability_damage_reduction = 0.7
+projectile_deflection = 0.5
+ward_hp = 5000
+ward_level = 55
+
+[named_fortifications.garrison_bonus]
+defender_multiplier = 5.0
+ranged_accuracy_bonus = 0.35
+melee_disadvantage = 0.65
+cover_rating = 0.95
+
+[named_fortifications.unique_properties]
+immune_to_sapper = true
+siege_damage_reduction = 0.5
+fire_immune = true
+acid_immune = true
+physical_damage_reduction = 0.3
+
+[[named_fortifications]]
+id = "the_dreaming_spire"
+name = "The Dreaming Spire"
+effective_level = 75
+tower_hp = 6000
+height = 30.0
+garrison_slots = 5
+description = "The tower exists partly in another plane. Attackers who approach it feel drowsy, confused, lost. Arrows fired at it sometimes pass through as if it weren't there. The [Archmage] who built it never explained how, and she hasn't been seen in two centuries. The tower remains, dreaming whatever towers dream."
+lore = "The assault team climbed the tower for six hours. They ended up back at the bottom. None of them could explain how."
+
+[named_fortifications.power_scaling]
+builder_class_bonus = false
+enchantable = false
+age_scaling = 0.0
+level_damage_reduction = true
+
+[named_fortifications.wards]
+anti_magic_radius = 15.0
+ability_damage_reduction = 0.8
+projectile_deflection = 0.6
+ward_hp = 8000
+ward_level = 60
+
+[named_fortifications.garrison_bonus]
+defender_multiplier = 4.0
+ranged_accuracy_bonus = 0.5
+melee_disadvantage = 0.5
+cover_rating = 0.8
+
+[named_fortifications.unique_properties]
+phase_shift_chance = 0.3
+confusion_aura_radius = 10.0
+confusion_duration_ticks = 30
+sleep_aura_radius = 5.0
+sleep_chance = 0.15
+spatial_distortion = true
+climbing_impossible = true
+
+[[named_fortifications]]
+id = "thornhold_bulwark"
+name = "Thornhold Bulwark"
+effective_level = 55
+wall_hp = 10000
+height = 8.0
+thickness = 5.0
+description = "A living wall grown by three generations of [Druids], each more powerful than the last. The thorns are iron-hard, the roots go down to bedrock, and the wall actively fights back. Climbers are grabbed and pulled in. Fire that touches it is smothered by green growth that seems to come from nowhere."
+lore = "They set it on fire. It grew back overnight, and the new thorns were longer."
+
+[named_fortifications.power_scaling]
+builder_class_bonus = false
+enchantable = false
+age_scaling = 0.03
+level_damage_reduction = true
+
+[named_fortifications.wards]
+anti_magic_radius = 5.0
+ability_damage_reduction = 0.4
+projectile_deflection = 0.1
+ward_hp = 4000
+ward_level = 35
+
+[named_fortifications.garrison_bonus]
+defender_multiplier = 4.0
+ranged_accuracy_bonus = 0.15
+melee_disadvantage = 0.6
+cover_rating = 0.7
+
+[named_fortifications.unique_properties]
+regeneration_per_tick = 10
+fire_resistance = 0.8
+grabs_climbers = true
+grab_damage_per_tick = 8
+grab_escape_difficulty = 0.9
+grows_thorns_on_damage = true
+thorn_damage = 5
+seasonal_strength_bonus = 0.3
+
+[[named_fortifications]]
+id = "the_silent_curtain"
+name = "The Silent Curtain"
+effective_level = 80
+wall_hp = 3000
+height = 0.0
+thickness = 0.0
+description = "Not a wall at all — a zone of absolute silence and nullification. No sound passes through it. No magic functions within it. No Skill activates. Fighters who enter it lose access to every class ability they have. A Level 70 [Blademaster] becomes a man with a sword. A Level 50 [Archmage] becomes someone in a robe. The effect extends fifty paces in every direction."
+lore = "The army charged through it at full strength. On the other side, they were just people. The garrison, who had trained to fight without Skills, cut them apart."
+
+[named_fortifications.power_scaling]
+builder_class_bonus = false
+enchantable = false
+age_scaling = 0.0
+level_damage_reduction = false
+
+[named_fortifications.wards]
+anti_magic_radius = 50.0
+ability_damage_reduction = 1.0
+projectile_deflection = 0.0
+ward_hp = 15000
+ward_level = 80
+
+[named_fortifications.garrison_bonus]
+defender_multiplier = 2.0
+ranged_accuracy_bonus = 0.0
+melee_disadvantage = 0.0
+cover_rating = 0.0
+
+[named_fortifications.unique_properties]
+suppresses_all_skills = true
+suppression_radius = 50.0
+suppresses_class_abilities = true
+suppresses_magic = true
+no_physical_barrier = true
+sound_nullification = true
+training_bonus_for_garrison = true
+
+[[named_fortifications]]
+id = "the_sunken_aegis"
+name = "The Sunken Aegis"
+effective_level = 65
+wall_hp = 15000
+height = 3.0
+thickness = 10.0
+description = "More below ground than above, the Aegis is a fortress designed to be assaulted from all directions — including below. The walls extend twenty feet underground, lined with enchanted stone that vibrates when tunnelers approach. The surface portion is modest, almost inviting. The trap is everything you can't see."
+lore = "The sappers broke through into what they thought was a basement. It was the first of nine kill rooms, each sealed by a portcullis they couldn't lift."
+
+[named_fortifications.power_scaling]
+builder_class_bonus = false
+enchantable = true
+age_scaling = 0.01
+level_damage_reduction = true
+
+[named_fortifications.wards]
+anti_magic_radius = 5.0
+ability_damage_reduction = 0.4
+projectile_deflection = 0.2
+ward_hp = 4000
+ward_level = 40
+
+[named_fortifications.garrison_bonus]
+defender_multiplier = 5.0
+ranged_accuracy_bonus = 0.2
+melee_disadvantage = 0.5
+cover_rating = 0.8
+
+[named_fortifications.unique_properties]
+underground_depth = 20.0
+anti_tunnel_detection = true
+kill_rooms = 9
+underground_portcullises = 9
+surface_deception = true
+immune_to_sapper = true
+underground_garrison_slots = 30
+
+[[named_fortifications]]
+id = "the_oathbound_gate"
+name = "The Oathbound Gate"
+effective_level = 70
+gate_hp = 8000
+height = 8.0
+thickness = 2.0
+description = "The gate was sealed with an oath, not a lock. A [Paladin] of the highest order swore that it would not open to enemies of the realm, and the oath took hold in the iron itself. No force has been able to open it from outside. Battering rams rebound. Petards fail to detonate. The gate simply refuses to be breached by those it judges unworthy."
+lore = "The [Rogue] picked the lock in thirty seconds. The gate remained shut. 'It's not locked,' he said, baffled. 'It just won't open.'"
+
+[named_fortifications.power_scaling]
+builder_class_bonus = false
+enchantable = false
+age_scaling = 0.0
+level_damage_reduction = true
+
+[named_fortifications.wards]
+anti_magic_radius = 5.0
+ability_damage_reduction = 0.6
+projectile_deflection = 0.3
+ward_hp = 6000
+ward_level = 50
+
+[named_fortifications.garrison_bonus]
+defender_multiplier = 4.0
+ranged_accuracy_bonus = 0.0
+melee_disadvantage = 0.5
+cover_rating = 0.6
+
+[named_fortifications.unique_properties]
+oath_bound = true
+immune_to_ram = true
+immune_to_petard = true
+judges_intent = true
+opens_for_righteous = true
+damage_reduction_vs_hostile = 0.8
+can_be_bypassed_by_deception = false
+can_be_bypassed_by_wall_breach = true

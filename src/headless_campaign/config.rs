@@ -68,6 +68,8 @@ pub struct CampaignConfig {
     pub threat: ThreatConfig,
     pub quest_lifecycle: QuestLifecycleConfig,
     pub starting_state: StartingStateConfig,
+    #[serde(default)]
+    pub npc_economy: NpcEconomyConfig,
 }
 
 // ---------------------------------------------------------------------------
@@ -727,6 +729,134 @@ impl Default for StartingStateConfig {
 // Top-level Default
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// NPC Economic Agent
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NpcEconomyConfig {
+    /// How often NPC decisions, demand, and safety are re-evaluated (ticks).
+    pub decision_interval_ticks: u64,
+
+    // --- Income ---
+    /// Base gold per tick per point of stat × level_multiplier when demand > 0.
+    pub service_income_per_stat_point: f32,
+    /// Demand exponent: income = stat × level_mult × demand^this × base_rate.
+    pub demand_income_exponent: f32,
+    /// Base combat income rate (per power_rating point × threat_premium).
+    pub base_combat_income_rate: f32,
+    /// Fraction of quest gold that goes to participating NPCs (rest to guild).
+    pub quest_reward_npc_share: f32,
+    /// Guild tax rate on NPC service income.
+    pub guild_tax_rate: f32,
+    /// Income variance range (±this fraction). 0.2 = ±20%.
+    pub income_variance: f32,
+
+    // --- Demand ---
+    /// Per-channel demand saturation rate (supply contribution divisor).
+    pub demand_saturation_rate: f32,
+    /// Base combat demand in any settlement (guards always needed).
+    pub base_combat_demand: f32,
+    /// Base medicine demand (healers always needed).
+    pub base_medicine_demand: f32,
+    /// Regional threat contribution to combat demand.
+    pub threat_to_combat_demand: f32,
+    /// Population contribution to base demand across all channels.
+    pub population_to_base_demand: f32,
+
+    // --- Expenses ---
+    /// Base living cost per NPC per tick at a settlement.
+    pub base_living_cost_per_tick: f32,
+    /// Equipment upkeep per tick (scaled by effective_level / 10).
+    pub equipment_upkeep_per_tick: f32,
+    /// Medical cost multiplier when injured.
+    pub injury_cost_multiplier: f32,
+    /// Cost of living population scale divisor.
+    pub cost_pop_scale: f32,
+
+    // --- Power ---
+    /// Resource value (gold + equipment) per effective level bonus. wealth_bonus = sqrt(resources / this).
+    pub resource_level_threshold: f32,
+
+    // --- Safety ---
+    /// Threat scale divisor for min_viable_threat calculation.
+    pub threat_scale: f32,
+    /// Viability floor fraction: party_max_level must exceed route_threat × this.
+    pub viability_floor_fraction: f32,
+
+    // --- Travel danger ---
+    /// Base injury chance per tick while traveling (ambient danger).
+    pub base_travel_injury_chance: f32,
+    /// Attrition injury chance when between viability floor and route threat.
+    pub attrition_injury_rate: f32,
+    /// Injury chance when below viability floor (capped).
+    pub below_floor_injury_chance: f32,
+    /// Base injury severity on a travel encounter hit.
+    pub travel_injury_base: f32,
+    /// Death chance per tick when injury > 90 while traveling.
+    pub travel_death_chance: f32,
+    /// Road safety factor: route_threat *= (1.0 - road_connectivity × this).
+    pub road_safety_factor: f32,
+
+    // --- Party formation ---
+    /// Ticks to wait before abandoning party search.
+    pub party_seek_patience_ticks: u32,
+    /// Maximum autonomous party size.
+    pub max_autonomous_party_size: usize,
+
+    // --- Counterleveling ---
+    /// Maximum adversity multiplier (from ln curve, ~2.0 in practice).
+    pub max_adversity_multiplier: f32,
+
+    // --- Death spiral floor ---
+    /// Minimum combat NPCs per region before immigration pressure activates.
+    pub min_combat_npcs_per_region: usize,
+}
+
+impl Default for NpcEconomyConfig {
+    fn default() -> Self {
+        Self {
+            decision_interval_ticks: 50,
+
+            service_income_per_stat_point: 0.1,
+            demand_income_exponent: 1.5,
+            base_combat_income_rate: 0.001,
+            quest_reward_npc_share: 0.6,
+            guild_tax_rate: 0.2,
+            income_variance: 0.2,
+
+            demand_saturation_rate: 0.02,
+            base_combat_demand: 0.3,
+            base_medicine_demand: 0.2,
+            threat_to_combat_demand: 0.01,
+            population_to_base_demand: 0.001,
+
+            base_living_cost_per_tick: 0.05,
+            equipment_upkeep_per_tick: 0.02,
+            injury_cost_multiplier: 3.0,
+            cost_pop_scale: 50.0,
+
+            resource_level_threshold: 100.0,
+
+            threat_scale: 10.0,
+            viability_floor_fraction: 0.6,
+
+            base_travel_injury_chance: 0.001,
+            attrition_injury_rate: 0.05,
+            below_floor_injury_chance: 0.3,
+            travel_injury_base: 10.0,
+            travel_death_chance: 0.05,
+            road_safety_factor: 0.7,
+
+            party_seek_patience_ticks: 200,
+            max_autonomous_party_size: 6,
+
+            max_adversity_multiplier: 2.0,
+            min_combat_npcs_per_region: 2,
+        }
+    }
+}
+
 impl Default for CampaignConfig {
     fn default() -> Self {
         Self {
@@ -745,6 +875,7 @@ impl Default for CampaignConfig {
             threat: ThreatConfig::default(),
             quest_lifecycle: QuestLifecycleConfig::default(),
             starting_state: StartingStateConfig::default(),
+            npc_economy: NpcEconomyConfig::default(),
         }
     }
 }

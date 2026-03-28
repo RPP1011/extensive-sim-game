@@ -367,6 +367,12 @@ fn apply_relief(state: &mut CampaignState, events: &mut Vec<WorldEvent>) {
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: crate::headless_campaign::state::EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
                 };
 
                 state.adventurers.push(adventurer);

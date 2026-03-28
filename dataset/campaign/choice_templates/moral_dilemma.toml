@@ -1,0 +1,47 @@
+# An ethical choice with no clear right answer.
+
+category = "world_event"
+trigger = "moral_dilemma"
+prompt = "{dilemma_description}"
+deadline_secs = 90.0
+default_option = 1
+
+[[options]]
+label = "The Righteous Path"
+description = "Do what's morally right, regardless of cost."
+
+[[options.effects]]
+type = "gold"
+amount = -25.0
+
+[[options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[options.effects]]
+type = "narrative"
+text = "The guild chooses honor over profit. It hurts the treasury but strengthens the soul."
+
+[[options]]
+label = "The Pragmatic Path"
+description = "Do what's practical. Morality is a luxury the guild can't always afford."
+
+[[options.effects]]
+type = "gold"
+amount = 15.0
+
+[[options.effects]]
+type = "reputation"
+amount = -3.0
+
+[[options.effects]]
+type = "narrative"
+text = "The practical choice is made. Some things are worth more than a clean conscience."
+
+[[options]]
+label = "Find a Middle Ground"
+description = "Compromise. Neither fully righteous nor fully pragmatic."
+
+[[options.effects]]
+type = "narrative"
+text = "A compromise is reached. No one is fully satisfied, but no one is fully wronged either."

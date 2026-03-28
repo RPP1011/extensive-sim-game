@@ -1,0 +1,54 @@
+name = "The Siege of Al-Sariya"
+description = "A desert oasis city. Water is the ultimate weapon. Whoever controls the wells controls the siege."
+difficulty = "medium"
+
+[settlement]
+template = "desert_oasis"
+wall_type = "stone_wall"
+wall_hp = 2000
+gate_type = "reinforced_gate"
+gate_hp = 800
+towers = 4
+tower_type = "stone_tower"
+garrison = 30
+terrain = "desert"
+water_wells = 3
+oasis_inside_walls = true
+
+[attacker]
+army_size = 80
+siege_equipment = ["trebuchet", "battering_ram", "catapult", "mantlet"]
+supply_ticks = 1000
+water_ticks = 600
+reinforcement_chance = 0.2
+morale = 0.7
+commander_level = 20
+heat_penalty = 0.2
+
+[defender]
+garrison_strength = 30
+adventurer_slots = 4
+supplies_ticks = 2000
+water_ticks = 4000
+reinforcement_chance = 0.35
+morale = 0.8
+special_defenses = ["boiling_oil", "arrow_slits"]
+commander_level = 22
+
+[victory_conditions]
+attacker_wins = ["gate_destroyed", "wall_breached_and_stormed", "water_wells_captured"]
+defender_wins = ["attacker_retreat", "attacker_dehydration", "reinforcements_arrive"]
+time_limit_ticks = 3000
+
+[power_context]
+defender_avg_level = 18
+attacker_avg_level = 16
+wall_effective_level = 28
+has_wards = false
+ward_type = "none"
+high_level_threat = "none"
+
+[narrative]
+opening = "In the desert, water is life. Al-Sariya sits on the only water for a hundred miles. The army that camps outside its walls brought enough water for two weeks. The city has enough for two years."
+attacker_victory = "The wells of Al-Sariya belong to the conqueror now. The desert obeys whoever controls the water."
+defender_victory = "The desert is patient and pitiless. The army withers under the sun, and Al-Sariya's wells never run dry. The sand will bury the bones of those who tried."

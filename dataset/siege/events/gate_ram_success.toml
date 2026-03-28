@@ -1,0 +1,46 @@
+[[events]]
+id = "gate_ram_success"
+name = "Gate Breached by Ram"
+phase = "assault"
+
+[events.trigger]
+type = "GateHpBelow"
+threshold = 0.0
+
+[events.choice]
+prompt = "The gate splinters inward! The ram crew cheers, but beyond the ruined gate lies the killing ground of the gatehouse."
+deadline_secs = 25.0
+
+[[events.choice.options]]
+label = "Charge Through"
+description = "Storm the gatehouse immediately. Murder holes above, portcullis ahead, but hesitation kills too."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "gatehouse_assault"
+attacker_bonus = -0.2
+defender_bonus = 0.4
+[[events.choice.options.effects]]
+type = "narrative"
+text = "They roar and charge into the gatehouse. Oil pours down. Arrows rain from murder holes. But the press of bodies carries them forward."
+
+[[events.choice.options]]
+label = "Clear with Archers First"
+description = "Send archers to suppress the murder holes before committing infantry."
+[[events.choice.options.effects]]
+type = "siege_progress"
+ticks_cost = 100
+defender_casualties = 5
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Arrows fly up through the murder holes. It's an ugly, close exchange. But when the infantry finally advances, fewer things pour down from above."
+
+[[events.choice.options]]
+label = "Feint — Assault Elsewhere"
+description = "The gate is open but it's a trap. Use it as a distraction while the real attack hits the walls."
+[[events.choice.options.effects]]
+type = "tactical_modifier"
+defender_repositioning_penalty = 0.3
+wall_defense_weakened = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The defenders commit their reserves to the gatehouse. The walls thin out. And that's when the ladders go up on the far side."

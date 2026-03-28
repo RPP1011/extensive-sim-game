@@ -1,0 +1,61 @@
+# A traveling arena master sets up in the region.
+
+name = "Arena Challenge"
+priority = 4
+repeatable = true
+cooldown_ticks = 7000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 7000
+
+[[conditions]]
+type = "MinAdventurers"
+count = 2
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "A traveling arena master has erected a fighting pit in the town square. Warriors from across the region gather to test their mettle. Entry fee is steep, but the prizes are legendary."
+deadline_secs = 60.0
+default_option = 2
+
+[[choice.options]]
+label = "Enter the Tournament (35g)"
+description = "Pay the entry fee and send your best fighters. Victory means gold, glory, and a rare weapon."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -35.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The crowd roars as your champion steps into the pit. Blood and glory await."
+
+[[choice.options]]
+label = "Run the Betting Ring"
+description = "Skip the fighting — run the odds. Less glory, steady profit."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = -2.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild quietly profits from the bloodsport. Not heroic, but effective."
+
+[[choice.options]]
+label = "Ignore the Spectacle"
+description = "Arenas are for showoffs. The guild has real work to do."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The arena packs up and moves on. Your adventurers watch it go with mixed feelings."

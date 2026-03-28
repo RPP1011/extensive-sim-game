@@ -1,0 +1,58 @@
+name = "Narrow Alley Ambush"
+map_type = "street_fight"
+width = 16
+height = 24
+
+[terrain]
+layout = """
+HHHH..RRRR..HHHH
+HHHH..R..R..HHHH
+HHHH..R..R..HHHH
+......R..R......
+HHHH..R..R..HHHH
+HHHH..R..R..HHHH
+......R..R......
+......R..R......
+HH....R..R....HH
+HH....R..R....HH
+......R..R......
+......R..R......
+......R..R......
+HH....R..R....HH
+HH....R..R....HH
+......R..R......
+......R..R......
+HHHH..R..R..HHHH
+HHHH..R..R..HHHH
+......R..R......
+HHHH..R..R..HHHH
+HHHH..R..R..HHHH
+HHHH..RRRR..HHHH
+................
+"""
+
+[[spawn_zones]]
+name = "ambushers"
+team = 0
+rect = [0, 8, 4, 15]
+
+[[spawn_zones]]
+name = "patrol"
+team = 1
+rect = [6, 20, 9, 23]
+
+[[cover_positions]]
+position = [0, 8]
+type = "full"
+
+[[cover_positions]]
+position = [12, 8]
+type = "full"
+
+[[cover_positions]]
+position = [0, 13]
+type = "full"
+
+[[cover_positions]]
+position = [12, 13]
+type = "full"

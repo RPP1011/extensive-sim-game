@@ -1,0 +1,69 @@
+# A guild member causes a diplomatic incident.
+
+name = "Diplomatic Incident"
+priority = 7
+repeatable = true
+cooldown_ticks = 6000
+
+[trigger]
+type = "FactionRelation"
+direction = "above"
+threshold = 10.0
+
+[choice]
+category = "diplomacy"
+trigger = "hook"
+prompt = "One of your adventurers got drunk in {faction_name} territory and punched a noble's son. The noble demands satisfaction — gold, an apology, or the offender's head. Faction relations are strained."
+deadline_secs = 60.0
+default_option = 1
+
+[[choice.options]]
+label = "Pay Reparations (50g)"
+description = "Gold smooths over most insults. Expensive but diplomatic."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -50.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A bag of gold and a written apology. The noble accepts, barely."
+
+[[choice.options]]
+label = "Public Apology"
+description = "Force your adventurer to apologize publicly. Humiliating but free."
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 3.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = -3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Your adventurer kneels before the noble and apologizes through clenched teeth."
+
+[[choice.options]]
+label = "Defend Your Member"
+description = "The noble's son started it. Stand by your people."
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = -15.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild stands behind its own. {faction_name} is not pleased."

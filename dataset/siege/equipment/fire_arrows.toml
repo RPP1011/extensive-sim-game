@@ -1,0 +1,33 @@
+[[equipment]]
+id = "fire_arrows"
+name = "Fire Arrows"
+category = "ranged"
+tier = 1
+
+[equipment.stats]
+gate_damage_per_tick = 2.0
+wall_damage_per_tick = 0.0
+range = 8.0
+crew_required = 1
+move_speed = 1.0
+hp = 0
+armor = 0
+fire_rate = 0.5
+accuracy = 0.6
+troop_damage = 8.0
+fire_damage_per_tick = 3.0
+ignite_chance = 0.3
+per_archer = true
+
+[equipment.requirements]
+min_tech_level = 1
+construction_cost = 5
+construction_ticks = 10
+resources = ["arrows", "pitch"]
+
+[equipment.counters]
+vulnerable_to = ["rain_weather", "wet_hides", "stone_construction"]
+strong_against = ["siege_tower", "wooden_palisade", "wooden_gate", "mantlet", "supply_wagon"]
+
+[equipment.narrative]
+description = "The tips glow like angry stars as the archers nock. Then the night sky fills with streaking fire, and below, the wooden works begin to burn."

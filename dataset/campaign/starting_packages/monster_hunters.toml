@@ -1,0 +1,81 @@
+name = "Monster Hunters"
+description = "Three specialists who live to fight the big ones. Their gear is purpose-built, their tactics refined, and their scars impressive. Useless at diplomacy, unstoppable against bosses."
+gold_bonus = 25.0
+supply_bonus = 20.0
+reputation_bonus = 5.0
+items = []
+
+[[adventurers]]
+id = 1
+name = "Grimslade"
+archetype = "warrior"
+level = 5
+xp = 0
+traits = ["battle_scarred", "monster_slayer"]
+status = "Idle"
+loyalty = 55.0
+stress = 15.0
+fatigue = 10.0
+injury = 8.0
+resolve = 65.0
+morale = 60.0
+guild_relationship = 35.0
+
+[adventurers.stats]
+max_hp = 90.0
+attack = 20.0
+defense = 14.0
+speed = 9.0
+ability_power = 4.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 2
+name = "Shrike"
+archetype = "ranger"
+level = 4
+xp = 0
+traits = ["explorer", "keen_eye"]
+status = "Idle"
+loyalty = 50.0
+stress = 12.0
+fatigue = 8.0
+injury = 0.0
+resolve = 55.0
+morale = 62.0
+guild_relationship = 30.0
+
+[adventurers.stats]
+max_hp = 70.0
+attack = 16.0
+defense = 8.0
+speed = 14.0
+ability_power = 8.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 3
+name = "Hemlock"
+archetype = "cleric"
+level = 3
+xp = 0
+traits = ["healer"]
+status = "Idle"
+loyalty = 60.0
+stress = 8.0
+fatigue = 5.0
+injury = 0.0
+resolve = 50.0
+morale = 65.0
+guild_relationship = 40.0
+
+[adventurers.stats]
+max_hp = 55.0
+attack = 5.0
+defense = 10.0
+speed = 9.0
+ability_power = 17.0
+
+[adventurers.equipment]

@@ -1,0 +1,20 @@
+class Plague_Doctor {
+    stat_growth: +3 ability_power, +2 max_hp, +1 defense per level
+
+    tags: medicine, dark, disease, cure, duality
+
+    scaling party_alive_count {
+        when party_members >= 1: +10% ability_power
+        always: +5% max_hp
+    }
+
+    abilities {
+        level 40: miasma "Release a cloud of disease that damages enemies and heals allies"
+        level 45: inoculate "Grant an ally immunity to all poisons and diseases permanently"
+        level 50: pandemic "Spread a debuff from one enemy to all enemies on the field"
+        level 60: life_and_death "Choose to either fully heal an ally or instantly kill a wounded enemy"
+        level 80: sovereign_remedy "Cure any condition, even death, but the cost is paid by your own lifespan"
+    }
+
+    requirements: level 40, classes: Doctor + Necromancer
+}

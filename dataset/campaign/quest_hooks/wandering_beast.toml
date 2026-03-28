@@ -1,0 +1,59 @@
+name = "Wandering Beast"
+priority = 6
+repeatable = true
+cooldown_ticks = 5000
+
+[trigger]
+type = "ThreatLevel"
+min_threat = 30.0
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "A massive creature — some kind of feral beast the size of a house — has been spotted wandering near settlements. It hasn't attacked yet, but livestock vanishes when it passes. Farmers are terrified."
+deadline_secs = 60.0
+default_option = 1
+
+[[choice.options]]
+label = "Hunt It (25g)"
+description = "Track and kill the beast. Parts are probably worth good money."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -25.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The hunt begins. Tracks the size of wagon wheels lead into the hills."
+
+[[choice.options]]
+label = "Drive It Away"
+description = "Scare it off without killing it. Less risk, less reward."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Fire and noise drive the beast away from settlements. It disappears into the wilderness."
+
+[[choice.options]]
+label = "Study It"
+description = "Observe from a distance. Understanding a threat is the first step to managing it."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Scouts maintain careful watch. The beast's patterns are mapped and cataloged."

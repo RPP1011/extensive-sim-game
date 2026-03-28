@@ -1,0 +1,34 @@
+name = "The Escape"
+world_template = "Frontier"
+sequence = 1
+default_option = 1
+prompt = "The chains break at midnight. You've been working the quarry for three years, since the debt collectors sold you to the mining consortium. Tonight, a guard falls asleep and your lockpick — a filed nail you've been hiding for months — finally does its work. The mine tunnel stretches two directions: toward the surface, and deeper into unknown caverns."
+
+[[options]]
+label = "Surface — Fight Through"
+description = "Charge up the main shaft. Two guards stand between you and freedom. You're half-starved and barefoot, but rage is a kind of fuel."
+pc_traits = [{ trait = "battle_scarred" }]
+pc_stats = { attack = 4.0, defense = 1.0, injury = 15.0 }
+effects = [
+    { type = "narrative", text = "Blood on the stone. You don't look back. The night air hits your face like a fist of mercy." },
+    { type = "reputation", amount = 3.0 },
+]
+
+[[options]]
+label = "Deep Tunnels — Disappear"
+description = "Vanish into the uncharted depths. The consortium won't follow into the dark. Whatever's down there can't be worse than what's behind."
+pc_traits = [{ trait = "explorer" }]
+pc_stats = { speed = 3.0, resolve = 2.0 }
+effects = [
+    { type = "narrative", text = "Three days in the dark. You eat cave moss and drink mineral water. When you finally surface, you're miles from the mine and free." },
+]
+
+[[options]]
+label = "Free the Others First"
+description = "You could run alone. But there are twenty others in chains. You know where the key ring hangs."
+pc_traits = [{ trait = "diplomat_born" }]
+pc_stats = { resolve = 4.0 }
+effects = [
+    { type = "reputation", amount = 15.0 },
+    { type = "narrative", text = "Twenty souls follow you into the night. Not all of them make it. But those who do will never forget what you did." },
+]

@@ -1,0 +1,341 @@
+# RL milestones — reward shaping achievements to encourage diverse play in training
+
+[[achievements]]
+id = "all_quest_types_attempted"
+name = "Well-Rounded"
+description = "Attempt all quest types: explore, combat, diplomatic, and economic."
+category = "rl_milestones"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "all_quest_types_attempted"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Explore, fight, talk, trade. A guild that does it all."
+
+[[achievements]]
+id = "use_all_resources"
+name = "Resource Manager"
+description = "Spend gold, supplies, and reputation in a single campaign."
+category = "rl_milestones"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ResourceThreshold"
+condition = "all_resources_used"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Gold buys things. Supplies keep you alive. Reputation opens doors."
+
+[[achievements]]
+id = "interact_every_faction"
+name = "Known Quantity"
+description = "Interact with every faction at least once."
+category = "rl_milestones"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "FactionRelationChanged"
+condition = "interacted_all_factions"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Every faction knows your name. For better or worse."
+
+[[achievements]]
+id = "combat_and_noncombat_skills"
+name = "Dual Approach"
+description = "Use both combat and non-combat class skills in the same campaign."
+category = "rl_milestones"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "SkillUsed"
+condition = "combat_and_noncombat_same_campaign"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Swords and ledgers. The guild uses every tool available."
+
+[[achievements]]
+id = "five_quest_types"
+name = "Quest Connoisseur"
+description = "Successfully complete quests of 5 or more different types."
+category = "rl_milestones"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "five_different_quest_types"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Five quest types, all completed. Versatility is the guild's greatest weapon."
+
+[[achievements]]
+id = "three_roles_active"
+name = "Balanced Party"
+description = "Have adventurers in 3 or more different roles active simultaneously."
+category = "rl_milestones"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "three_active_roles"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Tank, healer, damage. The fundamentals covered."
+
+[[achievements]]
+id = "nonviolent_resolution"
+name = "Peaceful Solution"
+description = "Resolve a situation non-violently when combat was an option."
+category = "rl_milestones"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "nonviolent_when_combat_available"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "The swords stayed sheathed. Words worked better."
+
+[[achievements]]
+id = "trade_after_fight"
+name = "Pragmatist"
+description = "Trade with a faction after fighting them."
+category = "rl_milestones"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TradeCompleted"
+condition = "traded_after_combat"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Yesterday's battlefield, today's marketplace. Pragmatism over pride."
+
+[[achievements]]
+id = "scout_info_used"
+name = "Intelligence Pays"
+description = "Use information from scouting to avoid a trap or ambush."
+category = "rl_milestones"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "scouting_avoided_trap"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "The scouts warned you. You listened. The trap was empty when you passed."
+
+[[achievements]]
+id = "adapt_strategy"
+name = "Adaptive"
+description = "Change approach mid-crisis after initial plan fails."
+category = "rl_milestones"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CrisisResolved"
+condition = "strategy_changed_mid_crisis"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Plan A failed. Plan B worked. Flexibility wins wars."
+
+[[achievements]]
+id = "balanced_resources"
+name = "Equilibrium"
+description = "Maintain balanced resources with no single resource exceeding 80% of total value."
+category = "rl_milestones"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ResourceThreshold"
+condition = "balanced_resources"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Gold, supplies, reputation. All healthy, all balanced."
+
+[[achievements]]
+id = "recovery_streak"
+name = "Resilient"
+description = "Lose a fight, then win the next 3 in a row."
+category = "rl_milestones"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "loss_then_three_wins"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Knocked down once. Got up three times stronger."
+
+[[achievements]]
+id = "explore_before_combat"
+name = "Prepared"
+description = "Scout a location before engaging enemies there."
+category = "rl_milestones"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "location_scouted_before_combat"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Know the ground before you fight on it. Basic tactics."
+
+[[achievements]]
+id = "diplomatic_and_combat_quest"
+name = "Carrot and Stick"
+description = "Complete a diplomatic quest and a combat quest for the same faction."
+category = "rl_milestones"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "diplo_and_combat_same_faction"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Talk when you can, fight when you must. Both skills serve the guild."
+
+[[achievements]]
+id = "multi_faction_trade"
+name = "Trade Network"
+description = "Complete trades with 3 different factions within 500 ticks."
+category = "rl_milestones"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TradeCompleted"
+condition = "three_factions_500_ticks"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Three factions, three deals, one window. The guild's trade network hums."
+
+[[achievements]]
+id = "use_terrain"
+name = "Tactical Advantage"
+description = "Win a combat encounter using terrain to your advantage."
+category = "rl_milestones"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "terrain_advantage_used"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "High ground, chokepoints, cover. The battlefield was your weapon."
+
+[[achievements]]
+id = "crisis_preparation"
+name = "Ready for Anything"
+description = "Have 100+ gold and 100+ supplies when a crisis starts."
+category = "rl_milestones"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CrisisStarted"
+condition = "well_resourced_at_crisis"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "The crisis hit, and the guild was ready. Preparation beats panic."
+
+[[achievements]]
+id = "diverse_party_composition"
+name = "Specialist Team"
+description = "Send a party with 4+ different classes on a single mission."
+category = "rl_milestones"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "four_class_party"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Four classes, four specialties, one team. Every gap covered."
+
+[[achievements]]
+id = "economic_then_military"
+name = "Build Then Fight"
+description = "Reach 500+ gold before winning your 10th combat encounter."
+category = "rl_milestones"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "GoldChanged"
+condition = "500_gold_before_10_fights"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Economy first, then war. A funded army fights harder."
+
+[[achievements]]
+id = "full_cycle"
+name = "Full Cycle"
+description = "Scout, quest, trade, and fight in the same region."
+category = "rl_milestones"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "scout_quest_trade_fight_same_region"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Explored, quested, traded, fought. You own that region now."

@@ -1,0 +1,41 @@
+// Tier 1: Stealth abilities
+
+ability Vanish {
+    target: self
+    cooldown: 15s, cast: 0ms
+    hint: utility
+
+    stealth 3s
+}
+
+ability ShadowCloak {
+    target: self
+    cooldown: 12s, cast: 100ms
+    hint: utility
+
+    stealth 2s
+}
+
+ability Camouflage {
+    target: self
+    cooldown: 18s, cast: 0ms
+    hint: utility
+
+    stealth 4s
+}
+
+ability Invisibility {
+    target: self
+    cooldown: 20s, cast: 300ms
+    hint: utility
+
+    stealth 5s
+}
+
+ability SmokeCover {
+    target: self
+    cooldown: 10s, cast: 0ms
+    hint: utility
+
+    stealth 2s
+}

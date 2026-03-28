@@ -1,0 +1,53 @@
+[[fortifications]]
+id = "ancient_ruin_wall"
+name = "Ancient Ruin Wall"
+tier = 3
+
+[fortifications.stats]
+wall_hp = 1800
+height = 4.0
+thickness = 3.0
+defender_cover = 0.6
+ranged_bonus = 0.2
+climb_difficulty = 0.6
+gaps_count = 3
+gap_width = 2.0
+lingering_enchantment_chance = 0.2
+
+[fortifications.construction]
+cost = 0
+ticks = 0
+resources = []
+pre_existing = true
+repair_cost = 200
+repair_ticks = 500
+
+[fortifications.weaknesses]
+trebuchet_multiplier = 2.5
+sapper_multiplier = 2.0
+fire_resistant = true
+magic_resistant = true
+already_damaged = true
+
+[fortifications.power_scaling]
+effective_level = 50
+builder_class_bonus = false
+enchantable = false
+age_scaling = 0.0
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 5.0
+ability_damage_reduction = 0.3
+projectile_deflection = 0.15
+ward_hp = 1000
+ward_level = 30
+
+[fortifications.garrison_bonus]
+defender_multiplier = 2.5
+ranged_accuracy_bonus = 0.15
+melee_disadvantage = 0.2
+cover_rating = 0.45
+
+[fortifications.narrative]
+description = "Whatever civilization built these walls, they built to last. Even ruined, even crumbling, the stones are harder than modern masonry. But time has done what armies could not — gaps yawn in the circuit, and the battlements are jagged teeth."

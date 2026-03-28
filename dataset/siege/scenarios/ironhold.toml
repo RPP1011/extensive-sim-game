@@ -1,0 +1,50 @@
+name = "The Siege of Ironhold"
+description = "A well-fortified mountain city holds against a superior force. The defenders have walls and position; the attackers have numbers and time."
+difficulty = "hard"
+
+[settlement]
+template = "mountain_fortress"
+wall_type = "reinforced_stone"
+wall_hp = 3000
+gate_type = "iron_gate"
+gate_hp = 1500
+towers = 6
+tower_type = "stone_tower"
+garrison = 40
+terrain = "mountain"
+elevation_bonus = 0.2
+
+[attacker]
+army_size = 120
+siege_equipment = ["trebuchet", "battering_ram", "siege_tower", "mantlet"]
+supply_ticks = 2000
+reinforcement_chance = 0.3
+morale = 0.7
+commander_level = 25
+
+[defender]
+garrison_strength = 40
+adventurer_slots = 6
+supplies_ticks = 3000
+reinforcement_chance = 0.4
+morale = 0.85
+special_defenses = ["boiling_oil", "murder_holes", "mage_tower"]
+commander_level = 30
+
+[victory_conditions]
+attacker_wins = ["gate_destroyed", "wall_breached_and_stormed", "defender_surrender"]
+defender_wins = ["attacker_retreat", "attacker_starved", "reinforcements_arrive"]
+time_limit_ticks = 5000
+
+[power_context]
+defender_avg_level = 25
+attacker_avg_level = 20
+wall_effective_level = 45
+has_wards = true
+ward_type = "arcane_barrier"
+high_level_threat = "none"
+
+[narrative]
+opening = "The banners of the Iron Legion stretch from horizon to horizon. Within Ironhold, the garrison watches and waits. The mountain air is cold, and the walls are colder."
+attacker_victory = "Ironhold falls. The Iron Gate, which stood for three hundred years, lies in twisted ruin. The Legion's banner rises where the city's once flew."
+defender_victory = "The Legion retreats down the mountain, leaving their dead and their siege engines behind. Ironhold endures, as it always has."

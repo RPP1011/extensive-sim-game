@@ -1,0 +1,20 @@
+class Merchant {
+    stat_growth: +1 speed, +1 defense per level
+
+    tags: trade, negotiation, appraisal, commerce, wealth
+
+    scaling party_alive_count {
+        when party_members >= 2: +10% speed
+        always: +5% defense
+    }
+
+    abilities {
+        level 1: appraise_worth "Instantly know the true value of any item or creature"
+        level 5: silver_tongue "Improve prices and persuade NPCs in negotiations"
+        level 10: supply_line "Party carries 50% more supplies with no weight penalty"
+        level 20: corner_the_market "Monopolize a resource; dramatically increase its sale value"
+        level 40: golden_leverage "Spend gold to resolve any non-combat encounter instantly"
+    }
+
+    requirements: level 1
+}

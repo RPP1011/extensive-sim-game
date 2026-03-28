@@ -1,0 +1,23 @@
+[[tactics]]
+id = "active_defense"
+name = "Active Defense"
+side = "defender"
+category = "aggression"
+
+[tactics.requirements]
+garrison_strength_min = 20
+special_defenses_available = ["boiling_oil", "arrow_slits"]
+morale_minimum = 0.6
+
+[tactics.effects]
+siege_duration_multiplier = 0.8
+attacker_casualty_multiplier = 1.8
+defender_casualty_multiplier = 0.8
+morale_boost = 0.1
+ammo_consumption = 1.5
+
+[tactics.counters]
+countered_by = ["bombardment_tactic", "sapper_approach", "starve_out"]
+
+[tactics.narrative]
+description = "Every approach is contested. Every ladder is met with oil and stone. Every ram crew dies under a rain of arrows. The defenders don't just hold — they punish every attempt to approach."

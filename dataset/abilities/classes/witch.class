@@ -1,0 +1,20 @@
+class Witch {
+    stat_growth: +3 ability_power, +2 speed, +1 max_hp per level
+
+    tags: dark, curses, hexes, potions, folklore
+
+    scaling enemy_count {
+        when enemy_count >= 1: +10% ability_power
+        always: +5% speed
+    }
+
+    abilities {
+        level 20: hex "Curse a target to deal reduced damage and take bonus damage"
+        level 25: brew_potion "Create a consumable with a random powerful effect"
+        level 30: evil_eye "Targeted enemy cannot heal for 10 seconds"
+        level 40: voodoo "Damage dealt to a cursed effigy is mirrored on the target"
+        level 50: coven "Link with allied casters; all share mana and spells"
+    }
+
+    requirements: level 20, classes: Mage or Necromancer
+}

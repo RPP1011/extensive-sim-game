@@ -1,0 +1,46 @@
+name = "Thornwall"
+type = "village"
+population = 600
+prosperity = 35.0
+
+[defenses]
+wall_type = "wooden_palisade"
+wall_hp = 300
+gate_count = 1
+tower_count = 3
+garrison_capacity = 20
+moat = false
+
+[[districts]]
+name = "Market Square"
+type = "commercial"
+buildings = ["market_stall", "blacksmith", "tavern"]
+population_pct = 25.0
+wealth = 35.0
+threat = 10.0
+
+[[districts]]
+name = "Lower Village"
+type = "residential"
+buildings = ["houses", "well", "herbalist", "tanner"]
+population_pct = 55.0
+wealth = 25.0
+threat = 5.0
+
+[[districts]]
+name = "Watch Post"
+type = "military"
+buildings = ["watchtower", "militia_shed"]
+population_pct = 20.0
+wealth = 20.0
+threat = 5.0
+
+[economy]
+primary_exports = ["leather", "herbs", "pelts"]
+primary_imports = ["grain", "metal", "luxuries"]
+trade_routes = 2
+market_size = "small"
+
+[narrative]
+description = "A frontier village surrounded by thorny hedgerows that serve as natural defenses. The militia drills weekly — they have reason to."
+flavor = ["Thorns as long as your finger", "Smoke from the tannery", "The watch bell rings at dusk"]

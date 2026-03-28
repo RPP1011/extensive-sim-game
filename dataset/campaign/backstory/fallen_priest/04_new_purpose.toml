@@ -1,0 +1,34 @@
+name = "New Purpose"
+world_template = "Frontier"
+sequence = 4
+default_option = 0
+prompt = "The adventurers' guild has a posting for a healer — anyone with medical or divine training. The guild master is a weathered woman who doesn't ask about your past. 'Can you keep my people alive?' she asks. 'That's all I need to know.'"
+
+[[options]]
+label = "Healer's Oath"
+description = "Pledge to keep every adventurer alive. No divine mandate — just the promise of a person who's seen too much death."
+pc_traits = [{ trait = "healer" }]
+pc_stats = { ability_power = 2.0, resolve = 2.0 }
+effects = [
+    { type = "reputation", amount = 5.0 },
+    { type = "narrative", text = "You take the oath in your own words, not the temple's. It means more that way." },
+]
+
+[[options]]
+label = "Combat Medic"
+description = "Heal in the thick of battle. Your place is on the front line, not the rear."
+pc_traits = [{ trait = "battle_scarred" }]
+pc_stats = { attack = 2.0, defense = 2.0 }
+effects = [
+    { type = "narrative", text = "You strap on armor over your robes. The guild master raises an eyebrow. 'A priest who fights?' 'A healer who doesn't run,' you correct." },
+]
+
+[[options]]
+label = "Advisory Role"
+description = "Teach others basic healing. Multiply the effect through knowledge."
+pc_traits = [{ trait = "scholar" }]
+pc_stats = { ability_power = 3.0 }
+effects = [
+    { type = "reputation", amount = 8.0 },
+    { type = "narrative", text = "Within a month, every adventurer knows field medicine. Fewer die. You find purpose in that." },
+]

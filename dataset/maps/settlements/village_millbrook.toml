@@ -1,0 +1,46 @@
+name = "Millbrook"
+type = "village"
+population = 450
+prosperity = 40.0
+
+[defenses]
+wall_type = "wooden_palisade"
+wall_hp = 200
+gate_count = 1
+tower_count = 2
+garrison_capacity = 15
+moat = false
+
+[[districts]]
+name = "Village Green"
+type = "commercial"
+buildings = ["general_store", "tavern", "mill"]
+population_pct = 30.0
+wealth = 40.0
+threat = 5.0
+
+[[districts]]
+name = "Cottages"
+type = "residential"
+buildings = ["houses", "well", "shrine", "bakery"]
+population_pct = 60.0
+wealth = 25.0
+threat = 5.0
+
+[[districts]]
+name = "Outer Farms"
+type = "agricultural"
+buildings = ["farmhouse", "barn", "granary"]
+population_pct = 10.0
+wealth = 30.0
+threat = 15.0
+
+[economy]
+primary_exports = ["flour", "grain", "ale"]
+primary_imports = ["metal", "cloth", "salt"]
+trade_routes = 2
+market_size = "small"
+
+[narrative]
+description = "A prosperous farming village centered on an ancient watermill. The miller is the richest person for miles around."
+flavor = ["The millwheel turns day and night", "Fresh bread smell from the bakery", "Children play on the green"]

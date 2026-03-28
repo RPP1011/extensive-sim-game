@@ -1,0 +1,54 @@
+name = "Riverside Trading Post"
+type = "town"
+population = 2500
+prosperity = 65.0
+
+[defenses]
+wall_type = "wooden_palisade"
+wall_hp = 500
+gate_count = 2
+tower_count = 4
+garrison_capacity = 50
+moat = false
+
+[[districts]]
+name = "Market Quarter"
+type = "commercial"
+buildings = ["general_store", "blacksmith", "tavern", "warehouse", "auction_house"]
+population_pct = 30.0
+wealth = 70.0
+threat = 10.0
+
+[[districts]]
+name = "Riverside Docks"
+type = "harbor"
+buildings = ["fishery", "boatyard", "customs_house", "sailors_inn"]
+population_pct = 20.0
+wealth = 50.0
+threat = 25.0
+
+[[districts]]
+name = "Common Quarter"
+type = "residential"
+buildings = ["houses", "well", "shrine", "bakery"]
+population_pct = 40.0
+wealth = 30.0
+threat = 5.0
+
+[[districts]]
+name = "Watch Barracks"
+type = "military"
+buildings = ["barracks", "armory", "training_yard", "watchtower"]
+population_pct = 10.0
+wealth = 40.0
+threat = 5.0
+
+[economy]
+primary_exports = ["fish", "timber", "river_trade"]
+primary_imports = ["metal", "grain", "luxury_goods"]
+trade_routes = 3
+market_size = "medium"
+
+[narrative]
+description = "A bustling river town where merchants from three kingdoms meet to trade. The docks never sleep, and neither do the pickpockets."
+flavor = ["The smell of fresh fish and sawdust", "Barges line the waterfront", "Arguments in four languages"]

@@ -1,0 +1,162 @@
+# Swamplands — Disease, hidden passages, druid factions.
+# 4 regions, 3 factions, 5 locations, 3 NPCs.
+
+name = "Swamplands"
+global_threat_level = 25.0
+
+[[regions]]
+id = 0
+name = "Stillwater Haven"
+owner_faction_id = 0
+neighbors = [1, 2]
+unrest = 12.0
+control = 75.0
+threat_level = 20.0
+
+[[regions]]
+id = 1
+name = "The Mire"
+owner_faction_id = 1
+neighbors = [0, 2, 3]
+unrest = 30.0
+control = 55.0
+threat_level = 40.0
+
+[[regions]]
+id = 2
+name = "Bogwood Reaches"
+owner_faction_id = 1
+neighbors = [0, 1, 3]
+unrest = 25.0
+control = 60.0
+threat_level = 35.0
+
+[[regions]]
+id = 3
+name = "The Drowned Temple"
+owner_faction_id = 2
+neighbors = [1, 2]
+unrest = 50.0
+control = 30.0
+threat_level = 60.0
+
+[[locations]]
+id = 0
+name = "Heron's Rest"
+position = [0.0, 0.0]
+location_type = "Settlement"
+threat_level = 12.0
+resource_availability = 65.0
+faction_owner = 0
+scouted = true
+
+[[locations]]
+id = 1
+name = "The Witch's Hut"
+position = [-15.0, 10.0]
+location_type = "Outpost"
+threat_level = 25.0
+resource_availability = 55.0
+faction_owner = 1
+scouted = true
+
+[[locations]]
+id = 2
+name = "Sunken Catacombs"
+position = [20.0, 20.0]
+location_type = "Dungeon"
+threat_level = 55.0
+resource_availability = 40.0
+scouted = false
+
+[[locations]]
+id = 3
+name = "Drowned Altar"
+position = [-25.0, -20.0]
+location_type = "Ruin"
+threat_level = 65.0
+resource_availability = 50.0
+scouted = false
+
+[[locations]]
+id = 4
+name = "Mudflat Trading Post"
+position = [10.0, -5.0]
+location_type = "Settlement"
+threat_level = 10.0
+resource_availability = 55.0
+faction_owner = 0
+scouted = true
+
+[[factions]]
+id = 0
+name = "Marshfolk Commune"
+relationship_to_guild = 35.0
+military_strength = 40.0
+max_military_strength = 60.0
+territory_size = 2
+diplomatic_stance = "Friendly"
+coalition_member = false
+at_war_with = []
+has_guild = true
+guild_adventurer_count = 5
+recent_actions = []
+
+[[factions]]
+id = 1
+name = "Circle of the Green"
+relationship_to_guild = 15.0
+military_strength = 55.0
+max_military_strength = 85.0
+territory_size = 1
+diplomatic_stance = "Neutral"
+coalition_member = false
+at_war_with = []
+has_guild = false
+guild_adventurer_count = 0
+recent_actions = []
+
+[[factions]]
+id = 2
+name = "The Drowned Ones"
+relationship_to_guild = -45.0
+military_strength = 70.0
+max_military_strength = 110.0
+territory_size = 1
+diplomatic_stance = "Hostile"
+coalition_member = false
+at_war_with = [0]
+has_guild = false
+guild_adventurer_count = 0
+recent_actions = []
+
+[diplomacy]
+relations = [[0, 15, -25], [15, 0, -10], [-25, -10, 0]]
+guild_faction_id = 0
+
+[[npc_relationships]]
+npc_id = 500
+npc_name = "Elder Moss"
+npc_type = "FactionLeader"
+relationship_score = 40.0
+last_interaction_ms = 0
+rescue_available = false
+rescue_cost = 0.0
+
+[[npc_relationships]]
+npc_id = 501
+npc_name = "Swamp Cat Vira"
+npc_type = "Mercenary"
+relationship_score = 25.0
+last_interaction_ms = 0
+rescue_available = false
+rescue_cost = 55.0
+
+[[npc_relationships]]
+npc_id = 502
+npc_name = "Toadstool Pim"
+npc_type = "Merchant"
+relationship_score = 35.0
+last_interaction_ms = 0
+rescue_available = true
+rescue_cost = 30.0

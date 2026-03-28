@@ -1,0 +1,65 @@
+# A monster nest is breeding near a settlement.
+
+name = "Monster Nest"
+priority = 7
+repeatable = true
+cooldown_ticks = 5000
+
+[trigger]
+type = "ThreatLevel"
+min_threat = 30.0
+
+[[conditions]]
+type = "MinAdventurers"
+count = 3
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Farmers report strange burrows appearing in the fields outside {location_name}. Something is breeding down there — and fast. The livestock has started disappearing."
+deadline_secs = 75.0
+default_option = 0
+
+[[choice.options]]
+label = "Burn the Nest"
+description = "Fire and smoke. Crude but effective. Destroys crops too."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Flames lick the burrow entrances. Whatever was down there won't be coming back — but neither will this season's wheat."
+
+[[choice.options]]
+label = "Delve and Clear"
+description = "Send adventurers underground to exterminate the source. Dangerous but thorough."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -25.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The squad crawls into the tunnels. Hours later, they emerge covered in ichor but victorious."
+
+[[choice.options]]
+label = "Hire Local Trappers"
+description = "Pay locals to contain the problem. Cheaper but the nest survives."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Traps go up around the burrows. The monsters are contained — for now."

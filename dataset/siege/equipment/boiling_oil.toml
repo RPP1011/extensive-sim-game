@@ -1,0 +1,34 @@
+[[equipment]]
+id = "boiling_oil"
+name = "Boiling Oil"
+category = "defensive"
+tier = 1
+
+[equipment.stats]
+gate_damage_per_tick = 0.0
+wall_damage_per_tick = 0.0
+range = 0.0
+crew_required = 3
+move_speed = 0.0
+hp = 0
+armor = 0
+troop_damage = 40.0
+fire_damage_per_tick = 8.0
+area_denial_radius = 1.5
+area_denial_duration = 100
+requires_wall = true
+pours_from_above = true
+
+[equipment.requirements]
+min_tech_level = 1
+construction_cost = 20
+construction_ticks = 50
+resources = ["oil", "cauldron"]
+charges = 5
+
+[equipment.counters]
+vulnerable_to = ["trebuchet", "arcane_cannon"]
+strong_against = ["battering_ram", "siege_ladder", "siege_hook", "escalade"]
+
+[equipment.narrative]
+description = "The cauldron tips and liquid fire pours down. Men who were brave a moment ago become something else entirely. The ram crew scatters, their courage boiled away."

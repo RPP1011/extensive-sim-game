@@ -1,0 +1,65 @@
+# Refugees arrive seeking shelter.
+
+name = "Refugee Wave"
+priority = 6
+repeatable = true
+cooldown_ticks = 7000
+
+[trigger]
+type = "ThreatLevel"
+min_threat = 40.0
+
+[choice]
+category = "world_event"
+trigger = "hook"
+prompt = "A column of refugees arrives at the settlement — families fleeing violence in the neighboring region. Hundreds of hungry, frightened people looking for safety. The guild's decision will define its character."
+deadline_secs = 90.0
+default_option = 0
+
+[[choice.options]]
+label = "Welcome All (40g)"
+description = "Open the gates, share food and shelter. Expensive but humane."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -40.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The gates open wide. Hot food and warm blankets greet the weary. The guild's name becomes a beacon."
+
+[[choice.options]]
+label = "Accept Workers Only"
+description = "Take those who can contribute. Practical charity."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Able-bodied refugees are accepted. The rest are given directions to the next town."
+
+[[choice.options]]
+label = "Turn Them Away"
+description = "The guild can't save everyone. Resources are finite."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The gates stay closed. The refugees shuffle on. Some of them won't make it."

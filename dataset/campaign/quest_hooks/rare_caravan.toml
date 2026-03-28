@@ -1,0 +1,65 @@
+# A caravan carrying rare goods passes through the region.
+
+name = "Rare Goods Caravan"
+priority = 5
+repeatable = true
+cooldown_ticks = 5000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 5500
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "A caravan from distant lands passes through — silks, spices, enchanted components, and weapons of foreign make. The caravan master offers a deal, but the goods won't be here long."
+deadline_secs = 45.0
+default_option = 1
+
+[[choice.options]]
+label = "Buy in Bulk (60g)"
+description = "Purchase a large share of the exotic goods. Premium equipment for the guild."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -60.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 25.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Crates of foreign goods are unloaded at the guild hall. Adventurers crowd around, eyes wide."
+
+[[choice.options]]
+label = "Trade Supplies for Goods"
+description = "Barter surplus supplies for select items. No gold changes hands."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A fair trade. The caravan master nods — a good deal for both sides."
+
+[[choice.options]]
+label = "Offer Escort for Discount"
+description = "Protect the caravan to the next town in exchange for discounted goods."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 15.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Guild adventurers ride alongside the caravan. Fair price and good press."

@@ -1,0 +1,22 @@
+[[tactics]]
+id = "negotiate"
+name = "Negotiate"
+side = "defender"
+category = "diplomacy"
+
+[tactics.requirements]
+envoy_available = true
+
+[tactics.effects]
+siege_duration_multiplier = 0.5
+casualty_rate_multiplier = 0.0
+surrender_terms_possible = true
+delay_tactic_possible = true
+tribute_payment_possible = true
+honor_preserved_chance = 0.6
+
+[tactics.counters]
+countered_by = ["refuse_parley", "unconditional_demand", "treachery"]
+
+[tactics.narrative]
+description = "Words instead of swords. The envoy rides out under a white flag, armed with nothing but proposals and the hope that the enemy would rather talk than bleed. Sometimes it works. Sometimes the flag comes back stained red."

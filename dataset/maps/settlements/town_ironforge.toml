@@ -1,0 +1,62 @@
+name = "Ironforge Hold"
+type = "town"
+population = 3200
+prosperity = 60.0
+
+[defenses]
+wall_type = "stone_wall"
+wall_hp = 800
+gate_count = 2
+tower_count = 6
+garrison_capacity = 80
+moat = false
+
+[[districts]]
+name = "Forge Quarter"
+type = "industrial"
+buildings = ["foundry", "blacksmith", "weapon_smith", "armor_smith", "coal_depot"]
+population_pct = 25.0
+wealth = 65.0
+threat = 10.0
+
+[[districts]]
+name = "Merchant Row"
+type = "commercial"
+buildings = ["trading_post", "tavern", "inn", "money_changer"]
+population_pct = 20.0
+wealth = 55.0
+threat = 15.0
+
+[[districts]]
+name = "Worker Housing"
+type = "residential"
+buildings = ["tenements", "bathhouse", "well", "shrine"]
+population_pct = 35.0
+wealth = 25.0
+threat = 10.0
+
+[[districts]]
+name = "Mine Gate"
+type = "industrial"
+buildings = ["mine_entrance", "ore_sorter", "smelter", "cart_depot"]
+population_pct = 10.0
+wealth = 50.0
+threat = 20.0
+
+[[districts]]
+name = "Guard Quarter"
+type = "military"
+buildings = ["barracks", "armory", "training_yard"]
+population_pct = 10.0
+wealth = 40.0
+threat = 5.0
+
+[economy]
+primary_exports = ["weapons", "armor", "iron_ingots", "steel"]
+primary_imports = ["food", "timber", "leather", "coal"]
+trade_routes = 4
+market_size = "medium"
+
+[narrative]
+description = "Built into the base of an iron-rich mountain, the forges here never cool. The weapons they produce arm half the kingdom's soldiers."
+flavor = ["Orange light from forge mouths", "The constant ring of hammers", "Soot covers everything"]

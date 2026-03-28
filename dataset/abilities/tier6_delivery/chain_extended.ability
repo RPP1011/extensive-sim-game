@@ -1,0 +1,125 @@
+// Tier 6: Extended chain delivery
+
+ability ChainLightning2 {
+    target: enemy, range: 6.0
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    deliver chain { bounces: 3, range: 4.0, falloff: 0.2 } {
+        on_hit {
+            damage 35 [MAGIC: 50]
+        }
+    }
+}
+
+ability ChainFrost {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: crowd_control
+
+    deliver chain { bounces: 3, range: 3.5, falloff: 0.15 } {
+        on_hit {
+            damage 25 [ICE: 45]
+            slow 0.4 for 2s [ICE: 40]
+        }
+    }
+}
+
+ability ChainHeal {
+    target: ally, range: 5.0
+    cooldown: 8s, cast: 300ms
+    hint: heal
+
+    deliver chain { bounces: 3, range: 4.0, falloff: 0.25 } {
+        on_hit {
+            heal 30 [HOLY: 40]
+        }
+    }
+}
+
+ability BouncingFireball {
+    target: enemy, range: 6.0
+    cooldown: 7s, cast: 200ms
+    hint: damage
+
+    deliver chain { bounces: 2, range: 3.0, falloff: 0.3 } {
+        on_hit {
+            damage 30 [FIRE: 45]
+        }
+    }
+}
+
+ability SpreadingCurse {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: damage
+
+    deliver chain { bounces: 4, range: 3.5, falloff: 0.1 } {
+        on_hit {
+            damage 5/1s for 5s [DARK: 40]
+        }
+    }
+}
+
+ability ChainSilence {
+    target: enemy, range: 5.0
+    cooldown: 14s, cast: 400ms
+    hint: crowd_control
+
+    deliver chain { bounces: 2, range: 3.0, falloff: 0.2 } {
+        on_hit {
+            silence 1500ms [MAGIC: 45]
+        }
+    }
+}
+
+ability RicochetBlade {
+    target: enemy, range: 5.0
+    cooldown: 5s, cast: 100ms
+    hint: damage
+
+    deliver chain { bounces: 2, range: 3.0, falloff: 0.25 } {
+        on_hit {
+            damage 25 [PHYSICAL: 40]
+        }
+    }
+}
+
+ability SpreadingPoison {
+    target: enemy, range: 4.0
+    cooldown: 9s, cast: 200ms
+    hint: damage
+
+    deliver chain { bounces: 3, range: 3.0, falloff: 0.15 } {
+        on_hit {
+            damage 4/1s for 5s [POISON: 40]
+            slow 0.2 for 3s [POISON: 30]
+        }
+    }
+}
+
+ability HolyChain {
+    target: ally, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: heal
+
+    deliver chain { bounces: 4, range: 4.0, falloff: 0.2 } {
+        on_hit {
+            heal 25 [HOLY: 35]
+            shield 10 for 3s
+        }
+    }
+}
+
+ability ArcaneRebound {
+    target: enemy, range: 6.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    deliver chain { bounces: 2, range: 3.5, falloff: 0.2 } {
+        on_hit {
+            damage 30 [MAGIC: 45]
+            debuff move_speed 0.2 for 2s [MAGIC: 30]
+        }
+    }
+}

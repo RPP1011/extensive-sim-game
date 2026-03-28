@@ -297,7 +297,7 @@ fn compute_progress(state: &CampaignState, adv_idx: usize, goal: &GoalType) -> f
         }
 
         GoalType::AccumulateGold { target } => {
-            let current = state.guild.gold;
+            let current = adv.gold;
             ((current / target) * 100.0).min(100.0)
         }
 
@@ -387,8 +387,8 @@ fn compute_progress(state: &CampaignState, adv_idx: usize, goal: &GoalType) -> f
         }
 
         GoalType::RetireWealthy => {
-            // Need high guild gold and high level
-            let gold_prog = (state.guild.gold / 500.0) * 50.0;
+            // Need high personal gold and high level
+            let gold_prog = (adv.gold / 500.0) * 50.0;
             let level_prog = (adv.level as f32 / 8.0) * 50.0;
             (gold_prog + level_prog).min(100.0)
         }

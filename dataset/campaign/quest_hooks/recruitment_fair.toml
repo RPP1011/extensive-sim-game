@@ -1,0 +1,57 @@
+# A regional recruitment fair draws potential guild members.
+
+name = "Recruitment Fair"
+priority = 4
+repeatable = true
+cooldown_ticks = 7000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 7000
+
+[choice]
+category = "character"
+trigger = "hook"
+prompt = "The annual recruitment fair draws hopeful adventurers from across the region. Dozens mill about, showing off skills and looking for a guild to call home. The competition for good recruits is fierce."
+deadline_secs = 90.0
+default_option = 1
+
+[[choice.options]]
+label = "Premium Recruitment (40g)"
+description = "Set up an impressive booth, offer signing bonuses. Attract the best candidates."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -40.0
+
+[[choice.options.effects]]
+type = "add_adventurer"
+quality = "high"
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A polished booth and generous terms draw the fair's best prospects to the guild."
+
+[[choice.options]]
+label = "Standard Booth (15g)"
+description = "Modest presence. You'll get decent recruits but not the standouts."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "add_adventurer"
+quality = "medium"
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A few promising faces sign up. Solid recruits, if unspectacular."
+
+[[choice.options]]
+label = "Skip the Fair"
+description = "Fairs are expensive. Recruit through word of mouth instead."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The fair comes and goes. The guild relies on its reputation to draw applicants."

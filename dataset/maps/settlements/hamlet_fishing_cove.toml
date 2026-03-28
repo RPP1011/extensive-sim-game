@@ -1,0 +1,30 @@
+name = "Gull's Rest"
+type = "hamlet"
+population = 65
+prosperity = 20.0
+
+[defenses]
+wall_type = "none"
+wall_hp = 0
+gate_count = 0
+tower_count = 0
+garrison_capacity = 0
+moat = false
+
+[[districts]]
+name = "The Cove"
+type = "harbor"
+buildings = ["fishing_shack", "smokehouse", "boat_shelter"]
+population_pct = 100.0
+wealth = 15.0
+threat = 20.0
+
+[economy]
+primary_exports = ["fish", "salt", "shells"]
+primary_imports = ["grain", "tools", "rope"]
+trade_routes = 1
+market_size = "small"
+
+[narrative]
+description = "A handful of fishing families clinging to a rocky cove. The catch is good but the storms are worse."
+flavor = ["Nets hang drying in the wind", "Seagulls fight over scraps", "The tide smell never leaves"]

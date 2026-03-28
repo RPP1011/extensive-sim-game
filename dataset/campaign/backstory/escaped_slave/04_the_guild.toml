@@ -1,0 +1,34 @@
+name = "The Guild"
+world_template = "Frontier"
+sequence = 4
+default_option = 0
+prompt = "The adventurers' guild accepts anyone who can fight. No questions about your past, no papers required. Just a strong arm and the willingness to risk your life for gold. The guild master looks you up and down. 'You've got scars,' she says. 'Good. Means you survive things.'"
+
+[[options]]
+label = "Swear the Oath"
+description = "Full membership. The guild becomes your family — the first one you've had in years."
+pc_traits = [{ trait = "disciplined" }]
+pc_stats = { resolve = 2.0, loyalty = 5.0 }
+effects = [
+    { type = "reputation", amount = 5.0 },
+    { type = "narrative", text = "Your hand on the guild stone, your voice steady. The oath is spoken. You belong somewhere again." },
+]
+
+[[options]]
+label = "Trial Membership"
+description = "No commitments yet. Prove yourself on the first quest, then decide."
+pc_traits = [{ trait = "pragmatist" }]
+pc_stats = { speed = 2.0 }
+effects = [
+    { type = "narrative", text = "The guild master nods. 'Earn your place. We'll see.' Fair enough. You've been earning things the hard way your whole life." },
+]
+
+[[options]]
+label = "Demand Leadership"
+description = "You didn't escape chains to take orders. You'll join — but you want a voice in how things are run."
+pc_traits = [{ trait = "diplomat_born" }]
+pc_stats = { resolve = 3.0 }
+effects = [
+    { type = "reputation", amount = 8.0 },
+    { type = "narrative", text = "The guild master laughs. Then she sees you're serious. 'You've got nerve,' she says. 'Fine. Earn it.'" },
+]

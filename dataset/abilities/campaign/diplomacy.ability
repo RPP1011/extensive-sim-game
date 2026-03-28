@@ -1,0 +1,63 @@
+ability DemandAudience {
+    target: faction
+    cooldown: 1000t
+    hint: diplomacy
+
+    demand_audience
+}
+
+ability CeasefireDeclaration {
+    target: global
+    cooldown: 5000t
+    hint: diplomacy
+
+    ceasefire for 300t when at_war
+}
+
+ability WhisperOfSuccession {
+    target: faction
+    cooldown: 3000t
+    hint: diplomacy
+
+    destabilize 0.3 for 500t
+}
+
+ability BrokerAlliance {
+    target: faction
+    cooldown: 5000t
+    hint: diplomacy
+
+    broker_alliance for 1000t
+}
+
+ability SubvertLoyalty {
+    target: faction
+    cooldown: 3000t
+    hint: diplomacy
+
+    subvert_loyalty
+}
+
+ability TreatyBreaker {
+    target: faction
+    cooldown: 5000t
+    hint: diplomacy
+
+    treaty_breaker
+}
+
+ability ShatterAlliance {
+    target: faction
+    cooldown: 8000t
+    hint: diplomacy
+
+    shatter_alliance
+}
+
+ability Forgery {
+    target: faction
+    cooldown: 1000t
+    hint: diplomacy
+
+    forgery
+}

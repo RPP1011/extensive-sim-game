@@ -1,0 +1,57 @@
+# A mysterious traveler arrives at the guild.
+
+name = "Mysterious Stranger"
+priority = 5
+repeatable = true
+cooldown_ticks = 6000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 6500
+
+[choice]
+category = "character"
+trigger = "hook"
+prompt = "A hooded figure knocks at the guild door during a rainstorm. They carry no visible weapons, speak with an accent no one recognizes, and ask for shelter in exchange for 'a service of great value.' Their eyes are unsettling."
+deadline_secs = 60.0
+default_option = 1
+
+[[choice.options]]
+label = "Welcome Them"
+description = "Hospitality to strangers is a guild tradition. Besides, the 'service' could be valuable."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The stranger is given a room, a meal, and a watchful eye. They smile knowingly."
+
+[[choice.options]]
+label = "Question First"
+description = "Name, origin, purpose. Standard procedure before anyone enters the hall."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The stranger answers each question with a half-truth and a smile. Something is off, but nothing is threatening."
+
+[[choice.options]]
+label = "Turn Them Away"
+description = "Unknown visitors during uncertain times? Not a chance."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The door closes. The stranger stands in the rain for a long moment, then vanishes."
+
+[[choice.options]]
+label = "Offer Guild Membership"
+description = "If they're that confident, test them. Worst case, you learn what they can do."
+
+[[choice.options.effects]]
+type = "add_adventurer"
+quality = "unknown"
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The stranger removes their hood and extends a hand. 'I accept.' Their grip is iron."

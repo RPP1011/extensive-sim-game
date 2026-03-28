@@ -1,0 +1,49 @@
+name = "Siege Breach"
+phase_index = 4
+duration_range = [50, 300]
+
+[description]
+text = "The wall is broken. Attackers flood through the gap into a killing ground where defenders have prepared their last surprises. The battle narrows to a chokepoint of rubble and blood."
+
+[attacker_actions]
+available = ["storm_breach", "widen_breach", "send_reserves", "flanking_attack", "suppress_defenders", "deploy_barricade_breakers"]
+priority = "exploitation"
+
+[defender_actions]
+available = ["barricade_breach", "concentrate_fire", "boiling_oil", "counter_attack", "fall_back_to_inner_wall", "call_last_reserve"]
+priority = "containment"
+
+[events]
+[[events.possible]]
+name = "Barricade Holds"
+probability = 0.25
+trigger = "barricade_deployed"
+effect = "breach_stalled"
+description = "The hastily-built barricade behind the breach holds. The attackers stack up, unable to push through the narrow gap."
+
+[[events.possible]]
+name = "Overwhelming Numbers"
+probability = 0.2
+trigger = "attacker_ratio > 3"
+effect = "breach_overwhelmed"
+description = "Sheer numbers carry the breach. The defenders are pushed back by the weight of bodies."
+
+[[events.possible]]
+name = "Fire in the Breach"
+probability = 0.1
+trigger = "fire_equipment_available"
+effect = "area_denial"
+description = "Someone — attacker or defender — sets fire to the rubble. The breach becomes impassable for a time."
+
+[[events.possible]]
+name = "Second Breach"
+probability = 0.08
+trigger = "bombardment_continuing"
+effect = "new_breach"
+description = "While everyone fights at the first breach, the weakened wall gives way elsewhere. The defenders cannot cover two gaps."
+
+[transition]
+to_next_phase = "siege_storm"
+conditions = ["breach_secured", "AND", "attackers_inside_walls"]
+to_fallback_phase = "siege_bombardment"
+fallback_conditions = ["breach_sealed", "AND", "attacker_casualties > 40%"]

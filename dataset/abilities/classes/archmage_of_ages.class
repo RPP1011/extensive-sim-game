@@ -1,0 +1,20 @@
+class Archmage_of_Ages {
+    stat_growth: +5 ability_power, +2 defense, +2 max_hp per level
+
+    tags: time, ancient_magic, immortality, arcane_mastery, legend
+
+    scaling hp_percent {
+        when hp_percent > 50: +20% ability_power
+        always: +15% ability_power
+    }
+
+    abilities {
+        level 60: time_stop "Freeze time for all enemies for 5 seconds"
+        level 70: age_regression "Reverse damage on an ally, restoring them to their state 10 seconds ago"
+        level 80: forgotten_spell "Cast a spell from a lost age that no living mage knows"
+        level 90: temporal_loop "If you die, time rewinds 30 seconds; you keep your memories"
+        level 100: epoch "Rewrite the last minute of battle entirely; all events are undone and replayed with your foreknowledge"
+    }
+
+    requirements: level 60, classes: Archmage
+}

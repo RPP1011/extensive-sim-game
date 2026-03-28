@@ -1,0 +1,20 @@
+class Navigator {
+    stat_growth: +2 speed, +1 defense, +1 max_hp per level
+
+    tags: exploration, pathfinding, cartography, wilderness, orientation
+
+    scaling party_alive_count {
+        when party_members >= 1: +10% speed
+        always: +5% defense
+    }
+
+    abilities {
+        level 1: trailblaze "Move faster through difficult terrain"
+        level 5: landmark_memory "Never get lost; always know your position on the map"
+        level 10: secret_paths "Discover hidden routes that bypass obstacles or enemies"
+        level 20: charted_territory "Reveal the full layout of any region you enter"
+        level 40: worlds_edge "Open a path to any location you have previously visited, instantly"
+    }
+
+    requirements: level 1
+}

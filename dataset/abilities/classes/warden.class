@@ -1,0 +1,20 @@
+class Warden {
+    stat_growth: +2 attack, +3 defense, +1 speed, +1 max_hp per level
+
+    tags: ranged, traps, terrain, nature, vigilance
+
+    scaling party_alive_count {
+        when party_members > 0: +10% defense
+        always: +5% attack
+    }
+
+    abilities {
+        level 20: lay_trap "Place a hidden trap that roots and damages enemies"
+        level 25: natural_camouflage "Become invisible while stationary in natural terrain"
+        level 30: bramble_wall "Summon thorny barriers that slow and damage enemies passing through"
+        level 40: warden_domain "Claim an area; all allies in it gain defense and enemies are revealed"
+        level 50: nature_reclaims "The terrain itself attacks all enemies in the area for 10 seconds"
+    }
+
+    requirements: level 20, classes: Ranger
+}

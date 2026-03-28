@@ -1,0 +1,64 @@
+# Defensive strategy during a crisis.
+
+category = "strategic"
+trigger = "crisis_defense_planning"
+prompt = "The crisis intensifies. The guild must decide its defensive strategy."
+deadline_secs = 60.0
+default_option = 0
+
+[[options]]
+label = "Fortify and Hold"
+description = "Build defenses and wait. Let the enemy come to you."
+
+[[options.effects]]
+type = "supplies"
+amount = -20.0
+
+[[options.effects]]
+type = "narrative"
+text = "Walls rise, ditches deepen. The guild becomes a fortress."
+
+[[options]]
+label = "Preemptive Strike"
+description = "Hit them before they hit you. Risky but could end the crisis early."
+
+[[options.effects]]
+type = "gold"
+amount = -30.0
+
+[[options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[options.effects]]
+type = "narrative"
+text = "The strike team moves out. First blood goes to the guild."
+
+[[options]]
+label = "Negotiate Ceasefire"
+description = "Talk before fighting. Maybe the crisis can be resolved with words."
+
+[[options.effects]]
+type = "gold"
+amount = -15.0
+
+[[options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 5.0
+
+[[options.effects]]
+type = "narrative"
+text = "White flags are raised. A tense meeting begins."
+
+[[options]]
+label = "Strategic Withdrawal"
+description = "Pull back to a more defensible position. Lose ground, save lives."
+
+[[options.effects]]
+type = "reputation"
+amount = -3.0
+
+[[options.effects]]
+type = "narrative"
+text = "The guild pulls back in good order. Pride stings, but everyone's alive."

@@ -1,0 +1,20 @@
+class Shadowblade {
+    stat_growth: +4 attack, +3 speed per level
+
+    tags: stealth, burst_damage, assassination, shadow, agility
+
+    scaling hp_percent {
+        when hp_percent > 80: +15% attack
+        always: +10% speed
+    }
+
+    abilities {
+        level 20: shadow_strike "Attack from stealth for triple damage"
+        level 25: smoke_bomb "Create a cloud that breaks targeting on you"
+        level 30: phantom_step "Teleport behind a target and attack"
+        level 40: mark_of_death "Target takes 50% more damage from all sources for 5 seconds"
+        level 50: ghost_walk "Become untargetable for 3 seconds while still able to attack"
+    }
+
+    requirements: level 20, classes: Rogue
+}

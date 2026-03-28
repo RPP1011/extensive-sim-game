@@ -1,0 +1,56 @@
+[[fortifications]]
+id = "magical_ward"
+name = "Magical Ward"
+tier = 5
+
+[fortifications.stats]
+wall_hp = 1500
+height = 0.0
+thickness = 0.0
+defender_cover = 0.6
+ranged_bonus = 0.0
+climb_difficulty = 1.0
+blocks_projectiles = true
+blocks_spells = true
+blocks_summons = true
+mana_drain_per_tick = 2.0
+visible = true
+color = "shimmering_blue"
+
+[fortifications.construction]
+cost = 1000
+ticks = 200
+resources = ["arcane_crystal", "mana_well"]
+builder_class_bonus = 0.0
+requires_class = "[Archmage]"
+
+[fortifications.weaknesses]
+trebuchet_multiplier = 0.0
+sapper_multiplier = 0.0
+fire_resistant = true
+magic_resistant = false
+ward_breaker_multiplier = 5.0
+mana_starve_vulnerable = true
+
+[fortifications.power_scaling]
+effective_level = 65
+builder_class_bonus = false
+enchantable = false
+age_scaling = 0.0
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 10.0
+ability_damage_reduction = 0.7
+projectile_deflection = 0.5
+ward_hp = 4000
+ward_level = 40
+
+[fortifications.garrison_bonus]
+defender_multiplier = 3.0
+ranged_accuracy_bonus = 0.0
+melee_disadvantage = 0.3
+cover_rating = 0.5
+
+[fortifications.narrative]
+description = "The air itself hardens into a wall of shimmering force. Arrows bounce off. Spells splash against it like water on glass. But it drinks mana like a fire drinks air, and when the mana runs out, it pops like a soap bubble."

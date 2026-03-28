@@ -1,0 +1,21 @@
+class War_Merchant {
+    stat_growth: +1 attack, +2 defense, +2 speed, +1 ability_power per level
+
+    tags: trade, warfare, logistics, supply_lines, war_profiteering
+
+    scaling party_alive_count {
+        when party_members >= 2: +10% defense
+        when party_members >= 4: +15% speed
+        always: +5% attack
+    }
+
+    abilities {
+        level 40: war_contracts "Hire mercenary units mid-campaign using accumulated wealth"
+        level 45: supply_chain "Party never runs out of equipment, potions, or provisions"
+        level 50: arms_dealer "Upgrade all party equipment by one tier before each battle"
+        level 60: economic_warfare "Collapse an enemy faction's economy, weakening their troops"
+        level 80: empire_of_coin "Your wealth becomes a strategic weapon; fund entire armies or buy cities"
+    }
+
+    requirements: level 40, classes: Merchant + Commander
+}

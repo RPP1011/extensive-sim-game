@@ -1,0 +1,20 @@
+class Summoner {
+    stat_growth: +4 ability_power, +1 max_hp, +1 defense per level
+
+    tags: arcane, summoning, minions, control, conjuration
+
+    scaling party_alive_count {
+        when party_members >= 1: +5% ability_power
+        always: +5% max_hp
+    }
+
+    abilities {
+        level 1: summon_familiar "Call a small creature that fights alongside you"
+        level 5: spirit_link "Share damage taken between you and your summons"
+        level 10: pack_tactics "All summons gain bonus damage when attacking the same target"
+        level 20: greater_summon "Call a powerful elemental that lasts the entire battle"
+        level 40: host_of_many "Summon an army; every creature you've ever summoned appears for 15 seconds"
+    }
+
+    requirements: level 1
+}

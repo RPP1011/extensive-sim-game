@@ -1,0 +1,235 @@
+[[buildings]]
+id = "farm"
+name = "Farm"
+category = "production"
+construction_cost = 50
+construction_ticks = 300
+maintenance_cost = 2
+
+[buildings.effects]
+food_production = 0.15
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "hamlet"
+required_resources = []
+
+[buildings.narrative]
+description = "Fields of grain stretching to the horizon. The backbone of civilization, chronically underappreciated."
+
+[[buildings]]
+id = "mine"
+name = "Mine"
+category = "production"
+construction_cost = 200
+construction_ticks = 800
+maintenance_cost = 8
+
+[buildings.effects]
+metal_production = 0.2
+stone_production = 0.1
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "hamlet"
+required_resources = []
+
+[buildings.narrative]
+description = "A dark hole in the ground where people dig out things that are worth more than their lives."
+
+[[buildings]]
+id = "lumber_mill"
+name = "Lumber Mill"
+category = "production"
+construction_cost = 100
+construction_ticks = 400
+maintenance_cost = 4
+
+[buildings.effects]
+timber_production = 0.2
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "hamlet"
+required_resources = []
+
+[buildings.narrative]
+description = "The saw screams through wood from dawn to dusk. Sawdust piles grow like snowdrifts."
+
+[[buildings]]
+id = "quarry"
+name = "Quarry"
+category = "production"
+construction_cost = 150
+construction_ticks = 600
+maintenance_cost = 6
+
+[buildings.effects]
+stone_production = 0.2
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "village"
+required_resources = []
+
+[buildings.narrative]
+description = "Blocks of stone cut from the living rock. The quarrymen work in dust so thick you can taste it."
+
+[[buildings]]
+id = "foundry"
+name = "Foundry"
+category = "production"
+construction_cost = 300
+construction_ticks = 1000
+maintenance_cost = 12
+
+[buildings.effects]
+metal_production = 0.15
+equipment_quality = 0.1
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "town"
+required_resources = ["metal", "coal"]
+
+[buildings.narrative]
+description = "Molten metal flows like water here. The heat is unbearable, the work is dangerous, and the output is essential."
+
+[[buildings]]
+id = "blacksmith"
+name = "Blacksmith"
+category = "production"
+construction_cost = 100
+construction_ticks = 500
+maintenance_cost = 5
+
+[buildings.effects]
+equipment_quality = 0.1
+repair_speed = 2.0
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "village"
+required_resources = ["metal"]
+
+[buildings.narrative]
+description = "The ring of hammer on steel echoes through the quarter."
+
+[[buildings]]
+id = "tannery"
+name = "Tannery"
+category = "production"
+construction_cost = 80
+construction_ticks = 400
+maintenance_cost = 4
+
+[buildings.effects]
+leather_production = 0.15
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "village"
+required_resources = ["hides"]
+
+[buildings.narrative]
+description = "Always downwind from the rest of town. The smell is the price of good leather."
+
+[[buildings]]
+id = "brewery"
+name = "Brewery"
+category = "production"
+construction_cost = 120
+construction_ticks = 500
+maintenance_cost = 5
+
+[buildings.effects]
+morale_bonus = 0.1
+trade_bonus = 0.05
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "village"
+required_resources = ["grain"]
+
+[buildings.narrative]
+description = "Hops, barley, and patience. The brewmaster guards the recipe with their life."
+
+[[buildings]]
+id = "weaver"
+name = "Weaver's Workshop"
+category = "production"
+construction_cost = 80
+construction_ticks = 400
+maintenance_cost = 4
+
+[buildings.effects]
+cloth_production = 0.15
+trade_bonus = 0.05
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "village"
+required_resources = ["wool"]
+
+[buildings.narrative]
+description = "Looms clack rhythmically from dawn to dusk. The weavers' fingers never rest."
+
+[[buildings]]
+id = "shipyard"
+name = "Shipyard"
+category = "production"
+construction_cost = 400
+construction_ticks = 1500
+maintenance_cost = 15
+
+[buildings.effects]
+naval_capacity = 5
+trade_bonus = 0.15
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "town"
+required_resources = ["timber", "metal", "rope"]
+
+[buildings.narrative]
+description = "The skeleton of a new ship rises from the drydock. It will carry cargo or war — the shipwright doesn't ask which."
+
+[[buildings]]
+id = "bakery"
+name = "Bakery"
+category = "production"
+construction_cost = 60
+construction_ticks = 300
+maintenance_cost = 3
+
+[buildings.effects]
+food_production = 0.05
+morale_bonus = 0.05
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "hamlet"
+required_resources = ["grain"]
+
+[buildings.narrative]
+description = "The smell of fresh bread is the most civilized thing in the world. The baker rises before dawn so no one else has to."
+
+[[buildings]]
+id = "fishery"
+name = "Fishery"
+category = "production"
+construction_cost = 70
+construction_ticks = 350
+maintenance_cost = 3
+
+[buildings.effects]
+food_production = 0.1
+trade_bonus = 0.05
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "hamlet"
+required_resources = []
+
+[buildings.narrative]
+description = "Nets, hooks, and patience. The sea provides, if you know where to ask."

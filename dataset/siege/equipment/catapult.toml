@@ -1,0 +1,31 @@
+[[equipment]]
+id = "catapult"
+name = "Catapult"
+category = "ranged"
+tier = 2
+
+[equipment.stats]
+gate_damage_per_tick = 5.0
+wall_damage_per_tick = 8.0
+range = 12.0
+crew_required = 6
+move_speed = 0.2
+hp = 300
+armor = 10
+fire_rate = 0.1
+accuracy = 0.6
+splash_radius = 2.0
+troop_damage = 25.0
+
+[equipment.requirements]
+min_tech_level = 2
+construction_cost = 120
+construction_ticks = 400
+resources = ["timber", "rope", "stone"]
+
+[equipment.counters]
+vulnerable_to = ["sally_out", "counter_battery", "fire_arrows"]
+strong_against = ["wooden_palisade", "troop_formations", "siege_camp"]
+
+[equipment.narrative]
+description = "The arm swings up with a sound like a giant cracking his knuckles. A boulder the size of a man's torso arcs across the sky, trailing dust. Somewhere behind the walls, something breaks."

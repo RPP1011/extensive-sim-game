@@ -1,0 +1,21 @@
+class Deathknight {
+    stat_growth: +3 attack, +2 defense, +2 max_hp per level
+
+    tags: melee, dark, undead, lifesteal, dread
+
+    scaling hp_percent {
+        when hp_percent < 50: +15% attack, lifesteal 0.2
+        when hp_percent < 25: lifesteal 0.4
+        always: +5% defense
+    }
+
+    abilities {
+        level 20: death_strike "Attack that heals you for a portion of damage dealt"
+        level 25: raise_ghoul "Summon a temporary undead minion from a fallen enemy"
+        level 30: aura_of_decay "Enemies near you lose health over time"
+        level 40: soul_reap "Kill a wounded enemy instantly and absorb their remaining life"
+        level 50: army_of_the_dead "Raise every corpse on the battlefield to fight for you"
+    }
+
+    requirements: level 20, classes: Knight or Warrior
+}

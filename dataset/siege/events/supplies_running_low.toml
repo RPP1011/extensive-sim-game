@@ -1,0 +1,48 @@
+[[events]]
+id = "supplies_running_low"
+name = "Supplies Running Low"
+phase = "surround"
+
+[events.trigger]
+type = "SupplyBelow"
+threshold = 0.25
+
+[events.choice]
+prompt = "The quartermaster's report is grim. At current consumption, the army has {days_remaining} days of food. After that, starvation."
+deadline_secs = 30.0
+
+[[events.choice.options]]
+label = "Half Rations"
+description = "Cut food in half. The soldiers won't like it, but they'll live longer."
+[[events.choice.options.effects]]
+type = "army_modifier"
+supply_consumption = 0.5
+morale_drain = 0.1
+strength_reduction = 0.1
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The portions shrink. The grumbling grows. Soldiers eye the cavalry horses with new interest."
+
+[[events.choice.options]]
+label = "Send Foragers"
+description = "Send troops to forage the surrounding countryside. Risk of ambush."
+[[events.choice.options.effects]]
+type = "forage_expedition"
+supply_gain_range = [100, 300]
+ambush_chance = 0.2
+troop_commitment = 15
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Foraging parties fan out across the countryside. They'll return with food — if the defenders' allies don't find them first."
+
+[[events.choice.options]]
+label = "Force Assault Before Starvation"
+description = "Attack now, before the army is too weak to fight."
+[[events.choice.options.effects]]
+type = "force_phase_transition"
+to_phase = "siege_assault"
+attacker_penalty = 0.0
+morale_modifier = -0.1
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Better to spend lives than to starve. The army lurches into motion, driven by hunger as much as orders."

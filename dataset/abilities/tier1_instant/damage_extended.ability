@@ -1,0 +1,161 @@
+// Tier 1: Extended damage variants — more elements, ranges, cooldowns
+
+ability VenomFang {
+    target: enemy, range: 1.5
+    cooldown: 4s, cast: 100ms
+    hint: damage
+
+    damage 25 [POISON: 45]
+}
+
+ability ThunderClap {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 300ms
+    hint: damage
+
+    damage 40 [MAGIC: 50]
+}
+
+ability Scorch {
+    target: enemy, range: 6.0
+    cooldown: 3s, cast: 200ms
+    hint: damage
+
+    damage 22 [FIRE: 40]
+}
+
+ability Smite {
+    target: enemy, range: 5.5
+    cooldown: 5s, cast: 300ms
+    hint: damage
+
+    damage 48 [HOLY: 55]
+}
+
+ability DarkPulse {
+    target: enemy, range: 5.0
+    cooldown: 4s, cast: 200ms
+    hint: damage
+
+    damage 32 [DARK: 45]
+}
+
+ability IceShard {
+    target: enemy, range: 6.0
+    cooldown: 3s, cast: 100ms
+    hint: damage
+
+    damage 18 [ICE: 35]
+}
+
+ability ArcaneMissile {
+    target: enemy, range: 7.0
+    cooldown: 3s, cast: 200ms
+    hint: damage
+
+    damage 20 [MAGIC: 40]
+}
+
+ability MoltenSlash {
+    target: enemy, range: 1.5
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    damage 38 [FIRE: 50]
+}
+
+ability RendingClaw {
+    target: enemy, range: 1.5
+    cooldown: 3s, cast: 100ms
+    hint: damage
+
+    damage 22 [PHYSICAL: 35]
+}
+
+ability VoidTouch {
+    target: enemy, range: 3.0
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    damage 35 [DARK: 50]
+}
+
+ability SerpentStrike {
+    target: enemy, range: 2.0
+    cooldown: 4s, cast: 100ms
+    hint: damage
+
+    damage 28 [POISON: 40]
+}
+
+ability Electrocute {
+    target: enemy, range: 5.0
+    cooldown: 7s, cast: 300ms
+    hint: damage
+
+    damage 55 [MAGIC: 55]
+}
+
+ability RighteousHammer {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 400ms
+    hint: damage
+
+    damage 50 [HOLY: 50]
+}
+
+ability FlameWhip {
+    target: enemy, range: 3.0
+    cooldown: 4s, cast: 200ms
+    hint: damage
+
+    damage 30 [FIRE: 45]
+}
+
+ability GlacialSpike {
+    target: enemy, range: 6.5
+    cooldown: 5s, cast: 300ms
+    hint: damage
+
+    damage 42 [ICE: 50]
+}
+
+ability ShadowRend {
+    target: enemy, range: 2.0
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    damage 36 [DARK: 45]
+}
+
+ability PoisonDart {
+    target: enemy, range: 7.0
+    cooldown: 3s, cast: 100ms
+    hint: damage
+
+    damage 15 [POISON: 35]
+}
+
+ability CrushingBlow {
+    target: enemy, range: 1.5
+    cooldown: 7s, cast: 400ms
+    hint: damage
+
+    damage 65 [PHYSICAL: 60]
+}
+
+ability EarthShatter {
+    target: enemy, range: 2.0
+    cooldown: 6s, cast: 300ms
+    hint: damage
+
+    damage 45 [PHYSICAL: 50]
+}
+
+ability DivineLance {
+    target: enemy, range: 6.0
+    cooldown: 6s, cast: 300ms
+    hint: damage
+
+    damage 40 [HOLY: 50]
+}

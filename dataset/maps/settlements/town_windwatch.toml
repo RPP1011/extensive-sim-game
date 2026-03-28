@@ -1,0 +1,62 @@
+name = "Windwatch"
+type = "town"
+population = 2100
+prosperity = 50.0
+
+[defenses]
+wall_type = "stone_wall"
+wall_hp = 700
+gate_count = 2
+tower_count = 5
+garrison_capacity = 60
+moat = false
+
+[[districts]]
+name = "Upper Town"
+type = "noble"
+buildings = ["manor_house", "courthouse", "garden", "library"]
+population_pct = 15.0
+wealth = 80.0
+threat = 5.0
+
+[[districts]]
+name = "Market Street"
+type = "commercial"
+buildings = ["general_store", "tailor", "jeweler", "tavern"]
+population_pct = 25.0
+wealth = 55.0
+threat = 10.0
+
+[[districts]]
+name = "Lower Town"
+type = "residential"
+buildings = ["houses", "well", "bakery", "carpenter"]
+population_pct = 40.0
+wealth = 30.0
+threat = 10.0
+
+[[districts]]
+name = "Watchtowers"
+type = "military"
+buildings = ["signal_tower", "barracks", "armory", "stables"]
+population_pct = 10.0
+wealth = 40.0
+threat = 5.0
+
+[[districts]]
+name = "Academy Hill"
+type = "academic"
+buildings = ["academy", "observatory", "alchemist_lab"]
+population_pct = 10.0
+wealth = 60.0
+threat = 5.0
+
+[economy]
+primary_exports = ["maps", "alchemical_goods", "trained_scouts"]
+primary_imports = ["food", "metal", "glass", "books"]
+trade_routes = 3
+market_size = "medium"
+
+[narrative]
+description = "Perched on a high ridge, Windwatch commands views for miles in every direction. The signal towers relay messages across the kingdom in hours."
+flavor = ["Wind never stops howling", "Flags snap on the towers", "You can see three kingdoms from the observatory"]

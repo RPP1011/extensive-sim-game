@@ -1,0 +1,17 @@
+name = "The Iron Tide"
+description = "A foreign army crosses the border in overwhelming numbers. Factions must unite or fall separately"
+crisis_type = "invasion"
+world_templates = []
+trigger_threshold = 0.8
+priority = 10
+allow_simultaneous = false
+
+[config]
+type = "Invasion"
+invader_faction_name = "The Iron Tide"
+initial_military_strength = 300.0
+strength_growth_per_tick = 1.0
+advance_interval_ticks = 3000
+regions_per_advance = 1
+rally_threshold = 3
+surrender_threshold = 0.2

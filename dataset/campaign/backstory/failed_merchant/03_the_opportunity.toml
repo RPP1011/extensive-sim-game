@@ -1,0 +1,36 @@
+name = "The Opportunity"
+world_template = "Archipelago"
+sequence = 3
+default_option = 0
+prompt = "In a tavern, you overhear adventurers complaining about supply chains — spoiled potions, overpriced gear, unreliable deliveries. Your merchant instincts fire. These people need a quartermaster, a logistics expert, a supply chain genius. They need you."
+
+[[options]]
+label = "Pitch Your Services"
+description = "Walk up and offer to manage their operations. Business sense is an adventuring skill nobody teaches."
+pc_traits = [{ trait = "merchant_mind" }]
+pc_stats = { resolve = 2.0 }
+effects = [
+    { type = "gold", amount = 10.0 },
+    { type = "reputation", amount = 5.0 },
+    { type = "narrative", text = "The adventurers stare at the well-dressed stranger quoting bulk discount rates. Then they start taking notes." },
+]
+
+[[options]]
+label = "Undercut Their Current Supplier"
+description = "Don't pitch — prove. Deliver better goods at lower prices. Actions speak louder than sales pitches."
+pc_traits = [{ trait = "pragmatist" }]
+pc_stats = { speed = 2.0 }
+effects = [
+    { type = "gold", amount = -20.0 },
+    { type = "supplies", amount = 20.0 },
+    { type = "narrative", text = "A crate of premium potions at half price appears at their door. Your calling card attached." },
+]
+
+[[options]]
+label = "Join as a Fighter"
+description = "Forget business. Pick up a sword and learn a new trade entirely."
+pc_traits = [{ trait = "battle_scarred" }]
+pc_stats = { attack = 3.0 }
+effects = [
+    { type = "narrative", text = "The sword feels wrong in your hands. But so did a quill, once. Everything is learned." },
+]

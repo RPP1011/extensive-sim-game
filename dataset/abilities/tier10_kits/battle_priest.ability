@@ -1,0 +1,60 @@
+// Tier 10: Battle Priest Kit — offensive healer who heals through damage
+
+ability SmitingBolt {
+    target: enemy, range: 5.0
+    cooldown: 3s, cast: 200ms
+    hint: damage
+
+    damage 25 [HOLY: 40]
+    heal 12 in self
+}
+
+ability PenanceBolt {
+    target: enemy, range: 5.0
+    cooldown: 6s, cast: 300ms
+    hint: damage
+
+    deliver projectile { speed: 8.0 } {
+        on_hit {
+            damage 35 [HOLY: 50]
+            heal 20 in self
+        }
+    }
+}
+
+ability PowerWordShield {
+    target: ally, range: 5.0
+    cooldown: 8s, cast: 100ms
+    hint: defense
+
+    shield 40 for 5s
+    heal 15 [HOLY: 30]
+}
+
+ability HolyFire {
+    target: enemy, range: 5.0
+    cooldown: 8s, cast: 400ms
+    hint: damage
+
+    damage 40 [HOLY: 50]
+    damage 8/1s for 3s [HOLY: 40]
+    heal 20 in self
+}
+
+ability SpiritOfRedemption {
+    target: self_aoe
+    cooldown: 50s, cast: 400ms
+    hint: heal
+
+    heal 50 in circle(4.0) [HOLY: 50]
+    shield 30 for 5s in circle(4.0)
+    damage 40 in circle(4.0) [HOLY: 45]
+    buff damage_output 0.15 for 5s in circle(4.0)
+}
+
+passive Atonement {
+    trigger: on_damage_dealt
+    cooldown: 4s
+
+    heal 10 [HOLY: 20]
+}

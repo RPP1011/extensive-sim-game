@@ -227,6 +227,8 @@ fn execute_delivered_action(
                         morale: state.config.quest_lifecycle.party_starting_morale,
                         quest_id: Some(quest_id),
                 food_level: 100.0,
+                autonomous: false,
+                party_type: AutonomousPartyType::PlayerDispatched,
                     };
 
                     events.push(WorldEvent::QuestDispatched {

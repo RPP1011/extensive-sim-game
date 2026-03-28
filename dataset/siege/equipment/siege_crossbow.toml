@@ -1,0 +1,31 @@
+[[equipment]]
+id = "siege_crossbow"
+name = "Siege Crossbow"
+category = "ranged"
+tier = 3
+
+[equipment.stats]
+gate_damage_per_tick = 1.0
+wall_damage_per_tick = 1.0
+range = 18.0
+crew_required = 2
+move_speed = 0.3
+hp = 150
+armor = 5
+fire_rate = 0.15
+accuracy = 0.9
+troop_damage = 60.0
+armor_penetration = 0.5
+
+[equipment.requirements]
+min_tech_level = 3
+construction_cost = 100
+construction_ticks = 200
+resources = ["timber", "iron", "sinew"]
+
+[equipment.counters]
+vulnerable_to = ["sally_out", "fire_arrows"]
+strong_against = ["champions", "mage_tower_crew", "officers"]
+
+[equipment.narrative]
+description = "Cranked back by a windlass until the steel bow groans. The bolt flies flat and true across impossible distance. Commanders learn to stop wearing distinctive armor."

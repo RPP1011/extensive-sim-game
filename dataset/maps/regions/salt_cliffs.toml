@@ -1,0 +1,29 @@
+name = "The Salt Cliffs"
+terrain = "coastal_cliffs"
+climate = "maritime"
+size = "small"
+
+[generation]
+settlement_density = 0.2
+road_connectivity = 0.4
+wilderness_danger = 0.5
+resource_richness = 0.5
+
+[settlement_distribution]
+hamlet_pct = 35
+village_pct = 30
+town_pct = 20
+city_pct = 5
+fortress_pct = 10
+
+[terrain_features]
+rivers = 1
+mountains = false
+forests = false
+coast = true
+lakes = 0
+
+[narrative]
+description = "White chalk cliffs dropping straight into churning seas. Settlements perch on cliff edges and nestle in sea caves, connected by hair-raising coastal paths."
+threats = ["cliff_falls", "sea_raiders", "storms", "coastal_erosion"]
+opportunities = ["fishing", "salt_harvesting", "smuggling_caves", "coastal_defense"]

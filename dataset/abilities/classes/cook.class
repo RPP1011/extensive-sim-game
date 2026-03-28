@@ -1,0 +1,20 @@
+class Cook {
+    stat_growth: +1 ability_power, +1 max_hp, +1 speed per level
+
+    tags: cooking, food, supply, nutrition, feasting
+
+    scaling party_alive_count {
+        when party_members >= 2: +10% max_hp
+        always: +5% ability_power
+    }
+
+    abilities {
+        level 1: nourishing_meal "Prepare food that heals the party between battles"
+        level 5: field_rations "Create preserved food that lasts twice as long"
+        level 10: invigorating_feast "A meal that grants a stat buff for the next battle"
+        level 20: secret_recipe "Cook a dish with a unique magical effect based on rare ingredients"
+        level 40: feast_of_kings "Prepare a legendary meal that permanently increases one stat for each party member"
+    }
+
+    requirements: level 1
+}

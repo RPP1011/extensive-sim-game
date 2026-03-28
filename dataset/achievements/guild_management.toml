@@ -1,0 +1,427 @@
+# Guild management achievements — recruitment, morale, adventurer development
+
+[[achievements]]
+id = "first_recruit"
+name = "Fresh Meat"
+description = "Recruit your first adventurer."
+category = "guild_management"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerRecruited"
+count = 1
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "The guild's roster has a name on it. Just one, for now."
+
+[[achievements]]
+id = "five_recruits"
+name = "Growing Ranks"
+description = "Have 5 adventurers in your guild."
+category = "guild_management"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerRecruited"
+count = 5
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "Five adventurers. Enough for a proper party and a spare."
+
+[[achievements]]
+id = "ten_recruits"
+name = "Full House"
+description = "Have 10 adventurers in your guild."
+category = "guild_management"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerRecruited"
+count = 10
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Ten swords, ten mouths to feed. The guild hall is getting crowded."
+
+[[achievements]]
+id = "twenty_recruits"
+name = "Guild Master"
+description = "Have 20 adventurers in your guild."
+category = "guild_management"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerRecruited"
+count = 20
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Twenty adventurers under one banner. This is no longer a party. It's an institution."
+
+[[achievements]]
+id = "level_10"
+name = "Showing Promise"
+description = "Have an adventurer reach level 10."
+category = "guild_management"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerLevelUp"
+condition = "level_10"
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "Level 10. The difference between someone who fights and a fighter."
+
+[[achievements]]
+id = "level_25"
+name = "Seasoned"
+description = "Have an adventurer reach level 25."
+category = "guild_management"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerLevelUp"
+condition = "level_25"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Level 25. They've seen enough to know what fear looks like in an enemy's eyes."
+
+[[achievements]]
+id = "level_50"
+name = "Named Rank"
+description = "Have an adventurer reach level 50."
+category = "guild_management"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerLevelUp"
+condition = "level_50"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Level 50. People know the name. Enemies avoid the road."
+
+[[achievements]]
+id = "level_75"
+name = "Living Legend"
+description = "Have an adventurer reach level 75."
+category = "guild_management"
+tier = "platinum"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerLevelUp"
+condition = "level_75"
+
+[achievements.reward]
+rl_bonus = 1.0
+narrative = "Level 75. Nations would go to war over someone like this."
+
+[[achievements]]
+id = "level_100"
+name = "Apex"
+description = "Have an adventurer reach level 100."
+category = "guild_management"
+tier = "legendary"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerLevelUp"
+condition = "level_100"
+
+[achievements.reward]
+rl_bonus = 2.0
+narrative = "Level 100. The cap. There are legends, and then there's this."
+
+[[achievements]]
+id = "five_above_20"
+name = "Elite Core"
+description = "Have 5 adventurers above level 20 simultaneously."
+category = "guild_management"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerLevelUp"
+condition = "five_above_20"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Five veterans. The backbone of the guild."
+
+[[achievements]]
+id = "lost_to_desertion"
+name = "Empty Bunk"
+description = "Lose an adventurer to desertion."
+category = "guild_management"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerLost"
+condition = "desertion"
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "They left in the night. No note, no goodbye. It stings."
+
+[[achievements]]
+id = "death_still_wins"
+name = "Pyrrhic Resolve"
+description = "Lose an adventurer in combat and still win the fight."
+category = "guild_management"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "adventurer_died_in_fight"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "They fell, but the rest fought harder. Victory tastes like ash."
+
+[[achievements]]
+id = "high_morale_500"
+name = "Good Times"
+description = "Maintain guild morale above 80 for 500 consecutive ticks."
+category = "guild_management"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TickCount"
+condition = "morale_above_80_for_500"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "High spirits, full bellies, good company. This is what they fight for."
+
+[[achievements]]
+id = "morale_recovery"
+name = "Rally"
+description = "Recover from a morale crisis (below 20) back to above 60."
+category = "guild_management"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ResourceThreshold"
+condition = "morale_crisis_recovered"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "They were ready to quit. Someone gave a speech. They stayed."
+
+[[achievements]]
+id = "first_class_earned"
+name = "Class Act"
+description = "Have an adventurer earn their first class."
+category = "guild_management"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+count = 1
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "A class earned through deed, not birth. This is how the System works."
+
+[[achievements]]
+id = "class_consolidation"
+name = "Refined"
+description = "Have an adventurer consolidate their classes."
+category = "guild_management"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "consolidation"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Two classes became one, greater than either. The System rewarded their focus."
+
+[[achievements]]
+id = "three_class_types"
+name = "Diverse Roster"
+description = "Have 3 or more different class types represented in your guild."
+category = "guild_management"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ClassEarned"
+condition = "three_class_types"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Knights, mages, rogues. Every problem has the right tool."
+
+[[achievements]]
+id = "promote_adventurer"
+name = "Moving Up"
+description = "Promote an adventurer to a leadership role."
+category = "guild_management"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "promotion"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "They earned it. New title, new responsibilities, same person."
+
+[[achievements]]
+id = "injury_free_200"
+name = "Safety Record"
+description = "Keep all adventurers injury-free for 200 consecutive ticks."
+category = "guild_management"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TickCount"
+condition = "no_injuries_200"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "Two hundred ticks without a scratch. Good planning or good luck."
+
+[[achievements]]
+id = "max_loyalty"
+name = "Unshakable"
+description = "Have an adventurer reach maximum loyalty."
+category = "guild_management"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ResourceThreshold"
+condition = "max_loyalty"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "They'd follow you into the abyss. And mean it."
+
+[[achievements]]
+id = "survive_top_departure"
+name = "Next in Line"
+description = "Survive the departure of your highest-level adventurer."
+category = "guild_management"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerLost"
+condition = "highest_level_departed"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "The best left. The guild didn't crumble. Someone else stepped up."
+
+[[achievements]]
+id = "stress_management"
+name = "Cool Heads"
+description = "Reduce an adventurer's stress from critical to low."
+category = "guild_management"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "ResourceThreshold"
+condition = "stress_critical_to_low"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Rest, drink, companionship. The shaking stopped. They're ready again."
+
+[[achievements]]
+id = "full_party_survived"
+name = "Not One Lost"
+description = "Complete 10 combat encounters without a single adventurer death."
+category = "guild_management"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "ten_fights_no_deaths"
+count = 10
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Ten fights. Zero funerals. That's leadership."
+
+[[achievements]]
+id = "fatigue_management"
+name = "Well Rested"
+description = "Never let any adventurer reach critical fatigue for 500 ticks."
+category = "guild_management"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TickCount"
+condition = "no_critical_fatigue_500"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "Rotated shifts, proper rest, enough food. The basics matter."
+
+[[achievements]]
+id = "multi_team"
+name = "Two Fronts"
+description = "Send two separate parties on missions simultaneously."
+category = "guild_management"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "simultaneous_missions"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "Two parties, two missions, one guild. You're scaling up."

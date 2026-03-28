@@ -1,0 +1,20 @@
+class Farmer {
+    stat_growth: +2 max_hp, +1 defense, +1 speed per level
+
+    tags: agriculture, weather, seasons, harvest, endurance
+
+    scaling hp_percent {
+        when hp_percent > 50: +10% max_hp
+        always: +5% defense
+    }
+
+    abilities {
+        level 1: green_thumb "Crops grow faster and yield more on your land"
+        level 5: weather_sense "Predict weather changes a day in advance"
+        level 10: bountiful_harvest "Double food production for one harvest cycle"
+        level 20: fertile_ground "Any land you tend becomes permanently more productive"
+        level 40: feeds_an_army "Produce enough food to sustain an entire campaign force indefinitely"
+    }
+
+    requirements: level 1
+}

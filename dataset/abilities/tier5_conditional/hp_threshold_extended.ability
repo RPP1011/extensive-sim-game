@@ -1,0 +1,102 @@
+// Tier 5: Extended HP threshold conditionals
+
+ability Execute {
+    target: enemy, range: 1.5
+    cooldown: 8s, cast: 200ms
+    hint: damage
+
+    damage 80 when hp_below(0.25) [PHYSICAL: 60]
+}
+
+ability Cull {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 100ms
+    hint: damage
+
+    damage 50 when hp_below(0.3) [PHYSICAL: 50]
+}
+
+ability MercyStrike {
+    target: enemy, range: 1.5
+    cooldown: 10s, cast: 300ms
+    hint: damage
+
+    damage 100 when hp_below(0.2) [HOLY: 65]
+}
+
+ability DesperateHeal {
+    target: self
+    cooldown: 15s, cast: 400ms
+    hint: heal
+
+    heal 80 when hp_below(0.3) [HOLY: 50]
+}
+
+ability LastStand {
+    target: self
+    cooldown: 20s, cast: 100ms
+    hint: defense
+
+    shield 60 for 5s when hp_below(0.25)
+    buff damage_output 0.3 for 5s when hp_below(0.25)
+}
+
+ability Frenzy {
+    target: self
+    cooldown: 15s, cast: 0ms
+    hint: utility
+
+    buff attack_speed 0.5 for 6s when hp_below(0.4)
+    buff damage_output 0.25 for 6s when hp_below(0.4)
+}
+
+ability FinalGambit {
+    target: enemy, range: 3.0
+    cooldown: 12s, cast: 200ms
+    hint: damage
+
+    damage 70 when hp_below(0.3) [DARK: 55]
+    heal 30 when hp_below(0.3)
+}
+
+ability EmergencyBarrier {
+    target: self
+    cooldown: 18s, cast: 0ms
+    hint: defense
+
+    shield 80 for 4s when hp_below(0.2)
+}
+
+ability Bloodrage {
+    target: self
+    cooldown: 14s, cast: 0ms
+    hint: utility
+
+    buff damage_output 0.4 for 5s when hp_below(0.35)
+}
+
+ability SurvivorInstinct {
+    target: self
+    cooldown: 16s, cast: 0ms
+    hint: utility
+
+    buff move_speed 0.5 for 4s when hp_below(0.3)
+    heal 25 when hp_below(0.3)
+}
+
+ability VoidFinisher {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: damage
+
+    damage 90 when hp_below(0.2) [DARK: 60]
+}
+
+ability Retaliation {
+    target: self
+    cooldown: 12s, cast: 0ms
+    hint: damage
+
+    damage 40 in circle(2.0) when hp_below(0.35) [PHYSICAL: 50]
+    buff damage_output 0.2 for 4s when hp_below(0.35)
+}

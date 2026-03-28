@@ -1,0 +1,45 @@
+[[events]]
+id = "reinforcements_arrive"
+name = "Reinforcements Arrive"
+phase = "bombardment"
+
+[events.trigger]
+type = "ReinforcementCheck"
+threshold = 0.0
+
+[events.choice]
+prompt = "Scouts report a column of troops approaching from the {direction}. Banners of {faction} — are they friend or foe?"
+deadline_secs = 25.0
+
+[[events.choice.options]]
+label = "Prepare to Receive Allies"
+description = "Open a corridor for the reinforcements to join the siege camp."
+[[events.choice.options.effects]]
+type = "army_reinforcement"
+troop_count_range = [15, 40]
+supply_bonus = 300
+morale_boost = 0.2
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Fresh troops file into camp, and the weary besiegers cheer. New swords, new supplies, and most importantly, new hope."
+
+[[events.choice.options]]
+label = "They're Not Ours — Fortify!"
+description = "The approaching force is a relief army for the defenders. Turn to face them."
+[[events.choice.options.effects]]
+type = "phase_transition"
+to_phase = "siege_relief"
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The banners are wrong. The approaching army isn't reinforcement — it's the enemy. The siege just became a battle on two fronts."
+
+[[events.choice.options]]
+label = "Send Envoys"
+description = "Uncertain allegiance. Send riders to determine if they're friendly before committing."
+[[events.choice.options.effects]]
+type = "siege_progress"
+ticks_cost = 50
+intelligence_gained = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Riders gallop out under a flag of truce. The army waits. The column draws closer. Everyone holds their breath."

@@ -1,0 +1,63 @@
+# Negotiating specific alliance terms with a faction.
+
+category = "diplomacy"
+trigger = "alliance_negotiation"
+prompt = "{faction_name} wants to formalize the relationship. What terms should the guild push for?"
+deadline_secs = 120.0
+default_option = 0
+
+[[options]]
+label = "Military Alliance"
+description = "Mutual defense pact. They fight for you, you fight for them."
+
+[[options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 15.0
+
+[[options.effects]]
+type = "narrative"
+text = "Swords are crossed in oath. An attack on one is an attack on both."
+
+[[options]]
+label = "Economic Partnership"
+description = "Shared markets, reduced tariffs. Steady income over military commitments."
+
+[[options.effects]]
+type = "gold"
+amount = 25.0
+
+[[options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 8.0
+
+[[options.effects]]
+type = "narrative"
+text = "Trade agreements are signed. The gold flows more freely."
+
+[[options]]
+label = "Information Sharing"
+description = "Intelligence exchange. Know what they know, share what you know."
+
+[[options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 5.0
+
+[[options.effects]]
+type = "narrative"
+text = "Runners carry sealed messages between guild and faction. Knowledge is power, shared."
+
+[[options]]
+label = "Non-Aggression Only"
+description = "Minimal commitment. Just agree not to fight each other."
+
+[[options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 3.0
+
+[[options.effects]]
+type = "narrative"
+text = "A simple agreement: no hostility. Nothing more, nothing less."

@@ -61,7 +61,7 @@ pub struct GtRecord {
 pub fn load_all_abilities() -> Vec<TaggedAbility> {
     let mut tagged = Vec::new();
 
-    let dirs = ["assets/hero_templates", "assets/lol_heroes"];
+    let dirs = ["dataset/abilities/hero_templates", "dataset/abilities/lol_heroes"];
     for dir in &dirs {
         let dir_path = Path::new(dir);
         if !dir_path.exists() {
@@ -366,7 +366,7 @@ pub fn run_gt_pipeline(config: &GtDatasetConfig) {
     eprintln!("Loaded {} abilities ({} active, {} passive)", abilities.len(), active, passive);
 
     if abilities.is_empty() {
-        eprintln!("No abilities found! Check assets/hero_templates/ and assets/lol_heroes/");
+        eprintln!("No abilities found! Check dataset/abilities/hero_templates/ and dataset/abilities/lol_heroes/");
         return;
     }
 

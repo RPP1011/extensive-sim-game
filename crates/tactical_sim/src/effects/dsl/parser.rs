@@ -80,8 +80,30 @@ pub(super) fn duration(input: &mut &str) -> ModalResult<u32> {
     } else if input.starts_with('s') && (input.len() == 1 || !input[1..].starts_with(|c: char| c.is_ascii_alphabetic())) {
         let _: char = 's'.parse_next(input)?;
         Ok((n * 1000.0) as u32)
+    } else if input.starts_with('t') && (input.len() == 1 || !input[1..].starts_with(|c: char| c.is_ascii_alphabetic())) {
+        // Campaign tick duration: Nt — return raw tick count
+        let _: char = 't'.parse_next(input)?;
+        Ok(n as u32)
     } else {
         Ok(n as u32)
+    }
+}
+
+/// Parse a duration that might be tick-based (`500t`).
+/// Returns (ms_duration, tick_duration) — exactly one will be Some.
+pub(super) fn duration_or_ticks(input: &mut &str) -> ModalResult<(Option<u32>, Option<u32>)> {
+    let n: f64 = number.parse_next(input)?;
+    if input.starts_with("ms") {
+        let _: &str = "ms".parse_next(input)?;
+        Ok((Some(n as u32), None))
+    } else if input.starts_with('s') && (input.len() == 1 || !input[1..].starts_with(|c: char| c.is_ascii_alphabetic())) {
+        let _: char = 's'.parse_next(input)?;
+        Ok((Some((n * 1000.0) as u32), None))
+    } else if input.starts_with('t') && (input.len() == 1 || !input[1..].starts_with(|c: char| c.is_ascii_alphabetic())) {
+        let _: char = 't'.parse_next(input)?;
+        Ok((None, Some(n as u32)))
+    } else {
+        Ok((Some(n as u32), None))
     }
 }
 
@@ -125,6 +147,10 @@ pub(super) fn duration_or_number(input: &mut &str) -> ModalResult<Arg> {
     } else if input.starts_with('s') && (input.len() == 1 || !input[1..].starts_with(|c: char| c.is_ascii_alphabetic())) {
         let _: char = 's'.parse_next(input)?;
         Ok(Arg::Duration((n * 1000.0) as u32))
+    } else if input.starts_with('t') && (input.len() == 1 || !input[1..].starts_with(|c: char| c.is_ascii_alphabetic())) {
+        // Campaign tick duration: Nt
+        let _: char = 't'.parse_next(input)?;
+        Ok(Arg::TickDuration(n as u32))
     } else {
         Ok(Arg::Number(n))
     }

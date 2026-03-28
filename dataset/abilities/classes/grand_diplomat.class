@@ -1,0 +1,21 @@
+class Grand_Diplomat {
+    stat_growth: +2 ability_power, +2 speed, +2 defense per level
+
+    tags: politics, authority, treaties, governance, world_shaping
+
+    scaling party_alive_count {
+        when party_members >= 2: +10% ability_power
+        when party_members >= 4: aura defense +3
+        always: +5% speed
+    }
+
+    abilities {
+        level 40: royal_edict "Issue a decree that all civilized factions must acknowledge"
+        level 45: diplomatic_immunity "Your party is untouchable in any territory with a government"
+        level 50: grand_alliance "Unite multiple factions under a single banner for a campaign"
+        level 60: kingmaker "Install or depose rulers; reshape the political landscape of a region"
+        level 80: pax "Declare peace across an entire region; all hostilities cease until you permit otherwise"
+    }
+
+    requirements: level 40, classes: Diplomat + Noble
+}

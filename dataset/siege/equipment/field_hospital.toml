@@ -1,0 +1,31 @@
+[[equipment]]
+id = "field_hospital"
+name = "Field Hospital"
+category = "support"
+tier = 2
+
+[equipment.stats]
+gate_damage_per_tick = 0.0
+wall_damage_per_tick = 0.0
+range = 0.0
+crew_required = 4
+move_speed = 0.0
+hp = 200
+armor = 5
+heal_per_tick = 2.0
+max_patients = 8
+wound_recovery_multiplier = 0.5
+disease_resistance = 0.3
+
+[equipment.requirements]
+min_tech_level = 2
+construction_cost = 80
+construction_ticks = 150
+resources = ["timber", "cloth", "herbs"]
+
+[equipment.counters]
+vulnerable_to = ["sally_out", "trebuchet", "fire_arrows"]
+strong_against = ["attrition", "disease", "morale_loss"]
+
+[equipment.narrative]
+description = "Canvas stretched over poles, cots lined in rows, the smell of herbs and blood. [Healers] work through the night, stitching what can be stitched, dosing what can't. Not every battle is won on the walls."

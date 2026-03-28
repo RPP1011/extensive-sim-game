@@ -1,0 +1,98 @@
+// Tier 2: Extended AoE CC variants
+
+ability Tremor {
+    target: self_aoe
+    cooldown: 12s, cast: 300ms
+    hint: crowd_control
+
+    stun 1200ms in circle(3.0) [PHYSICAL: 50]
+}
+
+ability BlindingFlash {
+    target: self_aoe
+    cooldown: 10s, cast: 100ms
+    hint: crowd_control
+
+    blind 0.6 for 2s in circle(3.0) [HOLY: 45]
+}
+
+ability EntanglingRoots {
+    target: ground, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: crowd_control
+
+    root 2s in circle(2.5)
+}
+
+ability FrostRing {
+    target: self_aoe
+    cooldown: 8s, cast: 200ms
+    hint: crowd_control
+
+    slow 0.4 for 2500ms in circle(3.0) [ICE: 45]
+}
+
+ability WarCry {
+    target: self_aoe
+    cooldown: 14s, cast: 200ms
+    hint: crowd_control
+
+    fear 1800ms in circle(2.5) [FEAR: 50]
+}
+
+ability MassRoot {
+    target: ground, range: 5.0
+    cooldown: 14s, cast: 400ms
+    hint: crowd_control
+
+    root 2500ms in circle(3.0) [MAGIC: 55]
+}
+
+ability IcyWind {
+    target: direction, range: 5.0
+    cooldown: 7s, cast: 200ms
+    hint: crowd_control
+
+    slow 0.5 for 2s in line(5.0, 2.0) [ICE: 45]
+}
+
+ability ThunderClap2 {
+    target: self_aoe
+    cooldown: 8s, cast: 200ms
+    hint: crowd_control
+
+    slow 0.3 for 2s in circle(2.5) [MAGIC: 40]
+}
+
+ability MassSilence {
+    target: ground, range: 5.0
+    cooldown: 16s, cast: 400ms
+    hint: crowd_control
+
+    silence 2s in circle(3.0) [DARK: 55]
+}
+
+ability GravityWell {
+    target: ground, range: 5.0
+    cooldown: 12s, cast: 300ms
+    hint: crowd_control
+
+    root 1500ms in circle(2.5) [MAGIC: 50]
+    slow 0.3 for 2s in circle(2.5) [MAGIC: 40]
+}
+
+ability TerrifyingPresence {
+    target: self_aoe
+    cooldown: 16s, cast: 200ms
+    hint: crowd_control
+
+    fear 2s in circle(3.0) [FEAR: 55, DARK: 45]
+}
+
+ability StaggeringStomp {
+    target: self_aoe
+    cooldown: 9s, cast: 300ms
+    hint: crowd_control
+
+    stun 1s in circle(2.0) [PHYSICAL: 45]
+}

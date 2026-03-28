@@ -1,0 +1,21 @@
+class Duelist {
+    stat_growth: +3 attack, +1 defense, +2 speed per level
+
+    tags: melee, precision, honor, single_combat, finesse
+
+    scaling enemy_count {
+        when enemy_count == 1: +30% attack
+        when enemy_count <= 3: +15% speed
+        always: +5% attack
+    }
+
+    abilities {
+        level 1: riposte "Counter-attack after a successful parry"
+        level 5: challenge "Mark a single enemy; both deal bonus damage to each other"
+        level 10: perfect_parry "Negate one melee attack entirely"
+        level 20: blade_dance "Chain three attacks if each one hits"
+        level 40: death_in_one "If you have studied a target for 10 seconds, your next strike cannot miss and crits"
+    }
+
+    requirements: level 1
+}

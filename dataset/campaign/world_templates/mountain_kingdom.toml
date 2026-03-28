@@ -1,0 +1,163 @@
+# Mountain Kingdom — Vertical terrain, mining, dwarven-inspired factions.
+# 4 regions, 3 factions, 5 locations, 3 NPCs.
+
+name = "Mountain Kingdom"
+global_threat_level = 25.0
+
+[[regions]]
+id = 0
+name = "Highforge"
+owner_faction_id = 0
+neighbors = [1, 2]
+unrest = 8.0
+control = 85.0
+threat_level = 15.0
+
+[[regions]]
+id = 1
+name = "The Deep Galleries"
+owner_faction_id = 0
+neighbors = [0, 2, 3]
+unrest = 15.0
+control = 75.0
+threat_level = 30.0
+
+[[regions]]
+id = 2
+name = "Windcrag Pass"
+owner_faction_id = 1
+neighbors = [0, 1, 3]
+unrest = 25.0
+control = 60.0
+threat_level = 40.0
+
+[[regions]]
+id = 3
+name = "The Underhalls"
+owner_faction_id = 2
+neighbors = [1, 2]
+unrest = 45.0
+control = 40.0
+threat_level = 65.0
+
+[[locations]]
+id = 0
+name = "Stonehearth Citadel"
+position = [0.0, 15.0]
+location_type = "Settlement"
+threat_level = 10.0
+resource_availability = 75.0
+faction_owner = 0
+scouted = true
+
+[[locations]]
+id = 1
+name = "The Mithril Vein"
+position = [-10.0, 5.0]
+location_type = "Outpost"
+threat_level = 25.0
+resource_availability = 90.0
+faction_owner = 0
+scouted = true
+
+[[locations]]
+id = 2
+name = "Windcrag Watchtower"
+position = [15.0, 20.0]
+location_type = "Outpost"
+threat_level = 35.0
+resource_availability = 40.0
+faction_owner = 1
+scouted = false
+
+[[locations]]
+id = 3
+name = "The Wyrm's Descent"
+position = [-20.0, -10.0]
+location_type = "Dungeon"
+threat_level = 70.0
+resource_availability = 50.0
+scouted = false
+
+[[locations]]
+id = 4
+name = "Fallen Bridge Market"
+position = [5.0, -5.0]
+location_type = "Settlement"
+threat_level = 15.0
+resource_availability = 65.0
+faction_owner = 1
+scouted = true
+
+[[factions]]
+id = 0
+name = "The Stoneborn Clan"
+relationship_to_guild = 45.0
+military_strength = 60.0
+max_military_strength = 90.0
+territory_size = 2
+diplomatic_stance = "Friendly"
+coalition_member = false
+at_war_with = []
+has_guild = true
+guild_adventurer_count = 6
+recent_actions = []
+
+[[factions]]
+id = 1
+name = "Windcrag Raiders"
+relationship_to_guild = -10.0
+military_strength = 50.0
+max_military_strength = 80.0
+territory_size = 1
+diplomatic_stance = "Neutral"
+coalition_member = false
+at_war_with = []
+has_guild = false
+guild_adventurer_count = 0
+recent_actions = []
+
+[[factions]]
+id = 2
+name = "The Underkings"
+relationship_to_guild = -40.0
+military_strength = 100.0
+max_military_strength = 150.0
+territory_size = 1
+diplomatic_stance = "Hostile"
+coalition_member = false
+at_war_with = [0]
+has_guild = false
+guild_adventurer_count = 0
+recent_actions = []
+
+[diplomacy]
+relations = [[0, -10, -30], [-10, 0, -5], [-30, -5, 0]]
+guild_faction_id = 0
+
+[[npc_relationships]]
+npc_id = 300
+npc_name = "Thane Brokk"
+npc_type = "FactionLeader"
+relationship_score = 50.0
+last_interaction_ms = 0
+rescue_available = false
+rescue_cost = 0.0
+
+[[npc_relationships]]
+npc_id = 301
+npc_name = "Ingrid Ironhand"
+npc_type = "Mercenary"
+relationship_score = 35.0
+last_interaction_ms = 0
+rescue_available = false
+rescue_cost = 70.0
+
+[[npc_relationships]]
+npc_id = 302
+npc_name = "Grit the Prospector"
+npc_type = "Merchant"
+relationship_score = 25.0
+last_interaction_ms = 0
+rescue_available = true
+rescue_cost = 40.0

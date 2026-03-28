@@ -33,8 +33,8 @@ fn main() {
         .parent()
         .unwrap();
 
-    let hero_dir = project_root.join("assets/hero_templates");
-    let lol_dir = project_root.join("assets/lol_heroes");
+    let hero_dir = project_root.join("dataset/abilities/hero_templates");
+    let lol_dir = project_root.join("dataset/abilities/lol_heroes");
 
     let mut hero_templates = load_hero_templates_from_dir(&hero_dir);
     let lol_templates = load_hero_templates_from_dir(&lol_dir);

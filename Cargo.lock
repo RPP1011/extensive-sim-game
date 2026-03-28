@@ -19,6 +19,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
+name = "ability-vae"
+version = "0.1.0"
+dependencies = [
+ "burn",
+ "rand 0.10.0",
+ "serde",
+ "serde_json",
+ "tactical_sim",
+]
+
+[[package]]
 name = "ability_operator"
 version = "0.1.0"
 dependencies = [

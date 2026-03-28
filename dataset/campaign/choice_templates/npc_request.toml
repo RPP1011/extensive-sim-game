@@ -1,0 +1,43 @@
+# An NPC requests a favor.
+
+category = "character"
+trigger = "npc_favor"
+prompt = "{npc_name} asks the guild for a personal favor: {favor_description}. It's outside normal operations."
+deadline_secs = 60.0
+default_option = 1
+
+[[options]]
+label = "Help Freely"
+description = "The guild helps its friends. No charge, no conditions."
+
+[[options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[options.effects]]
+type = "narrative"
+text = "The favor is done without question. {npc_name}'s gratitude is genuine."
+
+[[options]]
+label = "Help for a Price (20g)"
+description = "The guild isn't a charity. Fair compensation for fair work."
+
+[[options.effects]]
+type = "gold"
+amount = 20.0
+
+[[options.effects]]
+type = "narrative"
+text = "A reasonable fee is agreed. Business and friendship don't have to conflict."
+
+[[options]]
+label = "Decline"
+description = "The guild has its own problems. Personal favors are personal."
+
+[[options.effects]]
+type = "reputation"
+amount = -2.0
+
+[[options.effects]]
+type = "narrative"
+text = "{npc_name} nods, disappointed but understanding."

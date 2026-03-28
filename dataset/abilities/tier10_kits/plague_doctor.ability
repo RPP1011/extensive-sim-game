@@ -1,0 +1,63 @@
+// Tier 10: Plague Doctor Kit — poison DoT specialist with debuffs
+
+ability ToxicInjection {
+    target: enemy, range: 4.0
+    cooldown: 4s, cast: 200ms
+    hint: damage
+
+    damage 15 [POISON: 35]
+    damage 6/1s for 4s [POISON: 40]
+}
+
+ability PlagueBreath {
+    target: direction, range: 4.0
+    cooldown: 8s, cast: 300ms
+    hint: damage
+
+    damage 20 in line(4.0, 2.0) [POISON: 45]
+    damage 5/1s for 4s in line(4.0, 2.0) [POISON: 35]
+    debuff move_speed 0.25 for 3s in line(4.0, 2.0) [POISON: 30]
+}
+
+ability Quarantine {
+    target: ground, range: 5.0
+    cooldown: 12s, cast: 300ms
+    hint: crowd_control
+
+    deliver zone { duration: 5s, tick: 1s } {
+        on_hit {
+            damage 8 in circle(3.0) [POISON: 40]
+            slow 0.3 for 1500ms in circle(3.0) [POISON: 35]
+        }
+    }
+}
+
+ability Antidote {
+    target: ally, range: 4.0
+    cooldown: 6s, cast: 200ms
+    hint: heal
+
+    heal 30
+    heal 6/1s for 4s
+}
+
+ability Pandemic {
+    target: enemy, range: 5.0
+    cooldown: 45s, cast: 500ms
+    hint: damage
+
+    damage 10/1s for 6s [POISON: 55]
+    deliver chain { bounces: 4, range: 3.5, falloff: 0.1 } {
+        on_hit {
+            damage 6/1s for 6s [POISON: 45]
+            debuff damage_output 0.85 for 4s [POISON: 40]
+        }
+    }
+}
+
+passive PoisonousBlood {
+    trigger: on_damage_taken
+    cooldown: 4s
+
+    damage 5/1s for 3s [POISON: 30]
+}

@@ -363,6 +363,10 @@ mod tests {
             journal: vec![],
             equipped_items: vec![],
             nicknames: vec![],
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: Default::default(),
+            ticks_since_income: 0,
         };
 
         // No tags → default Inspirational

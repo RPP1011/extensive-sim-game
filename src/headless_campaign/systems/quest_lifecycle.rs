@@ -398,6 +398,32 @@ pub fn tick_quest_lifecycle(
             QuestReward::default()
         };
 
+        // Distribute NPC share of gold reward to participating adventurers.
+        if result == QuestResult::Victory && reward.gold > 0.0 {
+            let npc_share_fraction = state.config.npc_economy.quest_reward_npc_share;
+            let npc_gold = reward.gold * npc_share_fraction;
+            // Compute power ratings for proportional split.
+            let power_ratings: Vec<(u32, f32)> = member_ids
+                .iter()
+                .filter_map(|id| {
+                    state.adventurers.iter().find(|a| a.id == *id).map(|a| {
+                        let eff = super::npc_economy::effective_level(a);
+                        (*id, super::npc_economy::power_rating(eff))
+                    })
+                })
+                .collect();
+            let total_power: f32 = power_ratings.iter().map(|(_, p)| p).sum();
+            if total_power > 0.0 {
+                for (adv_id, pr) in &power_ratings {
+                    let share = npc_gold * (pr / total_power);
+                    if let Some(adv) = state.adventurers.iter_mut().find(|a| a.id == *adv_id) {
+                        adv.gold += share;
+                        adv.ticks_since_income = 0;
+                    }
+                }
+            }
+        }
+
         // Generate and equip loot on victory
         if result == QuestResult::Victory {
             process_quest_loot(

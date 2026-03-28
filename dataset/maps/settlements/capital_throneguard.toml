@@ -1,0 +1,102 @@
+name = "Throneguard"
+type = "capital"
+population = 45000
+prosperity = 85.0
+
+[defenses]
+wall_type = "citadel"
+wall_hp = 3000
+gate_count = 6
+tower_count = 24
+garrison_capacity = 2000
+moat = true
+
+[[districts]]
+name = "Royal Citadel"
+type = "noble"
+buildings = ["royal_palace", "throne_room", "royal_garden", "privy_council", "royal_treasury"]
+population_pct = 3.0
+wealth = 100.0
+threat = 5.0
+
+[[districts]]
+name = "Noble Quarter"
+type = "noble"
+buildings = ["noble_estates", "dueling_ground", "exclusive_club", "private_garden"]
+population_pct = 7.0
+wealth = 90.0
+threat = 5.0
+
+[[districts]]
+name = "Grand Cathedral"
+type = "religious"
+buildings = ["grand_cathedral", "seminary", "holy_archives", "saint_reliquary"]
+population_pct = 5.0
+wealth = 75.0
+threat = 5.0
+
+[[districts]]
+name = "Royal University"
+type = "academic"
+buildings = ["university", "grand_library", "royal_observatory", "alchemy_college"]
+population_pct = 5.0
+wealth = 70.0
+threat = 5.0
+
+[[districts]]
+name = "Crown Market"
+type = "commercial"
+buildings = ["great_market_hall", "royal_bank", "auction_house", "luxury_shops", "import_warehouse"]
+population_pct = 12.0
+wealth = 80.0
+threat = 10.0
+
+[[districts]]
+name = "Artisan Quarter"
+type = "industrial"
+buildings = ["master_smithy", "royal_tailor", "jeweler_guild", "printer", "glassworks"]
+population_pct = 10.0
+wealth = 55.0
+threat = 10.0
+
+[[districts]]
+name = "Military District"
+type = "military"
+buildings = ["royal_barracks", "knight_hall", "war_college", "siege_yard", "royal_stables"]
+population_pct = 8.0
+wealth = 50.0
+threat = 5.0
+
+[[districts]]
+name = "Harbor District"
+type = "harbor"
+buildings = ["royal_dockyard", "naval_command", "great_warehouse", "customs_fortress"]
+population_pct = 10.0
+wealth = 60.0
+threat = 20.0
+
+[[districts]]
+name = "Commons"
+type = "residential"
+buildings = ["apartment_blocks", "public_bath", "theater", "arena", "public_garden"]
+population_pct = 25.0
+wealth = 30.0
+threat = 10.0
+
+[[districts]]
+name = "Undercity"
+type = "slums"
+buildings = ["sewers", "thieves_guild", "black_market", "opium_den", "underground_arena"]
+population_pct = 15.0
+wealth = 10.0
+threat = 50.0
+
+[economy]
+primary_exports = ["governance", "luxury_crafts", "education", "military_contracts"]
+primary_imports = ["food", "raw_materials", "exotic_goods", "slaves"]
+trade_routes = 15
+market_size = "regional_hub"
+
+[narrative]
+description = "Seat of the kingdom for eight centuries. Every street has history, every building has secrets, and every noble has a dagger behind their smile."
+flavor = ["The palace towers catch the first light", "Carriages jostle for space on Royal Road", "The undercity never sees the sun"]

@@ -1,0 +1,73 @@
+// Tier 3: Heal + buff combos
+
+ability BlessingOfMight {
+    target: ally, range: 4.0
+    cooldown: 10s, cast: 300ms
+    hint: heal
+
+    heal 30 [HOLY: 35]
+    buff damage_output 0.2 for 5s
+}
+
+ability RejuvenatingWind {
+    target: ally, range: 5.0
+    cooldown: 8s, cast: 200ms
+    hint: heal
+
+    heal 25
+    buff move_speed 0.3 for 4s
+}
+
+ability BattleMend {
+    target: ally, range: 4.0
+    cooldown: 8s, cast: 200ms
+    hint: heal
+
+    heal 20 [HOLY: 30]
+    buff attack_speed 0.2 for 5s
+}
+
+ability InvigoratingTouch {
+    target: ally, range: 3.0
+    cooldown: 6s, cast: 200ms
+    hint: heal
+
+    heal 25
+    buff move_speed 0.2 for 3s
+}
+
+ability DivineBlessing {
+    target: ally, range: 4.0
+    cooldown: 12s, cast: 400ms
+    hint: heal
+
+    heal 45 [HOLY: 45]
+    buff damage_output 0.15 for 6s
+}
+
+ability WarriorsMend {
+    target: self
+    cooldown: 8s, cast: 200ms
+    hint: heal
+
+    heal 30
+    buff damage_output 0.2 for 4s
+}
+
+ability SecondWind {
+    target: self
+    cooldown: 10s, cast: 100ms
+    hint: heal
+
+    heal 35
+    buff move_speed 0.25 for 3s
+}
+
+ability SurgingVitality {
+    target: ally, range: 4.0
+    cooldown: 7s, cast: 200ms
+    hint: heal
+
+    heal 20
+    buff attack_speed 0.25 for 4s
+}

@@ -1,0 +1,53 @@
+# An opportunity to upgrade guild equipment.
+
+name = "Master Smith Arrives"
+priority = 4
+repeatable = true
+cooldown_ticks = 7000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 7500
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "A master blacksmith — retired from the royal forges — has set up shop nearby. They can improve existing weapons and armor to a quality the guild couldn't normally afford."
+deadline_secs = 90.0
+default_option = 1
+
+[[choice.options]]
+label = "Full Refit (70g)"
+description = "Upgrade everyone's equipment. Major expense, major improvement."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -70.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The forge burns day and night. When the smith finishes, every blade is keener, every shield stronger."
+
+[[choice.options]]
+label = "Priority Upgrades (30g)"
+description = "Upgrade weapons and armor for the front-line fighters only."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The best fighters get the best gear. The rest watch enviously."
+
+[[choice.options]]
+label = "Hire for Repairs Only (10g)"
+description = "Just fix what's broken. No upgrades, just maintenance."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Dents are hammered out, edges resharpened. Nothing fancy, but everything works."

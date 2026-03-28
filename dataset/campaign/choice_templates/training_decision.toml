@@ -1,0 +1,47 @@
+# Training focus decision for the guild.
+
+category = "progression"
+trigger = "periodic_training"
+prompt = "The guild has time for focused training. What should the adventurers practice?"
+deadline_secs = 90.0
+default_option = 0
+
+[[options]]
+label = "Combat Drills"
+description = "Sparring, weapon forms, and tactical exercises. Direct combat improvement."
+
+[[options.effects]]
+type = "supplies"
+amount = -10.0
+
+[[options.effects]]
+type = "narrative"
+text = "Steel clashes in the training yard from dawn to dusk."
+
+[[options]]
+label = "Survival Skills"
+description = "Foraging, first aid, navigation. Less glamorous but saves lives in the field."
+
+[[options.effects]]
+type = "supplies"
+amount = -5.0
+
+[[options.effects]]
+type = "narrative"
+text = "The adventurers learn to live off the land. Practical knowledge for the long road."
+
+[[options]]
+label = "Teamwork Exercises"
+description = "Formation drills, signal codes, trust falls. The squad fights as one unit."
+
+[[options.effects]]
+type = "narrative"
+text = "Bonds strengthen. The squad moves as a single organism."
+
+[[options]]
+label = "Rest and Recovery"
+description = "Sometimes the best training is no training. Let tired bodies heal."
+
+[[options.effects]]
+type = "narrative"
+text = "The guild takes a breather. Morale rises as stress falls."

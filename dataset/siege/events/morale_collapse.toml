@@ -1,0 +1,51 @@
+[[events]]
+id = "morale_collapse"
+name = "Morale Collapse"
+phase = "assault"
+
+[events.trigger]
+type = "MoraleBelow"
+threshold = 0.15
+side = "either"
+
+[events.choice]
+prompt = "The {side}'s resolve is breaking. Units refuse orders. Officers shout into empty air. Panic spreads through the ranks."
+deadline_secs = 15.0
+
+[[events.choice.options]]
+label = "Rally Speech"
+description = "The commander rides to the front. Words can turn the tide — or fall on deaf ears."
+[[events.choice.options.effects]]
+type = "morale_check"
+rally_chance = 0.5
+morale_boost_success = 0.3
+morale_drain_failure = 0.1
+requires = "commander_alive"
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The commander's voice cuts through the chaos. Some soldiers stop running. Some turn back. It's not a guarantee — but it's a chance."
+
+[[events.choice.options]]
+label = "Execute Deserters"
+description = "Make an example. Ruthless, but effective at stopping the rout."
+[[events.choice.options.effects]]
+type = "army_modifier"
+morale_boost = 0.15
+loyalty_drain = 0.2
+desertion_stopped = true
+reputation_loss = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The officers draw swords — not against the enemy. The fleeing soldiers see what happens to those who run. They stop. But the look in their eyes says this army will remember."
+
+[[events.choice.options]]
+label = "Orderly Retreat"
+description = "Fall back in good order. Save the army to fight another day."
+[[events.choice.options.effects]]
+type = "retreat"
+casualties_during_retreat = 0.1
+army_preserved = true
+siege_lost = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The horns sound retreat. The army pulls back, battered but intact. The walls still stand. But so does the army, and that counts for something."

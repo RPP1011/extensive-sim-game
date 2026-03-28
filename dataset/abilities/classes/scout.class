@@ -1,0 +1,20 @@
+class Scout {
+    stat_growth: +3 speed, +1 attack, +1 defense per level
+
+    tags: reconnaissance, tracking, ambush_detection, stealth, awareness
+
+    scaling enemy_count {
+        when enemy_count >= 2: +10% speed
+        always: +5% attack
+    }
+
+    abilities {
+        level 1: keen_eyes "Detect hidden enemies and traps in the area"
+        level 5: tracking "Follow any trail, no matter how old or faint"
+        level 10: ambush_warning "Party cannot be surprised; always detect incoming attacks"
+        level 20: terrain_report "Reveal all enemy positions and terrain features in the region"
+        level 40: ghost_scout "Project your senses to any location within a day's travel, seeing and hearing everything"
+    }
+
+    requirements: level 1
+}

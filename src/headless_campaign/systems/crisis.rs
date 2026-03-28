@@ -5,7 +5,7 @@
 //! Sleeping King AND a dungeon breach simultaneously.
 //!
 //! All content (champion rosters, escalation rates, etc.) comes from
-//! TOML templates in `assets/crises/`. This module is pure mechanics.
+//! TOML templates in `dataset/campaign/crises/`. This module is pure mechanics.
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::crisis_templates::{
@@ -177,6 +177,12 @@ pub fn activate_crisis_from_template(
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: crate::headless_campaign::state::EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
                 };
 
                 champion_ids.push(id);
@@ -438,6 +444,8 @@ fn tick_sleeping_king(
                 morale: 95.0,
                 quest_id: None,
                 food_level: 100.0,
+                autonomous: false,
+                party_type: AutonomousPartyType::PlayerDispatched,
             };
             state.parties.push(party);
 

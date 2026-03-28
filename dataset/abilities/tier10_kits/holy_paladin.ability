@@ -1,0 +1,54 @@
+// Tier 10: Holy Paladin Kit — tanky healer with shields and auras
+
+ability HolyLight {
+    target: ally, range: 5.0
+    cooldown: 4s, cast: 300ms
+    hint: heal
+
+    heal 40 [HOLY: 40]
+}
+
+ability FlashOfLight {
+    target: ally, range: 5.0
+    cooldown: 3s, cast: 100ms
+    hint: heal
+
+    heal 20 [HOLY: 30]
+}
+
+ability DivineBulwark {
+    target: self
+    cooldown: 12s, cast: 100ms
+    hint: defense
+
+    shield 50 for 5s
+    taunt 2s in circle(3.0) [CROWD_CONTROL: 45]
+}
+
+ability HammerOfJustice {
+    target: enemy, range: 1.5
+    cooldown: 8s, cast: 200ms
+    hint: crowd_control
+
+    damage 30 [HOLY: 45]
+    stun 1500ms [CROWD_CONTROL: 55]
+}
+
+ability AuraOfDevotion {
+    target: self_aoe
+    cooldown: 50s, cast: 400ms
+    hint: heal
+
+    heal 40 in circle(4.0) [HOLY: 45]
+    shield 30 for 5s in circle(4.0)
+    heal 8/1s for 5s in circle(4.0) [HOLY: 30]
+    buff damage_output 0.15 for 5s in circle(4.0)
+}
+
+passive BlessedDefense {
+    trigger: on_damage_taken
+    cooldown: 6s
+
+    heal 12 [HOLY: 25]
+    shield 10 for 3s
+}

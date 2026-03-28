@@ -1,0 +1,20 @@
+class Diplomat {
+    stat_growth: +2 ability_power, +2 speed, +1 defense per level
+
+    tags: negotiation, faction_relations, treaties, persuasion, politics
+
+    scaling party_alive_count {
+        when party_members >= 2: +10% ability_power
+        always: +5% speed
+    }
+
+    abilities {
+        level 1: parley "Request a ceasefire; chance to resolve encounters without combat"
+        level 5: read_intentions "Detect lies and hidden motives in conversation"
+        level 10: brokered_peace "Improve relations between two hostile factions"
+        level 20: treaty "Forge a lasting alliance with a faction, granting trade and military access"
+        level 40: world_stage "Your words carry the weight of nations; declarations reshape faction politics across the region"
+    }
+
+    requirements: level 1
+}

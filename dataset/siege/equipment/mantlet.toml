@@ -1,0 +1,30 @@
+[[equipment]]
+id = "mantlet"
+name = "Mantlet"
+category = "support"
+tier = 1
+
+[equipment.stats]
+gate_damage_per_tick = 0.0
+wall_damage_per_tick = 0.0
+range = 0.0
+crew_required = 2
+move_speed = 0.5
+hp = 250
+armor = 20
+cover_bonus = 0.7
+shields_troops_behind = 4
+mobile_cover = true
+
+[equipment.requirements]
+min_tech_level = 1
+construction_cost = 25
+construction_ticks = 60
+resources = ["timber", "leather"]
+
+[equipment.counters]
+vulnerable_to = ["fire_arrows", "trebuchet", "sally_out"]
+strong_against = ["arrow_slits", "archer_fire", "ballista"]
+
+[equipment.narrative]
+description = "A wooden shield on wheels, tall enough to hide behind, thick enough to stop most arrows. The archers behind it advance in its shadow, firing through gaps, alive because of planks and wet hides."

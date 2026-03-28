@@ -1,0 +1,50 @@
+[[events]]
+id = "fire_breaks_out"
+name = "Fire Breaks Out"
+phase = "storm"
+
+[events.trigger]
+type = "FirePresent"
+threshold = 0.0
+
+[events.choice]
+prompt = "Fire catches in the {location}! Flames leap from building to building, driven by wind and dry wood. Smoke chokes the streets."
+deadline_secs = 15.0
+
+[[events.choice.options]]
+label = "Fight Through the Flames"
+description = "Push the attack regardless. The fire will consume the defenders' cover too."
+[[events.choice.options.effects]]
+type = "tactical_modifier"
+fire_damage_both_sides = 5.0
+cover_destroyed = true
+visibility = 0.4
+ticks_duration = 200
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Soldiers fight with burning buildings collapsing around them. The fire doesn't care about sides. It eats everything equally."
+
+[[events.choice.options]]
+label = "Pull Back and Let It Burn"
+description = "Withdraw from the fire zone. Let the flames do the work of clearing buildings."
+[[events.choice.options.effects]]
+type = "siege_progress"
+ticks_cost = 200
+area_cleared = true
+civilian_casualties = true
+settlement_damage = 0.3
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The army pulls back to the firebreak. The settlement burns. When the embers cool, there will be less to fight over — and less to save."
+
+[[events.choice.options]]
+label = "Form Fire Brigades"
+description = "Stop fighting and put out the fire. Preserve the settlement you came to conquer."
+[[events.choice.options.effects]]
+type = "siege_progress"
+ticks_cost = 150
+settlement_damage = 0.1
+combat_paused = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Soldiers drop weapons and pick up buckets. Attacker and defender work side by side against the common enemy. For a brief, strange moment, the war pauses."

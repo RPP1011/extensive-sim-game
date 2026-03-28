@@ -1,0 +1,31 @@
+[[equipment]]
+id = "siege_ladder"
+name = "Siege Ladder"
+category = "support"
+tier = 1
+
+[equipment.stats]
+gate_damage_per_tick = 0.0
+wall_damage_per_tick = 0.0
+range = 0.0
+crew_required = 2
+move_speed = 0.7
+hp = 100
+armor = 0
+wall_height_max = 5.0
+climb_speed = 0.3
+climber_vulnerability = 0.8
+push_off_chance = 0.3
+
+[equipment.requirements]
+min_tech_level = 1
+construction_cost = 10
+construction_ticks = 30
+resources = ["timber"]
+
+[equipment.counters]
+vulnerable_to = ["boiling_oil", "push_off", "fire_arrows", "murder_holes"]
+strong_against = ["low_garrison", "wooden_palisade"]
+
+[equipment.narrative]
+description = "Simple. Brutal. Effective if you have enough men willing to climb into the teeth of the defense. The first man up the ladder is either the bravest or the most expendable. Often both."

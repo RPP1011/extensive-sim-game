@@ -1,0 +1,55 @@
+// Tier 3: Shield + mobility combos
+
+ability ShieldDash {
+    target: self
+    cooldown: 10s, cast: 0ms
+    hint: defense
+
+    shield 30 for 3s
+    dash 3.0
+}
+
+ability BlinkShield {
+    target: self
+    cooldown: 12s, cast: 0ms
+    hint: defense
+
+    shield 40 for 4s
+    blink 4.0
+}
+
+ability ChargeBarrier {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 0ms
+    hint: defense
+
+    shield 25 for 3s
+    dash to_target
+}
+
+ability EvasiveBarrier {
+    target: self
+    cooldown: 8s, cast: 0ms
+    hint: defense
+
+    shield 20 for 3s
+    dash 2.5
+}
+
+ability PhaseBarrier {
+    target: self
+    cooldown: 14s, cast: 0ms
+    hint: defense
+
+    shield 50 for 4s
+    blink 5.0
+}
+
+ability ProtectedRetreat {
+    target: self
+    cooldown: 10s, cast: 0ms
+    hint: defense
+
+    shield 35 for 4s
+    dash 4.0
+}

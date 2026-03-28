@@ -1,0 +1,54 @@
+name = "River Ford"
+map_type = "bridge_battle"
+width = 30
+height = 12
+
+[terrain]
+layout = """
+..HH........HH........HH....
+..HH........HH........HH....
+..............................
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~....~~~~....~~~~~~~~~
+~~~~~~~~~....~~~~....~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+..............................
+..HH........HH........HH....
+..HH........HH........HH....
+..............................
+..............................
+"""
+
+[[spawn_zones]]
+name = "north_force"
+team = 0
+rect = [0, 0, 29, 2]
+
+[[spawn_zones]]
+name = "south_force"
+team = 1
+rect = [0, 8, 29, 11]
+
+[[cover_positions]]
+position = [2, 0]
+type = "full"
+
+[[cover_positions]]
+position = [14, 0]
+type = "full"
+
+[[cover_positions]]
+position = [26, 0]
+type = "full"
+
+[[cover_positions]]
+position = [2, 8]
+type = "full"
+
+[[cover_positions]]
+position = [14, 8]
+type = "full"
+
+[[cover_positions]]
+position = [26, 8]
+type = "full"

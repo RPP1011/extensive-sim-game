@@ -1,0 +1,53 @@
+# A bounty on a dangerous criminal.
+
+name = "Bounty Posted"
+priority = 5
+repeatable = true
+cooldown_ticks = 5000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 5500
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "A bounty notice appears on the guild board: 80 gold for the capture — alive or dead — of a bandit captain terrorizing the northern roads. Several other guilds are eyeing the same poster."
+deadline_secs = 60.0
+default_option = 1
+
+[[choice.options]]
+label = "Take the Bounty"
+description = "Send hunters immediately. First guild there claims the reward."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 7.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Your fastest riders are dispatched before the ink on the poster is dry."
+
+[[choice.options]]
+label = "Investigate First (15g)"
+description = "Spend gold gathering intelligence. Slower but safer approach."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Informants are paid, maps are studied. When the guild moves, it moves with certainty."
+
+[[choice.options]]
+label = "Pass on It"
+description = "Too risky for the reward. Let another guild handle it."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The bounty goes unclaimed by the guild. Someone else will collect."

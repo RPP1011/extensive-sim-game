@@ -1,0 +1,59 @@
+name = "Mercenary Contract"
+priority = 5
+repeatable = true
+cooldown_ticks = 5000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 5500
+
+[[conditions]]
+type = "MinAdventurers"
+count = 3
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "A wealthy noble offers 80 gold for the guild to serve as personal bodyguards for a week. The work is easy but demeaning — standing behind a chair while someone eats pheasant."
+deadline_secs = 60.0
+default_option = 0
+
+[[choice.options]]
+label = "Accept the Contract"
+description = "Gold is gold. Stand, look tough, collect payment."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 80.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = -3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A week of polished armor and forced smiles. The gold makes it almost worth it."
+
+[[choice.options]]
+label = "Negotiate Better Terms (100g)"
+description = "Demand more. The noble clearly has the coin."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 100.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The noble sputters but agrees. You're expensive — and worth it."
+
+[[choice.options]]
+label = "Decline"
+description = "The guild isn't for hire as decoration."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The noble sniffs and hires someone else. Your pride is intact."

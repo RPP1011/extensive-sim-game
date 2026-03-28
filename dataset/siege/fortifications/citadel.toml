@@ -1,0 +1,52 @@
+[[fortifications]]
+id = "citadel"
+name = "Citadel"
+tier = 5
+
+[fortifications.stats]
+wall_hp = 5000
+height = 10.0
+thickness = 5.0
+defender_cover = 0.95
+ranged_bonus = 0.5
+climb_difficulty = 1.0
+arrow_slit_slots = 8
+tower_slots = 6
+machicolation = true
+inner_keep = true
+last_stand_bonus = 0.3
+
+[fortifications.construction]
+cost = 5000
+ticks = 15000
+resources = ["stone", "mortar", "iron", "master_mason", "enchanted_mortar"]
+builder_class_bonus = 0.2
+
+[fortifications.weaknesses]
+trebuchet_multiplier = 1.0
+sapper_multiplier = 0.8
+fire_resistant = true
+magic_resistant = true
+
+[fortifications.power_scaling]
+effective_level = 60
+builder_class_bonus = true
+enchantable = true
+age_scaling = 0.015
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 8.0
+ability_damage_reduction = 0.5
+projectile_deflection = 0.3
+ward_hp = 3000
+ward_level = 35
+
+[fortifications.garrison_bonus]
+defender_multiplier = 5.0
+ranged_accuracy_bonus = 0.4
+melee_disadvantage = 0.6
+cover_rating = 0.9
+
+[fortifications.narrative]
+description = "The fortress within the fortress. When the outer walls fall, when the city burns, the citadel remains. Its walls are thick enough to turn away anything short of a dragon's breath. Kingdoms have held on by the strength of a single citadel."

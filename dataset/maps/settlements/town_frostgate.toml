@@ -1,0 +1,54 @@
+name = "Frostgate"
+type = "town"
+population = 1500
+prosperity = 40.0
+
+[defenses]
+wall_type = "stone_wall"
+wall_hp = 900
+gate_count = 1
+tower_count = 5
+garrison_capacity = 80
+moat = false
+
+[[districts]]
+name = "Trading Post"
+type = "commercial"
+buildings = ["fur_trader", "provisioner", "tavern", "warm_inn"]
+population_pct = 20.0
+wealth = 50.0
+threat = 10.0
+
+[[districts]]
+name = "Longhouses"
+type = "residential"
+buildings = ["longhouse", "mead_hall", "smokehouse", "hot_spring_bath"]
+population_pct = 40.0
+wealth = 30.0
+threat = 5.0
+
+[[districts]]
+name = "Ice Docks"
+type = "harbor"
+buildings = ["winter_dock", "ice_house", "whale_processing"]
+population_pct = 20.0
+wealth = 40.0
+threat = 20.0
+
+[[districts]]
+name = "Ranger Outpost"
+type = "military"
+buildings = ["ranger_lodge", "dog_kennel", "armory", "signal_fire"]
+population_pct = 20.0
+wealth = 35.0
+threat = 5.0
+
+[economy]
+primary_exports = ["furs", "whale_oil", "amber", "mammoth_ivory"]
+primary_imports = ["grain", "wine", "metal", "timber"]
+trade_routes = 2
+market_size = "medium"
+
+[narrative]
+description = "The last civilized stop before the frozen wastes. Rangers and fur traders share stories in the mead hall while blizzards rage outside."
+flavor = ["Ice crystals on every surface", "Breath clouds in every room", "The aurora lights the sky green"]

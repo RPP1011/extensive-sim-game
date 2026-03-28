@@ -1,0 +1,49 @@
+[[events]]
+id = "defender_sally_night"
+name = "Night Raid"
+phase = "surround"
+
+[events.trigger]
+type = "NightCycle"
+threshold = 0.0
+
+[events.choice]
+prompt = "Movement near the walls in the darkness. The defenders are launching a night raid on the siege works!"
+deadline_secs = 15.0
+
+[[events.choice.options]]
+label = "Sound the Alarm"
+description = "Alert the camp and form a defensive line. Standard response."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "night_camp_defense"
+attacker_bonus = -0.1
+defender_bonus = 0.2
+visibility = 0.3
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Horns shatter the night. Men scramble from tents, half-armored, grabbing weapons. Shadows fight shadows in the firelight."
+
+[[events.choice.options]]
+label = "Counter-Ambush"
+description = "You expected this. Hidden reserves spring the trap."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "night_counter_ambush"
+attacker_bonus = 0.3
+defender_bonus = -0.1
+requires = "night_watch_prepared"
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The raiders hit the outer tents and find them empty. Then the torches light up behind them, and they realize they're surrounded."
+
+[[events.choice.options]]
+label = "Retreat to Inner Camp"
+description = "Let them have the outer works. Save lives, lose some equipment."
+[[events.choice.options.effects]]
+type = "siege_progress"
+equipment_damage = 0.2
+casualties_avoided = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The outer trenches are abandoned. Fire blooms as the raiders torch a siege engine. The army watches from a safe distance, cursing quietly."

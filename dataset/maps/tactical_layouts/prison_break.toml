@@ -1,0 +1,49 @@
+name = "Dungeon Prison Break"
+map_type = "prison_break"
+width = 24
+height = 18
+
+[terrain]
+layout = """
+WWWWWWWWWWWWWWWWWWWWWWWW
+W..RR..WWWW..RR..WWWWWW
+W..RR..W..W..RR..W..WWW
+W......WGGW......WGGWWW
+W......W..W......W..WWW
+WWGWWWWW..WWGWWWWW..WWW
+W..W......W..W.......WW
+W..W......W..W.......WW
+WWWWWWGWWWWWWWWWGWWWWWWW
+W....................W.W
+W....................W.W
+W....RRRRRRRRRRRR......W
+W....R..........R......W
+W....R..........R......W
+W....R..........R......W
+W....RRRRRRGRRRRR......W
+W....................W.W
+WWWWWWWWWWGGGGWWWWWWWWWW
+"""
+
+[[spawn_zones]]
+name = "prisoners"
+team = 0
+rect = [1, 1, 6, 7]
+
+[[spawn_zones]]
+name = "guards"
+team = 1
+rect = [4, 10, 18, 15]
+
+[[objectives]]
+type = "escape"
+position = [11, 17]
+hp = 500
+
+[[cover_positions]]
+position = [4, 9]
+type = "half"
+
+[[cover_positions]]
+position = [18, 9]
+type = "half"

@@ -5,7 +5,7 @@ use winnow::combinator::{alt, delimited, fail, opt, preceded, separated, termina
 use winnow::ascii::{multispace1};
 
 use super::ast::*;
-use super::parser::{ws, hws, ident, number, string_lit, duration, duration_or_number, try_parse_property};
+use super::parser::{ws, hws, ident, number, string_lit, duration_or_number, try_parse_property, duration_or_ticks};
 
 // ---------------------------------------------------------------------------
 // Tags: [FIRE: 60, MAGIC: 40]
@@ -142,7 +142,10 @@ pub fn effect_node(input: &mut &str) -> ModalResult<EffectNode> {
     let mut chance = None;
     let mut scaling = Vec::new();
     let mut dur = None;
+    let mut dur_t = None;
     let mut children = Vec::new();
+    let mut targeting_filter = None;
+    let mut targeting_args = Vec::new();
 
     loop {
         hws.parse_next(input)?;
@@ -178,10 +181,24 @@ pub fn effect_node(input: &mut &str) -> ModalResult<EffectNode> {
             continue;
         }
 
+        if input.starts_with("while_alive") && (input.len() == 11 || !input[11..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')) {
+            let _: &str = "while_alive".parse_next(input)?;
+            dur = Some(u32::MAX);
+            continue;
+        }
+
         if input.starts_with("for ") {
             let _: &str = "for".parse_next(input)?;
             multispace1.parse_next(input)?;
-            dur = Some(duration.parse_next(input)?);
+            // Check for `for while_alive` (emitter produces `for while_alive` via fmt_duration)
+            if input.starts_with("while_alive") && (input.len() == 11 || !input[11..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')) {
+                let _: &str = "while_alive".parse_next(input)?;
+                dur = Some(u32::MAX);
+            } else {
+                let (ms, ticks) = duration_or_ticks.parse_next(input)?;
+                dur = ms;
+                dur_t = ticks;
+            }
             continue;
         }
 
@@ -199,8 +216,45 @@ pub fn effect_node(input: &mut &str) -> ModalResult<EffectNode> {
             continue;
         }
 
+        if input.starts_with("targeting ") {
+            let _: &str = "targeting".parse_next(input)?;
+            multispace1.parse_next(input)?;
+            let pred_name: String = ident.parse_next(input)?;
+            targeting_filter = Some(pred_name);
+            // Parse optional parenthesized args
+            hws.parse_next(input)?;
+            if input.starts_with('(') {
+                let _: char = '('.parse_next(input)?;
+                let targs: Vec<Arg> = separated(0.., |i: &mut &str| {
+                    ws.parse_next(i)?;
+                    alt((
+                        string_lit.map(Arg::StringLit),
+                        duration_or_number,
+                        ident.map(Arg::Ident),
+                    )).parse_next(i)
+                }, (ws, ',')).parse_next(input)?;
+                ws.parse_next(input)?;
+                let _: char = ')'.parse_next(input)?;
+                targeting_args = targs;
+            }
+            continue;
+        }
+
         if input.starts_with('+') {
             scaling.push(scaling_term.parse_next(input)?);
+            continue;
+        }
+
+        if input.starts_with("scales_with") && (input.len() == 11 || !input[11..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')) {
+            let _: &str = "scales_with".parse_next(input)?;
+            multispace1.parse_next(input)?;
+            let stat_name: String = ident.parse_next(input)?;
+            scaling.push(ScalingNode {
+                percent: 100.0,
+                stat: stat_name,
+                consume: false,
+                cap: None,
+            });
             continue;
         }
 
@@ -234,7 +288,10 @@ pub fn effect_node(input: &mut &str) -> ModalResult<EffectNode> {
         chance,
         scaling,
         duration: dur,
+        duration_ticks: dur_t,
         children,
+        targeting_filter,
+        targeting_args,
     })
 }
 
@@ -250,7 +307,8 @@ fn try_parse_arg(input: &mut &str) -> ModalResult<Arg> {
             match id.as_str() {
                 "in" | "when" | "for" | "stacking" | "chance" | "else"
                 | "deliver" | "ability" | "passive" | "morph" | "recast"
-                | "on_hit" | "on_arrival" | "on_complete" => {
+                | "on_hit" | "on_arrival" | "on_complete" | "targeting"
+                | "while_alive" | "scales_with" => {
                     *i = checkpoint;
                     fail.parse_next(i)
                 }

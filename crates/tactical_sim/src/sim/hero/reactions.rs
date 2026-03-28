@@ -121,7 +121,7 @@ pub fn check_zone_reactions(
                     condition: None,
                     area: Some(Area::Circle { radius: 3.0 }),
                     tags: HashMap::new(),
-                    stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
+                    stacking: Stacking::default(), chance: 0.0, else_effects: vec![], targeting_filter: None,
                 },
                 ConditionalEffect {
                     effect: Effect::Damage {
@@ -133,7 +133,7 @@ pub fn check_zone_reactions(
                     condition: None,
                     area: Some(Area::Circle { radius: 3.0 }),
                     tags: HashMap::new(),
-                    stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
+                    stacking: Stacking::default(), chance: 0.0, else_effects: vec![], targeting_filter: None,
                 },
             ],
             3.0, 4000, 500,
@@ -152,7 +152,7 @@ pub fn check_zone_reactions(
                     condition: None,
                     area: Some(Area::Circle { radius: 3.5 }),
                     tags: HashMap::new(),
-                    stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
+                    stacking: Stacking::default(), chance: 0.0, else_effects: vec![], targeting_filter: None,
                 },
             ],
             3.5, 3000, 500,
@@ -171,14 +171,14 @@ pub fn check_zone_reactions(
                     condition: None,
                     area: Some(Area::Circle { radius: 2.5 }),
                     tags: HashMap::new(),
-                    stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
+                    stacking: Stacking::default(), chance: 0.0, else_effects: vec![], targeting_filter: None,
                 },
                 ConditionalEffect {
                     effect: Effect::Stun { duration_ms: 1500 },
                     condition: None,
                     area: Some(Area::Circle { radius: 2.5 }),
                     tags: HashMap::new(),
-                    stacking: Stacking::default(), chance: 0.0, else_effects: vec![],
+                    stacking: Stacking::default(), chance: 0.0, else_effects: vec![], targeting_filter: None,
                 },
             ],
             2.5, 1, 0, // duration=1ms, tick=0 → instant burst (applied once on creation by tick_zones)

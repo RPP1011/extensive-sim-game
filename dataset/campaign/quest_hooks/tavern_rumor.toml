@@ -1,0 +1,49 @@
+# A rumor circulates in the local tavern about treasure or danger.
+
+name = "Tavern Rumor"
+priority = 3
+repeatable = true
+cooldown_ticks = 4000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 4500
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "A drunk miner staggers into the tavern with a wild story — he claims to have found a cavern filled with glowing crystals deep in the hills. Could be valuable mana crystals. Could also be luminescent fungus and a waste of time."
+deadline_secs = 60.0
+default_option = 1
+
+[[choice.options]]
+label = "Investigate Immediately"
+description = "Get directions while the miner can still talk. First movers get the loot."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A team departs at dawn, following the miner's slurred directions into the hills."
+
+[[choice.options]]
+label = "Buy the Miner Drinks (5g)"
+description = "Keep him talking. Get every detail before committing resources."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Three ales later, the miner has drawn a surprisingly detailed map on a napkin."
+
+[[choice.options]]
+label = "Ignore Drunk Ramblings"
+description = "Miners find 'treasure' every week. Not worth the adventurers' time."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The miner finishes his drink and stumbles out. His secret dies with his hangover."

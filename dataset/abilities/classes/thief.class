@@ -1,0 +1,20 @@
+class Thief {
+    stat_growth: +2 speed, +2 attack, +1 defense per level
+
+    tags: stealing, lockpicking, fencing, underworld, sleight_of_hand
+
+    scaling enemy_count {
+        when enemy_count >= 1: +10% speed
+        always: +5% attack
+    }
+
+    abilities {
+        level 1: lockpick "Open any mundane lock without a key"
+        level 5: pickpocket "Steal an item from a target without them noticing"
+        level 10: fence_connections "Sell stolen goods at full value through underworld contacts"
+        level 20: heist "Plan and execute a theft of a guarded object with high success rate"
+        level 40: steal_skill "Temporarily copy one ability from any unit you can see"
+    }
+
+    requirements: level 1
+}

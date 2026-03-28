@@ -1,0 +1,65 @@
+# Undead begin rising from an old battlefield.
+
+name = "Undead Incursion"
+priority = 8
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "ThreatLevel"
+min_threat = 50.0
+
+[[conditions]]
+type = "MinAdventurers"
+count = 4
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "The dead are walking. An ancient battlefield near {location_name} has begun disgorging its fallen — skeletal warriors in rusted armor, shambling toward the living. Each night, more rise."
+deadline_secs = 60.0
+default_option = 0
+
+[[choice.options]]
+label = "Cleanse the Battlefield (50g)"
+description = "Holy rites across the entire field. Permanent solution but requires priests and gold."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -50.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 12.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Priests chant through the night. One by one, the dead find peace. By dawn, the field is quiet."
+
+[[choice.options]]
+label = "Perimeter Defense"
+description = "Build defenses and hold the line. The dead keep coming but can be managed."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Stakes and ditches ring the battlefield. The dead stumble into prepared kill zones night after night."
+
+[[choice.options]]
+label = "Find the Source"
+description = "Something is animating them. Find it and stop it."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -25.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A search party ventures onto the battlefield at dawn, looking for whatever necromantic focus drives the rising."

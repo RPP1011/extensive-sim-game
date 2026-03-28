@@ -1,0 +1,69 @@
+# Bandits have taken hostages from a settlement.
+
+name = "Hostage Crisis"
+priority = 9
+repeatable = true
+cooldown_ticks = 7000
+
+[trigger]
+type = "ThreatLevel"
+min_threat = 45.0
+
+[[conditions]]
+type = "MinAdventurers"
+count = 3
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Bandits have seized the village elder and three families in {location_name}. They demand 100 gold ransom and safe passage. A child's crying echoes from behind the barricade. The clock is ticking."
+deadline_secs = 45.0
+default_option = 0
+
+[[choice.options]]
+label = "Tactical Rescue"
+description = "Infiltrate and extract the hostages. High risk but no negotiation with criminals."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 12.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Under cover of darkness, the guild moves. Steel whispers in the night."
+
+[[choice.options]]
+label = "Pay the Ransom"
+description = "100 gold for lives. It stings, but people come home safe."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -100.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Gold changes hands. The hostages stumble free, shaking. The bandits vanish with their prize."
+
+[[choice.options]]
+label = "Negotiate Down (40g)"
+description = "Stall for time while negotiating a lower price. Some risk the bandits lose patience."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -40.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Hours of tense negotiation. The price drops. The hostages are released, pale and shaken."

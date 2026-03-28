@@ -1,0 +1,54 @@
+name = "Market Street Brawl"
+map_type = "street_fight"
+width = 30
+height = 20
+
+[terrain]
+layout = """
+HHHH..RRRR..HHHH..RRRR..HHHH.
+HHHH..R..R..HHHH..R..R..HHHH.
+......R..R........R..R........
+RRRRRRRR..RRRRRRRRRR..RRRRRRRR
+......R..R........R..R........
+HHH...R..R..HHH..R..R..HHH..
+HHH...R..R..HHH..R..R..HHH..
+......RRRR........RRRR........
+..HH......SSSSSSSS......HH...
+..HH......S......S......HH...
+..........S......S............
+..HH......S......S......HH...
+..HH......SSSSSSSS......HH...
+......RRRR........RRRR........
+HHH...R..R..HHH..R..R..HHH..
+HHH...R..R..HHH..R..R..HHH..
+......R..R........R..R........
+RRRRRRRR..RRRRRRRRRR..RRRRRRRR
+......R..R........R..R........
+HHHH..RRRR..HHHH..RRRR..HHHH.
+"""
+
+[[spawn_zones]]
+name = "team_alpha"
+team = 0
+rect = [0, 0, 10, 5]
+
+[[spawn_zones]]
+name = "team_beta"
+team = 1
+rect = [20, 15, 29, 19]
+
+[[cover_positions]]
+position = [8, 8]
+type = "half"
+
+[[cover_positions]]
+position = [8, 12]
+type = "half"
+
+[[cover_positions]]
+position = [22, 8]
+type = "half"
+
+[[cover_positions]]
+position = [22, 12]
+type = "half"

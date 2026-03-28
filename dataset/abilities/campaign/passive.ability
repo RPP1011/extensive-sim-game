@@ -1,0 +1,41 @@
+passive FieldTriage {
+    trigger: periodic_tick(50t)
+
+    field_triage 1.5 for 100t
+}
+
+passive QuickStudy {
+    trigger: on_level_up
+
+    quick_study
+}
+
+passive Forage {
+    trigger: periodic_tick(100t)
+
+    forage 0.1
+}
+
+passive TrackPrey {
+    trigger: on_quest_complete
+
+    track_prey
+}
+
+passive FieldRepair {
+    trigger: periodic_tick(200t)
+
+    field_repair
+}
+
+passive StabilizeAlly {
+    trigger: on_damage_taken
+
+    stabilize_ally
+}
+
+passive BattleInstinct {
+    trigger: on_combat_start
+
+    battle_instinct
+}

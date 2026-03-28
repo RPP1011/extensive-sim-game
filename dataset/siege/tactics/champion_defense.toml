@@ -1,0 +1,22 @@
+[[tactics]]
+id = "champion_defense"
+name = "Champion Defense"
+side = "defender"
+category = "morale"
+
+[tactics.requirements]
+champion_available = true
+champion_level_min = 25
+
+[tactics.effects]
+siege_duration_multiplier = 0.8
+defender_morale_boost = 0.3
+breach_holding_bonus = 0.5
+attacker_morale_drain = 0.2
+single_point_defense = true
+
+[tactics.counters]
+countered_by = ["multi_point_assault", "siege_crossbow", "arcane_cannon", "overwhelming_numbers"]
+
+[tactics.narrative]
+description = "A single champion worth a hundred soldiers. They hold the breach, they rally the walls, they terrify the attackers. As long as the champion stands, the fortress stands. Kill the champion and it crumbles."

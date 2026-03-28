@@ -1,0 +1,15 @@
+name = "The Closed Roads"
+description = "A hostile faction blockades all trade routes. Supplies dwindle, prices explode, and the guild's war chest drains"
+crisis_type = "embargo"
+world_templates = []
+trigger_threshold = 0.6
+priority = 6
+allow_simultaneous = true
+
+[config]
+type = "Embargo"
+supply_reduction_percent = 60.0
+gold_drain_per_tick = 1.0
+trade_route_restore_cost = 100.0
+smuggling_success_rate = 0.4
+faction_pressure_per_tick = 0.3

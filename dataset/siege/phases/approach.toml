@@ -1,0 +1,47 @@
+name = "Siege Approach"
+phase_index = 0
+duration_range = [100, 500]
+
+[description]
+text = "The army arrives and takes position around the settlement. Supply lines are established. The defenders watch from the walls and count banners."
+
+[attacker_actions]
+available = ["set_camp", "scout_defenses", "build_siege_equipment", "demand_surrender", "cut_supply_lines", "forage", "send_scouts"]
+priority = "preparation"
+
+[defender_actions]
+available = ["reinforce_walls", "stockpile_supplies", "send_for_help", "negotiate", "prepare_boiling_oil", "set_traps", "evacuate_civilians"]
+priority = "fortification"
+
+[events]
+[[events.possible]]
+name = "Defender Sortie"
+probability = 0.15
+trigger = "attacker_camp_vulnerable"
+effect = "tactical_combat_encounter"
+description = "The defenders launch a surprise sortie against the siege camp before it's properly fortified."
+
+[[events.possible]]
+name = "Supply Caravan"
+probability = 0.2
+trigger = "supply_lines_intact"
+effect = "attacker_resupply"
+description = "A supply caravan arrives with fresh provisions and ammunition."
+
+[[events.possible]]
+name = "Diplomatic Envoy"
+probability = 0.25
+trigger = "always"
+effect = "negotiation_event"
+description = "An envoy rides out under a white flag to discuss terms."
+
+[[events.possible]]
+name = "Desertion"
+probability = 0.1
+trigger = "morale_low"
+effect = "attacker_loses_troops"
+description = "Some soldiers slip away in the night. The siege hasn't started and already they've had enough."
+
+[transition]
+to_next_phase = "siege_surround"
+conditions = ["siege_equipment_ready", "OR", "ticks_elapsed > 300"]

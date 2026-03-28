@@ -1,0 +1,43 @@
+# What to do with captured enemies.
+
+category = "quest_branch"
+trigger = "prisoner_captured"
+prompt = "The guild has captured {prisoner_count} enemy combatants. They're bound and cooperative — for now."
+deadline_secs = 60.0
+default_option = 1
+
+[[options]]
+label = "Ransom Them"
+description = "Their faction will pay for their return. Profitable."
+
+[[options.effects]]
+type = "gold"
+amount = 30.0
+
+[[options.effects]]
+type = "narrative"
+text = "Ransom demands are sent. Gold arrives within the week."
+
+[[options]]
+label = "Interrogate and Release"
+description = "Extract information, then let them go as a gesture of mercy."
+
+[[options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[options.effects]]
+type = "narrative"
+text = "The prisoners talk, then walk. Word of the guild's mercy spreads."
+
+[[options]]
+label = "Recruit Them"
+description = "Offer them a place in the guild. Former enemies can become loyal allies."
+
+[[options.effects]]
+type = "add_adventurer"
+quality = "medium"
+
+[[options.effects]]
+type = "narrative"
+text = "A few accept the offer. Their former masters won't be pleased."

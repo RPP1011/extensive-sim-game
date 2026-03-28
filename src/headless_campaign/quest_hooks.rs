@@ -205,7 +205,7 @@ static HOOKS: std::sync::OnceLock<QuestHookRegistry> = std::sync::OnceLock::new(
 
 pub fn get_or_load_hooks() -> &'static QuestHookRegistry {
     HOOKS.get_or_init(|| {
-        let dir = std::path::Path::new("assets/quest_hooks");
+        let dir = std::path::Path::new("dataset/campaign/quest_hooks");
         let registry = QuestHookRegistry::load_from_dir(dir);
         if !registry.hooks.is_empty() {
             eprintln!("Quest hooks: loaded {} from {}", registry.hooks.len(), dir.display());

@@ -1,0 +1,59 @@
+name = "Rival Guild Ambush"
+priority = 8
+repeatable = true
+cooldown_ticks = 7000
+
+[trigger]
+type = "GuildReputation"
+min_reputation = 45.0
+
+[[conditions]]
+type = "MinAdventurers"
+count = 3
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "Intelligence reports that a rival guild is planning to ambush your next expedition. They've bribed a local to tip them off about your movements. You have a window to act."
+deadline_secs = 45.0
+default_option = 1
+
+[[choice.options]]
+label = "Counter-Ambush"
+description = "Feed false information and set your own trap. Turn the tables."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The rival guild walks into a trap meant for yours. The look on their faces is worth every coin."
+
+[[choice.options]]
+label = "Confront Them Diplomatically"
+description = "Call out the rival guild publicly. Shame them into backing down."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The accusation is made in the town square. The rival guild master goes red and stammers excuses."
+
+[[choice.options]]
+label = "Change Routes Quietly"
+description = "Avoid the ambush entirely. No confrontation, no drama."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The expedition takes a different path. The rival guild sits in the woods all day, waiting for no one."

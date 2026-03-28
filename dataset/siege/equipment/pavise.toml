@@ -1,0 +1,30 @@
+[[equipment]]
+id = "pavise"
+name = "Pavise"
+category = "support"
+tier = 1
+
+[equipment.stats]
+gate_damage_per_tick = 0.0
+wall_damage_per_tick = 0.0
+range = 0.0
+crew_required = 0
+move_speed = 0.9
+hp = 80
+armor = 15
+cover_bonus = 0.5
+personal_shield = true
+portable = true
+
+[equipment.requirements]
+min_tech_level = 1
+construction_cost = 8
+construction_ticks = 20
+resources = ["timber"]
+
+[equipment.counters]
+vulnerable_to = ["fire_arrows", "ballista", "flanking"]
+strong_against = ["archer_fire", "arrow_slits"]
+
+[equipment.narrative]
+description = "A tall shield, planted in the ground while the crossbowman reloads. Simple enough that any carpenter can make one. Important enough that crossbowmen treat theirs like a second life."

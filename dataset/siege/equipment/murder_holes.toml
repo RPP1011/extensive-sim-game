@@ -1,0 +1,33 @@
+[[equipment]]
+id = "murder_holes"
+name = "Murder Holes"
+category = "defensive"
+tier = 2
+
+[equipment.stats]
+gate_damage_per_tick = 0.0
+wall_damage_per_tick = 0.0
+range = 0.0
+crew_required = 2
+move_speed = 0.0
+hp = 0
+armor = 0
+troop_damage = 15.0
+fire_rate = 0.3
+requires_gatehouse = true
+covers_gate_approach = true
+crew_cover = 0.95
+
+[equipment.requirements]
+min_tech_level = 2
+construction_cost = 100
+construction_ticks = 300
+resources = ["stone", "mortar"]
+permanent = true
+
+[equipment.counters]
+vulnerable_to = ["sappers_tunnel", "petard"]
+strong_against = ["battering_ram", "escalade", "gate_rush"]
+
+[equipment.narrative]
+description = "Holes in the ceiling of the gatehouse passage, just wide enough to thrust a spear through, or pour something unpleasant. The attackers call it a killing box. The defenders call it architecture."

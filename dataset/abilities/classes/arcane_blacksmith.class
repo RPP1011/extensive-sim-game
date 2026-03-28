@@ -1,0 +1,20 @@
+class Arcane_Blacksmith {
+    stat_growth: +2 attack, +2 ability_power, +2 defense per level
+
+    tags: crafting, enchantment, rune_forging, magical_equipment, artifice
+
+    scaling party_alive_count {
+        when party_members >= 1: +10% ability_power
+        always: +5% defense
+    }
+
+    abilities {
+        level 40: runeforge "Inscribe a permanent magical rune onto any weapon or armor"
+        level 45: living_steel "Craft equipment that repairs itself and adapts to its wielder"
+        level 50: disenchant "Break down magical items to harvest their enchantments for reuse"
+        level 60: soul_forge "Bind a spirit to a weapon, granting it intelligence and unique abilities"
+        level 80: mythic_artifact "Create an artifact of legend; a single item that reshapes how its wielder fights"
+    }
+
+    requirements: level 40, classes: Blacksmith + Enchanter
+}

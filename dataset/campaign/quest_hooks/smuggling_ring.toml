@@ -1,0 +1,61 @@
+# Evidence of a smuggling ring operating in guild territory.
+
+name = "Smuggling Ring"
+priority = 6
+repeatable = true
+cooldown_ticks = 7000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 7500
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Your people have uncovered a smuggling ring moving contraband through guild territory — illegal potions, stolen artifacts, possibly weapons. The operation is profitable and well-organized."
+deadline_secs = 75.0
+default_option = 1
+
+[[choice.options]]
+label = "Shut It Down"
+description = "Raid the operation. Seize goods, arrest the smugglers. Law and order."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The raid is swift. Crates of contraband are seized. The guild's name carries the weight of justice."
+
+[[choice.options]]
+label = "Take a Cut"
+description = "Look the other way in exchange for a percentage. Profitable but morally gray."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 15.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A quiet arrangement is made. Gold flows, questions go unasked."
+
+[[choice.options]]
+label = "Investigate the Source"
+description = "Follow the supply chain. This might be bigger than a local operation."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Agents begin tracing the smuggling routes back to their origin. The web grows wider."

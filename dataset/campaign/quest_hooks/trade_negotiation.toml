@@ -1,0 +1,64 @@
+# A trade deal opportunity with a neighboring faction.
+
+name = "Trade Negotiation"
+priority = 5
+repeatable = true
+cooldown_ticks = 5000
+
+[trigger]
+type = "FactionRelation"
+direction = "above"
+threshold = 20.0
+
+[choice]
+category = "diplomacy"
+trigger = "hook"
+prompt = "Merchants from {faction_name} propose a long-term trade agreement: discounted supplies in exchange for guild protection on their caravans. The terms are favorable, but the commitment is real."
+deadline_secs = 90.0
+default_option = 1
+
+[[choice.options]]
+label = "Accept Full Terms"
+description = "Exclusive trade partnership. Great prices but you're locked in."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 30.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Contracts are signed. A steady flow of discounted goods begins arriving at the guild."
+
+[[choice.options]]
+label = "Counter-Offer"
+description = "Negotiate better terms. Takes time but preserves flexibility."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -10.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Days of haggling produce a deal both sides can live with."
+
+[[choice.options]]
+label = "Decline"
+description = "The guild trades with everyone. No exclusivity."
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = -3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The merchants shrug and seek other partners."

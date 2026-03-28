@@ -1,0 +1,20 @@
+class Scholar {
+    stat_growth: +3 ability_power, +1 speed, +1 defense per level
+
+    tags: research, languages, history, analysis, knowledge
+
+    scaling party_alive_count {
+        when party_members >= 1: +10% ability_power
+        always: +5% speed
+    }
+
+    abilities {
+        level 1: analyze "Study an enemy to reveal its weaknesses and resistances"
+        level 5: decipher "Read any language or decode any cipher"
+        level 10: lore_recall "Recall critical information about any creature, place, or artifact"
+        level 20: strategic_insight "Grant the party a tactical advantage based on battlefield analysis"
+        level 40: lost_knowledge "Access ancient techniques; temporarily grant any party member a skill they don't possess"
+    }
+
+    requirements: level 1
+}

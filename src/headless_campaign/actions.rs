@@ -164,6 +164,10 @@ pub fn agreement_type_name(agreement: &super::state::DiplomaticAgreement) -> &'s
 /// Returns true for always-on passive skill effects that don't need
 /// explicit player activation. Keep this list SMALL — most skills
 /// should be activatable for BFS decision diversity.
+///
+/// TODO: Migrate to use `tactical_sim::effects::Effect` instead of the legacy
+/// `SkillEffect` enum. Passivity classification should move to unified_dispatch.
+#[allow(deprecated)]
 pub fn is_passive_skill_effect(effect: &super::state::SkillEffect) -> bool {
     use super::state::SkillEffect;
     matches!(effect,
@@ -1006,6 +1010,18 @@ pub enum WorldEvent {
 
     // --- Starter Class Evolution ---
     ClassEvolutionFromStarter { adventurer_id: u32, from_class: String, to_class: String },
+
+    // --- NPC Economic Agent ---
+    NpcIncomeEarned { adventurer_id: u32, amount: f32, location_id: usize },
+    NpcRelocating { adventurer_id: u32, from: Option<usize>, to: usize },
+    CaravanFormed { party_id: u32, merchant_id: u32, escort_ids: Vec<u32>, route: String },
+    TravelPartyFormed { party_id: u32, member_ids: Vec<u32>, destination: usize },
+    AdventuringPartyFormed { party_id: u32, member_ids: Vec<u32>, region: String },
+    AdventuringPartyDisbanded { party_id: u32, reason: String },
+    TravelEncounter { party_id: u32, adventurer_id: u32, injury: f32, threat: f32 },
+    NpcTaxPaid { adventurer_id: u32, amount: f32 },
+    EscortHired { merchant_id: u32, escort_id: u32, fee_per_tick: f32 },
+    NpcClassStagnating { adventurer_id: u32, class_name: String, ticks_stagnant: u32 },
 }
 
 // ---------------------------------------------------------------------------
@@ -1449,6 +1465,9 @@ impl CampaignState {
         }
 
         // Use class skills — generate UseClassSkill for adventurers with active skill effects
+        // TODO: Migrate this block to use the unified Effect enum and unified_dispatch
+        // once GrantedSkill stores Effect instead of SkillEffect.
+        #[allow(deprecated)]
         for adv in &self.adventurers {
             if adv.status == AdventurerStatus::Dead {
                 continue;

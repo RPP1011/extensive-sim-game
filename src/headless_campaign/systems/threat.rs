@@ -2,7 +2,7 @@
 //!
 //! Updates global threat level based on world state.
 //! Checks for endgame crisis conditions using data-driven templates
-//! loaded from `assets/crises/*.toml`.
+//! loaded from `dataset/campaign/crises/*.toml`.
 
 use crate::headless_campaign::actions::{StepDeltas, WorldEvent};
 use crate::headless_campaign::crisis_templates::get_or_load_crises;

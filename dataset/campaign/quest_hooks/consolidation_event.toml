@@ -1,0 +1,70 @@
+# The guild reaches a milestone and can consolidate its gains.
+
+name = "Consolidation Milestone"
+priority = 5
+repeatable = true
+cooldown_ticks = 10000
+
+[trigger]
+type = "GuildReputation"
+min_reputation = 60.0
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "The guild has reached a tipping point. Reputation is solid, the treasury is stable, and the adventurers are experienced. It's time to decide the guild's identity going forward."
+deadline_secs = 120.0
+default_option = 0
+
+[[choice.options]]
+label = "Military Focus"
+description = "Double down on combat. Build a training yard, recruit fighters. Become feared."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -50.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild declares its focus. Steel and discipline will define the next chapter."
+
+[[choice.options]]
+label = "Diplomatic Focus"
+description = "Invest in alliances and trade. Become indispensable to every faction."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -40.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Embassies open, trade flows. The guild becomes the region's diplomatic backbone."
+
+[[choice.options]]
+label = "Balanced Growth"
+description = "Expand evenly. No specialization, no weakness."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 15.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild grows in every direction. A generalist's approach to an uncertain world."

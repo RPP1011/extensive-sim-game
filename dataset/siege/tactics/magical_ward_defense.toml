@@ -1,0 +1,23 @@
+[[tactics]]
+id = "magical_ward_defense"
+name = "Magical Ward Defense"
+side = "defender"
+category = "magic"
+
+[tactics.requirements]
+mage_available = true
+mana_pool_min = 500
+magical_ward_available = true
+
+[tactics.effects]
+siege_duration_multiplier = 0.8
+physical_damage_immunity = true
+mana_drain_per_tick = 3.0
+siege_equipment_nullified = ["battering_ram", "siege_tower", "siege_ladder", "catapult"]
+defender_casualty_multiplier = 0.1
+
+[tactics.counters]
+countered_by = ["ward_breaker", "mana_drain", "starve_out", "arcane_cannon"]
+
+[tactics.narrative]
+description = "Behind the shimmering ward, the garrison is invulnerable — for as long as the mana holds. It's the ultimate defense and the ultimate gamble. When the mana runs out, the ward falls, and so does everything behind it."

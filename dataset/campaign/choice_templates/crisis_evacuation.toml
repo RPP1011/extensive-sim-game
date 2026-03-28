@@ -1,0 +1,51 @@
+# How to respond to a crisis requiring evacuation.
+
+category = "strategic"
+trigger = "crisis_evacuation"
+prompt = "A crisis threatens the settlement. Evacuation may be necessary. What's the priority?"
+deadline_secs = 45.0
+default_option = 0
+
+[[options]]
+label = "Full Evacuation"
+description = "Everyone out. Leave everything behind. Lives first."
+
+[[options.effects]]
+type = "supplies"
+amount = -25.0
+
+[[options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[options.effects]]
+type = "narrative"
+text = "The settlement empties in orderly columns. Everything replaceable is left behind."
+
+[[options]]
+label = "Defend in Place"
+description = "Stand and fight. The settlement is too valuable to abandon."
+
+[[options.effects]]
+type = "gold"
+amount = -20.0
+
+[[options.effects]]
+type = "narrative"
+text = "Barricades go up. The guild prepares to hold the line."
+
+[[options]]
+label = "Selective Evacuation"
+description = "Move civilians, keep fighters. A measured response."
+
+[[options.effects]]
+type = "supplies"
+amount = -10.0
+
+[[options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[options.effects]]
+type = "narrative"
+text = "Women and children leave. The adventurers stay behind."

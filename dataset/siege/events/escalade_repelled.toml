@@ -1,0 +1,48 @@
+[[events]]
+id = "escalade_repelled"
+name = "Escalade Repelled"
+phase = "assault"
+
+[events.trigger]
+type = "LadderAssaultFailed"
+threshold = 0.0
+
+[events.choice]
+prompt = "The ladder assault has been thrown back. Broken ladders litter the base of the wall. The survivors stumble back to the siege lines, bloodied and shaken."
+deadline_secs = 20.0
+
+[[events.choice.options]]
+label = "Immediately Send More Ladders"
+description = "Don't give the defenders time to rest. Hit them again while they're still at the walls."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "escalade_retry"
+attacker_penalty = 0.1
+defender_penalty = 0.15
+[[events.choice.options.effects]]
+type = "narrative"
+text = "More ladders. More men. The defenders barely have time to pour fresh oil before the next wave hits."
+
+[[events.choice.options]]
+label = "Switch to Bombardment"
+description = "Ladders alone won't work against this defense. Go back to the trebuchets."
+[[events.choice.options.effects]]
+type = "phase_transition"
+to_phase = "siege_bombardment"
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The commander stares at the wall, at the broken ladders, at the bodies. 'Bring up the trebuchets. We do this the slow way.'"
+
+[[events.choice.options]]
+label = "Night Assault"
+description = "Wait for darkness. Try the ladders again when the defenders can't see."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "night_escalade"
+attacker_bonus = 0.15
+defender_penalty = 0.2
+ticks_delay = 200
+surprise_bonus = 0.3
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Midnight. No torches. The ladders go up in silence. The first the defenders know is the sound of boots on stone in the darkness above them."

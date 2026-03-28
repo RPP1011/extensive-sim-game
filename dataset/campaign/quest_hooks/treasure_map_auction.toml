@@ -1,0 +1,51 @@
+name = "Treasure Map Auction"
+priority = 5
+repeatable = true
+cooldown_ticks = 6000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 6500
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "A treasure map is being auctioned at the local market. Multiple guilds are bidding. The map allegedly leads to a dragon's abandoned hoard deep in the mountains."
+deadline_secs = 60.0
+default_option = 1
+
+[[choice.options]]
+label = "Outbid Everyone (70g)"
+description = "Money talks. Ensure the guild gets the map no matter the cost."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -70.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The auctioneer's gavel falls. The map is yours. Other guilds glare."
+
+[[choice.options]]
+label = "Steal It"
+description = "Why pay when you have rogues? Acquire the map after dark."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The map disappears from the auction house overnight. Nobody saw anything."
+
+[[choice.options]]
+label = "Let It Go"
+description = "One map, one hoard. The guild has better things to spend gold on."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Another guild wins the map. You wonder if the hoard was even real."

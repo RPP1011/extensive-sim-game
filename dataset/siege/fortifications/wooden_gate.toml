@@ -1,0 +1,47 @@
+[[fortifications]]
+id = "wooden_gate"
+name = "Wooden Gate"
+tier = 1
+type = "gate"
+
+[fortifications.stats]
+gate_hp = 400
+height = 3.0
+thickness = 0.3
+open_speed = 5
+barricade_bonus = 0.2
+
+[fortifications.construction]
+cost = 40
+ticks = 100
+resources = ["timber"]
+builder_class_bonus = 0.5
+
+[fortifications.weaknesses]
+ram_multiplier = 2.0
+fire_resistant = false
+fire_damage_multiplier = 3.0
+petard_multiplier = 2.0
+
+[fortifications.power_scaling]
+effective_level = 3
+builder_class_bonus = true
+enchantable = false
+age_scaling = 0.0
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 0.0
+ability_damage_reduction = 0.0
+projectile_deflection = 0.0
+ward_hp = 0
+ward_level = 0
+
+[fortifications.garrison_bonus]
+defender_multiplier = 1.5
+ranged_accuracy_bonus = 0.0
+melee_disadvantage = 0.1
+cover_rating = 0.2
+
+[fortifications.narrative]
+description = "Oak planks, iron studs, a heavy bar across the back. It will hold against bandits and beasts. Against a proper siege? Not for long."

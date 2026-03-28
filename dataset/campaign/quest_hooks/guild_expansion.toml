@@ -1,0 +1,54 @@
+name = "Guild Expansion Opportunity"
+priority = 5
+repeatable = false
+
+[trigger]
+type = "GuildReputation"
+min_reputation = 50.0
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "The guild's reputation has grown enough to justify a second chapter house in a neighboring region. The investment is massive but the rewards — territory, recruits, contracts — could transform the guild."
+deadline_secs = 120.0
+default_option = 1
+
+[[choice.options]]
+label = "Full Chapter House (120g)"
+description = "A proper guild hall with barracks, armory, and training grounds. Permanent presence."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -120.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Construction begins on the guild's second home. The banner flies in a new region."
+
+[[choice.options]]
+label = "Outpost (50g)"
+description = "A small office with a posting board. Minimal cost, minimal presence."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -50.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A modest office opens in the neighboring town. Small beginnings."
+
+[[choice.options]]
+label = "Not Yet"
+description = "Consolidate the current position before expanding."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The expansion plans are shelved. The guild focuses inward."

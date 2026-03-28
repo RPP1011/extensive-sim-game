@@ -1,0 +1,43 @@
+# Equipment is damaged after a difficult quest.
+
+category = "quest_branch"
+trigger = "post_quest_repair"
+prompt = "After the last quest, several pieces of equipment are damaged. How should repairs be handled?"
+deadline_secs = 60.0
+default_option = 1
+
+[[options]]
+label = "Full Professional Repair (30g)"
+description = "Hire a smith to restore everything to perfect condition."
+
+[[options.effects]]
+type = "gold"
+amount = -30.0
+
+[[options.effects]]
+type = "narrative"
+text = "The smith works through the night. By morning, every piece looks factory-new."
+
+[[options]]
+label = "Patch and Go (10g)"
+description = "Quick fixes only. Functional but not pretty."
+
+[[options.effects]]
+type = "gold"
+amount = -10.0
+
+[[options.effects]]
+type = "narrative"
+text = "Dents hammered out, edges resharpened. Good enough for now."
+
+[[options]]
+label = "Scavenge and Replace"
+description = "Strip the broken gear for parts and improvise replacements from salvage."
+
+[[options.effects]]
+type = "supplies"
+amount = -5.0
+
+[[options.effects]]
+type = "narrative"
+text = "Mismatched armor and jury-rigged weapons. Ugly, but it works."

@@ -1,0 +1,21 @@
+class Noble {
+    stat_growth: +1 attack, +2 defense, +1 ability_power, +1 speed per level
+
+    tags: authority, governance, politics, lineage, command
+
+    scaling party_alive_count {
+        when party_members >= 2: +10% defense
+        when party_members >= 4: aura attack +2
+        always: +5% ability_power
+    }
+
+    abilities {
+        level 1: commanding_presence "Allies near you fight with more discipline"
+        level 5: noble_decree "Issue an order that NPCs feel compelled to obey"
+        level 10: call_retainers "Summon loyal guards to fight alongside you"
+        level 20: political_immunity "You and your party cannot be arrested or detained in civilized lands"
+        level 40: sovereign_will "Declare martial law over a territory; all inhabitants must follow your commands"
+    }
+
+    requirements: level 1
+}

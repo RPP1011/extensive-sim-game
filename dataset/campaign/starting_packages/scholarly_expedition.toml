@@ -1,0 +1,106 @@
+name = "Scholarly Expedition"
+description = "Two mages and two clerics from the Academy of Arcane Studies. Brilliant minds, fragile bodies. They know more about ancient ruins than anyone — they just can't survive them alone."
+gold_bonus = 30.0
+supply_bonus = 20.0
+reputation_bonus = 10.0
+items = []
+
+[[adventurers]]
+id = 1
+name = "Magister Elwen"
+archetype = "mage"
+level = 3
+xp = 0
+traits = ["scholar", "keen_eye"]
+status = "Idle"
+loyalty = 60.0
+stress = 5.0
+fatigue = 3.0
+injury = 0.0
+resolve = 55.0
+morale = 70.0
+guild_relationship = 45.0
+
+[adventurers.stats]
+max_hp = 40.0
+attack = 4.0
+defense = 3.0
+speed = 8.0
+ability_power = 22.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 2
+name = "Archivist Nole"
+archetype = "mage"
+level = 2
+xp = 0
+traits = ["scholar"]
+status = "Idle"
+loyalty = 55.0
+stress = 8.0
+fatigue = 5.0
+injury = 0.0
+resolve = 45.0
+morale = 65.0
+guild_relationship = 40.0
+
+[adventurers.stats]
+max_hp = 38.0
+attack = 3.0
+defense = 3.0
+speed = 7.0
+ability_power = 20.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 3
+name = "Sister Aelith"
+archetype = "cleric"
+level = 2
+xp = 0
+traits = ["diplomat_born"]
+status = "Idle"
+loyalty = 70.0
+stress = 3.0
+fatigue = 2.0
+injury = 0.0
+resolve = 60.0
+morale = 80.0
+guild_relationship = 50.0
+
+[adventurers.stats]
+max_hp = 50.0
+attack = 4.0
+defense = 7.0
+speed = 8.0
+ability_power = 18.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 4
+name = "Brother Tomm"
+archetype = "cleric"
+level = 2
+xp = 0
+traits = ["healer"]
+status = "Idle"
+loyalty = 65.0
+stress = 5.0
+fatigue = 3.0
+injury = 0.0
+resolve = 55.0
+morale = 75.0
+guild_relationship = 45.0
+
+[adventurers.stats]
+max_hp = 52.0
+attack = 5.0
+defense = 8.0
+speed = 7.0
+ability_power = 16.0
+
+[adventurers.equipment]

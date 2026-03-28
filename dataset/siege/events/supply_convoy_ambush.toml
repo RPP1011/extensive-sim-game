@@ -1,0 +1,48 @@
+[[events]]
+id = "supply_convoy_ambush"
+name = "Supply Convoy Ambushed"
+phase = "surround"
+
+[events.trigger]
+type = "SupplyLineActive"
+threshold = 0.0
+
+[events.choice]
+prompt = "Scouts report that the supply convoy is under attack! Defenders have sent a raiding party to hit the supply lines."
+deadline_secs = 20.0
+
+[[events.choice.options]]
+label = "Send Cavalry to Rescue"
+description = "Dispatch mounted troops to protect the convoy. Fast, but weakens the siege lines."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "convoy_rescue"
+attacker_bonus = 0.2
+objective = "protect_wagons"
+troop_commitment = 10
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The cavalry thunders down the road. The wagons are burning. The raiders scatter into the trees. Whether the supplies can be saved is another matter."
+
+[[events.choice.options]]
+label = "Accept the Loss"
+description = "The convoy is gone. Redirect resources to foraging."
+[[events.choice.options.effects]]
+type = "supply_loss"
+supply_reduction = 200
+morale_loss = 0.05
+[[events.choice.options.effects]]
+type = "narrative"
+text = "Smoke rises from the road. The wagons burn, and with them, weeks of supplies. The quartermaster starts revising his numbers downward."
+
+[[events.choice.options]]
+label = "Set a Trap for the Raiders"
+description = "Let this convoy burn. But the next one will have a surprise escort."
+[[events.choice.options.effects]]
+type = "counter_ambush"
+trap_chance = 0.7
+supply_loss = 200
+raider_elimination_chance = 0.6
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The commander watches the smoke and nods. 'Good. Now we know their route.' The next convoy will look like easy prey. It won't be."

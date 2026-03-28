@@ -1,0 +1,78 @@
+// Tier 8: Passives triggered on kill
+
+passive Bloodbath {
+    trigger: on_kill
+    cooldown: 3s
+
+    heal 30
+}
+
+passive SoulHarvest {
+    trigger: on_kill
+    cooldown: 3s
+
+    heal 25
+    buff damage_output 0.15 for 5s
+}
+
+passive Executioner {
+    trigger: on_kill
+    cooldown: 3s
+
+    buff attack_speed 0.3 for 5s
+    buff move_speed 0.2 for 5s
+}
+
+passive DarkTriumph {
+    trigger: on_kill
+    cooldown: 3s
+
+    heal 20
+    shield 20 for 4s
+}
+
+passive Rampage {
+    trigger: on_kill
+    cooldown: 3s
+
+    buff damage_output 0.25 for 6s
+}
+
+passive VictoriousRush {
+    trigger: on_kill
+    cooldown: 3s
+
+    heal 15
+    buff move_speed 0.3 for 4s
+}
+
+passive SoulDevourer {
+    trigger: on_kill
+    cooldown: 3s
+
+    heal 35
+    buff damage_output 0.1 for 6s
+}
+
+passive Adrenaline {
+    trigger: on_kill
+    cooldown: 3s
+
+    buff attack_speed 0.4 for 4s
+}
+
+passive ReapingStrike {
+    trigger: on_kill
+    cooldown: 3s
+
+    damage 20 in circle(2.0) [DARK: 40]
+    heal 15
+}
+
+passive ConquerorsResolve {
+    trigger: on_kill
+    cooldown: 3s
+
+    shield 30 for 5s
+    buff damage_output 0.1 for 5s
+}

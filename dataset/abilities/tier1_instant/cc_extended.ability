@@ -1,0 +1,113 @@
+// Tier 1: Extended CC variants
+
+ability IceGrasp {
+    target: enemy, range: 4.0
+    cooldown: 9s, cast: 200ms
+    hint: crowd_control
+
+    root 2s [ICE: 50]
+}
+
+ability PetrifyingGaze {
+    target: enemy, range: 3.5
+    cooldown: 12s, cast: 300ms
+    hint: crowd_control
+
+    stun 2500ms [MAGIC: 60]
+}
+
+ability Entangle {
+    target: enemy, range: 5.0
+    cooldown: 8s, cast: 200ms
+    hint: crowd_control
+
+    root 2s
+}
+
+ability Deafen {
+    target: enemy, range: 4.0
+    cooldown: 8s, cast: 200ms
+    hint: crowd_control
+
+    silence 1500ms [MAGIC: 45]
+}
+
+ability ThunderStun {
+    target: enemy, range: 3.0
+    cooldown: 10s, cast: 300ms
+    hint: crowd_control
+
+    stun 1800ms [MAGIC: 55]
+}
+
+ability CripplingPoison {
+    target: enemy, range: 4.0
+    cooldown: 6s, cast: 100ms
+    hint: crowd_control
+
+    slow 0.5 for 3s [POISON: 45]
+}
+
+ability FrozenGrasp {
+    target: enemy, range: 3.0
+    cooldown: 7s, cast: 200ms
+    hint: crowd_control
+
+    slow 0.4 for 2500ms [ICE: 40]
+}
+
+ability IntimidatingRoar {
+    target: enemy, range: 2.5
+    cooldown: 14s, cast: 200ms
+    hint: crowd_control
+
+    fear 2500ms [FEAR: 60, CROWD_CONTROL: 55]
+}
+
+ability ChallengingShout {
+    target: enemy, range: 3.0
+    cooldown: 8s, cast: 100ms
+    hint: crowd_control
+
+    taunt 2500ms [CROWD_CONTROL: 50]
+}
+
+ability MindShatter {
+    target: enemy, range: 5.0
+    cooldown: 12s, cast: 400ms
+    hint: crowd_control
+
+    silence 3s [DARK: 55]
+}
+
+ability ShadowBind {
+    target: enemy, range: 5.0
+    cooldown: 10s, cast: 200ms
+    hint: crowd_control
+
+    root 2500ms [DARK: 50]
+}
+
+ability VineSnare {
+    target: enemy, range: 4.5
+    cooldown: 7s, cast: 200ms
+    hint: crowd_control
+
+    root 1800ms
+}
+
+ability Daze {
+    target: enemy, range: 1.5
+    cooldown: 5s, cast: 100ms
+    hint: crowd_control
+
+    stun 800ms [PHYSICAL: 35]
+}
+
+ability MagicDisrupt {
+    target: enemy, range: 5.0
+    cooldown: 6s, cast: 100ms
+    hint: crowd_control
+
+    silence 1200ms [MAGIC: 40]
+}

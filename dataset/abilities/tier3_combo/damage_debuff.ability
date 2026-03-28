@@ -1,0 +1,73 @@
+// Tier 3: Damage + debuff combos
+
+ability CripplingStrike {
+    target: enemy, range: 1.5
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    damage 25 [PHYSICAL: 40]
+    debuff move_speed 0.3 for 3s
+}
+
+ability CursingBolt {
+    target: enemy, range: 5.0
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 30 [DARK: 45]
+    debuff damage_output 0.8 for 4s [DARK: 35]
+}
+
+ability SearingMark {
+    target: enemy, range: 5.0
+    cooldown: 7s, cast: 300ms
+    hint: damage
+
+    damage 30 [FIRE: 45]
+    damage_modify 1.2 for 4s
+}
+
+ability PoisonStrike {
+    target: enemy, range: 1.5
+    cooldown: 5s, cast: 100ms
+    hint: damage
+
+    damage 20 [POISON: 35]
+    debuff attack_speed 0.25 for 3s [POISON: 35]
+}
+
+ability WeakeningBlow {
+    target: enemy, range: 1.5
+    cooldown: 6s, cast: 200ms
+    hint: damage
+
+    damage 25 [PHYSICAL: 40]
+    debuff damage_output 0.75 for 4s
+}
+
+ability FrostbiteTouch {
+    target: enemy, range: 2.0
+    cooldown: 5s, cast: 200ms
+    hint: damage
+
+    damage 22 [ICE: 40]
+    debuff attack_speed 0.3 for 3s [ICE: 35]
+}
+
+ability RendArmor {
+    target: enemy, range: 1.5
+    cooldown: 8s, cast: 200ms
+    hint: damage
+
+    damage 30 [PHYSICAL: 45]
+    damage_modify 1.25 for 5s
+}
+
+ability HexBolt {
+    target: enemy, range: 5.0
+    cooldown: 7s, cast: 300ms
+    hint: damage
+
+    damage 25 [MAGIC: 40]
+    debuff move_speed 0.4 for 3s [MAGIC: 35]
+}

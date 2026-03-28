@@ -1,0 +1,61 @@
+# A blood moon rises, empowering monsters.
+
+name = "Blood Moon Rising"
+priority = 8
+repeatable = true
+cooldown_ticks = 12000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 12000
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "The moon turns red tonight. The old tales say monsters grow stronger under the blood moon — more aggressive, more numerous, harder to kill. The region's defenses will be tested."
+deadline_secs = 60.0
+default_option = 0
+
+[[choice.options]]
+label = "Lockdown"
+description = "Bar the gates, double the watch, and wait it out. Safety first."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Shutters slam closed across the settlement. The guild watches the red-tinged night from behind barricades."
+
+[[choice.options]]
+label = "Night Hunt (35g)"
+description = "Blood moon creatures drop rare materials. Send hunters to exploit the chaos."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -35.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Under crimson light, the guild's hunters stalk prey that stalks them back."
+
+[[choice.options]]
+label = "Ritual Ward (20g)"
+description = "Mages cast protective wards. Weakens the blood moon's effect in your territory."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Runes glow at every crossroads. The monsters press against invisible walls and snarl."

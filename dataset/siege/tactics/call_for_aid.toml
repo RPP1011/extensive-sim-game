@@ -1,0 +1,21 @@
+[[tactics]]
+id = "call_for_aid"
+name = "Call for Aid"
+side = "defender"
+category = "patience"
+
+[tactics.requirements]
+signal_tower_available = true
+allies_within_range = true
+
+[tactics.effects]
+siege_duration_multiplier = 1.0
+reinforcement_chance_bonus = 0.3
+messenger_risk = 0.4
+morale_boost_on_hope = 0.1
+
+[tactics.counters]
+countered_by = ["intercept_messengers", "cut_supply_lines", "rapid_assault"]
+
+[tactics.narrative]
+description = "The signal fire burns on the highest tower. Messengers slip out through the smallest gaps in the siege lines. The garrison holds and waits, believing that help is coming. Sometimes it is."

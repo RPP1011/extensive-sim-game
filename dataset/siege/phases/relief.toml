@@ -1,0 +1,47 @@
+name = "Siege Relief"
+phase_index = 7
+duration_range = [100, 300]
+
+[description]
+text = "A relief army appears on the horizon. The besiegers must now fight on two fronts — the garrison within and the army without. The siege becomes a battle."
+
+[attacker_actions]
+available = ["fortify_siege_lines", "face_relief_army", "split_forces", "retreat", "press_assault", "burn_equipment"]
+priority = "survival"
+
+[defender_actions]
+available = ["sally_out", "coordinate_with_relief", "signal_relief", "attack_rear", "open_gates"]
+priority = "attack"
+
+[events]
+[[events.possible]]
+name = "Coordinated Attack"
+probability = 0.3
+trigger = "relief_army_in_range"
+effect = "two_front_battle"
+description = "The garrison and relief army attack simultaneously. The besiegers are caught between hammer and anvil."
+
+[[events.possible]]
+name = "Besiegers Retreat"
+probability = 0.25
+trigger = "relief_army_superior"
+effect = "siege_lifted"
+description = "The siege commander reads the odds and orders withdrawal. Better to retreat with an army than to die between two forces."
+
+[[events.possible]]
+name = "Desperate Assault"
+probability = 0.2
+trigger = "attacker_desperate"
+effect = "final_assault"
+description = "With relief approaching, the attackers throw everything at the walls. One final chance to take the city before they're overwhelmed."
+
+[[events.possible]]
+name = "Relief Army Defeated"
+probability = 0.15
+trigger = "attacker_strong"
+effect = "siege_continues"
+description = "The relief army is met in the field and broken. The defenders on the walls watch their last hope scatter."
+
+[transition]
+to_next_phase = "siege_fall"
+conditions = ["besiegers_retreat", "OR", "settlement_falls"]

@@ -64,6 +64,49 @@ pub const VOCAB: &[&str] = &[
     "FRAC_TINY", "FRAC_LOW", "FRAC_MID", "FRAC_HIGH", "FRAC_MAX",
     // 247-251: duration bucket tokens
     "DUR_INSTANT", "DUR_SHORT", "DUR_MED", "DUR_LONG", "DUR_VLONG",
+    // 252-299: campaign keywords (appended to preserve existing IDs)
+    "accelerated_study", "adventurer", "all_seeing_eye", "alone",
+    "ally_injured", "at_war", "battle_instinct", "beast_lore",
+    "blood_oath", "broker_alliance", "ceasefire", "claim_by_right",
+    "claim_territory", "coordinated_strike", "corner_market", "crisis_active",
+    "decipher", "demand_audience", "destabilize", "disinformation",
+    "distraction", "economy", "faction", "faction_hostile",
+    "field_command", "field_repair", "field_triage", "forage",
+    "forbidden_knowledge", "forge_artifact", "forge_trade_route", "forgery",
+    "fortify", "ghost_walk", "gold_above", "gold_below",
+    "golden_touch", "guild", "hidden_camp", "hold_the_line",
+    "immortal_moment", "inspire", "inspiring_presence", "intel_gathering",
+    "leadership", "life_eternal", "living_legend", "location",
+    "market", "market_maker", "master_armorer", "masterwork_craft",
+    "name_the_nameless", "near_death", "omniscience", "on_ability_use",
+    "on_crisis_start", "on_faction_change", "on_level_up", "on_quest_complete",
+    "on_trade", "outnumbered", "party", "periodic_tick",
+    "plague_ward", "prophecy", "purify", "quick_study",
+    "rally", "rallying_cry", "read_the_room", "region",
+    "rewrite_history", "rewrite_the_record", "safe_house", "sanctuary",
+    "sapper_eye", "shadow_step", "shatter_alliance", "silent_movement",
+    "silver_tongue", "stabilize_ally", "subvert_loyalty", "take_the_blow",
+    "the_last_word", "track_prey", "trade_embargo", "trade_empire",
+    "trap_sense", "treaty_breaker", "unbreakable", "vanish",
+    "war_cry", "wealth_of_nations",
+    // 348-352: campaign tick-based duration buckets
+    "TICK_SHORT", "TICK_MED", "TICK_LONG", "TICK_VLONG", "TICK_EPIC",
+    // 353+: meta-effects and campaign primitives
+    "amplify", "cast_copy", "cooldown_lock", "create_entity", "destroy_entity",
+    "echo", "evolve_after", "extend_durations", "free_cast", "grant_ability",
+    "instant_cast", "last_used", "mana_burn", "modify_stat",
+    "on_hit_cast", "refresh_cooldown", "refresh_cooldowns",
+    "reveal_info", "set_flag", "spell_shield", "transfer",
+    // combination skill tokens
+    "participants", "requires", "requires_class", "requires_participants",
+    // targeting filter keywords
+    "faction_member", "has_class", "has_status", "healthy", "injured",
+    "level_above", "level_below", "loyalty_above", "loyalty_below",
+    "under_command",
+    // aura + external scaling keywords
+    "adventurer_count", "army_size", "caster_level", "faction_territory",
+    "guild_gold", "guild_reputation", "kingdom_size", "loyalty_average",
+    "party_size", "scales_with", "while_alive",
 ];
 
 pub const PAD_ID: u32 = 0;
@@ -198,6 +241,31 @@ pub fn try_parse_duration(text: &str, pos: usize) -> Option<(f64, usize)> {
         }
     }
     None
+}
+
+/// Try to parse a campaign tick duration like "500t" starting at `pos`.
+/// Returns (ticks, end_pos) or None.
+pub fn try_parse_tick_duration(text: &str, pos: usize) -> Option<(f64, usize)> {
+    let (val, num_end) = try_parse_number(text, pos)?;
+    let rest = &text[num_end..];
+    if rest.starts_with('t') {
+        let end = num_end + 1;
+        // Word boundary: 't' must not be followed by another letter (avoid matching identifiers)
+        if end >= text.len() || !text.as_bytes()[end].is_ascii_alphabetic() {
+            return Some((val, end));
+        }
+    }
+    None
+}
+
+/// Bucket a campaign tick duration into a token.
+pub fn bucket_tick_duration(ticks: f64) -> &'static str {
+    let t = ticks.abs();
+    if t <= 50.0 { "TICK_SHORT" }
+    else if t <= 200.0 { "TICK_MED" }
+    else if t <= 500.0 { "TICK_LONG" }
+    else if t <= 1000.0 { "TICK_VLONG" }
+    else { "TICK_EPIC" }
 }
 
 /// Try to parse "N%" starting at `pos`.

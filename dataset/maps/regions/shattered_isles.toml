@@ -1,0 +1,29 @@
+name = "The Shattered Isles"
+terrain = "archipelago"
+climate = "maritime"
+size = "medium"
+
+[generation]
+settlement_density = 0.2
+road_connectivity = 0.1
+wilderness_danger = 0.5
+resource_richness = 0.5
+
+[settlement_distribution]
+hamlet_pct = 35
+village_pct = 30
+town_pct = 20
+city_pct = 10
+fortress_pct = 5
+
+[terrain_features]
+rivers = 0
+mountains = false
+forests = true
+coast = true
+lakes = 0
+
+[narrative]
+description = "Hundreds of islands scattered across warm seas. Each island has its own character, and the sailors who navigate between them know every current."
+threats = ["pirates", "sea_monsters", "storms", "rival_fleets"]
+opportunities = ["pearl_diving", "sea_trade", "island_resources", "hidden_coves"]

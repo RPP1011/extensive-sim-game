@@ -1,0 +1,51 @@
+name = "Mysterious Illness"
+priority = 7
+repeatable = true
+cooldown_ticks = 7000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 7500
+
+[choice]
+category = "character"
+trigger = "hook"
+prompt = "{adventurer_name} has fallen ill with something the healers can't identify. Dark veins spread across their skin, and they mutter in their sleep in a language no one recognizes."
+deadline_secs = 60.0
+default_option = 0
+
+[[choice.options]]
+label = "Quarantine and Research (30g)"
+description = "Isolate the patient and bring in specialists."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The sick adventurer is moved to a sealed room. Scholars pore over symptoms."
+
+[[choice.options]]
+label = "Seek Divine Healing (20g)"
+description = "A temple healer might succeed where medicine fails."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Priests chant over the writhing body. The dark veins pulse and slowly recede."
+
+[[choice.options]]
+label = "Let It Pass"
+description = "Sometimes sickness runs its course. Give them rest and hope."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The illness runs its course. {adventurer_name} emerges changed — weaker or stronger, only time will tell."

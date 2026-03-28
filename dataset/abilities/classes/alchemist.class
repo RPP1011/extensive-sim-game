@@ -1,0 +1,20 @@
+class Alchemist {
+    stat_growth: +3 ability_power, +1 speed, +1 max_hp per level
+
+    tags: brewing, transmutation, poison, reagents, experimentation
+
+    scaling hp_percent {
+        when hp_percent > 50: +10% ability_power
+        always: +5% speed
+    }
+
+    abilities {
+        level 1: brew_tonic "Create a healing potion from foraged ingredients"
+        level 5: identify_substance "Instantly identify any potion, poison, or material"
+        level 10: volatile_mixture "Throw an explosive flask that damages an area"
+        level 20: transmute "Convert cheap materials into valuable ones"
+        level 40: philosophers_stone "Transmute any material into any other, including creating elixirs of permanent stat increase"
+    }
+
+    requirements: level 1
+}

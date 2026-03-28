@@ -68,6 +68,11 @@ pub(crate) fn evaluate_hero_ability(
             AbilityTargeting::TargetAlly => target.team == unit.team,
             AbilityTargeting::SelfCast | AbilityTargeting::SelfAoe => true,
             AbilityTargeting::GroundTarget | AbilityTargeting::Direction | AbilityTargeting::Vector | AbilityTargeting::Global => true,
+            // Campaign targeting — not usable in combat
+            AbilityTargeting::TargetFaction | AbilityTargeting::TargetRegion
+            | AbilityTargeting::TargetMarket | AbilityTargeting::TargetParty
+            | AbilityTargeting::TargetGuild | AbilityTargeting::TargetAdventurer
+            | AbilityTargeting::TargetLocation => false,
         };
         if !target_ok {
             continue;
@@ -318,6 +323,11 @@ pub(crate) fn evaluate_hero_ability(
             });
             AbilityTarget::Position(combo_pos.unwrap_or(target.position))
         }
+        // Campaign targeting — not usable in combat, fallback to none
+        AbilityTargeting::TargetFaction | AbilityTargeting::TargetRegion
+        | AbilityTargeting::TargetMarket | AbilityTargeting::TargetParty
+        | AbilityTargeting::TargetGuild | AbilityTargeting::TargetAdventurer
+        | AbilityTargeting::TargetLocation => AbilityTarget::None,
     };
 
     Some(IntentAction::UseAbility {

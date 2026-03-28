@@ -1,0 +1,51 @@
+name = "The Battle of Riverside Crossing"
+description = "A fortified bridge town controls the only crossing for fifty miles. The river is too deep to ford and too wide to bridge quickly."
+difficulty = "medium"
+
+[settlement]
+template = "river_town"
+wall_type = "stone_wall"
+wall_hp = 2000
+gate_type = "reinforced_gate"
+gate_hp = 800
+towers = 4
+tower_type = "stone_tower"
+garrison = 25
+terrain = "river"
+bridge_control = true
+moat_natural = true
+
+[attacker]
+army_size = 80
+siege_equipment = ["catapult", "battering_ram", "siege_ladder", "mantlet", "fire_arrows"]
+supply_ticks = 1500
+reinforcement_chance = 0.2
+morale = 0.75
+commander_level = 20
+
+[defender]
+garrison_strength = 25
+adventurer_slots = 4
+supplies_ticks = 2500
+reinforcement_chance = 0.5
+morale = 0.8
+special_defenses = ["boiling_oil", "arrow_slits", "drawbridge"]
+commander_level = 22
+
+[victory_conditions]
+attacker_wins = ["gate_destroyed", "wall_breached_and_stormed", "bridge_captured"]
+defender_wins = ["attacker_retreat", "reinforcements_arrive", "attacker_starved"]
+time_limit_ticks = 3500
+
+[power_context]
+defender_avg_level = 18
+attacker_avg_level = 15
+wall_effective_level = 30
+has_wards = false
+ward_type = "none"
+high_level_threat = "none"
+
+[narrative]
+opening = "The river roars beneath the old stone bridge. On the far bank, the army masses. Between them and their campaign lies one small town that refuses to move."
+attacker_victory = "The bridge town falls, and the army crosses in triumph. The campaign can finally begin in earnest."
+defender_victory = "The river runs red with the attackers' failed crossings. The town still stands, and the bridge still belongs to its people."

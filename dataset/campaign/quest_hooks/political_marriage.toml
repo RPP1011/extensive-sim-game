@@ -1,0 +1,64 @@
+# A faction proposes a political marriage alliance.
+
+name = "Political Marriage"
+priority = 7
+repeatable = false
+
+[trigger]
+type = "FactionRelation"
+direction = "above"
+threshold = 50.0
+
+[choice]
+category = "diplomacy"
+trigger = "hook"
+prompt = "The ruling family of {faction_name} proposes a marriage alliance — one of your senior adventurers wed to their heir. It would cement the alliance for a generation, but you'd lose a key member to court life."
+deadline_secs = 120.0
+default_option = 2
+
+[[choice.options]]
+label = "Accept the Alliance"
+description = "A permanent bond between guild and faction. You lose an adventurer but gain an unbreakable ally."
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 30.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Bells ring across the city. The guild and {faction_name} are bound by blood and oath."
+
+[[choice.options]]
+label = "Counter with Trade Pact"
+description = "Marriage is too much. Propose a trade agreement instead."
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 5.0
+
+[[choice.options.effects]]
+type = "gold"
+amount = 20.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The proposal is gently redirected. Commerce, not vows, will bind the two houses."
+
+[[choice.options]]
+label = "Decline Gracefully"
+description = "The guild's people are not bargaining chips. Politely refuse."
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = -10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The rejection stings, despite the diplomatic language. Some bridges crack under the weight of refusal."

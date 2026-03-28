@@ -1,0 +1,55 @@
+// Tier 10: Nature Druid Kit — HoT healer with AoE roots and nature damage
+
+ability RegrowthTouch {
+    target: ally, range: 5.0
+    cooldown: 4s, cast: 200ms
+    hint: heal
+
+    heal 20
+    heal 8/1s for 4s
+}
+
+ability WildGrowth {
+    target: self_aoe
+    cooldown: 10s, cast: 300ms
+    hint: heal
+
+    heal 15 in circle(4.0)
+    heal 5/1s for 5s in circle(4.0)
+}
+
+ability NaturesGrasp {
+    target: enemy, range: 5.0
+    cooldown: 8s, cast: 200ms
+    hint: crowd_control
+
+    root 2s
+    damage 20
+}
+
+ability Thorns {
+    target: ally, range: 4.0
+    cooldown: 12s, cast: 200ms
+    hint: defense
+
+    shield 30 for 5s
+    damage 8/1s for 5s in circle(1.5)
+}
+
+ability NaturesWrath {
+    target: ground, range: 6.0
+    cooldown: 45s, cast: 600ms
+    hint: heal
+
+    heal 30 in circle(4.0)
+    heal 12/1s for 5s in circle(4.0)
+    root 2s in circle(4.0)
+    damage 30 in circle(4.0)
+}
+
+passive NaturalRegeneration {
+    trigger: periodic(4s)
+    cooldown: 4s
+
+    heal 6 in circle(3.0)
+}

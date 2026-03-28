@@ -1,0 +1,20 @@
+class Templar {
+    stat_growth: +2 attack, +3 defense, +1 ability_power, +1 max_hp per level
+
+    tags: melee, anti_magic, purification, faith, resilience
+
+    scaling enemy_count {
+        when enemy_count >= 1: +10% defense
+        always: +5% ability_power
+    }
+
+    abilities {
+        level 20: purifying_strike "Dispels all magical effects on the target"
+        level 25: spell_ward "Grant an ally immunity to the next spell that hits them"
+        level 30: silence "Prevent a target from casting for 5 seconds"
+        level 40: null_field "Create a zone where no magic functions for 8 seconds"
+        level 50: divine_judgment "Channel holy energy that deals damage proportional to target's magical power"
+    }
+
+    requirements: level 20, classes: Knight or Paladin
+}

@@ -1,0 +1,52 @@
+# An underground river system is discovered.
+
+name = "Underground River"
+priority = 5
+repeatable = false
+
+[trigger]
+type = "LocationScouted"
+location_type = "Dungeon"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Explorers in {location_name} have discovered a vast underground river system — fast-moving water cutting through caverns that stretch beyond torchlight. There could be entire networks of caves down here."
+deadline_secs = 90.0
+default_option = 1
+
+[[choice.options]]
+label = "Build Rafts and Explore (45g)"
+description = "Commission watercraft and map the river system. Expensive but could open entire new regions."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -45.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Crude rafts are lashed together. The expedition launches into the roaring dark."
+
+[[choice.options]]
+label = "Follow the Banks on Foot"
+description = "Walk along the river edge. Slower and limited, but free."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The party picks its way along slippery stone banks, mapping what it can reach."
+
+[[choice.options]]
+label = "Dam the Entrance"
+description = "Control the water flow. Could reveal drained caverns or flood others."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Stone and timber block the flow. Water levels shift throughout the cave system."

@@ -1,0 +1,341 @@
+# Narrative achievements — story moments, flavor, and world-building
+
+[[achievements]]
+id = "backstory_complete"
+name = "Origin Story"
+description = "Complete an adventurer's backstory sequence."
+category = "narrative"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "backstory_sequence"
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "Every adventurer has a past. Now you know theirs."
+
+[[achievements]]
+id = "risky_choice_payoff"
+name = "Fortune Favors"
+description = "Make the risky choice and have it pay off."
+category = "narrative"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "risky_choice_success"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "The safe path was right there. You chose the other one, and it worked."
+
+[[achievements]]
+id = "all_quest_hooks"
+name = "Every Thread"
+description = "Experience every type of quest hook."
+category = "narrative"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "all_quest_types_seen"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Rescue, escort, hunt, explore, negotiate, survive. You've seen them all."
+
+[[achievements]]
+id = "chronicle_entry"
+name = "For the Record"
+description = "Have an adventurer write in the guild chronicle."
+category = "narrative"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "chronicle_written"
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "Ink on parchment. Someone wanted to remember this."
+
+[[achievements]]
+id = "name_location"
+name = "Naming Rights"
+description = "Name a discovered location."
+category = "narrative"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "LocationScouted"
+condition = "location_named"
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "The place has a name now. Your name for it. That's how maps are made."
+
+[[achievements]]
+id = "prophetic_vision"
+name = "Foresight"
+description = "Witness a prophetic vision."
+category = "narrative"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "vision_witnessed"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "The future flickered. It wasn't reassuring."
+
+[[achievements]]
+id = "ancient_artifact"
+name = "Relic"
+description = "Find an ancient artifact."
+category = "narrative"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "artifact_found"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "Old beyond counting. Powerful beyond measure. Handle with care."
+
+[[achievements]]
+id = "forgotten_language"
+name = "Lost Words"
+description = "Read a text in a forgotten language."
+category = "narrative"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "SkillUsed"
+condition = "read_forgotten_language"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "The words were ancient, but the meaning was clear. Someone left a warning."
+
+[[achievements]]
+id = "host_celebration"
+name = "Feast Day"
+description = "Host a celebration at the guild hall."
+category = "narrative"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "celebration_hosted"
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "Music, food, laughter. Sometimes the best thing a guild can do is celebrate."
+
+[[achievements]]
+id = "survive_betrayal"
+name = "Stabbed in the Back"
+description = "Survive a betrayal by a trusted ally."
+category = "narrative"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "betrayal_survived"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "They smiled while they twisted the knife. You survived. They won't get another chance."
+
+[[achievements]]
+id = "blood_oath_narrative"
+name = "Blood Price"
+description = "Make a blood oath."
+category = "narrative"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "SkillUsed"
+condition = "blood_oath_made"
+
+[achievements.reward]
+rl_bonus = 0.2
+narrative = "The blood hit the ground and the System listened. There's no taking it back."
+
+[[achievements]]
+id = "all_seasons"
+name = "Full Circle"
+description = "Experience all four seasons."
+category = "narrative"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TickCount"
+condition = "all_four_seasons"
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "Spring, summer, autumn, winter. A full year. The guild endures."
+
+[[achievements]]
+id = "marathon"
+name = "Marathon"
+description = "Play for 10000 or more ticks."
+category = "narrative"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "TickCount"
+count = 10000
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "Ten thousand ticks. The guild's story fills volumes."
+
+[[achievements]]
+id = "point_of_no_return"
+name = "No Turning Back"
+description = "Reach the point of no return in the campaign."
+category = "narrative"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "QuestComplete"
+condition = "point_of_no_return"
+
+[achievements.reward]
+rl_bonus = 0.3
+narrative = "The road behind is gone. Only forward now."
+
+[[achievements]]
+id = "rival_guild"
+name = "Old Rivals"
+description = "Encounter a rival guild for the first time."
+category = "narrative"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "rival_encountered"
+
+[achievements.reward]
+rl_bonus = 0.1
+narrative = "Another guild. Same ambitions, different banner. This won't end peacefully."
+
+[[achievements]]
+id = "mentor_moment"
+name = "Passing It Down"
+description = "Have a high-level adventurer mentor a low-level one."
+category = "narrative"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "mentorship"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "The veteran took the rookie aside. Some lessons can't be learned from books."
+
+[[achievements]]
+id = "campfire_story"
+name = "Around the Fire"
+description = "Have adventurers share stories at camp."
+category = "narrative"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "campfire_stories"
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "Firelight, tall tales, and the bonds that form between them."
+
+[[achievements]]
+id = "last_stand_narrative"
+name = "Last Stand"
+description = "Face an overwhelming force with no retreat option."
+category = "narrative"
+tier = "gold"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "CombatWon"
+condition = "no_retreat_overwhelming"
+
+[achievements.reward]
+rl_bonus = 0.5
+narrative = "Backs to the wall. Nowhere to run. They fought anyway."
+
+[[achievements]]
+id = "unlikely_friendship"
+name = "Unlikely Friends"
+description = "Form a bond between two adventurers with opposing personalities."
+category = "narrative"
+tier = "silver"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "DiplomacyEvent"
+condition = "opposing_personality_bond"
+
+[achievements.reward]
+rl_bonus = 0.15
+narrative = "They couldn't stand each other. Now they'd die for each other."
+
+[[achievements]]
+id = "first_death"
+name = "The Cost"
+description = "Lose your first adventurer permanently."
+category = "narrative"
+tier = "bronze"
+hidden = false
+repeatable = false
+
+[achievements.trigger]
+type = "AdventurerLost"
+condition = "permanent_death"
+
+[achievements.reward]
+rl_bonus = 0.05
+narrative = "The first empty chair at the guild table. It won't be the last."

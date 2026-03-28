@@ -1,0 +1,73 @@
+// Tier 8: Passives triggered on dealing damage
+
+passive Bloodthirst {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    heal 12
+}
+
+passive VenomCoating {
+    trigger: on_damage_dealt
+    cooldown: 4s
+
+    damage 5/1s for 3s [POISON: 30]
+}
+
+passive ShockingGrasp {
+    trigger: on_damage_dealt
+    cooldown: 6s
+
+    damage 15 [MAGIC: 35]
+}
+
+passive LifeLeech {
+    trigger: on_damage_dealt
+    cooldown: 4s
+
+    heal 8
+}
+
+passive FlamingStrikes {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    damage 10 [FIRE: 35]
+    damage 4/1s for 2s [FIRE: 25]
+}
+
+passive FrostbiteAura {
+    trigger: on_damage_dealt
+    cooldown: 6s
+
+    slow 0.2 for 2s [ICE: 30]
+}
+
+passive CrushingForce {
+    trigger: on_damage_dealt
+    cooldown: 8s
+
+    stun 600ms [CROWD_CONTROL: 35]
+}
+
+passive HolyFervor {
+    trigger: on_damage_dealt
+    cooldown: 5s
+
+    heal 10 [HOLY: 25]
+    damage 8 [HOLY: 30]
+}
+
+passive SiphonStrength {
+    trigger: on_damage_dealt
+    cooldown: 7s
+
+    buff damage_output 0.1 for 3s
+}
+
+passive Manaburn {
+    trigger: on_damage_dealt
+    cooldown: 6s
+
+    silence 800ms [MAGIC: 30]
+}

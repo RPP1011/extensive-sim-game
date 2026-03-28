@@ -1,0 +1,59 @@
+# Economic disruption causes prices to swing wildly.
+
+name = "Market Crash"
+priority = 7
+repeatable = true
+cooldown_ticks = 10000
+
+[trigger]
+type = "ResourceThreshold"
+resource = "gold"
+direction = "below"
+threshold = 30.0
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "The regional market has collapsed. A major trading house defaulted on its debts, and prices are in freefall. Goods are cheap but confidence is shattered. The guild's own finances teeter."
+deadline_secs = 60.0
+default_option = 1
+
+[[choice.options]]
+label = "Buy the Dip (40g)"
+description = "Spend everything on discounted supplies and equipment. When the market recovers, you'll be rich."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -40.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 50.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "While others panic, the guild buys. Warehouses fill with bargain goods."
+
+[[choice.options]]
+label = "Conserve Resources"
+description = "Hold steady. Don't spend, don't risk. Weather the storm."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild tightens its belt and waits for stability to return."
+
+[[choice.options]]
+label = "Offer Loans (30g)"
+description = "Become the lender of last resort. Earn goodwill and interest."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Desperate merchants line up at the guild hall. The guild becomes the region's bank."

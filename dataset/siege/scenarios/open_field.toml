@@ -1,0 +1,50 @@
+name = "The Siege of Greenhollow"
+description = "A farming town with basic defenses faces a raiding army. The palisade walls are thin, but the militia fights for their homes."
+difficulty = "easy"
+
+[settlement]
+template = "farming_town"
+wall_type = "wooden_palisade"
+wall_hp = 500
+gate_type = "wooden_gate"
+gate_hp = 400
+towers = 2
+tower_type = "wooden_tower"
+garrison = 15
+terrain = "plains"
+
+[attacker]
+army_size = 45
+siege_equipment = ["battering_ram", "siege_ladder", "fire_arrows"]
+supply_ticks = 800
+reinforcement_chance = 0.1
+morale = 0.8
+commander_level = 12
+
+[defender]
+garrison_strength = 15
+adventurer_slots = 4
+supplies_ticks = 1000
+reinforcement_chance = 0.6
+morale = 0.9
+special_defenses = ["caltrops", "barricade"]
+commander_level = 10
+militia_bonus = true
+
+[victory_conditions]
+attacker_wins = ["gate_destroyed", "wall_breached_and_stormed", "defender_surrender"]
+defender_wins = ["attacker_retreat", "reinforcements_arrive", "attacker_casualties > 50%"]
+time_limit_ticks = 2000
+
+[power_context]
+defender_avg_level = 8
+attacker_avg_level = 10
+wall_effective_level = 7
+has_wards = false
+ward_type = "none"
+high_level_threat = "none"
+
+[narrative]
+opening = "The raiders come down the north road like a storm. Greenhollow has a wooden wall and forty farmers with pitchforks. But they're fighting for their families."
+attacker_victory = "The palisade burns. The town falls. Whether the raiders leave anything worth saving depends on their commander's mercy."
+defender_victory = "The militia holds the wall. The raiders break against the determination of people with nowhere to retreat to. Greenhollow stands."

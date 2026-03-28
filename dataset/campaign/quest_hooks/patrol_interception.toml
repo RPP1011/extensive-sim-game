@@ -1,0 +1,63 @@
+# Enemy patrol spotted near guild territory.
+
+name = "Enemy Patrol"
+priority = 6
+repeatable = true
+cooldown_ticks = 3500
+
+[trigger]
+type = "ThreatLevel"
+min_threat = 40.0
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "A hostile patrol — six armed soldiers bearing {faction_name} colors — has been spotted moving along the border of guild territory. They're scouting, not attacking. Yet."
+deadline_secs = 45.0
+default_option = 1
+
+[[choice.options]]
+label = "Ambush Them"
+description = "Strike first and send a message. Risk of escalating the conflict."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 1
+delta = -15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The patrol never returns to report. Their masters will wonder what happened."
+
+[[choice.options]]
+label = "Shadow and Report"
+description = "Follow them to learn their patrol routes and camp locations."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Your scouts trail the patrol for three days, mapping every checkpoint and signal fire."
+
+[[choice.options]]
+label = "Diplomatic Interception"
+description = "Approach under flag of truce. Costly in pride but might prevent bloodshed."
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 1
+delta = 5.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = -2.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The patrol captain accepts the meeting. No blood is shed, but no ground is gained either."

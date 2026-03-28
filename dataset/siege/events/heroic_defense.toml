@@ -1,0 +1,50 @@
+[[events]]
+id = "heroic_defense"
+name = "Heroic Last Stand"
+phase = "breach"
+
+[events.trigger]
+type = "DefenderCritical"
+threshold = 0.2
+
+[events.choice]
+prompt = "A lone defender — a leveled [Warrior] — holds the breach single-handedly. Bodies pile around them. The army hesitates."
+deadline_secs = 15.0
+
+[[events.choice.options]]
+label = "Overwhelm with Numbers"
+description = "One hero cannot hold against a tide. Send everyone."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "hero_breach_hold"
+attacker_count = 20
+defender_count = 1
+defender_quality = "legendary"
+[[events.choice.options.effects]]
+type = "narrative"
+text = "They come in waves. The hero cuts down the first five, the next three, the next two. But eventually, even legends tire."
+
+[[events.choice.options]]
+label = "Send Your Own Champion"
+description = "Champion against champion. It's the only way that doesn't cost fifty lives."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "champion_duel_breach"
+attacker_count = 1
+defender_count = 1
+attacker_quality = "champion"
+defender_quality = "legendary"
+[[events.choice.options.effects]]
+type = "narrative"
+text = "A path opens in the press. Your champion walks through it, shield high. The defender in the breach sees them coming and smiles. A worthy opponent at last."
+
+[[events.choice.options]]
+label = "Bypass — Use Another Route"
+description = "Let the hero hold their breach. Find another way in."
+[[events.choice.options.effects]]
+type = "siege_progress"
+ticks_cost = 150
+bypass_breach = true
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The commander studies the hero in the breach and shakes his head. 'Not worth the cost. Find me another way in.' The army flows around the obstacle like water."

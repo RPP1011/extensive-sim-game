@@ -1,0 +1,106 @@
+name = "Wandering Monks"
+description = "Four monks from a destroyed monastery. Balanced fighters with self-healing abilities. They own nothing but the robes on their backs and the skills in their fists. High resolve, zero equipment."
+gold_bonus = 5.0
+supply_bonus = 5.0
+reputation_bonus = 10.0
+items = []
+
+[[adventurers]]
+id = 1
+name = "Brother Ash"
+archetype = "warrior"
+level = 2
+xp = 0
+traits = ["disciplined"]
+status = "Idle"
+loyalty = 70.0
+stress = 5.0
+fatigue = 3.0
+injury = 0.0
+resolve = 70.0
+morale = 75.0
+guild_relationship = 45.0
+
+[adventurers.stats]
+max_hp = 65.0
+attack = 12.0
+defense = 10.0
+speed = 12.0
+ability_power = 8.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 2
+name = "Sister Willow"
+archetype = "cleric"
+level = 2
+xp = 0
+traits = ["healer", "disciplined"]
+status = "Idle"
+loyalty = 75.0
+stress = 3.0
+fatigue = 2.0
+injury = 0.0
+resolve = 72.0
+morale = 80.0
+guild_relationship = 50.0
+
+[adventurers.stats]
+max_hp = 55.0
+attack = 8.0
+defense = 8.0
+speed = 10.0
+ability_power = 14.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 3
+name = "Brother Stone"
+archetype = "warrior"
+level = 2
+xp = 0
+traits = ["disciplined"]
+status = "Idle"
+loyalty = 68.0
+stress = 5.0
+fatigue = 4.0
+injury = 0.0
+resolve = 68.0
+morale = 72.0
+guild_relationship = 42.0
+
+[adventurers.stats]
+max_hp = 70.0
+attack = 10.0
+defense = 12.0
+speed = 11.0
+ability_power = 6.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 4
+name = "Sister Reed"
+archetype = "ranger"
+level = 2
+xp = 0
+traits = ["explorer", "disciplined"]
+status = "Idle"
+loyalty = 72.0
+stress = 4.0
+fatigue = 3.0
+injury = 0.0
+resolve = 65.0
+morale = 74.0
+guild_relationship = 48.0
+
+[adventurers.stats]
+max_hp = 58.0
+attack = 11.0
+defense = 7.0
+speed = 13.0
+ability_power = 10.0
+
+[adventurers.equipment]

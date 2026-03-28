@@ -1,0 +1,49 @@
+[[events]]
+id = "starvation_crisis"
+name = "Starvation Crisis"
+phase = "surround"
+
+[events.trigger]
+type = "SupplyBelow"
+threshold = 0.05
+side = "defender"
+
+[events.choice]
+prompt = "The garrison is starving. Soldiers can barely lift their weapons. Civilians are eating rats and boiled leather. Surrender may be the only option."
+deadline_secs = 25.0
+
+[[events.choice.options]]
+label = "Eat the Horses"
+description = "Slaughter the cavalry mounts for food. Extends supplies but loses all mounted capability."
+[[events.choice.options.effects]]
+type = "army_modifier"
+supply_extension = 200
+cavalry_lost = true
+morale_loss = 0.1
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The war horses, worth more than most soldiers' yearly pay, are led to slaughter. The meat is tough and grief-seasoned, but it keeps the garrison alive."
+
+[[events.choice.options]]
+label = "Negotiate Surrender"
+description = "Open negotiations before the garrison is too weak to demand terms."
+[[events.choice.options.effects]]
+type = "negotiation"
+surrender_terms = "conditional"
+garrison_survival_chance = 0.8
+[[events.choice.options.effects]]
+type = "narrative"
+text = "The white flag goes up again, but this time it means it. The commander's hand shakes as he dictates terms. Pride can't fill bellies."
+
+[[events.choice.options]]
+label = "Desperate Breakout"
+description = "Fight through the siege lines. Not everyone will make it, but some might."
+[[events.choice.options.effects]]
+type = "tactical_combat"
+map = "siege_breakout"
+attacker_penalty = 0.3
+objective = "escape"
+escape_percentage_range = [0.2, 0.6]
+[[events.choice.options.effects]]
+type = "narrative"
+text = "At midnight, every soldier who can still hold a sword gathers at the weakest point of the siege line. The gate opens one last time."

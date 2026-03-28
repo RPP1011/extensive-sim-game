@@ -1,0 +1,120 @@
+[[buildings]]
+id = "wall_segment"
+name = "Wall Segment"
+category = "defensive"
+construction_cost = 100
+construction_ticks = 500
+maintenance_cost = 3
+
+[buildings.effects]
+wall_hp_bonus = 100
+garrison_bonus = 2
+defense_bonus = 0.05
+
+[buildings.requirements]
+min_settlement_type = "village"
+required_resources = ["stone"]
+
+[buildings.narrative]
+description = "Stone stacked on stone. Simple, effective, and the difference between safety and ruin."
+
+[[buildings]]
+id = "tower"
+name = "Defensive Tower"
+category = "defensive"
+construction_cost = 200
+construction_ticks = 800
+maintenance_cost = 5
+
+[buildings.effects]
+wall_hp_bonus = 50
+vision_range = 2
+garrison_bonus = 5
+defense_bonus = 0.1
+
+[buildings.requirements]
+min_settlement_type = "village"
+required_resources = ["stone"]
+
+[buildings.narrative]
+description = "Archers rain death from above. The tower commands the approaches."
+
+[[buildings]]
+id = "moat"
+name = "Moat"
+category = "defensive"
+construction_cost = 250
+construction_ticks = 1000
+maintenance_cost = 5
+
+[buildings.effects]
+defense_bonus = 0.2
+siege_resistance = 0.15
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "town"
+required_resources = []
+
+[buildings.narrative]
+description = "A wet ditch full of unpleasant things. Siege towers hate it."
+
+[[buildings]]
+id = "keep"
+name = "Keep"
+category = "defensive"
+construction_cost = 600
+construction_ticks = 2000
+maintenance_cost = 15
+
+[buildings.effects]
+wall_hp_bonus = 500
+garrison_bonus = 30
+defense_bonus = 0.25
+last_stand = true
+
+[buildings.requirements]
+min_settlement_type = "town"
+required_resources = ["stone", "metal"]
+
+[buildings.narrative]
+description = "The last refuge when everything else has fallen. Thick walls, deep stores, and desperate defenders."
+
+[[buildings]]
+id = "curtain_wall"
+name = "Curtain Wall"
+category = "defensive"
+construction_cost = 500
+construction_ticks = 1800
+maintenance_cost = 10
+
+[buildings.effects]
+wall_hp_bonus = 400
+garrison_bonus = 15
+defense_bonus = 0.2
+
+[buildings.requirements]
+min_settlement_type = "city"
+required_resources = ["stone", "metal"]
+
+[buildings.narrative]
+description = "An inner ring of walls for when the outer ring falls. Because in war, redundancy saves lives."
+
+[[buildings]]
+id = "murder_holes"
+name = "Murder Holes"
+category = "defensive"
+construction_cost = 150
+construction_ticks = 600
+maintenance_cost = 3
+
+[buildings.effects]
+defense_bonus = 0.15
+garrison_bonus = 0
+
+[buildings.requirements]
+min_settlement_type = "town"
+required_resources = ["stone"]
+
+[buildings.narrative]
+description = "Openings in the ceiling of the gatehouse passage. Boiling oil optional but recommended."

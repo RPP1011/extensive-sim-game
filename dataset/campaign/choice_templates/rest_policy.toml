@@ -1,0 +1,51 @@
+# How to manage rest between quests.
+
+category = "strategic"
+trigger = "between_quests"
+prompt = "The guild has a window between quests. How should the time be used?"
+deadline_secs = 90.0
+default_option = 0
+
+[[options]]
+label = "Full Rest"
+description = "Everyone rests and recovers. Maximum healing, minimum productivity."
+
+[[options.effects]]
+type = "narrative"
+text = "The guild sleeps. Wounds close, stress fades, morale rises."
+
+[[options]]
+label = "Light Training"
+description = "Gentle drills and skill maintenance. Some recovery, some growth."
+
+[[options.effects]]
+type = "supplies"
+amount = -5.0
+
+[[options.effects]]
+type = "narrative"
+text = "Morning stretches, afternoon sparring. A balanced approach."
+
+[[options]]
+label = "Maintenance Work"
+description = "Repair equipment, organize supplies, clean the hall."
+
+[[options.effects]]
+type = "supplies"
+amount = 5.0
+
+[[options.effects]]
+type = "narrative"
+text = "The guild hall gleams. Equipment is serviced. Everything in its place."
+
+[[options]]
+label = "Social Time"
+description = "Let adventurers bond. Shared meals, stories, and games."
+
+[[options.effects]]
+type = "reputation"
+amount = 2.0
+
+[[options.effects]]
+type = "narrative"
+text = "Laughter echoes through the hall. The guild feels more like a family."

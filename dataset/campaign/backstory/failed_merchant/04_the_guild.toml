@@ -1,0 +1,36 @@
+name = "The Guild"
+world_template = "Archipelago"
+sequence = 4
+default_option = 0
+prompt = "The adventurers' guild needs someone who can turn loot into gold and gold into equipment. The guild master doesn't care about your debts or your failed company. 'Can you run a treasury without stealing from it?' she asks. 'Because the last three couldn't.'"
+
+[[options]]
+label = "Full Partner"
+description = "Take on the guild's books completely. Finance, supply chains, contracts — the whole operation."
+pc_traits = [{ trait = "merchant_mind" }]
+pc_stats = { resolve = 2.0 }
+effects = [
+    { type = "gold", amount = 15.0 },
+    { type = "reputation", amount = 8.0 },
+    { type = "narrative", text = "You sit behind the guild's desk and open the ledger. It's a mess. You smile. Messes are your specialty." },
+]
+
+[[options]]
+label = "Quartermaster"
+description = "Focus on logistics — supplies, equipment, provisions. Keep the adventurers fed and armed."
+pc_traits = [{ trait = "merchant_mind" }]
+pc_stats = { defense = 2.0 }
+effects = [
+    { type = "supplies", amount = 15.0 },
+    { type = "narrative", text = "The supply closet is reorganized within a day. Potions sorted by type, rations by date, weapons by condition. The guild has never been this organized." },
+]
+
+[[options]]
+label = "Field Operative"
+description = "Go on quests and handle the business side in the field. Negotiate with dungeon keepers, bribe guards, appraise loot on the spot."
+pc_traits = [{ trait = "pragmatist" }]
+pc_stats = { speed = 2.0, attack = 1.0 }
+effects = [
+    { type = "reputation", amount = 5.0 },
+    { type = "narrative", text = "You strap on light armor over your merchant's vest. The guild master raises an eyebrow. 'A businessman with a blade.' 'A blade with a business plan,' you correct." },
+]

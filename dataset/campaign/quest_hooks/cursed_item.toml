@@ -1,0 +1,52 @@
+# An adventurer brings back a cursed artifact.
+
+name = "Cursed Artifact"
+priority = 7
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "QuestComplete"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Among the spoils from the last quest, {adventurer_name} found a black iron amulet that whispers when held. The guild's healer says it radiates malice — but also power. The adventurer is already growing attached to it."
+deadline_secs = 60.0
+default_option = 1
+
+[[choice.options]]
+label = "Let Them Keep It"
+description = "Power is power. The risk might be worth it."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The whispers grow louder. {adventurer_name} smiles, but their eyes have changed."
+
+[[choice.options]]
+label = "Confiscate and Study (20g)"
+description = "Remove the item and hire a scholar to study it safely."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The amulet is locked in a warded chest. A scholar arrives to probe its secrets."
+
+[[choice.options]]
+label = "Destroy It"
+description = "Melt it down. Some things aren't worth the risk."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The forge runs hot. The amulet screams as it melts. Then silence."

@@ -1,0 +1,55 @@
+name = "Abandoned Outpost"
+priority = 4
+repeatable = true
+cooldown_ticks = 5000
+
+[trigger]
+type = "LocationScouted"
+location_type = "Outpost"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Scouts find an abandoned military outpost at {location_name}. The fortifications are intact — someone left in a hurry. Supplies remain in the storeroom, and the walls could still hold against an assault."
+deadline_secs = 90.0
+default_option = 0
+
+[[choice.options]]
+label = "Claim and Garrison"
+description = "Move in and man the walls. A free forward base."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild banner rises over old stone walls. A new outpost is established."
+
+[[choice.options]]
+label = "Loot and Leave"
+description = "Take the supplies and move on. No commitment to holding it."
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Crates of preserved food and bundles of arrows are loaded onto mules. Free supplies."
+
+[[choice.options]]
+label = "Investigate Why It Was Abandoned"
+description = "Someone left this place fast. Find out why before committing."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Signs of struggle. Claw marks on stone. Whatever drove the garrison out might still be nearby."

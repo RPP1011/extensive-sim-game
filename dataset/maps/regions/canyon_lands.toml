@@ -1,0 +1,29 @@
+name = "The Painted Canyons"
+terrain = "canyon_lands"
+climate = "arid"
+size = "medium"
+
+[generation]
+settlement_density = 0.08
+road_connectivity = 0.2
+wilderness_danger = 0.6
+resource_richness = 0.5
+
+[settlement_distribution]
+hamlet_pct = 35
+village_pct = 25
+town_pct = 20
+city_pct = 5
+fortress_pct = 15
+
+[terrain_features]
+rivers = 1
+mountains = true
+forests = false
+coast = false
+lakes = 0
+
+[narrative]
+description = "Layered rock in a hundred shades of red and gold, carved by ancient rivers into labyrinthine canyons. Easy to enter, hard to leave."
+threats = ["flash_floods", "canyon_predators", "rock_slides", "bandits"]
+opportunities = ["mineral_deposits", "defensible_positions", "ancient_cliff_dwellings"]

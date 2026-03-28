@@ -1,0 +1,65 @@
+// Tier 10: Frost Mage Kit — control mage with slows, roots, and shatter combos
+
+ability Frostbolt {
+    target: enemy, range: 6.0
+    cooldown: 3s, cast: 200ms
+    hint: damage
+
+    deliver projectile { speed: 7.0 } {
+        on_hit {
+            damage 28 [ICE: 40]
+            slow 0.3 for 2s [ICE: 35]
+        }
+    }
+}
+
+ability FrozenOrb {
+    target: ground, range: 6.0
+    cooldown: 10s, cast: 300ms
+    hint: damage
+
+    deliver zone { duration: 4s, tick: 1s } {
+        on_hit {
+            damage 12 in circle(3.0) [ICE: 40]
+            slow 0.25 for 1500ms in circle(3.0) [ICE: 30]
+        }
+    }
+}
+
+ability IceBarrier {
+    target: self
+    cooldown: 14s, cast: 0ms
+    hint: defense
+
+    shield 50 for 5s
+    slow 0.3 for 2s in circle(2.0) [ICE: 30]
+}
+
+ability GlacialSpear {
+    target: enemy, range: 6.0
+    cooldown: 7s, cast: 300ms
+    hint: damage
+
+    damage 25 [ICE: 40]
+    damage 35 when target_has(slow) [ICE: 50]
+}
+
+ability Blizzard2 {
+    target: ground, range: 6.0
+    cooldown: 45s, cast: 600ms
+    hint: damage
+
+    deliver zone { duration: 5s, tick: 1s } {
+        on_hit {
+            damage 20 in circle(4.0) [ICE: 50]
+            slow 0.4 for 1500ms in circle(4.0) [ICE: 45]
+        }
+    }
+}
+
+passive Hypothermia {
+    trigger: on_damage_dealt
+    cooldown: 6s
+
+    slow 0.15 for 2s [ICE: 25]
+}

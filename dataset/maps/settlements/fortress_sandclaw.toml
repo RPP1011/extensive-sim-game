@@ -1,0 +1,46 @@
+name = "Sandclaw Outpost"
+type = "fortress"
+population = 600
+prosperity = 30.0
+
+[defenses]
+wall_type = "stone_wall"
+wall_hp = 1800
+gate_count = 1
+tower_count = 6
+garrison_capacity = 300
+moat = false
+
+[[districts]]
+name = "Main Fort"
+type = "military"
+buildings = ["command_post", "barracks", "watchtower", "armory"]
+population_pct = 50.0
+wealth = 35.0
+threat = 5.0
+
+[[districts]]
+name = "Oasis Compound"
+type = "agricultural"
+buildings = ["cistern", "date_grove", "goat_pen", "well"]
+population_pct = 30.0
+wealth = 25.0
+threat = 10.0
+
+[[districts]]
+name = "Trader's Yard"
+type = "commercial"
+buildings = ["caravanserai", "provisioner", "water_seller"]
+population_pct = 20.0
+wealth = 30.0
+threat = 20.0
+
+[economy]
+primary_exports = ["desert_patrols", "caravan_escort"]
+primary_imports = ["food", "water", "weapons", "timber"]
+trade_routes = 2
+market_size = "small"
+
+[narrative]
+description = "A desert fortress guarding the only reliable water source for three days' march. Caravans pay dearly for the privilege of filling their skins."
+flavor = ["Sand piles against the walls", "The well is guarded day and night", "Mirages shimmer on the horizon"]

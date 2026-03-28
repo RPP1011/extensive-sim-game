@@ -1,0 +1,54 @@
+name = "Market Square Chaos"
+map_type = "market_brawl"
+width = 24
+height = 20
+
+[terrain]
+layout = """
+HH....RRRRRRRRRRRR..HH.
+HH....R..........R..HH.
+......R..........R......
+......R..SSSSSS..R......
+......R..S....S..R......
+RRRRRRRR.S....S.RRRRRRRR
+......R..S....S..R......
+......R..SSSSSS..R......
+......R..........R......
+..CC..R..........R..CC..
+..CC..R..........R..CC..
+......R..SSSSSS..R......
+......R..S....S..R......
+RRRRRRRR.S....S.RRRRRRRR
+......R..S....S..R......
+......R..SSSSSS..R......
+......R..........R......
+HH....R..........R..HH.
+HH....RRRRRRRRRRRR..HH.
+........................
+"""
+
+[[spawn_zones]]
+name = "faction_a"
+team = 0
+rect = [0, 0, 5, 8]
+
+[[spawn_zones]]
+name = "faction_b"
+team = 1
+rect = [18, 11, 23, 19]
+
+[[cover_positions]]
+position = [2, 9]
+type = "half"
+
+[[cover_positions]]
+position = [21, 9]
+type = "half"
+
+[[cover_positions]]
+position = [9, 4]
+type = "destructible"
+
+[[cover_positions]]
+position = [9, 12]
+type = "destructible"

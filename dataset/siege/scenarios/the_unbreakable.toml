@@ -1,0 +1,86 @@
+name = "The Unbreakable"
+description = "A legendary Named fortification — The Unbroken Wall — defends a capital city. Conventional siege is mathematically impossible. The attackers must find an unconventional solution: bribery, tunneling, starvation, or finding a flaw left by the original builders."
+difficulty = "legendary"
+
+[settlement]
+template = "capital_city"
+wall_type = "named_fortification"
+wall_id = "the_unbroken_wall"
+wall_hp = 20000
+gate_type = "named_fortification"
+gate_id = "the_oathbound_gate"
+gate_hp = 8000
+towers = 8
+tower_type = "mage_tower"
+garrison = 200
+terrain = "plains"
+
+[settlement.wards]
+type = "runic_fortress"
+ward_hp = 8000
+ward_level = 75
+anti_magic_radius = 15.0
+ability_damage_reduction = 0.9
+projectile_deflection = 0.7
+spell_reflection = 0.2
+
+[attacker]
+army_size = 500
+siege_equipment = ["trebuchet", "trebuchet", "trebuchet", "battering_ram", "battering_ram", "siege_tower", "siege_tower", "ward_breaker", "arcane_cannon", "sappers_tunnel"]
+supply_ticks = 3000
+reinforcement_chance = 0.3
+morale = 0.6
+commander_level = 40
+
+[attacker.unconventional_options]
+# Option 1: Bribery — find a corrupt officer to open a postern gate
+bribery_chance = 0.1
+bribery_cost = 10000
+# Option 2: Starvation — the city has 200 garrison + civilians
+# Supply ratio favors defenders heavily, but 500 attackers can blockade
+starvation_ticks = 8000
+# Option 3: Tunneling — the wall extends underground, but maybe not everywhere
+tunnel_chance = 0.05
+tunnel_detection_chance = 0.8
+# Option 4: Find the builder's flaw — legend says no wall is perfect
+# Requires a Level 60+ [Builder] or [Engineer] to identify
+flaw_detection_required_level = 60
+flaw_damage_multiplier = 10.0
+# Option 5: Overwhelming magical force — a Level 80+ caster might breach the wards
+magic_breach_required_level = 80
+
+[defender]
+garrison_strength = 200
+adventurer_slots = 10
+supplies_ticks = 6000
+reinforcement_chance = 0.6
+morale = 0.95
+special_defenses = ["boiling_oil", "murder_holes", "mage_tower", "mage_tower", "arrow_slits", "portcullis", "flame_barrier"]
+commander_level = 45
+
+[power_context]
+defender_avg_level = 30
+attacker_avg_level = 25
+wall_effective_level = 90
+has_wards = true
+ward_type = "runic_fortress"
+high_level_threat = "none"
+
+# Power scaling analysis:
+# Direct assault: (25/90)^2 = 0.077x damage. At 20,000 HP, that's ~260,000 raw damage needed
+# Siege equipment ignores level scaling but: trebuchet does ~200 damage, reflected 30% = 140 net
+# 3 trebuchets: 420 net damage/volley, 48 volleys to breach = hundreds of ticks under fire
+# Ward blocks 90% ability damage, reflects 20% of spells, deflects 70% of projectiles
+# The Oathbound Gate is immune to rams and petards
+# Garrison of 200 at defender_multiplier 5.0 = effective level 150
+# This is not a siege that can be won by force alone
+
+[victory_conditions]
+attacker_wins = ["wall_breached", "gate_opened_treachery", "city_starved", "builder_flaw_exploited", "magical_breach"]
+defender_wins = ["attacker_retreat", "attacker_starved", "siege_equipment_destroyed", "reinforcements_arrive"]
+time_limit_ticks = 10000
+
+[narrative]
+opening = "Five hundred soldiers, three trebuchets, two ward breakers, and a commander who knows — he knows — that none of it will be enough. The Unbroken Wall has earned its name across five centuries and eleven sieges. But orders are orders, and the king wants this city. 'There has to be a way,' the commander mutters, studying the walls through his spyglass. 'There's always a way.'"
+attacker_victory = "It wasn't the trebuchets. It wasn't the ward breaker. It wasn't force or magic or fire. In the end, what brought down The Unbroken Wall was — well. That's the part they don't put in the songs. The wall still stands, technically. It's just that what's behind it changed hands."
+defender_victory = "The eleventh siege fails, like the ten before it. The army withdraws, smaller than when it arrived, leaving behind broken siege engines and shallow graves. The Unbroken Wall watches them go with the patience of stone. It will be here for the twelfth siege too."

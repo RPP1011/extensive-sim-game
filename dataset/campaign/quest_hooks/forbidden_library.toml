@@ -1,0 +1,56 @@
+# A sealed library of forbidden knowledge is discovered.
+
+name = "Forbidden Library"
+priority = 6
+repeatable = false
+
+[trigger]
+type = "LocationScouted"
+location_type = "Ruin"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Behind a warded door in {location_name}, shelves of books stretch into darkness. The wards are old — whoever sealed this knowledge away meant for it to stay sealed. The air smells of dust and consequence."
+deadline_secs = 90.0
+default_option = 1
+
+[[choice.options]]
+label = "Break the Seals (35g)"
+description = "Open the library and study everything. Knowledge is never evil — only the use of it."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -35.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The wards shatter. Ancient pages turn for the first time in millennia. Some of what's written here should never have been written."
+
+[[choice.options]]
+label = "Selective Study (20g)"
+description = "Open the library but only study safe topics. Leave the dangerous tomes alone."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Careful scholars photograph safe texts and reseal the rest. Temptation resisted."
+
+[[choice.options]]
+label = "Reseal and Leave"
+description = "Whoever locked this away had a reason. Respect their judgment."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The door is sealed again, with fresh wards layered over old. Some knowledge is best forgotten."

@@ -1,0 +1,24 @@
+[[tactics]]
+id = "bribe_garrison"
+name = "Bribe the Garrison"
+side = "attacker"
+category = "deception"
+
+[tactics.requirements]
+gold_available = 1000
+intelligence_on_garrison = true
+defender_morale_below = 0.5
+
+[tactics.effects]
+siege_duration_multiplier = 0.1
+casualty_rate_multiplier = 0.0
+gate_open_chance = 0.3
+partial_defection_chance = 0.4
+gold_cost = 1000
+requires_contact = true
+
+[tactics.counters]
+countered_by = ["loyal_garrison", "high_morale", "counter_intelligence"]
+
+[tactics.narrative]
+description = "Gold finds its way over walls more easily than soldiers. A whispered offer, a bag of coins dropped at the right time. Not every fortress falls to steel — some fall to greed."

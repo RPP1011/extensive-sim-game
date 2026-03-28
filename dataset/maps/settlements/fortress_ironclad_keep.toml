@@ -1,0 +1,54 @@
+name = "Ironclad Keep"
+type = "fortress"
+population = 1200
+prosperity = 45.0
+
+[defenses]
+wall_type = "fortified"
+wall_hp = 2000
+gate_count = 1
+tower_count = 8
+garrison_capacity = 500
+moat = true
+
+[[districts]]
+name = "Inner Keep"
+type = "military"
+buildings = ["command_hall", "war_room", "officer_quarters", "armory"]
+population_pct = 20.0
+wealth = 55.0
+threat = 5.0
+
+[[districts]]
+name = "Outer Bailey"
+type = "military"
+buildings = ["barracks", "training_yard", "stables", "siege_workshop"]
+population_pct = 40.0
+wealth = 35.0
+threat = 5.0
+
+[[districts]]
+name = "Supply Quarter"
+type = "industrial"
+buildings = ["granary", "well", "blacksmith", "supply_depot"]
+population_pct = 25.0
+wealth = 30.0
+threat = 5.0
+
+[[districts]]
+name = "Camp Followers"
+type = "commercial"
+buildings = ["tavern", "provisioner", "healer"]
+population_pct = 15.0
+wealth = 25.0
+threat = 15.0
+
+[economy]
+primary_exports = ["military_patrols", "trained_soldiers"]
+primary_imports = ["food", "weapons", "horses", "timber"]
+trade_routes = 2
+market_size = "small"
+
+[narrative]
+description = "A mountain fortress controlling the only pass between two kingdoms. The garrison has held it for three hundred years against everything that tried."
+flavor = ["The gates are three feet thick", "Signal fires on every peak", "The wind cuts like a blade"]

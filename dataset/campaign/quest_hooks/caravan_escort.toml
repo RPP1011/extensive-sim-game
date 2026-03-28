@@ -1,0 +1,61 @@
+# A merchant requests caravan escort through dangerous territory.
+
+name = "Caravan Escort Contract"
+priority = 4
+repeatable = true
+cooldown_ticks = 4000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 4500
+
+[[conditions]]
+type = "MinAdventurers"
+count = 2
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "A wealthy merchant offers 50 gold for a caravan escort through bandit country. The route is well-known but dangerous. Other guilds have lost people on this road."
+deadline_secs = 60.0
+default_option = 0
+
+[[choice.options]]
+label = "Accept the Contract"
+description = "Standard escort mission. Good pay, moderate risk."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 50.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 4.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The caravan departs under guild protection. Bandit eyes watch from the treeline."
+
+[[choice.options]]
+label = "Negotiate Higher Pay"
+description = "The route is dangerous. Demand 70 gold or walk away."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 70.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 2.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The merchant grumbles but agrees. Apparently, the cargo is worth the premium."
+
+[[choice.options]]
+label = "Decline"
+description = "Not worth risking adventurers for escort pay."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The merchant finds another guild. You wonder if they made it."

@@ -1,0 +1,21 @@
+class Battlemage {
+    stat_growth: +2 attack, +3 ability_power, +1 defense, +1 speed per level
+
+    tags: melee, arcane, hybrid, spellblade, combat_casting
+
+    scaling hp_percent {
+        when hp_percent > 50: +10% ability_power
+        when hp_percent < 50: +10% attack
+        always: +5% defense
+    }
+
+    abilities {
+        level 20: arcane_edge "Enchant weapon with spell energy for bonus magic damage on hit"
+        level 25: spell_parry "Counter a spell with a melee strike, nullifying it"
+        level 30: force_nova "Melee hit triggers a point-blank arcane explosion"
+        level 40: runic_armor "Absorb spell damage and convert it to melee power"
+        level 50: arcane_annihilation "Channel all remaining mana into a single devastating melee strike"
+    }
+
+    requirements: level 20, classes: Warrior or Mage
+}

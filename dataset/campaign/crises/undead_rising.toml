@@ -1,0 +1,16 @@
+name = "The Restless Dead"
+description = "Ancient battlefields disgorge their fallen. Skeletal armies march without a master, driven by necromantic resonance from an unknown source"
+crisis_type = "undead"
+world_templates = []
+trigger_threshold = 0.75
+priority = 8
+allow_simultaneous = true
+
+[config]
+type = "UndeadRising"
+source_location_type = "Ruin"
+initial_wave_size = 20
+wave_growth_multiplier = 1.4
+wave_interval_ticks = 4000
+necromantic_source_count = 3
+cleanse_cost_per_source = 60.0

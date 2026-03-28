@@ -1,0 +1,68 @@
+name = "The One-Man Siege"
+description = "A Level 72 [Sword Saint] assaults a fortified town alone. The walls are nothing to someone who can cut steel, but the garrison's force multiplier turns the interior into a grinding battle of attrition."
+difficulty = "very_hard"
+
+[settlement]
+template = "fortified_town"
+wall_type = "stone_wall"
+wall_hp = 2000
+gate_type = "reinforced_gate"
+gate_hp = 800
+towers = 3
+tower_type = "stone_tower"
+garrison = 60
+terrain = "plains"
+
+[attacker]
+army_size = 1
+siege_equipment = []
+supply_ticks = 9999
+reinforcement_chance = 0.0
+morale = 1.0
+commander_level = 72
+
+[attacker.champion]
+name = "Kerash the Undimmed"
+class = "Sword Saint"
+level = 72
+hp = 8000
+damage = 450
+armor = 200
+magic_resist = 150
+abilities = ["Horizon Cut", "Steel Wind Strike", "Blade Domain", "Unbreakable Stance", "Thousand Cuts"]
+description = "A [Sword Saint] who has cut mountains. Literally. The town walls are stone, which he considers a soft material."
+
+[defender]
+garrison_strength = 60
+adventurer_slots = 0
+supplies_ticks = 5000
+reinforcement_chance = 0.5
+morale = 0.7
+special_defenses = ["boiling_oil", "arrow_slits", "caltrops", "barricade"]
+commander_level = 20
+
+[power_context]
+defender_avg_level = 15
+attacker_avg_level = 72
+wall_effective_level = 30
+has_wards = false
+ward_type = "none"
+high_level_threat = "Kerash the Undimmed"
+
+# Power scaling analysis:
+# Wall breach: (72/30)^2 = 5.76, capped at 2.0x. Stone wall has 2000 HP.
+# Kerash deals 450 * 2.0 = 900 per hit to walls. Walls fall in ~3 hits.
+# The gate is even weaker. He walks through.
+# BUT: 60 garrison at defender_multiplier 3.0 means they fight like Level 45.
+# 60 units at effective level 45 vs one Level 72 is a real fight.
+# The town isn't won at the wall. It's won in the streets.
+
+[victory_conditions]
+attacker_wins = ["all_defenders_eliminated", "defender_surrender"]
+defender_wins = ["champion_killed", "champion_retreat"]
+time_limit_ticks = 3000
+
+[narrative]
+opening = "One man walks up the road. The sentries laugh. Then the first cut takes the gate off its hinges, and the laughter stops."
+attacker_victory = "Sixty soldiers. Three [Captains]. Two [Sergeants]. One town. Kerash the Undimmed walks out the other side, his blade clean. He always cleans his blade. The town surrenders to a man who didn't even slow down at their walls."
+defender_victory = "Numbers. In the end, it was just numbers. Even a [Sword Saint] bleeds, and sixty defenders on home ground, fighting from rooftops and alleyways, behind barricades and through murder holes — they bled him out. The walls didn't stop him. The people did."

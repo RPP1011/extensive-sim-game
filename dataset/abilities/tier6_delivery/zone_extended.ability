@@ -1,0 +1,153 @@
+// Tier 6: Extended zone delivery
+
+ability Blizzard {
+    target: ground, range: 6.0
+    cooldown: 12s, cast: 400ms
+    hint: damage
+
+    deliver zone { duration: 4s, tick: 1s } {
+        on_hit {
+            damage 15 in circle(3.0) [ICE: 50]
+            slow 0.3 for 1500ms in circle(3.0)
+        }
+    }
+}
+
+ability RainOfFire {
+    target: ground, range: 6.0
+    cooldown: 14s, cast: 500ms
+    hint: damage
+
+    deliver zone { duration: 5s, tick: 1s } {
+        on_hit {
+            damage 18 in circle(3.0) [FIRE: 55]
+        }
+    }
+}
+
+ability ConsecratedGround {
+    target: ground, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: heal
+
+    deliver zone { duration: 5s, tick: 1s } {
+        on_hit {
+            heal 12 in circle(3.0) [HOLY: 35]
+        }
+    }
+}
+
+ability MiasmaCloud {
+    target: ground, range: 5.0
+    cooldown: 12s, cast: 300ms
+    hint: damage
+
+    deliver zone { duration: 6s, tick: 1s } {
+        on_hit {
+            damage 8 in circle(2.5) [POISON: 40]
+            slow 0.2 for 1500ms in circle(2.5) [POISON: 30]
+        }
+    }
+}
+
+ability DarkVortex {
+    target: ground, range: 5.0
+    cooldown: 14s, cast: 400ms
+    hint: damage
+
+    deliver zone { duration: 4s, tick: 1s } {
+        on_hit {
+            damage 15 in circle(2.5) [DARK: 50]
+            debuff damage_output 0.9 for 1500ms in circle(2.5) [DARK: 35]
+        }
+    }
+}
+
+ability HallowedGround {
+    target: ground, range: 5.0
+    cooldown: 14s, cast: 400ms
+    hint: heal
+
+    deliver zone { duration: 6s, tick: 1s } {
+        on_hit {
+            heal 10 in circle(3.5) [HOLY: 30]
+            shield 5 for 2s in circle(3.5)
+        }
+    }
+}
+
+ability ThunderField {
+    target: ground, range: 6.0
+    cooldown: 10s, cast: 300ms
+    hint: damage
+
+    deliver zone { duration: 4s, tick: 1s } {
+        on_hit {
+            damage 12 in circle(2.5) [MAGIC: 45]
+        }
+    }
+}
+
+ability ToxicSwamp {
+    target: ground, range: 5.0
+    cooldown: 12s, cast: 400ms
+    hint: crowd_control
+
+    deliver zone { duration: 5s, tick: 1s } {
+        on_hit {
+            damage 6 in circle(3.0) [POISON: 35]
+            slow 0.4 for 1500ms in circle(3.0) [POISON: 40]
+        }
+    }
+}
+
+ability FrostField {
+    target: ground, range: 5.0
+    cooldown: 10s, cast: 300ms
+    hint: crowd_control
+
+    deliver zone { duration: 4s, tick: 1s } {
+        on_hit {
+            slow 0.35 for 1500ms in circle(3.0) [ICE: 40]
+            damage 8 in circle(3.0) [ICE: 35]
+        }
+    }
+}
+
+ability LavaPool {
+    target: ground, range: 5.0
+    cooldown: 14s, cast: 500ms
+    hint: damage
+
+    deliver zone { duration: 5s, tick: 1s } {
+        on_hit {
+            damage 20 in circle(2.0) [FIRE: 55]
+        }
+    }
+}
+
+ability ArcaneStorm {
+    target: ground, range: 6.0
+    cooldown: 12s, cast: 400ms
+    hint: damage
+
+    deliver zone { duration: 4s, tick: 1s } {
+        on_hit {
+            damage 14 in circle(3.0) [MAGIC: 45]
+            silence 800ms in circle(3.0) [MAGIC: 30]
+        }
+    }
+}
+
+ability ShadowWell {
+    target: ground, range: 5.0
+    cooldown: 14s, cast: 400ms
+    hint: damage
+
+    deliver zone { duration: 5s, tick: 1s } {
+        on_hit {
+            damage 12 in circle(2.5) [DARK: 45]
+            debuff move_speed 0.25 for 1500ms in circle(2.5) [DARK: 35]
+        }
+    }
+}

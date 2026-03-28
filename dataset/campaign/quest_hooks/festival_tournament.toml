@@ -1,0 +1,59 @@
+name = "Festival Tournament"
+priority = 4
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "SeasonChange"
+season = "Spring"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "The Spring Festival features a grand tournament — mounted jousting, archery, swordsmanship, and a team melee. Prizes include gold, rare equipment, and the attention of every noble patron in the region."
+deadline_secs = 90.0
+default_option = 0
+
+[[choice.options]]
+label = "Enter Every Event (45g)"
+description = "Full participation across all categories. Equipment and entry fees add up."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -45.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 15.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild fields competitors in every event. Win or lose, everyone knows their name."
+
+[[choice.options]]
+label = "Focus on Team Melee (20g)"
+description = "The team event showcases what the guild does best — fight together."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 8.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Five guild fighters enter the melee ring. The crowd roars."
+
+[[choice.options]]
+label = "Spectate Only"
+description = "Watch, network, and let others compete. Save the gold."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 2.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild watches from the stands, making contacts and taking mental notes on the competition."

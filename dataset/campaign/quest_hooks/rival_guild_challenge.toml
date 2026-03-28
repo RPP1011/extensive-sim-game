@@ -1,0 +1,62 @@
+# A rival guild challenges yours for territory or contracts.
+
+name = "Rival Guild Challenge"
+priority = 7
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "GuildReputation"
+min_reputation = 40.0
+
+[choice]
+category = "strategic"
+trigger = "hook"
+prompt = "The Iron Wolves, a rival adventuring guild, have challenged your claim to the region's dungeon-delving contracts. They've posted a public challenge: whoever clears {location_name} first gets exclusive rights for a year."
+deadline_secs = 60.0
+default_option = 0
+
+[[choice.options]]
+label = "Accept the Challenge"
+description = "Race them to the dungeon. Winner takes all."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -25.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 12.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The gauntlet is thrown and caught. Two guilds march toward the same dungeon."
+
+[[choice.options]]
+label = "Propose Joint Venture"
+description = "Why compete when you can cooperate? Split the contracts and the risk."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
+type = "faction_relation"
+faction_id = 0
+delta = 5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The Iron Wolves are surprised but agree. Shared risk, shared reward."
+
+[[choice.options]]
+label = "Ignore the Challenge"
+description = "You don't answer to other guilds. Continue business as usual."
+
+[[choice.options.effects]]
+type = "reputation"
+amount = -5.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The Iron Wolves crow about the guild's cowardice. It stings, but you have bigger concerns."

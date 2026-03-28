@@ -1,0 +1,56 @@
+name = "Rooftop Chase"
+map_type = "street_fight"
+width = 30
+height = 14
+
+[terrain]
+layout = """
+HHHH....HHHH....HHHH....HHHH.
+HHHH....HHHH....HHHH....HHHH.
+HHHH.BB.HHHH.BB.HHHH.BB.HHHH.
+......BB......BB......BB......
+HHHH.BB.HHHH.BB.HHHH.BB.HHHH.
+HHHH....HHHH....HHHH....HHHH.
+HHHH....HHHH....HHHH....HHHH.
+..............................
+HHHH....HHHH....HHHH....HHHH.
+HHHH.BB.HHHH.BB.HHHH.BB.HHHH.
+......BB......BB......BB......
+HHHH.BB.HHHH.BB.HHHH.BB.HHHH.
+HHHH....HHHH....HHHH....HHHH.
+HHHH....HHHH....HHHH....HHHH.
+"""
+
+[[spawn_zones]]
+name = "pursuers"
+team = 0
+rect = [0, 0, 8, 5]
+
+[[spawn_zones]]
+name = "runners"
+team = 1
+rect = [20, 8, 29, 13]
+
+[[cover_positions]]
+position = [5, 2]
+type = "half"
+
+[[cover_positions]]
+position = [13, 2]
+type = "half"
+
+[[cover_positions]]
+position = [21, 2]
+type = "half"
+
+[[cover_positions]]
+position = [5, 9]
+type = "half"
+
+[[cover_positions]]
+position = [13, 9]
+type = "half"
+
+[[cover_positions]]
+position = [21, 9]
+type = "half"

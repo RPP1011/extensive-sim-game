@@ -1,0 +1,37 @@
+[level_scaling]
+description = "How unit level affects damage to fortifications"
+
+# Base formula: damage_multiplier = clamp((unit_level / fort_level)^2, 0.05, 2.0)
+# This means:
+# - Level 10 vs Level 30 wall: (10/30)^2 = 0.11x damage (barely scratching)
+# - Level 30 vs Level 30 wall: (30/30)^2 = 1.0x damage (normal)
+# - Level 50 vs Level 30 wall: min(2.0, (50/30)^2) = 2.0x damage (cleaving through)
+# - Level 70 vs Level 10 palisade: 2.0x (capped, but palisade HP is low anyway)
+
+[level_scaling.formula]
+type = "quadratic_ratio"
+exponent = 2.0
+min_multiplier = 0.05
+max_multiplier = 2.0
+bypass_threshold = 1.5     # above this ratio, bonus damage kicks in
+
+[siege_equipment]
+description = "Siege equipment ignores level scaling entirely"
+level_scaling_applies = false
+# Siege equipment has its own damage values that apply directly to wall HP
+# A Level 1 crew operating a trebuchet does the same damage as a Level 50 crew
+# (though higher level crew may fire faster or more accurately)
+
+[ability_vs_walls]
+description = "How abilities interact with fortification wards"
+# Abilities within anti_magic_radius have their damage reduced
+# Ward level creates a secondary gate: abilities below ward_level do 0 damage to walls
+# Area abilities (AoE) that hit walls use the ability's "level" (tier * 10)
+# Single target abilities cannot target walls directly (must target gate or breach)
+
+[class_bonuses]
+description = "Certain classes deal bonus damage to fortifications"
+# [Builder] / [Sapper]: +100% damage to fortifications, can identify weak points
+# [Siege Engineer]: +50% siege equipment damage, faster reload
+# [Berserker]: rage abilities bypass 50% of level scaling
+# [Archmage]: spells above Tier 5 ignore wards entirely

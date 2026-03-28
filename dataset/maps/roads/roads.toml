@@ -1,0 +1,109 @@
+[[roads]]
+name = "Imperial Highway"
+type = "paved"
+travel_speed_multiplier = 1.5
+danger_level = 0.1
+maintenance_cost = 10
+trade_bonus = 0.2
+
+[roads.narrative]
+description = "The old empire's greatest achievement — a road so straight you can see tomorrow's destination today."
+
+[[roads]]
+name = "Forest Trail"
+type = "trail"
+travel_speed_multiplier = 0.7
+danger_level = 0.4
+maintenance_cost = 1
+trade_bonus = 0.0
+
+[roads.narrative]
+description = "A narrow path worn by hunters and woodcutters. One wrong turn and you're lost for days."
+
+[[roads]]
+name = "Trade Road"
+type = "dirt"
+travel_speed_multiplier = 1.0
+danger_level = 0.2
+maintenance_cost = 5
+trade_bonus = 0.1
+
+[roads.narrative]
+description = "Wagon ruts carved deep by years of merchant traffic. Muddy in rain, dusty in sun, but it gets you there."
+
+[[roads]]
+name = "King's Bridge"
+type = "bridge"
+travel_speed_multiplier = 1.2
+danger_level = 0.1
+maintenance_cost = 15
+trade_bonus = 0.15
+
+[roads.narrative]
+description = "A stone bridge wide enough for two carts to pass. The tolls are steep, but swimming isn't an option."
+
+[[roads]]
+name = "Eagle's Pass"
+type = "mountain_pass"
+travel_speed_multiplier = 0.5
+danger_level = 0.6
+maintenance_cost = 8
+trade_bonus = 0.05
+
+[roads.narrative]
+description = "A narrow ledge carved into the mountainside. Don't look down, and pray the weather holds."
+
+[[roads]]
+name = "Deep Tunnel"
+type = "tunnel"
+travel_speed_multiplier = 0.8
+danger_level = 0.5
+maintenance_cost = 12
+trade_bonus = 0.1
+
+[roads.narrative]
+description = "A dwarf-carved passage through the mountain. Faster than going over, if you don't mind the dark."
+
+[[roads]]
+name = "River Ford"
+type = "river_crossing"
+travel_speed_multiplier = 0.6
+danger_level = 0.3
+maintenance_cost = 3
+trade_bonus = 0.0
+
+[roads.narrative]
+description = "Shallow enough to wade in summer, deadly in spring floods. Locals know where to step."
+
+[[roads]]
+name = "Merchant Sea Lane"
+type = "sea_route"
+travel_speed_multiplier = 2.0
+danger_level = 0.4
+maintenance_cost = 0
+trade_bonus = 0.3
+
+[roads.narrative]
+description = "The fastest way between coastal cities. Pirates are the toll collectors, and storms are the gatekeepers."
+
+[[roads]]
+name = "Smuggler's Passage"
+type = "underground_passage"
+travel_speed_multiplier = 0.6
+danger_level = 0.5
+maintenance_cost = 2
+trade_bonus = 0.0
+
+[roads.narrative]
+description = "A hidden passage known only to those who need to move unseen. Cramped, dark, and off every map."
+
+[[roads]]
+name = "Wayfinder's Gate"
+type = "ancient_portal"
+travel_speed_multiplier = 10.0
+danger_level = 0.3
+maintenance_cost = 50
+trade_bonus = 0.0
+
+[roads.narrative]
+description = "An ancient portal of unknown origin. Step through and you're somewhere else entirely. Usually where you intended."

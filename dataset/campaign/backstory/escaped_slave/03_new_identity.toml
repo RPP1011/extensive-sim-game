@@ -1,0 +1,36 @@
+name = "New Identity"
+world_template = "Frontier"
+sequence = 3
+default_option = 0
+prompt = "A forger in a border town offers you new papers — a clean name, a clean history. The price is high, but with new identity comes a new life. Or you could embrace what you are: an escaped slave with nothing to lose and everything to prove."
+
+[[options]]
+label = "New Name, New Life (30g)"
+description = "Pay the forger. Become someone else entirely. The past dies here."
+pc_traits = [{ trait = "pragmatist" }]
+pc_stats = { speed = 1.0 }
+effects = [
+    { type = "gold", amount = -30.0 },
+    { type = "narrative", text = "You sign a name you've never used before. The ink dries. You are reborn." },
+]
+
+[[options]]
+label = "Keep Your Name"
+description = "You earned every scar. Your real name carries weight — the weight of survival."
+pc_traits = [{ trait = "battle_scarred" }]
+pc_stats = { resolve = 3.0 }
+effects = [
+    { type = "reputation", amount = 10.0 },
+    { type = "narrative", text = "Your name travels ahead of you. Some doors close; others open wider." },
+]
+
+[[options]]
+label = "Take the Forger's Identity"
+description = "He has papers. You have fists. Take his whole operation — tools, contacts, everything."
+pc_traits = [{ trait = "pragmatist" }]
+pc_stats = { attack = 2.0 }
+effects = [
+    { type = "gold", amount = 20.0 },
+    { type = "reputation", amount = -5.0 },
+    { type = "narrative", text = "The forger protests. Not for long. His workshop is yours now — and his list of clients." },
+]

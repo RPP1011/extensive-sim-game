@@ -1,0 +1,20 @@
+class Doctor {
+    stat_growth: +2 ability_power, +1 defense, +2 max_hp per level
+
+    tags: medicine, surgery, disease, anatomy, triage
+
+    scaling party_alive_count {
+        when party_members >= 1: +10% ability_power
+        always: +5% max_hp
+    }
+
+    abilities {
+        level 1: treat_wounds "Heal an ally's injuries between battles"
+        level 5: diagnose "Identify the cause of any ailment or curse"
+        level 10: field_surgery "Stabilize a critically wounded ally mid-combat"
+        level 20: quarantine "Prevent disease or poison from spreading through the party"
+        level 40: miracle_surgery "Operate on an ally to permanently remove a crippling wound or curse that no magic could heal"
+    }
+
+    requirements: level 1
+}

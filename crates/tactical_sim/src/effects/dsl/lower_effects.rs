@@ -24,6 +24,9 @@ pub(super) fn lower_effect(node: &EffectNode) -> Result<ConditionalEffect, Strin
         else_effects.push(lower_effect(eff)?);
     }
 
+    let targeting_filter = node.targeting_filter.as_ref()
+        .and_then(|name| lower_target_filter(name, &node.targeting_args));
+
     Ok(ConditionalEffect {
         effect,
         condition,
@@ -32,7 +35,60 @@ pub(super) fn lower_effect(node: &EffectNode) -> Result<ConditionalEffect, Strin
         stacking,
         chance,
         else_effects,
+        targeting_filter,
     })
+}
+
+fn lower_target_filter(name: &str, args: &[Arg]) -> Option<TargetFilter> {
+    match name {
+        "under_command" => Some(TargetFilter::UnderCommand),
+        "loyalty_above" => {
+            let t = args.first().and_then(|a| a.as_f64()).unwrap_or(50.0) as f32;
+            Some(TargetFilter::LoyaltyAbove { threshold: t })
+        }
+        "loyalty_below" => {
+            let t = args.first().and_then(|a| a.as_f64()).unwrap_or(50.0) as f32;
+            Some(TargetFilter::LoyaltyBelow { threshold: t })
+        }
+        "has_class" => {
+            let class_name = args.first().and_then(|a| a.as_str()).unwrap_or("").to_string();
+            Some(TargetFilter::HasClass { class_name })
+        }
+        "level_above" => {
+            let l = args.first().and_then(|a| a.as_u32()).unwrap_or(1);
+            Some(TargetFilter::LevelAbove { level: l })
+        }
+        "level_below" => {
+            let l = args.first().and_then(|a| a.as_u32()).unwrap_or(100);
+            Some(TargetFilter::LevelBelow { level: l })
+        }
+        "has_status" => {
+            let s = args.first().and_then(|a| a.as_str()).unwrap_or("").to_string();
+            Some(TargetFilter::HasStatus { status: s })
+        }
+        "faction" => {
+            let f = args.first().and_then(|a| a.as_str()).unwrap_or("").to_string();
+            Some(TargetFilter::FactionMember { faction: f })
+        }
+        "injured" => Some(TargetFilter::Injured),
+        "healthy" => Some(TargetFilter::Healthy),
+        _ => None,
+    }
+}
+
+/// Extract campaign tick duration from an EffectNode.
+fn get_ticks(node: &EffectNode) -> u32 {
+    // Check args for TickDuration first
+    for arg in &node.args {
+        if let Arg::TickDuration(t) = arg {
+            return *t;
+        }
+    }
+    // Then check duration_ticks field (from `for Nt` syntax)
+    node.duration_ticks.unwrap_or(
+        // Fall back to duration (might be ms, but best effort)
+        node.duration.unwrap_or(0),
+    )
 }
 
 fn lower_effect_type(node: &EffectNode) -> Result<Effect, String> {
@@ -438,6 +494,244 @@ fn lower_effect_type(node: &EffectNode) -> Result<Effect, String> {
                 .or(node.duration).unwrap_or(0);
             Ok(Effect::Duel { duration_ms: dur })
         }
+
+        // ===================================================================
+        // Meta-Effects
+        // ===================================================================
+        "refresh_cooldowns" => Ok(Effect::RefreshCooldowns),
+        "refresh_cooldown" => {
+            let idx = node.args.first().and_then(|a| a.as_u32()).unwrap_or(0);
+            Ok(Effect::RefreshCooldown { ability_index: idx })
+        }
+        "amplify" => {
+            let mult = node.args.first().and_then(|a| a.as_f64()).unwrap_or(1.5) as f32;
+            let charges = node.args.get(1).and_then(|a| a.as_u32()).unwrap_or(1);
+            Ok(Effect::Amplify { multiplier: mult, charges })
+        }
+        "echo" => {
+            let charges = node.args.first().and_then(|a| a.as_u32()).unwrap_or(1);
+            Ok(Effect::Echo { charges })
+        }
+        "extend_durations" => {
+            let ms = node.args.first().and_then(|a| a.as_duration_ms()).unwrap_or(2000);
+            Ok(Effect::ExtendDurations { amount_ms: ms })
+        }
+        "instant_cast" => {
+            let charges = node.args.first().and_then(|a| a.as_u32()).unwrap_or(1);
+            Ok(Effect::InstantCast { charges })
+        }
+        "free_cast" => {
+            let charges = node.args.first().and_then(|a| a.as_u32()).unwrap_or(1);
+            Ok(Effect::FreeCast { charges })
+        }
+        "spell_shield" => {
+            let charges = node.args.first().and_then(|a| a.as_u32()).unwrap_or(1);
+            Ok(Effect::SpellShield { charges })
+        }
+        "mana_burn" => {
+            let mult = node.args.first().and_then(|a| a.as_f64()).unwrap_or(2.0) as f32;
+            let dur = node.args.get(1).and_then(|a| a.as_duration_ms())
+                .or(node.duration).unwrap_or(5000);
+            Ok(Effect::ManaBurn { cost_multiplier: mult, duration_ms: dur })
+        }
+        "cooldown_lock" => {
+            let dur = node.args.first().and_then(|a| a.as_duration_ms())
+                .or(node.duration).unwrap_or(3000);
+            Ok(Effect::CooldownLock { duration_ms: dur })
+        }
+
+        // ===================================================================
+        // Recursive Effects
+        // ===================================================================
+        "on_hit_cast" => {
+            let name = node.args.iter().find_map(|a| a.as_str()).unwrap_or("").to_string();
+            Ok(Effect::OnHitCast { ability_name: name })
+        }
+        "grant_ability" => {
+            let name = node.args.iter().find_map(|a| a.as_str()).unwrap_or("").to_string();
+            let dur = node.duration.unwrap_or(10000);
+            Ok(Effect::GrantAbility { ability_name: name, duration_ms: dur })
+        }
+        "cast_copy" => Ok(Effect::CastCopy),
+        "evolve_after" => {
+            let count = node.args.first().and_then(|a| a.as_u32()).unwrap_or(5);
+            Ok(Effect::EvolveAfter { cast_count: count })
+        }
+
+        // ===================================================================
+        // Campaign Primitives
+        // ===================================================================
+        "modify_stat" => {
+            let entity = node.args.iter().find_map(|a| a.as_str()).unwrap_or("").to_string();
+            let property = node.args.iter().skip(1).find_map(|a| a.as_str()).unwrap_or("").to_string();
+            let amount = node.args.iter().find_map(|a| a.as_f64()).unwrap_or(0.0) as f32;
+            let op = if amount < 0.0 { "add" } else { "add" }.to_string();
+            let dur = get_ticks(node);
+            Ok(Effect::ModifyStat { entity, property, op, amount, duration_ticks: dur })
+        }
+        "set_flag" => {
+            let entity = node.args.iter().find_map(|a| a.as_str()).unwrap_or("").to_string();
+            let flag = node.args.iter().skip(1).find_map(|a| a.as_str()).unwrap_or("").to_string();
+            let dur = get_ticks(node);
+            Ok(Effect::SetFlag { entity, flag, value: true, duration_ticks: dur })
+        }
+        "reveal_info" => {
+            let target = node.args.iter().find_map(|a| a.as_str()).unwrap_or("").to_string();
+            let scope = node.args.iter().skip(1).find_map(|a| a.as_str()).unwrap_or("all").to_string();
+            Ok(Effect::RevealInfo { target_type: target, scope })
+        }
+        "create_entity" => {
+            let etype = node.args.iter().find_map(|a| a.as_str()).unwrap_or("").to_string();
+            let subtype = node.args.iter().skip(1).find_map(|a| a.as_str()).unwrap_or("").to_string();
+            let dur = get_ticks(node);
+            Ok(Effect::CreateEntity { entity_type: etype, subtype, duration_ticks: dur })
+        }
+        "destroy_entity" => {
+            let ttype = node.args.iter().find_map(|a| a.as_str()).unwrap_or("").to_string();
+            Ok(Effect::DestroyEntity { target_type: ttype })
+        }
+        "transfer" => {
+            let from = node.args.iter().find_map(|a| a.as_str()).unwrap_or("").to_string();
+            let to = node.args.iter().skip(1).find_map(|a| a.as_str()).unwrap_or("").to_string();
+            let prop = node.args.iter().skip(2).find_map(|a| a.as_str()).unwrap_or("").to_string();
+            let amount = node.args.iter().find_map(|a| a.as_f64()).unwrap_or(1.0) as f32;
+            Ok(Effect::TransferValue { from_entity: from, to_entity: to, property: prop, amount })
+        }
+
+        // ===================================================================
+        // Campaign Effects
+        // ===================================================================
+
+        // --- Economy ---
+        "corner_market" => {
+            let commodity = node.args.iter().find_map(|a| a.as_str()).unwrap_or("").to_string();
+            Ok(Effect::CornerMarket { commodity, duration_ticks: get_ticks(node) })
+        }
+        "forge_trade_route" | "forge_route" => {
+            let income = node.args.iter().find_map(|a| a.as_f64()).unwrap_or(0.0) as f32;
+            Ok(Effect::ForgeTradeRoute { income_per_tick: income, duration_ticks: get_ticks(node) })
+        }
+        "appraise" => Ok(Effect::Appraise),
+        "golden_touch" => Ok(Effect::GoldenTouch { duration_ticks: get_ticks(node) }),
+        "trade_embargo" => Ok(Effect::TradeEmbargo { duration_ticks: get_ticks(node) }),
+        "silver_tongue" => Ok(Effect::SilverTongue),
+
+        // --- Diplomacy ---
+        "demand_audience" => Ok(Effect::DemandAudience),
+        "ceasefire" => Ok(Effect::CeasefireDeclaration { duration_ticks: get_ticks(node) }),
+        "destabilize" => {
+            let instability = node.args.iter().find_map(|a| a.as_f64()).unwrap_or(0.3) as f32;
+            Ok(Effect::Destabilize { instability, duration_ticks: get_ticks(node) })
+        }
+        "broker_alliance" => Ok(Effect::BrokerAlliance { duration_ticks: get_ticks(node) }),
+        "subvert_loyalty" => Ok(Effect::SubvertLoyalty),
+        "treaty_breaker" => Ok(Effect::TreatyBreaker),
+        "shatter_alliance" => Ok(Effect::ShatterAlliance),
+
+        // --- Information ---
+        "reveal" | "reveal_threats" => {
+            let count = node.args.iter().find_map(|a| a.as_u32()).unwrap_or(1);
+            Ok(Effect::Reveal { count })
+        }
+        "prophecy" | "prophetic_vision" => {
+            let count = node.args.iter().find_map(|a| a.as_u32()).unwrap_or(1);
+            Ok(Effect::PropheticVision { count })
+        }
+        "beast_lore" => Ok(Effect::BeastLore),
+        "read_the_room" => Ok(Effect::ReadTheRoom),
+        "all_seeing_eye" => Ok(Effect::AllSeeingEye),
+        "decipher" => Ok(Effect::Decipher),
+        "trap_sense" => Ok(Effect::TrapSense),
+        "sapper_eye" => Ok(Effect::SapperEye),
+
+        // --- Leadership ---
+        "rally" => {
+            let morale = node.args.iter().find_map(|a| a.as_f64()).unwrap_or(0.5) as f32;
+            Ok(Effect::Rally { morale_restore: morale })
+        }
+        "rallying_cry" => {
+            let morale = node.args.iter().find_map(|a| a.as_f64()).unwrap_or(0.5) as f32;
+            Ok(Effect::RallyingCry { morale_restore: morale })
+        }
+        "inspire" => {
+            let boost = node.args.iter().find_map(|a| a.as_f64()).unwrap_or(0.2) as f32;
+            Ok(Effect::Inspire { morale_boost: boost, duration_ticks: get_ticks(node) })
+        }
+        "field_command" => Ok(Effect::FieldCommand { duration_ticks: get_ticks(node) }),
+        "coordinated_strike" => Ok(Effect::CoordinatedStrike),
+        "war_cry" => Ok(Effect::WarCry { duration_ticks: get_ticks(node) }),
+
+        // --- Stealth / Movement ---
+        "ghost_walk" => Ok(Effect::GhostWalk { duration_ticks: get_ticks(node) }),
+        "shadow_step" => Ok(Effect::ShadowStep { duration_ticks: get_ticks(node) }),
+        "silent_movement" => Ok(Effect::SilentMovement),
+        "hidden_camp" => Ok(Effect::HiddenCamp { duration_ticks: get_ticks(node) }),
+        "vanish" => Ok(Effect::Vanish),
+        "distraction" => Ok(Effect::Distraction { duration_ticks: get_ticks(node) }),
+
+        // --- Territory ---
+        "claim_territory" => Ok(Effect::ClaimTerritory),
+        "fortify" => Ok(Effect::Fortify { duration_ticks: get_ticks(node) }),
+        "sanctuary" => Ok(Effect::Sanctuary { duration_ticks: get_ticks(node) }),
+        "plague_ward" => Ok(Effect::PlagueWard { duration_ticks: get_ticks(node) }),
+        "safe_house" => Ok(Effect::SafeHouse { duration_ticks: get_ticks(node) }),
+
+        // --- Supernatural / Body ---
+        "blood_oath" => {
+            let bonus = node.args.iter().find_map(|a| a.as_f64()).unwrap_or(0.15) as f32;
+            Ok(Effect::BloodOath { stat_bonus: bonus })
+        }
+        "unbreakable" => Ok(Effect::Unbreakable),
+        "life_eternal" => Ok(Effect::LifeEternal),
+        "purify" => Ok(Effect::Purify),
+        "name_the_nameless" => Ok(Effect::NameTheNameless),
+        "forbidden_knowledge" => Ok(Effect::ForbiddenKnowledge),
+
+        // --- Passive Skill-State ---
+        "field_triage" => {
+            let mult = node.args.iter().find_map(|a| a.as_f64()).unwrap_or(1.5) as f32;
+            Ok(Effect::FieldTriage { heal_rate_multiplier: mult })
+        }
+        "inspiring_presence" => {
+            let boost = node.args.iter().find_map(|a| a.as_f64()).unwrap_or(0.2) as f32;
+            Ok(Effect::InspiringPresence { morale_boost: boost })
+        }
+        "battle_instinct" => Ok(Effect::BattleInstinct),
+        "quick_study" => Ok(Effect::QuickStudy),
+        "forage" => {
+            let rate = node.args.iter().find_map(|a| a.as_f64()).unwrap_or(0.1) as f32;
+            Ok(Effect::Forage { supply_per_tick: rate })
+        }
+        "track_prey" => Ok(Effect::TrackPrey),
+        "field_repair" => Ok(Effect::FieldRepair),
+        "stabilize_ally" | "stabilize" => Ok(Effect::StabilizeAlly),
+
+        // --- Higher Tier ---
+        "disinformation" => Ok(Effect::Disinformation { duration_ticks: get_ticks(node) }),
+        "accelerated_study" => Ok(Effect::AcceleratedStudy { duration_ticks: get_ticks(node) }),
+        "take_the_blow" => Ok(Effect::TakeTheBlow { duration_ticks: get_ticks(node) }),
+        "hold_the_line" => Ok(Effect::HoldTheLine),
+        "forgery" => Ok(Effect::Forgery),
+        "masterwork_craft" | "masterwork" => Ok(Effect::MasterworkCraft),
+        "intel_gathering" => Ok(Effect::IntelGathering),
+        "master_armorer" => Ok(Effect::MasterArmorer),
+        "market_maker" => Ok(Effect::MarketMaker { duration_ticks: get_ticks(node) }),
+        "forge_artifact" => Ok(Effect::ForgeArtifact),
+        "trade_empire" => {
+            let income = node.args.iter().find_map(|a| a.as_f64()).unwrap_or(1.0) as f32;
+            Ok(Effect::TradeEmpire { income_per_tick: income })
+        }
+
+        // --- Legendary / Mythic ---
+        "living_legend" => Ok(Effect::LivingLegend),
+        "rewrite_history" => Ok(Effect::RewriteHistory),
+        "the_last_word" => Ok(Effect::TheLastWord),
+        "wealth_of_nations" => Ok(Effect::WealthOfNations),
+        "omniscience" => Ok(Effect::Omniscience),
+        "immortal_moment" => Ok(Effect::ImmortalMoment),
+        "claim_by_right" => Ok(Effect::ClaimByRight),
+        "rewrite_the_record" => Ok(Effect::RewriteTheRecord),
+
         other => Err(format!("unknown effect type: {other}")),
     }
 }
@@ -452,6 +746,16 @@ fn lower_scaling(nodes: &[ScalingNode]) -> Vec<ScalingTerm> {
             "caster_current_hp" => StatRef::CasterCurrentHp,
             "caster_missing_hp" => StatRef::CasterMissingHp,
             "caster_attack_damage" => StatRef::CasterAttackDamage,
+            // Campaign stat references
+            "kingdom_size" => StatRef::KingdomSize,
+            "army_size" => StatRef::ArmySize,
+            "faction_territory" => StatRef::FactionTerritory,
+            "guild_reputation" => StatRef::GuildReputation,
+            "adventurer_count" => StatRef::AdventurerCount,
+            "loyalty_average" => StatRef::LoyaltyAverage,
+            "party_size" => StatRef::PartySize,
+            "guild_gold" | "gold" => StatRef::GuildGold,
+            "caster_level" | "level" => StatRef::CasterLevel,
             other => {
                 // Check for target_stacks("name") or caster_stacks("name")
                 if let Some(rest) = other.strip_prefix("target_stacks") {

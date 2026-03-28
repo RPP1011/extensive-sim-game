@@ -1,0 +1,57 @@
+# Magical ley lines in the region become unstable.
+
+name = "Ley Line Disruption"
+priority = 8
+repeatable = true
+cooldown_ticks = 10000
+
+[trigger]
+type = "ThreatLevel"
+min_threat = 35.0
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "The ley lines are shifting. Mages report headaches, potions spoil overnight, and enchanted weapons flicker. Something is disrupting the magical infrastructure of the entire region."
+deadline_secs = 90.0
+default_option = 0
+
+[[choice.options]]
+label = "Find the Source (40g)"
+description = "Send mages to trace the disruption to its origin. This needs to be fixed."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -40.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The guild's mages set out with crystal dowsing rods, following lines of power gone wrong."
+
+[[choice.options]]
+label = "Adapt"
+description = "Rely on steel instead of magic until things stabilize. Adjust tactics."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Enchanted gear is shelved. The guild fights the old-fashioned way for now."
+
+[[choice.options]]
+label = "Exploit It"
+description = "Disrupted ley lines are chaotic — but chaos can be harvested by those who know how."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -15.0
+
+[[choice.options.effects]]
+type = "supplies"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Wild magic is gathered in crystal jars. Volatile, unpredictable, but undeniably powerful."

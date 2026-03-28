@@ -1,0 +1,47 @@
+[[fortifications]]
+id = "wooden_tower"
+name = "Wooden Tower"
+tier = 1
+type = "tower"
+
+[fortifications.stats]
+tower_hp = 400
+height = 5.0
+garrison_slots = 4
+ranged_bonus = 0.3
+vision_radius = 12.0
+fire_arc = 270
+
+[fortifications.construction]
+cost = 80
+ticks = 200
+resources = ["timber"]
+builder_class_bonus = 0.5
+
+[fortifications.weaknesses]
+trebuchet_multiplier = 2.0
+fire_resistant = false
+fire_damage_multiplier = 3.0
+
+[fortifications.power_scaling]
+effective_level = 5
+builder_class_bonus = true
+enchantable = false
+age_scaling = 0.0
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 0.0
+ability_damage_reduction = 0.0
+projectile_deflection = 0.0
+ward_hp = 0
+ward_level = 0
+
+[fortifications.garrison_bonus]
+defender_multiplier = 2.0
+ranged_accuracy_bonus = 0.2
+melee_disadvantage = 0.1
+cover_rating = 0.35
+
+[fortifications.narrative]
+description = "Rough timber, an archer's platform, and a view of the killing ground. It won't survive a trebuchet stone, but it gives the defenders eyes and elevation. In a siege, both are worth their weight in gold."

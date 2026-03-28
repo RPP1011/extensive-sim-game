@@ -1,0 +1,81 @@
+name = "Exiled Nobles"
+description = "Three well-trained aristocrats cast out after a failed coup. Excellent stats, fine equipment knowledge, and a powerful faction that wants them dead. High risk, high ceiling."
+gold_bonus = 80.0
+supply_bonus = 5.0
+reputation_bonus = 5.0
+items = []
+
+[[adventurers]]
+id = 1
+name = "Lord Aldric"
+archetype = "warrior"
+level = 4
+xp = 0
+traits = ["diplomat_born", "noble_blood"]
+status = "Idle"
+loyalty = 60.0
+stress = 25.0
+fatigue = 5.0
+injury = 0.0
+resolve = 65.0
+morale = 55.0
+guild_relationship = 40.0
+
+[adventurers.stats]
+max_hp = 75.0
+attack = 14.0
+defense = 14.0
+speed = 10.0
+ability_power = 8.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 2
+name = "Lady Seraphina"
+archetype = "mage"
+level = 4
+xp = 0
+traits = ["scholar", "noble_blood"]
+status = "Idle"
+loyalty = 55.0
+stress = 20.0
+fatigue = 3.0
+injury = 0.0
+resolve = 60.0
+morale = 50.0
+guild_relationship = 35.0
+
+[adventurers.stats]
+max_hp = 45.0
+attack = 5.0
+defense = 6.0
+speed = 9.0
+ability_power = 22.0
+
+[adventurers.equipment]
+
+[[adventurers]]
+id = 3
+name = "Sir Corwin"
+archetype = "ranger"
+level = 3
+xp = 0
+traits = ["keen_eye", "noble_blood"]
+status = "Idle"
+loyalty = 50.0
+stress = 18.0
+fatigue = 5.0
+injury = 0.0
+resolve = 55.0
+morale = 52.0
+guild_relationship = 30.0
+
+[adventurers.stats]
+max_hp = 65.0
+attack = 13.0
+defense = 9.0
+speed = 13.0
+ability_power = 10.0
+
+[adventurers.equipment]

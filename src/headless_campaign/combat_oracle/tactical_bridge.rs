@@ -119,8 +119,8 @@ fn try_load_hero_template(archetype: &str) -> Option<tactical_sim::effects::Hero
 
     // Try loading from disk
     let paths = [
-        format!("assets/hero_templates/{}.toml", lower),
-        format!("assets/lol_heroes/{}.toml", lower),
+        format!("dataset/abilities/hero_templates/{}.toml", lower),
+        format!("dataset/abilities/lol_heroes/{}.toml", lower),
     ];
     for path in &paths {
         if let Ok(content) = std::fs::read_to_string(path) {
@@ -512,6 +512,10 @@ mod tests {
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: Default::default(),
+            ticks_since_income: 0,
         }
     }
 

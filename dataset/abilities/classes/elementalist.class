@@ -1,0 +1,21 @@
+class Elementalist {
+    stat_growth: +4 ability_power, +1 speed, +1 defense per level
+
+    tags: elemental, fire, ice, lightning, versatility
+
+    scaling enemy_count {
+        when enemy_count >= 2: +10% ability_power
+        when enemy_count >= 5: +15% ability_power
+        always: +5% speed
+    }
+
+    abilities {
+        level 1: elemental_bolt "Fire, ice, or lightning bolt chosen to exploit target weakness"
+        level 5: elemental_shield "Surround yourself in an element that damages melee attackers"
+        level 10: convergence "Combine two elements for a hybrid effect"
+        level 20: elemental_storm "Sustained area of rotating elemental damage"
+        level 40: primordial_wrath "Unleash all elements at once in a cataclysmic burst"
+    }
+
+    requirements: level 1
+}

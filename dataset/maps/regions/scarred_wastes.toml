@@ -1,0 +1,29 @@
+name = "The Scarred Wastes"
+terrain = "magical_wasteland"
+climate = "chaotic"
+size = "medium"
+
+[generation]
+settlement_density = 0.02
+road_connectivity = 0.1
+wilderness_danger = 0.95
+resource_richness = 0.6
+
+[settlement_distribution]
+hamlet_pct = 20
+village_pct = 15
+town_pct = 10
+city_pct = 5
+fortress_pct = 50
+
+[terrain_features]
+rivers = 0
+mountains = false
+forests = false
+coast = false
+lakes = 1
+
+[narrative]
+description = "Where a magical cataclysm scarred the land. Reality is thin here — gravity shifts, time stutters, and the ground itself remembers the destruction."
+threats = ["wild_magic", "reality_tears", "mutated_creatures", "temporal_anomalies"]
+opportunities = ["magical_residue", "ancient_artifacts", "rare_crystals", "planar_thin_spots"]

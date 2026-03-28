@@ -1,0 +1,32 @@
+[[equipment]]
+id = "ward_breaker"
+name = "Ward Breaker"
+category = "special"
+tier = 5
+
+[equipment.stats]
+gate_damage_per_tick = 0.0
+wall_damage_per_tick = 0.0
+magic_damage_per_tick = 25.0
+range = 15.0
+crew_required = 1
+move_speed = 0.6
+hp = 100
+armor = 5
+mana_cost_per_tick = 10
+dispel_strength = 5.0
+ward_suppression_radius = 5.0
+
+[equipment.requirements]
+min_tech_level = 5
+construction_cost = 500
+construction_ticks = 100
+resources = ["arcane_crystal", "null_stone"]
+requires_class = "[Archmage]"
+
+[equipment.counters]
+vulnerable_to = ["archer_focus", "sally_out", "counter_spell"]
+strong_against = ["magical_ward", "magical_barrier", "frost_wall", "flame_barrier"]
+
+[equipment.narrative]
+description = "The [Archmage] holds the null-stone staff and speaks words that are the opposite of spells. The magical barriers flicker, thin, and tear like wet paper. What remains is just stone and mortar, as vulnerable as anything else."

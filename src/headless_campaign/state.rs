@@ -505,6 +505,11 @@ pub struct CampaignState {
     #[serde(default)]
     pub world_gated_class_flags: std::collections::HashMap<String, u64>,
 
+    // --- NPC Economic Agent ---
+    /// Active patronage contracts between high-influence NPCs and their clients.
+    #[serde(default)]
+    pub patronage_contracts: Vec<PatronageContract>,
+
     // --- Extended system trackers ---
     /// Aggregate counters for the ~30 campaign subsystems.
     /// Updated by step logic; consumed by tokens, clustering, and value estimation.
@@ -1069,6 +1074,26 @@ pub struct Adventurer {
     /// Tiered skill effect tracking state (Phase 10).
     #[serde(default)]
     pub skill_state: SkillEffectState,
+
+    // --- NPC Economic Agent ---
+    /// Personal gold held by this adventurer.
+    #[serde(default)]
+    pub gold: f32,
+    /// Settlement where this NPC is economically based. `None` = in transit.
+    #[serde(default)]
+    pub home_location_id: Option<usize>,
+    /// Current economic activity / intent.
+    #[serde(default)]
+    pub economic_intent: EconomicIntent,
+    /// Ticks since last income was earned (drives urgency).
+    #[serde(default)]
+    pub ticks_since_income: u32,
+    /// Known prices at other settlements (information system).
+    #[serde(default)]
+    pub price_knowledge: Vec<PriceReport>,
+    /// Commodities being transported (for Merchant trade runs).
+    #[serde(default)]
+    pub carried_goods: [f32; 8],
 }
 
 /// A leadership role that provides passive buffs while the adventurer is active.
@@ -1226,9 +1251,16 @@ pub struct ClassInstance {
     pub stat_growth_stealth: f32,
     #[serde(default)]
     pub stat_growth_leadership: f32,
+
+    /// If this class was created by consolidation, tracks the parent class names.
+    /// Consolidated classes cannot consolidate with other consolidated classes
+    /// (only with base/starter classes) to prevent exponential class spam.
+    #[serde(default)]
+    pub consolidated_from: Option<(String, String)>,
 }
 
 /// A skill granted by the class system at a level threshold.
+#[allow(deprecated)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GrantedSkill {
     pub skill_name: String,
@@ -1251,7 +1283,10 @@ pub struct GrantedSkill {
     #[serde(default)]
     pub empowered: bool,
     /// Tiered skill effect — the actual power granted by this skill (Phase 10).
+    /// TODO: Replace with `Option<tactical_sim::effects::Effect>` and use
+    /// unified_dispatch::campaign_apply_effect() for dispatch.
     #[serde(default)]
+    #[allow(deprecated)]
     pub skill_effect: Option<SkillEffect>,
     /// Condition required for this skill to be activatable (conditional skills punch above weight).
     #[serde(default)]
@@ -1274,6 +1309,13 @@ pub enum SkillRarity {
 
 /// Non-combat powers granted by the class system. These are POWERS, not stat buffs.
 /// Skills are constrained by specificity and narrative consequence, not resource costs.
+///
+/// DEPRECATED: Use `tactical_sim::effects::Effect` instead.
+/// This enum is kept for backward compatibility but new code should use
+/// the unified Effect enum with `campaign_apply_effect()` dispatch
+/// in `crate::headless_campaign::unified_dispatch`.
+#[allow(deprecated)]
+#[deprecated(note = "Use tactical_sim::effects::Effect instead — see unified_dispatch.rs")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum SkillEffect {
     // --- Always-on passives (T1+) ---
@@ -1549,6 +1591,98 @@ pub enum EquipmentSlot {
 }
 
 // ---------------------------------------------------------------------------
+// NPC Economic Agent
+// ---------------------------------------------------------------------------
+
+/// What an NPC is currently trying to do economically.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub enum EconomicIntent {
+    #[default]
+    Idle,
+    /// Providing services at home settlement.
+    Working,
+    /// Moving to a better settlement.
+    Relocating { target_location_id: usize },
+    /// Waiting for travel companions.
+    SeekingParty { purpose: PartyPurpose },
+    /// In a persistent adventuring party running quests.
+    Adventuring,
+    /// In transit (caravan, travel party, or relocating).
+    Traveling,
+}
+
+/// Why an NPC wants to form/join a party.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum PartyPurpose {
+    /// Escort a caravan to a destination.
+    Escort { destination: usize },
+    /// Trade run between two settlements.
+    TradeRun { from: usize, to: usize },
+    /// Join a quest-running adventuring party.
+    Adventuring,
+    /// Travel to a new home settlement.
+    Relocation { destination: usize },
+    /// Found a new settlement at a viable location.
+    Founding { target_position: (f32, f32) },
+}
+
+/// Classification of autonomously-formed parties.
+#[derive(Clone, Debug, Default, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AutonomousPartyType {
+    /// Player-dispatched quest party (existing behavior).
+    #[default]
+    PlayerDispatched,
+    /// Trade run, dissolves on return.
+    Caravan,
+    /// One-way relocation group, dissolves on arrival.
+    Travel,
+    /// Persistent quest-running squad.
+    Adventuring,
+}
+
+/// A snapshot of prices and stockpile levels at a settlement, carried by NPCs
+/// as their knowledge of the world's economic state. Decays over time.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PriceReport {
+    pub location_id: usize,
+    /// Last known price per commodity.
+    pub prices: [f32; 8],
+    /// Last known stockpile levels.
+    pub stockpiles: [f32; 8],
+    /// Tick when this snapshot was taken (stale if old).
+    pub reported_tick: u32,
+}
+
+/// Commodity indices (for indexing into [f32; 8] arrays).
+pub const COMMODITY_FOOD: usize = 0;
+pub const COMMODITY_IRON: usize = 1;
+pub const COMMODITY_WOOD: usize = 2;
+pub const COMMODITY_HERBS: usize = 3;
+pub const COMMODITY_HIDE: usize = 4;
+pub const COMMODITY_CRYSTAL: usize = 5;
+pub const COMMODITY_EQUIPMENT: usize = 6;
+pub const COMMODITY_MEDICINE: usize = 7;
+
+/// Base prices per commodity (used for price computation).
+pub const BASE_PRICES: [f32; 8] = [1.0, 3.0, 2.0, 2.5, 2.0, 5.0, 10.0, 8.0];
+
+/// A patronage contract between a high-influence patron and a client NPC.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PatronageContract {
+    pub patron_id: u32,
+    pub client_id: u32,
+    pub location_id: usize,
+    /// Minimum gold/tick the patron guarantees the client.
+    pub income_guarantee: f32,
+    /// Whether the patron covers the client's living costs.
+    pub housing_provided: bool,
+    /// Contract duration in ticks.
+    pub duration_ticks: u32,
+    /// Tick when the contract was established.
+    pub started_tick: u32,
+}
+
+// ---------------------------------------------------------------------------
 // Party
 // ---------------------------------------------------------------------------
 
@@ -1573,6 +1707,14 @@ pub struct Party {
     /// Party food level (0–100). Driven by the food system.
     #[serde(default = "default_food_level")]
     pub food_level: f32,
+
+    // --- NPC Economic Agent ---
+    /// Whether this party was formed autonomously (vs player-dispatched).
+    #[serde(default)]
+    pub autonomous: bool,
+    /// Classification of autonomous party.
+    #[serde(default)]
+    pub party_type: AutonomousPartyType,
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1841,6 +1983,49 @@ pub struct Location {
     pub faction_owner: Option<usize>,
     /// Whether the guild has scouted this location.
     pub scouted: bool,
+
+    // --- NPC Economic Agent ---
+    /// Adventurer IDs currently based at this location.
+    #[serde(default)]
+    pub resident_ids: Vec<u32>,
+    /// Demand per service channel: [diplomacy, commerce, crafting, medicine,
+    /// scholarship, stealth, leadership, combat]. 0.0 = saturated, 1.0 = desperate.
+    #[serde(default)]
+    pub service_demand: [f32; 8],
+    /// Expense multiplier for residents. Higher in populous settlements.
+    #[serde(default = "default_cost_of_living")]
+    pub cost_of_living: f32,
+    /// Effective level of the strongest combat-class resident (0 = undefended).
+    #[serde(default)]
+    pub safety_level: f32,
+    /// Maximum threat level this settlement can handle.
+    #[serde(default)]
+    pub min_viable_threat: f32,
+    /// Settlement treasury — accumulated from resident taxes. Funds infrastructure,
+    /// bounties, and settlement-level spending.
+    #[serde(default)]
+    pub treasury: f32,
+    /// Tax rate this settlement charges residents (0.0–1.0).
+    #[serde(default = "default_settlement_tax_rate")]
+    pub tax_rate: f32,
+    /// Commodity stockpile at this settlement.
+    #[serde(default)]
+    pub stockpile: CommodityStockpile,
+    /// Current local price per commodity index (food=0, iron=1, wood=2, herbs=3, hide=4, crystal=5, equipment=6, medicine=7).
+    #[serde(default = "default_local_prices")]
+    pub local_prices: [f32; 8],
+}
+
+fn default_local_prices() -> [f32; 8] {
+    [1.0, 3.0, 2.0, 2.5, 2.0, 5.0, 10.0, 8.0] // base prices
+}
+
+fn default_cost_of_living() -> f32 {
+    1.0
+}
+
+fn default_settlement_tax_rate() -> f32 {
+    0.15
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1866,7 +2051,7 @@ pub enum CalamityType {
 
 /// Active endgame crisis with tracking state.
 ///
-/// All escalation parameters come from TOML templates in `assets/crises/`.
+/// All escalation parameters come from TOML templates in `dataset/campaign/crises/`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ActiveCrisis {
     /// The Sleeping King: champions rally to a distant ruler.
@@ -2780,6 +2965,39 @@ pub enum ResourceType {
     Herbs,
     Hide,
     Obsidian,
+}
+
+/// Settlement-level commodity stockpile. NPCs produce into this and consume from it.
+/// Trade happens when one settlement has surplus and another has deficit.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CommodityStockpile {
+    /// Food units. Consumed by every resident per tick. Produced by farmers.
+    pub food: f32,
+    /// Raw iron ore. Extracted from nodes. Consumed by blacksmiths to make equipment.
+    pub iron: f32,
+    /// Raw lumber. Extracted from nodes. Consumed by builders/crafters.
+    pub wood: f32,
+    /// Medicinal herbs. Extracted from nodes. Consumed by healers to treat injuries.
+    pub herbs: f32,
+    /// Animal hides. Extracted from hunting. Used for light armor/gear.
+    pub hide: f32,
+    /// Arcane crystals. Extracted from nodes. Used by mages for enchantment.
+    pub crystal: f32,
+    /// Finished equipment units (abstracted). Crafted from iron+wood. Degrades over time.
+    pub equipment: f32,
+    /// Prepared medicine. Crafted from herbs. Consumed to heal injuries.
+    pub medicine: f32,
+}
+
+impl CommodityStockpile {
+    /// Total raw materials value (for trade evaluation).
+    pub fn total_raw(&self) -> f32 {
+        self.food + self.iron + self.wood + self.herbs + self.hide + self.crystal
+    }
+    /// Total processed goods value.
+    pub fn total_processed(&self) -> f32 {
+        self.equipment + self.medicine
+    }
 }
 
 /// A harvestable resource node in a region.
@@ -5233,6 +5451,12 @@ impl CampaignState {
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
             },
             Adventurer {
                 id: 2,
@@ -5283,6 +5507,12 @@ impl CampaignState {
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
             },
             Adventurer {
                 id: 3,
@@ -5333,6 +5563,12 @@ impl CampaignState {
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
             },
             Adventurer {
                 id: 4,
@@ -5383,6 +5619,12 @@ impl CampaignState {
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
             },
         ];
 
@@ -5653,13 +5895,14 @@ impl CampaignState {
             living_legend_holder: None,
             wealth_of_nations_active: false,
             omniscience_active: false,
+            patronage_contracts: Vec::new(),
         }
     }
 
-    /// Load a world template based on seed from `assets/world_templates/`,
+    /// Load a world template based on seed from `dataset/campaign/world_templates/`,
     /// falling back to the built-in default frontier template.
     fn load_world_template(seed: u64) -> super::world_templates::WorldTemplate {
-        let dir = std::path::Path::new("assets/world_templates");
+        let dir = std::path::Path::new("dataset/campaign/world_templates");
         if dir.exists() {
             match super::world_templates::WorldTemplate::load_from_dir(dir) {
                 Ok(templates) if !templates.is_empty() => {
@@ -5675,7 +5918,7 @@ impl CampaignState {
 
     /// Load starting choices from `assets/starting_packages/` or return defaults.
     fn load_or_default_starting_choices() -> Vec<StartingChoice> {
-        let dir = std::path::Path::new("assets/starting_packages");
+        let dir = std::path::Path::new("dataset/campaign/starting_packages");
         if dir.exists() {
             match StartingChoice::load_from_dir(dir) {
                 Ok(choices) if !choices.is_empty() => return choices,
@@ -5719,6 +5962,12 @@ impl CampaignState {
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
                     },
                     Adventurer {
                         id: 2, name: "Greta".into(), archetype: "knight".into(), level: 2, xp: 0,
@@ -5749,6 +5998,12 @@ impl CampaignState {
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
                     },
                 ],
                 gold_bonus: 150.0, supply_bonus: 30.0, reputation_bonus: 5.0, items: Vec::new(),
@@ -5786,6 +6041,12 @@ impl CampaignState {
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
                     },
                 ],
                 gold_bonus: 0.0, supply_bonus: 0.0, reputation_bonus: 10.0, items: Vec::new(),
@@ -5823,6 +6084,12 @@ impl CampaignState {
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
                     },
                     Adventurer {
                         id: 2, name: "Brynn".into(), archetype: "mage".into(), level: 1, xp: 0,
@@ -5853,6 +6120,12 @@ impl CampaignState {
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
                     },
                     Adventurer {
                         id: 3, name: "Cira".into(), archetype: "cleric".into(), level: 1, xp: 0,
@@ -5883,6 +6156,12 @@ impl CampaignState {
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
                     },
                     Adventurer {
                         id: 4, name: "Daven".into(), archetype: "rogue".into(), level: 1, xp: 0,
@@ -5913,6 +6192,12 @@ impl CampaignState {
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
                     },
                 ],
                 gold_bonus: 20.0, supply_bonus: 10.0, reputation_bonus: 0.0, items: Vec::new(),

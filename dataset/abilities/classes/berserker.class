@@ -1,0 +1,21 @@
+class Berserker {
+    stat_growth: +5 attack, +2 max_hp per level
+
+    tags: melee, rage, aggression, recklessness, bloodlust
+
+    scaling hp_percent {
+        when hp_percent < 50: +25% attack
+        when hp_percent < 25: +15% speed, +10% attack
+        always: -10% defense
+    }
+
+    abilities {
+        level 1: frenzy "Attack speed increases with each consecutive hit"
+        level 5: reckless_swing "Massive damage but lowers your own defense"
+        level 10: blood_rage "Entering low health triggers a damage surge"
+        level 20: unstoppable_fury "Immune to crowd control while raging"
+        level 40: rampage "For 10 seconds, every kill extends the duration and heals you"
+    }
+
+    requirements: level 1
+}

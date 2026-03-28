@@ -1,0 +1,124 @@
+// Tier 9: Combination ultimates requiring multiple participants
+
+ability MeteorStrike {
+    target: ground, range: 10.0
+    cooldown: 45s, cast: 2s
+    hint: damage
+    requires_participants: 3
+
+    damage 300 in circle(4.0) [FIRE: 80]
+    stun 2s in circle(4.0) [CROWD_CONTROL: 60]
+    damage 25/1s for 4s in circle(4.0) [FIRE: 50]
+}
+
+ability DualBladeDance {
+    target: self_aoe
+    cooldown: 30s, cast: 500ms
+    hint: damage
+    requires_participants: 2
+
+    damage 120 in circle(3.0) [PHYSICAL: 65]
+    buff attack_speed 0.5 for 5s
+    buff damage_output 0.3 for 5s
+}
+
+ability UnifiedBarrier {
+    target: self_aoe
+    cooldown: 40s, cast: 800ms
+    hint: defense
+    requires_participants: 3
+
+    shield 200 for 8s in circle(6.0)
+    buff armor 0.4 for 8s in circle(6.0)
+    heal 50 in circle(6.0) [HOLY: 50]
+}
+
+ability SynchronizedVolley {
+    target: ground, range: 8.0
+    cooldown: 25s, cast: 600ms
+    hint: damage
+    requires_participants: 2
+
+    damage 150 in circle(3.5) [PHYSICAL: 60]
+    slow 0.4 for 3s in circle(3.5)
+}
+
+ability TripleCast {
+    target: enemy, range: 7.0
+    cooldown: 35s, cast: 1s
+    hint: damage
+    requires_participants: 3
+
+    damage 100 [MAGIC: 70]
+    damage 100 [FIRE: 70]
+    damage 100 [ICE: 70]
+    silence 3s [CROWD_CONTROL: 55]
+}
+
+ability CombinedHealingRitual {
+    target: self_aoe
+    cooldown: 35s, cast: 1500ms
+    hint: heal
+    requires_participants: 2
+
+    heal 150 in circle(8.0) [HOLY: 60]
+    shield 60 for 6s in circle(8.0)
+    dispel in circle(8.0)
+}
+
+ability TwinShadowStrike {
+    target: enemy, range: 4.0
+    cooldown: 20s, cast: 300ms
+    hint: damage
+    requires_participants: 2
+
+    dash to_target
+    damage 180 [PHYSICAL: 65, DARK: 55]
+    stun 1500ms [CROWD_CONTROL: 50]
+    stealth 2s
+}
+
+ability ShieldWall {
+    target: self_aoe
+    cooldown: 30s, cast: 500ms
+    hint: defense
+    requires_participants: 2
+
+    shield 150 for 6s in circle(4.0)
+    reflect 0.3 for 6s in circle(4.0)
+    taunt 4s in circle(6.0) [CROWD_CONTROL: 50]
+}
+
+ability ArcaneConvergence {
+    target: ground, range: 8.0
+    cooldown: 50s, cast: 2s
+    hint: damage
+    requires_participants: 3
+
+    damage 250 in circle(5.0) [MAGIC: 75]
+    silence 3s in circle(5.0) [MAGIC: 60]
+    pull 3.0 in circle(5.0)
+    slow 0.5 for 4s in circle(5.0)
+}
+
+ability CoordinatedAmbush {
+    target: self_aoe
+    cooldown: 25s, cast: 200ms
+    hint: damage
+    requires_participants: 2
+
+    stealth 3s in circle(5.0)
+    buff damage_output 0.5 for 3s in circle(5.0)
+    buff attack_speed 0.4 for 3s in circle(5.0)
+}
+
+ability GrandResurrection {
+    target: self_aoe
+    cooldown: 60s, cast: 2s
+    hint: heal
+    requires_participants: 3
+
+    resurrect 80 in circle(10.0)
+    heal 100 in circle(10.0) [HOLY: 70]
+    shield 80 for 6s in circle(10.0)
+}

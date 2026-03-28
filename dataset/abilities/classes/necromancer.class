@@ -1,0 +1,20 @@
+class Necromancer {
+    stat_growth: +4 ability_power, +1 max_hp, +1 defense per level
+
+    tags: dark, undead, life_drain, death, forbidden_knowledge
+
+    scaling enemy_count {
+        when enemy_count >= 3: +10% ability_power
+        always: +5% max_hp
+    }
+
+    abilities {
+        level 1: drain_life "Steal health from an enemy"
+        level 5: raise_skeleton "Animate a fallen enemy as a skeletal minion"
+        level 10: fear "All nearby enemies flee in terror for 3 seconds"
+        level 20: death_pact "Sacrifice a minion to fully heal yourself"
+        level 40: lichdom "Transform into a lich; you cannot die while any minion lives"
+    }
+
+    requirements: level 1
+}

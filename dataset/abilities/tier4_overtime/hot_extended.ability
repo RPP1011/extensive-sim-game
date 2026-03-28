@@ -1,0 +1,97 @@
+// Tier 4: Extended HoT variants
+
+ability Rejuvenation {
+    target: ally, range: 5.0
+    cooldown: 4s, cast: 100ms
+    hint: heal
+
+    heal 8/1s for 5s [HOLY: 35]
+}
+
+ability Renew {
+    target: ally, range: 5.0
+    cooldown: 5s, cast: 200ms
+    hint: heal
+
+    heal 10/1s for 4s [HOLY: 40]
+}
+
+ability LifeBloom2 {
+    target: ally, range: 4.0
+    cooldown: 6s, cast: 200ms
+    hint: heal
+
+    heal 12/1s for 4s
+}
+
+ability MendingWaters {
+    target: ally, range: 5.0
+    cooldown: 7s, cast: 200ms
+    hint: heal
+
+    heal 10/1s for 5s [MAGIC: 35]
+}
+
+ability NaturesGift {
+    target: ally, range: 4.0
+    cooldown: 8s, cast: 300ms
+    hint: heal
+
+    heal 15/1s for 4s
+}
+
+ability SpiritMend {
+    target: ally, range: 5.0
+    cooldown: 6s, cast: 200ms
+    hint: heal
+
+    heal 8/1s for 6s [HOLY: 30]
+}
+
+ability SoothingBreeze {
+    target: ally, range: 5.0
+    cooldown: 4s, cast: 100ms
+    hint: heal
+
+    heal 6/1s for 5s
+}
+
+ability EternalBloom {
+    target: ally, range: 4.0
+    cooldown: 10s, cast: 300ms
+    hint: heal
+
+    heal 12/1s for 6s [HOLY: 45]
+}
+
+ability WarmEmbers {
+    target: self
+    cooldown: 8s, cast: 200ms
+    hint: heal
+
+    heal 10/1s for 5s [FIRE: 30]
+}
+
+ability TidalRenewal {
+    target: ally, range: 5.0
+    cooldown: 5s, cast: 200ms
+    hint: heal
+
+    heal 9/1s for 4s [MAGIC: 35]
+}
+
+ability VerdantGrowth {
+    target: ally, range: 4.0
+    cooldown: 7s, cast: 200ms
+    hint: heal
+
+    heal 11/1s for 5s
+}
+
+ability SunlightBlessing {
+    target: ally, range: 6.0
+    cooldown: 6s, cast: 200ms
+    hint: heal
+
+    heal 8/1s for 5s [HOLY: 35]
+}

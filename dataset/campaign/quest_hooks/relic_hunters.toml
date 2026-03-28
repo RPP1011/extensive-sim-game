@@ -1,0 +1,51 @@
+name = "Relic Hunters Arrive"
+priority = 5
+repeatable = true
+cooldown_ticks = 7000
+
+[trigger]
+type = "PeriodicEvent"
+interval_ticks = 7000
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "A team of relic hunters — independent operators with no guild affiliation — arrive in town. They're after something specific in the local ruins and they're willing to pay for backup."
+deadline_secs = 60.0
+default_option = 0
+
+[[choice.options]]
+label = "Partner Up"
+description = "Join forces. Split the risk and the reward 50/50."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 25.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 3.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Two teams become one. The ruins won't know what hit them."
+
+[[choice.options]]
+label = "Hire Them"
+description = "Pay them to work under guild direction. You get priority on relics."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -30.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The relic hunters accept guild contracts. Professional but pricey."
+
+[[choice.options]]
+label = "Compete"
+description = "Race them to the relics. First team there keeps everything."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "Two groups head for the same ruins. Only one gets the prize."

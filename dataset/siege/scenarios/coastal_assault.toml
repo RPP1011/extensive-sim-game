@@ -1,0 +1,55 @@
+name = "The Storm of Port Ashenmire"
+description = "A naval assault on a coastal fortress. The attackers come from the sea, landing under fire. The defenders have the harbor fortified but the sea wall is weaker."
+difficulty = "hard"
+
+[settlement]
+template = "coastal_fortress"
+wall_type = "stone_wall"
+wall_hp = 2000
+sea_wall_type = "reinforced_stone"
+sea_wall_hp = 1500
+gate_type = "iron_gate"
+gate_hp = 1200
+towers = 5
+tower_type = "stone_tower"
+garrison = 35
+terrain = "coastal"
+harbor_chain = true
+harbor_chain_hp = 500
+
+[attacker]
+army_size = 90
+siege_equipment = ["catapult", "ballista", "siege_ladder", "fire_arrows", "battering_ram"]
+supply_ticks = 1200
+reinforcement_chance = 0.1
+morale = 0.7
+commander_level = 22
+ships = 15
+landing_craft = 8
+
+[defender]
+garrison_strength = 35
+adventurer_slots = 5
+supplies_ticks = 2000
+reinforcement_chance = 0.3
+morale = 0.8
+special_defenses = ["boiling_oil", "arrow_slits", "ballista", "harbor_chain"]
+commander_level = 25
+
+[victory_conditions]
+attacker_wins = ["harbor_captured", "sea_wall_breached", "gate_destroyed"]
+defender_wins = ["fleet_destroyed", "landing_repelled", "reinforcements_arrive"]
+time_limit_ticks = 3000
+
+[power_context]
+defender_avg_level = 22
+attacker_avg_level = 18
+wall_effective_level = 32
+has_wards = true
+ward_type = "basic_dampening"
+high_level_threat = "none"
+
+[narrative]
+opening = "The fleet appears at dawn, sails dark against the rising sun. Port Ashenmire's harbor chain rises from the water like a rusted serpent. Behind it, the catapults are already loaded."
+attacker_victory = "The harbor chain snaps. Ships surge into the port. Marines pour onto the docks. Port Ashenmire belongs to the sea now."
+defender_victory = "Burning ships litter the harbor. The fleet withdraws, leaving wreckage and bodies on the tide. The port's lights still burn."

@@ -1,0 +1,54 @@
+name = "Temple Haven"
+type = "town"
+population = 1800
+prosperity = 55.0
+
+[defenses]
+wall_type = "stone_wall"
+wall_hp = 600
+gate_count = 1
+tower_count = 4
+garrison_capacity = 40
+moat = false
+
+[[districts]]
+name = "Temple Grounds"
+type = "religious"
+buildings = ["temple", "monastery", "healing_house", "sacred_garden"]
+population_pct = 25.0
+wealth = 60.0
+threat = 5.0
+
+[[districts]]
+name = "Pilgrim Quarter"
+type = "commercial"
+buildings = ["inn", "tavern", "relic_shop", "scribe"]
+population_pct = 25.0
+wealth = 50.0
+threat = 15.0
+
+[[districts]]
+name = "Faithful District"
+type = "residential"
+buildings = ["houses", "shrine", "well", "bakery", "cemetery"]
+population_pct = 40.0
+wealth = 35.0
+threat = 5.0
+
+[[districts]]
+name = "Temple Guard"
+type = "military"
+buildings = ["paladin_barracks", "armory", "training_yard"]
+population_pct = 10.0
+wealth = 45.0
+threat = 5.0
+
+[economy]
+primary_exports = ["holy_relics", "healing_potions", "blessed_items"]
+primary_imports = ["food", "cloth", "incense", "candles"]
+trade_routes = 3
+market_size = "medium"
+
+[narrative]
+description = "A town grown around an ancient temple. Pilgrims come seeking healing and absolution, and the temple obliges — for a donation."
+flavor = ["Incense drifts through the streets", "Bells mark the hours", "The sick line up at dawn"]

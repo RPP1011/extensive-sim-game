@@ -1,0 +1,46 @@
+name = "Pillar's Rest"
+type = "village"
+population = 400
+prosperity = 50.0
+
+[defenses]
+wall_type = "stone_wall"
+wall_hp = 400
+gate_count = 1
+tower_count = 2
+garrison_capacity = 15
+moat = false
+
+[[districts]]
+name = "Ruin Settlement"
+type = "residential"
+buildings = ["repurposed_temple", "column_houses", "ancient_well"]
+population_pct = 50.0
+wealth = 30.0
+threat = 15.0
+
+[[districts]]
+name = "Excavation Site"
+type = "academic"
+buildings = ["dig_site", "artifact_tent", "scholar_camp"]
+population_pct = 20.0
+wealth = 60.0
+threat = 20.0
+
+[[districts]]
+name = "Relic Market"
+type = "commercial"
+buildings = ["antiquities_dealer", "tavern", "expedition_outfitter"]
+population_pct = 30.0
+wealth = 55.0
+threat = 15.0
+
+[economy]
+primary_exports = ["artifacts", "ancient_knowledge", "relic_fragments"]
+primary_imports = ["food", "tools", "preservation_supplies"]
+trade_routes = 2
+market_size = "medium"
+
+[narrative]
+description = "A village built among the ruins of something far older and grander. Scholars and treasure hunters alike come to pick through the bones of the ancient world."
+flavor = ["Columns taller than any modern building", "Strange writing on every surface", "The ruins hum at midnight"]

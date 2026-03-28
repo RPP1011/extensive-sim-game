@@ -1,0 +1,46 @@
+name = "Ancient Weapon Found"
+priority = 6
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "QuestComplete"
+
+[choice]
+category = "quest_branch"
+trigger = "hook"
+prompt = "Among dungeon spoils, an adventurer finds a weapon that pulses with old magic — a blade that hums, a staff that glows. It's powerful but unidentified. The runes shift when you look at them."
+deadline_secs = 90.0
+default_option = 1
+
+[[choice.options]]
+label = "Identify It (25g)"
+description = "Hire an enchanter to study the weapon properly."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -25.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The enchanter's hands tremble over the weapon. 'This is old. Very old. And very dangerous.'"
+
+[[choice.options]]
+label = "Use It Immediately"
+description = "Give it to the best fighter and see what it does in combat."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The weapon sings in combat. Its wielder grins. Side effects are a problem for later."
+
+[[choice.options]]
+label = "Sell It (35g)"
+description = "Ancient weapons fetch ancient prices. Take the gold."
+
+[[choice.options.effects]]
+type = "gold"
+amount = 35.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "A collector pays handsomely. The weapon vanishes into a private vault."

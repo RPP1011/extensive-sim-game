@@ -1,0 +1,51 @@
+[[fortifications]]
+id = "double_wall"
+name = "Double Wall"
+tier = 4
+
+[fortifications.stats]
+wall_hp = 2500
+inner_wall_hp = 2000
+height = 5.0
+inner_height = 6.0
+thickness = 2.0
+defender_cover = 0.85
+ranged_bonus = 0.4
+climb_difficulty = 0.9
+killing_ground_width = 4.0
+killing_ground_bonus = 0.5
+
+[fortifications.construction]
+cost = 1200
+ticks = 5000
+resources = ["stone", "mortar", "iron"]
+builder_class_bonus = 0.4
+
+[fortifications.weaknesses]
+trebuchet_multiplier = 1.5
+sapper_multiplier = 1.8
+fire_resistant = true
+magic_resistant = false
+
+[fortifications.power_scaling]
+effective_level = 40
+builder_class_bonus = true
+enchantable = true
+age_scaling = 0.01
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 3.0
+ability_damage_reduction = 0.25
+projectile_deflection = 0.15
+ward_hp = 800
+ward_level = 20
+
+[fortifications.garrison_bonus]
+defender_multiplier = 4.0
+ranged_accuracy_bonus = 0.3
+melee_disadvantage = 0.5
+cover_rating = 0.75
+
+[fortifications.narrative]
+description = "Breach the outer wall and you find yourself in a narrow killing ground, overlooked by the inner wall's battlements. The attackers who celebrated clearing the first wall discover they've entered a coffin."

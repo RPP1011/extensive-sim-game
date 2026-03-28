@@ -1,0 +1,46 @@
+name = "Seawall Fortress"
+type = "fortress"
+population = 900
+prosperity = 40.0
+
+[defenses]
+wall_type = "fortified"
+wall_hp = 2200
+gate_count = 1
+tower_count = 8
+garrison_capacity = 450
+moat = false
+
+[[districts]]
+name = "Naval Fortress"
+type = "military"
+buildings = ["coastal_battery", "signal_tower", "naval_barracks", "ammunition_store"]
+population_pct = 45.0
+wealth = 40.0
+threat = 5.0
+
+[[districts]]
+name = "Harbor"
+type = "harbor"
+buildings = ["war_dock", "chain_winch", "boat_shed", "supply_pier"]
+population_pct = 30.0
+wealth = 35.0
+threat = 10.0
+
+[[districts]]
+name = "Support Camp"
+type = "residential"
+buildings = ["quarters", "mess_hall", "infirmary", "chapel"]
+population_pct = 25.0
+wealth = 25.0
+threat = 5.0
+
+[economy]
+primary_exports = ["naval_patrols", "coastal_defense"]
+primary_imports = ["food", "timber", "tar", "rope", "gunpowder"]
+trade_routes = 2
+market_size = "small"
+
+[narrative]
+description = "A fortress built into the cliffs above a narrow strait. The great chain can be raised to block any fleet, and the coastal batteries have sunk more ships than storms."
+flavor = ["Waves crash against the foundations", "The chain links are as thick as a man", "Salt spray reaches the highest tower"]

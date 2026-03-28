@@ -1,0 +1,54 @@
+[[fortifications]]
+id = "ice_wall"
+name = "Ice Wall"
+tier = 3
+
+[fortifications.stats]
+wall_hp = 1200
+height = 5.0
+thickness = 3.0
+defender_cover = 0.7
+ranged_bonus = 0.2
+climb_difficulty = 0.95
+cold_aura_radius = 2.0
+cold_damage_per_tick = 3.0
+melt_rate_warm_climate = 2.0
+melt_rate_cold_climate = 0.0
+regeneration_cold_climate = 1.0
+
+[fortifications.construction]
+cost = 200
+ticks = 100
+resources = ["water"]
+requires_class = "[Cryomancer]"
+
+[fortifications.weaknesses]
+trebuchet_multiplier = 2.5
+sapper_multiplier = 0.5
+fire_resistant = false
+magic_resistant = false
+fire_damage_multiplier = 4.0
+warm_climate_penalty = true
+
+[fortifications.power_scaling]
+effective_level = 30
+builder_class_bonus = false
+enchantable = true
+age_scaling = 0.0
+level_damage_reduction = true
+
+[fortifications.wards]
+anti_magic_radius = 3.0
+ability_damage_reduction = 0.2
+projectile_deflection = 0.1
+ward_hp = 500
+ward_level = 15
+
+[fortifications.garrison_bonus]
+defender_multiplier = 2.5
+ranged_accuracy_bonus = 0.15
+melee_disadvantage = 0.3
+cover_rating = 0.5
+
+[fortifications.narrative]
+description = "Glacial blue and cold enough to burn, the wall rose in minutes where stone would take months. In the northern wastes, it will stand forever. In warmer lands, it is a race against the sun."

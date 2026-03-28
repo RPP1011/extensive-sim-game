@@ -1,0 +1,47 @@
+ability ClaimTerritory {
+    target: region
+    cooldown: 10000t
+    hint: leadership
+
+    claim_territory
+}
+
+ability Fortify {
+    target: region
+    cooldown: 2000t
+    hint: defense
+
+    fortify for 500t
+}
+
+ability Sanctuary {
+    target: region
+    cooldown: 5000t
+    hint: defense
+
+    sanctuary for 800t
+}
+
+ability PlagueWard {
+    target: region
+    cooldown: 3000t
+    hint: defense
+
+    plague_ward for 1000t
+}
+
+ability SafeHouse {
+    target: region
+    cooldown: 3000t
+    hint: utility
+
+    safe_house for 1000t
+}
+
+ability ClaimByRight {
+    target: region
+    cooldown: 15000t
+    hint: leadership
+
+    claim_by_right
+}

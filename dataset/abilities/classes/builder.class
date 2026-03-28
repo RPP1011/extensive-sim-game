@@ -1,0 +1,20 @@
+class Builder {
+    stat_growth: +1 attack, +2 defense, +2 max_hp per level
+
+    tags: construction, fortification, engineering, siege, architecture
+
+    scaling party_alive_count {
+        when party_members >= 1: +10% defense
+        always: +5% max_hp
+    }
+
+    abilities {
+        level 1: field_fortification "Erect temporary barricades that provide cover"
+        level 5: reinforce "Strengthen existing structures against siege damage"
+        level 10: siege_engine "Construct a ballista or catapult from available materials"
+        level 20: fortress "Build a defensible structure in one day that would normally take weeks"
+        level 40: grand_architect "Design and raise a permanent stronghold that grows stronger with each battle it survives"
+    }
+
+    requirements: level 1
+}

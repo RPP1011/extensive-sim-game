@@ -30,6 +30,17 @@ pub enum StatRef {
     TargetStacks { name: String },
     /// Number of stacks with the given name on the caster.
     CasterStacks { name: String },
+
+    // Campaign stat references
+    KingdomSize,
+    ArmySize,
+    FactionTerritory,
+    GuildReputation,
+    AdventurerCount,
+    LoyaltyAverage,
+    PartySize,
+    GuildGold,
+    CasterLevel,
 }
 
 /// One additive scaling term: contributes `percent`% of `stat` to an effect's amount.
@@ -235,12 +246,54 @@ pub enum Condition {
     CasterResourceBelow { percent: f32 },
     /// True if caster's resource is above `percent`% of max.
     CasterResourceAbove { percent: f32 },
+
+    // --- Campaign Conditions ---
+    FactionHostile,
+    AtWar,
+    CrisisActive,
+    GoldAbove { amount: f32 },
+    GoldBelow { amount: f32 },
+    Outnumbered,
+    AllyInjured,
+    Alone,
+    NearDeath,
 }
 
 impl Default for Condition {
     fn default() -> Self {
         Condition::Always
     }
+}
+
+// ---------------------------------------------------------------------------
+// TargetFilter — per-effect entity filter predicate
+// ---------------------------------------------------------------------------
+
+/// Filter predicate for which entities an effect applies to.
+/// Used with `targeting` keyword in DSL to narrow effect targets.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TargetFilter {
+    /// All units under the caster's command.
+    UnderCommand,
+    /// Units with loyalty above threshold.
+    LoyaltyAbove { threshold: f32 },
+    /// Units with loyalty below threshold.
+    LoyaltyBelow { threshold: f32 },
+    /// Units with a specific class.
+    HasClass { class_name: String },
+    /// Units above a level threshold.
+    LevelAbove { level: u32 },
+    /// Units below a level threshold.
+    LevelBelow { level: u32 },
+    /// Units with a specific status.
+    HasStatus { status: String },
+    /// Units belonging to a specific faction.
+    FactionMember { faction: String },
+    /// Units that are injured (injury > 20%).
+    Injured,
+    /// Units that are healthy (injury < 20%).
+    Healthy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -276,6 +329,15 @@ pub enum Trigger {
         name: String,
         count: u32,
     },
+
+    // --- Campaign Triggers ---
+    OnTrade,
+    OnQuestComplete,
+    OnFactionChange,
+    OnLevelUp,
+    OnCrisisStart,
+    PeriodicTick { interval_ticks: u32 },
+    OnAbilityUse,
 }
 
 fn default_trigger_range() -> f32 {
@@ -305,4 +367,7 @@ pub struct ConditionalEffect {
     /// Effects to apply instead when the condition evaluates to false.
     #[serde(default)]
     pub else_effects: Vec<ConditionalEffect>,
+    /// Optional filter to narrow which entities this effect applies to.
+    #[serde(default)]
+    pub targeting_filter: Option<TargetFilter>,
 }

@@ -1,6 +1,6 @@
 //! Choice template loading and instantiation.
 //!
-//! Templates are TOML files in `assets/choice_templates/` that define
+//! Templates are TOML files in `dataset/campaign/choice_templates/` that define
 //! the structure of branching decisions. The instantiation code fills
 //! in context variables ({quest_id}, {npc_name}, etc.) and converts
 //! template effects to concrete `ChoiceEffect`s.
@@ -128,7 +128,7 @@ static TEMPLATES: std::sync::OnceLock<ChoiceTemplateRegistry> = std::sync::OnceL
 /// Get or load the global template registry.
 pub fn get_or_load_templates() -> &'static ChoiceTemplateRegistry {
     TEMPLATES.get_or_init(|| {
-        let dir = std::path::Path::new("assets/choice_templates");
+        let dir = std::path::Path::new("dataset/campaign/choice_templates");
         let registry = ChoiceTemplateRegistry::load_from_dir(dir);
         if !registry.templates.is_empty() {
             eprintln!(
@@ -333,6 +333,12 @@ pub fn instantiate_effect(e: &EffectTemplate, ctx: &TemplateContext) -> Option<C
             behavior_ledger: BehaviorLedger::default(),
             classes: Vec::new(),
             skill_state: Default::default(),
+            gold: 0.0,
+            home_location_id: None,
+            economic_intent: crate::headless_campaign::state::EconomicIntent::Idle,
+            ticks_since_income: 0,
+            price_knowledge: Vec::new(),
+            carried_goods: [0.0; 8],
             }))
         }
         _ => {

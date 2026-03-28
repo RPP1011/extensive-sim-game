@@ -1,0 +1,53 @@
+# An adventurer qualifies for class advancement.
+
+name = "Class Advancement"
+priority = 8
+repeatable = true
+cooldown_ticks = 8000
+
+[trigger]
+type = "AdventurerLevelUp"
+min_level = 10
+
+[choice]
+category = "progression"
+trigger = "hook"
+prompt = "{adventurer_name} feels it — the pull of advancement. Their class trembles on the edge of evolution. The System offers a choice, but the path forward demands sacrifice. This moment comes once."
+deadline_secs = 120.0
+default_option = 0
+
+[[choice.options]]
+label = "Push for Advancement"
+description = "Dedicate resources to support the advancement attempt. The guild provides everything needed."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -60.0
+
+[[choice.options.effects]]
+type = "reputation"
+amount = 10.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer_name} enters the guild's ritual chamber. Power gathers. When they emerge, they are fundamentally changed."
+
+[[choice.options]]
+label = "Natural Progression"
+description = "Let it happen in its own time. No forced advancement, no wasted gold."
+
+[[choice.options.effects]]
+type = "narrative"
+text = "The moment passes. {adventurer_name} will advance when the time is truly right."
+
+[[choice.options]]
+label = "Consolidate Instead"
+description = "Strengthen existing skills rather than advancing. Deeper mastery of the current class."
+
+[[choice.options.effects]]
+type = "gold"
+amount = -20.0
+
+[[choice.options.effects]]
+type = "narrative"
+text = "{adventurer_name} chooses depth over breadth. Their existing skills sharpen to a razor's edge."

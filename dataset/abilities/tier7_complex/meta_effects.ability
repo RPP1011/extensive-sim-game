@@ -1,0 +1,89 @@
+// Meta-effects: abilities that modify other abilities
+
+ability ArcaneEmpowerment {
+    target: self
+    cooldown: 20s, cast: 0ms
+    hint: utility
+
+    amplify 1.5 3
+    buff damage_output 0.15 for 8s
+}
+
+ability DoubleCast {
+    target: self
+    cooldown: 25s, cast: 0ms
+    hint: utility
+
+    echo 1
+}
+
+ability SpellBarrier {
+    target: ally, range: 5.0
+    cooldown: 15s, cast: 200ms
+    hint: defense
+
+    spell_shield 1
+    shield 30 for 4s
+}
+
+ability QuickDraw {
+    target: self
+    cooldown: 18s, cast: 0ms
+    hint: utility
+
+    instant_cast 2
+    buff attack_speed 0.3 for 5s
+}
+
+ability ResourceSurge {
+    target: self
+    cooldown: 30s, cast: 0ms
+    hint: utility
+
+    free_cast 3
+    buff damage_output 0.1 for 10s
+}
+
+ability ManaShatter {
+    target: enemy, range: 5.0
+    cooldown: 12s, cast: 300ms
+    hint: crowd_control
+
+    mana_burn 2.5 for 5s
+    damage 30 [MAGIC: 50]
+}
+
+ability TimeLock {
+    target: enemy, range: 4.0
+    cooldown: 15s, cast: 200ms
+    hint: crowd_control
+
+    cooldown_lock 3s
+    slow 0.3 for 3s
+}
+
+ability CooldownReset {
+    target: self
+    cooldown: 45s, cast: 0ms
+    hint: utility
+
+    refresh_cooldowns
+}
+
+ability DurationExtender {
+    target: self_aoe
+    cooldown: 20s, cast: 300ms
+    hint: utility
+
+    extend_durations 3s in circle(4.0)
+}
+
+ability TripleThreat {
+    target: self
+    cooldown: 30s, cast: 0ms
+    hint: damage
+
+    amplify 2.0 1
+    echo 1
+    instant_cast 1
+}

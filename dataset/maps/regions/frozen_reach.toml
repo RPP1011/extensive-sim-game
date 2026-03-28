@@ -1,0 +1,29 @@
+name = "The Frozen Reach"
+terrain = "tundra"
+climate = "arctic"
+size = "large"
+
+[generation]
+settlement_density = 0.03
+road_connectivity = 0.1
+wilderness_danger = 0.8
+resource_richness = 0.3
+
+[settlement_distribution]
+hamlet_pct = 40
+village_pct = 25
+town_pct = 15
+city_pct = 0
+fortress_pct = 20
+
+[terrain_features]
+rivers = 1
+mountains = true
+forests = false
+coast = true
+lakes = 0
+
+[narrative]
+description = "Permafrost and eternal twilight in winter, endless sun in summer. Only the hardiest people survive here, and they're harder still."
+threats = ["blizzards", "ice_trolls", "starvation", "frozen_undead"]
+opportunities = ["mammoth_ivory", "ancient_ice_tombs", "aurora_magic"]

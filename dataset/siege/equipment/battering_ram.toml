@@ -1,0 +1,27 @@
+[[equipment]]
+id = "battering_ram"
+name = "Battering Ram"
+category = "breaching"
+tier = 1
+
+[equipment.stats]
+gate_damage_per_tick = 15.0
+wall_damage_per_tick = 0.0
+range = 0.0
+crew_required = 8
+move_speed = 0.3
+hp = 400
+armor = 20
+
+[equipment.requirements]
+min_tech_level = 1
+construction_cost = 80
+construction_ticks = 200
+resources = ["timber"]
+
+[equipment.counters]
+vulnerable_to = ["boiling_oil", "fire_arrows", "sally_out"]
+strong_against = ["wooden_gate", "reinforced_gate"]
+
+[equipment.narrative]
+description = "A log the size of a ship's mast, suspended from a wheeled frame. The men swing it back, and back again, and the gate screams."
