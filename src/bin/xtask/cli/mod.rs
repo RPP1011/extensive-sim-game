@@ -81,6 +81,12 @@ pub struct WorldSimArgs {
     /// RNG seed
     #[arg(long, default_value_t = 42)]
     pub seed: u64,
+    /// Run for N seconds instead of N ticks (overrides --ticks)
+    #[arg(long)]
+    pub duration_secs: Option<u64>,
+    /// Resource-rich world (10x stockpiles, varied production, more commodities)
+    #[arg(long)]
+    pub rich: bool,
 }
 
 #[derive(Debug, Parser)]
