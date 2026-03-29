@@ -782,6 +782,9 @@ pub struct WorldSim {
 
     /// Swappable ability generator (produces abilities on class level-up).
     pub ability_gen: Box<dyn super::class_gen::AbilityGenerator>,
+
+    /// Async naming queue + resolved name cache for LFM model integration.
+    pub naming: super::naming::NamingService,
 }
 
 impl WorldSim {
@@ -817,6 +820,7 @@ impl WorldSim {
             state: initial,
             class_gen: Box::new(super::class_gen::DefaultClassGenerator::new()),
             ability_gen: Box::new(super::class_gen::DefaultAbilityGenerator),
+            naming: super::naming::NamingService::new(),
         }
     }
 
@@ -1054,17 +1058,28 @@ impl WorldSim {
             // Match against class templates.
             let matches = self.class_gen.match_classes(&npc.behavior_tags, &npc.behavior_values);
 
+            let entity_seed = self.state.tick.wrapping_mul(2654435761) ^ entity.id as u64;
+
             for class_match in &matches {
                 // Skip if NPC already has this class.
                 if npc.classes.iter().any(|c| c.class_name_hash == class_match.class_name_hash) {
                     continue;
                 }
 
+                // Generate procedural name from behavior profile.
+                let display_name = super::naming::procedural_class_name(
+                    &class_match.display_name,
+                    &npc.behavior_tags,
+                    &npc.behavior_values,
+                    entity_seed ^ class_match.class_name_hash as u64,
+                );
+
                 // Grant the class.
                 npc.classes.push(ClassSlot {
                     class_name_hash: class_match.class_name_hash,
                     level: 1,
                     xp: 0.0,
+                    display_name,
                 });
             }
 
@@ -1074,10 +1089,17 @@ impl WorldSim {
                 if let Some(class_def) = self.class_gen.generate_unique_class(
                     &npc.behavior_tags, &npc.behavior_values, seed,
                 ) {
+                    let display_name = super::naming::procedural_class_name(
+                        &class_def.display_name,
+                        &npc.behavior_tags,
+                        &npc.behavior_values,
+                        seed,
+                    );
                     npc.classes.push(ClassSlot {
                         class_name_hash: class_def.name_hash,
                         level: 1,
                         xp: 0.0,
+                        display_name,
                     });
                 }
             }

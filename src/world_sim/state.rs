@@ -812,12 +812,15 @@ pub struct NpcData {
 /// A class granted to an NPC from behavior profile matching.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClassSlot {
-    /// FNV-1a hash of the class name.
+    /// FNV-1a hash of the base class template name.
     pub class_name_hash: u32,
     /// Current level in this class.
     pub level: u16,
     /// Accumulated XP toward next level.
     pub xp: f32,
+    /// Procedural display name (e.g., "Stoneheart Miner", "Frontier Herbalist").
+    /// Empty until naming runs. LFM model can override later.
+    pub display_name: String,
 }
 
 impl NpcData {

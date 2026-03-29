@@ -173,7 +173,13 @@ pub fn run_world_sim(args: WorldSimArgs) -> ExitCode {
                 class_name_table.iter().find(|(h, _)| *h == hash).map(|(_, n)| *n).unwrap_or("?")
             };
             let classes: Vec<String> = npc.classes.iter()
-                .map(|c| format!("{} L{}", resolve_class(c.class_name_hash), c.level))
+                .map(|c| {
+                    if c.display_name.is_empty() {
+                        format!("{} L{}", resolve_class(c.class_name_hash), c.level)
+                    } else {
+                        format!("{} L{}", c.display_name, c.level)
+                    }
+                })
                 .collect();
 
             println!("  #{} ({}) lv{} xp:{} | tags: {} | classes: [{}]",

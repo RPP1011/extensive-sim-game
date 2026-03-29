@@ -17,6 +17,7 @@ pub mod bridge;
 pub mod spatial;
 pub mod action_context;
 pub mod class_gen;
+pub mod naming;
 pub mod runtime;
 pub mod systems;
 

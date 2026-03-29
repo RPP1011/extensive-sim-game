@@ -6,3 +6,4 @@ pub mod quality;
 pub mod grokfast;
 pub mod tree_decoder;
 pub mod ability_generator;
+pub mod context_encoder;
