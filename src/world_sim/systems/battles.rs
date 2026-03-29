@@ -105,14 +105,31 @@ fn compute_battles_for_grid(
             }
         }
     }
-    // Friendlies attack hostiles
+    // Friendlies attack hostiles + earn combat XP
     for &fid in friendlies {
         let atk = state.entity(fid).map(|e| e.attack_damage).unwrap_or(0.0);
         let dmg_each = atk / hcount;
         if dmg_each > 0.0 {
             for &hid in hostiles {
                 out.push(WorldDelta::Damage { target_id: hid, amount: dmg_each, source_id: fid });
+
+                // Kill XP: if this hit would kill the hostile, grant bonus XP.
+                let hostile_hp = state.entity(hid).map(|e| e.hp).unwrap_or(0.0);
+                let hostile_level = state.entity(hid).map(|e| e.level).unwrap_or(1);
+                if hostile_hp - dmg_each <= 0.0 {
+                    // Kill XP scaled by hostile level (split among all friendlies).
+                    let kill_xp = (hostile_level * 5 + 10) / fc as u32;
+                    for &friend in friendlies {
+                        out.push(WorldDelta::AddXp {
+                            entity_id: friend,
+                            amount: kill_xp.max(1),
+                        });
+                    }
+                }
             }
+
+            // Combat participation XP: 1 XP per attack action.
+            out.push(WorldDelta::AddXp { entity_id: fid, amount: 1 });
         }
     }
 }

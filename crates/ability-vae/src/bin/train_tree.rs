@@ -8,6 +8,7 @@ use std::fs::OpenOptions;
 
 use burn::prelude::*;
 use burn::optim::{AdamWConfig, GradientsParams, Optimizer};
+use burn::record::Recorder;
 use burn::nn::{Linear, LinearConfig};
 
 #[cfg(feature = "gpu")]
@@ -272,6 +273,15 @@ fn main() {
                 total_acc / steps.max(1) as f64 * 100.0,
                 total_cls / steps.max(1) as f64,
                 dt);
+
+            // Checkpoint every 50 epochs
+            if (epoch + 1) % 50 == 0 {
+                let path = format!("generated/tree_checkpoint_e{}.bin", epoch + 1);
+                model.clone()
+                    .save_file(&path, &burn::record::DefaultRecorder::new())
+                    .ok();
+                log!(logfile, "  → Saved checkpoint: {}\n", path);
+            }
         }
     }
 

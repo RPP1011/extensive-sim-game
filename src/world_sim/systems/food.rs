@@ -113,7 +113,8 @@ pub fn compute_food_for_settlement(
         );
         if !working { continue; }
 
-        let level_mult = 0.5 + entity.level as f32 * 0.1; // level 1 = 0.6x, level 10 = 1.5x
+        let level_mult = 0.5 + entity.level as f32 * 0.1;
+        let mut produced_anything = false;
         for &(commodity, rate) in &npc.behavior_production {
             if rate > 0.0 {
                 out.push(WorldDelta::ProduceCommodity {
@@ -121,7 +122,13 @@ pub fn compute_food_for_settlement(
                     commodity,
                     amount: rate * level_mult,
                 });
+                produced_anything = true;
             }
+        }
+
+        // Labor XP: earned by doing the work.
+        if produced_anything {
+            out.push(WorldDelta::AddXp { entity_id: entity.id, amount: 1 });
         }
     }
 

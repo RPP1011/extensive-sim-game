@@ -214,24 +214,23 @@ impl<B: Backend> TreeDecoder<B> {
         let memory = self.memory_proj.forward(text_memory);
 
         let mut generated_bins: Vec<Vec<u32>> = (0..batch).map(|_| Vec::with_capacity(GRAMMAR_DIM)).collect();
-        let mut cache = self.decoder.new_autoregressive_cache();
 
-        // Current token: start with [START]
-        let mut current_token = Tensor::<B, 2, Int>::full([batch, 1], N_BINS as i64, &device);
+        // Build sequence incrementally: start with [START]
+        let mut current_seq = Tensor::<B, 2, Int>::full([batch, 1], N_BINS as i64, &device);
 
         for step in 0..GRAMMAR_DIM {
-            // Embed just the current token
-            let tok_emb = self.bin_emb.forward(current_token.clone());
-            let pos_id = Tensor::<B, 2, Int>::full([batch, 1], step as i64, &device);
-            let pos_emb = self.dim_emb.forward(pos_id);
-            let target_emb = tok_emb + pos_emb; // [B, 1, D_MODEL]
+            // Full recompute each step (burn 0.20 KV cache has reshape bugs)
+            // Build full sequence so far
+            let tok_emb_full = self.bin_emb.forward(current_seq.clone());
+            let seq_so_far = step + 1;
+            let positions_full = Tensor::<B, 1, Int>::arange(0..seq_so_far as i64, &device)
+                .unsqueeze::<2>()
+                .expand([batch as i64, seq_so_far as i64]);
+            let pos_emb_full = self.dim_emb.forward(positions_full);
+            let target_emb_full = tok_emb_full + pos_emb_full;
 
-            // Cached decoder forward — only processes new token, reuses KV from previous steps
-            let dec_input = TransformerDecoderInput::new(target_emb, memory.clone());
-            let decoded = self.decoder.forward_autoregressive_inference(dec_input, &mut cache);
-
-            // Cache returns accumulated [B, step+1, D]. Take last position.
-            let [_b, seq_so_far, _d] = decoded.dims();
+            let dec_input = TransformerDecoderInput::new(target_emb_full, memory.clone());
+            let decoded = self.decoder.forward(dec_input);
             let last = decoded.slice([0..batch, seq_so_far - 1..seq_so_far])
                 .reshape([batch, D_MODEL]);
 
@@ -268,8 +267,8 @@ impl<B: Backend> TreeDecoder<B> {
                 generated_bins[bi].push(bin as u32);
             }
 
-            // Next input token
-            current_token = next_bins.reshape([batch, 1]);
+            // Append to sequence
+            current_seq = Tensor::cat(vec![current_seq, next_bins.reshape([batch, 1])], 1);
         }
 
         // Convert bins to continuous [0,1] values
