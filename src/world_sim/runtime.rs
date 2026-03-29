@@ -741,6 +741,13 @@ pub struct WorldSim {
     /// Reusable spatial index.
     spatial: SpatialIndex,
 
+    /// Dedicated thread pool — stays warm across ticks, no wake latency.
+    pool: Option<rayon::ThreadPool>,
+
+    /// Per-thread reusable delta buffers. One per rayon thread.
+    /// Avoids Vec allocation per settlement per tick.
+    thread_bufs: Vec<std::sync::Mutex<Vec<WorldDelta>>>,
+
     /// Accumulated profiling stats.
     pub profile_acc: ProfileAccumulator,
 }
@@ -753,10 +760,27 @@ impl WorldSim {
         // Sort entities by settlement/party, build hot/cold + all indices.
         initial.rebuild_all_indices();
 
+        // Create dedicated thread pool for large worlds.
+        let num_threads = rayon::current_num_threads();
+        let (pool, thread_bufs) = if initial.entities.len() > 10_000 {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(num_threads)
+                .build()
+                .ok();
+            let bufs: Vec<std::sync::Mutex<Vec<WorldDelta>>> = (0..num_threads)
+                .map(|_| std::sync::Mutex::new(Vec::with_capacity(initial.entities.len() * 4 / num_threads)))
+                .collect();
+            (pool, bufs)
+        } else {
+            (None, Vec::new())
+        };
+
         WorldSim {
             delta_buf: Vec::with_capacity(initial.entities.len() * 4),
             merged: FlatMergedDeltas::new(max_entity_id, max_settlement_id),
             spatial: SpatialIndex::new(),
+            pool,
+            thread_bufs,
             profile_acc: ProfileAccumulator::default(),
             state: initial,
         }
@@ -766,87 +790,115 @@ impl WorldSim {
         &self.state
     }
 
-    /// Run campaign systems. Per-settlement parallel dispatch: each settlement runs
-    /// ALL settlement-scoped systems on its entity slice. Different settlements on
-    /// different rayon threads. Global systems run sequentially after.
+    /// Run campaign systems with per-settlement parallel dispatch.
+    /// Uses dedicated thread pool + pre-allocated per-thread buffers.
     fn compute_campaign_systems_par(&mut self) {
         use rayon::prelude::*;
 
         let state = &self.state;
+        let thread_bufs = &self.thread_bufs;
 
-        // Per-settlement parallel dispatch using fold+reduce.
-        // Each rayon thread reuses a single Vec across all settlements it processes.
-        // reduce merges thread-local Vecs by extending the larger one.
-        let parallel_deltas: Vec<WorldDelta> = state.settlements
-            .par_iter()
-            .fold(Vec::new, |mut buf, settlement| {
+        // Clear all thread buffers (O(threads), not O(settlements)).
+        for buf in thread_bufs.iter() {
+            buf.lock().unwrap().clear();
+        }
+
+        let do_parallel = |settlements: &[super::state::SettlementState]| {
+            settlements.par_iter().for_each(|settlement| {
                 let range = state.group_index.settlement_entities(settlement.id);
                 let entities = &state.entities[range];
 
-                // Run all settlement-scoped systems for this settlement.
-                super::systems::economy::compute_economy_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::food::compute_food_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::population::compute_population_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::mentorship::compute_mentorship_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::adventurer_condition::compute_adventurer_condition_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::adventurer_recovery::compute_adventurer_recovery_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::progression::compute_progression_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::recruitment::compute_recruitment_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::retirement::compute_retirement_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::hobbies::compute_hobbies_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::fears::compute_fears_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::personal_goals::compute_personal_goals_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::journals::compute_journals_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::wound_persistence::compute_wound_persistence_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::addiction::compute_addiction_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::equipment_durability::compute_equipment_durability_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::moods::compute_moods_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::bonds::compute_bonds_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::npc_relationships::compute_npc_relationships_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::npc_reputation::compute_npc_reputation_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::romance::compute_romance_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::rivalries::compute_rivalries_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::companions::compute_companions_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::party_chemistry::compute_party_chemistry_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::nicknames::compute_nicknames_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::legendary_deeds::compute_legendary_deeds_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::folk_hero::compute_folk_hero_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::memorials::compute_memorials_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::trophies::compute_trophies_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::awakening::compute_awakening_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::visions::compute_visions_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::bloodlines::compute_bloodlines_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::divine_favor::compute_divine_favor_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::religion::compute_religion_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::demonic_pacts::compute_demonic_pacts_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::legacy_weapons::compute_legacy_weapons_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::cooldowns::compute_cooldowns_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::battles::compute_battles_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::loot::compute_loot_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::last_stand::compute_last_stand_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::skill_challenges::compute_skill_challenges_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::dungeons::compute_dungeons_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::escalation_protocol::compute_escalation_protocol_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::trade_goods::compute_trade_goods_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::infrastructure::compute_infrastructure_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::crafting::compute_crafting_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::buildings::compute_buildings_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::guild_rooms::compute_guild_rooms_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::guild_tiers::compute_guild_tiers_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::festivals::compute_festivals_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::supply::compute_supply_for_settlement(state, settlement.id, entities, &mut buf);
-                super::systems::exploration::compute_exploration_for_settlement(state, settlement.id, entities, &mut buf);
+                // Get this thread's buffer. rayon assigns threads by index.
+                let thread_idx = rayon::current_thread_index().unwrap_or(0);
+                let buf_idx = thread_idx % thread_bufs.len().max(1);
+                let mut buf = thread_bufs[buf_idx].lock().unwrap();
 
-                buf
-            })
-            .reduce(Vec::new, |mut a, b| { a.extend(b); a });
+                run_settlement_systems(state, settlement.id, entities, &mut buf);
+            });
+        };
 
-        self.delta_buf.extend(parallel_deltas);
+        // Run on dedicated pool if available, else global pool.
+        if let Some(pool) = &self.pool {
+            pool.install(|| do_parallel(&state.settlements));
+        } else {
+            do_parallel(&state.settlements);
+        }
+
+        // Drain all thread buffers into main delta_buf.
+        for buf in thread_bufs.iter() {
+            let mut b = buf.lock().unwrap();
+            self.delta_buf.extend(b.drain(..));
+        }
 
         // Global systems (sequential).
         super::systems::compute_global_systems(state, &mut self.delta_buf);
     }
+}
 
+/// Run all settlement-scoped systems for one settlement.
+/// Extracted so both parallel and sequential paths can call it.
+fn run_settlement_systems(
+    state: &super::state::WorldState,
+    sid: u32,
+    entities: &[super::state::Entity],
+    buf: &mut Vec<WorldDelta>,
+) {
+    use super::systems::*;
+    economy::compute_economy_for_settlement(state, sid, entities, buf);
+    food::compute_food_for_settlement(state, sid, entities, buf);
+    population::compute_population_for_settlement(state, sid, entities, buf);
+    mentorship::compute_mentorship_for_settlement(state, sid, entities, buf);
+    adventurer_condition::compute_adventurer_condition_for_settlement(state, sid, entities, buf);
+    adventurer_recovery::compute_adventurer_recovery_for_settlement(state, sid, entities, buf);
+    progression::compute_progression_for_settlement(state, sid, entities, buf);
+    recruitment::compute_recruitment_for_settlement(state, sid, entities, buf);
+    retirement::compute_retirement_for_settlement(state, sid, entities, buf);
+    hobbies::compute_hobbies_for_settlement(state, sid, entities, buf);
+    fears::compute_fears_for_settlement(state, sid, entities, buf);
+    personal_goals::compute_personal_goals_for_settlement(state, sid, entities, buf);
+    journals::compute_journals_for_settlement(state, sid, entities, buf);
+    wound_persistence::compute_wound_persistence_for_settlement(state, sid, entities, buf);
+    addiction::compute_addiction_for_settlement(state, sid, entities, buf);
+    equipment_durability::compute_equipment_durability_for_settlement(state, sid, entities, buf);
+    moods::compute_moods_for_settlement(state, sid, entities, buf);
+    bonds::compute_bonds_for_settlement(state, sid, entities, buf);
+    npc_relationships::compute_npc_relationships_for_settlement(state, sid, entities, buf);
+    npc_reputation::compute_npc_reputation_for_settlement(state, sid, entities, buf);
+    romance::compute_romance_for_settlement(state, sid, entities, buf);
+    rivalries::compute_rivalries_for_settlement(state, sid, entities, buf);
+    companions::compute_companions_for_settlement(state, sid, entities, buf);
+    party_chemistry::compute_party_chemistry_for_settlement(state, sid, entities, buf);
+    nicknames::compute_nicknames_for_settlement(state, sid, entities, buf);
+    legendary_deeds::compute_legendary_deeds_for_settlement(state, sid, entities, buf);
+    folk_hero::compute_folk_hero_for_settlement(state, sid, entities, buf);
+    memorials::compute_memorials_for_settlement(state, sid, entities, buf);
+    trophies::compute_trophies_for_settlement(state, sid, entities, buf);
+    awakening::compute_awakening_for_settlement(state, sid, entities, buf);
+    visions::compute_visions_for_settlement(state, sid, entities, buf);
+    bloodlines::compute_bloodlines_for_settlement(state, sid, entities, buf);
+    divine_favor::compute_divine_favor_for_settlement(state, sid, entities, buf);
+    religion::compute_religion_for_settlement(state, sid, entities, buf);
+    demonic_pacts::compute_demonic_pacts_for_settlement(state, sid, entities, buf);
+    legacy_weapons::compute_legacy_weapons_for_settlement(state, sid, entities, buf);
+    cooldowns::compute_cooldowns_for_settlement(state, sid, entities, buf);
+    battles::compute_battles_for_settlement(state, sid, entities, buf);
+    loot::compute_loot_for_settlement(state, sid, entities, buf);
+    last_stand::compute_last_stand_for_settlement(state, sid, entities, buf);
+    skill_challenges::compute_skill_challenges_for_settlement(state, sid, entities, buf);
+    dungeons::compute_dungeons_for_settlement(state, sid, entities, buf);
+    escalation_protocol::compute_escalation_protocol_for_settlement(state, sid, entities, buf);
+    trade_goods::compute_trade_goods_for_settlement(state, sid, entities, buf);
+    infrastructure::compute_infrastructure_for_settlement(state, sid, entities, buf);
+    crafting::compute_crafting_for_settlement(state, sid, entities, buf);
+    buildings::compute_buildings_for_settlement(state, sid, entities, buf);
+    guild_rooms::compute_guild_rooms_for_settlement(state, sid, entities, buf);
+    guild_tiers::compute_guild_tiers_for_settlement(state, sid, entities, buf);
+    festivals::compute_festivals_for_settlement(state, sid, entities, buf);
+    supply::compute_supply_for_settlement(state, sid, entities, buf);
+    exploration::compute_exploration_for_settlement(state, sid, entities, buf);
+}
+
+impl WorldSim {
     pub fn tick(&mut self) -> TickProfile {
         let tick_start = Instant::now();
         let mut profile = TickProfile::default();
