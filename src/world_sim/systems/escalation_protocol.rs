@@ -107,11 +107,13 @@ pub fn compute_escalation_protocol_for_settlement(
                 }
             }
 
-            // War exhaustion treasury drain.
-            out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement_id,
-                delta: -ESCALATION_RATE,
-            });
+            // War exhaustion treasury drain (only above floor).
+            if settlement.treasury > -100.0 {
+                out.push(WorldDelta::UpdateTreasury {
+                    location_id: settlement_id,
+                    delta: -ESCALATION_RATE,
+                });
+            }
         } else if dead_hostiles == 0 {
             // De-escalate.
             if let Some(grid_id) = settlement.grid_id {

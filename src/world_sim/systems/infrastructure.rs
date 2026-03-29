@@ -84,9 +84,9 @@ pub fn compute_infrastructure_for_settlement(
         None => return,
     };
 
-    // --- Maintenance cost ---
+    // --- Maintenance cost (only drain if treasury above floor) ---
     let maintenance = settlement.population as f32 * MAINTENANCE_COST_PER_POP;
-    if maintenance > 0.0 {
+    if maintenance > 0.0 && settlement.treasury > -100.0 {
         out.push(WorldDelta::UpdateTreasury {
             location_id: settlement_id,
             delta: -maintenance,

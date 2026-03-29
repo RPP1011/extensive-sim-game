@@ -121,7 +121,7 @@ pub fn compute_crisis(state: &WorldState, out: &mut Vec<WorldDelta>) {
             for settlement in &state.settlements {
                 let dx = settlement.pos.0 - (ri as f32 * 20.0);
                 let dy = settlement.pos.1 - (ri as f32 * 15.0);
-                if dx * dx + dy * dy < 400.0 {
+                if dx * dx + dy * dy < 400.0 && settlement.treasury > -100.0 {
                     out.push(WorldDelta::UpdateTreasury {
                         location_id: settlement.id,
                         delta: -DECLINE_GOLD_DRAIN * severity,

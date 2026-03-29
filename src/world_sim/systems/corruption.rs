@@ -53,7 +53,7 @@ pub fn compute_corruption(state: &WorldState, out: &mut Vec<WorldDelta>) {
         }
 
         // Moderate corruption (0.5-1.0): gold siphoning
-        if corruption_proxy >= 0.5 {
+        if corruption_proxy >= 0.5 && settlement.treasury > -100.0 {
             let roll = tick_hash(state.tick, settlement.id as u64 ^ 0xC0EAEB);
             if roll < 0.10 {
                 out.push(WorldDelta::UpdateTreasury {

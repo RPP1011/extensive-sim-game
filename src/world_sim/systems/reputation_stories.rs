@@ -44,7 +44,7 @@ pub fn compute_reputation_stories(state: &WorldState, out: &mut Vec<WorldDelta>)
                 location_id: settlement.id,
                 delta: POSITIVE_STORY_GOLD,
             });
-        } else if settlement.treasury < 15.0 && roll < 0.20 {
+        } else if settlement.treasury < 15.0 && settlement.treasury > -100.0 && roll < 0.20 {
             out.push(WorldDelta::UpdateTreasury {
                 location_id: settlement.id,
                 delta: -NEGATIVE_STORY_DRAIN,

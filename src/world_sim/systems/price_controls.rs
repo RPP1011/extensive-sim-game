@@ -83,12 +83,14 @@ pub fn compute_price_controls(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 clamped_prices[c] = floor;
                 any_change = true;
 
-                // Treasury pays the subsidy difference.
-                let subsidy = FLOOR_SUBSIDY_DRAIN;
-                out.push(WorldDelta::UpdateTreasury {
-                    location_id: settlement.id,
-                    delta: -subsidy,
-                });
+                // Treasury pays the subsidy difference (only above floor).
+                if settlement.treasury > -100.0 {
+                    let subsidy = FLOOR_SUBSIDY_DRAIN;
+                    out.push(WorldDelta::UpdateTreasury {
+                        location_id: settlement.id,
+                        delta: -subsidy,
+                    });
+                }
             }
         }
 

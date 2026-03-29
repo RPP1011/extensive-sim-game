@@ -155,6 +155,7 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
             let damage = excess * 0.5 * threat_mod;
 
             for settlement in &state.settlements {
+                if settlement.treasury <= -100.0 { continue; }
                 let roll = tick_hash(state.tick, region.id as u64 ^ settlement.id as u64);
                 if roll > 0.3 { continue; }
 

@@ -87,13 +87,15 @@ pub fn compute_currency_debasement(state: &WorldState, out: &mut Vec<WorldDelta>
             prices: inflated_prices,
         });
 
-        // Inflation erodes treasury value.
-        let erosion = settlement.treasury * INFLATION_FACTOR;
-        if erosion > 0.01 {
-            out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
-                delta: -erosion,
-            });
+        // Inflation erodes treasury value (only if treasury is positive).
+        if settlement.treasury > 0.0 {
+            let erosion = settlement.treasury * INFLATION_FACTOR;
+            if erosion > 0.01 {
+                out.push(WorldDelta::UpdateTreasury {
+                    location_id: settlement.id,
+                    delta: -erosion,
+                });
+            }
         }
     }
 }

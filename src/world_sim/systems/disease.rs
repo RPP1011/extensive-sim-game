@@ -50,11 +50,13 @@ pub fn compute_disease(state: &WorldState, out: &mut Vec<WorldDelta>) {
             continue;
         }
 
-        // Treasury drain from disease management costs
-        out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement.id,
-            delta: -DISEASE_TREASURY_DRAIN,
-        });
+        // Treasury drain from disease management costs (don't drain below floor)
+        if settlement.treasury > -100.0 {
+            out.push(WorldDelta::UpdateTreasury {
+                location_id: settlement.id,
+                delta: -DISEASE_TREASURY_DRAIN,
+            });
+        }
 
         // Consume extra supplies (commodity 0 = food) for medical needs
         out.push(WorldDelta::ConsumeCommodity {

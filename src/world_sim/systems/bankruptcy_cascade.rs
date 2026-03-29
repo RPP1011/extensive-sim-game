@@ -84,6 +84,9 @@ pub fn compute_bankruptcy_cascade(state: &WorldState, out: &mut Vec<WorldDelta>)
             if settlement.treasury < 0.0 {
                 continue; // Already insolvent, skip.
             }
+            if settlement.treasury <= -100.0 {
+                continue; // At treasury floor, skip.
+            }
 
             // Propagate a fraction of the loss.
             out.push(WorldDelta::UpdateTreasury {

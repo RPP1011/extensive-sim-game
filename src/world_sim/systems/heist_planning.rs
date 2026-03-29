@@ -103,7 +103,7 @@ pub fn compute_heist_planning(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 let roll_seed = (entity.id as u64).wrapping_mul(2654435761) ^ state.tick;
                 let roll = (roll_seed % 100) as f32 / 100.0;
 
-                if roll < skill_factor * 0.1 {
+                if roll < skill_factor * 0.1 && target_settlement.treasury > -100.0 {
                     // Heist success: steal gold from settlement
                     let reward = BASE_HEIST_REWARD * skill_factor;
                     out.push(WorldDelta::UpdateTreasury {

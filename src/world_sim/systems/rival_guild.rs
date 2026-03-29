@@ -45,8 +45,8 @@ pub fn compute_rival_guild(state: &WorldState, out: &mut Vec<WorldDelta>) {
     for settlement in &state.settlements {
         let roll = tick_hash(state.tick, settlement.id as u64 ^ 0xE1FA1);
 
-        // 10% chance of sabotage per settlement per cycle
-        if roll < 0.10 {
+        // 10% chance of sabotage per settlement per cycle (only above treasury floor)
+        if roll < 0.10 && settlement.treasury > -100.0 {
             out.push(WorldDelta::UpdateTreasury {
                 location_id: settlement.id,
                 delta: -SABOTAGE_GOLD_DRAIN,

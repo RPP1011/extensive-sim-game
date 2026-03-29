@@ -106,8 +106,11 @@ pub fn compute_difficulty_scaling(state: &WorldState, out: &mut Vec<WorldDelta>)
 
 /// Escalation: guild is dominant, increase pressure via economic penalties.
 fn apply_escalation(state: &WorldState, power_rating: f32, out: &mut Vec<WorldDelta>) {
-    // Trade disruption: drain 10% from each settlement treasury
+    // Trade disruption: drain 10% from each settlement treasury (only positive treasury)
     for settlement in &state.settlements {
+        if settlement.treasury <= 0.0 {
+            continue;
+        }
         let loss = (settlement.treasury * 0.1).min(80.0);
         if loss > 0.0 {
             out.push(WorldDelta::UpdateTreasury {

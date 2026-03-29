@@ -26,6 +26,9 @@ pub fn compute_guild_rooms_for_settlement(
         Some(s) => s,
         None => return,
     };
+    if settlement.treasury <= 0.0 {
+        return;
+    }
     let room_count = (settlement.treasury / 200.0).floor().min(5.0) as u32;
     if room_count > 0 {
         out.push(WorldDelta::UpdateTreasury {

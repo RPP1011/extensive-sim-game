@@ -67,7 +67,7 @@ pub fn compute_dungeons_for_settlement(
 
     // --- Dungeon monster threat pressure ---
     for region in &state.regions {
-        if region.monster_density > 60.0 {
+        if region.monster_density > 60.0 && settlement.treasury > -100.0 {
             let threat_drain = region.monster_density * 0.01 * DEEP_DUNGEON_THREAT_MULTIPLIER;
             out.push(WorldDelta::UpdateTreasury {
                 location_id: settlement_id,

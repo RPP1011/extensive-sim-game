@@ -38,7 +38,7 @@ pub fn compute_charter(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 location_id: settlement.id,
                 delta: HIGH_LEGITIMACY_GOLD_BONUS,
             });
-        } else if settlement.treasury < 20.0 {
+        } else if settlement.treasury < 20.0 && settlement.treasury > -100.0 {
             // Low legitimacy: drain treasury further and damage NPCs (desertion)
             out.push(WorldDelta::UpdateTreasury {
                 location_id: settlement.id,

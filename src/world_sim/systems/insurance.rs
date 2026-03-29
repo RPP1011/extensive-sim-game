@@ -67,7 +67,8 @@ pub fn compute_insurance(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
         // --- Claim check: if NPC HP is below threshold, pay out ---
         let hp_ratio = entity.hp / entity.max_hp.max(1.0);
-        if hp_ratio < DAMAGE_CLAIM_THRESHOLD && hp_ratio > 0.0 {
+        let home_treasury = state.settlement(home_id).map(|s| s.treasury).unwrap_or(0.0);
+        if hp_ratio < DAMAGE_CLAIM_THRESHOLD && hp_ratio > 0.0 && home_treasury > -100.0 {
             let payout = premium * CLAIM_PAYOUT_MULTIPLIER;
             out.push(WorldDelta::TransferGold {
                 from_id: home_id,

@@ -92,12 +92,14 @@ pub fn compute_economic_competition(state: &WorldState, out: &mut Vec<WorldDelta
                 prices: inflated_prices,
             });
 
-            // Treasury drain from competitive disadvantage.
-            let drain = settlement.treasury * 0.01;
-            out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
-                delta: -drain,
-            });
+            // Treasury drain from competitive disadvantage (only above floor).
+            if settlement.treasury > -100.0 {
+                let drain = settlement.treasury.max(0.0) * 0.01;
+                out.push(WorldDelta::UpdateTreasury {
+                    location_id: settlement.id,
+                    delta: -drain,
+                });
+            }
         }
     }
 
@@ -115,7 +117,7 @@ pub fn compute_economic_competition(state: &WorldState, out: &mut Vec<WorldDelta
             let dy = settlement.pos.1 - 0.0;
             let dist = (dx * dx + dy * dy).sqrt();
 
-            if dist < 100.0 {
+            if dist < 100.0 && settlement.treasury > -100.0 {
                 let disruption = region.threat_level * 0.001;
                 out.push(WorldDelta::UpdateTreasury {
                     location_id: settlement.id,

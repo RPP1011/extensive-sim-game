@@ -45,11 +45,13 @@ pub fn compute_plague_vectors(state: &WorldState, out: &mut Vec<WorldDelta>) {
             continue;
         }
 
-        // Treasury drain from plague response
-        out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement.id,
-            delta: -PLAGUE_TREASURY_DRAIN,
-        });
+        // Treasury drain from plague response (only above floor)
+        if settlement.treasury > -100.0 {
+            out.push(WorldDelta::UpdateTreasury {
+                location_id: settlement.id,
+                delta: -PLAGUE_TREASURY_DRAIN,
+            });
+        }
 
         // Damage NPCs in the settlement
         if let Some(grid_id) = settlement.grid_id {

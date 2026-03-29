@@ -49,7 +49,7 @@ pub fn compute_buildings_for_settlement(
         None => return,
     };
 
-    if settlement.treasury >= UPGRADE_TREASURY_THRESHOLD {
+    if settlement.treasury >= UPGRADE_TREASURY_THRESHOLD && settlement.treasury > 0.0 {
         out.push(WorldDelta::UpdateTreasury {
             location_id: settlement_id,
             delta: -UPGRADE_COST,
