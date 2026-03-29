@@ -181,8 +181,26 @@ pub fn compute_food_for_settlement(
             }
         }
 
+        // NPC sells produced goods to settlement at local price.
+        // Gold flows: settlement pays NPC for their production.
+        if produced_anything {
+            let mut earnings = 0.0f32;
+            for &(commodity, rate) in &npc.behavior_production {
+                if rate > 0.0 {
+                    let actual = rate * level_mult; // same as production amount
+                    earnings += actual * settlement.prices[commodity];
+                }
+            }
+            if earnings > 0.01 {
+                out.push(WorldDelta::TransferGold {
+                    from_id: settlement_id,
+                    to_id: entity.id,
+                    amount: earnings,
+                });
+            }
+        }
+
         // Labor XP + behavior tags: earned by doing the work.
-        // Gold comes from selling goods via trade, not from production directly.
         if produced_anything {
             out.push(WorldDelta::AddXp { entity_id: entity.id, amount: 1 });
 
