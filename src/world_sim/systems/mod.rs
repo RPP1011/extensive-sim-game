@@ -153,13 +153,14 @@ macro_rules! run_system {
     }};
 }
 
-/// Run all registered world sim systems, pushing deltas into `out`.
-///
-/// Two-phase dispatch:
-/// 1. **Settlement-local systems** — iterate per-settlement using group_index slices.
-///    Each system only sees the ~180 entities at that settlement, not all 2000.
-/// 2. **Global systems** — iterate full state (factions, diplomacy, crisis, etc.)
+/// Run all systems. For single-threaded use.
 pub fn compute_all_systems(state: &WorldState, out: &mut Vec<WorldDelta>) {
+    compute_settlement_systems(state, out);
+    compute_global_systems(state, out);
+}
+
+/// Settlement-scoped systems for ALL settlements (single-threaded fallback).
+pub fn compute_settlement_systems(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // ===================================================================
     // Phase 1: Settlement-local systems
     // Each gets called once per settlement with the entity slice for that settlement.
@@ -233,9 +234,11 @@ pub fn compute_all_systems(state: &WorldState, out: &mut Vec<WorldDelta>) {
     run_system!("guild_tiers", guild_tiers::compute_guild_tiers, state, out);
     run_system!("festivals", festivals::compute_festivals, state, out);
 
-    // ===================================================================
-    // Phase 2: Global systems (don't iterate entities, or iterate all)
-    // ===================================================================
+}
+
+/// Global systems — NOT parallelizable per-settlement.
+/// These iterate factions, quests, regions, or cross-settlement entity pairs.
+pub fn compute_global_systems(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
     // Travel / overworld (iterate unaffiliated entities — monsters, travelers)
     run_system!("travel", travel::compute_travel, state, out);
