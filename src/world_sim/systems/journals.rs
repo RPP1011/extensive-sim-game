@@ -60,7 +60,7 @@ pub fn compute_journals(state: &WorldState, out: &mut Vec<WorldDelta>) {
         // Proxy: check if entity is on a combat grid
         if let Some(grid_id) = entity.grid_id {
             if let Some(grid) = state.grid(grid_id) {
-                if grid.has_hostiles(state) {
+                if grid.fidelity == crate::world_sim::fidelity::Fidelity::High {
                     // Entity is in combat — would generate battle memory entry
                     // NEEDS DELTA: WriteJournalEntry
                 }

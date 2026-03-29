@@ -167,7 +167,7 @@ pub fn compute_retirement(state: &WorldState, out: &mut Vec<WorldDelta>) {
         let on_hostile_grid = entity
             .grid_id
             .and_then(|gid| state.grid(gid))
-            .map(|g| g.has_hostiles(state))
+            .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
             .unwrap_or(false);
         if on_hostile_grid {
             continue;

@@ -392,6 +392,10 @@ const DT_SEC: f32 = 0.1;
 fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
     let mut p = ApplyProfile::default();
 
+    // Helper: O(1) entity index lookup (inline to avoid borrow issues).
+    let idx = &state.entity_index;
+    let ents = &mut state.entities;
+
     // HP changes
     let t = Instant::now();
     for &id in &m.entity_dirty {
@@ -401,12 +405,16 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
         let shield_add = m.shields[i];
         if damage == 0.0 && heal == 0.0 && shield_add == 0.0 { continue; }
 
-        if let Some(e) = state.entities.iter_mut().find(|e| e.id == id) {
-            if !e.alive { continue; }
-            let shield_absorb = damage.min(e.shield_hp);
-            e.shield_hp = e.shield_hp - shield_absorb + shield_add;
-            let remaining = damage - shield_absorb;
-            e.hp = (e.hp + heal - remaining).clamp(0.0, e.max_hp);
+        if i < idx.len() {
+            let ei = idx[i] as usize;
+            if ei < ents.len() {
+                let e = &mut ents[ei];
+                if !e.alive { continue; }
+                let shield_absorb = damage.min(e.shield_hp);
+                e.shield_hp = e.shield_hp - shield_absorb + shield_add;
+                let remaining = damage - shield_absorb;
+                e.hp = (e.hp + heal - remaining).clamp(0.0, e.max_hp);
+            }
         }
     }
     p.hp_us = t.elapsed().as_micros() as u64;
@@ -419,17 +427,21 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
         let fy = m.force_y[i];
         if fx == 0.0 && fy == 0.0 { continue; }
 
-        if let Some(e) = state.entities.iter_mut().find(|e| e.id == id) {
-            if !e.alive { continue; }
-            let mag = (fx * fx + fy * fy).sqrt();
-            let max_speed = e.move_speed * DT_SEC;
-            let (dx, dy) = if mag > max_speed && mag > 0.001 {
-                (fx / mag * max_speed, fy / mag * max_speed)
-            } else {
-                (fx, fy)
-            };
-            e.pos.0 += dx;
-            e.pos.1 += dy;
+        if i < idx.len() {
+            let ei = idx[i] as usize;
+            if ei < ents.len() {
+                let e = &mut ents[ei];
+                if !e.alive { continue; }
+                let mag = (fx * fx + fy * fy).sqrt();
+                let max_speed = e.move_speed * DT_SEC;
+                let (dx, dy) = if mag > max_speed && mag > 0.001 {
+                    (fx / mag * max_speed, fy / mag * max_speed)
+                } else {
+                    (fx, fy)
+                };
+                e.pos.0 += dx;
+                e.pos.1 += dy;
+            }
         }
     }
     p.movement_us = t.elapsed().as_micros() as u64;
@@ -569,7 +581,9 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
 
         if !has_fields && !has_xp && !has_mood { continue; }
 
-        if let Some(entity) = state.entities.iter_mut().find(|e| e.id == id) {
+        let ei = if i < state.entity_index.len() { state.entity_index[i] as usize } else { usize::MAX };
+        if ei < state.entities.len() {
+            let entity = &mut state.entities[ei];
             if has_fields {
                 super::apply::apply_entity_field_delta(entity, 0, m.entity_fields[base + 0]); // Morale
                 super::apply::apply_entity_field_delta(entity, 1, m.entity_fields[base + 1]); // Stress

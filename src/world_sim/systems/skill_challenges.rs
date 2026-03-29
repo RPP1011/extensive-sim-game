@@ -72,7 +72,7 @@ pub fn compute_skill_challenges(state: &WorldState, out: &mut Vec<WorldDelta>) {
         // Check if the grid has hostiles (challenge context)
         let grid_has_hostiles = state
             .grid(grid_id)
-            .map(|g| g.has_hostiles(state))
+            .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
             .unwrap_or(false);
 
         if !grid_has_hostiles {

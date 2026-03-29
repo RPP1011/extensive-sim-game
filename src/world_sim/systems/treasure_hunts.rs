@@ -64,7 +64,7 @@ pub fn compute_treasure_hunts(state: &WorldState, out: &mut Vec<WorldDelta>) {
         if let Some(gid) = entity.grid_id {
             if state
                 .grid(gid)
-                .map(|g| g.has_hostiles(state))
+                .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
                 .unwrap_or(false)
             {
                 continue;

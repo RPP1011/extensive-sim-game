@@ -45,14 +45,13 @@ pub fn compute_hobbies(state: &WorldState, out: &mut Vec<WorldDelta>) {
         }
         let npc = entity.npc.as_ref().unwrap();
 
-        // Determine if NPC is "idle" (at a settlement, not on a combat grid)
-        let at_settlement = entity.grid_id.is_none()
-            || entity.grid_id.map_or(false, |gid| {
-                state
-                    .grid(gid)
-                    .map(|g| !g.has_hostiles(state))
-                    .unwrap_or(true)
-            });
+        // Determine if NPC is "idle" (not on a High-fidelity combat grid)
+        let in_combat = entity.grid_id.map_or(false, |gid| {
+            state.grid(gid)
+                .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
+                .unwrap_or(false)
+        });
+        let at_settlement = !in_combat;
 
         if !at_settlement {
             continue;

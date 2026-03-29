@@ -53,7 +53,7 @@ pub fn compute_adventurer_recovery(state: &WorldState, out: &mut Vec<WorldDelta>
         let on_hostile_grid = entity
             .grid_id
             .and_then(|gid| state.grid(gid))
-            .map(|g| g.has_hostiles(state))
+            .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
             .unwrap_or(false);
 
         let injured = entity.hp < entity.max_hp * 0.5;

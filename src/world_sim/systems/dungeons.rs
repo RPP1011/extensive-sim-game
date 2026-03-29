@@ -92,7 +92,7 @@ pub fn compute_dungeons(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // here we handle the loot/reward side of dungeon clearing.
 
     for grid in &state.grids {
-        let has_hostiles = grid.has_hostiles(state);
+        let has_hostiles = grid.fidelity == crate::world_sim::fidelity::Fidelity::High;
         if !has_hostiles {
             continue;
         }

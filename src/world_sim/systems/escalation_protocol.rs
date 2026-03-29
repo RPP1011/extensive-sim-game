@@ -100,7 +100,7 @@ pub fn compute_escalation_protocol(state: &WorldState, out: &mut Vec<WorldDelta>
                     let dx = grid.center.0 - (ri as f32 * 20.0);
                     let dy = grid.center.1 - (ri as f32 * 15.0);
                     if dx * dx + dy * dy < 400.0 {
-                        if grid.fidelity == Fidelity::High && !grid.has_hostiles(state) {
+                        if grid.fidelity == Fidelity::High && grid.fidelity != crate::world_sim::fidelity::Fidelity::High {
                             out.push(WorldDelta::EscalateFidelity {
                                 grid_id: grid.id,
                                 new_fidelity: Fidelity::Medium,
