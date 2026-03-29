@@ -1,36 +1,52 @@
 #![allow(unused)]
 //! Vassalage system — every 17 ticks.
 //!
-//! Weak factions can become vassals of stronger ones. Vassals pay tribute
-//! to their lord and receive military protection. Autonomy drifts over time:
-//! high autonomy leads to rebellion, low autonomy leads to absorption.
+//! Weak factions (military_strength < 20) vassalize to strong neighbors
+//! (military_strength > 60). Vassalage is derived from the relationship
+//! between faction strengths rather than stored VassalRelation state.
+//!
+//! Tribute flows via TransferGold. Rebellion occurs when the vassal
+//! faction's relationship_to_guild diverges heavily from the lord's,
+//! signaling resentment buildup.
+//!
+//! Uses only existing WorldState types and WorldDelta variants:
+//! - UpdateFaction for military_strength, relationship_to_guild, treasury
+//! - TransferGold for tribute payments
+//! - RecordEvent / RecordChronicle for narrative
 //!
 //! Ported from `crates/headless_campaign/src/systems/vassalage.rs`.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
-
-// NEEDS STATE: factions: Vec<FactionState> on WorldState
-//   FactionState { id, name, military_strength, territory_size, relationship_to_guild }
-// NEEDS STATE: vassal_relations: Vec<VassalRelation> on WorldState
-//   VassalRelation { vassal_id: u32, lord_id: u32, tribute_rate: f32,
-//                    autonomy: f32, started_tick: u64 }
-// NEEDS STATE: diplomacy: DiplomacyState { guild_faction_id, relations: Vec<Vec<i32>> }
-// NEEDS STATE: guild: GuildState { gold }
-
-// NEEDS DELTA: CreateVassalRelation { vassal_id: u32, lord_id: u32, tribute_rate: f32,
-//              autonomy: f32 }
-// NEEDS DELTA: RemoveVassalRelation { vassal_id: u32, lord_id: u32 }
-// NEEDS DELTA: AdjustAutonomy { vassal_id: u32, lord_id: u32, delta: f32 }
-// NEEDS DELTA: AdjustRelationship { faction_id: u32, delta: f32 }
-// NEEDS DELTA: AdjustDiplomacyRelation { faction_a: u32, faction_b: u32, delta: i32 }
-// NEEDS DELTA: AdjustMilitaryStrength { faction_id: u32, delta: f32 }
-// NEEDS DELTA: SetMilitaryStrength { faction_id: u32, value: f32 }
-// NEEDS DELTA: AdjustTerritorySize { faction_id: u32, delta: i32 }
-// NEEDS DELTA: SetTerritorySize { faction_id: u32, value: u32 }
+use crate::world_sim::state::{
+    ChronicleCategory, ChronicleEntry, DiplomaticStance, FactionField, WorldEvent, WorldState,
+};
 
 /// Cadence: every 17 ticks.
 const VASSALAGE_INTERVAL: u64 = 17;
+
+/// Military strength below which a faction is considered weak.
+const WEAK_THRESHOLD: f32 = 20.0;
+
+/// Military strength above which a faction can be a lord.
+const STRONG_THRESHOLD: f32 = 60.0;
+
+/// Chance per interval for a weak faction to become a vassal.
+const VASSALIZATION_CHANCE: f32 = 0.30;
+
+/// Tribute rate: fraction of the weak faction's treasury transferred per interval.
+const TRIBUTE_RATE: f32 = 0.10;
+
+/// Military protection: lord contributes this fraction of their strength as a boost.
+const PROTECTION_RATE: f32 = 0.02;
+
+/// Relationship threshold below which resentment triggers rebellion.
+const REBELLION_RELATIONSHIP_THRESHOLD: f32 = -30.0;
+
+/// Chance per interval for rebellion when resentment is high.
+const REBELLION_CHANCE: f32 = 0.15;
+
+/// Relationship penalty when a faction rebels.
+const REBELLION_RELATIONSHIP_PENALTY: f32 = -20.0;
 
 /// Deterministic hash for pseudo-random decisions.
 #[inline]
@@ -53,270 +69,241 @@ pub fn compute_vassalage(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
-    // Once state.factions, state.vassal_relations, state.diplomacy, state.guild
-    // exist, enable this.
+    // --- Phase 1: Identify vassalage relationships ---
+    // Weak factions (military < WEAK_THRESHOLD) that are NOT at war vassalize
+    // to the strongest non-hostile faction.
+    compute_auto_vassalage(state, out);
 
-    /*
-    let guild_id = state.diplomacy.guild_faction_id;
+    // --- Phase 2: Tribute and protection ---
+    // Every weak faction adjacent to a strong faction pays tribute and receives
+    // military protection.
+    compute_tribute(state, out);
 
-    // --- Phase 1: Auto-vassalage for weak NPC factions ---
-    compute_auto_vassalage(state, guild_id, out);
-
-    // --- Phase 2: Tribute collection ---
-    compute_tribute(state, guild_id, out);
-
-    // --- Phase 3: Autonomy drift and rebellion ---
-    compute_autonomy(state, guild_id, out);
-
-    // --- Phase 4: Absorption of very low-autonomy vassals ---
-    compute_absorption(state, out);
-    */
+    // --- Phase 3: Rebellion ---
+    // Weak factions with very negative relationship to guild may rebel against
+    // their de-facto lord.
+    compute_rebellion(state, out);
 }
 
-/*
 // ---------------------------------------------------------------------------
-// Auto-vassalage
+// Auto-vassalage: weak factions submit to strong ones
 // ---------------------------------------------------------------------------
 
-/// Weak factions (strength < 20) with a strong neighbor (strength > 60)
-/// become vassals with 30% chance.
-fn compute_auto_vassalage(
-    state: &WorldState,
-    guild_id: u32,
-    out: &mut Vec<WorldDelta>,
-) {
-    let already_vassal: Vec<u32> = state
-        .vassal_relations
-        .iter()
-        .map(|v| v.vassal_id)
-        .collect();
-
+fn compute_auto_vassalage(state: &WorldState, out: &mut Vec<WorldDelta>) {
     for faction in &state.factions {
-        let fid = faction.id;
-
-        // Skip guild, existing vassals, and lords.
-        if fid == guild_id || already_vassal.contains(&fid) {
+        // Only weak, non-warring factions can become vassals.
+        if faction.military_strength >= WEAK_THRESHOLD {
             continue;
         }
-        if state.vassal_relations.iter().any(|v| v.lord_id == fid) {
+        if !faction.at_war_with.is_empty() {
+            continue;
+        }
+        // Already hostile or at war — too proud to vassalize.
+        if faction.diplomatic_stance == DiplomaticStance::Hostile
+            || faction.diplomatic_stance == DiplomaticStance::AtWar
+        {
             continue;
         }
 
-        if faction.military_strength >= 20.0 {
-            continue;
-        }
-
-        // Find strongest eligible neighbor.
+        // Find the strongest eligible lord.
         let best_lord = state
             .factions
             .iter()
             .filter(|f| {
-                f.id != fid
-                    && f.id != guild_id
-                    && f.military_strength > 60.0
-                    && !already_vassal.contains(&f.id)
+                f.id != faction.id
+                    && f.military_strength > STRONG_THRESHOLD
+                    && f.diplomatic_stance != DiplomaticStance::AtWar
             })
-            .max_by(|a, b| a.military_strength.partial_cmp(&b.military_strength).unwrap());
+            .max_by(|a, b| {
+                a.military_strength
+                    .partial_cmp(&b.military_strength)
+                    .unwrap()
+            });
 
-        if let Some(lord) = best_lord {
-            let roll = deterministic_roll(state.tick, fid, lord.id, 0);
-            if roll < 0.30 {
-                let tribute_roll = deterministic_roll(state.tick, fid, lord.id, 1);
-                let tribute_rate = 0.10 + tribute_roll * 0.20; // 10-30%
-
-                out.push(WorldDelta::CreateVassalRelation {
-                    vassal_id: fid,
-                    lord_id: lord.id,
-                    tribute_rate,
-                    autonomy: 50.0,
-                });
-            }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Tribute collection
-// ---------------------------------------------------------------------------
-
-fn compute_tribute(
-    state: &WorldState,
-    guild_id: u32,
-    out: &mut Vec<WorldDelta>,
-) {
-    for rel in &state.vassal_relations {
-        let vassal = match state.factions.iter().find(|f| f.id == rel.vassal_id) {
-            Some(f) => f,
+        let lord = match best_lord {
+            Some(l) => l,
             None => continue,
         };
 
-        let base_income = vassal.territory_size as f32 * 5.0;
-        let tribute = base_income * rel.tribute_rate;
-
-        if rel.lord_id == guild_id {
-            // Guild receives tribute via TransferGold.
-            out.push(WorldDelta::TransferGold {
-                from_id: rel.vassal_id,
-                to_id: guild_id,
-                amount: tribute,
-            });
-        } else if rel.vassal_id == guild_id {
-            // Guild pays tribute.
-            out.push(WorldDelta::TransferGold {
-                from_id: guild_id,
-                to_id: rel.lord_id,
-                amount: tribute,
-            });
-        } else {
-            // NPC-to-NPC: lord gains strength.
-            out.push(WorldDelta::AdjustMilitaryStrength {
-                faction_id: rel.lord_id,
-                delta: tribute * 0.1,
-            });
+        let roll = deterministic_roll(state.tick, faction.id, lord.id, 0);
+        if roll >= VASSALIZATION_CHANCE {
+            continue;
         }
 
-        // Lord provides military protection: small strength boost to vassal.
-        let lord_strength = state
-            .factions
-            .iter()
-            .find(|f| f.id == rel.lord_id)
-            .map(|f| f.military_strength)
-            .unwrap_or(0.0);
-        out.push(WorldDelta::AdjustMilitaryStrength {
-            faction_id: rel.vassal_id,
-            delta: lord_strength * 0.02,
+        // Vassalization: weak faction's relationship drifts toward the lord's.
+        // This represents political alignment with the stronger power.
+        let rel_drift = (lord.relationship_to_guild - faction.relationship_to_guild) * 0.3;
+        out.push(WorldDelta::UpdateFaction {
+            faction_id: faction.id,
+            field: FactionField::RelationshipToGuild,
+            value: rel_drift,
+        });
+
+        // Small military strength boost from the lord's protection umbrella.
+        out.push(WorldDelta::UpdateFaction {
+            faction_id: faction.id,
+            field: FactionField::MilitaryStrength,
+            value: lord.military_strength * PROTECTION_RATE,
+        });
+
+        out.push(WorldDelta::RecordEvent {
+            event: WorldEvent::Generic {
+                category: ChronicleCategory::Diplomacy,
+                text: format!(
+                    "{} becomes a vassal of {} (military disparity)",
+                    faction.name, lord.name
+                ),
+            },
         });
     }
 }
 
 // ---------------------------------------------------------------------------
-// Autonomy drift and rebellion
+// Tribute: weak factions pay strong neighbors
 // ---------------------------------------------------------------------------
 
-fn compute_autonomy(
-    state: &WorldState,
-    guild_id: u32,
-    out: &mut Vec<WorldDelta>,
-) {
-    for rel in &state.vassal_relations {
-        let lord_strength = state
-            .factions
-            .iter()
-            .find(|f| f.id == rel.lord_id)
-            .map(|f| f.military_strength)
-            .unwrap_or(0.0);
-        let vassal_strength = state
-            .factions
-            .iter()
-            .find(|f| f.id == rel.vassal_id)
-            .map(|f| f.military_strength)
-            .unwrap_or(0.0);
-
-        // Strength ratio drives autonomy drift.
-        let ratio = if lord_strength > 0.0 {
-            vassal_strength / lord_strength
-        } else {
-            1.0
-        };
-
-        let mut autonomy_delta = if ratio > 0.5 {
-            3.0
-        } else if ratio < 0.2 {
-            -2.0
-        } else {
-            1.0
-        };
-
-        // High tribute rate increases autonomy (resentment).
-        if rel.tribute_rate > 0.25 {
-            autonomy_delta += 2.0;
+fn compute_tribute(state: &WorldState, out: &mut Vec<WorldDelta>) {
+    for faction in &state.factions {
+        if faction.military_strength >= WEAK_THRESHOLD {
+            continue;
         }
-
-        out.push(WorldDelta::AdjustAutonomy {
-            vassal_id: rel.vassal_id,
-            lord_id: rel.lord_id,
-            delta: autonomy_delta,
-        });
-
-        // Rebellion check: autonomy > 80, 20% chance.
-        if rel.autonomy > 80.0 {
-            let roll = deterministic_roll(state.tick, rel.vassal_id, rel.lord_id, 100);
-            if roll < 0.20 {
-                // Remove vassal relation.
-                out.push(WorldDelta::RemoveVassalRelation {
-                    vassal_id: rel.vassal_id,
-                    lord_id: rel.lord_id,
-                });
-
-                // Vassal goes hostile toward lord.
-                if rel.lord_id == guild_id {
-                    out.push(WorldDelta::AdjustRelationship {
-                        faction_id: rel.vassal_id,
-                        delta: -20.0,
-                    });
-                }
-
-                // Update diplomacy matrix.
-                out.push(WorldDelta::AdjustDiplomacyRelation {
-                    faction_a: rel.vassal_id,
-                    faction_b: rel.lord_id,
-                    delta: -30,
-                });
-                out.push(WorldDelta::AdjustDiplomacyRelation {
-                    faction_a: rel.lord_id,
-                    faction_b: rel.vassal_id,
-                    delta: -20,
-                });
-            }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Absorption of very low-autonomy vassals
-// ---------------------------------------------------------------------------
-
-fn compute_absorption(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    for rel in &state.vassal_relations {
-        if rel.autonomy >= 20.0 {
+        if faction.treasury <= 0.0 {
             continue;
         }
 
-        let roll = deterministic_roll(state.tick, rel.vassal_id, rel.lord_id, 200);
-        if roll >= 0.15 {
-            continue;
-        }
+        // Find the strongest neighbor (de-facto lord).
+        let lord = state
+            .factions
+            .iter()
+            .filter(|f| {
+                f.id != faction.id
+                    && f.military_strength > STRONG_THRESHOLD
+                    && !f.at_war_with.contains(&faction.id)
+            })
+            .max_by(|a, b| {
+                a.military_strength
+                    .partial_cmp(&b.military_strength)
+                    .unwrap()
+            });
 
-        let vassal = match state.factions.iter().find(|f| f.id == rel.vassal_id) {
-            Some(f) => f,
+        let lord = match lord {
+            Some(l) => l,
             None => continue,
         };
 
-        // Transfer territory and partial strength to lord.
-        out.push(WorldDelta::AdjustTerritorySize {
-            faction_id: rel.lord_id,
-            delta: vassal.territory_size as i32,
-        });
-        out.push(WorldDelta::AdjustMilitaryStrength {
-            faction_id: rel.lord_id,
-            delta: vassal.military_strength * 0.5,
+        let tribute = faction.treasury * TRIBUTE_RATE;
+        if tribute < 0.1 {
+            continue;
+        }
+
+        // Transfer gold as tribute.
+        out.push(WorldDelta::TransferGold {
+            from_id: faction.id,
+            to_id: lord.id,
+            amount: tribute,
         });
 
-        // Zero out absorbed faction.
-        out.push(WorldDelta::SetMilitaryStrength {
-            faction_id: rel.vassal_id,
-            value: 0.0,
-        });
-        out.push(WorldDelta::SetTerritorySize {
-            faction_id: rel.vassal_id,
-            value: 0,
-        });
-
-        // Remove vassal relation.
-        out.push(WorldDelta::RemoveVassalRelation {
-            vassal_id: rel.vassal_id,
-            lord_id: rel.lord_id,
+        // Lord provides military protection in return.
+        let protection = lord.military_strength * PROTECTION_RATE;
+        out.push(WorldDelta::UpdateFaction {
+            faction_id: faction.id,
+            field: FactionField::MilitaryStrength,
+            value: protection,
         });
     }
 }
-*/
+
+// ---------------------------------------------------------------------------
+// Rebellion: resentful vassals break free
+// ---------------------------------------------------------------------------
+
+fn compute_rebellion(state: &WorldState, out: &mut Vec<WorldDelta>) {
+    for faction in &state.factions {
+        // Only weak factions with deep resentment can rebel.
+        if faction.military_strength >= WEAK_THRESHOLD {
+            continue;
+        }
+        if faction.relationship_to_guild > REBELLION_RELATIONSHIP_THRESHOLD {
+            continue;
+        }
+
+        // There must be a lord to rebel against.
+        let lord = state
+            .factions
+            .iter()
+            .filter(|f| {
+                f.id != faction.id
+                    && f.military_strength > STRONG_THRESHOLD
+            })
+            .max_by(|a, b| {
+                a.military_strength
+                    .partial_cmp(&b.military_strength)
+                    .unwrap()
+            });
+
+        let lord = match lord {
+            Some(l) => l,
+            None => continue,
+        };
+
+        let roll = deterministic_roll(state.tick, faction.id, lord.id, 100);
+        if roll >= REBELLION_CHANCE {
+            continue;
+        }
+
+        // Rebellion! Vassal breaks free with a military surge.
+        let surge = 5.0 + faction.military_strength * 0.5;
+        out.push(WorldDelta::UpdateFaction {
+            faction_id: faction.id,
+            field: FactionField::MilitaryStrength,
+            value: surge,
+        });
+
+        // Lord loses a small amount of strength from the uprising.
+        out.push(WorldDelta::UpdateFaction {
+            faction_id: lord.id,
+            field: FactionField::MilitaryStrength,
+            value: -surge * 0.3,
+        });
+
+        // Relationship craters between rebel and guild.
+        out.push(WorldDelta::UpdateFaction {
+            faction_id: faction.id,
+            field: FactionField::RelationshipToGuild,
+            value: REBELLION_RELATIONSHIP_PENALTY,
+        });
+
+        // Lord's relationship with guild improves (sympathy).
+        out.push(WorldDelta::UpdateFaction {
+            faction_id: lord.id,
+            field: FactionField::RelationshipToGuild,
+            value: 5.0,
+        });
+
+        // Coup risk rises for the rebel faction.
+        out.push(WorldDelta::UpdateFaction {
+            faction_id: faction.id,
+            field: FactionField::CoupRisk,
+            value: 0.15,
+        });
+
+        out.push(WorldDelta::RecordChronicle {
+            entry: ChronicleEntry {
+                tick: state.tick,
+                category: ChronicleCategory::Crisis,
+                text: format!(
+                    "{} rebels against {}! The vassal rises with newfound military strength.",
+                    faction.name, lord.name
+                ),
+                entity_ids: vec![],
+            },
+        });
+
+        out.push(WorldDelta::RecordEvent {
+            event: WorldEvent::Generic {
+                category: ChronicleCategory::Diplomacy,
+                text: format!("{} rebels against vassal lord {}", faction.name, lord.name),
+            },
+        });
+    }
+}
