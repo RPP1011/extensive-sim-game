@@ -15,14 +15,21 @@ use crate::world_sim::state::{ActionTags, Entity, EntityKind, WorldState, tags};
 /// How often the food system ticks.
 const FOOD_TICK_INTERVAL: u64 = 3;
 
-/// Food (commodity index 0) consumed per NPC per food tick.
-const FOOD_PER_NPC: f32 = 1.0;
+/// Food consumed per meal (one NPC eats this much per food tick).
+/// A farmer produces 0.15 × level_mult(0.6) = 0.09 food per food tick.
+/// One farmer feeds ~3 NPCs at this meal size. Sustainable with ~33% farmers.
+const MEAL_SIZE: f32 = 0.03;
+
+/// HP healed per meal. Eating restores a small amount of health.
+const MEAL_HEAL: f32 = 0.5;
 
 /// Commodity index for food.
 const COMMODITY_FOOD: usize = 0;
 
 /// HP damage per tick when starving (no food available).
-const STARVATION_DAMAGE: f32 = 2.0;
+/// Starvation damage per food tick when food runs out.
+/// At 100 HP, this takes ~100 ticks of complete starvation to kill.
+const STARVATION_DAMAGE: f32 = 0.3;
 
 pub fn compute_food(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % FOOD_TICK_INTERVAL != 0 {
@@ -51,7 +58,7 @@ pub fn compute_food(state: &WorldState, out: &mut Vec<WorldDelta>) {
         }
         // Traveling NPC eats from carried goods.
         let carried_food = npc.carried_goods[COMMODITY_FOOD];
-        let consume = FOOD_PER_NPC.min(carried_food);
+        let consume = MEAL_SIZE.min(carried_food);
         if consume > 0.0 {
             // Model carried food consumption as TransferGoods from self to self
             // (the apply phase will clamp to available).
@@ -63,8 +70,8 @@ pub fn compute_food(state: &WorldState, out: &mut Vec<WorldDelta>) {
             });
         }
         // Starvation for homeless NPCs with no food.
-        if carried_food < FOOD_PER_NPC {
-            let severity = (1.0 - carried_food / FOOD_PER_NPC).clamp(0.0, 1.0);
+        if carried_food < MEAL_SIZE {
+            let severity = (1.0 - carried_food / MEAL_SIZE).clamp(0.0, 1.0);
             out.push(WorldDelta::Damage {
                 target_id: entity.id,
                 amount: STARVATION_DAMAGE * severity,
@@ -209,32 +216,53 @@ pub fn compute_food_for_settlement(
         return;
     }
 
-    // --- Consumption ---
-    let food_needed = FOOD_PER_NPC * resident_count as f32;
+    // --- Eating: NPCs consume food as an action ---
+    // Each NPC eats one meal per food tick if food is available.
+    // Eating heals a small amount. No food = slow starvation.
     let food_available = settlement.stockpile[COMMODITY_FOOD];
+    let count = (resident_count as usize).min(512);
 
-    // Consume food from settlement stockpile.
-    let consumed = food_needed.min(food_available);
-    if consumed > 0.0 {
-        out.push(WorldDelta::ConsumeCommodity {
-            location_id: settlement_id,
-            commodity: COMMODITY_FOOD,
-            amount: consumed,
-        });
-    }
+    if food_available > 0.0 {
+        // Food available — NPCs eat. Each meal is a small amount.
+        let meal_size = MEAL_SIZE;
+        let meals_possible = (food_available / meal_size) as usize;
+        let eaters = count.min(meals_possible);
 
-    // If food was insufficient, apply starvation damage to residents.
-    let shortfall = food_needed - consumed;
-    if shortfall > 0.0 {
-        // Damage proportional to shortfall ratio.
-        let severity = (shortfall / food_needed).clamp(0.0, 1.0);
-        let damage = STARVATION_DAMAGE * severity;
-        let count = (resident_count as usize).min(512);
+        if eaters > 0 {
+            // Consume food from stockpile.
+            out.push(WorldDelta::ConsumeCommodity {
+                location_id: settlement_id,
+                commodity: COMMODITY_FOOD,
+                amount: meal_size * eaters as f32,
+            });
+
+            // Eating heals and grants farming behavior (food preparation).
+            for i in 0..eaters {
+                out.push(WorldDelta::Heal {
+                    target_id: resident_ids[i],
+                    amount: MEAL_HEAL,
+                    source_id: 0,
+                });
+            }
+        }
+
+        // NPCs who didn't get food: slow starvation.
+        if eaters < count {
+            for i in eaters..count {
+                out.push(WorldDelta::Damage {
+                    target_id: resident_ids[i],
+                    amount: STARVATION_DAMAGE,
+                    source_id: 0,
+                });
+            }
+        }
+    } else {
+        // No food at all — everyone starves slowly.
         for i in 0..count {
             out.push(WorldDelta::Damage {
                 target_id: resident_ids[i],
-                amount: damage,
-                source_id: 0, // environmental
+                amount: STARVATION_DAMAGE,
+                source_id: 0,
             });
         }
     }
