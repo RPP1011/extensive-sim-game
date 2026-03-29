@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::fidelity::Fidelity;
@@ -26,6 +28,32 @@ pub struct WorldState {
 
     /// Global economy (total gold supply, trade routes).
     pub economy: EconomyState,
+
+    // --- Campaign-level collections (migrated from headless_campaign) ---
+
+    /// Faction states (governments, guilds, cults, etc.).
+    pub factions: Vec<FactionState>,
+
+    /// Active quests currently being pursued.
+    pub quests: Vec<Quest>,
+
+    /// Quest board — available quests not yet accepted.
+    pub quest_board: Vec<QuestPosting>,
+
+    /// Bond graph between entities. Key = (min_id, max_id), value = strength 0–100.
+    pub adventurer_bonds: HashMap<(u32, u32), f32>,
+
+    /// Player guild state.
+    pub guild: GuildState,
+
+    /// Narrative chronicle log (bounded ring buffer).
+    pub chronicle: Vec<ChronicleEntry>,
+
+    /// Relation graph between entities. Key = (entity_a, entity_b, kind), value = strength.
+    pub relations: HashMap<(u32, u32, u8), f32>,
+
+    /// World events log (recent events for system queries, bounded).
+    pub world_events: Vec<WorldEvent>,
 }
 
 impl WorldState {
@@ -38,6 +66,14 @@ impl WorldState {
             regions: Vec::new(),
             settlements: Vec::new(),
             economy: EconomyState::default(),
+            factions: Vec::new(),
+            quests: Vec::new(),
+            quest_board: Vec::new(),
+            adventurer_bonds: HashMap::new(),
+            guild: GuildState::default(),
+            chronicle: Vec::new(),
+            relations: HashMap::new(),
+            world_events: Vec::new(),
         }
     }
 
@@ -55,6 +91,42 @@ impl WorldState {
 
     pub fn grid(&self, id: u32) -> Option<&LocalGrid> {
         self.grids.iter().find(|g| g.id == id)
+    }
+
+    pub fn faction(&self, id: u32) -> Option<&FactionState> {
+        self.factions.iter().find(|f| f.id == id)
+    }
+
+    pub fn faction_mut(&mut self, id: u32) -> Option<&mut FactionState> {
+        self.factions.iter_mut().find(|f| f.id == id)
+    }
+
+    pub fn quest(&self, id: u32) -> Option<&Quest> {
+        self.quests.iter().find(|q| q.id == id)
+    }
+
+    pub fn quest_mut(&mut self, id: u32) -> Option<&mut Quest> {
+        self.quests.iter_mut().find(|q| q.id == id)
+    }
+
+    pub fn region_mut(&mut self, id: u32) -> Option<&mut RegionState> {
+        self.regions.iter_mut().find(|r| r.id == id)
+    }
+
+    pub fn settlement_mut(&mut self, id: u32) -> Option<&mut SettlementState> {
+        self.settlements.iter_mut().find(|s| s.id == id)
+    }
+
+    /// Look up bond strength between two entities.
+    pub fn bond_strength(&self, a: u32, b: u32) -> f32 {
+        if a == b { return 0.0; }
+        let key = (a.min(b), a.max(b));
+        self.adventurer_bonds.get(&key).copied().unwrap_or(0.0)
+    }
+
+    /// Look up a relation value between two entities.
+    pub fn relation(&self, a: u32, b: u32, kind: RelationKind) -> f32 {
+        self.relations.get(&(a, b, kind as u8)).copied().unwrap_or(0.0)
     }
 }
 
@@ -244,6 +316,37 @@ pub struct NpcData {
     pub class_tags: Vec<String>,
     /// What commodities this NPC produces (commodity_index, rate_per_tick).
     pub behavior_production: Vec<(usize, f32)>,
+
+    // --- Campaign system fields (migrated from headless_campaign::Adventurer) ---
+
+    /// 0–100. Combat morale.
+    pub morale: f32,
+    /// 0–100. Psychological stress.
+    pub stress: f32,
+    /// 0–100. Physical fatigue.
+    pub fatigue: f32,
+    /// 0–100. Loyalty to guild/faction.
+    pub loyalty: f32,
+    /// 0–100. Injury severity (>=90 incapacitated).
+    pub injury: f32,
+    /// Experience points.
+    pub xp: u32,
+    /// Hero archetype name (e.g. "knight", "ranger", "mage").
+    pub archetype: String,
+    /// Party membership, if any.
+    pub party_id: Option<u32>,
+    /// Faction membership, if any.
+    pub faction_id: Option<u32>,
+    /// Current mood (index into a mood enum). 0 = Neutral.
+    pub mood: u8,
+    /// Active fear type indices.
+    pub fears: Vec<u8>,
+    /// Legendary deed type indices.
+    pub deeds: Vec<u8>,
+    /// 0–100. Resolve under pressure.
+    pub resolve: f32,
+    /// Guild relationship score (-100 to 100).
+    pub guild_relationship: f32,
 }
 
 impl Default for NpcData {
@@ -257,6 +360,20 @@ impl Default for NpcData {
             carried_goods: [0.0; NUM_COMMODITIES],
             class_tags: Vec::new(),
             behavior_production: Vec::new(),
+            morale: 50.0,
+            stress: 0.0,
+            fatigue: 0.0,
+            loyalty: 50.0,
+            injury: 0.0,
+            xp: 0,
+            archetype: String::new(),
+            party_id: None,
+            faction_id: None,
+            mood: 0,
+            fears: Vec::new(),
+            deeds: Vec::new(),
+            resolve: 50.0,
+            guild_relationship: 0.0,
         }
     }
 }
@@ -324,6 +441,15 @@ pub struct SettlementState {
     pub prices: [f32; NUM_COMMODITIES],
     pub treasury: f32,
     pub population: u32,
+
+    // --- Campaign system fields ---
+
+    /// Owning faction, if any.
+    pub faction_id: Option<u32>,
+    /// 0–1. Threat from nearby monsters/enemies.
+    pub threat_level: f32,
+    /// 0–5. Building/upgrade level.
+    pub infrastructure_level: f32,
 }
 
 impl SettlementState {
@@ -337,6 +463,9 @@ impl SettlementState {
             prices: [1.0; NUM_COMMODITIES],
             treasury: 0.0,
             population: 0,
+            faction_id: None,
+            threat_level: 0.0,
+            infrastructure_level: 0.0,
         }
     }
 }
@@ -352,6 +481,13 @@ pub struct RegionState {
     pub monster_density: f32,
     pub faction_id: Option<u32>,
     pub threat_level: f32,
+
+    // --- Campaign system fields ---
+
+    /// 0–1. Civil unrest level.
+    pub unrest: f32,
+    /// 0–1. Faction control strength.
+    pub control: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -362,4 +498,321 @@ pub struct RegionState {
 pub struct EconomyState {
     pub total_gold_supply: f32,
     pub total_commodities: [f32; NUM_COMMODITIES],
+}
+
+// ---------------------------------------------------------------------------
+// FactionState — political/military faction
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FactionState {
+    pub id: u32,
+    pub name: String,
+    /// Relationship to the player guild (-100 to 100).
+    pub relationship_to_guild: f32,
+    pub military_strength: f32,
+    pub max_military_strength: f32,
+    pub territory_size: u32,
+    pub diplomatic_stance: DiplomaticStance,
+    /// Treasury (faction gold).
+    pub treasury: f32,
+    /// Faction-to-faction war targets.
+    pub at_war_with: Vec<u32>,
+    /// Running coup-risk score (0.0–1.0).
+    pub coup_risk: f32,
+    /// Escalation level (0=normal, 5=maximum).
+    pub escalation_level: u32,
+    /// Tech/research level.
+    pub tech_level: u32,
+    /// Recent actions log (bounded).
+    pub recent_actions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DiplomaticStance {
+    Friendly,
+    Neutral,
+    Hostile,
+    AtWar,
+    Coalition,
+}
+
+impl Default for DiplomaticStance {
+    fn default() -> Self {
+        DiplomaticStance::Neutral
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GuildState — player guild
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GuildState {
+    pub gold: f32,
+    pub supplies: f32,
+    /// 0–100. Affects quest quality and pricing.
+    pub reputation: f32,
+    /// Guild tier (0–5).
+    pub tier: u32,
+    /// Credit rating for loans.
+    pub credit_rating: f32,
+    /// Active quest capacity.
+    pub active_quest_capacity: u32,
+}
+
+impl Default for GuildState {
+    fn default() -> Self {
+        Self {
+            gold: 100.0,
+            supplies: 50.0,
+            reputation: 10.0,
+            tier: 0,
+            credit_rating: 50.0,
+            active_quest_capacity: 2,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Quest — an active quest being pursued
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Quest {
+    pub id: u32,
+    pub name: String,
+    pub quest_type: QuestType,
+    /// Assigned party entity IDs.
+    pub party_member_ids: Vec<u32>,
+    /// Destination position.
+    pub destination: (f32, f32),
+    /// 0–1. Progress toward completion.
+    pub progress: f32,
+    /// Current quest phase.
+    pub status: QuestStatus,
+    /// Tick when quest was accepted.
+    pub accepted_tick: u64,
+    /// Tick deadline (0 = no deadline).
+    pub deadline_tick: u64,
+    /// Threat level of the quest.
+    pub threat_level: f32,
+    /// Gold reward on completion.
+    pub reward_gold: f32,
+    /// XP reward on completion.
+    pub reward_xp: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum QuestType {
+    Hunt,
+    Escort,
+    Deliver,
+    Explore,
+    Defend,
+    Gather,
+    Rescue,
+    Assassinate,
+    Diplomacy,
+    Custom,
+}
+
+impl Default for QuestType {
+    fn default() -> Self {
+        QuestType::Hunt
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum QuestStatus {
+    /// Quest accepted, party traveling to destination.
+    Traveling,
+    /// Party is at the quest location, working on it.
+    InProgress,
+    /// Quest completed successfully.
+    Completed,
+    /// Quest failed.
+    Failed,
+    /// Party is returning to base.
+    Returning,
+}
+
+impl Default for QuestStatus {
+    fn default() -> Self {
+        QuestStatus::Traveling
+    }
+}
+
+// ---------------------------------------------------------------------------
+// QuestPosting — a quest available on the board
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuestPosting {
+    pub id: u32,
+    pub name: String,
+    pub quest_type: QuestType,
+    pub destination: (f32, f32),
+    pub threat_level: f32,
+    pub reward_gold: f32,
+    pub reward_xp: u32,
+    /// Tick when posting expires.
+    pub expires_tick: u64,
+}
+
+// ---------------------------------------------------------------------------
+// ChronicleEntry — narrative log entry
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChronicleEntry {
+    pub tick: u64,
+    pub category: ChronicleCategory,
+    pub text: String,
+    /// Entity IDs involved.
+    pub entity_ids: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ChronicleCategory {
+    Battle,
+    Quest,
+    Diplomacy,
+    Economy,
+    Death,
+    Discovery,
+    Crisis,
+    Achievement,
+    Narrative,
+}
+
+// ---------------------------------------------------------------------------
+// WorldEvent — events recorded during a tick
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WorldEvent {
+    /// Generic event with a category tag and description.
+    Generic { category: ChronicleCategory, text: String },
+    /// Entity died.
+    EntityDied { entity_id: u32, cause: String },
+    /// Quest status changed.
+    QuestChanged { quest_id: u32, new_status: QuestStatus },
+    /// Faction relation changed.
+    FactionRelationChanged { faction_id: u32, old: f32, new: f32 },
+    /// Region ownership changed.
+    RegionOwnerChanged { region_id: u32, old_owner: Option<u32>, new_owner: Option<u32> },
+    /// Bond grief event.
+    BondGrief { entity_id: u32, dead_id: u32, bond_strength: f32 },
+    /// Season changed.
+    SeasonChanged { new_season: u8 },
+    /// Battle started.
+    BattleStarted { grid_id: u32, participants: Vec<u32> },
+    /// Battle ended.
+    BattleEnded { grid_id: u32, victor_team: WorldTeam },
+}
+
+// ---------------------------------------------------------------------------
+// EntityField — fields on Entity/NpcData addressable by delta
+// ---------------------------------------------------------------------------
+
+/// Addressable scalar fields on an entity's NpcData.
+/// Used by `UpdateEntityField` delta for consolidated per-entity updates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EntityField {
+    Morale,
+    Stress,
+    Fatigue,
+    Loyalty,
+    Injury,
+    Resolve,
+    GuildRelationship,
+    Gold,
+    Hp,
+    MaxHp,
+    ShieldHp,
+    Armor,
+    MagicResist,
+    AttackDamage,
+    AttackRange,
+    MoveSpeed,
+}
+
+// ---------------------------------------------------------------------------
+// FactionField — addressable fields on FactionState
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FactionField {
+    RelationshipToGuild,
+    MilitaryStrength,
+    Treasury,
+    CoupRisk,
+    EscalationLevel,
+    TechLevel,
+}
+
+// ---------------------------------------------------------------------------
+// RegionField — addressable fields on RegionState
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum RegionField {
+    MonsterDensity,
+    ThreatLevel,
+    Unrest,
+    Control,
+}
+
+// ---------------------------------------------------------------------------
+// SettlementField — addressable fields on SettlementState
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SettlementField {
+    Treasury,
+    Population,
+    ThreatLevel,
+    InfrastructureLevel,
+}
+
+// ---------------------------------------------------------------------------
+// RelationKind — types of entity-to-entity relations
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum RelationKind {
+    /// General relationship (-100 to 100).
+    Relationship = 0,
+    /// Bond strength (0–100).
+    Bond = 1,
+    /// Romance level (0–100).
+    Romance = 2,
+    /// Rivalry intensity (0–100).
+    Rivalry = 3,
+    /// Grudge intensity (0–100).
+    Grudge = 4,
+    /// Mentor-mentee (0–100).
+    Mentorship = 5,
+}
+
+// ---------------------------------------------------------------------------
+// QuestDelta — quest lifecycle changes
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum QuestDelta {
+    /// Advance progress by a fraction.
+    AdvanceProgress { amount: f32 },
+    /// Change quest status.
+    SetStatus { status: QuestStatus },
+    /// Add a member to the quest party.
+    AddMember { entity_id: u32 },
+    /// Remove a member from the quest party.
+    RemoveMember { entity_id: u32 },
+    /// Complete the quest (triggers rewards).
+    Complete,
+    /// Fail the quest.
+    Fail,
 }

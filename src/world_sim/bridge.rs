@@ -45,6 +45,8 @@ pub fn campaign_to_world(campaign: &CampaignState) -> WorldState {
             monster_density: region.threat_level / 10.0,
             faction_id: Some(region.owner_faction_id as u32),
             threat_level: region.threat_level,
+            unrest: 0.0,
+            control: 1.0,
         });
     }
 
@@ -119,8 +121,22 @@ fn adventurer_to_entity(adv: &Adventurer) -> Entity {
             economic_intent,
             price_knowledge,
             carried_goods: adv.carried_goods,
-            class_tags: Vec::new(), // Populated from class system separately.
-            behavior_production: Vec::new(), // Populated from class system separately.
+            class_tags: Vec::new(),
+            behavior_production: Vec::new(),
+            morale: adv.morale,
+            stress: adv.stress,
+            fatigue: adv.fatigue,
+            loyalty: adv.loyalty,
+            injury: adv.injury,
+            xp: adv.xp,
+            archetype: adv.archetype.clone(),
+            party_id: adv.party_id,
+            faction_id: adv.faction_id.map(|f| f as u32),
+            mood: 0,
+            fears: Vec::new(),
+            deeds: adv.deeds.iter().enumerate().map(|(i, _)| i as u8).collect(),
+            resolve: adv.resolve,
+            guild_relationship: adv.guild_relationship,
         }),
     }
 }
@@ -146,6 +162,9 @@ fn location_to_settlement(loc: &Location) -> SettlementState {
         prices: loc.local_prices,
         treasury: loc.treasury,
         population: loc.resident_ids.len() as u32,
+        faction_id: None,
+        threat_level: 0.0,
+        infrastructure_level: 0.0,
     }
 }
 

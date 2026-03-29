@@ -3,7 +3,10 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use super::fidelity::Fidelity;
-use super::state::{PriceReport, StatusEffect};
+use super::state::{
+    ChronicleEntry, EntityField, EntityKind, FactionField, PriceReport, QuestDelta,
+    RegionField, RelationKind, SettlementField, StatusEffect, WorldEvent, WorldTeam,
+};
 use super::NUM_COMMODITIES;
 
 // ---------------------------------------------------------------------------
@@ -112,6 +115,97 @@ pub enum WorldDelta {
         entity_id: u32,
         dt_ms: u32,
     },
+
+    // -----------------------------------------------------------------------
+    // Consolidated campaign system deltas
+    // -----------------------------------------------------------------------
+
+    // --- Entity field updates (additive f32 deltas on NPC/entity scalars) ---
+    UpdateEntityField {
+        entity_id: u32,
+        field: EntityField,
+        /// Additive delta (e.g. +5.0 morale, -10.0 stress).
+        value: f32,
+    },
+
+    /// Set a discrete entity field that isn't numeric (mood index, alive, etc.).
+    SetEntityMood {
+        entity_id: u32,
+        mood: u8,
+    },
+
+    /// Add XP to an entity (commutative sum).
+    AddXp {
+        entity_id: u32,
+        amount: u32,
+    },
+
+    // --- Faction updates ---
+    UpdateFaction {
+        faction_id: u32,
+        field: FactionField,
+        /// Additive delta.
+        value: f32,
+    },
+
+    // --- Region updates ---
+    UpdateRegion {
+        region_id: u32,
+        field: RegionField,
+        /// Additive delta.
+        value: f32,
+    },
+
+    // --- Settlement updates ---
+    UpdateSettlementField {
+        settlement_id: u32,
+        field: SettlementField,
+        /// Additive delta.
+        value: f32,
+    },
+
+    // --- Relationship updates ---
+    UpdateRelation {
+        entity_a: u32,
+        entity_b: u32,
+        kind: RelationKind,
+        /// Additive delta.
+        delta: f32,
+    },
+
+    // --- Spawn ---
+    SpawnEntity {
+        kind: EntityKind,
+        pos: (f32, f32),
+        team: WorldTeam,
+        level: u32,
+    },
+
+    // --- Events/Records ---
+    RecordEvent {
+        event: WorldEvent,
+    },
+
+    RecordChronicle {
+        entry: ChronicleEntry,
+    },
+
+    // --- Quest lifecycle ---
+    QuestUpdate {
+        quest_id: u32,
+        update: QuestDelta,
+    },
+
+    // --- Guild updates (additive) ---
+    UpdateGuildGold {
+        delta: f32,
+    },
+    UpdateGuildSupplies {
+        delta: f32,
+    },
+    UpdateGuildReputation {
+        delta: f32,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +263,50 @@ pub struct MergedDeltas {
 
     /// Cooldown ticks per entity (sum of dt_ms).
     pub cooldown_ticks: HashMap<u32, u32>,
+
+    // -----------------------------------------------------------------------
+    // Campaign system accumulators
+    // -----------------------------------------------------------------------
+
+    /// Per-entity, per-field additive f32 deltas. Key = (entity_id, field discriminant).
+    pub entity_field_deltas: HashMap<(u32, u8), f32>,
+
+    /// Per-entity mood updates. Last-write-wins (latest value per entity).
+    pub entity_mood_sets: HashMap<u32, u8>,
+
+    /// Per-entity XP additions (commutative sum).
+    pub xp_additions: HashMap<u32, u32>,
+
+    /// Per-faction, per-field additive f32 deltas. Key = (faction_id, field discriminant).
+    pub faction_field_deltas: HashMap<(u32, u8), f32>,
+
+    /// Per-region, per-field additive f32 deltas. Key = (region_id, field discriminant).
+    pub region_field_deltas: HashMap<(u32, u8), f32>,
+
+    /// Per-settlement, per-field additive f32 deltas. Key = (settlement_id, field discriminant).
+    pub settlement_field_deltas: HashMap<(u32, u8), f32>,
+
+    /// Relation deltas. Key = (entity_a, entity_b, kind). Value = additive sum.
+    pub relation_deltas: HashMap<(u32, u32, u8), f32>,
+
+    /// Entities to spawn (collected, applied in order).
+    pub spawns: Vec<(EntityKind, (f32, f32), WorldTeam, u32)>,
+
+    /// World events (collected).
+    pub recorded_events: Vec<WorldEvent>,
+
+    /// Chronicle entries (collected).
+    pub recorded_chronicles: Vec<ChronicleEntry>,
+
+    /// Quest updates. Key = quest_id. Value = list of QuestDelta (applied in order).
+    pub quest_updates: Vec<(u32, QuestDelta)>,
+
+    /// Guild gold delta (commutative sum).
+    pub guild_gold_delta: f32,
+    /// Guild supplies delta (commutative sum).
+    pub guild_supplies_delta: f32,
+    /// Guild reputation delta (commutative sum).
+    pub guild_reputation_delta: f32,
 }
 
 impl MergedDeltas {
@@ -193,6 +331,22 @@ impl MergedDeltas {
         self.fidelity_changes.clear();
         self.price_reports.clear();
         self.cooldown_ticks.clear();
+
+        // Campaign system accumulators.
+        self.entity_field_deltas.clear();
+        self.entity_mood_sets.clear();
+        self.xp_additions.clear();
+        self.faction_field_deltas.clear();
+        self.region_field_deltas.clear();
+        self.settlement_field_deltas.clear();
+        self.relation_deltas.clear();
+        self.spawns.clear();
+        self.recorded_events.clear();
+        self.recorded_chronicles.clear();
+        self.quest_updates.clear();
+        self.guild_gold_delta = 0.0;
+        self.guild_supplies_delta = 0.0;
+        self.guild_reputation_delta = 0.0;
     }
 
     /// Merge a single delta into this accumulator (in-place, no alloc).
@@ -282,6 +436,53 @@ fn merge_one(m: &mut MergedDeltas, delta: WorldDelta) {
         WorldDelta::TickCooldown { entity_id, dt_ms } => {
             *m.cooldown_ticks.entry(entity_id).or_default() += dt_ms;
         }
+
+        // --- Campaign system deltas ---
+
+        WorldDelta::UpdateEntityField { entity_id, field, value } => {
+            *m.entity_field_deltas.entry((entity_id, field as u8)).or_default() += value;
+        }
+        WorldDelta::SetEntityMood { entity_id, mood } => {
+            m.entity_mood_sets.insert(entity_id, mood);
+        }
+        WorldDelta::AddXp { entity_id, amount } => {
+            *m.xp_additions.entry(entity_id).or_default() += amount;
+        }
+        WorldDelta::UpdateFaction { faction_id, field, value } => {
+            *m.faction_field_deltas.entry((faction_id, field as u8)).or_default() += value;
+        }
+        WorldDelta::UpdateRegion { region_id, field, value } => {
+            *m.region_field_deltas.entry((region_id, field as u8)).or_default() += value;
+        }
+        WorldDelta::UpdateSettlementField { settlement_id, field, value } => {
+            *m.settlement_field_deltas.entry((settlement_id, field as u8)).or_default() += value;
+        }
+        WorldDelta::UpdateRelation { entity_a, entity_b, kind, delta } => {
+            // Canonicalize: always (min, max) for symmetric relations.
+            let (a, b) = if entity_a <= entity_b { (entity_a, entity_b) } else { (entity_b, entity_a) };
+            *m.relation_deltas.entry((a, b, kind as u8)).or_default() += delta;
+        }
+        WorldDelta::SpawnEntity { kind, pos, team, level } => {
+            m.spawns.push((kind, pos, team, level));
+        }
+        WorldDelta::RecordEvent { event } => {
+            m.recorded_events.push(event);
+        }
+        WorldDelta::RecordChronicle { entry } => {
+            m.recorded_chronicles.push(entry);
+        }
+        WorldDelta::QuestUpdate { quest_id, update } => {
+            m.quest_updates.push((quest_id, update));
+        }
+        WorldDelta::UpdateGuildGold { delta } => {
+            m.guild_gold_delta += delta;
+        }
+        WorldDelta::UpdateGuildSupplies { delta } => {
+            m.guild_supplies_delta += delta;
+        }
+        WorldDelta::UpdateGuildReputation { delta } => {
+            m.guild_reputation_delta += delta;
+        }
     }
 }
 
@@ -313,6 +514,18 @@ mod tests {
         assert_eq!(forward.treasury_deltas, backward.treasury_deltas);
         assert_eq!(forward.cooldown_ticks, backward.cooldown_ticks);
         assert_eq!(forward.fidelity_changes, backward.fidelity_changes);
+
+        // Campaign system sums.
+        assert_eq!(forward.entity_field_deltas, backward.entity_field_deltas);
+        assert_eq!(forward.entity_mood_sets, backward.entity_mood_sets);
+        assert_eq!(forward.xp_additions, backward.xp_additions);
+        assert_eq!(forward.faction_field_deltas, backward.faction_field_deltas);
+        assert_eq!(forward.region_field_deltas, backward.region_field_deltas);
+        assert_eq!(forward.settlement_field_deltas, backward.settlement_field_deltas);
+        assert_eq!(forward.relation_deltas, backward.relation_deltas);
+        assert_eq!(forward.guild_gold_delta, backward.guild_gold_delta);
+        assert_eq!(forward.guild_supplies_delta, backward.guild_supplies_delta);
+        assert_eq!(forward.guild_reputation_delta, backward.guild_reputation_delta);
     }
 
     #[test]

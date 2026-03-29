@@ -19,7 +19,13 @@ pub mod runtime;
 pub mod systems;
 
 pub use delta::{WorldDelta, MergedDeltas, merge_deltas};
-pub use state::{WorldState, Entity, EntityKind, LocalGrid, SettlementState, RegionState, EconomyState};
+pub use state::{
+    WorldState, Entity, EntityKind, LocalGrid, SettlementState, RegionState, EconomyState,
+    // Campaign system types
+    FactionState, DiplomaticStance, GuildState, Quest, QuestPosting, QuestType, QuestStatus,
+    ChronicleEntry, ChronicleCategory, WorldEvent,
+    EntityField, FactionField, RegionField, SettlementField, RelationKind, QuestDelta,
+};
 pub use tick::{tick, tick_par, tick_profiled, TickProfile, ProfileAccumulator};
 pub use fidelity::Fidelity;
 

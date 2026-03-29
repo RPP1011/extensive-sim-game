@@ -48,6 +48,9 @@ struct FlatMergedDeltas {
     fidelity_changes: Vec<(u32, Fidelity)>,
     price_reports: Vec<(u32, u32, super::state::PriceReport)>,
     price_updates: Vec<(u32, [f32; NUM_COMMODITIES])>,
+
+    /// Campaign system deltas that need the MergedDeltas path.
+    overflow: Vec<WorldDelta>,
 }
 
 impl FlatMergedDeltas {
@@ -76,6 +79,7 @@ impl FlatMergedDeltas {
             fidelity_changes: Vec::with_capacity(16),
             price_reports: Vec::with_capacity(64),
             price_updates: Vec::with_capacity(16),
+            overflow: Vec::with_capacity(64),
         }
     }
 
@@ -109,6 +113,7 @@ impl FlatMergedDeltas {
         self.fidelity_changes.clear();
         self.price_reports.clear();
         self.price_updates.clear();
+        self.overflow.clear();
     }
 
     #[inline]
@@ -202,6 +207,26 @@ impl FlatMergedDeltas {
                 self.price_reports.push((from_id, to_id, report));
             }
             WorldDelta::TickCooldown { .. } => {}
+
+            // Campaign system deltas — not handled in the flat runtime path.
+            // These go through the MergedDeltas → apply_campaign_deltas path instead.
+            WorldDelta::UpdateEntityField { .. }
+            | WorldDelta::SetEntityMood { .. }
+            | WorldDelta::AddXp { .. }
+            | WorldDelta::UpdateFaction { .. }
+            | WorldDelta::UpdateRegion { .. }
+            | WorldDelta::UpdateSettlementField { .. }
+            | WorldDelta::UpdateRelation { .. }
+            | WorldDelta::SpawnEntity { .. }
+            | WorldDelta::RecordEvent { .. }
+            | WorldDelta::RecordChronicle { .. }
+            | WorldDelta::QuestUpdate { .. }
+            | WorldDelta::UpdateGuildGold { .. }
+            | WorldDelta::UpdateGuildSupplies { .. }
+            | WorldDelta::UpdateGuildReputation { .. } => {
+                // Fall through to overflow path which uses MergedDeltas.
+                self.overflow.push(delta);
+            }
         }
     }
 }
@@ -378,6 +403,14 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
         }
     }
     p.price_reports_us = t.elapsed().as_micros() as u64;
+
+    // Campaign system overflow — merge into MergedDeltas and apply.
+    if !m.overflow.is_empty() {
+        let t = Instant::now();
+        let merged = super::merge_deltas(m.overflow.iter().cloned());
+        super::apply::apply_campaign_deltas(state, &merged);
+        p.campaign_us = t.elapsed().as_micros() as u64;
+    }
 
     p
 }
