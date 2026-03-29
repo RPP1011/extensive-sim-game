@@ -64,8 +64,16 @@ fn find_nearest_hostile<'a>(entity: &Entity, state: &'a WorldState) -> Option<&'
         WorldTeam::Neutral => return None,
     };
 
+    // Only target entities on the same grid (local combat, not global targeting).
+    // If entity has no grid, fall back to proximity (within 20 units).
+    let max_range_sq = 400.0; // 20 units
+
     state.entities.iter()
-        .filter(|e| e.alive && e.team == hostile_team && e.id != entity.id)
+        .filter(|e| {
+            e.alive && e.team == hostile_team && e.id != entity.id
+            && (entity.grid_id.is_some() && e.grid_id == entity.grid_id
+                || dist_sq(entity, e) < max_range_sq)
+        })
         .min_by(|a, b| {
             let da = dist_sq(entity, a);
             let db = dist_sq(entity, b);
