@@ -90,24 +90,46 @@ pub fn compute_food_for_settlement(
         None => return,
     };
 
-    // Count alive NPCs in the provided entity slice.
+    // --- NPC-driven production ---
+    // Each NPC produces commodities based on their behavior_production tags.
+    // Production only happens for NPCs with Working or Produce intent.
+    // Output scaled by NPC level. This is the core economic engine.
     let mut resident_count = 0u32;
-    let mut resident_ids = Vec::new();
+    let mut resident_ids = [0u32; 512];
+
     for entity in entities {
-        if entity.kind != EntityKind::Npc || !entity.alive {
-            continue;
-        }
-        if entity.npc.is_none() {
-            continue;
+        if entity.kind != EntityKind::Npc || !entity.alive { continue; }
+        let npc = match &entity.npc { Some(n) => n, None => continue };
+
+        if resident_count < 512 {
+            resident_ids[resident_count as usize] = entity.id;
         }
         resident_count += 1;
-        resident_ids.push(entity.id);
+
+        // Only working NPCs produce.
+        let working = matches!(npc.economic_intent,
+            crate::world_sim::state::EconomicIntent::Produce
+            | crate::world_sim::state::EconomicIntent::Idle // idle NPCs default to basic labor
+        );
+        if !working { continue; }
+
+        let level_mult = 0.5 + entity.level as f32 * 0.1; // level 1 = 0.6x, level 10 = 1.5x
+        for &(commodity, rate) in &npc.behavior_production {
+            if rate > 0.0 {
+                out.push(WorldDelta::ProduceCommodity {
+                    location_id: settlement_id,
+                    commodity,
+                    amount: rate * level_mult,
+                });
+            }
+        }
     }
 
     if resident_count == 0 {
         return;
     }
 
+    // --- Consumption ---
     let food_needed = FOOD_PER_NPC * resident_count as f32;
     let food_available = settlement.stockpile[COMMODITY_FOOD];
 
@@ -127,9 +149,10 @@ pub fn compute_food_for_settlement(
         // Damage proportional to shortfall ratio.
         let severity = (shortfall / food_needed).clamp(0.0, 1.0);
         let damage = STARVATION_DAMAGE * severity;
-        for &npc_id in &resident_ids {
+        let count = (resident_count as usize).min(512);
+        for i in 0..count {
             out.push(WorldDelta::Damage {
-                target_id: npc_id,
+                target_id: resident_ids[i],
                 amount: damage,
                 source_id: 0, // environmental
             });

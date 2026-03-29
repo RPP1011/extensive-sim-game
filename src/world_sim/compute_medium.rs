@@ -1,7 +1,9 @@
-//! Medium-fidelity entity compute: settlement activity as deltas.
+//! Medium-fidelity entity compute: settlement-level NPC behavior.
 //!
-//! NPCs in settlements produce commodities, consume food/equipment,
-//! and make economic decisions — all expressed as deltas.
+//! Handles movement only. All economic behavior (production, consumption,
+//! trade) is driven by NPC agent decisions in the campaign systems
+//! (systems/economy.rs, systems/food.rs, systems/trade_goods.rs, etc.)
+//! which use price signals and economic intent.
 
 use super::delta::WorldDelta;
 use super::state::{Entity, EntityKind, EconomicIntent, WorldState};
@@ -24,24 +26,7 @@ pub fn compute_entity_deltas_into(entity: &Entity, _state: &WorldState, out: &mu
         None => return,
     };
 
-    let settlement_id = npc.home_settlement_id.unwrap_or(0);
-
-    for &(commodity, rate) in &npc.behavior_production {
-        if rate > 0.0 {
-            out.push(WorldDelta::ProduceCommodity {
-                location_id: settlement_id,
-                commodity,
-                amount: rate,
-            });
-        }
-    }
-
-    out.push(WorldDelta::ConsumeCommodity {
-        location_id: settlement_id,
-        commodity: 0,
-        amount: 0.01,
-    });
-
+    // Movement toward economic destination.
     if let EconomicIntent::Travel { destination } = &npc.economic_intent {
         let dx = destination.0 - entity.pos.0;
         let dy = destination.1 - entity.pos.1;
@@ -62,22 +47,24 @@ mod tests {
     use crate::world_sim::state::*;
 
     #[test]
-    fn npc_produces_and_consumes() {
+    fn npc_moves_toward_destination() {
         let mut state = WorldState::new(42);
         let mut npc = Entity::new_npc(1, (0.0, 0.0));
         let npc_data = npc.npc.as_mut().unwrap();
-        npc_data.home_settlement_id = Some(10);
-        npc_data.behavior_production = vec![(1, 0.5)]; // produces iron
+        npc_data.economic_intent = EconomicIntent::Travel { destination: (10.0, 0.0) };
         state.entities.push(npc);
-        state.settlements.push(SettlementState::new(10, "Town".into(), (0.0, 0.0)));
 
         let deltas = compute_entity_deltas(&state.entities[0], &state);
-        // Should have production + consumption deltas.
-        assert!(deltas.iter().any(|d| matches!(d,
-            WorldDelta::ProduceCommodity { commodity: 1, .. }
-        )));
-        assert!(deltas.iter().any(|d| matches!(d,
-            WorldDelta::ConsumeCommodity { commodity: 0, .. }
-        )));
+        assert!(deltas.iter().any(|d| matches!(d, WorldDelta::Move { entity_id: 1, .. })));
+    }
+
+    #[test]
+    fn idle_npc_no_deltas() {
+        let mut state = WorldState::new(42);
+        let npc = Entity::new_npc(1, (0.0, 0.0));
+        state.entities.push(npc);
+
+        let deltas = compute_entity_deltas(&state.entities[0], &state);
+        assert!(deltas.is_empty());
     }
 }
