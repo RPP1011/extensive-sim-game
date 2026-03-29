@@ -130,11 +130,18 @@ pub fn apply_deltas_in_place(state: &mut WorldState, merged: &MergedDeltas) -> A
 
 fn apply_hp_changes(state: &mut WorldState, merged: &MergedDeltas) {
     for entity in &mut state.entities {
-        if !entity.alive { continue; }
-
         let damage = merged.damage_by_target.get(&entity.id).copied().unwrap_or(0.0);
         let heal = merged.heals_by_target.get(&entity.id).copied().unwrap_or(0.0);
         let shield_add = merged.shields_by_target.get(&entity.id).copied().unwrap_or(0.0);
+
+        if !entity.alive {
+            // Revive dead entities that receive pure healing (entity pool recycling).
+            if heal > 0.0 && damage == 0.0 {
+                entity.alive = true;
+                entity.hp = heal.min(entity.max_hp);
+            }
+            continue;
+        }
 
         if damage == 0.0 && heal == 0.0 && shield_add == 0.0 { continue; }
 

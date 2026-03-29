@@ -409,7 +409,14 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
             let ei = idx[i] as usize;
             if ei < ents.len() {
                 let e = &mut ents[ei];
-                if !e.alive { continue; }
+                // Revive dead entities that receive healing (entity pool recycling).
+                if !e.alive {
+                    if heal > 0.0 && damage == 0.0 {
+                        e.alive = true;
+                        e.hp = heal.min(e.max_hp);
+                    }
+                    continue;
+                }
                 let shield_absorb = damage.min(e.shield_hp);
                 e.shield_hp = e.shield_hp - shield_absorb + shield_add;
                 let remaining = damage - shield_absorb;
