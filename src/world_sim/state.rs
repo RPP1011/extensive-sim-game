@@ -28,12 +28,19 @@ pub struct WorldState {
     pub cold: Vec<ColdEntity>,
 
     /// Secondary index: entity_id → index into entities/hot/cold.
-    /// Rebuilt by `rebuild_index()`. Enables O(1) lookup by ID.
+    /// Rebuilt by `rebuild_entity_cache()`. Enables O(1) lookup by ID.
     #[serde(skip)]
     pub entity_index: Vec<u32>,
     /// Max entity ID seen (entity_index is sized to max_id+1).
     #[serde(skip)]
     pub max_entity_id: u32,
+
+    /// Group index: contiguous entity ranges by settlement/party.
+    /// Entities are sorted by (settlement_id, party_id) so that all entities
+    /// at the same settlement are adjacent. Systems iterate a slice instead of
+    /// scanning all entities.
+    #[serde(skip)]
+    pub group_index: GroupIndex,
 
     /// Active local grids (settlements, encounter zones).
     pub grids: Vec<LocalGrid>,
@@ -84,6 +91,7 @@ impl WorldState {
             cold: Vec::new(),
             entity_index: Vec::new(),
             max_entity_id: 0,
+            group_index: GroupIndex::default(),
             grids: Vec::new(),
             regions: Vec::new(),
             settlements: Vec::new(),
@@ -99,8 +107,15 @@ impl WorldState {
         }
     }
 
-    /// Full rebuild of hot/cold arrays and entity_index from `entities`.
-    /// Call after structural changes (push, remove, reorder).
+    /// Full rebuild: sort entities by group, then rebuild hot/cold/index.
+    /// Call after structural changes (push, remove).
+    pub fn rebuild_all_indices(&mut self) {
+        self.rebuild_group_index();
+        self.rebuild_entity_cache();
+    }
+
+    /// Rebuild hot/cold arrays and entity_index from `entities`.
+    /// Does NOT re-sort. Call `rebuild_all_indices` if order may have changed.
     pub fn rebuild_entity_cache(&mut self) {
         let len = self.entities.len();
         self.hot.resize(len, HotEntity {
@@ -263,6 +278,158 @@ impl WorldState {
     /// Look up a relation value between two entities.
     pub fn relation(&self, a: u32, b: u32, kind: RelationKind) -> f32 {
         self.relations.get(&(a, b, kind as u8)).copied().unwrap_or(0.0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GroupIndex — contiguous ranges for per-settlement / per-party iteration
+// ---------------------------------------------------------------------------
+
+/// Stores (start, end) ranges into the entity arrays for each group.
+/// After `rebuild_group_index()`, entities are sorted by settlement, then party.
+/// `settlement_ranges[settlement_id] = (start, end)` means
+/// `entities[start..end]` are all entities at that settlement.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GroupIndex {
+    /// (start, end) index range per settlement_id.
+    pub settlement_ranges: Vec<(u32, u32)>,
+    /// (start, end) index range per party_id. 0 = no party.
+    pub party_ranges: Vec<(u32, u32)>,
+    /// Entities not assigned to any settlement (monsters, travelers).
+    pub unaffiliated_range: (u32, u32),
+}
+
+impl GroupIndex {
+    /// Iterate entity indices for a given settlement.
+    pub fn settlement_entities(&self, settlement_id: u32) -> std::ops::Range<usize> {
+        let i = settlement_id as usize;
+        if i < self.settlement_ranges.len() {
+            let (start, end) = self.settlement_ranges[i];
+            start as usize..end as usize
+        } else {
+            0..0
+        }
+    }
+
+    /// Iterate entity indices for a given party.
+    pub fn party_entities(&self, party_id: u32) -> std::ops::Range<usize> {
+        let i = party_id as usize;
+        if i < self.party_ranges.len() {
+            let (start, end) = self.party_ranges[i];
+            start as usize..end as usize
+        } else {
+            0..0
+        }
+    }
+
+    /// Iterate entity indices not belonging to any settlement.
+    pub fn unaffiliated_entities(&self) -> std::ops::Range<usize> {
+        self.unaffiliated_range.0 as usize..self.unaffiliated_range.1 as usize
+    }
+}
+
+impl WorldState {
+    /// Sort entities by (settlement_id, party_id) and rebuild all indices.
+    ///
+    /// After this call:
+    /// - `entities`, `hot`, `cold` are sorted so settlement members are contiguous
+    /// - `group_index.settlement_ranges` gives slice ranges per settlement
+    /// - `entity_index` is rebuilt for O(1) ID lookup into the new order
+    ///
+    /// Call at init and after structural changes (spawn/despawn).
+    pub fn rebuild_group_index(&mut self) {
+        let n = self.entities.len();
+        if n == 0 { return; }
+
+        // Build sort keys: (settlement_id or MAX, party_id or MAX, original_index).
+        // Entities without a settlement sort to the end.
+        let mut order: Vec<(u32, u32, usize)> = Vec::with_capacity(n);
+        for (i, e) in self.entities.iter().enumerate() {
+            let sid = e.npc.as_ref()
+                .and_then(|npc| npc.home_settlement_id)
+                .unwrap_or(u32::MAX);
+            let pid = e.npc.as_ref()
+                .and_then(|npc| npc.party_id)
+                .unwrap_or(u32::MAX);
+            order.push((sid, pid, i));
+        }
+        order.sort_unstable();
+
+        // Apply the permutation to entities, hot, cold.
+        let mut new_entities = Vec::with_capacity(n);
+        let mut new_hot = Vec::with_capacity(n);
+        let mut new_cold = Vec::with_capacity(n);
+        for &(_, _, old_i) in &order {
+            new_entities.push(self.entities[old_i].clone());
+            if old_i < self.hot.len() {
+                new_hot.push(self.hot[old_i]);
+            }
+            if old_i < self.cold.len() {
+                new_cold.push(self.cold[old_i].clone());
+            }
+        }
+        self.entities = new_entities;
+        self.hot = new_hot;
+        self.cold = new_cold;
+
+        // Rebuild entity_index.
+        self.max_entity_id = self.entities.iter().map(|e| e.id).max().unwrap_or(0);
+        let idx_len = self.max_entity_id as usize + 1;
+        self.entity_index.resize(idx_len, u32::MAX);
+        for v in &mut self.entity_index { *v = u32::MAX; }
+        for (i, e) in self.entities.iter().enumerate() {
+            if (e.id as usize) < idx_len {
+                self.entity_index[e.id as usize] = i as u32;
+            }
+        }
+
+        // Build settlement ranges.
+        let max_sid = self.settlements.iter().map(|s| s.id).max().unwrap_or(0) as usize + 1;
+        self.group_index.settlement_ranges.clear();
+        self.group_index.settlement_ranges.resize(max_sid, (0, 0));
+
+        let mut i = 0;
+        while i < n {
+            let sid = order[i].0;
+            if sid == u32::MAX { break; } // rest are unaffiliated
+            let start = i;
+            while i < n && order[i].0 == sid { i += 1; }
+            let sid_idx = sid as usize;
+            if sid_idx < max_sid {
+                self.group_index.settlement_ranges[sid_idx] = (start as u32, i as u32);
+            }
+        }
+        self.group_index.unaffiliated_range = (i as u32, n as u32);
+
+        // Build party ranges.
+        // Scan entities for distinct party_ids and record ranges.
+        let max_pid = self.entities.iter()
+            .filter_map(|e| e.npc.as_ref().and_then(|n| n.party_id))
+            .max()
+            .unwrap_or(0) as usize + 1;
+        self.group_index.party_ranges.clear();
+        self.group_index.party_ranges.resize(max_pid, (0, 0));
+
+        // Party ranges require a secondary sort within each settlement group.
+        // Since we sorted by (sid, pid), entities with the same pid are contiguous
+        // within each settlement. But the same pid could appear in multiple settlements
+        // if parties span settlements. For now, just record first/last occurrence.
+        let mut party_first = vec![u32::MAX; max_pid];
+        let mut party_last = vec![0u32; max_pid];
+        for (i, e) in self.entities.iter().enumerate() {
+            if let Some(pid) = e.npc.as_ref().and_then(|n| n.party_id) {
+                let p = pid as usize;
+                if p < max_pid {
+                    if party_first[p] == u32::MAX { party_first[p] = i as u32; }
+                    party_last[p] = (i + 1) as u32;
+                }
+            }
+        }
+        for p in 0..max_pid {
+            if party_first[p] != u32::MAX {
+                self.group_index.party_ranges[p] = (party_first[p], party_last[p]);
+            }
+        }
     }
 }
 

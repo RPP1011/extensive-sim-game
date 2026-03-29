@@ -736,8 +736,8 @@ impl WorldSim {
         let max_entity_id = initial.entities.iter().map(|e| e.id).max().unwrap_or(0) as usize + 1;
         let max_settlement_id = initial.settlements.iter().map(|s| s.id).max().unwrap_or(0) as usize + 1;
 
-        // Build the hot/cold cache + secondary index.
-        initial.rebuild_entity_cache();
+        // Sort entities by settlement/party, build hot/cold + all indices.
+        initial.rebuild_all_indices();
 
         WorldSim {
             delta_buf: Vec::with_capacity(initial.entities.len() * 4),
@@ -833,7 +833,8 @@ impl WorldSim {
         // Sync hot array from entities (fast — scalar copy only).
         // Full rebuild only if entities were spawned (array length changed).
         if self.state.entities.len() != self.state.hot.len() {
-            self.state.rebuild_entity_cache();
+            // Entities spawned/removed — full rebuild with re-sort.
+            self.state.rebuild_all_indices();
         } else {
             self.state.sync_hot_from_entities();
         }
