@@ -8,7 +8,7 @@
 //! Ported from `crates/headless_campaign/src/systems/battles.rs`.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{ActionTags, WorldState, tags};
 
 // NEEDS STATE: active_battles: Vec<BattleState> on WorldState
 // NEEDS STATE: BattleState { id, quest_id, party_id, enemy_strength, elapsed_ticks,
@@ -102,6 +102,15 @@ fn compute_battles_for_grid(
         if dmg_each > 0.0 {
             for &fid in friendlies {
                 out.push(WorldDelta::Damage { target_id: fid, amount: dmg_each, source_id: hid });
+
+                // Behavior tags: taking damage builds defense/endurance.
+                let mut action = ActionTags::empty();
+                action.add(tags::DEFENSE, 0.5);
+                action.add(tags::ENDURANCE, 0.3);
+                if let Some(entity) = state.entity(fid) {
+                    let action = crate::world_sim::action_context::with_context(&action, entity, state);
+                    out.push(WorldDelta::AddBehaviorTags { entity_id: fid, tags: action.tags, count: action.count });
+                }
             }
         }
     }
@@ -125,7 +134,20 @@ fn compute_battles_for_grid(
                             amount: kill_xp.max(1),
                         });
                     }
+                    // Behavior tags: kill grants heavy combat tags.
+                    let mut kill_action = ActionTags::empty();
+                    kill_action.add(tags::COMBAT, 2.0);
+                    out.push(WorldDelta::AddBehaviorTags { entity_id: fid, tags: kill_action.tags, count: kill_action.count });
                 }
+            }
+
+            // Behavior tags: attacking builds melee/combat.
+            let mut action = ActionTags::empty();
+            action.add(tags::MELEE, 1.0);
+            action.add(tags::COMBAT, 0.5);
+            if let Some(entity) = state.entity(fid) {
+                let action = crate::world_sim::action_context::with_context(&action, entity, state);
+                out.push(WorldDelta::AddBehaviorTags { entity_id: fid, tags: action.tags, count: action.count });
             }
 
             // Combat participation XP: 1 XP per attack action.

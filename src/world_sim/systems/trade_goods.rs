@@ -11,7 +11,7 @@
 //! NEEDS STATE: `demand: [f32; NUM_COMMODITIES]` on SettlementState
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{ActionTags, WorldState, tags};
 use crate::world_sim::NUM_COMMODITIES;
 
 /// How often the trade goods system ticks.
@@ -103,6 +103,19 @@ pub fn compute_trade_goods(state: &WorldState, out: &mut Vec<WorldDelta>) {
                         location_id: src.id,
                         delta: profit,
                     });
+                }
+
+                // Behavior tags: NPCs at source settlement earn trade/negotiation.
+                let range = state.group_index.settlement_entities(src.id);
+                for entity in &state.entities[range] {
+                    if entity.alive && entity.kind == crate::world_sim::state::EntityKind::Npc {
+                        let mut action = ActionTags::empty();
+                        action.add(tags::TRADE, 1.0);
+                        action.add(tags::NEGOTIATION, 0.5);
+                        let action = crate::world_sim::action_context::with_context(&action, entity, state);
+                        out.push(WorldDelta::AddBehaviorTags { entity_id: entity.id, tags: action.tags, count: action.count });
+                        break; // Only tag one NPC per caravan run.
+                    }
                 }
             }
         }

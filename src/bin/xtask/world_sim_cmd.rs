@@ -432,6 +432,18 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
         // Assign specialty based on terrain.
         settlement.specialty = choose_specialty(terrain, &mut rng);
 
+        // Set context tags based on specialty (tag-based action system).
+        settlement.context_tags = match settlement.specialty {
+            SettlementSpecialty::MiningTown => vec![(tags::MINING, 0.3), (tags::ENDURANCE, 0.1)],
+            SettlementSpecialty::TradeHub => vec![(tags::TRADE, 0.3), (tags::NEGOTIATION, 0.2)],
+            SettlementSpecialty::MilitaryOutpost => vec![(tags::TACTICS, 0.2), (tags::DISCIPLINE, 0.1)],
+            SettlementSpecialty::FarmingVillage => vec![(tags::FARMING, 0.3), (tags::LABOR, 0.2)],
+            SettlementSpecialty::ScholarCity => vec![(tags::RESEARCH, 0.3), (tags::LORE, 0.2)],
+            SettlementSpecialty::PortTown => vec![(tags::TRADE, 0.2), (tags::NAVIGATION, 0.2)],
+            SettlementSpecialty::CraftingGuild => vec![(tags::CRAFTING, 0.3), (tags::SMITHING, 0.2)],
+            SettlementSpecialty::General => vec![(tags::LABOR, 0.1)],
+        };
+
         // Assign faction ownership: distribute settlements round-robin among factions.
         let faction_id = (i % num_factions) as u32;
         settlement.faction_id = Some(faction_id);

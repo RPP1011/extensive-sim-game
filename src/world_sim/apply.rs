@@ -559,6 +559,16 @@ pub(super) fn apply_campaign_deltas(state: &mut WorldState, merged: &MergedDelta
         }
     }
 
+    // --- Behavior tag accumulation ---
+    for &(entity_id, tags, count) in &merged.behavior_tag_deltas {
+        if let Some(entity) = state.entity_mut(entity_id) {
+            if let Some(npc) = entity.npc.as_mut() {
+                let action = crate::world_sim::state::ActionTags { tags, count };
+                npc.accumulate_tags(&action);
+            }
+        }
+    }
+
     // --- Guild updates ---
     if merged.guild_gold_delta != 0.0 {
         state.guild.gold += merged.guild_gold_delta;

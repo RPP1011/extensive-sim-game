@@ -26,6 +26,7 @@ pub mod charter;
 pub mod choices;
 pub mod chronicle;
 pub mod civil_war;
+pub mod class_progression;
 pub mod commodity_futures;
 pub mod companions;
 pub mod contract_negotiation;
@@ -185,6 +186,7 @@ pub fn compute_settlement_systems(state: &WorldState, out: &mut Vec<WorldDelta>)
     run_system!("adventurer_condition", adventurer_condition::compute_adventurer_condition, state, out);
     run_system!("adventurer_recovery", adventurer_recovery::compute_adventurer_recovery, state, out);
     run_system!("progression", progression::compute_progression, state, out);
+    run_system!("class_progression", class_progression::compute_class_progression, state, out);
     run_system!("recruitment", recruitment::compute_recruitment, state, out);
     run_system!("retirement", retirement::compute_retirement, state, out);
     run_system!("hobbies", hobbies::compute_hobbies, state, out);

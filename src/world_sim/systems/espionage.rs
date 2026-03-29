@@ -7,7 +7,7 @@
 //! Ported from `crates/headless_campaign/src/systems/espionage.rs`.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{ActionTags, WorldState, tags};
 
 // NEEDS STATE: spies: Vec<SpyState> on WorldState
 //   SpyState { id: u32, adventurer_id: u32, target_faction_id: u32,
@@ -60,6 +60,8 @@ pub fn compute_espionage(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     // Once state.spies exists, iterate each spy and compute intel/cover/discovery deltas.
+    // TODO: When enabled, emit AddBehaviorTags with tags::STEALTH(2.0) + tags::DECEPTION(1.0)
+    //       alongside GatherIntel deltas.
 
     /*
     if state.spies.is_empty() {

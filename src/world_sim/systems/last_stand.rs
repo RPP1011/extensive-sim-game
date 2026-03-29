@@ -16,7 +16,7 @@
 //! NEEDS DELTA: UpdateReputation { entity_id, delta } (for guild reputation boost)
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, WorldState, WorldTeam};
+use crate::world_sim::state::{ActionTags, EntityKind, WorldState, WorldTeam, tags};
 
 /// HP ratio threshold below which a last stand can trigger.
 const LAST_STAND_HP_THRESHOLD: f32 = 0.15;
@@ -112,6 +112,15 @@ pub fn compute_last_stand_for_settlement(
                 amount: shield_amount,
                 source_id: hero_id,
             });
+        }
+
+        // Behavior tags: desperate combat earns high resilience/combat.
+        let mut action = ActionTags::empty();
+        action.add(tags::RESILIENCE, 3.0);
+        action.add(tags::COMBAT, 2.0);
+        if let Some(entity) = state.entity(hero_id) {
+            let action = crate::world_sim::action_context::with_context(&action, entity, state);
+            out.push(WorldDelta::AddBehaviorTags { entity_id: hero_id, tags: action.tags, count: action.count });
         }
     }
 }

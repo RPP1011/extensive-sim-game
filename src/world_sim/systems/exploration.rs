@@ -20,7 +20,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::fidelity::Fidelity;
-use crate::world_sim::state::{EntityKind, WorldState, WorldTeam};
+use crate::world_sim::state::{ActionTags, EntityKind, WorldState, WorldTeam, tags};
 
 /// Cadence: runs every 3 ticks.
 const EXPLORATION_INTERVAL: u64 = 3;
@@ -69,6 +69,13 @@ pub fn compute_exploration(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 to_id: entity.id,
                 amount: 0.5,
             });
+
+            // Behavior tags: frontier exploration.
+            let mut action = ActionTags::empty();
+            action.add(tags::EXPLORATION, 1.0);
+            action.add(tags::NAVIGATION, 0.5);
+            let action = crate::world_sim::action_context::with_context(&action, entity, state);
+            out.push(WorldDelta::AddBehaviorTags { entity_id: entity.id, tags: action.tags, count: action.count });
         }
     }
 }

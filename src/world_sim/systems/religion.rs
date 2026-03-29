@@ -10,7 +10,7 @@
 //! NEEDS DELTA: ModifyDevotion
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
+use crate::world_sim::state::{ActionTags, Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState, tags};
 
 /// How often the religion system ticks.
 const RELIGION_INTERVAL: u64 = 17;
@@ -60,6 +60,13 @@ pub fn compute_religion_for_settlement(
                 amount: BLESSING_HEAL,
                 source_id: 0,
             });
+
+            // Behavior tags: receiving a blessing builds faith/ritual.
+            let mut action = ActionTags::empty();
+            action.add(tags::FAITH, 1.0);
+            action.add(tags::RITUAL, 0.5);
+            let action = crate::world_sim::action_context::with_context(&action, entity, state);
+            out.push(WorldDelta::AddBehaviorTags { entity_id: entity.id, tags: action.tags, count: action.count });
         }
     }
 }

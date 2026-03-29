@@ -206,6 +206,13 @@ pub enum WorldDelta {
     UpdateGuildReputation {
         delta: f32,
     },
+
+    /// Accumulate behavior tags on an NPC's profile.
+    AddBehaviorTags {
+        entity_id: u32,
+        tags: [(u32, f32); 8],
+        count: u8,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -307,6 +314,9 @@ pub struct MergedDeltas {
     pub guild_supplies_delta: f32,
     /// Guild reputation delta (commutative sum).
     pub guild_reputation_delta: f32,
+
+    /// Behavior tag deltas. Collected (entity_id, tags, count). Addition is commutative per tag.
+    pub behavior_tag_deltas: Vec<(u32, [(u32, f32); 8], u8)>,
 }
 
 impl MergedDeltas {
@@ -347,6 +357,7 @@ impl MergedDeltas {
         self.guild_gold_delta = 0.0;
         self.guild_supplies_delta = 0.0;
         self.guild_reputation_delta = 0.0;
+        self.behavior_tag_deltas.clear();
     }
 
     /// Merge a single delta into this accumulator (in-place, no alloc).
@@ -482,6 +493,9 @@ fn merge_one(m: &mut MergedDeltas, delta: WorldDelta) {
         }
         WorldDelta::UpdateGuildReputation { delta } => {
             m.guild_reputation_delta += delta;
+        }
+        WorldDelta::AddBehaviorTags { entity_id, tags, count } => {
+            m.behavior_tag_deltas.push((entity_id, tags, count));
         }
     }
 }

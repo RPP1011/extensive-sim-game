@@ -10,7 +10,7 @@
 //! NEEDS DELTA: ApplyFatigueAndMorale { entity_id, fatigue_delta, morale_delta }
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, EntityKind, WorldState};
+use crate::world_sim::state::{ActionTags, Entity, EntityKind, WorldState, tags};
 
 /// How often the food system ticks.
 const FOOD_TICK_INTERVAL: u64 = 3;
@@ -126,9 +126,31 @@ pub fn compute_food_for_settlement(
             }
         }
 
-        // Labor XP: earned by doing the work.
+        // Labor XP + behavior tags: earned by doing the work.
         if produced_anything {
             out.push(WorldDelta::AddXp { entity_id: entity.id, amount: 1 });
+
+            // Behavior tags: map commodity to tag.
+            for &(commodity, rate) in &npc.behavior_production {
+                if rate > 0.0 {
+                    let mut action = ActionTags::empty();
+                    let commodity_tag = match commodity {
+                        0 => tags::FARMING,     // food
+                        1 => tags::MINING,      // iron/ore
+                        2 => tags::WOODWORK,    // wood
+                        3 => tags::HERBALISM,   // herbs
+                        4 => tags::SURVIVAL,    // hide
+                        5 => tags::ALCHEMY,     // crystal
+                        6 => tags::SMITHING,    // equipment
+                        7 => tags::MEDICINE,    // medicine
+                        _ => tags::LABOR,
+                    };
+                    action.add(commodity_tag, 1.0);
+                    action.add(tags::LABOR, 0.5);
+                    let action = crate::world_sim::action_context::with_context(&action, entity, state);
+                    out.push(WorldDelta::AddBehaviorTags { entity_id: entity.id, tags: action.tags, count: action.count });
+                }
+            }
         }
     }
 

@@ -15,7 +15,7 @@
 //! NEEDS DELTA: CraftItem { settlement_id: u32, recipe_name: String, quality: f32 }
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{ActionTags, WorldState, tags};
 use crate::world_sim::NUM_COMMODITIES;
 
 /// How often crafting ticks.
@@ -105,5 +105,18 @@ pub fn compute_crafting_for_settlement(
             location_id: settlement_id,
             delta: CRAFT_PRODUCE_AMOUNT * 0.5,
         });
+
+        // Behavior tags: NPCs at this settlement earn crafting/smithing.
+        let range = state.group_index.settlement_entities(settlement_id);
+        for entity in &state.entities[range] {
+            if entity.alive && entity.kind == crate::world_sim::state::EntityKind::Npc {
+                let mut action = ActionTags::empty();
+                action.add(tags::CRAFTING, 1.0);
+                action.add(tags::SMITHING, 0.5);
+                let action = crate::world_sim::action_context::with_context(&action, entity, state);
+                out.push(WorldDelta::AddBehaviorTags { entity_id: entity.id, tags: action.tags, count: action.count });
+                break; // Tag one NPC per craft batch.
+            }
+        }
     }
 }

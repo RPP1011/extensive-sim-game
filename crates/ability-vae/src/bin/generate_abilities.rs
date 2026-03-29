@@ -1,11 +1,12 @@
 //! Generate abilities from natural language descriptions using the trained tree decoder.
 //!
-//! Usage:
-//!   cargo run -p ability-vae --release --bin generate-abilities
+//! Loads checkpoint, encodes prompts, generates abilities autoregressively.
+//! Benchmarks throughput.
 
 use std::time::Instant;
 
 use burn::prelude::*;
+use burn::record::{NamedMpkFileRecorder, FullPrecisionSettings};
 
 #[cfg(feature = "gpu")]
 use burn::backend::LibTorch;
@@ -26,6 +27,22 @@ use tactical_sim::effects::dsl::parse_abilities;
 const EMBED_DIM: usize = STATIC_EMBED_DIM;
 const MAX_TEXT_LEN: usize = 32;
 
+/// Must match the struct used during training exactly.
+#[derive(Module, Debug, Clone)]
+struct E2ETreeModel<B2: Backend> {
+    text_encoder: StaticEmbedder<B2>,
+    tree_decoder: TreeDecoder<B2>,
+}
+
+impl<B2: Backend> E2ETreeModel<B2> {
+    fn new(vocab_size: usize, device: &B2::Device) -> Self {
+        Self {
+            text_encoder: StaticEmbedder::new(vocab_size, EMBED_DIM, device),
+            tree_decoder: TreeDecoder::new(EMBED_DIM, device),
+        }
+    }
+}
+
 fn main() {
     #[cfg(feature = "gpu")]
     let device = burn::backend::libtorch::LibTorchDevice::Cuda(0);
@@ -44,10 +61,10 @@ fn main() {
         "holy healing aura that protects allies from fear",
         "poison DoT with slow and debuff",
     ];
-    let count = 5; // per prompt
+    let count = 5usize;
     let temperature = 0.7f32;
 
-    // Build tokenizer
+    // Build tokenizer (must match training)
     eprintln!("Building tokenizer...");
     let desc_path = if std::path::Path::new("dataset/ability_descriptions_filtered.jsonl").exists() {
         "dataset/ability_descriptions_filtered.jsonl"
@@ -77,12 +94,38 @@ fn main() {
     let tokenizer = WordTokenizer::fit(&all_texts, 3);
     eprintln!("Tokenizer: {} words", tokenizer.vocab_size());
 
-    // Create model (randomly initialized — no checkpoint loading for now)
-    // The grammar space guarantees 100% validity regardless of model quality
-    let encoder: StaticEmbedder<B> = StaticEmbedder::new(tokenizer.vocab_size(), EMBED_DIM, &device);
-    let decoder: TreeDecoder<B> = TreeDecoder::new(EMBED_DIM, &device);
-    eprintln!("Model initialized (random weights — benchmarking pipeline speed)");
+    // Load model from checkpoint
+    let checkpoint = "generated/tree_checkpoint_e150";
+    eprintln!("Loading checkpoint: {}.mpk", checkpoint);
+    let model: E2ETreeModel<B> = E2ETreeModel::new(tokenizer.vocab_size(), &device);
+    let recorder = NamedMpkFileRecorder::<FullPrecisionSettings>::new();
+    let model: E2ETreeModel<B> = match <E2ETreeModel<B> as burn::module::Module<B>>::load_file::<NamedMpkFileRecorder<FullPrecisionSettings>, &str>(model, checkpoint, &recorder, &device) {
+        Ok(m) => { eprintln!("Checkpoint loaded successfully."); m }
+        Err(e) => {
+            eprintln!("Failed to load checkpoint: {}", e);
+            eprintln!("Using random weights (grammar space still guarantees valid output).");
+            E2ETreeModel::new(tokenizer.vocab_size(), &device)
+        }
+    };
     eprintln!();
+
+    // Warmup
+    {
+        let ids = tokenizer.encode("warmup");
+        let len = ids.len().min(MAX_TEXT_LEN);
+        let ids_t = Tensor::<B, 1, Int>::from_data(
+            burn::tensor::TensorData::new(
+                ids.into_iter().take(len).map(|x| x as i64).collect::<Vec<_>>(), [len],
+            ), &device,
+        ).unsqueeze::<2>();
+        let lens_t = Tensor::<B, 1, Int>::from_data(
+            burn::tensor::TensorData::new(vec![len as i64], [1]), &device,
+        );
+        let emb = model.text_encoder.forward(ids_t, lens_t);
+        let mem = emb.unsqueeze_dim::<3>(1);
+        let _ = model.tree_decoder.generate(mem, temperature);
+        eprintln!("Warmup complete.");
+    }
 
     // Generate
     let total_start = Instant::now();
@@ -92,7 +135,6 @@ fn main() {
     for prompt in &prompts {
         let prompt_start = Instant::now();
 
-        // Encode text
         let ids = tokenizer.encode(prompt);
         let len = ids.len().min(MAX_TEXT_LEN);
         let ids_t = Tensor::<B, 1, Int>::from_data(
@@ -104,23 +146,23 @@ fn main() {
             burn::tensor::TensorData::new(vec![len as i64], [1]), &device,
         );
 
-        let text_emb = encoder.forward(ids_t, lens_t);
+        let text_emb = model.text_encoder.forward(ids_t, lens_t);
         let text_memory = text_emb.unsqueeze_dim::<3>(1);
 
         println!("=== \"{}\" ===", prompt);
 
         for sample_i in 0..count {
             let sample_start = Instant::now();
-            let (_, grammar_vecs) = decoder.generate(text_memory.clone(), temperature);
+            let (_, grammar_vecs) = model.tree_decoder.generate(text_memory.clone(), temperature);
 
             for v in &grammar_vecs {
                 let dsl = grammar_space::decode(v);
                 let parsed = parse_abilities(&dsl).is_ok();
                 total_generated += 1;
                 if parsed { total_parsed += 1; }
-                let ms = sample_start.elapsed().as_millis();
+                let ms = sample_start.elapsed().as_secs_f64() * 1000.0;
 
-                println!("  --- Sample {} ({} ms) [{}] ---", sample_i, ms,
+                println!("  --- Sample {} ({:.1} ms) [{}] ---", sample_i, ms,
                     if parsed { "OK" } else { "FAIL" });
                 for line in dsl.lines() {
                     println!("  {}", line);
@@ -129,20 +171,20 @@ fn main() {
             }
         }
 
-        let prompt_ms = prompt_start.elapsed().as_millis();
-        println!("  [{} samples in {} ms, {:.1} ms/sample]\n",
-            count, prompt_ms, prompt_ms as f64 / count as f64);
+        let prompt_ms = prompt_start.elapsed().as_secs_f64() * 1000.0;
+        println!("  [{} samples in {:.0} ms, {:.1} ms/sample]\n",
+            count, prompt_ms, prompt_ms / count as f64);
     }
 
-    let total_ms = total_start.elapsed().as_millis();
+    let total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
     eprintln!("=== Benchmark Summary ===");
     eprintln!("  Prompts: {}", prompts.len());
     eprintln!("  Abilities generated: {}", total_generated);
     eprintln!("  Parse rate: {}/{} ({:.0}%)", total_parsed, total_generated,
         total_parsed as f64 / total_generated.max(1) as f64 * 100.0);
-    eprintln!("  Total time: {} ms", total_ms);
-    eprintln!("  Avg per ability: {:.1} ms", total_ms as f64 / total_generated.max(1) as f64);
-    eprintln!("  Throughput: {:.0} abilities/sec", total_generated as f64 / (total_ms as f64 / 1000.0));
+    eprintln!("  Total time: {:.0} ms", total_ms);
+    eprintln!("  Avg per ability: {:.1} ms", total_ms / total_generated.max(1) as f64);
+    eprintln!("  Throughput: {:.0} abilities/sec", total_generated as f64 / (total_ms / 1000.0));
 }
 
 fn find_ability_files(dir: &str) -> Vec<std::path::PathBuf> {

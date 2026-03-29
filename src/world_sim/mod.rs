@@ -15,6 +15,8 @@ pub mod compute_medium;
 pub mod compute_low;
 pub mod bridge;
 pub mod spatial;
+pub mod action_context;
+pub mod class_gen;
 pub mod runtime;
 pub mod systems;
 
@@ -26,7 +28,10 @@ pub use state::{
     FactionState, DiplomaticStance, GuildState, Quest, QuestPosting, QuestType, QuestStatus,
     ChronicleEntry, ChronicleCategory, WorldEvent,
     EntityField, FactionField, RegionField, SettlementField, RelationKind, QuestDelta,
+    // Tag-based action system
+    ActionTags, ClassSlot, tag,
 };
+pub use state::tags;
 pub use tick::{tick, tick_par, tick_profiled, TickProfile, ProfileAccumulator};
 pub use fidelity::Fidelity;
 

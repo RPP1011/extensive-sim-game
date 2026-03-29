@@ -6,6 +6,97 @@ use super::fidelity::Fidelity;
 use super::NUM_COMMODITIES;
 
 // ---------------------------------------------------------------------------
+// Tag hashing — compile-time FNV-1a for tag interning
+// ---------------------------------------------------------------------------
+
+/// Compile-time FNV-1a hash for tag interning.
+pub const fn tag(name: &[u8]) -> u32 {
+    let mut hash: u32 = 2166136261;
+    let mut i = 0;
+    while i < name.len() {
+        hash ^= name[i] as u32;
+        hash = hash.wrapping_mul(16777619);
+        i += 1;
+    }
+    hash
+}
+
+pub mod tags {
+    use super::tag;
+    // Combat
+    pub const MELEE: u32 = tag(b"melee");
+    pub const RANGED: u32 = tag(b"ranged");
+    pub const COMBAT: u32 = tag(b"combat");
+    pub const DEFENSE: u32 = tag(b"defense");
+    pub const TACTICS: u32 = tag(b"tactics");
+    // Craft
+    pub const MINING: u32 = tag(b"mining");
+    pub const SMITHING: u32 = tag(b"smithing");
+    pub const CRAFTING: u32 = tag(b"crafting");
+    pub const ENCHANTMENT: u32 = tag(b"enchantment");
+    pub const ALCHEMY: u32 = tag(b"alchemy");
+    // Social
+    pub const TRADE: u32 = tag(b"trade");
+    pub const DIPLOMACY: u32 = tag(b"diplomacy");
+    pub const LEADERSHIP: u32 = tag(b"leadership");
+    pub const NEGOTIATION: u32 = tag(b"negotiation");
+    pub const DECEPTION: u32 = tag(b"deception");
+    // Knowledge
+    pub const RESEARCH: u32 = tag(b"research");
+    pub const LORE: u32 = tag(b"lore");
+    pub const MEDICINE: u32 = tag(b"medicine");
+    pub const HERBALISM: u32 = tag(b"herbalism");
+    pub const NAVIGATION: u32 = tag(b"navigation");
+    // Survival
+    pub const ENDURANCE: u32 = tag(b"endurance");
+    pub const RESILIENCE: u32 = tag(b"resilience");
+    pub const STEALTH: u32 = tag(b"stealth");
+    pub const SURVIVAL: u32 = tag(b"survival");
+    pub const AWARENESS: u32 = tag(b"awareness");
+    // Spiritual
+    pub const FAITH: u32 = tag(b"faith");
+    pub const RITUAL: u32 = tag(b"ritual");
+    // Labor
+    pub const LABOR: u32 = tag(b"labor");
+    pub const TEACHING: u32 = tag(b"teaching");
+    pub const DISCIPLINE: u32 = tag(b"discipline");
+    // Commodity-specific
+    pub const FARMING: u32 = tag(b"farming");
+    pub const WOODWORK: u32 = tag(b"woodwork");
+    pub const EXPLORATION: u32 = tag(b"exploration");
+}
+
+// ---------------------------------------------------------------------------
+// ActionTags — stack-allocated tag bundle for actions
+// ---------------------------------------------------------------------------
+
+/// Stack-allocated action tag bundle. Max 8 tag-weight pairs per action.
+#[derive(Debug, Clone, Copy)]
+pub struct ActionTags {
+    pub tags: [(u32, f32); 8],
+    pub count: u8,
+}
+
+impl ActionTags {
+    pub const fn empty() -> Self {
+        Self { tags: [(0, 0.0); 8], count: 0 }
+    }
+
+    pub fn add(&mut self, tag_hash: u32, weight: f32) {
+        if (self.count as usize) < 8 {
+            self.tags[self.count as usize] = (tag_hash, weight);
+            self.count += 1;
+        }
+    }
+
+    pub fn merge(&mut self, other: &ActionTags) {
+        for i in 0..other.count as usize {
+            self.add(other.tags[i].0, other.tags[i].1);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // WorldState — the complete snapshot, immutable during COMPUTE phase
 // ---------------------------------------------------------------------------
 
@@ -708,6 +799,50 @@ pub struct NpcData {
     pub resolve: f32,
     /// Guild relationship score (-100 to 100).
     pub guild_relationship: f32,
+
+    /// Lifetime behavior tag accumulator. Parallel sorted arrays.
+    /// behavior_tags[i] is the tag hash, behavior_values[i] is the accumulated weight.
+    pub behavior_tags: Vec<u32>,
+    pub behavior_values: Vec<f32>,
+
+    /// Acquired classes from behavior profile matching.
+    pub classes: Vec<ClassSlot>,
+}
+
+/// A class granted to an NPC from behavior profile matching.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClassSlot {
+    /// FNV-1a hash of the class name.
+    pub class_name_hash: u32,
+    /// Current level in this class.
+    pub level: u16,
+    /// Accumulated XP toward next level.
+    pub xp: f32,
+}
+
+impl NpcData {
+    /// Accumulate tags into the sorted behavior profile.
+    pub fn accumulate_tags(&mut self, action: &ActionTags) {
+        for i in 0..action.count as usize {
+            let (tag_hash, weight) = action.tags[i];
+            if weight <= 0.0 { continue; }
+            match self.behavior_tags.binary_search(&tag_hash) {
+                Ok(idx) => self.behavior_values[idx] += weight,
+                Err(idx) => {
+                    self.behavior_tags.insert(idx, tag_hash);
+                    self.behavior_values.insert(idx, weight);
+                }
+            }
+        }
+    }
+
+    /// Look up accumulated value for a tag. O(log n).
+    pub fn behavior_value(&self, tag_hash: u32) -> f32 {
+        match self.behavior_tags.binary_search(&tag_hash) {
+            Ok(idx) => self.behavior_values[idx],
+            Err(_) => 0.0,
+        }
+    }
 }
 
 impl Default for NpcData {
@@ -735,6 +870,9 @@ impl Default for NpcData {
             deeds: Vec::new(),
             resolve: 50.0,
             guild_relationship: 0.0,
+            behavior_tags: Vec::new(),
+            behavior_values: Vec::new(),
+            classes: Vec::new(),
         }
     }
 }
@@ -897,6 +1035,9 @@ pub struct SettlementState {
     pub threat_level: f32,
     /// 0–5. Building/upgrade level.
     pub infrastructure_level: f32,
+
+    /// Context tags applied to all actions at this settlement.
+    pub context_tags: Vec<(u32, f32)>,
 }
 
 impl SettlementState {
@@ -914,6 +1055,7 @@ impl SettlementState {
             faction_id: None,
             threat_level: 0.0,
             infrastructure_level: 0.0,
+            context_tags: Vec::new(),
         }
     }
 }

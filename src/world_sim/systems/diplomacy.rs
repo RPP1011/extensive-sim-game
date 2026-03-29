@@ -11,7 +11,7 @@
 //! Ported from `crates/headless_campaign/src/systems/diplomacy.rs`.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{ActionTags, WorldState, tags};
 
 // NEEDS STATE: factions: Vec<FactionState> on WorldState
 // NEEDS STATE: diplomacy: DiplomacyState on WorldState
@@ -81,6 +81,8 @@ pub fn compute_diplomacy(state: &WorldState, out: &mut Vec<WorldDelta>) {
 fn compute_trade_income(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // Once state.diplomacy exists, iterate active trade agreements
     // involving the guild and emit TransferGold deltas.
+    // TODO: When enabled, emit AddBehaviorTags with tags::DIPLOMACY(2.0) + tags::NEGOTIATION(1.0)
+    //       alongside AddAgreement deltas.
 
     /*
     let guild_fid = state.diplomacy.guild_faction_id;

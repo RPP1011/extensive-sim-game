@@ -79,6 +79,9 @@ struct FlatMergedDeltas {
     price_reports: Vec<(u32, u32, super::state::PriceReport)>,
     price_updates: Vec<(u32, [f32; NUM_COMMODITIES])>,
 
+    // --- Behavior tags (collected) ---
+    behavior_tag_deltas: Vec<(u32, [(u32, f32); 8], u8)>,
+
     // --- Campaign collected (no flat-array equivalent) ---
     relation_deltas: Vec<(u32, u32, u8, f32)>,
     spawns: Vec<(super::state::EntityKind, (f32, f32), super::state::WorldTeam, u32)>,
@@ -134,6 +137,7 @@ impl FlatMergedDeltas {
             price_reports: Vec::with_capacity(64),
             price_updates: Vec::with_capacity(16),
 
+            behavior_tag_deltas: Vec::with_capacity(64),
             relation_deltas: Vec::with_capacity(64),
             spawns: Vec::with_capacity(16),
             events: Vec::with_capacity(32),
@@ -196,6 +200,7 @@ impl FlatMergedDeltas {
         self.price_reports.clear();
         self.price_updates.clear();
 
+        self.behavior_tag_deltas.clear();
         self.relation_deltas.clear();
         self.spawns.clear();
         self.events.clear();
@@ -378,6 +383,9 @@ impl FlatMergedDeltas {
             }
             WorldDelta::UpdateGuildReputation { delta } => {
                 self.guild_reputation_delta += delta;
+            }
+            WorldDelta::AddBehaviorTags { entity_id, tags, count } => {
+                self.behavior_tag_deltas.push((entity_id, tags, count));
             }
         }
     }
@@ -726,6 +734,18 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
     state.guild.supplies += m.guild_supplies_delta;
     state.guild.reputation += m.guild_reputation_delta;
 
+    // Behavior tag accumulation
+    for &(entity_id, tags, count) in &m.behavior_tag_deltas {
+        let ei = if (entity_id as usize) < state.entity_index.len() {
+            state.entity_index[entity_id as usize] as usize
+        } else { continue };
+        if ei >= state.entities.len() { continue; }
+        if let Some(npc) = state.entities[ei].npc.as_mut() {
+            let action = crate::world_sim::state::ActionTags { tags, count };
+            npc.accumulate_tags(&action);
+        }
+    }
+
     p.campaign_us = t.elapsed().as_micros() as u64;
     p
 }
@@ -757,6 +777,12 @@ pub struct WorldSim {
 
     /// Accumulated profiling stats.
     pub profile_acc: ProfileAccumulator,
+
+    /// Swappable class generator (matches behavior profiles to class templates).
+    pub class_gen: Box<dyn super::class_gen::ClassGenerator>,
+
+    /// Swappable ability generator (produces abilities on class level-up).
+    pub ability_gen: Box<dyn super::class_gen::AbilityGenerator>,
 }
 
 impl WorldSim {
@@ -790,6 +816,8 @@ impl WorldSim {
             thread_bufs,
             profile_acc: ProfileAccumulator::default(),
             state: initial,
+            class_gen: Box::new(super::class_gen::DefaultClassGenerator::new()),
+            ability_gen: Box::new(super::class_gen::DefaultAbilityGenerator),
         }
     }
 
@@ -858,6 +886,7 @@ fn run_settlement_systems(
     adventurer_condition::compute_adventurer_condition_for_settlement(state, sid, entities, buf);
     adventurer_recovery::compute_adventurer_recovery_for_settlement(state, sid, entities, buf);
     progression::compute_progression_for_settlement(state, sid, entities, buf);
+    class_progression::compute_class_progression_for_settlement(state, sid, entities, buf);
     recruitment::compute_recruitment_for_settlement(state, sid, entities, buf);
     retirement::compute_retirement_for_settlement(state, sid, entities, buf);
     hobbies::compute_hobbies_for_settlement(state, sid, entities, buf);

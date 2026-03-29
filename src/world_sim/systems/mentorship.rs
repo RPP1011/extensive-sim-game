@@ -6,7 +6,7 @@
 //! settlement to spread load.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, EntityKind, WorldState, EntityField};
+use crate::world_sim::state::{ActionTags, Entity, EntityKind, WorldState, EntityField, tags};
 
 const BASE_CADENCE: u64 = 3;
 const BASE_MENTOR_XP: f32 = 5.0;
@@ -107,6 +107,27 @@ pub fn compute_mentorship_for_settlement(
                 entity_id: apprentice_id,
                 amount: xp_gain as u32,
             });
+
+            // Behavior tags: mentor earns teaching/leadership.
+            {
+                let mut action = ActionTags::empty();
+                action.add(tags::TEACHING, 2.0);
+                action.add(tags::LEADERSHIP, 1.0);
+                if let Some(mentor_entity) = state.entity(mentor_id) {
+                    let action = crate::world_sim::action_context::with_context(&action, mentor_entity, state);
+                    out.push(WorldDelta::AddBehaviorTags { entity_id: mentor_id, tags: action.tags, count: action.count });
+                }
+            }
+
+            // Behavior tags: apprentice earns discipline.
+            {
+                let mut action = ActionTags::empty();
+                action.add(tags::DISCIPLINE, 1.0);
+                if let Some(apprentice_entity) = state.entity(apprentice_id) {
+                    let action = crate::world_sim::action_context::with_context(&action, apprentice_entity, state);
+                    out.push(WorldDelta::AddBehaviorTags { entity_id: apprentice_id, tags: action.tags, count: action.count });
+                }
+            }
 
             // Level-up check (staggered).
             let level_up_cadence = 200 * apprentice_level.max(1) as u64;
