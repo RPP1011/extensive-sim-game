@@ -38,7 +38,7 @@ fn compute_combatant_into(entity: &Entity, state: &WorldState, out: &mut Vec<Wor
                 source_id: entity.id,
             });
         } else if dist > 0.001 {
-            let speed = entity.move_speed * 0.1;
+            let speed = entity.move_speed * crate::world_sim::DT_SEC;
             let fx = dx / dist * speed;
             let fy = dy / dist * speed;
             out.push(WorldDelta::Move {

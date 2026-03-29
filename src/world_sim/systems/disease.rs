@@ -59,7 +59,7 @@ pub fn compute_disease(state: &WorldState, out: &mut Vec<WorldDelta>) {
         // Consume extra supplies (commodity 0 = food) for medical needs
         out.push(WorldDelta::ConsumeCommodity {
             location_id: settlement.id,
-            commodity: 0,
+            commodity: crate::world_sim::commodity::FOOD,
             amount: DISEASE_SUPPLY_DRAIN,
         });
 

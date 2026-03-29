@@ -235,13 +235,13 @@ mod tests {
         // Should have negative stockpile delta on source and positive on dest for commodity 1.
         let src_drain = deltas.iter().any(|d| {
             matches!(d,
-                WorldDelta::UpdateStockpile { location_id: 10, commodity: 1, delta }
+                WorldDelta::UpdateStockpile { location_id: 10, commodity: crate::world_sim::commodity::IRON, delta }
                     if *delta < 0.0
             )
         });
         let dst_gain = deltas.iter().any(|d| {
             matches!(d,
-                WorldDelta::UpdateStockpile { location_id: 20, commodity: 1, delta }
+                WorldDelta::UpdateStockpile { location_id: 20, commodity: crate::world_sim::commodity::IRON, delta }
                     if *delta > 0.0
             )
         });

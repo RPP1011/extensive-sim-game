@@ -123,7 +123,7 @@ pub fn compute_timed_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
         for settlement in &state.settlements {
             out.push(WorldDelta::ProduceCommodity {
                 location_id: settlement.id,
-                commodity: 0, // food
+                commodity: crate::world_sim::commodity::FOOD, // food
                 amount: 5.0 + tick_hash(state.tick, settlement.id as u64 ^ 0xF00D) * 10.0,
             });
         }

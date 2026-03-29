@@ -111,7 +111,7 @@ pub fn compute_recruitment_for_settlement(
         // Consume food for the birth.
         out.push(WorldDelta::ConsumeCommodity {
             location_id: settlement_id,
-            commodity: 0,
+            commodity: crate::world_sim::commodity::FOOD,
             amount: FOOD_PER_BIRTH,
         });
 

@@ -30,7 +30,7 @@ pub fn compute_guild_tiers_for_settlement(
     if tier > 0 {
         out.push(WorldDelta::ProduceCommodity {
             location_id: settlement_id,
-            commodity: 0,
+            commodity: crate::world_sim::commodity::FOOD,
             amount: tier as f32 * 0.02,
         });
     }

@@ -219,7 +219,7 @@ pub fn compute_retirement_for_settlement(
         if legacy == LegacyType::Quartermaster {
             out.push(WorldDelta::UpdateStockpile {
                 location_id: settlement_id,
-                commodity: 0,
+                commodity: crate::world_sim::commodity::FOOD,
                 delta: bonus_value * 10.0,
             });
         }

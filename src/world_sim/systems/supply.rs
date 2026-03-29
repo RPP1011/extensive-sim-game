@@ -123,7 +123,7 @@ mod tests {
                 d,
                 WorldDelta::TransferGoods {
                     from_id: 1,
-                    commodity: 0,
+                    commodity: crate::world_sim::commodity::FOOD,
                     ..
                 }
             )

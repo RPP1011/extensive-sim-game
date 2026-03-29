@@ -54,7 +54,7 @@ pub fn compute_festivals_for_settlement(
         Season::Autumn => {
             out.push(WorldDelta::ProduceCommodity {
                 location_id: settlement_id,
-                commodity: 0,
+                commodity: crate::world_sim::commodity::FOOD,
                 amount: HARVEST_FEAST_FOOD,
             });
         }

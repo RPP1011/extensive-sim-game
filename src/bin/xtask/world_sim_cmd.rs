@@ -83,7 +83,7 @@ pub fn run_world_sim(args: WorldSimArgs) -> ExitCode {
     println!("\n--- World state ---");
     println!("Alive: {} NPCs, {} monsters", alive_npcs, alive_monsters);
 
-    let total_food: f32 = s.settlements.iter().map(|s| s.stockpile[0]).sum();
+    let total_food: f32 = s.settlements.iter().map(|s| s.stockpile[commodity::FOOD]).sum();
     let total_treasury: f32 = s.settlements.iter().map(|s| s.treasury).sum();
     let total_gold: f32 = s.entities.iter()
         .filter_map(|e| e.npc.as_ref())
@@ -97,13 +97,13 @@ pub fn run_world_sim(args: WorldSimArgs) -> ExitCode {
     println!("\nRichest settlements:");
     for s in settlements.iter().take(5) {
         println!("  {} ({}) — food:{:.0} iron:{:.0} wood:{:.0} treasury:{:.0}",
-            s.name, s.specialty, s.stockpile[0], s.stockpile[1], s.stockpile[2], s.treasury);
+            s.name, s.specialty, s.stockpile[commodity::FOOD], s.stockpile[commodity::IRON], s.stockpile[commodity::WOOD], s.treasury);
     }
     if settlements.len() > 5 {
         println!("Poorest settlements:");
         for s in settlements.iter().rev().take(3) {
             println!("  {} ({}) — food:{:.0} iron:{:.0} wood:{:.0} treasury:{:.0}",
-                s.name, s.specialty, s.stockpile[0], s.stockpile[1], s.stockpile[2], s.treasury);
+                s.name, s.specialty, s.stockpile[commodity::FOOD], s.stockpile[commodity::IRON], s.stockpile[commodity::WOOD], s.treasury);
         }
     }
 

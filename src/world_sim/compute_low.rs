@@ -45,7 +45,7 @@ fn compute_npc_overworld_into(entity: &Entity, state: &WorldState, out: &mut Vec
         let dy = dest.1 - entity.pos.1;
         let dist = (dx * dx + dy * dy).sqrt();
         if dist > 0.5 {
-            let speed = entity.move_speed * 0.1;
+            let speed = entity.move_speed * crate::world_sim::DT_SEC;
             out.push(WorldDelta::Move {
                 entity_id: entity.id,
                 force: (dx / dist * speed, dy / dist * speed),
@@ -77,7 +77,7 @@ fn compute_monster_overworld_into(entity: &Entity, state: &WorldState, out: &mut
         let dy = settlement.pos.1 - entity.pos.1;
         let dist = (dx * dx + dy * dy).sqrt();
         if dist > 1.0 {
-            let speed = entity.move_speed * 0.1;
+            let speed = entity.move_speed * crate::world_sim::DT_SEC;
             out.push(WorldDelta::Move {
                 entity_id: entity.id,
                 force: (dx / dist * speed, dy / dist * speed),

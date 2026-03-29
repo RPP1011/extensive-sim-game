@@ -395,7 +395,6 @@ impl FlatMergedDeltas {
 // Flat apply — reads FlatMergedDeltas arrays directly
 // ---------------------------------------------------------------------------
 
-const DT_SEC: f32 = 0.1;
 
 fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
     let mut p = ApplyProfile::default();
@@ -448,7 +447,7 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
                 let e = &mut ents[ei];
                 if !e.alive { continue; }
                 let mag = (fx * fx + fy * fy).sqrt();
-                let max_speed = e.move_speed * DT_SEC;
+                let max_speed = e.move_speed * crate::world_sim::DT_SEC;
                 let (dx, dy) = if mag > max_speed && mag > 0.001 {
                     (fx / mag * max_speed, fy / mag * max_speed)
                 } else {

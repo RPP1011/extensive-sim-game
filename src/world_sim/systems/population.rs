@@ -188,7 +188,7 @@ mod tests {
                 d,
                 WorldDelta::ConsumeCommodity {
                     location_id: 10,
-                    commodity: 0,
+                    commodity: crate::world_sim::commodity::FOOD,
                     ..
                 }
             )

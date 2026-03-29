@@ -37,3 +37,18 @@ pub use fidelity::Fidelity;
 
 /// Number of commodity types in the economy.
 pub const NUM_COMMODITIES: usize = 8;
+
+/// Tick duration in seconds (100ms fixed tick).
+pub const DT_SEC: f32 = 0.1;
+
+/// Named commodity indices for the 8-slot stockpile/price arrays.
+pub mod commodity {
+    pub const FOOD: usize = 0;
+    pub const IRON: usize = 1;
+    pub const WOOD: usize = 2;
+    pub const HERBS: usize = 3;
+    pub const HIDE: usize = 4;
+    pub const CRYSTAL: usize = 5;
+    pub const EQUIPMENT: usize = 6;
+    pub const MEDICINE: usize = 7;
+}

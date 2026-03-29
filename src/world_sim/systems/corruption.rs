@@ -69,7 +69,7 @@ pub fn compute_corruption(state: &WorldState, out: &mut Vec<WorldDelta>) {
             if roll < 0.08 {
                 out.push(WorldDelta::ConsumeCommodity {
                     location_id: settlement.id,
-                    commodity: 0, // food
+                    commodity: crate::world_sim::commodity::FOOD, // food
                     amount: SUPPLY_LOSS,
                 });
             }

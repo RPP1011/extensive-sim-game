@@ -160,7 +160,6 @@ fn apply_hp_changes(state: &mut WorldState, merged: &MergedDeltas) {
 // ---------------------------------------------------------------------------
 
 /// Tick duration in seconds (100ms fixed tick).
-const DT_SEC: f32 = 0.1;
 
 fn apply_movement(state: &mut WorldState, merged: &MergedDeltas) {
     for entity in &mut state.entities {
@@ -168,7 +167,7 @@ fn apply_movement(state: &mut WorldState, merged: &MergedDeltas) {
 
         if let Some(&(fx, fy)) = merged.forces_by_entity.get(&entity.id) {
             let mag = (fx * fx + fy * fy).sqrt();
-            let max_speed = entity.move_speed * DT_SEC;
+            let max_speed = entity.move_speed * crate::world_sim::DT_SEC;
             let (dx, dy) = if mag > max_speed && mag > 0.001 {
                 (fx / mag * max_speed, fy / mag * max_speed)
             } else {

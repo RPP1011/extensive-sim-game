@@ -67,12 +67,12 @@ pub fn compute_geography(state: &WorldState, out: &mut Vec<WorldDelta>) {
                     // Produce wood (commodity 2) and herbs (commodity 3).
                     out.push(WorldDelta::ProduceCommodity {
                         location_id: settlement.id,
-                        commodity: 2,
+                        commodity: crate::world_sim::commodity::WOOD,
                         amount: 1.0,
                     });
                     out.push(WorldDelta::ProduceCommodity {
                         location_id: settlement.id,
-                        commodity: 3,
+                        commodity: crate::world_sim::commodity::HERBS,
                         amount: 0.5,
                     });
                 }
@@ -95,7 +95,7 @@ pub fn compute_geography(state: &WorldState, out: &mut Vec<WorldDelta>) {
                     if loss > 0.001 {
                         out.push(WorldDelta::ConsumeCommodity {
                             location_id: settlement.id,
-                            commodity: 0,
+                            commodity: crate::world_sim::commodity::FOOD,
                             amount: loss,
                         });
                     }
@@ -117,7 +117,7 @@ pub fn compute_geography(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 if dx * dx + dy * dy < 400.0 && settlement.population > 400 {
                     out.push(WorldDelta::ProduceCommodity {
                         location_id: settlement.id,
-                        commodity: 0, // food
+                        commodity: crate::world_sim::commodity::FOOD, // food
                         amount: 2.0,
                     });
                     out.push(WorldDelta::UpdateTreasury {
