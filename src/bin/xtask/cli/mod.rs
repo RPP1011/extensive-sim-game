@@ -87,6 +87,15 @@ pub struct WorldSimArgs {
     /// Resource-rich world (10x stockpiles, varied production, more commodities)
     #[arg(long)]
     pub rich: bool,
+    /// Seed for terrain generation (default: same as --seed)
+    #[arg(long)]
+    pub terrain_seed: Option<u64>,
+    /// Number of factions (default: 6)
+    #[arg(long, default_value_t = 6)]
+    pub factions: usize,
+    /// Enable pre-placed trade routes between nearby settlements
+    #[arg(long)]
+    pub trade_routes: bool,
 }
 
 #[derive(Debug, Parser)]

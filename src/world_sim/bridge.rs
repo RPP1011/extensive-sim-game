@@ -42,6 +42,7 @@ pub fn campaign_to_world(campaign: &CampaignState) -> WorldState {
         world.regions.push(RegionState {
             id: region.id as u32,
             name: region.name.clone(),
+            terrain: Terrain::Plains, // default for bridged campaign data
             monster_density: region.threat_level / 10.0,
             faction_id: Some(region.owner_faction_id as u32),
             threat_level: region.threat_level,
@@ -162,6 +163,7 @@ fn location_to_settlement(loc: &Location) -> SettlementState {
         prices: loc.local_prices,
         treasury: loc.treasury,
         population: loc.resident_ids.len() as u32,
+        specialty: SettlementSpecialty::default(),
         faction_id: None,
         threat_level: 0.0,
         infrastructure_level: 0.0,

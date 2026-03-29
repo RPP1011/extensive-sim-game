@@ -54,6 +54,9 @@ pub struct WorldState {
     /// Global economy (total gold supply, trade routes).
     pub economy: EconomyState,
 
+    /// Trade routes between settlements (settlement_id_a, settlement_id_b).
+    pub trade_routes: Vec<(u32, u32)>,
+
     // --- Campaign-level collections (migrated from headless_campaign) ---
 
     /// Faction states (governments, guilds, cults, etc.).
@@ -96,6 +99,7 @@ impl WorldState {
             regions: Vec::new(),
             settlements: Vec::new(),
             economy: EconomyState::default(),
+            trade_routes: Vec::new(),
             factions: Vec::new(),
             quests: Vec::new(),
             quest_board: Vec::new(),
@@ -785,6 +789,91 @@ impl LocalGrid {
 }
 
 // ---------------------------------------------------------------------------
+// SettlementSpecialty — settlement economic specialization
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum SettlementSpecialty {
+    #[default]
+    General,
+    /// Iron, crystal production bonus.
+    MiningTown,
+    /// Price discovery, merchant NPCs.
+    TradeHub,
+    /// Warriors, patrols reduce threat.
+    MilitaryOutpost,
+    /// Food, hide surplus.
+    FarmingVillage,
+    /// Research, XP bonus.
+    ScholarCity,
+    /// Coastal trade, fish (food).
+    PortTown,
+    /// Equipment, medicine production.
+    CraftingGuild,
+}
+
+impl SettlementSpecialty {
+    pub const ALL: [SettlementSpecialty; 8] = [
+        SettlementSpecialty::General,
+        SettlementSpecialty::MiningTown,
+        SettlementSpecialty::TradeHub,
+        SettlementSpecialty::MilitaryOutpost,
+        SettlementSpecialty::FarmingVillage,
+        SettlementSpecialty::ScholarCity,
+        SettlementSpecialty::PortTown,
+        SettlementSpecialty::CraftingGuild,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            SettlementSpecialty::General => "General",
+            SettlementSpecialty::MiningTown => "Mining Town",
+            SettlementSpecialty::TradeHub => "Trade Hub",
+            SettlementSpecialty::MilitaryOutpost => "Military Outpost",
+            SettlementSpecialty::FarmingVillage => "Farming Village",
+            SettlementSpecialty::ScholarCity => "Scholar City",
+            SettlementSpecialty::PortTown => "Port Town",
+            SettlementSpecialty::CraftingGuild => "Crafting Guild",
+        }
+    }
+
+    /// Commodity production bonuses for this specialty.
+    /// Returns (commodity_index, multiplier) pairs.
+    pub fn production_bonuses(self) -> &'static [(usize, f32)] {
+        match self {
+            SettlementSpecialty::General => &[],
+            SettlementSpecialty::MiningTown => &[(1, 2.0), (5, 1.5)],       // iron, crystal
+            SettlementSpecialty::TradeHub => &[(7, 2.0)],                    // trade_goods
+            SettlementSpecialty::MilitaryOutpost => &[(1, 1.3)],             // iron
+            SettlementSpecialty::FarmingVillage => &[(0, 2.0), (3, 1.5)],   // food, hide
+            SettlementSpecialty::ScholarCity => &[(5, 1.5)],                 // crystal
+            SettlementSpecialty::PortTown => &[(0, 1.5), (7, 1.5)],         // food, trade_goods
+            SettlementSpecialty::CraftingGuild => &[(6, 2.0), (1, 1.3)],    // medicine, iron
+        }
+    }
+
+    /// Preferred NPC archetypes for this specialty.
+    pub fn preferred_archetypes(self) -> &'static [&'static str] {
+        match self {
+            SettlementSpecialty::General => &["farmer", "knight", "ranger", "merchant"],
+            SettlementSpecialty::MiningTown => &["smith", "miner", "knight"],
+            SettlementSpecialty::TradeHub => &["merchant", "rogue", "cleric"],
+            SettlementSpecialty::MilitaryOutpost => &["knight", "ranger", "mage"],
+            SettlementSpecialty::FarmingVillage => &["farmer", "cleric", "ranger"],
+            SettlementSpecialty::ScholarCity => &["mage", "cleric", "rogue"],
+            SettlementSpecialty::PortTown => &["merchant", "ranger", "rogue"],
+            SettlementSpecialty::CraftingGuild => &["smith", "mage", "merchant"],
+        }
+    }
+}
+
+impl std::fmt::Display for SettlementSpecialty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SettlementState — per-settlement economy
 // ---------------------------------------------------------------------------
 
@@ -798,6 +887,7 @@ pub struct SettlementState {
     pub prices: [f32; NUM_COMMODITIES],
     pub treasury: f32,
     pub population: u32,
+    pub specialty: SettlementSpecialty,
 
     // --- Campaign system fields ---
 
@@ -820,10 +910,73 @@ impl SettlementState {
             prices: [1.0; NUM_COMMODITIES],
             treasury: 0.0,
             population: 0,
+            specialty: SettlementSpecialty::default(),
             faction_id: None,
             threat_level: 0.0,
             infrastructure_level: 0.0,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Terrain — biome type for a region
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Terrain {
+    /// Food, hide.
+    Plains,
+    /// Wood, herbs.
+    Forest,
+    /// Iron, crystal.
+    Mountains,
+    /// Food, trade bonus.
+    Coast,
+    /// Herbs, medicine.
+    Swamp,
+    /// Crystal, sparse.
+    Desert,
+    /// Hide, sparse.
+    Tundra,
+}
+
+impl Terrain {
+    pub const ALL: [Terrain; 7] = [
+        Terrain::Plains, Terrain::Forest, Terrain::Mountains,
+        Terrain::Coast, Terrain::Swamp, Terrain::Desert, Terrain::Tundra,
+    ];
+
+    /// Name for display.
+    pub fn name(self) -> &'static str {
+        match self {
+            Terrain::Plains => "Plains",
+            Terrain::Forest => "Forest",
+            Terrain::Mountains => "Mountains",
+            Terrain::Coast => "Coast",
+            Terrain::Swamp => "Swamp",
+            Terrain::Desert => "Desert",
+            Terrain::Tundra => "Tundra",
+        }
+    }
+
+    /// Commodity indices that this terrain naturally produces.
+    /// Indices: 0=food, 1=iron, 2=wood, 3=hide, 4=herbs, 5=crystal, 6=medicine, 7=trade_goods.
+    pub fn primary_commodities(self) -> &'static [(usize, f32)] {
+        match self {
+            Terrain::Plains    => &[(0, 1.5), (3, 1.0)],        // food, hide
+            Terrain::Forest    => &[(2, 1.5), (4, 1.0)],        // wood, herbs
+            Terrain::Mountains => &[(1, 1.5), (5, 1.0)],        // iron, crystal
+            Terrain::Coast     => &[(0, 1.2), (7, 1.5)],        // food, trade_goods
+            Terrain::Swamp     => &[(4, 1.5), (6, 1.0)],        // herbs, medicine
+            Terrain::Desert    => &[(5, 1.2)],                   // crystal (sparse)
+            Terrain::Tundra    => &[(3, 1.2)],                   // hide (sparse)
+        }
+    }
+}
+
+impl std::fmt::Display for Terrain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
     }
 }
 
@@ -835,6 +988,7 @@ impl SettlementState {
 pub struct RegionState {
     pub id: u32,
     pub name: String,
+    pub terrain: Terrain,
     pub monster_density: f32,
     pub faction_id: Option<u32>,
     pub threat_level: f32,

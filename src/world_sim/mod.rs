@@ -21,6 +21,7 @@ pub mod systems;
 pub use delta::{WorldDelta, MergedDeltas, merge_deltas};
 pub use state::{
     WorldState, Entity, HotEntity, ColdEntity, EntityKind, GroupIndex, LocalGrid, SettlementState, RegionState, EconomyState,
+    Terrain, SettlementSpecialty,
     // Campaign system types
     FactionState, DiplomaticStance, GuildState, Quest, QuestPosting, QuestType, QuestStatus,
     ChronicleEntry, ChronicleCategory, WorldEvent,
