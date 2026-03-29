@@ -70,7 +70,9 @@ pub fn compute_progression_for_settlement(
         let npc = match &entity.npc { Some(n) => n, None => continue };
         if entity.level >= MAX_LEVEL { continue; }
 
-        let threshold = entity.level * entity.level * XP_LEVEL_MULT;
+        // Logarithmic XP curve: 200 × e^(level × 0.06)
+        // L1:200, L5:270, L10:364, L20:664, L30:1210, L50:4017
+        let threshold = (200.0 * (entity.level as f32 * 0.06).exp()) as u32;
         if npc.xp < threshold { continue; }
 
         // Compute class-weighted stat bonuses.

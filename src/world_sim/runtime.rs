@@ -1241,13 +1241,16 @@ impl WorldSim {
                     .map(|m| m.score)
                     .unwrap_or(0.1); // minimum XP for classes without template match
 
-                // XP gain = score × behavior_sum_growth_factor.
-                // Scale so classes level roughly every 500 behavior sum gained.
-                let xp_gain = score * (behavior_sum * 0.001).min(5.0);
+                // XP gain = score only. No behavior_sum multiplier.
+                // Score is typically 0.3–2.0. At 50-tick cadence, that's
+                // ~0.006–0.04 XP per tick. L10 needs 136 XP ≈ 3400–22000 ticks.
+                let xp_gain = score * 0.5;
                 class_slot.xp += xp_gain;
 
-                // Level-up: quadratic curve. Level N requires N * 150 XP.
-                let xp_to_next = class_slot.level as f32 * 150.0;
+                // Level-up: exponential XP curve.
+                // xp_to_next = 50 × e^(level × 0.1)
+                // L1:53, L5:82, L10:136, L20:369, L30:1004, L50:7389, L70:54598, L100:2.7M
+                let xp_to_next = 50.0 * (class_slot.level as f32 * 0.1).exp();
                 if class_slot.xp >= xp_to_next {
                     class_slot.xp -= xp_to_next;
                     class_slot.level += 1;
