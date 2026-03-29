@@ -1,77 +1,244 @@
 #![allow(unused)]
-//! Wanted poster system — delta architecture port.
+//! Wanted poster system — every 10 ticks.
 //!
-//! Factions issue bounties on guild NPCs who've wronged them. Wanted NPCs
-//! face increased ambush chance in hostile territory. Posters expire after
-//! 167 ticks or can be resolved through payment, combat, or diplomacy.
+//! Settlements issue bounties for hostile entities (monsters or enemy faction
+//! NPCs) near their grid. When an NPC kills a wanted target, they receive a
+//! gold reward via TransferGold. Bounties are tracked via RecordEvent and the
+//! existing quest_board/world_events.
 //!
 //! Original: `crates/headless_campaign/src/systems/wanted.rs`
 //! Cadence: every 10 ticks.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
-
-// NEEDS STATE: wanted_posters: Vec<WantedPoster> on WorldState
-//   WantedPoster { id, adventurer_id, faction_id, bounty_amount, reason, posted_tick, hunters_dispatched }
-// NEEDS STATE: factions with relationship_to_guild, military_strength
-// NEEDS STATE: guild reputation
-// NEEDS DELTA: IssuePoster { entity_id, faction_id, bounty }
-// NEEDS DELTA: RemovePoster { poster_id }
-// NEEDS DELTA: AdjustReputation { delta }
-// NEEDS DELTA: CreateBattle { ... } (for hunter encounters)
+use crate::world_sim::state::{
+    ChronicleCategory, DiplomaticStance, EntityKind, FactionField, SettlementField,
+    WorldEvent, WorldState, WorldTeam,
+};
 
 /// Cadence gate.
 const WANTED_TICK_INTERVAL: u64 = 10;
 
-/// Poster expiry (ticks).
-const POSTER_EXPIRY_TICKS: u64 = 167;
+/// Range (squared) within which a settlement can identify wanted targets.
+const WANTED_RANGE_SQ: f32 = 900.0; // 30 units
 
-/// Faction relation threshold for diplomatic poster removal.
-const DIPLOMACY_REMOVAL_THRESHOLD: f32 = 30.0;
+/// Base bounty gold per monster level.
+const MONSTER_BOUNTY_PER_LEVEL: f32 = 15.0;
 
-/// Ambush chance increase for wanted NPCs in hostile territory.
-const WANTED_AMBUSH_BONUS: f32 = 0.20;
+/// Base bounty gold for hostile faction NPCs.
+const HOSTILE_NPC_BOUNTY_BASE: f32 = 40.0;
 
-/// Battle poster issuance chance.
-const BATTLE_POSTER_CHANCE: f32 = 0.15;
+/// Minimum threat level for a settlement to issue wanted posters.
+const MIN_THREAT_FOR_WANTED: f32 = 0.15;
 
-/// Compute wanted poster deltas.
-///
-/// Since WorldState lacks wanted poster and faction relation storage,
-/// this is a structural placeholder. Hunter encounter battles could be
-/// expressed via Damage/Die deltas when the combat state is available.
+/// Max wanted events emitted per settlement per tick (prevent spam).
+const MAX_WANTED_PER_SETTLEMENT: usize = 3;
+
+/// Bounty reward multiplier for high-level targets.
+const HIGH_LEVEL_BONUS_THRESHOLD: u32 = 5;
+const HIGH_LEVEL_BONUS_MULT: f32 = 1.5;
+
+/// Deterministic hash for pseudo-random decisions.
+#[inline]
+fn deterministic_roll(tick: u64, id_a: u32, id_b: u32) -> f32 {
+    let mut h = tick
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(id_a as u64)
+        .wrapping_mul(2862933555777941757)
+        .wrapping_add(id_b as u64);
+    h = h
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    (h >> 33) as f32 / (1u64 << 31) as f32
+}
+
 pub fn compute_wanted(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    if state.tick % WANTED_TICK_INTERVAL != 0 {
+    if state.tick % WANTED_TICK_INTERVAL != 0 || state.tick == 0 {
         return;
     }
 
-    // --- Phase 1: Check for new poster triggers ---
-    // NEEDS STATE: recently completed quests/battles against hostile factions
-    // Deterministic roll < BATTLE_POSTER_CHANCE:
-    //   out.push(WorldDelta::IssuePoster { entity_id, faction_id, bounty })
+    // Build hostile faction set.
+    let hostile_faction_ids: Vec<u32> = state
+        .factions
+        .iter()
+        .filter(|f| {
+            matches!(
+                f.diplomatic_stance,
+                DiplomaticStance::Hostile | DiplomaticStance::AtWar
+            )
+        })
+        .map(|f| f.id)
+        .collect();
 
-    // --- Phase 2: Diplomatic removal ---
-    // NEEDS STATE: for each poster where faction relation > DIPLOMACY_REMOVAL_THRESHOLD:
-    //   out.push(WorldDelta::RemovePoster { poster_id })
-
-    // --- Phase 3: Expire old posters ---
-    // NEEDS STATE: for each poster where tick - posted_tick >= POSTER_EXPIRY_TICKS:
-    //   out.push(WorldDelta::RemovePoster { poster_id })
-
-    // --- Phase 4: Dispatch bounty hunters ---
-    // NEEDS STATE: for each undispatched poster, if faction has enough strength:
-    //   Mark dispatched, reduce faction military strength
-    //   No delta needed — dispatching is a state flag
-
-    // --- Phase 5: Hunter encounters ---
-    // NEEDS STATE: wanted NPCs traveling through hostile territory
-    //   Deterministic roll for encounter:
-    //   Create battle encounter via Damage deltas or EscalateFidelity
-    for entity in &state.entities {
-        if !entity.alive || entity.npc.is_none() {
+    // --- Phase 1: Issue wanted posters for hostile entities near settlements ---
+    for settlement in &state.settlements {
+        if settlement.threat_level < MIN_THREAT_FOR_WANTED {
             continue;
         }
-        // NEEDS STATE: check if entity has an active wanted poster
-        // NEEDS STATE: check if entity is in hostile faction territory
+
+        let mut posted_count = 0usize;
+
+        for entity in &state.entities {
+            if posted_count >= MAX_WANTED_PER_SETTLEMENT {
+                break;
+            }
+            if !entity.alive {
+                continue;
+            }
+
+            // Check range to settlement.
+            let dx = entity.pos.0 - settlement.pos.0;
+            let dy = entity.pos.1 - settlement.pos.1;
+            if dx * dx + dy * dy > WANTED_RANGE_SQ {
+                continue;
+            }
+
+            // Determine if this entity is a valid wanted target.
+            let (is_wanted, bounty_gold) = match entity.kind {
+                EntityKind::Monster => {
+                    let base = MONSTER_BOUNTY_PER_LEVEL * entity.level.max(1) as f32;
+                    let mult = if entity.level >= HIGH_LEVEL_BONUS_THRESHOLD {
+                        HIGH_LEVEL_BONUS_MULT
+                    } else {
+                        1.0
+                    };
+                    (true, base * mult)
+                }
+                EntityKind::Npc => {
+                    // Hostile faction NPCs are wanted.
+                    let is_hostile_npc = entity
+                        .npc
+                        .as_ref()
+                        .and_then(|n| n.faction_id)
+                        .map(|fid| hostile_faction_ids.contains(&fid))
+                        .unwrap_or(false);
+                    if is_hostile_npc {
+                        let base = HOSTILE_NPC_BOUNTY_BASE + entity.level as f32 * 10.0;
+                        (true, base)
+                    } else {
+                        (false, 0.0)
+                    }
+                }
+                _ => (false, 0.0),
+            };
+
+            if !is_wanted {
+                continue;
+            }
+
+            // Use deterministic roll to gate poster issuance (not every hostile
+            // gets a poster every tick).
+            let roll = deterministic_roll(state.tick, settlement.id, entity.id);
+            if roll > 0.4 {
+                continue;
+            }
+
+            // Record the wanted poster as a world event.
+            out.push(WorldDelta::RecordEvent {
+                event: WorldEvent::Generic {
+                    category: ChronicleCategory::Quest,
+                    text: format!(
+                        "WANTED: {} (entity {}, level {}) near {} — bounty {} gold",
+                        if entity.kind == EntityKind::Monster {
+                            "monster"
+                        } else {
+                            "hostile agent"
+                        },
+                        entity.id,
+                        entity.level,
+                        settlement.name,
+                        bounty_gold as u32
+                    ),
+                },
+            });
+
+            posted_count += 1;
+        }
+    }
+
+    // --- Phase 2: Reward NPCs near dead wanted targets ---
+    // When a hostile entity has died on a grid near a settlement, reward
+    // friendly NPCs on the same grid as bounty collectors.
+    for grid in &state.grids {
+        // Find dead hostiles on this grid.
+        let dead_hostiles: Vec<(u32, u32)> = grid
+            .entity_ids
+            .iter()
+            .filter_map(|&eid| state.entity(eid))
+            .filter(|e| !e.alive && (e.kind == EntityKind::Monster || {
+                e.npc
+                    .as_ref()
+                    .and_then(|n| n.faction_id)
+                    .map(|fid| hostile_faction_ids.contains(&fid))
+                    .unwrap_or(false)
+            }))
+            .map(|e| (e.id, e.level))
+            .collect();
+
+        if dead_hostiles.is_empty() {
+            continue;
+        }
+
+        // Find friendly NPCs on this grid who can collect the bounty.
+        let collectors: Vec<u32> = grid
+            .entity_ids
+            .iter()
+            .filter_map(|&eid| state.entity(eid))
+            .filter(|e| e.alive && e.kind == EntityKind::Npc && e.team == WorldTeam::Friendly)
+            .map(|e| e.id)
+            .collect();
+
+        if collectors.is_empty() {
+            continue;
+        }
+
+        for (dead_id, dead_level) in &dead_hostiles {
+            let bounty = MONSTER_BOUNTY_PER_LEVEL * (*dead_level).max(1) as f32;
+            let share = bounty / collectors.len() as f32;
+
+            for &collector_id in &collectors {
+                out.push(WorldDelta::TransferGold {
+                    from_id: 0, // Guild funds the bounty.
+                    to_id: collector_id,
+                    amount: share,
+                });
+            }
+        }
+    }
+
+    // --- Phase 3: High-threat settlements reduce threat when wanted targets die ---
+    for settlement in &state.settlements {
+        if settlement.threat_level < MIN_THREAT_FOR_WANTED {
+            continue;
+        }
+
+        // Count dead hostiles near this settlement as a proxy for bounty fulfillment.
+        let dead_nearby = state
+            .entities
+            .iter()
+            .filter(|e| {
+                !e.alive
+                    && (e.kind == EntityKind::Monster
+                        || e.npc
+                            .as_ref()
+                            .and_then(|n| n.faction_id)
+                            .map(|fid| hostile_faction_ids.contains(&fid))
+                            .unwrap_or(false))
+            })
+            .filter(|e| {
+                let dx = e.pos.0 - settlement.pos.0;
+                let dy = e.pos.1 - settlement.pos.1;
+                dx * dx + dy * dy <= WANTED_RANGE_SQ
+            })
+            .count();
+
+        if dead_nearby > 0 {
+            // Each dead hostile reduces settlement threat slightly.
+            let threat_reduction = -(dead_nearby as f32 * 0.02).min(settlement.threat_level);
+            out.push(WorldDelta::UpdateSettlementField {
+                settlement_id: settlement.id,
+                field: SettlementField::ThreatLevel,
+                value: threat_reduction,
+            });
+        }
     }
 }

@@ -1,56 +1,55 @@
 #![allow(unused)]
 //! Espionage system — every 7 ticks.
 //!
-//! Manages spies planted by the guild in factions. Spies gather intel,
-//! risk discovery, and can perform sabotage actions.
+//! Hostile factions send spies (NPCs from hostile factions positioned near
+//! enemy settlements). Spies gather intel (reducing target faction military
+//! effectiveness) and risk detection. Detected spies take Damage.
+//!
+//! Uses existing WorldState types: entities with npc.faction_id identify spies
+//! vs locals. UpdateFaction for intel effects. Damage/Die for caught spies.
 //!
 //! Ported from `crates/headless_campaign/src/systems/espionage.rs`.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{ActionTags, WorldState, tags};
-
-// NEEDS STATE: spies: Vec<SpyState> on WorldState
-//   SpyState { id: u32, adventurer_id: u32, target_faction_id: u32,
-//              cover: f32, intel_gathered: f32 }
-// NEEDS STATE: factions: Vec<FactionState> on WorldState
-//   FactionState.diplomatic_stance: DiplomaticStance
-// NEEDS STATE: entities or adventurers with level, archetype, stealth stat
-
-// NEEDS DELTA: AdjustSpyCover { spy_id: u32, delta: f32 }
-// NEEDS DELTA: GatherIntel { spy_id: u32, target_faction_id: u32, amount: f32 }
-// NEEDS DELTA: SpyCaught { spy_id: u32, adventurer_id: u32, faction_id: u32 }
-// NEEDS DELTA: AdjustRelationship { faction_id: u32, delta: f32 }
-// NEEDS DELTA: KillEntity { entity_id: u32 }
+use crate::world_sim::state::{
+    ActionTags, DiplomaticStance, EntityKind, FactionField, WorldEvent, WorldState, tags,
+};
 
 /// Cadence: runs every 7 ticks.
 const ESPIONAGE_INTERVAL: u64 = 7;
 
-/// Base intel gathered per espionage tick.
-const BASE_INTEL_PER_TICK: f32 = 5.0;
+/// Distance squared within which an NPC is "near" a settlement (spy range).
+const SPY_RANGE_SQ: f32 = 400.0; // 20 units
 
-/// Base cover degradation per espionage tick.
-const BASE_COVER_DECAY: f32 = 2.0;
+/// Base military strength reduction per spy per tick.
+const BASE_INTEL_DRAIN: f32 = 2.0;
 
-/// Extra cover decay when the target faction is hostile.
-const HOSTILE_COVER_DECAY: f32 = 5.0;
+/// Extra drain when the spy has stealth behavior tags.
+const STEALTH_BONUS_DRAIN: f32 = 1.5;
 
-/// Cover threshold below which discovery checks occur.
-const DISCOVERY_THRESHOLD: f32 = 20.0;
+/// Cover threshold: if detection roll exceeds this, the spy is caught.
+const BASE_DETECTION_CHANCE: f32 = 0.12;
 
-/// Chance (0-1) of being caught per tick when cover < threshold.
-const DISCOVERY_CHANCE: f32 = 0.1;
+/// Stealth tag value that fully suppresses detection (linear scale).
+const STEALTH_SUPPRESS_AT: f32 = 20.0;
+
+/// Damage dealt to a caught spy.
+const CAUGHT_SPY_DAMAGE: f32 = 80.0;
 
 /// Faction relation penalty when a spy is caught.
-const CAUGHT_RELATION_PENALTY: f32 = 20.0;
+const CAUGHT_RELATION_PENALTY: f32 = 15.0;
 
 /// Deterministic hash for pseudo-random decisions.
 #[inline]
-fn deterministic_roll(tick: u64, spy_id: u32, salt: u32) -> f32 {
-    let mut h = tick.wrapping_mul(6364136223846793005)
-        .wrapping_add(spy_id as u64)
+fn deterministic_roll(tick: u64, id_a: u32, id_b: u32) -> f32 {
+    let mut h = tick
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(id_a as u64)
         .wrapping_mul(2862933555777941757)
-        .wrapping_add(salt as u64);
-    h = h.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        .wrapping_add(id_b as u64);
+    h = h
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     (h >> 33) as f32 / (1u64 << 31) as f32
 }
 
@@ -59,84 +58,116 @@ pub fn compute_espionage(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
-    // Once state.spies exists, iterate each spy and compute intel/cover/discovery deltas.
-    // TODO: When enabled, emit AddBehaviorTags with tags::STEALTH(2.0) + tags::DECEPTION(1.0)
-    //       alongside GatherIntel deltas.
+    // Build set of hostile faction IDs for quick lookup.
+    let hostile_faction_ids: Vec<u32> = state
+        .factions
+        .iter()
+        .filter(|f| {
+            matches!(
+                f.diplomatic_stance,
+                DiplomaticStance::Hostile | DiplomaticStance::AtWar
+            )
+        })
+        .map(|f| f.id)
+        .collect();
 
-    /*
-    if state.spies.is_empty() {
+    if hostile_faction_ids.is_empty() {
         return;
     }
 
-    for spy in &state.spies {
-        // --- Look up adventurer stats ---
-        let (adv_level, is_rogue, stealth_bonus) = state.entities.iter()
-            .filter_map(|e| e.npc.as_ref().map(|n| (e, n)))
-            .find(|(_, n)| n.adventurer_id == spy.adventurer_id)
-            .map(|(e, n)| {
-                let is_rogue = n.class_tags.iter()
-                    .any(|t| t.to_lowercase().contains("rogue"));
-                // Stealth bonus from class tags (simplified)
-                let stealth = if is_rogue { 2.0 } else { 0.0 };
-                (e.level, is_rogue, stealth)
-            })
-            .unwrap_or((1, false, 0.0));
-
-        // --- Intel gathering ---
-        let level_modifier = 1.0 + (adv_level as f32 - 1.0) * 0.1;
-        let rogue_modifier = if is_rogue { 1.5 } else { 1.0 };
-        let intel_delta = BASE_INTEL_PER_TICK * level_modifier * rogue_modifier;
-
-        // --- Cover degradation ---
-        let faction_hostile = state.factions.iter()
-            .find(|f| f.id == spy.target_faction_id)
-            .map(|f| matches!(
-                f.diplomatic_stance,
-                DiplomaticStance::Hostile | DiplomaticStance::AtWar
-            ))
-            .unwrap_or(false);
-
-        let cover_decay = if faction_hostile {
-            HOSTILE_COVER_DECAY
-        } else {
-            BASE_COVER_DECAY
+    // For each alive NPC entity belonging to a hostile faction, check if they
+    // are near a settlement owned by a different (non-hostile-to-guild) faction.
+    // If so, they are acting as a spy.
+    for entity in &state.entities {
+        if !entity.alive || entity.kind != EntityKind::Npc {
+            continue;
+        }
+        let npc = match &entity.npc {
+            Some(n) => n,
+            None => continue,
+        };
+        let spy_faction_id = match npc.faction_id {
+            Some(fid) if hostile_faction_ids.contains(&fid) => fid,
+            _ => continue,
         };
 
-        let new_cover = (spy.cover - cover_decay).max(0.0);
+        // Check proximity to settlements NOT owned by the spy's faction.
+        for settlement in &state.settlements {
+            // Skip settlements owned by the spy's own faction.
+            if settlement.faction_id == Some(spy_faction_id) {
+                continue;
+            }
 
-        // --- Discovery check ---
-        let caught = if new_cover < DISCOVERY_THRESHOLD {
-            let roll = deterministic_roll(state.tick, spy.id, 0);
-            let adjusted_chance = (DISCOVERY_CHANCE - stealth_bonus * 0.02).max(0.01);
-            roll < adjusted_chance
-        } else {
-            false
-        };
+            let dx = entity.pos.0 - settlement.pos.0;
+            let dy = entity.pos.1 - settlement.pos.1;
+            if dx * dx + dy * dy > SPY_RANGE_SQ {
+                continue;
+            }
 
-        if caught {
-            // Spy is caught: remove spy, mark adventurer dead, damage relations
-            out.push(WorldDelta::SpyCaught {
-                spy_id: spy.id,
-                adventurer_id: spy.adventurer_id,
-                faction_id: spy.target_faction_id,
+            // This NPC is a spy near a target settlement. Compute effects.
+
+            // --- Intel gathering: reduce target settlement's faction military strength ---
+            let stealth_val = npc.behavior_value(tags::STEALTH);
+            let deception_val = npc.behavior_value(tags::DECEPTION);
+            let spy_skill = 1.0 + (stealth_val + deception_val) * 0.05;
+            let drain = BASE_INTEL_DRAIN * spy_skill + if stealth_val > 5.0 { STEALTH_BONUS_DRAIN } else { 0.0 };
+
+            // Drain military strength of the settlement's owning faction.
+            if let Some(target_faction_id) = settlement.faction_id {
+                out.push(WorldDelta::UpdateFaction {
+                    faction_id: target_faction_id,
+                    field: FactionField::MilitaryStrength,
+                    value: -drain,
+                });
+            }
+
+            // Accumulate espionage behavior tags on the spy.
+            let mut action_tags = ActionTags::empty();
+            action_tags.add(tags::STEALTH, 2.0);
+            action_tags.add(tags::DECEPTION, 1.0);
+            out.push(WorldDelta::AddBehaviorTags {
+                entity_id: entity.id,
+                tags: action_tags.tags,
+                count: action_tags.count,
             });
-            out.push(WorldDelta::Die { entity_id: spy.adventurer_id });
-            out.push(WorldDelta::AdjustRelationship {
-                faction_id: spy.target_faction_id,
-                delta: -CAUGHT_RELATION_PENALTY,
-            });
-        } else {
-            // Normal tick: degrade cover and gather intel
-            out.push(WorldDelta::AdjustSpyCover {
-                spy_id: spy.id,
-                delta: -cover_decay,
-            });
-            out.push(WorldDelta::GatherIntel {
-                spy_id: spy.id,
-                target_faction_id: spy.target_faction_id,
-                amount: intel_delta,
-            });
+
+            // --- Detection check ---
+            let roll = deterministic_roll(state.tick, entity.id, settlement.id);
+            // Stealth reduces detection: at STEALTH_SUPPRESS_AT value, detection is 0.
+            let stealth_factor = (1.0 - stealth_val / STEALTH_SUPPRESS_AT).clamp(0.0, 1.0);
+            // Higher population settlements are better at detecting spies.
+            let pop_factor = 1.0 + (settlement.population as f32).sqrt() * 0.02;
+            let detection_threshold = BASE_DETECTION_CHANCE * stealth_factor * pop_factor;
+
+            if roll < detection_threshold {
+                // Spy caught!
+                out.push(WorldDelta::Damage {
+                    target_id: entity.id,
+                    amount: CAUGHT_SPY_DAMAGE,
+                    source_id: settlement.id,
+                });
+
+                // Penalize the spy's faction relationship with guild.
+                out.push(WorldDelta::UpdateFaction {
+                    faction_id: spy_faction_id,
+                    field: FactionField::RelationshipToGuild,
+                    value: -CAUGHT_RELATION_PENALTY,
+                });
+
+                // Record the event.
+                out.push(WorldDelta::RecordEvent {
+                    event: WorldEvent::Generic {
+                        category: crate::world_sim::state::ChronicleCategory::Diplomacy,
+                        text: format!(
+                            "Spy (entity {}) from faction {} caught near settlement {}",
+                            entity.id, spy_faction_id, settlement.name
+                        ),
+                    },
+                });
+
+                // Only process the first settlement hit per spy per tick.
+                break;
+            }
         }
     }
-    */
 }

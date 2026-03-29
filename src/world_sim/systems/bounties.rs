@@ -1,63 +1,88 @@
 #![allow(unused)]
 //! Bounty board system — every 10 ticks.
 //!
-//! Factions and NPCs post bounties on targets. Bounty completion rewards gold
-//! via TransferGold deltas. Expiry and auto-completion are tracked through
-//! bounty state on WorldState.
+//! Tracks high-value targets (elite monsters, faction leaders) via RecordEvent.
+//! Bounty completion rewards gold via TransferGold. High-threat regions
+//! generate implicit bounty pressure via UpdateTreasury funding.
 //!
 //! Ported from `crates/headless_campaign/src/systems/bounties.rs`.
-//!
-//! NEEDS STATE: `bounty_board: Vec<Bounty>` on WorldState
-//! NEEDS STATE: `Bounty { id, poster_faction_id, target_description, target_type,
-//!              reward_gold, reward_reputation, region_id, posted_tick, expires_tick,
-//!              claimed, claimed_by, completed }`
-//! NEEDS STATE: `BountyTarget` enum { MonsterHunt, FactionEnemy, NemesisKill,
-//!              BanditClearance, ResourceDelivery, EscortMission }
-//! NEEDS STATE: `next_bounty_id: u32` on WorldState
-//! NEEDS STATE: `guild_gold: f32` on WorldState (or guild entity treasury)
-//! NEEDS STATE: `guild_reputation: f32` on WorldState
-//! NEEDS DELTA: PostBounty { bounty_id, description, reward_gold }
-//! NEEDS DELTA: CompleteBounty { bounty_id, reward_gold }
-//! NEEDS DELTA: ExpireBounty { bounty_id }
-//! NEEDS DELTA: UpdateReputation { entity_id, delta }
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, WorldState, WorldTeam};
+use crate::world_sim::state::{
+    ChronicleCategory, DiplomaticStance, EntityField, EntityKind, FactionField,
+    WorldEvent, WorldState, WorldTeam,
+};
 
 /// How often the bounty system ticks (in world sim ticks).
 const BOUNTY_INTERVAL: u64 = 10;
 
-/// Maximum active (unclaimed + claimed-but-incomplete) bounties.
-const MAX_ACTIVE_BOUNTIES: usize = 6;
-
-/// Minimum active bounties before we try to generate more.
-const MIN_ACTIVE_BOUNTIES: usize = 2;
-
-/// Bounty expiry duration in ticks from when it was posted.
-const BOUNTY_EXPIRY_TICKS: u64 = 3000;
-
 /// Guild entity ID sentinel (by convention, entity id 0 is the guild).
 const GUILD_ENTITY_ID: u32 = 0;
+
+/// Monster level threshold for "high-value" bounty target.
+const HIGH_VALUE_LEVEL_THRESHOLD: u32 = 5;
+
+/// Gold reward per level for high-value monster kills.
+const HV_BOUNTY_PER_LEVEL: f32 = 25.0;
+
+/// Gold reward for killing a hostile faction NPC (scales with level).
+const FACTION_NPC_BOUNTY_BASE: f32 = 50.0;
+
+/// XP reward for bounty completion.
+const BOUNTY_XP_REWARD: u32 = 15;
+
+/// Threat threshold for regions to generate bounty funding.
+const REGION_THREAT_FUNDING_THRESHOLD: f32 = 50.0;
+
+/// Funding per unit of threat above threshold.
+const THREAT_FUNDING_RATE: f32 = 0.05;
+
+/// Maximum bounty events per tick (prevent log spam).
+const MAX_BOUNTY_EVENTS_PER_TICK: usize = 5;
+
+/// Deterministic hash for pseudo-random decisions.
+#[inline]
+fn deterministic_roll(tick: u64, id_a: u32, id_b: u32) -> f32 {
+    let mut h = tick
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(id_a as u64)
+        .wrapping_mul(2862933555777941757)
+        .wrapping_add(id_b as u64);
+    h = h
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    (h >> 33) as f32 / (1u64 << 31) as f32
+}
 
 pub fn compute_bounties(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % BOUNTY_INTERVAL != 0 || state.tick == 0 {
         return;
     }
 
-    // --- Auto-complete check: bounties targeting dead monsters ---
-    // When monsters die on a grid, nearby NPCs who are bounty-eligible
-    // receive gold rewards. We approximate bounty completion by detecting
-    // dead/dying monsters and rewarding nearby friendly NPCs.
+    let hostile_faction_ids: Vec<u32> = state
+        .factions
+        .iter()
+        .filter(|f| {
+            matches!(
+                f.diplomatic_stance,
+                DiplomaticStance::Hostile | DiplomaticStance::AtWar
+            )
+        })
+        .map(|f| f.id)
+        .collect();
 
+    let mut bounty_events = 0usize;
+
+    // --- Phase 1: Auto-complete bounties for dead high-value targets on grids ---
     for grid in &state.grids {
-        let dead_monsters: Vec<&crate::world_sim::state::Entity> = grid
+        let dead_hv_targets: Vec<&crate::world_sim::state::Entity> = grid
             .entity_ids
             .iter()
             .filter_map(|&eid| state.entity(eid))
-            .filter(|e| e.kind == EntityKind::Monster && !e.alive)
+            .filter(|e| !e.alive && is_high_value_target(e, &hostile_faction_ids))
             .collect();
 
-        if dead_monsters.is_empty() {
+        if dead_hv_targets.is_empty() {
             continue;
         }
 
@@ -72,37 +97,151 @@ pub fn compute_bounties(state: &WorldState, out: &mut Vec<WorldDelta>) {
             continue;
         }
 
-        // Bounty reward: gold per dead monster based on level, split among friendlies
-        for monster in &dead_monsters {
-            let bounty_gold = 30.0 + monster.level as f32 * 10.0;
+        // Bounty reward per dead high-value target, split among friendlies.
+        for target in &dead_hv_targets {
+            let bounty_gold = compute_bounty_reward(target, &hostile_faction_ids);
             let gold_each = bounty_gold / friendlies.len() as f32;
 
             for friendly in &friendlies {
                 if gold_each > 0.0 {
                     out.push(WorldDelta::TransferGold {
-                        from_id: GUILD_ENTITY_ID, // bounty paid from guild
+                        from_id: GUILD_ENTITY_ID,
                         to_id: friendly.id,
                         amount: gold_each,
                     });
                 }
+
+                // XP reward.
+                out.push(WorldDelta::AddXp {
+                    entity_id: friendly.id,
+                    amount: BOUNTY_XP_REWARD,
+                });
+            }
+
+            // Record bounty completion event.
+            if bounty_events < MAX_BOUNTY_EVENTS_PER_TICK {
+                out.push(WorldDelta::RecordEvent {
+                    event: WorldEvent::Generic {
+                        category: ChronicleCategory::Quest,
+                        text: format!(
+                            "BOUNTY COMPLETED: {} (entity {}, level {}) slain — {} gold distributed",
+                            if target.kind == EntityKind::Monster {
+                                "elite monster"
+                            } else {
+                                "high-value target"
+                            },
+                            target.id,
+                            target.level,
+                            bounty_gold as u32
+                        ),
+                    },
+                });
+                bounty_events += 1;
+            }
+
+            // If the target was a hostile faction NPC, weaken their faction.
+            if let Some(fid) = target
+                .npc
+                .as_ref()
+                .and_then(|n| n.faction_id)
+                .filter(|fid| hostile_faction_ids.contains(fid))
+            {
+                out.push(WorldDelta::UpdateFaction {
+                    faction_id: fid,
+                    field: FactionField::MilitaryStrength,
+                    value: -(target.level as f32 * 2.0),
+                });
             }
         }
     }
 
-    // --- High-threat regions generate implicit bounty pressure ---
-    // Regions with high threat get fidelity escalation so encounters
-    // are resolved at higher fidelity (the "bounty" incentivizes action).
+    // --- Phase 2: Post new bounty notices for high-value targets near settlements ---
+    for settlement in &state.settlements {
+        for entity in &state.entities {
+            if bounty_events >= MAX_BOUNTY_EVENTS_PER_TICK {
+                break;
+            }
+            if !entity.alive || !is_high_value_target(entity, &hostile_faction_ids) {
+                continue;
+            }
+
+            let dx = entity.pos.0 - settlement.pos.0;
+            let dy = entity.pos.1 - settlement.pos.1;
+            let dist_sq = dx * dx + dy * dy;
+            if dist_sq > 900.0 {
+                continue; // Beyond 30-unit range.
+            }
+
+            // Stagger posting: not every target gets posted every tick.
+            let roll = deterministic_roll(state.tick, settlement.id, entity.id);
+            if roll > 0.25 {
+                continue;
+            }
+
+            let bounty_gold = compute_bounty_reward(entity, &hostile_faction_ids);
+
+            out.push(WorldDelta::RecordEvent {
+                event: WorldEvent::Generic {
+                    category: ChronicleCategory::Quest,
+                    text: format!(
+                        "BOUNTY POSTED at {}: {} (entity {}, level {}) — {} gold reward",
+                        settlement.name,
+                        if entity.kind == EntityKind::Monster {
+                            "elite monster"
+                        } else {
+                            "high-value target"
+                        },
+                        entity.id,
+                        entity.level,
+                        bounty_gold as u32
+                    ),
+                },
+            });
+            bounty_events += 1;
+        }
+    }
+
+    // --- Phase 3: High-threat regions generate implicit bounty funding ---
     for region in &state.regions {
-        if region.threat_level > 50.0 {
-            // Transfer a small bounty reward to nearest settlement treasury
-            // as incentive for patrols (represents standing bounty funding)
+        if region.threat_level > REGION_THREAT_FUNDING_THRESHOLD {
+            // Fund nearest settlement treasury as bounty incentive.
             if let Some(settlement) = state.settlements.first() {
-                let funding = region.threat_level * 0.05;
+                let funding = region.threat_level * THREAT_FUNDING_RATE;
                 out.push(WorldDelta::UpdateTreasury {
                     location_id: settlement.id,
                     delta: funding,
                 });
             }
         }
+    }
+}
+
+/// Check if an entity qualifies as a high-value bounty target.
+fn is_high_value_target(
+    entity: &crate::world_sim::state::Entity,
+    hostile_faction_ids: &[u32],
+) -> bool {
+    match entity.kind {
+        EntityKind::Monster => entity.level >= HIGH_VALUE_LEVEL_THRESHOLD,
+        EntityKind::Npc => entity
+            .npc
+            .as_ref()
+            .and_then(|n| n.faction_id)
+            .map(|fid| hostile_faction_ids.contains(&fid))
+            .unwrap_or(false)
+            && entity.level >= 3,
+        _ => false,
+    }
+}
+
+/// Compute gold reward for a bounty target.
+fn compute_bounty_reward(
+    target: &crate::world_sim::state::Entity,
+    hostile_faction_ids: &[u32],
+) -> f32 {
+    match target.kind {
+        EntityKind::Monster => HV_BOUNTY_PER_LEVEL * target.level.max(1) as f32,
+        EntityKind::Npc => FACTION_NPC_BOUNTY_BASE + target.level as f32 * 15.0,
+        _ => 0.0,
     }
 }

@@ -1,77 +1,59 @@
 #![allow(unused)]
 //! Counter-espionage system — every 7 ticks.
 //!
-//! Factions plant agents in the guild. The guild must detect and neutralize
-//! them using counter-intelligence. Undetected agents steal gold, leak intel,
-//! sabotage equipment, and boost enemy combat effectiveness.
+//! Settlements detect hostile NPCs in their vicinity. NPCs with stealth
+//! behavior tags are harder to detect. Detection chance is based on
+//! settlement population vs spy stealth. Detected spies receive Damage
+//! or Die deltas.
+//!
+//! This complements the espionage system: espionage handles spy intel
+//! gathering, while counter-espionage handles settlement-initiated
+//! detection sweeps.
 //!
 //! Ported from `crates/headless_campaign/src/systems/counter_espionage.rs`.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
-
-// NEEDS STATE: factions: Vec<FactionState> on WorldState
-//   FactionState { id, diplomatic_stance, relationship_to_guild }
-//   DiplomaticStance enum (Hostile, AtWar, ...)
-// NEEDS STATE: enemy_agents: Vec<EnemyAgentState> on WorldState
-//   EnemyAgentState { id, faction_id, infiltration_level, detected, planted_tick, damage_done }
-// NEEDS STATE: guild: GuildState on WorldState
-//   GuildState { gold, reputation, inventory: Vec<Item> }
-// NEEDS STATE: counter_intel_level: f32 on WorldState
-// NEEDS STATE: guild_buildings: GuildBuildings on WorldState
-//   GuildBuildings { war_room: u32 }
-// NEEDS STATE: adventurers (for idle rogues on guard duty)
-// NEEDS STATE: spies: Vec<SpyState> on WorldState (for turning double agents)
-
-// NEEDS DELTA: PlantEnemyAgent { faction_id: u32, infiltration_level: f32 }
-// NEEDS DELTA: GrowInfiltration { agent_id: u32, delta: f32 }
-// NEEDS DELTA: SiphonGold { agent_id: u32, amount: f32 }
-// NEEDS DELTA: AdjustRelationship { faction_id: u32, delta: f32 }
-// NEEDS DELTA: DestroyInventoryItem { item_index: usize }
-// NEEDS DELTA: AdjustGuildReputation { delta: f32 }
-// NEEDS DELTA: DetectEnemyAgent { agent_id: u32 }
-// NEEDS DELTA: RemoveEnemyAgent { agent_id: u32 }
-// NEEDS DELTA: AdjustCounterIntel { delta: f32 }
-// NEEDS DELTA: PlantSpy { target_faction_id: u32, cover: f32 }
+use crate::world_sim::state::{
+    ChronicleCategory, DiplomaticStance, EntityField, EntityKind, FactionField,
+    WorldEvent, WorldState, tags,
+};
 
 /// Cadence: runs every 7 ticks.
 const COUNTER_ESPIONAGE_INTERVAL: u64 = 7;
 
-/// Chance (0-1) per hostile faction per tick to plant an agent.
-const PLANT_CHANCE: f32 = 0.03;
+/// Range (squared) within which a settlement can detect hostiles.
+const DETECTION_RANGE_SQ: f32 = 625.0; // 25 units
 
-/// Gold siphoned per tick per agent (scaled by infiltration_level / 100).
-const SIPHON_GOLD_PER_TICK: f32 = 0.5;
+/// Base detection chance per hostile NPC near a settlement.
+const BASE_DETECTION_CHANCE: f32 = 0.08;
 
-/// Chance (0-1) per tick for a sabotage event (scaled by infiltration_level / 100).
-const SABOTAGE_CHANCE: f32 = 0.02;
+/// Stealth value that fully suppresses counter-espionage detection.
+const STEALTH_SUPPRESS_AT: f32 = 25.0;
 
-/// Base detection chance per tick: counter_intel_level / 100 * 0.10.
-const BASE_DETECTION_RATE: f32 = 0.10;
+/// Population factor: sqrt(pop) * this scales detection up.
+const POP_DETECTION_SCALE: f32 = 0.04;
 
-/// Aggression boost per agent leaking intel.
-const INTEL_LEAK_AGGRESSION: f32 = 3.0;
+/// Military outpost bonus to detection chance.
+const OUTPOST_BONUS: f32 = 0.10;
 
-/// Combat effectiveness bonus percentage enemies get per agent leaking info.
-const COMBAT_LEAK_BONUS_PCT: f32 = 5.0;
+/// Damage dealt to a detected hostile NPC.
+const DETECTED_SPY_DAMAGE: f32 = 60.0;
 
-/// Infiltration growth per tick for an undetected agent.
-const INFILTRATION_GROWTH: f32 = 2.0;
+/// Lethal threshold: if detection roll is under this fraction of the
+/// detection chance, the spy is killed outright.
+const LETHAL_FRACTION: f32 = 0.3;
 
-/// Counter-intel boost from War Room (per tier).
-const WAR_ROOM_BOOST: f32 = 5.0;
-
-/// Counter-intel boost per idle rogue adventurer on guard duty.
-const ROGUE_GUARD_BOOST: f32 = 3.0;
+/// Morale boost for settlement-aligned NPCs when a spy is caught.
+const MORALE_BOOST_ON_CATCH: f32 = 3.0;
 
 /// Deterministic hash for pseudo-random decisions.
 #[inline]
-fn deterministic_roll(tick: u64, agent_id: u32, salt: u32) -> f32 {
+fn deterministic_roll(tick: u64, id_a: u32, id_b: u32) -> f32 {
     let mut h = tick
         .wrapping_mul(6364136223846793005)
-        .wrapping_add(agent_id as u64)
+        .wrapping_add(id_a as u64)
         .wrapping_mul(2862933555777941757)
-        .wrapping_add(salt as u64);
+        .wrapping_add(id_b as u64);
     h = h
         .wrapping_mul(6364136223846793005)
         .wrapping_add(1442695040888963407);
@@ -83,102 +65,137 @@ pub fn compute_counter_espionage(state: &WorldState, out: &mut Vec<WorldDelta>) 
         return;
     }
 
-    // Once state.factions, state.enemy_agents, state.guild,
-    // state.counter_intel_level, state.guild_buildings, state.adventurers exist,
-    // enable this.
-
-    /*
-    // --- Phase 1: Hostile factions attempt to plant agents ---
-    for faction in &state.factions {
-        let is_hostile = matches!(
-            faction.diplomatic_stance,
-            DiplomaticStance::Hostile | DiplomaticStance::AtWar
-        );
-        if !is_hostile {
-            continue;
-        }
-
-        let roll = deterministic_roll(state.tick, faction.id, 0);
-        if roll < PLANT_CHANCE {
-            out.push(WorldDelta::PlantEnemyAgent {
-                faction_id: faction.id,
-                infiltration_level: 5.0,
-            });
-        }
-    }
-
-    if state.enemy_agents.is_empty() {
+    if state.settlements.is_empty() || state.factions.is_empty() {
         return;
     }
 
-    // --- Compute effective counter-intel level ---
-    let war_room_bonus = state.guild_buildings.war_room as f32 * WAR_ROOM_BOOST;
-
-    let rogue_guard_count = state
-        .adventurers
+    // Build a lookup: faction_id -> is_hostile.
+    let hostile_faction_ids: Vec<u32> = state
+        .factions
         .iter()
-        .filter(|a| {
-            a.status == AdventurerStatus::Idle
-                && a.class_tags.iter().any(|t| t.to_lowercase().contains("rogue"))
+        .filter(|f| {
+            matches!(
+                f.diplomatic_stance,
+                DiplomaticStance::Hostile | DiplomaticStance::AtWar
+            )
         })
-        .count();
-    let rogue_bonus = rogue_guard_count as f32 * ROGUE_GUARD_BOOST;
+        .map(|f| f.id)
+        .collect();
 
-    let effective_intel = (state.counter_intel_level + war_room_bonus + rogue_bonus).min(100.0);
+    if hostile_faction_ids.is_empty() {
+        return;
+    }
 
-    // --- Phase 2: Agent effects + detection ---
-    for agent in &state.enemy_agents {
-        if agent.detected {
-            continue;
-        }
+    // For each settlement, scan nearby entities for hostile faction NPCs.
+    for settlement in &state.settlements {
+        // Compute settlement detection strength.
+        let pop_bonus = (settlement.population as f32).sqrt() * POP_DETECTION_SCALE;
+        let is_military = matches!(
+            settlement.specialty,
+            crate::world_sim::state::SettlementSpecialty::MilitaryOutpost
+        );
+        let outpost_bonus = if is_military { OUTPOST_BONUS } else { 0.0 };
+        let detection_strength = BASE_DETECTION_CHANCE + pop_bonus + outpost_bonus;
 
-        let inf_scale = agent.infiltration_level / 100.0;
+        for entity in &state.entities {
+            if !entity.alive || entity.kind != EntityKind::Npc {
+                continue;
+            }
+            let npc = match &entity.npc {
+                Some(n) => n,
+                None => continue,
+            };
 
-        // Gold siphoning -- map to TransferGold (guild -> faction entity).
-        let gold_siphoned = (SIPHON_GOLD_PER_TICK * inf_scale).min(state.guild.gold);
-        if gold_siphoned > 0.0 {
-            out.push(WorldDelta::SiphonGold {
-                agent_id: agent.id,
-                amount: gold_siphoned,
-            });
-        }
+            // Must belong to a hostile faction.
+            let spy_faction_id = match npc.faction_id {
+                Some(fid) if hostile_faction_ids.contains(&fid) => fid,
+                _ => continue,
+            };
 
-        // Intel leak: boost faction aggression.
-        out.push(WorldDelta::AdjustRelationship {
-            faction_id: agent.faction_id,
-            delta: -INTEL_LEAK_AGGRESSION,
-        });
+            // Must not be at their own faction's settlement.
+            if settlement.faction_id == Some(spy_faction_id) {
+                continue;
+            }
 
-        // Grow infiltration.
-        out.push(WorldDelta::GrowInfiltration {
-            agent_id: agent.id,
-            delta: INFILTRATION_GROWTH,
-        });
+            // Range check.
+            let dx = entity.pos.0 - settlement.pos.0;
+            let dy = entity.pos.1 - settlement.pos.1;
+            if dx * dx + dy * dy > DETECTION_RANGE_SQ {
+                continue;
+            }
 
-        // Sabotage check.
-        let sab_roll = deterministic_roll(state.tick, agent.id, 1);
-        if sab_roll < SABOTAGE_CHANCE * inf_scale {
-            let sab_type_roll = deterministic_roll(state.tick, agent.id, 2);
-            if !state.guild.inventory.is_empty() && sab_type_roll < 0.5 {
-                let item_idx = (deterministic_roll(state.tick, agent.id, 3)
-                    * state.guild.inventory.len() as f32) as usize
-                    % state.guild.inventory.len();
-                out.push(WorldDelta::DestroyInventoryItem {
-                    item_index: item_idx,
+            // Stealth reduces detection chance.
+            let stealth_val = npc.behavior_value(tags::STEALTH);
+            let stealth_factor = (1.0 - stealth_val / STEALTH_SUPPRESS_AT).clamp(0.05, 1.0);
+
+            let final_detection = detection_strength * stealth_factor;
+            let roll = deterministic_roll(state.tick, settlement.id, entity.id);
+
+            if roll >= final_detection {
+                continue; // Not detected this tick.
+            }
+
+            // Detected! Determine severity.
+            let is_lethal = roll < final_detection * LETHAL_FRACTION;
+
+            if is_lethal {
+                // Kill the spy outright.
+                out.push(WorldDelta::Die {
+                    entity_id: entity.id,
+                });
+
+                out.push(WorldDelta::RecordEvent {
+                    event: WorldEvent::EntityDied {
+                        entity_id: entity.id,
+                        cause: format!(
+                            "Executed as spy by {} counter-intelligence",
+                            settlement.name
+                        ),
+                    },
                 });
             } else {
-                out.push(WorldDelta::AdjustGuildReputation { delta: -3.0 });
+                // Wound the spy.
+                out.push(WorldDelta::Damage {
+                    target_id: entity.id,
+                    amount: DETECTED_SPY_DAMAGE,
+                    source_id: settlement.id,
+                });
+
+                out.push(WorldDelta::RecordEvent {
+                    event: WorldEvent::Generic {
+                        category: ChronicleCategory::Diplomacy,
+                        text: format!(
+                            "Hostile agent (entity {}) detected and wounded near {}",
+                            entity.id, settlement.name
+                        ),
+                    },
+                });
+            }
+
+            // Penalize the spy's faction diplomatically.
+            out.push(WorldDelta::UpdateFaction {
+                faction_id: spy_faction_id,
+                field: FactionField::RelationshipToGuild,
+                value: -10.0,
+            });
+
+            // Boost morale of friendly NPCs at this settlement.
+            for ally in &state.entities {
+                if !ally.alive || ally.kind != EntityKind::Npc || ally.id == entity.id {
+                    continue;
+                }
+                let ally_npc = match &ally.npc {
+                    Some(n) => n,
+                    None => continue,
+                };
+                if ally_npc.home_settlement_id == Some(settlement.id) {
+                    out.push(WorldDelta::UpdateEntityField {
+                        entity_id: ally.id,
+                        field: EntityField::Morale,
+                        value: MORALE_BOOST_ON_CATCH,
+                    });
+                }
             }
         }
-
-        // Detection check.
-        let detect_chance = (effective_intel / 100.0) * BASE_DETECTION_RATE;
-        let detect_roll = deterministic_roll(state.tick, agent.id, 4);
-        if detect_roll < detect_chance {
-            out.push(WorldDelta::DetectEnemyAgent {
-                agent_id: agent.id,
-            });
-        }
     }
-    */
 }
