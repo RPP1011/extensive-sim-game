@@ -27,6 +27,10 @@ path = "src/bin/train_e2e.rs"
 name = "train-tree"
 path = "src/bin/train_tree.rs"
 
+[[bin]]
+name = "generate-abilities"
+path = "src/bin/generate_abilities.rs"
+
 [features]
 default = ["gpu"]
 gpu = ["burn/tch", "burn/autodiff"]
