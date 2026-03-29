@@ -888,6 +888,8 @@ pub enum EconomicIntent {
     Buy { commodity: usize },
     Sell { commodity: usize },
     Travel { destination: (f32, f32) },
+    /// On a quest — traveling to quest destination to fight/explore.
+    Adventuring { quest_id: u32, destination: (f32, f32) },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1310,6 +1312,8 @@ pub struct QuestPosting {
     pub id: u32,
     pub name: String,
     pub quest_type: QuestType,
+    /// Settlement that posted this quest.
+    pub settlement_id: u32,
     pub destination: (f32, f32),
     pub threat_level: f32,
     pub reward_gold: f32,
@@ -1368,6 +1372,12 @@ pub enum WorldEvent {
     BattleStarted { grid_id: u32, participants: Vec<u32> },
     /// Battle ended.
     BattleEnded { grid_id: u32, victor_team: WorldTeam },
+    /// Settlement posted a quest to reduce threat.
+    QuestPosted { settlement_id: u32, threat_level: f32, reward_gold: f32 },
+    /// NPC accepted a quest.
+    QuestAccepted { entity_id: u32, quest_id: u32 },
+    /// Quest completed.
+    QuestCompleted { entity_id: u32, quest_id: u32, reward_gold: f32 },
 }
 
 // ---------------------------------------------------------------------------

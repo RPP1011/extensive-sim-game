@@ -95,6 +95,7 @@ pub mod personal_goals;
 pub mod plague_vectors;
 pub mod population;
 pub mod price_discovery;
+pub mod quests;
 pub mod price_controls;
 pub mod prisoners;
 pub mod progression;
@@ -192,6 +193,7 @@ pub fn compute_settlement_systems(state: &WorldState, out: &mut Vec<WorldDelta>)
     run_system!("recruitment", recruitment::compute_recruitment, state, out);
     run_system!("npc_decisions", npc_decisions::compute_npc_decisions, state, out);
     run_system!("price_discovery", price_discovery::compute_price_discovery, state, out);
+    run_system!("quests", quests::compute_quests, state, out);
     run_system!("retirement", retirement::compute_retirement, state, out);
     run_system!("hobbies", hobbies::compute_hobbies, state, out);
     run_system!("fears", fears::compute_fears, state, out);

@@ -912,6 +912,7 @@ fn run_settlement_systems(
     recruitment::compute_recruitment_for_settlement(state, sid, entities, buf);
     npc_decisions::compute_npc_decisions_for_settlement(state, sid, entities, buf);
     price_discovery::compute_price_discovery_for_settlement(state, sid, entities, buf);
+    quests::compute_quests_for_settlement(state, sid, entities, buf);
     retirement::compute_retirement_for_settlement(state, sid, entities, buf);
     hobbies::compute_hobbies_for_settlement(state, sid, entities, buf);
     fears::compute_fears_for_settlement(state, sid, entities, buf);
@@ -1041,8 +1042,10 @@ impl WorldSim {
         profile.apply_fidelity_us = apply_profile.fidelity_us;
         profile.apply_price_reports_us = apply_profile.price_reports_us;
 
+        // POST-APPLY: process world events into state changes.
+        self.process_world_events();
+
         // CLASS MATCHING — run after apply so behavior tags are up to date.
-        // Only check every 50 ticks (same cadence as class_progression).
         if self.state.tick % 50 == 0 && self.state.tick > 0 {
             self.run_class_matching();
         }
@@ -1063,6 +1066,50 @@ impl WorldSim {
 
     /// Match NPC behavior profiles against class templates and grant new classes.
     /// Runs after apply so behavior_tags are up to date.
+    /// Convert world events into state changes (quest postings, etc.).
+    fn process_world_events(&mut self) {
+        use super::state::{WorldEvent, QuestPosting, QuestType};
+
+        let mut next_quest_id = self.state.quest_board.iter()
+            .map(|q| q.id)
+            .max()
+            .unwrap_or(0) + 1;
+
+        // Process events that create quest postings.
+        for event in &self.state.world_events {
+            match event {
+                WorldEvent::QuestPosted { settlement_id, threat_level, reward_gold } => {
+                    // Don't duplicate.
+                    if self.state.quest_board.iter().any(|q| q.settlement_id == *settlement_id) {
+                        continue;
+                    }
+                    if self.state.quest_board.len() >= 20 { break; }
+
+                    let settlement_pos = self.state.settlement(*settlement_id)
+                        .map(|s| s.pos)
+                        .unwrap_or((0.0, 0.0));
+
+                    self.state.quest_board.push(QuestPosting {
+                        id: next_quest_id,
+                        name: format!("Clear threat near settlement {}", settlement_id),
+                        quest_type: QuestType::Hunt,
+                        settlement_id: *settlement_id,
+                        destination: settlement_pos,
+                        threat_level: *threat_level,
+                        reward_gold: *reward_gold,
+                        reward_xp: (*threat_level * 5.0) as u32,
+                        expires_tick: self.state.tick + 500,
+                    });
+                    next_quest_id += 1;
+                }
+                _ => {}
+            }
+        }
+
+        // Expire old quest postings.
+        self.state.quest_board.retain(|q| q.expires_tick > self.state.tick);
+    }
+
     fn run_class_matching(&mut self) {
         use super::state::{EntityKind, ClassSlot};
 

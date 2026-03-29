@@ -60,7 +60,7 @@ pub fn compute_equipment_durability_for_settlement(
                     });
                 }
             }
-            EconomicIntent::Travel { .. } | EconomicIntent::Trade { .. } => {
+            EconomicIntent::Travel { .. } | EconomicIntent::Trade { .. } | EconomicIntent::Adventuring { .. } => {
                 let already_debuffed = entity.status_effects.iter().any(|s| {
                     matches!(&s.kind, StatusEffectKind::Debuff { stat, .. } if stat == "attack")
                 });

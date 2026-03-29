@@ -59,7 +59,7 @@ pub fn compute_wound_persistence_for_settlement(
         // Determine heal rate based on activity
         let heal_rate = match &npc.economic_intent {
             EconomicIntent::Idle => HEAL_RATE_IDLE,
-            EconomicIntent::Travel { .. } | EconomicIntent::Trade { .. } => HEAL_RATE_TRAVELING,
+            EconomicIntent::Travel { .. } | EconomicIntent::Trade { .. } | EconomicIntent::Adventuring { .. } => HEAL_RATE_TRAVELING,
             EconomicIntent::Produce | EconomicIntent::Buy { .. } | EconomicIntent::Sell { .. } => {
                 HEAL_RATE_IDLE
             }
