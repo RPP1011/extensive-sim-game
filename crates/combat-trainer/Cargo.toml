@@ -8,7 +8,7 @@ name = "combat-trainer"
 path = "src/main.rs"
 
 [dependencies]
-rl4burn = { path = "../../../rl4burn/rl4burn" }
+rl4burn = { workspace = true }
 tactical_sim = { path = "../tactical_sim" }
 burn = { version = "0.20", features = ["ndarray", "autodiff"] }
 rand = "0.10"
