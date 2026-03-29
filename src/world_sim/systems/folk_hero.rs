@@ -1,0 +1,98 @@
+#![allow(unused)]
+//! Folk hero reputation system — delta architecture port.
+//!
+//! Tracks how common people view the guild, separate from faction reputation.
+//! Fame grows from heroic deeds (defending settlements, defeating monsters)
+//! and decays from neglect. Regional fame thresholds unlock benefits
+//! (cheaper prices, militia) or penalties (suspicion, hostility).
+//!
+//! Original: `crates/headless_campaign/src/systems/folk_hero.rs`
+//! Cadence: every 17 ticks (skips tick 0).
+
+use crate::world_sim::delta::WorldDelta;
+use crate::world_sim::state::WorldState;
+
+// NEEDS STATE: folk_reputation on WorldState
+//   FolkReputation { regional_fame: HashMap<u32, f32>, overall_fame: f32, folk_tales: Vec<FolkTale> }
+//   FolkTale { id, adventurer_id, tale, region_id, fame_impact, created_tick }
+// NEEDS STATE: regions with threat_level, unrest
+// NEEDS STATE: guild gold, reputation
+// NEEDS DELTA: UpdateFolkFame { region_id, delta }
+// NEEDS DELTA: CreateFolkTale { region_id, entity_id, tale, fame_impact }
+// NEEDS DELTA: ExpireFolkTale { tale_id }
+
+/// Cadence gate.
+const FOLK_HERO_TICK_INTERVAL: u64 = 17;
+
+/// Max folk tales.
+const MAX_FOLK_TALES: usize = 20;
+
+/// Ticks before a folk tale fades.
+const TALE_LIFETIME: u64 = 167;
+
+/// Fame thresholds.
+const FAME_POSITIVE_THRESHOLD: f32 = 50.0;
+const FAME_HERO_THRESHOLD: f32 = 75.0;
+const FAME_SUSPICION_THRESHOLD: f32 = 20.0;
+
+/// Passive fame decay per tick interval.
+const FAME_DECAY_RATE: f32 = 0.5;
+
+/// Compute folk hero deltas: fame changes, tale generation, fame effects.
+///
+/// Fame changes from heroic deeds could be expressed via UpdateTreasury
+/// (tribute gold from hero status) and settlement-level effects.
+pub fn compute_folk_hero(state: &WorldState, out: &mut Vec<WorldDelta>) {
+    if state.tick % FOLK_HERO_TICK_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
+    // --- Phase 1: Detect fame-generating events ---
+    // Positive sources:
+    //   - Defended settlement (quest victory near settlement) → +8 fame
+    //   - Defeated monsters (region threat reduced) → +4 fame
+    //   - Charitable guild (high treasury + reputation) → +5 fame
+    //
+    // Negative sources:
+    //   - High threat in region with no active defense → -10 fame
+    //   - Settlement treasury very low (neglect) → -5 fame
+
+    // Use region threat_level as proxy for fame-relevant events
+    for region in &state.regions {
+        let _threat = region.threat_level;
+        // High threat + no friendly entities nearby → "ignored crisis"
+        // Low threat after reduction → "defeated monsters"
+        // NEEDS STATE: folk_reputation.regional_fame
+    }
+
+    // --- Phase 2: Apply fame deltas ---
+    // NEEDS DELTA: UpdateFolkFame { region_id, delta }
+
+    // --- Phase 3: Generate folk tales from significant events ---
+    // NEEDS DELTA: CreateFolkTale for events with fame impact > 5
+
+    // --- Phase 4: Spread tales to adjacent regions (diminished) ---
+    // NEEDS STATE: region neighbors
+
+    // --- Phase 5: Fame threshold effects ---
+    // fame > 75 (hero): tribute gold, unrest reduction
+    //   out.push(WorldDelta::UpdateTreasury { location_id: settlement.id, delta: 2.0 })
+    // fame > 50 (positive): slight unrest reduction
+    // fame < 20 (suspicion): increase unrest
+
+    // Apply tribute from hero-status settlements
+    for settlement in &state.settlements {
+        // NEEDS STATE: regional fame for this settlement's region
+        // If fame > FAME_HERO_THRESHOLD:
+        //   out.push(WorldDelta::UpdateTreasury {
+        //       location_id: settlement.id,
+        //       delta: 2.0,
+        //   });
+    }
+
+    // --- Phase 6: Passive decay toward neutral (50) ---
+    // NEEDS STATE: update regional_fame values
+
+    // --- Phase 7: Expire old tales ---
+    // NEEDS STATE: remove tales where tick - created_tick >= TALE_LIFETIME
+}

@@ -1,0 +1,94 @@
+#![allow(unused)]
+//! Resource gathering and crafting system — every 7 ticks.
+//!
+//! Ported from `crates/headless_campaign/src/systems/crafting.rs`.
+//! Resource nodes in controlled regions auto-harvest materials into
+//! settlement stockpiles. When sufficient materials are available,
+//! the system auto-crafts by consuming commodities and producing
+//! finished goods (represented as commodity transforms).
+//!
+//! NEEDS STATE: `resource_nodes: Vec<ResourceNode>` on WorldState
+//!   (id, region_id, resource_type, amount, regen_rate, max_amount)
+//! NEEDS STATE: `gathering_boosts: HashMap<u32, u32>` on WorldState
+//! NEEDS STATE: `guild: GuildState` on WorldState (inventory)
+//! NEEDS STATE: `adventurers: Vec<Adventurer>` on WorldState (equipment)
+//! NEEDS DELTA: CraftItem { settlement_id: u32, recipe_name: String, quality: f32 }
+
+use crate::world_sim::delta::WorldDelta;
+use crate::world_sim::state::WorldState;
+use crate::world_sim::NUM_COMMODITIES;
+
+/// How often crafting ticks.
+const CRAFTING_INTERVAL: u64 = 7;
+
+/// Commodity indices used as crafting inputs.
+/// By convention: 0=food, 1=ore, 2=wood, 3=hide, 4=herbs, 5=crystal, 6=obsidian, 7=luxury.
+const CRAFT_INPUT_A: usize = 1; // ore
+const CRAFT_INPUT_B: usize = 2; // wood
+const CRAFT_OUTPUT: usize = 7;  // luxury (finished goods)
+
+/// Minimum input stockpile to trigger crafting.
+const MIN_INPUT_STOCKPILE: f32 = 5.0;
+
+/// Amount consumed per craft batch.
+const CRAFT_CONSUME_AMOUNT: f32 = 2.0;
+
+/// Amount produced per craft batch.
+const CRAFT_PRODUCE_AMOUNT: f32 = 1.0;
+
+/// Resource regeneration rate per tick (stockpile natural growth).
+const REGEN_RATE: f32 = 0.02;
+
+/// Compute crafting deltas.
+///
+/// Each settlement with sufficient raw material stockpile (ore + wood)
+/// consumes inputs and produces finished goods. Settlements also see
+/// natural regeneration of commodity stockpiles.
+pub fn compute_crafting(state: &WorldState, out: &mut Vec<WorldDelta>) {
+    if state.tick % CRAFTING_INTERVAL != 0 {
+        return;
+    }
+
+    for settlement in &state.settlements {
+        // --- Natural resource regeneration ---
+        for c in 0..NUM_COMMODITIES {
+            let regen = REGEN_RATE * (settlement.population as f32 / 100.0).max(0.1);
+            out.push(WorldDelta::ProduceCommodity {
+                location_id: settlement.id,
+                commodity: c,
+                amount: regen,
+            });
+        }
+
+        // --- Auto-craft: consume raw materials, produce finished goods ---
+        let has_input_a = settlement.stockpile[CRAFT_INPUT_A] >= MIN_INPUT_STOCKPILE;
+        let has_input_b = settlement.stockpile[CRAFT_INPUT_B] >= MIN_INPUT_STOCKPILE;
+
+        if has_input_a && has_input_b {
+            // Consume inputs.
+            out.push(WorldDelta::ConsumeCommodity {
+                location_id: settlement.id,
+                commodity: CRAFT_INPUT_A,
+                amount: CRAFT_CONSUME_AMOUNT,
+            });
+            out.push(WorldDelta::ConsumeCommodity {
+                location_id: settlement.id,
+                commodity: CRAFT_INPUT_B,
+                amount: CRAFT_CONSUME_AMOUNT,
+            });
+
+            // Produce output.
+            out.push(WorldDelta::ProduceCommodity {
+                location_id: settlement.id,
+                commodity: CRAFT_OUTPUT,
+                amount: CRAFT_PRODUCE_AMOUNT,
+            });
+
+            // Crafting activity generates a small treasury bonus.
+            out.push(WorldDelta::UpdateTreasury {
+                location_id: settlement.id,
+                delta: CRAFT_PRODUCE_AMOUNT * 0.5,
+            });
+        }
+    }
+}
