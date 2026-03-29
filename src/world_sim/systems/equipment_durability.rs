@@ -1,26 +1,32 @@
 #![allow(unused)]
-//! Equipment durability — fires every 7 ticks.
+//! Equipment durability — fires every 50 ticks.
 //!
-//! Gear degrades through use: fighting entities lose attack effectiveness,
-//! traveling entities lose move speed. Mapped to Debuff status effects and
-//! gold costs for repairs at settlements.
+//! Gear degrades through use:
+//! - NPCs in combat (on High-fidelity grids) lose attack damage and armor.
+//! - NPCs traveling/trading/adventuring lose move speed.
+//! - Degradation emits negative `UpdateEntityField` deltas on the stats that
+//!   equipment originally boosted. The equipping system will re-boost stats
+//!   when more EQUIPMENT commodity becomes available.
 //!
-//! Original: `crates/headless_campaign/src/systems/equipment_durability.rs`
-//!
-//! NEEDS STATE: `equipped_items` with `durability` on NpcData
-//! NEEDS DELTA: ModifyDurability, EquipmentBroken
+//! Gated on settlement treasury > -100 (skip degradation if economy collapsed).
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EconomicIntent, Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
+use crate::world_sim::fidelity::Fidelity;
+use crate::world_sim::state::{EconomicIntent, Entity, EntityField, EntityKind, WorldState};
 
-/// Durability check interval.
-const DURABILITY_INTERVAL: u64 = 7;
+/// Durability check interval (ticks).
+const DURABILITY_INTERVAL: u64 = 50;
 
-/// Gold cost for auto-repair at a settlement.
-const REPAIR_COST: f32 = 5.0;
+/// Combat degradation: attack damage lost per degradation tick.
+const COMBAT_ATTACK_DEGRADATION: f32 = -0.05;
+/// Combat degradation: armor lost per degradation tick.
+const COMBAT_ARMOR_DEGRADATION: f32 = -0.02;
 
-/// Debuff duration when equipment is severely degraded.
-const DEGRADED_DEBUFF_MS: u32 = 7000;
+/// Travel degradation: move speed lost per degradation tick.
+const TRAVEL_SPEED_DEGRADATION: f32 = -0.001;
+
+/// Don't degrade if the settlement treasury is below this threshold.
+const ECONOMY_COLLAPSE_THRESHOLD: f32 = -100.0;
 
 pub fn compute_equipment_durability(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % DURABILITY_INTERVAL != 0 || state.tick == 0 {
@@ -35,11 +41,19 @@ pub fn compute_equipment_durability(state: &WorldState, out: &mut Vec<WorldDelta
 
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_equipment_durability_for_settlement(
-    _state: &WorldState,
+    state: &WorldState,
     settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {
+    // Gate: skip degradation if settlement economy has collapsed.
+    let treasury = state.settlement(settlement_id)
+        .map(|s| s.treasury)
+        .unwrap_or(0.0);
+    if treasury <= ECONOMY_COLLAPSE_THRESHOLD {
+        return;
+    }
+
     for entity in entities {
         if !entity.alive || entity.kind != EntityKind::Npc {
             continue;
@@ -49,35 +63,45 @@ pub fn compute_equipment_durability_for_settlement(
             None => continue,
         };
 
-        match &npc.economic_intent {
-            EconomicIntent::Idle | EconomicIntent::Produce | EconomicIntent::Buy { .. } | EconomicIntent::Sell { .. } => {
-                // At settlement: auto-repair costs gold
-                if npc.gold >= REPAIR_COST {
-                    out.push(WorldDelta::TransferGold {
-                        from_id: entity.id,
-                        to_id: settlement_id,
-                        amount: REPAIR_COST,
-                    });
-                }
-            }
-            EconomicIntent::Travel { .. } | EconomicIntent::Trade { .. } | EconomicIntent::Adventuring { .. } => {
-                let already_debuffed = entity.status_effects.iter().any(|s| {
-                    matches!(&s.kind, StatusEffectKind::Debuff { stat, .. } if stat == "attack")
+        // Check if the entity is on a High-fidelity grid (combat).
+        let in_combat = entity.grid_id
+            .and_then(|gid| state.grid(gid))
+            .map(|g| g.fidelity == Fidelity::High)
+            .unwrap_or(false);
+
+        if in_combat {
+            // Combat degradation: weapon and armor wear out.
+            // Only degrade if the stat is still positive (quality > 0 means stat > base).
+            if entity.attack_damage > 0.0 {
+                out.push(WorldDelta::UpdateEntityField {
+                    entity_id: entity.id,
+                    field: EntityField::AttackDamage,
+                    value: COMBAT_ATTACK_DEGRADATION,
                 });
-                if !already_debuffed {
-                    out.push(WorldDelta::ApplyStatus {
-                        target_id: entity.id,
-                        status: StatusEffect {
-                            kind: StatusEffectKind::Debuff {
-                                stat: "attack".to_string(),
-                                factor: 0.95,
-                            },
-                            source_id: 0,
-                            remaining_ms: DEGRADED_DEBUFF_MS,
-                        },
+            }
+            if entity.armor > 0.0 {
+                out.push(WorldDelta::UpdateEntityField {
+                    entity_id: entity.id,
+                    field: EntityField::Armor,
+                    value: COMBAT_ARMOR_DEGRADATION,
+                });
+            }
+        }
+
+        match &npc.economic_intent {
+            EconomicIntent::Trade { .. }
+            | EconomicIntent::Travel { .. }
+            | EconomicIntent::Adventuring { .. } => {
+                // Travel degradation: boots/gear wear out.
+                if entity.move_speed > 0.0 {
+                    out.push(WorldDelta::UpdateEntityField {
+                        entity_id: entity.id,
+                        field: EntityField::MoveSpeed,
+                        value: TRAVEL_SPEED_DEGRADATION,
                     });
                 }
             }
+            _ => {}
         }
     }
 }
