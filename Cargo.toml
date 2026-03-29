@@ -12,6 +12,7 @@ app = []
 stream-monitor = ["tactical_sim/stream-monitor"]
 burn-gpu = ["tactical_sim/burn-gpu"]
 burn-cpu = ["tactical_sim/burn-cpu"]
+profile-systems = []
 
 [dependencies]
 tack = { path = "../tack" }

@@ -37,67 +37,56 @@ pub fn compute_loot(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // monsters (hp <= 0 or hp very low relative to incoming damage).
 
     for grid in &state.grids {
-        // Find dying monsters on this grid
-        let dying_monsters: Vec<&crate::world_sim::state::Entity> = grid
-            .entity_ids
-            .iter()
-            .filter_map(|&eid| state.entity(eid))
-            .filter(|e| e.kind == EntityKind::Monster && e.alive && e.hp <= 0.0)
-            .collect();
+        if grid.fidelity != crate::world_sim::fidelity::Fidelity::High { continue; }
 
-        if dying_monsters.is_empty() {
-            continue;
+        // Count dying monsters and friendlies without allocating.
+        let mut dying_ids = [0u32; 32];
+        let mut dying_levels = [0u32; 32];
+        let mut dc = 0usize;
+        let mut friendly_ids = [0u32; 64];
+        let mut fc = 0usize;
+
+        for &eid in &grid.entity_ids {
+            if let Some(e) = state.entity(eid) {
+                if !e.alive { continue; }
+                if e.kind == EntityKind::Monster && e.hp <= 0.0 && dc < 32 {
+                    dying_ids[dc] = eid;
+                    dying_levels[dc] = e.level;
+                    dc += 1;
+                } else if e.kind == EntityKind::Npc && e.team == WorldTeam::Friendly && fc < 64 {
+                    friendly_ids[fc] = eid;
+                    fc += 1;
+                }
+            }
         }
 
-        // Find alive friendlies on this grid to receive loot
-        let friendlies: Vec<&crate::world_sim::state::Entity> = grid
-            .entity_ids
-            .iter()
-            .filter_map(|&eid| state.entity(eid))
-            .filter(|e| e.kind == EntityKind::Npc && e.alive && e.team == WorldTeam::Friendly)
-            .collect();
+        if dc == 0 || fc == 0 { continue; }
 
-        if friendlies.is_empty() {
-            continue;
-        }
-
-        for monster in &dying_monsters {
-            let threat = monster.level as f32;
-
-            // Gold reward split among friendlies
+        for di in 0..dc {
+            let monster_id = dying_ids[di];
+            let threat = dying_levels[di] as f32;
             let total_gold = threat * GOLD_PER_THREAT;
-            let gold_each = total_gold / friendlies.len() as f32;
+            let gold_each = total_gold / fc as f32;
 
-            for friendly in &friendlies {
+            for fi in 0..fc {
                 if gold_each > 0.0 {
                     out.push(WorldDelta::TransferGold {
-                        from_id: monster.id,
-                        to_id: friendly.id,
+                        from_id: monster_id,
+                        to_id: friendly_ids[fi],
                         amount: gold_each,
                     });
                 }
             }
 
-            // Goods (treasure) reward to the nearest friendly
+            // Goods (treasure) reward to the first friendly (no alloc nearest search)
             let goods_amount = threat * GOODS_PER_THREAT;
-            if goods_amount > 0.0 {
-                // Pick closest friendly by position
-                let recipient = friendlies
-                    .iter()
-                    .min_by(|a, b| {
-                        let da = dist_sq(a.pos, monster.pos);
-                        let db = dist_sq(b.pos, monster.pos);
-                        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-                    });
-
-                if let Some(recipient) = recipient {
-                    out.push(WorldDelta::TransferGoods {
-                        from_id: monster.id,
-                        to_id: recipient.id,
-                        commodity: LOOT_COMMODITY,
-                        amount: goods_amount,
-                    });
-                }
+            if goods_amount > 0.0 && fc > 0 {
+                out.push(WorldDelta::TransferGoods {
+                    from_id: monster_id,
+                    to_id: friendly_ids[0],
+                    commodity: LOOT_COMMODITY,
+                    amount: goods_amount,
+                });
             }
         }
     }

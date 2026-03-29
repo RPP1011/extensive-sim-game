@@ -39,75 +39,57 @@ pub fn compute_battles(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // any hostile+friendly pair sharing a grid exchanges damage.
 
     for grid in &state.grids {
-        // Collect alive friendlies and hostiles on this grid.
-        let mut friendlies: Vec<&crate::world_sim::state::Entity> = Vec::new();
-        let mut hostiles: Vec<&crate::world_sim::state::Entity> = Vec::new();
-
-        for &eid in &grid.entity_ids {
-            if let Some(e) = state.entity(eid) {
-                if !e.alive {
-                    continue;
-                }
-                match e.team {
-                    crate::world_sim::state::WorldTeam::Friendly => friendlies.push(e),
-                    crate::world_sim::state::WorldTeam::Hostile => hostiles.push(e),
-                    crate::world_sim::state::WorldTeam::Neutral => {}
-                }
-            }
-        }
-
-        if friendlies.is_empty() || hostiles.is_empty() {
+        // Only process High-fidelity grids (combat already happening).
+        if grid.fidelity != crate::world_sim::fidelity::Fidelity::High {
             continue;
         }
 
-        // --- Simplified oracle-style resolution per tick ---
-        // Each hostile deals its attack_damage spread across friendlies.
-        // Each friendly deals its attack_damage spread across hostiles.
+        // Count friendlies/hostiles without allocating.
+        let mut friendly_ids = [0u32; 64];
+        let mut hostile_ids = [0u32; 64];
+        let mut fc = 0usize;
+        let mut hc = 0usize;
+
+        for &eid in &grid.entity_ids {
+            if let Some(e) = state.entity(eid) {
+                if !e.alive { continue; }
+                match e.team {
+                    crate::world_sim::state::WorldTeam::Friendly => {
+                        if fc < 64 { friendly_ids[fc] = eid; fc += 1; }
+                    }
+                    crate::world_sim::state::WorldTeam::Hostile => {
+                        if hc < 64 { hostile_ids[hc] = eid; hc += 1; }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if fc == 0 || hc == 0 { continue; }
+
+        let friendlies = &friendly_ids[..fc];
+        let hostiles = &hostile_ids[..hc];
 
         // Hostiles attack friendlies
-        let friendly_count = friendlies.len() as f32;
-        for hostile in &hostiles {
-            let dmg_each = hostile.attack_damage / friendly_count;
-            for friendly in &friendlies {
-                if dmg_each > 0.0 {
-                    out.push(WorldDelta::Damage {
-                        target_id: friendly.id,
-                        amount: dmg_each,
-                        source_id: hostile.id,
-                    });
+        let fcount = fc as f32;
+        let hcount = hc as f32;
+        for &hid in hostiles {
+            let atk = state.entity(hid).map(|e| e.attack_damage).unwrap_or(0.0);
+            let dmg_each = atk / fcount;
+            if dmg_each > 0.0 {
+                for &fid in friendlies {
+                    out.push(WorldDelta::Damage { target_id: fid, amount: dmg_each, source_id: hid });
                 }
             }
         }
-
         // Friendlies attack hostiles
-        let hostile_count = hostiles.len() as f32;
-        for friendly in &friendlies {
-            let dmg_each = friendly.attack_damage / hostile_count;
-            for hostile in &hostiles {
-                if dmg_each > 0.0 {
-                    out.push(WorldDelta::Damage {
-                        target_id: hostile.id,
-                        amount: dmg_each,
-                        source_id: friendly.id,
-                    });
+        for &fid in friendlies {
+            let atk = state.entity(fid).map(|e| e.attack_damage).unwrap_or(0.0);
+            let dmg_each = atk / hcount;
+            if dmg_each > 0.0 {
+                for &hid in hostiles {
+                    out.push(WorldDelta::Damage { target_id: hid, amount: dmg_each, source_id: fid });
                 }
-            }
-        }
-
-        // Emit Die for any entity whose hp would drop to zero after accumulated
-        // damage this tick. We check current HP against expected damage.
-        // (The apply phase handles clamping, but we emit Die proactively so that
-        //  other systems in the same tick can see it.)
-        for friendly in &friendlies {
-            let incoming: f32 = hostiles.iter().map(|h| h.attack_damage / friendly_count).sum();
-            if friendly.hp - incoming <= 0.0 {
-                out.push(WorldDelta::Die { entity_id: friendly.id });
-            }
-        }
-        for hostile in &hostiles {
-            let incoming: f32 = friendlies.iter().map(|f| f.attack_damage / hostile_count).sum();
-            if hostile.hp - incoming <= 0.0 {
-                out.push(WorldDelta::Die { entity_id: hostile.id });
             }
         }
     }

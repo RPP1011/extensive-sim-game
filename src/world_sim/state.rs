@@ -78,10 +78,20 @@ impl WorldState {
     }
 
     pub fn entity(&self, id: u32) -> Option<&Entity> {
+        // Fast path: if id matches index position, O(1).
+        let i = id as usize;
+        if i < self.entities.len() && self.entities[i].id == id {
+            return Some(&self.entities[i]);
+        }
+        // Fallback: linear scan for non-contiguous IDs.
         self.entities.iter().find(|e| e.id == id)
     }
 
     pub fn entity_mut(&mut self, id: u32) -> Option<&mut Entity> {
+        let i = id as usize;
+        if i < self.entities.len() && self.entities[i].id == id {
+            return Some(&mut self.entities[i]);
+        }
         self.entities.iter_mut().find(|e| e.id == id)
     }
 

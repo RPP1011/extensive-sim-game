@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use super::delta::WorldDelta;
 use super::fidelity::Fidelity;
+use super::state::Entity;
 use super::spatial::SpatialIndex;
 use super::state::{WorldState, EntityKind};
 use super::tick::{TickProfile, ProfileAccumulator};
@@ -18,11 +19,16 @@ use super::apply::ApplyProfile;
 // FlatMergedDeltas — flat-array merge accumulator, zero HashMap overhead
 // ---------------------------------------------------------------------------
 
+const NUM_ENTITY_FIELDS: usize = 17;
+const NUM_FACTION_FIELDS: usize = 6;
+const NUM_REGION_FIELDS: usize = 4;
+const NUM_SETTLEMENT_FIELDS: usize = 4;
+
 /// Flat-array merge accumulator. All per-entity fields are indexed by entity ID.
 /// Per-settlement fields indexed by settlement ID. Dirty lists track which
 /// indices were touched so clear is O(touched) not O(capacity).
 struct FlatMergedDeltas {
-    // --- Per-entity (indexed by entity ID) ---
+    // --- Per-entity combat (indexed by entity ID) ---
     damage: Vec<f32>,
     heals: Vec<f32>,
     shields: Vec<f32>,
@@ -31,12 +37,36 @@ struct FlatMergedDeltas {
     dead: Vec<bool>,
     entity_dirty: Vec<u32>,
 
+    // --- Per-entity campaign fields (indexed by entity_id * NUM_ENTITY_FIELDS + field) ---
+    entity_fields: Vec<f32>,
+    entity_xp: Vec<u32>,
+    entity_mood: Vec<u8>,
+    entity_mood_set: Vec<bool>, // whether mood was set this tick
+
     // --- Per-settlement (indexed by settlement ID) ---
     production: Vec<[f32; NUM_COMMODITIES]>,
     consumption: Vec<[f32; NUM_COMMODITIES]>,
     stockpile_adj: Vec<[f32; NUM_COMMODITIES]>,
     treasury_adj: Vec<f32>,
     settlement_dirty: Vec<u32>,
+
+    // --- Per-settlement campaign fields (indexed by settlement_id * NUM_SETTLEMENT_FIELDS + field) ---
+    settlement_fields: Vec<f32>,
+
+    // --- Per-faction (indexed by faction_id * NUM_FACTION_FIELDS + field) ---
+    faction_fields: Vec<f32>,
+    faction_dirty: Vec<u32>,
+    max_factions: usize,
+
+    // --- Per-region (indexed by region_id * NUM_REGION_FIELDS + field) ---
+    region_fields: Vec<f32>,
+    region_dirty: Vec<u32>,
+    max_regions: usize,
+
+    // --- Guild scalars ---
+    guild_gold_delta: f32,
+    guild_supplies_delta: f32,
+    guild_reputation_delta: f32,
 
     // --- Collected (Vecs, cleared each tick) ---
     new_statuses: Vec<(u32, super::state::StatusEffect)>,
@@ -49,12 +79,18 @@ struct FlatMergedDeltas {
     price_reports: Vec<(u32, u32, super::state::PriceReport)>,
     price_updates: Vec<(u32, [f32; NUM_COMMODITIES])>,
 
-    /// Campaign system deltas that need the MergedDeltas path.
-    overflow: Vec<WorldDelta>,
+    // --- Campaign collected (no flat-array equivalent) ---
+    relation_deltas: Vec<(u32, u32, u8, f32)>,
+    spawns: Vec<(super::state::EntityKind, (f32, f32), super::state::WorldTeam, u32)>,
+    events: Vec<super::state::WorldEvent>,
+    chronicles: Vec<super::state::ChronicleEntry>,
+    quest_updates: Vec<(u32, super::state::QuestDelta)>,
 }
 
 impl FlatMergedDeltas {
     fn new(max_entities: usize, max_settlements: usize) -> Self {
+        let max_factions = 16; // pre-allocate for up to 16 factions
+        let max_regions = 16;
         FlatMergedDeltas {
             damage: vec![0.0; max_entities],
             heals: vec![0.0; max_entities],
@@ -64,11 +100,29 @@ impl FlatMergedDeltas {
             dead: vec![false; max_entities],
             entity_dirty: Vec::with_capacity(max_entities),
 
+            entity_fields: vec![0.0; max_entities * NUM_ENTITY_FIELDS],
+            entity_xp: vec![0; max_entities],
+            entity_mood: vec![0; max_entities],
+            entity_mood_set: vec![false; max_entities],
+
             production: vec![[0.0; NUM_COMMODITIES]; max_settlements],
             consumption: vec![[0.0; NUM_COMMODITIES]; max_settlements],
             stockpile_adj: vec![[0.0; NUM_COMMODITIES]; max_settlements],
             treasury_adj: vec![0.0; max_settlements],
             settlement_dirty: Vec::with_capacity(max_settlements),
+            settlement_fields: vec![0.0; max_settlements * NUM_SETTLEMENT_FIELDS],
+
+            faction_fields: vec![0.0; max_factions * NUM_FACTION_FIELDS],
+            faction_dirty: Vec::with_capacity(max_factions),
+            max_factions,
+
+            region_fields: vec![0.0; max_regions * NUM_REGION_FIELDS],
+            region_dirty: Vec::with_capacity(max_regions),
+            max_regions,
+
+            guild_gold_delta: 0.0,
+            guild_supplies_delta: 0.0,
+            guild_reputation_delta: 0.0,
 
             new_statuses: Vec::with_capacity(64),
             remove_statuses: Vec::with_capacity(64),
@@ -79,7 +133,12 @@ impl FlatMergedDeltas {
             fidelity_changes: Vec::with_capacity(16),
             price_reports: Vec::with_capacity(64),
             price_updates: Vec::with_capacity(16),
-            overflow: Vec::with_capacity(64),
+
+            relation_deltas: Vec::with_capacity(64),
+            spawns: Vec::with_capacity(16),
+            events: Vec::with_capacity(32),
+            chronicles: Vec::with_capacity(16),
+            quest_updates: Vec::with_capacity(16),
         }
     }
 
@@ -92,6 +151,11 @@ impl FlatMergedDeltas {
             self.force_x[i] = 0.0;
             self.force_y[i] = 0.0;
             self.dead[i] = false;
+            // Clear entity campaign fields
+            let base = i * NUM_ENTITY_FIELDS;
+            for f in 0..NUM_ENTITY_FIELDS { self.entity_fields[base + f] = 0.0; }
+            self.entity_xp[i] = 0;
+            self.entity_mood_set[i] = false;
         }
         self.entity_dirty.clear();
 
@@ -101,8 +165,26 @@ impl FlatMergedDeltas {
             self.consumption[i] = [0.0; NUM_COMMODITIES];
             self.stockpile_adj[i] = [0.0; NUM_COMMODITIES];
             self.treasury_adj[i] = 0.0;
+            let base = i * NUM_SETTLEMENT_FIELDS;
+            for f in 0..NUM_SETTLEMENT_FIELDS { self.settlement_fields[base + f] = 0.0; }
         }
         self.settlement_dirty.clear();
+
+        for &id in &self.faction_dirty {
+            let base = id as usize * NUM_FACTION_FIELDS;
+            for f in 0..NUM_FACTION_FIELDS { self.faction_fields[base + f] = 0.0; }
+        }
+        self.faction_dirty.clear();
+
+        for &id in &self.region_dirty {
+            let base = id as usize * NUM_REGION_FIELDS;
+            for f in 0..NUM_REGION_FIELDS { self.region_fields[base + f] = 0.0; }
+        }
+        self.region_dirty.clear();
+
+        self.guild_gold_delta = 0.0;
+        self.guild_supplies_delta = 0.0;
+        self.guild_reputation_delta = 0.0;
 
         self.new_statuses.clear();
         self.remove_statuses.clear();
@@ -113,18 +195,27 @@ impl FlatMergedDeltas {
         self.fidelity_changes.clear();
         self.price_reports.clear();
         self.price_updates.clear();
-        self.overflow.clear();
+
+        self.relation_deltas.clear();
+        self.spawns.clear();
+        self.events.clear();
+        self.chronicles.clear();
+        self.quest_updates.clear();
     }
 
     #[inline]
     fn mark_entity(&mut self, id: u32) {
         let i = id as usize;
-        // Only add to dirty list on first touch (damage==0 && heals==0 && ... is the init state).
-        // Cheaper to just always push and dedup isn't needed — clear handles duplicates fine.
         if self.damage[i] == 0.0 && self.heals[i] == 0.0 && self.shields[i] == 0.0
             && self.force_x[i] == 0.0 && self.force_y[i] == 0.0 && !self.dead[i]
+            && self.entity_xp[i] == 0 && !self.entity_mood_set[i]
         {
-            self.entity_dirty.push(id);
+            // Check if any entity_fields are nonzero
+            let base = i * NUM_ENTITY_FIELDS;
+            let fields_clean = (0..NUM_ENTITY_FIELDS).all(|f| self.entity_fields[base + f] == 0.0);
+            if fields_clean {
+                self.entity_dirty.push(id);
+            }
         }
     }
 
@@ -136,7 +227,31 @@ impl FlatMergedDeltas {
             && self.stockpile_adj[i] == [0.0; NUM_COMMODITIES]
             && self.treasury_adj[i] == 0.0
         {
-            self.settlement_dirty.push(id);
+            let base = i * NUM_SETTLEMENT_FIELDS;
+            let fields_clean = (0..NUM_SETTLEMENT_FIELDS).all(|f| self.settlement_fields[base + f] == 0.0);
+            if fields_clean {
+                self.settlement_dirty.push(id);
+            }
+        }
+    }
+
+    #[inline]
+    fn mark_faction(&mut self, id: u32) {
+        let i = id as usize;
+        if i < self.max_factions {
+            let base = i * NUM_FACTION_FIELDS;
+            let clean = (0..NUM_FACTION_FIELDS).all(|f| self.faction_fields[base + f] == 0.0);
+            if clean { self.faction_dirty.push(id); }
+        }
+    }
+
+    #[inline]
+    fn mark_region(&mut self, id: u32) {
+        let i = id as usize;
+        if i < self.max_regions {
+            let base = i * NUM_REGION_FIELDS;
+            let clean = (0..NUM_REGION_FIELDS).all(|f| self.region_fields[base + f] == 0.0);
+            if clean { self.region_dirty.push(id); }
         }
     }
 
@@ -208,24 +323,61 @@ impl FlatMergedDeltas {
             }
             WorldDelta::TickCooldown { .. } => {}
 
-            // Campaign system deltas — not handled in the flat runtime path.
-            // These go through the MergedDeltas → apply_campaign_deltas path instead.
-            WorldDelta::UpdateEntityField { .. }
-            | WorldDelta::SetEntityMood { .. }
-            | WorldDelta::AddXp { .. }
-            | WorldDelta::UpdateFaction { .. }
-            | WorldDelta::UpdateRegion { .. }
-            | WorldDelta::UpdateSettlementField { .. }
-            | WorldDelta::UpdateRelation { .. }
-            | WorldDelta::SpawnEntity { .. }
-            | WorldDelta::RecordEvent { .. }
-            | WorldDelta::RecordChronicle { .. }
-            | WorldDelta::QuestUpdate { .. }
-            | WorldDelta::UpdateGuildGold { .. }
-            | WorldDelta::UpdateGuildSupplies { .. }
-            | WorldDelta::UpdateGuildReputation { .. } => {
-                // Fall through to overflow path which uses MergedDeltas.
-                self.overflow.push(delta);
+            // --- Campaign deltas: flat-array path ---
+            WorldDelta::UpdateEntityField { entity_id, field, value } => {
+                self.mark_entity(entity_id);
+                self.entity_fields[entity_id as usize * NUM_ENTITY_FIELDS + field as usize] += value;
+            }
+            WorldDelta::SetEntityMood { entity_id, mood } => {
+                self.mark_entity(entity_id);
+                self.entity_mood[entity_id as usize] = mood;
+                self.entity_mood_set[entity_id as usize] = true;
+            }
+            WorldDelta::AddXp { entity_id, amount } => {
+                self.mark_entity(entity_id);
+                self.entity_xp[entity_id as usize] = self.entity_xp[entity_id as usize].saturating_add(amount);
+            }
+            WorldDelta::UpdateFaction { faction_id, field, value } => {
+                self.mark_faction(faction_id);
+                let i = faction_id as usize;
+                if i < self.max_factions {
+                    self.faction_fields[i * NUM_FACTION_FIELDS + field as usize] += value;
+                }
+            }
+            WorldDelta::UpdateRegion { region_id, field, value } => {
+                self.mark_region(region_id);
+                let i = region_id as usize;
+                if i < self.max_regions {
+                    self.region_fields[i * NUM_REGION_FIELDS + field as usize] += value;
+                }
+            }
+            WorldDelta::UpdateSettlementField { settlement_id, field, value } => {
+                self.mark_settlement(settlement_id);
+                self.settlement_fields[settlement_id as usize * NUM_SETTLEMENT_FIELDS + field as usize] += value;
+            }
+            WorldDelta::UpdateRelation { entity_a, entity_b, kind, delta } => {
+                self.relation_deltas.push((entity_a, entity_b, kind as u8, delta));
+            }
+            WorldDelta::SpawnEntity { kind, pos, team, level } => {
+                self.spawns.push((kind, pos, team, level));
+            }
+            WorldDelta::RecordEvent { event } => {
+                self.events.push(event);
+            }
+            WorldDelta::RecordChronicle { entry } => {
+                self.chronicles.push(entry);
+            }
+            WorldDelta::QuestUpdate { quest_id, update } => {
+                self.quest_updates.push((quest_id, update));
+            }
+            WorldDelta::UpdateGuildGold { delta } => {
+                self.guild_gold_delta += delta;
+            }
+            WorldDelta::UpdateGuildSupplies { delta } => {
+                self.guild_supplies_delta += delta;
+            }
+            WorldDelta::UpdateGuildReputation { delta } => {
+                self.guild_reputation_delta += delta;
             }
         }
     }
@@ -404,14 +556,156 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
     }
     p.price_reports_us = t.elapsed().as_micros() as u64;
 
-    // Campaign system overflow — merge into MergedDeltas and apply.
-    if !m.overflow.is_empty() {
-        let t = Instant::now();
-        let merged = super::merge_deltas(m.overflow.iter().cloned());
-        super::apply::apply_campaign_deltas(state, &merged);
-        p.campaign_us = t.elapsed().as_micros() as u64;
+    // Campaign system deltas — flat-array apply
+    let t = Instant::now();
+
+    // Entity field deltas + XP + mood
+    for &id in &m.entity_dirty {
+        let i = id as usize;
+        let base = i * NUM_ENTITY_FIELDS;
+        let has_fields = (0..NUM_ENTITY_FIELDS).any(|f| m.entity_fields[base + f] != 0.0);
+        let has_xp = m.entity_xp[i] > 0;
+        let has_mood = m.entity_mood_set[i];
+
+        if !has_fields && !has_xp && !has_mood { continue; }
+
+        if let Some(entity) = state.entities.iter_mut().find(|e| e.id == id) {
+            if has_fields {
+                super::apply::apply_entity_field_delta(entity, 0, m.entity_fields[base + 0]); // Morale
+                super::apply::apply_entity_field_delta(entity, 1, m.entity_fields[base + 1]); // Stress
+                super::apply::apply_entity_field_delta(entity, 2, m.entity_fields[base + 2]); // Fatigue
+                super::apply::apply_entity_field_delta(entity, 3, m.entity_fields[base + 3]); // Loyalty
+                super::apply::apply_entity_field_delta(entity, 4, m.entity_fields[base + 4]); // Injury
+                super::apply::apply_entity_field_delta(entity, 5, m.entity_fields[base + 5]); // Resolve
+                super::apply::apply_entity_field_delta(entity, 6, m.entity_fields[base + 6]); // GuildRelationship
+                super::apply::apply_entity_field_delta(entity, 7, m.entity_fields[base + 7]); // Gold
+                super::apply::apply_entity_field_delta(entity, 8, m.entity_fields[base + 8]); // Hp
+                super::apply::apply_entity_field_delta(entity, 9, m.entity_fields[base + 9]); // MaxHp
+                super::apply::apply_entity_field_delta(entity, 10, m.entity_fields[base + 10]); // ShieldHp
+                super::apply::apply_entity_field_delta(entity, 11, m.entity_fields[base + 11]); // Armor
+                super::apply::apply_entity_field_delta(entity, 12, m.entity_fields[base + 12]); // MagicResist
+                super::apply::apply_entity_field_delta(entity, 13, m.entity_fields[base + 13]); // AttackDamage
+                super::apply::apply_entity_field_delta(entity, 14, m.entity_fields[base + 14]); // AttackRange
+                super::apply::apply_entity_field_delta(entity, 15, m.entity_fields[base + 15]); // MoveSpeed
+                // field 16 is unused padding
+            }
+            if has_xp {
+                if let Some(npc) = entity.npc.as_mut() {
+                    npc.xp = npc.xp.saturating_add(m.entity_xp[i]);
+                }
+            }
+            if has_mood {
+                if let Some(npc) = entity.npc.as_mut() {
+                    npc.mood = m.entity_mood[i];
+                }
+            }
+        }
     }
 
+    // Faction field deltas
+    for &id in &m.faction_dirty {
+        let base = id as usize * NUM_FACTION_FIELDS;
+        if let Some(faction) = state.faction_mut(id) {
+            super::apply::apply_faction_field_delta(faction, 0, m.faction_fields[base + 0]);
+            super::apply::apply_faction_field_delta(faction, 1, m.faction_fields[base + 1]);
+            super::apply::apply_faction_field_delta(faction, 2, m.faction_fields[base + 2]);
+            super::apply::apply_faction_field_delta(faction, 3, m.faction_fields[base + 3]);
+            super::apply::apply_faction_field_delta(faction, 4, m.faction_fields[base + 4]);
+            super::apply::apply_faction_field_delta(faction, 5, m.faction_fields[base + 5]);
+        }
+    }
+
+    // Region field deltas
+    for &id in &m.region_dirty {
+        let base = id as usize * NUM_REGION_FIELDS;
+        if let Some(region) = state.region_mut(id) {
+            super::apply::apply_region_field_delta(region, 0, m.region_fields[base + 0]);
+            super::apply::apply_region_field_delta(region, 1, m.region_fields[base + 1]);
+            super::apply::apply_region_field_delta(region, 2, m.region_fields[base + 2]);
+            super::apply::apply_region_field_delta(region, 3, m.region_fields[base + 3]);
+        }
+    }
+
+    // Settlement field deltas
+    for &id in &m.settlement_dirty {
+        let base = id as usize * NUM_SETTLEMENT_FIELDS;
+        if let Some(s) = state.settlement_mut(id) {
+            super::apply::apply_settlement_field_delta(s, 0, m.settlement_fields[base + 0]);
+            super::apply::apply_settlement_field_delta(s, 1, m.settlement_fields[base + 1]);
+            super::apply::apply_settlement_field_delta(s, 2, m.settlement_fields[base + 2]);
+            super::apply::apply_settlement_field_delta(s, 3, m.settlement_fields[base + 3]);
+        }
+    }
+
+    // Relations
+    for &(a, b, kind, delta) in &m.relation_deltas {
+        let entry = state.relations.entry((a, b, kind)).or_insert(0.0);
+        *entry += delta;
+    }
+
+    // Spawns
+    for &(kind, pos, team, level) in &m.spawns {
+        let id = state.entities.iter().map(|e| e.id).max().unwrap_or(0) + 1;
+        let mut entity = match kind {
+            EntityKind::Npc => Entity::new_npc(id, pos),
+            EntityKind::Monster => Entity::new_monster(id, pos, level),
+            EntityKind::Building => Entity::new_building(id, pos),
+            EntityKind::Projectile => Entity::new_monster(id, pos, 0),
+        };
+        entity.team = team;
+        entity.level = level;
+        state.entities.push(entity);
+    }
+
+    // Events
+    state.world_events.extend(m.events.iter().cloned());
+    if state.world_events.len() > 1000 {
+        let drain = state.world_events.len() - 1000;
+        state.world_events.drain(..drain);
+    }
+
+    // Chronicles
+    state.chronicle.extend(m.chronicles.iter().cloned());
+    if state.chronicle.len() > 500 {
+        let drain = state.chronicle.len() - 500;
+        state.chronicle.drain(..drain);
+    }
+
+    // Quest updates
+    for (quest_id, update) in &m.quest_updates {
+        if let Some(quest) = state.quest_mut(*quest_id) {
+            match update {
+                super::state::QuestDelta::AdvanceProgress { amount } => {
+                    quest.progress = (quest.progress + amount).min(1.0);
+                }
+                super::state::QuestDelta::SetStatus { status } => {
+                    quest.status = *status;
+                }
+                super::state::QuestDelta::AddMember { entity_id } => {
+                    if !quest.party_member_ids.contains(entity_id) {
+                        quest.party_member_ids.push(*entity_id);
+                    }
+                }
+                super::state::QuestDelta::RemoveMember { entity_id } => {
+                    quest.party_member_ids.retain(|id| id != entity_id);
+                }
+                super::state::QuestDelta::Complete => {
+                    quest.status = super::state::QuestStatus::Completed;
+                    quest.progress = 1.0;
+                }
+                super::state::QuestDelta::Fail => {
+                    quest.status = super::state::QuestStatus::Failed;
+                }
+            }
+        }
+    }
+
+    // Guild
+    state.guild.gold += m.guild_gold_delta;
+    state.guild.supplies += m.guild_supplies_delta;
+    state.guild.reputation += m.guild_reputation_delta;
+
+    p.campaign_us = t.elapsed().as_micros() as u64;
     p
 }
 

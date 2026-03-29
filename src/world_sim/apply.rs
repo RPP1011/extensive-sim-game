@@ -565,7 +565,7 @@ pub(super) fn apply_campaign_deltas(state: &mut WorldState, merged: &MergedDelta
 }
 
 /// Apply an additive delta to the correct field on an entity.
-fn apply_entity_field_delta(entity: &mut Entity, field_disc: u8, delta: f32) {
+pub(super) fn apply_entity_field_delta(entity: &mut Entity, field_disc: u8, delta: f32) {
     // Fields that live on Entity directly.
     match field_disc {
         d if d == EntityField::Hp as u8 => {
@@ -628,7 +628,7 @@ fn apply_entity_field_delta(entity: &mut Entity, field_disc: u8, delta: f32) {
 }
 
 /// Apply an additive delta to the correct field on a faction.
-fn apply_faction_field_delta(faction: &mut super::state::FactionState, field_disc: u8, delta: f32) {
+pub(super) fn apply_faction_field_delta(faction: &mut super::state::FactionState, field_disc: u8, delta: f32) {
     use super::state::FactionField;
     match field_disc {
         d if d == FactionField::RelationshipToGuild as u8 => {
@@ -654,7 +654,7 @@ fn apply_faction_field_delta(faction: &mut super::state::FactionState, field_dis
 }
 
 /// Apply an additive delta to the correct field on a region.
-fn apply_region_field_delta(region: &mut super::state::RegionState, field_disc: u8, delta: f32) {
+pub(super) fn apply_region_field_delta(region: &mut super::state::RegionState, field_disc: u8, delta: f32) {
     use super::state::RegionField;
     match field_disc {
         d if d == RegionField::MonsterDensity as u8 => {
@@ -674,7 +674,7 @@ fn apply_region_field_delta(region: &mut super::state::RegionState, field_disc: 
 }
 
 /// Apply an additive delta to the correct field on a settlement.
-fn apply_settlement_field_delta(settlement: &mut super::state::SettlementState, field_disc: u8, delta: f32) {
+pub(super) fn apply_settlement_field_delta(settlement: &mut super::state::SettlementState, field_disc: u8, delta: f32) {
     use super::state::SettlementField;
     match field_disc {
         d if d == SettlementField::Treasury as u8 => {

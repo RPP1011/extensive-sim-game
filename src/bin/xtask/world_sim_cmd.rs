@@ -23,9 +23,9 @@ pub fn run_world_sim(args: WorldSimArgs) -> ExitCode {
     for t in 0..args.ticks {
         let profile = sim.tick();
 
-        if (t + 1) % 1000 == 0 {
+        if (t + 1) % 1000 == 0 || profile.total_us > 10000 {
             let alive = sim.state().entities.iter().filter(|e| e.alive).count();
-            println!("[tick {}] alive: {} | last: {}", t + 1, alive, profile);
+            println!("[tick {}] alive: {} | {}", t + 1, alive, profile);
         }
 
         last_profile = profile;

@@ -35,63 +35,64 @@ pub fn compute_last_stand(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // We look for friendly NPCs that are near death on grids with hostiles.
 
     for grid in &state.grids {
-        let hostiles: Vec<&crate::world_sim::state::Entity> = grid
-            .entity_ids
-            .iter()
-            .filter_map(|&eid| state.entity(eid))
-            .filter(|e| e.kind == EntityKind::Monster && e.alive && e.hp > 0.0)
-            .collect();
+        if grid.fidelity != crate::world_sim::fidelity::Fidelity::High { continue; }
 
-        if hostiles.is_empty() {
-            continue;
+        let mut hostile_ids = [0u32; 64];
+        let mut hc = 0usize;
+        let mut hero_ids = [0u32; 64];
+        let mut hero_atk = [0.0f32; 64];
+        let mut hero_maxhp = [0.0f32; 64];
+        let mut hrc = 0usize;
+
+        for &eid in &grid.entity_ids {
+            if let Some(e) = state.entity(eid) {
+                if !e.alive || e.hp <= 0.0 { continue; }
+                if e.kind == EntityKind::Monster && hc < 64 {
+                    hostile_ids[hc] = eid; hc += 1;
+                } else if e.kind == EntityKind::Npc && e.team == WorldTeam::Friendly
+                    && e.max_hp > 0.0 && (e.hp / e.max_hp) <= LAST_STAND_HP_THRESHOLD
+                    && hrc < 64
+                {
+                    hero_ids[hrc] = eid;
+                    hero_atk[hrc] = e.attack_damage;
+                    hero_maxhp[hrc] = e.max_hp;
+                    hrc += 1;
+                }
+            }
         }
 
-        let near_death_friendlies: Vec<&crate::world_sim::state::Entity> = grid
-            .entity_ids
-            .iter()
-            .filter_map(|&eid| state.entity(eid))
-            .filter(|e| {
-                e.kind == EntityKind::Npc
-                    && e.alive
-                    && e.team == WorldTeam::Friendly
-                    && e.max_hp > 0.0
-                    && (e.hp / e.max_hp) <= LAST_STAND_HP_THRESHOLD
-                    && e.hp > 0.0
-            })
-            .collect();
+        if hc == 0 || hrc == 0 { continue; }
 
-        for hero in &near_death_friendlies {
-            // --- Last stand burst: deal amplified damage to all hostiles ---
-            let burst_damage = hero.attack_damage * LAST_STAND_DAMAGE_MULT;
-            let dmg_per_hostile = burst_damage / hostiles.len() as f32;
+        for hi in 0..hrc {
+            let hero_id = hero_ids[hi];
+            let burst_damage = hero_atk[hi] * LAST_STAND_DAMAGE_MULT;
+            let dmg_per_hostile = burst_damage / hc as f32;
 
-            for hostile in &hostiles {
+            for i in 0..hc {
                 if dmg_per_hostile > 0.0 {
                     out.push(WorldDelta::Damage {
-                        target_id: hostile.id,
+                        target_id: hostile_ids[i],
                         amount: dmg_per_hostile,
-                        source_id: hero.id,
+                        source_id: hero_id,
                     });
                 }
             }
 
-            // --- Self-heal: the hero rallies ---
-            let heal_amount = hero.max_hp * LAST_STAND_HEAL_FRACTION;
+            let heal_amount = hero_maxhp[hi] * LAST_STAND_HEAL_FRACTION;
             if heal_amount > 0.0 {
                 out.push(WorldDelta::Heal {
-                    target_id: hero.id,
+                    target_id: hero_id,
                     amount: heal_amount,
-                    source_id: hero.id,
+                    source_id: hero_id,
                 });
             }
 
-            // --- Shield: temporary protection from the surge of adrenaline ---
-            let shield_amount = hero.max_hp * 0.05;
+            let shield_amount = hero_maxhp[hi] * 0.05;
             if shield_amount > 0.0 {
                 out.push(WorldDelta::Shield {
-                    target_id: hero.id,
+                    target_id: hero_id,
                     amount: shield_amount,
-                    source_id: hero.id,
+                    source_id: hero_id,
                 });
             }
         }
