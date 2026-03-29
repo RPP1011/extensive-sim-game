@@ -1389,6 +1389,8 @@ pub enum EntityField {
     AttackDamage,
     AttackRange,
     MoveSpeed,
+    /// Level increment (value cast to u32, added to entity.level).
+    Level,
 }
 
 // ---------------------------------------------------------------------------

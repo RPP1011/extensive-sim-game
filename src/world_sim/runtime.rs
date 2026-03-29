@@ -19,7 +19,7 @@ use super::apply::ApplyProfile;
 // FlatMergedDeltas — flat-array merge accumulator, zero HashMap overhead
 // ---------------------------------------------------------------------------
 
-const NUM_ENTITY_FIELDS: usize = 17;
+const NUM_ENTITY_FIELDS: usize = 18; // 17 original + Level
 const NUM_FACTION_FIELDS: usize = 6;
 const NUM_REGION_FIELDS: usize = 4;
 const NUM_SETTLEMENT_FIELDS: usize = 4;
@@ -616,7 +616,7 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
                 super::apply::apply_entity_field_delta(entity, 13, m.entity_fields[base + 13]); // AttackDamage
                 super::apply::apply_entity_field_delta(entity, 14, m.entity_fields[base + 14]); // AttackRange
                 super::apply::apply_entity_field_delta(entity, 15, m.entity_fields[base + 15]); // MoveSpeed
-                // field 16 is unused padding
+                super::apply::apply_entity_field_delta(entity, 16, m.entity_fields[base + 16]); // Level
             }
             if has_xp {
                 if let Some(npc) = entity.npc.as_mut() {

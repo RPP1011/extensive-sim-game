@@ -609,6 +609,9 @@ pub(super) fn apply_entity_field_delta(entity: &mut Entity, field_disc: u8, delt
         d if d == EntityField::MoveSpeed as u8 => {
             entity.move_speed = (entity.move_speed + delta).max(0.0);
         }
+        d if d == EntityField::Level as u8 => {
+            entity.level = (entity.level as f32 + delta).max(1.0) as u32;
+        }
         _ => {
             // NPC-specific fields.
             if let Some(npc) = entity.npc.as_mut() {

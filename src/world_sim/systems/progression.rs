@@ -80,8 +80,14 @@ pub fn compute_progression_for_settlement(
             value: SPEED_PER_LEVEL,
         });
 
-        // Note: actual level increment requires a delta for entity.level.
-        // Currently EntityField doesn't include Level. The XP reset also
+        // Increment level.
+        out.push(WorldDelta::UpdateEntityField {
+            entity_id: entity.id,
+            field: EntityField::Level,
+            value: 1.0,
+        });
+
+        // Note: XP reset also
         // needs a dedicated mechanism. For now, the stat gains accumulate
         // and the XP threshold check triggers every progression tick
         // until XP is consumed.
