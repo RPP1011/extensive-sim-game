@@ -210,7 +210,7 @@ pub(super) fn rich_entity_features_spatial(
 }
 
 /// Summary of a unit's strongest ability/heal/CC derived from AbilitySlot DSL effects.
-pub(super) struct AbilitySummary {
+pub struct AbilitySummary {
     /// Highest single-hit damage from any damage ability
     pub ability_damage: f32,
     /// Range of that ability

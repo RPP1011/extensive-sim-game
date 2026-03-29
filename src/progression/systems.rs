@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use crate::ai::core::{SimEvent, Team};
 use crate::game_core::{
     AssignedHero, CampaignEventLog, CampaignRoster, EquipmentItem, HeroCompanion,
-    HeroTrait, ItemRarity, MissionBoard, MissionData, MissionProgress, MissionResult,
+    HeroTrait, ItemRarity, MissionBoard, MissionData, MissionProgress,
     RunState, push_campaign_event,
 };
 use crate::mission::sim_bridge::{MissionEventLog, MissionSimState, SimEventBuffer};

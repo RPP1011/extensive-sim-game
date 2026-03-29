@@ -202,7 +202,7 @@ fn place_rooms(rng: &mut Lcg, config: &FloorplanConfig) -> Vec<PlacedRoom> {
     let mut rooms = Vec::new();
     let margin = 2; // Keep rooms away from grid edge
 
-    for i in 0..config.room_count * 20 {
+    for _i in 0..config.room_count * 20 {
         if rooms.len() >= config.room_count {
             break;
         }
@@ -267,8 +267,8 @@ fn place_rooms(rng: &mut Lcg, config: &FloorplanConfig) -> Vec<PlacedRoom> {
     // Assign elevation based on role + random variation.
     // Creates a general upward progression from entry to climax
     // with variation to avoid monotony.
-    let n = rooms.len();
-    for (i, room) in rooms.iter_mut().enumerate() {
+    let _n = rooms.len();
+    for (_i, room) in rooms.iter_mut().enumerate() {
         let base = match room.role {
             RoomRole::Entry => 0.0,
             RoomRole::Recovery => 0.5,
@@ -342,7 +342,7 @@ fn carve_corridor(
 fn connect_rooms(
     rng: &mut Lcg,
     rooms: &[PlacedRoom],
-    config: &FloorplanConfig,
+    _config: &FloorplanConfig,
 ) -> Vec<Corridor> {
     let n = rooms.len();
     if n < 2 {
@@ -608,7 +608,7 @@ fn add_corridor_alcoves(
 
             // Pick a side to place the alcove (perpendicular to corridor direction)
             let (dc, dr): (isize, isize) = if idx > 0 {
-                let (pc, pr) = corridor.cells[idx - 1];
+                let (pc, _pr) = corridor.cells[idx - 1];
                 if pc != cc {
                     // Corridor runs horizontal → alcove goes up or down
                     (0, if rng.next_u64() % 2 == 0 { -1 } else { 1 })
@@ -910,12 +910,12 @@ fn add_overlook(
 // Spawn placement
 // ---------------------------------------------------------------------------
 
-fn place_room_spawns(nav: &NavGrid, rng: &mut Lcg, room: &mut PlacedRoom) {
+fn place_room_spawns(nav: &NavGrid, _rng: &mut Lcg, room: &mut PlacedRoom) {
     let cols = nav.cols;
 
     // Place spawns near the edges of the room that face corridors.
     // Simple approach: player spawns on left side, enemy spawns on right side.
-    let mid_r = room.row + room.height / 2;
+    let _mid_r = room.row + room.height / 2;
     let r_lo = room.row + 2;
     let r_hi = (room.row + room.height).saturating_sub(3);
 

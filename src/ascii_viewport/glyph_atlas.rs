@@ -85,7 +85,7 @@ impl GlyphAtlas {
             uv_rects.insert(ch, uv);
 
             // Rasterize the glyph using egui's font system
-            let galley = ctx.fonts(|fonts| {
+            let _galley = ctx.fonts(|fonts| {
                 fonts.layout_no_wrap(ch.to_string(), font_id.clone(), egui::Color32::WHITE)
             });
 

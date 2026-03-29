@@ -71,12 +71,15 @@ fn main() {
 
     let mut logfile: Option<std::fs::File> = OpenOptions::new()
         .create(true).write(true).truncate(true)
-        .open("generated/tree_training.log").ok();
+        .open("generated/tree_mixed_training.log").ok();
 
     log!(logfile, "=== E2E: Text Encoder + Tree Decoder ===\n");
 
     // Load data
-    let llm_desc_path = if std::path::Path::new("dataset/ability_descriptions_v2.jsonl").exists() {
+    // Use filtered descriptions (only those with game-relevant keywords)
+    let llm_desc_path = if std::path::Path::new("dataset/ability_descriptions_filtered.jsonl").exists() {
+        "dataset/ability_descriptions_filtered.jsonl"
+    } else if std::path::Path::new("dataset/ability_descriptions_v2.jsonl").exists() {
         "dataset/ability_descriptions_v2.jsonl"
     } else {
         "dataset/ability_descriptions.jsonl"
@@ -136,6 +139,7 @@ fn main() {
         text_ids: Tensor<B2, 2, Int>,
         text_lens: Tensor<B2, 1, Int>,
         target_bins: Tensor<B2, 2, Int>,
+        target_continuous: Tensor<B2, 2>,
         target_labels: Tensor<B2, 2, Int>,
     }
 
@@ -174,6 +178,18 @@ fn main() {
             burn::tensor::TensorData::new(bins_data, [batch * GRAMMAR_DIM]), &device,
         ).reshape([batch, GRAMMAR_DIM]);
 
+        // Continuous target values (raw [0,1])
+        let mut cont_data = vec![0.0f32; batch * GRAMMAR_DIM];
+        for (bi, idx) in (chunk_start..chunk_end).enumerate() {
+            let (_, v) = &pairs[idx];
+            for d in 0..GRAMMAR_DIM {
+                cont_data[bi * GRAMMAR_DIM + d] = v[d];
+            }
+        }
+        let tgt_continuous = Tensor::<B, 1>::from_data(
+            burn::tensor::TensorData::new(cont_data, [batch * GRAMMAR_DIM]), &device,
+        ).reshape([batch, GRAMMAR_DIM]);
+
         // Classification labels
         let mut labels_data = vec![0i64; batch * 4];
         for (bi, idx) in (chunk_start..chunk_end).enumerate() {
@@ -189,6 +205,7 @@ fn main() {
             text_ids,
             text_lens,
             target_bins: tgt_bins,
+            target_continuous: tgt_continuous,
             target_labels: tgt_labels,
         });
     }
@@ -227,10 +244,11 @@ fn main() {
             // For now, expand CLS to a 1-token memory.
             let text_memory = text_emb.clone().unsqueeze_dim::<3>(1); // [B, 1, EMBED_DIM]
 
-            // Tree decoder loss
+            // Tree decoder loss (mixed: CE for categorical, MSE for continuous)
             let output = tree_decoder_loss(
                 &model.tree_decoder,
                 batch.target_bins.clone(),
+                batch.target_continuous.clone(),
                 text_memory,
                 text_emb,
                 batch.target_labels.clone(),

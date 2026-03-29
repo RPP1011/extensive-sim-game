@@ -2,10 +2,9 @@ use crate::ai::core::{sim_vec2, SimState, SimVec2, Team, UnitStore};
 use crate::ai::effects::HeroToml;
 use crate::ai::effects::manifest::AbilityManifest;
 use crate::ai::pathing::GridNav;
-use crate::game_core::RoomType;
 use crate::mission::enemy_templates::default_enemy_wave;
 use crate::mission::hero_templates::{load_embedded_templates, hero_toml_to_unit, parse_hero_toml_with_dsl, HeroTemplate};
-use crate::mission::room_gen::{generate_room, NavGrid};
+use crate::mission::room_gen::NavGrid;
 use crate::mission::sim_bridge::{build_sim_with_hero_templates, build_sim_with_templates, scale_enemy_stats};
 
 use super::types::ScenarioCfg;

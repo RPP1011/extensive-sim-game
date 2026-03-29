@@ -102,7 +102,7 @@ pub(crate) fn draw_hub_egui_system(
         mut camera_focus_transition,
         mut region_transition,
         mut local_intro,
-        flashpoint_state,
+        _flashpoint_state,
         mut hero_detail,
     ) = campaign_state;
     let (save_index, save_panel, region_art, last_replay, mut mission_pane, trace_viewer) = save_state;

@@ -172,7 +172,7 @@ pub fn compute_morale_inputs(state: &SimState, unit: &UnitState) -> MoraleInputs
         .iter()
         .filter(|u| u.hp > 0 && u.team != unit.team)
         .count() as f32;
-    let total_allies = alive_allies.max(1) as f32;
+    let total_allies = (alive_allies + 1).max(1) as f32; // +1 for self
     let ratio = total_allies / (total_allies + enemy_count).max(1.0);
     let threats_input = ratio * 2.0 - 1.0; // even → 0, outnumbered → negative
 

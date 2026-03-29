@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::registry::{ContentEntry, ContentId, ContentKind, ContentNamespace, ContentRegistry, ContentTier};
+use super::registry::{ContentEntry, ContentId, ContentKind, ContentRegistry, ContentTier};
 use super::schema::*;
 use crate::model_backend::{ModelClient, ModelConfig};
 

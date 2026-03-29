@@ -41,7 +41,7 @@ impl ExtractionCache {
     /// Build cache from current sim state. Called once per tick.
     pub fn build(state: &SimState) -> Self {
         let mut units = HashMap::with_capacity(state.units.len());
-        let mut alive_enemy_ids = Vec::new();
+        let alive_enemy_ids = Vec::new();
         let mut alive_ally_ids_by_team: HashMap<Team, Vec<u32>> = HashMap::new();
 
         for u in &state.units {

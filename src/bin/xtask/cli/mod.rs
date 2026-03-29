@@ -56,6 +56,31 @@ pub enum TaskCommand {
         /// Emit DSL text instead of slot JSONL
         #[arg(long)] dsl: bool,
     },
+    /// Run world simulation benchmark with profiling
+    WorldSim(WorldSimArgs),
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Run world simulation benchmark with profiling")]
+pub struct WorldSimArgs {
+    /// Number of entities to simulate
+    #[arg(long, default_value_t = 2000)]
+    pub entities: usize,
+    /// Number of ticks to run
+    #[arg(long, default_value_t = 5000)]
+    pub ticks: u64,
+    /// Use parallel (rayon) tick
+    #[arg(long)]
+    pub parallel: bool,
+    /// Number of settlements
+    #[arg(long, default_value_t = 10)]
+    pub settlements: usize,
+    /// Number of monsters
+    #[arg(long, default_value_t = 200)]
+    pub monsters: usize,
+    /// RNG seed
+    #[arg(long, default_value_t = 42)]
+    pub seed: u64,
 }
 
 #[derive(Debug, Parser)]

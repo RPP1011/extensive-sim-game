@@ -1,0 +1,16 @@
+[package]
+name = "headless_campaign"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+combat-bridge = []
+
+[dependencies]
+tactical_sim = { path = "../tactical_sim" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+rayon = "1.10"
+ureq = { version = "3", features = ["json"] }

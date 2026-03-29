@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ai::core::{SimEvent, SimState, UnitStore};
+use crate::ai::core::{SimEvent, SimState};
 use crate::game_core::HeroCompanion;
 
 use super::types::CombatJournal;
@@ -161,7 +161,7 @@ pub fn build_combat_journal(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::core::{SimState, SimVec2, Team, UnitState};
+    use crate::ai::core::{SimState, SimVec2, Team, UnitState, UnitStore};
     use crate::game_core::PersonalityArchetype;
 
     fn make_hero() -> HeroCompanion {

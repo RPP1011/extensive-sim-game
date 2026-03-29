@@ -2,8 +2,8 @@
 
 use super::action::{GoapAction, IntentTemplate};
 use super::goal::{CompOp, Goal, InsistenceFn, Precondition};
-use super::target::{parse_target, Target};
-use super::world_state::{self, prop_index, PropValue};
+use super::target::parse_target;
+use super::world_state::{prop_index, PropValue};
 
 /// Role hint for threat/formation systems.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

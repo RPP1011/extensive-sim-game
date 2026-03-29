@@ -3,7 +3,7 @@
 //! Split from `actions.rs` to keep files under 500 lines.
 
 use crate::sim::{
-    distance, is_alive,
+    distance,
     IntentAction, SimState, SimVec2,
 };
 use crate::effects::AbilityTarget;

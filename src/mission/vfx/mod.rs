@@ -7,6 +7,7 @@ mod indicators;
 pub use types::*;
 
 // Re-export spawn/update systems
+#[allow(unused_imports)]
 pub use spawn::{
     spawn_vfx_system,
     update_floating_text_system,
@@ -15,6 +16,7 @@ pub use spawn::{
 };
 
 // Re-export sync systems
+#[allow(unused_imports)]
 pub use sync::{
     sync_projectile_visuals_system,
     sync_zone_visuals_system,
@@ -24,6 +26,7 @@ pub use sync::{
 };
 
 // Re-export indicator systems
+#[allow(unused_imports)]
 pub use indicators::{
     sync_shield_indicators_system,
     sync_status_indicators_system,

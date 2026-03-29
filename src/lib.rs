@@ -4,7 +4,7 @@
 
 pub mod audio;
 pub mod game_core;
-pub mod headless_campaign;
+pub use headless_campaign;
 pub mod mission;
 pub mod progression;
 
@@ -33,6 +33,7 @@ pub mod ai {
     pub use tactical_sim::tooling;
 }
 
+pub mod world_sim;
 pub mod content;
 pub mod model_backend;
 pub mod ascii_gen;

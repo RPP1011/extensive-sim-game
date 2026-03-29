@@ -29,10 +29,10 @@ pub(crate) fn draw_gui_only_screens(
     can_continue: bool,
     first_launch_lock: bool,
     runtime_mode: &RuntimeModeState,
-    slot1: &str,
-    slot2: &str,
-    slot3: &str,
-    autosave: &str,
+    _slot1: &str,
+    _slot2: &str,
+    _slot3: &str,
+    _autosave: &str,
 ) {
     let show_start_menu_sidebar = hub_ui.screen == HubScreen::StartMenu;
     if show_start_menu_sidebar {

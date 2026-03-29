@@ -21,12 +21,11 @@ pub(crate) fn reset_profiling() {
 
 use super::transformer_rl::{
     Policy, RlEpisode, RlStep,
-    lcg_f32, masked_softmax_sample,
     MAX_ABILITIES,
 };
 use super::rl_policies::{
     apply_random_policy,
-    apply_v5_policy, check_drill_objective, hp_fraction,
+    apply_v5_policy, check_drill_objective,
 };
 
 // ---------------------------------------------------------------------------
@@ -51,7 +50,7 @@ pub(crate) fn run_rl_episode(
     drill_objective: Option<&bevy_game::scenario::ObjectiveDef>,
     scenario_action_mask: Option<&str>,
 ) -> RlEpisode {
-    use bevy_game::ai::core::{is_alive, step, distance, move_towards, Team, UnitIntent, FIXED_TICK_MS};
+    use bevy_game::ai::core::{is_alive, step, distance, Team, FIXED_TICK_MS};
     use bevy_game::ai::core::ability_eval::{extract_game_state_v2, extract_game_state_v2_spatial, extract_game_state_v2_with_objectives, ZoneObjective};
     use bevy_game::ai::core::self_play::actions::{action_mask, intent_to_action};
     use bevy_game::ai::effects::dsl::emit::emit_ability_dsl;

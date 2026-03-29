@@ -524,7 +524,7 @@ fn format_world_event(event: &WorldEvent) -> (String, egui::Color32) {
         ),
         WorldEvent::CalamityWarning { description } => (description.clone(), red),
         WorldEvent::CampaignMilestone { description } => (description.clone(), green),
-        WorldEvent::RegionScoutReport { region_id, details } => (
+        WorldEvent::RegionScoutReport { region_id: _, details } => (
             format!(
                 "Scout report: {} (threat {:.0}, unrest {:.0}, {} quests)",
                 details.region_name, details.threat_level, details.unrest, details.quest_opportunities

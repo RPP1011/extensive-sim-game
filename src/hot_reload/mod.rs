@@ -5,7 +5,6 @@
 //! crate dependencies — uses only `std::fs::metadata()`.
 
 use bevy::prelude::*;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 

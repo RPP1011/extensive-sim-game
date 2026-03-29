@@ -12,6 +12,7 @@ mod mcts_bootstrap_cmd;
 mod bfs_analyze;
 mod champion_gen;
 mod vae_dataset_cmd;
+mod world_sim_cmd;
 
 use std::process::ExitCode;
 
@@ -201,5 +202,6 @@ fn main() -> ExitCode {
             bevy_game::headless_campaign::vae_gt_dataset::run_gt_pipeline(&config);
             ExitCode::SUCCESS
         }
+        TaskCommand::WorldSim(args) => world_sim_cmd::run_world_sim(args),
     }
 }

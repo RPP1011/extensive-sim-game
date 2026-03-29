@@ -18,6 +18,7 @@ use tack::{TackConfig, TackUi};
 
 const SLOT_DIM: usize = 142;
 const LATENT_DIM: usize = 64;
+#[allow(dead_code)]
 const HIDDEN_DIM: usize = 256;
 const NUM_ARCHETYPES: usize = 19;
 
@@ -510,6 +511,7 @@ fn argmax(slice: &[f32]) -> Option<usize> {
 // Cluster map: encode dataset abilities, project to 2D, color by effect type
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 struct ClusterPoint {
     x: f64,
     y: f64,
@@ -519,7 +521,7 @@ struct ClusterPoint {
 
 /// Load .ability files, parse slot vectors, encode to latent, project to 2D.
 fn build_cluster_map(vae: &Vae) -> (Vec<ClusterPoint>, [f64; 4]) {
-    let dataset_path = std::path::Path::new("generated/ability_dataset.npz");
+    let _dataset_path = std::path::Path::new("generated/ability_dataset.npz");
 
     // Try loading from npz via a pre-computed JSON cache, or just use presets
     // For now, generate a grid of latent points to show the space structure

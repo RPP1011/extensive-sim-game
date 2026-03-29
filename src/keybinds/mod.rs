@@ -7,6 +7,7 @@ mod actions;
 mod config;
 mod dispatcher;
 
+#[allow(unused_imports)]
 pub use actions::{GameAction, InputContext};
 pub use config::KeybindConfig;
 pub use dispatcher::{ActionEvents, keybind_dispatch_system};

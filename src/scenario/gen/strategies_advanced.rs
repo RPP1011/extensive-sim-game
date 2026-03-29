@@ -7,7 +7,7 @@ use std::path::Path;
 use super::super::types::ScenarioFile;
 use super::coverage::CoverageTracker;
 use super::metadata::{
-    heroes_by_role, Role, ALL_HEROES, ALL_LOL_HEROES, ROOM_TYPES, DedupSet, Lcg,
+    ALL_HEROES, ALL_LOL_HEROES, ROOM_TYPES, DedupSet, Lcg,
 };
 use super::strategies::{build_scenario, build_hvh_scenario, emit, to_toml};
 use super::GenConfig;

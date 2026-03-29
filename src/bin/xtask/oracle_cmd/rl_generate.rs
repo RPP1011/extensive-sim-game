@@ -6,7 +6,7 @@ use std::process::ExitCode;
 use rayon::prelude::*;
 
 use super::collect_toml_paths;
-use super::transformer_rl::{Policy, RlEpisode, MAX_ABILITIES};
+use super::transformer_rl::{Policy, RlEpisode};
 use super::rl_policies::run_single_episode;
 
 pub(crate) fn run_generate(args: crate::cli::TransformerRlGenerateArgs) -> ExitCode {

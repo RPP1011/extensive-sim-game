@@ -82,7 +82,7 @@ fn main() {
     // Location stats
     println!();
     for loc in &state.overworld.locations {
-        let demand_sum: f32 = loc.service_demand.iter().sum();
+        let _demand_sum: f32 = loc.service_demand.iter().sum();
         let s = &loc.stockpile;
         println!("  {} ({:?}) — pop:{}, safety:{:.0}, threat:{:.0}, treasury:{:.0}",
             loc.name, loc.location_type, loc.resident_ids.len(),

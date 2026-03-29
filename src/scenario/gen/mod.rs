@@ -10,7 +10,9 @@ mod coverage;
 mod strategies;
 mod strategies_advanced;
 
+#[allow(unused_imports)]
 pub use metadata::{Role, HeroMeta, ALL_HEROES, ALL_LOL_HEROES, ROOM_TYPES, heroes_by_role};
+#[allow(unused_imports)]
 pub use strategies::{generate, write_scenarios};
 
 // ---------------------------------------------------------------------------

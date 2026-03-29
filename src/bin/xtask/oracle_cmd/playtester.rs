@@ -20,8 +20,7 @@ use std::process::ExitCode;
 
 use serde::{Deserialize, Serialize};
 
-use super::transformer_rl::{Policy, RlEpisode, PrecomputedScenario, precompute_scenarios, lcg_f32};
-use super::rl_policies::run_single_episode;
+use super::transformer_rl::{Policy, RlEpisode, precompute_scenarios, lcg_f32};
 use super::collect_toml_paths;
 
 // ---------------------------------------------------------------------------
@@ -421,7 +420,7 @@ pub(crate) fn run_playtester(args: crate::cli::PlaytesterArgs) -> ExitCode {
             use rayon::prelude::*;
             tasks
                 .par_iter()
-                .filter_map(|&(agent_id, si, ei, temp, seed)| {
+                .filter_map(|&(agent_id, si, _ei, temp, seed)| {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         let mut pre_sim = precomputed_ref[si].sim.clone();
                         pre_sim.rng_state = seed;

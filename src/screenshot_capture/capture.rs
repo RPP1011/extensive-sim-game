@@ -77,6 +77,7 @@ pub fn configure_hub_stage_capture_fixture(world: &mut World, target_stage: HubS
     // MissionExecution: build combat state directly into the world so mission
     // systems have their resources on the same frame the screen changes.
     if target_stage == HubScreen::MissionExecution {
+        #[allow(unused_imports)]
         use crate::ai::core::Team;
         use crate::mission::sim_bridge::{
             EnemyAiState, MissionCombatRecording, MissionSimState, PlayerOrderState,

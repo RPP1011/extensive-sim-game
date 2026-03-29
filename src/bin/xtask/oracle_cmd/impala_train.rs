@@ -10,14 +10,13 @@
 //! 5. Repeat
 
 use std::process::ExitCode;
-use std::collections::HashMap;
 
 use crate::cli::ImpalaTrainArgs;
 
 #[cfg(feature = "burn-gpu")]
 use rl4burn::{ReplayBuffer, Logger, CompositeLogger, PrintLogger, TensorBoardLogger};
 
-pub(crate) fn run_impala_train(args: ImpalaTrainArgs) -> ExitCode {
+pub(crate) fn run_impala_train(_args: ImpalaTrainArgs) -> ExitCode {
     #[cfg(not(feature = "burn-gpu"))]
     {
         eprintln!("impala-train requires --features burn-gpu");

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::grid::{AsciiCell, AsciiGrid};
-use super::palette::{self, snap_to_palette, Rgb};
+use super::palette::{snap_to_palette, Rgb};
 use super::templates;
 use super::vocab::GlyphVocab;
 use crate::model_backend::{ModelClient, ModelError, format_json_generation_prompt};

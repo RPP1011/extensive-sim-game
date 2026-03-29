@@ -7,7 +7,6 @@ use std::process::ExitCode;
 
 use serde::{Deserialize, Serialize};
 
-use super::collect_toml_paths;
 
 // ---------------------------------------------------------------------------
 // Episode types
@@ -76,6 +75,7 @@ pub struct RlStep {
 
 impl RlStep {
     /// Create with no teacher labels (non-DAgger paths)
+    #[allow(dead_code)]
     pub fn without_teacher(
         tick: u64, unit_id: u32, game_state: Vec<f32>, action: usize,
         log_prob: f32, mask: Vec<bool>, step_reward: f32,
@@ -202,6 +202,7 @@ impl Policy {
         !matches!(self, Policy::Combined | Policy::Random)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn is_v5(&self) -> bool {
         matches!(self, Policy::ActorCriticV5(_))
     }
@@ -236,6 +237,7 @@ pub(crate) fn apply_action_mask(combat_mask: &mut [bool], action_mask: Option<&s
 // Precomputed scenarios (extracted from former rl_gpu_sim module)
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 pub(crate) struct PrecomputedScenario {
     pub(crate) sim: bevy_game::ai::core::SimState,
     pub(crate) squad_ai: bevy_game::ai::squad::SquadAiState,

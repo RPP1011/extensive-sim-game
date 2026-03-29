@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::{
-    DiplomacyState, FactionCommander, FactionState, OverworldMap, OverworldRegion,
+    DiplomacyState, FactionCommander, FactionState, OverworldMap,
 };
 
 // ---------------------------------------------------------------------------
@@ -432,7 +432,7 @@ pub fn apply_faction_results(
                     faction.cohesion = (faction.cohesion + 0.02).min(1.0);
                 }
             }
-            FactionActionDetails::AttackFaction { target_faction_id, region_id } => {
+            FactionActionDetails::AttackFaction { target_faction_id, region_id: _ } => {
                 // Reduce target faction strength, increase war focus
                 if let Some(target) = map.factions.get_mut(*target_faction_id) {
                     target.strength = (target.strength - 3.0).max(0.0);

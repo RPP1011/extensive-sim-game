@@ -10,7 +10,7 @@
 //! and caches terrain layers (L0+L1+L2), rebuilding only on camera/faction changes.
 
 use super::camera::OverworldCamera;
-use super::{OverworldGrid, TerrainType};
+use super::OverworldGrid;
 
 // ---------------------------------------------------------------------------
 // Faction colors

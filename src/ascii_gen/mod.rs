@@ -13,7 +13,11 @@ pub mod vocab;
 pub mod generator;
 pub mod templates;
 
+#[allow(unused_imports)]
 pub use grid::{AsciiCell, AsciiGrid};
+#[allow(unused_imports)]
 pub use generator::{AsciiArtGenerator, AsciiArtRequest, AsciiArtStyle, AsciiGenError};
+#[allow(unused_imports)]
 pub use palette::{snap_to_palette, Rgb, GAME_PALETTE};
+#[allow(unused_imports)]
 pub use vocab::GlyphVocab;

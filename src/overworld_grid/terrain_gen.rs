@@ -2,7 +2,7 @@
 //! post-processing passes (mountain ridges, forest clumping, rivers, roads).
 
 use super::{
-    MapCell, OverworldGrid, RoadSegment, Settlement, SettlementKind, TerrainType,
+    OverworldGrid, RoadSegment, Settlement, SettlementKind, TerrainType,
     TerrainVisualRegistry, GRID_H, GRID_W,
 };
 

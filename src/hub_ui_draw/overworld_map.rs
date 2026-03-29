@@ -12,7 +12,6 @@ use crate::region_nav::{
     request_enter_selected_region,
 };
 use super::overworld_map_parties;
-use super::overworld_map_strategic;
 
 /// Draw the left-panel overworld map content.
 #[allow(clippy::too_many_arguments)]
@@ -30,7 +29,7 @@ pub(crate) fn draw_overworld_map_panel(
     character_creation: &CharacterCreationState,
     camera_query: &Query<&OrbitCameraController>,
     bounds: &SceneViewBounds,
-    party_snapshots: &[game_core::CampaignParty],
+    _party_snapshots: &[game_core::CampaignParty],
     runtime_mode: &RuntimeModeState,
     transition_locked: bool,
 ) {

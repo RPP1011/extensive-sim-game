@@ -12,11 +12,15 @@ mod validation;
 pub mod aot_pipeline;
 pub mod stages;
 
+#[allow(unused_imports)]
 pub use registry::{ContentRegistry, ContentId, ContentNamespace, ContentKind, ContentEntry, ContentTier};
+#[allow(unused_imports)]
 pub use schema::{
     ContentData,
     // Tier 2 content types (Issue #15)
     ThemeContent, RegionContent, EventContent, ItemContent, NarrativeArcContent,
 };
+#[allow(unused_imports)]
 pub use cache::ContentCache;
+#[allow(unused_imports)]
 pub use validation::{ValidationError, validate_entry};

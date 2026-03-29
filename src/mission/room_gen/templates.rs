@@ -73,7 +73,7 @@ fn strategy_corridor(
 ) -> Vec<ObstacleRegion> {
     let rows = nav.rows;
     let mid_r = rows / 2;
-    let play_mid = (play_lo + play_hi) / 2;
+    let _play_mid = (play_lo + play_hi) / 2;
     let play_w = play_hi - play_lo;
 
     // Gap width scales with room height
@@ -226,7 +226,7 @@ fn strategy_barricade_rows(
     play_hi: usize,
 ) -> Vec<ObstacleRegion> {
     let rows = nav.rows;
-    let play_w = play_hi - play_lo;
+    let _play_w = play_hi - play_lo;
 
     // Number of barricade rows scales with room depth
     let n_rows = (rows / 6).clamp(2, 5);
@@ -262,7 +262,7 @@ fn strategy_l_cover(
     play_hi: usize,
 ) -> Vec<ObstacleRegion> {
     let rows = nav.rows;
-    let play_mid = (play_lo + play_hi) / 2;
+    let _play_mid = (play_lo + play_hi) / 2;
     let play_w = play_hi - play_lo;
 
     let arm = (play_w / 6).clamp(2, 4);

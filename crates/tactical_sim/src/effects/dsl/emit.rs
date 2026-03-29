@@ -128,7 +128,7 @@ fn emit_delivery_with_effects(
 ) {
     let pad = "    ".repeat(indent);
     let inner_pad = "    ".repeat(indent + 1);
-    let effect_pad = "    ".repeat(indent + 2);
+    let _effect_pad = "    ".repeat(indent + 2);
 
     match delivery {
         Delivery::Instant => {

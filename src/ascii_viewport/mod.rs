@@ -1623,7 +1623,7 @@ pub fn draw_ascii_viewport_system(
     }
 
     let transition_locked = region_transition.interaction_locked;
-    let party_snapshots = parties.parties.clone();
+    let _party_snapshots = parties.parties.clone();
 
     // Auto-open mission pane when entering MissionExecution
     if hub_ui.screen == HubScreen::MissionExecution && sim_state.is_some() {

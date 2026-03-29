@@ -339,7 +339,7 @@ fn run_render(args: RoomgenRenderArgs) -> ExitCode {
 // ---------------------------------------------------------------------------
 
 fn run_floorplan(args: RoomgenFloorplanArgs) -> ExitCode {
-    use bevy_game::mission::room_gen::floorplan::{generate_floorplan, FloorplanConfig, RoomRole};
+    use bevy_game::mission::room_gen::floorplan::{generate_floorplan, FloorplanConfig};
     use bevy_game::mission::room_gen::*;
 
     std::fs::create_dir_all(&args.output).ok();
@@ -578,12 +578,7 @@ fn run_retrieve(args: RoomgenRetrieveArgs) -> ExitCode {
 // ---------------------------------------------------------------------------
 
 fn run_simulate(args: RoomgenSimulateArgs) -> ExitCode {
-    use bevy_game::ai::core::{step, SimVec2, Team, FIXED_TICK_MS};
     use bevy_game::ai::effects::HeroToml;
-    use bevy_game::mission::hero_templates::parse_hero_toml_with_dsl;
-    use bevy_game::mission::room_gen::NavGrid;
-    use bevy_game::mission::sim_bridge::build_sim_with_hero_templates;
-    use bevy_game::scenario::build_unified_ai;
 
     // 1. Discover hero templates from directory
     let hero_tomls = load_hero_dir(&args.heroes);
@@ -731,7 +726,7 @@ fn run_retrieval_match(
     enemy_tomls: &[bevy_game::ai::effects::HeroToml],
     seed: u64,
 ) -> String {
-    use bevy_game::ai::core::{step, distance, move_towards, SimVec2, Team, IntentAction, UnitIntent, FIXED_TICK_MS};
+    use bevy_game::ai::core::{step, distance, SimVec2, Team, IntentAction, FIXED_TICK_MS};
     use bevy_game::scenario::build_unified_ai;
 
     let nav = room_record_to_navgrid(room);
@@ -851,8 +846,6 @@ fn run_single_match(
     seed: u64,
 ) -> String {
     use bevy_game::ai::core::{step, SimVec2, Team, FIXED_TICK_MS};
-    use bevy_game::mission::room_gen::NavGrid;
-    use bevy_game::mission::sim_bridge::build_sim_with_hero_templates;
     use bevy_game::scenario::build_unified_ai;
 
     // Reconstruct NavGrid from room record

@@ -125,6 +125,7 @@ pub fn campaign_outcome_ui_system(
     }
 }
 
+#[allow(unreachable_code, unused_variables, unused_mut)]
 pub fn draw_runtime_asset_gen_egui_system(
     mut contexts: EguiContexts,
     hub_ui: Res<HubUiState>,

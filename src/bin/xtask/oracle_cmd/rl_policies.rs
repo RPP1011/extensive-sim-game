@@ -293,6 +293,7 @@ pub(crate) fn check_drill_objective(
 // Helpers
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 pub(crate) fn hp_fraction(sim: &bevy_game::ai::core::SimState, team: bevy_game::ai::core::Team) -> f32 {
     let mut lost = 0i32;
     let mut total = 0i32;

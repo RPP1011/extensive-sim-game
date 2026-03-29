@@ -383,15 +383,15 @@ fn run_scenario_profile(args: ScenarioBenchArgs) -> ExitCode {
 
             // Phase 2: Simulation step (physics + effects)
             let t1 = Instant::now();
-            let (new_sim, events) = step(sim, &all_intents, FIXED_TICK_MS);
+            let (new_sim, _events) = step(sim, &all_intents, FIXED_TICK_MS);
             iter_step_us += t1.elapsed().as_micros() as u64;
 
             // Phase 3: Event processing (stats bookkeeping)
             let t2 = Instant::now();
-            let hero_dead = new_sim.units.iter().any(|u| {
+            let _hero_dead = new_sim.units.iter().any(|u| {
                 u.team == bevy_game::ai::core::Team::Hero && u.hp <= 0
             });
-            let enemy_alive = new_sim.units.iter().any(|u| {
+            let _enemy_alive = new_sim.units.iter().any(|u| {
                 u.team == bevy_game::ai::core::Team::Enemy && u.hp > 0
             });
             iter_events_us += t2.elapsed().as_micros() as u64;

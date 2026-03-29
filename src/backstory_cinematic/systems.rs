@@ -67,7 +67,7 @@ pub fn backstory_cinematic_bootstrap_system(
 
 pub fn backstory_narrative_gen_dispatch_system(
     hub_ui: Res<HubUiState>,
-    character_creation: Res<CharacterCreationState>,
+    _character_creation: Res<CharacterCreationState>,
     overworld: Res<game_core::OverworldMap>,
     cinematic: Res<BackstoryCinematicState>,
     mut narrative_gen: ResMut<BackstoryNarrativeGenState>,

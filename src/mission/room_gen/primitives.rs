@@ -85,7 +85,7 @@ pub(crate) fn place_wall_segment(
 /// Place thick pillars (2×2) in a grid pattern — breaks sightlines.
 pub(crate) fn place_pillar_grid(
     nav: &mut NavGrid,
-    rng: &mut Lcg,
+    _rng: &mut Lcg,
     col0: usize,
     row0: usize,
     col1: usize,
@@ -115,7 +115,7 @@ pub(crate) fn place_pillar_grid(
 /// Place an L-shaped cover block (2 cells thick for visual weight).
 pub(crate) fn place_l_shape(
     nav: &mut NavGrid,
-    rng: &mut Lcg,
+    _rng: &mut Lcg,
     anchor_col: usize,
     anchor_row: usize,
     arm_len: usize,
@@ -252,7 +252,7 @@ pub(crate) fn place_elevated_platform(
 /// Place a sandbag arc: short cover walls in a semicircle pattern.
 pub(crate) fn place_sandbag_arc(
     nav: &mut NavGrid,
-    rng: &mut Lcg,
+    _rng: &mut Lcg,
     centre_col: usize,
     centre_row: usize,
     radius: usize,

@@ -17,8 +17,12 @@ mod config;
 mod prompt;
 mod tier;
 
+#[allow(unused_imports)]
 pub use backend::{ModelBackend, ModelError, SubprocessBackend};
 pub use client::ModelClient;
+#[allow(unused_imports)]
 pub use config::{ModelConfig, ProviderConfig};
+#[allow(unused_imports)]
 pub use prompt::{format_json_generation_prompt, format_text_prompt};
+#[allow(unused_imports)]
 pub use tier::{detect_best_tier, detect_gpu_available, DevicePreference, ModelTier};

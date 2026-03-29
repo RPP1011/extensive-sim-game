@@ -9,9 +9,9 @@ use std::process::{Command, Stdio};
 
 use crate::game_core;
 
-use super::lcg::{ObstacleRegion, RampRegion, OBS_FLOOR, OBS_WALL, OBS_RAMP};
+use super::lcg::{ObstacleRegion, RampRegion, OBS_FLOOR, OBS_RAMP};
 use super::nav::NavGrid;
-use super::{build_spawn_zone, generate_room, RoomLayout, SpawnZone};
+use super::{build_spawn_zone, generate_room, RoomLayout};
 use super::lcg::Lcg;
 use super::validation::validate_layout;
 
