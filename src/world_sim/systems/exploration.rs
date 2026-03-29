@@ -51,40 +51,27 @@ pub fn compute_exploration(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // Without that field on WorldState, we express exploration as economic benefits:
     // NPCs near settlements boost that settlement's treasury (cartography intel).
 
-    for entity in &state.entities {
-        if entity.kind != EntityKind::Npc || !entity.alive || entity.team != WorldTeam::Friendly {
-            continue;
-        }
-
-        // Find nearest settlement to this NPC
-        let nearest_settlement = state.settlements.iter().min_by(|a, b| {
-            let da = dist_sq(entity.pos, a.pos);
-            let db = dist_sq(entity.pos, b.pos);
-            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        if let Some(settlement) = nearest_settlement {
-            let dist = dist_sq(entity.pos, settlement.pos);
-            // NPCs within sight range of a settlement boost its treasury
-            let sight_world = (BASE_SIGHT_RANGE as f32) * TILE_SIZE;
-            if dist <= sight_world * sight_world {
-                out.push(WorldDelta::UpdateTreasury {
-                    location_id: settlement.id,
-                    delta: EXPLORATION_TREASURY_BONUS,
-                });
-            }
+    // NPCs at settlements: boost treasury via exploration intel.
+    let sight_world = (BASE_SIGHT_RANGE as f32) * TILE_SIZE;
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        let npc_count = state.entities[range].iter()
+            .filter(|e| e.alive && e.kind == EntityKind::Npc && e.team == WorldTeam::Friendly)
+            .count();
+        if npc_count > 0 {
+            out.push(WorldDelta::UpdateTreasury {
+                location_id: settlement.id,
+                delta: EXPLORATION_TREASURY_BONUS * npc_count as f32,
+            });
         }
     }
 
-    // --- Landmark discovery: NPCs near undiscovered region features ---
-    // Without landmark state, we approximate by granting bonuses when NPCs
-    // move far from all settlements (exploring "the frontier").
-    for entity in &state.entities {
+    // Frontier exploration: unaffiliated NPCs far from settlements.
+    let unaffiliated = state.group_index.unaffiliated_entities();
+    for entity in &state.entities[unaffiliated] {
         if entity.kind != EntityKind::Npc || !entity.alive || entity.team != WorldTeam::Friendly {
             continue;
         }
-
-        // Check if this NPC is far from all settlements (frontier exploration)
         let min_settlement_dist = state
             .settlements
             .iter()

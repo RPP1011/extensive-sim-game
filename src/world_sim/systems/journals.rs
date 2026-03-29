@@ -46,47 +46,50 @@ pub fn compute_journals(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
-    for entity in &state.entities {
-        if !entity.alive || entity.npc.is_none() {
-            continue;
-        }
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        for entity in &state.entities[range] {
+            if !entity.alive || entity.npc.is_none() {
+                continue;
+            }
 
-        // --- Battle memories ---
-        // If entity is on a grid with hostiles (recently fought):
-        //   Victory: sentiment +0.5 to +0.8
-        //   Defeat (low hp): sentiment -0.6 to -0.9
-        //   out.push(WorldDelta::WriteJournalEntry { entity_id, BattleMemory, text, sentiment })
+            // --- Battle memories ---
+            // If entity is on a grid with hostiles (recently fought):
+            //   Victory: sentiment +0.5 to +0.8
+            //   Defeat (low hp): sentiment -0.6 to -0.9
+            //   out.push(WorldDelta::WriteJournalEntry { entity_id, BattleMemory, text, sentiment })
 
-        // Proxy: check if entity is on a combat grid
-        if let Some(grid_id) = entity.grid_id {
-            if let Some(grid) = state.grid(grid_id) {
-                if grid.fidelity == crate::world_sim::fidelity::Fidelity::High {
-                    // Entity is in combat — would generate battle memory entry
-                    // NEEDS DELTA: WriteJournalEntry
+            // Proxy: check if entity is on a combat grid
+            if let Some(grid_id) = entity.grid_id {
+                if let Some(grid) = state.grid(grid_id) {
+                    if grid.fidelity == crate::world_sim::fidelity::Fidelity::High {
+                        // Entity is in combat — would generate battle memory entry
+                        // NEEDS DELTA: WriteJournalEntry
+                    }
                 }
             }
+
+            // --- Grief entries for dead allies ---
+            // NEEDS STATE: adventurer_bonds — for each dead entity with bond > 30:
+            //   out.push(WorldDelta::WriteJournalEntry { entity_id, GriefEntry, ..., sentiment: -0.7 to -0.9 })
+
+            // --- Bond moments (bond > 60 with co-located NPC) ---
+            // out.push(WorldDelta::WriteJournalEntry { entity_id, BondMoment, ..., sentiment: +0.5 to +0.7 })
+
+            // --- Ambition entries (level milestones) ---
+            // out.push(WorldDelta::WriteJournalEntry { entity_id, Ambition, ..., sentiment: +0.4 to +0.7 })
+
+            // --- Discovery entries (5% random chance) ---
+            let roll = deterministic_roll(state.tick, entity.id);
+            if roll < 0.05 {
+                // out.push(WorldDelta::WriteJournalEntry { entity_id, Discovery, ..., sentiment: +0.3 to +0.5 })
+            }
+
+            // --- Personality drift from journal sentiment ---
+            // NEEDS STATE: read journal entries, compute average sentiment
+            // avg > POSITIVE_THRESHOLD: +1 morale, +0.5 loyalty
+            // avg < NEGATIVE_THRESHOLD: -1 morale, +0.5 stress
         }
-
-        // --- Grief entries for dead allies ---
-        // NEEDS STATE: adventurer_bonds — for each dead entity with bond > 30:
-        //   out.push(WorldDelta::WriteJournalEntry { entity_id, GriefEntry, ..., sentiment: -0.7 to -0.9 })
-
-        // --- Bond moments (bond > 60 with co-located NPC) ---
-        // out.push(WorldDelta::WriteJournalEntry { entity_id, BondMoment, ..., sentiment: +0.5 to +0.7 })
-
-        // --- Ambition entries (level milestones) ---
-        // out.push(WorldDelta::WriteJournalEntry { entity_id, Ambition, ..., sentiment: +0.4 to +0.7 })
-
-        // --- Discovery entries (5% random chance) ---
-        let roll = deterministic_roll(state.tick, entity.id);
-        if roll < 0.05 {
-            // out.push(WorldDelta::WriteJournalEntry { entity_id, Discovery, ..., sentiment: +0.3 to +0.5 })
-        }
-
-        // --- Personality drift from journal sentiment ---
-        // NEEDS STATE: read journal entries, compute average sentiment
-        // avg > POSITIVE_THRESHOLD: +1 morale, +0.5 loyalty
-        // avg < NEGATIVE_THRESHOLD: -1 morale, +0.5 stress
     }
 }
 

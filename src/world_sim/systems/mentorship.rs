@@ -21,20 +21,16 @@ pub fn compute_mentorship(state: &WorldState, out: &mut Vec<WorldDelta>) {
         let jitter = settlement.id as u64 % BASE_CADENCE;
         if state.tick % BASE_CADENCE != jitter { continue; }
 
-        // Collect eligible NPC (id, level) pairs at this settlement.
-        // Stack-allocated, no heap. Max 128 NPCs per settlement.
-        let mut npcs = [(0u32, 0u32); 128]; // (entity_id, level)
+        // Collect eligible NPC (id, level) pairs at this settlement via group index.
+        let mut npcs = [(0u32, 0u32); 128];
         let mut count = 0usize;
 
-        for entity in &state.entities {
+        let range = state.group_index.settlement_entities(settlement.id);
+        for entity in &state.entities[range] {
             if !entity.alive || entity.kind != EntityKind::Npc { continue; }
-            let npc = match &entity.npc {
-                Some(n) => n,
-                None => continue,
-            };
-            if npc.home_settlement_id != Some(settlement.id) { continue; }
+            if entity.npc.is_none() { continue; }
 
-            // Skip NPCs in combat (on High fidelity grid).
+            // Skip NPCs in combat.
             if let Some(gid) = entity.grid_id {
                 if let Some(g) = state.grid(gid) {
                     if g.fidelity == crate::world_sim::fidelity::Fidelity::High {

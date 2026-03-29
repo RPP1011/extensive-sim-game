@@ -144,65 +144,66 @@ pub fn compute_retirement(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
-    for entity in &state.entities {
-        if !entity.alive || entity.kind != EntityKind::Npc {
-            continue;
-        }
-        let npc = match &entity.npc {
-            Some(n) => n,
-            None => continue,
-        };
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        for entity in &state.entities[range] {
+            if !entity.alive || entity.kind != EntityKind::Npc {
+                continue;
+            }
+            let npc = match &entity.npc {
+                Some(n) => n,
+                None => continue,
+            };
 
-        // Eligibility checks.
-        if entity.level < MIN_RETIREMENT_LEVEL {
-            continue;
-        }
+            // Eligibility checks.
+            if entity.level < MIN_RETIREMENT_LEVEL {
+                continue;
+            }
 
-        let hp_ratio = entity.hp / entity.max_hp.max(1.0);
-        if hp_ratio < MIN_HP_RATIO_FOR_RETIRE {
-            continue;
-        }
+            let hp_ratio = entity.hp / entity.max_hp.max(1.0);
+            if hp_ratio < MIN_HP_RATIO_FOR_RETIRE {
+                continue;
+            }
 
-        // Don't retire during combat.
-        let on_hostile_grid = entity
-            .grid_id
-            .and_then(|gid| state.grid(gid))
-            .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
-            .unwrap_or(false);
-        if on_hostile_grid {
-            continue;
-        }
+            // Don't retire during combat.
+            let on_hostile_grid = entity
+                .grid_id
+                .and_then(|gid| state.grid(gid))
+                .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
+                .unwrap_or(false);
+            if on_hostile_grid {
+                continue;
+            }
 
-        // Deterministic retirement roll.
-        let hash = tick_entity_hash(state.tick, entity.id);
-        let roll = hash_to_f32(hash);
-        if roll >= AUTO_RETIRE_CHANCE {
-            continue;
-        }
+            // Deterministic retirement roll.
+            let hash = tick_entity_hash(state.tick, entity.id);
+            let roll = hash_to_f32(hash);
+            if roll >= AUTO_RETIRE_CHANCE {
+                continue;
+            }
 
-        // Select legacy type from class tags.
-        let legacy = LegacyType::from_class_tags(&npc.class_tags, hash);
+            // Select legacy type from class tags.
+            let legacy = LegacyType::from_class_tags(&npc.class_tags, hash);
 
-        // Calculate bonus: base * (level / 10).
-        let bonus_value =
-            legacy.base_bonus() * (entity.level as f32 / 10.0) * LEGACY_BONUS_PER_LEVEL;
+            // Calculate bonus: base * (level / 10).
+            let bonus_value =
+                legacy.base_bonus() * (entity.level as f32 / 10.0) * LEGACY_BONUS_PER_LEVEL;
 
-        // Remove entity from play (represents retirement, not death).
-        out.push(WorldDelta::Die {
-            entity_id: entity.id,
-        });
+            // Remove entity from play (represents retirement, not death).
+            out.push(WorldDelta::Die {
+                entity_id: entity.id,
+            });
 
-        // Grant legacy bonus to home settlement as treasury boost.
-        if let Some(settlement_id) = npc.home_settlement_id {
+            // Grant legacy bonus to home settlement as treasury boost.
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement_id,
+                location_id: settlement.id,
                 delta: bonus_value,
             });
 
             // Quartermaster legacy → stockpile bonus (food).
             if legacy == LegacyType::Quartermaster {
                 out.push(WorldDelta::UpdateStockpile {
-                    location_id: settlement_id,
+                    location_id: settlement.id,
                     commodity: 0, // food
                     delta: bonus_value * 10.0,
                 });

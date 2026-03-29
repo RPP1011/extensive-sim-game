@@ -59,78 +59,81 @@ pub fn compute_heist_planning(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // are performing covert ops (scouting, infiltrating, executing heists).
 
     // Identify NPCs near settlements they don't belong to (infiltrators)
-    for entity in &state.entities {
-        if entity.kind != EntityKind::Npc || !entity.alive || entity.team != WorldTeam::Friendly {
-            continue;
-        }
-
-        // Skip NPCs on combat grids (they're fighting, not heisting)
-        if let Some(gid) = entity.grid_id {
-            if state
-                .grid(gid)
-                .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
-                .unwrap_or(false)
-            {
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        for entity in &state.entities[range] {
+            if entity.kind != EntityKind::Npc || !entity.alive || entity.team != WorldTeam::Friendly {
                 continue;
             }
-        }
 
-        let npc = match &entity.npc {
-            Some(n) => n,
-            None => continue,
-        };
-
-        // Check if NPC is near a settlement that isn't their home (infiltration)
-        let home_id = npc.home_settlement_id;
-        for settlement in &state.settlements {
-            if Some(settlement.id) == home_id {
-                continue; // Skip home settlement
+            // Skip NPCs on combat grids (they're fighting, not heisting)
+            if let Some(gid) = entity.grid_id {
+                if state
+                    .grid(gid)
+                    .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
             }
 
-            let dist = dist_sq(entity.pos, settlement.pos);
-            if dist > 400.0 {
-                // 20 units
-                continue; // Too far
+            let npc = match &entity.npc {
+                Some(n) => n,
+                None => continue,
+            };
+
+            // Check if NPC is near a settlement that isn't their home (infiltration)
+            let home_id = npc.home_settlement_id;
+            for target_settlement in &state.settlements {
+                if Some(target_settlement.id) == home_id {
+                    continue; // Skip home settlement
+                }
+
+                let dist = dist_sq(entity.pos, target_settlement.pos);
+                if dist > 400.0 {
+                    // 20 units
+                    continue; // Too far
+                }
+
+                // NPC is infiltrating a foreign settlement
+                // Success chance based on level (higher level = better heist skills)
+                let skill_factor = (entity.level as f32 * 0.05 + 0.5).min(1.0);
+
+                // Deterministic outcome based on entity id + tick
+                let roll_seed = (entity.id as u64).wrapping_mul(2654435761) ^ state.tick;
+                let roll = (roll_seed % 100) as f32 / 100.0;
+
+                if roll < skill_factor * 0.1 {
+                    // Heist success: steal gold from settlement
+                    let reward = BASE_HEIST_REWARD * skill_factor;
+                    out.push(WorldDelta::UpdateTreasury {
+                        location_id: target_settlement.id,
+                        delta: -reward,
+                    });
+                    out.push(WorldDelta::TransferGold {
+                        from_id: target_settlement.id,
+                        to_id: entity.id,
+                        amount: reward,
+                    });
+                } else if roll > 0.95 {
+                    // Heist failure: NPC takes damage (caught by guards)
+                    out.push(WorldDelta::Damage {
+                        target_id: entity.id,
+                        amount: FAILURE_CREW_DAMAGE,
+                        source_id: entity.id,
+                    });
+                    // Gold penalty
+                    out.push(WorldDelta::TransferGold {
+                        from_id: entity.id,
+                        to_id: target_settlement.id,
+                        amount: FAILURE_GOLD_PENALTY,
+                    });
+                }
+                // Most of the time (85-95%) the NPC is still in planning/scouting phase
+                // and no delta is emitted (preparation continues silently).
+
+                break; // Only one infiltration target per NPC per tick
             }
-
-            // NPC is infiltrating a foreign settlement
-            // Success chance based on level (higher level = better heist skills)
-            let skill_factor = (entity.level as f32 * 0.05 + 0.5).min(1.0);
-
-            // Deterministic outcome based on entity id + tick
-            let roll_seed = (entity.id as u64).wrapping_mul(2654435761) ^ state.tick;
-            let roll = (roll_seed % 100) as f32 / 100.0;
-
-            if roll < skill_factor * 0.1 {
-                // Heist success: steal gold from settlement
-                let reward = BASE_HEIST_REWARD * skill_factor;
-                out.push(WorldDelta::UpdateTreasury {
-                    location_id: settlement.id,
-                    delta: -reward,
-                });
-                out.push(WorldDelta::TransferGold {
-                    from_id: settlement.id,
-                    to_id: entity.id,
-                    amount: reward,
-                });
-            } else if roll > 0.95 {
-                // Heist failure: NPC takes damage (caught by guards)
-                out.push(WorldDelta::Damage {
-                    target_id: entity.id,
-                    amount: FAILURE_CREW_DAMAGE,
-                    source_id: entity.id,
-                });
-                // Gold penalty
-                out.push(WorldDelta::TransferGold {
-                    from_id: entity.id,
-                    to_id: settlement.id,
-                    amount: FAILURE_GOLD_PENALTY,
-                });
-            }
-            // Most of the time (85-95%) the NPC is still in planning/scouting phase
-            // and no delta is emitted (preparation continues silently).
-
-            break; // Only one infiltration target per NPC per tick
         }
     }
 }

@@ -53,13 +53,16 @@ pub fn compute_companions(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // Bond milestone events at 25, 50, 70 would be emitted as separate deltas
     // or logged via an event system layered on top of deltas.
 
-    // Structural skeleton: iterate NPC entities
-    for entity in &state.entities {
-        if !entity.alive || entity.npc.is_none() {
-            continue;
+    // Structural skeleton: iterate NPC entities per settlement
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        for entity in &state.entities[range] {
+            if !entity.alive || entity.npc.is_none() {
+                continue;
+            }
+            // NEEDS STATE: check if entity has a companion
+            // NEEDS STATE: determine activity from grid membership
         }
-        // NEEDS STATE: check if entity has a companion
-        // NEEDS STATE: determine activity from grid membership
     }
 }
 

@@ -41,114 +41,117 @@ pub fn compute_adventurer_condition(state: &WorldState, out: &mut Vec<WorldDelta
         return;
     }
 
-    for entity in &state.entities {
-        if !entity.alive || entity.kind != EntityKind::Npc {
-            continue;
-        }
-        let npc = match &entity.npc {
-            Some(n) => n,
-            None => continue,
-        };
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        for entity in &state.entities[range] {
+            if !entity.alive || entity.kind != EntityKind::Npc {
+                continue;
+            }
+            let npc = match &entity.npc {
+                Some(n) => n,
+                None => continue,
+            };
 
-        // Determine activity from entity state.
-        // Without an explicit activity field, infer from context:
-        //   - on a grid with hostiles → Fighting
-        //   - on a grid without hostiles → OnMission/Idle
-        //   - hp < max_hp * 0.3 → Injured
-        //   - otherwise → Idle
-        let on_hostile_grid = entity
-            .grid_id
-            .and_then(|gid| state.grid(gid))
-            .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
-            .unwrap_or(false);
+            // Determine activity from entity state.
+            // Without an explicit activity field, infer from context:
+            //   - on a grid with hostiles → Fighting
+            //   - on a grid without hostiles → OnMission/Idle
+            //   - hp < max_hp * 0.3 → Injured
+            //   - otherwise → Idle
+            let on_hostile_grid = entity
+                .grid_id
+                .and_then(|gid| state.grid(gid))
+                .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
+                .unwrap_or(false);
 
-        let injured = entity.hp < entity.max_hp * 0.3;
-        let on_grid = entity.grid_id.is_some();
+            let injured = entity.hp < entity.max_hp * 0.3;
+            let on_grid = entity.grid_id.is_some();
 
-        let drift = if injured {
-            INJURED_DRIFT
-        } else if on_hostile_grid {
-            FIGHTING_DRIFT
-        } else if on_grid {
-            ON_MISSION_DRIFT
-        } else {
-            IDLE_DRIFT
-        };
+            let drift = if injured {
+                INJURED_DRIFT
+            } else if on_hostile_grid {
+                FIGHTING_DRIFT
+            } else if on_grid {
+                ON_MISSION_DRIFT
+            } else {
+                IDLE_DRIFT
+            };
 
-        let [stress_d, fatigue_d, morale_d, loyalty_d] = drift;
+            let [stress_d, fatigue_d, morale_d, loyalty_d] = drift;
 
-        // Map condition changes to the closest available deltas.
-        //
-        // Stress/fatigue increases → small self-damage (represents wear-and-tear).
-        // Positive stress_d means the adventurer is wearing down.
-        // We use Damage with amount proportional to stress+fatigue gain as a
-        // proxy until a dedicated UpdateCondition delta exists.
-        //
-        // For now, emit as status effects to track condition changes:
-        //   - High stress → Debuff on speed (stress slows reactions)
-        //   - High fatigue → Debuff on attack (tiredness weakens blows)
-        //   - Low morale → Debuff on defense (demoralized, less careful)
-        //
-        // These are rough proxies. The real mapping needs UpdateCondition delta.
-
-        // Desertion: idle NPC with critically low loyalty and high stress.
-        // We approximate "idle" as not-on-any-grid and alive.
-        if !on_grid && !injured {
-            // Use deterministic hash to simulate the RNG roll.
-            let hash = tick_entity_hash(state.tick, entity.id);
-            let roll = hash_to_f32(hash);
-
-            // Original: loyalty <= 15 && stress >= 85 → 10% chance to desert.
-            // We don't have stress/loyalty fields yet, so use HP ratio as proxy:
-            //   very low HP ratio on a non-grid NPC → potential desertion.
-            // With real fields this would check loyalty <= DESERTION_LOYALTY_THRESHOLD
-            // && stress >= DESERTION_STRESS_THRESHOLD.
+            // Map condition changes to the closest available deltas.
             //
-            // TODO: once NpcData has stress/loyalty fields, replace this proxy.
-            let _ = (DESERTION_LOYALTY_THRESHOLD, DESERTION_STRESS_THRESHOLD);
+            // Stress/fatigue increases → small self-damage (represents wear-and-tear).
+            // Positive stress_d means the adventurer is wearing down.
+            // We use Damage with amount proportional to stress+fatigue gain as a
+            // proxy until a dedicated UpdateCondition delta exists.
+            //
+            // For now, emit as status effects to track condition changes:
+            //   - High stress → Debuff on speed (stress slows reactions)
+            //   - High fatigue → Debuff on attack (tiredness weakens blows)
+            //   - Low morale → Debuff on defense (demoralized, less careful)
+            //
+            // These are rough proxies. The real mapping needs UpdateCondition delta.
 
-            // For now, no desertion without real condition fields — just push
-            // the status effect proxies below.
-        }
+            // Desertion: idle NPC with critically low loyalty and high stress.
+            // We approximate "idle" as not-on-any-grid and alive.
+            if !on_grid && !injured {
+                // Use deterministic hash to simulate the RNG roll.
+                let hash = tick_entity_hash(state.tick, entity.id);
+                let roll = hash_to_f32(hash);
 
-        // Apply fatigue as a small Heal-suppress (Debuff on attack):
-        // Fatigue gain > 1.0 → apply a minor debuff status.
-        if fatigue_d > 1.0 {
-            out.push(WorldDelta::ApplyStatus {
-                target_id: entity.id,
-                status: crate::world_sim::state::StatusEffect {
-                    kind: crate::world_sim::state::StatusEffectKind::Debuff {
-                        stat: "attack".into(),
-                        factor: 0.95, // 5% attack reduction per drift tick
+                // Original: loyalty <= 15 && stress >= 85 → 10% chance to desert.
+                // We don't have stress/loyalty fields yet, so use HP ratio as proxy:
+                //   very low HP ratio on a non-grid NPC → potential desertion.
+                // With real fields this would check loyalty <= DESERTION_LOYALTY_THRESHOLD
+                // && stress >= DESERTION_STRESS_THRESHOLD.
+                //
+                // TODO: once NpcData has stress/loyalty fields, replace this proxy.
+                let _ = (DESERTION_LOYALTY_THRESHOLD, DESERTION_STRESS_THRESHOLD);
+
+                // For now, no desertion without real condition fields — just push
+                // the status effect proxies below.
+            }
+
+            // Apply fatigue as a small Heal-suppress (Debuff on attack):
+            // Fatigue gain > 1.0 → apply a minor debuff status.
+            if fatigue_d > 1.0 {
+                out.push(WorldDelta::ApplyStatus {
+                    target_id: entity.id,
+                    status: crate::world_sim::state::StatusEffect {
+                        kind: crate::world_sim::state::StatusEffectKind::Debuff {
+                            stat: "attack".into(),
+                            factor: 0.95, // 5% attack reduction per drift tick
+                        },
+                        source_id: entity.id,
+                        remaining_ms: (DRIFT_INTERVAL as u32) * 100, // lasts until next drift
                     },
-                    source_id: entity.id,
-                    remaining_ms: (DRIFT_INTERVAL as u32) * 100, // lasts until next drift
-                },
-            });
-        }
+                });
+            }
 
-        // Apply stress as a speed debuff:
-        if stress_d > 1.0 {
-            out.push(WorldDelta::ApplyStatus {
-                target_id: entity.id,
-                status: crate::world_sim::state::StatusEffect {
-                    kind: crate::world_sim::state::StatusEffectKind::Debuff {
-                        stat: "speed".into(),
-                        factor: 0.95,
+            // Apply stress as a speed debuff:
+            if stress_d > 1.0 {
+                out.push(WorldDelta::ApplyStatus {
+                    target_id: entity.id,
+                    status: crate::world_sim::state::StatusEffect {
+                        kind: crate::world_sim::state::StatusEffectKind::Debuff {
+                            stat: "speed".into(),
+                            factor: 0.95,
+                        },
+                        source_id: entity.id,
+                        remaining_ms: (DRIFT_INTERVAL as u32) * 100,
                     },
-                    source_id: entity.id,
-                    remaining_ms: (DRIFT_INTERVAL as u32) * 100,
-                },
-            });
-        }
+                });
+            }
 
-        // Positive morale → small heal-over-time (represents higher resilience):
-        if morale_d > 0.0 {
-            out.push(WorldDelta::Heal {
-                target_id: entity.id,
-                amount: morale_d * 0.1, // tiny heal as morale proxy
-                source_id: entity.id,
-            });
+            // Positive morale → small heal-over-time (represents higher resilience):
+            if morale_d > 0.0 {
+                out.push(WorldDelta::Heal {
+                    target_id: entity.id,
+                    amount: morale_d * 0.1, // tiny heal as morale proxy
+                    source_id: entity.id,
+                });
+            }
         }
     }
 }

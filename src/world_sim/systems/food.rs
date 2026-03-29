@@ -31,21 +31,19 @@ pub fn compute_food(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
     // For each settlement, count resident NPCs and consume food from stockpile.
     for settlement in &state.settlements {
-        // Count alive NPCs whose home settlement matches.
+        // Count alive NPCs at this settlement using the group index.
         let mut resident_count = 0u32;
         let mut resident_ids = Vec::new();
-        for entity in &state.entities {
+        let range = state.group_index.settlement_entities(settlement.id);
+        for entity in &state.entities[range] {
             if entity.kind != EntityKind::Npc || !entity.alive {
                 continue;
             }
-            let npc = match &entity.npc {
-                Some(n) => n,
-                None => continue,
-            };
-            if npc.home_settlement_id == Some(settlement.id) {
-                resident_count += 1;
-                resident_ids.push(entity.id);
+            if entity.npc.is_none() {
+                continue;
             }
+            resident_count += 1;
+            resident_ids.push(entity.id);
         }
 
         if resident_count == 0 {
@@ -136,6 +134,7 @@ mod tests {
         let mut npc = Entity::new_npc(1, (0.0, 0.0));
         npc.npc.as_mut().unwrap().home_settlement_id = Some(10);
         state.entities.push(npc);
+        state.rebuild_group_index();
 
         let mut deltas = Vec::new();
         compute_food(&state, &mut deltas);
@@ -164,6 +163,7 @@ mod tests {
         let mut npc = Entity::new_npc(1, (0.0, 0.0));
         npc.npc.as_mut().unwrap().home_settlement_id = Some(10);
         state.entities.push(npc);
+        state.rebuild_group_index();
 
         let mut deltas = Vec::new();
         compute_food(&state, &mut deltas);

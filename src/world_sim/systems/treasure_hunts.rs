@@ -50,102 +50,97 @@ pub fn compute_treasure_hunts(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // proportional to the distance traveled. This captures the multi-step
     // nature of the original system (further = more reward).
 
-    for entity in &state.entities {
-        if entity.kind != EntityKind::Npc || !entity.alive || entity.team != WorldTeam::Friendly {
-            continue;
-        }
-
-        let npc = match &entity.npc {
-            Some(n) => n,
-            None => continue,
-        };
-
-        // Skip NPCs on combat grids (fighting, not treasure hunting)
-        if let Some(gid) = entity.grid_id {
-            if state
-                .grid(gid)
-                .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
-                .unwrap_or(false)
-            {
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        for entity in &state.entities[range] {
+            if entity.kind != EntityKind::Npc || !entity.alive || entity.team != WorldTeam::Friendly {
                 continue;
             }
-        }
 
-        let home_id = match npc.home_settlement_id {
-            Some(id) => id,
-            None => continue,
-        };
+            let npc = match &entity.npc {
+                Some(n) => n,
+                None => continue,
+            };
 
-        let home_pos = state
-            .settlement(home_id)
-            .map(|s| s.pos)
-            .unwrap_or((0.0, 0.0));
+            // Skip NPCs on combat grids (fighting, not treasure hunting)
+            if let Some(gid) = entity.grid_id {
+                if state
+                    .grid(gid)
+                    .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+            }
 
-        let dist_from_home_sq = dist_sq(entity.pos, home_pos);
+            let home_id = settlement.id;
 
-        // NPCs far from home are "on treasure hunts"
-        // Step rewards increase with distance (escalating like the original)
-        if dist_from_home_sq < 625.0 {
-            // 25^2: too close to home
-            continue;
-        }
+            let home_pos = settlement.pos;
 
-        // Deterministic treasure discovery roll (entity id + tick based)
-        let roll_seed = (entity.id as u64).wrapping_mul(6364136223846793005) ^ state.tick;
-        let roll = (roll_seed % 1000) as f32 / 1000.0;
+            let dist_from_home_sq = dist_sq(entity.pos, home_pos);
 
-        // 5% chance per interval to find treasure
-        if roll > 0.05 {
-            continue;
-        }
+            // NPCs far from home are "on treasure hunts"
+            // Step rewards increase with distance (escalating like the original)
+            if dist_from_home_sq < 625.0 {
+                // 25^2: too close to home
+                continue;
+            }
 
-        // Reward scales with distance from home (escalating steps)
-        let distance = dist_from_home_sq.sqrt();
-        let distance_multiplier = (distance / 25.0).min(4.0); // cap at 4x
-        let step_reward = BASE_STEP_REWARD * distance_multiplier;
+            // Deterministic treasure discovery roll (entity id + tick based)
+            let roll_seed = (entity.id as u64).wrapping_mul(6364136223846793005) ^ state.tick;
+            let roll = (roll_seed % 1000) as f32 / 1000.0;
 
-        // Gold reward to the NPC
-        out.push(WorldDelta::TransferGold {
-            from_id: GUILD_ENTITY_ID,
-            to_id: entity.id,
-            amount: step_reward,
-        });
+            // 5% chance per interval to find treasure
+            if roll > 0.05 {
+                continue;
+            }
 
-        // At max distance, also award treasure commodity (artifact equivalent)
-        if distance_multiplier >= 3.0 {
-            // Final step: large bonus + treasure goods
-            let final_bonus = step_reward * FINAL_STEP_MULTIPLIER;
+            // Reward scales with distance from home (escalating steps)
+            let distance = dist_from_home_sq.sqrt();
+            let distance_multiplier = (distance / 25.0).min(4.0); // cap at 4x
+            let step_reward = BASE_STEP_REWARD * distance_multiplier;
+
+            // Gold reward to the NPC
             out.push(WorldDelta::TransferGold {
                 from_id: GUILD_ENTITY_ID,
                 to_id: entity.id,
-                amount: final_bonus,
+                amount: step_reward,
             });
 
-            // Award treasure commodity to NPC's home settlement
-            if let Some(settlement) = state.settlement(home_id) {
+            // At max distance, also award treasure commodity (artifact equivalent)
+            if distance_multiplier >= 3.0 {
+                // Final step: large bonus + treasure goods
+                let final_bonus = step_reward * FINAL_STEP_MULTIPLIER;
+                out.push(WorldDelta::TransferGold {
+                    from_id: GUILD_ENTITY_ID,
+                    to_id: entity.id,
+                    amount: final_bonus,
+                });
+
+                // Award treasure commodity to NPC's home settlement
                 out.push(WorldDelta::UpdateStockpile {
                     location_id: home_id,
                     commodity: TREASURE_COMMODITY,
                     delta: 5.0, // artifact-equivalent goods
                 });
             }
-        }
 
-        // Exploration near settlements: deliver findings to nearest settlement
-        let nearest_settlement = state.settlements.iter().min_by(|a, b| {
-            let da = dist_sq(entity.pos, a.pos);
-            let db = dist_sq(entity.pos, b.pos);
-            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-        });
+            // Exploration near settlements: deliver findings to nearest settlement
+            let nearest_settlement = state.settlements.iter().min_by(|a, b| {
+                let da = dist_sq(entity.pos, a.pos);
+                let db = dist_sq(entity.pos, b.pos);
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            });
 
-        if let Some(settlement) = nearest_settlement {
-            let settlement_dist = dist_sq(entity.pos, settlement.pos);
-            if settlement_dist <= DISCOVERY_RADIUS_SQ {
-                // NPC is near a settlement: deposit treasure findings
-                out.push(WorldDelta::UpdateTreasury {
-                    location_id: settlement.id,
-                    delta: step_reward * 0.1, // 10% goes to settlement
-                });
+            if let Some(nearest) = nearest_settlement {
+                let settlement_dist = dist_sq(entity.pos, nearest.pos);
+                if settlement_dist <= DISCOVERY_RADIUS_SQ {
+                    // NPC is near a settlement: deposit treasure findings
+                    out.push(WorldDelta::UpdateTreasury {
+                        location_id: nearest.id,
+                        delta: step_reward * 0.1, // 10% goes to settlement
+                    });
+                }
             }
         }
     }

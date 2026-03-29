@@ -50,12 +50,15 @@ pub fn compute_memorials(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     // --- Detect dead NPC entities ---
-    let dead_npcs: Vec<u32> = state
-        .entities
-        .iter()
-        .filter(|e| !e.alive && e.kind == EntityKind::Npc)
-        .map(|e| e.id)
-        .collect();
+    let mut dead_npcs: Vec<u32> = Vec::new();
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        for entity in &state.entities[range] {
+            if !entity.alive && entity.kind == EntityKind::Npc {
+                dead_npcs.push(entity.id);
+            }
+        }
+    }
 
     // NEEDS STATE: check if dead NPCs already have pending funerals or memorials
     // For new deaths:

@@ -25,57 +25,56 @@ const DISTANCE_DRAIN_FACTOR: f32 = 0.0001;
 const OUT_OF_SUPPLY_DAMAGE: f32 = 1.0;
 
 pub fn compute_supply(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    for entity in &state.entities {
-        if entity.kind != EntityKind::Npc || !entity.alive {
-            continue;
-        }
-        let npc = match &entity.npc {
-            Some(n) => n,
-            None => continue,
-        };
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        for entity in &state.entities[range] {
+            if entity.kind != EntityKind::Npc || !entity.alive {
+                continue;
+            }
+            let npc = match &entity.npc {
+                Some(n) => n,
+                None => continue,
+            };
 
-        // Only traveling NPCs consume supply.
-        let is_traveling = matches!(
-            npc.economic_intent,
-            EconomicIntent::Travel { .. } | EconomicIntent::Trade { .. }
-        );
-        if !is_traveling {
-            continue;
-        }
+            // Only traveling NPCs consume supply.
+            let is_traveling = matches!(
+                npc.economic_intent,
+                EconomicIntent::Travel { .. } | EconomicIntent::Trade { .. }
+            );
+            if !is_traveling {
+                continue;
+            }
 
-        // Calculate distance from home settlement (if any).
-        let home_dist = npc
-            .home_settlement_id
-            .and_then(|hid| state.settlement(hid))
-            .map(|s| {
-                let dx = entity.pos.0 - s.pos.0;
-                let dy = entity.pos.1 - s.pos.1;
+            // Calculate distance from home settlement (if any).
+            let home_dist = {
+                let dx = entity.pos.0 - settlement.pos.0;
+                let dy = entity.pos.1 - settlement.pos.1;
                 (dx * dx + dy * dy).sqrt()
-            })
-            .unwrap_or(0.0);
+            };
 
-        // Total drain: base + distance-proportional.
-        let drain = BASE_DRAIN_PER_TICK + home_dist * DISTANCE_DRAIN_FACTOR;
+            // Total drain: base + distance-proportional.
+            let drain = BASE_DRAIN_PER_TICK + home_dist * DISTANCE_DRAIN_FACTOR;
 
-        let carried_food = npc.carried_goods[COMMODITY_FOOD];
-        if carried_food > 0.0 {
-            let consumed = drain.min(carried_food);
-            // Consume from carried goods via self-transfer (apply phase clamps).
-            out.push(WorldDelta::TransferGoods {
-                from_id: entity.id,
-                to_id: entity.id,
-                commodity: COMMODITY_FOOD,
-                amount: consumed,
-            });
-        }
+            let carried_food = npc.carried_goods[COMMODITY_FOOD];
+            if carried_food > 0.0 {
+                let consumed = drain.min(carried_food);
+                // Consume from carried goods via self-transfer (apply phase clamps).
+                out.push(WorldDelta::TransferGoods {
+                    from_id: entity.id,
+                    to_id: entity.id,
+                    commodity: COMMODITY_FOOD,
+                    amount: consumed,
+                });
+            }
 
-        // Out-of-supply: NPC has no food left and is still traveling.
-        if carried_food < drain {
-            out.push(WorldDelta::Damage {
-                target_id: entity.id,
-                amount: OUT_OF_SUPPLY_DAMAGE,
-                source_id: 0, // environmental
-            });
+            // Out-of-supply: NPC has no food left and is still traveling.
+            if carried_food < drain {
+                out.push(WorldDelta::Damage {
+                    target_id: entity.id,
+                    amount: OUT_OF_SUPPLY_DAMAGE,
+                    source_id: 0, // environmental
+                });
+            }
         }
     }
 }
@@ -100,6 +99,7 @@ mod tests {
         };
         npc_data.carried_goods[0] = 10.0; // has food
         state.entities.push(npc);
+        state.rebuild_group_index();
 
         let mut deltas = Vec::new();
         compute_supply(&state, &mut deltas);
@@ -132,6 +132,7 @@ mod tests {
         };
         npc_data.carried_goods[0] = 0.0; // no food
         state.entities.push(npc);
+        state.rebuild_group_index();
 
         let mut deltas = Vec::new();
         compute_supply(&state, &mut deltas);

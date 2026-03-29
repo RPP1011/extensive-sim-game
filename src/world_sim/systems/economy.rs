@@ -47,17 +47,18 @@ pub fn compute_economy(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     // --- Equipment maintenance / upkeep: each living NPC drains from home settlement ---
-    for entity in &state.entities {
-        if entity.kind != EntityKind::Npc || !entity.alive {
-            continue;
-        }
-        let npc = match &entity.npc {
-            Some(n) => n,
-            None => continue,
-        };
-        if let Some(home_id) = npc.home_settlement_id {
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        for entity in &state.entities[range] {
+            if entity.kind != EntityKind::Npc || !entity.alive {
+                continue;
+            }
+            let npc = match &entity.npc {
+                Some(n) => n,
+                None => continue,
+            };
             out.push(WorldDelta::UpdateTreasury {
-                location_id: home_id,
+                location_id: settlement.id,
                 delta: -MAINTENANCE_PER_NPC,
             });
         }
@@ -134,6 +135,7 @@ mod tests {
         let mut npc = Entity::new_npc(1, (0.0, 0.0));
         npc.npc.as_mut().unwrap().home_settlement_id = Some(10);
         state.entities.push(npc);
+        state.rebuild_group_index();
 
         let mut deltas = Vec::new();
         compute_economy(&state, &mut deltas);

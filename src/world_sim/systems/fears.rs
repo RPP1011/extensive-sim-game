@@ -47,30 +47,33 @@ pub fn compute_fears(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     // --- Phase 1: Fear acquisition from traumatic events ---
-    for entity in &state.entities {
-        if !entity.alive || entity.npc.is_none() {
-            continue;
-        }
-
-        let hp_ratio = entity.hp / entity.max_hp.max(1.0);
-
-        // Near-death (hp < 20%) on an active grid → Darkness fear (30%)
-        if hp_ratio < 0.2 && entity.grid_id.is_some() {
-            let roll = deterministic_roll(state.tick, entity.id);
-            if roll < DARKNESS_FEAR_CHANCE {
-                // NEEDS DELTA: AcquireFear { entity_id, Darkness, severity: 20+rand*40 }
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        for entity in &state.entities[range] {
+            if !entity.alive || entity.npc.is_none() {
+                continue;
             }
-        }
 
-        // Low hp while fighting → Undead fear (20%)
-        if hp_ratio < 0.4 && entity.grid_id.is_some() {
-            let roll = deterministic_roll(state.tick, entity.id.wrapping_add(1));
-            if roll < MONSTER_FEAR_CHANCE {
-                // NEEDS DELTA: AcquireFear { entity_id, Undead, severity: 15+rand*35 }
+            let hp_ratio = entity.hp / entity.max_hp.max(1.0);
+
+            // Near-death (hp < 20%) on an active grid → Darkness fear (30%)
+            if hp_ratio < 0.2 && entity.grid_id.is_some() {
+                let roll = deterministic_roll(state.tick, entity.id);
+                if roll < DARKNESS_FEAR_CHANCE {
+                    // NEEDS DELTA: AcquireFear { entity_id, Darkness, severity: 20+rand*40 }
+                }
             }
-        }
 
-        // NEEDS STATE: check fears list for existing fears
+            // Low hp while fighting → Undead fear (20%)
+            if hp_ratio < 0.4 && entity.grid_id.is_some() {
+                let roll = deterministic_roll(state.tick, entity.id.wrapping_add(1));
+                if roll < MONSTER_FEAR_CHANCE {
+                    // NEEDS DELTA: AcquireFear { entity_id, Undead, severity: 15+rand*35 }
+                }
+            }
+
+            // NEEDS STATE: check fears list for existing fears
+        }
     }
 
     // --- Phase 2: Fear effects (morale/stress penalties) ---
