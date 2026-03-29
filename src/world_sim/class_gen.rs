@@ -104,6 +104,10 @@ const TAG_LABOR: u32 = tag(b"labor");
 const TAG_LEADERSHIP: u32 = tag(b"leadership");
 const TAG_FARMING: u32 = tag(b"farming");
 const TAG_MINING: u32 = tag(b"mining");
+const TAG_WOODWORK: u32 = tag(b"woodwork");
+const TAG_ALCHEMY: u32 = tag(b"alchemy");
+const TAG_EXPLORATION: u32 = tag(b"exploration");
+const TAG_TEACHING: u32 = tag(b"teaching");
 
 /// Minimum dot-product score for a class match.
 const SCORE_THRESHOLD: f32 = 0.3;
@@ -181,6 +185,36 @@ static TEMPLATES: &[ClassTemplate] = &[
         requirements: &[(TAG_MINING, 100.0)],
         score_tags: &[(TAG_MINING, 0.4), (TAG_ENDURANCE, 0.3), (TAG_LABOR, 0.2), (TAG_SMITHING, 0.1)],
     },
+    ClassTemplate {
+        name_hash: tag(b"Woodsman"),
+        display_name: "Woodsman",
+        requirements: &[(TAG_WOODWORK, 100.0)],
+        score_tags: &[(TAG_WOODWORK, 0.4), (TAG_ENDURANCE, 0.3), (TAG_LABOR, 0.2), (TAG_SURVIVAL, 0.1)],
+    },
+    ClassTemplate {
+        name_hash: tag(b"Alchemist"),
+        display_name: "Alchemist",
+        requirements: &[(TAG_ALCHEMY, 100.0)],
+        score_tags: &[(TAG_ALCHEMY, 0.4), (TAG_RESEARCH, 0.2), (TAG_HERBALISM, 0.2), (TAG_MEDICINE, 0.2)],
+    },
+    ClassTemplate {
+        name_hash: tag(b"Herbalist"),
+        display_name: "Herbalist",
+        requirements: &[(TAG_HERBALISM, 100.0)],
+        score_tags: &[(TAG_HERBALISM, 0.4), (TAG_MEDICINE, 0.3), (TAG_SURVIVAL, 0.2), (TAG_LORE, 0.1)],
+    },
+    ClassTemplate {
+        name_hash: tag(b"Explorer"),
+        display_name: "Explorer",
+        requirements: &[(TAG_EXPLORATION, 50.0), (TAG_SURVIVAL, 30.0)],
+        score_tags: &[(TAG_EXPLORATION, 0.3), (TAG_NAVIGATION, 0.3), (TAG_SURVIVAL, 0.2), (TAG_AWARENESS, 0.2)],
+    },
+    ClassTemplate {
+        name_hash: tag(b"Mentor"),
+        display_name: "Mentor",
+        requirements: &[(TAG_TEACHING, 50.0), (TAG_LEADERSHIP, 30.0)],
+        score_tags: &[(TAG_TEACHING, 0.4), (TAG_LEADERSHIP, 0.3), (TAG_DISCIPLINE, 0.2), (TAG_LABOR, 0.1)],
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -217,6 +251,10 @@ fn tag_display_name(hash: u32) -> Option<&'static str> {
         (TAG_LEADERSHIP, "Leadership"),
         (TAG_FARMING, "Farming"),
         (TAG_MINING, "Mining"),
+        (TAG_WOODWORK, "Woodwork"),
+        (TAG_ALCHEMY, "Alchemy"),
+        (TAG_EXPLORATION, "Exploration"),
+        (TAG_TEACHING, "Teaching"),
     ];
     TABLE.iter().find(|&&(h, _)| h == hash).map(|&(_, name)| name)
 }

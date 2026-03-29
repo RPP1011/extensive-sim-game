@@ -149,8 +149,31 @@ pub fn run_world_sim(args: WorldSimArgs) -> ExitCode {
                 .map(|(name, val)| format!("{}:{:.0}", name, val))
                 .collect();
 
+            // Resolve class name hashes
+            let class_name_table: &[(u32, &str)] = &[
+                (bevy_game::world_sim::state::tag(b"Warrior"), "Warrior"),
+                (bevy_game::world_sim::state::tag(b"Ranger"), "Ranger"),
+                (bevy_game::world_sim::state::tag(b"Guardian"), "Guardian"),
+                (bevy_game::world_sim::state::tag(b"Healer"), "Healer"),
+                (bevy_game::world_sim::state::tag(b"Merchant"), "Merchant"),
+                (bevy_game::world_sim::state::tag(b"Scholar"), "Scholar"),
+                (bevy_game::world_sim::state::tag(b"Rogue"), "Rogue"),
+                (bevy_game::world_sim::state::tag(b"Artisan"), "Artisan"),
+                (bevy_game::world_sim::state::tag(b"Diplomat"), "Diplomat"),
+                (bevy_game::world_sim::state::tag(b"Commander"), "Commander"),
+                (bevy_game::world_sim::state::tag(b"Farmer"), "Farmer"),
+                (bevy_game::world_sim::state::tag(b"Miner"), "Miner"),
+                (bevy_game::world_sim::state::tag(b"Woodsman"), "Woodsman"),
+                (bevy_game::world_sim::state::tag(b"Alchemist"), "Alchemist"),
+                (bevy_game::world_sim::state::tag(b"Herbalist"), "Herbalist"),
+                (bevy_game::world_sim::state::tag(b"Explorer"), "Explorer"),
+                (bevy_game::world_sim::state::tag(b"Mentor"), "Mentor"),
+            ];
+            let resolve_class = |hash: u32| -> &str {
+                class_name_table.iter().find(|(h, _)| *h == hash).map(|(_, n)| *n).unwrap_or("?")
+            };
             let classes: Vec<String> = npc.classes.iter()
-                .map(|c| format!("L{}", c.level))
+                .map(|c| format!("{} L{}", resolve_class(c.class_name_hash), c.level))
                 .collect();
 
             println!("  #{} ({}) lv{} xp:{} | tags: {} | classes: [{}]",
