@@ -61,6 +61,67 @@ pub fn compute_npc_decisions_for_settlement(
         if !entity.alive || entity.kind != EntityKind::Npc { continue; }
         let npc = match &entity.npc { Some(n) => n, None => continue };
 
+        // Handle NPCs already on trade runs — check for arrival + sell.
+        if let EconomicIntent::Trade { destination_settlement_id } = &npc.economic_intent {
+            let dest_id = *destination_settlement_id;
+            if let Some(dest) = state.settlement(dest_id) {
+                let dx = dest.pos.0 - entity.pos.0;
+                let dy = dest.pos.1 - entity.pos.1;
+                let dist = (dx * dx + dy * dy).sqrt();
+
+                if dist < 3.0 {
+                    // Arrived! Sell carried goods at destination prices.
+                    for c in 0..crate::world_sim::NUM_COMMODITIES {
+                        let amount = npc.carried_goods[c];
+                        if amount > 0.1 {
+                            let revenue = amount * dest.prices[c];
+
+                            // Add goods to destination stockpile.
+                            out.push(WorldDelta::UpdateStockpile {
+                                location_id: dest_id,
+                                commodity: c,
+                                delta: amount,
+                            });
+
+                            // NPC earns gold from the sale.
+                            out.push(WorldDelta::TransferGold {
+                                from_id: dest_id, // destination pays
+                                to_id: entity.id,
+                                amount: revenue,
+                            });
+
+                            // Clear carried goods (consume from self).
+                            out.push(WorldDelta::TransferGoods {
+                                from_id: entity.id,
+                                to_id: entity.id,
+                                commodity: c,
+                                amount,
+                            });
+                        }
+                    }
+
+                    // Trade behavior tags + XP.
+                    let mut action = ActionTags::empty();
+                    action.add(tags::TRADE, 2.0);
+                    action.add(tags::NEGOTIATION, 1.0);
+                    let action = crate::world_sim::action_context::with_context(&action, entity, state);
+                    out.push(WorldDelta::AddBehaviorTags {
+                        entity_id: entity.id,
+                        tags: action.tags,
+                        count: action.count,
+                    });
+                    out.push(WorldDelta::AddXp { entity_id: entity.id, amount: 5 });
+
+                    // Return to producing.
+                    out.push(WorldDelta::SetIntent {
+                        entity_id: entity.id,
+                        intent: EconomicIntent::Produce,
+                    });
+                }
+            }
+            continue; // don't re-evaluate while trading
+        }
+
         // Only re-evaluate idle or producing NPCs.
         match &npc.economic_intent {
             EconomicIntent::Idle | EconomicIntent::Produce => {}

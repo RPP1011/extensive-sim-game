@@ -1226,6 +1226,33 @@ impl WorldSim {
                     });
                 }
             }
+
+            // --- Per-class XP allocation + level-up ---
+            // Each class gains XP proportional to behavior alignment with its template.
+            // The ClassGenerator.match_classes() returns scores — use those.
+            let class_matches = self.class_gen.match_classes(&npc.behavior_tags, &npc.behavior_values);
+
+            for class_slot in &mut npc.classes {
+                if class_slot.level >= 100 { continue; } // max class level
+
+                // Find score for this class from template matching.
+                let score = class_matches.iter()
+                    .find(|m| m.class_name_hash == class_slot.class_name_hash)
+                    .map(|m| m.score)
+                    .unwrap_or(0.1); // minimum XP for classes without template match
+
+                // XP gain = score × behavior_sum_growth_factor.
+                // Scale so classes level roughly every 500 behavior sum gained.
+                let xp_gain = score * (behavior_sum * 0.001).min(5.0);
+                class_slot.xp += xp_gain;
+
+                // Level-up: quadratic curve. Level N requires N * 150 XP.
+                let xp_to_next = class_slot.level as f32 * 150.0;
+                if class_slot.xp >= xp_to_next {
+                    class_slot.xp -= xp_to_next;
+                    class_slot.level += 1;
+                }
+            }
         }
     }
 }

@@ -95,8 +95,22 @@ pub fn compute_economy_for_settlement(
         compute_economy_maintenance_for_settlement(state, settlement_id, entities, out);
     }
 
-    // Trade income comes from actual trade transactions in npc_decisions.rs,
-    // not from passive stockpile existence.
+    // --- Supply/demand price update ---
+    // Prices inversely proportional to stockpile. Scarce goods cost more.
+    // price = base_price / (1 + stockpile / (population * halflife))
+    let pop = (settlement.population as f32).max(1.0);
+    let halflife = 50.0;
+    let base_prices = [1.0, 3.0, 2.0, 2.5, 2.0, 5.0, 10.0, 8.0]; // FOOD..MEDICINE
+    let mut new_prices = [0.0f32; 8];
+    for i in 0..8 {
+        let supply_ticks = settlement.stockpile[i] / (pop * 0.1).max(0.01);
+        new_prices[i] = base_prices[i] / (1.0 + supply_ticks / halflife);
+        new_prices[i] = new_prices[i].clamp(0.1, 100.0);
+    }
+    out.push(WorldDelta::UpdatePrices {
+        location_id: settlement_id,
+        prices: new_prices,
+    });
 }
 
 /// Per-settlement variant for parallel dispatch (maintenance upkeep).
