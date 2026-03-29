@@ -287,4 +287,112 @@ pub fn compute_npc_decisions_for_settlement(
             }
         }
     }
+
+    // --- Barter: NPCs at the same settlement swap commodities ---
+    // Find pairs where A has surplus of X and B has surplus of Y.
+    // They trade at local prices without gold changing hands.
+    // This enables gold-poor settlements to still have functioning economies.
+    if state.tick % DECISION_INTERVAL != 0 { return; }
+    barter_at_settlement(state, settlement_id, entities, out);
+}
+
+fn barter_at_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    let settlement = match state.settlement(settlement_id) {
+        Some(s) => s,
+        None => return,
+    };
+
+    // Collect NPC IDs with their primary production commodity.
+    // Stack-allocated, max 64 pairs.
+    let mut producers: [(u32, usize, f32); 64] = [(0, 0, 0.0); 64]; // (entity_id, commodity, amount_available)
+    let mut count = 0usize;
+
+    for entity in entities {
+        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        let npc = match &entity.npc { Some(n) => n, None => continue };
+        if count >= 64 { break; }
+
+        // Find this NPC's primary production commodity.
+        if let Some(&(commodity, rate)) = npc.behavior_production.first() {
+            if rate > 0.0 {
+                producers[count] = (entity.id, commodity, rate);
+                count += 1;
+            }
+        }
+    }
+
+    if count < 2 { return; }
+
+    // Find barter pairs: A produces X, B produces Y, X ≠ Y.
+    // Each pair swaps a small amount at local prices.
+    let mut swaps_done = 0;
+    let max_swaps = 3; // cap per settlement per decision cycle
+
+    for i in 0..count {
+        if swaps_done >= max_swaps { break; }
+        for j in (i + 1)..count {
+            if swaps_done >= max_swaps { break; }
+            let (a_id, a_commodity, a_rate) = producers[i];
+            let (b_id, b_commodity, b_rate) = producers[j];
+
+            if a_commodity == b_commodity { continue; } // same product, no point
+
+            // Swap amount: smaller of the two rates.
+            let swap_amount = a_rate.min(b_rate) * 0.5;
+            if swap_amount < 0.01 { continue; }
+
+            // Value equivalence at local prices.
+            let a_value = swap_amount * settlement.prices[a_commodity];
+            let b_value = swap_amount * settlement.prices[b_commodity];
+            let value_ratio = a_value / b_value.max(0.01);
+
+            // Only barter if roughly fair (within 3:1 ratio).
+            if value_ratio < 0.33 || value_ratio > 3.0 { continue; }
+
+            // Adjust amounts so values match.
+            let (a_give, b_give) = if value_ratio > 1.0 {
+                // A's goods worth more — A gives less.
+                (swap_amount / value_ratio, swap_amount)
+            } else {
+                (swap_amount, swap_amount * value_ratio)
+            };
+
+            // A gives commodity_a to B.
+            out.push(WorldDelta::TransferGoods {
+                from_id: a_id,
+                to_id: b_id,
+                commodity: a_commodity,
+                amount: a_give,
+            });
+            // B gives commodity_b to A.
+            out.push(WorldDelta::TransferGoods {
+                from_id: b_id,
+                to_id: a_id,
+                commodity: b_commodity,
+                amount: b_give,
+            });
+
+            // Both earn trade behavior tags.
+            let mut action = ActionTags::empty();
+            action.add(tags::TRADE, 0.5);
+            action.add(tags::NEGOTIATION, 0.3);
+            out.push(WorldDelta::AddBehaviorTags {
+                entity_id: a_id,
+                tags: action.tags,
+                count: action.count,
+            });
+            out.push(WorldDelta::AddBehaviorTags {
+                entity_id: b_id,
+                tags: action.tags,
+                count: action.count,
+            });
+
+            swaps_done += 1;
+        }
+    }
 }
