@@ -14,8 +14,26 @@ pub struct WorldState {
     pub tick: u64,
     pub rng_state: u64,
 
-    /// All entities (NPCs, monsters, buildings, projectiles).
+    /// All entities — backward-compatible combined view.
+    /// Kept in sync with hot/cold arrays. Use `hot`/`cold` for perf-critical paths.
     pub entities: Vec<Entity>,
+
+    /// Cache-line-friendly entity data for high-frequency iteration.
+    /// Parallel array: `hot[i]` corresponds to `entities[i]`.
+    #[serde(skip)]
+    pub hot: Vec<HotEntity>,
+    /// Heap-heavy entity data accessed only when needed.
+    /// Parallel array: `cold[i]` corresponds to `entities[i]`.
+    #[serde(skip)]
+    pub cold: Vec<ColdEntity>,
+
+    /// Secondary index: entity_id → index into entities/hot/cold.
+    /// Rebuilt by `rebuild_index()`. Enables O(1) lookup by ID.
+    #[serde(skip)]
+    pub entity_index: Vec<u32>,
+    /// Max entity ID seen (entity_index is sized to max_id+1).
+    #[serde(skip)]
+    pub max_entity_id: u32,
 
     /// Active local grids (settlements, encounter zones).
     pub grids: Vec<LocalGrid>,
@@ -62,6 +80,10 @@ impl WorldState {
             tick: 0,
             rng_state: seed,
             entities: Vec::new(),
+            hot: Vec::new(),
+            cold: Vec::new(),
+            entity_index: Vec::new(),
+            max_entity_id: 0,
             grids: Vec::new(),
             regions: Vec::new(),
             settlements: Vec::new(),
@@ -77,22 +99,126 @@ impl WorldState {
         }
     }
 
-    pub fn entity(&self, id: u32) -> Option<&Entity> {
-        // Fast path: if id matches index position, O(1).
-        let i = id as usize;
-        if i < self.entities.len() && self.entities[i].id == id {
-            return Some(&self.entities[i]);
+    /// Full rebuild of hot/cold arrays and entity_index from `entities`.
+    /// Call after structural changes (push, remove, reorder).
+    pub fn rebuild_entity_cache(&mut self) {
+        let len = self.entities.len();
+        self.hot.resize(len, HotEntity {
+            id: 0, kind: EntityKind::Npc, team: WorldTeam::Neutral, alive: false,
+            level: 0, pos: (0.0, 0.0), hp: 0.0, max_hp: 0.0,
+            attack_damage: 0.0, attack_range: 0.0, move_speed: 0.0, grid_id: None,
+        });
+        self.cold.resize_with(len, ColdEntity::default);
+
+        self.max_entity_id = self.entities.iter().map(|e| e.id).max().unwrap_or(0);
+        let idx_len = self.max_entity_id as usize + 1;
+        self.entity_index.resize(idx_len, u32::MAX);
+        for v in &mut self.entity_index { *v = u32::MAX; }
+
+        for (i, e) in self.entities.iter().enumerate() {
+            self.hot[i] = HotEntity {
+                id: e.id, kind: e.kind, team: e.team, alive: e.alive,
+                level: e.level, pos: e.pos, hp: e.hp, max_hp: e.max_hp,
+                attack_damage: e.attack_damage, attack_range: e.attack_range,
+                move_speed: e.move_speed, grid_id: e.grid_id,
+            };
+            self.cold[i] = ColdEntity {
+                shield_hp: e.shield_hp, armor: e.armor, magic_resist: e.magic_resist,
+                local_pos: e.local_pos,
+                status_effects: std::mem::take(&mut self.cold[i].status_effects),
+                npc: std::mem::take(&mut self.cold[i].npc),
+            };
+            // Re-populate cold from entity (only on full rebuild).
+            self.cold[i].status_effects.clear();
+            self.cold[i].status_effects.extend_from_slice(&e.status_effects);
+            self.cold[i].npc = e.npc.clone();
+
+            if (e.id as usize) < idx_len {
+                self.entity_index[e.id as usize] = i as u32;
+            }
         }
-        // Fallback: linear scan for non-contiguous IDs.
-        self.entities.iter().find(|e| e.id == id)
+    }
+
+    /// Fast sync: update hot array from entities without touching cold or index.
+    /// O(n) flat copy of scalar fields only. No allocations.
+    pub fn sync_hot_from_entities(&mut self) {
+        for i in 0..self.entities.len().min(self.hot.len()) {
+            let e = &self.entities[i];
+            let h = &mut self.hot[i];
+            h.alive = e.alive;
+            h.hp = e.hp;
+            h.max_hp = e.max_hp;
+            h.pos = e.pos;
+            h.attack_damage = e.attack_damage;
+            h.attack_range = e.attack_range;
+            h.move_speed = e.move_speed;
+            h.grid_id = e.grid_id;
+            h.level = e.level;
+            h.team = e.team;
+        }
+    }
+
+    /// Sync `entities[i]` back from `hot[i]` and `cold[i]`.
+    /// Call after mutating hot/cold arrays directly.
+    pub fn sync_entity(&mut self, i: usize) {
+        let h = &self.hot[i];
+        let c = &self.cold[i];
+        let e = &mut self.entities[i];
+        e.id = h.id; e.kind = h.kind; e.team = h.team; e.alive = h.alive;
+        e.level = h.level; e.pos = h.pos; e.hp = h.hp; e.max_hp = h.max_hp;
+        e.attack_damage = h.attack_damage; e.attack_range = h.attack_range;
+        e.move_speed = h.move_speed; e.grid_id = h.grid_id;
+        e.shield_hp = c.shield_hp; e.armor = c.armor; e.magic_resist = c.magic_resist;
+        e.local_pos = c.local_pos;
+        // status_effects and npc are reference types — entities[i] keeps its own copy.
+        // Only sync scalar fields.
+    }
+
+    /// O(1) entity lookup by ID using the secondary index.
+    pub fn entity(&self, id: u32) -> Option<&Entity> {
+        let i = id as usize;
+        if i < self.entity_index.len() {
+            let idx = self.entity_index[i] as usize;
+            if idx < self.entities.len() {
+                return Some(&self.entities[idx]);
+            }
+        }
+        None
     }
 
     pub fn entity_mut(&mut self, id: u32) -> Option<&mut Entity> {
         let i = id as usize;
-        if i < self.entities.len() && self.entities[i].id == id {
-            return Some(&mut self.entities[i]);
+        if i < self.entity_index.len() {
+            let idx = self.entity_index[i] as usize;
+            if idx < self.entities.len() {
+                return Some(&mut self.entities[idx]);
+            }
         }
-        self.entities.iter_mut().find(|e| e.id == id)
+        None
+    }
+
+    /// O(1) hot entity lookup by ID.
+    pub fn hot_entity(&self, id: u32) -> Option<&HotEntity> {
+        let i = id as usize;
+        if i < self.entity_index.len() {
+            let idx = self.entity_index[i] as usize;
+            if idx < self.hot.len() {
+                return Some(&self.hot[idx]);
+            }
+        }
+        None
+    }
+
+    /// O(1) cold entity lookup by ID.
+    pub fn cold_entity(&self, id: u32) -> Option<&ColdEntity> {
+        let i = id as usize;
+        if i < self.entity_index.len() {
+            let idx = self.entity_index[i] as usize;
+            if idx < self.cold.len() {
+                return Some(&self.cold[idx]);
+            }
+        }
+        None
     }
 
     pub fn settlement(&self, id: u32) -> Option<&SettlementState> {
@@ -169,21 +295,48 @@ impl Default for WorldTeam {
     }
 }
 
+/// Hot entity data — 48 bytes, cache-line friendly.
+/// Iterated by every system every tick. Keep this small.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[repr(C)]
+pub struct HotEntity {
+    pub id: u32,
+    pub kind: EntityKind,
+    pub team: WorldTeam,
+    pub alive: bool,
+    pub level: u32,
+    pub pos: (f32, f32),
+    pub hp: f32,
+    pub max_hp: f32,
+    pub attack_damage: f32,
+    pub attack_range: f32,
+    pub move_speed: f32,
+    pub grid_id: Option<u32>,
+}
+
+/// Cold entity data — large, heap-heavy. Only accessed when a system
+/// needs NPC-specific or detailed combat data. Indexed in parallel with HotEntity.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ColdEntity {
+    pub shield_hp: f32,
+    pub armor: f32,
+    pub magic_resist: f32,
+    pub local_pos: Option<(f32, f32)>,
+    pub status_effects: Vec<StatusEffect>,
+    pub npc: Option<NpcData>,
+}
+
+/// Combined view of an entity for backward-compatible access.
+/// This is NOT stored — it's constructed on demand from hot + cold refs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entity {
     pub id: u32,
     pub kind: EntityKind,
     pub team: WorldTeam,
-    /// World position (always valid).
     pub pos: (f32, f32),
-    /// Which local grid this entity is on, if any.
     pub grid_id: Option<u32>,
-    /// Position within local grid (only valid when grid_id is Some).
     pub local_pos: Option<(f32, f32)>,
-    /// Whether this entity is alive/active.
     pub alive: bool,
-
-    // --- Combat state (used at High fidelity) ---
     pub hp: f32,
     pub max_hp: f32,
     pub shield_hp: f32,
@@ -193,14 +346,41 @@ pub struct Entity {
     pub attack_range: f32,
     pub move_speed: f32,
     pub level: u32,
-
     pub status_effects: Vec<StatusEffect>,
-
-    // --- NPC-specific ---
     pub npc: Option<NpcData>,
 }
 
 impl Entity {
+    /// Split into hot + cold components.
+    pub fn split(&self) -> (HotEntity, ColdEntity) {
+        (
+            HotEntity {
+                id: self.id, kind: self.kind, team: self.team, alive: self.alive,
+                level: self.level, pos: self.pos, hp: self.hp, max_hp: self.max_hp,
+                attack_damage: self.attack_damage, attack_range: self.attack_range,
+                move_speed: self.move_speed, grid_id: self.grid_id,
+            },
+            ColdEntity {
+                shield_hp: self.shield_hp, armor: self.armor, magic_resist: self.magic_resist,
+                local_pos: self.local_pos, status_effects: self.status_effects.clone(),
+                npc: self.npc.clone(),
+            },
+        )
+    }
+
+    /// Reconstruct from hot + cold.
+    pub fn from_parts(hot: &HotEntity, cold: &ColdEntity) -> Self {
+        Entity {
+            id: hot.id, kind: hot.kind, team: hot.team, pos: hot.pos,
+            grid_id: hot.grid_id, local_pos: cold.local_pos, alive: hot.alive,
+            hp: hot.hp, max_hp: hot.max_hp, shield_hp: cold.shield_hp,
+            armor: cold.armor, magic_resist: cold.magic_resist,
+            attack_damage: hot.attack_damage, attack_range: hot.attack_range,
+            move_speed: hot.move_speed, level: hot.level,
+            status_effects: cold.status_effects.clone(), npc: cold.npc.clone(),
+        }
+    }
+
     pub fn new_npc(id: u32, pos: (f32, f32)) -> Self {
         Self {
             id,

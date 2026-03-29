@@ -732,9 +732,12 @@ pub struct WorldSim {
 }
 
 impl WorldSim {
-    pub fn new(initial: WorldState) -> Self {
+    pub fn new(mut initial: WorldState) -> Self {
         let max_entity_id = initial.entities.iter().map(|e| e.id).max().unwrap_or(0) as usize + 1;
         let max_settlement_id = initial.settlements.iter().map(|s| s.id).max().unwrap_or(0) as usize + 1;
+
+        // Build the hot/cold cache + secondary index.
+        initial.rebuild_entity_cache();
 
         WorldSim {
             delta_buf: Vec::with_capacity(initial.entities.len() * 4),
@@ -753,16 +756,20 @@ impl WorldSim {
         let tick_start = Instant::now();
         let mut profile = TickProfile::default();
 
-        // SPATIAL INDEX
+        // SPATIAL INDEX — rebuild from hot entities (position data).
         self.spatial.rebuild(&self.state.entities);
 
-        // COMPUTE
+        // COMPUTE — iterate hot array for fast filtering.
         self.delta_buf.clear();
         let compute_start = Instant::now();
 
-        for i in 0..self.state.entities.len() {
-            if !self.state.entities[i].alive { continue; }
-            let fid = entity_fidelity_idx(i, &self.state);
+        for i in 0..self.state.hot.len() {
+            let h = &self.state.hot[i];
+            if !h.alive { continue; }
+            let fid = hot_entity_fidelity(h, &self.state);
+            // Systems still receive full Entity refs for compatibility.
+            // The hot iteration is just for the filter loop — the actual compute
+            // still reads from state.entities[i].
             match fid {
                 Fidelity::High => {
                     profile.high_count += 1;
@@ -823,15 +830,22 @@ impl WorldSim {
         profile.apply_fidelity_us = apply_profile.fidelity_us;
         profile.apply_price_reports_us = apply_profile.price_reports_us;
 
+        // Sync hot array from entities (fast — scalar copy only).
+        // Full rebuild only if entities were spawned (array length changed).
+        if self.state.entities.len() != self.state.hot.len() {
+            self.state.rebuild_entity_cache();
+        } else {
+            self.state.sync_hot_from_entities();
+        }
+
         profile.total_us = tick_start.elapsed().as_micros() as u64;
         self.profile_acc.record(&profile);
         profile
     }
 }
 
-fn entity_fidelity_idx(idx: usize, state: &WorldState) -> Fidelity {
-    let entity = &state.entities[idx];
-    if let Some(grid_id) = entity.grid_id {
+fn hot_entity_fidelity(h: &super::state::HotEntity, state: &WorldState) -> Fidelity {
+    if let Some(grid_id) = h.grid_id {
         state.grid(grid_id)
             .map(|g| g.fidelity)
             .unwrap_or(Fidelity::Low)
