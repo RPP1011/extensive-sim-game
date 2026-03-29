@@ -165,22 +165,5 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
             }
         }
 
-        // Ambient encounters: damage traveling NPCs in dangerous regions
-        if density > AMBIENT_ENCOUNTER_THRESHOLD {
-            let unaffiliated = state.group_index.unaffiliated_entities();
-            for entity in &state.entities[unaffiliated] {
-                if !entity.alive || entity.kind != EntityKind::Npc { continue; }
-
-                let roll = tick_hash(state.tick, entity.id as u64 ^ region.id as u64 ^ 0xDEAD);
-                let chance = (density - AMBIENT_ENCOUNTER_THRESHOLD) * 0.0005;
-                if roll < chance {
-                    out.push(WorldDelta::Damage {
-                        target_id: entity.id,
-                        amount: density * 0.05,
-                        source_id: 0,
-                    });
-                }
-            }
-        }
     }
 }
