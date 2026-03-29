@@ -191,11 +191,16 @@ pub fn compute_food_for_settlement(
                     earnings += actual * settlement.prices[commodity];
                 }
             }
-            if earnings > 0.01 {
-                out.push(WorldDelta::TransferGold {
-                    from_id: settlement_id,
-                    to_id: entity.id,
-                    amount: earnings,
+            if earnings > 0.01 && settlement.treasury > 0.0 {
+                // Settlement pays NPC from treasury.
+                out.push(WorldDelta::UpdateTreasury {
+                    location_id: settlement_id,
+                    delta: -earnings.min(settlement.treasury),
+                });
+                out.push(WorldDelta::UpdateEntityField {
+                    entity_id: entity.id,
+                    field: crate::world_sim::state::EntityField::Gold,
+                    value: earnings.min(settlement.treasury),
                 });
             }
         }

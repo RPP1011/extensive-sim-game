@@ -296,6 +296,16 @@ pub fn compute_npc_decisions_for_settlement(
     barter_at_settlement(state, settlement_id, entities, out);
 }
 
+/// Carrying capacity for an NPC: level-scaled plus a base allowance.
+fn carry_capacity(entity: &Entity) -> f32 {
+    entity.level as f32 * 5.0 + 10.0
+}
+
+/// Total weight of goods currently carried by an NPC.
+fn total_carried(npc: &NpcData) -> f32 {
+    npc.carried_goods.iter().sum()
+}
+
 fn barter_at_settlement(
     state: &WorldState,
     settlement_id: u32,
@@ -361,6 +371,22 @@ fn barter_at_settlement(
             } else {
                 (swap_amount, swap_amount * value_ratio)
             };
+
+            // --- Carrying capacity check ---
+            // After the swap, A loses a_give of a_commodity and gains b_give of b_commodity.
+            // B loses b_give of b_commodity and gains a_give of a_commodity.
+            // Reject the trade if either NPC would exceed their capacity.
+            let entity_a = entities.iter().find(|e| e.id == a_id);
+            let entity_b = entities.iter().find(|e| e.id == b_id);
+            if let (Some(ea), Some(eb)) = (entity_a, entity_b) {
+                let npc_a = ea.npc.as_ref().unwrap();
+                let npc_b = eb.npc.as_ref().unwrap();
+                let a_after = total_carried(npc_a) - a_give + b_give;
+                let b_after = total_carried(npc_b) - b_give + a_give;
+                if a_after > carry_capacity(ea) || b_after > carry_capacity(eb) {
+                    continue;
+                }
+            }
 
             // A gives commodity_a to B.
             out.push(WorldDelta::TransferGoods {
