@@ -127,53 +127,67 @@ fn main() {
         eprintln!("Warmup complete.");
     }
 
-    // Generate
+    // Batch ALL prompts × count as a single batch for maximum GPU utilization
+    let total_batch = prompts.len() * count;
+    eprintln!("Batching {} prompts × {} samples = {} total", prompts.len(), count, total_batch);
+
+    // Encode all prompts
+    let encode_start = Instant::now();
+    let mut all_ids = vec![0i64; total_batch * MAX_TEXT_LEN];
+    let mut all_lens = vec![0i64; total_batch];
+
+    for (pi, prompt) in prompts.iter().enumerate() {
+        let ids = tokenizer.encode(prompt);
+        let len = ids.len().min(MAX_TEXT_LEN);
+        for sample_i in 0..count {
+            let bi = pi * count + sample_i;
+            all_lens[bi] = len as i64;
+            for ti in 0..len {
+                all_ids[bi * MAX_TEXT_LEN + ti] = ids[ti] as i64;
+            }
+        }
+    }
+
+    let ids_t = Tensor::<B, 1, Int>::from_data(
+        burn::tensor::TensorData::new(all_ids, [total_batch * MAX_TEXT_LEN]), &device,
+    ).reshape([total_batch, MAX_TEXT_LEN]);
+    let lens_t = Tensor::<B, 1, Int>::from_data(
+        burn::tensor::TensorData::new(all_lens, [total_batch]), &device,
+    );
+
+    let text_emb = model.text_encoder.forward(ids_t, lens_t); // [total_batch, D]
+    let text_memory = text_emb.unsqueeze_dim::<3>(1); // [total_batch, 1, D]
+    let encode_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
+    eprintln!("Text encoding: {:.1} ms for {} prompts", encode_ms, total_batch);
+
+    // Generate all at once
+    let gen_start = Instant::now();
+    let (_, grammar_vecs) = model.tree_decoder.generate(text_memory, temperature);
+    let gen_ms = gen_start.elapsed().as_secs_f64() * 1000.0;
+    eprintln!("Tree decoding: {:.1} ms for {} abilities ({:.1} ms/ability)",
+        gen_ms, total_batch, gen_ms / total_batch as f64);
+
+    // Decode and display
     let total_start = Instant::now();
     let mut total_generated = 0usize;
     let mut total_parsed = 0usize;
 
-    for prompt in &prompts {
-        let prompt_start = Instant::now();
-
-        let ids = tokenizer.encode(prompt);
-        let len = ids.len().min(MAX_TEXT_LEN);
-        let ids_t = Tensor::<B, 1, Int>::from_data(
-            burn::tensor::TensorData::new(
-                ids.into_iter().take(len).map(|x| x as i64).collect::<Vec<_>>(), [len],
-            ), &device,
-        ).unsqueeze::<2>();
-        let lens_t = Tensor::<B, 1, Int>::from_data(
-            burn::tensor::TensorData::new(vec![len as i64], [1]), &device,
-        );
-
-        let text_emb = model.text_encoder.forward(ids_t, lens_t);
-        let text_memory = text_emb.unsqueeze_dim::<3>(1);
-
+    for (pi, prompt) in prompts.iter().enumerate() {
         println!("=== \"{}\" ===", prompt);
-
         for sample_i in 0..count {
-            let sample_start = Instant::now();
-            let (_, grammar_vecs) = model.tree_decoder.generate(text_memory.clone(), temperature);
+            let bi = pi * count + sample_i;
+            let v = &grammar_vecs[bi];
+            let dsl = grammar_space::decode(v);
+            let parsed = parse_abilities(&dsl).is_ok();
+            total_generated += 1;
+            if parsed { total_parsed += 1; }
 
-            for v in &grammar_vecs {
-                let dsl = grammar_space::decode(v);
-                let parsed = parse_abilities(&dsl).is_ok();
-                total_generated += 1;
-                if parsed { total_parsed += 1; }
-                let ms = sample_start.elapsed().as_secs_f64() * 1000.0;
-
-                println!("  --- Sample {} ({:.1} ms) [{}] ---", sample_i, ms,
-                    if parsed { "OK" } else { "FAIL" });
-                for line in dsl.lines() {
-                    println!("  {}", line);
-                }
-                println!();
+            println!("  --- Sample {} [{}] ---", sample_i, if parsed { "OK" } else { "FAIL" });
+            for line in dsl.lines() {
+                println!("  {}", line);
             }
+            println!();
         }
-
-        let prompt_ms = prompt_start.elapsed().as_secs_f64() * 1000.0;
-        println!("  [{} samples in {:.0} ms, {:.1} ms/sample]\n",
-            count, prompt_ms, prompt_ms / count as f64);
     }
 
     let total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
