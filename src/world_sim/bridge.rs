@@ -138,6 +138,7 @@ fn adventurer_to_entity(adv: &Adventurer) -> Entity {
             deeds: adv.deeds.iter().enumerate().map(|(i, _)| i as u8).collect(),
             resolve: adv.resolve,
             guild_relationship: adv.guild_relationship,
+            equipment: Equipment::default(),
             behavior_tags: Vec::new(),
             behavior_values: Vec::new(),
             classes: Vec::new(),

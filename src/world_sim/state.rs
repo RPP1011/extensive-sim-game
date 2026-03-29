@@ -807,6 +807,29 @@ pub struct NpcData {
 
     /// Acquired classes from behavior profile matching.
     pub classes: Vec<ClassSlot>,
+
+    /// Equipment quality per slot. 0.0 = unequipped, higher = better stats.
+    /// Weapon: adds attack_damage. Armor: adds armor + max_hp. Accessory: adds move_speed.
+    pub equipment: Equipment,
+}
+
+/// Simple equipment with quality levels per slot.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct Equipment {
+    /// Weapon quality. +1 attack_damage per quality point.
+    pub weapon: f32,
+    /// Armor quality. +0.5 armor + 3 max_hp per quality point.
+    pub armor: f32,
+    /// Accessory quality. +0.02 move_speed per quality point.
+    pub accessory: f32,
+}
+
+impl Equipment {
+    pub fn attack_bonus(&self) -> f32 { self.weapon }
+    pub fn armor_bonus(&self) -> f32 { self.armor * 0.5 }
+    pub fn hp_bonus(&self) -> f32 { self.armor * 3.0 }
+    pub fn speed_bonus(&self) -> f32 { self.accessory * 0.02 }
+    pub fn total_quality(&self) -> f32 { self.weapon + self.armor + self.accessory }
 }
 
 /// A class granted to an NPC from behavior profile matching.
@@ -876,6 +899,7 @@ impl Default for NpcData {
             behavior_tags: Vec::new(),
             behavior_values: Vec::new(),
             classes: Vec::new(),
+            equipment: Equipment::default(),
         }
     }
 }

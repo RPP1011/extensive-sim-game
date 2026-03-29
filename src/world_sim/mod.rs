@@ -30,7 +30,7 @@ pub use state::{
     ChronicleEntry, ChronicleCategory, WorldEvent,
     EntityField, FactionField, RegionField, SettlementField, RelationKind, QuestDelta,
     // Tag-based action system
-    ActionTags, ClassSlot, tag,
+    ActionTags, ClassSlot, Equipment, tag,
 };
 pub use state::tags;
 pub use tick::{tick, tick_par, tick_profiled, TickProfile, ProfileAccumulator};

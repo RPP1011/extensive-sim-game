@@ -921,6 +921,7 @@ fn run_settlement_systems(
     wound_persistence::compute_wound_persistence_for_settlement(state, sid, entities, buf);
     addiction::compute_addiction_for_settlement(state, sid, entities, buf);
     equipment_durability::compute_equipment_durability_for_settlement(state, sid, entities, buf);
+    equipping::compute_equipping_for_settlement(state, sid, entities, buf);
     moods::compute_moods_for_settlement(state, sid, entities, buf);
     bonds::compute_bonds_for_settlement(state, sid, entities, buf);
     npc_relationships::compute_npc_relationships_for_settlement(state, sid, entities, buf);

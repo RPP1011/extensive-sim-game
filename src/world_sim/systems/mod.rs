@@ -50,6 +50,7 @@ pub mod dungeons;
 pub mod economic_competition;
 pub mod economy;
 pub mod equipment_durability;
+pub mod equipping;
 pub mod escalation_protocol;
 pub mod espionage;
 pub mod exploration;
@@ -202,6 +203,7 @@ pub fn compute_settlement_systems(state: &WorldState, out: &mut Vec<WorldDelta>)
     run_system!("wound_persistence", wound_persistence::compute_wound_persistence, state, out);
     run_system!("addiction", addiction::compute_addiction, state, out);
     run_system!("equipment_durability", equipment_durability::compute_equipment_durability, state, out);
+    run_system!("equipping", equipping::compute_equipping, state, out);
     run_system!("moods", moods::compute_moods, state, out);
     run_system!("bonds", bonds::compute_bonds, state, out);
     run_system!("npc_relationships", npc_relationships::compute_npc_relationships, state, out);
