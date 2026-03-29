@@ -213,6 +213,12 @@ pub enum WorldDelta {
         tags: [(u32, f32); 8],
         count: u8,
     },
+
+    /// Change an NPC's economic intent. Last-writer-wins per entity.
+    SetIntent {
+        entity_id: u32,
+        intent: super::state::EconomicIntent,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +323,9 @@ pub struct MergedDeltas {
 
     /// Behavior tag deltas. Collected (entity_id, tags, count). Addition is commutative per tag.
     pub behavior_tag_deltas: Vec<(u32, [(u32, f32); 8], u8)>,
+
+    /// Intent changes. Last-writer-wins per entity_id.
+    pub intent_changes: Vec<(u32, super::state::EconomicIntent)>,
 }
 
 impl MergedDeltas {
@@ -358,6 +367,7 @@ impl MergedDeltas {
         self.guild_supplies_delta = 0.0;
         self.guild_reputation_delta = 0.0;
         self.behavior_tag_deltas.clear();
+        self.intent_changes.clear();
     }
 
     /// Merge a single delta into this accumulator (in-place, no alloc).
@@ -496,6 +506,9 @@ fn merge_one(m: &mut MergedDeltas, delta: WorldDelta) {
         }
         WorldDelta::AddBehaviorTags { entity_id, tags, count } => {
             m.behavior_tag_deltas.push((entity_id, tags, count));
+        }
+        WorldDelta::SetIntent { entity_id, intent } => {
+            m.intent_changes.push((entity_id, intent));
         }
     }
 }

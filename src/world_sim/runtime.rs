@@ -82,6 +82,9 @@ struct FlatMergedDeltas {
     // --- Behavior tags (collected) ---
     behavior_tag_deltas: Vec<(u32, [(u32, f32); 8], u8)>,
 
+    // --- Intent changes (last-writer-wins, collected) ---
+    intent_changes: Vec<(u32, super::state::EconomicIntent)>,
+
     // --- Campaign collected (no flat-array equivalent) ---
     relation_deltas: Vec<(u32, u32, u8, f32)>,
     spawns: Vec<(super::state::EntityKind, (f32, f32), super::state::WorldTeam, u32)>,
@@ -138,6 +141,7 @@ impl FlatMergedDeltas {
             price_updates: Vec::with_capacity(16),
 
             behavior_tag_deltas: Vec::with_capacity(64),
+            intent_changes: Vec::with_capacity(64),
             relation_deltas: Vec::with_capacity(64),
             spawns: Vec::with_capacity(16),
             events: Vec::with_capacity(32),
@@ -201,6 +205,7 @@ impl FlatMergedDeltas {
         self.price_updates.clear();
 
         self.behavior_tag_deltas.clear();
+        self.intent_changes.clear();
         self.relation_deltas.clear();
         self.spawns.clear();
         self.events.clear();
@@ -386,6 +391,9 @@ impl FlatMergedDeltas {
             }
             WorldDelta::AddBehaviorTags { entity_id, tags, count } => {
                 self.behavior_tag_deltas.push((entity_id, tags, count));
+            }
+            WorldDelta::SetIntent { entity_id, intent } => {
+                self.intent_changes.push((entity_id, intent));
             }
         }
     }
@@ -742,6 +750,17 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
         if let Some(npc) = state.entities[ei].npc.as_mut() {
             let action = crate::world_sim::state::ActionTags { tags, count };
             npc.accumulate_tags(&action);
+        }
+    }
+
+    // Intent changes (last-writer-wins: iterate in reverse, skip already-set)
+    for (entity_id, intent) in m.intent_changes.iter().rev() {
+        let ei = if (*entity_id as usize) < state.entity_index.len() {
+            state.entity_index[*entity_id as usize] as usize
+        } else { continue };
+        if ei >= state.entities.len() { continue; }
+        if let Some(npc) = state.entities[ei].npc.as_mut() {
+            npc.economic_intent = intent.clone();
         }
     }
 

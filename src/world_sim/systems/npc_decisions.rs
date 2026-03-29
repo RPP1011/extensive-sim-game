@@ -194,39 +194,36 @@ pub fn compute_npc_decisions_for_settlement(
             }
         }
 
-        // Emit intent change delta if changed.
-        // Note: we can't mutate NpcData directly (read-only snapshot).
-        // The intent change needs a new delta type or EntityField.
-        // For now, we emit a Move delta toward the trade destination
-        // since the movement system reads EconomicIntent::Travel.
-        match &chosen_intent {
+        // Emit intent change + movement toward destination.
+        // Skip if intent didn't change from current.
+        let intent_changed = std::mem::discriminant(&chosen_intent) != std::mem::discriminant(&npc.economic_intent);
+        if intent_changed {
+            out.push(WorldDelta::SetIntent {
+                entity_id: entity.id,
+                intent: chosen_intent.clone(),
+            });
+        }
+
+        // Movement toward destination (regardless of intent change — keep moving if already traveling).
+        let dest_pos = match &chosen_intent {
             EconomicIntent::Trade { destination_settlement_id } => {
-                if let Some(dest) = state.settlement(*destination_settlement_id) {
-                    let dx = dest.pos.0 - entity.pos.0;
-                    let dy = dest.pos.1 - entity.pos.1;
-                    let dist = (dx * dx + dy * dy).sqrt();
-                    if dist > 1.0 {
-                        let speed = entity.move_speed * crate::world_sim::DT_SEC;
-                        out.push(WorldDelta::Move {
-                            entity_id: entity.id,
-                            force: (dx / dist * speed, dy / dist * speed),
-                        });
-                    }
-                }
+                state.settlement(*destination_settlement_id).map(|s| s.pos)
             }
-            EconomicIntent::Travel { destination } => {
-                let dx = destination.0 - entity.pos.0;
-                let dy = destination.1 - entity.pos.1;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist > 1.0 {
-                    let speed = entity.move_speed * crate::world_sim::DT_SEC;
-                    out.push(WorldDelta::Move {
-                        entity_id: entity.id,
-                        force: (dx / dist * speed, dy / dist * speed),
-                    });
-                }
+            EconomicIntent::Travel { destination } => Some(*destination),
+            _ => None,
+        };
+
+        if let Some(dest) = dest_pos {
+            let dx = dest.0 - entity.pos.0;
+            let dy = dest.1 - entity.pos.1;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist > 1.0 {
+                let speed = entity.move_speed * crate::world_sim::DT_SEC;
+                out.push(WorldDelta::Move {
+                    entity_id: entity.id,
+                    force: (dx / dist * speed, dy / dist * speed),
+                });
             }
-            _ => {} // Produce/Idle — no movement needed.
         }
     }
 }

@@ -568,6 +568,15 @@ pub(super) fn apply_campaign_deltas(state: &mut WorldState, merged: &MergedDelta
         }
     }
 
+    // --- Intent changes (last-writer-wins) ---
+    for (entity_id, intent) in merged.intent_changes.iter().rev() {
+        if let Some(entity) = state.entity_mut(*entity_id) {
+            if let Some(npc) = entity.npc.as_mut() {
+                npc.economic_intent = intent.clone();
+            }
+        }
+    }
+
     // --- Guild updates ---
     if merged.guild_gold_delta != 0.0 {
         state.guild.gold += merged.guild_gold_delta;
