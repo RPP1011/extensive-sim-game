@@ -107,6 +107,63 @@ pub fn run_world_sim(args: WorldSimArgs) -> ExitCode {
         }
     }
 
+    // Behavior profile samples — show top tags for a few alive NPCs
+    let alive_npcs: Vec<&bevy_game::world_sim::state::Entity> = s.entities.iter()
+        .filter(|e| e.alive && e.kind == EntityKind::Npc && e.npc.is_some())
+        .take(10)
+        .collect();
+
+    if !alive_npcs.is_empty() {
+        println!("\n--- NPC behavior profiles (sample) ---");
+        // Build reverse tag lookup
+        use bevy_game::world_sim::state::tags;
+        let tag_names: &[(u32, &str)] = &[
+            (tags::MELEE, "melee"), (tags::RANGED, "ranged"), (tags::COMBAT, "combat"),
+            (tags::DEFENSE, "defense"), (tags::TACTICS, "tactics"), (tags::MINING, "mining"),
+            (tags::SMITHING, "smithing"), (tags::CRAFTING, "crafting"), (tags::ENCHANTMENT, "enchantment"),
+            (tags::ALCHEMY, "alchemy"), (tags::TRADE, "trade"), (tags::DIPLOMACY, "diplomacy"),
+            (tags::LEADERSHIP, "leadership"), (tags::NEGOTIATION, "negotiation"),
+            (tags::RESEARCH, "research"), (tags::LORE, "lore"), (tags::MEDICINE, "medicine"),
+            (tags::HERBALISM, "herbalism"), (tags::NAVIGATION, "navigation"),
+            (tags::ENDURANCE, "endurance"), (tags::RESILIENCE, "resilience"),
+            (tags::STEALTH, "stealth"), (tags::SURVIVAL, "survival"), (tags::AWARENESS, "awareness"),
+            (tags::FAITH, "faith"), (tags::RITUAL, "ritual"), (tags::LABOR, "labor"),
+            (tags::TEACHING, "teaching"), (tags::DISCIPLINE, "discipline"),
+            (tags::FARMING, "farming"), (tags::WOODWORK, "woodwork"), (tags::EXPLORATION, "exploration"),
+            (tags::DECEPTION, "deception"),
+        ];
+        let resolve_tag = |hash: u32| -> &str {
+            tag_names.iter().find(|(h, _)| *h == hash).map(|(_, n)| *n).unwrap_or("unknown")
+        };
+
+        for npc_entity in &alive_npcs {
+            let npc = npc_entity.npc.as_ref().unwrap();
+            let mut tag_pairs: Vec<(&str, f32)> = npc.behavior_tags.iter()
+                .zip(npc.behavior_values.iter())
+                .map(|(&h, &v)| (resolve_tag(h), v))
+                .filter(|(_, v)| *v > 0.0)
+                .collect();
+            tag_pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+            let top_tags: Vec<String> = tag_pairs.iter().take(5)
+                .map(|(name, val)| format!("{}:{:.0}", name, val))
+                .collect();
+
+            let classes: Vec<String> = npc.classes.iter()
+                .map(|c| format!("L{}", c.level))
+                .collect();
+
+            println!("  #{} ({}) lv{} xp:{} | tags: {} | classes: [{}]",
+                npc_entity.id,
+                if npc.archetype.is_empty() { "?" } else { &npc.archetype },
+                npc_entity.level,
+                npc.xp,
+                if top_tags.is_empty() { "none".to_string() } else { top_tags.join(", ") },
+                classes.join(", "),
+            );
+        }
+    }
+
     ExitCode::SUCCESS
 }
 

@@ -16,6 +16,8 @@
 
 use burn::nn::{
     Embedding, EmbeddingConfig, Linear, LinearConfig,
+    LayerNorm, LayerNormConfig, Dropout, DropoutConfig,
+    attention::{MultiHeadAttention, MultiHeadAttentionConfig, MhaInput, MhaCache},
     transformer::{
         TransformerDecoder, TransformerDecoderConfig, TransformerDecoderInput,
     },
@@ -218,18 +220,33 @@ impl<B: Backend> TreeDecoder<B> {
         // Build sequence incrementally: start with [START]
         let mut current_seq = Tensor::<B, 2, Int>::full([batch, 1], N_BINS as i64, &device);
 
+        // Pre-compute all embeddings we'll need (cheap, avoids repeated lookups)
+        let all_bin_ids: Vec<i64> = (0..=N_BINS as i64).collect();
+
+        // Cache: accumulated hidden states from previous steps [B, steps_so_far, D]
+        let mut cached_target: Option<Tensor<B, 3>> = None;
+
         for step in 0..GRAMMAR_DIM {
-            let slen = step + 1;
+            // Embed only the new token
+            let new_tok_id = if step == 0 {
+                Tensor::<B, 2, Int>::full([batch, 1], N_BINS as i64, &device) // START
+            } else {
+                current_seq.clone().slice([0..batch, step..step + 1])
+            };
+            let new_tok_emb = self.bin_emb.forward(new_tok_id);
+            let new_pos_id = Tensor::<B, 2, Int>::full([batch, 1], step as i64, &device);
+            let new_pos_emb = self.dim_emb.forward(new_pos_id);
+            let new_emb = new_tok_emb + new_pos_emb; // [B, 1, D]
 
-            // Embed full sequence + positions
-            let tok_emb = self.bin_emb.forward(current_seq.clone());
-            let pos_ids = Tensor::<B, 1, Int>::arange(0..slen as i64, &device)
-                .unsqueeze::<2>().expand([batch as i64, slen as i64]);
-            let pos_emb = self.dim_emb.forward(pos_ids);
-            let target_emb = tok_emb + pos_emb;
+            // Append to cached target sequence
+            let full_target = match cached_target {
+                Some(ref prev) => Tensor::cat(vec![prev.clone(), new_emb], 1),
+                None => new_emb,
+            };
+            cached_target = Some(full_target.clone());
 
-            // Decoder forward (full recompute — burn 0.20 KV cache is broken)
-            let dec_input = TransformerDecoderInput::new(target_emb, memory.clone());
+            // Run decoder on full accumulated sequence (no re-embedding, just re-attending)
+            let dec_input = TransformerDecoderInput::new(full_target, memory.clone());
             let decoded = self.decoder.forward(dec_input);
             let last = decoded.slice([0..batch, step..step + 1]).reshape([batch, D_MODEL]);
 
