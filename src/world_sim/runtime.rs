@@ -494,6 +494,9 @@ impl WorldSim {
             }
         }
 
+        // Campaign systems (all 122, each gated by its own cadence).
+        super::systems::compute_all_systems(&self.state, &mut self.delta_buf);
+
         let grid_start = Instant::now();
         for i in 0..self.state.grids.len() {
             compute_grid_deltas_into(&self.state.grids[i], &self.spatial, &mut self.delta_buf);
