@@ -52,42 +52,18 @@ pub fn compute_trade_goods(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
-    // --- Supply regeneration: each settlement's stockpile naturally regenerates ---
     for settlement in &state.settlements {
-        for c in 0..NUM_COMMODITIES {
-            // Natural regeneration scaled by population.
-            let regen = SUPPLY_REGEN_RATE * (settlement.population as f32 / 100.0).max(0.1);
-            out.push(WorldDelta::UpdateStockpile {
-                location_id: settlement.id,
-                commodity: c,
-                delta: regen,
-            });
-        }
-    }
-
-    // --- Price updates based on supply/demand ---
-    for settlement in &state.settlements {
-        let mut new_prices = [0.0f32; NUM_COMMODITIES];
-        for c in 0..NUM_COMMODITIES {
-            let supply = settlement.stockpile[c].max(MIN_SUPPLY);
-            // Demand estimate: higher price when supply is low relative to population.
-            let demand = (settlement.population as f32 * 0.01).max(0.5);
-            new_prices[c] = commodity_price(supply, demand);
-        }
-        out.push(WorldDelta::UpdatePrices {
-            location_id: settlement.id,
-            prices: new_prices,
-        });
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_trade_goods_for_settlement(state, settlement.id, &state.entities[range], out);
     }
 
     // --- Automated caravans: move goods between settlements for profit ---
-    // For each commodity, find cheapest source and most expensive destination.
+    // (Cross-settlement logic remains in the top-level function.)
     if state.settlements.len() < 2 {
         return;
     }
 
     for c in 0..NUM_COMMODITIES {
-        // Find settlement with most surplus (highest stockpile).
         let source = state
             .settlements
             .iter()
@@ -98,7 +74,6 @@ pub fn compute_trade_goods(state: &WorldState, out: &mut Vec<WorldDelta>) {
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
-        // Find settlement with highest price (most demand).
         let dest = state.settlements.iter().max_by(|a, b| {
             a.prices[c]
                 .partial_cmp(&b.prices[c])
@@ -111,20 +86,17 @@ pub fn compute_trade_goods(state: &WorldState, out: &mut Vec<WorldDelta>) {
             }
             let price_ratio = dst.prices[c] / src.prices[c].max(0.01);
             if price_ratio > CARAVAN_PROFIT_THRESHOLD {
-                // Remove goods from source stockpile.
                 out.push(WorldDelta::UpdateStockpile {
                     location_id: src.id,
                     commodity: c,
                     delta: -CARAVAN_AMOUNT,
                 });
-                // Add goods to destination (minus transit loss).
                 let delivered = CARAVAN_AMOUNT * (1.0 - TRANSIT_LOSS);
                 out.push(WorldDelta::UpdateStockpile {
                     location_id: dst.id,
                     commodity: c,
                     delta: delivered,
                 });
-                // Profit accrues to source settlement treasury.
                 let profit = (dst.prices[c] - src.prices[c]) * CARAVAN_AMOUNT * 0.1;
                 if profit > 0.0 {
                     out.push(WorldDelta::UpdateTreasury {
@@ -135,6 +107,47 @@ pub fn compute_trade_goods(state: &WorldState, out: &mut Vec<WorldDelta>) {
             }
         }
     }
+}
+
+/// Per-settlement variant for parallel dispatch.
+///
+/// Handles supply regeneration and price updates for a single settlement.
+pub fn compute_trade_goods_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    _entities: &[crate::world_sim::state::Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % TRADE_TICK_INTERVAL != 0 {
+        return;
+    }
+
+    let settlement = match state.settlement(settlement_id) {
+        Some(s) => s,
+        None => return,
+    };
+
+    // --- Supply regeneration ---
+    for c in 0..NUM_COMMODITIES {
+        let regen = SUPPLY_REGEN_RATE * (settlement.population as f32 / 100.0).max(0.1);
+        out.push(WorldDelta::UpdateStockpile {
+            location_id: settlement_id,
+            commodity: c,
+            delta: regen,
+        });
+    }
+
+    // --- Price updates based on supply/demand ---
+    let mut new_prices = [0.0f32; NUM_COMMODITIES];
+    for c in 0..NUM_COMMODITIES {
+        let supply = settlement.stockpile[c].max(MIN_SUPPLY);
+        let demand = (settlement.population as f32 * 0.01).max(0.5);
+        new_prices[c] = commodity_price(supply, demand);
+    }
+    out.push(WorldDelta::UpdatePrices {
+        location_id: settlement_id,
+        prices: new_prices,
+    });
 }
 
 #[cfg(test)]

@@ -31,70 +31,87 @@ const LAST_STAND_HEAL_FRACTION: f32 = 0.10;
 const LEVEL_VICTORY_BONUS: f32 = 0.005;
 
 pub fn compute_last_stand(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    // Last stand triggers are checked every tick during combat.
-    // We look for friendly NPCs that are near death on grids with hostiles.
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_last_stand_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
 
-    for grid in &state.grids {
-        if grid.fidelity != crate::world_sim::fidelity::Fidelity::High { continue; }
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_last_stand_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    _entities: &[crate::world_sim::state::Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    let grid_id = match state.settlement(settlement_id).and_then(|s| s.grid_id) {
+        Some(gid) => gid,
+        None => return,
+    };
+    let grid = match state.grid(grid_id) {
+        Some(g) => g,
+        None => return,
+    };
 
-        let mut hostile_ids = [0u32; 64];
-        let mut hc = 0usize;
-        let mut hero_ids = [0u32; 64];
-        let mut hero_atk = [0.0f32; 64];
-        let mut hero_maxhp = [0.0f32; 64];
-        let mut hrc = 0usize;
+    if grid.fidelity != crate::world_sim::fidelity::Fidelity::High { return; }
 
-        for &eid in &grid.entity_ids {
-            if let Some(e) = state.entity(eid) {
-                if !e.alive || e.hp <= 0.0 { continue; }
-                if e.kind == EntityKind::Monster && hc < 64 {
-                    hostile_ids[hc] = eid; hc += 1;
-                } else if e.kind == EntityKind::Npc && e.team == WorldTeam::Friendly
-                    && e.max_hp > 0.0 && (e.hp / e.max_hp) <= LAST_STAND_HP_THRESHOLD
-                    && hrc < 64
-                {
-                    hero_ids[hrc] = eid;
-                    hero_atk[hrc] = e.attack_damage;
-                    hero_maxhp[hrc] = e.max_hp;
-                    hrc += 1;
-                }
+    let mut hostile_ids = [0u32; 64];
+    let mut hc = 0usize;
+    let mut hero_ids = [0u32; 64];
+    let mut hero_atk = [0.0f32; 64];
+    let mut hero_maxhp = [0.0f32; 64];
+    let mut hrc = 0usize;
+
+    for &eid in &grid.entity_ids {
+        if let Some(e) = state.entity(eid) {
+            if !e.alive || e.hp <= 0.0 { continue; }
+            if e.kind == EntityKind::Monster && hc < 64 {
+                hostile_ids[hc] = eid; hc += 1;
+            } else if e.kind == EntityKind::Npc && e.team == WorldTeam::Friendly
+                && e.max_hp > 0.0 && (e.hp / e.max_hp) <= LAST_STAND_HP_THRESHOLD
+                && hrc < 64
+            {
+                hero_ids[hrc] = eid;
+                hero_atk[hrc] = e.attack_damage;
+                hero_maxhp[hrc] = e.max_hp;
+                hrc += 1;
+            }
+        }
+    }
+
+    if hc == 0 || hrc == 0 { return; }
+
+    for hi in 0..hrc {
+        let hero_id = hero_ids[hi];
+        let burst_damage = hero_atk[hi] * LAST_STAND_DAMAGE_MULT;
+        let dmg_per_hostile = burst_damage / hc as f32;
+
+        for i in 0..hc {
+            if dmg_per_hostile > 0.0 {
+                out.push(WorldDelta::Damage {
+                    target_id: hostile_ids[i],
+                    amount: dmg_per_hostile,
+                    source_id: hero_id,
+                });
             }
         }
 
-        if hc == 0 || hrc == 0 { continue; }
+        let heal_amount = hero_maxhp[hi] * LAST_STAND_HEAL_FRACTION;
+        if heal_amount > 0.0 {
+            out.push(WorldDelta::Heal {
+                target_id: hero_id,
+                amount: heal_amount,
+                source_id: hero_id,
+            });
+        }
 
-        for hi in 0..hrc {
-            let hero_id = hero_ids[hi];
-            let burst_damage = hero_atk[hi] * LAST_STAND_DAMAGE_MULT;
-            let dmg_per_hostile = burst_damage / hc as f32;
-
-            for i in 0..hc {
-                if dmg_per_hostile > 0.0 {
-                    out.push(WorldDelta::Damage {
-                        target_id: hostile_ids[i],
-                        amount: dmg_per_hostile,
-                        source_id: hero_id,
-                    });
-                }
-            }
-
-            let heal_amount = hero_maxhp[hi] * LAST_STAND_HEAL_FRACTION;
-            if heal_amount > 0.0 {
-                out.push(WorldDelta::Heal {
-                    target_id: hero_id,
-                    amount: heal_amount,
-                    source_id: hero_id,
-                });
-            }
-
-            let shield_amount = hero_maxhp[hi] * 0.05;
-            if shield_amount > 0.0 {
-                out.push(WorldDelta::Shield {
-                    target_id: hero_id,
-                    amount: shield_amount,
-                    source_id: hero_id,
-                });
-            }
+        let shield_amount = hero_maxhp[hi] * 0.05;
+        if shield_amount > 0.0 {
+            out.push(WorldDelta::Shield {
+                target_id: hero_id,
+                amount: shield_amount,
+                source_id: hero_id,
+            });
         }
     }
 }

@@ -10,7 +10,7 @@
 //! NEEDS DELTA: ApplyFatigueAndMorale { entity_id, fatigue_delta, morale_delta }
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, WorldState};
+use crate::world_sim::state::{Entity, EntityKind, WorldState};
 
 /// How often the food system ticks.
 const FOOD_TICK_INTERVAL: u64 = 3;
@@ -31,55 +31,12 @@ pub fn compute_food(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
     // For each settlement, count resident NPCs and consume food from stockpile.
     for settlement in &state.settlements {
-        // Count alive NPCs at this settlement using the group index.
-        let mut resident_count = 0u32;
-        let mut resident_ids = Vec::new();
         let range = state.group_index.settlement_entities(settlement.id);
-        for entity in &state.entities[range] {
-            if entity.kind != EntityKind::Npc || !entity.alive {
-                continue;
-            }
-            if entity.npc.is_none() {
-                continue;
-            }
-            resident_count += 1;
-            resident_ids.push(entity.id);
-        }
-
-        if resident_count == 0 {
-            continue;
-        }
-
-        let food_needed = FOOD_PER_NPC * resident_count as f32;
-        let food_available = settlement.stockpile[COMMODITY_FOOD];
-
-        // Consume food from settlement stockpile.
-        let consumed = food_needed.min(food_available);
-        if consumed > 0.0 {
-            out.push(WorldDelta::ConsumeCommodity {
-                location_id: settlement.id,
-                commodity: COMMODITY_FOOD,
-                amount: consumed,
-            });
-        }
-
-        // If food was insufficient, apply starvation damage to residents.
-        let shortfall = food_needed - consumed;
-        if shortfall > 0.0 {
-            // Damage proportional to shortfall ratio.
-            let severity = (shortfall / food_needed).clamp(0.0, 1.0);
-            let damage = STARVATION_DAMAGE * severity;
-            for &npc_id in &resident_ids {
-                out.push(WorldDelta::Damage {
-                    target_id: npc_id,
-                    amount: damage,
-                    source_id: 0, // environmental
-                });
-            }
-        }
+        compute_food_for_settlement(state, settlement.id, &state.entities[range], out);
     }
 
     // Traveling NPCs (not at any settlement) consume carried food.
+    // NOTE: this loop is not settlement-scoped and remains in the top-level function.
     for entity in &state.entities {
         if entity.kind != EntityKind::Npc || !entity.alive {
             continue;
@@ -112,6 +69,69 @@ pub fn compute_food(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 target_id: entity.id,
                 amount: STARVATION_DAMAGE * severity,
                 source_id: 0,
+            });
+        }
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_food_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % FOOD_TICK_INTERVAL != 0 {
+        return;
+    }
+
+    let settlement = match state.settlement(settlement_id) {
+        Some(s) => s,
+        None => return,
+    };
+
+    // Count alive NPCs in the provided entity slice.
+    let mut resident_count = 0u32;
+    let mut resident_ids = Vec::new();
+    for entity in entities {
+        if entity.kind != EntityKind::Npc || !entity.alive {
+            continue;
+        }
+        if entity.npc.is_none() {
+            continue;
+        }
+        resident_count += 1;
+        resident_ids.push(entity.id);
+    }
+
+    if resident_count == 0 {
+        return;
+    }
+
+    let food_needed = FOOD_PER_NPC * resident_count as f32;
+    let food_available = settlement.stockpile[COMMODITY_FOOD];
+
+    // Consume food from settlement stockpile.
+    let consumed = food_needed.min(food_available);
+    if consumed > 0.0 {
+        out.push(WorldDelta::ConsumeCommodity {
+            location_id: settlement_id,
+            commodity: COMMODITY_FOOD,
+            amount: consumed,
+        });
+    }
+
+    // If food was insufficient, apply starvation damage to residents.
+    let shortfall = food_needed - consumed;
+    if shortfall > 0.0 {
+        // Damage proportional to shortfall ratio.
+        let severity = (shortfall / food_needed).clamp(0.0, 1.0);
+        let damage = STARVATION_DAMAGE * severity;
+        for &npc_id in &resident_ids {
+            out.push(WorldDelta::Damage {
+                target_id: npc_id,
+                amount: damage,
+                source_id: 0, // environmental
             });
         }
     }

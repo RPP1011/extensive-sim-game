@@ -31,65 +31,87 @@ const VICTORY_PARTY_DAMAGE: f32 = 0.3;
 const DEFEAT_ENEMY_DAMAGE: f32 = 0.7;
 
 pub fn compute_battles(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    // For each entity pair on the same grid with opposing teams, resolve combat
-    // by emitting Damage/Die deltas.
-    //
-    // In the full migration this would iterate `state.active_battles`, but since
-    // that field does not yet exist on WorldState we operate on grid-level proximity:
-    // any hostile+friendly pair sharing a grid exchanges damage.
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_battles_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
 
-    for grid in &state.grids {
-        // Only process High-fidelity grids (combat already happening).
-        if grid.fidelity != crate::world_sim::fidelity::Fidelity::High {
-            continue;
-        }
+/// Per-settlement variant for parallel dispatch.
+///
+/// Finds the grid associated with this settlement and processes combat on it.
+pub fn compute_battles_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    _entities: &[crate::world_sim::state::Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    let grid_id = match state.settlement(settlement_id).and_then(|s| s.grid_id) {
+        Some(gid) => gid,
+        None => return,
+    };
+    let grid = match state.grid(grid_id) {
+        Some(g) => g,
+        None => return,
+    };
+    compute_battles_for_grid(state, grid, out);
+}
 
-        // Count friendlies/hostiles without allocating.
-        let mut friendly_ids = [0u32; 64];
-        let mut hostile_ids = [0u32; 64];
-        let mut fc = 0usize;
-        let mut hc = 0usize;
+fn compute_battles_for_grid(
+    state: &WorldState,
+    grid: &crate::world_sim::state::LocalGrid,
+    out: &mut Vec<WorldDelta>,
+) {
+    // Only process High-fidelity grids (combat already happening).
+    if grid.fidelity != crate::world_sim::fidelity::Fidelity::High {
+        return;
+    }
 
-        for &eid in &grid.entity_ids {
-            if let Some(e) = state.entity(eid) {
-                if !e.alive { continue; }
-                match e.team {
-                    crate::world_sim::state::WorldTeam::Friendly => {
-                        if fc < 64 { friendly_ids[fc] = eid; fc += 1; }
-                    }
-                    crate::world_sim::state::WorldTeam::Hostile => {
-                        if hc < 64 { hostile_ids[hc] = eid; hc += 1; }
-                    }
-                    _ => {}
+    // Count friendlies/hostiles without allocating.
+    let mut friendly_ids = [0u32; 64];
+    let mut hostile_ids = [0u32; 64];
+    let mut fc = 0usize;
+    let mut hc = 0usize;
+
+    for &eid in &grid.entity_ids {
+        if let Some(e) = state.entity(eid) {
+            if !e.alive { continue; }
+            match e.team {
+                crate::world_sim::state::WorldTeam::Friendly => {
+                    if fc < 64 { friendly_ids[fc] = eid; fc += 1; }
                 }
+                crate::world_sim::state::WorldTeam::Hostile => {
+                    if hc < 64 { hostile_ids[hc] = eid; hc += 1; }
+                }
+                _ => {}
             }
         }
+    }
 
-        if fc == 0 || hc == 0 { continue; }
+    if fc == 0 || hc == 0 { return; }
 
-        let friendlies = &friendly_ids[..fc];
-        let hostiles = &hostile_ids[..hc];
+    let friendlies = &friendly_ids[..fc];
+    let hostiles = &hostile_ids[..hc];
 
-        // Hostiles attack friendlies
-        let fcount = fc as f32;
-        let hcount = hc as f32;
-        for &hid in hostiles {
-            let atk = state.entity(hid).map(|e| e.attack_damage).unwrap_or(0.0);
-            let dmg_each = atk / fcount;
-            if dmg_each > 0.0 {
-                for &fid in friendlies {
-                    out.push(WorldDelta::Damage { target_id: fid, amount: dmg_each, source_id: hid });
-                }
+    // Hostiles attack friendlies
+    let fcount = fc as f32;
+    let hcount = hc as f32;
+    for &hid in hostiles {
+        let atk = state.entity(hid).map(|e| e.attack_damage).unwrap_or(0.0);
+        let dmg_each = atk / fcount;
+        if dmg_each > 0.0 {
+            for &fid in friendlies {
+                out.push(WorldDelta::Damage { target_id: fid, amount: dmg_each, source_id: hid });
             }
         }
-        // Friendlies attack hostiles
-        for &fid in friendlies {
-            let atk = state.entity(fid).map(|e| e.attack_damage).unwrap_or(0.0);
-            let dmg_each = atk / hcount;
-            if dmg_each > 0.0 {
-                for &hid in hostiles {
-                    out.push(WorldDelta::Damage { target_id: hid, amount: dmg_each, source_id: fid });
-                }
+    }
+    // Friendlies attack hostiles
+    for &fid in friendlies {
+        let atk = state.entity(fid).map(|e| e.attack_damage).unwrap_or(0.0);
+        let dmg_each = atk / hcount;
+        if dmg_each > 0.0 {
+            for &hid in hostiles {
+                out.push(WorldDelta::Damage { target_id: hid, amount: dmg_each, source_id: fid });
             }
         }
     }

@@ -9,7 +9,7 @@
 //! Cadence: every 7 ticks (skips tick 0).
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{Entity, WorldState};
 
 // NEEDS STATE: deeds: Vec<LegendaryDeed> on Entity/NpcData
 //   LegendaryDeed { title, earned_at_tick, deed_type: DeedType, bonus: DeedBonus }
@@ -44,36 +44,50 @@ pub fn compute_legendary_deeds(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
-        for entity in &state.entities[range] {
-            if !entity.alive || entity.npc.is_none() {
-                continue;
-            }
+        compute_legendary_deeds_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
 
-            // NEEDS STATE: read entity history_tags and existing deeds
-            //
-            // kill_count > 10 && !has_deed(Slayer):
-            //   out.push(WorldDelta::GrantDeed { entity_id, Slayer, "Slayer", CombatPowerBoost(0.05) })
-            //
-            // diplo_count > 5 && !has_deed(Peacemaker):
-            //   out.push(WorldDelta::GrantDeed { ..., Peacemaker, FactionRelationBoost(10.0) })
-            //
-            // explore_count > 8 && !has_deed(Explorer):
-            //   out.push(WorldDelta::GrantDeed { ..., Explorer, QuestRewardBoost(0.15) })
-            //
-            // near_death > 3 && !has_deed(Survivor):
-            //   out.push(WorldDelta::GrantDeed { ..., Survivor, MoraleAura(0.10) })
-            //
-            // quest_count > 15 && !has_deed(Wealthy):
-            //   out.push(WorldDelta::GrantDeed { ..., "Legendary", QuestRewardBoost(0.20) })
-            //
-            // solo_count > 5 && !has_deed(Undefeated):
-            //   out.push(WorldDelta::GrantDeed { ..., "Lone Wolf", CombatPowerBoost(0.10) })
-            //
-            // defense_count > 5 && !has_deed(Defender):
-            //   out.push(WorldDelta::GrantDeed { ..., "Shield of the Realm", RecruitmentBoost(0.10) })
-            //
-            // rescue_count > 5 && !has_deed(Savior):
-            //   out.push(WorldDelta::GrantDeed { ..., "Savior", FactionRelationBoost(5.0) })
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_legendary_deeds_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % DEED_TICK_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
+    for entity in entities {
+        if !entity.alive || entity.npc.is_none() {
+            continue;
         }
+
+        // NEEDS STATE: read entity history_tags and existing deeds
+        //
+        // kill_count > 10 && !has_deed(Slayer):
+        //   out.push(WorldDelta::GrantDeed { entity_id, Slayer, "Slayer", CombatPowerBoost(0.05) })
+        //
+        // diplo_count > 5 && !has_deed(Peacemaker):
+        //   out.push(WorldDelta::GrantDeed { ..., Peacemaker, FactionRelationBoost(10.0) })
+        //
+        // explore_count > 8 && !has_deed(Explorer):
+        //   out.push(WorldDelta::GrantDeed { ..., Explorer, QuestRewardBoost(0.15) })
+        //
+        // near_death > 3 && !has_deed(Survivor):
+        //   out.push(WorldDelta::GrantDeed { ..., Survivor, MoraleAura(0.10) })
+        //
+        // quest_count > 15 && !has_deed(Wealthy):
+        //   out.push(WorldDelta::GrantDeed { ..., "Legendary", QuestRewardBoost(0.20) })
+        //
+        // solo_count > 5 && !has_deed(Undefeated):
+        //   out.push(WorldDelta::GrantDeed { ..., "Lone Wolf", CombatPowerBoost(0.10) })
+        //
+        // defense_count > 5 && !has_deed(Defender):
+        //   out.push(WorldDelta::GrantDeed { ..., "Shield of the Realm", RecruitmentBoost(0.10) })
+        //
+        // rescue_count > 5 && !has_deed(Savior):
+        //   out.push(WorldDelta::GrantDeed { ..., "Savior", FactionRelationBoost(5.0) })
     }
 }

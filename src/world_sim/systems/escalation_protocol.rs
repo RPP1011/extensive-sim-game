@@ -42,70 +42,85 @@ pub fn compute_escalation_protocol(state: &WorldState, out: &mut Vec<WorldDelta>
         return;
     }
 
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_escalation_protocol_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+///
+/// Evaluates escalation for this settlement based on nearby region threat levels.
+pub fn compute_escalation_protocol_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    _entities: &[crate::world_sim::state::Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % ESCALATION_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
     if state.regions.is_empty() {
         return;
     }
 
-    // Without per-faction patrol_losses tracking on WorldState, we approximate
-    // escalation by looking at the density of dead hostile entities near
-    // settlements and comparing to region threat levels.
+    let settlement = match state.settlement(settlement_id) {
+        Some(s) => s,
+        None => return,
+    };
+
+    // Count dead/alive hostile entities globally (proxy for recent kills).
+    let dead_hostiles = state
+        .entities
+        .iter()
+        .filter(|e| !e.alive && e.team == WorldTeam::Hostile && e.kind == EntityKind::Monster)
+        .count();
+
+    let alive_hostiles_nearby = state
+        .entities
+        .iter()
+        .filter(|e| e.alive && e.team == WorldTeam::Hostile && e.kind == EntityKind::Monster)
+        .count();
 
     for (ri, region) in state.regions.iter().enumerate() {
-        // Count dead hostile entities near this region (proxy for recent kills).
-        let dead_hostiles = state
-            .entities
-            .iter()
-            .filter(|e| !e.alive && e.team == WorldTeam::Hostile && e.kind == EntityKind::Monster)
-            .count();
+        if region.threat_level <= ESCALATION_THREAT_THRESHOLD {
+            continue;
+        }
 
-        // Count alive hostile entities (to know if there's active combat).
-        let alive_hostiles_nearby = state
-            .entities
-            .iter()
-            .filter(|e| e.alive && e.team == WorldTeam::Hostile && e.kind == EntityKind::Monster)
-            .count();
+        let dx = settlement.pos.0 - (ri as f32 * 20.0);
+        let dy = settlement.pos.1 - (ri as f32 * 15.0);
+        if dx * dx + dy * dy >= 400.0 {
+            continue;
+        }
 
-        if region.threat_level > ESCALATION_THREAT_THRESHOLD {
-            if dead_hostiles > alive_hostiles_nearby && alive_hostiles_nearby > 0 {
-                // Player is winning — escalate: request fidelity upgrade for grids
-                // in this region so higher-fidelity combat can spawn.
-                for grid in &state.grids {
-                    let dx = grid.center.0 - (ri as f32 * 20.0);
-                    let dy = grid.center.1 - (ri as f32 * 15.0);
-                    if dx * dx + dy * dy < 400.0 {
-                        if grid.fidelity != Fidelity::High {
-                            out.push(WorldDelta::EscalateFidelity {
-                                grid_id: grid.id,
-                                new_fidelity: Fidelity::High,
-                            });
-                        }
-                    }
-                }
-
-                // Boost nearby settlements' stockpile drain (war exhaustion).
-                for settlement in &state.settlements {
-                    let dx = settlement.pos.0 - (ri as f32 * 20.0);
-                    let dy = settlement.pos.1 - (ri as f32 * 15.0);
-                    if dx * dx + dy * dy < 400.0 {
-                        out.push(WorldDelta::UpdateTreasury {
-                            location_id: settlement.id,
-                            delta: -ESCALATION_RATE,
+        if dead_hostiles > alive_hostiles_nearby && alive_hostiles_nearby > 0 {
+            // Player is winning — escalate grid fidelity.
+            if let Some(grid_id) = settlement.grid_id {
+                if let Some(grid) = state.grid(grid_id) {
+                    if grid.fidelity != Fidelity::High {
+                        out.push(WorldDelta::EscalateFidelity {
+                            grid_id,
+                            new_fidelity: Fidelity::High,
                         });
                     }
                 }
-            } else if dead_hostiles == 0 {
-                // No recent kills — de-escalate.
-                // Lower fidelity if no active combat in grids.
-                for grid in &state.grids {
-                    let dx = grid.center.0 - (ri as f32 * 20.0);
-                    let dy = grid.center.1 - (ri as f32 * 15.0);
-                    if dx * dx + dy * dy < 400.0 {
-                        if grid.fidelity == Fidelity::High && grid.fidelity != crate::world_sim::fidelity::Fidelity::High {
-                            out.push(WorldDelta::EscalateFidelity {
-                                grid_id: grid.id,
-                                new_fidelity: Fidelity::Medium,
-                            });
-                        }
+            }
+
+            // War exhaustion treasury drain.
+            out.push(WorldDelta::UpdateTreasury {
+                location_id: settlement_id,
+                delta: -ESCALATION_RATE,
+            });
+        } else if dead_hostiles == 0 {
+            // De-escalate.
+            if let Some(grid_id) = settlement.grid_id {
+                if let Some(grid) = state.grid(grid_id) {
+                    if grid.fidelity == Fidelity::High {
+                        out.push(WorldDelta::EscalateFidelity {
+                            grid_id,
+                            new_fidelity: Fidelity::Medium,
+                        });
                     }
                 }
             }

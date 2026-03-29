@@ -13,8 +13,20 @@ use crate::world_sim::state::WorldState;
 const DT_MS: u32 = 1000;
 
 pub fn compute_cooldowns(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    // Tick cooldowns for every living entity, every tick.
-    for entity in &state.entities {
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_cooldowns_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_cooldowns_for_settlement(
+    _state: &WorldState,
+    _settlement_id: u32,
+    entities: &[super::super::state::Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    for entity in entities {
         if !entity.alive {
             continue;
         }

@@ -27,17 +27,32 @@ pub fn compute_buildings(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
-    // Without per-settlement building tiers, we approximate:
-    // Settlements with high treasury automatically spend on upgrades,
-    // reducing treasury in exchange for infrastructure (passive bonuses
-    // would be read by other systems).
-
     for settlement in &state.settlements {
-        if settlement.treasury >= UPGRADE_TREASURY_THRESHOLD {
-            out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
-                delta: -UPGRADE_COST,
-            });
-        }
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_buildings_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_buildings_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    _entities: &[crate::world_sim::state::Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % BUILDING_TICK_INTERVAL != 0 {
+        return;
+    }
+
+    let settlement = match state.settlement(settlement_id) {
+        Some(s) => s,
+        None => return,
+    };
+
+    if settlement.treasury >= UPGRADE_TREASURY_THRESHOLD {
+        out.push(WorldDelta::UpdateTreasury {
+            location_id: settlement_id,
+            delta: -UPGRADE_COST,
+        });
     }
 }

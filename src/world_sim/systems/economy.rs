@@ -15,7 +15,7 @@
 //! NEEDS DELTA: ApplyFatigueAndMorale { entity_id, fatigue_delta, morale_delta }
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, WorldState};
+use crate::world_sim::state::{Entity, EntityKind, WorldState};
 
 /// Passive gold income per tick for each guild-controlled settlement.
 const PASSIVE_INCOME_PER_TICK: f32 = 0.5;
@@ -34,49 +34,9 @@ const THREAT_REWARD_RATE: f32 = 0.01;
 const GUILD_ENTITY_ID: u32 = 0;
 
 pub fn compute_economy(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    // --- Passive income: each settlement produces treasury ---
-    for settlement in &state.settlements {
-        // Passive income proportional to population
-        let income = PASSIVE_INCOME_PER_TICK * (settlement.population as f32).max(1.0).sqrt();
-        if income > 0.0 {
-            out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
-                delta: income,
-            });
-        }
-    }
-
-    // --- Equipment maintenance / upkeep: each living NPC drains from home settlement ---
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
-        for entity in &state.entities[range] {
-            if entity.kind != EntityKind::Npc || !entity.alive {
-                continue;
-            }
-            let npc = match &entity.npc {
-                Some(n) => n,
-                None => continue,
-            };
-            out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
-                delta: -MAINTENANCE_PER_NPC,
-            });
-        }
-    }
-
-    // --- Trade income: settlements with positive stockpile generate gold ---
-    for settlement in &state.settlements {
-        // Trade income = population * trade rate, reduced by low stockpile
-        let avg_stockpile: f32 =
-            settlement.stockpile.iter().sum::<f32>() / settlement.stockpile.len() as f32;
-        let stability = (avg_stockpile / 10.0).clamp(0.0, 1.0);
-        let trade_income = settlement.population as f32 * TRADE_INCOME_PER_POP * stability;
-        if trade_income > 0.0 {
-            out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
-                delta: trade_income,
-            });
-        }
+        compute_economy_for_settlement(state, settlement.id, &state.entities[range], out);
     }
 
     // --- Threat reward bonus: regions with high threat yield bonus gold to nearest settlement ---
@@ -91,6 +51,65 @@ pub fn compute_economy(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 });
             }
         }
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_economy_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    let settlement = match state.settlement(settlement_id) {
+        Some(s) => s,
+        None => return,
+    };
+
+    // --- Passive income: settlement produces treasury ---
+    let income = PASSIVE_INCOME_PER_TICK * (settlement.population as f32).max(1.0).sqrt();
+    if income > 0.0 {
+        out.push(WorldDelta::UpdateTreasury {
+            location_id: settlement_id,
+            delta: income,
+        });
+    }
+
+    // --- Equipment maintenance / upkeep ---
+    compute_economy_maintenance_for_settlement(state, settlement_id, entities, out);
+
+    // --- Trade income: settlement with positive stockpile generates gold ---
+    let avg_stockpile: f32 =
+        settlement.stockpile.iter().sum::<f32>() / settlement.stockpile.len() as f32;
+    let stability = (avg_stockpile / 10.0).clamp(0.0, 1.0);
+    let trade_income = settlement.population as f32 * TRADE_INCOME_PER_POP * stability;
+    if trade_income > 0.0 {
+        out.push(WorldDelta::UpdateTreasury {
+            location_id: settlement_id,
+            delta: trade_income,
+        });
+    }
+}
+
+/// Per-settlement variant for parallel dispatch (maintenance upkeep).
+pub fn compute_economy_maintenance_for_settlement(
+    _state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    for entity in entities {
+        if entity.kind != EntityKind::Npc || !entity.alive {
+            continue;
+        }
+        let _npc = match &entity.npc {
+            Some(n) => n,
+            None => continue,
+        };
+        out.push(WorldDelta::UpdateTreasury {
+            location_id: settlement_id,
+            delta: -MAINTENANCE_PER_NPC,
+        });
     }
 }
 

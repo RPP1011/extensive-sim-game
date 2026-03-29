@@ -27,67 +27,80 @@ const GOLD_PER_THREAT: f32 = 2.0;
 const GOODS_PER_THREAT: f32 = 0.5;
 
 pub fn compute_loot(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    // --- Monster kill loot ---
-    // When a monster dies (hp <= 0, team == Hostile), nearby friendly entities
-    // receive gold and goods drops scaled by the monster's level.
-    //
-    // We check for monsters that are about to die this tick by looking at
-    // their current HP. The battles system emits Die deltas, but since
-    // all systems read the same frozen snapshot, we detect "near death"
-    // monsters (hp <= 0 or hp very low relative to incoming damage).
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_loot_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
 
-    for grid in &state.grids {
-        if grid.fidelity != crate::world_sim::fidelity::Fidelity::High { continue; }
+/// Per-settlement variant for parallel dispatch.
+///
+/// Finds the grid associated with this settlement and processes loot on it.
+pub fn compute_loot_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    _entities: &[crate::world_sim::state::Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    let grid_id = match state.settlement(settlement_id).and_then(|s| s.grid_id) {
+        Some(gid) => gid,
+        None => return,
+    };
+    let grid = match state.grid(grid_id) {
+        Some(g) => g,
+        None => return,
+    };
 
-        // Count dying monsters and friendlies without allocating.
-        let mut dying_ids = [0u32; 32];
-        let mut dying_levels = [0u32; 32];
-        let mut dc = 0usize;
-        let mut friendly_ids = [0u32; 64];
-        let mut fc = 0usize;
+    if grid.fidelity != crate::world_sim::fidelity::Fidelity::High { return; }
 
-        for &eid in &grid.entity_ids {
-            if let Some(e) = state.entity(eid) {
-                if !e.alive { continue; }
-                if e.kind == EntityKind::Monster && e.hp <= 0.0 && dc < 32 {
-                    dying_ids[dc] = eid;
-                    dying_levels[dc] = e.level;
-                    dc += 1;
-                } else if e.kind == EntityKind::Npc && e.team == WorldTeam::Friendly && fc < 64 {
-                    friendly_ids[fc] = eid;
-                    fc += 1;
-                }
+    // Count dying monsters and friendlies without allocating.
+    let mut dying_ids = [0u32; 32];
+    let mut dying_levels = [0u32; 32];
+    let mut dc = 0usize;
+    let mut friendly_ids = [0u32; 64];
+    let mut fc = 0usize;
+
+    for &eid in &grid.entity_ids {
+        if let Some(e) = state.entity(eid) {
+            if !e.alive { continue; }
+            if e.kind == EntityKind::Monster && e.hp <= 0.0 && dc < 32 {
+                dying_ids[dc] = eid;
+                dying_levels[dc] = e.level;
+                dc += 1;
+            } else if e.kind == EntityKind::Npc && e.team == WorldTeam::Friendly && fc < 64 {
+                friendly_ids[fc] = eid;
+                fc += 1;
+            }
+        }
+    }
+
+    if dc == 0 || fc == 0 { return; }
+
+    for di in 0..dc {
+        let monster_id = dying_ids[di];
+        let threat = dying_levels[di] as f32;
+        let total_gold = threat * GOLD_PER_THREAT;
+        let gold_each = total_gold / fc as f32;
+
+        for fi in 0..fc {
+            if gold_each > 0.0 {
+                out.push(WorldDelta::TransferGold {
+                    from_id: monster_id,
+                    to_id: friendly_ids[fi],
+                    amount: gold_each,
+                });
             }
         }
 
-        if dc == 0 || fc == 0 { continue; }
-
-        for di in 0..dc {
-            let monster_id = dying_ids[di];
-            let threat = dying_levels[di] as f32;
-            let total_gold = threat * GOLD_PER_THREAT;
-            let gold_each = total_gold / fc as f32;
-
-            for fi in 0..fc {
-                if gold_each > 0.0 {
-                    out.push(WorldDelta::TransferGold {
-                        from_id: monster_id,
-                        to_id: friendly_ids[fi],
-                        amount: gold_each,
-                    });
-                }
-            }
-
-            // Goods (treasure) reward to the first friendly (no alloc nearest search)
-            let goods_amount = threat * GOODS_PER_THREAT;
-            if goods_amount > 0.0 && fc > 0 {
-                out.push(WorldDelta::TransferGoods {
-                    from_id: monster_id,
-                    to_id: friendly_ids[0],
-                    commodity: LOOT_COMMODITY,
-                    amount: goods_amount,
-                });
-            }
+        // Goods (treasure) reward to the first friendly (no alloc nearest search)
+        let goods_amount = threat * GOODS_PER_THREAT;
+        if goods_amount > 0.0 && fc > 0 {
+            out.push(WorldDelta::TransferGoods {
+                from_id: monster_id,
+                to_id: friendly_ids[0],
+                commodity: LOOT_COMMODITY,
+                amount: goods_amount,
+            });
         }
     }
 

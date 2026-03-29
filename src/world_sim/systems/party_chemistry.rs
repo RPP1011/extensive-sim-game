@@ -11,7 +11,7 @@
 //! NEEDS DELTA: ModifyChemistry
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, StatusEffect, StatusEffectKind, WorldState};
+use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
 
 /// Chemistry tick interval.
 const CHEMISTRY_INTERVAL: u64 = 7;
@@ -27,48 +27,52 @@ pub fn compute_party_chemistry(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
-    // For each grid with multiple friendly NPCs, apply a chemistry buff
-    // to all NPCs in that grid.
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_party_chemistry_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
 
-    for grid in &state.grids {
-        let npc_ids: Vec<u32> = grid
-            .entity_ids
-            .iter()
-            .copied()
-            .filter(|&id| {
-                state
-                    .entity(id)
-                    .map(|e| e.alive && e.kind == EntityKind::Npc)
-                    .unwrap_or(false)
-            })
-            .collect();
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_party_chemistry_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % CHEMISTRY_INTERVAL != 0 {
+        return;
+    }
 
-        if npc_ids.len() < 2 {
+    // For settlements with multiple friendly NPCs, apply a chemistry buff.
+    let npc_entities: Vec<&Entity> = entities
+        .iter()
+        .filter(|e| e.alive && e.kind == EntityKind::Npc)
+        .collect();
+
+    if npc_entities.len() < 2 {
+        return;
+    }
+
+    for entity in &npc_entities {
+        // Don't stack if already buffed
+        let already_buffed = entity.status_effects.iter().any(|s| {
+            matches!(&s.kind, StatusEffectKind::Buff { stat, .. } if stat == "chemistry")
+        });
+        if already_buffed {
             continue;
         }
 
-        for &npc_id in &npc_ids {
-            // Don't stack if already buffed
-            let already_buffed = state.entity(npc_id).map_or(true, |e| {
-                e.status_effects.iter().any(|s| {
-                    matches!(&s.kind, StatusEffectKind::Buff { stat, .. } if stat == "chemistry")
-                })
-            });
-            if already_buffed {
-                continue;
-            }
-
-            out.push(WorldDelta::ApplyStatus {
-                target_id: npc_id,
-                status: StatusEffect {
-                    kind: StatusEffectKind::Buff {
-                        stat: "chemistry".to_string(),
-                        factor: CHEMISTRY_BUFF_FACTOR,
-                    },
-                    source_id: npc_id,
-                    remaining_ms: CHEMISTRY_BUFF_MS,
+        out.push(WorldDelta::ApplyStatus {
+            target_id: entity.id,
+            status: StatusEffect {
+                kind: StatusEffectKind::Buff {
+                    stat: "chemistry".to_string(),
+                    factor: CHEMISTRY_BUFF_FACTOR,
                 },
-            });
-        }
+                source_id: entity.id,
+                remaining_ms: CHEMISTRY_BUFF_MS,
+            },
+        });
     }
 }

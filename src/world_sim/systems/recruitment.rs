@@ -9,7 +9,7 @@
 //! Original: `crates/headless_campaign/src/systems/recruitment.rs`
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, WorldState};
+use crate::world_sim::state::{Entity, EntityKind, WorldState};
 
 // NEEDS STATE: guild_reputation: f32 on WorldState (or per-settlement reputation)
 // NEEDS STATE: max_adventurers: usize on WorldState (population cap)
@@ -63,73 +63,71 @@ pub fn compute_recruitment(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     for settlement in &state.settlements {
-        // Count alive NPCs with home_settlement_id matching this settlement.
-        let npc_count = state
-            .entities
-            .iter()
-            .filter(|e| {
-                e.alive
-                    && e.kind == EntityKind::Npc
-                    && e.npc
-                        .as_ref()
-                        .map(|n| n.home_settlement_id == Some(settlement.id))
-                        .unwrap_or(false)
-            })
-            .count();
-
-        if npc_count >= MAX_NPCS_PER_SETTLEMENT {
-            continue;
-        }
-
-        if settlement.treasury < RECRUIT_COST {
-            continue;
-        }
-
-        // Recruitment chance scales with how far below the cap we are.
-        let vacancy_ratio = 1.0 - (npc_count as f32 / MAX_NPCS_PER_SETTLEMENT as f32);
-        let recruit_chance = (BASE_RECRUIT_CHANCE * vacancy_ratio).clamp(0.05, 0.8);
-
-        // Deterministic roll from tick + settlement ID.
-        let hash = tick_settlement_hash(state.tick, settlement.id);
-        let roll = hash_to_f32(hash);
-
-        if roll > recruit_chance {
-            continue;
-        }
-
-        // Deduct recruitment cost from settlement treasury.
-        out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement.id,
-            delta: -RECRUIT_COST,
-        });
-
-        // Select archetype deterministically.
-        let archetype_idx = (hash >> 16) as usize % ARCHETYPES.len();
-        let (_name, _hp, _atk, _armor, _speed) = ARCHETYPES[archetype_idx];
-
-        // The actual NPC creation requires a SpawnEntity delta.
-        // Until that delta variant exists, the treasury cost is deducted but
-        // no entity is spawned. The apply phase would need to handle:
-        //
-        //   SpawnEntity {
-        //       settlement_id: settlement.id,
-        //       template: EntityTemplate {
-        //           kind: Npc,
-        //           max_hp: _hp,
-        //           attack_damage: _atk,
-        //           armor: _armor,
-        //           move_speed: _speed,
-        //           level: 1,
-        //           class_tag: _name,
-        //       },
-        //   }
-        //
-        // For now, log the intent via a comment. The treasury deduction above
-        // is real and reversible (if no spawn delta is applied, the settlement
-        // just loses gold to "failed recruitment").
-
-        // NEEDS DELTA: SpawnEntity { settlement_id: u32, kind: EntityKind, max_hp: f32, attack_damage: f32, armor: f32, move_speed: f32, level: u32, class_tag: String }
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_recruitment_for_settlement(state, settlement.id, &state.entities[range], out);
     }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_recruitment_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % RECRUITMENT_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
+    let settlement = match state.settlement(settlement_id) {
+        Some(s) => s,
+        None => return,
+    };
+
+    // Count alive NPCs in the provided entity slice.
+    let npc_count = entities
+        .iter()
+        .filter(|e| {
+            e.alive
+                && e.kind == EntityKind::Npc
+                && e.npc
+                    .as_ref()
+                    .map(|n| n.home_settlement_id == Some(settlement_id))
+                    .unwrap_or(false)
+        })
+        .count();
+
+    if npc_count >= MAX_NPCS_PER_SETTLEMENT {
+        return;
+    }
+
+    if settlement.treasury < RECRUIT_COST {
+        return;
+    }
+
+    // Recruitment chance scales with how far below the cap we are.
+    let vacancy_ratio = 1.0 - (npc_count as f32 / MAX_NPCS_PER_SETTLEMENT as f32);
+    let recruit_chance = (BASE_RECRUIT_CHANCE * vacancy_ratio).clamp(0.05, 0.8);
+
+    // Deterministic roll from tick + settlement ID.
+    let hash = tick_settlement_hash(state.tick, settlement_id);
+    let roll = hash_to_f32(hash);
+
+    if roll > recruit_chance {
+        return;
+    }
+
+    // Deduct recruitment cost from settlement treasury.
+    out.push(WorldDelta::UpdateTreasury {
+        location_id: settlement_id,
+        delta: -RECRUIT_COST,
+    });
+
+    // Select archetype deterministically.
+    let archetype_idx = (hash >> 16) as usize % ARCHETYPES.len();
+    let (_name, _hp, _atk, _armor, _speed) = ARCHETYPES[archetype_idx];
+
+    // NEEDS DELTA: SpawnEntity { settlement_id, kind, max_hp, attack_damage, armor, move_speed, level, class_tag }
 }
 
 // ---------------------------------------------------------------------------

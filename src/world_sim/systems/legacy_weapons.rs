@@ -11,7 +11,7 @@
 //! NEEDS DELTA: CreateLegacyWeapon, LegacyWeaponLevelUp
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, StatusEffect, StatusEffectKind, WorldState};
+use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
 
 /// Legacy weapon check interval.
 const LEGACY_WEAPON_INTERVAL: u64 = 17;
@@ -33,11 +33,28 @@ pub fn compute_legacy_weapons(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_legacy_weapons_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_legacy_weapons_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % LEGACY_WEAPON_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
     // Without legacy weapon tracking, we apply a proxy: high-level NPCs
     // (level >= 5) with high attack have a chance to manifest a "legacy weapon"
     // buff representing their bonded weapon's power.
 
-    for entity in &state.entities {
+    for entity in entities {
         if !entity.alive || entity.kind != EntityKind::Npc {
             continue;
         }

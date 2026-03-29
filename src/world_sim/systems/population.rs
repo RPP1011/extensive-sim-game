@@ -12,7 +12,7 @@
 //! NEEDS DELTA: UpdatePopulation { settlement_id, delta: i32 }
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{Entity, WorldState};
 use crate::world_sim::NUM_COMMODITIES;
 
 /// Cadence: runs every 3 ticks.
@@ -45,117 +45,121 @@ pub fn compute_population(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     for settlement in &state.settlements {
-        let pop = settlement.population;
-        if pop == 0 {
-            continue;
-        }
+        compute_population_for_settlement(state, settlement.id, &[], out);
+    }
+}
 
-        // --- Food consumption by civilian population ---
-        let food_demand = pop as f32 * FOOD_PER_POP;
-        let food_available = settlement.stockpile[COMMODITY_FOOD];
-        let food_consumed = food_demand.min(food_available);
+/// Per-settlement variant for parallel dispatch.
+///
+/// Population operates at settlement level (not entity level), so the
+/// `entities` slice is accepted for interface consistency but unused.
+pub fn compute_population_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    _entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % POP_TICK_INTERVAL != 0 {
+        return;
+    }
 
-        if food_consumed > 0.0 {
-            out.push(WorldDelta::ConsumeCommodity {
-                location_id: settlement.id,
-                commodity: COMMODITY_FOOD,
-                amount: food_consumed,
-            });
-        }
+    let settlement = match state.settlement(settlement_id) {
+        Some(s) => s,
+        None => return,
+    };
 
-        // --- Population growth/decline ---
-        // Growth factors:
-        //   + food surplus (stockpile > demand)
-        //   + positive treasury
-        //   - food shortage
-        //   - high regional threat
-        let food_ratio = if food_demand > 0.0 {
-            food_available / food_demand
-        } else {
-            1.0
-        };
+    let pop = settlement.population;
+    if pop == 0 {
+        return;
+    }
 
-        let mut growth = BASE_GROWTH_RATE;
+    // --- Food consumption by civilian population ---
+    let food_demand = pop as f32 * FOOD_PER_POP;
+    let food_available = settlement.stockpile[COMMODITY_FOOD];
+    let food_consumed = food_demand.min(food_available);
 
-        // Food surplus boosts growth.
-        if food_ratio > 1.5 {
-            growth *= 1.5;
-        }
-        // Food shortage suppresses growth.
-        if food_ratio < 0.5 {
-            growth *= 0.3;
-        }
-        // Starvation causes decline.
-        if food_ratio < 0.1 {
-            growth = -0.01;
-        }
+    if food_consumed > 0.0 {
+        out.push(WorldDelta::ConsumeCommodity {
+            location_id: settlement_id,
+            commodity: COMMODITY_FOOD,
+            amount: food_consumed,
+        });
+    }
 
-        // Positive treasury boosts growth.
-        if settlement.treasury > 0.0 {
-            growth *= 1.2;
-        }
-        // Negative treasury suppresses growth.
-        if settlement.treasury < -10.0 {
-            growth *= 0.5;
-        }
+    // --- Population growth/decline ---
+    let food_ratio = if food_demand > 0.0 {
+        food_available / food_demand
+    } else {
+        1.0
+    };
 
-        // High regional threat causes population decline.
-        // Find the nearest region's threat level.
-        let regional_threat = state
-            .regions
-            .iter()
-            .map(|r| r.threat_level)
-            .fold(0.0f32, f32::max);
-        if regional_threat > THREAT_DECLINE_THRESHOLD {
-            growth -= THREAT_DECLINE_RATE * (regional_threat / 100.0);
-        }
+    let mut growth = BASE_GROWTH_RATE;
 
-        // Compute population change.
-        // Note: we can't directly modify population through existing deltas,
-        // so we express the economic consequences: tax income and food consumption
-        // are the observable effects. The actual population update would need
-        // a new delta type.
-        //
-        // For now, model population growth/decline indirectly:
-        //   - Growing population → increased tax revenue → UpdateTreasury
-        //   - Declining population → reduced tax revenue (handled by lower pop next tick)
+    // Food surplus boosts growth.
+    if food_ratio > 1.5 {
+        growth *= 1.5;
+    }
+    // Food shortage suppresses growth.
+    if food_ratio < 0.5 {
+        growth *= 0.3;
+    }
+    // Starvation causes decline.
+    if food_ratio < 0.1 {
+        growth = -0.01;
+    }
 
-        // --- Tax income from population ---
-        let tax_income = pop as f32 * TAX_PER_POP;
-        if tax_income > 0.0 {
-            out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
-                delta: tax_income,
-            });
-        }
+    // Positive treasury boosts growth.
+    if settlement.treasury > 0.0 {
+        growth *= 1.2;
+    }
+    // Negative treasury suppresses growth.
+    if settlement.treasury < -10.0 {
+        growth *= 0.5;
+    }
 
-        // --- Growth bonus: when population is growing, surplus production goes to stockpile ---
-        if growth > 0.0 && food_ratio > 1.0 {
-            // Growing settlement produces surplus across all commodities.
-            let surplus_rate = growth * pop as f32 * 0.01;
-            for c in 0..NUM_COMMODITIES {
-                if surplus_rate > 0.001 {
-                    out.push(WorldDelta::ProduceCommodity {
-                        location_id: settlement.id,
-                        commodity: c,
-                        amount: surplus_rate,
-                    });
-                }
+    // High regional threat causes population decline.
+    let regional_threat = state
+        .regions
+        .iter()
+        .map(|r| r.threat_level)
+        .fold(0.0f32, f32::max);
+    if regional_threat > THREAT_DECLINE_THRESHOLD {
+        growth -= THREAT_DECLINE_RATE * (regional_threat / 100.0);
+    }
+
+    // --- Tax income from population ---
+    let tax_income = pop as f32 * TAX_PER_POP;
+    if tax_income > 0.0 {
+        out.push(WorldDelta::UpdateTreasury {
+            location_id: settlement_id,
+            delta: tax_income,
+        });
+    }
+
+    // --- Growth bonus: when population is growing, surplus production goes to stockpile ---
+    if growth > 0.0 && food_ratio > 1.0 {
+        let surplus_rate = growth * pop as f32 * 0.01;
+        for c in 0..NUM_COMMODITIES {
+            if surplus_rate > 0.001 {
+                out.push(WorldDelta::ProduceCommodity {
+                    location_id: settlement_id,
+                    commodity: c,
+                    amount: surplus_rate,
+                });
             }
         }
+    }
 
-        // --- Decline penalty: starving settlements lose stockpile ---
-        if growth < 0.0 {
-            // Declining population consumes stockpile faster (desperation).
-            let desperation = (-growth) * pop as f32 * 0.005;
-            for c in 0..NUM_COMMODITIES {
-                if settlement.stockpile[c] > desperation {
-                    out.push(WorldDelta::ConsumeCommodity {
-                        location_id: settlement.id,
-                        commodity: c,
-                        amount: desperation,
-                    });
-                }
+    // --- Decline penalty: starving settlements lose stockpile ---
+    if growth < 0.0 {
+        let desperation = (-growth) * pop as f32 * 0.005;
+        for c in 0..NUM_COMMODITIES {
+            if settlement.stockpile[c] > desperation {
+                out.push(WorldDelta::ConsumeCommodity {
+                    location_id: settlement_id,
+                    commodity: c,
+                    amount: desperation,
+                });
             }
         }
     }

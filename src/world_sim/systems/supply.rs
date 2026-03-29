@@ -10,7 +10,7 @@
 //! NEEDS DELTA: ApplyFatigueAndMorale { entity_id, fatigue_delta, morale_delta }
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EconomicIntent, EntityKind, WorldState};
+use crate::world_sim::state::{EconomicIntent, Entity, EntityKind, WorldState};
 
 /// Food commodity index.
 const COMMODITY_FOOD: usize = 0;
@@ -27,54 +27,68 @@ const OUT_OF_SUPPLY_DAMAGE: f32 = 1.0;
 pub fn compute_supply(state: &WorldState, out: &mut Vec<WorldDelta>) {
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
-        for entity in &state.entities[range] {
-            if entity.kind != EntityKind::Npc || !entity.alive {
-                continue;
-            }
-            let npc = match &entity.npc {
-                Some(n) => n,
-                None => continue,
-            };
+        compute_supply_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
 
-            // Only traveling NPCs consume supply.
-            let is_traveling = matches!(
-                npc.economic_intent,
-                EconomicIntent::Travel { .. } | EconomicIntent::Trade { .. }
-            );
-            if !is_traveling {
-                continue;
-            }
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_supply_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    let settlement_pos = state
+        .settlement(settlement_id)
+        .map(|s| s.pos)
+        .unwrap_or((0.0, 0.0));
 
-            // Calculate distance from home settlement (if any).
-            let home_dist = {
-                let dx = entity.pos.0 - settlement.pos.0;
-                let dy = entity.pos.1 - settlement.pos.1;
-                (dx * dx + dy * dy).sqrt()
-            };
+    for entity in entities {
+        if entity.kind != EntityKind::Npc || !entity.alive {
+            continue;
+        }
+        let npc = match &entity.npc {
+            Some(n) => n,
+            None => continue,
+        };
 
-            // Total drain: base + distance-proportional.
-            let drain = BASE_DRAIN_PER_TICK + home_dist * DISTANCE_DRAIN_FACTOR;
+        // Only traveling NPCs consume supply.
+        let is_traveling = matches!(
+            npc.economic_intent,
+            EconomicIntent::Travel { .. } | EconomicIntent::Trade { .. }
+        );
+        if !is_traveling {
+            continue;
+        }
 
-            let carried_food = npc.carried_goods[COMMODITY_FOOD];
-            if carried_food > 0.0 {
-                let consumed = drain.min(carried_food);
-                // Consume from carried goods via self-transfer (apply phase clamps).
-                out.push(WorldDelta::TransferGoods {
-                    from_id: entity.id,
-                    to_id: entity.id,
-                    commodity: COMMODITY_FOOD,
-                    amount: consumed,
-                });
-            }
+        // Calculate distance from home settlement.
+        let home_dist = {
+            let dx = entity.pos.0 - settlement_pos.0;
+            let dy = entity.pos.1 - settlement_pos.1;
+            (dx * dx + dy * dy).sqrt()
+        };
 
-            // Out-of-supply: NPC has no food left and is still traveling.
-            if carried_food < drain {
-                out.push(WorldDelta::Damage {
-                    target_id: entity.id,
-                    amount: OUT_OF_SUPPLY_DAMAGE,
-                    source_id: 0, // environmental
-                });
-            }
+        // Total drain: base + distance-proportional.
+        let drain = BASE_DRAIN_PER_TICK + home_dist * DISTANCE_DRAIN_FACTOR;
+
+        let carried_food = npc.carried_goods[COMMODITY_FOOD];
+        if carried_food > 0.0 {
+            let consumed = drain.min(carried_food);
+            out.push(WorldDelta::TransferGoods {
+                from_id: entity.id,
+                to_id: entity.id,
+                commodity: COMMODITY_FOOD,
+                amount: consumed,
+            });
+        }
+
+        // Out-of-supply: NPC has no food left and is still traveling.
+        if carried_food < drain {
+            out.push(WorldDelta::Damage {
+                target_id: entity.id,
+                amount: OUT_OF_SUPPLY_DAMAGE,
+                source_id: 0,
+            });
         }
     }
 }

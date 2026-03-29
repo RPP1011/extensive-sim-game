@@ -9,7 +9,7 @@
 //! Cadence: every 17 ticks (skips tick 0).
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{Entity, WorldState};
 
 // NEEDS STATE: trophy_hall: Vec<Trophy> on WorldState
 //   Trophy { id, name, trophy_type, source_description, earned_tick, bonus: TrophyBonus }
@@ -70,11 +70,26 @@ pub fn compute_trophies(state: &WorldState, out: &mut Vec<WorldDelta>) {
     //   out.push(WorldDelta::AdjustMorale { entity_id, delta: total_morale * 100.0 })
 
     // Apply gold boost from trophy hall (structural skeleton)
-    if let Some(settlement) = state.settlements.first() {
-        // NEEDS STATE: total gold boost from trophies
-        // out.push(WorldDelta::UpdateTreasury {
-        //     location_id: settlement.id,
-        //     delta: 10.0 * total_gold_boost,
-        // });
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_trophies_for_settlement(state, settlement.id, &state.entities[range], out);
     }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_trophies_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % TROPHY_TICK_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
+    // NEEDS STATE: total gold boost from trophies
+    // out.push(WorldDelta::UpdateTreasury {
+    //     location_id: settlement_id,
+    //     delta: 10.0 * total_gold_boost,
+    // });
 }

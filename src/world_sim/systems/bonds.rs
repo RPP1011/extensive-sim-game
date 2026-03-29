@@ -8,7 +8,7 @@
 //! Cadence: every 50 ticks.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{Entity, WorldState};
 
 // NEEDS STATE: adventurer_bonds: HashMap<(u32, u32), f32> on WorldState
 // NEEDS STATE: entity party/group membership (e.g. party_id on Entity or NpcData)
@@ -51,27 +51,36 @@ pub fn compute_bonds(state: &WorldState, out: &mut Vec<WorldDelta>) {
     //   out.push(WorldDelta::UpdateBond { entity_a: key.0, entity_b: key.1, delta: -BOND_DECAY_RATE });
 
     // --- Phase 2: Grow bonds for NPC entities sharing the same grid ---
-    // Collect NPC entity IDs per grid.
-    for grid in &state.grids {
-        let npc_ids: Vec<u32> = grid
-            .entity_ids
-            .iter()
-            .copied()
-            .filter(|&eid| {
-                state
-                    .entity(eid)
-                    .map(|e| e.alive && e.npc.is_some())
-                    .unwrap_or(false)
-            })
-            .collect();
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_bonds_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
 
-        // Emit growth deltas for each pair on this grid.
-        for i in 0..npc_ids.len() {
-            for j in (i + 1)..npc_ids.len() {
-                let (a, b) = bond_key(npc_ids[i], npc_ids[j]);
-                // NEEDS DELTA: UpdateBond { entity_a: a, entity_b: b, delta: BOND_GROWTH_RATE }
-                let _ = (a, b); // suppress unused warning until delta exists
-            }
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_bonds_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % BOND_TICK_INTERVAL != 0 {
+        return;
+    }
+
+    // Collect NPC entity IDs from the settlement's entities.
+    let npc_ids: Vec<u32> = entities
+        .iter()
+        .filter(|e| e.alive && e.npc.is_some())
+        .map(|e| e.id)
+        .collect();
+
+    // Emit growth deltas for each pair.
+    for i in 0..npc_ids.len() {
+        for j in (i + 1)..npc_ids.len() {
+            let (a, b) = bond_key(npc_ids[i], npc_ids[j]);
+            // NEEDS DELTA: UpdateBond { entity_a: a, entity_b: b, delta: BOND_GROWTH_RATE }
+            let _ = (a, b); // suppress unused warning until delta exists
         }
     }
 }

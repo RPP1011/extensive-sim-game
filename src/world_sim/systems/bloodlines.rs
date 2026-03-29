@@ -11,7 +11,7 @@
 //! NEEDS DELTA: SpawnDescendant (new entity creation)
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, StatusEffect, StatusEffectKind, WorldState};
+use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
 
 /// Bloodline check interval.
 const BLOODLINE_INTERVAL: u64 = 33;
@@ -33,10 +33,27 @@ pub fn compute_bloodlines(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_bloodlines_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_bloodlines_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % BLOODLINE_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
     // Without bloodline tracking, we apply a proxy: high-level NPCs (level >= 8)
     // occasionally receive a "bloodline power" buff representing inherited strength.
 
-    for entity in &state.entities {
+    for entity in entities {
         if !entity.alive || entity.kind != EntityKind::Npc {
             continue;
         }

@@ -9,7 +9,7 @@
 //! Cadence: every 10 ticks.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{Entity, WorldState};
 
 // NEEDS STATE: rivalries: Vec<Rivalry> on WorldState
 //   Rivalry { adventurer_a, adventurer_b, intensity, cause: RivalryCause, started_tick }
@@ -67,23 +67,32 @@ pub fn compute_rivalries(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // --- 5. Cleanup: remove rivalries for dead NPCs or intensity <= 0 ---
     // out.push(WorldDelta::RemoveRivalry { entity_a, entity_b })
 
-    // Identify co-located NPC pairs per grid (structural skeleton)
-    for grid in &state.grids {
-        let npc_ids: Vec<u32> = grid
-            .entity_ids
-            .iter()
-            .copied()
-            .filter(|&eid| {
-                state
-                    .entity(eid)
-                    .map(|e| e.alive && e.npc.is_some())
-                    .unwrap_or(false)
-            })
-            .collect();
-
-        // NEEDS STATE: check bonds and existing rivalries for each pair
-        let _ = npc_ids;
+    // Identify co-located NPC pairs per settlement (structural skeleton)
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_rivalries_for_settlement(state, settlement.id, &state.entities[range], out);
     }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_rivalries_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % RIVALRY_TICK_INTERVAL != 0 {
+        return;
+    }
+
+    let npc_ids: Vec<u32> = entities
+        .iter()
+        .filter(|e| e.alive && e.npc.is_some())
+        .map(|e| e.id)
+        .collect();
+
+    // NEEDS STATE: check bonds and existing rivalries for each pair
+    let _ = npc_ids;
 }
 
 // ---------------------------------------------------------------------------

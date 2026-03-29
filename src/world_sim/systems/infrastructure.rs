@@ -43,50 +43,11 @@ pub fn compute_infrastructure(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     for settlement in &state.settlements {
-        // --- Maintenance cost: drain from treasury ---
-        let maintenance = settlement.population as f32 * MAINTENANCE_COST_PER_POP;
-        if maintenance > 0.0 {
-            out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
-                delta: -maintenance,
-            });
-        }
-
-        // --- Infrastructure effects on production ---
-        if settlement.treasury > 0.0 {
-            // Well-maintained infrastructure boosts all commodity production.
-            // Bonus scales with treasury (diminishing returns via sqrt).
-            let bonus_scale = (settlement.treasury / 100.0).sqrt().min(1.0);
-            for c in 0..NUM_COMMODITIES {
-                let bonus = MAINTAINED_PRODUCTION_BONUS
-                    * bonus_scale
-                    * (settlement.population as f32 / 50.0).max(0.1);
-                out.push(WorldDelta::UpdateStockpile {
-                    location_id: settlement.id,
-                    commodity: c,
-                    delta: bonus,
-                });
-            }
-        } else {
-            // Crumbling infrastructure penalizes production.
-            for c in 0..NUM_COMMODITIES {
-                let penalty = UNMAINTAINED_PRODUCTION_PENALTY
-                    * (settlement.population as f32 / 50.0).max(0.1);
-                // Only penalize if there's stockpile to lose.
-                if settlement.stockpile[c] > penalty {
-                    out.push(WorldDelta::UpdateStockpile {
-                        location_id: settlement.id,
-                        commodity: c,
-                        delta: -penalty,
-                    });
-                }
-            }
-        }
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_infrastructure_for_settlement(state, settlement.id, &state.entities[range], out);
     }
 
     // --- Inter-settlement trade bonuses ---
-    // When multiple settlements have positive treasury, they benefit
-    // from shared trade infrastructure (proxy for trade posts / roads).
     let funded_settlements: Vec<u32> = state
         .settlements
         .iter()
@@ -95,13 +56,65 @@ pub fn compute_infrastructure(state: &WorldState, out: &mut Vec<WorldDelta>) {
         .collect();
 
     if funded_settlements.len() >= 2 {
-        // All funded settlements get a trade bonus.
         for &sid in &funded_settlements {
             for c in 0..NUM_COMMODITIES {
                 out.push(WorldDelta::UpdateStockpile {
                     location_id: sid,
                     commodity: c,
                     delta: TRADE_POST_BONUS,
+                });
+            }
+        }
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_infrastructure_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    _entities: &[crate::world_sim::state::Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % INFRA_TICK_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
+    let settlement = match state.settlement(settlement_id) {
+        Some(s) => s,
+        None => return,
+    };
+
+    // --- Maintenance cost ---
+    let maintenance = settlement.population as f32 * MAINTENANCE_COST_PER_POP;
+    if maintenance > 0.0 {
+        out.push(WorldDelta::UpdateTreasury {
+            location_id: settlement_id,
+            delta: -maintenance,
+        });
+    }
+
+    // --- Infrastructure effects on production ---
+    if settlement.treasury > 0.0 {
+        let bonus_scale = (settlement.treasury / 100.0).sqrt().min(1.0);
+        for c in 0..NUM_COMMODITIES {
+            let bonus = MAINTAINED_PRODUCTION_BONUS
+                * bonus_scale
+                * (settlement.population as f32 / 50.0).max(0.1);
+            out.push(WorldDelta::UpdateStockpile {
+                location_id: settlement_id,
+                commodity: c,
+                delta: bonus,
+            });
+        }
+    } else {
+        for c in 0..NUM_COMMODITIES {
+            let penalty = UNMAINTAINED_PRODUCTION_PENALTY
+                * (settlement.population as f32 / 50.0).max(0.1);
+            if settlement.stockpile[c] > penalty {
+                out.push(WorldDelta::UpdateStockpile {
+                    location_id: settlement_id,
+                    commodity: c,
+                    delta: -penalty,
                 });
             }
         }

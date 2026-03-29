@@ -9,7 +9,7 @@
 //! Cadence: every 10 ticks (skips tick 0).
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, WorldState};
+use crate::world_sim::state::{Entity, EntityKind, WorldState};
 
 // NEEDS STATE: pending_funerals: Vec<FuneralPending> on WorldState
 //   FuneralPending { adventurer_id, name, level, death_tick }
@@ -53,11 +53,7 @@ pub fn compute_memorials(state: &WorldState, out: &mut Vec<WorldDelta>) {
     let mut dead_npcs: Vec<u32> = Vec::new();
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
-        for entity in &state.entities[range] {
-            if !entity.alive && entity.kind == EntityKind::Npc {
-                dead_npcs.push(entity.id);
-            }
-        }
+        collect_dead_npcs(state, &state.entities[range], &mut dead_npcs);
     }
 
     // NEEDS STATE: check if dead NPCs already have pending funerals or memorials
@@ -88,4 +84,41 @@ pub fn compute_memorials(state: &WorldState, out: &mut Vec<WorldDelta>) {
     //   out.push(WorldDelta::UpdateTreasury { location_id: guild_settlement, delta: -50.0 })
 
     let _ = dead_npcs;
+}
+
+/// Per-settlement variant for parallel dispatch.
+///
+/// Detects dead NPCs and emits memorial-related deltas. Since full memorial
+/// state doesn't exist yet on WorldState, this is a structural placeholder.
+pub fn compute_memorials_for_settlement(
+    state: &WorldState,
+    _settlement_id: u32,
+    entities: &[Entity],
+    _out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % MEMORIAL_TICK_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
+    // Detect dead NPCs at this settlement.
+    // NEEDS DELTA: CreatePendingFuneral when memorial state exists.
+    for entity in entities {
+        if !entity.alive && entity.kind == EntityKind::Npc {
+            // Placeholder: once memorial state exists, emit funeral deltas.
+            let _ = entity.id;
+        }
+    }
+}
+
+/// Helper: collects dead NPC entity IDs (used by the top-level function).
+fn collect_dead_npcs(
+    state: &WorldState,
+    entities: &[Entity],
+    dead_npcs: &mut Vec<u32>,
+) {
+    for entity in entities {
+        if !entity.alive && entity.kind == EntityKind::Npc {
+            dead_npcs.push(entity.id);
+        }
+    }
 }

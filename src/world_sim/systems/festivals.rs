@@ -31,32 +31,39 @@ pub fn compute_festivals(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_festivals_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_festivals_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    _entities: &[crate::world_sim::state::Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % FESTIVAL_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
     let season = current_season(state.tick);
 
-    // Without festival tracking, we apply seasonal bonuses directly:
-    // Each season provides a different passive benefit to settlements.
-
-    for settlement in &state.settlements {
-        match season {
-            Season::Autumn => {
-                // Harvest Feast: food production bonus
-                out.push(WorldDelta::ProduceCommodity {
-                    location_id: settlement.id,
-                    commodity: 0, // food
-                    amount: HARVEST_FEAST_FOOD,
-                });
-            }
-            Season::Summer => {
-                // Trade Fair: treasury bonus
-                out.push(WorldDelta::UpdateTreasury {
-                    location_id: settlement.id,
-                    delta: TRADE_FAIR_BONUS,
-                });
-            }
-            Season::Spring | Season::Winter => {
-                // Spring: religious ceremony — no direct economic effect
-                // Winter: war memorial — no direct economic effect
-            }
+    match season {
+        Season::Autumn => {
+            out.push(WorldDelta::ProduceCommodity {
+                location_id: settlement_id,
+                commodity: 0,
+                amount: HARVEST_FEAST_FOOD,
+            });
         }
+        Season::Summer => {
+            out.push(WorldDelta::UpdateTreasury {
+                location_id: settlement_id,
+                delta: TRADE_FAIR_BONUS,
+            });
+        }
+        Season::Spring | Season::Winter => {}
     }
 }

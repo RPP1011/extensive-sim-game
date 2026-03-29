@@ -10,7 +10,7 @@
 //! NEEDS DELTA: ModifyDevotion
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, StatusEffect, StatusEffectKind, WorldState};
+use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
 
 /// How often the religion system ticks.
 const RELIGION_INTERVAL: u64 = 17;
@@ -26,36 +26,40 @@ pub fn compute_religion(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
-    // Without temples on WorldState, we use settlements with high treasury
-    // as proxy for temple-blessed locations. NPCs at these settlements
-    // receive periodic healing (blessing proxy).
-
     for settlement in &state.settlements {
         // Only prosperous settlements have active temples
         if settlement.treasury < 50.0 {
             continue;
         }
 
-        let grid_id = match settlement.grid_id {
-            Some(id) => id,
-            None => continue,
-        };
-        let grid = match state.grid(grid_id) {
-            Some(g) => g,
-            None => continue,
-        };
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_religion_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
 
-        // Blessing: heal all NPCs in the settlement slightly
-        for &entity_id in &grid.entity_ids {
-            if let Some(entity) = state.entity(entity_id) {
-                if entity.alive && entity.kind == EntityKind::Npc && entity.hp < entity.max_hp {
-                    out.push(WorldDelta::Heal {
-                        target_id: entity_id,
-                        amount: BLESSING_HEAL,
-                        source_id: 0,
-                    });
-                }
-            }
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_religion_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % RELIGION_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
+    // Without temples on WorldState, we use settlements with high treasury
+    // as proxy for temple-blessed locations. NPCs at these settlements
+    // receive periodic healing (blessing proxy).
+
+    // Blessing: heal all NPCs in the settlement slightly
+    for entity in entities {
+        if entity.alive && entity.kind == EntityKind::Npc && entity.hp < entity.max_hp {
+            out.push(WorldDelta::Heal {
+                target_id: entity.id,
+                amount: BLESSING_HEAL,
+                source_id: 0,
+            });
         }
     }
 }

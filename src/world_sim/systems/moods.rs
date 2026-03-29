@@ -9,7 +9,7 @@
 //! Cadence: every 7 ticks.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{Entity, WorldState};
 
 // NEEDS STATE: mood_state: MoodState on Entity or NpcData (mood, started_at, expires_at)
 // NEEDS STATE: morale: f32 on Entity or NpcData
@@ -84,8 +84,6 @@ pub fn compute_moods(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
-    let tick = state.tick;
-
     // --- Phase 1: Natural decay — moods expire after their duration ---
     // NEEDS STATE: for each alive NPC entity with a non-Neutral mood:
     //   if tick >= entity.mood_state.expires_at:
@@ -102,30 +100,39 @@ pub fn compute_moods(state: &WorldState, out: &mut Vec<WorldDelta>) {
     //       out.push(WorldDelta::AdjustMorale { entity_id, delta: -1.0 });
 
     // --- Phase 3: Contagion — moods spread within shared grids ---
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_moods_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_moods_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % MOOD_TICK_INTERVAL != 0 {
+        return;
+    }
+
+    // Contagion — moods spread within shared grids.
     // For each grid, check if any NPC has Excited (20% spread) or Fearful (15% spread).
     // Neutral NPCs on the same grid may catch the mood.
     // NEEDS STATE: mood_state on NpcData, rng on WorldState (read-only — use tick+id as seed)
     // Note: contagion probability must use deterministic hashing (not mutable rng)
     // since compute phase is read-only. Use (tick ^ entity_id) based deterministic roll.
 
-    for grid in &state.grids {
-        let npc_entities: Vec<(u32, bool)> = grid
-            .entity_ids
-            .iter()
-            .filter_map(|&eid| {
-                let e = state.entity(eid)?;
-                if e.alive && e.npc.is_some() {
-                    Some((eid, true)) // second field would be mood == Neutral check
-                } else {
-                    None
-                }
-            })
-            .collect();
+    let npc_entities: Vec<(u32, bool)> = entities
+        .iter()
+        .filter(|e| e.alive && e.npc.is_some())
+        .map(|e| (e.id, true)) // second field would be mood == Neutral check
+        .collect();
 
-        // NEEDS STATE: check if any NPC on grid has Excited/Fearful mood
-        // NEEDS DELTA: SetMood for contagion targets
-        // Contagion uses deterministic roll: hash(tick, entity_id) < threshold
-    }
+    // NEEDS STATE: check if any NPC on grid has Excited/Fearful mood
+    // NEEDS DELTA: SetMood for contagion targets
+    // Contagion uses deterministic roll: hash(tick, entity_id) < threshold
 }
 
 // ---------------------------------------------------------------------------

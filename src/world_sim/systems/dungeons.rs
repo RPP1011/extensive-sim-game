@@ -41,35 +41,42 @@ pub fn compute_dungeons(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_dungeons_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+///
+/// Handles dungeon threat pressure for this settlement and exploration on its grid.
+pub fn compute_dungeons_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    _entities: &[crate::world_sim::state::Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % DUNGEON_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
+    let settlement = match state.settlement(settlement_id) {
+        Some(s) => s,
+        None => return,
+    };
+
     // --- Dungeon monster threat pressure ---
-    // Without explicit dungeon state, we model dungeons as high-threat regions:
-    // regions with high monster density act like dungeons that leak threats
-    // into nearby settlements.
-
     for region in &state.regions {
-        // Deep dungeon equivalent: regions with very high monster density
-        // can spawn threat events that pressure settlements.
         if region.monster_density > 60.0 {
-            // Threat leaks into settlement treasury as a drain (defense cost)
             let threat_drain = region.monster_density * 0.01 * DEEP_DUNGEON_THREAT_MULTIPLIER;
-
-            // Find settlement in this region (heuristic: match by faction)
-            for settlement in &state.settlements {
-                out.push(WorldDelta::UpdateTreasury {
-                    location_id: settlement.id,
-                    delta: -threat_drain / state.settlements.len().max(1) as f32,
-                });
-            }
+            out.push(WorldDelta::UpdateTreasury {
+                location_id: settlement_id,
+                delta: -threat_drain / state.settlements.len().max(1) as f32,
+            });
         }
 
-        // Monster-dense regions escalate grid fidelity (dungeon encounters)
         if region.monster_density > 40.0 {
-            for settlement in &state.settlements {
-                let grid_id = match settlement.grid_id {
-                    Some(gid) => gid,
-                    None => continue,
-                };
-
+            if let Some(grid_id) = settlement.grid_id {
                 let current_fidelity = state
                     .grid(grid_id)
                     .map(|g| g.fidelity)
@@ -85,62 +92,60 @@ pub fn compute_dungeons(state: &WorldState, out: &mut Vec<WorldDelta>) {
         }
     }
 
-    // --- Dungeon exploration by NPCs ---
-    // When friendly NPCs are on grids with monsters, they're effectively
-    // "exploring a dungeon." Surviving NPCs earn loot.
-    // The actual combat damage is handled by the battles system;
-    // here we handle the loot/reward side of dungeon clearing.
+    // --- Dungeon exploration by NPCs on this settlement's grid ---
+    let grid_id = match settlement.grid_id {
+        Some(gid) => gid,
+        None => return,
+    };
+    let grid = match state.grid(grid_id) {
+        Some(g) => g,
+        None => return,
+    };
 
-    for grid in &state.grids {
-        let has_hostiles = grid.fidelity == crate::world_sim::fidelity::Fidelity::High;
-        if !has_hostiles {
-            continue;
-        }
+    if grid.fidelity != Fidelity::High {
+        return;
+    }
 
-        let friendlies: Vec<&crate::world_sim::state::Entity> = grid
-            .entity_ids
-            .iter()
-            .filter_map(|&eid| state.entity(eid))
-            .filter(|e| e.kind == EntityKind::Npc && e.alive && e.team == WorldTeam::Friendly)
-            .collect();
+    let friendlies: Vec<&crate::world_sim::state::Entity> = grid
+        .entity_ids
+        .iter()
+        .filter_map(|&eid| state.entity(eid))
+        .filter(|e| e.kind == EntityKind::Npc && e.alive && e.team == WorldTeam::Friendly)
+        .collect();
 
-        if friendlies.is_empty() {
-            continue;
-        }
+    if friendlies.is_empty() {
+        return;
+    }
 
-        // Count dead monsters as "dungeon loot sources"
-        let dead_monster_levels: f32 = grid
-            .entity_ids
-            .iter()
-            .filter_map(|&eid| state.entity(eid))
-            .filter(|e| e.kind == EntityKind::Monster && !e.alive)
-            .map(|e| e.level as f32)
-            .sum();
+    let dead_monster_levels: f32 = grid
+        .entity_ids
+        .iter()
+        .filter_map(|&eid| state.entity(eid))
+        .filter(|e| e.kind == EntityKind::Monster && !e.alive)
+        .map(|e| e.level as f32)
+        .sum();
 
-        if dead_monster_levels <= 0.0 {
-            continue;
-        }
+    if dead_monster_levels <= 0.0 {
+        return;
+    }
 
-        // Dungeon loot: gold scaled by monster depth (level)
-        let loot_gold = dead_monster_levels * GOLD_PER_LOOT;
-        let gold_each = loot_gold / friendlies.len() as f32;
+    let loot_gold = dead_monster_levels * GOLD_PER_LOOT;
+    let gold_each = loot_gold / friendlies.len() as f32;
 
-        for friendly in &friendlies {
-            if gold_each > 0.0 {
-                out.push(WorldDelta::TransferGold {
-                    from_id: 0, // dungeon treasure
-                    to_id: friendly.id,
-                    amount: gold_each,
-                });
-            }
-
-            // Dungeon exploration stress: minor damage from hazards
-            let hazard_damage = 2.0;
-            out.push(WorldDelta::Damage {
-                target_id: friendly.id,
-                amount: hazard_damage,
-                source_id: friendly.id, // environmental damage
+    for friendly in &friendlies {
+        if gold_each > 0.0 {
+            out.push(WorldDelta::TransferGold {
+                from_id: 0,
+                to_id: friendly.id,
+                amount: gold_each,
             });
         }
+
+        let hazard_damage = 2.0;
+        out.push(WorldDelta::Damage {
+            target_id: friendly.id,
+            amount: hazard_damage,
+            source_id: friendly.id,
+        });
     }
 }

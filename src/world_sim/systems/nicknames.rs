@@ -10,7 +10,7 @@
 //! Cadence: every 17 ticks (skips tick 0).
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{Entity, WorldState};
 
 // NEEDS STATE: nicknames: Vec<Nickname> on Entity/NpcData
 //   Nickname { title, earned_tick, source: NicknameSource, reputation_modifier }
@@ -51,31 +51,45 @@ pub fn compute_nicknames(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
-        for entity in &state.entities[range] {
-            if !entity.alive || entity.npc.is_none() {
-                continue;
-            }
+        compute_nicknames_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
 
-            // NEEDS STATE: read entity.npc.history_tags
-            // NEEDS STATE: read entity.npc.nicknames
-            //
-            // Check each threshold:
-            //   kill_count >= 10 && !has_combat_nickname:
-            //     Pick deterministic nickname from COMBAT_NICKNAMES
-            //     out.push(WorldDelta::GrantNickname { entity_id, title, source: CombatDeed, modifier: 0.05 })
-            //
-            //   diplo_count >= 5 && !has_diplomatic_nickname:
-            //     out.push(WorldDelta::GrantNickname { ..., source: DiplomaticAchievement, modifier: 0.08 })
-            //
-            //   explore_count >= 8 && !has_exploration_nickname:
-            //     out.push(WorldDelta::GrantNickname { ..., source: ExplorationFeat, modifier: 0.04 })
-            //
-            //   near_death >= 3 && !has_survival_nickname:
-            //     out.push(WorldDelta::GrantNickname { ..., source: Sacrifice, modifier: 0.06 })
-            //
-            // After granting: enforce MAX_NICKNAMES (keep highest reputation_modifier)
-            // Apply reputation effect: out.push(WorldDelta::AdjustReputation { delta: modifier * 2.0 })
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_nicknames_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % NICKNAME_TICK_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
+    for entity in entities {
+        if !entity.alive || entity.npc.is_none() {
+            continue;
         }
+
+        // NEEDS STATE: read entity.npc.history_tags
+        // NEEDS STATE: read entity.npc.nicknames
+        //
+        // Check each threshold:
+        //   kill_count >= 10 && !has_combat_nickname:
+        //     Pick deterministic nickname from COMBAT_NICKNAMES
+        //     out.push(WorldDelta::GrantNickname { entity_id, title, source: CombatDeed, modifier: 0.05 })
+        //
+        //   diplo_count >= 5 && !has_diplomatic_nickname:
+        //     out.push(WorldDelta::GrantNickname { ..., source: DiplomaticAchievement, modifier: 0.08 })
+        //
+        //   explore_count >= 8 && !has_exploration_nickname:
+        //     out.push(WorldDelta::GrantNickname { ..., source: ExplorationFeat, modifier: 0.04 })
+        //
+        //   near_death >= 3 && !has_survival_nickname:
+        //     out.push(WorldDelta::GrantNickname { ..., source: Sacrifice, modifier: 0.06 })
+        //
+        // After granting: enforce MAX_NICKNAMES (keep highest reputation_modifier)
+        // Apply reputation effect: out.push(WorldDelta::AdjustReputation { delta: modifier * 2.0 })
     }
 }
 

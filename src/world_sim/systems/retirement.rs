@@ -146,68 +146,82 @@ pub fn compute_retirement(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
-        for entity in &state.entities[range] {
-            if !entity.alive || entity.kind != EntityKind::Npc {
-                continue;
-            }
-            let npc = match &entity.npc {
-                Some(n) => n,
-                None => continue,
-            };
+        compute_retirement_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
 
-            // Eligibility checks.
-            if entity.level < MIN_RETIREMENT_LEVEL {
-                continue;
-            }
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_retirement_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % RETIREMENT_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
 
-            let hp_ratio = entity.hp / entity.max_hp.max(1.0);
-            if hp_ratio < MIN_HP_RATIO_FOR_RETIRE {
-                continue;
-            }
+    for entity in entities {
+        if !entity.alive || entity.kind != EntityKind::Npc {
+            continue;
+        }
+        let npc = match &entity.npc {
+            Some(n) => n,
+            None => continue,
+        };
 
-            // Don't retire during combat.
-            let on_hostile_grid = entity
-                .grid_id
-                .and_then(|gid| state.grid(gid))
-                .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
-                .unwrap_or(false);
-            if on_hostile_grid {
-                continue;
-            }
+        // Eligibility checks.
+        if entity.level < MIN_RETIREMENT_LEVEL {
+            continue;
+        }
 
-            // Deterministic retirement roll.
-            let hash = tick_entity_hash(state.tick, entity.id);
-            let roll = hash_to_f32(hash);
-            if roll >= AUTO_RETIRE_CHANCE {
-                continue;
-            }
+        let hp_ratio = entity.hp / entity.max_hp.max(1.0);
+        if hp_ratio < MIN_HP_RATIO_FOR_RETIRE {
+            continue;
+        }
 
-            // Select legacy type from class tags.
-            let legacy = LegacyType::from_class_tags(&npc.class_tags, hash);
+        // Don't retire during combat.
+        let on_hostile_grid = entity
+            .grid_id
+            .and_then(|gid| state.grid(gid))
+            .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
+            .unwrap_or(false);
+        if on_hostile_grid {
+            continue;
+        }
 
-            // Calculate bonus: base * (level / 10).
-            let bonus_value =
-                legacy.base_bonus() * (entity.level as f32 / 10.0) * LEGACY_BONUS_PER_LEVEL;
+        // Deterministic retirement roll.
+        let hash = tick_entity_hash(state.tick, entity.id);
+        let roll = hash_to_f32(hash);
+        if roll >= AUTO_RETIRE_CHANCE {
+            continue;
+        }
 
-            // Remove entity from play (represents retirement, not death).
-            out.push(WorldDelta::Die {
-                entity_id: entity.id,
+        // Select legacy type from class tags.
+        let legacy = LegacyType::from_class_tags(&npc.class_tags, hash);
+
+        // Calculate bonus: base * (level / 10).
+        let bonus_value =
+            legacy.base_bonus() * (entity.level as f32 / 10.0) * LEGACY_BONUS_PER_LEVEL;
+
+        // Remove entity from play (represents retirement, not death).
+        out.push(WorldDelta::Die {
+            entity_id: entity.id,
+        });
+
+        // Grant legacy bonus to home settlement as treasury boost.
+        out.push(WorldDelta::UpdateTreasury {
+            location_id: settlement_id,
+            delta: bonus_value,
+        });
+
+        // Quartermaster legacy → stockpile bonus (food).
+        if legacy == LegacyType::Quartermaster {
+            out.push(WorldDelta::UpdateStockpile {
+                location_id: settlement_id,
+                commodity: 0,
+                delta: bonus_value * 10.0,
             });
-
-            // Grant legacy bonus to home settlement as treasury boost.
-            out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
-                delta: bonus_value,
-            });
-
-            // Quartermaster legacy → stockpile bonus (food).
-            if legacy == LegacyType::Quartermaster {
-                out.push(WorldDelta::UpdateStockpile {
-                    location_id: settlement.id,
-                    commodity: 0, // food
-                    delta: bonus_value * 10.0,
-                });
-            }
         }
     }
 }

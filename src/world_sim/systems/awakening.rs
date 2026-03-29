@@ -11,7 +11,7 @@
 //! NEEDS DELTA: PermanentStatBoost (awakening is permanent, not a timed buff)
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, StatusEffect, StatusEffectKind, WorldState};
+use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
 
 /// How often the awakening system ticks.
 const AWAKENING_INTERVAL: u64 = 33;
@@ -39,7 +39,24 @@ pub fn compute_awakening(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
-    for entity in &state.entities {
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_awakening_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_awakening_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % AWAKENING_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
+    for entity in entities {
         if !entity.alive || entity.kind != EntityKind::Npc {
             continue;
         }

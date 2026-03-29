@@ -9,7 +9,7 @@
 //! Cadence: every 10 ticks (skips tick 0).
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{Entity, WorldState};
 
 // NEEDS STATE: fears: Vec<Fear> on Entity/NpcData
 //   Fear { fear_type: FearType, severity, acquired_tick, times_triggered, times_overcome }
@@ -49,31 +49,7 @@ pub fn compute_fears(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // --- Phase 1: Fear acquisition from traumatic events ---
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
-        for entity in &state.entities[range] {
-            if !entity.alive || entity.npc.is_none() {
-                continue;
-            }
-
-            let hp_ratio = entity.hp / entity.max_hp.max(1.0);
-
-            // Near-death (hp < 20%) on an active grid → Darkness fear (30%)
-            if hp_ratio < 0.2 && entity.grid_id.is_some() {
-                let roll = deterministic_roll(state.tick, entity.id);
-                if roll < DARKNESS_FEAR_CHANCE {
-                    // NEEDS DELTA: AcquireFear { entity_id, Darkness, severity: 20+rand*40 }
-                }
-            }
-
-            // Low hp while fighting → Undead fear (20%)
-            if hp_ratio < 0.4 && entity.grid_id.is_some() {
-                let roll = deterministic_roll(state.tick, entity.id.wrapping_add(1));
-                if roll < MONSTER_FEAR_CHANCE {
-                    // NEEDS DELTA: AcquireFear { entity_id, Undead, severity: 15+rand*35 }
-                }
-            }
-
-            // NEEDS STATE: check fears list for existing fears
-        }
+        compute_fears_for_settlement(state, settlement.id, &state.entities[range], out);
     }
 
     // --- Phase 2: Fear effects (morale/stress penalties) ---
@@ -117,6 +93,44 @@ pub fn compute_fears(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // NEEDS STATE: for high-stress NPCs with severe fears (>50), spread to co-located NPCs
     //   Deterministic roll < FEAR_CONTAGION_CHANCE:
     //   out.push(WorldDelta::AcquireFear { entity_id, fear_type, severity: source * 0.5 })
+}
+
+/// Per-settlement variant for parallel dispatch (fear acquisition phase).
+pub fn compute_fears_for_settlement(
+    state: &WorldState,
+    _settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % FEAR_TICK_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
+    for entity in entities {
+        if !entity.alive || entity.npc.is_none() {
+            continue;
+        }
+
+        let hp_ratio = entity.hp / entity.max_hp.max(1.0);
+
+        // Near-death (hp < 20%) on an active grid → Darkness fear (30%)
+        if hp_ratio < 0.2 && entity.grid_id.is_some() {
+            let roll = deterministic_roll(state.tick, entity.id);
+            if roll < DARKNESS_FEAR_CHANCE {
+                // NEEDS DELTA: AcquireFear { entity_id, Darkness, severity: 20+rand*40 }
+            }
+        }
+
+        // Low hp while fighting → Undead fear (20%)
+        if hp_ratio < 0.4 && entity.grid_id.is_some() {
+            let roll = deterministic_roll(state.tick, entity.id.wrapping_add(1));
+            if roll < MONSTER_FEAR_CHANCE {
+                // NEEDS DELTA: AcquireFear { entity_id, Undead, severity: 15+rand*35 }
+            }
+        }
+
+        // NEEDS STATE: check fears list for existing fears
+    }
 }
 
 fn deterministic_roll(tick: u64, id: u32) -> f32 {

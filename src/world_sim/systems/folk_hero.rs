@@ -10,7 +10,7 @@
 //! Cadence: every 17 ticks (skips tick 0).
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{Entity, WorldState};
 
 // NEEDS STATE: folk_reputation on WorldState
 //   FolkReputation { regional_fame: HashMap<u32, f32>, overall_fame: f32, folk_tales: Vec<FolkTale> }
@@ -82,12 +82,8 @@ pub fn compute_folk_hero(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
     // Apply tribute from hero-status settlements
     for settlement in &state.settlements {
-        // NEEDS STATE: regional fame for this settlement's region
-        // If fame > FAME_HERO_THRESHOLD:
-        //   out.push(WorldDelta::UpdateTreasury {
-        //       location_id: settlement.id,
-        //       delta: 2.0,
-        //   });
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_folk_hero_for_settlement(state, settlement.id, &state.entities[range], out);
     }
 
     // --- Phase 6: Passive decay toward neutral (50) ---
@@ -95,4 +91,25 @@ pub fn compute_folk_hero(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
     // --- Phase 7: Expire old tales ---
     // NEEDS STATE: remove tales where tick - created_tick >= TALE_LIFETIME
+}
+
+/// Per-settlement variant for parallel dispatch.
+///
+/// Applies fame threshold effects (tribute gold) for a single settlement's entities.
+pub fn compute_folk_hero_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % FOLK_HERO_TICK_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
+    // NEEDS STATE: regional fame for this settlement's region
+    // If fame > FAME_HERO_THRESHOLD:
+    //   out.push(WorldDelta::UpdateTreasury {
+    //       location_id: settlement_id,
+    //       delta: 2.0,
+    //   });
 }

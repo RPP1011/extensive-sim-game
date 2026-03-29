@@ -46,24 +46,9 @@ pub fn compute_exploration(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
-    // --- Track NPC movement: NPCs that are alive and moving reveal areas ---
-    // In the full system, this would update explored_tiles on ExplorationState.
-    // Without that field on WorldState, we express exploration as economic benefits:
-    // NPCs near settlements boost that settlement's treasury (cartography intel).
-
-    // NPCs at settlements: boost treasury via exploration intel.
-    let sight_world = (BASE_SIGHT_RANGE as f32) * TILE_SIZE;
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
-        let npc_count = state.entities[range].iter()
-            .filter(|e| e.alive && e.kind == EntityKind::Npc && e.team == WorldTeam::Friendly)
-            .count();
-        if npc_count > 0 {
-            out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
-                delta: EXPLORATION_TREASURY_BONUS * npc_count as f32,
-            });
-        }
+        compute_exploration_for_settlement(state, settlement.id, &state.entities[range], out);
     }
 
     // Frontier exploration: unaffiliated NPCs far from settlements.
@@ -78,51 +63,71 @@ pub fn compute_exploration(state: &WorldState, out: &mut Vec<WorldDelta>) {
             .map(|s| dist_sq(entity.pos, s.pos))
             .fold(f32::MAX, f32::min);
 
-        // If NPC is far from settlements (>30 units), they're in frontier territory
-        // Grant a small gold bonus representing exploration discoveries
         if min_settlement_dist > 900.0 {
-            // 30^2
             out.push(WorldDelta::TransferGold {
-                from_id: 0, // guild funds the expedition
+                from_id: 0,
                 to_id: entity.id,
-                amount: 0.5, // small per-tick frontier bonus
+                amount: 0.5,
             });
         }
     }
+}
 
-    // --- Scouting visibility boost: explored areas near regions ---
-    // Settlements with many nearby NPCs get fidelity upgrades
-    // (representing better map knowledge of the area).
-    for settlement in &state.settlements {
-        let grid_id = match settlement.grid_id {
-            Some(gid) => gid,
-            None => continue,
-        };
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_exploration_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[crate::world_sim::state::Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % EXPLORATION_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
 
-        let nearby_npc_count = state
-            .entities
-            .iter()
-            .filter(|e| {
-                e.kind == EntityKind::Npc
-                    && e.alive
-                    && e.team == WorldTeam::Friendly
-                    && dist_sq(e.pos, settlement.pos) <= 400.0 // within 20 units
-            })
-            .count();
+    let settlement = match state.settlement(settlement_id) {
+        Some(s) => s,
+        None => return,
+    };
 
-        // If 3+ NPCs are scouting near a settlement, escalate its grid fidelity
-        if nearby_npc_count >= 3 {
-            let current_fidelity = state
-                .grid(grid_id)
-                .map(|g| g.fidelity)
-                .unwrap_or(Fidelity::Low);
+    // NPCs at this settlement: boost treasury via exploration intel.
+    let npc_count = entities.iter()
+        .filter(|e| e.alive && e.kind == EntityKind::Npc && e.team == WorldTeam::Friendly)
+        .count();
+    if npc_count > 0 {
+        out.push(WorldDelta::UpdateTreasury {
+            location_id: settlement_id,
+            delta: EXPLORATION_TREASURY_BONUS * npc_count as f32,
+        });
+    }
 
-            if matches!(current_fidelity, Fidelity::Low | Fidelity::Background) {
-                out.push(WorldDelta::EscalateFidelity {
-                    grid_id,
-                    new_fidelity: Fidelity::Medium,
-                });
-            }
+    // Scouting visibility boost: nearby NPCs escalate grid fidelity.
+    let grid_id = match settlement.grid_id {
+        Some(gid) => gid,
+        None => return,
+    };
+
+    let nearby_npc_count = state
+        .entities
+        .iter()
+        .filter(|e| {
+            e.kind == EntityKind::Npc
+                && e.alive
+                && e.team == WorldTeam::Friendly
+                && dist_sq(e.pos, settlement.pos) <= 400.0
+        })
+        .count();
+
+    if nearby_npc_count >= 3 {
+        let current_fidelity = state
+            .grid(grid_id)
+            .map(|g| g.fidelity)
+            .unwrap_or(Fidelity::Low);
+
+        if matches!(current_fidelity, Fidelity::Low | Fidelity::Background) {
+            out.push(WorldDelta::EscalateFidelity {
+                grid_id,
+                new_fidelity: Fidelity::Medium,
+            });
         }
     }
 }

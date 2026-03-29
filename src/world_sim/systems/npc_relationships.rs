@@ -8,7 +8,7 @@
 //! Cadence: every 300 ticks.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{Entity, WorldState};
 
 // NEEDS STATE: npc_relationships: Vec<NpcRelationship> on WorldState
 //   where NpcRelationship { entity_a: u32, entity_b: u32, relationship_score: f32, rescue_available: bool }
@@ -39,7 +39,24 @@ pub fn compute_npc_relationships(state: &WorldState, out: &mut Vec<WorldDelta>) 
         return;
     }
 
-    // NEEDS STATE: iterate state.npc_relationships
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_npc_relationships_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_npc_relationships_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % DRIFT_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
+    // NEEDS STATE: iterate state.npc_relationships for entities in this settlement
     // For each rel in state.npc_relationships:
     //
     //   // Drift toward 0 (neutral)

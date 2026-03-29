@@ -13,7 +13,7 @@
 //! NEEDS DELTA: ModifyReputation, UnlockService
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, WorldState};
+use crate::world_sim::state::{Entity, EntityKind, WorldState};
 
 /// Reputation tick interval.
 const REPUTATION_TICK_INTERVAL: u64 = 10;
@@ -26,42 +26,53 @@ pub fn compute_npc_reputation(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_npc_reputation_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_npc_reputation_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % REPUTATION_TICK_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
     // Without named NPC reputation tracking, we approximate:
     // NPCs with healer class tags at settlements provide periodic healing
     // to other NPCs in the same grid (high-reputation healer service).
 
-    for grid in &state.grids {
-        // Check if any healer is present
-        let has_healer = grid.entity_ids.iter().any(|&id| {
-            state.entity(id).map_or(false, |e| {
-                e.alive
-                    && e.kind == EntityKind::Npc
-                    && e.npc.as_ref().map_or(false, |npc| {
-                        npc.class_tags.iter().any(|t| {
-                            t.contains("healer") || t.contains("cleric") || t.contains("priest")
-                        })
-                    })
+    // Check if any healer is present
+    let has_healer = entities.iter().any(|e| {
+        e.alive
+            && e.kind == EntityKind::Npc
+            && e.npc.as_ref().map_or(false, |npc| {
+                npc.class_tags.iter().any(|t| {
+                    t.contains("healer") || t.contains("cleric") || t.contains("priest")
+                })
             })
-        });
+    });
 
-        if !has_healer {
-            continue;
-        }
+    if !has_healer {
+        return;
+    }
 
-        // Healer provides healing to injured NPCs in the same grid
-        for &entity_id in &grid.entity_ids {
-            if let Some(entity) = state.entity(entity_id) {
-                if entity.alive
-                    && entity.kind == EntityKind::Npc
-                    && entity.hp < entity.max_hp
-                {
-                    out.push(WorldDelta::Heal {
-                        target_id: entity_id,
-                        amount: HEALER_SERVICE_HEAL,
-                        source_id: 0,
-                    });
-                }
-            }
+    // Healer provides healing to injured NPCs in the same settlement
+    for entity in entities {
+        if entity.alive
+            && entity.kind == EntityKind::Npc
+            && entity.hp < entity.max_hp
+        {
+            out.push(WorldDelta::Heal {
+                target_id: entity.id,
+                amount: HEALER_SERVICE_HEAL,
+                source_id: 0,
+            });
         }
     }
 }

@@ -12,7 +12,7 @@
 //! NEEDS DELTA: ModifyDebt, SpawnNemesis
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, StatusEffect, StatusEffectKind, WorldState};
+use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
 
 /// Pact system tick interval.
 const PACT_INTERVAL: u64 = 7;
@@ -37,11 +37,28 @@ pub fn compute_demonic_pacts(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_demonic_pacts_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_demonic_pacts_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % PACT_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
     // Without demonic_pacts state, we use a proxy: NPCs with very low HP
     // and existing debuffs are "pact-holders" who suffer escalating effects.
     // This is a placeholder until full pact tracking is added.
 
-    for entity in &state.entities {
+    for entity in entities {
         if !entity.alive || entity.kind != EntityKind::Npc {
             continue;
         }
@@ -81,28 +98,21 @@ pub fn compute_demonic_pacts(state: &WorldState, out: &mut Vec<WorldDelta>) {
             }
         }
 
-        // Severe: possession — damage a nearby ally
+        // Severe: possession — damage a nearby ally in the same settlement
         if debuff_count >= 3 {
             let roll = tick_hash(state.tick, entity.id as u64 ^ 0xDE30);
             if roll < 0.15 {
-                // Find a nearby friendly NPC to damage
-                if let Some(grid_id) = entity.grid_id {
-                    if let Some(grid) = state.grid(grid_id) {
-                        for &other_id in &grid.entity_ids {
-                            if other_id == entity.id {
-                                continue;
-                            }
-                            if let Some(other) = state.entity(other_id) {
-                                if other.alive && other.kind == EntityKind::Npc {
-                                    out.push(WorldDelta::Damage {
-                                        target_id: other_id,
-                                        amount: POSSESSION_DAMAGE,
-                                        source_id: entity.id,
-                                    });
-                                    break;
-                                }
-                            }
-                        }
+                for other in entities {
+                    if other.id == entity.id {
+                        continue;
+                    }
+                    if other.alive && other.kind == EntityKind::Npc {
+                        out.push(WorldDelta::Damage {
+                            target_id: other.id,
+                            amount: POSSESSION_DAMAGE,
+                            source_id: entity.id,
+                        });
+                        break;
                     }
                 }
             }

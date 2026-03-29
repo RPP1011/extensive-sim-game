@@ -9,7 +9,7 @@
 //! Cadence: every 10 ticks.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{Entity, WorldState};
 
 // NEEDS STATE: companions: Vec<Companion> on WorldState or Entity
 //   Companion { id, name, species, owner_id, bond_level, acquired_tick }
@@ -40,6 +40,23 @@ pub fn compute_companions(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_companions_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_companions_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % COMPANION_TICK_INTERVAL != 0 {
+        return;
+    }
+
     // For each entity with a companion (NEEDS STATE: companion data on Entity):
     //
     // Determine owner activity from grid context:
@@ -53,16 +70,12 @@ pub fn compute_companions(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // Bond milestone events at 25, 50, 70 would be emitted as separate deltas
     // or logged via an event system layered on top of deltas.
 
-    // Structural skeleton: iterate NPC entities per settlement
-    for settlement in &state.settlements {
-        let range = state.group_index.settlement_entities(settlement.id);
-        for entity in &state.entities[range] {
-            if !entity.alive || entity.npc.is_none() {
-                continue;
-            }
-            // NEEDS STATE: check if entity has a companion
-            // NEEDS STATE: determine activity from grid membership
+    for entity in entities {
+        if !entity.alive || entity.npc.is_none() {
+            continue;
         }
+        // NEEDS STATE: check if entity has a companion
+        // NEEDS STATE: determine activity from grid membership
     }
 }
 

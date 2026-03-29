@@ -10,7 +10,7 @@
 //! NEEDS STATE: `activity_status` on NpcData (idle/traveling/fighting)
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EconomicIntent, EntityKind, WorldState};
+use crate::world_sim::state::{EconomicIntent, Entity, EntityKind, WorldState};
 
 /// Heal interval in ticks.
 const WOUND_HEAL_INTERVAL: u64 = 3;
@@ -31,44 +31,53 @@ pub fn compute_wound_persistence(state: &WorldState, out: &mut Vec<WorldDelta>) 
 
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
-        for entity in &state.entities[range] {
-            if !entity.alive || entity.kind != EntityKind::Npc {
-                continue;
-            }
-            // Only heal entities that are below max HP
-            if entity.hp >= entity.max_hp {
-                continue;
-            }
+        compute_wound_persistence_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
 
-            let npc = match &entity.npc {
-                Some(n) => n,
-                None => continue,
-            };
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_wound_persistence_for_settlement(
+    _state: &WorldState,
+    _settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    for entity in entities {
+        if !entity.alive || entity.kind != EntityKind::Npc {
+            continue;
+        }
+        // Only heal entities that are below max HP
+        if entity.hp >= entity.max_hp {
+            continue;
+        }
 
-            // Determine heal rate based on activity
-            let heal_rate = match &npc.economic_intent {
-                EconomicIntent::Idle => HEAL_RATE_IDLE,
-                EconomicIntent::Travel { .. } | EconomicIntent::Trade { .. } => HEAL_RATE_TRAVELING,
-                // Produce/Buy/Sell are "at settlement" activities — heal at idle rate
-                EconomicIntent::Produce | EconomicIntent::Buy { .. } | EconomicIntent::Sell { .. } => {
-                    HEAL_RATE_IDLE
-                }
-            };
+        let npc = match &entity.npc {
+            Some(n) => n,
+            None => continue,
+        };
 
-            if heal_rate <= 0.0 {
-                continue;
+        // Determine heal rate based on activity
+        let heal_rate = match &npc.economic_intent {
+            EconomicIntent::Idle => HEAL_RATE_IDLE,
+            EconomicIntent::Travel { .. } | EconomicIntent::Trade { .. } => HEAL_RATE_TRAVELING,
+            EconomicIntent::Produce | EconomicIntent::Buy { .. } | EconomicIntent::Sell { .. } => {
+                HEAL_RATE_IDLE
             }
+        };
 
-            // Don't overheal
-            let missing = entity.max_hp - entity.hp;
-            let amount = heal_rate.min(missing);
-            if amount > 0.0 {
-                out.push(WorldDelta::Heal {
-                    target_id: entity.id,
-                    amount,
-                    source_id: entity.id, // self-healing
-                });
-            }
+        if heal_rate <= 0.0 {
+            continue;
+        }
+
+        // Don't overheal
+        let missing = entity.max_hp - entity.hp;
+        let amount = heal_rate.min(missing);
+        if amount > 0.0 {
+            out.push(WorldDelta::Heal {
+                target_id: entity.id,
+                amount,
+                source_id: entity.id,
+            });
         }
     }
 }

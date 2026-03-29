@@ -9,7 +9,7 @@
 //! Cadence: every 10 ticks (skips tick 0).
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{Entity, WorldState};
 
 // NEEDS STATE: personal_goal on Entity/NpcData
 //   AdventurerGoal { goal_type: GoalType, progress, deadline_tick, fulfilled, abandoned }
@@ -46,42 +46,41 @@ pub fn compute_personal_goals(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
-        for entity in &state.entities[range] {
-            if !entity.alive || entity.npc.is_none() {
-                continue;
-            }
-            let npc = entity.npc.as_ref().unwrap();
+        compute_personal_goals_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
 
-            // --- Phase 1: Assign goals to NPCs without one ---
-            // NEEDS STATE: entity.personal_goal
-            // Pick goal based on context:
-            //   Low level → ReachLevel
-            //   Low gold → AccumulateGold { target: level * 50 }
-            //   High bond with someone → FormBond
-            //   Deterministic weighted selection
-            // out.push(WorldDelta::AssignGoal { entity_id, goal_type, deadline_tick })
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_personal_goals_for_settlement(
+    state: &WorldState,
+    _settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % GOAL_TICK_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
 
-            // --- Phase 2: Update progress on active goals ---
-            // Compute progress based on goal type:
-            //   ReachLevel: level >= target → 100%
-            //   AccumulateGold: npc.gold / target * 100
-            //   FormBond: bond_strength / 80 * 100
-            //   EarnTitle: has leadership role or deed → 100%
-            // out.push(WorldDelta::UpdateGoalProgress { entity_id, progress })
-
-            // --- Phase 3: Check fulfillment (progress >= 100) ---
-            // out.push(WorldDelta::FulfillGoal { entity_id })
-            // out.push(WorldDelta::AdjustLoyalty { entity_id, delta: FULFILLMENT_LOYALTY })
-            // out.push(WorldDelta::AdjustMorale { entity_id, delta: FULFILLMENT_MORALE })
-
-            // --- Phase 4: Check deadline neglect (progress < 50% at deadline) ---
-            // out.push(WorldDelta::AbandonGoal { entity_id })
-            // out.push(WorldDelta::AdjustLoyalty { entity_id, delta: -NEGLECT_LOYALTY })
-            // out.push(WorldDelta::AdjustMorale { entity_id, delta: -NEGLECT_MORALE })
-
-            // Gold-based progress can use existing NPC gold field
-            let _gold = npc.gold;
-            let _level = entity.level;
+    for entity in entities {
+        if !entity.alive || entity.npc.is_none() {
+            continue;
         }
+        let npc = entity.npc.as_ref().unwrap();
+
+        // --- Phase 1: Assign goals to NPCs without one ---
+        // NEEDS STATE: entity.personal_goal
+
+        // --- Phase 2: Update progress on active goals ---
+        // NEEDS STATE: entity.personal_goal
+
+        // --- Phase 3: Check fulfillment (progress >= 100) ---
+        // NEEDS STATE: entity.personal_goal
+
+        // --- Phase 4: Check deadline neglect (progress < 50% at deadline) ---
+        // NEEDS STATE: entity.personal_goal
+
+        // Gold-based progress can use existing NPC gold field
+        let _gold = npc.gold;
+        let _level = entity.level;
     }
 }

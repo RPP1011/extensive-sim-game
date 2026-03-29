@@ -11,7 +11,7 @@
 //! NEEDS DELTA: ModifyDurability, EquipmentBroken
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EconomicIntent, EntityKind, StatusEffect, StatusEffectKind, WorldState};
+use crate::world_sim::state::{EconomicIntent, Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
 
 /// Durability check interval.
 const DURABILITY_INTERVAL: u64 = 7;
@@ -27,51 +27,55 @@ pub fn compute_equipment_durability(state: &WorldState, out: &mut Vec<WorldDelta
         return;
     }
 
-    // Without per-item durability tracking on NpcData, we approximate:
-    // NPCs at settlements spend gold on maintenance (TransferGold to settlement).
-    // Traveling/fighting NPCs accumulate a debuff representing worn equipment.
-
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
-        for entity in &state.entities[range] {
-            if !entity.alive || entity.kind != EntityKind::Npc {
-                continue;
-            }
-            let npc = match &entity.npc {
-                Some(n) => n,
-                None => continue,
-            };
+        compute_equipment_durability_for_settlement(state, settlement.id, &state.entities[range], out);
+    }
+}
 
-            match &npc.economic_intent {
-                EconomicIntent::Idle | EconomicIntent::Produce | EconomicIntent::Buy { .. } | EconomicIntent::Sell { .. } => {
-                    // At settlement: auto-repair costs gold
-                    if npc.gold >= REPAIR_COST {
-                        out.push(WorldDelta::TransferGold {
-                            from_id: entity.id,
-                            to_id: settlement.id,
-                            amount: REPAIR_COST,
-                        });
-                    }
-                }
-                EconomicIntent::Travel { .. } | EconomicIntent::Trade { .. } => {
-                    // Traveling: equipment wears down — apply a mild debuff
-                    // (only if not already debuffed for this)
-                    let already_debuffed = entity.status_effects.iter().any(|s| {
-                        matches!(&s.kind, StatusEffectKind::Debuff { stat, .. } if stat == "attack")
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_equipment_durability_for_settlement(
+    _state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    for entity in entities {
+        if !entity.alive || entity.kind != EntityKind::Npc {
+            continue;
+        }
+        let npc = match &entity.npc {
+            Some(n) => n,
+            None => continue,
+        };
+
+        match &npc.economic_intent {
+            EconomicIntent::Idle | EconomicIntent::Produce | EconomicIntent::Buy { .. } | EconomicIntent::Sell { .. } => {
+                // At settlement: auto-repair costs gold
+                if npc.gold >= REPAIR_COST {
+                    out.push(WorldDelta::TransferGold {
+                        from_id: entity.id,
+                        to_id: settlement_id,
+                        amount: REPAIR_COST,
                     });
-                    if !already_debuffed {
-                        out.push(WorldDelta::ApplyStatus {
-                            target_id: entity.id,
-                            status: StatusEffect {
-                                kind: StatusEffectKind::Debuff {
-                                    stat: "attack".to_string(),
-                                    factor: 0.95,
-                                },
-                                source_id: 0,
-                                remaining_ms: DEGRADED_DEBUFF_MS,
+                }
+            }
+            EconomicIntent::Travel { .. } | EconomicIntent::Trade { .. } => {
+                let already_debuffed = entity.status_effects.iter().any(|s| {
+                    matches!(&s.kind, StatusEffectKind::Debuff { stat, .. } if stat == "attack")
+                });
+                if !already_debuffed {
+                    out.push(WorldDelta::ApplyStatus {
+                        target_id: entity.id,
+                        status: StatusEffect {
+                            kind: StatusEffectKind::Debuff {
+                                stat: "attack".to_string(),
+                                factor: 0.95,
                             },
-                        });
-                    }
+                            source_id: 0,
+                            remaining_ms: DEGRADED_DEBUFF_MS,
+                        },
+                    });
                 }
             }
         }

@@ -10,7 +10,7 @@
 //! Cadence: every 10 ticks.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{Entity, WorldState};
 
 // NEEDS STATE: romances: Vec<Romance> on WorldState
 //   Romance { adventurer_a, adventurer_b, stage: RomanceStage, strength, started_tick }
@@ -51,32 +51,9 @@ pub fn compute_romance(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     // --- 1. Romance formation ---
-    // For NPC pairs sharing the same grid:
-    //   - Both alive, not already romanced, bond > 50, morale > 40, no rivalry
-    //   - Deterministic roll < 0.05
-    //   - out.push(WorldDelta::UpdateRomance { a, b, new_stage: Attraction, strength_delta: 10.0 })
-    for grid in &state.grids {
-        let npc_ids: Vec<u32> = grid
-            .entity_ids
-            .iter()
-            .copied()
-            .filter(|&eid| {
-                state
-                    .entity(eid)
-                    .map(|e| e.alive && e.npc.is_some())
-                    .unwrap_or(false)
-            })
-            .collect();
-
-        // NEEDS STATE: check bonds, romances, rivalries for each pair
-        // For now, pairs are identified but cannot be processed without state.
-        for i in 0..npc_ids.len() {
-            for j in (i + 1)..npc_ids.len() {
-                let _a = npc_ids[i];
-                let _b = npc_ids[j];
-                // NEEDS STATE + DELTA: formation check
-            }
-        }
+    for settlement in &state.settlements {
+        let range = state.group_index.settlement_entities(settlement.id);
+        compute_romance_for_settlement(state, settlement.id, &state.entities[range], out);
     }
 
     // --- 2. Stage progression ---
@@ -93,6 +70,38 @@ pub fn compute_romance(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
     // --- 3. Cleanup dead romances ---
     // NEEDS STATE: remove romances involving dead entities
+}
+
+/// Per-settlement variant for parallel dispatch.
+pub fn compute_romance_for_settlement(
+    state: &WorldState,
+    settlement_id: u32,
+    entities: &[Entity],
+    out: &mut Vec<WorldDelta>,
+) {
+    if state.tick % ROMANCE_TICK_INTERVAL != 0 {
+        return;
+    }
+
+    // Romance formation: For NPC pairs sharing the same settlement:
+    //   - Both alive, not already romanced, bond > 50, morale > 40, no rivalry
+    //   - Deterministic roll < 0.05
+    //   - out.push(WorldDelta::UpdateRomance { a, b, new_stage: Attraction, strength_delta: 10.0 })
+    let npc_ids: Vec<u32> = entities
+        .iter()
+        .filter(|e| e.alive && e.npc.is_some())
+        .map(|e| e.id)
+        .collect();
+
+    // NEEDS STATE: check bonds, romances, rivalries for each pair
+    // For now, pairs are identified but cannot be processed without state.
+    for i in 0..npc_ids.len() {
+        for j in (i + 1)..npc_ids.len() {
+            let _a = npc_ids[i];
+            let _b = npc_ids[j];
+            // NEEDS STATE + DELTA: formation check
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
