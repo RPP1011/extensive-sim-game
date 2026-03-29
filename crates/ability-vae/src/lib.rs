@@ -5,3 +5,4 @@ pub mod text_encoder;
 pub mod quality;
 pub mod grokfast;
 pub mod tree_decoder;
+pub mod ability_generator;

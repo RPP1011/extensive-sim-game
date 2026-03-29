@@ -1016,6 +1016,12 @@ impl WorldSim {
         profile.apply_fidelity_us = apply_profile.fidelity_us;
         profile.apply_price_reports_us = apply_profile.price_reports_us;
 
+        // CLASS MATCHING — run after apply so behavior tags are up to date.
+        // Only check every 50 ticks (same cadence as class_progression).
+        if self.state.tick % 50 == 0 && self.state.tick > 0 {
+            self.run_class_matching();
+        }
+
         // Sync hot array from entities (fast — scalar copy only).
         // Full rebuild only if entities were spawned (array length changed).
         if self.state.entities.len() != self.state.hot.len() {
@@ -1028,6 +1034,54 @@ impl WorldSim {
         profile.total_us = tick_start.elapsed().as_micros() as u64;
         self.profile_acc.record(&profile);
         profile
+    }
+
+    /// Match NPC behavior profiles against class templates and grant new classes.
+    /// Runs after apply so behavior_tags are up to date.
+    fn run_class_matching(&mut self) {
+        use super::state::{EntityKind, ClassSlot};
+
+        let min_behavior_sum = 10.0_f32;
+
+        for entity in &mut self.state.entities {
+            if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+            let npc = match &mut entity.npc { Some(n) => n, None => continue };
+
+            // Skip NPCs with insufficient behavior.
+            let behavior_sum: f32 = npc.behavior_values.iter().sum();
+            if behavior_sum < min_behavior_sum { continue; }
+
+            // Match against class templates.
+            let matches = self.class_gen.match_classes(&npc.behavior_tags, &npc.behavior_values);
+
+            for class_match in &matches {
+                // Skip if NPC already has this class.
+                if npc.classes.iter().any(|c| c.class_name_hash == class_match.class_name_hash) {
+                    continue;
+                }
+
+                // Grant the class.
+                npc.classes.push(ClassSlot {
+                    class_name_hash: class_match.class_name_hash,
+                    level: 1,
+                    xp: 0.0,
+                });
+            }
+
+            // If no templates matched and behavior is high, try unique class.
+            if matches.is_empty() && behavior_sum > 500.0 && npc.classes.is_empty() {
+                let seed = self.state.tick ^ entity.id as u64;
+                if let Some(class_def) = self.class_gen.generate_unique_class(
+                    &npc.behavior_tags, &npc.behavior_values, seed,
+                ) {
+                    npc.classes.push(ClassSlot {
+                        class_name_hash: class_def.name_hash,
+                        level: 1,
+                        xp: 0.0,
+                    });
+                }
+            }
+        }
     }
 }
 
