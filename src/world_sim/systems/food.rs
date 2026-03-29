@@ -109,18 +109,66 @@ pub fn compute_food_for_settlement(
         // Only working NPCs produce.
         let working = matches!(npc.economic_intent,
             crate::world_sim::state::EconomicIntent::Produce
-            | crate::world_sim::state::EconomicIntent::Idle // idle NPCs default to basic labor
+            | crate::world_sim::state::EconomicIntent::Idle
         );
         if !working { continue; }
 
         let level_mult = 0.5 + entity.level as f32 * 0.1;
         let mut produced_anything = false;
+
         for &(commodity, rate) in &npc.behavior_production {
-            if rate > 0.0 {
+            if rate <= 0.0 { continue; }
+            let amount = rate * level_mult;
+
+            // Recipe check: processed goods require raw material inputs.
+            // Raw materials (food, iron, wood, herbs, hide, crystal) need no inputs.
+            // Equipment: 2 iron + 1 wood per unit.
+            // Medicine: 2 herbs per unit.
+            use crate::world_sim::commodity as c;
+
+            // inputs: [(commodity, amount_per_unit); 2] — stack allocated, no Vec.
+            let (recipe, recipe_count): ([(usize, f32); 2], usize) = match commodity {
+                c::EQUIPMENT => ([(c::IRON, 2.0), (c::WOOD, 1.0)], 2),
+                c::MEDICINE => ([(c::HERBS, 2.0), (0, 0.0)], 1),
+                _ => ([(0, 0.0); 2], 0), // raw material, no inputs
+            };
+
+            // Check input availability and compute production scale.
+            let mut scale = 1.0f32;
+            for i in 0..recipe_count {
+                let (input_c, per_unit) = recipe[i];
+                let needed = amount * per_unit;
+                let avail = settlement.stockpile[input_c];
+                if needed > 0.0 {
+                    scale = scale.min(avail / needed);
+                }
+            }
+            scale = scale.clamp(0.0, 1.0);
+
+            if recipe_count > 0 && scale < 0.1 {
+                continue; // not enough inputs to produce anything meaningful
+            }
+
+            let actual_amount = amount * scale;
+
+            // Consume inputs.
+            for i in 0..recipe_count {
+                let (input_c, per_unit) = recipe[i];
+                let consume = actual_amount * per_unit;
+                if consume > 0.0 {
+                    out.push(WorldDelta::ConsumeCommodity {
+                        location_id: settlement_id,
+                        commodity: input_c,
+                        amount: consume,
+                    });
+                }
+            }
+
+            if actual_amount > 0.0 {
                 out.push(WorldDelta::ProduceCommodity {
                     location_id: settlement_id,
                     commodity,
-                    amount: rate * level_mult,
+                    amount: actual_amount,
                 });
                 produced_anything = true;
             }
@@ -130,27 +178,29 @@ pub fn compute_food_for_settlement(
         if produced_anything {
             out.push(WorldDelta::AddXp { entity_id: entity.id, amount: 1 });
 
-            // Behavior tags: map commodity to tag.
             for &(commodity, rate) in &npc.behavior_production {
-                if rate > 0.0 {
-                    let mut action = ActionTags::empty();
-                    use crate::world_sim::commodity;
-                    let commodity_tag = match commodity {
-                        commodity::FOOD => tags::FARMING,
-                        commodity::IRON => tags::MINING,
-                        commodity::WOOD => tags::WOODWORK,
-                        commodity::HERBS => tags::HERBALISM,
-                        commodity::HIDE => tags::SURVIVAL,
-                        commodity::CRYSTAL => tags::ALCHEMY,
-                        commodity::EQUIPMENT => tags::SMITHING,
-                        commodity::MEDICINE => tags::MEDICINE,
-                        _ => tags::LABOR,
-                    };
-                    action.add(commodity_tag, 1.0);
-                    action.add(tags::LABOR, 0.5);
-                    let action = crate::world_sim::action_context::with_context(&action, entity, state);
-                    out.push(WorldDelta::AddBehaviorTags { entity_id: entity.id, tags: action.tags, count: action.count });
+                if rate <= 0.0 { continue; }
+                let mut action = ActionTags::empty();
+                use crate::world_sim::commodity;
+                let commodity_tag = match commodity {
+                    commodity::FOOD => tags::FARMING,
+                    commodity::IRON => tags::MINING,
+                    commodity::WOOD => tags::WOODWORK,
+                    commodity::HERBS => tags::HERBALISM,
+                    commodity::HIDE => tags::SURVIVAL,
+                    commodity::CRYSTAL => tags::ALCHEMY,
+                    commodity::EQUIPMENT => tags::SMITHING,
+                    commodity::MEDICINE => tags::MEDICINE,
+                    _ => tags::LABOR,
+                };
+                action.add(commodity_tag, 1.0);
+                action.add(tags::LABOR, 0.5);
+                // Crafting-specific tags for processed goods.
+                if commodity == commodity::EQUIPMENT || commodity == commodity::MEDICINE {
+                    action.add(tags::CRAFTING, 0.8);
                 }
+                let action = crate::world_sim::action_context::with_context(&action, entity, state);
+                out.push(WorldDelta::AddBehaviorTags { entity_id: entity.id, tags: action.tags, count: action.count });
             }
         }
     }
