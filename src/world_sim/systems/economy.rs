@@ -75,8 +75,33 @@ pub fn compute_economy_for_settlement(
         });
     }
 
-    // --- Equipment maintenance / upkeep ---
-    compute_economy_maintenance_for_settlement(state, settlement_id, entities, out);
+    // --- NPC taxation: NPCs with gold pay a small tax to settlement treasury ---
+    let mut tax_income = 0.0f32;
+    for entity in entities {
+        if entity.kind != EntityKind::Npc || !entity.alive { continue; }
+        if let Some(npc) = &entity.npc {
+            if npc.gold > 1.0 {
+                let tax = npc.gold * 0.001; // 0.1% tax per tick
+                tax_income += tax;
+                out.push(WorldDelta::TransferGold {
+                    from_id: entity.id,
+                    to_id: settlement_id, // goes to treasury via convention
+                    amount: tax,
+                });
+            }
+        }
+    }
+    if tax_income > 0.0 {
+        out.push(WorldDelta::UpdateTreasury {
+            location_id: settlement_id,
+            delta: tax_income,
+        });
+    }
+
+    // --- Equipment maintenance / upkeep (only if treasury positive) ---
+    if settlement.treasury > 0.0 {
+        compute_economy_maintenance_for_settlement(state, settlement_id, entities, out);
+    }
 
     // --- Trade income: settlement with positive stockpile generates gold ---
     let avg_stockpile: f32 =
