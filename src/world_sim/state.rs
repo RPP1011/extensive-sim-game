@@ -981,15 +981,16 @@ impl SettlementSpecialty {
     /// Commodity production bonuses for this specialty.
     /// Returns (commodity_index, multiplier) pairs.
     pub fn production_bonuses(self) -> &'static [(usize, f32)] {
+        use crate::world_sim::commodity::*;
         match self {
             SettlementSpecialty::General => &[],
-            SettlementSpecialty::MiningTown => &[(1, 2.0), (5, 1.5)],       // iron, crystal
-            SettlementSpecialty::TradeHub => &[(7, 2.0)],                    // trade_goods
-            SettlementSpecialty::MilitaryOutpost => &[(1, 1.3)],             // iron
-            SettlementSpecialty::FarmingVillage => &[(0, 2.0), (3, 1.5)],   // food, hide
-            SettlementSpecialty::ScholarCity => &[(5, 1.5)],                 // crystal
-            SettlementSpecialty::PortTown => &[(0, 1.5), (7, 1.5)],         // food, trade_goods
-            SettlementSpecialty::CraftingGuild => &[(6, 2.0), (1, 1.3)],    // medicine, iron
+            SettlementSpecialty::MiningTown => &[(IRON, 2.0), (CRYSTAL, 1.5)],
+            SettlementSpecialty::TradeHub => &[(FOOD, 1.0)],  // trade hubs don't produce, they move goods
+            SettlementSpecialty::MilitaryOutpost => &[(IRON, 1.3), (EQUIPMENT, 0.5)],
+            SettlementSpecialty::FarmingVillage => &[(FOOD, 2.0), (HIDE, 1.5)],
+            SettlementSpecialty::ScholarCity => &[(HERBS, 1.0), (MEDICINE, 0.5)],
+            SettlementSpecialty::PortTown => &[(FOOD, 1.5), (WOOD, 1.0)],
+            SettlementSpecialty::CraftingGuild => &[(EQUIPMENT, 2.0), (MEDICINE, 1.5)],
         }
     }
 
@@ -1107,14 +1108,15 @@ impl Terrain {
     /// Commodity indices that this terrain naturally produces.
     /// Indices: 0=food, 1=iron, 2=wood, 3=hide, 4=herbs, 5=crystal, 6=medicine, 7=trade_goods.
     pub fn primary_commodities(self) -> &'static [(usize, f32)] {
+        use crate::world_sim::commodity::*;
         match self {
-            Terrain::Plains    => &[(0, 1.5), (3, 1.0)],        // food, hide
-            Terrain::Forest    => &[(2, 1.5), (4, 1.0)],        // wood, herbs
-            Terrain::Mountains => &[(1, 1.5), (5, 1.0)],        // iron, crystal
-            Terrain::Coast     => &[(0, 1.2), (7, 1.5)],        // food, trade_goods
-            Terrain::Swamp     => &[(4, 1.5), (6, 1.0)],        // herbs, medicine
-            Terrain::Desert    => &[(5, 1.2)],                   // crystal (sparse)
-            Terrain::Tundra    => &[(3, 1.2)],                   // hide (sparse)
+            Terrain::Plains    => &[(FOOD, 1.5), (HIDE, 1.0)],
+            Terrain::Forest    => &[(WOOD, 1.5), (HERBS, 1.0)],
+            Terrain::Mountains => &[(IRON, 1.5), (CRYSTAL, 1.0)],
+            Terrain::Coast     => &[(FOOD, 1.2), (WOOD, 0.8)],
+            Terrain::Swamp     => &[(HERBS, 1.5), (MEDICINE, 1.0)],
+            Terrain::Desert    => &[(CRYSTAL, 1.2)],
+            Terrain::Tundra    => &[(HIDE, 1.2)],
         }
     }
 }

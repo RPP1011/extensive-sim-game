@@ -134,15 +134,16 @@ pub fn compute_food_for_settlement(
             for &(commodity, rate) in &npc.behavior_production {
                 if rate > 0.0 {
                     let mut action = ActionTags::empty();
+                    use crate::world_sim::commodity;
                     let commodity_tag = match commodity {
-                        0 => tags::FARMING,     // food
-                        1 => tags::MINING,      // iron/ore
-                        2 => tags::WOODWORK,    // wood
-                        3 => tags::HERBALISM,   // herbs
-                        4 => tags::SURVIVAL,    // hide
-                        5 => tags::ALCHEMY,     // crystal
-                        6 => tags::SMITHING,    // equipment
-                        7 => tags::MEDICINE,    // medicine
+                        commodity::FOOD => tags::FARMING,
+                        commodity::IRON => tags::MINING,
+                        commodity::WOOD => tags::WOODWORK,
+                        commodity::HERBS => tags::HERBALISM,
+                        commodity::HIDE => tags::SURVIVAL,
+                        commodity::CRYSTAL => tags::ALCHEMY,
+                        commodity::EQUIPMENT => tags::SMITHING,
+                        commodity::MEDICINE => tags::MEDICINE,
                         _ => tags::LABOR,
                     };
                     action.add(commodity_tag, 1.0);

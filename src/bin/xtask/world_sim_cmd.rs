@@ -108,9 +108,15 @@ pub fn run_world_sim(args: WorldSimArgs) -> ExitCode {
     }
 
     // Behavior profile samples — show top tags for a few alive NPCs
-    let alive_npcs: Vec<&bevy_game::world_sim::state::Entity> = s.entities.iter()
+    // Sample NPCs evenly across the entity array (different settlements).
+    let alive_all: Vec<&bevy_game::world_sim::state::Entity> = s.entities.iter()
         .filter(|e| e.alive && e.kind == EntityKind::Npc && e.npc.is_some())
+        .collect();
+    let stride = (alive_all.len() / 10).max(1);
+    let alive_npcs: Vec<&bevy_game::world_sim::state::Entity> = alive_all.iter()
+        .step_by(stride)
         .take(10)
+        .copied()
         .collect();
 
     if !alive_npcs.is_empty() {
