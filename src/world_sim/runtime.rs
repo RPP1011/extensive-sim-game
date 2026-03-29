@@ -1046,6 +1046,13 @@ impl WorldSim {
         // POST-APPLY: process world events into state changes.
         self.process_world_events();
 
+        // GRID ASSIGNMENT — entities near grids get assigned to them.
+        // This enables combat: monsters entering a settlement grid trigger
+        // fidelity escalation → High → compute_high runs combat.
+        if self.state.tick % 10 == 0 {
+            self.update_grid_membership();
+        }
+
         // CLASS MATCHING — run after apply so behavior tags are up to date.
         if self.state.tick % 50 == 0 && self.state.tick > 0 {
             self.run_class_matching();
@@ -1067,6 +1074,53 @@ impl WorldSim {
 
     /// Match NPC behavior profiles against class templates and grant new classes.
     /// Runs after apply so behavior_tags are up to date.
+    /// Assign entities to grids based on proximity.
+    fn update_grid_membership(&mut self) {
+        let num_grids = self.state.grids.len();
+
+        // Phase 1: compute new membership for each grid.
+        // Collect (grid_index, new_entity_ids) without borrowing conflicts.
+        let mut new_memberships: Vec<Vec<u32>> = Vec::with_capacity(num_grids);
+
+        for grid in &self.state.grids {
+            let r2 = grid.radius * grid.radius;
+            let mut members = Vec::new();
+
+            for entity in &self.state.entities {
+                if !entity.alive { continue; }
+                let dx = entity.pos.0 - grid.center.0;
+                let dy = entity.pos.1 - grid.center.1;
+                if dx * dx + dy * dy <= r2 {
+                    members.push(entity.id);
+                }
+            }
+            new_memberships.push(members);
+        }
+
+        // Phase 2: apply.
+        for (i, grid) in self.state.grids.iter_mut().enumerate() {
+            grid.entity_ids = std::mem::take(&mut new_memberships[i]);
+        }
+
+        // Phase 3: update entity grid_id.
+        // Build a quick lookup: entity_id → grid_id.
+        let mut entity_grid: Vec<Option<u32>> = vec![None; self.state.max_entity_id as usize + 1];
+        for grid in &self.state.grids {
+            for &eid in &grid.entity_ids {
+                if (eid as usize) < entity_grid.len() {
+                    entity_grid[eid as usize] = Some(grid.id);
+                }
+            }
+        }
+        for entity in &mut self.state.entities {
+            entity.grid_id = if (entity.id as usize) < entity_grid.len() {
+                entity_grid[entity.id as usize]
+            } else {
+                None
+            };
+        }
+    }
+
     /// Convert world events into state changes (quest postings, etc.).
     fn process_world_events(&mut self) {
         use super::state::{WorldEvent, QuestPosting, QuestType};
