@@ -182,6 +182,7 @@ pub fn compute_food_for_settlement(
         }
 
         // Labor XP + behavior tags: earned by doing the work.
+        // Gold comes from selling goods via trade, not from production directly.
         if produced_anything {
             out.push(WorldDelta::AddXp { entity_id: entity.id, amount: 1 });
 
