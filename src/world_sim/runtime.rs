@@ -891,6 +891,8 @@ fn run_settlement_systems(
     progression::compute_progression_for_settlement(state, sid, entities, buf);
     class_progression::compute_class_progression_for_settlement(state, sid, entities, buf);
     recruitment::compute_recruitment_for_settlement(state, sid, entities, buf);
+    npc_decisions::compute_npc_decisions_for_settlement(state, sid, entities, buf);
+    price_discovery::compute_price_discovery_for_settlement(state, sid, entities, buf);
     retirement::compute_retirement_for_settlement(state, sid, entities, buf);
     hobbies::compute_hobbies_for_settlement(state, sid, entities, buf);
     fears::compute_fears_for_settlement(state, sid, entities, buf);
