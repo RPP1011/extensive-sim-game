@@ -217,7 +217,7 @@ pub fn compute_settlement_systems(state: &WorldState, out: &mut Vec<WorldDelta>)
     run_system!("adventurer_condition", adventurer_condition::compute_adventurer_condition, state, out);
     run_system!("adventurer_recovery", adventurer_recovery::compute_adventurer_recovery, state, out);
     run_system!("progression", progression::compute_progression, state, out);
-    run_system!("class_progression", class_progression::compute_class_progression, state, out);
+    // class_progression: stub (XP removed, class matching handled by runtime post-apply)
     run_system!("recruitment", recruitment::compute_recruitment, state, out);
     run_system!("npc_decisions", npc_decisions::compute_npc_decisions, state, out);
     run_system!("work", work::compute_work, state, out);
@@ -227,10 +227,10 @@ pub fn compute_settlement_systems(state: &WorldState, out: &mut Vec<WorldDelta>)
     run_system!("hobbies", hobbies::compute_hobbies, state, out);
     run_system!("fears", fears::compute_fears, state, out);
     run_system!("personal_goals", personal_goals::compute_personal_goals, state, out);
-    run_system!("journals", journals::compute_journals, state, out);
+    // journals: stub (journal state not on entities, all logic in agent_inner memory)
     run_system!("wound_persistence", wound_persistence::compute_wound_persistence, state, out);
     run_system!("addiction", addiction::compute_addiction, state, out);
-    run_system!("equipment_durability", equipment_durability::compute_equipment_durability, state, out);
+    // equipment_durability: compute phase is a no-op (durability handled in post-apply advance_item_durability)
     run_system!("equipping", equipping::compute_equipping, state, out);
     run_system!("moods", moods::compute_moods, state, out);
     run_system!("bonds", bonds::compute_bonds, state, out);
@@ -258,7 +258,7 @@ pub fn compute_settlement_systems(state: &WorldState, out: &mut Vec<WorldDelta>)
     run_system!("battles", battles::compute_battles, state, out);
     run_system!("loot", loot::compute_loot, state, out);
     run_system!("last_stand", last_stand::compute_last_stand, state, out);
-    run_system!("interception", interception::compute_interception, state, out);
+    // interception: stub (no deltas emitted)
     run_system!("skill_challenges", skill_challenges::compute_skill_challenges, state, out);
     run_system!("dungeons", dungeons::compute_dungeons, state, out);
     run_system!("escalation_protocol", escalation_protocol::compute_escalation_protocol, state, out);
@@ -331,13 +331,13 @@ pub fn compute_global_systems(state: &WorldState, out: &mut Vec<WorldDelta>) {
     run_system!("mercenaries", mercenaries::compute_mercenaries, state, out);
 
     // Social global (entity pairs across settlements)
-    run_system!("reputation_decay", reputation_decay::compute_reputation_decay, state, out);
+    // reputation_decay: stub (guild reputation not tracked)
     run_system!("reputation_stories", reputation_stories::compute_reputation_stories, state, out);
     run_system!("rumors", rumors::compute_rumors, state, out);
     run_system!("chronicle", chronicle::compute_chronicle, state, out);
     run_system!("marriages", marriages::compute_marriages, state, out);
     run_system!("grudges", grudges::compute_grudges, state, out);
-    run_system!("oaths", oaths::compute_oaths, state, out);
+    // oaths: stub (oath state not on entities)
     run_system!("intrigue", intrigue::compute_intrigue, state, out);
     run_system!("secrets", secrets::compute_secrets, state, out);
     // prisoners: stub (all logic commented out), skipped
@@ -364,7 +364,7 @@ pub fn compute_global_systems(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // Artifacts
     run_system!("artifacts", artifacts::compute_artifacts, state, out);
     run_system!("great_works", great_works::compute_great_works, state, out);
-    run_system!("settlement_founding", settlement_founding::compute_settlement_founding, state, out);
+    // settlement_founding: stub (handled directly in runtime)
 
     // Meta
     run_system!("charter", charter::compute_charter, state, out);
