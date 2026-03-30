@@ -6,7 +6,206 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::config::CampaignConfig;
+// Stub types for deleted modules (config, quest_hooks, backstory, actions,
+// unit_tiers, world_templates). These existed in removed sub-crates; only the
+// type shapes are needed so CampaignState still compiles for bridge.rs.
+
+/// Campaign configuration — stub replacing the deleted `config` module.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CampaignConfig {
+    #[serde(default)]
+    pub starting_state: StartingStateConfig,
+}
+impl Default for CampaignConfig {
+    fn default() -> Self {
+        Self { starting_state: StartingStateConfig::default() }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StartingStateConfig {
+    #[serde(default = "default_100f")]
+    pub gold: f32,
+    #[serde(default = "default_80f")]
+    pub supplies: f32,
+    #[serde(default = "default_25f")]
+    pub reputation: f32,
+    #[serde(default = "default_10f")]
+    pub base_defensive_strength: f32,
+    #[serde(default = "default_3usize")]
+    pub active_quest_capacity: usize,
+    #[serde(default = "default_01f")]
+    pub global_threat_level: f32,
+}
+impl Default for StartingStateConfig {
+    fn default() -> Self {
+        Self {
+            gold: 100.0,
+            supplies: 80.0,
+            reputation: 25.0,
+            base_defensive_strength: 10.0,
+            active_quest_capacity: 3,
+            global_threat_level: 0.1,
+        }
+    }
+}
+fn default_100f() -> f32 { 100.0 }
+fn default_80f() -> f32 { 80.0 }
+fn default_25f() -> f32 { 25.0 }
+fn default_10f() -> f32 { 10.0 }
+fn default_3usize() -> usize { 3 }
+fn default_01f() -> f32 { 0.1 }
+
+/// Quest hook state — stub replacing the deleted `quest_hooks` module.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct HookState {
+    pub fired: Vec<String>,
+}
+
+/// Backstory event — stub replacing the deleted `backstory` module.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BackstoryEvent {
+    pub tag: String,
+    pub description: String,
+}
+
+/// Spending priority — stub replacing the deleted `actions` module.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SpendPriority {
+    pub training: f32,
+    pub equipment: f32,
+    pub supplies: f32,
+    pub expansion: f32,
+}
+
+/// Campaign action — stub replacing the deleted `actions` module.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CampaignAction {
+    pub kind: String,
+}
+
+/// Unit tier status — stub replacing the deleted `unit_tiers` module.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct UnitTierStatus {
+    pub current_tier: u8,
+    pub xp_toward_next: f32,
+}
+
+/// World template — stub replacing the deleted `world_templates` module.
+/// Used only by `default_test_campaign` to initialise regions/locations.
+struct WorldTemplate {
+    regions: Vec<Region>,
+    locations: Vec<Location>,
+    factions: Vec<FactionState>,
+    diplomacy: DiplomacyMatrix,
+    npc_relationships: Vec<NpcRelationship>,
+    global_threat_level: f32,
+}
+
+// ---------------------------------------------------------------------------
+// Types formerly in `systems/` — inlined here after systems module removal.
+// The actual system tick logic has been ported to `src/world_sim/systems/`.
+// ---------------------------------------------------------------------------
+
+/// Tracks the tier (0-3) of each guild building.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct GuildBuildings {
+    pub training_grounds: u8,
+    pub watchtower: u8,
+    pub trade_post: u8,
+    pub barracks: u8,
+    pub infirmary: u8,
+    pub war_room: u8,
+}
+
+/// A room installed in the guild base.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GuildRoom {
+    pub id: u32,
+    pub room_type: RoomType,
+    pub level: u32,
+    pub assigned_adventurer_id: Option<u32>,
+    pub built_tick: u64,
+}
+
+/// The type of room that can be built in the guild.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RoomType {
+    ThroneRoom,
+    WarRoom,
+    Treasury,
+    Armory,
+    Kitchen,
+    Garden,
+    Observatory,
+    Dungeon,
+    Workshop,
+    GuestQuarters,
+}
+
+/// State for the bankruptcy cascade system.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct BankruptcyCascadeState {
+    pub defaults_this_cycle: Vec<DefaultEvent>,
+    pub credit_freeze_ticks: u32,
+    pub systemic_risk: f32,
+    pub faction_debts: Vec<FactionDebt>,
+    pub defaulted_factions: Vec<u32>,
+}
+
+/// A single default event in the cascade.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DefaultEvent {
+    pub debtor_faction: u32,
+    pub creditor_faction: u32,
+    pub amount: f32,
+    pub tick: u32,
+}
+
+/// An inter-faction debt obligation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FactionDebt {
+    pub debtor_faction_id: u32,
+    pub creditor_faction_id: u32,
+    pub amount: f32,
+}
+
+/// A generated backstory attached to an adventurer at recruitment time.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Backstory {
+    pub birthplace: String,
+    pub motivation: BackstoryMotivation,
+    pub flaw: BackstoryFlaw,
+    pub personal_quest_hook: String,
+    pub rival_faction_id: Option<usize>,
+    pub hometown_region_id: Option<usize>,
+}
+
+/// Core motivation for an adventurer's backstory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BackstoryMotivation {
+    Revenge,
+    Glory,
+    Redemption,
+    Greed,
+    Duty,
+    Curiosity,
+    Survival,
+    Legacy,
+}
+
+/// Character flaw for an adventurer's backstory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BackstoryFlaw {
+    Reckless,
+    Distrustful,
+    Greedy,
+    Proud,
+    Haunted,
+    Impulsive,
+    Stubborn,
+    Cowardly,
+}
 
 /// Fixed tick duration in milliseconds, matching the combat sim.
 /// Kept for elapsed_ms calculations and backward compatibility.
@@ -68,7 +267,7 @@ pub struct CampaignState {
     // --- Hook state ---
     /// Tracks which quest hooks have fired and when.
     #[serde(default)]
-    pub hook_state: super::quest_hooks::HookState,
+    pub hook_state: HookState,
 
     // --- Bonds ---
     /// Adventurer bond matrix. Key = (min_id, max_id), value = bond strength 0-100.
@@ -120,30 +319,17 @@ pub struct CampaignState {
 
     /// Queue of backstory events to present during character creation.
     #[serde(default)]
-    pub creation_event_queue: Vec<super::backstory::BackstoryEvent>,
+    pub creation_event_queue: Vec<BackstoryEvent>,
 
     // --- Buildings ---
     /// Guild building upgrade tiers (0–3 each). Provides passive bonuses.
     #[serde(default)]
-    pub guild_buildings: super::systems::buildings::GuildBuildings,
+    pub guild_buildings: GuildBuildings,
 
     // --- Configuration ---
     /// All tunable balance parameters. Systems read from this.
     pub config: CampaignConfig,
 
-    // --- LLM content generation ---
-    /// Optional LLM config for generating abilities/classes via Ollama.
-    /// When None, falls back to template generators.
-    #[serde(skip)]
-    pub llm_config: Option<super::llm::LlmConfig>,
-    /// Shared content store for LLM request/response logging and dedup.
-    /// Arc so it survives Clone (BFS branches share the same store).
-    #[serde(skip)]
-    pub llm_store: Option<std::sync::Arc<super::llm::ContentStore>>,
-    /// Optional VAE model for content generation (replaces LLM + templates).
-    /// Arc so cloned states share the same weights.
-    #[serde(skip)]
-    pub vae_model: Option<std::sync::Arc<super::vae_inference::ContentVaeWeights>>,
 
     // --- Rival guild ---
     /// AI-controlled competing guild. Activates at tick 2000.
@@ -370,7 +556,7 @@ pub struct CampaignState {
     #[serde(default)]
     pub guild_identity: GuildIdentityState,
     #[serde(default)]
-    pub guild_rooms: Vec<super::systems::guild_rooms::GuildRoom>,
+    pub guild_rooms: Vec<GuildRoom>,
     #[serde(default)]
     pub guild_leader: Option<GuildLeader>,
     #[serde(default)]
@@ -467,7 +653,7 @@ pub struct CampaignState {
 
     // --- Bankruptcy cascade ---
     #[serde(default)]
-    pub bankruptcy_cascade: super::systems::bankruptcy_cascade::BankruptcyCascadeState,
+    pub bankruptcy_cascade: BankruptcyCascadeState,
 
     // --- Currency debasement ---
     #[serde(default)]
@@ -824,7 +1010,7 @@ pub struct GuildState {
     // --- Economy system ---
     /// Current spending priority allocation.
     #[serde(default)]
-    pub spend_priority: super::actions::SpendPriority,
+    pub spend_priority: SpendPriority,
     /// Dynamic market price multipliers.
     #[serde(default)]
     pub market_prices: MarketPrices,
@@ -1003,7 +1189,7 @@ pub struct Adventurer {
     pub rallying_to: Option<RallyTarget>,
     /// Unit tier progression status.
     #[serde(default)]
-    pub tier_status: super::unit_tiers::UnitTierStatus,
+    pub tier_status: UnitTierStatus,
 
     /// History tags accumulated from gameplay. Used to bias ability generation
     /// so abilities reflect the adventurer's actual journey.
@@ -1014,7 +1200,7 @@ pub struct Adventurer {
     // --- New system fields ---
     /// Generated backstory — birthplace, motivation, flaw, personal quest hook.
     #[serde(default)]
-    pub backstory: Option<super::systems::backstory::Backstory>,
+    pub backstory: Option<Backstory>,
     /// Legendary deeds earned through achievements.
     #[serde(default)]
     pub deeds: Vec<LegendaryDeed>,
@@ -4236,7 +4422,7 @@ pub struct PendingOrder {
     pub target_party_id: u32,
     pub sent_tick: u64,
     pub arrival_tick: u64,
-    pub action: Option<super::actions::CampaignAction>,
+    pub action: Option<CampaignAction>,
     pub lost: bool,
 }
 
@@ -5688,7 +5874,7 @@ impl CampaignState {
             completed_quests: Vec::new(),
             active_battles: Vec::new(),
             pending_choices: Vec::new(),
-            hook_state: super::quest_hooks::HookState::default(),
+            hook_state: HookState::default(),
             unlocks: Vec::new(),
             progression_history: Vec::new(),
             adventurer_bonds: std::collections::HashMap::new(),
@@ -5708,11 +5894,8 @@ impl CampaignState {
             available_starting_choices: Self::load_or_default_starting_choices(),
             player_character: None,
             creation_event_queue: Vec::new(),
-            guild_buildings: super::systems::buildings::GuildBuildings::default(),
+            guild_buildings: GuildBuildings::default(),
             config: CampaignConfig::default(),
-            llm_config: None,
-            llm_store: None,
-            vae_model: None,
             rival_guild: RivalGuildState::default(),
             trade_routes: Vec::new(),
             caravans: Vec::new(),
@@ -5901,21 +6084,55 @@ impl CampaignState {
         }
     }
 
-    /// Load a world template based on seed from `dataset/campaign/world_templates/`,
-    /// falling back to the built-in default frontier template.
-    fn load_world_template(seed: u64) -> super::world_templates::WorldTemplate {
-        let dir = std::path::Path::new("dataset/campaign/world_templates");
-        if dir.exists() {
-            match super::world_templates::WorldTemplate::load_from_dir(dir) {
-                Ok(templates) if !templates.is_empty() => {
-                    let idx = (seed as usize) % templates.len();
-                    return templates.into_iter().nth(idx).unwrap();
-                }
-                Ok(_) => {} // empty dir, fall through
-                Err(_) => {} // parse error, fall through
-            }
+    /// Load a world template based on seed.
+    ///
+    /// The `world_templates` module has been removed. This stub returns a
+    /// minimal default frontier template with one region and one location.
+    fn load_world_template(seed: u64) -> WorldTemplate {
+        let _ = seed;
+        WorldTemplate {
+            regions: vec![Region {
+                id: 0,
+                name: "Frontier".into(),
+                owner_faction_id: 0,
+                neighbors: Vec::new(),
+                unrest: 0.0,
+                control: 50.0,
+                threat_level: 10.0,
+                visibility: 0.3,
+                population: 100,
+                civilian_morale: 50.0,
+                tax_rate: 0.1,
+                growth_rate: 0.0,
+            }],
+            locations: vec![Location {
+                id: 0,
+                name: "Outpost".into(),
+                position: (0.0, 0.0),
+                location_type: LocationType::Outpost,
+                threat_level: 5.0,
+                resource_availability: 50.0,
+                faction_owner: None,
+                scouted: true,
+                resident_ids: Vec::new(),
+                service_demand: [0.5; 8],
+                cost_of_living: 1.0,
+                safety_level: 0.0,
+                min_viable_threat: 0.0,
+                treasury: 0.0,
+                tax_rate: 0.15,
+                stockpile: CommodityStockpile::default(),
+                local_prices: default_local_prices(),
+            }],
+            factions: Vec::new(),
+            diplomacy: DiplomacyMatrix {
+                relations: Vec::new(),
+                guild_faction_id: 0,
+                agreements: Vec::new(),
+            },
+            npc_relationships: Vec::new(),
+            global_threat_level: 0.1,
         }
-        super::world_templates::WorldTemplate::default_frontier()
     }
 
     /// Load starting choices from `assets/starting_packages/` or return defaults.

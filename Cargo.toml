@@ -20,10 +20,6 @@ path = "src/main.rs"
 name = "xtask"
 path = "src/bin/xtask/main.rs"
 
-[[bin]]
-name = "test_npc_economy"
-path = "src/bin/test_npc_economy.rs"
-
 [features]
 default = []
 app = []

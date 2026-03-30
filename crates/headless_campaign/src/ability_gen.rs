@@ -720,52 +720,17 @@ fn gen_effect(p: &ArchetypeProfile, level_scale: f32, rng: &mut u64) -> Conditio
 
 /// Generate N abilities for dataset creation.
 /// Returns Vec of (slots, archetype, level).
+///
+/// NOTE: The `vae_slots` module has been removed. This function is no longer
+/// functional — it returns an empty vec. Callers that need slot vectors should
+/// use `grammar_space::encode` instead.
 pub fn generate_batch(
-    archetypes: &[&str],
-    max_level: u32,
-    count: usize,
-    base_seed: u64,
+    _archetypes: &[&str],
+    _max_level: u32,
+    _count: usize,
+    _base_seed: u64,
 ) -> Vec<(Vec<f32>, String, u32, bool)> {
-    use super::vae_slots;
-
-    let mut rng = base_seed;
-    let mut results = Vec::with_capacity(count);
-
-    for _ in 0..count {
-        let arch_idx = (xrng(&mut rng) as usize) % archetypes.len();
-        let archetype = archetypes[arch_idx];
-        let level = 1 + (xrng(&mut rng) % max_level as u64) as u32;
-
-        let (def, is_passive) = generate_ability(archetype, level, &mut rng);
-
-        let slots = if is_passive {
-            // Convert to PassiveDef for slot extraction
-            let p = &profile_for_archetype(archetype);
-            let trigger_idx = sample_weighted(&mut rng, &p.trigger);
-            let trigger = match trigger_idx {
-                0 => Trigger::OnDamageDealt,
-                1 => Trigger::OnDamageTaken,
-                2 => Trigger::OnKill,
-                3 => Trigger::OnAbilityUsed,
-                4 => Trigger::OnHpBelow { percent: 0.3 + rf(&mut rng) * 0.3 },
-                _ => Trigger::Periodic { interval_ms: 3000 + (rf(&mut rng) * 5000.0) as u32 },
-            };
-            let passive = PassiveDef {
-                name: def.name.clone(),
-                trigger,
-                cooldown_ms: def.cooldown_ms,
-                effects: def.effects.clone(),
-                range: def.range,
-            };
-            vae_slots::passive_to_slots(&passive)
-        } else {
-            vae_slots::ability_to_slots(&def)
-        };
-
-        results.push((slots, archetype.to_string(), level, is_passive));
-    }
-
-    results
+    Vec::new()
 }
 
 /// Generate synthetic abilities and write to stdout.
@@ -843,18 +808,8 @@ pub fn dump_synthetic(count: usize, seed: u64, emit_dsl: bool) {
             writeln!(out, "{}", dsl).ok();
             writeln!(out).ok();
         } else {
-            let slots = if is_passive {
-                let passive = tactical_sim::effects::defs::PassiveDef {
-                    name: def.name.clone(),
-                    trigger: Trigger::OnDamageTaken,
-                    cooldown_ms: def.cooldown_ms,
-                    effects: def.effects,
-                    range: def.range,
-                };
-                super::vae_slots::passive_to_slots(&passive)
-            } else {
-                super::vae_slots::ability_to_slots(&def)
-            };
+            // vae_slots module removed — emit empty slots (use grammar_space::encode instead)
+            let slots: Vec<f32> = Vec::new();
             let record = serde_json::json!({
                 "slots": slots,
                 "archetype": archetype,

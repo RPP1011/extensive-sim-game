@@ -113,10 +113,19 @@ impl HeuristicOracle {
 
         let unlock_bonus = unlock_power_bonus(unlocks);
         let base_party_pow = Self::party_power_with_bonus(party_members, unlock_bonus);
+        // Bond bonus: inline simple calculation (systems::bonds module removed)
         let member_ids: Vec<u32> = party_members.iter().map(|a| a.id).collect();
-        let bond_bonus = crate::systems::bonds::party_bond_power_bonus(
-            bonds, &member_ids, base_party_pow,
-        );
+        let mut bond_sum = 0.0_f32;
+        for i in 0..member_ids.len() {
+            for j in (i + 1)..member_ids.len() {
+                let a = member_ids[i].min(member_ids[j]);
+                let b = member_ids[i].max(member_ids[j]);
+                if let Some(&strength) = bonds.get(&(a, b)) {
+                    bond_sum += strength;
+                }
+            }
+        }
+        let bond_bonus = base_party_pow * (bond_sum * 0.02).min(0.3);
         let party_pow = base_party_pow + bond_bonus;
         Self::predict_from_power(party_pow, party_members.len(), enemy_strength, threat_level)
     }

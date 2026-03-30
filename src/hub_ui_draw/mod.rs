@@ -3,8 +3,6 @@
 //! The Bevy system `draw_hub_egui_system` lives here. It delegates to
 //! sub-module helpers for each logical screen section.
 
-mod campaign_trace;
-pub mod trace_viewer;
 mod start_menu;
 mod character_creation_center;
 mod character_create;
@@ -89,8 +87,7 @@ pub(crate) fn draw_hub_egui_system(
     mut settings_menu: ResMut<SettingsMenuState>,
     save_state: (Res<CampaignSaveIndexState>, Res<CampaignSavePanelState>, Res<RegionArtState>,
         Option<Res<crate::mission::sim_bridge::LastMissionReplay>>,
-        ResMut<crate::ascii_viewport::MissionPaneState>,
-        Option<Res<trace_viewer::CampaignTraceViewerState>>),
+        ResMut<crate::ascii_viewport::MissionPaneState>),
 ) {
     let (runtime_mode, attention) = runtime_context;
     let (bounds, camera_query) = camera_context;
@@ -106,7 +103,7 @@ pub(crate) fn draw_hub_egui_system(
         _flashpoint_state,
         mut hero_detail,
     ) = campaign_state;
-    let (save_index, save_panel, region_art, last_replay, mut mission_pane, trace_viewer) = save_state;
+    let (save_index, save_panel, region_art, last_replay, mut mission_pane) = save_state;
 
     // Pre-register the region art texture with egui before ctx_mut() borrows contexts.
     let region_art_texture_id: Option<egui::TextureId> = {
@@ -416,13 +413,6 @@ pub(crate) fn draw_hub_egui_system(
                     ui.colored_label(egui::Color32::from_rgb(120, 140, 165), "Playback: 1x (100ms/frame)");
                     ui.colored_label(egui::Color32::from_rgb(90, 100, 115), "Speed control: coming soon");
                 }
-                HubScreen::CampaignTraceViewer => {
-                    if let Some(ref viewer) = trace_viewer {
-                        campaign_trace::draw_trace_side_panel(ui, viewer);
-                    } else {
-                        ui.label("No trace loaded");
-                    }
-                }
             }
 
             // Show "Review Last Mission" button when a replay is available
@@ -445,15 +435,6 @@ pub(crate) fn draw_hub_egui_system(
                 ));
             }
         });
-
-    // Campaign trace viewer center panel (event feed)
-    if hub_ui.screen == HubScreen::CampaignTraceViewer {
-        if let Some(ref viewer) = trace_viewer {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                campaign_trace::draw_trace_center_panel(ui, viewer);
-            });
-        }
-    }
 
     if hub_ui.show_credits {
         common::draw_credits_window(ctx, &mut hub_ui);
