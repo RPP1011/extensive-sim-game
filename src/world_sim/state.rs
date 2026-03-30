@@ -3543,3 +3543,152 @@ pub enum QuestDelta {
     /// Fail the quest.
     Fail,
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_state() -> WorldState {
+        let mut s = WorldState::new(42);
+        // Add 3 NPCs at settlement 0, 2 buildings at settlement 0, 1 monster (no settlement).
+        let mut settlement = SettlementState::new(0, "TestTown".into(), (0.0, 0.0));
+        settlement.treasury = 100.0;
+        settlement.stockpile[0] = 50.0; // food
+        s.settlements.push(settlement);
+
+        for i in 0..3 {
+            let mut e = Entity::new_npc(i, (i as f32, 0.0));
+            e.npc.as_mut().unwrap().home_settlement_id = Some(0);
+            s.entities.push(e);
+        }
+        for i in 3..5 {
+            let mut e = Entity::new_building(i, (i as f32, 0.0));
+            e.building = Some(BuildingData {
+                settlement_id: Some(0),
+                ..Default::default()
+            });
+            s.entities.push(e);
+        }
+        let monster = Entity::new_monster(5, (10.0, 10.0), 3);
+        s.entities.push(monster);
+
+        s.next_id = 6;
+        s.rebuild_all_indices();
+        s
+    }
+
+    #[test]
+    fn entity_index_o1_lookup() {
+        let s = make_test_state();
+        for i in 0..6 {
+            let e = s.entity(i).expect("entity should exist");
+            assert_eq!(e.id, i);
+        }
+        assert!(s.entity(999).is_none());
+    }
+
+    #[test]
+    fn entity_idx_returns_position() {
+        let s = make_test_state();
+        for id in 0..6 {
+            let idx = s.entity_idx(id).expect("should have index");
+            assert_eq!(s.entities[idx].id, id);
+        }
+    }
+
+    #[test]
+    fn entity_mut_modifies_in_place() {
+        let mut s = make_test_state();
+        s.entity_mut(0).unwrap().hp = 999.0;
+        assert_eq!(s.entity(0).unwrap().hp, 999.0);
+    }
+
+    #[test]
+    fn next_entity_id_is_monotonic() {
+        let mut s = make_test_state();
+        let a = s.next_entity_id();
+        let b = s.next_entity_id();
+        let c = s.next_entity_id();
+        assert!(a < b && b < c);
+    }
+
+    #[test]
+    fn settlement_index_o1_lookup() {
+        let s = make_test_state();
+        let settlement = s.settlement(0).expect("should exist");
+        assert_eq!(settlement.name, "TestTown");
+        assert!(s.settlement(999).is_none());
+    }
+
+    #[test]
+    fn settlement_mut_modifies() {
+        let mut s = make_test_state();
+        s.settlement_mut(0).unwrap().treasury = 999.0;
+        assert_eq!(s.settlement(0).unwrap().treasury, 999.0);
+    }
+
+    #[test]
+    fn group_index_settlement_range() {
+        let s = make_test_state();
+        let range = s.group_index.settlement_entities(0);
+        // Should contain all 5 entities at settlement 0 (3 NPCs + 2 buildings).
+        assert_eq!(range.len(), 5);
+        for i in range {
+            assert!(s.entities[i].settlement_id() == Some(0));
+        }
+    }
+
+    #[test]
+    fn group_index_unaffiliated_contains_monster() {
+        let s = make_test_state();
+        let range = s.group_index.unaffiliated_entities();
+        assert!(range.len() >= 1);
+        let has_monster = range.clone().any(|i| s.entities[i].kind == EntityKind::Monster);
+        assert!(has_monster);
+    }
+
+    #[test]
+    fn rng_is_deterministic() {
+        let mut s1 = WorldState::new(42);
+        let mut s2 = WorldState::new(42);
+        let vals1: Vec<u32> = (0..10).map(|_| s1.next_rand_u32()).collect();
+        let vals2: Vec<u32> = (0..10).map(|_| s2.next_rand_u32()).collect();
+        assert_eq!(vals1, vals2);
+    }
+
+    #[test]
+    fn inventory_deposit_withdraw() {
+        let mut inv = Inventory::with_capacity(100.0);
+        let stored = inv.deposit(0, 50.0);
+        assert_eq!(stored, 50.0);
+        assert_eq!(inv.commodities[0], 50.0);
+
+        let taken = inv.withdraw(0, 30.0);
+        assert_eq!(taken, 30.0);
+        assert_eq!(inv.commodities[0], 20.0);
+
+        // Withdraw more than available.
+        let taken = inv.withdraw(0, 100.0);
+        assert_eq!(taken, 20.0);
+        assert_eq!(inv.commodities[0], 0.0);
+    }
+
+    #[test]
+    fn inventory_capacity_limit() {
+        let mut inv = Inventory::with_capacity(10.0);
+        let stored = inv.deposit(0, 50.0);
+        assert_eq!(stored, 10.0); // capped at capacity
+        assert_eq!(inv.commodities[0], 10.0);
+    }
+
+    #[test]
+    fn inventory_unlimited_capacity() {
+        let mut inv = Inventory::default(); // capacity = 0.0 = unlimited
+        let stored = inv.deposit(0, 1_000_000.0);
+        assert_eq!(stored, 1_000_000.0);
+    }
+}
