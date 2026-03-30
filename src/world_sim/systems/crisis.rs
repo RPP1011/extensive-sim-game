@@ -23,14 +23,9 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::fidelity::Fidelity;
 use crate::world_sim::state::{EntityKind, StatusEffect, StatusEffectKind, WorldState, WorldTeam};
+use crate::world_sim::state::{entity_hash_f32};
 use crate::world_sim::NUM_COMMODITIES;
 
-/// Deterministic hash for pseudo-random decisions from immutable state.
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 /// Threat threshold above which crisis effects intensify.
 const CRISIS_THREAT_THRESHOLD: f32 = 70.0;
@@ -67,7 +62,7 @@ pub fn compute_crisis(state: &WorldState, out: &mut Vec<WorldDelta>) {
         }
 
         let severity = (region.threat_level - CRISIS_THREAT_THRESHOLD) / 30.0; // 0..1
-        let crisis_type_roll = tick_hash(state.tick, ri as u64 ^ 0xC815_15EE);
+        let crisis_type_roll = entity_hash_f32(ri as u32, state.tick, 0xC815_15EE);
 
         if crisis_type_roll < 0.25 {
             // --- Breach-style: damage entities near the crisis region ---

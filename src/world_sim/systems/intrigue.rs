@@ -10,6 +10,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
+use crate::world_sim::state::entity_hash_f32;
 
 // NEEDS STATE: intrigues: Vec<PoliticalIntrigue> on WorldState
 //   PoliticalIntrigue { id, faction_id, intrigue_type, participants, guild_involvement, resolution_tick, resolved }
@@ -65,18 +66,9 @@ pub fn compute_intrigue(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // Structural: identify qualifying factions via region threat as proxy
     for region in &state.regions {
         if region.threat_level > 50.0 {
-            let _roll = deterministic_roll(state.tick, region.id);
+            let _roll = entity_hash_f32(region.id, state.tick, 0);
             // NEEDS DELTA: CreateIntrigue
         }
     }
 }
 
-fn deterministic_roll(tick: u64, id: u32) -> f32 {
-    let h = tick
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(id as u64);
-    let h = h ^ (h >> 33);
-    let h = h.wrapping_mul(0xff51afd7ed558ccd);
-    let h = h ^ (h >> 33);
-    (h & 0xFFFF) as f32 / 65536.0
-}

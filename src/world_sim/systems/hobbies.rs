@@ -1,41 +1,31 @@
 #![allow(unused)]
 //! Adventurer hobbies and downtime system — delta architecture port.
 //!
-//! Idle NPCs develop interests over time that provide passive bonuses.
-//! Hobby selection is weighted by class tags; NPCs can have at most 2
-//! hobbies. Gambling has special gold gain/loss mechanics.
+//! Idle NPCs with low stress develop side activities that add variety to
+//! their behavior tags. Hobby selection is deterministic (entity.id + tick)
+//! and weighted by existing behavior profile.
 //!
 //! Original: `crates/headless_campaign/src/systems/hobbies.rs`
-//! Cadence: every 7 ticks (skips tick 0).
+//! Cadence: every 30 ticks (skips tick 0).
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, WorldState};
+use crate::world_sim::state::{
+    ActionTags, Entity, EntityField, EconomicIntent, WorldState, tags,
+    entity_hash, entity_hash_f32,
+};
 
-// NEEDS STATE: hobbies: Vec<HobbyProgress> on Entity/NpcData
-//   HobbyProgress { hobby: Hobby, skill_level, started_tick }
-//   Hobby: Cooking, Cartography, Gambling, Herbalism, Smithing, Training, Meditation, Storytelling
-// NEEDS STATE: class_tags on NpcData (used as archetype proxy)
-// NEEDS DELTA: AssignHobby { entity_id, hobby }
-// NEEDS DELTA: UpdateHobbySkill { entity_id, hobby, delta }
+/// Cadence gate — hobbies tick every 30 ticks.
+const HOBBY_TICK_INTERVAL: u64 = 30;
 
-/// Cadence gate.
-const HOBBY_TICK_INTERVAL: u64 = 7;
+/// Morale threshold: NPCs must have morale > 30 to pursue hobbies.
+const MORALE_THRESHOLD: f32 = 30.0;
 
-/// Ticks an NPC must be idle before picking a hobby.
-const IDLE_THRESHOLD: u64 = 17;
+/// Behavior value threshold for considering an NPC "high" in a tag domain.
+const HIGH_BEHAVIOR_THRESHOLD: f32 = 3.0;
 
-/// Skill gain per hobby tick for idle NPCs.
-const SKILL_GAIN_PER_TICK: f32 = 2.0;
-
-/// Maximum hobbies per NPC.
-const MAX_HOBBIES: usize = 2;
-
-/// Compute hobby deltas: hobby selection, skill progression, gambling.
-///
-/// Since WorldState lacks hobby storage on entities, this is a structural
-/// placeholder. Gambling gold gain/loss can be expressed via TransferGold.
+/// Compute hobby deltas for all settlements.
 pub fn compute_hobbies(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    if state.tick % HOBBY_TICK_INTERVAL != 0 || state.tick == 0 {
+    if state.tick == 0 || state.tick % HOBBY_TICK_INTERVAL != 0 {
         return;
     }
 
@@ -52,39 +42,143 @@ pub fn compute_hobbies_for_settlement(
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {
-    if state.tick % HOBBY_TICK_INTERVAL != 0 || state.tick == 0 {
+    if state.tick == 0 || state.tick % HOBBY_TICK_INTERVAL != 0 {
         return;
     }
 
     for entity in entities {
-        if !entity.alive || entity.npc.is_none() {
+        if !entity.alive {
             continue;
         }
-        let npc = entity.npc.as_ref().unwrap();
+        let npc = match &entity.npc {
+            Some(n) => n,
+            None => continue,
+        };
 
-        // Determine if NPC is "idle" (not on a High-fidelity combat grid)
-        let in_combat = entity.grid_id.map_or(false, |gid| {
-            state.grid(gid)
-                .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
-                .unwrap_or(false)
+        // Only consider NPCs with Produce or Idle intent.
+        match &npc.economic_intent {
+            EconomicIntent::Produce | EconomicIntent::Idle => {}
+            _ => continue,
+        }
+
+        // Morale gate.
+        if npc.morale <= MORALE_THRESHOLD {
+            continue;
+        }
+
+        // Build hobby tags based on NPC's existing behavior profile.
+        let mut action = ActionTags::empty();
+        select_hobby(npc, entity.id, state.tick, &mut action);
+
+        // Apply settlement/NPC context modifiers.
+        let action = crate::world_sim::action_context::with_context(&action, entity, state);
+
+        // Emit behavior tag delta.
+        out.push(WorldDelta::AddBehaviorTags {
+            entity_id: entity.id,
+            tags: action.tags,
+            count: action.count,
         });
-        let at_settlement = !in_combat;
 
-        if !at_settlement {
-            continue;
+        // Small morale boost from engaging in a hobby (0.5 to 1.0,
+        // deterministic based on entity id + tick).
+        let morale_boost = 0.5 + deterministic_frac(entity.id, state.tick, 7) * 0.5;
+        out.push(WorldDelta::UpdateEntityField {
+            entity_id: entity.id,
+            field: EntityField::Morale,
+            value: morale_boost,
+        });
+    }
+}
+
+/// Select hobby tags based on the NPC's strongest behavior domain.
+/// Deterministic: when multiple domains tie, uses entity.id + tick to break ties.
+fn select_hobby(
+    npc: &crate::world_sim::state::NpcData,
+    entity_id: u32,
+    tick: u64,
+    action: &mut ActionTags,
+) {
+    // Compute domain scores from accumulated behavior tags.
+    let mining_labor = npc.behavior_value(tags::MINING) + npc.behavior_value(tags::LABOR);
+    let trade_negotiation = npc.behavior_value(tags::TRADE) + npc.behavior_value(tags::NEGOTIATION);
+    let combat_melee = npc.behavior_value(tags::COMBAT) + npc.behavior_value(tags::MELEE);
+    let faith_ritual = npc.behavior_value(tags::FAITH) + npc.behavior_value(tags::RITUAL);
+
+    // Find the strongest domain above threshold.
+    // Use a deterministic tiebreaker via hashed ordering.
+    let domains: [(f32, u8); 4] = [
+        (mining_labor, 0),
+        (trade_negotiation, 1),
+        (combat_melee, 2),
+        (faith_ritual, 3),
+    ];
+
+    // Find max score.
+    let max_score = domains.iter().map(|d| d.0).fold(0.0f32, f32::max);
+
+    if max_score >= HIGH_BEHAVIOR_THRESHOLD {
+        // Among domains that are at or near the max, pick deterministically.
+        // "Near" = within 1.0 of max, to allow some variety.
+        let near_threshold = max_score - 1.0;
+        let mut candidates: [(f32, u8); 4] = [(0.0, 0); 4];
+        let mut n_candidates = 0u8;
+        for &(score, idx) in &domains {
+            if score >= near_threshold && score >= HIGH_BEHAVIOR_THRESHOLD {
+                candidates[n_candidates as usize] = (score, idx);
+                n_candidates += 1;
+            }
         }
 
-        // --- Phase 1: Hobby selection ---
-        // NEEDS STATE: entity hobbies list
+        // Deterministic pick among candidates.
+        let pick_idx = deterministic_pick(entity_id, tick, n_candidates as u32);
+        let chosen = candidates[pick_idx as usize].1;
 
-        // --- Phase 2: Skill progression ---
-        // NEEDS STATE: entity hobbies list
-
-        // --- Phase 3: Gambling effects ---
-        // NEEDS STATE: entity hobbies list
-
-        let _class_tags = &npc.class_tags;
+        match chosen {
+            0 => {
+                // Mining/labor → studying geology: research + lore
+                action.add(tags::RESEARCH, 0.3);
+                action.add(tags::LORE, 0.2);
+            }
+            1 => {
+                // Trade/negotiation → socializing: diplomacy + negotiation (persuasion)
+                action.add(tags::DIPLOMACY, 0.3);
+                action.add(tags::NEGOTIATION, 0.2);
+            }
+            2 => {
+                // Combat/melee → training: tactics + discipline
+                action.add(tags::TACTICS, 0.3);
+                action.add(tags::DISCIPLINE, 0.2);
+            }
+            3 => {
+                // Faith/ritual → scripture study: lore + research
+                action.add(tags::LORE, 0.3);
+                action.add(tags::RESEARCH, 0.2);
+            }
+            _ => unreachable!(),
+        }
+    } else {
+        // Default: walking/foraging: exploration + survival
+        action.add(tags::EXPLORATION, 0.2);
+        action.add(tags::SURVIVAL, 0.1);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic helpers (no mutable RNG — compute phase is read-only)
+// ---------------------------------------------------------------------------
+
+/// Deterministic fractional value in [0.0, 1.0) from entity id, tick, and salt.
+fn deterministic_frac(entity_id: u32, tick: u64, salt: u32) -> f32 {
+    entity_hash_f32(entity_id, tick, salt as u64)
+}
+
+/// Deterministic pick in [0, n) from entity id and tick.
+fn deterministic_pick(entity_id: u32, tick: u64, n: u32) -> u32 {
+    if n == 0 {
+        return 0;
+    }
+    entity_hash(entity_id, tick, 13) % n
 }
 
 /// Compute the passive bonus scale factor for a hobby.

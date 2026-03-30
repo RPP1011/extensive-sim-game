@@ -1,16 +1,9 @@
 #![allow(unused)]
-//! NPC economic agent decisions — the core AI loop.
+//! NPC needs-driven decisions — the core AI loop.
 //!
-//! Every DECISION_INTERVAL ticks, each idle/working NPC evaluates:
-//! 1. Stay and work (produce at current settlement)
-//! 2. Trade (buy cheap, carry to expensive settlement, sell)
-//! 3. Relocate (move to a settlement with better prospects)
-//!
-//! Decisions use utility scoring based on:
-//! - Expected income from production at current vs other settlements
-//! - Price differentials from price knowledge (information economy)
-//! - Safety (settlement threat level)
-//! - Risk aversion (stress, fears, resolve)
+//! Every DECISION_INTERVAL ticks, each idle/working NPC evaluates possible
+//! actions scored by how well they satisfy the NPC's most urgent need, modulated
+//! by emotions, beliefs, and personality.
 //!
 //! Cadence: every 100 ticks.
 
@@ -26,14 +19,7 @@ const MIN_TRADE_MARGIN: f32 = 2.0;
 /// Price staleness discount: reports older than this lose confidence.
 const STALE_TICKS: f32 = 200.0;
 
-/// Hysteresis: relocation must be 30% better than staying.
-const RELOCATION_HYSTERESIS: f32 = 1.3;
 
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_npc_decisions(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % DECISION_INTERVAL != 0 || state.tick == 0 { return; }
@@ -100,6 +86,25 @@ pub fn compute_npc_decisions_for_settlement(
                         }
                     }
 
+                    // Chronicle: notable traders completing runs.
+                    if entity.level >= 30 {
+                        let trader_name = crate::world_sim::naming::entity_display_name(entity);
+                        let dest_name = state.settlement(dest_id)
+                            .map(|s| s.name.as_str()).unwrap_or("unknown");
+                        let home_name = npc.home_settlement_id
+                            .and_then(|sid| state.settlement(sid))
+                            .map(|s| s.name.as_str()).unwrap_or("unknown");
+                        out.push(WorldDelta::RecordChronicle {
+                            entry: ChronicleEntry {
+                                tick: state.tick,
+                                category: ChronicleCategory::Economy,
+                                text: format!("{} completed a trade run from {} to {}",
+                                    trader_name, home_name, dest_name),
+                                entity_ids: vec![entity.id],
+                            },
+                        });
+                    }
+
                     // Trade behavior tags + XP.
                     let mut action = ActionTags::empty();
                     action.add(tags::TRADE, 2.0);
@@ -110,8 +115,6 @@ pub fn compute_npc_decisions_for_settlement(
                         tags: action.tags,
                         count: action.count,
                     });
-                    out.push(WorldDelta::AddXp { entity_id: entity.id, amount: 5 });
-
                     // Return to producing.
                     out.push(WorldDelta::SetIntent {
                         entity_id: entity.id,
@@ -122,49 +125,134 @@ pub fn compute_npc_decisions_for_settlement(
             continue; // don't re-evaluate while trading
         }
 
+        // --- Commuting: NPCs with home and work buildings follow schedules ---
+        // Skip commuting if the NPC is actively in the work state machine (non-Idle).
+        // The work system handles movement for traveling/working/carrying states.
+        if let (Some(home_bid), Some(work_bid)) = (npc.home_building_id, npc.work_building_id) {
+            if !matches!(npc.work_state, WorkState::Idle) {
+                continue; // work system handles movement
+            }
+
+            // Look up building positions from real entity IDs.
+            let home_pos = state.entity(home_bid).map(|e| e.pos);
+            let work_pos = state.entity(work_bid).map(|e| e.pos);
+
+            if let (Some(home_pos), Some(work_pos)) = (home_pos, work_pos) {
+                // Commute schedule: first half of cycle at work, second half at home.
+                let target = if state.tick % 200 < 100 {
+                    work_pos
+                } else {
+                    home_pos
+                };
+
+                let dx = target.0 - entity.pos.0;
+                let dy = target.1 - entity.pos.1;
+                let dist = (dx * dx + dy * dy).sqrt();
+                if dist > 1.0 {
+                    let speed = entity.move_speed * crate::world_sim::DT_SEC;
+                    out.push(WorldDelta::Move {
+                        entity_id: entity.id,
+                        force: (dx / dist * speed, dy / dist * speed),
+                    });
+                }
+                continue; // structured schedule, skip normal decision tree
+            }
+        }
+
         // Only re-evaluate idle or producing NPCs.
         match &npc.economic_intent {
-            EconomicIntent::Idle | EconomicIntent::Produce => {}
+            EconomicIntent::Idle => {
+                // Idle (combat-ready) NPCs stand down when threat is low.
+                if settlement.threat_level < 0.4 {
+                    out.push(WorldDelta::SetIntent {
+                        entity_id: entity.id,
+                        intent: EconomicIntent::Produce,
+                    });
+                    continue;
+                }
+            }
+            EconomicIntent::Produce => {}
             _ => continue,
         }
 
-        // --- Utility: Stay and work ---
-        let production_income = npc.behavior_production.iter()
-            .map(|&(c, rate)| rate * settlement.prices[c])
-            .sum::<f32>();
-        let safety = 1.0 / (1.0 + settlement.threat_level * 0.05);
-        let stay_utility = production_income + 2.0 * safety;
+        // =================================================================
+        // Needs-driven decision scoring
+        // =================================================================
 
-        // --- Utility: Trade run (if NPC has price knowledge) ---
+        // 1. Compute need urgencies.
+        let (urgent_need, _urgency) = npc.needs.most_urgent();
+
+        // 2. Emotion modifiers (transient bias from current emotional state).
+        let emo = &npc.emotions;
+        let anger_mod   = if emo.anger > 0.3 { emo.anger } else { 0.0 };
+        let fear_mod    = if emo.fear > 0.3 { emo.fear } else { 0.0 };
+        let grief_mod   = if emo.grief > 0.3 { emo.grief } else { 0.0 };
+        let anxiety_mod = if emo.anxiety > 0.5 { 0.1 } else { 0.0 };
+        let pride_mod   = if emo.pride > 0.3 { emo.pride } else { 0.0 };
+
+        // 3. Personality shortcuts.
+        let pers = &npc.personality;
+
+        // Helper: does this NPC produce food?
+        let produces_food = npc.behavior_production.iter().any(|&(c, _)| c == commodity::FOOD);
+
+        // ----- Candidate action: Work/Produce -----
+        let work_base = match urgent_need {
+            "purpose" => 0.7,
+            "hunger" if produces_food => 0.5,
+            "esteem" => 0.3,
+            _ => 0.15,
+        };
+        let work_emotion = pride_mod * 0.2 - anxiety_mod;
+        let work_personality = if pers.ambition > 0.6 { 0.2 } else { 0.0 };
+        let work_utility = work_base * (1.0 + work_emotion * 0.3 + work_personality * 0.2);
+
+        // ----- Candidate action: Trade run -----
         let mut best_trade_utility = f32::NEG_INFINITY;
         let mut best_trade_dest: Option<u32> = None;
         let mut best_trade_commodity: usize = 0;
 
         if npc.gold > 5.0 && !npc.price_knowledge.is_empty() {
+            let trade_base = match urgent_need {
+                "purpose" => 0.5,
+                "esteem" => 0.3,
+                _ => 0.2,
+            };
+            let trade_emotion = -fear_mod * 0.2 - anxiety_mod;
+            let trade_personality =
+                  (if pers.curiosity > 0.6 { 0.2 } else { 0.0 })
+                + (if pers.ambition > 0.6 { 0.1 } else { 0.0 });
+
             for report in &npc.price_knowledge {
                 if report.settlement_id == settlement_id { continue; }
                 let staleness = (state.tick.saturating_sub(report.tick_observed)) as f32 / STALE_TICKS;
-                if staleness > 3.0 { continue; } // too old
+                if staleness > 3.0 { continue; }
                 let confidence = (1.0 - staleness * 0.3).max(0.1);
 
-                // Find best commodity to trade.
+                // Belief modifier: prosperous destination boosts trade.
+                let belief_mod = npc.memory.has_belief(
+                    &BeliefType::SettlementProsperous(report.settlement_id)
+                ).unwrap_or(0.0) * 0.2;
+
                 for c in 0..crate::world_sim::NUM_COMMODITIES {
                     let local_price = settlement.prices[c];
                     let remote_price = report.prices[c];
                     let margin = remote_price - local_price;
                     if margin < MIN_TRADE_MARGIN { continue; }
 
-                    // How much can we carry? Simplified: level * 5 units.
                     let carry = (entity.level as f32 * 5.0).max(5.0);
                     let afford = if local_price > 0.01 { npc.gold / local_price } else { carry };
                     let units = carry.min(afford).min(settlement.stockpile[c]);
                     if units < 1.0 { continue; }
 
-                    let profit = margin * units * confidence;
-                    let trade_utility = profit * 0.5 + safety; // trade value minus risk
+                    let profit_factor = (margin * units * confidence).min(20.0) / 20.0;
+                    let effective_base = trade_base + profit_factor * 0.4;
 
-                    if trade_utility > best_trade_utility {
-                        best_trade_utility = trade_utility;
+                    let trade_util = effective_base
+                        * (1.0 + trade_emotion * 0.3 + belief_mod + trade_personality * 0.2);
+
+                    if trade_util > best_trade_utility {
+                        best_trade_utility = trade_util;
                         best_trade_dest = Some(report.settlement_id);
                         best_trade_commodity = c;
                     }
@@ -172,87 +260,222 @@ pub fn compute_npc_decisions_for_settlement(
             }
         }
 
-        // --- Utility: Relocate to a better settlement ---
+        // ----- Candidate action: Combat mobilize -----
+        let combat_aptitude = npc.behavior_value(tags::COMBAT) + npc.behavior_value(tags::MELEE)
+            + npc.behavior_value(tags::DEFENSE);
+        let threat_high = settlement.threat_level > 0.6;
+
+        let mobilize_base = if threat_high {
+            match urgent_need {
+                "safety" => 0.6,
+                "esteem" => 0.4,
+                _ => 0.25,
+            }
+        } else {
+            0.05
+        };
+        let mobilize_emotion = anger_mod * 0.3 - fear_mod * 0.2;
+        let mobilize_personality =
+              (if pers.risk_tolerance > 0.6 { 0.2 } else if pers.risk_tolerance < 0.3 { -0.2 } else { 0.0 })
+            + (if pers.compassion > 0.6 { 0.1 } else { 0.0 });
+        let mobilize_aptitude = (combat_aptitude * 0.01).min(0.3);
+        let mobilize_utility = mobilize_base
+            * (1.0 + mobilize_emotion * 0.3 + mobilize_personality * 0.2)
+            + mobilize_aptitude;
+
+        // ----- Candidate action: Relocate -----
         let mut best_reloc_utility = f32::NEG_INFINITY;
         let mut best_reloc_dest: Option<u32> = None;
 
-        // Risk aversion from NPC state.
-        let risk_aversion = (1.0 + npc.stress * 0.005 - npc.resolve * 0.003).clamp(0.3, 3.0);
+        let reloc_base = match urgent_need {
+            "safety" if threat_high => 0.7,
+            "safety" => 0.4,
+            "shelter" => 0.4,
+            _ => 0.1,
+        };
+        // Belief: current location dangerous boosts relocation.
+        let loc_danger_belief = npc.memory.has_belief(
+            &BeliefType::LocationDangerous(settlement_id)
+        ).unwrap_or(0.0) * 0.3;
+        let reloc_emotion = fear_mod * 0.3 - anxiety_mod;
+        let reloc_personality = if pers.curiosity > 0.6 { 0.2 } else { 0.0 };
 
         for other in &state.settlements {
             if other.id == settlement_id { continue; }
-            // Estimate income at other settlement.
-            let other_income = npc.behavior_production.iter()
-                .map(|&(c, rate)| rate * other.prices[c])
-                .sum::<f32>();
             let other_safety = 1.0 / (1.0 + other.threat_level * 0.05);
-            let travel_risk = settlement.threat_level * 0.02 * risk_aversion;
-            let reloc_utility = other_income + 2.0 * other_safety - travel_risk;
+            // Slightly prefer settlements with better safety.
+            let dest_bonus = (other_safety - 0.5).max(0.0) * 0.3;
+            let dest_prosperous = npc.memory.has_belief(
+                &BeliefType::SettlementProsperous(other.id)
+            ).unwrap_or(0.0) * 0.2;
 
-            if reloc_utility > best_reloc_utility {
-                best_reloc_utility = reloc_utility;
+            let reloc_util = (reloc_base + dest_bonus + dest_prosperous + loc_danger_belief)
+                * (1.0 + reloc_emotion * 0.3 + reloc_personality * 0.2);
+
+            if reloc_util > best_reloc_utility {
+                best_reloc_utility = reloc_util;
                 best_reloc_dest = Some(other.id);
             }
         }
 
-        // --- Pick best option ---
-        // Default: keep working.
+        // ----- Candidate action: Seek companionship (social) -----
+        let social_base = match urgent_need {
+            "social" => 0.7,
+            _ => 0.1,
+        };
+        let social_emotion = grief_mod * 0.4 - anxiety_mod;
+        let social_personality = if pers.social_drive > 0.6 { 0.2 } else { 0.0 };
+        let social_utility = social_base * (1.0 + social_emotion * 0.3 + social_personality * 0.2);
+
+        // ----- Candidate action: Quest/Adventure -----
+        let quest_base = match urgent_need {
+            "purpose" => 0.8,
+            "esteem" => 0.6,
+            _ => 0.15,
+        };
+        let quest_emotion = pride_mod * 0.2 + anger_mod * 0.1 - fear_mod * 0.15;
+        let quest_personality =
+              (if pers.risk_tolerance > 0.6 { 0.2 } else if pers.risk_tolerance < 0.3 { -0.2 } else { 0.0 })
+            + (if pers.ambition > 0.6 { 0.15 } else { 0.0 })
+            + (if pers.curiosity > 0.6 { 0.1 } else { 0.0 });
+        let quest_utility = quest_base * (1.0 + quest_emotion * 0.3 + quest_personality * 0.2);
+
+        // ----- Candidate action: Go home (shelter) -----
+        let home_base = match urgent_need {
+            "shelter" => 0.8,
+            "hunger" if !produces_food => 0.3,
+            _ => 0.1,
+        };
+        let home_utility = home_base * (1.0 - anxiety_mod * 0.1);
+
+        // =================================================================
+        // Pick best action
+        // =================================================================
+        // Collect (label, utility) and pick highest.
+        let candidates: [(&str, f32); 7] = [
+            ("work",      work_utility),
+            ("trade",     best_trade_utility.max(0.0)),
+            ("mobilize",  mobilize_utility),
+            ("relocate",  best_reloc_utility.max(0.0)),
+            ("social",    social_utility),
+            ("quest",     quest_utility),
+            ("home",      home_utility),
+        ];
+
+        let (best_action, _best_score) = candidates.iter()
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap();
+
         let mut chosen_intent = EconomicIntent::Produce;
 
-        // Trade if significantly better than staying.
-        if best_trade_utility > stay_utility * 1.2 {
-            if let Some(dest_id) = best_trade_dest {
-                // Buy goods at local settlement, set intent to trade.
-                let local_price = settlement.prices[best_trade_commodity];
-                let carry = (entity.level as f32 * 5.0).max(5.0);
-                let afford = if local_price > 0.01 { npc.gold / local_price } else { carry };
-                let units = carry.min(afford).min(settlement.stockpile[best_trade_commodity]);
+        match *best_action {
+            "work" => {
+                chosen_intent = EconomicIntent::Produce;
+            }
+            "trade" => {
+                if let Some(dest_id) = best_trade_dest {
+                    let local_price = settlement.prices[best_trade_commodity];
+                    let carry = (entity.level as f32 * 5.0).max(5.0);
+                    let afford = if local_price > 0.01 { npc.gold / local_price } else { carry };
+                    let units = carry.min(afford).min(settlement.stockpile[best_trade_commodity]);
 
-                if units > 0.0 {
-                    // Buy from settlement.
-                    out.push(WorldDelta::ConsumeCommodity {
-                        location_id: settlement_id,
-                        commodity: best_trade_commodity,
-                        amount: units,
-                    });
-                    // Pay gold.
-                    let cost = units * local_price;
-                    out.push(WorldDelta::TransferGold {
-                        from_id: entity.id,
-                        to_id: settlement_id, // gold goes to settlement treasury
-                        amount: cost,
-                    });
-                    // Set intent to travel to destination.
-                    if let Some(dest) = state.settlement(dest_id) {
-                        chosen_intent = EconomicIntent::Trade {
-                            destination_settlement_id: dest_id,
-                        };
-                        // Behavior: trade action.
-                        let mut action = ActionTags::empty();
-                        action.add(crate::world_sim::state::tags::TRADE, 1.0);
-                        action.add(crate::world_sim::state::tags::NEGOTIATION, 0.5);
-                        let action = crate::world_sim::action_context::with_context(&action, entity, state);
-                        out.push(WorldDelta::AddBehaviorTags {
-                            entity_id: entity.id,
-                            tags: action.tags,
-                            count: action.count,
+                    if units > 0.0 {
+                        // Buy from settlement.
+                        out.push(WorldDelta::ConsumeCommodity {
+                            location_id: settlement_id,
+                            commodity: best_trade_commodity,
+                            amount: units,
                         });
+                        let cost = units * local_price;
+                        out.push(WorldDelta::TransferGold {
+                            from_id: entity.id,
+                            to_id: settlement_id,
+                            amount: cost,
+                        });
+                        if state.settlement(dest_id).is_some() {
+                            chosen_intent = EconomicIntent::Trade {
+                                destination_settlement_id: dest_id,
+                            };
+                            let mut action = ActionTags::empty();
+                            action.add(tags::TRADE, 1.0);
+                            action.add(tags::NEGOTIATION, 0.5);
+                            let action = crate::world_sim::action_context::with_context(&action, entity, state);
+                            out.push(WorldDelta::AddBehaviorTags {
+                                entity_id: entity.id,
+                                tags: action.tags,
+                                count: action.count,
+                            });
+                        }
                     }
                 }
             }
-        }
-
-        // Relocate if significantly better than staying (with hysteresis).
-        if best_reloc_utility > stay_utility * RELOCATION_HYSTERESIS
-            && best_reloc_utility > best_trade_utility
-        {
-            if let Some(dest_id) = best_reloc_dest {
-                if let Some(dest) = state.settlement(dest_id) {
-                    chosen_intent = EconomicIntent::Travel {
-                        destination: dest.pos,
-                    };
+            "mobilize" => {
+                // Only ~20% mobilize per cycle (deterministic hash).
+                let mob_roll = entity_hash_f32(entity.id, state.tick, 0xF16B7);
+                if threat_high && mob_roll < 0.2 {
+                    chosen_intent = EconomicIntent::Idle;
+                    let mut action = ActionTags::empty();
+                    action.add(tags::COMBAT, 1.0);
+                    action.add(tags::DEFENSE, 0.5);
+                    action.add(tags::TACTICS, 0.3);
+                    let action = crate::world_sim::action_context::with_context(&action, entity, state);
+                    out.push(WorldDelta::AddBehaviorTags {
+                        entity_id: entity.id,
+                        tags: action.tags,
+                        count: action.count,
+                    });
                 }
             }
+            "relocate" => {
+                if let Some(dest_id) = best_reloc_dest {
+                    if let Some(dest) = state.settlement(dest_id) {
+                        chosen_intent = EconomicIntent::Travel {
+                            destination: dest.pos,
+                        };
+                    }
+                }
+            }
+            "social" => {
+                // Social seeking: stay in settlement, gain social tags.
+                chosen_intent = EconomicIntent::Produce; // stays local
+                let mut action = ActionTags::empty();
+                action.add(tags::DIPLOMACY, 0.5);
+                action.add(tags::NEGOTIATION, 0.3);
+                let action = crate::world_sim::action_context::with_context(&action, entity, state);
+                out.push(WorldDelta::AddBehaviorTags {
+                    entity_id: entity.id,
+                    tags: action.tags,
+                    count: action.count,
+                });
+            }
+            "quest" => {
+                // Quest/adventure: for now, treated as producing with purpose.
+                // When quest system integration is ready, this will set Adventuring intent.
+                chosen_intent = EconomicIntent::Produce;
+                let mut action = ActionTags::empty();
+                action.add(tags::EXPLORATION, 1.0);
+                action.add(tags::COMBAT, 0.3);
+                let action = crate::world_sim::action_context::with_context(&action, entity, state);
+                out.push(WorldDelta::AddBehaviorTags {
+                    entity_id: entity.id,
+                    tags: action.tags,
+                    count: action.count,
+                });
+            }
+            "home" => {
+                // Go home: travel to home settlement if away, else stay local.
+                if let Some(home_sid) = npc.home_settlement_id {
+                    if home_sid != settlement_id {
+                        if let Some(home_s) = state.settlement(home_sid) {
+                            chosen_intent = EconomicIntent::Travel {
+                                destination: home_s.pos,
+                            };
+                        }
+                    }
+                }
+                // If already home, just stay (Produce).
+            }
+            _ => {}
         }
 
         // Emit intent change + movement toward destination.
@@ -376,8 +599,8 @@ fn barter_at_settlement(
             // After the swap, A loses a_give of a_commodity and gains b_give of b_commodity.
             // B loses b_give of b_commodity and gains a_give of a_commodity.
             // Reject the trade if either NPC would exceed their capacity.
-            let entity_a = entities.iter().find(|e| e.id == a_id);
-            let entity_b = entities.iter().find(|e| e.id == b_id);
+            let entity_a = state.entity(a_id);
+            let entity_b = state.entity(b_id);
             if let (Some(ea), Some(eb)) = (entity_a, entity_b) {
                 let npc_a = ea.npc.as_ref().unwrap();
                 let npc_b = eb.npc.as_ref().unwrap();

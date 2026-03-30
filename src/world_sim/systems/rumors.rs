@@ -10,6 +10,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{entity_hash, entity_hash_f32};
 
 // NEEDS STATE: rumors: Vec<Rumor> on WorldState
 //   where Rumor { id: u32, text: String, rumor_type: RumorType, accuracy: f32,
@@ -99,13 +100,13 @@ pub fn compute_rumors(state: &WorldState, out: &mut Vec<WorldDelta>) {
         // NEEDS STATE: check active_count < MAX_ACTIVE_RUMORS
 
         // Deterministic roll for rumor generation (read-only state).
-        let roll = deterministic_roll(state.tick, entity.id, 0);
+        let roll = entity_hash_f32(entity.id, state.tick, 0);
         if roll > RUMOR_CHANCE {
             continue;
         }
 
         // Pick rumor type deterministically.
-        let type_idx = deterministic_u32(state.tick, entity.id, 1) % 6;
+        let type_idx = entity_hash(entity.id, state.tick, 1) % 6;
         let rumor_type = match type_idx {
             0 => RumorType::HiddenQuest,
             1 => RumorType::CrisisWarning,
@@ -120,7 +121,7 @@ pub fn compute_rumors(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
         // Pick target region.
         let target_region_id = if !state.regions.is_empty() {
-            let idx = deterministic_u32(state.tick, entity.id, 2) as usize % state.regions.len();
+            let idx = entity_hash(entity.id, state.tick, 2) as usize % state.regions.len();
             Some(state.regions[idx].id)
         } else {
             None
@@ -140,23 +141,3 @@ pub fn compute_rumors(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Deterministic hashing (no mutable rng in compute phase)
-// ---------------------------------------------------------------------------
-
-/// Deterministic float roll in [0, 1) from tick, entity_id, and salt.
-fn deterministic_roll(tick: u64, entity_id: u32, salt: u32) -> f32 {
-    let h = deterministic_u32(tick, entity_id, salt);
-    (h & 0xFFFF) as f32 / 65536.0
-}
-
-/// Deterministic u32 hash from tick, entity_id, and salt.
-fn deterministic_u32(tick: u64, entity_id: u32, salt: u32) -> u32 {
-    // Simple mixing: multiply by large primes and XOR.
-    let mut h = tick.wrapping_mul(2654435761) ^ (entity_id as u64).wrapping_mul(40503);
-    h ^= (salt as u64).wrapping_mul(2246822519);
-    h ^= h >> 16;
-    h = h.wrapping_mul(0x45d9f3b);
-    h ^= h >> 16;
-    h as u32
-}

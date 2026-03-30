@@ -13,6 +13,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
+use crate::world_sim::state::{entity_hash_f32};
 
 /// Addiction tick cadence.
 const ADDICTION_TICK_INTERVAL: u64 = 3;
@@ -26,11 +27,6 @@ const MODERATE_WITHDRAWAL_DAMAGE: f32 = 0.5;
 /// Debuff duration for withdrawal slow.
 const WITHDRAWAL_DEBUFF_MS: u32 = 3000;
 
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_addiction(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % ADDICTION_TICK_INTERVAL != 0 {

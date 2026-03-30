@@ -3,8 +3,10 @@ use std::time::Instant;
 
 use super::delta::MergedDeltas;
 use super::state::{
-    Entity, EntityField, EntityKind, QuestDelta, QuestStatus, WorldState,
+    ChronicleCategory, ChronicleEntry, Entity, EntityField, EntityKind, QuestDelta, QuestStatus,
+    WorldEvent, WorldState,
 };
+use super::naming::entity_display_name;
 use super::NUM_COMMODITIES;
 
 /// Sub-phase timing for the apply phase.
@@ -270,24 +272,33 @@ fn apply_economy(state: &mut WorldState, merged: &MergedDeltas) {
 fn apply_gold_transfers(state: &mut WorldState, merged: &MergedDeltas) {
     if merged.gold_transfers.is_empty() { return; }
 
-    // Compute total outgoing per sender.
+    // Compute total outgoing per sender and snapshot original gold.
     let mut outgoing: HashMap<u32, f32> = HashMap::new();
+    let mut original_gold: HashMap<u32, f32> = HashMap::new();
     for &(from, _, amount) in &merged.gold_transfers {
         *outgoing.entry(from).or_default() += amount;
+        original_gold.entry(from).or_insert_with(|| {
+            state.entity(from)
+                .and_then(|e| e.npc.as_ref())
+                .map(|n| n.gold)
+                .unwrap_or(0.0)
+        });
     }
 
-    // Apply each transfer with proportional scaling.
-    for &(from, to, amount) in &merged.gold_transfers {
-        let sender_gold = state.entity(from)
-            .and_then(|e| e.npc.as_ref())
-            .map(|n| n.gold)
-            .unwrap_or(0.0);
-        let total_out = outgoing.get(&from).copied().unwrap_or(0.0);
-        let scale = if total_out > sender_gold && total_out > 0.0 {
-            sender_gold / total_out
+    // Compute per-sender scale from snapshot (before any mutations).
+    let scales: HashMap<u32, f32> = outgoing.iter().map(|(&from, &total_out)| {
+        let gold = original_gold.get(&from).copied().unwrap_or(0.0);
+        let scale = if total_out > gold && total_out > 0.0 {
+            gold / total_out
         } else {
             1.0
         };
+        (from, scale)
+    }).collect();
+
+    // Apply each transfer with pre-computed scaling.
+    for &(from, to, amount) in &merged.gold_transfers {
+        let scale = scales.get(&from).copied().unwrap_or(1.0);
         let actual = amount * scale;
 
         if let Some(sender) = state.entity_mut(from) {
@@ -297,7 +308,7 @@ fn apply_gold_transfers(state: &mut WorldState, merged: &MergedDeltas) {
         }
         if let Some(receiver) = state.entity_mut(to) {
             if let Some(npc) = receiver.npc.as_mut() {
-                npc.gold += actual;
+                npc.gold = (npc.gold + actual).min(10000.0);
             }
         }
     }
@@ -347,14 +358,102 @@ fn apply_goods_transfers(state: &mut WorldState, merged: &MergedDeltas) {
 // ---------------------------------------------------------------------------
 
 fn apply_deaths(state: &mut WorldState, merged: &MergedDeltas) {
+    // Collect death info before mutating, so we can look up killer names.
+    let mut death_records: Vec<(u32, String, Option<u32>, Option<u32>, u32, EntityKind)> = Vec::new();
+
     for entity in &mut state.entities {
         if !entity.alive { continue; }
         // Explicit Die deltas or hp depleted.
         if merged.deaths.contains(&entity.id)
             || (entity.hp <= 0.0 && entity.kind != EntityKind::Building)
         {
+            let victim_name = entity_display_name(entity);
+            let home_settlement_id = entity.npc.as_ref().and_then(|n| n.home_settlement_id);
+            let killer_id = merged.last_damage_source.get(&entity.id).copied();
+            death_records.push((entity.id, victim_name, home_settlement_id, killer_id, entity.level, entity.kind));
             entity.alive = false;
         }
+    }
+
+    // Record deaths in chronicle and world events.
+    // Cap chronicle death entries per tick to avoid flooding.
+    let mut death_chronicle_count = 0u32;
+    const MAX_DEATH_CHRONICLES_PER_TICK: u32 = 2;
+    for (entity_id, victim_name, home_settlement_id, killer_id, level, kind) in death_records {
+        // Look up settlement name.
+        let settlement_name = home_settlement_id
+            .and_then(|sid| state.settlement(sid))
+            .map(|s| s.name.clone());
+
+        // Look up killer name (exclude self-damage).
+        let killer_name = killer_id
+            .filter(|&kid| kid != entity_id)
+            .and_then(|kid| {
+                state.entity(kid).map(|e| entity_display_name(e))
+            });
+
+        // Build death text.
+        let text = match (&settlement_name, &killer_name) {
+            (Some(sname), Some(kname)) => {
+                format!("{} of {} was slain by {}", victim_name, sname, kname)
+            }
+            (Some(sname), None) => {
+                format!("{} of {} fell in battle", victim_name, sname)
+            }
+            (None, Some(kname)) => {
+                format!("{} was slain by {}", victim_name, kname)
+            }
+            (None, None) => {
+                format!("{} fell in battle", victim_name)
+            }
+        };
+
+        // Only record notable deaths to chronicle, capped per tick.
+        if (level >= 40 || kind == EntityKind::Monster) && death_chronicle_count < MAX_DEATH_CHRONICLES_PER_TICK {
+            death_chronicle_count += 1;
+            state.chronicle.push(ChronicleEntry {
+                tick: state.tick,
+                category: ChronicleCategory::Death,
+                text,
+                entity_ids: {
+                    let mut ids = vec![entity_id];
+                    if let Some(kid) = killer_id {
+                        ids.push(kid);
+                    }
+                    ids
+                },
+            });
+        }
+
+        // Legendary death: first time only for this entity.
+        if kind == EntityKind::Npc {
+            let already_legendary = state.chronicle.iter().any(|e| {
+                e.category == ChronicleCategory::Narrative
+                    && e.entity_ids.contains(&entity_id)
+                    && e.text.contains("legendary")
+            });
+            if !already_legendary {
+                let mention_count = state.chronicle.iter()
+                    .filter(|e| e.entity_ids.contains(&entity_id))
+                    .count();
+                if mention_count >= 20 {
+                    let settlement_text = settlement_name.as_deref().unwrap_or("the wilderness");
+                    state.chronicle.push(ChronicleEntry {
+                        tick: state.tick,
+                        category: ChronicleCategory::Narrative,
+                        text: format!("The legendary {} of {} has fallen. {} chronicle entries tell their story.",
+                            victim_name, settlement_text, mention_count),
+                        entity_ids: vec![entity_id],
+                    });
+                }
+            }
+        }
+
+        // Always record ALL deaths to world_events.
+        state.world_events.push(WorldEvent::EntityDied {
+            entity_id,
+            cause: "combat".to_string(),
+        });
     }
 }
 
@@ -484,7 +583,7 @@ pub(super) fn apply_campaign_deltas(state: &mut WorldState, merged: &MergedDelta
 
     // --- Spawns ---
     for &(kind, pos, team, level) in &merged.spawns {
-        let id = state.entities.iter().map(|e| e.id).max().unwrap_or(0) + 1;
+        let id = state.next_entity_id();
         let entity = match kind {
             EntityKind::Npc => {
                 let mut e = Entity::new_npc(id, pos);
@@ -508,6 +607,10 @@ pub(super) fn apply_campaign_deltas(state: &mut WorldState, merged: &MergedDelta
                 e.kind = EntityKind::Projectile;
                 e.team = team;
                 e
+            }
+            EntityKind::Item => {
+                // Items are spawned via SpawnItem delta, not SpawnEntity.
+                Entity::new_building(id, pos)
             }
         };
         state.entities.push(entity);
@@ -625,7 +728,7 @@ pub(super) fn apply_entity_field_delta(entity: &mut Entity, field_disc: u8, delt
             if let Some(npc) = entity.npc.as_mut() {
                 match field_disc {
                     d if d == EntityField::Morale as u8 => {
-                        npc.morale = (npc.morale + delta).clamp(0.0, 100.0);
+                        npc.morale = (npc.morale + delta).clamp(10.0, 100.0);
                     }
                     d if d == EntityField::Stress as u8 => {
                         npc.stress = (npc.stress + delta).clamp(0.0, 100.0);
@@ -706,7 +809,7 @@ pub(super) fn apply_settlement_field_delta(settlement: &mut super::state::Settle
     use super::state::SettlementField;
     match field_disc {
         d if d == SettlementField::Treasury as u8 => {
-            settlement.treasury += delta;
+            settlement.treasury = (settlement.treasury + delta).clamp(-1000.0, 100000.0);
         }
         d if d == SettlementField::Population as u8 => {
             settlement.population = (settlement.population as f32 + delta).max(0.0) as u32;
@@ -716,6 +819,10 @@ pub(super) fn apply_settlement_field_delta(settlement: &mut super::state::Settle
         }
         d if d == SettlementField::InfrastructureLevel as u8 => {
             settlement.infrastructure_level = (settlement.infrastructure_level + delta).clamp(0.0, 5.0);
+        }
+        d if d == SettlementField::FactionId as u8 => {
+            // Set (not additive): value is the new faction owner id.
+            settlement.faction_id = Some(delta as u32);
         }
         _ => {}
     }
@@ -744,6 +851,7 @@ mod tests {
         s.entities[2].max_hp = 70.0;
         s.settlements.push(SettlementState::new(10, "TestVille".into(), (0.0, 0.0)));
         s.settlements[0].stockpile[0] = 100.0; // 100 food
+        s.rebuild_entity_cache();
         s
     }
 

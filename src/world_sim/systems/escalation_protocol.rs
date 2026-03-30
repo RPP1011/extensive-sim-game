@@ -16,6 +16,7 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::fidelity::Fidelity;
 use crate::world_sim::state::{EntityKind, WorldState, WorldTeam};
+use crate::world_sim::state::{entity_hash_f32};
 
 /// How often the escalation system evaluates (in ticks).
 const ESCALATION_INTERVAL: u64 = 13;
@@ -30,12 +31,6 @@ const ESCALATION_RATE: f32 = 2.0;
 /// Only applies when threat is above the threshold.
 const DE_ESCALATION_RATE: f32 = 0.5;
 
-/// Deterministic hash for pseudo-random decisions from immutable state.
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_escalation_protocol(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % ESCALATION_INTERVAL != 0 || state.tick == 0 {

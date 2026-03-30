@@ -10,7 +10,9 @@
 //! Original: `crates/headless_campaign/src/systems/migration.rs`
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, NpcData, SettlementState, WorldState};
+use crate::world_sim::naming::entity_display_name;
+use crate::world_sim::state::{ChronicleCategory, ChronicleEntry, EntityKind, NpcData, SettlementState, WorldState};
+use crate::world_sim::state::{entity_hash_f32, pair_hash_f32};
 
 use super::seasons::{current_season, season_modifiers};
 
@@ -29,12 +31,6 @@ const MIGRATION_CHANCE: f32 = 0.05;
 /// Maximum distance an NPC will consider migrating (squared, for efficiency).
 const MAX_MIGRATION_DIST_SQ: f32 = 10000.0; // 100 units
 
-/// Deterministic hash for pseudo-random decisions from immutable state.
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 /// Compute an attractiveness score for a settlement.
 /// Higher = more attractive to migrants.
@@ -139,7 +135,7 @@ pub fn compute_migration(state: &WorldState, out: &mut Vec<WorldDelta>) {
             }
 
             // ~5% chance per eligible NPC per cycle (deterministic hash).
-            let roll = tick_hash(state.tick, entity.id as u64 ^ settlement.id as u64 ^ 0xBEEF_CAFE);
+            let roll = pair_hash_f32(entity.id, settlement.id, state.tick, 0xBEEF_CAFE);
             if roll >= MIGRATION_CHANCE {
                 continue;
             }
@@ -151,6 +147,24 @@ pub fn compute_migration(state: &WorldState, out: &mut Vec<WorldDelta>) {
                     destination: best_pos,
                 },
             });
+
+            // Chronicle: notable NPCs (level >= 20) fleeing.
+            if entity.level >= 20 {
+                let npc_name = entity_display_name(entity);
+                let target_name = state.settlement(target_id)
+                    .map(|s| s.name.as_str())
+                    .unwrap_or("unknown");
+                let reason = if high_threat { "rising threat" } else { "famine" };
+                out.push(WorldDelta::RecordChronicle {
+                    entry: ChronicleEntry {
+                        tick: state.tick,
+                        category: ChronicleCategory::Narrative,
+                        text: format!("{} fled {} due to {}, heading for {}",
+                            npc_name, settlement.name, reason, target_name),
+                        entity_ids: vec![entity.id],
+                    },
+                });
+            }
         }
     }
 }

@@ -19,6 +19,7 @@ use crate::world_sim::state::{
     ChronicleCategory, ChronicleEntry, DiplomaticStance, FactionField, RegionField, WorldEvent,
     WorldState,
 };
+use crate::world_sim::state::entity_hash_f32;
 
 /// Cadence: every 7 ticks.
 const CIVIL_WAR_INTERVAL: u64 = 7;
@@ -50,19 +51,6 @@ const COUP_RISK_INCREASE: f32 = 0.05;
 /// Chance per interval to trigger civil war when conditions are met.
 const IGNITION_CHANCE: f32 = 0.08;
 
-/// Deterministic hash for pseudo-random decisions.
-#[inline]
-fn deterministic_roll(tick: u64, faction_id: u32, salt: u32) -> f32 {
-    let mut h = tick
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(faction_id as u64)
-        .wrapping_mul(2862933555777941757)
-        .wrapping_add(salt as u64);
-    h = h
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407);
-    (h >> 33) as f32 / (1u64 << 31) as f32
-}
 
 pub fn compute_civil_war(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % CIVIL_WAR_INTERVAL != 0 || state.tick == 0 {
@@ -108,7 +96,7 @@ fn compute_trigger_civil_wars(state: &WorldState, out: &mut Vec<WorldDelta>) {
         }
 
         // Probabilistic ignition.
-        let roll = deterministic_roll(state.tick, faction.id, 100);
+        let roll = entity_hash_f32(faction.id, state.tick, 100 as u64);
         if roll >= IGNITION_CHANCE {
             continue;
         }
@@ -182,7 +170,7 @@ fn compute_active_civil_wars(state: &WorldState, out: &mut Vec<WorldDelta>) {
         });
 
         // Military strength attrition from internal conflict.
-        let attrition_roll = deterministic_roll(state.tick, fi, 200);
+        let attrition_roll = entity_hash_f32(fi, state.tick, 200 as u64);
         let attrition = MILITARY_ATTRITION + attrition_roll * 1.5;
         out.push(WorldDelta::UpdateFaction {
             faction_id: fi,

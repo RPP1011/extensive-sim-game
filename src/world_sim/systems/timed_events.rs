@@ -14,6 +14,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, StatusEffect, StatusEffectKind, WorldState, WorldTeam};
+use crate::world_sim::state::{entity_hash_f32};
 use crate::world_sim::NUM_COMMODITIES;
 
 use super::seasons::{current_season, Season};
@@ -27,12 +28,6 @@ const BASE_CHANCE: f32 = 0.05;
 /// Maximum concurrent active timed events.
 const MAX_ACTIVE: usize = 2;
 
-/// Deterministic hash for pseudo-random decisions from immutable state.
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 /// Count of active timed events (approximated by checking recent buff statuses).
 fn estimate_active_events(state: &WorldState) -> usize {
@@ -45,7 +40,7 @@ fn estimate_active_events(state: &WorldState) -> usize {
         if past_tick == 0 {
             break;
         }
-        let past_roll = tick_hash(past_tick, 0xE4E4_7001u64.wrapping_add(0xEE01));
+        let past_roll = entity_hash_f32(0, past_tick, 0xE4E4_7001u64.wrapping_add(0xEE01));
         if past_roll < BASE_CHANCE {
             count += 1;
         }
@@ -72,18 +67,18 @@ pub fn compute_timed_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
     };
     let chance = BASE_CHANCE * season_mult;
 
-    let roll = tick_hash(state.tick, 0xEE01_7001);
+    let roll = entity_hash_f32(0, state.tick, 0xEE01_7001);
     if roll > chance {
         return;
     }
 
     // Pick event type.
-    let event_roll = tick_hash(state.tick, 0xEE02_7002);
+    let event_roll = entity_hash_f32(0, state.tick, 0xEE02_7002);
 
     if event_roll < 0.15 {
         // Trade Winds: gold bonus to all settlements.
         for settlement in &state.settlements {
-            let bonus = 5.0 + tick_hash(state.tick, settlement.id as u64) * 15.0;
+            let bonus = 5.0 + entity_hash_f32(settlement.id, state.tick, 0) * 15.0;
             out.push(WorldDelta::UpdateTreasury {
                 location_id: settlement.id,
                 delta: bonus,
@@ -96,7 +91,7 @@ pub fn compute_timed_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
             out.push(WorldDelta::ProduceCommodity {
                 location_id: settlement.id,
                 commodity,
-                amount: 3.0 + tick_hash(state.tick, settlement.id as u64 ^ 0xCCC) * 7.0,
+                amount: 3.0 + entity_hash_f32(settlement.id, state.tick, 0xCCC) * 7.0,
             });
         }
     } else if event_roll < 0.45 {
@@ -124,7 +119,7 @@ pub fn compute_timed_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
             out.push(WorldDelta::ProduceCommodity {
                 location_id: settlement.id,
                 commodity: crate::world_sim::commodity::FOOD, // food
-                amount: 5.0 + tick_hash(state.tick, settlement.id as u64 ^ 0xF00D) * 10.0,
+                amount: 5.0 + entity_hash_f32(settlement.id, state.tick, 0xF00D) * 10.0,
             });
         }
     } else if event_roll < 0.75 {

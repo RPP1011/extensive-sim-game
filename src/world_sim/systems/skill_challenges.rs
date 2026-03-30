@@ -5,6 +5,9 @@
 //! NPC level, archetype class tags, and a deterministic roll. Outcomes produce
 //! gold rewards (success) or damage (failure) via deltas.
 //!
+//! **Gold conservation:** Rewards are paid from the NPC's home settlement
+//! treasury. If the settlement cannot afford the reward, no gold is paid.
+//!
 //! Ported from `crates/headless_campaign/src/systems/skill_challenges.rs`.
 //!
 //! NEEDS STATE: `active_quests: Vec<ActiveQuest>` on WorldState
@@ -23,6 +26,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState, WorldTeam};
+use crate::world_sim::state::entity_hash;
 
 /// How often to tick skill challenges (in ticks).
 const CHALLENGE_INTERVAL: u64 = 7;
@@ -42,9 +46,6 @@ const FAILURE_DAMAGE: f32 = 5.0;
 /// Damage dealt to entity on critical failure.
 const CRITICAL_FAILURE_DAMAGE: f32 = 15.0;
 
-/// Guild entity ID sentinel.
-const GUILD_ENTITY_ID: u32 = 0;
-
 pub fn compute_skill_challenges(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % CHALLENGE_INTERVAL != 0 || state.tick == 0 {
         return;
@@ -59,13 +60,18 @@ pub fn compute_skill_challenges(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_skill_challenges_for_settlement(
     state: &WorldState,
-    _settlement_id: u32,
+    settlement_id: u32,
     entities: &[crate::world_sim::state::Entity],
     out: &mut Vec<WorldDelta>,
 ) {
     if state.tick % CHALLENGE_INTERVAL != 0 || state.tick == 0 {
         return;
     }
+
+    let settlement = match state.settlement(settlement_id) {
+        Some(s) => s,
+        None => return,
+    };
 
     for entity in entities {
         if entity.kind != EntityKind::Npc || !entity.alive || entity.team != WorldTeam::Friendly {
@@ -110,8 +116,7 @@ pub fn compute_skill_challenges_for_settlement(
         let difficulty = 30.0 + hostile_count as f32 * 10.0;
 
         // Deterministic roll based on entity id and tick (no RNG on immutable state)
-        let roll_seed = (entity.id as u64).wrapping_mul(2654435761) ^ state.tick;
-        let roll = ((roll_seed % 2000) as f32) / 100.0; // [0, 20)
+        let roll = (entity_hash(entity.id, state.tick, 0x5411) % 2000) as f32 / 100.0; // [0, 20)
 
         let total = base_skill + roll;
         let succeeded = total > difficulty;
@@ -120,11 +125,14 @@ pub fn compute_skill_challenges_for_settlement(
         let is_critical_failure = base_skill < difficulty - 30.0 && !succeeded;
 
         if is_critical_success {
-            out.push(WorldDelta::TransferGold {
-                from_id: GUILD_ENTITY_ID,
-                to_id: entity.id,
-                amount: CRITICAL_SUCCESS_GOLD,
-            });
+            // Paid from settlement treasury
+            if settlement.treasury > CRITICAL_SUCCESS_GOLD {
+                out.push(WorldDelta::TransferGold {
+                    from_id: settlement_id,
+                    to_id: entity.id,
+                    amount: CRITICAL_SUCCESS_GOLD,
+                });
+            }
             out.push(WorldDelta::Heal {
                 target_id: entity.id,
                 amount: 10.0,
@@ -136,17 +144,21 @@ pub fn compute_skill_challenges_for_settlement(
                 amount: CRITICAL_FAILURE_DAMAGE,
                 source_id: entity.id,
             });
+            // Gold penalty goes to settlement treasury
             out.push(WorldDelta::TransferGold {
                 from_id: entity.id,
-                to_id: GUILD_ENTITY_ID,
+                to_id: settlement_id,
                 amount: CRITICAL_FAILURE_GOLD_PENALTY,
             });
         } else if succeeded {
-            out.push(WorldDelta::TransferGold {
-                from_id: GUILD_ENTITY_ID,
-                to_id: entity.id,
-                amount: SUCCESS_GOLD,
-            });
+            // Paid from settlement treasury
+            if settlement.treasury > SUCCESS_GOLD {
+                out.push(WorldDelta::TransferGold {
+                    from_id: settlement_id,
+                    to_id: entity.id,
+                    amount: SUCCESS_GOLD,
+                });
+            }
         } else {
             out.push(WorldDelta::Damage {
                 target_id: entity.id,

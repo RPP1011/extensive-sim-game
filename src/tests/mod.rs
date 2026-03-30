@@ -15,7 +15,7 @@ use crate::ui::settings::{
     InvertOrbitYLabel,
 };
 use crate::game_core::{
-    self, MissionResult,
+    self, MissionResult, CampaignSaveData,
     CampaignLayerMarker, CampaignProgressState, RegionTransitionPayload,
     derive_region_transition_seed,
     load_campaign_data, load_and_prepare_campaign_data,
@@ -24,7 +24,7 @@ use crate::game_core::{
 };
 use crate::ui::save_browser::{
     campaign_slot_path, continue_campaign_candidates, upsert_slot_metadata,
-    CampaignSaveIndex, SaveSlotMetadata,
+    CampaignSaveIndex, CampaignSaveIndexState, SaveSlotMetadata,
     CAMPAIGN_AUTOSAVE_PATH, CAMPAIGN_SAVE_PATH,
     CAMPAIGN_SAVE_SLOT_2_PATH, CAMPAIGN_SAVE_SLOT_3_PATH,
     CURRENT_SAVE_VERSION, SAVE_VERSION_V1,

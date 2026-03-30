@@ -17,11 +17,6 @@ const PRICE_DISCOVERY_INTERVAL: u64 = 10;
 const MAX_REPORTS_PER_NPC: usize = 30;
 const GOSSIP_RATE: f32 = 0.05;
 
-fn tick_hash(tick: u64, salt: u64) -> u32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    (x >> 33) as u32
-}
 
 pub fn compute_price_discovery(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % PRICE_DISCOVERY_INTERVAL != 0 || state.tick == 0 { return; }
@@ -91,8 +86,8 @@ pub fn compute_price_discovery_for_settlement(
     let exchanges = ((count as f32) * GOSSIP_RATE).ceil() as usize;
 
     for i in 0..exchanges {
-        let a_idx = (tick_hash(state.tick, settlement_id as u64 * 31 + i as u64) as usize) % count;
-        let b_idx = (tick_hash(state.tick, settlement_id as u64 * 37 + i as u64 + 1000) as usize) % count;
+        let a_idx = (entity_hash(settlement_id, state.tick, 31_u64.wrapping_add(i as u64)) as usize) % count;
+        let b_idx = (entity_hash(settlement_id, state.tick, 1037_u64.wrapping_add(i as u64)) as usize) % count;
         if a_idx == b_idx { continue; }
 
         let a_id = npc_ids[a_idx];

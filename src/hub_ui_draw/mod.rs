@@ -4,6 +4,7 @@
 //! sub-module helpers for each logical screen section.
 
 mod campaign_trace;
+pub mod trace_viewer;
 mod start_menu;
 mod character_creation_center;
 mod character_create;
@@ -89,7 +90,7 @@ pub(crate) fn draw_hub_egui_system(
     save_state: (Res<CampaignSaveIndexState>, Res<CampaignSavePanelState>, Res<RegionArtState>,
         Option<Res<crate::mission::sim_bridge::LastMissionReplay>>,
         ResMut<crate::ascii_viewport::MissionPaneState>,
-        Option<Res<bevy_game::headless_campaign::trace_viewer::CampaignTraceViewerState>>),
+        Option<Res<trace_viewer::CampaignTraceViewerState>>),
 ) {
     let (runtime_mode, attention) = runtime_context;
     let (bounds, camera_query) = camera_context;

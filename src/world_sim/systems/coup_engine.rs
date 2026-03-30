@@ -18,6 +18,7 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{
     ChronicleCategory, ChronicleEntry, FactionField, RegionField, WorldEvent, WorldState,
 };
+use crate::world_sim::state::entity_hash_f32;
 
 /// How often the coup engine evaluates risk (in ticks).
 const COUP_CHECK_INTERVAL: u64 = 10;
@@ -28,19 +29,6 @@ const COUP_RISK_THRESHOLD: f32 = 0.7;
 /// Risk decay per interval for factions below threshold (stabilization).
 const RISK_DECAY: f32 = 0.02;
 
-/// Deterministic hash for pseudo-random decisions.
-#[inline]
-fn deterministic_roll(tick: u64, faction_id: u32, salt: u32) -> f32 {
-    let mut h = tick
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(faction_id as u64)
-        .wrapping_mul(2862933555777941757)
-        .wrapping_add(salt as u64);
-    h = h
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407);
-    (h >> 33) as f32 / (1u64 << 31) as f32
-}
 
 pub fn compute_coup_engine(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % COUP_CHECK_INTERVAL != 0 || state.tick == 0 {
@@ -62,7 +50,7 @@ pub fn compute_coup_engine(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
         // --- Attempt coup if risk exceeds threshold ---
         if projected_risk > COUP_RISK_THRESHOLD {
-            let roll = deterministic_roll(state.tick, fi, 0);
+            let roll = entity_hash_f32(fi, state.tick, 0 as u64);
             let coup_chance = (projected_risk - COUP_RISK_THRESHOLD).min(0.3);
             if roll < coup_chance {
                 emit_coup_deltas(state, faction, projected_risk, out);
@@ -154,7 +142,7 @@ fn emit_coup_deltas(
     out: &mut Vec<WorldDelta>,
 ) {
     let fi = faction.id;
-    let success_roll = deterministic_roll(state.tick, fi, 1);
+    let success_roll = entity_hash_f32(fi, state.tick, 1 as u64);
     let success = success_roll < 0.6 + (risk - COUP_RISK_THRESHOLD) * 0.5;
 
     if success {

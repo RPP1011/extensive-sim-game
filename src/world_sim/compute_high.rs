@@ -17,12 +17,41 @@ pub fn compute_entity_deltas(entity: &Entity, state: &WorldState) -> Vec<WorldDe
 pub fn compute_entity_deltas_into(entity: &Entity, state: &WorldState, out: &mut Vec<WorldDelta>) {
     match entity.kind {
         EntityKind::Npc | EntityKind::Monster => compute_combatant_into(entity, state, out),
-        EntityKind::Building | EntityKind::Projectile => {}
+        EntityKind::Building | EntityKind::Projectile | EntityKind::Item => {}
     }
 }
 
 fn compute_combatant_into(entity: &Entity, state: &WorldState, out: &mut Vec<WorldDelta>) {
     if is_stunned(entity) { return; }
+
+    // Non-combat NPCs (workers/traders) flee from hostiles instead of fighting.
+    if entity.kind == EntityKind::Npc {
+        if let Some(npc) = &entity.npc {
+            let is_combat_npc = matches!(npc.economic_intent,
+                super::state::EconomicIntent::Idle
+                | super::state::EconomicIntent::Adventuring { .. }
+            ) || npc.behavior_value(super::state::tags::COMBAT) > 50.0
+              || npc.behavior_value(super::state::tags::MELEE) > 50.0;
+
+            if !is_combat_npc {
+                // Flee: move away from nearest hostile.
+                if let Some(threat) = find_nearest_hostile(entity, state) {
+                    let dx = entity.pos.0 - threat.pos.0;
+                    let dy = entity.pos.1 - threat.pos.1;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    if dist > 0.001 {
+                        let speed = entity.move_speed * crate::world_sim::DT_SEC;
+                        out.push(WorldDelta::Move {
+                            entity_id: entity.id,
+                            force: (dx / dist * speed, dy / dist * speed),
+                        });
+                    }
+                }
+                tick_status_effects_into(entity, out);
+                return;
+            }
+        }
+    }
 
     let target = find_nearest_hostile(entity, state);
 
@@ -143,6 +172,7 @@ mod tests {
             radius: 20.0,
             entity_ids: vec![1, 2],
         });
+        s.rebuild_entity_cache();
         s
     }
 

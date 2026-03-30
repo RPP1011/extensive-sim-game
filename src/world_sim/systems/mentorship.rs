@@ -34,7 +34,27 @@ pub fn compute_mentorship_for_settlement(
     // Jitter cadence is checked in the caller; the per-settlement variant
     // assumes it has already been gated.
 
-    // Collect eligible NPC (id, level) pairs from the entity slice.
+    // Find Library/Workshop positions at this settlement for proximity check.
+    let mut knowledge_buildings: [(f32, f32); 16] = [(0.0, 0.0); 16];
+    let mut kb_count = 0usize;
+    for entity in entities {
+        if !entity.alive || entity.kind != EntityKind::Building { continue; }
+        if let Some(bd) = &entity.building {
+            if bd.construction_progress >= 1.0
+                && matches!(bd.building_type,
+                    crate::world_sim::state::BuildingType::Library
+                    | crate::world_sim::state::BuildingType::Workshop
+                    | crate::world_sim::state::BuildingType::GuildHall)
+            {
+                if kb_count < 16 {
+                    knowledge_buildings[kb_count] = entity.pos;
+                    kb_count += 1;
+                }
+            }
+        }
+    }
+
+    // Collect eligible NPC (id, level) pairs — must be near a knowledge building.
     let mut npcs = [(0u32, 0u32); 128];
     let mut count = 0usize;
 
@@ -50,6 +70,14 @@ pub fn compute_mentorship_for_settlement(
                 }
             }
         }
+
+        // Must be near a Library/Workshop/GuildHall (within 15 units).
+        let near_knowledge = kb_count == 0 || (0..kb_count).any(|k| {
+            let dx = entity.pos.0 - knowledge_buildings[k].0;
+            let dy = entity.pos.1 - knowledge_buildings[k].1;
+            dx * dx + dy * dy < 225.0 // 15^2
+        });
+        if !near_knowledge { continue; }
 
         if count < 128 {
             npcs[count] = (entity.id, entity.level);
@@ -100,12 +128,6 @@ pub fn compute_mentorship_for_settlement(
                 entity_id: apprentice_id,
                 field: EntityField::AttackDamage,
                 value: stat_gain,
-            });
-
-            // XP
-            out.push(WorldDelta::AddXp {
-                entity_id: apprentice_id,
-                amount: xp_gain as u32,
             });
 
             // Behavior tags: mentor earns teaching/leadership.

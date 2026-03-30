@@ -12,6 +12,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState};
+use crate::world_sim::state::{entity_hash_f32};
 
 /// Grace period before rival activates.
 const ACTIVATION_TICK: u64 = 67;
@@ -25,11 +26,6 @@ const SABOTAGE_GOLD_DRAIN: f32 = 10.0;
 /// Damage from rival raiders.
 const RAID_DAMAGE: f32 = 5.0;
 
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_rival_guild(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick < ACTIVATION_TICK {
@@ -43,7 +39,7 @@ pub fn compute_rival_guild(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // threats against settlements and NPCs.
 
     for settlement in &state.settlements {
-        let roll = tick_hash(state.tick, settlement.id as u64 ^ 0xE1FA1);
+        let roll = entity_hash_f32(settlement.id, state.tick, 0xE1FA1);
 
         // 10% chance of sabotage per settlement per cycle (only above treasury floor)
         if roll < 0.10 && settlement.treasury > -100.0 {

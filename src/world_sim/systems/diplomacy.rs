@@ -1,346 +1,389 @@
-#![allow(unused)]
-//! Diplomacy system — every 7 ticks.
+//! Diplomacy system — every 100 ticks.
 //!
-//! Manages diplomatic agreements between factions:
-//! - Expires agreements past their deadline
-//! - AI factions propose trade, NAPs, and alliances based on relations
-//! - War ceasefire checks (strength < 20 or heavy losses)
-//! - Alliance coordination (shared enemies)
-//! - Trade agreements generate gold income every tick
+//! Manages faction diplomacy using existing WorldState fields:
+//! - **Trade agreements**: Factions with positive relations generate gold for
+//!   settlements they share borders with (both own settlements in same region).
+//! - **Relation changes**: Factions sharing regions with high threat see improved
+//!   relations (common enemy effect).
+//! - **Alliance coordination**: Allied factions (relationship_to_guild > 50)
+//!   share threat reduction across their settlements.
 //!
-//! Ported from `crates/headless_campaign/src/systems/diplomacy.rs`.
+//! All output is via WorldDelta — state is read-only.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{ActionTags, WorldState, tags};
+use crate::world_sim::state::{
+    ChronicleCategory, ChronicleEntry, DiplomaticStance, FactionField, SettlementField,
+    WorldState,
+};
+use crate::world_sim::state::pair_hash_f32;
 
-// NEEDS STATE: factions: Vec<FactionState> on WorldState
-// NEEDS STATE: diplomacy: DiplomacyState on WorldState
-//   DiplomacyState { guild_faction_id, agreements: Vec<(u32, u32, DiplomaticAgreement)>,
-//                    relations: Vec<Vec<i32>> }
-// NEEDS STATE: DiplomaticAgreement enum { TradeAgreement { gold_per_tick, expires_tick },
-//              NonAggressionPact { expires_tick }, MilitaryAlliance { expires_tick } }
-// NEEDS STATE: FactionState { id, diplomatic_stance, relationship_to_guild,
-//              military_strength, at_war_with }
-// NEEDS STATE: DiplomaticStance enum (AtWar, Hostile, Neutral, Friendly, Coalition)
+/// Cadence for diplomacy processing (every 100 ticks).
+const DIPLOMACY_INTERVAL: u64 = 100;
 
-// NEEDS DELTA: AddAgreement { faction_a: u32, faction_b: u32, agreement: DiplomaticAgreement }
-// NEEDS DELTA: RemoveAgreement { faction_a: u32, faction_b: u32, agreement_type: String }
-// NEEDS DELTA: SetDiplomaticStance { faction_id: u32, stance: DiplomaticStance }
-// NEEDS DELTA: AdjustRelationship { faction_id: u32, delta: f32 }
-// NEEDS DELTA: EndWar { faction_a: u32, faction_b: u32 }
-// NEEDS DELTA: DeclareWar { attacker_id: u32, defender_id: u32 }
+/// Base gold per settlement pair from a trade-friendly relationship.
+const TRADE_GOLD_PER_PAIR: f32 = 0.5;
 
-/// Cadence for full diplomacy processing.
-const DIPLOMACY_INTERVAL: u64 = 7;
+/// Relation boost per shared-threat region per cycle.
+const SHARED_THREAT_RELATION_BOOST: f32 = 1.0;
 
-/// Duration of a trade agreement in ticks.
-const TRADE_DURATION: u64 = 167;
-/// Duration of a non-aggression pact in ticks.
-const NAP_DURATION: u64 = 8000;
-/// Duration of a military alliance in ticks.
-const ALLIANCE_DURATION: u64 = 10000;
+/// Threat level threshold to count a region as "threatened".
+const THREAT_THRESHOLD: f32 = 0.3;
 
-/// Gold per tick for trade agreements.
-const TRADE_GOLD_PER_TICK: f32 = 0.05;
+/// Relationship threshold for alliance coordination.
+const ALLIANCE_THRESHOLD: f32 = 50.0;
 
-/// Deterministic hash for pseudo-random decisions.
-#[inline]
-fn deterministic_roll(tick: u64, a: u32, b: u32, salt: u32) -> f32 {
-    let mut h = tick.wrapping_mul(6364136223846793005)
-        .wrapping_add(a as u64)
-        .wrapping_mul(2862933555777941757)
-        .wrapping_add(b as u64)
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(salt as u64);
-    h = h.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-    (h >> 33) as f32 / (1u64 << 31) as f32
-}
+/// Threat reduction applied to allied faction settlements per cycle.
+const ALLIANCE_THREAT_REDUCTION: f32 = 0.02;
+
+/// Relationship threshold for trade income generation.
+const TRADE_RELATION_THRESHOLD: f32 = 20.0;
+
 
 pub fn compute_diplomacy(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    // Trade agreement income runs every tick (not gated by interval).
-    compute_trade_income(state, out);
-
     if state.tick % DIPLOMACY_INTERVAL != 0 || state.tick == 0 {
         return;
     }
+    if state.factions.len() < 2 {
+        return;
+    }
 
-    // 1. Expire agreements past their deadline
-    compute_expire_agreements(state, out);
-
-    // 2. War ceasefire checks
-    compute_ceasefires(state, out);
-
-    // 3. AI faction proposals (trade, NAP, alliance)
-    compute_proposals(state, out);
-
-    // 4. Alliance coordination
+    compute_trade_income(state, out);
+    compute_shared_threat_relations(state, out);
     compute_alliance_coordination(state, out);
 }
 
-/// Trade agreements involving the guild generate gold income via TransferGold.
+/// Trade agreements: faction pairs with positive relations generate gold income
+/// for settlements where both factions have a presence in the same region.
+///
+/// For each pair of factions with relation > TRADE_RELATION_THRESHOLD, find
+/// settlements owned by each faction that share a region. Each such settlement
+/// pair generates a small treasury boost for both settlements.
 fn compute_trade_income(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    // Once state.diplomacy exists, iterate active trade agreements
-    // involving the guild and emit TransferGold deltas.
-    // TODO: When enabled, emit AddBehaviorTags with tags::DIPLOMACY(2.0) + tags::NEGOTIATION(1.0)
-    //       alongside AddAgreement deltas.
+    let factions = &state.factions;
 
-    /*
-    let guild_fid = state.diplomacy.guild_faction_id;
+    for (i, fa) in factions.iter().enumerate() {
+        for fb in factions.iter().skip(i + 1) {
+            // Skip factions at war.
+            if fa.at_war_with.contains(&fb.id) || fb.at_war_with.contains(&fa.id) {
+                continue;
+            }
 
-    for (fa, fb, ag) in &state.diplomacy.agreements {
-        if let DiplomaticAgreement::TradeAgreement { gold_per_tick, .. } = ag {
-            if *fa == guild_fid || *fb == guild_fid {
-                // Model trade income as gold transferred from the trading partner
-                let partner = if *fa == guild_fid { *fb } else { *fa };
-                out.push(WorldDelta::TransferGold {
-                    from_id: partner,
-                    to_id: guild_fid,
-                    amount: *gold_per_tick,
+            // Determine relationship between the pair.
+            // We use relationship_to_guild when one faction is effectively the
+            // player guild proxy (faction 0). For faction-to-faction, we infer
+            // from diplomatic stance.
+            let relation = estimate_bilateral_relation(fa.id, fb.id, state);
+            if relation <= TRADE_RELATION_THRESHOLD {
+                continue;
+            }
+
+            // Find settlements owned by each faction that share a region.
+            let fa_settlements: Vec<u32> = state
+                .settlements
+                .iter()
+                .filter(|s| s.faction_id == Some(fa.id))
+                .map(|s| s.id)
+                .collect();
+            let fb_settlements: Vec<u32> = state
+                .settlements
+                .iter()
+                .filter(|s| s.faction_id == Some(fb.id))
+                .map(|s| s.id)
+                .collect();
+
+            if fa_settlements.is_empty() || fb_settlements.is_empty() {
+                continue;
+            }
+
+            // Find shared regions (both factions own at least one settlement with
+            // a grid in the same region, or we approximate by region ownership).
+            let fa_regions: Vec<u32> = state
+                .regions
+                .iter()
+                .filter(|r| r.faction_id == Some(fa.id))
+                .map(|r| r.id)
+                .collect();
+            let fb_regions: Vec<u32> = state
+                .regions
+                .iter()
+                .filter(|r| r.faction_id == Some(fb.id))
+                .map(|r| r.id)
+                .collect();
+
+            // Check for border adjacency: do they have neighboring regions?
+            // Since we don't have explicit adjacency, count settlement co-presence
+            // as a proxy — if both have settlements at all, they trade.
+            let has_border = !fa_regions.is_empty() && !fb_regions.is_empty();
+            if !has_border && fa_settlements.is_empty() {
+                continue;
+            }
+
+            // Scale gold by relation strength (0 at threshold, full at 100).
+            let relation_factor =
+                (relation - TRADE_RELATION_THRESHOLD) / (100.0 - TRADE_RELATION_THRESHOLD);
+            let gold = TRADE_GOLD_PER_PAIR * relation_factor;
+
+            // Each faction's settlements get a treasury boost.
+            for &sid in &fa_settlements {
+                out.push(WorldDelta::UpdateTreasury {
+                    location_id: sid,
+                    delta: gold,
                 });
             }
-        }
-    }
-    */
-}
+            for &sid in &fb_settlements {
+                out.push(WorldDelta::UpdateTreasury {
+                    location_id: sid,
+                    delta: gold,
+                });
+            }
 
-/// Remove agreements that have expired.
-fn compute_expire_agreements(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    /*
-    let tick = state.tick;
-
-    for (fa, fb, ag) in &state.diplomacy.agreements {
-        let expires = match ag {
-            DiplomaticAgreement::TradeAgreement { expires_tick, .. } => *expires_tick,
-            DiplomaticAgreement::NonAggressionPact { expires_tick } => *expires_tick,
-            DiplomaticAgreement::MilitaryAlliance { expires_tick } => *expires_tick,
-        };
-        if tick >= expires {
-            out.push(WorldDelta::RemoveAgreement {
-                faction_a: *fa,
-                faction_b: *fb,
-                agreement_type: agreement_type_name(ag).to_string(),
-            });
-        }
-    }
-    */
-}
-
-/// Factions at war with strength < 20 seek ceasefire.
-fn compute_ceasefires(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    /*
-    let n = state.factions.len();
-    let guild_fid = state.diplomacy.guild_faction_id;
-
-    for faction in &state.factions {
-        let fi = faction.id;
-        let strength = faction.military_strength;
-        if strength >= 20.0 {
-            continue;
-        }
-
-        for &target in &faction.at_war_with {
-            if target as usize >= n { continue; }
-
-            let target_strength = state.factions.iter()
-                .find(|f| f.id == target)
-                .map(|f| f.military_strength)
-                .unwrap_or(0.0);
-
-            let should_ceasefire = strength < 20.0 || target_strength < 20.0;
-            if !should_ceasefire { continue; }
-
-            // Deterministic ceasefire acceptance roll
-            let accept_chance = if target_strength < 30.0 { 0.8 } else { 0.3 };
-            let roll = deterministic_roll(state.tick, fi, target, 1);
-            if roll < accept_chance {
-                // End war between both factions
-                out.push(WorldDelta::EndWar { faction_a: fi, faction_b: target });
-
-                // Update stance if at war with guild
-                if fi == guild_fid || target == guild_fid {
-                    let other = if fi == guild_fid { target } else { fi };
-                    // Check if the other faction has no remaining wars
-                    let other_wars = state.factions.iter()
-                        .find(|f| f.id == other)
-                        .map(|f| f.at_war_with.len())
-                        .unwrap_or(0);
-                    if other_wars <= 1 {
-                        // This was their only war
-                        out.push(WorldDelta::SetDiplomaticStance {
-                            faction_id: other,
-                            stance: DiplomaticStance::Hostile,
-                        });
-                    }
-                }
-
-                // Create a NAP to prevent immediate re-declaration
-                out.push(WorldDelta::AddAgreement {
-                    faction_a: fi,
-                    faction_b: target,
-                    agreement: DiplomaticAgreement::NonAggressionPact {
-                        expires_tick: state.tick + NAP_DURATION / 2,
+            // Record notable trade events at higher relation thresholds.
+            if relation > 70.0 && pair_hash_f32(fa.id, fb.id, state.tick, 10 as u64) < 0.1 {
+                out.push(WorldDelta::RecordChronicle {
+                    entry: ChronicleEntry {
+                        tick: state.tick,
+                        category: ChronicleCategory::Diplomacy,
+                        text: format!(
+                            "A prosperous trade agreement between {} and {} enriches border settlements.",
+                            fa.name, fb.name
+                        ),
+                        entity_ids: vec![fa.id, fb.id],
                     },
                 });
             }
         }
     }
-    */
 }
 
-/// AI factions propose agreements based on relationship levels.
-fn compute_proposals(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    /*
-    let n = state.factions.len();
-    let guild_fid = state.diplomacy.guild_faction_id;
+/// Shared-threat relation improvement: factions controlling regions with high
+/// threat levels see their relations improve (enemy of my enemy effect).
+///
+/// For each region with threat > THREAT_THRESHOLD, find which factions own
+/// neighboring regions or settlements in the same area. Those factions get a
+/// small relation boost toward the guild.
+fn compute_shared_threat_relations(state: &WorldState, out: &mut Vec<WorldDelta>) {
+    // Build a map: faction_id -> list of region IDs they control.
+    let mut faction_regions: Vec<(u32, Vec<u32>)> = Vec::new();
+    for faction in &state.factions {
+        let regions: Vec<u32> = state
+            .regions
+            .iter()
+            .filter(|r| r.faction_id == Some(faction.id))
+            .map(|r| r.id)
+            .collect();
+        if !regions.is_empty() {
+            faction_regions.push((faction.id, regions));
+        }
+    }
 
-    for (i, fi_faction) in state.factions.iter().enumerate() {
-        for fj_faction in state.factions.iter().skip(i + 1) {
-            let fi = fi_faction.id;
-            let fj = fj_faction.id;
+    // For each high-threat region, find all factions with presence there
+    // or in adjacent regions (using region ID proximity as adjacency heuristic).
+    for region in &state.regions {
+        if region.threat_level < THREAT_THRESHOLD {
+            continue;
+        }
 
-            // Determine relationship between factions
-            let relation = if fi == guild_fid {
-                fj_faction.relationship_to_guild
-            } else if fj == guild_fid {
-                fi_faction.relationship_to_guild
-            } else {
-                // Non-guild faction pair — use diplomacy matrix
-                state.diplomacy.relations
-                    .get(fi as usize)
-                    .and_then(|row| row.get(fj as usize))
-                    .copied()
-                    .unwrap_or(0) as f32
+        // Find factions that own this region or neighboring regions (id +/- 1).
+        let mut affected_factions: Vec<u32> = Vec::new();
+        for (fid, regions) in &faction_regions {
+            let near_threat = regions.iter().any(|&rid| {
+                rid == region.id
+                    || rid == region.id.wrapping_add(1)
+                    || rid == region.id.wrapping_sub(1)
+            });
+            if near_threat {
+                affected_factions.push(*fid);
+            }
+        }
+
+        if affected_factions.len() < 2 {
+            continue;
+        }
+
+        // All affected factions get a relation boost toward the guild,
+        // scaled by threat severity.
+        let boost = SHARED_THREAT_RELATION_BOOST * region.threat_level;
+        for &fid in &affected_factions {
+            // Clamp check: only boost if not already at max.
+            let faction = match state.factions.iter().find(|f| f.id == fid) {
+                Some(f) => f,
+                None => continue,
             };
-
-            // Skip factions at war
-            if fi_faction.at_war_with.contains(&fj)
-                || fj_faction.at_war_with.contains(&fi)
-            {
+            if faction.relationship_to_guild >= 100.0 {
+                continue;
+            }
+            // Skip factions at war with the guild (stance == AtWar).
+            if faction.diplomatic_stance == DiplomaticStance::AtWar {
                 continue;
             }
 
-            // Check existing agreements (read-only)
-            let has_trade = state.diplomacy.agreements.iter().any(|(a, b, ag)| {
-                ((*a == fi && *b == fj) || (*a == fj && *b == fi))
-                    && matches!(ag, DiplomaticAgreement::TradeAgreement { .. })
+            out.push(WorldDelta::UpdateFaction {
+                faction_id: fid,
+                field: FactionField::RelationshipToGuild,
+                value: boost,
             });
-            let has_nap = state.diplomacy.agreements.iter().any(|(a, b, ag)| {
-                ((*a == fi && *b == fj) || (*a == fj && *b == fi))
-                    && matches!(ag, DiplomaticAgreement::NonAggressionPact { .. })
+        }
+
+        // Record chronicle for major threat-driven diplomacy.
+        if affected_factions.len() >= 2
+            && region.threat_level > 0.6
+            && pair_hash_f32(region.id, 0, state.tick, 20 as u64) < 0.15
+        {
+            out.push(WorldDelta::RecordChronicle {
+                entry: ChronicleEntry {
+                    tick: state.tick,
+                    category: ChronicleCategory::Diplomacy,
+                    text: format!(
+                        "Rising threats in {} drive neighboring factions toward cooperation.",
+                        region.name
+                    ),
+                    entity_ids: affected_factions.clone(),
+                },
             });
-            let has_alliance = state.diplomacy.agreements.iter().any(|(a, b, ag)| {
-                ((*a == fi && *b == fj) || (*a == fj && *b == fi))
-                    && matches!(ag, DiplomaticAgreement::MilitaryAlliance { .. })
-            });
-
-            // Trade proposal: relation > 50, 5% chance
-            if relation > 50.0 && !has_trade {
-                let roll = deterministic_roll(state.tick, fi, fj, 10);
-                if roll < 0.05 {
-                    out.push(WorldDelta::AddAgreement {
-                        faction_a: fi,
-                        faction_b: fj,
-                        agreement: DiplomaticAgreement::TradeAgreement {
-                            gold_per_tick: TRADE_GOLD_PER_TICK,
-                            expires_tick: state.tick + TRADE_DURATION,
-                        },
-                    });
-                }
-            }
-
-            // NAP proposal: relation > 30, 3% chance
-            if relation > 30.0 && !has_nap {
-                let roll = deterministic_roll(state.tick, fi, fj, 20);
-                if roll < 0.03 {
-                    out.push(WorldDelta::AddAgreement {
-                        faction_a: fi,
-                        faction_b: fj,
-                        agreement: DiplomaticAgreement::NonAggressionPact {
-                            expires_tick: state.tick + NAP_DURATION,
-                        },
-                    });
-                }
-            }
-
-            // Alliance proposal: relation > 70, 2% chance
-            if relation > 70.0 && !has_alliance {
-                let roll = deterministic_roll(state.tick, fi, fj, 30);
-                if roll < 0.02 {
-                    out.push(WorldDelta::AddAgreement {
-                        faction_a: fi,
-                        faction_b: fj,
-                        agreement: DiplomaticAgreement::MilitaryAlliance {
-                            expires_tick: state.tick + ALLIANCE_DURATION,
-                        },
-                    });
-                }
-            }
         }
     }
-    */
 }
 
-/// Alliance coordination: factions with military alliances share enemies.
+/// Alliance coordination: factions allied with the guild (relationship > 50)
+/// share threat reduction. Allied faction settlements get reduced threat,
+/// simulating coordinated patrols and intelligence sharing.
 fn compute_alliance_coordination(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    /*
-    // Collect alliances
-    let alliances: Vec<(u32, u32)> = state.diplomacy.agreements.iter()
-        .filter_map(|(a, b, ag)| {
-            if matches!(ag, DiplomaticAgreement::MilitaryAlliance { .. }) {
-                Some((*a, *b))
-            } else {
-                None
-            }
+    // Find allied factions (relationship_to_guild > ALLIANCE_THRESHOLD,
+    // not at war, stance is Friendly or Coalition).
+    let allied_factions: Vec<u32> = state
+        .factions
+        .iter()
+        .filter(|f| {
+            f.relationship_to_guild > ALLIANCE_THRESHOLD
+                && !matches!(
+                    f.diplomatic_stance,
+                    DiplomaticStance::AtWar | DiplomaticStance::Hostile
+                )
         })
+        .map(|f| f.id)
         .collect();
 
-    for (ally_a, ally_b) in &alliances {
-        let a_faction = match state.factions.iter().find(|f| f.id == *ally_a) {
-            Some(f) => f,
+    if allied_factions.is_empty() {
+        return;
+    }
+
+    // Reduce threat at settlements owned by allied factions.
+    for settlement in &state.settlements {
+        let faction_id = match settlement.faction_id {
+            Some(fid) => fid,
             None => continue,
         };
-
-        // Check if ally_a is at war with anyone ally_b isn't
-        for &enemy in &a_faction.at_war_with {
-            if enemy == *ally_b { continue; }
-
-            let b_at_war = state.factions.iter()
-                .find(|f| f.id == *ally_b)
-                .map(|f| f.at_war_with.contains(&enemy))
-                .unwrap_or(false);
-
-            if !b_at_war {
-                // 10% chance per tick to join the war
-                let roll = deterministic_roll(state.tick, *ally_b, enemy, 40);
-                if roll < 0.10 {
-                    out.push(WorldDelta::DeclareWar {
-                        attacker_id: *ally_b,
-                        defender_id: enemy,
-                    });
-                }
-            }
+        if !allied_factions.contains(&faction_id) {
+            continue;
+        }
+        // Only reduce if threat is positive.
+        if settlement.threat_level <= 0.0 {
+            continue;
         }
 
-        // Reverse direction
-        let b_faction = match state.factions.iter().find(|f| f.id == *ally_b) {
+        // Scale reduction by how strong the alliance is.
+        let faction = match state.factions.iter().find(|f| f.id == faction_id) {
             Some(f) => f,
             None => continue,
         };
+        let alliance_strength =
+            (faction.relationship_to_guild - ALLIANCE_THRESHOLD) / (100.0 - ALLIANCE_THRESHOLD);
+        let reduction = ALLIANCE_THREAT_REDUCTION * alliance_strength;
 
-        for &enemy in &b_faction.at_war_with {
-            if enemy == *ally_a { continue; }
-
-            let a_at_war = a_faction.at_war_with.contains(&enemy);
-            if !a_at_war {
-                let roll = deterministic_roll(state.tick, *ally_a, enemy, 41);
-                if roll < 0.10 {
-                    out.push(WorldDelta::DeclareWar {
-                        attacker_id: *ally_a,
-                        defender_id: enemy,
-                    });
-                }
-            }
+        // Don't reduce below zero.
+        let clamped = reduction.min(settlement.threat_level);
+        if clamped > 0.0 {
+            out.push(WorldDelta::UpdateSettlementField {
+                settlement_id: settlement.id,
+                field: SettlementField::ThreatLevel,
+                value: -clamped,
+            });
         }
     }
-    */
+
+    // Record alliance coordination events occasionally.
+    if allied_factions.len() >= 2
+        && pair_hash_f32(allied_factions[0], allied_factions[1], state.tick, 30 as u64) < 0.08
+    {
+        // Look up names for the chronicle.
+        let names: Vec<&str> = allied_factions
+            .iter()
+            .take(3)
+            .filter_map(|&fid| state.factions.iter().find(|f| f.id == fid).map(|f| f.name.as_str()))
+            .collect();
+        if names.len() >= 2 {
+            out.push(WorldDelta::RecordChronicle {
+                entry: ChronicleEntry {
+                    tick: state.tick,
+                    category: ChronicleCategory::Diplomacy,
+                    text: format!(
+                        "Allied factions {} coordinate patrols, reducing regional threats.",
+                        names.join(" and ")
+                    ),
+                    entity_ids: allied_factions.clone(),
+                },
+            });
+        }
+    }
+}
+
+/// Estimate bilateral relation between two factions.
+///
+/// Since WorldState only stores `relationship_to_guild` per faction, we use:
+/// - If either faction ID is 0 (guild proxy), use the other's `relationship_to_guild`.
+/// - Otherwise, infer from diplomatic stances:
+///   Friendly/Coalition = 60, Neutral = 0, Hostile = -40, AtWar = -80.
+///   Average the two stances and add a small offset based on whether they share enemies.
+fn estimate_bilateral_relation(fa_id: u32, fb_id: u32, state: &WorldState) -> f32 {
+    // Guild is typically faction 0, but check both directions.
+    if fa_id == 0 {
+        return state
+            .factions
+            .iter()
+            .find(|f| f.id == fb_id)
+            .map(|f| f.relationship_to_guild)
+            .unwrap_or(0.0);
+    }
+    if fb_id == 0 {
+        return state
+            .factions
+            .iter()
+            .find(|f| f.id == fa_id)
+            .map(|f| f.relationship_to_guild)
+            .unwrap_or(0.0);
+    }
+
+    let fa = state.factions.iter().find(|f| f.id == fa_id);
+    let fb = state.factions.iter().find(|f| f.id == fb_id);
+    let (fa, fb) = match (fa, fb) {
+        (Some(a), Some(b)) => (a, b),
+        _ => return 0.0,
+    };
+
+    // Direct war check.
+    if fa.at_war_with.contains(&fb_id) || fb.at_war_with.contains(&fa_id) {
+        return -80.0;
+    }
+
+    let stance_score = |s: DiplomaticStance| -> f32 {
+        match s {
+            DiplomaticStance::Coalition => 70.0,
+            DiplomaticStance::Friendly => 50.0,
+            DiplomaticStance::Neutral => 0.0,
+            DiplomaticStance::Hostile => -40.0,
+            DiplomaticStance::AtWar => -80.0,
+        }
+    };
+
+    let base = (stance_score(fa.diplomatic_stance) + stance_score(fb.diplomatic_stance)) / 2.0;
+
+    // Bonus for shared enemies.
+    let shared_enemies = fa
+        .at_war_with
+        .iter()
+        .filter(|e| fb.at_war_with.contains(e))
+        .count();
+    let enemy_bonus = (shared_enemies as f32) * 10.0;
+
+    (base + enemy_bonus).clamp(-100.0, 100.0)
 }

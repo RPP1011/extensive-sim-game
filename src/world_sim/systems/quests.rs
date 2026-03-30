@@ -8,31 +8,25 @@
 //! 4. At destination, NPCs on High-fidelity grids fight (handled by battles.rs)
 //! 5. Quest completes when threat drops or timer expires → NPC gets reward
 //!
+//! **Gold conservation:** Quest rewards are paid from the posting settlement's
+//! treasury. If the settlement cannot afford it, no gold is paid.
+//!
 //! Cadence: generation every 50 ticks, lifecycle every tick.
 
 use crate::world_sim::delta::WorldDelta;
+use crate::world_sim::naming::entity_display_name;
 use crate::world_sim::state::*;
 use crate::world_sim::commodity;
 
 const QUEST_GEN_INTERVAL: u64 = 50;
 const QUEST_LIFETIME_TICKS: u64 = 500;
-const MIN_THREAT_FOR_QUEST: f32 = 20.0;
-const QUEST_REWARD_PER_THREAT: f32 = 2.0;
-const QUEST_XP_PER_THREAT: f32 = 5.0;
+const MIN_THREAT_FOR_QUEST: f32 = 0.3; // threat_level is 0.0-1.0
+const QUEST_REWARD_PER_THREAT: f32 = 100.0; // scale up since threat is fractional
+const QUEST_XP_PER_THREAT: f32 = 50.0;
 const MIN_LEVEL_FOR_QUEST: u32 = 2;
 const MAX_ACTIVE_QUESTS: usize = 20;
 
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
-fn tick_hash_u32(tick: u64, salt: u64) -> u32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    (x >> 33) as u32
-}
 
 pub fn compute_quests(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // --- Phase 1: Quest generation (every 50 ticks) ---
@@ -76,15 +70,15 @@ fn generate_quests(state: &WorldState, out: &mut Vec<WorldDelta>) {
         if already_posted { continue; }
 
         // Deterministic: only some settlements post per cycle.
-        let roll = tick_hash(state.tick, settlement.id as u64 ^ 0xBE57);
+        let roll = entity_hash_f32(settlement.id, state.tick, 0xBE57);
         if roll > 0.3 { continue; }
 
         let reward = settlement.threat_level * QUEST_REWARD_PER_THREAT;
         let xp = (settlement.threat_level * QUEST_XP_PER_THREAT) as u32;
 
         // Quest destination: near the settlement (where monsters are).
-        let jx = tick_hash(state.tick, settlement.id as u64 * 3) * 20.0 - 10.0;
-        let jy = tick_hash(state.tick, settlement.id as u64 * 7) * 20.0 - 10.0;
+        let jx = entity_hash_f32(settlement.id, state.tick, 3) * 20.0 - 10.0;
+        let jy = entity_hash_f32(settlement.id, state.tick, 7) * 20.0 - 10.0;
         let dest = (settlement.pos.0 + jx, settlement.pos.1 + jy);
 
         // Pay for quest posting from treasury.
@@ -101,6 +95,18 @@ fn generate_quests(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 settlement_id: settlement.id,
                 threat_level: settlement.threat_level,
                 reward_gold: reward,
+            },
+        });
+
+        out.push(WorldDelta::RecordChronicle {
+            entry: ChronicleEntry {
+                tick: state.tick,
+                category: ChronicleCategory::Quest,
+                text: format!(
+                    "{} posted a quest: clear threat (reward: {:.0} gold)",
+                    settlement.name, reward,
+                ),
+                entity_ids: vec![],
             },
         });
     }
@@ -183,6 +189,23 @@ fn accept_quests(state: &WorldState, out: &mut Vec<WorldDelta>) {
                     count: action.count,
                 });
 
+                // Chronicle: NPC accepted a quest.
+                let npc_name = entity_display_name(entity);
+                let settlement_name = state.settlement(quest.settlement_id)
+                    .map(|s| s.name.as_str())
+                    .unwrap_or("unknown");
+                out.push(WorldDelta::RecordChronicle {
+                    entry: ChronicleEntry {
+                        tick: state.tick,
+                        category: ChronicleCategory::Quest,
+                        text: format!(
+                            "{} accepted a quest to clear threats near {}",
+                            npc_name, settlement_name,
+                        ),
+                        entity_ids: vec![entity.id],
+                    },
+                });
+
                 break; // one quest per NPC per decision cycle
             }
         }
@@ -203,7 +226,7 @@ fn run_quest_lifecycle(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
 fn run_quest_lifecycle_for_entities(
     state: &WorldState,
-    _settlement_id: u32,
+    settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {
@@ -245,24 +268,25 @@ fn run_quest_lifecycle_for_entities(
             let reward_gold = quest.map(|q| q.reward_gold)
                 .or_else(|| quest_posting.map(|q| q.reward_gold))
                 .unwrap_or(10.0);
-            let reward_xp = quest.map(|q| q.reward_xp)
-                .or_else(|| quest_posting.map(|q| q.reward_xp))
-                .unwrap_or(5);
-
             // Completion check: deterministic, ~5% chance per tick at destination.
-            let roll = tick_hash(state.tick, entity.id as u64 ^ quest_id as u64);
+            let roll = pair_hash_f32(entity.id, quest_id, state.tick, 0);
             if roll < 0.05 {
-                // Quest complete — reward NPC.
-                out.push(WorldDelta::TransferGold {
-                    from_id: 0, // from guild/world
-                    to_id: entity.id,
-                    amount: reward_gold,
-                });
-                out.push(WorldDelta::AddXp {
-                    entity_id: entity.id,
-                    amount: reward_xp,
-                });
+                // Quest reward paid from posting settlement's treasury.
+                // Use quest posting's settlement, fall back to NPC's home settlement.
+                let funding_sid = quest_posting.map(|q| q.settlement_id)
+                    .or(npc.home_settlement_id)
+                    .unwrap_or(settlement_id);
+                let can_afford = state.settlement(funding_sid)
+                    .map(|s| s.treasury > reward_gold)
+                    .unwrap_or(false);
 
+                if can_afford {
+                    out.push(WorldDelta::TransferGold {
+                        from_id: funding_sid,
+                        to_id: entity.id,
+                        amount: reward_gold,
+                    });
+                }
                 // Combat behavior from quest completion.
                 let mut action = ActionTags::empty();
                 action.add(tags::COMBAT, 3.0);

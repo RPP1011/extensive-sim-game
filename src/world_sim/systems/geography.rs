@@ -15,18 +15,13 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{entity_hash_f32};
 
 use super::seasons::{current_season, Season};
 
 /// How often to evaluate geography changes (in ticks).
 const GEOGRAPHY_INTERVAL: u64 = 33;
 
-/// Deterministic hash for pseudo-random decisions from immutable state.
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GeoChangeType {
@@ -55,7 +50,7 @@ pub fn compute_geography(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // change, and appropriate deltas are emitted.
 
     for (ri, region) in state.regions.iter().enumerate() {
-        let roll = tick_hash(state.tick, 0x6E06_8A9Eu64.wrapping_add(ri as u64));
+        let roll = entity_hash_f32(0, state.tick, 0x6E06_8A9Eu64.wrapping_add(ri as u64));
 
         // ForestGrowth: low threat, low population settlement nearby.
         // Effect: small commodity production boost (wood/herbs).

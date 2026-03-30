@@ -15,6 +15,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{entity_hash_f32};
 
 /// Cadence: runs every 17 ticks.
 const DEAD_ZONE_INTERVAL: u64 = 17;
@@ -35,12 +36,6 @@ const PRESSURE_DECAY: f32 = 0.01;
 /// Damage per tick to NPCs in high dead-zone regions (dz_level * this factor).
 const NPC_DEAD_ZONE_DAMAGE: f32 = 2.0;
 
-/// Deterministic hash for pseudo-random decisions from immutable state.
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_dead_zones(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % DEAD_ZONE_INTERVAL != 0 || state.tick == 0 {
@@ -79,7 +74,7 @@ pub fn compute_dead_zones(state: &WorldState, out: &mut Vec<WorldDelta>) {
             if !near {
                 continue;
             }
-            let roll = tick_hash(state.tick, entity.id as u64 ^ 0xDEAD_20E5);
+            let roll = entity_hash_f32(entity.id, state.tick, 0xDEAD_20E5);
             if roll < severity * 0.3 {
                 out.push(WorldDelta::Damage {
                     target_id: entity.id,

@@ -13,6 +13,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, StatusEffect, StatusEffectKind, WorldState, WorldTeam};
+use crate::world_sim::state::{entity_hash_f32};
 use crate::world_sim::NUM_COMMODITIES;
 
 /// How often to roll for a random event (in ticks).
@@ -21,31 +22,25 @@ const EVENT_INTERVAL: u64 = 17;
 /// Base probability of an event firing each roll (15%).
 const BASE_CHANCE: f32 = 0.15;
 
-/// Deterministic hash for pseudo-random decisions from immutable state.
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_random_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % EVENT_INTERVAL != 0 || state.tick == 0 {
         return;
     }
 
-    let roll = tick_hash(state.tick, 0x8A3D_EE01);
+    let roll = entity_hash_f32(0, state.tick, 0x8A3D_EE01);
     if roll > BASE_CHANCE {
         return;
     }
 
     // Pick event type from weighted pool.
-    let event_roll = tick_hash(state.tick, 0x8A3D_EE02);
+    let event_roll = entity_hash_f32(0, state.tick, 0x8A3D_EE02);
 
     if event_roll < 0.12 {
         // --- Treasure Discovery: gold boost to random settlement ---
         if !state.settlements.is_empty() {
             let idx = (state.tick as usize) % state.settlements.len();
-            let amount = 30.0 + tick_hash(state.tick, 0x601D_0001u64.wrapping_add(0xA)) * 70.0;
+            let amount = 30.0 + entity_hash_f32(0, state.tick, 0x601D_0001u64.wrapping_add(0xA)) * 70.0;
             out.push(WorldDelta::UpdateTreasury {
                 location_id: state.settlements[idx].id,
                 delta: amount,
@@ -54,7 +49,7 @@ pub fn compute_random_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
     } else if event_roll < 0.24 {
         // --- Harvest Bounty: food production boost ---
         for settlement in &state.settlements {
-            let amount = 5.0 + tick_hash(state.tick, settlement.id as u64 ^ 0xF00D) * 10.0;
+            let amount = 5.0 + entity_hash_f32(settlement.id, state.tick, 0xF00D) * 10.0;
             out.push(WorldDelta::ProduceCommodity {
                 location_id: settlement.id,
                 commodity: crate::world_sim::commodity::FOOD, // food
@@ -65,7 +60,7 @@ pub fn compute_random_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
         // --- Bandit Raid: gold drain from settlement ---
         if !state.settlements.is_empty() {
             let idx = (state.tick as usize + 3) % state.settlements.len();
-            let loss = 10.0 + tick_hash(state.tick, 0xBA3D_1700) * 30.0;
+            let loss = 10.0 + entity_hash_f32(0, state.tick, 0xBA3D_1700) * 30.0;
             out.push(WorldDelta::UpdateTreasury {
                 location_id: state.settlements[idx].id,
                 delta: -loss,
@@ -123,7 +118,7 @@ pub fn compute_random_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
         // --- Faction Gift: treasury boost from friendly settlement ---
         if !state.settlements.is_empty() {
             let idx = (state.tick as usize + 7) % state.settlements.len();
-            let gift = 15.0 + tick_hash(state.tick, 0x61F7_0001) * 25.0;
+            let gift = 15.0 + entity_hash_f32(0, state.tick, 0x61F7_0001) * 25.0;
             out.push(WorldDelta::UpdateTreasury {
                 location_id: state.settlements[idx].id,
                 delta: gift,

@@ -8,7 +8,7 @@ use bevy_egui::egui;
 use bevy_game::headless_campaign::actions::WorldEvent;
 use bevy_game::headless_campaign::state::*;
 use bevy_game::headless_campaign::trace::CampaignTrace;
-use bevy_game::headless_campaign::trace_viewer::CampaignTraceViewerState;
+use super::trace_viewer::CampaignTraceViewerState;
 
 use super::common;
 

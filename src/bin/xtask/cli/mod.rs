@@ -58,6 +58,8 @@ pub enum TaskCommand {
     },
     /// Run world simulation benchmark with profiling
     WorldSim(WorldSimArgs),
+    /// Visualize a world sim trace file
+    Visualize(VisualizeArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -96,6 +98,44 @@ pub struct WorldSimArgs {
     /// Enable pre-placed trade routes between nearby settlements
     #[arg(long)]
     pub trade_routes: bool,
+    /// Print chronicle log after simulation
+    #[arg(long)]
+    pub chronicle: bool,
+    /// Print a narrative world history summary after simulation
+    #[arg(long)]
+    pub history: bool,
+    /// Warm-up mode: rich defaults, chronicle output, and summary at end
+    #[arg(long)]
+    pub warm: bool,
+    /// Output path: serialize warmed world state as JSON for game loading
+    #[arg(long)]
+    pub output: Option<String>,
+    /// Load world state from a previously saved JSON file (resume simulation)
+    #[arg(long)]
+    pub load: Option<String>,
+    /// Record a trace file during simulation for later visualization
+    #[arg(long)]
+    pub trace: Option<String>,
+    /// Export world history as a readable markdown narrative file
+    #[arg(long)]
+    pub export_history: Option<String>,
+    /// Divine intervention: trigger events mid-simulation.
+    /// Format: "bless:SETTLEMENT", "curse:REGION", "champion:SETTLEMENT", "prophecy", "plague:SETTLEMENT"
+    #[arg(long)]
+    pub intervene: Option<String>,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Visualize a world sim trace file")]
+pub struct VisualizeArgs {
+    /// Path to a world sim trace JSON file
+    pub trace: String,
+    /// Initial playback speed (ticks per second)
+    #[arg(long, default_value_t = 100.0)]
+    pub speed: f32,
+    /// Target render FPS
+    #[arg(long, default_value_t = 10)]
+    pub fps: u32,
 }
 
 #[derive(Debug, Parser)]

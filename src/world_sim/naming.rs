@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use super::state::tag;
+use super::state::{tag, Entity, EntityKind};
 
 // ---------------------------------------------------------------------------
 // Procedural naming from behavior tags
@@ -62,19 +62,17 @@ static TAG_FLAVORS: &[TagFlavor] = &[
 ///       a Farmer with high faith → "Devout Farmer"
 pub fn procedural_class_name(
     base_name: &str,
-    behavior_tags: &[u32],
-    behavior_values: &[f32],
+    behavior_profile: &[(u32, f32)],
     seed: u64,
 ) -> String {
-    if behavior_tags.is_empty() {
+    if behavior_profile.is_empty() {
         return base_name.to_string();
     }
 
     // Find the tag with the highest value that has a flavor adjective.
     let mut best_tag = 0u32;
     let mut best_val = 0.0f32;
-    for (i, &tag_hash) in behavior_tags.iter().enumerate() {
-        let val = behavior_values[i];
+    for &(tag_hash, val) in behavior_profile {
         if val > best_val && TAG_FLAVORS.iter().any(|f| f.tag_hash == tag_hash) {
             best_tag = tag_hash;
             best_val = val;
@@ -91,6 +89,119 @@ pub fn procedural_class_name(
         format!("{} {}", flavor.adjectives[idx], base_name)
     } else {
         base_name.to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Personal name generation — deterministic fantasy names from entity ID + seed
+// ---------------------------------------------------------------------------
+
+static PREFIXES: &[&str] = &[
+    "Kor", "Thes", "Bre", "Val", "Mor", "Eld", "Gar", "Fen", "Ash", "Dra",
+    "Kel", "Tor", "Lyn", "Har", "Sar", "Wren", "Zev", "Nol", "Cael", "Iri",
+    "Oth", "Rav", "Sel", "Tam", "Ul", "Vex", "Yar", "Dun", "Grim", "Rhi",
+];
+
+static SUFFIXES: &[&str] = &[
+    "rin", "sa", "gan", "ek", "don", "wen", "ax", "is", "ra", "os",
+    "ia", "en", "ul", "ith", "ard", "ley", "on", "us", "an", "ael",
+    "ik", "or", "eth", "ius", "ara", "olt", "ynn", "ash", "mir", "tek",
+];
+
+/// Generate a deterministic fantasy personal name from an entity ID and world seed.
+///
+/// Uses LCG-style hashing to pick from prefix/suffix syllable tables, producing
+/// names like "Korrin", "Thessa", "Bregan", etc.
+pub fn generate_personal_name(entity_id: u32, seed: u64) -> String {
+    let h = (entity_id as u64).wrapping_mul(6364136223846793005u64).wrapping_add(seed);
+    let prefix_idx = (h as usize) % PREFIXES.len();
+    let suffix_idx = ((h >> 16) as usize) % SUFFIXES.len();
+    format!("{}{}", PREFIXES[prefix_idx], SUFFIXES[suffix_idx])
+}
+
+/// Generate a settlement name from a seed.
+pub fn generate_settlement_name_from_seed(seed: u64) -> String {
+    const PREFIXES: &[&str] = &[
+        "Iron", "Oak", "Grey", "Black", "Red", "South", "North", "East", "West",
+        "Old", "New", "High", "Low", "Silver", "Gold", "Blue", "Green", "White",
+    ];
+    const SUFFIXES: &[&str] = &[
+        "haven", "port", "wick", "dale", "field", "moor", "crest", "hollow",
+        "bridge", "watch", "keep", "grove", "vale", "ford", "stead", "gate",
+    ];
+    let h = seed.wrapping_mul(6364136223846793005);
+    let p = (h as usize) % PREFIXES.len();
+    let s = ((h >> 20) as usize) % SUFFIXES.len();
+    format!("{}{}", PREFIXES[p], SUFFIXES[s])
+}
+
+/// Return a display name for an entity. NPCs use their personal name,
+/// monsters get evocative names based on level, and buildings/other types
+/// use "Entity #ID".
+pub fn entity_display_name(entity: &Entity) -> String {
+    match entity.kind {
+        EntityKind::Npc => {
+            if let Some(npc) = entity.npc.as_ref() {
+                if !npc.name.is_empty() {
+                    return npc.name.clone();
+                }
+            }
+            format!("Entity #{}", entity.id)
+        }
+        EntityKind::Monster => monster_display_name(entity.id, entity.level),
+        _ => format!("Entity #{}", entity.id),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Monster name generation — deterministic evocative names from ID + level
+// ---------------------------------------------------------------------------
+
+static MONSTER_ADJECTIVES: &[&str] = &[
+    "Rabid", "Feral", "Diseased", "Frenzied", "Lurking",
+    "Twisted", "Hollow", "Bloated", "Starving", "Withered",
+    "Venomous", "Rotting", "Savage", "Cursed", "Blighted",
+];
+
+static MONSTER_CREATURES: &[&str] = &[
+    "Wolf", "Spider", "Troll", "Wyrm", "Ghoul",
+    "Ogre", "Drake", "Warg", "Fiend", "Crawler",
+    "Stalker", "Brute", "Horror", "Shade", "Beast",
+];
+
+static MONSTER_TITLES: &[&str] = &[
+    "Iron", "Shadow", "Blood", "Stone", "Bone",
+    "Dread", "Night", "Rust", "Ash", "Doom",
+    "Blight", "Plague", "Rot", "Storm", "Frost",
+];
+
+static MONSTER_NAMES: &[&str] = &[
+    "Grath", "Skarn", "Vex", "Thok", "Murg",
+    "Krell", "Drex", "Zul", "Nyx", "Gor",
+    "Blight", "Char", "Skar", "Dusk", "Kraven",
+];
+
+/// Generate a deterministic evocative monster name from entity ID and level.
+///
+/// - Level 1-5:  "{adjective} {creature}" (e.g., "a Rabid Wolf")
+/// - Level 6-15: "{title} {creature}" (e.g., "the Iron Troll")
+/// - Level 16+:  "{name} the {title}" (e.g., "Grath the Devourer")
+fn monster_display_name(id: u32, level: u32) -> String {
+    // LCG-style deterministic hash mixing ID and level tier for variety across seeds.
+    let tier_salt = if level >= 16 { 2 } else if level >= 6 { 1 } else { 0 };
+    let h = (id as u64).wrapping_mul(6364136223846793005u64)
+        .wrapping_add(1442695040888963407u64)
+        .wrapping_add(tier_salt * 2862933555777941757);
+
+    let creature_idx = (h as usize) % MONSTER_CREATURES.len();
+    let adj_idx = ((h >> 16) as usize) % MONSTER_ADJECTIVES.len();
+    let title_idx = ((h >> 32) as usize) % MONSTER_TITLES.len();
+    let name_idx = ((h >> 48) as usize) % MONSTER_NAMES.len();
+
+    match level {
+        0..=5 => format!("a {} {}", MONSTER_ADJECTIVES[adj_idx], MONSTER_CREATURES[creature_idx]),
+        6..=15 => format!("the {} {}", MONSTER_TITLES[title_idx], MONSTER_CREATURES[creature_idx]),
+        _ => format!("{} the {}", MONSTER_NAMES[name_idx], MONSTER_TITLES[title_idx]),
     }
 }
 

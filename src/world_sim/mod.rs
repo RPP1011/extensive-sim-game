@@ -5,6 +5,7 @@
 //! 2. **Compute**: Every entity reads the snapshot, computes its delta independently
 //! 3. **Merge**: All deltas combine into the next world state (commutative + associative)
 
+pub mod city_grid;
 pub mod delta;
 pub mod state;
 pub mod tick;
@@ -20,6 +21,8 @@ pub mod class_gen;
 pub mod naming;
 pub mod runtime;
 pub mod systems;
+pub mod trace;
+pub mod visualizer;
 
 pub use delta::{WorldDelta, MergedDeltas, merge_deltas};
 pub use state::{
@@ -30,7 +33,7 @@ pub use state::{
     ChronicleEntry, ChronicleCategory, WorldEvent,
     EntityField, FactionField, RegionField, SettlementField, RelationKind, QuestDelta,
     // Tag-based action system
-    ActionTags, ClassSlot, Equipment, tag,
+    ActionTags, ClassSlot, Equipment, tag, EconomicIntent,
 };
 pub use state::tags;
 pub use tick::{tick, tick_par, tick_profiled, TickProfile, ProfileAccumulator};

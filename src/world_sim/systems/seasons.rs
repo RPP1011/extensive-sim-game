@@ -86,31 +86,181 @@ pub fn season_modifiers(season: Season) -> SeasonModifiers {
             supply_drain: 1.1,
             threat: 1.1,
             recruit_chance: 0.9,
-            morale_per_tick: -0.05,
+            morale_per_tick: -0.01, // slight autumn melancholy
         },
         Season::Winter => SeasonModifiers {
             travel_speed: 0.7,
             supply_drain: 1.5,
             threat: 1.3,
             recruit_chance: 0.6,
-            morale_per_tick: -0.1,
+            morale_per_tick: -0.02, // gentler winter morale drain
         },
     }
 }
 
-/// Compute seasonal deltas. Currently a no-op in terms of deltas because:
-/// - Season is derived from tick (pure function, no state mutation needed).
-/// - Morale drift would require a morale field on NpcData or a Heal-like delta.
-///
-/// Other systems should call `current_season(state.tick)` and
-/// `season_modifiers(season)` to apply seasonal effects in their own deltas.
+/// Food production multiplier by season.
+pub fn food_production_mult(season: Season) -> f32 {
+    match season {
+        Season::Spring => 1.5, // planting & early harvest
+        Season::Summer => 1.2, // good growing weather
+        Season::Autumn => 1.8, // main harvest
+        Season::Winter => 0.2, // almost no production
+    }
+}
+
+/// Food consumption multiplier by season (people eat more in cold).
+pub fn food_consumption_mult(season: Season) -> f32 {
+    match season {
+        Season::Spring => 1.0,
+        Season::Summer => 0.9,
+        Season::Autumn => 1.0,
+        Season::Winter => 1.4, // more calories needed in cold
+    }
+}
+
+/// Price pressure multiplier by season (scarcity drives prices up).
+pub fn price_pressure(season: Season) -> [f32; 8] {
+    let mut p = [1.0f32; 8];
+    match season {
+        Season::Spring => {
+            p[0] = 1.2; // food slightly scarce (reserves depleted from winter)
+        }
+        Season::Summer => {
+            p[0] = 0.9; // food abundant
+        }
+        Season::Autumn => {
+            p[0] = 0.7; // food very cheap (harvest)
+            p[2] = 0.8; // wood cheap (logging season)
+        }
+        Season::Winter => {
+            p[0] = 2.0; // food very expensive (scarcity)
+            p[2] = 1.5; // wood expensive (heating fuel)
+            p[7] = 1.5; // medicine expensive (illness season)
+        }
+    }
+    p
+}
+
+/// Compute seasonal deltas — economic effects, morale drift, chronicle events.
 pub fn compute_seasons(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    // Season is derived from state.tick — no delta needed for season transition.
-    //
-    // Morale drift: the original system modified `adv.morale` per tick.
-    // In the delta architecture, morale would be expressed as a status effect
-    // or a dedicated delta variant. For now we note the need and let downstream
-    // systems (weather, threat) incorporate season_modifiers() directly.
-    //
-    // NEEDS DELTA: MoraleDrift { entity_id, amount } — if we want per-NPC morale
+    let season = current_season(state.tick);
+    let mods = season_modifiers(season);
+
+    // Record season transition in chronicle.
+    if state.tick > 0 && state.tick % TICKS_PER_SEASON == 0 {
+        let (name, flavor) = match season {
+            Season::Spring => ("Spring", "The snows melt and new life stirs across the land."),
+            Season::Summer => ("Summer", "The long days bring warmth, prosperity, and easier travel."),
+            Season::Autumn => ("Autumn", "Leaves turn gold as the world braces for darker times ahead."),
+            Season::Winter => ("Winter", "Bitter cold grips the world. Supplies dwindle and monsters grow bold."),
+        };
+        out.push(WorldDelta::RecordChronicle {
+            entry: crate::world_sim::state::ChronicleEntry {
+                tick: state.tick,
+                category: crate::world_sim::state::ChronicleCategory::Narrative,
+                text: format!("{} arrives. {}", name, flavor),
+                entity_ids: vec![],
+            },
+        });
+
+        out.push(WorldDelta::RecordEvent {
+            event: crate::world_sim::state::WorldEvent::SeasonChanged {
+                new_season: season as u8,
+            },
+        });
+
+        // Season transition: adjust food stockpiles for winter scarcity.
+        if season == Season::Winter {
+            // Winter onset: food decays faster (spoilage, increased consumption).
+            for settlement in &state.settlements {
+                let food_loss = settlement.stockpile[0] * 0.1; // 10% spoilage
+                if food_loss > 0.0 {
+                    out.push(WorldDelta::ConsumeCommodity {
+                        location_id: settlement.id,
+                        commodity: 0, // FOOD
+                        amount: food_loss,
+                    });
+                }
+            }
+        }
+
+        // Autumn harvest bonus: settlements with farms get food boost.
+        if season == Season::Autumn {
+            for settlement in &state.settlements {
+                // Harvest bonus proportional to existing food production.
+                let harvest_bonus = settlement.stockpile[0] * 0.3;
+                if harvest_bonus > 0.0 {
+                    out.push(WorldDelta::ProduceCommodity {
+                        location_id: settlement.id,
+                        commodity: 0, // FOOD
+                        amount: harvest_bonus.min(50.0),
+                    });
+                }
+            }
+        }
+    }
+
+    // --- Per-tick seasonal price pressure (every 50 ticks) ---
+    if state.tick % 50 == 0 && state.tick > 0 {
+        let pressure = price_pressure(season);
+        for settlement in &state.settlements {
+            let mut new_prices = settlement.prices;
+            for c in 0..8 {
+                // Drift prices toward seasonal pressure.
+                let target = pressure[c];
+                let current = new_prices[c];
+                // Move 5% toward target each cycle.
+                new_prices[c] = current + (target - current) * 0.05;
+                new_prices[c] = new_prices[c].max(0.1); // floor
+            }
+            out.push(WorldDelta::UpdatePrices {
+                location_id: settlement.id,
+                prices: new_prices,
+            });
+        }
+    }
+
+    // --- Morale drift from season (every 10 ticks) ---
+    if state.tick % 10 == 0 {
+        let morale_delta = mods.morale_per_tick * 10.0; // accumulated over 10 ticks
+        if morale_delta.abs() > 0.01 {
+            for entity in &state.entities {
+                if !entity.alive || entity.kind != crate::world_sim::state::EntityKind::Npc { continue; }
+                out.push(WorldDelta::UpdateEntityField {
+                    entity_id: entity.id,
+                    field: crate::world_sim::state::EntityField::Morale,
+                    value: morale_delta,
+                });
+            }
+        }
+    }
+
+    // --- Festival: mid-season celebration (once per season at tick 600) ---
+    let season_tick = state.tick % TICKS_PER_SEASON;
+    if season_tick == TICKS_PER_SEASON / 2 && state.tick > 0 {
+        let festival_name = match season {
+            Season::Spring => "Blossom Festival",
+            Season::Summer => "Solstice Feast",
+            Season::Autumn => "Harvest Fair",
+            Season::Winter => "Midwinter Vigil",
+        };
+        out.push(WorldDelta::RecordChronicle {
+            entry: crate::world_sim::state::ChronicleEntry {
+                tick: state.tick,
+                category: crate::world_sim::state::ChronicleCategory::Achievement,
+                text: format!("The {} is celebrated across the realm.", festival_name),
+                entity_ids: vec![],
+            },
+        });
+
+        // Festival morale boost to all NPCs.
+        for entity in &state.entities {
+            if !entity.alive || entity.kind != crate::world_sim::state::EntityKind::Npc { continue; }
+            out.push(WorldDelta::UpdateEntityField {
+                entity_id: entity.id,
+                field: crate::world_sim::state::EntityField::Morale,
+                value: 10.0, // festival cheer
+            });
+        }
+    }
 }

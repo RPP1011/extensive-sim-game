@@ -6,6 +6,9 @@
 //! gold reward via TransferGold. Bounties are tracked via RecordEvent and the
 //! existing quest_board/world_events.
 //!
+//! **Gold conservation:** Bounty payouts are funded by the nearest settlement
+//! treasury. If the settlement cannot afford the bounty, no gold is paid.
+//!
 //! Original: `crates/headless_campaign/src/systems/wanted.rs`
 //! Cadence: every 10 ticks.
 
@@ -14,6 +17,7 @@ use crate::world_sim::state::{
     ChronicleCategory, DiplomaticStance, EntityKind, FactionField, SettlementField,
     WorldEvent, WorldState, WorldTeam,
 };
+use crate::world_sim::state::pair_hash_f32;
 
 /// Cadence gate.
 const WANTED_TICK_INTERVAL: u64 = 10;
@@ -37,19 +41,6 @@ const MAX_WANTED_PER_SETTLEMENT: usize = 3;
 const HIGH_LEVEL_BONUS_THRESHOLD: u32 = 5;
 const HIGH_LEVEL_BONUS_MULT: f32 = 1.5;
 
-/// Deterministic hash for pseudo-random decisions.
-#[inline]
-fn deterministic_roll(tick: u64, id_a: u32, id_b: u32) -> f32 {
-    let mut h = tick
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(id_a as u64)
-        .wrapping_mul(2862933555777941757)
-        .wrapping_add(id_b as u64);
-    h = h
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407);
-    (h >> 33) as f32 / (1u64 << 31) as f32
-}
 
 pub fn compute_wanted(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % WANTED_TICK_INTERVAL != 0 || state.tick == 0 {
@@ -127,7 +118,7 @@ pub fn compute_wanted(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
             // Use deterministic roll to gate poster issuance (not every hostile
             // gets a poster every tick).
-            let roll = deterministic_roll(state.tick, settlement.id, entity.id);
+            let roll = pair_hash_f32(settlement.id, entity.id, state.tick, 0);
             if roll > 0.4 {
                 continue;
             }
@@ -158,6 +149,7 @@ pub fn compute_wanted(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // --- Phase 2: Reward NPCs near dead wanted targets ---
     // When a hostile entity has died on a grid near a settlement, reward
     // friendly NPCs on the same grid as bounty collectors.
+    // Bounties are funded by the nearest settlement treasury.
     for grid in &state.grids {
         // Find dead hostiles on this grid.
         let dead_hostiles: Vec<(u32, u32)> = grid
@@ -191,13 +183,38 @@ pub fn compute_wanted(state: &WorldState, out: &mut Vec<WorldDelta>) {
             continue;
         }
 
+        // Find the nearest settlement to fund the bounty.
+        let grid_center = grid
+            .entity_ids
+            .first()
+            .and_then(|&eid| state.entity(eid))
+            .map(|e| e.pos)
+            .unwrap_or((0.0, 0.0));
+
+        let nearest_settlement = state.settlements.iter().min_by(|a, b| {
+            let da = (a.pos.0 - grid_center.0).powi(2) + (a.pos.1 - grid_center.1).powi(2);
+            let db = (b.pos.0 - grid_center.0).powi(2) + (b.pos.1 - grid_center.1).powi(2);
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let funding_settlement = match nearest_settlement {
+            Some(s) => s,
+            None => continue,
+        };
+
         for (dead_id, dead_level) in &dead_hostiles {
             let bounty = MONSTER_BOUNTY_PER_LEVEL * (*dead_level).max(1) as f32;
+
+            // Settlement must be able to afford the bounty
+            if funding_settlement.treasury <= bounty {
+                continue;
+            }
+
             let share = bounty / collectors.len() as f32;
 
             for &collector_id in &collectors {
                 out.push(WorldDelta::TransferGold {
-                    from_id: 0, // Guild funds the bounty.
+                    from_id: funding_settlement.id,
                     to_id: collector_id,
                     amount: share,
                 });

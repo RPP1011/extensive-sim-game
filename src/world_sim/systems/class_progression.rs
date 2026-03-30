@@ -45,22 +45,11 @@ pub fn compute_class_progression_for_settlement(
         };
 
         // Skip NPCs with insufficient behavior accumulation.
-        let behavior_sum: f32 = npc.behavior_values.iter().sum();
+        let behavior_sum: f32 = npc.behavior_profile.iter().map(|&(_, v)| v).sum();
         if behavior_sum < MIN_BEHAVIOR_SUM {
             continue;
         }
 
-        // Emit XP for existing classes based on behavior alignment.
-        // The XP amount is proportional to total accumulated behavior,
-        // capped to prevent runaway accumulation.
-        if !npc.classes.is_empty() {
-            let xp = (behavior_sum * 0.1) as u32;
-            if xp > 0 {
-                out.push(WorldDelta::AddXp {
-                    entity_id: entity.id,
-                    amount: xp.min(50),
-                });
-            }
-        }
+        // XP removed — entity level derived from class levels.
     }
 }

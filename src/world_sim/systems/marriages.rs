@@ -10,6 +10,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
+use crate::world_sim::state::entity_hash_f32;
 
 // NEEDS STATE: marriages: Vec<Marriage> on WorldState
 //   Marriage { id, adventurer_id, faction_id, noble_name, married_tick, relation_bonus, dowry_received, produces_heir }
@@ -90,11 +91,3 @@ pub fn compute_marriages(state: &WorldState, out: &mut Vec<WorldDelta>) {
 // Deterministic RNG helper
 // ---------------------------------------------------------------------------
 
-fn deterministic_roll(tick: u64, id: u32) -> f32 {
-    let hash = tick
-        .wrapping_mul(2654435761)
-        .wrapping_add(id as u64)
-        ^ (id as u64).wrapping_mul(40503);
-    let h = hash ^ (hash >> 33);
-    (h & 0xFFFF) as f32 / 65536.0
-}

@@ -7,31 +7,10 @@
 //! Ported from `crates/headless_campaign/src/systems/faction_ai.rs`.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
-
-// NEEDS STATE: factions: Vec<FactionState> on WorldState
-// NEEDS STATE: FactionState { id, name, military_strength, max_military_strength,
-//              diplomatic_stance, relationship_to_guild, coalition_member,
-//              at_war_with, territory_size, recent_actions }
-// NEEDS STATE: DiplomaticStance enum { AtWar, Hostile, Neutral, Friendly, Coalition }
-// NEEDS STATE: guild_faction_id: usize on WorldState (or diplomacy sub-struct)
-// NEEDS STATE: faction_ai_config on WorldState (decision_interval_ticks,
-//              attack_power_fraction, territory_capture_control, hostile_strength_gain,
-//              war_declaration_threshold, war_declaration_penalty,
-//              neutral_control_gain, friendly_relationship_gain, max_recent_actions)
-
-// NEEDS DELTA: SetDiplomaticStance { faction_id: u32, stance: DiplomaticStance }
-// NEEDS DELTA: AdjustMilitaryStrength { faction_id: u32, delta: f32 }
-// NEEDS DELTA: AdjustRelationship { faction_id: u32, delta: f32 }
-// NEEDS DELTA: AdjustRegionControl { region_id: u32, delta: f32 }
-// NEEDS DELTA: AdjustRegionUnrest { region_id: u32, delta: f32 }
-// NEEDS DELTA: ChangeRegionOwner { region_id: u32, new_owner: u32 }
-// NEEDS DELTA: DeclareWar { attacker_id: u32, defender_id: u32 }
-// NEEDS DELTA: EndWar { faction_a: u32, faction_b: u32 }
-// NEEDS DELTA: RecordFactionAction { faction_id: u32, tick: u64, action: String }
+use crate::world_sim::state::*;
 
 /// Cadence: every 600 ticks.
-const FACTION_AI_INTERVAL: u64 = 600;
+const FACTION_AI_INTERVAL: u64 = 100;
 
 /// Default config values (mirrors FactionAiConfig defaults from campaign).
 const ATTACK_POWER_FRACTION: f32 = 0.05;
@@ -42,300 +21,338 @@ const WAR_DECLARATION_PENALTY: f32 = 20.0;
 const NEUTRAL_CONTROL_GAIN: f32 = 2.0;
 const FRIENDLY_RELATIONSHIP_GAIN: f32 = 1.0;
 
-/// Deterministic hash for pseudo-random decisions (no mutable RNG needed).
-/// Returns a float in [0, 1).
-#[inline]
-fn deterministic_roll(tick: u64, faction_id: u32, salt: u32) -> f32 {
-    let mut h = tick.wrapping_mul(6364136223846793005)
-        .wrapping_add(faction_id as u64)
-        .wrapping_mul(2862933555777941757)
-        .wrapping_add(salt as u64);
-    h = h.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-    (h >> 33) as f32 / (1u64 << 31) as f32
-}
 
 pub fn compute_faction_ai(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % FACTION_AI_INTERVAL != 0 || state.tick == 0 {
         return;
     }
 
-    // --- Faction-level decisions ---
-    // Since WorldState doesn't yet have `factions`, this is structured to show
-    // what deltas would be emitted once the state fields exist.
-    //
-    // The logic below is commented-out pseudocode that mirrors the original
-    // system, rewritten to push deltas instead of mutating state.
-
-    /*
-    let guild_faction_id = state.guild_faction_id;
-
     for faction in &state.factions {
         let fi = faction.id;
         let strength = faction.military_strength;
         let max_strength = faction.max_military_strength;
 
-        // --- Per-stance behavior ---
+        // --- Natural military strength regeneration ---
+        // Strength grows toward max, faster for factions with combat NPCs.
+        let combat_npcs = state.entities.iter().filter(|e| {
+            e.alive && e.kind == EntityKind::Npc
+                && e.npc.as_ref().map_or(false, |n| {
+                    n.faction_id == Some(fi)
+                        && n.behavior_value(tags::COMBAT) > 50.0
+                })
+        }).count() as f32;
+
+        // Base regen + bonus from combat-trained NPCs.
+        let base_regen = (max_strength - strength).max(0.0) * 0.05;
+        let regen = base_regen + combat_npcs * 0.2;
+        if regen > 0.01 {
+            out.push(WorldDelta::UpdateFaction {
+                faction_id: fi,
+                field: FactionField::MilitaryStrength,
+                value: regen,
+            });
+        }
+
+        // --- Stance-based behavior ---
         match faction.diplomatic_stance {
-            DiplomaticStance::AtWar => {
-                // War costs strength — if too weak, forced ceasefire
-                if strength < 20.0 {
-                    out.push(WorldDelta::SetDiplomaticStance {
-                        faction_id: fi,
-                        stance: DiplomaticStance::Hostile,
-                    });
-                    out.push(WorldDelta::EndWar {
-                        faction_a: fi,
-                        faction_b: guild_faction_id,
-                    });
-                } else {
-                    // Attack costs
-                    let attack_cost = 3.0 + strength * 0.03;
-                    out.push(WorldDelta::AdjustMilitaryStrength {
-                        faction_id: fi,
-                        delta: -attack_cost,
-                    });
+            DiplomaticStance::Hostile | DiplomaticStance::AtWar => {
+                // Hostile/at-war factions build up military faster.
+                out.push(WorldDelta::UpdateFaction {
+                    faction_id: fi,
+                    field: FactionField::MilitaryStrength,
+                    value: HOSTILE_STRENGTH_GAIN * 2.0,
+                });
 
-                    // Find weakest guild region to attack
-                    if let Some(region) = state.regions.iter()
-                        .filter(|r| r.faction_id == Some(guild_faction_id)
-                                     && r.threat_level > 0.0)
-                        .min_by(|a, b| a.threat_level.partial_cmp(&b.threat_level).unwrap())
-                    {
-                        let attack_power = strength * ATTACK_POWER_FRACTION;
-                        out.push(WorldDelta::AdjustRegionControl {
+                // Hostile factions increase unrest in their regions.
+                for region in &state.regions {
+                    if region.faction_id == Some(fi) {
+                        out.push(WorldDelta::UpdateRegion {
                             region_id: region.id,
-                            delta: -attack_power,
+                            field: RegionField::Unrest,
+                            value: 0.5,
                         });
-                        out.push(WorldDelta::AdjustRegionUnrest {
-                            region_id: region.id,
-                            delta: attack_power * 0.5,
-                        });
-
-                        // Conquest check: if region control would drop to 0
-                        // (apply phase handles clamping; we push the ownership
-                        //  change delta conditionally based on current control)
-                        if region.threat_level - attack_power <= 0.0 {
-                            out.push(WorldDelta::ChangeRegionOwner {
-                                region_id: region.id,
-                                new_owner: fi,
-                            });
-                            out.push(WorldDelta::AdjustMilitaryStrength {
-                                faction_id: fi,
-                                delta: 5.0,
-                            });
-                        }
                     }
                 }
             }
 
-            DiplomaticStance::Hostile => {
-                out.push(WorldDelta::AdjustMilitaryStrength {
-                    faction_id: fi,
-                    delta: HOSTILE_STRENGTH_GAIN,
-                });
-
-                // May declare war if strong enough and relations bad
-                if strength > WAR_DECLARATION_THRESHOLD
-                    && faction.relationship_to_guild < -20.0
-                {
-                    out.push(WorldDelta::SetDiplomaticStance {
-                        faction_id: fi,
-                        stance: DiplomaticStance::AtWar,
-                    });
-                    out.push(WorldDelta::DeclareWar {
-                        attacker_id: fi,
-                        defender_id: guild_faction_id,
-                    });
-                    out.push(WorldDelta::AdjustRelationship {
-                        faction_id: fi,
-                        delta: -WAR_DECLARATION_PENALTY,
-                    });
+            DiplomaticStance::Friendly | DiplomaticStance::Coalition => {
+                // Friendly/coalition factions stabilize their regions.
+                for region in &state.regions {
+                    if region.faction_id == Some(fi) {
+                        out.push(WorldDelta::UpdateRegion {
+                            region_id: region.id,
+                            field: RegionField::Control,
+                            value: NEUTRAL_CONTROL_GAIN,
+                        });
+                        out.push(WorldDelta::UpdateRegion {
+                            region_id: region.id,
+                            field: RegionField::Unrest,
+                            value: -0.3,
+                        });
+                    }
                 }
+
+                // Relationship improvement.
+                out.push(WorldDelta::UpdateFaction {
+                    faction_id: fi,
+                    field: FactionField::RelationshipToGuild,
+                    value: FRIENDLY_RELATIONSHIP_GAIN,
+                });
             }
 
             DiplomaticStance::Neutral => {
-                // Defend owned territory
+                // Neutral factions slowly consolidate control.
                 for region in &state.regions {
                     if region.faction_id == Some(fi) {
-                        out.push(WorldDelta::AdjustRegionControl {
+                        out.push(WorldDelta::UpdateRegion {
                             region_id: region.id,
-                            delta: NEUTRAL_CONTROL_GAIN,
+                            field: RegionField::Control,
+                            value: NEUTRAL_CONTROL_GAIN * 0.5,
                         });
-                    }
-                }
-
-                // Drift based on relationship
-                if faction.relationship_to_guild > 40.0 {
-                    out.push(WorldDelta::SetDiplomaticStance {
-                        faction_id: fi,
-                        stance: DiplomaticStance::Friendly,
-                    });
-                } else if faction.relationship_to_guild < -30.0 {
-                    out.push(WorldDelta::SetDiplomaticStance {
-                        faction_id: fi,
-                        stance: DiplomaticStance::Hostile,
-                    });
-                }
-            }
-
-            DiplomaticStance::Friendly => {
-                // Defend own territory
-                for region in &state.regions {
-                    if region.faction_id == Some(fi) {
-                        out.push(WorldDelta::AdjustRegionControl {
-                            region_id: region.id,
-                            delta: NEUTRAL_CONTROL_GAIN * 0.5,
-                        });
-                    }
-                }
-
-                // Send military aid if guild under pressure
-                let guild_under_pressure = state.regions.iter()
-                    .any(|r| r.faction_id == Some(guild_faction_id)
-                             && r.threat_level < 40.0);
-
-                if guild_under_pressure && strength > 30.0 {
-                    if let Some(region) = state.regions.iter()
-                        .find(|r| r.faction_id == Some(guild_faction_id)
-                                   && r.threat_level < 40.0)
-                    {
-                        let aid = strength * 0.03;
-                        out.push(WorldDelta::AdjustRegionControl {
-                            region_id: region.id,
-                            delta: aid,
-                        });
-                        out.push(WorldDelta::AdjustMilitaryStrength {
-                            faction_id: fi,
-                            delta: -aid * 0.5,
-                        });
-                    }
-                }
-
-                // Relationship improvement
-                out.push(WorldDelta::AdjustRelationship {
-                    faction_id: fi,
-                    delta: FRIENDLY_RELATIONSHIP_GAIN * 0.5,
-                });
-
-                // Drift to neutral if relations cool
-                if faction.relationship_to_guild < 20.0 {
-                    out.push(WorldDelta::SetDiplomaticStance {
-                        faction_id: fi,
-                        stance: DiplomaticStance::Neutral,
-                    });
-                }
-            }
-
-            DiplomaticStance::Coalition => {
-                // Defend guild + own territory
-                for region in &state.regions {
-                    if region.faction_id == Some(guild_faction_id)
-                        || region.faction_id == Some(fi)
-                    {
-                        out.push(WorldDelta::AdjustRegionControl {
-                            region_id: region.id,
-                            delta: NEUTRAL_CONTROL_GAIN,
-                        });
-                        out.push(WorldDelta::AdjustRegionUnrest {
-                            region_id: region.id,
-                            delta: -0.5,
-                        });
-                    }
-                }
-
-                // Counter-attack factions at war with guild
-                for other in &state.factions {
-                    if other.id == fi { continue; }
-                    if other.diplomatic_stance == DiplomaticStance::AtWar {
-                        if let Some(region) = state.regions.iter()
-                            .find(|r| r.faction_id == Some(other.id)
-                                       && r.threat_level > 10.0)
-                        {
-                            let attack = strength * 0.05;
-                            out.push(WorldDelta::AdjustRegionControl {
-                                region_id: region.id,
-                                delta: -attack,
-                            });
-                            out.push(WorldDelta::AdjustMilitaryStrength {
-                                faction_id: fi,
-                                delta: -attack * 0.3,
-                            });
-                        }
                     }
                 }
             }
-        }
 
-        // --- Natural strength regeneration ---
-        let regen = (max_strength - strength).max(0.0) * 0.02;
-        out.push(WorldDelta::AdjustMilitaryStrength {
-            faction_id: fi,
-            delta: regen,
-        });
-
-        // --- Relationship drift ---
-        match faction.diplomatic_stance {
             DiplomaticStance::AtWar => {
-                out.push(WorldDelta::AdjustRelationship {
+                // War drains strength and treasury.
+                let war_cost = 3.0 + strength * 0.03;
+                out.push(WorldDelta::UpdateFaction {
                     faction_id: fi,
-                    delta: -3.0,
+                    field: FactionField::MilitaryStrength,
+                    value: -war_cost,
                 });
-            }
-            DiplomaticStance::Hostile => {
-                out.push(WorldDelta::AdjustRelationship {
+                out.push(WorldDelta::UpdateFaction {
                     faction_id: fi,
-                    delta: -1.0,
+                    field: FactionField::Treasury,
+                    value: -war_cost * 2.0,
                 });
+
+                // War increases unrest in owned regions.
+                for region in &state.regions {
+                    if region.faction_id == Some(fi) {
+                        out.push(WorldDelta::UpdateRegion {
+                            region_id: region.id,
+                            field: RegionField::Unrest,
+                            value: 1.0,
+                        });
+                    }
+                }
             }
-            DiplomaticStance::Coalition | DiplomaticStance::Friendly => {
-                out.push(WorldDelta::AdjustRelationship {
-                    faction_id: fi,
-                    delta: 0.5,
-                });
-            }
-            _ => {}
+        }
+
+        // --- Reactive mobilization: factions that lost territory build up faster ---
+        let current_territory = state.settlements.iter()
+            .filter(|s| s.faction_id == Some(fi))
+            .count() as u32;
+        if current_territory < faction.territory_size && strength < max_strength {
+            // Lost territory → emergency mobilization.
+            let urgency = (faction.territory_size - current_territory) as f32 * 3.0;
+            out.push(WorldDelta::UpdateFaction {
+                faction_id: fi,
+                field: FactionField::MilitaryStrength,
+                value: urgency,
+            });
+        }
+
+        // --- Chronicle notable faction events ---
+        // Military strength crossing thresholds.
+        let roll = entity_hash_f32(fi, state.tick, 77 as u64);
+        if strength > 70.0 && roll < 0.1 {
+            out.push(WorldDelta::RecordChronicle {
+                entry: ChronicleEntry {
+                    tick: state.tick,
+                    category: ChronicleCategory::Narrative,
+                    text: format!("{} musters a formidable army (strength {:.0}).", faction.name, strength),
+                    entity_ids: vec![],
+                },
+            });
         }
     }
 
-    // --- Faction-to-faction wars ---
+    // --- Defensive response: any faction that lost territory can fight to reclaim it ---
     for faction in &state.factions {
-        let fi = faction.id;
-        for &target in &faction.at_war_with {
-            if target == guild_faction_id { continue; }
-
-            let attacker_strength = faction.military_strength;
-            if attacker_strength < 10.0 { continue; }
-
-            let defender_strength = state.factions.iter()
-                .find(|f| f.id == target)
-                .map(|f| f.military_strength)
-                .unwrap_or(0.0);
-
-            if let Some(region) = state.regions.iter()
-                .find(|r| r.faction_id == Some(target) && r.threat_level > 5.0)
+        // Hostile factions use the conquest system instead.
+        if matches!(faction.diplomatic_stance, DiplomaticStance::Hostile | DiplomaticStance::AtWar) {
+            continue;
+        }
+        // Check if this faction has lost territory (current < original).
+        let current_territory = state.settlements.iter()
+            .filter(|s| s.faction_id == Some(faction.id))
+            .count() as u32;
+        if current_territory < faction.territory_size && faction.military_strength > 40.0 {
+            // Attempt to reclaim a settlement from the aggressor.
+            if let Some(target) = state.settlements.iter()
+                .filter(|s| s.faction_id.map_or(false, |fid| {
+                    state.factions.iter().any(|f| f.id == fid
+                        && matches!(f.diplomatic_stance, DiplomaticStance::Hostile | DiplomaticStance::AtWar))
+                }))
+                .min_by(|a, b| a.population.cmp(&b.population))
             {
-                let attack = attacker_strength * 0.04;
-                let defense = defender_strength * 0.02;
-                let net = (attack - defense).max(0.0);
-
-                out.push(WorldDelta::AdjustRegionControl {
-                    region_id: region.id,
-                    delta: -net,
-                });
-                out.push(WorldDelta::AdjustMilitaryStrength {
-                    faction_id: fi,
-                    delta: -attack * 0.3,
-                });
-
-                // Conquest check
-                if region.threat_level - net <= 0.0 {
-                    out.push(WorldDelta::ChangeRegionOwner {
-                        region_id: region.id,
-                        new_owner: fi,
+                let defense = target.population as f32 / 10.0;
+                if faction.military_strength > defense * 2.0 {
+                    let target_owner = target.faction_id.and_then(|fid| state.factions.iter().find(|f| f.id == fid));
+                    let owner_name = target_owner.map(|f| f.name.as_str()).unwrap_or("unknown");
+                    out.push(WorldDelta::UpdateSettlementField {
+                        settlement_id: target.id,
+                        field: SettlementField::FactionId,
+                        value: faction.id as f32,
+                    });
+                    out.push(WorldDelta::UpdateFaction {
+                        faction_id: faction.id,
+                        field: FactionField::MilitaryStrength,
+                        value: -25.0,
+                    });
+                    out.push(WorldDelta::RecordChronicle {
+                        entry: ChronicleEntry {
+                            tick: state.tick,
+                            category: ChronicleCategory::Battle,
+                            text: format!("{} reclaimed {} from {}!",
+                                faction.name, target.name, owner_name),
+                            entity_ids: vec![],
+                        },
                     });
                 }
             }
         }
     }
-    */
+
+    // --- Faction warfare: hostile/at-war factions attempt to conquer settlements ---
+    if state.tick % CONQUEST_INTERVAL == 0 && state.tick >= CONQUEST_INTERVAL {
+        compute_faction_conquests(state, out);
+    }
+}
+
+/// Interval (ticks) between conquest attempts.
+const CONQUEST_INTERVAL: u64 = 500;
+
+/// Military strength required before a faction can attempt conquest.
+const CONQUEST_MIN_STRENGTH: f32 = 60.0;
+
+/// Strength cost on successful conquest.
+const CONQUEST_SUCCESS_COST: f32 = 20.0;
+
+/// Strength cost on failed conquest attempt.
+const CONQUEST_FAILURE_COST: f32 = 10.0;
+
+/// Evaluate faction conquest attempts. Hostile/AtWar factions with sufficient
+/// military strength pick the weakest enemy settlement and attempt to take it.
+fn compute_faction_conquests(state: &WorldState, out: &mut Vec<WorldDelta>) {
+    for faction in &state.factions {
+        // Only hostile or at-war factions attempt conquest.
+        let is_aggressive = matches!(
+            faction.diplomatic_stance,
+            DiplomaticStance::Hostile | DiplomaticStance::AtWar
+        );
+        if !is_aggressive || faction.military_strength < CONQUEST_MIN_STRENGTH {
+            continue;
+        }
+
+        // Rate limit: max one conquest per faction per 2000 ticks.
+        // Check recent chronicle for this faction's conquests.
+        let recent_conquest = state.chronicle.iter().rev().take(100).any(|e| {
+            e.category == ChronicleCategory::Crisis
+                && e.text.contains(&faction.name)
+                && e.text.contains("conquered")
+                && state.tick.saturating_sub(e.tick) < 2000
+        });
+        if recent_conquest { continue; }
+
+        // Find enemy settlements: settlements owned by a different faction.
+        // For AtWar factions, only target factions they are at war with.
+        // For Hostile factions, target any other faction's settlements.
+        let mut best_target: Option<(u32, f32)> = None; // (settlement_id, weakness_score)
+        let mut target_faction_name = String::new();
+
+        for settlement in &state.settlements {
+            let owner_id = match settlement.faction_id {
+                Some(id) if id != faction.id => id,
+                _ => continue, // skip unowned or own settlements
+            };
+
+            // AtWar factions only attack their war targets.
+            if faction.diplomatic_stance == DiplomaticStance::AtWar
+                && !faction.at_war_with.contains(&owner_id)
+            {
+                continue;
+            }
+
+            // Weakness score: lower population + treasury = easier target.
+            let weakness = settlement.population as f32 + settlement.treasury;
+
+            if best_target.is_none() || weakness < best_target.unwrap().1 {
+                best_target = Some((settlement.id, weakness));
+                // Look up target faction name for chronicle text.
+                target_faction_name = state.factions.iter()
+                    .find(|f| f.id == owner_id)
+                    .map(|f| f.name.clone())
+                    .unwrap_or_else(|| format!("Faction {}", owner_id));
+            }
+        }
+
+        let (target_id, _weakness) = match best_target {
+            Some(t) => t,
+            None => continue, // no valid target
+        };
+
+        let target_settlement = match state.settlement(target_id) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        // Defense = population / 10.
+        let defense = target_settlement.population as f32 / 10.0;
+        let target_name = target_settlement.name.clone();
+
+        if faction.military_strength > defense * 2.0 {
+            // --- Conquest succeeds ---
+            // Transfer settlement ownership to the attacker via world event.
+            out.push(WorldDelta::RecordEvent {
+                event: WorldEvent::SettlementConquered {
+                    settlement_id: target_id,
+                    new_faction_id: faction.id,
+                },
+            });
+
+            // Reduce attacker military strength.
+            out.push(WorldDelta::UpdateFaction {
+                faction_id: faction.id,
+                field: FactionField::MilitaryStrength,
+                value: -CONQUEST_SUCCESS_COST,
+            });
+
+            // Chronicle: Crisis entry for conquest.
+            out.push(WorldDelta::RecordChronicle {
+                entry: ChronicleEntry {
+                    tick: state.tick,
+                    category: ChronicleCategory::Crisis,
+                    text: format!(
+                        "{} conquered {} from {}!",
+                        faction.name, target_name, target_faction_name,
+                    ),
+                    entity_ids: vec![],
+                },
+            });
+        } else {
+            // --- Conquest fails ---
+            // Reduce attacker military strength (failed assault).
+            out.push(WorldDelta::UpdateFaction {
+                faction_id: faction.id,
+                field: FactionField::MilitaryStrength,
+                value: -CONQUEST_FAILURE_COST,
+            });
+
+            // Chronicle: Battle entry for the failed attempt.
+            out.push(WorldDelta::RecordChronicle {
+                entry: ChronicleEntry {
+                    tick: state.tick,
+                    category: ChronicleCategory::Battle,
+                    text: format!(
+                        "{} launched a failed assault on {} (defended by {}).",
+                        faction.name, target_name, target_faction_name,
+                    ),
+                    entity_ids: vec![],
+                },
+            });
+        }
+    }
 }

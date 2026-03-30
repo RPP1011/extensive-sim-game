@@ -40,13 +40,12 @@ pub struct GeneratedAbility {
 pub trait ClassGenerator: Send + Sync {
     /// Match behavior profile against known class templates.
     /// Returns classes the NPC qualifies for (score >= threshold).
-    fn match_classes(&self, behavior_tags: &[u32], behavior_values: &[f32]) -> Vec<ClassMatch>;
+    fn match_classes(&self, behavior_profile: &[(u32, f32)]) -> Vec<ClassMatch>;
 
     /// Generate a unique class when no template matches but behavior is significant.
     fn generate_unique_class(
         &self,
-        behavior_tags: &[u32],
-        behavior_values: &[f32],
+        behavior_profile: &[(u32, f32)],
         seed: u64,
     ) -> Option<ClassDef>;
 }
@@ -59,8 +58,7 @@ pub trait AbilityGenerator: Send + Sync {
         class_name_hash: u32,
         archetype: &str,
         tier: u32,
-        behavior_tags: &[u32],
-        behavior_values: &[f32],
+        behavior_profile: &[(u32, f32)],
         seed: u64,
     ) -> GeneratedAbility;
 }
@@ -108,8 +106,13 @@ const TAG_WOODWORK: u32 = tag(b"woodwork");
 const TAG_ALCHEMY: u32 = tag(b"alchemy");
 const TAG_EXPLORATION: u32 = tag(b"exploration");
 const TAG_TEACHING: u32 = tag(b"teaching");
+const TAG_CONSTRUCTION: u32 = tag(b"construction");
+const TAG_ARCHITECTURE: u32 = tag(b"architecture");
+const TAG_MASONRY: u32 = tag(b"masonry");
 
-/// Minimum dot-product score for a class match.
+/// Minimum normalized alignment score for a class match.
+/// Score uses sigmoid: raw/(raw+100). Score=100→0.5, 500→0.83.
+/// Threshold 0.3 requires raw score ~43 (modest behavior alignment).
 const SCORE_THRESHOLD: f32 = 0.3;
 
 static TEMPLATES: &[ClassTemplate] = &[
@@ -215,7 +218,101 @@ static TEMPLATES: &[ClassTemplate] = &[
         requirements: &[(TAG_TEACHING, 50.0), (TAG_LEADERSHIP, 30.0)],
         score_tags: &[(TAG_TEACHING, 0.4), (TAG_LEADERSHIP, 0.3), (TAG_DISCIPLINE, 0.2), (TAG_LABOR, 0.1)],
     },
+    ClassTemplate {
+        name_hash: tag(b"Builder"),
+        display_name: "Builder",
+        requirements: &[(TAG_CONSTRUCTION, 20.0), (TAG_LABOR, 10.0)],
+        score_tags: &[(TAG_CONSTRUCTION, 0.4), (TAG_MASONRY, 0.3), (TAG_WOODWORK, 0.2), (TAG_LABOR, 0.1)],
+    },
+    ClassTemplate {
+        name_hash: tag(b"Architect"),
+        display_name: "Architect",
+        requirements: &[(TAG_CONSTRUCTION, 50.0), (TAG_ARCHITECTURE, 30.0)],
+        score_tags: &[(TAG_ARCHITECTURE, 0.4), (TAG_CONSTRUCTION, 0.3), (TAG_MASONRY, 0.2), (TAG_LEADERSHIP, 0.1)],
+    },
+    // --- Experience-driven classes (from surviving hardship, not work) ---
+    ClassTemplate {
+        name_hash: tag(b"Sentinel"),
+        display_name: "Sentinel",
+        requirements: &[(TAG_DEFENSE, 50.0), (TAG_RESILIENCE, 30.0)],
+        score_tags: &[(TAG_DEFENSE, 0.3), (TAG_RESILIENCE, 0.3), (TAG_ENDURANCE, 0.2), (TAG_AWARENESS, 0.2)],
+    },
+    ClassTemplate {
+        name_hash: tag(b"Survivor"),
+        display_name: "Survivor",
+        requirements: &[(TAG_SURVIVAL, 50.0), (TAG_ENDURANCE, 30.0)],
+        score_tags: &[(TAG_SURVIVAL, 0.4), (TAG_ENDURANCE, 0.3), (TAG_RESILIENCE, 0.2), (TAG_AWARENESS, 0.1)],
+    },
+    ClassTemplate {
+        name_hash: tag(b"Warden"),
+        display_name: "Warden",
+        requirements: &[(TAG_DEFENSE, 80.0), (TAG_COMBAT, 50.0)],
+        score_tags: &[(TAG_DEFENSE, 0.3), (TAG_COMBAT, 0.3), (TAG_RESILIENCE, 0.2), (TAG_LEADERSHIP, 0.2)],
+    },
+    ClassTemplate {
+        name_hash: tag(b"Veteran"),
+        display_name: "Veteran",
+        requirements: &[(TAG_COMBAT, 80.0), (TAG_TACTICS, 30.0)],
+        score_tags: &[(TAG_COMBAT, 0.3), (TAG_TACTICS, 0.3), (TAG_MELEE, 0.2), (TAG_ENDURANCE, 0.2)],
+    },
+    ClassTemplate {
+        name_hash: tag(b"Stalwart"),
+        display_name: "Stalwart",
+        requirements: &[(TAG_RESILIENCE, 80.0), (TAG_ENDURANCE, 50.0)],
+        score_tags: &[(TAG_RESILIENCE, 0.4), (TAG_ENDURANCE, 0.3), (TAG_DEFENSE, 0.2), (TAG_SURVIVAL, 0.1)],
+    },
+    // --- Storytelling class ---
+    ClassTemplate {
+        name_hash: tag(b"Bard"),
+        display_name: "Bard",
+        requirements: &[(TAG_TEACHING, 100.0), (TAG_DIPLOMACY, 50.0)],
+        score_tags: &[(TAG_TEACHING, 0.3), (TAG_DIPLOMACY, 0.3), (TAG_LEADERSHIP, 0.2), (TAG_TRADE, 0.2)],
+    },
+    // --- Seafaring classes ---
+    ClassTemplate {
+        name_hash: tag(b"Mariner"),
+        display_name: "Mariner",
+        requirements: &[(TAG_SEAFARING, 50.0), (TAG_NAVIGATION, 30.0)],
+        score_tags: &[(TAG_SEAFARING, 0.4), (TAG_NAVIGATION, 0.3), (TAG_SURVIVAL, 0.2), (TAG_TRADE, 0.1)],
+    },
+    ClassTemplate {
+        name_hash: tag(b"Sea Captain"),
+        display_name: "Sea Captain",
+        requirements: &[(TAG_SEAFARING, 100.0), (TAG_LEADERSHIP, 50.0)],
+        score_tags: &[(TAG_SEAFARING, 0.3), (TAG_LEADERSHIP, 0.3), (TAG_NAVIGATION, 0.2), (TAG_COMBAT, 0.2)],
+    },
+    // --- Dungeoneering classes ---
+    ClassTemplate {
+        name_hash: tag(b"Delver"),
+        display_name: "Delver",
+        requirements: &[(TAG_DUNGEONEERING, 50.0), (TAG_SURVIVAL, 30.0)],
+        score_tags: &[(TAG_DUNGEONEERING, 0.4), (TAG_SURVIVAL, 0.3), (TAG_AWARENESS, 0.2), (TAG_COMBAT, 0.1)],
+    },
+    ClassTemplate {
+        name_hash: tag(b"Dungeon Master"),
+        display_name: "Dungeon Master",
+        requirements: &[(TAG_DUNGEONEERING, 100.0), (TAG_TACTICS, 50.0)],
+        score_tags: &[(TAG_DUNGEONEERING, 0.3), (TAG_TACTICS, 0.3), (TAG_COMBAT, 0.2), (TAG_LEADERSHIP, 0.2)],
+    },
+    // --- Oath classes ---
+    ClassTemplate {
+        name_hash: tag(b"Oathkeeper"),
+        display_name: "Oathkeeper",
+        requirements: &[(TAG_FAITH, 50.0), (TAG_DISCIPLINE, 30.0)],
+        score_tags: &[(TAG_FAITH, 0.4), (TAG_DISCIPLINE, 0.3), (TAG_RESILIENCE, 0.2), (TAG_LEADERSHIP, 0.1)],
+    },
+    // --- Villainy classes ---
+    ClassTemplate {
+        name_hash: tag(b"Betrayer"),
+        display_name: "Betrayer",
+        requirements: &[(TAG_DECEPTION, 80.0), (TAG_STEALTH, 50.0)],
+        score_tags: &[(TAG_DECEPTION, 0.4), (TAG_STEALTH, 0.3), (TAG_AWARENESS, 0.2), (TAG_COMBAT, 0.1)],
+    },
 ];
+
+const TAG_SEAFARING: u32 = tag(b"seafaring");
+const TAG_DUNGEONEERING: u32 = tag(b"dungeoneering");
+const TAG_COMPASSION: u32 = tag(b"compassion");
 
 // ---------------------------------------------------------------------------
 // Tag hash -> display name table (for variant naming)
@@ -255,6 +352,12 @@ fn tag_display_name(hash: u32) -> Option<&'static str> {
         (TAG_ALCHEMY, "Alchemy"),
         (TAG_EXPLORATION, "Exploration"),
         (TAG_TEACHING, "Teaching"),
+        (TAG_CONSTRUCTION, "Construction"),
+        (TAG_ARCHITECTURE, "Architecture"),
+        (TAG_MASONRY, "Masonry"),
+        (TAG_COMPASSION, "Compassion"),
+        (TAG_SEAFARING, "Seafaring"),
+        (TAG_DUNGEONEERING, "Dungeoneering"),
     ];
     TABLE.iter().find(|&&(h, _)| h == hash).map(|&(_, name)| name)
 }
@@ -263,9 +366,9 @@ fn tag_display_name(hash: u32) -> Option<&'static str> {
 // Helper: look up a tag value in sorted parallel arrays (O(log n))
 // ---------------------------------------------------------------------------
 
-fn lookup_tag(behavior_tags: &[u32], behavior_values: &[f32], tag_hash: u32) -> f32 {
-    match behavior_tags.binary_search(&tag_hash) {
-        Ok(idx) => behavior_values[idx],
+fn lookup_tag(behavior_profile: &[(u32, f32)], tag_hash: u32) -> f32 {
+    match behavior_profile.binary_search_by_key(&tag_hash, |&(t, _)| t) {
+        Ok(idx) => behavior_profile[idx].1,
         Err(_) => 0.0,
     }
 }
@@ -283,14 +386,14 @@ impl DefaultClassGenerator {
 }
 
 impl ClassGenerator for DefaultClassGenerator {
-    fn match_classes(&self, behavior_tags: &[u32], behavior_values: &[f32]) -> Vec<ClassMatch> {
+    fn match_classes(&self, behavior_profile: &[(u32, f32)]) -> Vec<ClassMatch> {
         let mut matches = Vec::new();
 
         for tmpl in TEMPLATES {
             // Check all requirements are met.
             let mut qualified = true;
             for &(req_tag, min_val) in tmpl.requirements {
-                if lookup_tag(behavior_tags, behavior_values, req_tag) < min_val {
+                if lookup_tag(behavior_profile, req_tag) < min_val {
                     qualified = false;
                     break;
                 }
@@ -307,7 +410,7 @@ impl ClassGenerator for DefaultClassGenerator {
             let mut second_weighted = 0.0f32;
 
             for &(score_tag, weight) in tmpl.score_tags {
-                let val = lookup_tag(behavior_tags, behavior_values, score_tag);
+                let val = lookup_tag(behavior_profile, score_tag);
                 let weighted = val * weight;
                 score += weighted;
 
@@ -322,9 +425,15 @@ impl ClassGenerator for DefaultClassGenerator {
                 }
             }
 
-            if score < SCORE_THRESHOLD {
+            // Normalize: raw score is a dot product (can be thousands).
+            // Compress to a 0–1 alignment quality using sigmoid-like scaling.
+            // score=100 → 0.5, score=500 → 0.83, score=1000 → 0.91
+            let normalized_score = score / (score + 100.0);
+
+            if normalized_score < SCORE_THRESHOLD {
                 continue;
             }
+            let score = normalized_score;
 
             // Variant naming: if second-highest weighted tag exceeds primary * 0.8, append suffix.
             let display_name = if best_weighted > 0.0
@@ -352,8 +461,7 @@ impl ClassGenerator for DefaultClassGenerator {
 
     fn generate_unique_class(
         &self,
-        _behavior_tags: &[u32],
-        _behavior_values: &[f32],
+        _behavior_profile: &[(u32, f32)],
         _seed: u64,
     ) -> Option<ClassDef> {
         // Placeholder: no procedural class generation yet.
@@ -365,23 +473,67 @@ impl ClassGenerator for DefaultClassGenerator {
 // DefaultAbilityGenerator
 // ---------------------------------------------------------------------------
 
-pub struct DefaultAbilityGenerator;
+/// Ability generator that walks the DSL grammar tree with archetype-conditioned
+/// probability distributions, then scores the result with the grammar-space
+/// quality metric. Generates N candidates and keeps the best one.
+pub struct DefaultAbilityGenerator {
+    candidates: usize,
+}
+
+impl DefaultAbilityGenerator {
+    pub fn new() -> Self {
+        Self { candidates: 1 }
+    }
+}
 
 impl AbilityGenerator for DefaultAbilityGenerator {
     fn generate_ability(
         &self,
         _class_name_hash: u32,
-        _archetype: &str,
+        archetype: &str,
         tier: u32,
-        _behavior_tags: &[u32],
-        _behavior_values: &[f32],
-        _seed: u64,
+        _behavior_profile: &[(u32, f32)],
+        seed: u64,
     ) -> GeneratedAbility {
-        let power = tier as f32 * 5.0;
+        let history = std::collections::HashMap::new();
+        let mut best_dsl = String::new();
+        let mut best_name = String::new();
+        let mut best_score = -1.0f32;
+        let mut best_passive = false;
+
+        for i in 0..self.candidates {
+            let mut rng = seed.wrapping_mul(6364136223846793005).wrapping_add(i as u64);
+            let (ability, dsl) = headless_campaign::ability_gen::generate_tiered_ability(
+                archetype, tier, &mut rng, &history,
+            );
+
+            // Score via grammar space encode → quality metric
+            let score = headless_campaign::grammar_space::encode(&dsl)
+                .map(|v| headless_campaign::ability_quality::score_ability(&v))
+                .unwrap_or(0.0);
+
+            if score > best_score {
+                best_score = score;
+                best_name = ability.name.clone();
+                best_dsl = dsl;
+                best_passive = ability.cast_time_ms == 0 && ability.cooldown_ms == 0;
+            }
+        }
+
+        // Fallback if all candidates failed to encode
+        if best_dsl.is_empty() {
+            let mut rng = seed;
+            let (ability, dsl) = headless_campaign::ability_gen::generate_tiered_ability(
+                archetype, tier, &mut rng, &history,
+            );
+            best_name = ability.name;
+            best_dsl = dsl;
+        }
+
         GeneratedAbility {
-            name: format!("Skill T{}", tier),
-            dsl_text: format!("buff attack {} for 10s", power),
-            is_passive: tier % 2 == 0,
+            name: best_name,
+            dsl_text: best_dsl,
+            is_passive: best_passive,
             tier,
         }
     }
@@ -395,24 +547,22 @@ impl AbilityGenerator for DefaultAbilityGenerator {
 mod tests {
     use super::*;
 
-    fn make_profile(pairs: &[(&[u8], f32)]) -> (Vec<u32>, Vec<f32>) {
+    fn make_profile(pairs: &[(&[u8], f32)]) -> Vec<(u32, f32)> {
         let mut entries: Vec<(u32, f32)> = pairs.iter().map(|(name, val)| (tag(name), *val)).collect();
         entries.sort_by_key(|&(h, _)| h);
-        let tags = entries.iter().map(|&(h, _)| h).collect();
-        let values = entries.iter().map(|&(_, v)| v).collect();
-        (tags, values)
+        entries
     }
 
     #[test]
     fn warrior_matches_with_high_melee() {
-        let (tags, values) = make_profile(&[
+        let profile = make_profile(&[
             (b"melee", 200.0),
             (b"defense", 80.0),
             (b"endurance", 60.0),
             (b"combat", 40.0),
         ]);
         let gen = DefaultClassGenerator::new();
-        let matches = gen.match_classes(&tags, &values);
+        let matches = gen.match_classes(&profile);
         assert!(
             matches.iter().any(|m| m.display_name.starts_with("Warrior")),
             "Expected Warrior class match, got: {:?}",
@@ -422,12 +572,12 @@ mod tests {
 
     #[test]
     fn no_match_below_requirements() {
-        let (tags, values) = make_profile(&[
+        let profile = make_profile(&[
             (b"melee", 50.0),
             (b"defense", 10.0),
         ]);
         let gen = DefaultClassGenerator::new();
-        let matches = gen.match_classes(&tags, &values);
+        let matches = gen.match_classes(&profile);
         assert!(
             matches.iter().all(|m| !m.display_name.starts_with("Warrior")),
             "Warrior should not match with melee=50",
@@ -436,14 +586,14 @@ mod tests {
 
     #[test]
     fn variant_naming_when_secondary_high() {
-        let (tags, values) = make_profile(&[
+        let profile = make_profile(&[
             (b"crafting", 200.0),
             (b"smithing", 200.0),
             (b"labor", 50.0),
             (b"endurance", 50.0),
         ]);
         let gen = DefaultClassGenerator::new();
-        let matches = gen.match_classes(&tags, &values);
+        let matches = gen.match_classes(&profile);
         let artisan = matches.iter().find(|m| m.class_name_hash == tag(b"Artisan"));
         assert!(artisan.is_some(), "Artisan should match");
         let name = &artisan.unwrap().display_name;
@@ -452,7 +602,7 @@ mod tests {
 
     #[test]
     fn multiple_classes_can_match() {
-        let (tags, values) = make_profile(&[
+        let profile = make_profile(&[
             (b"melee", 200.0),
             (b"defense", 200.0),
             (b"endurance", 200.0),
@@ -460,20 +610,22 @@ mod tests {
             (b"resilience", 100.0),
         ]);
         let gen = DefaultClassGenerator::new();
-        let matches = gen.match_classes(&tags, &values);
+        let matches = gen.match_classes(&profile);
         let names: Vec<_> = matches.iter().map(|m| m.display_name.as_str()).collect();
         assert!(names.iter().any(|n| n.starts_with("Warrior")), "Missing Warrior in {:?}", names);
         assert!(names.iter().any(|n| n.starts_with("Guardian")), "Missing Guardian in {:?}", names);
     }
 
     #[test]
-    fn default_ability_generator_scales_by_tier() {
-        let gen = DefaultAbilityGenerator;
-        let a1 = gen.generate_ability(0, "test", 1, &[], &[], 42);
-        let a3 = gen.generate_ability(0, "test", 3, &[], &[], 42);
-        assert!(a1.dsl_text.contains("5"), "Tier 1 should have power 5");
-        assert!(a3.dsl_text.contains("15"), "Tier 3 should have power 15");
-        assert!(!a1.is_passive, "Tier 1 (odd) should not be passive");
-        assert!(!a3.is_passive, "Tier 3 (odd) should not be passive");
+    fn ability_generator_produces_valid_dsl() {
+        let gen = DefaultAbilityGenerator::new();
+        let a1 = gen.generate_ability(0, "knight", 1, &[], 42);
+        let a3 = gen.generate_ability(0, "mage", 3, &[], 99);
+        // Both should produce non-empty DSL that contains "ability" keyword
+        assert!(!a1.dsl_text.is_empty(), "Tier 1 should produce DSL");
+        assert!(!a3.dsl_text.is_empty(), "Tier 3 should produce DSL");
+        assert!(a1.dsl_text.contains("ability"), "DSL should contain ability block: {}", a1.dsl_text);
+        assert!(a3.dsl_text.contains("ability"), "DSL should contain ability block: {}", a3.dsl_text);
+        assert!(!a1.name.is_empty(), "Should have a name");
     }
 }

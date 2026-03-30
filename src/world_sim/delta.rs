@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::fidelity::Fidelity;
 use super::state::{
-    ChronicleEntry, EntityField, EntityKind, FactionField, PriceReport, QuestDelta,
+    ChronicleEntry, EntityField, EntityKind, FactionField, ItemData, PriceReport, QuestDelta,
     RegionField, RelationKind, SettlementField, StatusEffect, WorldEvent, WorldTeam,
 };
 use super::NUM_COMMODITIES;
@@ -219,6 +219,41 @@ pub enum WorldDelta {
         entity_id: u32,
         intent: super::state::EconomicIntent,
     },
+
+    /// Spawn a new item entity at a position.
+    SpawnItem {
+        pos: (f32, f32),
+        item_data: ItemData,
+    },
+
+    /// Equip an item entity on an NPC (sets owner, applies stat bonuses).
+    EquipItem {
+        npc_id: u32,
+        item_id: u32,
+    },
+
+    /// Unequip an item from an NPC (clears owner, removes stat bonuses).
+    UnequipItem {
+        npc_id: u32,
+        item_id: u32,
+    },
+
+    /// Transfer commodity between any two entity inventories.
+    /// The universal inventory transfer — replaces per-system commodity flows.
+    /// Both entities must have `inventory: Some(Inventory)`.
+    TransferCommodity {
+        from_entity: u32,
+        to_entity: u32,
+        commodity: usize,
+        amount: f32,
+    },
+
+    /// Transfer gold between any two entity inventories.
+    TransferInventoryGold {
+        from_entity: u32,
+        to_entity: u32,
+        amount: f32,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -326,6 +361,25 @@ pub struct MergedDeltas {
 
     /// Intent changes. Last-writer-wins per entity_id.
     pub intent_changes: Vec<(u32, super::state::EconomicIntent)>,
+
+    /// Last damage source per target (target_id -> source_id).
+    /// Used in death recording to attribute kills.
+    pub last_damage_source: HashMap<u32, u32>,
+
+    /// Item entity spawns (collected).
+    pub item_spawns: Vec<((f32, f32), ItemData)>,
+
+    /// Item equip requests: (npc_id, item_id).
+    pub equip_requests: Vec<(u32, u32)>,
+
+    /// Item unequip requests: (npc_id, item_id).
+    pub unequip_requests: Vec<(u32, u32)>,
+
+    /// Inventory-to-inventory commodity transfers: (from_entity, to_entity, commodity, amount).
+    pub inventory_transfers: Vec<(u32, u32, usize, f32)>,
+
+    /// Inventory-to-inventory gold transfers: (from_entity, to_entity, amount).
+    pub inventory_gold_transfers: Vec<(u32, u32, f32)>,
 }
 
 impl MergedDeltas {
@@ -368,6 +422,12 @@ impl MergedDeltas {
         self.guild_reputation_delta = 0.0;
         self.behavior_tag_deltas.clear();
         self.intent_changes.clear();
+        self.last_damage_source.clear();
+        self.item_spawns.clear();
+        self.equip_requests.clear();
+        self.unequip_requests.clear();
+        self.inventory_transfers.clear();
+        self.inventory_gold_transfers.clear();
     }
 
     /// Merge a single delta into this accumulator (in-place, no alloc).
@@ -392,8 +452,9 @@ pub fn merge_deltas(deltas: impl IntoIterator<Item = WorldDelta>) -> MergedDelta
 
 fn merge_one(m: &mut MergedDeltas, delta: WorldDelta) {
     match delta {
-        WorldDelta::Damage { target_id, amount, .. } => {
+        WorldDelta::Damage { target_id, amount, source_id } => {
             *m.damage_by_target.entry(target_id).or_default() += amount;
+            m.last_damage_source.insert(target_id, source_id);
         }
         WorldDelta::Heal { target_id, amount, .. } => {
             *m.heals_by_target.entry(target_id).or_default() += amount;
@@ -509,6 +570,21 @@ fn merge_one(m: &mut MergedDeltas, delta: WorldDelta) {
         }
         WorldDelta::SetIntent { entity_id, intent } => {
             m.intent_changes.push((entity_id, intent));
+        }
+        WorldDelta::SpawnItem { pos, item_data } => {
+            m.item_spawns.push((pos, item_data));
+        }
+        WorldDelta::EquipItem { npc_id, item_id } => {
+            m.equip_requests.push((npc_id, item_id));
+        }
+        WorldDelta::UnequipItem { npc_id, item_id } => {
+            m.unequip_requests.push((npc_id, item_id));
+        }
+        WorldDelta::TransferCommodity { from_entity, to_entity, commodity, amount } => {
+            m.inventory_transfers.push((from_entity, to_entity, commodity, amount));
+        }
+        WorldDelta::TransferInventoryGold { from_entity, to_entity, amount } => {
+            m.inventory_gold_transfers.push((from_entity, to_entity, amount));
         }
     }
 }

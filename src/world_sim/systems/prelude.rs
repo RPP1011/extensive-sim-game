@@ -10,6 +10,7 @@ pub use crate::world_sim::state::{
     ActionTags, ClassSlot, PriceReport,
     EntityField, FactionField, RegionField, SettlementField,
     tags, tag,
+    entity_hash, entity_hash_f32, pair_hash_f32,
 };
 pub use crate::world_sim::fidelity::Fidelity;
 pub use crate::world_sim::commodity;

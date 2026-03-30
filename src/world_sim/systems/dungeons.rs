@@ -5,6 +5,10 @@
 //! emergence from deep dungeons. Dungeon exploration is resolved when
 //! friendly NPCs enter a dungeon grid, emitting Damage/TransferGold deltas.
 //!
+//! **Gold conservation:** Dungeon loot gold is paid from the settlement
+//! treasury as a bounty reward. If the settlement cannot afford it, no gold
+//! is paid.
+//!
 //! Ported from `crates/headless_campaign/src/systems/dungeons.rs`.
 //!
 //! NEEDS STATE: `dungeons: Vec<DungeonState>` on WorldState
@@ -132,10 +136,13 @@ pub fn compute_dungeons_for_settlement(
     let loot_gold = dead_monster_levels * GOLD_PER_LOOT;
     let gold_each = loot_gold / friendlies.len() as f32;
 
+    // Dungeon loot is paid from settlement treasury as bounty reward
+    let can_afford = settlement.treasury > loot_gold;
+
     for friendly in &friendlies {
-        if gold_each > 0.0 {
+        if gold_each > 0.0 && can_afford {
             out.push(WorldDelta::TransferGold {
-                from_id: 0,
+                from_id: settlement_id,
                 to_id: friendly.id,
                 amount: gold_each,
             });

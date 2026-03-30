@@ -14,6 +14,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, PriceReport, WorldState, WorldTeam};
+use crate::world_sim::state::{entity_hash_f32};
 
 /// Cadence: runs every 7 ticks.
 const SIGNAL_TOWER_INTERVAL: u64 = 7;
@@ -24,12 +25,6 @@ const TOWER_RANGE_SQ: f32 = 400.0; // 20 units
 /// Chance that a battle near a tower damages it.
 const BATTLE_DAMAGE_CHANCE: f32 = 0.30;
 
-/// Deterministic hash for pseudo-random decisions from immutable state.
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_signal_towers(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % SIGNAL_TOWER_INTERVAL != 0 || state.tick == 0 {
@@ -71,7 +66,7 @@ pub fn compute_signal_towers(state: &WorldState, out: &mut Vec<WorldDelta>) {
             .count();
 
         if hostile_count > 0 {
-            let roll = tick_hash(state.tick, 0x70AE_DA46u64.wrapping_add(building_id as u64));
+            let roll = entity_hash_f32(0, state.tick, 0x70AE_DA46u64.wrapping_add(building_id as u64));
             if roll < BATTLE_DAMAGE_CHANCE {
                 out.push(WorldDelta::Damage {
                     target_id: building_id,

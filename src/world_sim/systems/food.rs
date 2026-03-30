@@ -7,10 +7,9 @@
 //! stockpile. Starvation is modeled as status-effect damage.
 //!
 //! NEEDS STATE: `party_id: Option<u32>` on NpcData (to group NPCs into parties)
-//! NEEDS DELTA: ApplyFatigueAndMorale { entity_id, fatigue_delta, morale_delta }
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{ActionTags, Entity, EntityKind, WorldState, tags};
+use crate::world_sim::state::{ActionTags, Entity, EntityField, EntityKind, WorldState, tags};
 
 /// How often the food system ticks.
 const FOOD_TICK_INTERVAL: u64 = 3;
@@ -22,6 +21,12 @@ const MEAL_SIZE: f32 = 0.03;
 
 /// HP healed per meal. Eating restores a small amount of health.
 const MEAL_HEAL: f32 = 0.5;
+
+/// Small morale boost from eating a meal (contentment).
+const MEAL_MORALE_BOOST: f32 = 0.5;
+
+/// Morale penalty per food tick when starving.
+const STARVATION_MORALE_PENALTY: f32 = -2.0;
 
 /// Commodity index for food.
 const COMMODITY_FOOD: usize = 0;
@@ -123,6 +128,17 @@ pub fn compute_food_for_settlement(
         let level_mult = 0.5 + entity.level as f32 * 0.1;
         let mut produced_anything = false;
 
+        // Fallback: NPCs with no production assignments forage for food.
+        if npc.behavior_production.is_empty() {
+            let forage = 0.02 * level_mult;
+            out.push(WorldDelta::ProduceCommodity {
+                location_id: settlement_id,
+                commodity: COMMODITY_FOOD,
+                amount: forage,
+            });
+            produced_anything = true;
+        }
+
         for &(commodity, rate) in &npc.behavior_production {
             if rate <= 0.0 { continue; }
             let amount = rate * level_mult;
@@ -205,10 +221,8 @@ pub fn compute_food_for_settlement(
             }
         }
 
-        // Labor XP + behavior tags: earned by doing the work.
+        // Behavior tags: earned by doing the work.
         if produced_anything {
-            out.push(WorldDelta::AddXp { entity_id: entity.id, amount: 1 });
-
             for &(commodity, rate) in &npc.behavior_production {
                 if rate <= 0.0 { continue; }
                 let mut action = ActionTags::empty();
@@ -260,23 +274,33 @@ pub fn compute_food_for_settlement(
                 amount: meal_size * eaters as f32,
             });
 
-            // Eating heals and grants farming behavior (food preparation).
+            // Eating heals, boosts morale, and grants farming behavior (food preparation).
             for i in 0..eaters {
                 out.push(WorldDelta::Heal {
                     target_id: resident_ids[i],
                     amount: MEAL_HEAL,
                     source_id: 0,
                 });
+                out.push(WorldDelta::UpdateEntityField {
+                    entity_id: resident_ids[i],
+                    field: EntityField::Morale,
+                    value: MEAL_MORALE_BOOST,
+                });
             }
         }
 
-        // NPCs who didn't get food: slow starvation.
+        // NPCs who didn't get food: slow starvation + morale drop.
         if eaters < count {
             for i in eaters..count {
                 out.push(WorldDelta::Damage {
                     target_id: resident_ids[i],
                     amount: STARVATION_DAMAGE,
                     source_id: 0,
+                });
+                out.push(WorldDelta::UpdateEntityField {
+                    entity_id: resident_ids[i],
+                    field: EntityField::Morale,
+                    value: STARVATION_MORALE_PENALTY,
                 });
             }
         }
@@ -287,6 +311,11 @@ pub fn compute_food_for_settlement(
                 target_id: resident_ids[i],
                 amount: STARVATION_DAMAGE,
                 source_id: 0,
+            });
+            out.push(WorldDelta::UpdateEntityField {
+                entity_id: resident_ids[i],
+                field: EntityField::Morale,
+                value: STARVATION_MORALE_PENALTY,
             });
         }
     }

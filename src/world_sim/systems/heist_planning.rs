@@ -6,6 +6,9 @@
 //! Escape). Success yields gold; failure results in damage to crew and
 //! gold penalties.
 //!
+//! **Gold conservation:** Heist gold is stolen from the target settlement
+//! treasury (UpdateTreasury drain + TransferGold). No gold is minted.
+//!
 //! Ported from `crates/headless_campaign/src/systems/heist_planning.rs`.
 //!
 //! NEEDS STATE: `active_heists: Vec<HeistPlan>` on WorldState
@@ -22,6 +25,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState, WorldTeam};
+use crate::world_sim::state::entity_hash;
 
 /// How often the heist system ticks (in ticks).
 const HEIST_INTERVAL: u64 = 10;
@@ -40,9 +44,6 @@ const FAILURE_GOLD_PENALTY: f32 = 30.0;
 
 /// Damage to crew members on heist failure.
 const FAILURE_CREW_DAMAGE: f32 = 25.0;
-
-/// Guild entity ID sentinel.
-const GUILD_ENTITY_ID: u32 = 0;
 
 pub fn compute_heist_planning(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % HEIST_INTERVAL != 0 || state.tick == 0 {
@@ -100,8 +101,7 @@ pub fn compute_heist_planning(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 let skill_factor = (entity.level as f32 * 0.05 + 0.5).min(1.0);
 
                 // Deterministic outcome based on entity id + tick
-                let roll_seed = (entity.id as u64).wrapping_mul(2654435761) ^ state.tick;
-                let roll = (roll_seed % 100) as f32 / 100.0;
+                let roll = (entity_hash(entity.id, state.tick, 0x4E15) % 100) as f32 / 100.0;
 
                 if roll < skill_factor * 0.1 && target_settlement.treasury > -100.0 {
                     // Heist success: steal gold from settlement

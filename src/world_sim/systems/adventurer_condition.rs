@@ -8,14 +8,13 @@
 //! Original: `crates/headless_campaign/src/systems/adventurer_condition.rs`
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, EntityKind, WorldState};
+use crate::world_sim::state::{Entity, EntityField, EntityKind, WorldState};
+use crate::world_sim::state::entity_hash_f32;
 
 // NEEDS STATE: stress: f32 on NpcData (or Entity)
 // NEEDS STATE: fatigue: f32 on NpcData (or Entity)
-// NEEDS STATE: morale: f32 on NpcData (or Entity)
 // NEEDS STATE: loyalty: f32 on NpcData (or Entity)
 // NEEDS STATE: activity: ActivityStatus on NpcData (Idle, Fighting, OnMission, Traveling, Injured)
-// NEEDS DELTA: UpdateCondition { entity_id: u32, stress_delta: f32, fatigue_delta: f32, morale_delta: f32, loyalty_delta: f32 }
 
 /// How often condition drift runs (in ticks).
 const DRIFT_INTERVAL: u64 = 10;
@@ -91,8 +90,7 @@ pub fn compute_adventurer_condition_for_settlement(
 
         // Desertion: idle NPC with critically low loyalty and high stress.
         if !on_grid && !injured {
-            let hash = tick_entity_hash(state.tick, entity.id);
-            let roll = hash_to_f32(hash);
+            let roll = entity_hash_f32(entity.id, state.tick, 0);
             let _ = (DESERTION_LOYALTY_THRESHOLD, DESERTION_STRESS_THRESHOLD);
         }
 
@@ -126,6 +124,16 @@ pub fn compute_adventurer_condition_for_settlement(
             });
         }
 
+        // Apply morale drift based on activity.
+        // Fighting and injury drain morale; idle rest restores it.
+        if morale_d.abs() > 0.01 {
+            out.push(WorldDelta::UpdateEntityField {
+                entity_id: entity.id,
+                field: EntityField::Morale,
+                value: morale_d,
+            });
+        }
+
         // Positive morale → small heal-over-time (represents higher resilience):
         if morale_d > 0.0 {
             out.push(WorldDelta::Heal {
@@ -137,24 +145,3 @@ pub fn compute_adventurer_condition_for_settlement(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Deterministic RNG helpers (no mutable state needed)
-// ---------------------------------------------------------------------------
-
-/// Hash tick and entity_id into a deterministic u64.
-fn tick_entity_hash(tick: u64, entity_id: u32) -> u64 {
-    let mut h = tick
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(entity_id as u64);
-    h ^= h >> 33;
-    h = h.wrapping_mul(0xff51afd7ed558ccd);
-    h ^= h >> 33;
-    h = h.wrapping_mul(0xc4ceb9fe1a85ec53);
-    h ^= h >> 33;
-    h
-}
-
-/// Convert a hash to a float in [0, 1).
-fn hash_to_f32(h: u64) -> f32 {
-    (h >> 40) as f32 / (1u64 << 24) as f32
-}

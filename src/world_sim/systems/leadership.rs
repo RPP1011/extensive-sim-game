@@ -10,7 +10,7 @@
 //! Cadence: every 17 ticks (skips tick 0).
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, WorldState};
+use crate::world_sim::state::{EntityField, EntityKind, WorldState};
 
 // NEEDS STATE: guild_leader: Option<GuildLeader> on WorldState
 //   GuildLeader { adventurer_id, appointed_tick, leadership_style, approval_rating, decisions_made }
@@ -22,7 +22,6 @@ use crate::world_sim::state::{EntityKind, WorldState};
 // NEEDS DELTA: TriggerSuccessionCrisis { previous_leader_id }
 // NEEDS DELTA: ResolveSuccessionCrisis {}
 // NEEDS DELTA: UpdateApproval { delta }
-// NEEDS DELTA: AdjustMorale { entity_id, delta }
 
 /// Cadence gate.
 const LEADERSHIP_TICK_INTERVAL: u64 = 17;
@@ -91,7 +90,19 @@ pub fn compute_leadership(state: &WorldState, out: &mut Vec<WorldDelta>) {
     //   No council: immediate replacement
     //   out.push(WorldDelta::TriggerSuccessionCrisis { previous_leader_id })
 
-    let _ = best_candidate;
+    // --- Leadership morale effect ---
+    // A high-level leader boosts morale of all alive NPCs each cadence.
+    // Without a formal leader (no state yet), use the best candidate as proxy.
+    if let Some(leader) = best_candidate {
+        let bonus = 0.5 + leader.level as f32 * 0.1; // higher-level leader inspires more
+        for entity in state.entities.iter().filter(|e| e.alive && e.kind == EntityKind::Npc && e.id != leader.id) {
+            out.push(WorldDelta::UpdateEntityField {
+                entity_id: entity.id,
+                field: EntityField::Morale,
+                value: bonus,
+            });
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

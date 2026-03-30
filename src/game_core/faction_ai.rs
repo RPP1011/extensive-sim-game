@@ -146,10 +146,10 @@ fn score_actions(
         })
     }).count() as f32;
 
-    // Can we expand? (adjacent unclaimed or weak-faction regions)
+    // Can we expand? Only into unclaimed regions (not enemy-occupied — that's Attack).
     let expandable = owned_regions.iter().any(|&rid| {
         map.regions[rid].neighbors.iter().any(|&nid| {
-            nid < map.regions.len() && map.regions[nid].owner_faction_id != faction.id
+            nid < map.regions.len() && map.regions[nid].owner_faction_id >= map.factions.len()
         })
     });
 
@@ -491,9 +491,35 @@ fn lcg_next(state: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game_core::OverworldRegion;
 
     fn test_map() -> OverworldMap {
-        OverworldMap::default()
+        // Compact 3-region map: each faction owns exactly one region.
+        // All regions neighbor each other → no expansion advantage, Attack/Diplomacy can compete.
+        let regions = vec![
+            OverworldRegion {
+                id: 0, name: "Heartland".into(), neighbors: vec![1, 2],
+                owner_faction_id: 0, mission_slot: None, unrest: 0.1, control: 0.8, intel_level: 0.5,
+            },
+            OverworldRegion {
+                id: 1, name: "Iron Ridge".into(), neighbors: vec![0, 2],
+                owner_faction_id: 1, mission_slot: None, unrest: 0.1, control: 0.8, intel_level: 0.5,
+            },
+            OverworldRegion {
+                id: 2, name: "River Crossing".into(), neighbors: vec![0, 1],
+                owner_faction_id: 2, mission_slot: None, unrest: 0.1, control: 0.8, intel_level: 0.5,
+            },
+        ];
+        let factions = vec![
+            FactionState { id: 0, name: "Guild Compact".into(), strength: 50.0, cohesion: 0.7, war_goal_faction_id: None, war_focus: 0.0, vassals: vec![] },
+            FactionState { id: 1, name: "Iron Marches".into(), strength: 50.0, cohesion: 0.7, war_goal_faction_id: None, war_focus: 0.0, vassals: vec![] },
+            FactionState { id: 2, name: "River Concord".into(), strength: 50.0, cohesion: 0.7, war_goal_faction_id: None, war_focus: 0.0, vassals: vec![] },
+        ];
+        OverworldMap {
+            regions, factions, current_region: 0, selected_region: 0,
+            travel_cooldown_turns: 0, travel_cooldown_max: 3, travel_cost: 20.0,
+            next_vassal_id: 1, map_seed: 42,
+        }
     }
 
     fn test_diplomacy() -> DiplomacyState {

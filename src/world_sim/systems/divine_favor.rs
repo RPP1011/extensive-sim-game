@@ -13,6 +13,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, WorldState};
+use crate::world_sim::state::{entity_hash_f32};
 
 /// How often the divine favor system ticks.
 const DIVINE_FAVOR_INTERVAL: u64 = 7;
@@ -26,11 +27,6 @@ const MIRACLE_GOLD: f32 = 20.0;
 /// Displeasure damage amount.
 const DISPLEASURE_DAMAGE: f32 = 5.0;
 
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_divine_favor(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % DIVINE_FAVOR_INTERVAL != 0 || state.tick == 0 {
@@ -66,7 +62,7 @@ pub fn compute_divine_favor_for_settlement(
 
     if settlement.treasury > 100.0 {
         // Miracle: heal a random NPC in the settlement
-        let roll = tick_hash(state.tick, settlement_id as u64 ^ 0xFA17_4001);
+        let roll = entity_hash_f32(settlement_id, state.tick, 0xFA17_4001);
         if roll < 0.15 {
             for entity in entities {
                 if entity.alive && entity.kind == EntityKind::Npc && entity.hp < entity.max_hp {
@@ -81,7 +77,7 @@ pub fn compute_divine_favor_for_settlement(
         }
 
         // Gold blessing to settlement treasury
-        let roll2 = tick_hash(state.tick, settlement_id as u64 ^ 0xB1E55);
+        let roll2 = entity_hash_f32(settlement_id, state.tick, 0xB1E55);
         if roll2 < 0.10 {
             out.push(WorldDelta::UpdateTreasury {
                 location_id: settlement_id,
@@ -90,7 +86,7 @@ pub fn compute_divine_favor_for_settlement(
         }
     } else if settlement.treasury < 10.0 {
         // Displeasure: damage NPCs
-        let roll = tick_hash(state.tick, settlement_id as u64 ^ 0xD15FEEA5E);
+        let roll = entity_hash_f32(settlement_id, state.tick, 0xD15FEEA5E);
         if roll < 0.10 {
             for entity in entities {
                 if entity.alive && entity.kind == EntityKind::Npc {

@@ -1,46 +1,49 @@
 #![allow(unused)]
-//! Legendary deeds and reputation titles — delta architecture port.
+//! Legendary deeds — milestone achievements based on behavior tag thresholds.
 //!
-//! NPCs earn titles from gameplay achievements (kill counts, diplomatic
-//! actions, exploration, near-death survivals, etc.). Each deed type can
-//! only be earned once per entity.
+//! NPCs who accumulate enough tags in a category earn a one-time deed.
+//! Deeds grant XP, morale, and chronicle entries. Since we don't store
+//! explicit deed state, we use the same narrow-window trick as secrets:
+//! deeds fire when tag value crosses a threshold within a 50-unit window.
 //!
-//! Original: `crates/headless_campaign/src/systems/legendary_deeds.rs`
-//! Cadence: every 7 ticks (skips tick 0).
+//! Cadence: every 100 ticks.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, WorldState};
+use crate::world_sim::naming::entity_display_name;
+use crate::world_sim::state::*;
 
-// NEEDS STATE: deeds: Vec<LegendaryDeed> on Entity/NpcData
-//   LegendaryDeed { title, earned_at_tick, deed_type: DeedType, bonus: DeedBonus }
-//   DeedType: Slayer, Peacemaker, Explorer, Survivor, Wealthy, Undefeated, Defender, Savior
-//   DeedBonus: CombatPowerBoost, FactionRelationBoost, QuestRewardBoost, MoraleAura, RecruitmentBoost
-// NEEDS STATE: history_tags: HashMap<String, u32> on Entity/NpcData
-// NEEDS DELTA: GrantDeed { entity_id, deed_type, title, bonus }
+const DEED_INTERVAL: u64 = 100;
+const WINDOW: f32 = 20.0; // narrow enough to fire ~once per threshold crossing
 
-/// Cadence gate.
-const DEED_TICK_INTERVAL: u64 = 7;
+struct DeedDef {
+    tag: u32,
+    threshold: f32,
+    title: &'static str,
+    xp: u32,
+    morale: f32,
+    category: ChronicleCategory,
+}
 
-/// History tag thresholds for each deed type.
-const SLAYER_THRESHOLD: u32 = 10;
-const PEACEMAKER_THRESHOLD: u32 = 5;
-const EXPLORER_THRESHOLD: u32 = 8;
-const SURVIVOR_THRESHOLD: u32 = 3;
-const LEGENDARY_THRESHOLD: u32 = 15;
-const LONE_WOLF_THRESHOLD: u32 = 5;
-const DEFENDER_THRESHOLD: u32 = 5;
-const SAVIOR_THRESHOLD: u32 = 5;
+const DEEDS: &[DeedDef] = &[
+    DeedDef { tag: tags::COMBAT,     threshold: 2000.0, title: "Slayer",          xp: 30, morale: 5.0, category: ChronicleCategory::Achievement },
+    DeedDef { tag: tags::MELEE,      threshold: 1500.0, title: "Blade Master",    xp: 25, morale: 4.0, category: ChronicleCategory::Achievement },
+    DeedDef { tag: tags::DEFENSE,    threshold: 1000.0, title: "Shield Bearer",   xp: 20, morale: 3.0, category: ChronicleCategory::Achievement },
+    DeedDef { tag: tags::TACTICS,    threshold: 1000.0, title: "Tactician",       xp: 20, morale: 3.0, category: ChronicleCategory::Achievement },
+    DeedDef { tag: tags::TRADE,      threshold: 1500.0, title: "Master Merchant", xp: 20, morale: 4.0, category: ChronicleCategory::Economy },
+    DeedDef { tag: tags::DIPLOMACY,  threshold: 800.0,  title: "Peacemaker",      xp: 25, morale: 5.0, category: ChronicleCategory::Diplomacy },
+    DeedDef { tag: tags::LEADERSHIP, threshold: 1500.0, title: "Commander",       xp: 30, morale: 5.0, category: ChronicleCategory::Achievement },
+    DeedDef { tag: tags::RESEARCH,   threshold: 1000.0, title: "Scholar",         xp: 25, morale: 3.0, category: ChronicleCategory::Discovery },
+    DeedDef { tag: tags::FAITH,      threshold: 1000.0, title: "Devout",          xp: 20, morale: 4.0, category: ChronicleCategory::Achievement },
+    DeedDef { tag: tags::RESILIENCE, threshold: 2000.0, title: "Survivor",        xp: 30, morale: 5.0, category: ChronicleCategory::Achievement },
+    DeedDef { tag: tags::MINING,     threshold: 2000.0, title: "Deep Delver",     xp: 20, morale: 3.0, category: ChronicleCategory::Achievement },
+    DeedDef { tag: tags::FARMING,    threshold: 2000.0, title: "Master Farmer",   xp: 20, morale: 3.0, category: ChronicleCategory::Economy },
+    DeedDef { tag: tags::STEALTH,    threshold: 1000.0, title: "Shadow Walker",   xp: 25, morale: 3.0, category: ChronicleCategory::Achievement },
+    DeedDef { tag: tags::EXPLORATION,threshold: 1000.0, title: "Explorer",        xp: 25, morale: 4.0, category: ChronicleCategory::Discovery },
+    DeedDef { tag: tags::TEACHING,   threshold: 1000.0, title: "Grand Mentor",    xp: 20, morale: 4.0, category: ChronicleCategory::Achievement },
+];
 
-/// Compute legendary deed deltas.
-///
-/// Since WorldState lacks history_tags and deed storage on entities,
-/// this is a structural placeholder. The passive bonuses from deeds
-/// (combat power, faction relations, morale) would be applied by
-/// consuming systems that read the deed list.
 pub fn compute_legendary_deeds(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    if state.tick % DEED_TICK_INTERVAL != 0 || state.tick == 0 {
-        return;
-    }
+    if state.tick % DEED_INTERVAL != 0 || state.tick == 0 { return; }
 
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
@@ -48,46 +51,62 @@ pub fn compute_legendary_deeds(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 }
 
-/// Per-settlement variant for parallel dispatch.
 pub fn compute_legendary_deeds_for_settlement(
     state: &WorldState,
     settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {
-    if state.tick % DEED_TICK_INTERVAL != 0 || state.tick == 0 {
-        return;
-    }
+    if state.tick % DEED_INTERVAL != 0 || state.tick == 0 { return; }
 
     for entity in entities {
-        if !entity.alive || entity.npc.is_none() {
-            continue;
-        }
+        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        let npc = match &entity.npc { Some(n) => n, None => continue };
 
-        // NEEDS STATE: read entity history_tags and existing deeds
-        //
-        // kill_count > 10 && !has_deed(Slayer):
-        //   out.push(WorldDelta::GrantDeed { entity_id, Slayer, "Slayer", CombatPowerBoost(0.05) })
-        //
-        // diplo_count > 5 && !has_deed(Peacemaker):
-        //   out.push(WorldDelta::GrantDeed { ..., Peacemaker, FactionRelationBoost(10.0) })
-        //
-        // explore_count > 8 && !has_deed(Explorer):
-        //   out.push(WorldDelta::GrantDeed { ..., Explorer, QuestRewardBoost(0.15) })
-        //
-        // near_death > 3 && !has_deed(Survivor):
-        //   out.push(WorldDelta::GrantDeed { ..., Survivor, MoraleAura(0.10) })
-        //
-        // quest_count > 15 && !has_deed(Wealthy):
-        //   out.push(WorldDelta::GrantDeed { ..., "Legendary", QuestRewardBoost(0.20) })
-        //
-        // solo_count > 5 && !has_deed(Undefeated):
-        //   out.push(WorldDelta::GrantDeed { ..., "Lone Wolf", CombatPowerBoost(0.10) })
-        //
-        // defense_count > 5 && !has_deed(Defender):
-        //   out.push(WorldDelta::GrantDeed { ..., "Shield of the Realm", RecruitmentBoost(0.10) })
-        //
-        // rescue_count > 5 && !has_deed(Savior):
-        //   out.push(WorldDelta::GrantDeed { ..., "Savior", FactionRelationBoost(5.0) })
+        for deed in DEEDS {
+            let value = npc.behavior_value(deed.tag);
+            // Fire once: only in the window [threshold, threshold + WINDOW).
+            if value >= deed.threshold && value < deed.threshold + WINDOW {
+                out.push(WorldDelta::AddXp {
+                    entity_id: entity.id,
+                    amount: deed.xp,
+                });
+                out.push(WorldDelta::UpdateEntityField {
+                    entity_id: entity.id,
+                    field: EntityField::Morale,
+                    value: deed.morale,
+                });
+                out.push(WorldDelta::RecordChronicle {
+                    entry: ChronicleEntry {
+                        tick: state.tick,
+                        category: deed.category.clone(),
+                        text: format!("{} earned the title '{}'", entity_display_name(entity), deed.title),
+                        entity_ids: vec![entity.id],
+                    },
+                });
+            }
+
+            // Second tier: double the threshold.
+            let tier2 = deed.threshold * 2.0;
+            if value >= tier2 && value < tier2 + WINDOW {
+                out.push(WorldDelta::AddXp {
+                    entity_id: entity.id,
+                    amount: deed.xp * 2,
+                });
+                out.push(WorldDelta::UpdateEntityField {
+                    entity_id: entity.id,
+                    field: EntityField::Morale,
+                    value: deed.morale * 1.5,
+                });
+                out.push(WorldDelta::RecordChronicle {
+                    entry: ChronicleEntry {
+                        tick: state.tick,
+                        category: deed.category.clone(),
+                        text: format!("{} became a legendary {}", entity_display_name(entity), deed.title),
+                        entity_ids: vec![entity.id],
+                    },
+                });
+            }
+        }
     }
 }

@@ -12,18 +12,18 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::fidelity::Fidelity;
-use crate::world_sim::state::{EntityKind, WorldState, WorldTeam};
+use crate::world_sim::state::{EntityKind, RegionField, SettlementField, ChronicleEntry, ChronicleCategory, WorldState, WorldTeam};
 
 use super::seasons::{current_season, season_modifiers};
 
 /// How often threat is recalculated (in ticks).
 const THREAT_INTERVAL: u64 = 50;
 
-/// Threat increase per tick from monster density above this value.
-const DENSITY_THREAT_THRESHOLD: f32 = 30.0;
+/// Monster density above which threat increases (density is 0.0-1.0).
+const DENSITY_THREAT_THRESHOLD: f32 = 0.3;
 
 /// Threat decrease per friendly NPC in the region (patrols reduce threat).
-const PATROL_THREAT_REDUCTION: f32 = 2.0;
+const PATROL_THREAT_REDUCTION: f32 = 0.0002;
 
 /// Threat level that triggers fidelity escalation to Medium.
 const ESCALATE_MEDIUM_THRESHOLD: f32 = 50.0;
@@ -31,8 +31,8 @@ const ESCALATE_MEDIUM_THRESHOLD: f32 = 50.0;
 /// Threat level that triggers fidelity escalation to High.
 const ESCALATE_HIGH_THRESHOLD: f32 = 80.0;
 
-/// Natural threat decay per interval (threat decays toward baseline).
-const THREAT_DECAY_RATE: f32 = 1.0;
+/// Natural threat decay per interval.
+const THREAT_DECAY_RATE: f32 = 0.1;
 
 pub fn compute_threat(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % THREAT_INTERVAL != 0 || state.tick == 0 {
@@ -45,7 +45,7 @@ pub fn compute_threat(state: &WorldState, out: &mut Vec<WorldDelta>) {
     for region in &state.regions {
         // --- Compute threat delta from monster density ---
         let density_pressure = if region.monster_density > DENSITY_THREAT_THRESHOLD {
-            (region.monster_density - DENSITY_THREAT_THRESHOLD) * 0.1 * threat_mod
+            (region.monster_density - DENSITY_THREAT_THRESHOLD) * 1.0 * threat_mod
         } else {
             0.0
         };
@@ -72,9 +72,37 @@ pub fn compute_threat(state: &WorldState, out: &mut Vec<WorldDelta>) {
         // Clamp projected threat to [0, 100].
         let projected = (region.threat_level + net_change).clamp(0.0, 100.0);
 
-        // Only emit a delta if threat actually changed meaningfully.
-        // Since we can't directly update threat_level (NEEDS DELTA: UpdateThreat),
-        // we express the consequence: fidelity escalation.
+        // Emit threat level update.
+        let threat_delta = projected - region.threat_level;
+        if threat_delta.abs() > 0.01 {
+            out.push(WorldDelta::UpdateRegion {
+                region_id: region.id,
+                field: RegionField::ThreatLevel,
+                value: threat_delta,
+            });
+        }
+
+        // Chronicle milestone: threat crossing critical thresholds.
+        if region.threat_level < 80.0 && projected >= 80.0 {
+            out.push(WorldDelta::RecordChronicle {
+                entry: ChronicleEntry {
+                    tick: state.tick,
+                    category: ChronicleCategory::Crisis,
+                    text: format!("Threat level in {} reached critical levels!", region.name),
+                    entity_ids: vec![],
+                },
+            });
+        }
+        if region.threat_level >= 50.0 && projected < 20.0 {
+            out.push(WorldDelta::RecordChronicle {
+                entry: ChronicleEntry {
+                    tick: state.tick,
+                    category: ChronicleCategory::Achievement,
+                    text: format!("Threat in {} has been pacified.", region.name),
+                    entity_ids: vec![],
+                },
+            });
+        }
 
         // --- Fidelity escalation based on threat ---
         // Find grids associated with this region's settlements.
@@ -134,6 +162,28 @@ pub fn compute_threat(state: &WorldState, out: &mut Vec<WorldDelta>) {
                     }
                 }
             }
+        }
+    }
+
+    // --- Propagate regional threat to settlements ---
+    // Settlements inherit threat from their region's monster density.
+    for settlement in &state.settlements {
+        // Find region for this settlement (match by faction_id or nearest).
+        let regional_threat = state.regions.iter()
+            .filter(|r| r.faction_id == settlement.faction_id)
+            .map(|r| r.threat_level)
+            .fold(0.0f32, f32::max);
+
+        // Settlement threat = fraction of regional threat (0.0-1.0 range).
+        let target_threat = (regional_threat / 100.0).clamp(0.0, 1.0);
+        let current = settlement.threat_level;
+        let delta = (target_threat - current) * 0.1; // drift toward regional threat
+        if delta.abs() > 0.001 {
+            out.push(WorldDelta::UpdateSettlementField {
+                settlement_id: settlement.id,
+                field: SettlementField::ThreatLevel,
+                value: delta,
+            });
         }
     }
 }

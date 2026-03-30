@@ -9,6 +9,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
+use crate::world_sim::state::entity_hash_f32;
 
 // NEEDS STATE: factions: Vec<FactionState> on WorldState
 //   FactionState { id, relationship_to_guild }
@@ -33,19 +34,6 @@ const MAX_CASCADE_DEPTH: u32 = 3;
 /// Cadence: fires every 7 ticks.
 const DEFECTION_INTERVAL: u64 = 7;
 
-/// Deterministic hash for pseudo-random decisions.
-#[inline]
-fn deterministic_roll(tick: u64, entity_id: u32, salt: u32) -> f32 {
-    let mut h = tick
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(entity_id as u64)
-        .wrapping_mul(2862933555777941757)
-        .wrapping_add(salt as u64);
-    h = h
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407);
-    (h >> 33) as f32 / (1u64 << 31) as f32
-}
 
 pub fn compute_defection_cascade(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % DEFECTION_INTERVAL != 0 || state.tick == 0 {
@@ -153,7 +141,7 @@ pub fn compute_defection_cascade(state: &WorldState, out: &mut Vec<WorldDelta>) 
 
             // Remaining adventurers in losing faction lose 5-15 morale.
             let morale_loss = 5.0
-                + deterministic_roll(state.tick, candidate.adv_id, 10) * 10.0;
+                + entity_hash_f32(candidate.adv_id, state.tick, 10 as u64) * 10.0;
             for adv in &state.adventurers {
                 if adv.faction_id == Some(candidate.from_faction)
                     && adv.status != AdventurerStatus::Dead

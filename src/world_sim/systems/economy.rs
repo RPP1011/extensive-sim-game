@@ -29,10 +29,6 @@ const TRADE_INCOME_PER_POP: f32 = 0.001;
 /// Threat reward bonus: fraction of region threat_level added as gold per tick.
 const THREAT_REWARD_RATE: f32 = 0.01;
 
-/// Guild entity ID sentinel used as the "guild treasury" endpoint for TransferGold.
-/// By convention, entity id 0 is the guild.
-const GUILD_ENTITY_ID: u32 = 0;
-
 pub fn compute_economy(state: &WorldState, out: &mut Vec<WorldDelta>) {
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
@@ -68,12 +64,15 @@ pub fn compute_economy_for_settlement(
 
     // --- NPC taxation: NPCs with gold pay a small tax to settlement treasury ---
     // This is the primary income source for settlements. No passive income.
+    // Progressive tax: rich settlements have diminishing returns to prevent
+    // runaway treasury accumulation (positive feedback loop).
+    let tax_efficiency = 1.0 / (1.0 + settlement.treasury / 10_000.0);
     let mut tax_income = 0.0f32;
     for entity in entities {
         if entity.kind != EntityKind::Npc || !entity.alive { continue; }
         if let Some(npc) = &entity.npc {
             if npc.gold > 1.0 {
-                let tax = npc.gold * 0.001; // 0.1% tax per tick
+                let tax = npc.gold * 0.001 * tax_efficiency; // 0.1% base, reduced by wealth
                 tax_income += tax;
                 out.push(WorldDelta::TransferGold {
                     from_id: entity.id,
@@ -87,6 +86,16 @@ pub fn compute_economy_for_settlement(
         out.push(WorldDelta::UpdateTreasury {
             location_id: settlement_id,
             delta: tax_income,
+        });
+    }
+
+    // --- Administrative cost decay: wealthy settlements leak treasury ---
+    // Settlements with treasury > 10000 lose 0.1% per tick as admin overhead.
+    if settlement.treasury > 10_000.0 {
+        let admin_cost = settlement.treasury * 0.001;
+        out.push(WorldDelta::UpdateTreasury {
+            location_id: settlement_id,
+            delta: -admin_cost,
         });
     }
 
@@ -141,11 +150,21 @@ mod tests {
     use crate::world_sim::state::*;
 
     #[test]
-    fn passive_income_scales_with_population() {
+    fn npc_taxation_generates_income() {
         let mut state = WorldState::new(42);
         let mut s = SettlementState::new(10, "Town".into(), (0.0, 0.0));
         s.population = 100;
         state.settlements.push(s);
+
+        // NPCs with gold generate tax income for the settlement.
+        for i in 1..=5 {
+            let mut npc = Entity::new_npc(i, (0.0, 0.0));
+            npc.npc.as_mut().unwrap().gold = 100.0;
+            npc.npc.as_mut().unwrap().home_settlement_id = Some(10);
+            state.entities.push(npc);
+        }
+        state.rebuild_group_index();
+        state.rebuild_entity_cache();
 
         let mut deltas = Vec::new();
         compute_economy(&state, &mut deltas);
@@ -162,21 +181,22 @@ mod tests {
             .sum();
         assert!(
             treasury_delta > 0.0,
-            "settlement should earn passive income"
+            "NPC taxation should generate settlement income"
         );
     }
 
     #[test]
     fn maintenance_drains_treasury() {
         let mut state = WorldState::new(42);
-        state
-            .settlements
-            .push(SettlementState::new(10, "Town".into(), (0.0, 0.0)));
+        let mut settlement = SettlementState::new(10, "Town".into(), (0.0, 0.0));
+        settlement.treasury = 100.0; // needs positive treasury for maintenance
+        state.settlements.push(settlement);
 
         let mut npc = Entity::new_npc(1, (0.0, 0.0));
         npc.npc.as_mut().unwrap().home_settlement_id = Some(10);
         state.entities.push(npc);
         state.rebuild_group_index();
+        state.rebuild_entity_cache();
 
         let mut deltas = Vec::new();
         compute_economy(&state, &mut deltas);

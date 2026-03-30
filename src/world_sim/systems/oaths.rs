@@ -1,91 +1,160 @@
 #![allow(unused)]
-//! Adventurer oath system — delta architecture port.
+//! Oath system — NPCs swear, fulfill, and break oaths.
 //!
-//! NPCs can swear binding oaths granting powerful bonuses with strict
-//! constraints. Breaking an oath carries loyalty, morale, and reputation
-//! penalties plus an "oathbreaker" tag. Fulfilling grants a permanent
-//! bonus and "oathkeeper" tag.
+//! Oath types: Loyalty (to settlement), Vengeance (against grudge target),
+//! Protection (defend settlement). Stored on NpcData.oaths.
 //!
-//! Original: `crates/headless_campaign/src/systems/oaths.rs`
-//! Cadence: every 10 ticks (skips tick 0).
+//! Fulfilling oaths → faith+discipline tags → Oathkeeper class.
+//! Breaking oaths (betrayal) → deception tags → Oathbreaker class.
+//!
+//! Cadence: every 200 ticks (post-apply).
 
-use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use serde::{Serialize, Deserialize};
+use crate::world_sim::state::*;
 
-// NEEDS STATE: oaths: Vec<Oath> on WorldState or Entity
-//   Oath { id, adventurer_id, oath_type: OathType, sworn_tick, fulfilled, broken, bonus_active }
-//   OathType: OathOfVengeance, OathOfProtection, OathOfPoverty, OathOfSilence, OathOfService, OathOfExploration
-// NEEDS STATE: adventurer loyalty, morale, history_tags, level, status on Entity/NpcData
-// NEEDS STATE: guild reputation
-// NEEDS DELTA: BreakOath { oath_id }
-// NEEDS DELTA: FulfillOath { oath_id }
-// NEEDS DELTA: SwearOath { entity_id, oath_type }
-// NEEDS DELTA: AdjustMorale { entity_id, delta }
-// NEEDS DELTA: AdjustLoyalty { entity_id, delta }
-// NEEDS DELTA: AdjustReputation { delta }
+const OATH_INTERVAL: u64 = 200;
+const OATH_CHANCE: f32 = 0.05;
 
-/// Cadence gate.
-const OATH_TICK_INTERVAL: u64 = 10;
+/// An oath sworn by an NPC.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Oath {
+    pub kind: OathKind,
+    pub target_id: u32,
+    pub sworn_tick: u64,
+    pub fulfilled: bool,
+    pub broken: bool,
+}
 
-/// Loyalty threshold for voluntary oath proposals.
-const OATH_PROPOSAL_LOYALTY: f32 = 70.0;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum OathKind {
+    Loyalty,
+    Vengeance,
+    Protection,
+}
 
-/// Chance per eligible NPC per tick to propose an oath (10%).
-const OATH_PROPOSAL_CHANCE: f32 = 0.10;
+/// Process oath swearing, fulfillment, and breaking. Called post-apply.
+pub fn advance_oaths(state: &mut WorldState) {
+    if state.tick % OATH_INTERVAL != 0 || state.tick == 0 { return; }
+    let tick = state.tick;
 
-/// Exploration deadline (ticks).
-const EXPLORATION_DEADLINE_TICKS: u64 = 67;
+    let entity_count = state.entities.len();
 
-/// Compute oath deltas: check violations, fulfillment, proposals.
-///
-/// Since WorldState lacks oath storage, this is a structural placeholder.
-pub fn compute_oaths(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    if state.tick % OATH_TICK_INTERVAL != 0 || state.tick == 0 {
-        return;
+    // --- Phase 1: Swear new oaths ---
+    for i in 0..entity_count {
+        let entity = &state.entities[i];
+        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        let npc = match &entity.npc { Some(n) => n, None => continue };
+        if npc.oaths.len() >= 3 { continue; }
+        let sid = match npc.home_settlement_id { Some(s) => s, None => continue };
+
+        let roll = entity_hash_f32(entity.id, tick, 0x0A7B);
+        if roll > OATH_CHANCE { continue; }
+
+        let oath_type = entity_hash(entity.id, tick, 0x0A7C) % 3;
+        let new_oath = match oath_type {
+            0 => {
+                let already = npc.oaths.iter().any(|o| o.kind == OathKind::Loyalty && !o.fulfilled && !o.broken);
+                if already { continue; }
+                Some(Oath { kind: OathKind::Loyalty, target_id: sid, sworn_tick: tick, fulfilled: false, broken: false })
+            }
+            1 => {
+                let grudge_target = npc.memory.beliefs.iter()
+                    .find_map(|b| match &b.belief_type { BeliefType::Grudge(tid) => Some(*tid), _ => None });
+                let already = npc.oaths.iter().any(|o| o.kind == OathKind::Vengeance && !o.fulfilled && !o.broken);
+                if already { continue; }
+                grudge_target.map(|tid| Oath { kind: OathKind::Vengeance, target_id: tid, sworn_tick: tick, fulfilled: false, broken: false })
+            }
+            _ => {
+                let already = npc.oaths.iter().any(|o| o.kind == OathKind::Protection && !o.fulfilled && !o.broken);
+                if already { continue; }
+                Some(Oath { kind: OathKind::Protection, target_id: sid, sworn_tick: tick, fulfilled: false, broken: false })
+            }
+        };
+
+        if let Some(oath) = new_oath {
+            let npc = state.entities[i].npc.as_mut().unwrap();
+            npc.oaths.push(oath);
+            npc.accumulate_tags(&{
+                let mut a = ActionTags::empty();
+                a.add(tags::FAITH, 1.0);
+                a.add(tags::DISCIPLINE, 0.5);
+                a
+            });
+        }
     }
 
-    // --- Phase 1: Check active oaths for violations and fulfillment ---
-    // NEEDS STATE: iterate state.oaths where !broken && !fulfilled
-    //
-    // OathOfVengeance: violation if NPC idle while target faction has active quest
-    // OathOfProtection: violation if ward has died
-    // OathOfPoverty: violation if equipped item quality > common threshold
-    // OathOfSilence: violation if assigned to diplomatic quest
-    // OathOfService: fulfilled after 3+ completed quests since sworn
-    // OathOfExploration: violation if idle too long without exploring
+    // --- Phase 2: Check fulfillment ---
+    for i in 0..state.entities.len() {
+        let entity = &state.entities[i];
+        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        let npc = match &entity.npc { Some(n) => n, None => continue };
 
-    // --- Phase 2: Broken oath penalties ---
-    // out.push(WorldDelta::AdjustLoyalty { entity_id, delta: -20.0 })
-    // out.push(WorldDelta::AdjustMorale { entity_id, delta: -15.0 })
-    // out.push(WorldDelta::AdjustReputation { delta: -5.0 })
-    // Add "oathbreaker" history tag
-
-    // --- Phase 3: Fulfilled oath bonuses ---
-    // out.push(WorldDelta::AdjustReputation { delta: 10.0 })
-    // Add "oathkeeper" history tag
-
-    // --- Phase 4: Oath proposals from high-loyalty NPCs ---
-    // For each alive NPC with loyalty > 70 and no active oath:
-    //   Deterministic roll < 0.10:
-    //   out.push(WorldDelta::SwearOath { entity_id, oath_type })
-
-    for entity in &state.entities {
-        if !entity.alive || entity.npc.is_none() {
-            continue;
+        let mut to_fulfill: Vec<usize> = Vec::new();
+        for (oi, oath) in npc.oaths.iter().enumerate() {
+            if oath.fulfilled || oath.broken { continue; }
+            let fulfilled = match &oath.kind {
+                OathKind::Vengeance => !state.entities.iter().any(|e| e.id == oath.target_id && e.alive),
+                OathKind::Protection => tick.saturating_sub(oath.sworn_tick) >= 1000,
+                OathKind::Loyalty => tick.saturating_sub(oath.sworn_tick) >= 1500
+                    && npc.home_settlement_id == Some(oath.target_id),
+            };
+            if fulfilled { to_fulfill.push(oi); }
         }
-        // NEEDS STATE: check if entity has an active oath
-        // NEEDS STATE: check loyalty level
-        // Deterministic proposal roll
-        let _roll = deterministic_roll(state.tick, entity.id);
+
+        if to_fulfill.is_empty() { continue; }
+
+        let entity_id = entity.id;
+        let npc_name = npc.name.clone();
+        let npc = state.entities[i].npc.as_mut().unwrap();
+
+        for &oi in &to_fulfill {
+            npc.oaths[oi].fulfilled = true;
+            npc.emotions.pride = (npc.emotions.pride + 0.6).min(1.0);
+            npc.accumulate_tags(&{
+                let mut a = ActionTags::empty();
+                a.add(tags::FAITH, 3.0);
+                a.add(tags::DISCIPLINE, 2.0);
+                a.add(tags::RESILIENCE, 1.0);
+                a
+            });
+        }
+
+        let total_fulfilled = npc.oaths.iter().filter(|o| o.fulfilled).count();
+        if total_fulfilled >= 3 && to_fulfill.len() > 0 {
+            state.chronicle.push(ChronicleEntry {
+                tick,
+                category: ChronicleCategory::Achievement,
+                text: format!("{} has fulfilled three oaths — a true Oathkeeper.", npc_name),
+                entity_ids: vec![entity_id],
+            });
+        }
+    }
+
+    // --- Phase 3: Detect broken oaths (hostile betrayers) ---
+    for entity in &mut state.entities {
+        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        if entity.team != WorldTeam::Hostile { continue; }
+        let npc = match &mut entity.npc { Some(n) => n, None => continue };
+
+        let mut any_broken = false;
+        for oath in &mut npc.oaths {
+            if oath.fulfilled || oath.broken { continue; }
+            if oath.kind == OathKind::Loyalty {
+                oath.broken = true;
+                any_broken = true;
+            }
+        }
+        if any_broken {
+            npc.accumulate_tags(&{
+                let mut a = ActionTags::empty();
+                a.add(tags::DECEPTION, 3.0);
+                a
+            });
+        }
     }
 }
 
-fn deterministic_roll(tick: u64, id: u32) -> f32 {
-    let h = tick
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(id as u64);
-    let h = h ^ (h >> 33);
-    let h = h.wrapping_mul(0xff51afd7ed558ccd);
-    let h = h ^ (h >> 33);
-    (h & 0xFFFF) as f32 / 65536.0
+// Keep stub for backward compat with compute_all_systems.
+pub fn compute_oaths(state: &WorldState, out: &mut Vec<crate::world_sim::delta::WorldDelta>) {
+    // No-op — oaths handled by advance_oaths (post-apply).
 }

@@ -1,124 +1,181 @@
 #![allow(unused)]
-//! Adventurer romance system — delta architecture port.
+//! Romance system — NPC pair bonding at settlements.
 //!
-//! Romances progress through stages: Attraction -> Courting -> Together ->
-//! (optionally) Strained -> BrokenUp. Together-stage partners sharing a
-//! grid get morale boosts and bond growth. Breakups cause morale penalties
-//! and may create rivalries.
+//! NPCs at the same settlement with complementary behavior profiles
+//! develop romantic connections. Since we don't store explicit romance
+//! state, affinity is computed each tick from behavior profiles and
+//! proximity. Strong affinity produces morale boosts and cooperation tags.
 //!
-//! Original: `crates/headless_campaign/src/systems/romance.rs`
-//! Cadence: every 10 ticks.
+//! Cadence: every 50 ticks.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, WorldState};
+use crate::world_sim::state::*;
 
-// NEEDS STATE: romances: Vec<Romance> on WorldState
-//   Romance { adventurer_a, adventurer_b, stage: RomanceStage, strength, started_tick }
-// NEEDS STATE: adventurer_bonds: HashMap<(u32,u32), f32> on WorldState
-// NEEDS STATE: adventurer morale, stress on Entity/NpcData
-// NEEDS STATE: party_id on Entity/NpcData
-// NEEDS DELTA: UpdateRomance { adventurer_a, adventurer_b, new_stage, strength_delta }
-// NEEDS DELTA: UpdateBond { entity_a, entity_b, delta: f32 }
-// NEEDS DELTA: AdjustMorale { entity_id, delta: f32 }
-// NEEDS DELTA: CreateRivalry { entity_a, entity_b, intensity, cause }
+const ROMANCE_INTERVAL: u64 = 50;
 
-/// Maximum active (non-broken-up) romances.
-const MAX_ROMANCES: usize = 3;
+/// Maximum pairs to evaluate per settlement (avoid O(n²) explosion).
+const MAX_NPCS_PER_SETTLEMENT: usize = 32;
 
-/// Ticks of separation before a romance becomes strained.
-const SEPARATION_STRAIN_TICKS: u64 = 67;
+/// Maximum romantic pairs to process per settlement per tick.
+const MAX_PAIRS: usize = 3;
 
-/// Ticks after breakup during which both refuse to be in the same party.
-const BREAKUP_COOLDOWN_TICKS: u64 = 1500;
+/// Minimum affinity score for a romantic bond.
+const AFFINITY_THRESHOLD: f32 = 0.5;
 
-/// Bond threshold for romance formation.
-const BOND_FORMATION_THRESHOLD: f32 = 50.0;
 
-/// Romance formation chance per eligible pair per tick (5%).
-const FORMATION_CHANCE: f32 = 0.05;
-
-/// Cadence gate.
-const ROMANCE_TICK_INTERVAL: u64 = 10;
-
-/// Compute romance deltas: formation, stage progression, strain, breakup.
-///
-/// Since WorldState lacks romance and bond storage, this is a structural
-/// placeholder. Once the required state and delta variants exist, the
-/// logic below will emit real deltas.
 pub fn compute_romance(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    if state.tick % ROMANCE_TICK_INTERVAL != 0 {
-        return;
-    }
+    if state.tick % ROMANCE_INTERVAL != 0 || state.tick == 0 { return; }
 
-    // --- 1. Romance formation ---
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
         compute_romance_for_settlement(state, settlement.id, &state.entities[range], out);
     }
-
-    // --- 2. Stage progression ---
-    // NEEDS STATE: iterate state.romances
-    // Attraction -> Courting (bond > 60)
-    // Courting -> Together (bond > 75)
-    // Together benefits: bond growth 2x for co-located pairs
-    //   out.push(WorldDelta::UpdateBond { entity_a, entity_b, delta: 0.5 })
-    // Together -> Strained (rivalry or long separation)
-    // Strained -> BrokenUp (strength < 20)
-    //   out.push(WorldDelta::AdjustMorale { entity_id: a, delta: -10.0 })
-    //   out.push(WorldDelta::AdjustMorale { entity_id: b, delta: -10.0 })
-    //   30% chance rivalry: out.push(WorldDelta::CreateRivalry { ... })
-
-    // --- 3. Cleanup dead romances ---
-    // NEEDS STATE: remove romances involving dead entities
 }
 
-/// Per-settlement variant for parallel dispatch.
 pub fn compute_romance_for_settlement(
     state: &WorldState,
     settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {
-    if state.tick % ROMANCE_TICK_INTERVAL != 0 {
-        return;
-    }
+    if state.tick % ROMANCE_INTERVAL != 0 || state.tick == 0 { return; }
 
-    // Romance formation: For NPC pairs sharing the same settlement:
-    //   - Both alive, not already romanced, bond > 50, morale > 40, no rivalry
-    //   - Deterministic roll < 0.05
-    //   - out.push(WorldDelta::UpdateRomance { a, b, new_stage: Attraction, strength_delta: 10.0 })
-    let npc_ids: Vec<u32> = entities
-        .iter()
-        .filter(|e| e.alive && e.npc.is_some())
-        .map(|e| e.id)
-        .collect();
-
-    // NEEDS STATE: check bonds, romances, rivalries for each pair
-    // For now, pairs are identified but cannot be processed without state.
-    for i in 0..npc_ids.len() {
-        for j in (i + 1)..npc_ids.len() {
-            let _a = npc_ids[i];
-            let _b = npc_ids[j];
-            // NEEDS STATE + DELTA: formation check
+    // Find social gathering spots (Tavern/Temple/Market/Inn).
+    let mut social_buildings: [(f32, f32); 16] = [(0.0, 0.0); 16];
+    let mut sb_count = 0usize;
+    for entity in entities {
+        if !entity.alive || entity.kind != EntityKind::Building { continue; }
+        if let Some(bd) = &entity.building {
+            if bd.construction_progress >= 1.0
+                && matches!(bd.building_type,
+                    BuildingType::Inn | BuildingType::Temple
+                    | BuildingType::Market | BuildingType::GuildHall)
+            {
+                if sb_count < 16 {
+                    social_buildings[sb_count] = entity.pos;
+                    sb_count += 1;
+                }
+            }
         }
     }
+
+    // Collect alive NPC indices near social buildings, morale > 30.
+    let mut npc_indices: [usize; 32] = [0; 32];
+    let mut count = 0;
+
+    for (idx, entity) in entities.iter().enumerate() {
+        if count >= MAX_NPCS_PER_SETTLEMENT { break; }
+        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        let npc = match &entity.npc { Some(n) => n, None => continue };
+        if npc.morale < 30.0 { continue; }
+
+        // Must be near a social gathering spot (within 15 units).
+        let near_social = sb_count == 0 || (0..sb_count).any(|k| {
+            let dx = entity.pos.0 - social_buildings[k].0;
+            let dy = entity.pos.1 - social_buildings[k].1;
+            dx * dx + dy * dy < 225.0 // 15^2
+        });
+        if !near_social { continue; }
+
+        npc_indices[count] = idx;
+        count += 1;
+    }
+
+    if count < 2 { return; }
+
+    let mut pairs_found = 0;
+
+    for i in 0..count {
+        if pairs_found >= MAX_PAIRS { break; }
+        for j in (i + 1)..count {
+            if pairs_found >= MAX_PAIRS { break; }
+
+            let entity_a = &entities[npc_indices[i]];
+            let entity_b = &entities[npc_indices[j]];
+            let id_a = entity_a.id;
+            let id_b = entity_b.id;
+            let npc_a = entity_a.npc.as_ref().unwrap();
+            let npc_b = entity_b.npc.as_ref().unwrap();
+
+            // Deterministic pair check: only evaluate certain pairs per tick.
+            let roll = pair_hash_f32(id_a, id_b, state.tick, 0xE04A);
+            if roll > 0.15 { continue; } // only 15% of pairs checked per tick
+
+            // Compute affinity from behavior profile cosine similarity.
+            let affinity = compute_shared_affinity(npc_a, npc_b);
+
+            if affinity < AFFINITY_THRESHOLD { continue; }
+
+            // Romantic bond effects: mutual morale boost.
+            let morale_boost = (affinity - AFFINITY_THRESHOLD) * 2.0;
+            out.push(WorldDelta::UpdateEntityField {
+                entity_id: id_a,
+                field: EntityField::Morale,
+                value: morale_boost.min(3.0),
+            });
+            out.push(WorldDelta::UpdateEntityField {
+                entity_id: id_b,
+                field: EntityField::Morale,
+                value: morale_boost.min(3.0),
+            });
+
+            // Cooperation tags: both get social behavior.
+            let mut action = ActionTags::empty();
+            action.add(tags::DIPLOMACY, 0.3);
+            action.add(tags::RESILIENCE, 0.2);
+            out.push(WorldDelta::AddBehaviorTags {
+                entity_id: id_a,
+                tags: action.tags,
+                count: action.count,
+            });
+            out.push(WorldDelta::AddBehaviorTags {
+                entity_id: id_b,
+                tags: action.tags,
+                count: action.count,
+            });
+
+            pairs_found += 1;
+        }
+    }
+
+    // Chronicle: strong romantic bonds.
+    if pairs_found > 0 && state.tick % 500 == 0 {
+        let settlement_name = state.settlement(settlement_id)
+            .map(|s| s.name.as_str())
+            .unwrap_or("an unknown settlement");
+        out.push(WorldDelta::RecordChronicle {
+            entry: ChronicleEntry {
+                tick: state.tick,
+                category: ChronicleCategory::Narrative,
+                text: format!("{} romantic bonds formed at {}",
+                    pairs_found, settlement_name),
+                entity_ids: vec![],
+            },
+        });
+    }
 }
 
-// ---------------------------------------------------------------------------
-// Query helpers
-// ---------------------------------------------------------------------------
+/// Compute shared affinity between two NPCs based on overlapping behavior tags.
+fn compute_shared_affinity(a: &NpcData, b: &NpcData) -> f32 {
+    // Compare top 5 tags from each NPC.
+    // Shared tags weighted by geometric mean of their values.
+    let common_tags = [
+        tags::COMBAT, tags::TRADE, tags::FAITH, tags::RESEARCH,
+        tags::FARMING, tags::MINING, tags::LEADERSHIP, tags::DIPLOMACY,
+    ];
 
-/// Morale bonus from being in the same grid as a Together-stage partner.
-/// Returns +15 if partner present, 0 otherwise.
-/// Requires romance state on WorldState.
-pub fn romance_morale_bonus(_entity_id: u32, _neighbor_ids: &[u32]) -> f32 {
-    // NEEDS STATE: romances
-    0.0
-}
+    let mut dot = 0.0f32;
+    let mut mag_a = 0.0f32;
+    let mut mag_b = 0.0f32;
 
-/// Combat power multiplier from fighting alongside a Together-stage partner.
-/// Returns 1.10 if partner present, 1.0 otherwise.
-pub fn romance_combat_multiplier(_entity_id: u32, _neighbor_ids: &[u32]) -> f32 {
-    // NEEDS STATE: romances
-    1.0
+    for &tag in &common_tags {
+        let va = a.behavior_value(tag);
+        let vb = b.behavior_value(tag);
+        dot += va * vb;
+        mag_a += va * va;
+        mag_b += vb * vb;
+    }
+
+    let denom = (mag_a.sqrt() * mag_b.sqrt()).max(1.0);
+    dot / denom // cosine similarity, 0..1
 }

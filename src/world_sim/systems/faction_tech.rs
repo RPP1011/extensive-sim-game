@@ -10,6 +10,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
+use crate::world_sim::state::entity_hash_f32;
 
 // NEEDS STATE: factions: Vec<FactionState> on WorldState
 //   FactionState { id, diplomatic_stance, coalition_member, relationship_to_guild,
@@ -29,19 +30,6 @@ use crate::world_sim::state::WorldState;
 /// How often faction tech advances (in ticks).
 const TECH_INTERVAL: u64 = 17;
 
-/// Deterministic hash for pseudo-random decisions.
-#[inline]
-fn deterministic_roll(tick: u64, faction_id: u32, salt: u32) -> f32 {
-    let mut h = tick
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(faction_id as u64)
-        .wrapping_mul(2862933555777941757)
-        .wrapping_add(salt as u64);
-    h = h
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407);
-    (h >> 33) as f32 / (1u64 << 31) as f32
-}
 
 pub fn compute_faction_tech(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % TECH_INTERVAL != 0 || state.tick == 0 {

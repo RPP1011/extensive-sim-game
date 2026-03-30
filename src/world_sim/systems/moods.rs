@@ -9,14 +9,13 @@
 //! Cadence: every 7 ticks.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, WorldState};
+use crate::world_sim::state::{Entity, EntityField, EntityKind, WorldState};
+use crate::world_sim::state::entity_hash_f32;
 
 // NEEDS STATE: mood_state: MoodState on Entity or NpcData (mood, started_at, expires_at)
-// NEEDS STATE: morale: f32 on Entity or NpcData
 // NEEDS STATE: stress: f32 on Entity or NpcData
 // NEEDS STATE: party_id: Option<u32> on Entity or NpcData
 // NEEDS DELTA: SetMood { entity_id: u32, mood: Mood, started_at: u64, expires_at: u64 }
-// NEEDS DELTA: AdjustMorale { entity_id: u32, delta: f32 }
 
 /// Mood tick cadence (every 7 ticks).
 const MOOD_TICK_INTERVAL: u64 = 7;
@@ -90,14 +89,43 @@ pub fn compute_moods(state: &WorldState, out: &mut Vec<WorldDelta>) {
     //     out.push(WorldDelta::SetMood { entity_id, mood: Mood::Neutral, ... });
 
     // --- Phase 2: Ongoing mood effects ---
-    // NEEDS STATE + DELTA: for each alive NPC entity:
-    //   match entity.mood_state.mood:
-    //     Mood::Grieving if elapsed <= GRIEF_DURATION =>
-    //       out.push(WorldDelta::AdjustMorale { entity_id, delta: -2.0 });
-    //     Mood::Excited =>
-    //       out.push(WorldDelta::AdjustMorale { entity_id, delta: 5.0 });
-    //     Mood::Melancholic =>
-    //       out.push(WorldDelta::AdjustMorale { entity_id, delta: -1.0 });
+    // Until mood_state exists on NpcData, derive mood proxy from entity state
+    // and emit morale deltas accordingly.
+    for entity in &state.entities {
+        if !entity.alive || entity.kind != EntityKind::Npc {
+            continue;
+        }
+        let hp_ratio = if entity.max_hp > 0.0 { entity.hp / entity.max_hp } else { 1.0 };
+
+        // Proxy: entity on a high-fidelity grid with low HP → grieving/fearful
+        let on_combat_grid = entity.grid_id
+            .and_then(|gid| state.grid(gid))
+            .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
+            .unwrap_or(false);
+
+        if on_combat_grid && hp_ratio < 0.3 {
+            // Fearful/grieving: morale drain
+            out.push(WorldDelta::UpdateEntityField {
+                entity_id: entity.id,
+                field: EntityField::Morale,
+                value: -2.0,
+            });
+        } else if on_combat_grid && hp_ratio > 0.8 {
+            // Determined/excited in combat with good health: morale boost
+            out.push(WorldDelta::UpdateEntityField {
+                entity_id: entity.id,
+                field: EntityField::Morale,
+                value: 1.0,
+            });
+        } else if !on_combat_grid && hp_ratio > 0.9 {
+            // Idle and healthy: small contentment boost
+            out.push(WorldDelta::UpdateEntityField {
+                entity_id: entity.id,
+                field: EntityField::Morale,
+                value: 0.5,
+            });
+        }
+    }
 
     // --- Phase 3: Contagion — moods spread within shared grids ---
     for settlement in &state.settlements {
@@ -194,10 +222,8 @@ pub fn mood_bond_growth_bonus(mood: Mood) -> f32 {
 pub fn is_reckless(mood: Mood, entity_id: u32, tick: u64) -> bool {
     match mood {
         Mood::Excited => {
-            // Deterministic 10% chance using hash of tick + entity_id.
-            let hash =
-                (tick.wrapping_mul(2654435761) ^ (entity_id as u64).wrapping_mul(40503)) & 0xFFFF;
-            (hash as f32 / 65536.0) < 0.10
+            // Deterministic 10% chance using entity_hash.
+            entity_hash_f32(entity_id, tick, 0xE3C1) < 0.10
         }
         _ => false,
     }

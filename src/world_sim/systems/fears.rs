@@ -9,16 +9,16 @@
 //! Cadence: every 10 ticks (skips tick 0).
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, WorldState};
+use crate::world_sim::state::{Entity, EntityField, EntityKind, WorldState};
+use crate::world_sim::state::entity_hash_f32;
 
 // NEEDS STATE: fears: Vec<Fear> on Entity/NpcData
 //   Fear { fear_type: FearType, severity, acquired_tick, times_triggered, times_overcome }
 //   FearType: Darkness, Heights, Water, Undead, Fire, Crowds, Isolation, Authority
-// NEEDS STATE: adventurer morale, stress, injury, status on Entity/NpcData
+// NEEDS STATE: adventurer stress, injury, status on Entity/NpcData
 // NEEDS DELTA: AcquireFear { entity_id, fear_type, severity }
 // NEEDS DELTA: UpdateFearSeverity { entity_id, fear_type, delta }
 // NEEDS DELTA: ConquerFear { entity_id, fear_type }
-// NEEDS DELTA: AdjustMorale { entity_id, delta }
 // NEEDS DELTA: AdjustStress { entity_id, delta }
 
 /// Cadence gate.
@@ -52,16 +52,36 @@ pub fn compute_fears(state: &WorldState, out: &mut Vec<WorldDelta>) {
         compute_fears_for_settlement(state, settlement.id, &state.entities[range], out);
     }
 
-    // --- Phase 2: Fear effects (morale/stress penalties) ---
-    // For each entity with fears relevant to current situation:
-    //   out.push(WorldDelta::AdjustMorale { entity_id, delta: -(5 + severity/100 * 10) })
-    //   out.push(WorldDelta::AdjustStress { entity_id, delta: 3 + severity/100 * 7 })
-    //
-    // Expressible via ApplyStatus with Debuff variant:
-    //   out.push(WorldDelta::ApplyStatus {
-    //       target_id: entity.id,
-    //       status: StatusEffect { kind: Debuff { stat: "morale".into(), factor: 0.9 }, ... },
-    //   })
+    // --- Phase 2: Fear effects (morale penalties) ---
+    // Until fear storage exists on NpcData, use entity HP ratio on active grids
+    // as a proxy for active fear. Low-HP NPCs in combat suffer morale drain
+    // representing fear/panic effects.
+    for entity in &state.entities {
+        if !entity.alive || entity.kind != EntityKind::Npc {
+            continue;
+        }
+        let hp_ratio = entity.hp / entity.max_hp.max(1.0);
+        let on_combat_grid = entity.grid_id
+            .and_then(|gid| state.grid(gid))
+            .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
+            .unwrap_or(false);
+
+        if on_combat_grid && hp_ratio < 0.3 {
+            // Near-death fear: significant morale penalty.
+            out.push(WorldDelta::UpdateEntityField {
+                entity_id: entity.id,
+                field: EntityField::Morale,
+                value: -3.0,
+            });
+        } else if on_combat_grid && hp_ratio < 0.5 {
+            // Wounded and fighting: moderate fear-induced morale drain.
+            out.push(WorldDelta::UpdateEntityField {
+                entity_id: entity.id,
+                field: EntityField::Morale,
+                value: -1.0,
+            });
+        }
+    }
 
     // --- Phase 3: Fear overcoming (successful exposure) ---
     // NEEDS STATE: idle entities with triggered fears and low injury
@@ -115,7 +135,7 @@ pub fn compute_fears_for_settlement(
 
         // Near-death (hp < 20%) on an active grid → Darkness fear (30%)
         if hp_ratio < 0.2 && entity.grid_id.is_some() {
-            let roll = deterministic_roll(state.tick, entity.id);
+            let roll = entity_hash_f32(entity.id, state.tick, 0);
             if roll < DARKNESS_FEAR_CHANCE {
                 // NEEDS DELTA: AcquireFear { entity_id, Darkness, severity: 20+rand*40 }
             }
@@ -123,7 +143,7 @@ pub fn compute_fears_for_settlement(
 
         // Low hp while fighting → Undead fear (20%)
         if hp_ratio < 0.4 && entity.grid_id.is_some() {
-            let roll = deterministic_roll(state.tick, entity.id.wrapping_add(1));
+            let roll = entity_hash_f32(entity.id, state.tick, 1);
             if roll < MONSTER_FEAR_CHANCE {
                 // NEEDS DELTA: AcquireFear { entity_id, Undead, severity: 15+rand*35 }
             }
@@ -133,12 +153,3 @@ pub fn compute_fears_for_settlement(
     }
 }
 
-fn deterministic_roll(tick: u64, id: u32) -> f32 {
-    let h = tick
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(id as u64);
-    let h = h ^ (h >> 33);
-    let h = h.wrapping_mul(0xff51afd7ed558ccd);
-    let h = h ^ (h >> 33);
-    (h & 0xFFFF) as f32 / 65536.0
-}

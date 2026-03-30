@@ -11,6 +11,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, WorldState};
+use crate::world_sim::state::entity_hash_f32;
 
 // NEEDS STATE: journal: Vec<JournalEntry> on Entity/NpcData
 //   JournalEntry { tick, entry_type: JournalType, text, sentiment }
@@ -87,7 +88,7 @@ pub fn compute_journals_for_settlement(
         // NEEDS STATE: journal history
 
         // --- Discovery entries (5% random chance) ---
-        let roll = deterministic_roll(state.tick, entity.id);
+        let roll = entity_hash_f32(entity.id, state.tick, 0);
         if roll < 0.05 {
             // NEEDS DELTA: WriteJournalEntry
         }
@@ -97,12 +98,3 @@ pub fn compute_journals_for_settlement(
     }
 }
 
-fn deterministic_roll(tick: u64, id: u32) -> f32 {
-    let h = tick
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(id as u64);
-    let h = h ^ (h >> 33);
-    let h = h.wrapping_mul(0xff51afd7ed558ccd);
-    let h = h ^ (h >> 33);
-    (h & 0xFFFF) as f32 / 65536.0
-}

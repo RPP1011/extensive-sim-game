@@ -6,6 +6,10 @@
 //! cartography bonuses). Milestone rewards are expressed as treasury updates
 //! and fidelity changes.
 //!
+//! **Gold conservation:** Frontier exploration rewards are paid from the
+//! nearest settlement treasury. If no settlement can afford it, no gold
+//! is paid.
+//!
 //! Ported from `crates/headless_campaign/src/systems/exploration.rs`.
 //!
 //! NEEDS STATE: `exploration: ExplorationState` on WorldState
@@ -57,18 +61,28 @@ pub fn compute_exploration(state: &WorldState, out: &mut Vec<WorldDelta>) {
         if entity.kind != EntityKind::Npc || !entity.alive || entity.team != WorldTeam::Friendly {
             continue;
         }
-        let min_settlement_dist = state
+        let nearest = state
             .settlements
             .iter()
-            .map(|s| dist_sq(entity.pos, s.pos))
-            .fold(f32::MAX, f32::min);
+            .min_by(|a, b| {
+                let da = dist_sq(entity.pos, a.pos);
+                let db = dist_sq(entity.pos, b.pos);
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+        let min_settlement_dist = nearest.map(|s| dist_sq(entity.pos, s.pos)).unwrap_or(f32::MAX);
 
         if min_settlement_dist > 900.0 {
-            out.push(WorldDelta::TransferGold {
-                from_id: 0,
-                to_id: entity.id,
-                amount: 0.5,
-            });
+            // Pay frontier exploration stipend from nearest settlement treasury
+            if let Some(s) = nearest {
+                if s.treasury > 0.5 {
+                    out.push(WorldDelta::TransferGold {
+                        from_id: s.id,
+                        to_id: entity.id,
+                        amount: 0.5,
+                    });
+                }
+            }
 
             // Behavior tags: frontier exploration.
             let mut action = ActionTags::empty();

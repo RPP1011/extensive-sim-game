@@ -19,6 +19,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, RegionState, WorldState};
+use crate::world_sim::state::{entity_hash_f32};
 
 use super::seasons::{current_season, season_modifiers, Season};
 
@@ -57,13 +58,6 @@ impl WeatherEvent {
     }
 }
 
-/// Deterministic hash for pseudo-random decisions from immutable state.
-/// Produces a float in [0, 1) from tick + a salt.
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_weather(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % WEATHER_INTERVAL != 0 || state.tick == 0 {
@@ -201,7 +195,7 @@ fn apply_ambient_threat_damage(state: &WorldState, out: &mut Vec<WorldDelta>, th
             }
 
             // Probabilistic damage based on tick hash.
-            let roll = tick_hash(state.tick, entity.id as u64 ^ 0xEA7E_8001);
+            let roll = entity_hash_f32(entity.id, state.tick, 0xEA7E_8001);
             let damage_chance = (effective_threat - threat_threshold) * 0.001;
             if roll < damage_chance {
                 let damage = (effective_threat - threat_threshold) * 0.1;

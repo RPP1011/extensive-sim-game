@@ -58,7 +58,7 @@ use crate::ui::settings::{
     settings_menu_toggle_system, update_settings_menu_visual_system,
 };
 use crate::keybinds::keybind_dispatch_system;
-use bevy_game::headless_campaign::trace_viewer::{
+use crate::hub_ui_draw::trace_viewer::{
     advance_campaign_trace_viewer_system, campaign_trace_viewer_keyboard_system,
     campaign_trace_viewer_transition_system,
 };

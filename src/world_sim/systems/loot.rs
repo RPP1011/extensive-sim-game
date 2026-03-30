@@ -1,30 +1,27 @@
 #![allow(unused)]
 //! Loot drops from combat and quest completion.
 //!
-//! On quest victory or monster kill, generates item drops as TransferGoods/TransferGold
-//! deltas. Quality scales with threat level, item type biased by quest type.
+//! On monster kill, generates gold transfers to nearby friendlies and spawns
+//! item entities as loot drops. Item quality scales with monster threat level.
 //!
-//! Ported from `crates/headless_campaign/src/systems/loot.rs`.
+//! **Gold conservation:** Monster kill gold is paid from the settlement treasury
+//! as a bounty reward. If the settlement cannot afford it, no gold is paid.
+//! Goods drops and item spawns are still awarded (representing physical loot).
+//!
+//! Items are spawned as unowned entities at the kill location with the monster's
+//! settlement affiliation. NPCs pick them up via the equipping system.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{WorldState, EntityKind, WorldTeam};
-
-// NEEDS STATE: completed_quests_this_tick: Vec<CompletedQuest> on WorldState
-//              (or a way to detect quest completion events from other systems)
-// NEEDS STATE: CompletedQuest { quest_id, quest_type, threat_level, member_ids, result }
-// NEEDS STATE: QuestResult enum { Victory, Defeat, Abandoned }
-// NEEDS DELTA: SpawnItem { recipient_id: u32, item_name: String, slot: u8, quality: f32,
-//              stat_bonuses: [f32; 4] }
-
-/// Commodity index used for "loot drops" (generic treasure goods).
-/// Maps to one of the NUM_COMMODITIES slots.
-const LOOT_COMMODITY: usize = 7; // Last commodity slot = treasure/loot
+use crate::world_sim::state::{
+    Entity, EntityKind, ItemData, ItemRarity, ItemSlot, WorldState, WorldTeam,
+    entity_hash,
+};
 
 /// Gold drop per unit of threat level on monster kill.
 const GOLD_PER_THREAT: f32 = 2.0;
 
-/// Goods drop per unit of threat on monster kill.
-const GOODS_PER_THREAT: f32 = 0.5;
+/// Chance that a monster drops an item (0.0–1.0).
+const ITEM_DROP_CHANCE: f32 = 0.15;
 
 pub fn compute_loot(state: &WorldState, out: &mut Vec<WorldDelta>) {
     for settlement in &state.settlements {
@@ -34,15 +31,17 @@ pub fn compute_loot(state: &WorldState, out: &mut Vec<WorldDelta>) {
 }
 
 /// Per-settlement variant for parallel dispatch.
-///
-/// Finds the grid associated with this settlement and processes loot on it.
 pub fn compute_loot_for_settlement(
     state: &WorldState,
     settlement_id: u32,
-    _entities: &[crate::world_sim::state::Entity],
+    _entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {
-    let grid_id = match state.settlement(settlement_id).and_then(|s| s.grid_id) {
+    let settlement = match state.settlement(settlement_id) {
+        Some(s) => s,
+        None => return,
+    };
+    let grid_id = match settlement.grid_id {
         Some(gid) => gid,
         None => return,
     };
@@ -56,6 +55,7 @@ pub fn compute_loot_for_settlement(
     // Count dying monsters and friendlies without allocating.
     let mut dying_ids = [0u32; 32];
     let mut dying_levels = [0u32; 32];
+    let mut dying_pos = [(0.0f32, 0.0f32); 32];
     let mut dc = 0usize;
     let mut friendly_ids = [0u32; 64];
     let mut fc = 0usize;
@@ -66,6 +66,7 @@ pub fn compute_loot_for_settlement(
             if e.kind == EntityKind::Monster && e.hp <= 0.0 && dc < 32 {
                 dying_ids[dc] = eid;
                 dying_levels[dc] = e.level;
+                dying_pos[dc] = e.pos;
                 dc += 1;
             } else if e.kind == EntityKind::Npc && e.team == WorldTeam::Friendly && fc < 64 {
                 friendly_ids[fc] = eid;
@@ -82,65 +83,84 @@ pub fn compute_loot_for_settlement(
         let total_gold = threat * GOLD_PER_THREAT;
         let gold_each = total_gold / fc as f32;
 
+        // Monster kill gold is paid from settlement treasury as a bounty
+        let can_afford = settlement.treasury > total_gold;
         for fi in 0..fc {
-            if gold_each > 0.0 {
+            if gold_each > 0.0 && can_afford {
                 out.push(WorldDelta::TransferGold {
-                    from_id: monster_id,
+                    from_id: settlement_id,
                     to_id: friendly_ids[fi],
                     amount: gold_each,
                 });
             }
         }
 
-        // Goods (treasure) reward to the first friendly (no alloc nearest search)
-        let goods_amount = threat * GOODS_PER_THREAT;
-        if goods_amount > 0.0 && fc > 0 {
-            out.push(WorldDelta::TransferGoods {
-                from_id: monster_id,
-                to_id: friendly_ids[0],
-                commodity: LOOT_COMMODITY,
-                amount: goods_amount,
+        // Item drop chance (deterministic from tick + monster id).
+        let drop_h = entity_hash(monster_id, state.tick, 0x100D);
+        let roll = (drop_h % 1000) as f32 / 1000.0;
+        if roll < ITEM_DROP_CHANCE {
+            // Spawn an item entity at the monster's position.
+            let slot = match entity_hash(monster_id, state.tick, 0x100E) % 3 {
+                0 => ItemSlot::Weapon,
+                1 => ItemSlot::Armor,
+                _ => ItemSlot::Accessory,
+            };
+
+            // Quality and rarity scale with monster level.
+            let quality = (1.0 + threat * 0.3).min(20.0);
+            let rarity = if threat >= 40.0 { ItemRarity::Epic }
+                else if threat >= 20.0 { ItemRarity::Rare }
+                else if threat >= 10.0 { ItemRarity::Uncommon }
+                else { ItemRarity::Common };
+
+            let name = generate_loot_name(slot, rarity, drop_h as u64);
+
+            out.push(WorldDelta::SpawnItem {
+                pos: dying_pos[di],
+                item_data: ItemData {
+                    slot,
+                    rarity,
+                    quality,
+                    durability: 80.0, // slightly worn from battle
+                    max_durability: 100.0,
+                    owner_id: None,
+                    settlement_id: Some(settlement_id),
+                    name,
+                    crafter_id: None,
+                    crafted_tick: state.tick,
+                    history: Vec::new(),
+                    is_legendary: false,
+                    is_relic: false,
+                    relic_bonus: None,
+                },
             });
         }
     }
-
-    // --- Quest completion loot ---
-    // The original system generates equipment items (weapons, armor, accessories)
-    // with grammar-walked names and archetype-biased slot selection.
-    //
-    // In the delta architecture, equipment items would need a SpawnItem delta
-    // variant since they carry structured data (name, slot, quality, stat bonuses)
-    // that doesn't map to commodity transfers.
-    //
-    // Until SpawnItem exists, quest victory loot is represented as gold and
-    // commodity transfers above (from monster kills during the quest battle).
-    //
-    // When the state is extended with quest tracking:
-    //
-    //   for quest in &state.completed_quests_this_tick {
-    //       if quest.result != QuestResult::Victory { continue; }
-    //       let drop_chance = quest_type_drop_chance(quest.quest_type);
-    //       // RNG roll against drop_chance
-    //       // Generate item quality from threat level
-    //       // Emit SpawnItem delta to best-matching party member
-    //   }
 }
 
-fn dist_sq(a: (f32, f32), b: (f32, f32)) -> f32 {
-    let dx = a.0 - b.0;
-    let dy = a.1 - b.1;
-    dx * dx + dy * dy
-}
+fn generate_loot_name(slot: ItemSlot, rarity: ItemRarity, h: u64) -> String {
+    let prefix = match rarity {
+        ItemRarity::Common => "Rusted ",
+        ItemRarity::Uncommon => "Weathered ",
+        ItemRarity::Rare => "Ornate ",
+        ItemRarity::Epic => "Ancient ",
+        ItemRarity::Legendary => "Legendary ",
+    };
 
-/// Drop chance by quest type (mirrors original system).
-fn quest_type_drop_chance(quest_type: u8) -> f32 {
-    match quest_type {
-        0 => 0.70, // Combat
-        1 => 0.50, // Exploration
-        2 => 0.30, // Rescue
-        3 => 0.20, // Gather
-        4 => 0.15, // Diplomatic
-        5 => 0.40, // Escort
-        _ => 0.30,
-    }
+    let base = match slot {
+        ItemSlot::Weapon => {
+            const W: [&str; 4] = ["Blade", "War Axe", "Warhammer", "Glaive"];
+            W[(h >> 44) as usize % W.len()]
+        }
+        ItemSlot::Armor => {
+            const A: [&str; 4] = ["Cuirass", "Helm", "Shield", "Greaves"];
+            A[(h >> 44) as usize % A.len()]
+        }
+        ItemSlot::Accessory => {
+            const C: [&str; 4] = ["Talisman", "Warboots", "Signet Ring", "Ward Amulet"];
+            C[(h >> 44) as usize % C.len()]
+        }
+    };
+
+    format!("{}{}", prefix, base)
 }

@@ -5,28 +5,27 @@
 //! Growth rate scales with food availability and settlement safety.
 //! New NPCs are level 1.
 //!
-//! Cadence: every 20 ticks.
+//! Cadence: every 10 ticks.
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, WorldState};
+use crate::world_sim::state::{entity_hash_f32};
 use crate::world_sim::commodity;
 
-const GROWTH_INTERVAL: u64 = 20;
+const GROWTH_INTERVAL: u64 = 10;
 
 /// Minimum food stockpile for growth. Low bar — even scarce food allows slow growth.
-const MIN_FOOD_FOR_GROWTH: f32 = 1.0;
+const MIN_FOOD_FOR_GROWTH: f32 = 0.5;
 
-/// Food consumed per birth (about 10 meals worth).
+/// Food consumed per birth.
 const FOOD_PER_BIRTH: f32 = 0.3;
 
 /// Max births per settlement per growth tick.
-const MAX_BIRTHS_PER_TICK: usize = 3;
+const MAX_BIRTHS_PER_TICK: usize = 8;
 
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
+/// Target population per settlement. Above this, growth slows exponentially.
+const CARRYING_CAPACITY: f32 = 500.0;
+
 
 pub fn compute_recruitment(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % GROWTH_INTERVAL != 0 || state.tick == 0 { return; }
@@ -55,56 +54,44 @@ pub fn compute_recruitment_for_settlement(
         return;
     }
 
-    // Count alive NPCs. Even 1 NPC can recruit (immigration, not just birth).
     let alive_count = entities.iter()
         .filter(|e| e.alive && e.kind == EntityKind::Npc)
         .count();
 
-    // Growth chance: higher with more food, lower with more population (carrying capacity).
-    // food_ratio > 1.0 means surplus, < 1.0 means scarce.
-    let food_per_capita = settlement.stockpile[commodity::FOOD] / (alive_count as f32 + 1.0);
-    let growth_chance = (food_per_capita * 0.1).clamp(0.02, 0.5);
+    // Proportional growth: number of births scales with food surplus and population headroom.
+    // No binary gate — always try to birth at least 1 if food available.
+    let food_surplus = settlement.stockpile[commodity::FOOD] - MIN_FOOD_FOR_GROWTH;
+    let pop_ratio = alive_count as f32 / CARRYING_CAPACITY;
+    // Logistic growth: fast when pop is low, slows as it approaches carrying capacity.
+    let growth_factor = (1.0 - pop_ratio).max(0.05);
+    // How many births food can support this tick.
+    let food_births = (food_surplus / FOOD_PER_BIRTH) as usize;
+    // Scale by growth factor: at 50% capacity, allow ~50% of max births.
+    let target_births = ((MAX_BIRTHS_PER_TICK as f32 * growth_factor) as usize)
+        .max(1) // always try at least 1
+        .min(food_births)
+        .min(MAX_BIRTHS_PER_TICK);
 
-    // Safety bonus: safe settlements attract more immigrants.
-    let safety_bonus = if settlement.threat_level < 10.0 { 0.1 } else { 0.0 };
+    if target_births == 0 { return; }
 
-    let roll = tick_hash(state.tick, settlement_id as u64 ^ 0xB177);
-    if roll > growth_chance + safety_bonus {
-        return;
-    }
-
-    // Find dead NPCs to recycle. Use group_index unaffiliated range first,
-    // then scan settlement's own dead.
+    // Find dead NPCs to recycle.
     let mut births = 0;
 
     // First: recycle dead NPCs at this settlement.
     for entity in entities {
-        if births >= MAX_BIRTHS_PER_TICK { break; }
+        if births >= target_births { break; }
         if entity.kind != EntityKind::Npc || entity.alive { continue; }
-
-        let food_remaining = settlement.stockpile[commodity::FOOD] - (births as f32 * FOOD_PER_BIRTH);
-        if food_remaining < FOOD_PER_BIRTH { break; }
-
-        // Deterministic per-entity per-settlement per-tick.
-        let entity_roll = tick_hash(state.tick, entity.id as u64 ^ settlement_id as u64 ^ 0xDEAD);
-        if entity_roll > 0.15 { continue; } // ~15% eligibility
 
         revive_npc(entity.id, settlement, out);
         births += 1;
     }
 
     // Second: if we still have capacity, recycle from unaffiliated dead.
-    if births < MAX_BIRTHS_PER_TICK {
+    if births < target_births {
         let unaffiliated = state.group_index.unaffiliated_entities();
         for entity in &state.entities[unaffiliated] {
-            if births >= MAX_BIRTHS_PER_TICK { break; }
+            if births >= target_births { break; }
             if entity.kind != EntityKind::Npc || entity.alive { continue; }
-
-            let food_remaining = settlement.stockpile[commodity::FOOD] - (births as f32 * FOOD_PER_BIRTH);
-            if food_remaining < FOOD_PER_BIRTH { break; }
-
-            let entity_roll = tick_hash(state.tick, entity.id as u64 ^ settlement_id as u64 ^ 0xBEEF);
-            if entity_roll > 0.08 { continue; }
 
             revive_npc(entity.id, settlement, out);
             births += 1;

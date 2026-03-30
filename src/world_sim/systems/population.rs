@@ -9,17 +9,21 @@
 //! NEEDS STATE: `civilian_morale: f32` on SettlementState
 //! NEEDS STATE: `growth_rate: f32` on SettlementState
 //! NEEDS STATE: `tax_rate: f32` on SettlementState
-//! NEEDS DELTA: UpdatePopulation { settlement_id, delta: i32 }
+//!
+//! Population changes are emitted via `UpdateSettlementField { field: Population, .. }`.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, WorldState};
+use crate::world_sim::state::{Entity, SettlementField, WorldState};
 use crate::world_sim::NUM_COMMODITIES;
 
-/// Cadence: runs every 3 ticks.
-const POP_TICK_INTERVAL: u64 = 3;
+/// Cadence: runs every 50 ticks.
+const POP_TICK_INTERVAL: u64 = 50;
 
-/// Base population growth rate per tick (fraction of current population).
-const BASE_GROWTH_RATE: f32 = 0.001;
+/// Base population growth rate per interval (fraction of current population).
+const BASE_GROWTH_RATE: f32 = 0.005;
+
+/// Maximum population per settlement (carrying capacity).
+const MAX_POPULATION: u32 = 500;
 
 /// Food commodity index consumed by population.
 const COMMODITY_FOOD: usize = 0;
@@ -127,6 +131,33 @@ pub fn compute_population_for_settlement(
         growth -= THREAT_DECLINE_RATE * (regional_threat / 100.0);
     }
 
+    // Logistic growth: slow down as population approaches carrying capacity.
+    if pop >= MAX_POPULATION {
+        growth = growth.min(0.0); // only decline at cap
+    } else {
+        let headroom = 1.0 - (pop as f32 / MAX_POPULATION as f32);
+        growth *= headroom;
+    }
+
+    // --- Apply population growth/decline ---
+    let pop_delta = (growth * pop as f32).round();
+    if pop_delta.abs() >= 1.0 {
+        // Don't shrink below MIN_POPULATION.
+        let clamped = if pop_delta < 0.0 {
+            let max_loss = -((pop.saturating_sub(MIN_POPULATION)) as f32);
+            pop_delta.max(max_loss)
+        } else {
+            pop_delta.min((MAX_POPULATION - pop) as f32)
+        };
+        if clamped.abs() >= 1.0 {
+            out.push(WorldDelta::UpdateSettlementField {
+                settlement_id,
+                field: SettlementField::Population,
+                value: clamped,
+            });
+        }
+    }
+
     // --- Tax income from population ---
     let tax_income = pop as f32 * TAX_PER_POP;
     if tax_income > 0.0 {
@@ -173,7 +204,7 @@ mod tests {
     #[test]
     fn population_consumes_food() {
         let mut state = WorldState::new(42);
-        state.tick = 3;
+        state.tick = 50;
         let mut s = SettlementState::new(10, "Town".into(), (0.0, 0.0));
         s.population = 200;
         s.stockpile[0] = 50.0; // food available
@@ -199,7 +230,7 @@ mod tests {
     #[test]
     fn population_generates_tax() {
         let mut state = WorldState::new(42);
-        state.tick = 3;
+        state.tick = 50;
         let mut s = SettlementState::new(10, "Town".into(), (0.0, 0.0));
         s.population = 100;
         s.stockpile[0] = 50.0;
@@ -219,7 +250,7 @@ mod tests {
     #[test]
     fn growing_settlement_produces_surplus() {
         let mut state = WorldState::new(42);
-        state.tick = 3;
+        state.tick = 50;
         let mut s = SettlementState::new(10, "Town".into(), (0.0, 0.0));
         s.population = 200;
         s.stockpile[0] = 100.0; // plenty of food (ratio > 1.0)
@@ -244,7 +275,7 @@ mod tests {
     #[test]
     fn zero_pop_no_deltas() {
         let mut state = WorldState::new(42);
-        state.tick = 3;
+        state.tick = 50;
         let mut s = SettlementState::new(10, "Ghost".into(), (0.0, 0.0));
         s.population = 0;
         state.settlements.push(s);
@@ -261,5 +292,57 @@ mod tests {
         let mut deltas = Vec::new();
         compute_population(&state, &mut deltas);
         assert!(deltas.is_empty());
+    }
+
+    #[test]
+    fn growing_settlement_emits_population_delta() {
+        let mut state = WorldState::new(42);
+        state.tick = 50;
+        let mut s = SettlementState::new(10, "Town".into(), (0.0, 0.0));
+        s.population = 200; // large enough that growth rounds to >= 1, below MAX_POPULATION
+        s.stockpile[0] = 500.0; // plenty of food (ratio >> 1.5)
+        s.treasury = 50.0;
+        state.settlements.push(s);
+
+        let mut deltas = Vec::new();
+        compute_population(&state, &mut deltas);
+
+        let has_pop_delta = deltas.iter().any(|d| {
+            matches!(
+                d,
+                WorldDelta::UpdateSettlementField {
+                    settlement_id: 10,
+                    field: SettlementField::Population,
+                    value,
+                } if *value > 0.0
+            )
+        });
+        assert!(has_pop_delta, "growing settlement should emit positive population delta");
+    }
+
+    #[test]
+    fn starving_settlement_loses_population() {
+        let mut state = WorldState::new(42);
+        state.tick = 50;
+        let mut s = SettlementState::new(10, "Famine".into(), (0.0, 0.0));
+        s.population = 500;
+        s.stockpile[0] = 0.01; // almost no food (ratio < 0.1 → starvation)
+        s.treasury = -20.0;
+        state.settlements.push(s);
+
+        let mut deltas = Vec::new();
+        compute_population(&state, &mut deltas);
+
+        let has_pop_decline = deltas.iter().any(|d| {
+            matches!(
+                d,
+                WorldDelta::UpdateSettlementField {
+                    settlement_id: 10,
+                    field: SettlementField::Population,
+                    value,
+                } if *value < 0.0
+            )
+        });
+        assert!(has_pop_decline, "starving settlement should emit negative population delta");
     }
 }

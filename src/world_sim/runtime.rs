@@ -22,7 +22,7 @@ use super::apply::ApplyProfile;
 const NUM_ENTITY_FIELDS: usize = 18; // 17 original + Level
 const NUM_FACTION_FIELDS: usize = 6;
 const NUM_REGION_FIELDS: usize = 4;
-const NUM_SETTLEMENT_FIELDS: usize = 4;
+const NUM_SETTLEMENT_FIELDS: usize = 5;
 
 /// Flat-array merge accumulator. All per-entity fields are indexed by entity ID.
 /// Per-settlement fields indexed by settlement ID. Dirty lists track which
@@ -85,6 +85,18 @@ struct FlatMergedDeltas {
     // --- Intent changes (last-writer-wins, collected) ---
     intent_changes: Vec<(u32, super::state::EconomicIntent)>,
 
+    // --- Last damage source per target (for death attribution) ---
+    last_damage_source: std::collections::HashMap<u32, u32>,
+
+    // --- Item system ---
+    item_spawns: Vec<((f32, f32), super::state::ItemData)>,
+    equip_requests: Vec<(u32, u32)>,
+    unequip_requests: Vec<(u32, u32)>,
+
+    // --- Inventory transfers ---
+    inventory_transfers: Vec<(u32, u32, usize, f32)>,
+    inventory_gold_transfers: Vec<(u32, u32, f32)>,
+
     // --- Campaign collected (no flat-array equivalent) ---
     relation_deltas: Vec<(u32, u32, u8, f32)>,
     spawns: Vec<(super::state::EntityKind, (f32, f32), super::state::WorldTeam, u32)>,
@@ -142,6 +154,12 @@ impl FlatMergedDeltas {
 
             behavior_tag_deltas: Vec::with_capacity(64),
             intent_changes: Vec::with_capacity(64),
+            last_damage_source: std::collections::HashMap::with_capacity(64),
+            item_spawns: Vec::with_capacity(32),
+            equip_requests: Vec::with_capacity(32),
+            unequip_requests: Vec::with_capacity(32),
+            inventory_transfers: Vec::with_capacity(64),
+            inventory_gold_transfers: Vec::with_capacity(32),
             relation_deltas: Vec::with_capacity(64),
             spawns: Vec::with_capacity(16),
             events: Vec::with_capacity(32),
@@ -206,11 +224,31 @@ impl FlatMergedDeltas {
 
         self.behavior_tag_deltas.clear();
         self.intent_changes.clear();
+        self.last_damage_source.clear();
+        self.item_spawns.clear();
+        self.equip_requests.clear();
+        self.unequip_requests.clear();
+        self.inventory_transfers.clear();
+        self.inventory_gold_transfers.clear();
         self.relation_deltas.clear();
         self.spawns.clear();
         self.events.clear();
         self.chronicles.clear();
         self.quest_updates.clear();
+    }
+
+    /// Grow flat arrays to accommodate new entity IDs (after building spawns).
+    fn ensure_capacity(&mut self, new_max: usize) {
+        if new_max <= self.damage.len() { return; }
+        self.damage.resize(new_max, 0.0);
+        self.heals.resize(new_max, 0.0);
+        self.shields.resize(new_max, 0.0);
+        self.force_x.resize(new_max, 0.0);
+        self.force_y.resize(new_max, 0.0);
+        self.dead.resize(new_max, false);
+        self.entity_fields.resize(new_max * NUM_ENTITY_FIELDS, 0.0);
+        self.entity_xp.resize(new_max, 0);
+        self.entity_mood_set.resize(new_max, false);
     }
 
     #[inline]
@@ -267,9 +305,10 @@ impl FlatMergedDeltas {
 
     fn merge_one(&mut self, delta: WorldDelta) {
         match delta {
-            WorldDelta::Damage { target_id, amount, .. } => {
+            WorldDelta::Damage { target_id, amount, source_id } => {
                 self.mark_entity(target_id);
                 self.damage[target_id as usize] += amount;
+                self.last_damage_source.insert(target_id, source_id);
             }
             WorldDelta::Heal { target_id, amount, .. } => {
                 self.mark_entity(target_id);
@@ -394,6 +433,21 @@ impl FlatMergedDeltas {
             }
             WorldDelta::SetIntent { entity_id, intent } => {
                 self.intent_changes.push((entity_id, intent));
+            }
+            WorldDelta::SpawnItem { pos, item_data } => {
+                self.item_spawns.push((pos, item_data));
+            }
+            WorldDelta::EquipItem { npc_id, item_id } => {
+                self.equip_requests.push((npc_id, item_id));
+            }
+            WorldDelta::UnequipItem { npc_id, item_id } => {
+                self.unequip_requests.push((npc_id, item_id));
+            }
+            WorldDelta::TransferCommodity { from_entity, to_entity, commodity, amount } => {
+                self.inventory_transfers.push((from_entity, to_entity, commodity, amount));
+            }
+            WorldDelta::TransferInventoryGold { from_entity, to_entity, amount } => {
+                self.inventory_gold_transfers.push((from_entity, to_entity, amount));
             }
         }
     }
@@ -527,20 +581,249 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
 
     // Deaths
     let t = Instant::now();
-    for entity in &mut state.entities {
-        if !entity.alive { continue; }
-        if m.dead[entity.id as usize]
-            || (entity.hp <= 0.0 && entity.kind != EntityKind::Building)
-        {
-            entity.alive = false;
+    {
+        let mut death_records: Vec<(u32, String, Option<u32>, Option<u32>, u32, EntityKind)> = Vec::new();
+        // Collect items to drop from dead NPCs: (item_id, death_pos, settlement_id).
+        let mut item_drops: Vec<(u32, (f32, f32), Option<u32>)> = Vec::new();
+        for entity in &mut state.entities {
+            if !entity.alive { continue; }
+            let is_dead = (entity.id as usize) < m.dead.len() && m.dead[entity.id as usize];
+            if is_dead
+                || (entity.hp <= 0.0 && entity.kind != EntityKind::Building && entity.kind != EntityKind::Item)
+            {
+                let victim_name = super::naming::entity_display_name(entity);
+                let home_settlement_id = entity.npc.as_ref().and_then(|n| n.home_settlement_id);
+                let killer_id = m.last_damage_source.get(&entity.id).copied();
+
+                // Drop equipped items on death.
+                if let Some(npc) = &mut entity.npc {
+                    for item_id in [npc.equipped_items.weapon_id,
+                                    npc.equipped_items.armor_id,
+                                    npc.equipped_items.accessory_id].iter().flatten() {
+                        item_drops.push((*item_id, entity.pos, home_settlement_id));
+                    }
+                    npc.equipped_items = super::state::EquippedItems::default();
+                }
+
+                death_records.push((entity.id, victim_name, home_settlement_id, killer_id, entity.level, entity.kind));
+                entity.alive = false;
+            }
+        }
+
+        // Record kills on killer's weapon (item provenance).
+        for &(victim_id, ref victim_name, _, killer_id, victim_level, _) in &death_records {
+            if let Some(kid) = killer_id {
+                // Find killer's weapon and record the kill.
+                let weapon_id = state.entity(kid)
+                    .filter(|e| e.alive)
+                    .and_then(|e| e.npc.as_ref())
+                    .and_then(|n| n.equipped_items.weapon_id);
+
+                if let Some(wid) = weapon_id {
+                    let current_tick = state.tick;
+                    let mut legend_entry: Option<super::state::ChronicleEntry> = None;
+
+                    if let Some(item_entity) = state.entity_mut(wid) {
+                        if let Some(item) = &mut item_entity.item {
+                            item.history.push(super::state::ItemEvent {
+                                tick: current_tick,
+                                kind: super::state::ItemEventKind::Kill {
+                                    victim_name: victim_name.clone(),
+                                    victim_level,
+                                },
+                            });
+                            if item.history.len() > 20 { item.history.drain(..item.history.len() - 20); }
+
+                            if !item.is_legendary {
+                                let kill_count = item.history.iter()
+                                    .filter(|e| matches!(e.kind, super::state::ItemEventKind::Kill { .. }))
+                                    .count();
+                                if kill_count >= 3 {
+                                    item.is_legendary = true;
+                                    let legendary_name = generate_legendary_name(
+                                        item.slot, kill_count, current_tick, wid);
+                                    let old_name = item.name.clone();
+                                    item.name = legendary_name.clone();
+                                    legend_entry = Some(super::state::ChronicleEntry {
+                                        tick: current_tick,
+                                        category: super::state::ChronicleCategory::Achievement,
+                                        text: format!("The {} has earned the name \"{}\" after {} kills.",
+                                            old_name, legendary_name, kill_count),
+                                        entity_ids: vec![wid, kid],
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    if let Some(entry) = legend_entry {
+                        state.chronicle.push(entry);
+                    }
+                }
+            }
+        }
+
+        // Process item drops: clear owner, set position to death site.
+        for (item_id, death_pos, settlement_id) in item_drops {
+            if let Some(item_entity) = state.entity_mut(item_id) {
+                if let Some(item) = &mut item_entity.item {
+                    item.owner_id = None;
+                    item.settlement_id = settlement_id;
+                }
+                item_entity.pos = death_pos;
+            }
+        }
+
+        let mut death_chronicle_count = 0u32;
+        const MAX_DEATH_CHRONICLES_PER_TICK: u32 = 2;
+        for (entity_id, victim_name, home_settlement_id, killer_id, level, kind) in death_records {
+            let settlement_name = home_settlement_id
+                .and_then(|sid| state.settlement(sid))
+                .map(|s| s.name.clone());
+            let killer_name = killer_id
+                .filter(|&kid| kid != entity_id) // exclude self-damage
+                .and_then(|kid| {
+                    state.entity(kid).map(|e| super::naming::entity_display_name(e))
+                });
+
+            let text = match (&settlement_name, &killer_name) {
+                (Some(sname), Some(kname)) => {
+                    format!("{} of {} was slain by {}", victim_name, sname, kname)
+                }
+                (Some(sname), None) => {
+                    format!("{} of {} fell in battle", victim_name, sname)
+                }
+                (None, Some(kname)) => {
+                    format!("{} was slain by {}", victim_name, kname)
+                }
+                (None, None) => {
+                    format!("{} fell in battle", victim_name)
+                }
+            };
+
+            // Only record notable deaths, capped per tick.
+            if (level >= 40 || kind == EntityKind::Monster) && death_chronicle_count < MAX_DEATH_CHRONICLES_PER_TICK {
+                death_chronicle_count += 1;
+                state.chronicle.push(super::state::ChronicleEntry {
+                    tick: state.tick,
+                    category: super::state::ChronicleCategory::Death,
+                    text,
+                    entity_ids: {
+                        let mut ids = vec![entity_id];
+                        if let Some(kid) = killer_id {
+                            ids.push(kid);
+                        }
+                        ids
+                    },
+                });
+            }
+
+            // Legendary death: entities with 20+ chronicle mentions get a special narrative.
+            // Legendary death: first time only (check no existing "legendary" narrative for this entity).
+            if kind == EntityKind::Npc {
+                let already_legendary = state.chronicle.iter().any(|e| {
+                    e.category == super::state::ChronicleCategory::Narrative
+                        && e.entity_ids.contains(&entity_id)
+                        && e.text.contains("legendary")
+                });
+                if !already_legendary {
+                    let mention_count = state.chronicle.iter()
+                        .filter(|e| e.entity_ids.contains(&entity_id))
+                        .count();
+                    if mention_count >= 20 {
+                        let settlement_text = settlement_name.as_deref().unwrap_or("the wilderness");
+                        state.chronicle.push(super::state::ChronicleEntry {
+                            tick: state.tick,
+                            category: super::state::ChronicleCategory::Narrative,
+                            text: format!("The legendary {} of {} has fallen. {} chronicle entries tell their story.",
+                                victim_name, settlement_text, mention_count),
+                            entity_ids: vec![entity_id],
+                        });
+                    }
+                }
+            }
+
+            // Always record ALL deaths to world_events.
+            state.world_events.push(super::state::WorldEvent::EntityDied {
+                entity_id,
+                cause: "combat".to_string(),
+            });
         }
     }
+
+    // Record death memories on nearby NPCs (witnesses).
+    // Includes grudge formation when the killer is known.
+    let recent_deaths_with_killer: Vec<(u32, Option<u32>, Option<u32>)> = state.world_events.iter()
+        .filter_map(|e| match e {
+            super::state::WorldEvent::EntityDied { entity_id, .. } => {
+                let sid = state.entity(*entity_id).and_then(|e| e.settlement_id());
+                let killer = m.last_damage_source.get(entity_id).copied();
+                Some((*entity_id, sid, killer))
+            }
+            _ => None,
+        })
+        .collect();
+    for (dead_id, home_sid, killer_id) in &recent_deaths_with_killer {
+        let kind = state.entity(*dead_id).map(|e| e.kind).unwrap_or(EntityKind::Npc);
+        if kind != EntityKind::Npc { continue; }
+        let dead_pos = state.entity(*dead_id).map(|e| e.pos).unwrap_or((0.0, 0.0));
+        let sid = match *home_sid { Some(s) => s, None => continue };
+        for entity in &mut state.entities {
+            if entity.id == *dead_id || !entity.alive || entity.kind != EntityKind::Npc { continue; }
+            let npc = match &mut entity.npc { Some(n) => n, None => continue };
+            if npc.home_settlement_id != Some(sid) { continue; }
+            // Rate limit: max 1 FriendDied per NPC per 500 ticks.
+            let recent_grief = npc.memory.events.iter().rev().take(5).any(|e| {
+                matches!(e.event_type, super::state::MemEventType::FriendDied(_))
+                    && state.tick.saturating_sub(e.tick) < 500
+            });
+            if recent_grief { continue; }
+            let dx = entity.pos.0 - dead_pos.0;
+            let dy = entity.pos.1 - dead_pos.1;
+            if dx * dx + dy * dy > 2500.0 { continue; }
+            super::systems::agent_inner::record_npc_event(
+                npc,
+                super::state::MemEventType::FriendDied(*dead_id),
+                dead_pos,
+                vec![*dead_id],
+                -0.7,
+                state.tick,
+            );
+
+            // Form grudge against the killer if known.
+            if let Some(kid) = killer_id {
+                // Don't grudge yourself or dead entities.
+                if *kid != entity.id {
+                    // Check if we already have a grudge against this entity.
+                    let has_grudge = npc.memory.beliefs.iter().any(|b| {
+                        matches!(b.belief_type, super::state::BeliefType::Grudge(gid) if gid == *kid)
+                    });
+                    if !has_grudge {
+                        npc.memory.beliefs.push(super::state::Belief {
+                            belief_type: super::state::BeliefType::Grudge(*kid),
+                            confidence: 1.0,
+                            formed_tick: state.tick,
+                        });
+                        // Grudge anger spike.
+                        npc.emotions.anger = (npc.emotions.anger + 0.5).min(1.0);
+                        // Accumulate vengeance-related tags.
+                        npc.accumulate_tags(&{
+                            let mut a = super::state::ActionTags::empty();
+                            a.add(super::state::tags::COMBAT, 2.0);
+                            a.add(super::state::tags::RESILIENCE, 1.0);
+                            a
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     p.deaths_us = t.elapsed().as_micros() as u64;
 
     // Grid transitions
     let t = Instant::now();
     for &(entity_id, grid_id) in &m.grid_leaves {
-        if let Some(grid) = state.grids.iter_mut().find(|g| g.id == grid_id) {
+        if let Some(grid) = state.grid_mut(grid_id) {
             grid.entity_ids.retain(|&id| id != entity_id);
         }
         if let Some(e) = state.entity_mut(entity_id) {
@@ -551,7 +834,7 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
         }
     }
     for &(entity_id, grid_id) in &m.grid_enters {
-        if let Some(grid) = state.grids.iter_mut().find(|g| g.id == grid_id) {
+        if let Some(grid) = state.grid_mut(grid_id) {
             if !grid.entity_ids.contains(&entity_id) {
                 grid.entity_ids.push(entity_id);
             }
@@ -565,7 +848,7 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
     // Fidelity
     let t = Instant::now();
     for &(grid_id, new_fidelity) in &m.fidelity_changes {
-        if let Some(grid) = state.grids.iter_mut().find(|g| g.id == grid_id) {
+        if let Some(grid) = state.grid_mut(grid_id) {
             grid.fidelity = new_fidelity;
         }
     }
@@ -666,10 +949,12 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
     for &id in &m.settlement_dirty {
         let base = id as usize * NUM_SETTLEMENT_FIELDS;
         if let Some(s) = state.settlement_mut(id) {
-            super::apply::apply_settlement_field_delta(s, 0, m.settlement_fields[base + 0]);
-            super::apply::apply_settlement_field_delta(s, 1, m.settlement_fields[base + 1]);
-            super::apply::apply_settlement_field_delta(s, 2, m.settlement_fields[base + 2]);
-            super::apply::apply_settlement_field_delta(s, 3, m.settlement_fields[base + 3]);
+            for f in 0..NUM_SETTLEMENT_FIELDS {
+                let delta = m.settlement_fields[base + f];
+                if delta.abs() > 0.0001 {
+                    super::apply::apply_settlement_field_delta(s, f as u8, delta);
+                }
+            }
         }
     }
 
@@ -681,16 +966,105 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
 
     // Spawns
     for &(kind, pos, team, level) in &m.spawns {
-        let id = state.entities.iter().map(|e| e.id).max().unwrap_or(0) + 1;
+        let id = state.next_entity_id();
         let mut entity = match kind {
             EntityKind::Npc => Entity::new_npc(id, pos),
             EntityKind::Monster => Entity::new_monster(id, pos, level),
             EntityKind::Building => Entity::new_building(id, pos),
             EntityKind::Projectile => Entity::new_monster(id, pos, 0),
+            EntityKind::Item => Entity::new_building(id, pos), // items spawned via SpawnItem
         };
         entity.team = team;
         entity.level = level;
         state.entities.push(entity);
+    }
+
+    // Item spawns
+    for (pos, item_data) in &m.item_spawns {
+        let id = state.next_entity_id();
+        state.entities.push(Entity::new_item(id, *pos, item_data.clone()));
+    }
+
+    // Unequip requests (process before equips so slot is freed)
+    for &(npc_id, item_id) in &m.unequip_requests {
+        // Extract item info immutably first.
+        let item_info = state.entity(item_id)
+            .and_then(|e| e.item.as_ref())
+            .map(|i| (i.slot, i.attack_bonus(), i.armor_bonus(), i.hp_bonus(), i.speed_bonus()));
+        if let Some((slot, attack_loss, armor_loss, hp_loss, speed_loss)) = item_info {
+            // Remove stat bonuses from NPC.
+            if let Some(npc_entity) = state.entity_mut(npc_id) {
+                npc_entity.attack_damage = (npc_entity.attack_damage - attack_loss).max(0.0);
+                npc_entity.armor = (npc_entity.armor - armor_loss).max(0.0);
+                npc_entity.max_hp = (npc_entity.max_hp - hp_loss).max(1.0);
+                npc_entity.hp = npc_entity.hp.min(npc_entity.max_hp);
+                npc_entity.move_speed = (npc_entity.move_speed - speed_loss).max(0.5);
+                if let Some(npc) = &mut npc_entity.npc {
+                    npc.equipped_items.set_slot(slot, None);
+                }
+            }
+            // Clear item owner.
+            if let Some(item_entity) = state.entity_mut(item_id) {
+                if let Some(item) = &mut item_entity.item {
+                    item.owner_id = None;
+                }
+            }
+        }
+    }
+
+    // Equip requests
+    for &(npc_id, item_id) in &m.equip_requests {
+        // Get item data.
+        let item_info = state.entity(item_id)
+            .and_then(|e| e.item.as_ref())
+            .map(|i| (i.slot, i.attack_bonus(), i.armor_bonus(), i.hp_bonus(), i.speed_bonus()));
+        if let Some((slot, attack, armor_bonus, hp, speed)) = item_info {
+            // Apply stat bonuses to NPC.
+            if let Some(npc_entity) = state.entity_mut(npc_id) {
+                npc_entity.attack_damage += attack;
+                npc_entity.armor += armor_bonus;
+                npc_entity.max_hp += hp;
+                npc_entity.hp += hp;
+                npc_entity.move_speed += speed;
+                if let Some(npc) = &mut npc_entity.npc {
+                    npc.equipped_items.set_slot(slot, Some(item_id));
+                }
+            }
+            if let Some(item_entity) = state.entity_mut(item_id) {
+                if let Some(item) = &mut item_entity.item {
+                    item.owner_id = Some(npc_id);
+                }
+            }
+        }
+    }
+
+    // Inventory commodity transfers
+    for &(from_id, to_id, commodity, amount) in &m.inventory_transfers {
+        let withdrawn = state.entity_mut(from_id)
+            .and_then(|e| e.inventory.as_mut())
+            .map(|inv| inv.withdraw(commodity, amount))
+            .unwrap_or(0.0);
+        if withdrawn > 0.0 {
+            if let Some(target) = state.entity_mut(to_id) {
+                if let Some(inv) = &mut target.inventory {
+                    inv.deposit(commodity, withdrawn);
+                }
+            }
+        }
+    }
+
+    for &(from_id, to_id, amount) in &m.inventory_gold_transfers {
+        let taken = state.entity_mut(from_id)
+            .and_then(|e| e.inventory.as_mut())
+            .map(|inv| { let t = amount.min(inv.gold).max(0.0); inv.gold -= t; t })
+            .unwrap_or(0.0);
+        if taken > 0.0 {
+            if let Some(target) = state.entity_mut(to_id) {
+                if let Some(inv) = &mut target.inventory {
+                    inv.gold += taken;
+                }
+            }
+        }
     }
 
     // Events
@@ -702,8 +1076,8 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
 
     // Chronicles
     state.chronicle.extend(m.chronicles.iter().cloned());
-    if state.chronicle.len() > 500 {
-        let drain = state.chronicle.len() - 500;
+    if state.chronicle.len() > 2000 {
+        let drain = state.chronicle.len() - 2000;
         state.chronicle.drain(..drain);
     }
 
@@ -808,11 +1182,18 @@ pub struct WorldSim {
 
 impl WorldSim {
     pub fn new(mut initial: WorldState) -> Self {
-        let max_entity_id = initial.entities.iter().map(|e| e.id).max().unwrap_or(0) as usize + 1;
-        let max_settlement_id = initial.settlements.iter().map(|s| s.id).max().unwrap_or(0) as usize + 1;
+        // Sync monotonic ID counter from externally created entities.
+        initial.sync_next_id();
+
+        // Ensure every settlement has a Treasury building.
+        initial.ensure_treasury_buildings();
 
         // Sort entities by settlement/party, build hot/cold + all indices.
         initial.rebuild_all_indices();
+
+        // Compute max IDs AFTER treasury buildings are spawned.
+        let max_entity_id = initial.entities.iter().map(|e| e.id).max().unwrap_or(0) as usize + 1;
+        let max_settlement_id = initial.settlements.iter().map(|s| s.id).max().unwrap_or(0) as usize + 1;
 
         // Create dedicated thread pool for large worlds.
         let num_threads = rayon::current_num_threads();
@@ -838,9 +1219,13 @@ impl WorldSim {
             profile_acc: ProfileAccumulator::default(),
             state: initial,
             class_gen: Box::new(super::class_gen::DefaultClassGenerator::new()),
-            ability_gen: Box::new(super::class_gen::DefaultAbilityGenerator),
+            ability_gen: Box::new(super::class_gen::DefaultAbilityGenerator::new()),
             naming: super::naming::NamingService::new(),
         }
+    }
+
+    pub fn state_mut(&mut self) -> &mut WorldState {
+        &mut self.state
     }
 
     pub fn state(&self) -> &WorldState {
@@ -921,6 +1306,7 @@ fn run_settlement_systems(
     wound_persistence::compute_wound_persistence_for_settlement(state, sid, entities, buf);
     addiction::compute_addiction_for_settlement(state, sid, entities, buf);
     equipment_durability::compute_equipment_durability_for_settlement(state, sid, entities, buf);
+    culture::compute_culture_for_settlement(state, sid, entities, buf);
     equipping::compute_equipping_for_settlement(state, sid, entities, buf);
     moods::compute_moods_for_settlement(state, sid, entities, buf);
     bonds::compute_bonds_for_settlement(state, sid, entities, buf);
@@ -1058,6 +1444,108 @@ impl WorldSim {
             self.run_class_matching();
         }
 
+        let postapply_start = Instant::now();
+
+        super::systems::death_consequences::advance_death_consequences(&mut self.state);
+        super::systems::agent_inner::update_agent_inner_states(&mut self.state);
+        super::systems::goal_eval::evaluate_goals(&mut self.state);
+        super::systems::world_goap::evaluate_world_goap(&mut self.state);
+        super::systems::pathfollow::advance_pathfinding(&mut self.state);
+
+        // WORK STATE — advance NPC work state machine.
+        super::systems::work::advance_work_states(&mut self.state);
+
+        // EATING — hungry NPCs walk to food and eat.
+        super::systems::work::advance_eating(&mut self.state);
+
+        // SOCIAL GATHERING — NPCs meet at taverns/temples for conversations.
+        super::systems::social_gathering::advance_social_gatherings(&mut self.state);
+
+        // ADVENTURING — form parties, take quests, explore wilderness.
+        super::systems::adventuring::advance_adventuring(&mut self.state);
+
+        // SEA TRAVEL — coastal voyages with sea monster risk.
+        super::systems::sea_travel::advance_sea_travel(&mut self.state);
+
+        // ITEM DURABILITY — degrade equipped items, unequip broken items.
+        super::systems::equipment_durability::advance_item_durability(&mut self.state);
+
+        // TITLES — NPCs earn honorifics from their deeds.
+        super::systems::titles::advance_titles(&mut self.state);
+
+        // HAUNTED — mass death sites become supernaturally dangerous.
+        super::systems::haunted::advance_haunted(&mut self.state);
+
+        // WORLD AGES — name historical eras from event density.
+        super::systems::world_ages::advance_world_ages(&mut self.state);
+
+        // OATHS — swear, fulfill, and break oaths.
+        super::systems::oaths::advance_oaths(&mut self.state);
+
+        // MONSTER NAMES — monsters that kill NPCs gain names and notoriety.
+        super::systems::monster_names::advance_monster_naming(&mut self.state);
+
+        // CULTURAL IDENTITY — settlements develop emergent culture.
+        super::systems::cultural_identity::advance_cultural_identity(&mut self.state);
+
+        // WARFARE — faction wars, declarations, and peace treaties.
+        super::systems::warfare::advance_warfare(&mut self.state);
+
+        // SUCCESSION — power struggle when settlement leaders die.
+        super::systems::succession::advance_succession(&mut self.state);
+
+        // LEGENDS — detect and maintain heroic legends.
+        super::systems::legends::advance_legends(&mut self.state);
+
+        // PROPHECY — check and fulfill world prophecies.
+        super::systems::prophecy::advance_prophecies(&mut self.state);
+
+        // OUTLAWS — bandit camps, caravan raids, redemption.
+        super::systems::outlaws::advance_outlaws(&mut self.state);
+
+        // TRADE GUILDS — merchants form guilds, set prices, fund caravans.
+        super::systems::trade_guilds::advance_trade_guilds(&mut self.state);
+
+        // SETTLEMENT FOUNDING — overcrowded settlements send colonists.
+        super::systems::settlement_founding::advance_settlement_founding(&mut self.state);
+
+        // BETRAYAL — treacherous NPCs steal gold and become outlaws.
+        super::systems::betrayal::advance_betrayal(&mut self.state);
+
+        // FAMILY — marriages and births.
+        super::systems::family::advance_family(&mut self.state);
+
+        // STOCKPILE SYNC — rebuild settlement stockpiles from building inventories.
+        super::systems::work::sync_stockpiles_from_buildings(&mut self.state);
+
+        // INVENTORY SYNC — bridge legacy carried_goods/building.storage ↔ entity.inventory.
+        for entity in &mut self.state.entities {
+            // Cap NPC gold to prevent infinity.
+            if let Some(npc) = &mut entity.npc {
+                if !npc.gold.is_finite() || npc.gold > 10000.0 {
+                    npc.gold = 10000.0;
+                }
+            }
+            entity.sync_inventory_from_carried_goods();
+            entity.sync_inventory_from_building_storage();
+        }
+
+        // BUILDING INTERIORS — NPCs enter buildings and occupy rooms.
+        super::systems::interiors::advance_interiors(&mut self.state);
+
+        // ACTION SYNC — derive visible NPC action from current state.
+        super::systems::action_sync::sync_npc_actions(&mut self.state);
+
+        profile.postapply_us = postapply_start.elapsed().as_micros() as u64;
+
+        // CITY GROWTH — CA-driven building placement on city grids.
+        self.grow_cities();
+
+        // ENTITY COMPACTION — remove long-dead items/buildings every 500 ticks.
+        if self.state.tick % 500 == 0 && self.state.tick > 0 {
+            self.state.compact_dead_entities();
+        }
+
         // Sync hot array from entities (fast — scalar copy only).
         // Full rebuild only if entities were spawned (array length changed).
         if self.state.entities.len() != self.state.hot.len() {
@@ -1073,7 +1561,7 @@ impl WorldSim {
     }
 
     /// Match NPC behavior profiles against class templates and grant new classes.
-    /// Runs after apply so behavior_tags are up to date.
+    /// Runs after apply so behavior_profile is up to date.
     /// Assign entities to grids based on proximity.
     fn update_grid_membership(&mut self) {
         let num_grids = self.state.grids.len();
@@ -1088,11 +1576,26 @@ impl WorldSim {
 
             for entity in &self.state.entities {
                 if !entity.alive { continue; }
+                // Items and buildings don't enter combat grids.
+                if entity.kind == super::state::EntityKind::Item
+                    || entity.kind == super::state::EntityKind::Building { continue; }
                 let dx = entity.pos.0 - grid.center.0;
                 let dy = entity.pos.1 - grid.center.1;
-                if dx * dx + dy * dy <= r2 {
-                    members.push(entity.id);
+                if dx * dx + dy * dy > r2 { continue; }
+
+                // Workers/traders stay inside the settlement — not on the battlefield.
+                // Only idle/adventuring NPCs and monsters enter combat grids.
+                if entity.kind == super::state::EntityKind::Npc {
+                    if let Some(npc) = &entity.npc {
+                        let is_combatant = matches!(npc.economic_intent,
+                            super::state::EconomicIntent::Idle
+                            | super::state::EconomicIntent::Adventuring { .. }
+                        );
+                        if !is_combatant { continue; }
+                    }
                 }
+
+                members.push(entity.id);
             }
             new_memberships.push(members);
         }
@@ -1129,6 +1632,7 @@ impl WorldSim {
             .map(|q| q.id)
             .max()
             .unwrap_or(0) + 1;
+        let mut conquests: Vec<(u32, u32)> = Vec::new();
 
         // Process events that create quest postings.
         for event in &self.state.world_events {
@@ -1157,7 +1661,17 @@ impl WorldSim {
                     });
                     next_quest_id += 1;
                 }
+                WorldEvent::SettlementConquered { settlement_id, new_faction_id } => {
+                    conquests.push((*settlement_id, *new_faction_id));
+                }
                 _ => {}
+            }
+        }
+
+        // Apply settlement conquests (deferred to avoid borrow conflict).
+        for (sid, fid) in conquests {
+            if let Some(s) = self.state.settlement_mut(sid) {
+                s.faction_id = Some(fid);
             }
         }
 
@@ -1169,21 +1683,39 @@ impl WorldSim {
         use super::state::{EntityKind, ClassSlot};
 
         let min_behavior_sum = 10.0_f32;
+        let mut abilities_generated = 0u32;
+        let mut hero_milestones: Vec<(u32, String, String, String)> = Vec::new();
 
         for entity in &mut self.state.entities {
             if !entity.alive || entity.kind != EntityKind::Npc { continue; }
             let npc = match &mut entity.npc { Some(n) => n, None => continue };
 
             // Skip NPCs with insufficient behavior.
-            let behavior_sum: f32 = npc.behavior_values.iter().sum();
+            let behavior_sum: f32 = npc.behavior_profile.iter().map(|&(_, v)| v).sum();
             if behavior_sum < min_behavior_sum { continue; }
 
-            // Match against class templates.
-            let matches = self.class_gen.match_classes(&npc.behavior_tags, &npc.behavior_values);
+            // Soft cap: XP gain scales down as total level approaches 100.
+            // At 100 total, gain is 10% of normal. At 200, gain is ~1%.
+            const SOFT_CAP_LEVEL: f32 = 100.0;
 
-            let entity_seed = self.state.tick.wrapping_mul(2654435761) ^ entity.id as u64;
+            // Match against class templates.
+            let matches = self.class_gen.match_classes(&npc.behavior_profile);
+
+            let entity_seed = super::state::entity_hash(entity.id, self.state.tick, 0xC1A5) as u64;
+
+            let total_level: u16 = npc.classes.iter().map(|c| c.level).sum();
+
+            // Past 80 total: only the highest class can gain levels.
+            // Past 100 total: hard cap, no more levels.
+            let global_factor = 1.0 + (total_level as f32 / SOFT_CAP_LEVEL).powi(2);
 
             for class_match in &matches {
+                // No new classes past 80 total level.
+                if total_level >= 80 { break; }
+
+                // Score must exceed threshold × global factor to gain a new class.
+                if class_match.score < 0.3 * global_factor { continue; }
+
                 // Skip if NPC already has this class.
                 if npc.classes.iter().any(|c| c.class_name_hash == class_match.class_name_hash) {
                     continue;
@@ -1192,30 +1724,36 @@ impl WorldSim {
                 // Generate procedural name from behavior profile.
                 let display_name = super::naming::procedural_class_name(
                     &class_match.display_name,
-                    &npc.behavior_tags,
-                    &npc.behavior_values,
+                    &npc.behavior_profile,
                     entity_seed ^ class_match.class_name_hash as u64,
                 );
 
                 // Grant the class.
+                let class_display = display_name.clone();
                 npc.classes.push(ClassSlot {
                     class_name_hash: class_match.class_name_hash,
                     level: 1,
                     xp: 0.0,
                     display_name,
                 });
+
+                // Hero milestone: 5th class marks a rising hero (deferred to avoid borrow).
+                if npc.classes.len() == 5 {
+                    let hero_name = if !npc.name.is_empty() { npc.name.clone() }
+                        else { format!("Entity #{}", entity.id) };
+                    hero_milestones.push((entity.id, hero_name, npc.home_settlement_id.unwrap_or(0).to_string(), class_display));
+                }
             }
 
             // If no templates matched and behavior is high, try unique class.
             if matches.is_empty() && behavior_sum > 500.0 && npc.classes.is_empty() {
                 let seed = self.state.tick ^ entity.id as u64;
                 if let Some(class_def) = self.class_gen.generate_unique_class(
-                    &npc.behavior_tags, &npc.behavior_values, seed,
+                    &npc.behavior_profile, seed,
                 ) {
                     let display_name = super::naming::procedural_class_name(
                         &class_def.display_name,
-                        &npc.behavior_tags,
-                        &npc.behavior_values,
+                        &npc.behavior_profile,
                         seed,
                     );
                     npc.classes.push(ClassSlot {
@@ -1230,34 +1768,159 @@ impl WorldSim {
             // --- Per-class XP allocation + level-up ---
             // Each class gains XP proportional to behavior alignment with its template.
             // The ClassGenerator.match_classes() returns scores — use those.
-            let class_matches = self.class_gen.match_classes(&npc.behavior_tags, &npc.behavior_values);
+            let class_matches = self.class_gen.match_classes(&npc.behavior_profile);
+
+            let total_level: u16 = npc.classes.iter().map(|c| c.level).sum();
+
+            // Hard cap: no levels past 100 total.
+            if total_level >= 100 { continue; }
+
+            // At 80+: consolidate all classes into the single strongest one.
+            if total_level >= 80 && npc.classes.len() > 1 {
+                npc.classes.sort_by(|a, b| b.level.cmp(&a.level));
+                let absorbed_levels: u16 = npc.classes[1..].iter().map(|c| c.level).sum();
+                let absorbed_xp: f32 = npc.classes[1..].iter().map(|c| c.xp).sum();
+                npc.classes.truncate(1);
+                npc.classes[0].level += absorbed_levels;
+                npc.classes[0].xp += absorbed_xp;
+                // Re-check: don't exceed 100.
+                if npc.classes[0].level > 100 { npc.classes[0].level = 100; }
+            }
 
             for class_slot in &mut npc.classes {
-                if class_slot.level >= 100 { continue; } // max class level
+                if class_slot.level >= 100 { continue; }
 
                 // Find score for this class from template matching.
                 let score = class_matches.iter()
                     .find(|m| m.class_name_hash == class_slot.class_name_hash)
                     .map(|m| m.score)
-                    .unwrap_or(0.1); // minimum XP for classes without template match
+                    .unwrap_or(0.1);
 
-                // XP gain = score only. No behavior_sum multiplier.
-                // Score is typically 0.3–2.0. At 50-tick cadence, that's
-                // ~0.006–0.04 XP per tick. L10 needs 136 XP ≈ 3400–22000 ticks.
                 let xp_gain = score * 0.5;
                 class_slot.xp += xp_gain;
 
-                // Level-up: exponential XP curve.
-                // xp_to_next = 50 × e^(level × 0.1)
-                // L1:53, L5:82, L10:136, L20:369, L30:1004, L50:7389, L70:54598, L100:2.7M
-                let xp_to_next = 50.0 * (class_slot.level as f32 * 0.1).exp();
+                // Level-up XP floor: per-class exponential + global progression term.
+                // base = 50 × e^(class_level × 0.1)
+                // global = 1 + (total_level / 100)^2
+                // Effect: leveling slows as total approaches 100.
+                let base_xp = 50.0 * (class_slot.level as f32 * 0.1).exp();
+                let global_factor = 1.0 + (total_level as f32 / SOFT_CAP_LEVEL).powi(2);
+                let xp_to_next = base_xp * global_factor;
                 if class_slot.xp >= xp_to_next {
                     class_slot.xp -= xp_to_next;
                     class_slot.level += 1;
+
+                    // Generate ability on level-up at tier thresholds.
+                    let tier = match class_slot.level {
+                        2..=4 => Some(1),
+                        5..=7 => Some(2),
+                        10..=12 => Some(3),
+                        20..=22 => Some(4),
+                        35..=37 => Some(5),
+                        50..=52 => Some(6),
+                        70..=72 => Some(7),
+                        _ => None,
+                    };
+                    if let Some(tier) = tier {
+                        // Rate-limit ability generation to avoid tick spikes.
+                        // Max 10 abilities generated per class-assignment pass.
+                        if abilities_generated < 10 {
+                            let ability_seed = super::state::entity_hash(
+                                entity.id, self.state.tick,
+                                class_slot.class_name_hash as u64,
+                            ) as u64;
+                            let generated = self.ability_gen.generate_ability(
+                                class_slot.class_name_hash,
+                                &npc.archetype,
+                                tier,
+                                &npc.behavior_profile,
+                                ability_seed,
+                            );
+                            npc.class_tags.push(generated.dsl_text);
+                            abilities_generated += 1;
+                        }
+                    }
                 }
             }
         }
+
+        // --- Class pruning: consolidate fragmented classes ---
+        // If an NPC has more than 5 classes, drop the weakest (level < 5)
+        // and redistribute XP to the strongest class.
+        for entity in &mut self.state.entities {
+            if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+            let npc = match &mut entity.npc { Some(n) => n, None => continue };
+            if npc.classes.len() <= 5 { continue; }
+
+            // Sort by level descending, keep top 5 + anything >= L5.
+            npc.classes.sort_by(|a, b| b.level.cmp(&a.level));
+            let mut pruned_xp: f32 = 0.0;
+            let mut keep = Vec::new();
+            for c in npc.classes.drain(..) {
+                if keep.len() < 5 || c.level >= 5 {
+                    keep.push(c);
+                } else {
+                    pruned_xp += c.xp + c.level as f32 * 10.0;
+                }
+            }
+            npc.classes = keep;
+
+            // Redistribute pruned XP to the highest-level class.
+            if pruned_xp > 0.0 {
+                if let Some(best) = npc.classes.first_mut() {
+                    best.xp += pruned_xp;
+                }
+            }
+        }
+
+        // Apply deferred hero milestones to chronicle.
+        for (eid, hero_name, home_sid_str, class_name) in hero_milestones {
+            let home = home_sid_str.parse::<u32>().ok()
+                .and_then(|sid| self.state.settlement(sid))
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| "unknown".into());
+            self.state.chronicle.push(super::state::ChronicleEntry {
+                tick: self.state.tick,
+                category: super::state::ChronicleCategory::Achievement,
+                text: format!("{} of {} has become a hero of five disciplines, earning the {} class.",
+                    hero_name, home, class_name),
+                entity_ids: vec![eid],
+            });
+        }
     }
+
+    /// CA-driven city growth on settlement grids.
+    /// Called post-apply so it can mutate city grids directly.
+    fn grow_cities(&mut self) {
+        let old_count = self.state.entities.len();
+        super::systems::buildings::grow_cities(&mut self.state);
+
+        // If building entities were added, resize flat merge arrays.
+        if self.state.entities.len() > old_count {
+            let new_max = self.state.entities.iter().map(|e| e.id).max().unwrap_or(0) as usize + 1;
+            self.merged.ensure_capacity(new_max);
+        }
+    }
+}
+
+/// Generate a legendary name for an item with enough kills.
+fn generate_legendary_name(slot: super::state::ItemSlot, kills: usize, tick: u64, item_id: u32) -> String {
+    use super::state::ItemSlot;
+    let h = super::state::entity_hash(item_id, tick, 0x1E6D);
+
+    let prefix = match kills {
+        3..=5 => ["Blood", "Shadow", "Iron", "Storm"][h as usize % 4],
+        6..=9 => ["Dread", "Doom", "Death", "Wrath"][h as usize % 4],
+        _ => ["Soul", "World", "God", "Eternal"][h as usize % 4],
+    };
+
+    let suffix = match slot {
+        ItemSlot::Weapon => ["bringer", "cleaver", "fang", "edge", "reaper"][h as usize / 4 % 5],
+        ItemSlot::Armor => ["ward", "aegis", "bastion", "shell", "mantle"][h as usize / 4 % 5],
+        ItemSlot::Accessory => ["step", "sight", "whisper", "charm", "veil"][h as usize / 4 % 5],
+    };
+
+    format!("{}{}", prefix, suffix)
 }
 
 fn hot_entity_fidelity(h: &super::state::HotEntity, state: &WorldState) -> Fidelity {

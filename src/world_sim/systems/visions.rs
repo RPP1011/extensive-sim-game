@@ -13,6 +13,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
+use crate::world_sim::state::{entity_hash_f32};
 
 /// Vision generation cadence.
 const VISION_INTERVAL: u64 = 17;
@@ -20,11 +21,6 @@ const VISION_INTERVAL: u64 = 17;
 /// Morale buff duration on vision fulfillment.
 const VISION_BUFF_MS: u32 = 10_000;
 
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_visions(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % VISION_INTERVAL != 0 || state.tick == 0 {
@@ -68,7 +64,7 @@ pub fn compute_visions_for_settlement(
             continue;
         }
 
-        let roll = tick_hash(state.tick, entity.id as u64 ^ 0x0EAC1E);
+        let roll = entity_hash_f32(entity.id, state.tick, 0x0EAC1E);
         if roll < 0.05 {
             out.push(WorldDelta::ApplyStatus {
                 target_id: entity.id,

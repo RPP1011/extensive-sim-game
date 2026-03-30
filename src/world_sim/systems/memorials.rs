@@ -9,7 +9,7 @@
 //! Cadence: every 10 ticks (skips tick 0).
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, EntityKind, WorldState};
+use crate::world_sim::state::{Entity, EntityField, EntityKind, WorldState};
 
 // NEEDS STATE: pending_funerals: Vec<FuneralPending> on WorldState
 //   FuneralPending { adventurer_id, name, level, death_tick }
@@ -20,7 +20,6 @@ use crate::world_sim::state::{Entity, EntityKind, WorldState};
 // NEEDS STATE: guild gold, reputation
 // NEEDS DELTA: CreateMemorial { entity_id, memorial_type }
 // NEEDS DELTA: ExpireMemorial { memorial_id }
-// NEEDS DELTA: AdjustMorale { entity_id, delta }
 // NEEDS DELTA: AdjustReputation { delta }
 
 /// Cadence gate.
@@ -56,6 +55,37 @@ pub fn compute_memorials(state: &WorldState, out: &mut Vec<WorldDelta>) {
         collect_dead_npcs(state, &state.entities[range], &mut dead_npcs);
     }
 
+    // --- Grief morale effect ---
+    // When dead NPCs are found, all living NPCs at the same settlement
+    // suffer a grief morale penalty. Higher-level fallen comrades hurt more.
+    if !dead_npcs.is_empty() {
+        // Collect settlement IDs of dead NPCs to locate grieving survivors.
+        for settlement in &state.settlements {
+            let range = state.group_index.settlement_entities(settlement.id);
+            let entities = &state.entities[range];
+
+            // Only count RECENT deaths (from world events this tick), not all dead entities.
+            let recent_deaths = state.world_events.iter()
+                .filter(|e| matches!(e, crate::world_sim::state::WorldEvent::EntityDied { .. }))
+                .count();
+            if recent_deaths == 0 {
+                continue;
+            }
+
+            // Grief penalty from recent deaths (capped at 3).
+            let grief = -(recent_deaths.min(3) as f32) * 1.0;
+            for entity in entities {
+                if entity.alive && entity.kind == EntityKind::Npc {
+                    out.push(WorldDelta::UpdateEntityField {
+                        entity_id: entity.id,
+                        field: EntityField::Morale,
+                        value: grief,
+                    });
+                }
+            }
+        }
+    }
+
     // NEEDS STATE: check if dead NPCs already have pending funerals or memorials
     // For new deaths:
     //   Add to pending_funerals (NEEDS DELTA: CreatePendingFuneral)
@@ -73,7 +103,6 @@ pub fn compute_memorials(state: &WorldState, out: &mut Vec<WorldDelta>) {
     //   For all living NPC entities:
     //     effective_bonus = base_bonus + bond_strength * 0.05
     //     per_tick = effective_bonus / MEMORIAL_TICK_INTERVAL
-    //     out.push(WorldDelta::AdjustMorale { entity_id, delta: per_tick })
 
     // --- Funeral cost when HoldFuneral action is processed ---
     // HerosFuneral: 30 gold

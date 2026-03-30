@@ -9,14 +9,11 @@
 //!
 //! NEEDS STATE: `traits: Vec<String>` on NpcData (for "The Undying" check)
 //! NEEDS STATE: `loyalty: f32` on NpcData (loyalty > 80 triggers last stand)
-//! NEEDS STATE: `morale: f32` on NpcData (boosted on heroic victory)
 //! NEEDS STATE: `history_tags: HashMap<String, u32>` on NpcData (near_death count)
 //! NEEDS STATE: `bonds: Vec<(u32, u32, f32)>` on WorldState (bond strength lookup)
-//! NEEDS DELTA: UpdateMorale { entity_id, delta } (for morale boost on victory)
-//! NEEDS DELTA: UpdateReputation { entity_id, delta } (for guild reputation boost)
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{ActionTags, EntityKind, WorldState, WorldTeam, tags};
+use crate::world_sim::state::{ActionTags, EntityField, EntityKind, WorldState, WorldTeam, tags};
 
 /// HP ratio threshold below which a last stand can trigger.
 const LAST_STAND_HP_THRESHOLD: f32 = 0.15;
@@ -112,6 +109,26 @@ pub fn compute_last_stand_for_settlement(
                 amount: shield_amount,
                 source_id: hero_id,
             });
+        }
+
+        // Heroic rally: last stand boosts the hero's morale significantly.
+        out.push(WorldDelta::UpdateEntityField {
+            entity_id: hero_id,
+            field: EntityField::Morale,
+            value: 10.0,
+        });
+
+        // Nearby friendly NPCs are inspired by the last stand (rally effect).
+        for &eid in &grid.entity_ids {
+            if let Some(e) = state.entity(eid) {
+                if e.alive && e.kind == EntityKind::Npc && e.team == WorldTeam::Friendly && e.id != hero_id {
+                    out.push(WorldDelta::UpdateEntityField {
+                        entity_id: e.id,
+                        field: EntityField::Morale,
+                        value: 3.0,
+                    });
+                }
+            }
         }
 
         // Behavior tags: desperate combat earns high resilience/combat.

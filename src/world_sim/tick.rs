@@ -44,6 +44,8 @@ pub struct TickProfile {
     pub apply_grid_us: u64,
     pub apply_fidelity_us: u64,
     pub apply_price_reports_us: u64,
+    /// Post-apply systems (agent_inner, goals, work, pathfinding, families, etc.)
+    pub postapply_us: u64,
 }
 
 impl std::fmt::Display for TickProfile {

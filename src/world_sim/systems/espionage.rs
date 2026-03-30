@@ -14,6 +14,7 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{
     ActionTags, DiplomaticStance, EntityKind, FactionField, WorldEvent, WorldState, tags,
 };
+use crate::world_sim::state::pair_hash_f32;
 
 /// Cadence: runs every 7 ticks.
 const ESPIONAGE_INTERVAL: u64 = 7;
@@ -39,19 +40,6 @@ const CAUGHT_SPY_DAMAGE: f32 = 80.0;
 /// Faction relation penalty when a spy is caught.
 const CAUGHT_RELATION_PENALTY: f32 = 15.0;
 
-/// Deterministic hash for pseudo-random decisions.
-#[inline]
-fn deterministic_roll(tick: u64, id_a: u32, id_b: u32) -> f32 {
-    let mut h = tick
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(id_a as u64)
-        .wrapping_mul(2862933555777941757)
-        .wrapping_add(id_b as u64);
-    h = h
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407);
-    (h >> 33) as f32 / (1u64 << 31) as f32
-}
 
 pub fn compute_espionage(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % ESPIONAGE_INTERVAL != 0 || state.tick == 0 {
@@ -132,7 +120,7 @@ pub fn compute_espionage(state: &WorldState, out: &mut Vec<WorldDelta>) {
             });
 
             // --- Detection check ---
-            let roll = deterministic_roll(state.tick, entity.id, settlement.id);
+            let roll = pair_hash_f32(entity.id, settlement.id, state.tick, 0);
             // Stealth reduces detection: at STEALTH_SUPPRESS_AT value, detection is 0.
             let stealth_factor = (1.0 - stealth_val / STEALTH_SUPPRESS_AT).clamp(0.0, 1.0);
             // Higher population settlements are better at detecting spies.

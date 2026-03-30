@@ -1,12 +1,13 @@
 #![allow(unused)]
-//! Progression system — level-up from accumulated XP.
+//! Progression system — entity level = total class levels.
 //!
-//! This system does NOT grant XP. XP is granted by action systems.
-//! It checks if XP has crossed the level threshold, applies stat gains
-//! based on both global level AND class specialization.
+//! Entity level is derived from the sum of all class levels.
+//! Stat bonuses are granted when class levels increase (detected by
+//! comparing entity.level to the current class level sum).
 //!
-//! Class-based scaling: each class modifies which stats grow on level-up.
-//! A Warrior gains more attack+armor, a Healer gains more HP, etc.
+//! This system does NOT grant XP or drive leveling. Class leveling
+//! happens in run_class_matching(). This system syncs entity.level
+//! and applies stat gains from new class levels.
 //!
 //! Cadence: every 50 ticks.
 
@@ -14,8 +15,6 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, EntityField, WorldState, tag};
 
 const PROGRESSION_INTERVAL: u64 = 50;
-const XP_LEVEL_MULT: u32 = 100;
-const MAX_LEVEL: u32 = 50;
 
 // Base stat gains per level-up (before class modifiers).
 const BASE_MAX_HP: f32 = 5.0;
@@ -24,27 +23,38 @@ const BASE_ARMOR: f32 = 0.2;
 const BASE_SPEED: f32 = 0.02;
 
 // Class-specific bonus multipliers (added ON TOP of base).
-// Each class hash maps to (hp_bonus, attack_bonus, armor_bonus, speed_bonus).
 fn class_bonus(class_hash: u32) -> (f32, f32, f32, f32) {
     match class_hash {
-        h if h == tag(b"Warrior")   => (5.0, 2.0, 1.5, 0.0),   // tanky + hard hitting
-        h if h == tag(b"Guardian")  => (8.0, 0.5, 3.0, 0.0),   // very tanky
-        h if h == tag(b"Ranger")    => (2.0, 1.5, 0.3, 0.1),   // mobile + damage
-        h if h == tag(b"Healer")    => (10.0, 0.0, 0.5, 0.0),  // high HP to survive
-        h if h == tag(b"Merchant")  => (3.0, 0.0, 0.3, 0.05),  // moderate survivability
-        h if h == tag(b"Scholar")   => (2.0, 0.0, 0.2, 0.0),   // squishy
-        h if h == tag(b"Rogue")     => (1.0, 1.0, 0.0, 0.15),  // fast + damage
-        h if h == tag(b"Artisan")   => (3.0, 0.3, 0.5, 0.0),   // moderate
-        h if h == tag(b"Diplomat")  => (3.0, 0.0, 0.3, 0.03),  // moderate
-        h if h == tag(b"Commander") => (5.0, 1.0, 1.0, 0.0),   // leadership = tanky
-        h if h == tag(b"Farmer")    => (4.0, 0.3, 0.3, 0.0),   // hardy
-        h if h == tag(b"Miner")     => (6.0, 0.5, 1.0, 0.0),   // tough
-        h if h == tag(b"Woodsman")  => (4.0, 0.8, 0.5, 0.05),  // balanced
-        h if h == tag(b"Alchemist") => (2.0, 0.0, 0.2, 0.0),   // squishy
-        h if h == tag(b"Herbalist") => (5.0, 0.0, 0.3, 0.0),   // healer-adjacent
-        h if h == tag(b"Explorer")  => (3.0, 0.5, 0.3, 0.1),   // mobile
-        h if h == tag(b"Mentor")    => (4.0, 0.0, 0.5, 0.0),   // moderate
-        _ => (2.0, 0.3, 0.2, 0.0),                              // unknown class
+        h if h == tag(b"Warrior")   => (5.0, 2.0, 1.5, 0.0),
+        h if h == tag(b"Guardian")  => (8.0, 0.5, 3.0, 0.0),
+        h if h == tag(b"Ranger")    => (2.0, 1.5, 0.3, 0.1),
+        h if h == tag(b"Healer")    => (10.0, 0.0, 0.5, 0.0),
+        h if h == tag(b"Merchant")  => (3.0, 0.0, 0.3, 0.05),
+        h if h == tag(b"Scholar")   => (2.0, 0.0, 0.2, 0.0),
+        h if h == tag(b"Rogue")     => (1.0, 1.0, 0.0, 0.15),
+        h if h == tag(b"Artisan")   => (3.0, 0.3, 0.5, 0.0),
+        h if h == tag(b"Diplomat")  => (3.0, 0.0, 0.3, 0.03),
+        h if h == tag(b"Commander") => (5.0, 1.0, 1.0, 0.0),
+        h if h == tag(b"Farmer")    => (4.0, 0.3, 0.3, 0.0),
+        h if h == tag(b"Miner")     => (6.0, 0.5, 1.0, 0.0),
+        h if h == tag(b"Woodsman")  => (4.0, 0.8, 0.5, 0.05),
+        h if h == tag(b"Alchemist") => (2.0, 0.0, 0.2, 0.0),
+        h if h == tag(b"Herbalist") => (5.0, 0.0, 0.3, 0.0),
+        h if h == tag(b"Explorer")  => (3.0, 0.5, 0.3, 0.1),
+        h if h == tag(b"Mentor")    => (4.0, 0.0, 0.5, 0.0),
+        h if h == tag(b"Sentinel")  => (6.0, 0.5, 2.0, 0.0),
+        h if h == tag(b"Survivor")  => (8.0, 0.3, 0.5, 0.05),
+        h if h == tag(b"Warden")    => (5.0, 1.0, 2.0, 0.0),
+        h if h == tag(b"Veteran")   => (4.0, 2.0, 1.0, 0.0),
+        h if h == tag(b"Stalwart")  => (10.0, 0.0, 1.5, 0.0),
+        h if h == tag(b"Bard")      => (3.0, 0.0, 0.2, 0.1),   // mobile, charismatic
+        h if h == tag(b"Mariner")   => (5.0, 0.5, 0.5, 0.1),   // hardy sea dog
+        h if h == tag(b"Sea Captain") => (5.0, 1.0, 1.0, 0.05), // tough commander
+        h if h == tag(b"Delver")    => (4.0, 0.8, 1.0, 0.0),   // dungeon survivor
+        h if h == tag(b"Dungeon Master") => (3.0, 1.5, 1.5, 0.0), // tactical underground
+        h if h == tag(b"Oathkeeper")    => (8.0, 0.5, 2.0, 0.0),  // stalwart defender
+        h if h == tag(b"Betrayer")      => (2.0, 1.5, 0.0, 0.2),  // fast, deadly, fragile
+        _ => (2.0, 0.3, 0.2, 0.0),
     }
 }
 
@@ -68,53 +78,51 @@ pub fn compute_progression_for_settlement(
     for entity in entities {
         if !entity.alive || entity.kind != EntityKind::Npc { continue; }
         let npc = match &entity.npc { Some(n) => n, None => continue };
-        if entity.level >= MAX_LEVEL { continue; }
 
-        // Logarithmic XP curve: 200 × e^(level × 0.06)
-        // L1:200, L5:270, L10:364, L20:664, L30:1210, L50:4017
-        let threshold = (200.0 * (entity.level as f32 * 0.06).exp()) as u32;
-        if npc.xp < threshold { continue; }
+        // Entity level = total class levels (hard-derived).
+        let class_level_sum: u32 = npc.classes.iter().map(|c| c.level as u32).sum();
+        if class_level_sum == 0 { continue; }
 
-        // Compute class-weighted stat bonuses.
-        // If NPC has multiple classes, average their bonuses.
+        // How many NEW levels since last sync?
+        let new_levels = if class_level_sum > entity.level {
+            class_level_sum - entity.level
+        } else {
+            continue; // already synced or went down (consolidation)
+        };
+
+        // Compute class-weighted stat bonuses per level.
         let (mut hp_bonus, mut atk_bonus, mut armor_bonus, mut speed_bonus) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-        let class_count = npc.classes.len().max(1) as f32;
 
         if npc.classes.is_empty() {
-            // No class — base gains only.
+            // No class — base gains only (shouldn't happen since class_level_sum > 0).
         } else {
+            // Weight by class level: higher-level classes contribute more to stat gains.
+            let total_weight: f32 = npc.classes.iter().map(|c| c.level as f32).sum();
             for class in &npc.classes {
                 let (hp, atk, arm, spd) = class_bonus(class.class_name_hash);
-                hp_bonus += hp;
-                atk_bonus += atk;
-                armor_bonus += arm;
-                speed_bonus += spd;
+                let w = class.level as f32 / total_weight.max(1.0);
+                hp_bonus += hp * w;
+                atk_bonus += atk * w;
+                armor_bonus += arm * w;
+                speed_bonus += spd * w;
             }
-            hp_bonus /= class_count;
-            atk_bonus /= class_count;
-            armor_bonus /= class_count;
-            speed_bonus /= class_count;
         }
 
-        // Apply: base + class bonus.
-        let total_hp = BASE_MAX_HP + hp_bonus;
-        let total_atk = BASE_ATTACK + atk_bonus;
-        let total_armor = BASE_ARMOR + armor_bonus;
-        let total_speed = BASE_SPEED + speed_bonus;
+        let total_hp = (BASE_MAX_HP + hp_bonus) * new_levels as f32;
+        let total_atk = (BASE_ATTACK + atk_bonus) * new_levels as f32;
+        let total_armor = (BASE_ARMOR + armor_bonus) * new_levels as f32;
+        let total_speed = (BASE_SPEED + speed_bonus) * new_levels as f32;
 
-        // Increase MAX HP (not just current HP).
         out.push(WorldDelta::UpdateEntityField {
             entity_id: entity.id,
             field: EntityField::MaxHp,
             value: total_hp,
         });
-        // Also heal by the same amount so the NPC benefits immediately.
         out.push(WorldDelta::Heal {
             target_id: entity.id,
             amount: total_hp,
             source_id: entity.id,
         });
-
         out.push(WorldDelta::UpdateEntityField {
             entity_id: entity.id,
             field: EntityField::AttackDamage,
@@ -131,11 +139,14 @@ pub fn compute_progression_for_settlement(
             value: total_speed,
         });
 
-        // Increment level.
-        out.push(WorldDelta::UpdateEntityField {
-            entity_id: entity.id,
-            field: EntityField::Level,
-            value: 1.0,
-        });
+        // Sync entity level to class level sum.
+        let level_delta = class_level_sum as f32 - entity.level as f32;
+        if level_delta.abs() > 0.5 {
+            out.push(WorldDelta::UpdateEntityField {
+                entity_id: entity.id,
+                field: EntityField::Level,
+                value: level_delta,
+            });
+        }
     }
 }

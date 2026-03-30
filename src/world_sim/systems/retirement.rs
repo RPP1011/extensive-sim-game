@@ -10,6 +10,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, WorldState};
+use crate::world_sim::state::{entity_hash, entity_hash_f32};
 
 // NEEDS STATE: morale: f32 on NpcData (or Entity)
 // NEEDS STATE: loyalty: f32 on NpcData (or Entity)
@@ -191,8 +192,8 @@ pub fn compute_retirement_for_settlement(
         }
 
         // Deterministic retirement roll.
-        let hash = tick_entity_hash(state.tick, entity.id);
-        let roll = hash_to_f32(hash);
+        let hash = entity_hash(entity.id, state.tick, 0) as u64;
+        let roll = entity_hash_f32(entity.id, state.tick, 0);
         if roll >= AUTO_RETIRE_CHANCE {
             continue;
         }
@@ -226,22 +227,3 @@ pub fn compute_retirement_for_settlement(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Deterministic RNG helpers
-// ---------------------------------------------------------------------------
-
-fn tick_entity_hash(tick: u64, entity_id: u32) -> u64 {
-    let mut h = tick
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(entity_id as u64);
-    h ^= h >> 33;
-    h = h.wrapping_mul(0xff51afd7ed558ccd);
-    h ^= h >> 33;
-    h = h.wrapping_mul(0xc4ceb9fe1a85ec53);
-    h ^= h >> 33;
-    h
-}
-
-fn hash_to_f32(h: u64) -> f32 {
-    (h >> 40) as f32 / (1u64 << 24) as f32
-}

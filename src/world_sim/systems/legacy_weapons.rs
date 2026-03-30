@@ -12,6 +12,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
+use crate::world_sim::state::{entity_hash_f32};
 
 /// Legacy weapon check interval.
 const LEGACY_WEAPON_INTERVAL: u64 = 17;
@@ -22,11 +23,6 @@ const WEAPON_BUFF_FACTOR: f32 = 1.10;
 /// Buff duration (re-applied each tick cycle).
 const WEAPON_BUFF_MS: u32 = 17_000;
 
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_legacy_weapons(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % LEGACY_WEAPON_INTERVAL != 0 || state.tick == 0 {
@@ -69,7 +65,7 @@ pub fn compute_legacy_weapons_for_settlement(
             continue;
         }
 
-        let roll = tick_hash(state.tick, entity.id as u64 ^ 0x540ED);
+        let roll = entity_hash_f32(entity.id, state.tick, 0x540ED);
         if roll < 0.08 {
             out.push(WorldDelta::ApplyStatus {
                 target_id: entity.id,

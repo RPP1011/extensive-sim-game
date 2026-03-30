@@ -11,6 +11,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
+use crate::world_sim::state::entity_hash_f32;
 
 // NEEDS STATE: grudges: Vec<Grudge> on WorldState or Entity
 //   Grudge { id, adventurer_id, target: GrudgeTarget, intensity, cause, formed_tick, resolved }
@@ -73,7 +74,7 @@ pub fn compute_grudges(state: &WorldState, out: &mut Vec<WorldDelta>) {
         if hp_ratio < 0.2 && entity.grid_id.is_some() {
             // NEEDS STATE: check if grudge already exists
             // NEEDS DELTA: CreateGrudge
-            let _roll = deterministic_roll(state.tick, entity.id);
+            let _roll = entity_hash_f32(entity.id, state.tick, 0);
         }
     }
 
@@ -119,12 +120,3 @@ pub fn acts_recklessly(_entity_id: u32, _enemy_faction_id: u32) -> bool {
 // Deterministic RNG helper
 // ---------------------------------------------------------------------------
 
-fn deterministic_roll(tick: u64, id: u32) -> f32 {
-    let h = tick
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(id as u64);
-    let h = h ^ (h >> 33);
-    let h = h.wrapping_mul(0xff51afd7ed558ccd);
-    let h = h ^ (h >> 33);
-    (h & 0xFFFF) as f32 / 65536.0
-}

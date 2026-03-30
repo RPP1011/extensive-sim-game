@@ -12,6 +12,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{entity_hash_f32};
 
 /// Story tick interval.
 const STORY_INTERVAL: u64 = 17;
@@ -22,11 +23,6 @@ const POSITIVE_STORY_GOLD: f32 = 3.0;
 /// Treasury drain from negative stories.
 const NEGATIVE_STORY_DRAIN: f32 = 2.0;
 
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_reputation_stories(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % STORY_INTERVAL != 0 || state.tick == 0 {
@@ -38,7 +34,7 @@ pub fn compute_reputation_stories(state: &WorldState, out: &mut Vec<WorldDelta>)
     // Settlements with very low treasury (bad reputation) suffer a drain.
 
     for settlement in &state.settlements {
-        let roll = tick_hash(state.tick, settlement.id as u64 ^ 0x570E1);
+        let roll = entity_hash_f32(settlement.id, state.tick, 0x570E1);
         if settlement.treasury > 60.0 && roll < 0.15 {
             out.push(WorldDelta::UpdateTreasury {
                 location_id: settlement.id,

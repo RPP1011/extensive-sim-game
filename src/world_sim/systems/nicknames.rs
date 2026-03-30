@@ -11,6 +11,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, WorldState};
+use crate::world_sim::state::entity_hash;
 
 // NEEDS STATE: nicknames: Vec<Nickname> on Entity/NpcData
 //   Nickname { title, earned_tick, source: NicknameSource, reputation_modifier }
@@ -95,7 +96,6 @@ pub fn compute_nicknames_for_settlement(
 
 /// Pick a deterministic nickname from a template list.
 fn pick_nickname<'a>(templates: &'a [&str], tick: u64, entity_id: u32) -> &'a str {
-    let h = tick.wrapping_mul(2654435761) ^ (entity_id as u64).wrapping_mul(40503);
-    let idx = (h as usize) % templates.len();
+    let idx = entity_hash(entity_id, tick, 0xA1C4) as usize % templates.len();
     templates[idx]
 }

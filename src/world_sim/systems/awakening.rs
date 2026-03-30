@@ -12,6 +12,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
+use crate::world_sim::state::{entity_hash_f32};
 
 /// How often the awakening system ticks.
 const AWAKENING_INTERVAL: u64 = 33;
@@ -28,11 +29,6 @@ const AWAKENING_HEAL_FRACTION: f32 = 1.0;
 /// Buff duration representing awakened power (long-lasting proxy).
 const AWAKENING_BUFF_MS: u32 = 60_000;
 
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_awakening(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % AWAKENING_INTERVAL != 0 || state.tick == 0 {
@@ -73,7 +69,7 @@ pub fn compute_awakening_for_settlement(
         }
 
         // Roll for awakening
-        let roll = tick_hash(state.tick, entity.id as u64 ^ 0xA4AC);
+        let roll = entity_hash_f32(entity.id, state.tick, 0xA4AC);
         if roll >= AWAKENING_CHANCE {
             continue;
         }

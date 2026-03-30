@@ -15,6 +15,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EconomicIntent, EntityKind, WorldState, WorldTeam};
+use crate::world_sim::state::{entity_hash_f32, pair_hash_f32};
 use crate::world_sim::NUM_COMMODITIES;
 
 /// Cadence: runs every 7 ticks.
@@ -29,12 +30,6 @@ const INTERDICTION_DRAIN_MULT: f32 = 0.05;
 /// Distance (squared) at which friendly entities protect traders.
 const PATROL_RANGE_SQ: f32 = 64.0; // 8 units
 
-/// Deterministic hash for pseudo-random decisions from immutable state.
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_supply_lines(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % SUPPLY_LINE_TICK_INTERVAL != 0 {
@@ -111,7 +106,7 @@ pub fn compute_supply_lines(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 }
 
                 // Also deal minor damage.
-                let roll = tick_hash(state.tick, entity.id as u64 ^ hostile_id as u64);
+                let roll = pair_hash_f32(entity.id, hostile_id, state.tick, 0);
                 if roll < 0.2 {
                     out.push(WorldDelta::Damage {
                         target_id: entity.id,

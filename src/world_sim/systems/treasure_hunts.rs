@@ -5,6 +5,9 @@
 //! treasure steps, earning escalating gold rewards. Final step yields a
 //! large gold bonus and commodity goods (representing artifacts).
 //!
+//! **Gold conservation:** Rewards are paid from the NPC's home settlement
+//! treasury. If the settlement cannot afford the reward, no gold is paid.
+//!
 //! Ported from `crates/headless_campaign/src/systems/treasure_hunts.rs`.
 //!
 //! NEEDS STATE: `treasure_maps: Vec<TreasureMap>` on WorldState
@@ -20,6 +23,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState, WorldTeam};
+use crate::world_sim::state::entity_hash;
 
 /// How often the treasure hunt system ticks.
 const TICK_INTERVAL: u64 = 7;
@@ -35,9 +39,6 @@ const FINAL_STEP_MULTIPLIER: f32 = 3.0;
 
 /// Commodity index for treasure goods (artifact equivalent).
 const TREASURE_COMMODITY: usize = 7; // Last commodity slot
-
-/// Guild entity ID sentinel.
-const GUILD_ENTITY_ID: u32 = 0;
 
 pub fn compute_treasure_hunts(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % TICK_INTERVAL != 0 || state.tick == 0 {
@@ -87,8 +88,7 @@ pub fn compute_treasure_hunts(state: &WorldState, out: &mut Vec<WorldDelta>) {
             }
 
             // Deterministic treasure discovery roll (entity id + tick based)
-            let roll_seed = (entity.id as u64).wrapping_mul(6364136223846793005) ^ state.tick;
-            let roll = (roll_seed % 1000) as f32 / 1000.0;
+            let roll = (entity_hash(entity.id, state.tick, 0x78EA) % 1000) as f32 / 1000.0;
 
             // 5% chance per interval to find treasure
             if roll > 0.05 {
@@ -100,22 +100,26 @@ pub fn compute_treasure_hunts(state: &WorldState, out: &mut Vec<WorldDelta>) {
             let distance_multiplier = (distance / 25.0).min(4.0); // cap at 4x
             let step_reward = BASE_STEP_REWARD * distance_multiplier;
 
-            // Gold reward to the NPC
-            out.push(WorldDelta::TransferGold {
-                from_id: GUILD_ENTITY_ID,
-                to_id: entity.id,
-                amount: step_reward,
-            });
+            // Gold reward paid from home settlement treasury
+            if settlement.treasury > step_reward {
+                out.push(WorldDelta::TransferGold {
+                    from_id: settlement.id,
+                    to_id: entity.id,
+                    amount: step_reward,
+                });
+            }
 
             // At max distance, also award treasure commodity (artifact equivalent)
             if distance_multiplier >= 3.0 {
                 // Final step: large bonus + treasure goods
                 let final_bonus = step_reward * FINAL_STEP_MULTIPLIER;
-                out.push(WorldDelta::TransferGold {
-                    from_id: GUILD_ENTITY_ID,
-                    to_id: entity.id,
-                    amount: final_bonus,
-                });
+                if settlement.treasury > step_reward + final_bonus {
+                    out.push(WorldDelta::TransferGold {
+                        from_id: settlement.id,
+                        to_id: entity.id,
+                        amount: final_bonus,
+                    });
+                }
 
                 // Award treasure commodity to NPC's home settlement
                 out.push(WorldDelta::UpdateStockpile {

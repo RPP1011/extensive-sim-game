@@ -8,7 +8,8 @@
 //! Ported from `crates/headless_campaign/src/systems/battles.rs`.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{ActionTags, WorldState, tags};
+use crate::world_sim::naming::entity_display_name;
+use crate::world_sim::state::{ActionTags, ChronicleCategory, ChronicleEntry, WorldState, tags};
 
 // NEEDS STATE: active_battles: Vec<BattleState> on WorldState
 // NEEDS STATE: BattleState { id, quest_id, party_id, enemy_strength, elapsed_ticks,
@@ -103,6 +104,23 @@ fn compute_battles_for_grid(
             for &fid in friendlies {
                 out.push(WorldDelta::Damage { target_id: fid, amount: dmg_each, source_id: hid });
 
+                // Chronicle: monster kills a high-level NPC (level >= 20).
+                let friendly_hp = state.entity(fid).map(|e| e.hp).unwrap_or(0.0);
+                let friendly_level = state.entity(fid).map(|e| e.level).unwrap_or(0);
+                if friendly_hp <= dmg_each && friendly_level >= 20 {
+                    let npc_name = state.entity(fid).map(|e| entity_display_name(e)).unwrap_or_default();
+                    let monster_name = state.entity(hid).map(|e| entity_display_name(e)).unwrap_or_default();
+                    let pos = state.entity(fid).map(|e| e.pos).unwrap_or((0.0, 0.0));
+                    out.push(WorldDelta::RecordChronicle {
+                        entry: ChronicleEntry {
+                            tick: state.tick,
+                            category: ChronicleCategory::Battle,
+                            text: format!("{} was slain by {} near ({:.0}, {:.0})", npc_name, monster_name, pos.0, pos.1),
+                            entity_ids: vec![fid, hid],
+                        },
+                    });
+                }
+
                 // Behavior tags: taking damage builds defense/endurance.
                 let mut action = ActionTags::empty();
                 action.add(tags::DEFENSE, 0.5);
@@ -114,7 +132,7 @@ fn compute_battles_for_grid(
             }
         }
     }
-    // Friendlies attack hostiles + earn combat XP
+    // Friendlies attack hostiles
     for &fid in friendlies {
         let atk = state.entity(fid).map(|e| e.attack_damage).unwrap_or(0.0);
         let dmg_each = atk / hcount;
@@ -122,22 +140,24 @@ fn compute_battles_for_grid(
             for &hid in hostiles {
                 out.push(WorldDelta::Damage { target_id: hid, amount: dmg_each, source_id: fid });
 
-                // Kill XP: if this hit would kill the hostile, grant bonus XP.
                 let hostile_hp = state.entity(hid).map(|e| e.hp).unwrap_or(0.0);
-                let hostile_level = state.entity(hid).map(|e| e.level).unwrap_or(1);
                 if hostile_hp - dmg_each <= 0.0 {
-                    // Kill XP scaled by hostile level (split among all friendlies).
-                    let kill_xp = (hostile_level * 5 + 10) / fc as u32;
-                    for &friend in friendlies {
-                        out.push(WorldDelta::AddXp {
-                            entity_id: friend,
-                            amount: kill_xp.max(1),
-                        });
-                    }
                     // Behavior tags: kill grants heavy combat tags.
                     let mut kill_action = ActionTags::empty();
                     kill_action.add(tags::COMBAT, 2.0);
                     out.push(WorldDelta::AddBehaviorTags { entity_id: fid, tags: kill_action.tags, count: kill_action.count });
+
+                    // Chronicle: NPC slew a named monster.
+                    let npc_name = state.entity(fid).map(|e| entity_display_name(e)).unwrap_or_default();
+                    let monster_name = state.entity(hid).map(|e| entity_display_name(e)).unwrap_or_default();
+                    out.push(WorldDelta::RecordChronicle {
+                        entry: ChronicleEntry {
+                            tick: state.tick,
+                            category: ChronicleCategory::Battle,
+                            text: format!("{} slew {}", npc_name, monster_name),
+                            entity_ids: vec![fid, hid],
+                        },
+                    });
                 }
             }
 
@@ -150,8 +170,6 @@ fn compute_battles_for_grid(
                 out.push(WorldDelta::AddBehaviorTags { entity_id: fid, tags: action.tags, count: action.count });
             }
 
-            // Combat participation XP: 1 XP per attack action.
-            out.push(WorldDelta::AddXp { entity_id: fid, amount: 1 });
         }
     }
 }

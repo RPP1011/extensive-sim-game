@@ -5,6 +5,9 @@
 //! Bounty completion rewards gold via TransferGold. High-threat regions
 //! generate implicit bounty pressure via UpdateTreasury funding.
 //!
+//! **Gold conservation:** Bounty rewards are paid from the nearest settlement
+//! treasury. If the settlement cannot afford it, no gold is paid.
+//!
 //! Ported from `crates/headless_campaign/src/systems/bounties.rs`.
 
 use crate::world_sim::delta::WorldDelta;
@@ -12,12 +15,10 @@ use crate::world_sim::state::{
     ChronicleCategory, DiplomaticStance, EntityField, EntityKind, FactionField,
     WorldEvent, WorldState, WorldTeam,
 };
+use crate::world_sim::state::pair_hash_f32;
 
 /// How often the bounty system ticks (in world sim ticks).
 const BOUNTY_INTERVAL: u64 = 10;
-
-/// Guild entity ID sentinel (by convention, entity id 0 is the guild).
-const GUILD_ENTITY_ID: u32 = 0;
 
 /// Monster level threshold for "high-value" bounty target.
 const HIGH_VALUE_LEVEL_THRESHOLD: u32 = 5;
@@ -40,19 +41,6 @@ const THREAT_FUNDING_RATE: f32 = 0.05;
 /// Maximum bounty events per tick (prevent log spam).
 const MAX_BOUNTY_EVENTS_PER_TICK: usize = 5;
 
-/// Deterministic hash for pseudo-random decisions.
-#[inline]
-fn deterministic_roll(tick: u64, id_a: u32, id_b: u32) -> f32 {
-    let mut h = tick
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(id_a as u64)
-        .wrapping_mul(2862933555777941757)
-        .wrapping_add(id_b as u64);
-    h = h
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407);
-    (h >> 33) as f32 / (1u64 << 31) as f32
-}
 
 pub fn compute_bounties(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % BOUNTY_INTERVAL != 0 || state.tick == 0 {
@@ -97,25 +85,45 @@ pub fn compute_bounties(state: &WorldState, out: &mut Vec<WorldDelta>) {
             continue;
         }
 
+        // Find the nearest settlement to fund the bounty.
+        let grid_center = grid
+            .entity_ids
+            .first()
+            .and_then(|&eid| state.entity(eid))
+            .map(|e| e.pos)
+            .unwrap_or((0.0, 0.0));
+
+        let nearest_settlement = state.settlements.iter().min_by(|a, b| {
+            let da = (a.pos.0 - grid_center.0).powi(2) + (a.pos.1 - grid_center.1).powi(2);
+            let db = (b.pos.0 - grid_center.0).powi(2) + (b.pos.1 - grid_center.1).powi(2);
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let funding_settlement = match nearest_settlement {
+            Some(s) => s,
+            None => continue,
+        };
+
         // Bounty reward per dead high-value target, split among friendlies.
         for target in &dead_hv_targets {
             let bounty_gold = compute_bounty_reward(target, &hostile_faction_ids);
+
+            // Settlement must be able to afford the bounty
+            if funding_settlement.treasury <= bounty_gold {
+                continue;
+            }
+
             let gold_each = bounty_gold / friendlies.len() as f32;
 
             for friendly in &friendlies {
                 if gold_each > 0.0 {
                     out.push(WorldDelta::TransferGold {
-                        from_id: GUILD_ENTITY_ID,
+                        from_id: funding_settlement.id,
                         to_id: friendly.id,
                         amount: gold_each,
                     });
                 }
 
-                // XP reward.
-                out.push(WorldDelta::AddXp {
-                    entity_id: friendly.id,
-                    amount: BOUNTY_XP_REWARD,
-                });
             }
 
             // Record bounty completion event.
@@ -173,7 +181,7 @@ pub fn compute_bounties(state: &WorldState, out: &mut Vec<WorldDelta>) {
             }
 
             // Stagger posting: not every target gets posted every tick.
-            let roll = deterministic_roll(state.tick, settlement.id, entity.id);
+            let roll = pair_hash_f32(settlement.id, entity.id, state.tick, 0);
             if roll > 0.25 {
                 continue;
             }

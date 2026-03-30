@@ -13,6 +13,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState};
+use crate::world_sim::state::{entity_hash_f32};
 
 /// Corruption tick interval.
 const CORRUPTION_INTERVAL: u64 = 7;
@@ -29,11 +30,6 @@ const SUPPLY_LOSS: f32 = 2.0;
 /// Damage to NPCs at severe corruption (morale/desertion proxy).
 const DESERTION_DAMAGE: f32 = 3.0;
 
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_corruption(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % CORRUPTION_INTERVAL != 0 || state.tick == 0 {
@@ -54,7 +50,7 @@ pub fn compute_corruption(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
         // Moderate corruption (0.5-1.0): gold siphoning
         if corruption_proxy >= 0.5 && settlement.treasury > -100.0 {
-            let roll = tick_hash(state.tick, settlement.id as u64 ^ 0xC0EAEB);
+            let roll = entity_hash_f32(settlement.id, state.tick, 0xC0EAEB);
             if roll < 0.10 {
                 out.push(WorldDelta::UpdateTreasury {
                     location_id: settlement.id,
@@ -65,7 +61,7 @@ pub fn compute_corruption(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
         // High corruption (1.0-1.5): supply loss
         if corruption_proxy >= 1.0 {
-            let roll = tick_hash(state.tick, settlement.id as u64 ^ 0x5EFFA1);
+            let roll = entity_hash_f32(settlement.id, state.tick, 0x5EFFA1);
             if roll < 0.08 {
                 out.push(WorldDelta::ConsumeCommodity {
                     location_id: settlement.id,
@@ -83,7 +79,7 @@ pub fn compute_corruption(state: &WorldState, out: &mut Vec<WorldDelta>) {
                         if let Some(entity) = state.entity(entity_id) {
                             if entity.alive && entity.kind == EntityKind::Npc {
                                 let roll =
-                                    tick_hash(state.tick, entity_id as u64 ^ 0xDE5EBB);
+                                    entity_hash_f32(entity_id, state.tick, 0xDE5EBB);
                                 if roll < 0.03 {
                                     out.push(WorldDelta::Damage {
                                         target_id: entity_id,

@@ -13,15 +13,11 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{entity_hash_f32};
 
 /// World event choices check cadence.
 const WORLD_EVENT_INTERVAL: u64 = 10;
 
-fn tick_hash(tick: u64, salt: u64) -> f32 {
-    let x = tick.wrapping_mul(6364136223846793005).wrapping_add(salt);
-    let x = x.wrapping_mul(1103515245).wrapping_add(12345);
-    ((x >> 33) as u32) as f32 / u32::MAX as f32
-}
 
 pub fn compute_choices(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick == 0 || state.tick % WORLD_EVENT_INTERVAL != 0 {
@@ -33,10 +29,10 @@ pub fn compute_choices(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // "resolved choice outcomes".
 
     for settlement in &state.settlements {
-        let roll = tick_hash(state.tick, settlement.id as u64 ^ 0xC401CE);
+        let roll = entity_hash_f32(settlement.id, state.tick, 0xC401CE);
         if roll < 0.05 {
             // Random event: small gold change (positive or negative)
-            let amount_roll = tick_hash(state.tick, settlement.id as u64 ^ 0xA3B7);
+            let amount_roll = entity_hash_f32(settlement.id, state.tick, 0xA3B7);
             let amount = if amount_roll < 0.5 { 10.0 } else { -5.0 };
             out.push(WorldDelta::UpdateTreasury {
                 location_id: settlement.id,

@@ -13,6 +13,7 @@ mod bfs_analyze;
 mod champion_gen;
 mod vae_dataset_cmd;
 mod world_sim_cmd;
+mod visualize_cmd;
 
 use std::process::ExitCode;
 
@@ -203,5 +204,6 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         TaskCommand::WorldSim(args) => world_sim_cmd::run_world_sim(args),
+        TaskCommand::Visualize(args) => visualize_cmd::run_visualize(args),
     }
 }
