@@ -9,7 +9,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{
-    ActionTags, Entity, EntityField, EconomicIntent, WorldState, tags,
+    ActionTags, Entity, EconomicIntent, WorldState, tags,
     entity_hash, entity_hash_f32,
 };
 
@@ -79,14 +79,7 @@ pub fn compute_hobbies_for_settlement(
             count: action.count,
         });
 
-        // Small morale boost from engaging in a hobby (0.5 to 1.0,
-        // deterministic based on entity id + tick).
-        let morale_boost = 0.5 + deterministic_frac(entity.id, state.tick, 7) * 0.5;
-        out.push(WorldDelta::UpdateEntityField {
-            entity_id: entity.id,
-            field: EntityField::Morale,
-            value: morale_boost,
-        });
+        // Morale boost handled by agent_inner needs system (purpose satisfaction).
     }
 }
 

@@ -105,18 +105,7 @@ pub fn compute_romance_for_settlement(
 
             if affinity < AFFINITY_THRESHOLD { continue; }
 
-            // Romantic bond effects: mutual morale boost.
-            let morale_boost = (affinity - AFFINITY_THRESHOLD) * 2.0;
-            out.push(WorldDelta::UpdateEntityField {
-                entity_id: id_a,
-                field: EntityField::Morale,
-                value: morale_boost.min(3.0),
-            });
-            out.push(WorldDelta::UpdateEntityField {
-                entity_id: id_b,
-                field: EntityField::Morale,
-                value: morale_boost.min(3.0),
-            });
+            // Morale boost handled by agent_inner social needs.
 
             // Cooperation tags: both get social behavior.
             let mut action = ActionTags::empty();

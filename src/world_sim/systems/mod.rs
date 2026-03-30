@@ -233,7 +233,7 @@ pub fn compute_settlement_systems(state: &WorldState, out: &mut Vec<WorldDelta>)
     // equipment_durability: compute phase is a no-op (durability handled in post-apply advance_item_durability)
     run_system!("equipping", equipping::compute_equipping, state, out);
     run_system!("moods", moods::compute_moods, state, out);
-    run_system!("bonds", bonds::compute_bonds, state, out);
+    // bonds: stub (bond deltas not implemented)
     run_system!("npc_relationships", npc_relationships::compute_npc_relationships, state, out);
     run_system!("npc_reputation", npc_reputation::compute_npc_reputation, state, out);
     run_system!("romance", romance::compute_romance, state, out);
@@ -243,7 +243,7 @@ pub fn compute_settlement_systems(state: &WorldState, out: &mut Vec<WorldDelta>)
     run_system!("nicknames", nicknames::compute_nicknames, state, out);
     run_system!("legendary_deeds", legendary_deeds::compute_legendary_deeds, state, out);
     run_system!("folk_hero", folk_hero::compute_folk_hero, state, out);
-    run_system!("memorials", memorials::compute_memorials, state, out);
+    // memorials: redundant (grief morale handled by agent_inner)
     run_system!("trophies", trophies::compute_trophies, state, out);
     run_system!("awakening", awakening::compute_awakening, state, out);
     run_system!("visions", visions::compute_visions, state, out);
@@ -305,9 +305,9 @@ pub fn compute_global_systems(state: &WorldState, out: &mut Vec<WorldDelta>) {
     run_system!("difficulty_scaling", difficulty_scaling::compute_difficulty_scaling, state, out);
 
     // Quest systems (iterate quest state, not entities)
-    run_system!("quest_generation", quest_generation::compute_quest_generation, state, out);
+    // quest_generation: stub (logic commented out, awaiting SpawnQuestRequest delta)
     run_system!("quest_lifecycle", quest_lifecycle::compute_quest_lifecycle, state, out);
-    run_system!("quest_expiry", quest_expiry::compute_quest_expiry, state, out);
+    // quest_expiry: stub (no-op function body)
     run_system!("seasonal_quests", seasonal_quests::compute_seasonal_quests, state, out);
     run_system!("bounties", bounties::compute_bounties, state, out);
     run_system!("treasure_hunts", treasure_hunts::compute_treasure_hunts, state, out);
@@ -333,7 +333,7 @@ pub fn compute_global_systems(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // Social global (entity pairs across settlements)
     // reputation_decay: stub (guild reputation not tracked)
     run_system!("reputation_stories", reputation_stories::compute_reputation_stories, state, out);
-    run_system!("rumors", rumors::compute_rumors, state, out);
+    // rumors: stub (rumor state not tracked)
     run_system!("chronicle", chronicle::compute_chronicle, state, out);
     run_system!("marriages", marriages::compute_marriages, state, out);
     run_system!("grudges", grudges::compute_grudges, state, out);
@@ -342,7 +342,7 @@ pub fn compute_global_systems(state: &WorldState, out: &mut Vec<WorldDelta>) {
     run_system!("secrets", secrets::compute_secrets, state, out);
     // prisoners: stub (all logic commented out), skipped
     run_system!("wanted", wanted::compute_wanted, state, out);
-    run_system!("leadership", leadership::compute_leadership, state, out);
+    // leadership: redundant (morale-only, handled by agent_inner)
     // guild_identity: stub (computes signals but emits no deltas), skipped
 
     // Economic global
