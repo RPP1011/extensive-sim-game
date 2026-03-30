@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Regional threat tracking — fires every 50 ticks.
 //!
 //! Threat level per region increases with monster density and decreases

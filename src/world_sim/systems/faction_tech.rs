@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Faction technology system — every 17 ticks.
 //!
 //! Factions research improvements in military, economic, and diplomatic
@@ -10,7 +9,6 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
-use crate::world_sim::state::entity_hash_f32;
 
 //   FactionState { id, diplomatic_stance, coalition_member, relationship_to_guild,
 //                  military_strength, max_military_strength, at_war_with }
@@ -24,7 +22,7 @@ use crate::world_sim::state::entity_hash_f32;
 const TECH_INTERVAL: u64 = 17;
 
 
-pub fn compute_faction_tech(state: &WorldState, out: &mut Vec<WorldDelta>) {
+pub fn compute_faction_tech(state: &WorldState, _out: &mut Vec<WorldDelta>) {
     if state.tick % TECH_INTERVAL != 0 || state.tick == 0 {
         return;
     }

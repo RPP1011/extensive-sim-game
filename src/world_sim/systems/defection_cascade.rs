@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Defection cascade system — every 7 ticks.
 //!
 //! When a high-status adventurer defects from a faction, it triggers a cascade
@@ -9,7 +8,6 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
-use crate::world_sim::state::entity_hash_f32;
 
 //   FactionState { id, relationship_to_guild }
 //   AdventurerState { id, faction_id: Option<u32>, loyalty: f32, morale: f32,
@@ -26,7 +24,7 @@ const MAX_CASCADE_DEPTH: u32 = 3;
 const DEFECTION_INTERVAL: u64 = 7;
 
 
-pub fn compute_defection_cascade(state: &WorldState, out: &mut Vec<WorldDelta>) {
+pub fn compute_defection_cascade(state: &WorldState, _out: &mut Vec<WorldDelta>) {
     if state.tick % DEFECTION_INTERVAL != 0 || state.tick == 0 {
         return;
     }

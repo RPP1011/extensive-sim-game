@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Mercenary contract system — fires every 7 ticks.
 //!
 //! Hired mercenaries drain gold each cycle and may desert or betray if

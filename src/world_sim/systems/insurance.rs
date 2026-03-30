@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Insurance contracts system — fires every 7 ticks.
 //!
 //! Ported from `crates/headless_campaign/src/systems/insurance.rs`.

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Population growth — settlements with food surplus produce new NPCs.
 //!
 //! Uses entity pooling: dead NPCs are recycled via Heal + Move.
@@ -9,7 +8,6 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, WorldState};
-use crate::world_sim::state::{entity_hash_f32};
 use crate::world_sim::commodity;
 
 const GROWTH_INTERVAL: u64 = 10;

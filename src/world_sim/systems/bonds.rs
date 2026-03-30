@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Adventurer bond system — delta architecture port.
 //!
 //! Bonds grow between NPC entities that share a grid (party co-location proxy)
@@ -55,9 +54,9 @@ pub fn compute_bonds(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_bonds_for_settlement(
     state: &WorldState,
-    settlement_id: u32,
+    _settlement_id: u32,
     entities: &[Entity],
-    out: &mut Vec<WorldDelta>,
+    _out: &mut Vec<WorldDelta>,
 ) {
     if state.tick % BOND_TICK_INTERVAL != 0 {
         return;

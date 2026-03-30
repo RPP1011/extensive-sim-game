@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Price discovery — NPCs learn local prices and share knowledge via gossip.
 //!
 //! 1. NPCs at a settlement automatically learn its current prices (free).

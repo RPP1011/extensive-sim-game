@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Adventurer awakening / transformation — fires every 33 ticks.
 //!
 //! Rare event: high-level NPCs undergo a permanent power transformation.
@@ -41,7 +40,7 @@ pub fn compute_awakening(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_awakening_for_settlement(
     state: &WorldState,
-    settlement_id: u32,
+    _settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {

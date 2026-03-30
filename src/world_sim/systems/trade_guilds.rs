@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Trade guilds — merchants at a settlement form guilds that control trade.
 //!
 //! When 3+ NPCs with trade tags > 50 share a settlement, they form a guild.

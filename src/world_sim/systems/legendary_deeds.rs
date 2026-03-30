@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Legendary deeds — milestone achievements based on behavior tag thresholds.
 //!
 //! NPCs who accumulate enough tags in a category earn a one-time deed.
@@ -53,7 +52,7 @@ pub fn compute_legendary_deeds(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
 pub fn compute_legendary_deeds_for_settlement(
     state: &WorldState,
-    settlement_id: u32,
+    _settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {

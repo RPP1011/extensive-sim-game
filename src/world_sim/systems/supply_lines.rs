@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Supply line interdiction system — every 7 ticks.
 //!
 //! NPC entities with Trade intent traveling through hostile territory
@@ -10,7 +9,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EconomicIntent, EntityKind, WorldState, WorldTeam};
-use crate::world_sim::state::{entity_hash_f32, pair_hash_f32};
+use crate::world_sim::state::pair_hash_f32;
 use crate::world_sim::NUM_COMMODITIES;
 
 /// Cadence: runs every 7 ticks.

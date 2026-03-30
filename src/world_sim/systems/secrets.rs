@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Adventurer secret past system.
 //!
 //! Some NPCs have hidden histories that emerge over time based on their

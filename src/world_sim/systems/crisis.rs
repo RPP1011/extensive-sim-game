@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Endgame crisis system — fires every tick.
 //!
 //! Crises escalate global threat, damage settlements, spawn powerful

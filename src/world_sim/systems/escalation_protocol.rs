@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Escalation protocol — every 13 ticks.
 //!
 //! When hostile entities are killed near settlements, the local threat
@@ -11,7 +10,6 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::fidelity::Fidelity;
 use crate::world_sim::state::{EntityKind, WorldState, WorldTeam};
-use crate::world_sim::state::{entity_hash_f32};
 
 /// How often the escalation system evaluates (in ticks).
 const ESCALATION_INTERVAL: u64 = 13;

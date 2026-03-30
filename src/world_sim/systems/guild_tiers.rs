@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Guild tier progression system.
 
 use crate::world_sim::delta::WorldDelta;

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Guild trophy hall system — delta architecture port.
 //!
 //! Trophies are earned from major victories (defeating nemeses, resolving
@@ -70,9 +69,9 @@ pub fn compute_trophies(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_trophies_for_settlement(
     state: &WorldState,
-    settlement_id: u32,
-    entities: &[Entity],
-    out: &mut Vec<WorldDelta>,
+    _settlement_id: u32,
+    _entities: &[Entity],
+    _out: &mut Vec<WorldDelta>,
 ) {
     if state.tick % TROPHY_TICK_INTERVAL != 0 || state.tick == 0 {
         return;

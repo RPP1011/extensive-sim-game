@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! NPC migration between settlements — fires every 200 ticks.
 //!
 //! NPCs at settlements with high threat (> 30) or very low food (stockpile < 5)
@@ -11,10 +10,9 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::naming::entity_display_name;
-use crate::world_sim::state::{ChronicleCategory, ChronicleEntry, EntityKind, NpcData, SettlementState, WorldState};
-use crate::world_sim::state::{entity_hash_f32, pair_hash_f32};
+use crate::world_sim::state::{ChronicleCategory, ChronicleEntry, EntityKind, SettlementState, WorldState};
+use crate::world_sim::state::pair_hash_f32;
 
-use super::seasons::{current_season, season_modifiers};
 
 /// How often migration checks run (in ticks).
 const MIGRATION_INTERVAL: u64 = 200;

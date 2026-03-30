@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Adventurer fears and phobias system — delta architecture port.
 //!
 //! NPCs can develop fears from traumatic experiences that affect their
@@ -9,7 +8,7 @@
 //! Cadence: every 10 ticks (skips tick 0).
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, EntityField, EntityKind, WorldState};
+use crate::world_sim::state::{Entity, EntityField, WorldState};
 use crate::world_sim::state::entity_hash_f32;
 
 //   Fear { fear_type: FearType, severity, acquired_tick, times_triggered, times_overcome }
@@ -109,7 +108,7 @@ pub fn compute_fears_for_settlement(
     state: &WorldState,
     _settlement_id: u32,
     entities: &[Entity],
-    out: &mut Vec<WorldDelta>,
+    _out: &mut Vec<WorldDelta>,
 ) {
     if state.tick % FEAR_TICK_INTERVAL != 0 || state.tick == 0 {
         return;

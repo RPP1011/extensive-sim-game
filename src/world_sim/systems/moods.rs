@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Adventurer mood/emotion system — delta architecture port.
 //!
 //! Moods affect combat effectiveness, morale drift, bond formation, and
@@ -9,7 +8,7 @@
 //! Cadence: every 7 ticks.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, EntityField, EntityKind, WorldState};
+use crate::world_sim::state::{Entity, EntityField, WorldState};
 use crate::world_sim::state::entity_hash_f32;
 
 
@@ -130,9 +129,9 @@ pub fn compute_moods(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_moods_for_settlement(
     state: &WorldState,
-    settlement_id: u32,
+    _settlement_id: u32,
     entities: &[Entity],
-    out: &mut Vec<WorldDelta>,
+    _out: &mut Vec<WorldDelta>,
 ) {
     if state.tick % MOOD_TICK_INTERVAL != 0 {
         return;
@@ -144,7 +143,7 @@ pub fn compute_moods_for_settlement(
     // Note: contagion probability must use deterministic hashing (not mutable rng)
     // since compute phase is read-only. Use (tick ^ entity_id) based deterministic roll.
 
-    let npc_entities: Vec<(u32, bool)> = entities
+    let _npc_entities: Vec<(u32, bool)> = entities
         .iter()
         .filter(|e| e.alive && e.npc.is_some())
         .map(|e| (e.id, true)) // second field would be mood == Neutral check

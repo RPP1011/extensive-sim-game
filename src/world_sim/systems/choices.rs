@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Choice event generation — fires every 10 ticks.
 //!
 //! Generates branching decisions from templates. In the delta architecture,

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Supply depletion for traveling parties — every tick.
 //!
 //! Ported from `crates/headless_campaign/src/systems/supply.rs`.

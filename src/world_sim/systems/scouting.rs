@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Scouting and fog-of-war system — every tick.
 //!
 //! NPC entities traveling near settlements generate price reports,
@@ -10,7 +9,6 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EconomicIntent, EntityKind, PriceReport, WorldState};
-use crate::world_sim::NUM_COMMODITIES;
 
 /// Cadence: runs every tick.
 const SCOUTING_INTERVAL: u64 = 1;

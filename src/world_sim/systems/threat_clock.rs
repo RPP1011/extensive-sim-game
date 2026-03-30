@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Global threat clock — escalating pressure that drives the world forward.
 //!
 //! The threat clock is a global counter that grows each interval. As it rises,

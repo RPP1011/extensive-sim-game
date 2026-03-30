@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Adventurer hobbies and downtime system — delta architecture port.
 //!
 //! Idle NPCs with low stress develop side activities that add variety to

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Treasure hunt system — every 7 ticks.
 //!
 //! Multi-step treasure map quests. NPCs traveling across regions discover
@@ -11,7 +10,7 @@
 //! Ported from `crates/headless_campaign/src/systems/treasure_hunts.rs`.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, WorldState, WorldTeam};
+use crate::world_sim::state::{WorldState, WorldTeam};
 use crate::world_sim::state::entity_hash;
 
 /// How often the treasure hunt system ticks.
@@ -47,7 +46,7 @@ pub fn compute_treasure_hunts(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 continue;
             }
 
-            let npc = match &entity.npc {
+            let _npc = match &entity.npc {
                 Some(n) => n,
                 None => continue,
             };

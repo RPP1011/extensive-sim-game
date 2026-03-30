@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Reputation decay system — delta architecture port.
 //!
 //! Guild/faction reputation decays over time unless actively maintained.

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! NPC-to-NPC relationship evolution at settlements.
 //!
 //! For each settlement, NPC pairs develop friendships or rivalries based on

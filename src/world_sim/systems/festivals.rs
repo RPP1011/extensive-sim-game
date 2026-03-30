@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Seasonal festivals — fires every 17 ticks.
 //!
 //! Settlements host festivals that provide economic and morale effects.

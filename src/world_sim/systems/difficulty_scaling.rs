@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Dynamic difficulty scaling — every 10 ticks.
 //!
 //! Monitors guild power (entity count, levels, economy) and adjusts pressure.
@@ -87,7 +86,7 @@ pub fn compute_difficulty_scaling(state: &WorldState, out: &mut Vec<WorldDelta>)
         target -= deficit * 30.0;
     }
 
-    let target_pressure = target.clamp(0.0, 100.0);
+    let _target_pressure = target.clamp(0.0, 100.0);
 
     // --- Apply escalation or relief via deltas ---
     // We cannot read difficulty_scaling.current_pressure from state (field doesn't exist yet),

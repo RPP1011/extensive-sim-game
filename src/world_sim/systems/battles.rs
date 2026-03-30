@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Battle resolution — every tick.
 //!
 //! Advances in-progress battles. Interpolates health ratios toward the predicted

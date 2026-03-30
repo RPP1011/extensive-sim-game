@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Black market system — fires every 17 ticks.
 //!
 //! Ported from `crates/headless_campaign/src/systems/black_market.rs`.

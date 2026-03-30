@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Adventurer condition drift — ported from headless_campaign.
 //!
 //! Every `DRIFT_INTERVAL` ticks, NPC entities accumulate stress, fatigue,
@@ -57,7 +56,7 @@ pub fn compute_adventurer_condition_for_settlement(
         if !entity.alive || entity.kind != EntityKind::Npc {
             continue;
         }
-        let npc = match &entity.npc {
+        let _npc = match &entity.npc {
             Some(n) => n,
             None => continue,
         };
@@ -82,11 +81,11 @@ pub fn compute_adventurer_condition_for_settlement(
             IDLE_DRIFT
         };
 
-        let [stress_d, fatigue_d, morale_d, loyalty_d] = drift;
+        let [stress_d, fatigue_d, morale_d, _loyalty_d] = drift;
 
         // Desertion: idle NPC with critically low loyalty and high stress.
         if !on_grid && !injured {
-            let roll = entity_hash_f32(entity.id, state.tick, 0);
+            let _roll = entity_hash_f32(entity.id, state.tick, 0);
             let _ = (DESERTION_LOYALTY_THRESHOLD, DESERTION_STRESS_THRESHOLD);
         }
 

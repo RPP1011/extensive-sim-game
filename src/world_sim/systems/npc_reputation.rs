@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Named NPC reputation — fires every 10 ticks.
 //!
 //! Each NPC has a reputation that drifts toward neutral. Completed quests
@@ -32,7 +31,7 @@ pub fn compute_npc_reputation(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_npc_reputation_for_settlement(
     state: &WorldState,
-    settlement_id: u32,
+    _settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {

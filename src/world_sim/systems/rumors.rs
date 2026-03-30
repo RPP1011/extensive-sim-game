@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Rumor spreading system — delta architecture port.
 //!
 //! Returning NPC entities bring information fragments (rumors) that
@@ -50,7 +49,7 @@ pub enum RumorType {
 /// Since WorldState lacks rumor storage, this is a structural
 /// placeholder. The grid/settlement structure can identify which
 /// NPCs are "home" to source rumors.
-pub fn compute_rumors(state: &WorldState, out: &mut Vec<WorldDelta>) {
+pub fn compute_rumors(state: &WorldState, _out: &mut Vec<WorldDelta>) {
     if state.tick % RUMOR_INTERVAL != 0 || state.tick == 0 {
         return;
     }

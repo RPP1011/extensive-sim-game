@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Building interiors — NPCs enter buildings and occupy specific rooms.
 //!
 //! When an NPC arrives at a building (work, home, inn), they "enter" it:

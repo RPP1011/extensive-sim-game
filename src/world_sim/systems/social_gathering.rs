@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Social gathering — NPCs meet at taverns/temples for multi-tick conversations.
 //!
 //! NPCs with low social need and a Socialize goal walk to the nearest social

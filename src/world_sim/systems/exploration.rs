@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Map exploration tracking system — every 3 ticks.
 //!
 //! Tracks NPC movement across the world to reveal regions and discover

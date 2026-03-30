@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Adventurer journal system — delta architecture port.
 //!
 //! Each NPC keeps a personal journal that accumulates entries from their
@@ -51,7 +50,7 @@ pub fn compute_journals_for_settlement(
     state: &WorldState,
     _settlement_id: u32,
     entities: &[Entity],
-    out: &mut Vec<WorldDelta>,
+    _out: &mut Vec<WorldDelta>,
 ) {
     if state.tick % JOURNAL_TICK_INTERVAL != 0 {
         return;

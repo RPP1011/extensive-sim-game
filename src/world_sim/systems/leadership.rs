@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Guild leadership and succession system — delta architecture port.
 //!
 //! The guild has a single leader whose style provides global bonuses.

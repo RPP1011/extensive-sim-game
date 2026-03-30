@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Dynamic world geography system — fires every 33 ticks.
 //!
 //! The world map slowly changes over time: forests grow, deserts expand,

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Path-following system — NPCs walk tile-by-tile along cached A* paths.
 //!
 //! When an NPC's active goal has a target_pos and they're in a settlement with

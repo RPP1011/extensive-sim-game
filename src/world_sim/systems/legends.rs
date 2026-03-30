@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Heroic legends — NPCs who achieve enough deeds become legendary figures.
 //!
 //! Legend status is earned, not assigned. An NPC becomes a Legend when they:

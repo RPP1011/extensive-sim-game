@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Animal companion system — delta architecture port.
 //!
 //! NPCs can have animal companions that provide combat, travel, or utility
@@ -44,7 +43,7 @@ pub fn compute_companions(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_companions_for_settlement(
     state: &WorldState,
-    settlement_id: u32,
+    _settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {

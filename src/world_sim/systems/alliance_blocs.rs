@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Alliance bloc system — every 17 ticks.
 //!
 //! Factions with mutual friendly stance form blocs and share resources.
@@ -11,9 +10,8 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{
-    ChronicleCategory, ChronicleEntry, DiplomaticStance, FactionField, WorldEvent, WorldState,
+    ChronicleCategory, DiplomaticStance, FactionField, WorldEvent, WorldState,
 };
-use crate::world_sim::state::pair_hash_f32;
 
 /// Cadence: every 17 ticks.
 const BLOC_INTERVAL: u64 = 17;

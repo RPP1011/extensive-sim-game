@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Heist planning system — every 10 ticks, after tick 1500.
 //!
 //! Multi-phase heist preparation with crew skill factors. Each heist
@@ -12,7 +11,7 @@
 //! Ported from `crates/headless_campaign/src/systems/heist_planning.rs`.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, WorldState, WorldTeam};
+use crate::world_sim::state::{WorldState, WorldTeam};
 use crate::world_sim::state::entity_hash;
 
 /// How often the heist system ticks (in ticks).

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Price controls system — council sets ceiling/floor prices on commodities.
 //!
 //! Ported from `crates/headless_campaign/src/systems/price_controls.rs`.

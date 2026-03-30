@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Quest generation — checked every 50 ticks.
 //!
 //! Generates new quest requests based on world state. Uses a Poisson-style
@@ -22,7 +21,7 @@ const REPUTATION_SCALING_CENTER: f32 = 50.0;
 const REPUTATION_FACTOR_MIN: f32 = 0.5;
 const REPUTATION_FACTOR_MAX: f32 = 3.0;
 
-pub fn compute_quest_generation(state: &WorldState, out: &mut Vec<WorldDelta>) {
+pub fn compute_quest_generation(state: &WorldState, _out: &mut Vec<WorldDelta>) {
     // Gate: only run every BASE_ARRIVAL_INTERVAL ticks
     if state.tick % BASE_ARRIVAL_INTERVAL != 0 || state.tick == 0 {
         return;

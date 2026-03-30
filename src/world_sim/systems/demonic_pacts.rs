@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Demonic pacts — fires every 7 ticks.
 //!
 //! NPCs with demonic pacts accrue debt. At thresholds, escalating
@@ -10,7 +9,7 @@
 //!
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
+use crate::world_sim::state::{Entity, EntityKind, StatusEffectKind, WorldState};
 use crate::world_sim::state::{entity_hash_f32};
 
 /// Pact system tick interval.
@@ -40,7 +39,7 @@ pub fn compute_demonic_pacts(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_demonic_pacts_for_settlement(
     state: &WorldState,
-    settlement_id: u32,
+    _settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {

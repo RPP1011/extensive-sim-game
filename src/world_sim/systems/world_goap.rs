@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! World GOAP — goal-oriented action planning for NPC behavior.
 //!
 //! Lightweight GOAP for the world sim, separate from the tactical combat GOAP.
@@ -58,7 +57,7 @@ fn plan_goal(
     goal: &Goal,
     npc: &NpcData,
     entity_pos: (f32, f32),
-    settlement_food: f32,
+    _settlement_food: f32,
 ) -> Option<Vec<PlannedStep>> {
     match &goal.kind {
         GoalKind::Eat => {
@@ -141,7 +140,7 @@ fn plan_goal(
             });
             Some(steps)
         }
-        GoalKind::Trade { destination_settlement_id } => {
+        GoalKind::Trade { destination_settlement_id: _ } => {
             let mut steps = Vec::new();
             // Step 1: Acquire goods from local market.
             steps.push(PlannedStep {

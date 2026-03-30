@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Equipment durability — degrades equipped items every 50 ticks.
 //!
 //! Items lose durability through use:
@@ -40,7 +39,7 @@ pub fn compute_equipment_durability_for_settlement(
     state: &WorldState,
     settlement_id: u32,
     entities: &[Entity],
-    out: &mut Vec<WorldDelta>,
+    _out: &mut Vec<WorldDelta>,
 ) {
     // Gate: skip degradation if settlement economy has collapsed.
     let treasury = state.settlement(settlement_id)

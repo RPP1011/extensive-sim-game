@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Weather hazards — fires every 7 ticks.
 //!
 //! Applies ongoing weather effects to entities and settlements:
@@ -13,7 +12,7 @@
 //!
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, RegionState, WorldState};
+use crate::world_sim::state::{EntityKind, WorldState};
 use crate::world_sim::state::{entity_hash_f32};
 
 use super::seasons::{current_season, season_modifiers, Season};
@@ -165,7 +164,7 @@ fn apply_ambient_threat_damage(state: &WorldState, out: &mut Vec<WorldDelta>, th
         let region_settlements: Vec<(f32, f32)> = state
             .settlements
             .iter()
-            .filter(|s| {
+            .filter(|_s| {
                 // Heuristic: settlement belongs to region if names overlap or
                 // IDs are close. For now, use all settlements as a simplification.
                 true

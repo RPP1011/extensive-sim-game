@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Cooldown tick — every tick.
 //!
 //! Decrements active ability cooldowns on all entities. Maps directly to

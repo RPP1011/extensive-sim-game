@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Cultural identity — settlements develop emergent culture from NPC experiences.
 //!
 //! Every 500 ticks, aggregate the behavior profiles of all NPCs at a settlement.

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Quest expiry — every tick.
 //!
 //! Removes quest requests that have passed their deadline tick.
@@ -9,7 +8,7 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
 
 
-pub fn compute_quest_expiry(state: &WorldState, out: &mut Vec<WorldDelta>) {
+pub fn compute_quest_expiry(_state: &WorldState, _out: &mut Vec<WorldDelta>) {
     // The original system checks each quest request on the board against the
     // current elapsed time. If now >= deadline, the request is removed.
     //

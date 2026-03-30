@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Bankruptcy cascade system — every 17 ticks.
 //!
 //! Ported from `crates/headless_campaign/src/systems/bankruptcy_cascade.rs`.

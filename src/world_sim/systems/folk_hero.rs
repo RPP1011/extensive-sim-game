@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Folk hero reputation system — delta architecture port.
 //!
 //! Tracks how common people view the guild, separate from faction reputation.
@@ -86,9 +85,9 @@ pub fn compute_folk_hero(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Applies fame threshold effects (tribute gold) for a single settlement's entities.
 pub fn compute_folk_hero_for_settlement(
     state: &WorldState,
-    settlement_id: u32,
-    entities: &[Entity],
-    out: &mut Vec<WorldDelta>,
+    _settlement_id: u32,
+    _entities: &[Entity],
+    _out: &mut Vec<WorldDelta>,
 ) {
     if state.tick % FOLK_HERO_TICK_INTERVAL != 0 || state.tick == 0 {
         return;

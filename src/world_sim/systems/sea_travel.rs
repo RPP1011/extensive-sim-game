@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Sea travel — NPCs at coastal settlements embark on voyages to other
 //! coastal settlements. Faster than overland travel but risk of sea monsters.
 //!

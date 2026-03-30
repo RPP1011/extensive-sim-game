@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Funeral and memorial system — delta architecture port.
 //!
 //! When NPCs die, the guild can hold funerals that affect morale, bonds,
@@ -107,7 +106,7 @@ pub fn compute_memorials_for_settlement(
 
 /// Helper: collects dead NPC entity IDs (used by the top-level function).
 fn collect_dead_npcs(
-    state: &WorldState,
+    _state: &WorldState,
     entities: &[Entity],
     dead_npcs: &mut Vec<u32>,
 ) {

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Propaganda and public relations system — every 7 ticks.
 //!
 //! Allows the guild to spend gold on influence campaigns that boost reputation,

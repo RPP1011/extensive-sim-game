@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Settlement founding — overcrowded settlements send colonists to empty regions.
 //!
 //! When population exceeds 1.5× housing AND an NPC with leadership+exploration
@@ -180,6 +179,6 @@ pub fn advance_settlement_founding(state: &mut WorldState) {
 }
 
 // Keep the old delta-based stub for backward compat (called by compute_all_systems).
-pub fn compute_settlement_founding(state: &WorldState, out: &mut Vec<crate::world_sim::delta::WorldDelta>) {
+pub fn compute_settlement_founding(_state: &WorldState, _out: &mut Vec<crate::world_sim::delta::WorldDelta>) {
     // No-op — founding is handled by advance_settlement_founding (post-apply).
 }

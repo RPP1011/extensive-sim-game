@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Signal tower system — every 7 ticks.
 //!
 //! Signal towers are modeled as Building entities. Operational towers boost

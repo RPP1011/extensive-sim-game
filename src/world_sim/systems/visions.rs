@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Prophetic visions — fires every 17 ticks.
 //!
 //! High-level NPCs receive visions that foreshadow world events. Fulfilled
@@ -33,7 +32,7 @@ pub fn compute_visions(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_visions_for_settlement(
     state: &WorldState,
-    settlement_id: u32,
+    _settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {

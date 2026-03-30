@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Adventurer recovery — ported from headless_campaign.
 //!
 //! Every `RECOVERY_INTERVAL` ticks, NPC entities passively recover from

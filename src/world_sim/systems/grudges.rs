@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Adventurer grudge/vendetta system — delta architecture port.
 //!
 //! NPCs develop grudges against factions, nemeses, or regions from traumatic
@@ -50,7 +49,7 @@ const GRUDGE_TICK_INTERVAL: u64 = 10;
 ///
 /// Since WorldState lacks grudge/nemesis storage, this is a structural
 /// placeholder. The mapped delta emissions are documented below.
-pub fn compute_grudges(state: &WorldState, out: &mut Vec<WorldDelta>) {
+pub fn compute_grudges(state: &WorldState, _out: &mut Vec<WorldDelta>) {
     if state.tick % GRUDGE_TICK_INTERVAL != 0 {
         return;
     }

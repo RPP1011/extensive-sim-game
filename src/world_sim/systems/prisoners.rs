@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Prisoner system — delta architecture port.
 //!
 //! Manages captured enemy prisoners: upkeep costs, escape attempts,

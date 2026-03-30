@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Family system — marriage, children, and inheritance.
 //!
 //! NPCs who have socialized frequently (3+ MadeNewFriend events with same NPC)

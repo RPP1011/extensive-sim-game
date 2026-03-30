@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Great works — prosperous settlements commission monuments and institutions.
 //!
 //! When a settlement's treasury exceeds a threshold and population is healthy,

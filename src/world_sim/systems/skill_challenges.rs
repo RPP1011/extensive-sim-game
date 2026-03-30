@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Skill challenge system — every 7 ticks.
 //!
 //! Non-combat skill checks occur during active quests. Resolution is based on

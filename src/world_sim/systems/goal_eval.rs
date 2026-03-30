@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Goal evaluation system — manages NPC goal stacks.
 //!
 //! Runs post-apply (needs `&mut WorldState`). Evaluates each NPC's needs,

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Party chemistry — fires every 7 ticks.
 //!
 //! NPCs who share the same grid build "chemistry" which improves their
@@ -34,7 +33,7 @@ pub fn compute_party_chemistry(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_party_chemistry_for_settlement(
     state: &WorldState,
-    settlement_id: u32,
+    _settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {

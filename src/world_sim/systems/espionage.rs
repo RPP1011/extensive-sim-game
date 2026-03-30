@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Espionage system — every 7 ticks.
 //!
 //! Hostile factions send spies (NPCs from hostile factions positioned near

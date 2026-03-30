@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Adventurer rivalry system — delta architecture port.
 //!
 //! NPCs with low bonds develop rivalries that affect party composition,
@@ -70,9 +69,9 @@ pub fn compute_rivalries(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_rivalries_for_settlement(
     state: &WorldState,
-    settlement_id: u32,
+    _settlement_id: u32,
     entities: &[Entity],
-    out: &mut Vec<WorldDelta>,
+    _out: &mut Vec<WorldDelta>,
 ) {
     if state.tick % RIVALRY_TICK_INTERVAL != 0 {
         return;

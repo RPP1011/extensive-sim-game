@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Progression system — entity level = total class levels.
 //!
 //! Entity level is derived from the sum of all class levels.
@@ -12,7 +11,7 @@
 //! Cadence: every 50 ticks.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, EntityKind, EntityField, WorldState, tag};
+use crate::world_sim::state::{Entity, EntityField, WorldState, tag};
 
 const PROGRESSION_INTERVAL: u64 = 50;
 

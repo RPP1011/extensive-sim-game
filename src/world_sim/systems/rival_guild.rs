@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Rival guild AI — fires every 7 ticks (activates at tick 67).
 //!
 //! A competing faction that steals quests, recruits, and sabotages the

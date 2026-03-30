@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Time-limited events system — fires every 7 ticks.
 //!
 //! Special opportunities that briefly affect the world: trade windfalls,
@@ -137,7 +136,7 @@ pub fn compute_timed_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
         }
     } else {
         // Ancient Portal: brief commodity production at a random settlement.
-        if let Some(settlement) = state.settlements.first() {
+        if let Some(_settlement) = state.settlements.first() {
             let idx = (state.tick as usize) % state.settlements.len().max(1);
             let s = &state.settlements[idx];
             for c in 0..NUM_COMMODITIES {

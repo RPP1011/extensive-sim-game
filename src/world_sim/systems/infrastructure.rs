@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Infrastructure system — every 7 ticks.
 //!
 //! Ported from `crates/headless_campaign/src/systems/infrastructure.rs`.

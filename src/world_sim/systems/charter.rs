@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Guild charter / legitimacy — fires every 17 ticks.
 //!
 //! Charter legitimacy affects morale and desertion. High legitimacy grants
@@ -9,7 +8,7 @@
 //!
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, WorldState};
+use crate::world_sim::state::WorldState;
 
 /// Charter check interval.
 const CHARTER_INTERVAL: u64 = 17;

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Personal goals system — delta architecture port.
 //!
 //! Each NPC can pursue a personal ambition derived from their behavior profile.
@@ -18,7 +17,7 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::naming::entity_display_name;
 use crate::world_sim::state::{
-    ChronicleCategory, ChronicleEntry, Entity, EntityField, EntityKind, WorldState,
+    ChronicleCategory, ChronicleEntry, Entity, EntityField, WorldState,
     tags,
 };
 

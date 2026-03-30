@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Outlaw system — exiled NPCs form bandit camps, raid caravans, seek redemption.
 //!
 //! Hostile NPCs (from betrayal or faction conflict) without a settlement become

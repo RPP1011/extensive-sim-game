@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Guild identity/specialization system — delta architecture port.
 //!
 //! The guild develops a distinct identity across five axes: martial,

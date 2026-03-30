@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Seasonal traveling merchant system — fires every 17 ticks.
 //!
 //! NPC merchant entities arrive at settlements, share price reports, and
@@ -10,7 +9,6 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EconomicIntent, EntityKind, PriceReport, WorldState};
-use crate::world_sim::state::{entity_hash_f32};
 use crate::world_sim::NUM_COMMODITIES;
 
 /// How often to process merchant activity (in ticks).

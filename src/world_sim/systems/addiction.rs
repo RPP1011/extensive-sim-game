@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Potion addiction / withdrawal — fires every 3 ticks.
 //!
 //! NPCs with high potion dependency who haven't consumed recently suffer
@@ -8,8 +7,7 @@
 //! Original: `crates/headless_campaign/src/systems/addiction.rs`
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
-use crate::world_sim::state::{entity_hash_f32};
+use crate::world_sim::state::{Entity, StatusEffect, StatusEffectKind, WorldState};
 
 /// Addiction tick cadence.
 const ADDICTION_TICK_INTERVAL: u64 = 3;

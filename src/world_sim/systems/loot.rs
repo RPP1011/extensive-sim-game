@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Loot drops from combat and quest completion.
 //!
 //! On monster kill, generates gold transfers to nearby friendlies and spawns

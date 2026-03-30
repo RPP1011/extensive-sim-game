@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Haunted locations — sites of mass death become supernaturally dangerous.
 //!
 //! When 5+ NPCs die within 30 units of each other, the area becomes haunted.
@@ -63,7 +62,7 @@ pub fn advance_haunted(state: &mut WorldState) {
     }
 
     // --- Phase 2: Apply haunting effects ---
-    for &(site_pos, death_count) in &haunted_sites {
+    for &(site_pos, _death_count) in &haunted_sites {
         // Fear effect: NPCs near the haunted site get fear spikes.
         for entity in &mut state.entities {
             if !entity.alive || entity.kind != EntityKind::Npc { continue; }

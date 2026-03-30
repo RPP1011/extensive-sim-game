@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Dead zone system — every 17 ticks.
 //!
 //! Over-exploited regions accumulate extraction pressure from questing and

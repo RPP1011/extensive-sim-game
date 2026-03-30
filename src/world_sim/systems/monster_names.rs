@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Monster naming — monsters that kill NPCs gain names and notoriety.
 //!
 //! Tracks kills via last_damage_source in death records. When a monster

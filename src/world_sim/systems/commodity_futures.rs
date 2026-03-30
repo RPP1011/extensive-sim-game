@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Commodity futures market — ticks every 17 ticks.
 //!
 //! Ported from `crates/headless_campaign/src/systems/commodity_futures.rs`.

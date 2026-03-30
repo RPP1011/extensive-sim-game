@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Political intrigue system — delta architecture port.
 //!
 //! Generates court intrigues within factions experiencing instability.
@@ -33,7 +32,7 @@ const MAX_RESOLUTION_TICKS: u64 = 67;
 /// Since WorldState lacks intrigue/faction storage, this is a structural
 /// placeholder. Gold/reputation effects from intrigue resolution could be
 /// expressed via TransferGold and UpdateTreasury when the state is available.
-pub fn compute_intrigue(state: &WorldState, out: &mut Vec<WorldDelta>) {
+pub fn compute_intrigue(state: &WorldState, _out: &mut Vec<WorldDelta>) {
     if state.tick % INTRIGUE_TICK_INTERVAL != 0 || state.tick == 0 {
         return;
     }

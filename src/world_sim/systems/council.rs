@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Guild council voting system — every 7 ticks.
 //!
 //! NPCs at settlements vote on faction policy. The system counts NPCs per
@@ -15,7 +14,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{
-    ChronicleCategory, ChronicleEntry, EntityKind, FactionField, WorldEvent, WorldState,
+    ChronicleCategory, EntityKind, FactionField, WorldEvent, WorldState,
 };
 
 /// Cadence: every 7 ticks.
@@ -70,7 +69,7 @@ pub fn compute_council(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
         // Tally faction membership among NPCs.
         let mut faction_counts: Vec<(u32, usize)> = Vec::new();
-        let mut unaffiliated = 0usize;
+        let mut _unaffiliated = 0usize;
 
         for npc_entity in &npcs_at_settlement {
             if let Some(ref npc) = npc_entity.npc {
@@ -81,7 +80,7 @@ pub fn compute_council(state: &WorldState, out: &mut Vec<WorldDelta>) {
                         faction_counts.push((fid, 1));
                     }
                 } else {
-                    unaffiliated += 1;
+                    _unaffiliated += 1;
                 }
             }
         }

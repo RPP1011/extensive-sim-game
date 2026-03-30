@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Action sync — updates NpcAction from current state each tick.
 //!
 //! Derives the visible action from WorkState, GoalStack, movement, and combat.
@@ -22,7 +21,7 @@ pub fn sync_npc_actions(state: &mut WorldState) {
             }
             WorkState::Working { building_id, ticks_remaining } => {
                 let activity = npc.work_building_id
-                    .and_then(|wid| {
+                    .and_then(|_wid| {
                         // Can't look up building type here (no state access for entities),
                         // so infer from behavior tags.
                         let farming = npc.behavior_value(tags::FARMING);

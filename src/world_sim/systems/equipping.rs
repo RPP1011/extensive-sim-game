@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Equipment system — NPCs equip item entities from their settlement.
 //!
 //! Every EQUIP_INTERVAL ticks, NPCs at settlements check for unowned item entities
@@ -29,7 +28,7 @@ pub fn compute_equipping(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
 pub fn compute_equipping_for_settlement(
     state: &WorldState,
-    settlement_id: u32,
+    _settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {

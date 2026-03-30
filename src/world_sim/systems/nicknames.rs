@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Adventurer nicknames and earned titles — delta architecture port.
 //!
 //! NPCs earn descriptive nicknames from their deeds. Positive nicknames
@@ -54,9 +53,9 @@ pub fn compute_nicknames(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_nicknames_for_settlement(
     state: &WorldState,
-    settlement_id: u32,
+    _settlement_id: u32,
     entities: &[Entity],
-    out: &mut Vec<WorldDelta>,
+    _out: &mut Vec<WorldDelta>,
 ) {
     if state.tick % NICKNAME_TICK_INTERVAL != 0 || state.tick == 0 {
         return;

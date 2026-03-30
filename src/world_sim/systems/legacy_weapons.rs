@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Legacy weapons — fires every 17 ticks.
 //!
 //! Weapons that grow with their wielder. In the delta architecture, weapon
@@ -36,7 +35,7 @@ pub fn compute_legacy_weapons(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_legacy_weapons_for_settlement(
     state: &WorldState,
-    settlement_id: u32,
+    _settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Random world events — fires every 17 ticks.
 //!
 //! Unpredictable events that affect the world state: treasure discoveries

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! World ages — named historical eras that emerge from event density.
 //!
 //! Every 2400 ticks (1 game-year), analyzes recent chronicle entries to
@@ -36,7 +35,7 @@ pub fn advance_world_ages(state: &mut WorldState) {
 
     let deaths = recent.iter().filter(|e| e.category == ChronicleCategory::Death).count();
     let achievements = recent.iter().filter(|e| e.category == ChronicleCategory::Achievement).count();
-    let narratives = recent.iter().filter(|e| e.category == ChronicleCategory::Narrative).count();
+    let _narratives = recent.iter().filter(|e| e.category == ChronicleCategory::Narrative).count();
 
     // Check for specific themes in narrative text.
     let wars = recent.iter().filter(|e| e.text.contains("WAR") || e.text.contains("war")).count();

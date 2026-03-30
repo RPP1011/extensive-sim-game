@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Loan and debt system — every 3 ticks.
 //!
 //! Ported from `crates/headless_campaign/src/systems/loans.rs`.

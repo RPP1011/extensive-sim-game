@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Counter-espionage system — every 7 ticks.
 //!
 //! Settlements detect hostile NPCs in their vicinity. NPCs with stealth

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Romance system — NPC pair bonding at settlements.
 //!
 //! NPCs at the same settlement with complementary behavior profiles

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Adventurer retirement — ported from headless_campaign.
 //!
 //! Every `RETIREMENT_INTERVAL` ticks, high-level NPC entities with good

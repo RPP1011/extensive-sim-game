@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Guild room building system.
 
 use crate::world_sim::delta::WorldDelta;

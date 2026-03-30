@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Oath system — NPCs swear, fulfill, and break oaths.
 //!
 //! Oath types: Loyalty (to settlement), Vengeance (against grudge target),
@@ -155,6 +154,6 @@ pub fn advance_oaths(state: &mut WorldState) {
 }
 
 // Keep stub for backward compat with compute_all_systems.
-pub fn compute_oaths(state: &WorldState, out: &mut Vec<crate::world_sim::delta::WorldDelta>) {
+pub fn compute_oaths(_state: &WorldState, _out: &mut Vec<crate::world_sim::delta::WorldDelta>) {
     // No-op — oaths handled by advance_oaths (post-apply).
 }

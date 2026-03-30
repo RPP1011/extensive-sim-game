@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Currency debasement system — fires every 13 ticks.
 //!
 //! Ported from `crates/headless_campaign/src/systems/currency_debasement.rs`.

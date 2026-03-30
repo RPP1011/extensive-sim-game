@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Diplomatic marriage system — delta architecture port.
 //!
 //! Adventurers marry faction nobles for alliance bonuses, dowries, and heirs.
@@ -10,7 +9,6 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
-use crate::world_sim::state::entity_hash_f32;
 
 //   Marriage { id, adventurer_id, faction_id, noble_name, married_tick, relation_bonus, dowry_received, produces_heir }
 
@@ -42,7 +40,7 @@ const MARRIAGE_TICK_INTERVAL: u64 = 17;
 /// variants (UpdateRelation, AdjustMorale, RemoveMarriage, SpawnEntity).
 /// This function is a structural placeholder that documents the logic and
 /// emits available deltas where possible.
-pub fn compute_marriages(state: &WorldState, out: &mut Vec<WorldDelta>) {
+pub fn compute_marriages(state: &WorldState, _out: &mut Vec<WorldDelta>) {
     if state.tick % MARRIAGE_TICK_INTERVAL != 0 {
         return;
     }

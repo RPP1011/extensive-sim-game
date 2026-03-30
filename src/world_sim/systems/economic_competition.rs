@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Faction economic competition system — ticks every 17 ticks.
 //!
 //! Ported from `crates/headless_campaign/src/systems/economic_competition.rs`.

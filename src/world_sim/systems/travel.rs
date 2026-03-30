@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Party travel — every tick.
 //!
 //! Moves NPC entities toward their travel destinations via Move deltas.
@@ -8,7 +7,7 @@
 //! Original: `crates/headless_campaign/src/systems/travel.rs`
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EconomicIntent, Entity, EntityKind, WorldState};
+use crate::world_sim::state::{EconomicIntent, EntityKind, WorldState};
 
 /// Distance threshold below which an entity is considered "arrived".
 const ARRIVAL_THRESHOLD: f32 = 0.5;

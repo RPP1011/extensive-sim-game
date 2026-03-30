@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Regional culture — emerges from NPC behavior at settlements.
 //!
 //! Four culture axes per settlement, derived from accumulated behavior tags:

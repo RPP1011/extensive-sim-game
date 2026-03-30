@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Economy system — every tick.
 //!
 //! Ported from `crates/headless_campaign/src/systems/economy.rs`.
@@ -8,7 +7,7 @@
 //!
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, EntityKind, WorldState};
+use crate::world_sim::state::{Entity, WorldState};
 
 /// Passive gold income per tick for each guild-controlled settlement.
 const PASSIVE_INCOME_PER_TICK: f32 = 0.5;

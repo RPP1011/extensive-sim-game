@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Underground dungeon network system — every 10 ticks.
 //!
 //! Manages dungeon monster regeneration, loot regeneration, and threat

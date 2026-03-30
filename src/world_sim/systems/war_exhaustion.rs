@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! War exhaustion system — every 3 ticks.
 //!
 //! Prolonged wars drain morale, gold, and public support. Factions accumulate
@@ -35,7 +34,7 @@ const PEACE_DECAY_PER_TICK: f32 = 1.0;
 /// Morale penalty applied to adventurers per 25 exhaustion (guild wars only).
 const GUILD_MORALE_PENALTY_PER_25: f32 = 0.5;
 
-pub fn compute_war_exhaustion(state: &WorldState, out: &mut Vec<WorldDelta>) {
+pub fn compute_war_exhaustion(state: &WorldState, _out: &mut Vec<WorldDelta>) {
     if state.tick % WAR_EXHAUSTION_INTERVAL != 0 || state.tick == 0 {
         return;
     }

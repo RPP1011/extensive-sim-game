@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Seasonal quest variants — fires every 17 ticks.
 //!
 //! Season-themed quests appear on season change and expire at season end.
@@ -11,7 +10,7 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
 
-use super::seasons::{current_season, Season, TICKS_PER_SEASON};
+use super::seasons::TICKS_PER_SEASON;
 
 /// Seasonal quest check interval.
 const CHECK_INTERVAL: u64 = 17;

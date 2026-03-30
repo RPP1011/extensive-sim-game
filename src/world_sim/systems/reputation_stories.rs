@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Reputation stories — fires every 17 ticks.
 //!
 //! Tales of deeds spread across regions, affecting settlement treasury and

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Mentor-apprentice training — ported from headless_campaign.
 //!
 //! Mentors (level >= apprentice + 3) at the same settlement train apprentices.

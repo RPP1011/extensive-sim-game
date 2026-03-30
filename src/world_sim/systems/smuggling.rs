@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Smuggling routes system — fires every 10 ticks.
 //!
 //! Ported from `crates/headless_campaign/src/systems/smuggling.rs`.

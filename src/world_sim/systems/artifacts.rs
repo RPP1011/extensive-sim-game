@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Artifact system — notable NPCs forge or discover named artifacts.
 //!
 //! When an NPC has 3+ classes and level >= 40, they have a chance (10% per

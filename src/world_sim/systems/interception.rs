@@ -1,14 +1,12 @@
-#![allow(unused)]
 //! Party interception — fires every tick.
 //!
 //! Hostile entities near friendly NPCs escalate grid fidelity to High.
 //! Uses grid fidelity as a proxy: only grids NOT already High need checking.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::fidelity::Fidelity;
 use crate::world_sim::state::WorldState;
 
-pub fn compute_interception(state: &WorldState, out: &mut Vec<WorldDelta>) {
+pub fn compute_interception(state: &WorldState, _out: &mut Vec<WorldDelta>) {
     if state.tick == 0 { return; }
 
     // Only check grids that aren't already High fidelity.

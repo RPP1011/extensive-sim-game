@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Wound persistence — heals injured NPCs over time, every 3 ticks.
 //!
 //! Battle survivors sustain persistent damage. Idle NPCs heal faster than

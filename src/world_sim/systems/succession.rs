@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Succession crisis — when a settlement's strongest NPC dies, a power struggle.
 //!
 //! Each settlement's de facto leader is its highest-level NPC. When they die:
@@ -57,8 +56,8 @@ pub fn advance_succession(state: &mut WorldState) {
 
         // --- Succession crisis ---
         // Top candidate becomes leader.
-        let (winner_idx, winner_id, winner_level) = npcs_at_settlement[0];
-        let (runner_idx, runner_id, runner_level) = npcs_at_settlement[1];
+        let (winner_idx, winner_id, _winner_level) = npcs_at_settlement[0];
+        let (runner_idx, runner_id, _runner_level) = npcs_at_settlement[1];
 
         let winner_name = state.entities[winner_idx].npc.as_ref()
             .map(|n| n.name.clone()).unwrap_or_default();

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Contract negotiation — fires every 7 ticks.
 //!
 //! When contracts appear, factions negotiate terms. Success depends on

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Resource gathering and crafting system — every 7 ticks.
 //!
 //! Ported from `crates/headless_campaign/src/systems/crafting.rs`.

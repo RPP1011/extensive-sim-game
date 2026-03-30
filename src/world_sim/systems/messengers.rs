@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Messenger system — fires every tick.
 //!
 //! Orders to distant entities are delayed by distance. In the delta

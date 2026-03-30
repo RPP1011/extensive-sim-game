@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Caravan and trade route system — every tick.
 //!
 //! NPC entities with Trade intent move between settlements, transferring
@@ -9,7 +8,7 @@
 //!
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EconomicIntent, Entity, EntityKind, WorldState, WorldTeam};
+use crate::world_sim::state::{EconomicIntent, EntityKind, WorldState, WorldTeam};
 use crate::world_sim::NUM_COMMODITIES;
 
 /// Cadence: runs every tick.

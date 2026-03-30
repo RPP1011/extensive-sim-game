@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Class progression -- grants classes from behavior profiles and levels them up.
 //!
 //! Cadence: every 50 ticks.
@@ -9,7 +8,7 @@
 //! runtime's post-system phase, since we only have `&WorldState` here.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, EntityKind, EntityField, WorldState};
+use crate::world_sim::state::{Entity, EntityKind, WorldState};
 
 const CLASS_INTERVAL: u64 = 50;
 const MIN_BEHAVIOR_SUM: f32 = 10.0;
@@ -29,7 +28,7 @@ pub fn compute_class_progression_for_settlement(
     state: &WorldState,
     _settlement_id: u32,
     entities: &[Entity],
-    out: &mut Vec<WorldDelta>,
+    _out: &mut Vec<WorldDelta>,
 ) {
     if state.tick % CLASS_INTERVAL != 0 || state.tick == 0 {
         return;

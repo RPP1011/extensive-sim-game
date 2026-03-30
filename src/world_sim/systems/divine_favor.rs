@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Divine favor economy — fires every 7 ticks.
 //!
 //! Accumulated devotion from temples/shrines can grant miracles (heals,

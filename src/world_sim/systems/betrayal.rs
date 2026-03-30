@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Betrayal system — NPCs with treacherous profiles become villains.
 //!
 //! NPCs with stealth/deception tags > 80 and compassion < 0.3 may:
@@ -56,7 +55,7 @@ pub fn advance_betrayal(state: &mut WorldState) {
 
     for (entity_idx, sid, betrayer_name) in &betrayals {
         let entity_id = state.entities[*entity_idx].id;
-        let entity_pos = state.entities[*entity_idx].pos;
+        let _entity_pos = state.entities[*entity_idx].pos;
 
         // Steal gold from treasury.
         let stolen = state.settlements.iter()

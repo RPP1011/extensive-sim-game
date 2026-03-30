@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Corruption system — fires every 7 ticks.
 //!
 //! Guild operations degrade over time. High corruption causes gold siphoning,

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Heroic last stand system — checked during battle resolution.
 //!
 //! When a friendly entity is near death on a grid with hostiles, it may

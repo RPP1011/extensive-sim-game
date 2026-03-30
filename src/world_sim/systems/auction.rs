@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Auction house system — periodic item auctions where entities compete for
 //! rare goods, driving up prices.
 //!

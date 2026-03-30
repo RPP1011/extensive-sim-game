@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Warfare — faction wars, declarations, and peace treaties.
 //!
 //! Factions accumulate grievances from: NPCs killed by rival faction members,

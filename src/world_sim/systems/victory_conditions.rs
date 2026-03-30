@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Victory conditions — fires every 7 ticks.
 //!
 //! Checks multiple win conditions (economic, military, diplomatic, quest,
@@ -10,7 +9,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState};
-use crate::world_sim::state::{entity_hash_f32, pair_hash_f32};
+use crate::world_sim::state::pair_hash_f32;
 
 /// Victory check interval.
 const VICTORY_CHECK_INTERVAL: u64 = 7;

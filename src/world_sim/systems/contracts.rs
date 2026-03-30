@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Guild contracts / commissions — fires every 10 ticks.
 //!
 //! NPCs and factions commission work with deadlines and penalties. Completed

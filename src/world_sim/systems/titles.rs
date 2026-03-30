@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Titles & honorifics — NPCs earn permanent name titles from deeds.
 //!
 //! Titles are checked every 500 ticks. Each NPC can earn at most one title
