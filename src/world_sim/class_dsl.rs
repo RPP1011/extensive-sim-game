@@ -264,31 +264,31 @@ fn parse_stat_growth(line: &str, line_num: usize) -> Result<StatGrowth, ParseErr
         })?;
 
         match stat {
-            "attack" => growth.attack = val,
-            "defense" => growth.defense = val,
-            "speed" => growth.speed = val,
-            "hp" | "max_hp" => growth.max_hp = val,
-            "ability_power" | "ap" => growth.ability_power = val,
-            "diplomacy" => growth.diplomacy = val,
-            "commerce" | "trade" => growth.commerce = val,
-            "crafting" | "craft" => growth.crafting = val,
-            "medicine" | "healing" => growth.medicine = val,
-            "scholarship" | "lore" => growth.scholarship = val,
-            "stealth" | "subterfuge" => growth.stealth = val,
-            "leadership" | "command" => growth.leadership = val,
+            "attack" => growth.attack += val,
+            "defense" => growth.defense += val,
+            "speed" => growth.speed += val,
+            "hp" | "max_hp" => growth.max_hp += val,
+            "ability_power" | "ap" => growth.ability_power += val,
+            "diplomacy" => growth.diplomacy += val,
+            "commerce" | "trade" => growth.commerce += val,
+            "crafting" | "craft" => growth.crafting += val,
+            "medicine" | "healing" => growth.medicine += val,
+            "scholarship" | "lore" => growth.scholarship += val,
+            "stealth" | "subterfuge" => growth.stealth += val,
+            "leadership" | "command" => growth.leadership += val,
             "all" => {
-                growth.attack = val;
-                growth.defense = val;
-                growth.speed = val;
-                growth.max_hp = val;
-                growth.ability_power = val;
-                growth.diplomacy = val;
-                growth.commerce = val;
-                growth.crafting = val;
-                growth.medicine = val;
-                growth.scholarship = val;
-                growth.stealth = val;
-                growth.leadership = val;
+                growth.attack += val;
+                growth.defense += val;
+                growth.speed += val;
+                growth.max_hp += val;
+                growth.ability_power += val;
+                growth.diplomacy += val;
+                growth.commerce += val;
+                growth.crafting += val;
+                growth.medicine += val;
+                growth.scholarship += val;
+                growth.stealth += val;
+                growth.leadership += val;
             }
             _ => {
                 return Err(ParseError {

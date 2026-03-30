@@ -41,7 +41,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         TaskCommand::SynthAbilities { count, seed, dsl } => {
-            bevy_game::headless_campaign::ability_gen::dump_synthetic(count, seed, dsl);
+            bevy_game::world_sim::ability_gen::dump_synthetic(count, seed, dsl);
             ExitCode::SUCCESS
         }
         TaskCommand::WorldSim(args) => world_sim_cmd::run_world_sim(args),

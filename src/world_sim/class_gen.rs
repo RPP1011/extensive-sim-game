@@ -503,13 +503,13 @@ impl AbilityGenerator for DefaultAbilityGenerator {
 
         for i in 0..self.candidates {
             let mut rng = seed.wrapping_mul(6364136223846793005).wrapping_add(i as u64);
-            let (ability, dsl) = headless_campaign::ability_gen::generate_tiered_ability(
+            let (ability, dsl) = super::ability_gen::generate_tiered_ability(
                 archetype, tier, &mut rng, &history,
             );
 
             // Score via grammar space encode → quality metric
-            let score = headless_campaign::grammar_space::encode(&dsl)
-                .map(|v| headless_campaign::ability_quality::score_ability(&v))
+            let score = super::grammar_space::encode(&dsl)
+                .map(|v| super::ability_quality::score_ability(&v))
                 .unwrap_or(0.0);
 
             if score > best_score {
@@ -523,7 +523,7 @@ impl AbilityGenerator for DefaultAbilityGenerator {
         // Fallback if all candidates failed to encode
         if best_dsl.is_empty() {
             let mut rng = seed;
-            let (ability, dsl) = headless_campaign::ability_gen::generate_tiered_ability(
+            let (ability, dsl) = super::ability_gen::generate_tiered_ability(
                 archetype, tier, &mut rng, &history,
             );
             best_name = ability.name;

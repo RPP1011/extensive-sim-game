@@ -5,7 +5,7 @@
 //! Produces 3 candidates per slot (4 combat + 3 non-combat = 7 slots = 21 candidates)
 //! with 4-5 procedurally generated abilities each at tier 6-7.
 
-use bevy_game::headless_campaign::ability_gen::generate_tiered_ability;
+use bevy_game::world_sim::ability_gen::generate_tiered_ability;
 use std::collections::HashMap;
 
 pub struct ChampionGenArgs {

@@ -4,7 +4,6 @@
 
 pub mod audio;
 pub mod game_core;
-pub use headless_campaign;
 pub mod mission;
 pub mod progression;
 

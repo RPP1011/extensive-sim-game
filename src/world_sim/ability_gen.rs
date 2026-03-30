@@ -124,7 +124,7 @@ fn categorize_for_name(effect: &Effect) -> usize {
     }
 }
 
-use tactical_sim::effects::defs::{AbilityDef, AbilityTargeting, PassiveDef};
+use tactical_sim::effects::defs::{AbilityDef, AbilityTargeting};
 use tactical_sim::effects::effect_enum::Effect;
 use tactical_sim::effects::types::DamageType;
 use tactical_sim::effects::types::*;

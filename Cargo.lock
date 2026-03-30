@@ -849,7 +849,6 @@ dependencies = [
  "clap",
  "crossbeam-channel",
  "crossterm",
- "headless_campaign",
  "image 0.25.9",
  "memmap2",
  "ndarray 0.16.1",
@@ -4779,18 +4778,6 @@ dependencies = [
  "thiserror 1.0.69",
  "widestring",
  "winapi",
-]
-
-[[package]]
-name = "headless_campaign"
-version = "0.1.0"
-dependencies = [
- "rayon",
- "serde",
- "serde_json",
- "tactical_sim",
- "toml 0.8.23",
- "ureq 3.3.0",
 ]
 
 [[package]]

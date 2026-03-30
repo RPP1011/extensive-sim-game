@@ -15,7 +15,7 @@ pub fn score_ability(v: &[f32; GRAMMAR_DIM]) -> f32 {
     let is_campaign = v[1] > 0.5;
 
     // Targeting indices (approximate)
-    let combat_targets = ["enemy", "ally", "self", "self_aoe", "ground", "direction", "global"];
+    let _combat_targets = ["enemy", "ally", "self", "self_aoe", "ground", "direction", "global"];
     let tgt_idx = ((v[2] * 8.0) as usize).min(7);
 
     // Hint indices

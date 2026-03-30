@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/ability_operator", "crates/tactical_sim", "crates/ability-vae", "crates/headless_campaign"]
+members = [".", "crates/ability_operator", "crates/tactical_sim", "crates/ability-vae"]
 exclude = ["crates/combat-trainer"]  # depends on rl4burn which may not build
 
 [workspace.dependencies]
@@ -31,7 +31,6 @@ profile-systems = []
 [dependencies]
 # tack = { workspace = true }  # disabled — project not present locally
 tactical_sim = { path = "crates/tactical_sim" }
-headless_campaign = { path = "crates/headless_campaign", features = ["combat-bridge"] }
 bevy = { version = "0.13.2", features = ["jpeg"] }
 bevy_egui = "0.27"
 clap = { version = "4.5", features = ["derive"] }
