@@ -1595,6 +1595,38 @@ impl Entity {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Inventory accessors — read from entity.inventory (canonical source)
+    // -----------------------------------------------------------------------
+
+    /// Read a single commodity from the entity's inventory.
+    /// Returns 0.0 if the entity has no inventory.
+    #[inline]
+    pub fn inv_commodity(&self, commodity: usize) -> f32 {
+        self.inventory
+            .as_ref()
+            .map(|inv| inv.commodities[commodity])
+            .unwrap_or(0.0)
+    }
+
+    /// Sum of all commodities in the entity's inventory.
+    #[inline]
+    pub fn inv_total_commodities(&self) -> f32 {
+        self.inventory
+            .as_ref()
+            .map(|inv| inv.commodities.iter().sum())
+            .unwrap_or(0.0)
+    }
+
+    /// Whether the entity carries any commodity above the given threshold.
+    #[inline]
+    pub fn inv_has_any_commodity(&self, threshold: f32) -> bool {
+        self.inventory
+            .as_ref()
+            .map(|inv| inv.commodities.iter().any(|&g| g > threshold))
+            .unwrap_or(false)
+    }
+
     /// Sync NPC carried_goods + gold FROM entity.inventory.
     pub fn sync_carried_goods_from_inventory(&mut self) {
         if let (Some(npc), Some(inv)) = (&mut self.npc, &self.inventory) {

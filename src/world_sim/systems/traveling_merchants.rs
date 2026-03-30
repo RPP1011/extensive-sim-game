@@ -72,9 +72,10 @@ pub fn compute_traveling_merchants(state: &WorldState, out: &mut Vec<WorldDelta>
         }
 
         // At the settlement: sell goods.
-        if sell_commodity < NUM_COMMODITIES && npc.carried_goods[sell_commodity] > 0.001 {
-            let amount = npc.carried_goods[sell_commodity];
-            out.push(WorldDelta::TransferGoods {
+        let sell_stock = entity.inv_commodity(sell_commodity);
+        if sell_commodity < NUM_COMMODITIES && sell_stock > 0.001 {
+            let amount = sell_stock;
+            out.push(WorldDelta::TransferCommodity {
                 from_entity: entity.id,
                 to_entity: settlement.id,
                 commodity: sell_commodity,

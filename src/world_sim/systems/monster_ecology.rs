@@ -12,7 +12,7 @@
 //! Cadence: every 7 ticks.
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{EntityKind, WorldState, WorldTeam};
+use crate::world_sim::state::{EntityKind, WorldState};
 use crate::world_sim::state::{entity_hash_f32, pair_hash_f32};
 
 use super::seasons::{current_season, season_modifiers};
@@ -61,14 +61,7 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
             .sum::<f32>()
             * 0.001; // normalize
 
-        // Patrol suppression: count friendly NPCs in the region
-        // (approximated by entities near the region's derived position)
-        let region_x = (region.id as f32 * 137.5).sin() * 150.0;
-        let region_y = (region.id as f32 * 73.1).cos() * 150.0;
-        let patrol_count = state.group_index.unaffiliated_entities()
-            .len().min(10) as f32 * 0.0; // unaffiliated aren't patrols
-        // Real patrol: count friendly NPCs far from home settlements
-        // For now, use threat_level as inverse proxy (high threat = low patrols)
+        // Patrol suppression: use threat_level as inverse proxy (high threat = low patrols)
         let patrol_factor = 1.0 / (1.0 + (100.0 - region.threat_level).max(0.0) * 0.02);
 
         // Seasonal: winter drives spawns up (monsters desperate for food)
@@ -219,7 +212,7 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
         if alive_count < max_monsters {
             // Find clusters of 3+ monsters within 30 units.
             let mut bred = 0;
-            for &(mid, mpos, mlevel) in &alive_monsters {
+            for &(mid, mpos, _mlevel) in &alive_monsters {
                 if bred >= 2 { break; } // max 2 births per cycle
 
                 let neighbors = alive_monsters.iter()
@@ -307,7 +300,7 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % (ECOLOGY_TICK_INTERVAL * 3) == 0 {
         // Find coastal settlement positions for patrol targets.
         let coastal_pos: Vec<(f32, f32)> = state.settlements.iter()
-            .filter(|s| state.regions.iter().any(|r| r.is_coastal))
+            .filter(|_s| state.regions.iter().any(|r| r.is_coastal))
             .map(|s| s.pos)
             .take(5)
             .collect();

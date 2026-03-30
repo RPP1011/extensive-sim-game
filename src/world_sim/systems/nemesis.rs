@@ -18,7 +18,6 @@ use crate::world_sim::state::{
     EntityField, EntityKind, WorldState, WorldTeam,
     tags,
 };
-use crate::world_sim::state::{entity_hash_f32};
 
 // ---------------------------------------------------------------------------
 // Constants

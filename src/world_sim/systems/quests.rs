@@ -16,7 +16,6 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::naming::entity_display_name;
 use crate::world_sim::state::*;
-use crate::world_sim::commodity;
 
 const QUEST_GEN_INTERVAL: u64 = 50;
 const QUEST_LIFETIME_TICKS: u64 = 500;
@@ -74,12 +73,6 @@ fn generate_quests(state: &WorldState, out: &mut Vec<WorldDelta>) {
         if roll > 0.3 { continue; }
 
         let reward = settlement.threat_level * QUEST_REWARD_PER_THREAT;
-        let xp = (settlement.threat_level * QUEST_XP_PER_THREAT) as u32;
-
-        // Quest destination: near the settlement (where monsters are).
-        let jx = entity_hash_f32(settlement.id, state.tick, 3) * 20.0 - 10.0;
-        let jy = entity_hash_f32(settlement.id, state.tick, 7) * 20.0 - 10.0;
-        let dest = (settlement.pos.0 + jx, settlement.pos.1 + jy);
 
         // Pay for quest posting from treasury.
         out.push(WorldDelta::UpdateTreasury {

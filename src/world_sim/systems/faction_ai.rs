@@ -55,8 +55,8 @@ pub fn compute_faction_ai(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
         // --- Stance-based behavior ---
         match faction.diplomatic_stance {
-            DiplomaticStance::Hostile | DiplomaticStance::AtWar => {
-                // Hostile/at-war factions build up military faster.
+            DiplomaticStance::Hostile => {
+                // Hostile factions build up military faster.
                 out.push(WorldDelta::UpdateFaction {
                     faction_id: fi,
                     field: FactionField::MilitaryStrength,

@@ -80,7 +80,6 @@ struct FlatMergedDeltas {
     new_statuses: Vec<(u32, super::state::StatusEffect)>,
     remove_statuses: Vec<(u32, u8)>,
     gold_transfers: Vec<(u32, u32, f32)>,
-    goods_transfers: Vec<(u32, u32, usize, f32)>,
     grid_enters: Vec<(u32, u32)>,
     grid_leaves: Vec<(u32, u32)>,
     fidelity_changes: Vec<(u32, Fidelity)>,
@@ -152,7 +151,6 @@ impl FlatMergedDeltas {
             new_statuses: Vec::with_capacity(64),
             remove_statuses: Vec::with_capacity(64),
             gold_transfers: Vec::with_capacity(64),
-            goods_transfers: Vec::with_capacity(64),
             grid_enters: Vec::with_capacity(32),
             grid_leaves: Vec::with_capacity(32),
             fidelity_changes: Vec::with_capacity(16),
@@ -221,7 +219,6 @@ impl FlatMergedDeltas {
         self.new_statuses.clear();
         self.remove_statuses.clear();
         self.gold_transfers.clear();
-        self.goods_transfers.clear();
         self.grid_enters.clear();
         self.grid_leaves.clear();
         self.fidelity_changes.clear();
@@ -361,9 +358,7 @@ impl FlatMergedDeltas {
             WorldDelta::TransferGold { from_entity, to_entity, amount } => {
                 self.gold_transfers.push((from_entity, to_entity, amount));
             }
-            WorldDelta::TransferGoods { from_entity, to_entity, commodity, amount } => {
-                self.goods_transfers.push((from_entity, to_entity, commodity, amount));
-            }
+            // TransferGoods removed — use TransferCommodity instead.
             WorldDelta::UpdateStockpile { settlement_id, commodity, delta } => {
                 if self.mark_settlement(settlement_id) {
                     self.stockpile_adj[settlement_id as usize][commodity] += delta;

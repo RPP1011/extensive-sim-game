@@ -5,7 +5,7 @@
 //! Settlements produce commodities based on their production profile,
 //! prices adjust via supply/demand, and automated caravans move goods
 //! between settlements when profitable. All mutations expressed as
-//! TransferGoods, UpdateStockpile, and UpdatePrices deltas.
+//! TransferCommodity, UpdateStockpile, and UpdatePrices deltas.
 //!
 
 use crate::world_sim::delta::WorldDelta;

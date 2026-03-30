@@ -14,7 +14,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{
-    ChronicleCategory, DiplomaticStance, EntityKind, FactionField, SettlementField,
+    ChronicleCategory, DiplomaticStance, EntityKind, SettlementField,
     WorldEvent, WorldState, WorldTeam,
 };
 use crate::world_sim::state::pair_hash_f32;
@@ -202,7 +202,7 @@ pub fn compute_wanted(state: &WorldState, out: &mut Vec<WorldDelta>) {
             None => continue,
         };
 
-        for (dead_id, dead_level) in &dead_hostiles {
+        for (_dead_id, dead_level) in &dead_hostiles {
             let bounty = MONSTER_BOUNTY_PER_LEVEL * (*dead_level).max(1) as f32;
 
             // Settlement must be able to afford the bounty

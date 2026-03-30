@@ -12,7 +12,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{
-    ChronicleCategory, DiplomaticStance, EntityField, EntityKind, FactionField,
+    ChronicleCategory, DiplomaticStance, EntityKind, FactionField,
     WorldEvent, WorldState, WorldTeam,
 };
 use crate::world_sim::state::pair_hash_f32;
@@ -245,7 +245,7 @@ fn is_high_value_target(
 /// Compute gold reward for a bounty target.
 fn compute_bounty_reward(
     target: &crate::world_sim::state::Entity,
-    hostile_faction_ids: &[u32],
+    _hostile_faction_ids: &[u32],
 ) -> f32 {
     match target.kind {
         EntityKind::Monster => HV_BOUNTY_PER_LEVEL * target.level.max(1) as f32,

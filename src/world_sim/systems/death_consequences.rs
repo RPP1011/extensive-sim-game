@@ -16,7 +16,6 @@
 //! Cadence: every tick (check for new deaths), funerals run for 20 ticks.
 
 use crate::world_sim::state::*;
-use crate::world_sim::systems::agent_inner::record_npc_event;
 
 /// How long a funeral lasts (ticks).
 const FUNERAL_DURATION: u16 = 20;
@@ -73,7 +72,7 @@ pub fn advance_death_consequences(state: &mut WorldState) {
                 (name, level, gold, home_sid, home_bid, pos, is_npc)
             });
 
-        let (name, level, gold, home_sid, home_bid, death_pos, is_npc) = match dead_info {
+        let (name, level, gold, home_sid, home_bid, _death_pos, is_npc) = match dead_info {
             Some(info) => info,
             None => continue,
         };
@@ -279,7 +278,7 @@ pub fn advance_death_consequences(state: &mut WorldState) {
 }
 
 /// Generate a one-sentence epitaph from an NPC's life story.
-fn generate_epitaph(state: &WorldState, entity_id: u32, name: &str, level: u32) -> String {
+fn generate_epitaph(state: &WorldState, entity_id: u32, name: &str, _level: u32) -> String {
     let entity = match state.entity(entity_id) {
         Some(e) => e,
         None => return String::new(),

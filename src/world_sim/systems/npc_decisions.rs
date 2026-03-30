@@ -58,7 +58,7 @@ pub fn compute_npc_decisions_for_settlement(
                 if dist < 3.0 {
                     // Arrived! Sell carried goods at destination prices.
                     for c in 0..crate::world_sim::NUM_COMMODITIES {
-                        let amount = npc.carried_goods[c];
+                        let amount = entity.inv_commodity(c);
                         if amount > 0.1 {
                             let revenue = amount * dest.prices[c];
 
@@ -77,7 +77,7 @@ pub fn compute_npc_decisions_for_settlement(
                             });
 
                             // Clear carried goods (consume from self).
-                            out.push(WorldDelta::TransferGoods {
+                            out.push(WorldDelta::TransferCommodity {
                                 from_entity: entity.id,
                                 to_entity: entity.id,
                                 commodity: c,
@@ -525,8 +525,8 @@ fn carry_capacity(entity: &Entity) -> f32 {
 }
 
 /// Total weight of goods currently carried by an NPC.
-fn total_carried(npc: &NpcData) -> f32 {
-    npc.carried_goods.iter().sum()
+fn total_carried(entity: &Entity) -> f32 {
+    entity.inv_total_commodities()
 }
 
 fn barter_at_settlement(
@@ -602,24 +602,22 @@ fn barter_at_settlement(
             let entity_a = state.entity(a_id);
             let entity_b = state.entity(b_id);
             if let (Some(ea), Some(eb)) = (entity_a, entity_b) {
-                let npc_a = ea.npc.as_ref().unwrap();
-                let npc_b = eb.npc.as_ref().unwrap();
-                let a_after = total_carried(npc_a) - a_give + b_give;
-                let b_after = total_carried(npc_b) - b_give + a_give;
+                let a_after = total_carried(ea) - a_give + b_give;
+                let b_after = total_carried(eb) - b_give + a_give;
                 if a_after > carry_capacity(ea) || b_after > carry_capacity(eb) {
                     continue;
                 }
             }
 
             // A gives commodity_a to B.
-            out.push(WorldDelta::TransferGoods {
+            out.push(WorldDelta::TransferCommodity {
                 from_entity: a_id,
                 to_entity: b_id,
                 commodity: a_commodity,
                 amount: a_give,
             });
             // B gives commodity_b to A.
-            out.push(WorldDelta::TransferGoods {
+            out.push(WorldDelta::TransferCommodity {
                 from_entity: b_id,
                 to_entity: a_id,
                 commodity: b_commodity,

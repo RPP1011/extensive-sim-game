@@ -3,7 +3,7 @@
 //!
 //! NPC entities with Trade intent move between settlements, transferring
 //! goods on arrival. This replaces the original caravan struct with
-//! entity-based movement and TransferGoods/TransferGold deltas.
+//! entity-based movement and TransferCommodity/TransferGold deltas.
 //!
 //! Original: `crates/headless_campaign/src/systems/caravans.rs`
 //!
@@ -58,12 +58,13 @@ pub fn compute_caravans(state: &WorldState, out: &mut Vec<WorldDelta>) {
         if dist_sq < ARRIVAL_DIST_SQ {
             // Arrived: transfer carried goods to settlement.
             for c in 0..NUM_COMMODITIES {
-                if npc.carried_goods[c] > 0.001 {
-                    out.push(WorldDelta::TransferGoods {
+                let stock = entity.inv_commodity(c);
+                if stock > 0.001 {
+                    out.push(WorldDelta::TransferCommodity {
                         from_entity: entity.id,
                         to_entity: dest_settlement_id,
                         commodity: c,
-                        amount: npc.carried_goods[c],
+                        amount: stock,
                     });
                 }
             }

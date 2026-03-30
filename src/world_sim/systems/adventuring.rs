@@ -11,7 +11,6 @@
 //!
 //! Cadence: every 100 ticks (party formation), every 10 ticks (party movement).
 
-use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::*;
 
 const FORMATION_INTERVAL: u64 = 100;
@@ -126,12 +125,12 @@ fn advance_party_quests(state: &mut WorldState, tick: u64) {
         }
     }
 
-    for (pid, members, home_sid) in &parties {
+    for (_pid, members, home_sid) in &parties {
         if members.is_empty() { continue; }
 
         // Get the leader (first member) and their quest destination.
         let leader_idx = members[0];
-        let (leader_pos, quest_dest, quest_id) = {
+        let (leader_pos, quest_dest, _quest_id) = {
             let entity = &state.entities[leader_idx];
             let npc = entity.npc.as_ref().unwrap();
             let dest = match &npc.economic_intent {
@@ -223,7 +222,7 @@ fn advance_party_quests(state: &mut WorldState, tick: u64) {
                 .map(|d| (d.name.clone(), d.max_depth, d.threat_mult));
 
             // Mark dungeon as explored.
-            if let Some((ref dname, _, _)) = dungeon_info {
+            if let Some((ref _dname, _, _)) = dungeon_info {
                 for region in &mut state.regions {
                     for dungeon in &mut region.dungeon_sites {
                         let ddx = dungeon.pos.0 - dest.0;
@@ -241,7 +240,7 @@ fn advance_party_quests(state: &mut WorldState, tick: u64) {
 
             let is_dungeon = dungeon_info.is_some();
             let dungeon_depth = dungeon_info.as_ref().map(|(_, d, _)| *d).unwrap_or(0);
-            let dungeon_threat = dungeon_info.as_ref().map(|(_, _, t)| *t).unwrap_or(1.0);
+            let _dungeon_threat = dungeon_info.as_ref().map(|(_, _, t)| *t).unwrap_or(1.0);
             let dungeon_name = dungeon_info.as_ref().map(|(n, _, _)| n.clone());
 
             // Adventure complete! Reward and disband.
@@ -386,8 +385,8 @@ fn advance_party_quests(state: &mut WorldState, tick: u64) {
         for i in 0..parties.len() {
             for j in (i + 1)..parties.len() {
                 if clashes.len() >= 2 { break; }
-                let (pid_a, members_a, sid_a) = &parties[i];
-                let (pid_b, members_b, sid_b) = &parties[j];
+                let (_pid_a, members_a, _sid_a) = &parties[i];
+                let (_pid_b, members_b, _sid_b) = &parties[j];
                 if members_a.is_empty() || members_b.is_empty() { continue; }
 
                 // Different factions?
@@ -428,7 +427,7 @@ fn advance_party_quests(state: &mut WorldState, tick: u64) {
 
             // Pre-collect IDs and positions to avoid borrow conflicts.
             let winner_ids: Vec<u32> = winners.iter().map(|&wi| state.entities[wi].id).collect();
-            let loser_ids: Vec<u32> = losers.iter().map(|&li| state.entities[li].id).collect();
+            let _loser_ids: Vec<u32> = losers.iter().map(|&li| state.entities[li].id).collect();
 
             // Losers take damage and form grudges against winners.
             for &li in &losers {

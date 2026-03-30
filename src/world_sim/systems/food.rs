@@ -8,7 +8,7 @@
 //!
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{ActionTags, Entity, EntityField, EntityKind, WorldState, tags};
+use crate::world_sim::state::{ActionTags, Entity, EntityField, WorldState, tags};
 
 /// How often the food system ticks.
 const FOOD_TICK_INTERVAL: u64 = 3;
@@ -59,12 +59,12 @@ pub fn compute_food(state: &WorldState, out: &mut Vec<WorldDelta>) {
             continue;
         }
         // Traveling NPC eats from carried goods.
-        let carried_food = npc.carried_goods[COMMODITY_FOOD];
+        let carried_food = entity.inv_commodity(COMMODITY_FOOD);
         let consume = MEAL_SIZE.min(carried_food);
         if consume > 0.0 {
-            // Model carried food consumption as TransferGoods from self to self
+            // Model carried food consumption as TransferCommodity from self to self
             // (the apply phase will clamp to available).
-            out.push(WorldDelta::TransferGoods {
+            out.push(WorldDelta::TransferCommodity {
                 from_entity: entity.id,
                 to_entity: entity.id,
                 commodity: COMMODITY_FOOD,

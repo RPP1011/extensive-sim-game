@@ -1796,35 +1796,60 @@ fn pick_weighted_archetype(specialty: SettlementSpecialty, rng: &mut u64) -> &'s
 // build_world — terrain-aware, faction-controlled world generation
 // ---------------------------------------------------------------------------
 
+/// Grid layout dimensions shared across build_world helpers.
+struct GridLayout {
+    cols: usize,
+    rows: usize,
+    spacing: f32,
+}
+
 fn build_world(args: &WorldSimArgs) -> WorldState {
     let mut state = WorldState::new(args.seed);
     let npcs = args.entities.saturating_sub(args.monsters);
-    let rich = args.rich;
     let num_factions = args.factions.max(1);
 
     let terrain_seed = args.terrain_seed.unwrap_or(args.seed);
     let mut rng = terrain_seed;
 
-    // -----------------------------------------------------------------------
-    // 1. Create regions with terrain types
-    // -----------------------------------------------------------------------
     let cols = (args.settlements as f32).sqrt().ceil() as usize;
     let rows = (args.settlements + cols - 1) / cols;
-    let spacing = if rich { 200.0 } else { 100.0 };
+    let spacing = if args.rich { 200.0 } else { 100.0 };
+    let layout = GridLayout { cols, rows, spacing };
 
-    // One region per grid cell.
-    let num_regions = cols * rows;
+    create_regions(&mut state, &layout, &mut rng);
+    create_water_features(&mut state, &layout);
+    assign_elevations(&mut state);
+    assign_sub_biomes(&mut state);
+    build_adjacency_graph(&mut state, &layout);
+    create_dungeon_sites(&mut state, &layout);
+    create_factions(&mut state, num_factions, &mut rng);
+    create_settlements(&mut state, args, &layout, num_factions, npcs, &mut rng);
+    create_trade_routes(&mut state, &layout, args.trade_routes);
+    let mut next_id = populate_npcs(&mut state, args, npcs, &mut rng);
+    next_id = spawn_monsters(&mut state, &layout, args, next_id, &mut rng);
+    spawn_sea_monsters(&mut state, &layout, next_id, &mut rng);
+
+    state
+}
+
+// ---------------------------------------------------------------------------
+// build_world helpers — one per generation phase
+// ---------------------------------------------------------------------------
+
+/// Phase 1: Create regions with terrain types.
+fn create_regions(state: &mut WorldState, layout: &GridLayout, rng: &mut u64) {
+    let num_regions = layout.cols * layout.rows;
     for i in 0..num_regions {
-        let row = i / cols;
-        let col = i % cols;
-        let terrain = assign_terrain(col, row, &mut rng);
+        let row = i / layout.cols;
+        let col = i % layout.cols;
+        let terrain = assign_terrain(col, row, rng);
         state.regions.push(RegionState {
             id: i as u32,
-            name: generate_region_name(i, &mut rng),
+            name: generate_region_name(i, rng),
             terrain,
             monster_density: terrain.threat_multiplier()
                 * Terrain::elevation_threat_mult(terrain.base_elevation())
-                * (0.1 + lcg_f32(&mut rng) * 0.3),
+                * (0.1 + lcg_f32(rng) * 0.3),
             faction_id: None,
             threat_level: (terrain.threat_multiplier() - 1.0).max(0.0) * 0.2
                 + (terrain.base_elevation() as f32 - 1.0).max(0.0) * 0.1,
@@ -1838,134 +1863,133 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
             is_chokepoint: false,
             elevation: terrain.base_elevation(),
             is_floating: terrain == Terrain::FlyingIslands,
-            unrest: lcg_f32(&mut rng) * 0.2,
-            control: 0.5 + lcg_f32(&mut rng) * 0.5,
+            unrest: lcg_f32(rng) * 0.2,
+            control: 0.5 + lcg_f32(rng) * 0.5,
         });
     }
+}
 
-    // -----------------------------------------------------------------------
-    // 1b. Generate water features — rivers, lakes, ocean borders
-    // -----------------------------------------------------------------------
-    {
-        let num_regions = state.regions.len();
+/// Phase 1b: Generate water features — rivers, lakes, ocean borders.
+fn create_water_features(state: &mut WorldState, layout: &GridLayout) {
+    let GridLayout { cols, rows, .. } = *layout;
+    let num_regions = state.regions.len();
 
-        // Ocean borders: edge regions and DeepOcean regions mark neighbors as coastal.
-        for i in 0..num_regions {
-            let row = i / cols;
-            let col = i % cols;
-            let is_edge = row == 0 || col == 0 || row >= rows - 1 || col >= cols - 1;
-            let is_ocean = state.regions[i].terrain == Terrain::DeepOcean
-                || state.regions[i].terrain == Terrain::CoralReef;
+    // Ocean borders: edge regions and DeepOcean regions mark neighbors as coastal.
+    for i in 0..num_regions {
+        let row = i / cols;
+        let col = i % cols;
+        let is_edge = row == 0 || col == 0 || row >= rows - 1 || col >= cols - 1;
+        let is_ocean = state.regions[i].terrain == Terrain::DeepOcean
+            || state.regions[i].terrain == Terrain::CoralReef;
 
-            if is_edge || is_ocean {
-                // Mark self and neighbors as coastal.
-                if state.regions[i].terrain == Terrain::Coast || is_edge {
-                    state.regions[i].is_coastal = true;
-                }
-                for &(dr, dc) in &[(-1i32, 0), (1, 0), (0, -1), (0, 1)] {
-                    let nr = row as i32 + dr;
-                    let nc = col as i32 + dc;
-                    if nr >= 0 && nc >= 0 && (nr as usize) < rows && (nc as usize) < cols {
-                        let ni = nr as usize * cols + nc as usize;
-                        if ni < num_regions {
-                            state.regions[ni].is_coastal = true;
-                        }
-                    }
-                }
+        if is_edge || is_ocean {
+            // Mark self and neighbors as coastal.
+            if state.regions[i].terrain == Terrain::Coast || is_edge {
+                state.regions[i].is_coastal = true;
             }
-        }
-
-        // Rivers: start from Mountains/Glacier, flow downhill toward Coast/Plains.
-        // Each river is a chain of connected regions.
-        let mut river_count = 0;
-        for i in 0..num_regions {
-            if river_count >= 3 { break; } // max 3 rivers
-            let terrain = state.regions[i].terrain;
-            if !matches!(terrain, Terrain::Mountains | Terrain::Glacier | Terrain::Volcano) { continue; }
-            // Deterministic: only some mountain regions spawn rivers.
-            let roll = (i as u32).wrapping_mul(2654435761).wrapping_add(0x81B3);
-            if roll % 3 != 0 { continue; }
-
-            // Flow downhill: prefer Plains, Coast, Forest, Swamp.
-            let mut current = i;
-            let mut path = vec![i];
-            for _ in 0..6 { // max river length
-                let crow = current / cols;
-                let ccol = current % cols;
-                let mut best_next = None;
-                let mut best_score = 0.0f32;
-                for &(dr, dc) in &[(-1i32, 0), (1, 0), (0, -1), (0, 1)] {
-                    let nr = crow as i32 + dr;
-                    let nc = ccol as i32 + dc;
-                    if nr < 0 || nc < 0 || nr as usize >= rows || nc as usize >= cols { continue; }
-                    let ni = nr as usize * cols + nc as usize;
-                    if ni >= num_regions || path.contains(&ni) { continue; }
-                    // Score: prefer lower-threat (lower elevation proxy).
-                    let score = 1.0 / state.regions[ni].terrain.threat_multiplier()
-                        + if state.regions[ni].terrain == Terrain::Coast { 2.0 } else { 0.0 }
-                        + if state.regions[ni].terrain == Terrain::Plains { 1.0 } else { 0.0 };
-                    if score > best_score {
-                        best_score = score;
-                        best_next = Some(ni);
-                    }
-                }
-                match best_next {
-                    Some(ni) => {
-                        path.push(ni);
-                        current = ni;
-                        if state.regions[ni].is_coastal { break; } // reached the sea
-                    }
-                    None => break,
-                }
-            }
-
-            if path.len() >= 2 {
-                // Mark river regions and connections.
-                for wi in 0..path.len() {
-                    let ri = path[wi];
-                    state.regions[ri].has_river = true;
-                    if wi + 1 < path.len() {
-                        let next_id = state.regions[path[wi + 1]].id;
-                        state.regions[ri].river_connections.push(next_id);
-                    }
-                    if wi > 0 {
-                        let prev_id = state.regions[path[wi - 1]].id;
-                        state.regions[ri].river_connections.push(prev_id);
-                    }
-                }
-                river_count += 1;
-            }
-        }
-
-        // Lakes: valleys between mountains (non-mountain regions adjacent to 2+ mountain regions).
-        for i in 0..num_regions {
-            let row = i / cols;
-            let col = i % cols;
-            if matches!(state.regions[i].terrain, Terrain::Mountains | Terrain::DeepOcean | Terrain::Volcano) {
-                continue;
-            }
-            let mut mountain_neighbors = 0;
             for &(dr, dc) in &[(-1i32, 0), (1, 0), (0, -1), (0, 1)] {
                 let nr = row as i32 + dr;
                 let nc = col as i32 + dc;
                 if nr >= 0 && nc >= 0 && (nr as usize) < rows && (nc as usize) < cols {
                     let ni = nr as usize * cols + nc as usize;
-                    if ni < num_regions && matches!(state.regions[ni].terrain,
-                        Terrain::Mountains | Terrain::Glacier) {
-                        mountain_neighbors += 1;
+                    if ni < num_regions {
+                        state.regions[ni].is_coastal = true;
                     }
                 }
-            }
-            if mountain_neighbors >= 2 {
-                state.regions[i].has_lake = true;
-                // Lakes boost food production.
             }
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 1c. Elevation variation — Mountains/Glacier get random height tiers
-    // -----------------------------------------------------------------------
+    // Rivers: start from Mountains/Glacier, flow downhill toward Coast/Plains.
+    // Each river is a chain of connected regions.
+    let mut river_count = 0;
+    for i in 0..num_regions {
+        if river_count >= 3 { break; } // max 3 rivers
+        let terrain = state.regions[i].terrain;
+        if !matches!(terrain, Terrain::Mountains | Terrain::Glacier | Terrain::Volcano) { continue; }
+        // Deterministic: only some mountain regions spawn rivers.
+        let roll = (i as u32).wrapping_mul(2654435761).wrapping_add(0x81B3);
+        if roll % 3 != 0 { continue; }
+
+        // Flow downhill: prefer Plains, Coast, Forest, Swamp.
+        let mut current = i;
+        let mut path = vec![i];
+        for _ in 0..6 { // max river length
+            let crow = current / cols;
+            let ccol = current % cols;
+            let mut best_next = None;
+            let mut best_score = 0.0f32;
+            for &(dr, dc) in &[(-1i32, 0), (1, 0), (0, -1), (0, 1)] {
+                let nr = crow as i32 + dr;
+                let nc = ccol as i32 + dc;
+                if nr < 0 || nc < 0 || nr as usize >= rows || nc as usize >= cols { continue; }
+                let ni = nr as usize * cols + nc as usize;
+                if ni >= num_regions || path.contains(&ni) { continue; }
+                // Score: prefer lower-threat (lower elevation proxy).
+                let score = 1.0 / state.regions[ni].terrain.threat_multiplier()
+                    + if state.regions[ni].terrain == Terrain::Coast { 2.0 } else { 0.0 }
+                    + if state.regions[ni].terrain == Terrain::Plains { 1.0 } else { 0.0 };
+                if score > best_score {
+                    best_score = score;
+                    best_next = Some(ni);
+                }
+            }
+            match best_next {
+                Some(ni) => {
+                    path.push(ni);
+                    current = ni;
+                    if state.regions[ni].is_coastal { break; } // reached the sea
+                }
+                None => break,
+            }
+        }
+
+        if path.len() >= 2 {
+            // Mark river regions and connections.
+            for wi in 0..path.len() {
+                let ri = path[wi];
+                state.regions[ri].has_river = true;
+                if wi + 1 < path.len() {
+                    let next_id = state.regions[path[wi + 1]].id;
+                    state.regions[ri].river_connections.push(next_id);
+                }
+                if wi > 0 {
+                    let prev_id = state.regions[path[wi - 1]].id;
+                    state.regions[ri].river_connections.push(prev_id);
+                }
+            }
+            river_count += 1;
+        }
+    }
+
+    // Lakes: valleys between mountains (non-mountain regions adjacent to 2+ mountain regions).
+    for i in 0..num_regions {
+        let row = i / cols;
+        let col = i % cols;
+        if matches!(state.regions[i].terrain, Terrain::Mountains | Terrain::DeepOcean | Terrain::Volcano) {
+            continue;
+        }
+        let mut mountain_neighbors = 0;
+        for &(dr, dc) in &[(-1i32, 0), (1, 0), (0, -1), (0, 1)] {
+            let nr = row as i32 + dr;
+            let nc = col as i32 + dc;
+            if nr >= 0 && nc >= 0 && (nr as usize) < rows && (nc as usize) < cols {
+                let ni = nr as usize * cols + nc as usize;
+                if ni < num_regions && matches!(state.regions[ni].terrain,
+                    Terrain::Mountains | Terrain::Glacier) {
+                    mountain_neighbors += 1;
+                }
+            }
+        }
+        if mountain_neighbors >= 2 {
+            state.regions[i].has_lake = true;
+            // Lakes boost food production.
+        }
+    }
+}
+
+/// Phase 1c: Elevation variation — Mountains/Glacier get random height tiers.
+fn assign_elevations(state: &mut WorldState) {
     for i in 0..state.regions.len() {
         let terrain = state.regions[i].terrain;
         let base = terrain.base_elevation();
@@ -1989,9 +2013,10 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
         };
         state.regions[i].elevation = variation;
     }
+}
 
-    // -----------------------------------------------------------------------
-    // 1d. Sub-biome assignment — terrain variants for richer geography.
+/// Phase 1d: Sub-biome assignment — terrain variants for richer geography.
+fn assign_sub_biomes(state: &mut WorldState) {
     for i in 0..state.regions.len() {
         let terrain = state.regions[i].terrain;
         let h = (i as u32).wrapping_mul(1103515245).wrapping_add(12345);
@@ -2017,104 +2042,105 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
             _ => SubBiome::Standard,
         };
     }
+}
 
-    // 1e. Build region adjacency graph + detect chokepoints.
-    {
-        let num_regions = state.regions.len();
-        for i in 0..num_regions {
-            let row = i / cols;
-            let col = i % cols;
-            let mut neighbors = Vec::new();
+/// Phase 1e: Build region adjacency graph + detect chokepoints.
+fn build_adjacency_graph(state: &mut WorldState, layout: &GridLayout) {
+    let GridLayout { cols, rows, .. } = *layout;
+    let num_regions = state.regions.len();
+    for i in 0..num_regions {
+        let row = i / cols;
+        let col = i % cols;
+        let mut neighbors = Vec::new();
 
-            // 4-connected neighbors (cardinal directions).
-            for &(dr, dc) in &[(-1i32, 0), (1, 0), (0, -1), (0, 1)] {
-                let nr = row as i32 + dr;
-                let nc = col as i32 + dc;
-                if nr >= 0 && nc >= 0 && (nr as usize) < rows && (nc as usize) < cols {
-                    let ni = nr as usize * cols + nc as usize;
-                    if ni < num_regions {
-                        neighbors.push(state.regions[ni].id);
-                    }
+        // 4-connected neighbors (cardinal directions).
+        for &(dr, dc) in &[(-1i32, 0), (1, 0), (0, -1), (0, 1)] {
+            let nr = row as i32 + dr;
+            let nc = col as i32 + dc;
+            if nr >= 0 && nc >= 0 && (nr as usize) < rows && (nc as usize) < cols {
+                let ni = nr as usize * cols + nc as usize;
+                if ni < num_regions {
+                    neighbors.push(state.regions[ni].id);
                 }
             }
-
-            state.regions[i].neighbors = neighbors;
         }
 
-        // Detect chokepoints: regions with ≤2 passable neighbors.
-        for i in 0..num_regions {
-            let passable_neighbors = state.regions[i].neighbors.iter()
-                .filter(|&&nid| {
-                    state.regions.iter()
-                        .find(|r| r.id == nid)
-                        .map(|r| r.terrain.travel_speed() > 0.0)
-                        .unwrap_or(false)
-                })
-                .count();
-            // A chokepoint is a passable region with only 1-2 passable neighbors.
-            let is_passable = state.regions[i].terrain.travel_speed() > 0.0;
-            state.regions[i].is_chokepoint = is_passable && passable_neighbors <= 2
-                && passable_neighbors >= 1;
-        }
+        state.regions[i].neighbors = neighbors;
     }
 
-    // 1f. Generate dungeon sites in appropriate regions
-    // -----------------------------------------------------------------------
-    {
-        let dungeon_prefixes = ["Sunken", "Lost", "Forgotten", "Ancient", "Cursed", "Hidden", "Ruined", "Shadowed"];
-        let dungeon_suffixes = ["Halls", "Depths", "Catacombs", "Labyrinth", "Sanctum", "Vault", "Crypts", "Cavern"];
+    // Detect chokepoints: regions with <=2 passable neighbors.
+    for i in 0..num_regions {
+        let passable_neighbors = state.regions[i].neighbors.iter()
+            .filter(|&&nid| {
+                state.regions.iter()
+                    .find(|r| r.id == nid)
+                    .map(|r| r.terrain.travel_speed() > 0.0)
+                    .unwrap_or(false)
+            })
+            .count();
+        // A chokepoint is a passable region with only 1-2 passable neighbors.
+        let is_passable = state.regions[i].terrain.travel_speed() > 0.0;
+        state.regions[i].is_chokepoint = is_passable && passable_neighbors <= 2
+            && passable_neighbors >= 1;
+    }
+}
 
-        for i in 0..state.regions.len() {
-            let terrain = state.regions[i].terrain;
-            if !terrain.has_dungeons() { continue; }
+/// Phase 1f: Generate dungeon sites in appropriate regions.
+fn create_dungeon_sites(state: &mut WorldState, layout: &GridLayout) {
+    let GridLayout { cols, spacing, .. } = *layout;
+    let dungeon_prefixes = ["Sunken", "Lost", "Forgotten", "Ancient", "Cursed", "Hidden", "Ruined", "Shadowed"];
+    let dungeon_suffixes = ["Halls", "Depths", "Catacombs", "Labyrinth", "Sanctum", "Vault", "Crypts", "Cavern"];
 
-            // Number of dungeons based on terrain.
-            let num_dungeons = match terrain {
-                Terrain::AncientRuins => 2,
-                Terrain::Caverns => 2,
-                Terrain::Volcano => 1,
-                Terrain::DeathZone => 1,
-                _ => 0,
+    for i in 0..state.regions.len() {
+        let terrain = state.regions[i].terrain;
+        if !terrain.has_dungeons() { continue; }
+
+        // Number of dungeons based on terrain.
+        let num_dungeons = match terrain {
+            Terrain::AncientRuins => 2,
+            Terrain::Caverns => 2,
+            Terrain::Volcano => 1,
+            Terrain::DeathZone => 1,
+            _ => 0,
+        };
+
+        let row = i / cols;
+        let col = i % cols;
+        let region_center = (col as f32 * spacing, row as f32 * spacing);
+
+        for d in 0..num_dungeons {
+            let h = (i as u32).wrapping_mul(2654435761).wrapping_add(d as u32);
+            let jx = (h % 100) as f32 * 0.4 - 20.0;
+            let jy = ((h / 100) % 100) as f32 * 0.4 - 20.0;
+            let pos = (region_center.0 + jx, region_center.1 + jy);
+
+            let max_depth = match terrain {
+                Terrain::AncientRuins => 3 + (h % 3) as u8,  // 3-5 floors
+                Terrain::Caverns => 4 + (h % 4) as u8,       // 4-7 floors
+                Terrain::Volcano => 2 + (h % 2) as u8,       // 2-3 floors
+                Terrain::DeathZone => 5 + (h % 3) as u8,     // 5-7 floors
+                _ => 3,
             };
 
-            let row = i / cols;
-            let col = i % cols;
-            let region_center = (col as f32 * spacing, row as f32 * spacing);
+            let prefix = dungeon_prefixes[(h as usize / 10) % dungeon_prefixes.len()];
+            let suffix = dungeon_suffixes[(h as usize / 100) % dungeon_suffixes.len()];
+            let name = format!("The {} {}", prefix, suffix);
 
-            for d in 0..num_dungeons {
-                let h = (i as u32).wrapping_mul(2654435761).wrapping_add(d as u32);
-                let jx = (h % 100) as f32 * 0.4 - 20.0;
-                let jy = ((h / 100) % 100) as f32 * 0.4 - 20.0;
-                let pos = (region_center.0 + jx, region_center.1 + jy);
-
-                let max_depth = match terrain {
-                    Terrain::AncientRuins => 3 + (h % 3) as u8,  // 3-5 floors
-                    Terrain::Caverns => 4 + (h % 4) as u8,       // 4-7 floors
-                    Terrain::Volcano => 2 + (h % 2) as u8,       // 2-3 floors
-                    Terrain::DeathZone => 5 + (h % 3) as u8,     // 5-7 floors
-                    _ => 3,
-                };
-
-                let prefix = dungeon_prefixes[(h as usize / 10) % dungeon_prefixes.len()];
-                let suffix = dungeon_suffixes[(h as usize / 100) % dungeon_suffixes.len()];
-                let name = format!("The {} {}", prefix, suffix);
-
-                state.regions[i].dungeon_sites.push(DungeonSite {
-                    pos,
-                    name,
-                    explored_depth: 0,
-                    max_depth,
-                    is_cleared: false,
-                    last_explored_tick: 0,
-                    threat_mult: terrain.threat_multiplier(),
-                });
-            }
+            state.regions[i].dungeon_sites.push(DungeonSite {
+                pos,
+                name,
+                explored_depth: 0,
+                max_depth,
+                is_cleared: false,
+                last_explored_tick: 0,
+                threat_mult: terrain.threat_multiplier(),
+            });
         }
     }
+}
 
-    // -----------------------------------------------------------------------
-    // 2. Create factions
-    // -----------------------------------------------------------------------
+/// Phase 2: Create factions with diplomatic stances and initial wars.
+fn create_factions(state: &mut WorldState, num_factions: usize, rng: &mut u64) {
     let stances = [
         DiplomaticStance::Friendly,
         DiplomaticStance::Neutral,
@@ -2127,56 +2153,64 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
     for f in 0..num_factions {
         let stance = stances[f % stances.len()];
         let relationship = match stance {
-            DiplomaticStance::Friendly => 30.0 + lcg_f32(&mut rng) * 40.0,
-            DiplomaticStance::Hostile => -60.0 + lcg_f32(&mut rng) * 30.0,
-            DiplomaticStance::AtWar => -80.0 + lcg_f32(&mut rng) * 20.0,
-            DiplomaticStance::Coalition => 50.0 + lcg_f32(&mut rng) * 30.0,
-            DiplomaticStance::Neutral => -10.0 + lcg_f32(&mut rng) * 20.0,
+            DiplomaticStance::Friendly => 30.0 + lcg_f32(rng) * 40.0,
+            DiplomaticStance::Hostile => -60.0 + lcg_f32(rng) * 30.0,
+            DiplomaticStance::AtWar => -80.0 + lcg_f32(rng) * 20.0,
+            DiplomaticStance::Coalition => 50.0 + lcg_f32(rng) * 30.0,
+            DiplomaticStance::Neutral => -10.0 + lcg_f32(rng) * 20.0,
         };
         state.factions.push(FactionState {
             id: f as u32,
-            name: generate_faction_name(&mut rng),
+            name: generate_faction_name(rng),
             relationship_to_guild: relationship,
-            military_strength: 20.0 + lcg_f32(&mut rng) * 80.0,
+            military_strength: 20.0 + lcg_f32(rng) * 80.0,
             max_military_strength: 100.0,
             territory_size: 0, // computed after assignment
             diplomatic_stance: stance,
-            treasury: 500.0 + lcg_f32(&mut rng) * 2000.0,
+            treasury: 500.0 + lcg_f32(rng) * 2000.0,
             at_war_with: Vec::new(),
-            coup_risk: lcg_f32(&mut rng) * 0.3,
+            coup_risk: lcg_f32(rng) * 0.3,
             escalation_level: 0,
-            tech_level: 1 + (lcg_u32(&mut rng) % 3) as u32,
+            tech_level: 1 + (lcg_u32(rng) % 3) as u32,
             recent_actions: Vec::new(),
         });
     }
 
     // Set some faction wars: hostile factions fight each other.
-    {
-        let hostile_ids: Vec<u32> = state.factions.iter()
-            .filter(|f| f.diplomatic_stance == DiplomaticStance::Hostile)
-            .map(|f| f.id)
-            .collect();
-        if hostile_ids.len() >= 2 {
-            // First hostile faction is at war with the second.
-            let a = hostile_ids[0];
-            let b = hostile_ids[1 % hostile_ids.len()];
-            if a != b {
-                if let Some(fa) = state.faction_mut(a) { fa.at_war_with.push(b); }
-                if let Some(fb) = state.faction_mut(b) { fb.at_war_with.push(a); }
-            }
+    let hostile_ids: Vec<u32> = state.factions.iter()
+        .filter(|f| f.diplomatic_stance == DiplomaticStance::Hostile)
+        .map(|f| f.id)
+        .collect();
+    if hostile_ids.len() >= 2 {
+        // First hostile faction is at war with the second.
+        let a = hostile_ids[0];
+        let b = hostile_ids[1 % hostile_ids.len()];
+        if a != b {
+            if let Some(fa) = state.faction_mut(a) { fa.at_war_with.push(b); }
+            if let Some(fb) = state.faction_mut(b) { fb.at_war_with.push(a); }
         }
     }
+}
 
-    // -----------------------------------------------------------------------
-    // 3. Create settlements with terrain-aware specialties
-    // -----------------------------------------------------------------------
+/// Phase 3: Create settlements with terrain-aware specialties, city grids, and local grids.
+fn create_settlements(
+    state: &mut WorldState,
+    args: &WorldSimArgs,
+    layout: &GridLayout,
+    num_factions: usize,
+    npcs: usize,
+    rng: &mut u64,
+) {
+    let GridLayout { cols, spacing, .. } = *layout;
+    let rich = args.rich;
+
     let mut used_names = std::collections::HashSet::new();
     for i in 0..args.settlements {
         let row = i / cols;
         let col = i % cols;
         // Jitter settlement positions so the world isn't a perfect grid.
-        let jx = (lcg_f32(&mut rng) - 0.5) * spacing * 0.6;
-        let jy = (lcg_f32(&mut rng) - 0.5) * spacing * 0.6;
+        let jx = (lcg_f32(rng) - 0.5) * spacing * 0.6;
+        let jy = (lcg_f32(rng) - 0.5) * spacing * 0.6;
         let pos = (col as f32 * spacing + jx, row as f32 * spacing + jy);
         let region_idx = row * cols + col;
         let region_idx = region_idx.min(state.regions.len().saturating_sub(1));
@@ -2193,10 +2227,10 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
         let terrain = state.regions[region_idx].terrain;
 
         // Generate a unique settlement name (retry on collision).
-        let mut name = generate_settlement_name(&mut rng);
+        let mut name = generate_settlement_name(rng);
         let mut attempts = 0;
         while used_names.contains(&name) && attempts < 50 {
-            name = generate_settlement_name(&mut rng);
+            name = generate_settlement_name(rng);
             attempts += 1;
         }
         if used_names.contains(&name) {
@@ -2207,7 +2241,7 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
         let mut settlement = SettlementState::new(i as u32, name, pos);
 
         // Assign specialty based on terrain.
-        settlement.specialty = choose_specialty(terrain, &mut rng);
+        settlement.specialty = choose_specialty(terrain, rng);
 
         // Set context tags based on specialty (tag-based action system).
         settlement.context_tags = match settlement.specialty {
@@ -2241,23 +2275,23 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
             let terrain_produces = terrain.primary_commodities().iter().any(|&(ci, _)| ci == c);
             let specialty_produces = settlement.specialty.production_bonuses().iter().any(|&(ci, _)| ci == c);
             settlement.prices[c] = if terrain_produces && specialty_produces {
-                0.4 + lcg_f32(&mut rng) * 0.2
+                0.4 + lcg_f32(rng) * 0.2
             } else if terrain_produces || specialty_produces {
-                0.7 + lcg_f32(&mut rng) * 0.3
+                0.7 + lcg_f32(rng) * 0.3
             } else {
-                1.5 + lcg_f32(&mut rng) * 1.0
+                1.5 + lcg_f32(rng) * 1.0
             };
         }
 
         // Treasury based on specialty and terrain.
         settlement.treasury = match settlement.specialty {
             SettlementSpecialty::TradeHub | SettlementSpecialty::PortTown => {
-                200.0 + lcg_f32(&mut rng) * 500.0
+                200.0 + lcg_f32(rng) * 500.0
             }
             SettlementSpecialty::MiningTown | SettlementSpecialty::CraftingGuild => {
-                150.0 + lcg_f32(&mut rng) * 300.0
+                150.0 + lcg_f32(rng) * 300.0
             }
-            _ => 50.0 + lcg_f32(&mut rng) * 200.0,
+            _ => 50.0 + lcg_f32(rng) * 200.0,
         };
         if rich { settlement.treasury *= 3.0; }
 
@@ -2275,7 +2309,7 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
             SettlementSpecialty::MilitaryOutpost => 0.7,
         };
         // Add +-10% jitter so no two settlements are exactly the same.
-        let jitter = 0.9 + lcg_f32(&mut rng) * 0.2;
+        let jitter = 0.9 + lcg_f32(rng) * 0.2;
         settlement.population = (base_pop * pop_mult * jitter) as u32;
 
         // Also tag the region with the faction.
@@ -2310,29 +2344,34 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
             .filter(|s| s.faction_id == Some(faction.id))
             .count() as u32;
     }
+}
 
-    // -----------------------------------------------------------------------
-    // 4. Trade routes between nearby settlements
-    // -----------------------------------------------------------------------
-    if args.trade_routes {
-        let max_dist = spacing * 1.8; // connect settlements within ~2 grid cells
-        for i in 0..state.settlements.len() {
-            for j in (i + 1)..state.settlements.len() {
-                let a = &state.settlements[i];
-                let b = &state.settlements[j];
-                let dx = a.pos.0 - b.pos.0;
-                let dy = a.pos.1 - b.pos.1;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist <= max_dist {
-                    state.trade_routes.push((a.id, b.id));
-                }
+/// Phase 4: Trade routes between nearby settlements.
+fn create_trade_routes(state: &mut WorldState, layout: &GridLayout, enabled: bool) {
+    if !enabled { return; }
+    let max_dist = layout.spacing * 1.8; // connect settlements within ~2 grid cells
+    for i in 0..state.settlements.len() {
+        for j in (i + 1)..state.settlements.len() {
+            let a = &state.settlements[i];
+            let b = &state.settlements[j];
+            let dx = a.pos.0 - b.pos.0;
+            let dy = a.pos.1 - b.pos.1;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist <= max_dist {
+                state.trade_routes.push((a.id, b.id));
             }
         }
     }
+}
 
-    // -----------------------------------------------------------------------
-    // 5. Distribute NPCs with specialty-aware archetypes
-    // -----------------------------------------------------------------------
+/// Phase 5: Distribute NPCs with specialty-aware archetypes. Returns next entity id.
+fn populate_npcs(
+    state: &mut WorldState,
+    args: &WorldSimArgs,
+    npcs: usize,
+    rng: &mut u64,
+) -> u32 {
+    let rich = args.rich;
     let mut id = 0u32;
 
     for i in 0..npcs {
@@ -2355,7 +2394,7 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
         npc_data.faction_id = settlement_faction;
 
         // Choose archetype from weighted distribution matching settlement specialty.
-        npc_data.archetype = pick_weighted_archetype(specialty, &mut rng).to_string();
+        npc_data.archetype = pick_weighted_archetype(specialty, rng).to_string();
 
         // Set production based on terrain region.
         let region_idx = settlement_idx.min(state.regions.len().saturating_sub(1));
@@ -2386,9 +2425,9 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
 
             // Varied starting gold based on settlement wealth.
             let wealth_factor = settlement_treasury / 200.0;
-            npc_data.gold = 5.0 + wealth_factor * lcg_f32(&mut rng) * 20.0;
-            npc_data.morale = 30.0 + lcg_f32(&mut rng) * 50.0;
-            npc_data.loyalty = 20.0 + lcg_f32(&mut rng) * 60.0;
+            npc_data.gold = 5.0 + wealth_factor * lcg_f32(rng) * 20.0;
+            npc_data.morale = 30.0 + lcg_f32(rng) * 50.0;
+            npc_data.loyalty = 20.0 + lcg_f32(rng) * 60.0;
         } else {
             let terrain_commodities = terrain.primary_commodities();
             if !terrain_commodities.is_empty() {
@@ -2397,9 +2436,9 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
             } else {
                 npc_data.behavior_production = vec![(0, 0.05)];
             }
-            npc_data.gold = 2.0 + lcg_f32(&mut rng) * 8.0;
-            npc_data.morale = 40.0 + lcg_f32(&mut rng) * 30.0;
-            npc_data.loyalty = 30.0 + lcg_f32(&mut rng) * 40.0;
+            npc_data.gold = 2.0 + lcg_f32(rng) * 8.0;
+            npc_data.morale = 40.0 + lcg_f32(rng) * 30.0;
+            npc_data.loyalty = 30.0 + lcg_f32(rng) * 40.0;
         }
 
         // ~80% of NPCs are producers (flee from combat), ~20% are idle defenders.
@@ -2420,13 +2459,22 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
         id += 1;
     }
 
-    // -----------------------------------------------------------------------
-    // 6. Spawn monsters in the wilderness (density weighted by region)
-    // -----------------------------------------------------------------------
-    let max_extent = (cols as f32) * spacing;
+    id
+}
+
+/// Phase 6: Spawn monsters in the wilderness (density weighted by region). Returns next entity id.
+fn spawn_monsters(
+    state: &mut WorldState,
+    layout: &GridLayout,
+    args: &WorldSimArgs,
+    mut id: u32,
+    rng: &mut u64,
+) -> u32 {
+    let max_extent = (layout.cols as f32) * layout.spacing;
+    let rich = args.rich;
     for i in 0..args.monsters {
         let angle = (i as f32 / args.monsters.max(1) as f32) * std::f32::consts::TAU;
-        let base_radius = max_extent * 0.6 + lcg_f32(&mut rng) * max_extent * 0.4;
+        let base_radius = max_extent * 0.6 + lcg_f32(rng) * max_extent * 0.4;
         let cx = max_extent / 2.0;
         let cy = max_extent / 2.0;
         let pos = (cx + base_radius * angle.cos(), cy + base_radius * angle.sin());
@@ -2440,10 +2488,19 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
         state.entities.push(monster);
         id += 1;
     }
+    id
+}
 
-    // -----------------------------------------------------------------------
-    // 7. Spawn sea monsters in DeepOcean/CoralReef regions
-    // -----------------------------------------------------------------------
+/// Phase 7: Spawn sea monsters in DeepOcean/CoralReef regions and along coastal edges.
+fn spawn_sea_monsters(
+    state: &mut WorldState,
+    layout: &GridLayout,
+    mut id: u32,
+    rng: &mut u64,
+) {
+    let GridLayout { cols, spacing, .. } = *layout;
+    let max_extent = (cols as f32) * spacing;
+
     let ocean_regions: Vec<(f32, f32)> = state.regions.iter()
         .filter(|r| matches!(r.terrain, Terrain::DeepOcean | Terrain::CoralReef))
         .map(|r| {
@@ -2475,8 +2532,8 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
     let num_sea_monsters = (sea_positions.len() * 2).min(10).max(2);
     for i in 0..num_sea_monsters {
         let base_pos = sea_positions[i % sea_positions.len()];
-        let jx = lcg_f32(&mut rng) * 40.0 - 20.0;
-        let jy = lcg_f32(&mut rng) * 40.0 - 20.0;
+        let jx = lcg_f32(rng) * 40.0 - 20.0;
+        let jy = lcg_f32(rng) * 40.0 - 20.0;
         let pos = (base_pos.0 + jx, base_pos.1 + jy);
         let level = 20 + (i as u32 * 5); // high level: 20-65
         let mut monster = Entity::new_monster(id, pos, level);
@@ -2489,6 +2546,4 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
         state.entities.push(monster);
         id += 1;
     }
-
-    state
 }

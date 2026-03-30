@@ -67,13 +67,6 @@ pub enum WorldDelta {
         to_entity: u32,
         amount: f32,
     },
-    TransferGoods {
-        from_entity: u32,
-        to_entity: u32,
-        commodity: usize,
-        amount: f32,
-    },
-
     // --- Settlement ---
     UpdateStockpile {
         settlement_id: u32,
@@ -289,9 +282,6 @@ pub struct MergedDeltas {
 
     /// Gold transfers: (from, to, amount). Applied with proportional scaling.
     pub gold_transfers: Vec<(u32, u32, f32)>,
-    /// Goods transfers: (from, to, commodity, amount).
-    pub goods_transfers: Vec<(u32, u32, usize, f32)>,
-
     /// Direct stockpile adjustments (commutative sums per settlement per commodity).
     pub stockpile_deltas: HashMap<u32, [f32; NUM_COMMODITIES]>,
     /// Treasury adjustments (commutative sums per settlement).
@@ -392,7 +382,6 @@ impl MergedDeltas {
         self.production_by_settlement.clear();
         self.consumption_by_settlement.clear();
         self.gold_transfers.clear();
-        self.goods_transfers.clear();
         self.stockpile_deltas.clear();
         self.treasury_deltas.clear();
         self.price_updates.clear();
@@ -485,9 +474,7 @@ fn merge_one(m: &mut MergedDeltas, delta: WorldDelta) {
         WorldDelta::TransferGold { from_entity, to_entity, amount } => {
             m.gold_transfers.push((from_entity, to_entity, amount));
         }
-        WorldDelta::TransferGoods { from_entity, to_entity, commodity, amount } => {
-            m.goods_transfers.push((from_entity, to_entity, commodity, amount));
-        }
+        // TransferGoods removed — use TransferCommodity instead.
         WorldDelta::UpdateStockpile { settlement_id, commodity, delta } => {
             m.stockpile_deltas
                 .entry(settlement_id)

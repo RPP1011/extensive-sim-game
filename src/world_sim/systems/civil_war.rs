@@ -16,7 +16,7 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{
-    ChronicleCategory, ChronicleEntry, DiplomaticStance, FactionField, RegionField, WorldEvent,
+    ChronicleCategory, ChronicleEntry, FactionField, RegionField, WorldEvent,
     WorldState,
 };
 use crate::world_sim::state::entity_hash_f32;

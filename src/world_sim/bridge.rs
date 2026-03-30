@@ -175,7 +175,12 @@ fn adventurer_to_entity(adv: &Adventurer) -> Entity {
         }),
         building: None,
         item: None,
-        inventory: Some(Inventory::with_capacity(50.0)),
+        inventory: Some({
+            let mut inv = Inventory::with_capacity(50.0);
+            inv.commodities = adv.carried_goods;
+            inv.gold = adv.gold;
+            inv
+        }),
     }
 }
 
@@ -223,8 +228,13 @@ pub fn world_to_campaign(world: &WorldState, campaign: &mut CampaignState) {
     for entity in &world.entities {
         if let Some(npc) = &entity.npc {
             if let Some(adv) = campaign.adventurers.iter_mut().find(|a| a.id == npc.adventurer_id) {
-                adv.gold = npc.gold;
-                adv.carried_goods = npc.carried_goods;
+                if let Some(inv) = &entity.inventory {
+                    adv.gold = inv.gold;
+                    adv.carried_goods = inv.commodities;
+                } else {
+                    adv.gold = npc.gold;
+                    adv.carried_goods = npc.carried_goods;
+                }
 
                 // Update price knowledge.
                 adv.price_knowledge = npc.price_knowledge.iter().map(|pr| {

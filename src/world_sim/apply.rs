@@ -53,7 +53,6 @@ pub fn apply_deltas_profiled(old: &WorldState, merged: &MergedDeltas) -> (WorldS
     let t = Instant::now();
     apply_economy(&mut next, merged);
     apply_gold_transfers(&mut next, merged);
-    apply_goods_transfers(&mut next, merged);
     p.economy_us = t.elapsed().as_micros() as u64;
 
     let t = Instant::now();
@@ -100,7 +99,6 @@ pub fn apply_deltas_in_place(state: &mut WorldState, merged: &MergedDeltas) -> A
     let t = Instant::now();
     apply_economy(state, merged);
     apply_gold_transfers(state, merged);
-    apply_goods_transfers(state, merged);
     p.economy_us = t.elapsed().as_micros() as u64;
 
     let t = Instant::now();
@@ -315,41 +313,6 @@ fn apply_gold_transfers(state: &mut WorldState, merged: &MergedDeltas) {
 // ---------------------------------------------------------------------------
 // Goods transfers with proportional scaling
 // ---------------------------------------------------------------------------
-
-fn apply_goods_transfers(state: &mut WorldState, merged: &MergedDeltas) {
-    if merged.goods_transfers.is_empty() { return; }
-
-    // Compute total outgoing per (sender, commodity).
-    let mut outgoing: HashMap<(u32, usize), f32> = HashMap::with_capacity(merged.goods_transfers.len());
-    for &(from, _, commodity, amount) in &merged.goods_transfers {
-        *outgoing.entry((from, commodity)).or_default() += amount;
-    }
-
-    for &(from, to, commodity, amount) in &merged.goods_transfers {
-        let sender_stock = state.entity(from)
-            .and_then(|e| e.npc.as_ref())
-            .map(|n| n.carried_goods[commodity])
-            .unwrap_or(0.0);
-        let total_out = outgoing.get(&(from, commodity)).copied().unwrap_or(0.0);
-        let scale = if total_out > sender_stock && total_out > 0.0 {
-            sender_stock / total_out
-        } else {
-            1.0
-        };
-        let actual = amount * scale;
-
-        if let Some(sender) = state.entity_mut(from) {
-            if let Some(npc) = sender.npc.as_mut() {
-                npc.carried_goods[commodity] -= actual;
-            }
-        }
-        if let Some(receiver) = state.entity_mut(to) {
-            if let Some(npc) = receiver.npc.as_mut() {
-                npc.carried_goods[commodity] += actual;
-            }
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Deaths: mark entities with hp <= 0 as dead

@@ -237,7 +237,9 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
 
         // --- Detect trade: NPC on Trade intent with carried goods → trading ---
         if matches!(npc.economic_intent, EconomicIntent::Trade { .. }) {
-            let has_goods = npc.carried_goods.iter().any(|&g| g > 0.1);
+            let has_goods = entity.inventory.as_ref()
+                .map(|inv| inv.commodities.iter().any(|&g| g > 0.1))
+                .unwrap_or(false);
             if has_goods {
                 let recent_trade = npc.memory.events.iter().rev().take(3).any(|e| {
                     matches!(e.event_type, MemEventType::TradedWith(_))
@@ -256,7 +258,7 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
         }
 
         // --- Detect building construction: NPCs working at unfinished buildings ---
-        if let Some(wbid) = npc.work_building_id {
+        if let Some(_wbid) = npc.work_building_id {
             // This is a proxy — actual BuiltSomething events are recorded in buildings.rs
             // when construction completes. Here we just give purpose satisfaction for building work.
             if npc.behavior_value(tags::CONSTRUCTION) > 10.0 {

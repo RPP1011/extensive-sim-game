@@ -69,10 +69,10 @@ pub fn compute_supply_for_settlement(
         // Total drain: base + distance-proportional.
         let drain = BASE_DRAIN_PER_TICK + home_dist * DISTANCE_DRAIN_FACTOR;
 
-        let carried_food = npc.carried_goods[COMMODITY_FOOD];
+        let carried_food = entity.inv_commodity(COMMODITY_FOOD);
         if carried_food > 0.0 {
             let consumed = drain.min(carried_food);
-            out.push(WorldDelta::TransferGoods {
+            out.push(WorldDelta::TransferCommodity {
                 from_entity: entity.id,
                 to_entity: entity.id,
                 commodity: COMMODITY_FOOD,
@@ -110,6 +110,7 @@ mod tests {
             destination: (100.0, 0.0),
         };
         npc_data.carried_goods[0] = 10.0; // has food
+        npc.inventory.as_mut().unwrap().commodities[0] = 10.0;
         state.entities.push(npc);
         state.rebuild_group_index();
 
@@ -119,7 +120,7 @@ mod tests {
         let has_consume = deltas.iter().any(|d| {
             matches!(
                 d,
-                WorldDelta::TransferGoods {
+                WorldDelta::TransferCommodity {
                     from_entity: 1,
                     commodity: crate::world_sim::commodity::FOOD,
                     ..
