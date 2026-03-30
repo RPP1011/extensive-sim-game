@@ -66,10 +66,6 @@ pub fn compute_legendary_deeds_for_settlement(
             let value = npc.behavior_value(deed.tag);
             // Fire once: only in the window [threshold, threshold + WINDOW).
             if value >= deed.threshold && value < deed.threshold + WINDOW {
-                out.push(WorldDelta::AddXp {
-                    entity_id: entity.id,
-                    amount: deed.xp,
-                });
                 out.push(WorldDelta::UpdateEntityField {
                     entity_id: entity.id,
                     field: EntityField::Morale,
@@ -88,10 +84,6 @@ pub fn compute_legendary_deeds_for_settlement(
             // Second tier: double the threshold.
             let tier2 = deed.threshold * 2.0;
             if value >= tier2 && value < tier2 + WINDOW {
-                out.push(WorldDelta::AddXp {
-                    entity_id: entity.id,
-                    amount: deed.xp * 2,
-                });
                 out.push(WorldDelta::UpdateEntityField {
                     entity_id: entity.id,
                     field: EntityField::Morale,

@@ -110,10 +110,6 @@ pub fn compute_personal_goals_for_settlement(
                 field: EntityField::Morale,
                 value: MASTERY_MORALE,
             });
-            out.push(WorldDelta::AddXp {
-                entity_id: entity.id,
-                amount: MASTERY_XP,
-            });
             out.push(WorldDelta::RecordChronicle {
                 entry: ChronicleEntry {
                     tick: state.tick,
@@ -134,10 +130,6 @@ pub fn compute_personal_goals_for_settlement(
                 field: EntityField::Morale,
                 value: WEALTH_MORALE,
             });
-            out.push(WorldDelta::AddXp {
-                entity_id: entity.id,
-                amount: WEALTH_XP,
-            });
         }
 
         // --- 3. Combat: combat + melee crosses 300 ---
@@ -149,10 +141,6 @@ pub fn compute_personal_goals_for_settlement(
                 entity_id: entity.id,
                 field: EntityField::Morale,
                 value: COMBAT_MORALE,
-            });
-            out.push(WorldDelta::AddXp {
-                entity_id: entity.id,
-                amount: COMBAT_XP,
             });
             out.push(WorldDelta::RecordChronicle {
                 entry: ChronicleEntry {
@@ -179,10 +167,6 @@ pub fn compute_personal_goals_for_settlement(
                 field: EntityField::Morale,
                 value: SCHOLARLY_MORALE,
             });
-            out.push(WorldDelta::AddXp {
-                entity_id: entity.id,
-                amount: SCHOLARLY_XP,
-            });
         }
 
         // --- 5. Social: trade + diplomacy crosses 200 ---
@@ -194,10 +178,6 @@ pub fn compute_personal_goals_for_settlement(
                 entity_id: entity.id,
                 field: EntityField::Morale,
                 value: SOCIAL_MORALE,
-            });
-            out.push(WorldDelta::AddXp {
-                entity_id: entity.id,
-                amount: SOCIAL_XP,
             });
         }
     }

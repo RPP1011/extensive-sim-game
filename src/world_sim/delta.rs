@@ -127,12 +127,6 @@ pub enum WorldDelta {
         mood: u8,
     },
 
-    /// Add XP to an entity (commutative sum).
-    AddXp {
-        entity_id: u32,
-        amount: u32,
-    },
-
     // --- Faction updates ---
     UpdateFaction {
         faction_id: u32,
@@ -509,9 +503,6 @@ fn merge_one(m: &mut MergedDeltas, delta: WorldDelta) {
         }
         WorldDelta::SetEntityMood { entity_id, mood } => {
             m.entity_mood_sets.insert(entity_id, mood);
-        }
-        WorldDelta::AddXp { .. } => {
-            // Vestigial: npc.xp is no longer used.
         }
         WorldDelta::UpdateFaction { faction_id, field, value } => {
             *m.faction_field_deltas.entry((faction_id, field as u8)).or_default() += value;

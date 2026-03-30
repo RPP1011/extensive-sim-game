@@ -505,8 +505,6 @@ pub(super) fn apply_campaign_deltas(state: &mut WorldState, merged: &MergedDelta
         }
     }
 
-    // XP additions: vestigial, npc.xp no longer used (level derives from class levels).
-
     // --- Faction field deltas ---
     for (&(faction_id, field_disc), &delta) in &merged.faction_field_deltas {
         if let Some(faction) = state.faction_mut(faction_id) {

@@ -398,9 +398,6 @@ impl FlatMergedDeltas {
                     self.entity_mood_set[entity_id as usize] = true;
                 }
             }
-            WorldDelta::AddXp { .. } => {
-                // Vestigial: npc.xp is no longer used (level derives from class levels).
-            }
             WorldDelta::UpdateFaction { faction_id, field, value } => {
                 self.mark_faction(faction_id);
                 let i = faction_id as usize;
@@ -1533,7 +1530,7 @@ impl WorldSim {
         // STOCKPILE SYNC — rebuild settlement stockpiles from building inventories.
         super::systems::work::sync_stockpiles_from_buildings(&mut self.state);
 
-        // INVENTORY SYNC — bridge legacy carried_goods/building.storage ↔ entity.inventory.
+        // INVENTORY SYNC — cap gold and sync building storage → entity.inventory.
         for entity in &mut self.state.entities {
             // Cap NPC gold to prevent infinity.
             if let Some(npc) = &mut entity.npc {
@@ -1541,7 +1538,6 @@ impl WorldSim {
                     npc.gold = 10000.0;
                 }
             }
-            entity.sync_inventory_from_carried_goods();
             entity.sync_inventory_from_building_storage();
         }
 

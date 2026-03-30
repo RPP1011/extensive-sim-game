@@ -144,12 +144,6 @@ fn complete_quest(
             value: gold_share,
         });
 
-        // XP reward.
-        out.push(WorldDelta::AddXp {
-            entity_id: entity.id,
-            amount: xp_share.max(1),
-        });
-
         // Morale boost from completing a quest.
         out.push(WorldDelta::UpdateEntityField {
             entity_id: entity.id,

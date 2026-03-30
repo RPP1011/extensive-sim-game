@@ -8,7 +8,7 @@
 //! new nemesis can spawn after a `RESPAWN_COOLDOWN`.
 //!
 //! Uses only existing delta types:
-//!   UpdateEntityField, AddXp, AddBehaviorTags, RecordChronicle, Damage, Heal.
+//!   UpdateEntityField, AddBehaviorTags, RecordChronicle, Damage, Heal.
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::naming::entity_display_name;
@@ -110,12 +110,6 @@ fn check_nemesis_deaths(state: &WorldState, out: &mut Vec<WorldDelta>) {
         if let Some(killer_id) = best_id {
             // Only credit if reasonably close (within 100 units).
             if best_dist_sq > 10000.0 { continue; }
-
-            // Massive XP reward.
-            out.push(WorldDelta::AddXp {
-                entity_id: killer_id,
-                amount: NEMESIS_KILL_XP,
-            });
 
             // Combat behavior tags for the slayer.
             let mut action = ActionTags::empty();

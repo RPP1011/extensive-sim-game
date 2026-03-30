@@ -88,7 +88,6 @@ pub fn compute_secrets_for_settlement(
                         field: EntityField::Morale,
                         value: 10.0,
                     });
-                    out.push(WorldDelta::AddXp { entity_id: entity.id, amount: 20 });
                     out.push(WorldDelta::RecordChronicle {
                         entry: ChronicleEntry {
                             tick: state.tick,
@@ -144,7 +143,6 @@ pub fn compute_secrets_for_settlement(
                         tags: action.tags,
                         count: action.count,
                     });
-                    out.push(WorldDelta::AddXp { entity_id: entity.id, amount: 15 });
                     out.push(WorldDelta::RecordChronicle {
                         entry: ChronicleEntry {
                             tick: state.tick,
@@ -203,7 +201,6 @@ pub fn compute_secrets_for_settlement(
                         tags: action.tags,
                         count: action.count,
                     });
-                    out.push(WorldDelta::AddXp { entity_id: entity.id, amount: 25 });
                     out.push(WorldDelta::RecordChronicle {
                         entry: ChronicleEntry {
                             tick: state.tick,

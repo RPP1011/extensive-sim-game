@@ -98,20 +98,6 @@ pub fn compute_culture_for_settlement(
         });
     }
 
-    // Scholarly culture > 30%: XP bonus to all NPCs.
-    if scholarly_pct > 30.0 {
-        let xp_bonus = ((scholarly_pct - 30.0) * 0.1) as u32;
-        if xp_bonus > 0 {
-            for entity in entities {
-                if !entity.alive { continue; }
-                out.push(WorldDelta::AddXp {
-                    entity_id: entity.id,
-                    amount: xp_bonus.min(3),
-                });
-            }
-        }
-    }
-
     // Spiritual culture > 30%: morale boost.
     if spiritual_pct > 30.0 {
         let morale_boost = (spiritual_pct - 30.0) * 0.01;

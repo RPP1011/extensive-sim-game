@@ -1627,22 +1627,6 @@ impl Entity {
             .unwrap_or(false)
     }
 
-    /// Sync NPC carried_goods + gold FROM entity.inventory.
-    pub fn sync_carried_goods_from_inventory(&mut self) {
-        if let (Some(npc), Some(inv)) = (&mut self.npc, &self.inventory) {
-            npc.carried_goods = inv.commodities;
-            npc.gold = inv.gold;
-        }
-    }
-
-    /// Sync entity.inventory FROM NPC carried_goods + gold.
-    pub fn sync_inventory_from_carried_goods(&mut self) {
-        if let (Some(npc), Some(inv)) = (&self.npc, &mut self.inventory) {
-            inv.commodities = npc.carried_goods;
-            inv.gold = npc.gold;
-        }
-    }
-
     /// Sync building.storage FROM entity.inventory.
     pub fn sync_building_storage_from_inventory(&mut self) {
         if let (Some(bld), Some(inv)) = (&mut self.building, &self.inventory) {
@@ -2230,7 +2214,6 @@ pub struct NpcData {
     /// Index into cached_path — which waypoint we're currently walking toward.
     pub path_index: u16,
     pub price_knowledge: Vec<PriceReport>,
-    pub carried_goods: [f32; NUM_COMMODITIES],
     pub class_tags: Vec<String>,
     /// What commodities this NPC produces (commodity_index, rate_per_tick).
     pub behavior_production: Vec<(usize, f32)>,
@@ -2247,8 +2230,6 @@ pub struct NpcData {
     pub loyalty: f32,
     /// 0–100. Injury severity (>=90 incapacitated).
     pub injury: f32,
-    /// Vestigial — entity level is derived from class level sum. Kept for serialization compat.
-    pub xp: u32,
     /// Hero archetype name (e.g. "knight", "ranger", "mage").
     pub archetype: String,
     /// Party membership, if any.
@@ -2539,7 +2520,6 @@ impl Default for NpcData {
             cached_path: Vec::new(),
             path_index: 0,
             price_knowledge: Vec::new(),
-            carried_goods: [0.0; NUM_COMMODITIES],
             class_tags: Vec::new(),
             behavior_production: Vec::new(),
             morale: 50.0,
@@ -2547,7 +2527,6 @@ impl Default for NpcData {
             fatigue: 0.0,
             loyalty: 50.0,
             injury: 0.0,
-            xp: 0,
             archetype: String::new(),
             party_id: None,
             faction_id: None,

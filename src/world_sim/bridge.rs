@@ -147,7 +147,6 @@ fn adventurer_to_entity(adv: &Adventurer) -> Entity {
             cached_path: Vec::new(),
             path_index: 0,
             price_knowledge,
-            carried_goods: adv.carried_goods,
             class_tags: Vec::new(),
             behavior_production: Vec::new(),
             morale: adv.morale,
@@ -155,7 +154,6 @@ fn adventurer_to_entity(adv: &Adventurer) -> Entity {
             fatigue: adv.fatigue,
             loyalty: adv.loyalty,
             injury: adv.injury,
-            xp: adv.xp,
             archetype: adv.archetype.clone(),
             party_id: adv.party_id,
             faction_id: adv.faction_id.map(|f| f as u32),
@@ -233,7 +231,7 @@ pub fn world_to_campaign(world: &WorldState, campaign: &mut CampaignState) {
                     adv.carried_goods = inv.commodities;
                 } else {
                     adv.gold = npc.gold;
-                    adv.carried_goods = npc.carried_goods;
+                    adv.carried_goods = [0.0; crate::world_sim::NUM_COMMODITIES];
                 }
 
                 // Update price knowledge.

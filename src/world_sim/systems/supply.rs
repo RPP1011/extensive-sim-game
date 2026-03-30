@@ -108,8 +108,7 @@ mod tests {
         npc_data.economic_intent = EconomicIntent::Travel {
             destination: (100.0, 0.0),
         };
-        npc_data.carried_goods[0] = 10.0; // has food
-        npc.inventory.as_mut().unwrap().commodities[0] = 10.0;
+        npc.inventory.as_mut().unwrap().commodities[0] = 10.0; // has food
         state.entities.push(npc);
         state.rebuild_group_index();
 
@@ -142,7 +141,7 @@ mod tests {
         npc_data.economic_intent = EconomicIntent::Travel {
             destination: (100.0, 0.0),
         };
-        npc_data.carried_goods[0] = 0.0; // no food
+        // NPC has no food (inventory default is zeroed)
         state.entities.push(npc);
         state.rebuild_group_index();
 
