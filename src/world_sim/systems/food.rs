@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Food consumption system — every 3 ticks.
 //!
 //! Ported from `crates/headless_campaign/src/systems/food.rs`.

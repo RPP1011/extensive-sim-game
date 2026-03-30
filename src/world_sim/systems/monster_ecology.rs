@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Monster ecology — spawning, migration pressure, and settlement attacks.
 //!
 //! Monsters spawn in wilderness (far from settlements), preferring:

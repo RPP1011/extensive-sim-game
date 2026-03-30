@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Agent inner state system — updates NPC needs, emotions, memory, personality.
 //!
 //! This system bridges the gap between world events and NPC inner life.

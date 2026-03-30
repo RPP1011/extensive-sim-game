@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Bounty board system — every 10 ticks.
 //!
 //! Tracks high-value targets (elite monsters, faction leaders) via RecordEvent.

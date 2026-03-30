@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Death consequences — funerals, mourning, inheritance, and memorials.
 //!
 //! When an NPC dies:

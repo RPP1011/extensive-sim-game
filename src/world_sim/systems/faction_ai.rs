@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Faction AI — every 600 ticks (~60s).
 //!
 //! Each faction evaluates its situation and picks from multiple possible

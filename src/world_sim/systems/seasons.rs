@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Seasonal cycle — every tick.
 //!
 //! Derives the current season from `state.tick` and applies per-tick

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Population growth/decline system — every 3 ticks.
 //!
 //! Ported from `crates/headless_campaign/src/systems/population.rs`.

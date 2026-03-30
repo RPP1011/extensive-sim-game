@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Quest lifecycle — every 10 ticks.
 //!
 //! Progresses active quests toward completion, expiry, or staleness:

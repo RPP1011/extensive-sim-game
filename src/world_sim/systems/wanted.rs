@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Wanted poster system — every 10 ticks.
 //!
 //! Settlements issue bounties for hostile entities (monsters or enemy faction

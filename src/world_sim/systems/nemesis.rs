@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Nemesis system -- persistent enemy champions that grow stronger over time.
 //!
 //! Every `NEMESIS_CHECK_INTERVAL` ticks, each hostile faction with

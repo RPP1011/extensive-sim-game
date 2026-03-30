@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Civil war system — every 7 ticks.
 //!
 //! When a faction's regions have high unrest (>70) and its military_strength

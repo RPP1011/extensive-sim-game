@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Regional trade goods system — every 7 ticks.
 //!
 //! Ported from `crates/headless_campaign/src/systems/trade_goods.rs`.

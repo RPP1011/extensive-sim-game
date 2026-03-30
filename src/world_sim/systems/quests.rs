@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Quest system — settlements post quests, NPCs accept and complete them.
 //!
 //! Flow:

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Adventuring parties — NPCs form groups, take quests, and explore.
 //!
 //! NPCs with high risk_tolerance, combat tags, and purpose/esteem needs form

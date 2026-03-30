@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Prophecy engine — procedural prophecies that track world state for fulfillment.
 //!
 //! At world init, 3-5 prophecies are generated with vague conditions mapped to

@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Coup engine system — every 10 ticks.
 //!
 //! Tracks running coup-risk scores for each faction based on internal

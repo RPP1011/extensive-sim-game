@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Terrain events — natural disasters tied to terrain type, sub-biome, and season.
 //!
 //! Events are terrain-specific and season-gated:

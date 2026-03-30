@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! Vassalage system — every 17 ticks.
 //!
 //! Weak factions (military_strength < 20) vassalize to strong neighbors

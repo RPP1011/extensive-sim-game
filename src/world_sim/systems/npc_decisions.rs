@@ -1,4 +1,3 @@
-#![allow(unused)]
 //! NPC needs-driven decisions — the core AI loop.
 //!
 //! Every DECISION_INTERVAL ticks, each idle/working NPC evaluates possible
