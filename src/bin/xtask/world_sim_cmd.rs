@@ -1824,6 +1824,12 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
     create_dungeon_sites(&mut state, &layout);
     create_factions(&mut state, num_factions, &mut rng);
     create_settlements(&mut state, args, &layout, num_factions, npcs, &mut rng);
+    // Update faction territory sizes now that settlements are assigned.
+    for faction in &mut state.factions {
+        faction.territory_size = state.settlements.iter()
+            .filter(|s| s.faction_id == Some(faction.id))
+            .count() as u32;
+    }
     create_trade_routes(&mut state, &layout, args.trade_routes);
     let mut next_id = populate_npcs(&mut state, args, npcs, &mut rng);
     next_id = spawn_monsters(&mut state, &layout, args, next_id, &mut rng);
@@ -2338,12 +2344,6 @@ fn create_settlements(
         });
     }
 
-    // Update faction territory sizes.
-    for faction in &mut state.factions {
-        faction.territory_size = state.settlements.iter()
-            .filter(|s| s.faction_id == Some(faction.id))
-            .count() as u32;
-    }
 }
 
 /// Phase 4: Trade routes between nearby settlements.
