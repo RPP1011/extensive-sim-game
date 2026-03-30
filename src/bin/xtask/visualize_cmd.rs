@@ -27,6 +27,12 @@ use super::cli::VisualizeArgs;
 // Terminal backend
 // ---------------------------------------------------------------------------
 
+const ZOOM_FACTOR: f32 = 1.5;
+const ZOOM_MAX: f32 = 10.0;
+const ZOOM_MIN: f32 = 0.5;
+const ZOOM_AUTOFIT_THRESHOLD: f32 = 1.01;
+const PAN_SPEED: f32 = 50.0;
+
 struct TerminalBackend {
     running: bool,
     cols: u16,
@@ -51,6 +57,22 @@ impl TerminalBackend {
             running: true, cols, rows, speed: 100.0, paused: true,
             zoom: 1.0, camera: (0.0, 0.0), auto_fit: true,
         })
+    }
+
+    fn zoom_in(&mut self) {
+        self.zoom = (self.zoom * ZOOM_FACTOR).min(ZOOM_MAX);
+        self.auto_fit = false;
+    }
+
+    fn zoom_out(&mut self) {
+        self.zoom = (self.zoom / ZOOM_FACTOR).max(ZOOM_MIN);
+        if self.zoom <= ZOOM_AUTOFIT_THRESHOLD { self.auto_fit = true; }
+    }
+
+    fn pan(&mut self, dx: f32, dy: f32) {
+        self.camera.0 += dx * PAN_SPEED / self.zoom;
+        self.camera.1 += dy * PAN_SPEED / self.zoom;
+        self.auto_fit = false;
     }
 }
 
@@ -161,48 +183,26 @@ impl VisualizerBackend for TerminalBackend {
                     }
                     KeyCode::Char('+') | KeyCode::Char('=') => {
                         if key.modifiers.contains(KeyModifiers::CONTROL) {
-                            // Ctrl+= zoom in
-                            self.zoom = (self.zoom * 1.5).min(10.0);
-                            self.auto_fit = false;
+                            self.zoom_in();
                         } else {
                             return PlaybackCommand::SpeedUp;
                         }
                     }
                     KeyCode::Char('-') | KeyCode::Char('_') => {
                         if key.modifiers.contains(KeyModifiers::CONTROL) {
-                            // Ctrl+- zoom out
-                            self.zoom = (self.zoom / 1.5).max(0.5);
-                            if self.zoom <= 1.01 { self.auto_fit = true; }
+                            self.zoom_out();
                         } else {
                             return PlaybackCommand::SlowDown;
                         }
                     }
                     // WASD for camera pan
-                    KeyCode::Char('w') | KeyCode::Char('W') => {
-                        self.camera.1 -= 50.0 / self.zoom;
-                        self.auto_fit = false;
-                    }
-                    KeyCode::Char('s') | KeyCode::Char('S') => {
-                        self.camera.1 += 50.0 / self.zoom;
-                        self.auto_fit = false;
-                    }
-                    KeyCode::Char('a') | KeyCode::Char('A') => {
-                        self.camera.0 -= 50.0 / self.zoom;
-                        self.auto_fit = false;
-                    }
-                    KeyCode::Char('d') | KeyCode::Char('D') => {
-                        self.camera.0 += 50.0 / self.zoom;
-                        self.auto_fit = false;
-                    }
-                    // Z to zoom in, X to zoom out (simpler than Ctrl+)
-                    KeyCode::Char('z') | KeyCode::Char('Z') => {
-                        self.zoom = (self.zoom * 1.5).min(10.0);
-                        self.auto_fit = false;
-                    }
-                    KeyCode::Char('x') | KeyCode::Char('X') => {
-                        self.zoom = (self.zoom / 1.5).max(0.5);
-                        if self.zoom <= 1.01 { self.auto_fit = true; }
-                    }
+                    KeyCode::Char('w') | KeyCode::Char('W') => self.pan(0.0, -1.0),
+                    KeyCode::Char('s') | KeyCode::Char('S') => self.pan(0.0, 1.0),
+                    KeyCode::Char('a') | KeyCode::Char('A') => self.pan(-1.0, 0.0),
+                    KeyCode::Char('d') | KeyCode::Char('D') => self.pan(1.0, 0.0),
+                    // Z to zoom in, X to zoom out
+                    KeyCode::Char('z') | KeyCode::Char('Z') => self.zoom_in(),
+                    KeyCode::Char('x') | KeyCode::Char('X') => self.zoom_out(),
                     // F to fit/reset view
                     KeyCode::Char('f') | KeyCode::Char('F') => {
                         self.zoom = 1.0;

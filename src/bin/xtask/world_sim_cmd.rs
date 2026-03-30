@@ -7,6 +7,9 @@ use bevy_game::world_sim::runtime::WorldSim;
 
 use super::cli::WorldSimArgs;
 
+/// 4 seasons × 1200 ticks per season.
+const TICKS_PER_YEAR: u64 = 4800;
+
 pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
     // --warm implies rich mode
     if args.warm {
@@ -636,6 +639,10 @@ fn npc_display_name(npc: &bevy_game::world_sim::state::NpcData, entity_id: u32) 
     }
 }
 
+fn name_matches(name: &str, query: &str) -> bool {
+    name.to_lowercase().contains(&query.to_lowercase())
+}
+
 fn apply_intervention(state: &mut WorldState, cmd: &str, tick: u64) {
     let parts: Vec<&str> = cmd.splitn(2, ':').collect();
     let action = parts[0];
@@ -645,7 +652,7 @@ fn apply_intervention(state: &mut WorldState, cmd: &str, tick: u64) {
         "bless" => {
             // Bless a settlement: +50 food, +30 treasury, +20 morale to all NPCs.
             let found = state.settlements.iter_mut().find(|s|
-                s.name.to_lowercase().contains(&target.to_lowercase()));
+                name_matches(&s.name, &target));
             if let Some(settlement) = found {
                 let sid = settlement.id;
                 settlement.stockpile[bevy_game::world_sim::commodity::FOOD] += 50.0;
@@ -671,7 +678,7 @@ fn apply_intervention(state: &mut WorldState, cmd: &str, tick: u64) {
         "curse" => {
             // Curse a region: +50 monster density, +0.5 threat.
             let found = state.regions.iter_mut().find(|r|
-                r.name.to_lowercase().contains(&target.to_lowercase()));
+                name_matches(&r.name, &target));
             if let Some(region) = found {
                 region.monster_density += 50.0;
                 region.threat_level += 0.5;
@@ -688,7 +695,7 @@ fn apply_intervention(state: &mut WorldState, cmd: &str, tick: u64) {
         "champion" => {
             // Spawn a powerful champion NPC at a settlement.
             let sid = state.settlements.iter()
-                .find(|s| s.name.to_lowercase().contains(&target.to_lowercase()))
+                .find(|s| name_matches(&s.name, &target))
                 .map(|s| (s.id, s.pos));
             if let Some((sid, pos)) = sid {
                 let id = state.next_entity_id();
@@ -745,7 +752,7 @@ fn apply_intervention(state: &mut WorldState, cmd: &str, tick: u64) {
         "plague" => {
             // Plague a settlement: damage all NPCs, drain food.
             let found = state.settlements.iter().find(|s|
-                s.name.to_lowercase().contains(&target.to_lowercase()))
+                name_matches(&s.name, &target))
                 .map(|s| (s.id, s.name.clone()));
             if let Some((sid, sname)) = found {
                 for entity in &mut state.entities {
@@ -782,7 +789,7 @@ fn print_history(state: &WorldState) {
     println!("{}\n", "=".repeat(60));
 
     let total_ticks = state.tick;
-    let years = total_ticks / 4800; // 4 seasons × 1200 ticks
+    let years = total_ticks / TICKS_PER_YEAR; // 4 seasons × 1200 ticks
     let pop = state.entities.iter().filter(|e| e.alive && e.kind == EntityKind::Npc).count();
     let monsters = state.entities.iter().filter(|e| e.alive && e.kind == EntityKind::Monster).count();
     let settlements = state.settlements.len();
@@ -964,7 +971,7 @@ fn print_creation_myth(state: &WorldState, seed: u64) {
 fn export_history_markdown(state: &WorldState, path: &str) {
     let mut out = String::new();
 
-    let years = state.tick / 4800;
+    let years = state.tick / TICKS_PER_YEAR;
     let pop = state.entities.iter().filter(|e| e.alive && e.kind == EntityKind::Npc).count();
     let monsters = state.entities.iter().filter(|e| e.alive && e.kind == EntityKind::Monster).count();
 
@@ -1050,7 +1057,7 @@ fn export_history_markdown(state: &WorldState, path: &str) {
     if !notable.is_empty() {
         out.push_str("\n## Chronicle\n\n");
         for entry in notable.iter().take(30) {
-            let year = entry.tick / 4800;
+            let year = entry.tick / TICKS_PER_YEAR;
             out.push_str(&format!("- **Year {}:** {}\n", year, entry.text));
         }
     }
