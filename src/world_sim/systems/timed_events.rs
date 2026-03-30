@@ -77,7 +77,7 @@ pub fn compute_timed_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
         for settlement in &state.settlements {
             let bonus = 5.0 + entity_hash_f32(settlement.id, state.tick, 0) * 15.0;
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 delta: bonus,
             });
         }
@@ -86,7 +86,7 @@ pub fn compute_timed_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
         let commodity = (state.tick as usize / EVENT_INTERVAL as usize) % NUM_COMMODITIES;
         for settlement in &state.settlements {
             out.push(WorldDelta::ProduceCommodity {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 commodity,
                 amount: 3.0 + entity_hash_f32(settlement.id, state.tick, 0xCCC) * 7.0,
             });
@@ -114,7 +114,7 @@ pub fn compute_timed_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
         // Harvest Moon: food commodity boost.
         for settlement in &state.settlements {
             out.push(WorldDelta::ProduceCommodity {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 commodity: crate::world_sim::commodity::FOOD, // food
                 amount: 5.0 + entity_hash_f32(settlement.id, state.tick, 0xF00D) * 10.0,
             });
@@ -142,7 +142,7 @@ pub fn compute_timed_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
             let s = &state.settlements[idx];
             for c in 0..NUM_COMMODITIES {
                 out.push(WorldDelta::ProduceCommodity {
-                    location_id: s.id,
+                    settlement_id: s.id,
                     commodity: c,
                     amount: 2.0,
                 });

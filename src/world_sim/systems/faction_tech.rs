@@ -184,8 +184,8 @@ pub fn compute_faction_tech(state: &WorldState, out: &mut Vec<WorldDelta>) {
         let bonus_gold = state.guild.total_trade_income * eco_bonus_total;
         // Map to TransferGold from a virtual "economy" source to guild.
         out.push(WorldDelta::TransferGold {
-            from_id: u32::MAX, // virtual source
-            to_id: state.diplomacy.guild_faction_id,
+            from_entity: u32::MAX, // virtual source
+            to_entity: state.diplomacy.guild_faction_id,
             amount: bonus_gold,
         });
     }

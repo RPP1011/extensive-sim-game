@@ -34,7 +34,7 @@ pub fn compute_seasonal_quests(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if just_changed {
         for settlement in &state.settlements {
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 delta: SEASONAL_REWARD_GOLD,
             });
         }

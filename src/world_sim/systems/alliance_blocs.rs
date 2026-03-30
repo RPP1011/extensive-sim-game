@@ -79,8 +79,8 @@ pub fn compute_alliance_blocs(state: &WorldState, out: &mut Vec<WorldDelta>) {
             let transfer = surplus * RESOURCE_SHARE_FRACTION;
             if transfer > 0.1 {
                 out.push(WorldDelta::TransferGold {
-                    from_id: rich.id,
-                    to_id: poor.id,
+                    from_entity: rich.id,
+                    to_entity: poor.id,
                     amount: transfer,
                 });
             }

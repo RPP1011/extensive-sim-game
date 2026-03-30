@@ -53,39 +53,39 @@ pub enum WorldDelta {
 
     // --- Economy ---
     ProduceCommodity {
-        location_id: u32,
+        settlement_id: u32,
         commodity: usize,
         amount: f32,
     },
     ConsumeCommodity {
-        location_id: u32,
+        settlement_id: u32,
         commodity: usize,
         amount: f32,
     },
     TransferGold {
-        from_id: u32,
-        to_id: u32,
+        from_entity: u32,
+        to_entity: u32,
         amount: f32,
     },
     TransferGoods {
-        from_id: u32,
-        to_id: u32,
+        from_entity: u32,
+        to_entity: u32,
         commodity: usize,
         amount: f32,
     },
 
     // --- Settlement ---
     UpdateStockpile {
-        location_id: u32,
+        settlement_id: u32,
         commodity: usize,
         delta: f32,
     },
     UpdateTreasury {
-        location_id: u32,
+        settlement_id: u32,
         delta: f32,
     },
     UpdatePrices {
-        location_id: u32,
+        settlement_id: u32,
         prices: [f32; NUM_COMMODITIES],
     },
 
@@ -296,7 +296,7 @@ pub struct MergedDeltas {
     pub stockpile_deltas: HashMap<u32, [f32; NUM_COMMODITIES]>,
     /// Treasury adjustments (commutative sums per settlement).
     pub treasury_deltas: HashMap<u32, f32>,
-    /// Price updates — last-write-wins per settlement (deterministic: lowest location_id wins ties).
+    /// Price updates — last-write-wins per settlement (deterministic: lowest settlement_id wins ties).
     pub price_updates: HashMap<u32, [f32; NUM_COMMODITIES]>,
 
     /// Grid membership changes.
@@ -472,32 +472,32 @@ fn merge_one(m: &mut MergedDeltas, delta: WorldDelta) {
         WorldDelta::Die { entity_id } => {
             m.deaths.insert(entity_id);
         }
-        WorldDelta::ProduceCommodity { location_id, commodity, amount } => {
+        WorldDelta::ProduceCommodity { settlement_id, commodity, amount } => {
             m.production_by_settlement
-                .entry(location_id)
+                .entry(settlement_id)
                 .or_insert([0.0; NUM_COMMODITIES])[commodity] += amount;
         }
-        WorldDelta::ConsumeCommodity { location_id, commodity, amount } => {
+        WorldDelta::ConsumeCommodity { settlement_id, commodity, amount } => {
             m.consumption_by_settlement
-                .entry(location_id)
+                .entry(settlement_id)
                 .or_insert([0.0; NUM_COMMODITIES])[commodity] += amount;
         }
-        WorldDelta::TransferGold { from_id, to_id, amount } => {
-            m.gold_transfers.push((from_id, to_id, amount));
+        WorldDelta::TransferGold { from_entity, to_entity, amount } => {
+            m.gold_transfers.push((from_entity, to_entity, amount));
         }
-        WorldDelta::TransferGoods { from_id, to_id, commodity, amount } => {
-            m.goods_transfers.push((from_id, to_id, commodity, amount));
+        WorldDelta::TransferGoods { from_entity, to_entity, commodity, amount } => {
+            m.goods_transfers.push((from_entity, to_entity, commodity, amount));
         }
-        WorldDelta::UpdateStockpile { location_id, commodity, delta } => {
+        WorldDelta::UpdateStockpile { settlement_id, commodity, delta } => {
             m.stockpile_deltas
-                .entry(location_id)
+                .entry(settlement_id)
                 .or_insert([0.0; NUM_COMMODITIES])[commodity] += delta;
         }
-        WorldDelta::UpdateTreasury { location_id, delta } => {
-            *m.treasury_deltas.entry(location_id).or_default() += delta;
+        WorldDelta::UpdateTreasury { settlement_id, delta } => {
+            *m.treasury_deltas.entry(settlement_id).or_default() += delta;
         }
-        WorldDelta::UpdatePrices { location_id, prices } => {
-            m.price_updates.insert(location_id, prices);
+        WorldDelta::UpdatePrices { settlement_id, prices } => {
+            m.price_updates.insert(settlement_id, prices);
         }
         WorldDelta::EntityEntersGrid { entity_id, grid_id } => {
             m.grid_enters.push((entity_id, grid_id));
@@ -686,21 +686,21 @@ mod tests {
     #[test]
     fn economy_commutative() {
         assert_commutative(vec![
-            WorldDelta::ProduceCommodity { location_id: 10, commodity: 0, amount: 5.0 },
-            WorldDelta::ProduceCommodity { location_id: 10, commodity: 0, amount: 3.0 },
-            WorldDelta::ConsumeCommodity { location_id: 10, commodity: 0, amount: 4.0 },
-            WorldDelta::ConsumeCommodity { location_id: 10, commodity: 1, amount: 2.0 },
-            WorldDelta::UpdateStockpile { location_id: 10, commodity: 2, delta: 7.0 },
-            WorldDelta::UpdateTreasury { location_id: 10, delta: -15.0 },
-            WorldDelta::UpdateTreasury { location_id: 10, delta: 5.0 },
+            WorldDelta::ProduceCommodity { settlement_id: 10, commodity: 0, amount: 5.0 },
+            WorldDelta::ProduceCommodity { settlement_id: 10, commodity: 0, amount: 3.0 },
+            WorldDelta::ConsumeCommodity { settlement_id: 10, commodity: 0, amount: 4.0 },
+            WorldDelta::ConsumeCommodity { settlement_id: 10, commodity: 1, amount: 2.0 },
+            WorldDelta::UpdateStockpile { settlement_id: 10, commodity: 2, delta: 7.0 },
+            WorldDelta::UpdateTreasury { settlement_id: 10, delta: -15.0 },
+            WorldDelta::UpdateTreasury { settlement_id: 10, delta: 5.0 },
         ]);
     }
 
     #[test]
     fn production_sums() {
         let merged = merge_deltas(vec![
-            WorldDelta::ProduceCommodity { location_id: 10, commodity: 0, amount: 5.0 },
-            WorldDelta::ProduceCommodity { location_id: 10, commodity: 0, amount: 3.0 },
+            WorldDelta::ProduceCommodity { settlement_id: 10, commodity: 0, amount: 5.0 },
+            WorldDelta::ProduceCommodity { settlement_id: 10, commodity: 0, amount: 3.0 },
         ]);
         assert_eq!(merged.production_by_settlement[&10][0], 8.0);
     }
@@ -722,9 +722,9 @@ mod tests {
             WorldDelta::Move { entity_id: 1, force: (1.0, 2.0) },
             WorldDelta::Move { entity_id: 2, force: (-1.0, 0.0) },
             WorldDelta::Die { entity_id: 5 },
-            WorldDelta::ProduceCommodity { location_id: 10, commodity: 0, amount: 5.0 },
-            WorldDelta::ConsumeCommodity { location_id: 10, commodity: 0, amount: 3.0 },
-            WorldDelta::UpdateTreasury { location_id: 10, delta: 100.0 },
+            WorldDelta::ProduceCommodity { settlement_id: 10, commodity: 0, amount: 5.0 },
+            WorldDelta::ConsumeCommodity { settlement_id: 10, commodity: 0, amount: 3.0 },
+            WorldDelta::UpdateTreasury { settlement_id: 10, delta: 100.0 },
             WorldDelta::TickCooldown { entity_id: 1, dt_ms: 100 },
             WorldDelta::TickCooldown { entity_id: 1, dt_ms: 100 },
         ]);

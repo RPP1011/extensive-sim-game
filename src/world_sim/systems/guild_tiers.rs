@@ -27,7 +27,7 @@ pub fn compute_guild_tiers_for_settlement(
     let tier = ((settlement.treasury / 500.0).floor() as u32).min(5);
     if tier > 0 {
         out.push(WorldDelta::ProduceCommodity {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             commodity: crate::world_sim::commodity::FOOD,
             amount: tier as f32 * 0.02,
         });

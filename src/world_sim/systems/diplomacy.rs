@@ -126,13 +126,13 @@ fn compute_trade_income(state: &WorldState, out: &mut Vec<WorldDelta>) {
             // Each faction's settlements get a treasury boost.
             for &sid in &fa_settlements {
                 out.push(WorldDelta::UpdateTreasury {
-                    location_id: sid,
+                    settlement_id: sid,
                     delta: gold,
                 });
             }
             for &sid in &fb_settlements {
                 out.push(WorldDelta::UpdateTreasury {
-                    location_id: sid,
+                    settlement_id: sid,
                     delta: gold,
                 });
             }

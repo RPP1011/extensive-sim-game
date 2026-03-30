@@ -41,7 +41,7 @@ pub fn compute_intrigue(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // --- Resolve matured intrigues ---
     //   Determine outcome based on guild_involvement level
     //   Guild-backed (involvement > 20): +20 faction relation, +50 gold
-    //     out.push(WorldDelta::TransferGold { from_id: faction, to_id: guild, amount: 50.0 })
+    //     out.push(WorldDelta::TransferGold { from_entity: faction, to_entity: guild, amount: 50.0 })
     //   Guild-exploited (involvement < -20): 40% caught → -20 faction relation
     //   Moderate involvement: 50% backed side wins
     //   Neutral: no effect

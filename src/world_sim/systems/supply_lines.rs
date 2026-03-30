@@ -93,7 +93,7 @@ pub fn compute_supply_lines(state: &WorldState, out: &mut Vec<WorldDelta>) {
                     let drain = npc.carried_goods[c] * INTERDICTION_DRAIN_MULT;
                     if drain > 0.001 {
                         out.push(WorldDelta::ConsumeCommodity {
-                            location_id: entity.id, // entity acts as location for carried goods
+                            settlement_id: entity.id, // entity acts as location for carried goods
                             commodity: c,
                             amount: drain,
                         });

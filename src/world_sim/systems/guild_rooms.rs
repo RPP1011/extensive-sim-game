@@ -30,7 +30,7 @@ pub fn compute_guild_rooms_for_settlement(
     let room_count = (settlement.treasury / 200.0).floor().min(5.0) as u32;
     if room_count > 0 {
         out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             delta: -(room_count as f32 * 0.5),
         });
     }

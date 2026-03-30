@@ -921,8 +921,8 @@ mod tests {
         let state = test_state();
         // Two consumers want 60 food each from 100 stockpile.
         let merged = merge_deltas(vec![
-            WorldDelta::ConsumeCommodity { location_id: 10, commodity: 0, amount: 60.0 },
-            WorldDelta::ConsumeCommodity { location_id: 10, commodity: 0, amount: 60.0 },
+            WorldDelta::ConsumeCommodity { settlement_id: 10, commodity: 0, amount: 60.0 },
+            WorldDelta::ConsumeCommodity { settlement_id: 10, commodity: 0, amount: 60.0 },
         ]);
         let next = apply_deltas(&state, &merged);
         // Total demand 120 > 100 stockpile → stockpile drained to 0.
@@ -934,8 +934,8 @@ mod tests {
         let mut state = test_state();
         state.settlements[0].stockpile[0] = 0.0; // empty
         let merged = merge_deltas(vec![
-            WorldDelta::ProduceCommodity { location_id: 10, commodity: 0, amount: 50.0 },
-            WorldDelta::ConsumeCommodity { location_id: 10, commodity: 0, amount: 30.0 },
+            WorldDelta::ProduceCommodity { settlement_id: 10, commodity: 0, amount: 50.0 },
+            WorldDelta::ConsumeCommodity { settlement_id: 10, commodity: 0, amount: 30.0 },
         ]);
         let next = apply_deltas(&state, &merged);
         // Production adds first, then consumption subtracts.
@@ -948,8 +948,8 @@ mod tests {
         state.entity_mut(1).unwrap().npc.as_mut().unwrap().gold = 10.0;
         // Two transfers from entity 1: total 20 but only has 10.
         let merged = merge_deltas(vec![
-            WorldDelta::TransferGold { from_id: 1, to_id: 2, amount: 10.0 },
-            WorldDelta::TransferGold { from_id: 1, to_id: 3, amount: 10.0 },
+            WorldDelta::TransferGold { from_entity: 1, to_entity: 2, amount: 10.0 },
+            WorldDelta::TransferGold { from_entity: 1, to_entity: 3, amount: 10.0 },
         ]);
         let next = apply_deltas(&state, &merged);
         let sender = next.entity(1).unwrap().npc.as_ref().unwrap();

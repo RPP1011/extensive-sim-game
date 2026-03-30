@@ -100,7 +100,7 @@ pub fn compute_escalation_protocol_for_settlement(
             // War exhaustion treasury drain (only above floor).
             if settlement.treasury > -100.0 {
                 out.push(WorldDelta::UpdateTreasury {
-                    location_id: settlement_id,
+                    settlement_id: settlement_id,
                     delta: -ESCALATION_RATE,
                 });
             }

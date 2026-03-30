@@ -70,7 +70,7 @@ pub fn compute_crafting_for_settlement(
     for c in 0..NUM_COMMODITIES {
         let regen = REGEN_RATE * (settlement.population as f32 / 100.0).max(0.1);
         out.push(WorldDelta::ProduceCommodity {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             commodity: c,
             amount: regen,
         });
@@ -82,22 +82,22 @@ pub fn compute_crafting_for_settlement(
 
     if has_input_a && has_input_b {
         out.push(WorldDelta::ConsumeCommodity {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             commodity: CRAFT_INPUT_A,
             amount: CRAFT_CONSUME_AMOUNT,
         });
         out.push(WorldDelta::ConsumeCommodity {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             commodity: CRAFT_INPUT_B,
             amount: CRAFT_CONSUME_AMOUNT,
         });
         out.push(WorldDelta::ProduceCommodity {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             commodity: CRAFT_OUTPUT,
             amount: CRAFT_PRODUCE_AMOUNT,
         });
         out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             delta: CRAFT_PRODUCE_AMOUNT * 0.5,
         });
 

@@ -95,12 +95,12 @@ pub fn compute_heist_planning(state: &WorldState, out: &mut Vec<WorldDelta>) {
                     // Heist success: steal gold from settlement
                     let reward = BASE_HEIST_REWARD * skill_factor;
                     out.push(WorldDelta::UpdateTreasury {
-                        location_id: target_settlement.id,
+                        settlement_id: target_settlement.id,
                         delta: -reward,
                     });
                     out.push(WorldDelta::TransferGold {
-                        from_id: target_settlement.id,
-                        to_id: entity.id,
+                        from_entity: target_settlement.id,
+                        to_entity: entity.id,
                         amount: reward,
                     });
                 } else if roll > 0.95 {
@@ -112,8 +112,8 @@ pub fn compute_heist_planning(state: &WorldState, out: &mut Vec<WorldDelta>) {
                     });
                     // Gold penalty
                     out.push(WorldDelta::TransferGold {
-                        from_id: entity.id,
-                        to_id: target_settlement.id,
+                        from_entity: entity.id,
+                        to_entity: target_settlement.id,
                         amount: FAILURE_GOLD_PENALTY,
                     });
                 }

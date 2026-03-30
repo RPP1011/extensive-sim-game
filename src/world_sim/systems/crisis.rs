@@ -98,7 +98,7 @@ pub fn compute_crisis(state: &WorldState, out: &mut Vec<WorldDelta>) {
                         let drain = CORRUPTION_COMMODITY_DRAIN * severity;
                         if settlement.stockpile[c] > drain {
                             out.push(WorldDelta::ConsumeCommodity {
-                                location_id: settlement.id,
+                                settlement_id: settlement.id,
                                 commodity: c,
                                 amount: drain,
                             });
@@ -113,7 +113,7 @@ pub fn compute_crisis(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 let dy = settlement.pos.1 - (ri as f32 * 15.0);
                 if dx * dx + dy * dy < 400.0 && settlement.treasury > -100.0 {
                     out.push(WorldDelta::UpdateTreasury {
-                        location_id: settlement.id,
+                        settlement_id: settlement.id,
                         delta: -DECLINE_GOLD_DRAIN * severity,
                     });
                 }

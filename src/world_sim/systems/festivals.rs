@@ -50,14 +50,14 @@ pub fn compute_festivals_for_settlement(
     match season {
         Season::Autumn => {
             out.push(WorldDelta::ProduceCommodity {
-                location_id: settlement_id,
+                settlement_id: settlement_id,
                 commodity: crate::world_sim::commodity::FOOD,
                 amount: HARVEST_FEAST_FOOD,
             });
         }
         Season::Summer => {
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement_id,
+                settlement_id: settlement_id,
                 delta: TRADE_FAIR_BONUS,
             });
         }

@@ -81,7 +81,7 @@ pub fn compute_population_for_settlement(
 
     if food_consumed > 0.0 {
         out.push(WorldDelta::ConsumeCommodity {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             commodity: COMMODITY_FOOD,
             amount: food_consumed,
         });
@@ -159,7 +159,7 @@ pub fn compute_population_for_settlement(
     let tax_income = pop as f32 * TAX_PER_POP;
     if tax_income > 0.0 {
         out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             delta: tax_income,
         });
     }
@@ -170,7 +170,7 @@ pub fn compute_population_for_settlement(
         for c in 0..NUM_COMMODITIES {
             if surplus_rate > 0.001 {
                 out.push(WorldDelta::ProduceCommodity {
-                    location_id: settlement_id,
+                    settlement_id: settlement_id,
                     commodity: c,
                     amount: surplus_rate,
                 });
@@ -184,7 +184,7 @@ pub fn compute_population_for_settlement(
         for c in 0..NUM_COMMODITIES {
             if settlement.stockpile[c] > desperation {
                 out.push(WorldDelta::ConsumeCommodity {
-                    location_id: settlement_id,
+                    settlement_id: settlement_id,
                     commodity: c,
                     amount: desperation,
                 });
@@ -215,7 +215,7 @@ mod tests {
             matches!(
                 d,
                 WorldDelta::ConsumeCommodity {
-                    location_id: 10,
+                    settlement_id: 10,
                     commodity: crate::world_sim::commodity::FOOD,
                     ..
                 }
@@ -238,7 +238,7 @@ mod tests {
 
         let has_tax = deltas.iter().any(|d| {
             matches!(d,
-                WorldDelta::UpdateTreasury { location_id: 10, delta } if *delta > 0.0
+                WorldDelta::UpdateTreasury { settlement_id: 10, delta } if *delta > 0.0
             )
         });
         assert!(has_tax, "population should generate tax income");
@@ -261,7 +261,7 @@ mod tests {
             matches!(
                 d,
                 WorldDelta::ProduceCommodity {
-                    location_id: 10,
+                    settlement_id: 10,
                     ..
                 }
             )

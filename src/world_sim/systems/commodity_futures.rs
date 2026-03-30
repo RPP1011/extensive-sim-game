@@ -69,7 +69,7 @@ pub fn compute_commodity_futures(state: &WorldState, out: &mut Vec<WorldDelta>) 
         };
 
         out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement.id,
+            settlement_id: settlement.id,
             delta: profit,
         });
 
@@ -83,7 +83,7 @@ pub fn compute_commodity_futures(state: &WorldState, out: &mut Vec<WorldDelta>) 
         }
 
         out.push(WorldDelta::UpdatePrices {
-            location_id: settlement.id,
+            settlement_id: settlement.id,
             prices: stabilized_prices,
         });
     }

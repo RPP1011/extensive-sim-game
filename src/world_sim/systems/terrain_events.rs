@@ -116,11 +116,11 @@ fn eruption(state: &WorldState, region: &RegionState, out: &mut Vec<WorldDelta>)
 
     for sid in settlements_near_region(state, region) {
         if let Some(s) = state.settlement(sid) {
-            out.push(WorldDelta::UpdateTreasury { location_id: sid, delta: -50.0 });
+            out.push(WorldDelta::UpdateTreasury { settlement_id: sid, delta: -50.0 });
             let food_loss = s.stockpile[crate::world_sim::commodity::FOOD] * 0.3;
             if food_loss > 0.0 {
                 out.push(WorldDelta::ConsumeCommodity {
-                    location_id: sid, commodity: crate::world_sim::commodity::FOOD, amount: food_loss,
+                    settlement_id: sid, commodity: crate::world_sim::commodity::FOOD, amount: food_loss,
                 });
             }
         }
@@ -161,10 +161,10 @@ fn flood(state: &WorldState, region: &RegionState, out: &mut Vec<WorldDelta>) {
             for &c in &[crate::world_sim::commodity::FOOD, crate::world_sim::commodity::WOOD] {
                 let loss = s.stockpile[c] * 0.2;
                 if loss > 0.0 {
-                    out.push(WorldDelta::ConsumeCommodity { location_id: sid, commodity: c, amount: loss });
+                    out.push(WorldDelta::ConsumeCommodity { settlement_id: sid, commodity: c, amount: loss });
                 }
             }
-            out.push(WorldDelta::UpdateTreasury { location_id: sid, delta: -20.0 });
+            out.push(WorldDelta::UpdateTreasury { settlement_id: sid, delta: -20.0 });
         }
     }
 }
@@ -222,13 +222,13 @@ fn forest_fire(state: &WorldState, region: &RegionState, out: &mut Vec<WorldDelt
             let wood_loss = s.stockpile[crate::world_sim::commodity::WOOD] * 0.5;
             if wood_loss > 0.0 {
                 out.push(WorldDelta::ConsumeCommodity {
-                    location_id: sid, commodity: crate::world_sim::commodity::WOOD, amount: wood_loss,
+                    settlement_id: sid, commodity: crate::world_sim::commodity::WOOD, amount: wood_loss,
                 });
             }
             let herb_loss = s.stockpile[crate::world_sim::commodity::HERBS] * 0.3;
             if herb_loss > 0.0 {
                 out.push(WorldDelta::ConsumeCommodity {
-                    location_id: sid, commodity: crate::world_sim::commodity::HERBS, amount: herb_loss,
+                    settlement_id: sid, commodity: crate::world_sim::commodity::HERBS, amount: herb_loss,
                 });
             }
         }
@@ -255,10 +255,10 @@ fn cave_collapse(state: &WorldState, region: &RegionState, out: &mut Vec<WorldDe
     // Expose ore — produce iron/crystal at nearby settlements.
     for sid in settlements_near_region(state, region) {
         out.push(WorldDelta::ProduceCommodity {
-            location_id: sid, commodity: crate::world_sim::commodity::IRON, amount: 10.0,
+            settlement_id: sid, commodity: crate::world_sim::commodity::IRON, amount: 10.0,
         });
         out.push(WorldDelta::ProduceCommodity {
-            location_id: sid, commodity: crate::world_sim::commodity::CRYSTAL, amount: 5.0,
+            settlement_id: sid, commodity: crate::world_sim::commodity::CRYSTAL, amount: 5.0,
         });
     }
 
@@ -287,7 +287,7 @@ fn sandstorm(state: &WorldState, region: &RegionState, out: &mut Vec<WorldDelta>
             for c in 0..NUM_COMMODITIES {
                 let loss = s.stockpile[c] * 0.1;
                 if loss > 0.5 {
-                    out.push(WorldDelta::ConsumeCommodity { location_id: sid, commodity: c, amount: loss });
+                    out.push(WorldDelta::ConsumeCommodity { settlement_id: sid, commodity: c, amount: loss });
                 }
             }
         }

@@ -51,7 +51,7 @@ pub fn compute_corruption(state: &WorldState, out: &mut Vec<WorldDelta>) {
             let roll = entity_hash_f32(settlement.id, state.tick, 0xC0EAEB);
             if roll < 0.10 {
                 out.push(WorldDelta::UpdateTreasury {
-                    location_id: settlement.id,
+                    settlement_id: settlement.id,
                     delta: -MODERATE_GOLD_DRAIN,
                 });
             }
@@ -62,7 +62,7 @@ pub fn compute_corruption(state: &WorldState, out: &mut Vec<WorldDelta>) {
             let roll = entity_hash_f32(settlement.id, state.tick, 0x5EFFA1);
             if roll < 0.08 {
                 out.push(WorldDelta::ConsumeCommodity {
-                    location_id: settlement.id,
+                    settlement_id: settlement.id,
                     commodity: crate::world_sim::commodity::FOOD, // food
                     amount: SUPPLY_LOSS,
                 });

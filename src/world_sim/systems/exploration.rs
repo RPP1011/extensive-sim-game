@@ -67,8 +67,8 @@ pub fn compute_exploration(state: &WorldState, out: &mut Vec<WorldDelta>) {
             if let Some(s) = nearest {
                 if s.treasury > 0.5 {
                     out.push(WorldDelta::TransferGold {
-                        from_id: s.id,
-                        to_id: entity.id,
+                        from_entity: s.id,
+                        to_entity: entity.id,
                         amount: 0.5,
                     });
                 }
@@ -106,7 +106,7 @@ pub fn compute_exploration_for_settlement(
         .count();
     if npc_count > 0 {
         out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             delta: EXPLORATION_TREASURY_BONUS * npc_count as f32,
         });
     }

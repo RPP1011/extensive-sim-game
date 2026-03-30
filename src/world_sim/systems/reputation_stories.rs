@@ -35,12 +35,12 @@ pub fn compute_reputation_stories(state: &WorldState, out: &mut Vec<WorldDelta>)
         let roll = entity_hash_f32(settlement.id, state.tick, 0x570E1);
         if settlement.treasury > 60.0 && roll < 0.15 {
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 delta: POSITIVE_STORY_GOLD,
             });
         } else if settlement.treasury < 15.0 && settlement.treasury > -100.0 && roll < 0.20 {
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 delta: -NEGATIVE_STORY_DRAIN,
             });
         }

@@ -85,20 +85,20 @@ pub fn compute_trade_goods(state: &WorldState, out: &mut Vec<WorldDelta>) {
             let price_ratio = dst.prices[c] / src.prices[c].max(0.01);
             if price_ratio > CARAVAN_PROFIT_THRESHOLD {
                 out.push(WorldDelta::UpdateStockpile {
-                    location_id: src.id,
+                    settlement_id: src.id,
                     commodity: c,
                     delta: -CARAVAN_AMOUNT,
                 });
                 let delivered = CARAVAN_AMOUNT * (1.0 - TRANSIT_LOSS);
                 out.push(WorldDelta::UpdateStockpile {
-                    location_id: dst.id,
+                    settlement_id: dst.id,
                     commodity: c,
                     delta: delivered,
                 });
                 let profit = (dst.prices[c] - src.prices[c]) * CARAVAN_AMOUNT * 0.1;
                 if profit > 0.0 {
                     out.push(WorldDelta::UpdateTreasury {
-                        location_id: src.id,
+                        settlement_id: src.id,
                         delta: profit,
                     });
                 }
@@ -142,7 +142,7 @@ pub fn compute_trade_goods_for_settlement(
     for c in 0..NUM_COMMODITIES {
         let regen = SUPPLY_REGEN_RATE * (settlement.population as f32 / 100.0).max(0.1);
         out.push(WorldDelta::UpdateStockpile {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             commodity: c,
             delta: regen,
         });
@@ -156,7 +156,7 @@ pub fn compute_trade_goods_for_settlement(
         new_prices[c] = commodity_price(supply, demand);
     }
     out.push(WorldDelta::UpdatePrices {
-        location_id: settlement_id,
+        settlement_id: settlement_id,
         prices: new_prices,
     });
 }
@@ -179,7 +179,7 @@ mod tests {
 
         let has_regen = deltas.iter().any(|d| {
             matches!(d,
-                WorldDelta::UpdateStockpile { location_id: 10, delta, .. } if *delta > 0.0
+                WorldDelta::UpdateStockpile { settlement_id: 10, delta, .. } if *delta > 0.0
             )
         });
         assert!(has_regen, "stockpile should regenerate");
@@ -200,7 +200,7 @@ mod tests {
             matches!(
                 d,
                 WorldDelta::UpdatePrices {
-                    location_id: 10,
+                    settlement_id: 10,
                     ..
                 }
             )
@@ -233,13 +233,13 @@ mod tests {
         // Should have negative stockpile delta on source and positive on dest for commodity 1.
         let src_drain = deltas.iter().any(|d| {
             matches!(d,
-                WorldDelta::UpdateStockpile { location_id: 10, commodity: crate::world_sim::commodity::IRON, delta }
+                WorldDelta::UpdateStockpile { settlement_id: 10, commodity: crate::world_sim::commodity::IRON, delta }
                     if *delta < 0.0
             )
         });
         let dst_gain = deltas.iter().any(|d| {
             matches!(d,
-                WorldDelta::UpdateStockpile { location_id: 20, commodity: crate::world_sim::commodity::IRON, delta }
+                WorldDelta::UpdateStockpile { settlement_id: 20, commodity: crate::world_sim::commodity::IRON, delta }
                     if *delta > 0.0
             )
         });

@@ -73,7 +73,7 @@ pub fn compute_great_works(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
         // Deduct cost.
         out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement.id,
+            settlement_id: settlement.id,
             delta: -WORK_COST,
         });
 

@@ -60,8 +60,8 @@ pub fn compute_caravans(state: &WorldState, out: &mut Vec<WorldDelta>) {
             for c in 0..NUM_COMMODITIES {
                 if npc.carried_goods[c] > 0.001 {
                     out.push(WorldDelta::TransferGoods {
-                        from_id: entity.id,
-                        to_id: dest_settlement_id,
+                        from_entity: entity.id,
+                        to_entity: dest_settlement_id,
                         commodity: c,
                         amount: npc.carried_goods[c],
                     });
@@ -71,8 +71,8 @@ pub fn compute_caravans(state: &WorldState, out: &mut Vec<WorldDelta>) {
             // Deliver gold to settlement treasury.
             if npc.gold > 0.001 {
                 out.push(WorldDelta::TransferGold {
-                    from_id: entity.id,
-                    to_id: dest_settlement_id,
+                    from_entity: entity.id,
+                    to_entity: dest_settlement_id,
                     amount: npc.gold * 0.1, // 10% commission
                 });
             }

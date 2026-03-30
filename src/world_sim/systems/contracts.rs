@@ -40,7 +40,7 @@ pub fn compute_contracts(state: &WorldState, out: &mut Vec<WorldDelta>) {
         // Well-functioning settlements complete contracts
         if settlement.treasury > 30.0 && settlement.population > 50 && roll < 0.08 {
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 delta: CONTRACT_REWARD,
             });
         }
@@ -48,7 +48,7 @@ pub fn compute_contracts(state: &WorldState, out: &mut Vec<WorldDelta>) {
         // Struggling settlements fail contracts (don't pile on if already deep in debt)
         if settlement.treasury < 10.0 && settlement.treasury > -100.0 && roll > 0.95 {
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 delta: -CONTRACT_PENALTY,
             });
         }

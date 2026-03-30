@@ -72,8 +72,8 @@ pub fn compute_marriages(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // if/when the arrange_marriage action is ported:
     //
     // out.push(WorldDelta::TransferGold {
-    //     from_id: guild_entity_id,
-    //     to_id: faction_entity_id,
+    //     from_entity: guild_entity_id,
+    //     to_entity: faction_entity_id,
     //     amount: dowry,
     // });
 }

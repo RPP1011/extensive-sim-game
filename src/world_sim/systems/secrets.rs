@@ -166,7 +166,7 @@ pub fn compute_secrets_for_settlement(
                     let stolen = (npc.gold * 0.3).min(50.0);
                     if stolen > 1.0 {
                         out.push(WorldDelta::UpdateTreasury {
-                            location_id: settlement_id,
+                            settlement_id: settlement_id,
                             delta: -stolen,
                         });
                     }

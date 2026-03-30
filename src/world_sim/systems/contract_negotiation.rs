@@ -37,7 +37,7 @@ pub fn compute_contract_negotiation(state: &WorldState, out: &mut Vec<WorldDelta
         let roll = entity_hash_f32(settlement.id, state.tick, 0xAE60);
         if roll < 0.05 {
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 delta: NEGOTIATION_BONUS,
             });
         }

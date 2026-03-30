@@ -35,7 +35,7 @@ pub fn compute_economy(state: &WorldState, out: &mut Vec<WorldDelta>) {
             // Find nearest settlement to this region (by faction or first match)
             if let Some(settlement) = state.settlements.first() {
                 out.push(WorldDelta::UpdateTreasury {
-                    location_id: settlement.id,
+                    settlement_id: settlement.id,
                     delta: bonus,
                 });
             }
@@ -68,8 +68,8 @@ pub fn compute_economy_for_settlement(
                 let tax = npc.gold * 0.001 * tax_efficiency; // 0.1% base, reduced by wealth
                 tax_income += tax;
                 out.push(WorldDelta::TransferGold {
-                    from_id: entity.id,
-                    to_id: settlement_id, // goes to treasury via convention
+                    from_entity: entity.id,
+                    to_entity: settlement_id, // goes to treasury via convention
                     amount: tax,
                 });
             }
@@ -77,7 +77,7 @@ pub fn compute_economy_for_settlement(
     }
     if tax_income > 0.0 {
         out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             delta: tax_income,
         });
     }
@@ -87,7 +87,7 @@ pub fn compute_economy_for_settlement(
     if settlement.treasury > 10_000.0 {
         let admin_cost = settlement.treasury * 0.001;
         out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             delta: -admin_cost,
         });
     }
@@ -110,7 +110,7 @@ pub fn compute_economy_for_settlement(
         new_prices[i] = new_prices[i].clamp(0.1, 100.0);
     }
     out.push(WorldDelta::UpdatePrices {
-        location_id: settlement_id,
+        settlement_id: settlement_id,
         prices: new_prices,
     });
 }
@@ -129,7 +129,7 @@ pub fn compute_economy_maintenance_for_settlement(
             None => continue,
         };
         out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             delta: -MAINTENANCE_PER_NPC,
         });
     }
@@ -164,7 +164,7 @@ mod tests {
             .iter()
             .filter_map(|d| match d {
                 WorldDelta::UpdateTreasury {
-                    location_id: 10,
+                    settlement_id: 10,
                     delta,
                 } => Some(*delta),
                 _ => None,
@@ -194,7 +194,7 @@ mod tests {
 
         let has_drain = deltas.iter().any(|d| {
             matches!(d,
-                WorldDelta::UpdateTreasury { location_id: 10, delta } if *delta < 0.0
+                WorldDelta::UpdateTreasury { settlement_id: 10, delta } if *delta < 0.0
             )
         });
         assert!(has_drain, "NPC upkeep should drain settlement treasury");

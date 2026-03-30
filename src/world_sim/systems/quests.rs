@@ -83,7 +83,7 @@ fn generate_quests(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
         // Pay for quest posting from treasury.
         out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement.id,
+            settlement_id: settlement.id,
             delta: -reward * 0.1, // 10% upfront cost
         });
 
@@ -282,8 +282,8 @@ fn run_quest_lifecycle_for_entities(
 
                 if can_afford {
                     out.push(WorldDelta::TransferGold {
-                        from_id: funding_sid,
-                        to_id: entity.id,
+                        from_entity: funding_sid,
+                        to_entity: entity.id,
                         amount: reward_gold,
                     });
                 }

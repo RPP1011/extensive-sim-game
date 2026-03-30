@@ -39,7 +39,7 @@ pub fn compute_random_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
             let idx = (state.tick as usize) % state.settlements.len();
             let amount = 30.0 + entity_hash_f32(0, state.tick, 0x601D_0001u64.wrapping_add(0xA)) * 70.0;
             out.push(WorldDelta::UpdateTreasury {
-                location_id: state.settlements[idx].id,
+                settlement_id: state.settlements[idx].id,
                 delta: amount,
             });
         }
@@ -48,7 +48,7 @@ pub fn compute_random_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
         for settlement in &state.settlements {
             let amount = 5.0 + entity_hash_f32(settlement.id, state.tick, 0xF00D) * 10.0;
             out.push(WorldDelta::ProduceCommodity {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 commodity: crate::world_sim::commodity::FOOD, // food
                 amount,
             });
@@ -59,7 +59,7 @@ pub fn compute_random_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
             let idx = (state.tick as usize + 3) % state.settlements.len();
             let loss = 10.0 + entity_hash_f32(0, state.tick, 0xBA3D_1700) * 30.0;
             out.push(WorldDelta::UpdateTreasury {
-                location_id: state.settlements[idx].id,
+                settlement_id: state.settlements[idx].id,
                 delta: -loss,
             });
             // Drain some goods too.
@@ -67,7 +67,7 @@ pub fn compute_random_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 let goods_loss = state.settlements[idx].stockpile[c] * 0.05;
                 if goods_loss > 0.001 {
                     out.push(WorldDelta::ConsumeCommodity {
-                        location_id: state.settlements[idx].id,
+                        settlement_id: state.settlements[idx].id,
                         commodity: c,
                         amount: goods_loss,
                     });
@@ -105,7 +105,7 @@ pub fn compute_random_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
             let drain = settlement.stockpile[0] * 0.15;
             if drain > 0.001 {
                 out.push(WorldDelta::ConsumeCommodity {
-                    location_id: settlement.id,
+                    settlement_id: settlement.id,
                     commodity: crate::world_sim::commodity::FOOD,
                     amount: drain,
                 });
@@ -117,7 +117,7 @@ pub fn compute_random_events(state: &WorldState, out: &mut Vec<WorldDelta>) {
             let idx = (state.tick as usize + 7) % state.settlements.len();
             let gift = 15.0 + entity_hash_f32(0, state.tick, 0x61F7_0001) * 25.0;
             out.push(WorldDelta::UpdateTreasury {
-                location_id: state.settlements[idx].id,
+                settlement_id: state.settlements[idx].id,
                 delta: gift,
             });
         }

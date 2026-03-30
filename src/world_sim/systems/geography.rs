@@ -57,12 +57,12 @@ pub fn compute_geography(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 if dx * dx + dy * dy < 400.0 && settlement.population < 300 {
                     // Produce wood (commodity 2) and herbs (commodity 3).
                     out.push(WorldDelta::ProduceCommodity {
-                        location_id: settlement.id,
+                        settlement_id: settlement.id,
                         commodity: crate::world_sim::commodity::WOOD,
                         amount: 1.0,
                     });
                     out.push(WorldDelta::ProduceCommodity {
-                        location_id: settlement.id,
+                        settlement_id: settlement.id,
                         commodity: crate::world_sim::commodity::HERBS,
                         amount: 0.5,
                     });
@@ -85,13 +85,13 @@ pub fn compute_geography(state: &WorldState, out: &mut Vec<WorldDelta>) {
                     let loss = settlement.stockpile[0] * 0.05;
                     if loss > 0.001 {
                         out.push(WorldDelta::ConsumeCommodity {
-                            location_id: settlement.id,
+                            settlement_id: settlement.id,
                             commodity: crate::world_sim::commodity::FOOD,
                             amount: loss,
                         });
                     }
                     out.push(WorldDelta::UpdateTreasury {
-                        location_id: settlement.id,
+                        settlement_id: settlement.id,
                         delta: -2.0,
                     });
                 }
@@ -107,12 +107,12 @@ pub fn compute_geography(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 let dy = settlement.pos.1 - (ri as f32 * 15.0);
                 if dx * dx + dy * dy < 400.0 && settlement.population > 400 {
                     out.push(WorldDelta::ProduceCommodity {
-                        location_id: settlement.id,
+                        settlement_id: settlement.id,
                         commodity: crate::world_sim::commodity::FOOD, // food
                         amount: 2.0,
                     });
                     out.push(WorldDelta::UpdateTreasury {
-                        location_id: settlement.id,
+                        settlement_id: settlement.id,
                         delta: -5.0,
                     });
                 }
@@ -128,7 +128,7 @@ pub fn compute_geography(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 let dy = settlement.pos.1 - (ri as f32 * 15.0);
                 if dx * dx + dy * dy < 400.0 && settlement.population > 500 {
                     out.push(WorldDelta::UpdateTreasury {
-                        location_id: settlement.id,
+                        settlement_id: settlement.id,
                         delta: 10.0,
                     });
                 }

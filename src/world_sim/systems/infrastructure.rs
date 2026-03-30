@@ -57,7 +57,7 @@ pub fn compute_infrastructure(state: &WorldState, out: &mut Vec<WorldDelta>) {
         for &sid in &funded_settlements {
             for c in 0..NUM_COMMODITIES {
                 out.push(WorldDelta::UpdateStockpile {
-                    location_id: sid,
+                    settlement_id: sid,
                     commodity: c,
                     delta: TRADE_POST_BONUS,
                 });
@@ -86,7 +86,7 @@ pub fn compute_infrastructure_for_settlement(
     let maintenance = settlement.population as f32 * MAINTENANCE_COST_PER_POP;
     if maintenance > 0.0 && settlement.treasury > -100.0 {
         out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             delta: -maintenance,
         });
     }
@@ -99,7 +99,7 @@ pub fn compute_infrastructure_for_settlement(
                 * bonus_scale
                 * (settlement.population as f32 / 50.0).max(0.1);
             out.push(WorldDelta::UpdateStockpile {
-                location_id: settlement_id,
+                settlement_id: settlement_id,
                 commodity: c,
                 delta: bonus,
             });
@@ -110,7 +110,7 @@ pub fn compute_infrastructure_for_settlement(
                 * (settlement.population as f32 / 50.0).max(0.1);
             if settlement.stockpile[c] > penalty {
                 out.push(WorldDelta::UpdateStockpile {
-                    location_id: settlement_id,
+                    settlement_id: settlement_id,
                     commodity: c,
                     delta: -penalty,
                 });
@@ -138,7 +138,7 @@ mod tests {
 
         let has_drain = deltas.iter().any(|d| {
             matches!(d,
-                WorldDelta::UpdateTreasury { location_id: 10, delta } if *delta < 0.0
+                WorldDelta::UpdateTreasury { settlement_id: 10, delta } if *delta < 0.0
             )
         });
         assert!(has_drain, "maintenance should drain treasury");
@@ -158,7 +158,7 @@ mod tests {
 
         let has_stockpile_boost = deltas.iter().any(|d| {
             matches!(d,
-                WorldDelta::UpdateStockpile { location_id: 10, delta, .. } if *delta > 0.0
+                WorldDelta::UpdateStockpile { settlement_id: 10, delta, .. } if *delta > 0.0
             )
         });
         assert!(
@@ -182,7 +182,7 @@ mod tests {
 
         let has_penalty = deltas.iter().any(|d| {
             matches!(d,
-                WorldDelta::UpdateStockpile { location_id: 10, delta, .. } if *delta < 0.0
+                WorldDelta::UpdateStockpile { settlement_id: 10, delta, .. } if *delta < 0.0
             )
         });
         assert!(has_penalty, "negative treasury should penalize stockpile");

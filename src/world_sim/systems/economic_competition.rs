@@ -69,7 +69,7 @@ pub fn compute_economic_competition(state: &WorldState, out: &mut Vec<WorldDelta
                 deflated_prices[c] = deflated_prices[c].max(0.01);
             }
             out.push(WorldDelta::UpdatePrices {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 prices: deflated_prices,
             });
         } else if wealth_ratio < 0.5 && settlement.treasury > 0.0 {
@@ -80,7 +80,7 @@ pub fn compute_economic_competition(state: &WorldState, out: &mut Vec<WorldDelta
                 inflated_prices[c] *= 1.0 + TRADE_WAR_PRICE_INFLATION;
             }
             out.push(WorldDelta::UpdatePrices {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 prices: inflated_prices,
             });
 
@@ -88,7 +88,7 @@ pub fn compute_economic_competition(state: &WorldState, out: &mut Vec<WorldDelta
             if settlement.treasury > -100.0 {
                 let drain = settlement.treasury.max(0.0) * 0.01;
                 out.push(WorldDelta::UpdateTreasury {
-                    location_id: settlement.id,
+                    settlement_id: settlement.id,
                     delta: -drain,
                 });
             }
@@ -112,7 +112,7 @@ pub fn compute_economic_competition(state: &WorldState, out: &mut Vec<WorldDelta
             if dist < 100.0 && settlement.treasury > -100.0 {
                 let disruption = region.threat_level * 0.001;
                 out.push(WorldDelta::UpdateTreasury {
-                    location_id: settlement.id,
+                    settlement_id: settlement.id,
                     delta: -disruption,
                 });
             }

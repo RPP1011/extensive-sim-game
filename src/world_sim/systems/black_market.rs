@@ -79,7 +79,7 @@ pub fn compute_black_market(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
         // Gold flows into the settlement treasury (illicit commerce tax).
         out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement.id,
+            settlement_id: settlement.id,
             delta: profit * DEAL_TREASURY_FRACTION,
         });
 
@@ -87,8 +87,8 @@ pub fn compute_black_market(state: &WorldState, out: &mut Vec<WorldDelta>) {
         let per_npc = profit / participants.len() as f32;
         for &npc_id in &participants {
             out.push(WorldDelta::TransferGold {
-                from_id: settlement.id,
-                to_id: npc_id,
+                from_entity: settlement.id,
+                to_entity: npc_id,
                 amount: per_npc,
             });
         }

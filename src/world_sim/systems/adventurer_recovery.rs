@@ -157,7 +157,7 @@ pub fn compute_adventurer_recovery_for_settlement(
 
         // Consume medicine from settlement stockpile.
         out.push(WorldDelta::ConsumeCommodity {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             commodity: commodity::MEDICINE,
             amount: MEDICINE_CONSUME,
         });

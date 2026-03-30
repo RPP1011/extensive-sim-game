@@ -118,8 +118,8 @@ pub fn compute_bounties(state: &WorldState, out: &mut Vec<WorldDelta>) {
             for friendly in &friendlies {
                 if gold_each > 0.0 {
                     out.push(WorldDelta::TransferGold {
-                        from_id: funding_settlement.id,
-                        to_id: friendly.id,
+                        from_entity: funding_settlement.id,
+                        to_entity: friendly.id,
                         amount: gold_each,
                     });
                 }
@@ -216,7 +216,7 @@ pub fn compute_bounties(state: &WorldState, out: &mut Vec<WorldDelta>) {
             if let Some(settlement) = state.settlements.first() {
                 let funding = region.threat_level * THREAT_FUNDING_RATE;
                 out.push(WorldDelta::UpdateTreasury {
-                    location_id: settlement.id,
+                    settlement_id: settlement.id,
                     delta: funding,
                 });
             }

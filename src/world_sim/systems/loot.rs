@@ -88,8 +88,8 @@ pub fn compute_loot_for_settlement(
         for fi in 0..fc {
             if gold_each > 0.0 && can_afford {
                 out.push(WorldDelta::TransferGold {
-                    from_id: settlement_id,
-                    to_id: friendly_ids[fi],
+                    from_entity: settlement_id,
+                    to_entity: friendly_ids[fi],
                     amount: gold_each,
                 });
             }

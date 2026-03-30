@@ -55,8 +55,8 @@ pub fn compute_insurance(state: &WorldState, out: &mut Vec<WorldDelta>) {
         let premium = (npc.gold * PREMIUM_FRACTION).max(BASE_PREMIUM).min(npc.gold);
         if premium > 0.01 {
             out.push(WorldDelta::TransferGold {
-                from_id: entity.id,
-                to_id: home_id,
+                from_entity: entity.id,
+                to_entity: home_id,
                 amount: premium,
             });
         }
@@ -67,13 +67,13 @@ pub fn compute_insurance(state: &WorldState, out: &mut Vec<WorldDelta>) {
         if hp_ratio < DAMAGE_CLAIM_THRESHOLD && hp_ratio > 0.0 && home_treasury > -100.0 {
             let payout = premium * CLAIM_PAYOUT_MULTIPLIER;
             out.push(WorldDelta::TransferGold {
-                from_id: home_id,
-                to_id: entity.id,
+                from_entity: home_id,
+                to_entity: entity.id,
                 amount: payout,
             });
             // Treasury absorbs the loss.
             out.push(WorldDelta::UpdateTreasury {
-                location_id: home_id,
+                settlement_id: home_id,
                 delta: -payout,
             });
         }

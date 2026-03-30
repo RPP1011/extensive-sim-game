@@ -91,7 +91,7 @@ pub fn compute_dead_zones(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 let drain = settlement.stockpile[c] * 0.02 * severity;
                 if drain > 0.001 {
                     out.push(WorldDelta::ConsumeCommodity {
-                        location_id: settlement.id,
+                        settlement_id: settlement.id,
                         commodity: c,
                         amount: drain,
                     });

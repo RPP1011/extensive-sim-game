@@ -56,7 +56,7 @@ pub fn compute_trophies(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
     // Reputation boost: out.push(WorldDelta::AdjustReputation { delta: reputation * total_rep_boost })
     // Gold boost: flat gold per application
-    //   out.push(WorldDelta::UpdateTreasury { location_id: guild_settlement, delta: 10.0 * total_gold_boost })
+    //   out.push(WorldDelta::UpdateTreasury { settlement_id: guild_settlement, delta: 10.0 * total_gold_boost })
     // Morale boost: for each alive NPC:
     //   out.push(WorldDelta::AdjustMorale { entity_id, delta: total_morale * 100.0 })
 
@@ -79,7 +79,7 @@ pub fn compute_trophies_for_settlement(
     }
 
     // out.push(WorldDelta::UpdateTreasury {
-    //     location_id: settlement_id,
+    //     settlement_id: settlement_id,
     //     delta: 10.0 * total_gold_boost,
     // });
 }

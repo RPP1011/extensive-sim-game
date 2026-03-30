@@ -56,8 +56,8 @@ fn compute_npc_overworld_into(entity: &Entity, state: &WorldState, out: &mut Vec
     if npc.carried_goods[0] > 0.0 {
         let travel_food: f32 = 0.005;
         out.push(WorldDelta::TransferGoods {
-            from_id: entity.id,
-            to_id: entity.id,
+            from_entity: entity.id,
+            to_entity: entity.id,
             commodity: 0,
             amount: travel_food.min(npc.carried_goods[0]),
         });

@@ -101,7 +101,7 @@ pub fn compute_recruitment_for_settlement(
     // Consume food for births.
     if births > 0 {
         out.push(WorldDelta::ConsumeCommodity {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             commodity: commodity::FOOD,
             amount: FOOD_PER_BIRTH * births as f32,
         });

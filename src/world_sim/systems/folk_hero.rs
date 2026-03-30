@@ -66,7 +66,7 @@ pub fn compute_folk_hero(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
     // --- Phase 5: Fame threshold effects ---
     // fame > 75 (hero): tribute gold, unrest reduction
-    //   out.push(WorldDelta::UpdateTreasury { location_id: settlement.id, delta: 2.0 })
+    //   out.push(WorldDelta::UpdateTreasury { settlement_id: settlement.id, delta: 2.0 })
     // fame > 50 (positive): slight unrest reduction
     // fame < 20 (suspicion): increase unrest
 
@@ -96,7 +96,7 @@ pub fn compute_folk_hero_for_settlement(
 
     // If fame > FAME_HERO_THRESHOLD:
     //   out.push(WorldDelta::UpdateTreasury {
-    //       location_id: settlement_id,
+    //       settlement_id: settlement_id,
     //       delta: 2.0,
     //   });
 }

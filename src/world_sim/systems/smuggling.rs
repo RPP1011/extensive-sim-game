@@ -85,7 +85,7 @@ pub fn compute_smuggling(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
         // Drain from source.
         out.push(WorldDelta::UpdateStockpile {
-            location_id: src.id,
+            settlement_id: src.id,
             commodity: c,
             delta: -amount,
         });
@@ -93,7 +93,7 @@ pub fn compute_smuggling(state: &WorldState, out: &mut Vec<WorldDelta>) {
         // Deliver to destination (minus transit loss).
         let delivered = amount * (1.0 - TRANSIT_LOSS);
         out.push(WorldDelta::UpdateStockpile {
-            location_id: dst.id,
+            settlement_id: dst.id,
             commodity: c,
             delta: delivered,
         });
@@ -102,7 +102,7 @@ pub fn compute_smuggling(state: &WorldState, out: &mut Vec<WorldDelta>) {
         let profit = (dst.prices[c] - src.prices[c]) * amount * PROFIT_TREASURY_FRACTION;
         if profit > 0.0 {
             out.push(WorldDelta::UpdateTreasury {
-                location_id: src.id,
+                settlement_id: src.id,
                 delta: profit,
             });
         }

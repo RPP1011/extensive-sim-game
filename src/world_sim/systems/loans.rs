@@ -56,14 +56,14 @@ pub fn compute_loans(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
             // NPC pays settlement.
             out.push(WorldDelta::TransferGold {
-                from_id: entity.id,
-                to_id: home_id,
+                from_entity: entity.id,
+                to_entity: home_id,
                 amount: payment,
             });
 
             // Settlement treasury grows from interest income.
             out.push(WorldDelta::UpdateTreasury {
-                location_id: home_id,
+                settlement_id: home_id,
                 delta: interest_portion,
             });
         }

@@ -66,7 +66,7 @@ pub fn compute_price_controls(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 let stockpile_drain = settlement.stockpile[c] * CEILING_SUPPLY_REDUCTION;
                 if stockpile_drain > 0.01 {
                     out.push(WorldDelta::ConsumeCommodity {
-                        location_id: settlement.id,
+                        settlement_id: settlement.id,
                         commodity: c,
                         amount: stockpile_drain,
                     });
@@ -83,7 +83,7 @@ pub fn compute_price_controls(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 if settlement.treasury > -100.0 {
                     let subsidy = FLOOR_SUBSIDY_DRAIN;
                     out.push(WorldDelta::UpdateTreasury {
-                        location_id: settlement.id,
+                        settlement_id: settlement.id,
                         delta: -subsidy,
                     });
                 }
@@ -92,7 +92,7 @@ pub fn compute_price_controls(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
         if any_change {
             out.push(WorldDelta::UpdatePrices {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 prices: clamped_prices,
             });
         }

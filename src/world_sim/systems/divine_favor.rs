@@ -77,7 +77,7 @@ pub fn compute_divine_favor_for_settlement(
         let roll2 = entity_hash_f32(settlement_id, state.tick, 0xB1E55);
         if roll2 < 0.10 {
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement_id,
+                settlement_id: settlement_id,
                 delta: MIRACLE_GOLD,
             });
         }

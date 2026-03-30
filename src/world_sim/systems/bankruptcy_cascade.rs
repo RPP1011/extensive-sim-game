@@ -84,7 +84,7 @@ pub fn compute_bankruptcy_cascade(state: &WorldState, out: &mut Vec<WorldDelta>)
 
             // Propagate a fraction of the loss.
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 delta: -per_settlement_loss,
             });
         }
@@ -93,7 +93,7 @@ pub fn compute_bankruptcy_cascade(state: &WorldState, out: &mut Vec<WorldDelta>)
         // restructuring / bailout) to prevent permanent negative spiral.
         let recovery = deficit.abs() * 0.05;
         out.push(WorldDelta::UpdateTreasury {
-            location_id: *insolvent_id,
+            settlement_id: *insolvent_id,
             delta: recovery,
         });
     }
@@ -109,7 +109,7 @@ pub fn compute_bankruptcy_cascade(state: &WorldState, out: &mut Vec<WorldDelta>)
                 *p *= 1.0 + risk_factor * 0.05;
             }
             out.push(WorldDelta::UpdatePrices {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 prices: inflated,
             });
         }

@@ -174,7 +174,7 @@ pub fn compute_seasons(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 let food_loss = settlement.stockpile[0] * 0.1; // 10% spoilage
                 if food_loss > 0.0 {
                     out.push(WorldDelta::ConsumeCommodity {
-                        location_id: settlement.id,
+                        settlement_id: settlement.id,
                         commodity: 0, // FOOD
                         amount: food_loss,
                     });
@@ -189,7 +189,7 @@ pub fn compute_seasons(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 let harvest_bonus = settlement.stockpile[0] * 0.3;
                 if harvest_bonus > 0.0 {
                     out.push(WorldDelta::ProduceCommodity {
-                        location_id: settlement.id,
+                        settlement_id: settlement.id,
                         commodity: 0, // FOOD
                         amount: harvest_bonus.min(50.0),
                     });
@@ -212,7 +212,7 @@ pub fn compute_seasons(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 new_prices[c] = new_prices[c].max(0.1); // floor
             }
             out.push(WorldDelta::UpdatePrices {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 prices: new_prices,
             });
         }

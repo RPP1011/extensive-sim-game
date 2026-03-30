@@ -73,8 +73,8 @@ pub fn compute_supply_for_settlement(
         if carried_food > 0.0 {
             let consumed = drain.min(carried_food);
             out.push(WorldDelta::TransferGoods {
-                from_id: entity.id,
-                to_id: entity.id,
+                from_entity: entity.id,
+                to_entity: entity.id,
                 commodity: COMMODITY_FOOD,
                 amount: consumed,
             });
@@ -120,7 +120,7 @@ mod tests {
             matches!(
                 d,
                 WorldDelta::TransferGoods {
-                    from_id: 1,
+                    from_entity: 1,
                     commodity: crate::world_sim::commodity::FOOD,
                     ..
                 }

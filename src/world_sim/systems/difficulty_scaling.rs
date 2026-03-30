@@ -110,7 +110,7 @@ fn apply_escalation(state: &WorldState, power_rating: f32, out: &mut Vec<WorldDe
         let loss = (settlement.treasury * 0.1).min(80.0);
         if loss > 0.0 {
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 delta: -loss,
             });
         }
@@ -160,7 +160,7 @@ fn apply_relief(state: &WorldState, power_rating: f32, out: &mut Vec<WorldDelta>
     for settlement in &state.settlements {
         if settlement.treasury < 50.0 && relief_amount > 0.0 {
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 delta: relief_amount,
             });
         }

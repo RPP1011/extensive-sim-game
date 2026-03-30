@@ -77,7 +77,7 @@ pub fn compute_currency_debasement(state: &WorldState, out: &mut Vec<WorldDelta>
         }
 
         out.push(WorldDelta::UpdatePrices {
-            location_id: settlement.id,
+            settlement_id: settlement.id,
             prices: inflated_prices,
         });
 
@@ -86,7 +86,7 @@ pub fn compute_currency_debasement(state: &WorldState, out: &mut Vec<WorldDelta>
             let erosion = settlement.treasury * INFLATION_FACTOR;
             if erosion > 0.01 {
                 out.push(WorldDelta::UpdateTreasury {
-                    location_id: settlement.id,
+                    settlement_id: settlement.id,
                     delta: -erosion,
                 });
             }

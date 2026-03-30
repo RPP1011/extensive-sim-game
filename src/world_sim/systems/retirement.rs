@@ -207,14 +207,14 @@ pub fn compute_retirement_for_settlement(
 
         // Grant legacy bonus to home settlement as treasury boost.
         out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement_id,
+            settlement_id: settlement_id,
             delta: bonus_value,
         });
 
         // Quartermaster legacy → stockpile bonus (food).
         if legacy == LegacyType::Quartermaster {
             out.push(WorldDelta::UpdateStockpile {
-                location_id: settlement_id,
+                settlement_id: settlement_id,
                 commodity: crate::world_sim::commodity::FOOD,
                 delta: bonus_value * 10.0,
             });

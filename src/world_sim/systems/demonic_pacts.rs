@@ -85,8 +85,8 @@ pub fn compute_demonic_pacts_for_settlement(
         if debuff_count >= 2 && npc.gold > MODERATE_GOLD_DRAIN {
             if let Some(home) = npc.home_settlement_id {
                 out.push(WorldDelta::TransferGold {
-                    from_id: entity.id,
-                    to_id: home,
+                    from_entity: entity.id,
+                    to_entity: home,
                     amount: MODERATE_GOLD_DRAIN,
                 });
             }

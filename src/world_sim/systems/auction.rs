@@ -73,8 +73,8 @@ pub fn compute_auction(state: &WorldState, out: &mut Vec<WorldDelta>) {
             let npc = bidder.npc.as_ref().unwrap();
             if npc.gold >= fee_per_bidder {
                 out.push(WorldDelta::TransferGold {
-                    from_id: bidder.id,
-                    to_id: settlement.id,
+                    from_entity: bidder.id,
+                    to_entity: settlement.id,
                     amount: fee_per_bidder,
                 });
             }
@@ -83,7 +83,7 @@ pub fn compute_auction(state: &WorldState, out: &mut Vec<WorldDelta>) {
         // Settlement treasury grows from auction activity.
         let auction_revenue = bidders.len() as f32 * fee_per_bidder * 0.5;
         out.push(WorldDelta::UpdateTreasury {
-            location_id: settlement.id,
+            settlement_id: settlement.id,
             delta: auction_revenue,
         });
     }

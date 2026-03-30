@@ -64,22 +64,22 @@ pub fn compute_npc_decisions_for_settlement(
 
                             // Add goods to destination stockpile.
                             out.push(WorldDelta::UpdateStockpile {
-                                location_id: dest_id,
+                                settlement_id: dest_id,
                                 commodity: c,
                                 delta: amount,
                             });
 
                             // NPC earns gold from the sale.
                             out.push(WorldDelta::TransferGold {
-                                from_id: dest_id, // destination pays
-                                to_id: entity.id,
+                                from_entity: dest_id, // destination pays
+                                to_entity: entity.id,
                                 amount: revenue,
                             });
 
                             // Clear carried goods (consume from self).
                             out.push(WorldDelta::TransferGoods {
-                                from_id: entity.id,
-                                to_id: entity.id,
+                                from_entity: entity.id,
+                                to_entity: entity.id,
                                 commodity: c,
                                 amount,
                             });
@@ -382,14 +382,14 @@ pub fn compute_npc_decisions_for_settlement(
                     if units > 0.0 {
                         // Buy from settlement.
                         out.push(WorldDelta::ConsumeCommodity {
-                            location_id: settlement_id,
+                            settlement_id: settlement_id,
                             commodity: best_trade_commodity,
                             amount: units,
                         });
                         let cost = units * local_price;
                         out.push(WorldDelta::TransferGold {
-                            from_id: entity.id,
-                            to_id: settlement_id,
+                            from_entity: entity.id,
+                            to_entity: settlement_id,
                             amount: cost,
                         });
                         if state.settlement(dest_id).is_some() {
@@ -613,15 +613,15 @@ fn barter_at_settlement(
 
             // A gives commodity_a to B.
             out.push(WorldDelta::TransferGoods {
-                from_id: a_id,
-                to_id: b_id,
+                from_entity: a_id,
+                to_entity: b_id,
                 commodity: a_commodity,
                 amount: a_give,
             });
             // B gives commodity_b to A.
             out.push(WorldDelta::TransferGoods {
-                from_id: b_id,
-                to_id: a_id,
+                from_entity: b_id,
+                to_entity: a_id,
                 commodity: b_commodity,
                 amount: b_give,
             });

@@ -1,8 +1,10 @@
-//! Zero-allocation runtime for the world simulation.
+//! Low-allocation runtime for the world simulation.
 //!
-//! All buffers are pre-allocated at init. Ticking reuses capacity via dirty-list
-//! clears — no heap allocations after `WorldSim::new()`. Merge uses flat arrays
-//! indexed by entity/settlement ID instead of HashMaps.
+//! Most buffers are pre-allocated at init. Ticking reuses capacity via dirty-list
+//! clears. The merge phase uses flat arrays indexed by entity/settlement ID for
+//! commutative fields (damage, movement, economy), plus a small HashMap for
+//! last-damage-source attribution. Vecs accumulate non-commutative items
+//! (status effects, spawns, transfers).
 
 use std::time::Instant;
 
@@ -346,34 +348,34 @@ impl FlatMergedDeltas {
             WorldDelta::RemoveStatus { target_id, status_discriminant } => {
                 self.remove_statuses.push((target_id, status_discriminant));
             }
-            WorldDelta::ProduceCommodity { location_id, commodity, amount } => {
-                if self.mark_settlement(location_id) {
-                    self.production[location_id as usize][commodity] += amount;
+            WorldDelta::ProduceCommodity { settlement_id, commodity, amount } => {
+                if self.mark_settlement(settlement_id) {
+                    self.production[settlement_id as usize][commodity] += amount;
                 }
             }
-            WorldDelta::ConsumeCommodity { location_id, commodity, amount } => {
-                if self.mark_settlement(location_id) {
-                    self.consumption[location_id as usize][commodity] += amount;
+            WorldDelta::ConsumeCommodity { settlement_id, commodity, amount } => {
+                if self.mark_settlement(settlement_id) {
+                    self.consumption[settlement_id as usize][commodity] += amount;
                 }
             }
-            WorldDelta::TransferGold { from_id, to_id, amount } => {
-                self.gold_transfers.push((from_id, to_id, amount));
+            WorldDelta::TransferGold { from_entity, to_entity, amount } => {
+                self.gold_transfers.push((from_entity, to_entity, amount));
             }
-            WorldDelta::TransferGoods { from_id, to_id, commodity, amount } => {
-                self.goods_transfers.push((from_id, to_id, commodity, amount));
+            WorldDelta::TransferGoods { from_entity, to_entity, commodity, amount } => {
+                self.goods_transfers.push((from_entity, to_entity, commodity, amount));
             }
-            WorldDelta::UpdateStockpile { location_id, commodity, delta } => {
-                if self.mark_settlement(location_id) {
-                    self.stockpile_adj[location_id as usize][commodity] += delta;
+            WorldDelta::UpdateStockpile { settlement_id, commodity, delta } => {
+                if self.mark_settlement(settlement_id) {
+                    self.stockpile_adj[settlement_id as usize][commodity] += delta;
                 }
             }
-            WorldDelta::UpdateTreasury { location_id, delta } => {
-                if self.mark_settlement(location_id) {
-                    self.treasury_adj[location_id as usize] += delta;
+            WorldDelta::UpdateTreasury { settlement_id, delta } => {
+                if self.mark_settlement(settlement_id) {
+                    self.treasury_adj[settlement_id as usize] += delta;
                 }
             }
-            WorldDelta::UpdatePrices { location_id, prices } => {
-                self.price_updates.push((location_id, prices));
+            WorldDelta::UpdatePrices { settlement_id, prices } => {
+                self.price_updates.push((settlement_id, prices));
             }
             WorldDelta::EntityEntersGrid { entity_id, grid_id } => {
                 self.grid_enters.push((entity_id, grid_id));

@@ -184,8 +184,8 @@ fn compute_tribute(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
         // Transfer gold as tribute.
         out.push(WorldDelta::TransferGold {
-            from_id: faction.id,
-            to_id: lord.id,
+            from_entity: faction.id,
+            to_entity: lord.id,
             amount: tribute,
         });
 

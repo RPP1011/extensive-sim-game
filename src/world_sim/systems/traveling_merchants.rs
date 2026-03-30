@@ -75,8 +75,8 @@ pub fn compute_traveling_merchants(state: &WorldState, out: &mut Vec<WorldDelta>
         if sell_commodity < NUM_COMMODITIES && npc.carried_goods[sell_commodity] > 0.001 {
             let amount = npc.carried_goods[sell_commodity];
             out.push(WorldDelta::TransferGoods {
-                from_id: entity.id,
-                to_id: settlement.id,
+                from_entity: entity.id,
+                to_entity: settlement.id,
                 commodity: sell_commodity,
                 amount,
             });
@@ -84,8 +84,8 @@ pub fn compute_traveling_merchants(state: &WorldState, out: &mut Vec<WorldDelta>
             // Receive gold based on settlement prices.
             let gold = settlement.prices[sell_commodity] * amount;
             out.push(WorldDelta::TransferGold {
-                from_id: settlement.id,
-                to_id: entity.id,
+                from_entity: settlement.id,
+                to_entity: entity.id,
                 amount: gold,
             });
         }

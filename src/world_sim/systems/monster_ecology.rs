@@ -151,7 +151,7 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 if roll > 0.3 { continue; }
 
                 out.push(WorldDelta::UpdateTreasury {
-                    location_id: settlement.id,
+                    settlement_id: settlement.id,
                     delta: -damage,
                 });
             }

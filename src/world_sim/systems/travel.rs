@@ -67,7 +67,7 @@ pub fn compute_travel(state: &WorldState, out: &mut Vec<WorldDelta>) {
         let food_drain: f32 = 0.005;
         if npc.carried_goods[0] > 0.0 {
             out.push(WorldDelta::ConsumeCommodity {
-                location_id: entity.id, // consumed from personal inventory
+                settlement_id: entity.id, // consumed from personal inventory
                 commodity: crate::world_sim::commodity::FOOD,
                 amount: food_drain.min(npc.carried_goods[0]),
             });

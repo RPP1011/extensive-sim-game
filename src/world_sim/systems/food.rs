@@ -65,8 +65,8 @@ pub fn compute_food(state: &WorldState, out: &mut Vec<WorldDelta>) {
             // Model carried food consumption as TransferGoods from self to self
             // (the apply phase will clamp to available).
             out.push(WorldDelta::TransferGoods {
-                from_id: entity.id,
-                to_id: entity.id,
+                from_entity: entity.id,
+                to_entity: entity.id,
                 commodity: COMMODITY_FOOD,
                 amount: consume,
             });
@@ -129,7 +129,7 @@ pub fn compute_food_for_settlement(
         if npc.behavior_production.is_empty() {
             let forage = 0.02 * level_mult;
             out.push(WorldDelta::ProduceCommodity {
-                location_id: settlement_id,
+                settlement_id: settlement_id,
                 commodity: COMMODITY_FOOD,
                 amount: forage,
             });
@@ -177,7 +177,7 @@ pub fn compute_food_for_settlement(
                 let consume = actual_amount * per_unit;
                 if consume > 0.0 {
                     out.push(WorldDelta::ConsumeCommodity {
-                        location_id: settlement_id,
+                        settlement_id: settlement_id,
                         commodity: input_c,
                         amount: consume,
                     });
@@ -186,7 +186,7 @@ pub fn compute_food_for_settlement(
 
             if actual_amount > 0.0 {
                 out.push(WorldDelta::ProduceCommodity {
-                    location_id: settlement_id,
+                    settlement_id: settlement_id,
                     commodity,
                     amount: actual_amount,
                 });
@@ -207,7 +207,7 @@ pub fn compute_food_for_settlement(
             if earnings > 0.01 && settlement.treasury > 0.0 {
                 // Settlement pays NPC from treasury.
                 out.push(WorldDelta::UpdateTreasury {
-                    location_id: settlement_id,
+                    settlement_id: settlement_id,
                     delta: -earnings.min(settlement.treasury),
                 });
                 out.push(WorldDelta::UpdateEntityField {
@@ -266,7 +266,7 @@ pub fn compute_food_for_settlement(
         if eaters > 0 {
             // Consume food from stockpile.
             out.push(WorldDelta::ConsumeCommodity {
-                location_id: settlement_id,
+                settlement_id: settlement_id,
                 commodity: COMMODITY_FOOD,
                 amount: meal_size * eaters as f32,
             });
@@ -344,7 +344,7 @@ mod tests {
             matches!(
                 d,
                 WorldDelta::ConsumeCommodity {
-                    location_id: 10,
+                    settlement_id: 10,
                     commodity: crate::world_sim::commodity::FOOD,
                     ..
                 }

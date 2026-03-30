@@ -67,7 +67,7 @@ pub fn compute_dungeons_for_settlement(
         if region.monster_density > 60.0 && settlement.treasury > -100.0 {
             let threat_drain = region.monster_density * 0.01 * DEEP_DUNGEON_THREAT_MULTIPLIER;
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement_id,
+                settlement_id: settlement_id,
                 delta: -threat_drain / state.settlements.len().max(1) as f32,
             });
         }
@@ -135,8 +135,8 @@ pub fn compute_dungeons_for_settlement(
     for friendly in &friendlies {
         if gold_each > 0.0 && can_afford {
             out.push(WorldDelta::TransferGold {
-                from_id: settlement_id,
-                to_id: friendly.id,
+                from_entity: settlement_id,
+                to_entity: friendly.id,
                 amount: gold_each,
             });
         }

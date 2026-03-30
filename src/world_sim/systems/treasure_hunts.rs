@@ -92,8 +92,8 @@ pub fn compute_treasure_hunts(state: &WorldState, out: &mut Vec<WorldDelta>) {
             // Gold reward paid from home settlement treasury
             if settlement.treasury > step_reward {
                 out.push(WorldDelta::TransferGold {
-                    from_id: settlement.id,
-                    to_id: entity.id,
+                    from_entity: settlement.id,
+                    to_entity: entity.id,
                     amount: step_reward,
                 });
             }
@@ -104,15 +104,15 @@ pub fn compute_treasure_hunts(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 let final_bonus = step_reward * FINAL_STEP_MULTIPLIER;
                 if settlement.treasury > step_reward + final_bonus {
                     out.push(WorldDelta::TransferGold {
-                        from_id: settlement.id,
-                        to_id: entity.id,
+                        from_entity: settlement.id,
+                        to_entity: entity.id,
                         amount: final_bonus,
                     });
                 }
 
                 // Award treasure commodity to NPC's home settlement
                 out.push(WorldDelta::UpdateStockpile {
-                    location_id: home_id,
+                    settlement_id: home_id,
                     commodity: TREASURE_COMMODITY,
                     delta: 5.0, // artifact-equivalent goods
                 });
@@ -130,7 +130,7 @@ pub fn compute_treasure_hunts(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 if settlement_dist <= DISCOVERY_RADIUS_SQ {
                     // NPC is near a settlement: deposit treasure findings
                     out.push(WorldDelta::UpdateTreasury {
-                        location_id: nearest.id,
+                        settlement_id: nearest.id,
                         delta: step_reward * 0.1, // 10% goes to settlement
                     });
                 }

@@ -41,7 +41,7 @@ pub fn compute_mercenaries(state: &WorldState, out: &mut Vec<WorldDelta>) {
         // If settlement can afford it, pay mercenary maintenance
         if settlement.treasury > MERCENARY_MAINTENANCE_COST * 3.0 && settlement.treasury > -100.0 {
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 delta: -MERCENARY_MAINTENANCE_COST,
             });
         } else {

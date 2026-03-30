@@ -114,8 +114,8 @@ pub fn compute_skill_challenges_for_settlement(
             // Paid from settlement treasury
             if settlement.treasury > CRITICAL_SUCCESS_GOLD {
                 out.push(WorldDelta::TransferGold {
-                    from_id: settlement_id,
-                    to_id: entity.id,
+                    from_entity: settlement_id,
+                    to_entity: entity.id,
                     amount: CRITICAL_SUCCESS_GOLD,
                 });
             }
@@ -132,16 +132,16 @@ pub fn compute_skill_challenges_for_settlement(
             });
             // Gold penalty goes to settlement treasury
             out.push(WorldDelta::TransferGold {
-                from_id: entity.id,
-                to_id: settlement_id,
+                from_entity: entity.id,
+                to_entity: settlement_id,
                 amount: CRITICAL_FAILURE_GOLD_PENALTY,
             });
         } else if succeeded {
             // Paid from settlement treasury
             if settlement.treasury > SUCCESS_GOLD {
                 out.push(WorldDelta::TransferGold {
-                    from_id: settlement_id,
-                    to_id: entity.id,
+                    from_entity: settlement_id,
+                    to_entity: entity.id,
                     amount: SUCCESS_GOLD,
                 });
             }

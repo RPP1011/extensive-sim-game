@@ -214,8 +214,8 @@ pub fn compute_wanted(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
             for &collector_id in &collectors {
                 out.push(WorldDelta::TransferGold {
-                    from_id: funding_settlement.id,
-                    to_id: collector_id,
+                    from_entity: funding_settlement.id,
+                    to_entity: collector_id,
                     amount: share,
                 });
             }

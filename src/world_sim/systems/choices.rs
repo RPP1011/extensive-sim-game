@@ -32,7 +32,7 @@ pub fn compute_choices(state: &WorldState, out: &mut Vec<WorldDelta>) {
             let amount_roll = entity_hash_f32(settlement.id, state.tick, 0xA3B7);
             let amount = if amount_roll < 0.5 { 10.0 } else { -5.0 };
             out.push(WorldDelta::UpdateTreasury {
-                location_id: settlement.id,
+                settlement_id: settlement.id,
                 delta: amount,
             });
         }
