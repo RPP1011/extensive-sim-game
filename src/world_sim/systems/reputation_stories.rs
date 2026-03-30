@@ -7,8 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/reputation_stories.rs`
 //!
-//! NEEDS STATE: `reputation_stories: Vec<ReputationStory>` on WorldState
-//! NEEDS DELTA: CreateStory, SpreadStory, FadeStory
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

@@ -218,7 +218,7 @@ fn apply_status_effects(state: &mut WorldState, merged: &MergedDeltas) {
 fn apply_economy(state: &mut WorldState, merged: &MergedDeltas) {
     // Direct stockpile deltas (additive).
     for (&loc_id, deltas) in &merged.stockpile_deltas {
-        if let Some(s) = state.settlements.iter_mut().find(|s| s.id == loc_id) {
+        if let Some(s) = state.settlement_mut(loc_id) {
             for i in 0..NUM_COMMODITIES {
                 s.stockpile[i] += deltas[i];
             }
@@ -227,14 +227,14 @@ fn apply_economy(state: &mut WorldState, merged: &MergedDeltas) {
 
     // Treasury deltas (additive).
     for (&loc_id, &delta) in &merged.treasury_deltas {
-        if let Some(s) = state.settlements.iter_mut().find(|s| s.id == loc_id) {
+        if let Some(s) = state.settlement_mut(loc_id) {
             s.treasury += delta;
         }
     }
 
     // Production: add to stockpile.
     for (&loc_id, produced) in &merged.production_by_settlement {
-        if let Some(s) = state.settlements.iter_mut().find(|s| s.id == loc_id) {
+        if let Some(s) = state.settlement_mut(loc_id) {
             for i in 0..NUM_COMMODITIES {
                 s.stockpile[i] += produced[i];
             }
@@ -243,12 +243,10 @@ fn apply_economy(state: &mut WorldState, merged: &MergedDeltas) {
 
     // Consumption with fair rationing.
     for (&loc_id, consumed) in &merged.consumption_by_settlement {
-        if let Some(s) = state.settlements.iter_mut().find(|s| s.id == loc_id) {
+        if let Some(s) = state.settlement_mut(loc_id) {
             for i in 0..NUM_COMMODITIES {
                 if consumed[i] <= 0.0 { continue; }
                 if consumed[i] > s.stockpile[i] {
-                    // Demand exceeds supply — stockpile is fully consumed.
-                    // Individual consumers would each get (stockpile / consumed) fraction.
                     s.stockpile[i] = 0.0;
                 } else {
                     s.stockpile[i] -= consumed[i];
@@ -259,7 +257,7 @@ fn apply_economy(state: &mut WorldState, merged: &MergedDeltas) {
 
     // Price updates.
     for (&loc_id, prices) in &merged.price_updates {
-        if let Some(s) = state.settlements.iter_mut().find(|s| s.id == loc_id) {
+        if let Some(s) = state.settlement_mut(loc_id) {
             s.prices = *prices;
         }
     }
@@ -273,8 +271,8 @@ fn apply_gold_transfers(state: &mut WorldState, merged: &MergedDeltas) {
     if merged.gold_transfers.is_empty() { return; }
 
     // Compute total outgoing per sender and snapshot original gold.
-    let mut outgoing: HashMap<u32, f32> = HashMap::new();
-    let mut original_gold: HashMap<u32, f32> = HashMap::new();
+    let mut outgoing: HashMap<u32, f32> = HashMap::with_capacity(merged.gold_transfers.len());
+    let mut original_gold: HashMap<u32, f32> = HashMap::with_capacity(merged.gold_transfers.len());
     for &(from, _, amount) in &merged.gold_transfers {
         *outgoing.entry(from).or_default() += amount;
         original_gold.entry(from).or_insert_with(|| {
@@ -322,7 +320,7 @@ fn apply_goods_transfers(state: &mut WorldState, merged: &MergedDeltas) {
     if merged.goods_transfers.is_empty() { return; }
 
     // Compute total outgoing per (sender, commodity).
-    let mut outgoing: HashMap<(u32, usize), f32> = HashMap::new();
+    let mut outgoing: HashMap<(u32, usize), f32> = HashMap::with_capacity(merged.goods_transfers.len());
     for &(from, _, commodity, amount) in &merged.goods_transfers {
         *outgoing.entry((from, commodity)).or_default() += amount;
     }
@@ -464,7 +462,7 @@ fn apply_deaths(state: &mut WorldState, merged: &MergedDeltas) {
 fn apply_grid_transitions(state: &mut WorldState, merged: &MergedDeltas) {
     // Process leaves first.
     for &(entity_id, grid_id) in &merged.grid_leaves {
-        if let Some(grid) = state.grids.iter_mut().find(|g| g.id == grid_id) {
+        if let Some(grid) = state.grid_mut(grid_id) {
             grid.entity_ids.retain(|&id| id != entity_id);
         }
         if let Some(e) = state.entity_mut(entity_id) {
@@ -477,7 +475,7 @@ fn apply_grid_transitions(state: &mut WorldState, merged: &MergedDeltas) {
 
     // Then enters.
     for &(entity_id, grid_id) in &merged.grid_enters {
-        if let Some(grid) = state.grids.iter_mut().find(|g| g.id == grid_id) {
+        if let Some(grid) = state.grid_mut(grid_id) {
             if !grid.entity_ids.contains(&entity_id) {
                 grid.entity_ids.push(entity_id);
             }
@@ -494,7 +492,7 @@ fn apply_grid_transitions(state: &mut WorldState, merged: &MergedDeltas) {
 
 fn apply_fidelity(state: &mut WorldState, merged: &MergedDeltas) {
     for (&grid_id, &new_fidelity) in &merged.fidelity_changes {
-        if let Some(grid) = state.grids.iter_mut().find(|g| g.id == grid_id) {
+        if let Some(grid) = state.grid_mut(grid_id) {
             grid.fidelity = new_fidelity;
         }
     }
@@ -544,14 +542,7 @@ pub(super) fn apply_campaign_deltas(state: &mut WorldState, merged: &MergedDelta
         }
     }
 
-    // --- XP additions ---
-    for (&entity_id, &xp) in &merged.xp_additions {
-        if let Some(entity) = state.entity_mut(entity_id) {
-            if let Some(npc) = entity.npc.as_mut() {
-                npc.xp = npc.xp.saturating_add(xp);
-            }
-        }
-    }
+    // XP additions: vestigial, npc.xp no longer used (level derives from class levels).
 
     // --- Faction field deltas ---
     for (&(faction_id, field_disc), &delta) in &merged.faction_field_deltas {

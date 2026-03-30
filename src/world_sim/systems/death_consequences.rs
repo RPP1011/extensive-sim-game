@@ -280,7 +280,7 @@ pub fn advance_death_consequences(state: &mut WorldState) {
 
 /// Generate a one-sentence epitaph from an NPC's life story.
 fn generate_epitaph(state: &WorldState, entity_id: u32, name: &str, level: u32) -> String {
-    let entity = match state.entities.iter().find(|e| e.id == entity_id) {
+    let entity = match state.entity(entity_id) {
         Some(e) => e,
         None => return String::new(),
     };

@@ -10,12 +10,6 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{ActionTags, Entity, EntityKind, WorldState, tags};
 
-// NEEDS STATE: stress: f32 on NpcData
-// NEEDS STATE: fatigue: f32 on NpcData
-// NEEDS STATE: injury: f32 on NpcData
-// NEEDS STATE: loyalty: f32 on NpcData
-// NEEDS STATE: activity: ActivityStatus on NpcData
-// NEEDS DELTA: UpdateCondition { entity_id: u32, stress_delta: f32, fatigue_delta: f32, injury_delta: f32, loyalty_delta: f32 }
 
 /// How often recovery runs (in ticks).
 const RECOVERY_INTERVAL: u64 = 100;

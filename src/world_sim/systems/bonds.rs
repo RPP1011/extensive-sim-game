@@ -10,10 +10,6 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, WorldState};
 
-// NEEDS STATE: adventurer_bonds: HashMap<(u32, u32), f32> on WorldState
-// NEEDS STATE: entity party/group membership (e.g. party_id on Entity or NpcData)
-// NEEDS STATE: party status (OnMission, Fighting, Traveling) or equivalent active flag
-// NEEDS DELTA: UpdateBond { entity_a: u32, entity_b: u32, delta: f32 }
 
 /// Tick cadence — bonds update every 50 ticks.
 const BOND_TICK_INTERVAL: u64 = 50;
@@ -46,7 +42,6 @@ pub fn compute_bonds(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     // --- Phase 1: Decay existing bonds ---
-    // NEEDS STATE: iterate state.adventurer_bonds
     // For each (key, value) in state.adventurer_bonds:
     //   out.push(WorldDelta::UpdateBond { entity_a: key.0, entity_b: key.1, delta: -BOND_DECAY_RATE });
 
@@ -79,7 +74,6 @@ pub fn compute_bonds_for_settlement(
     for i in 0..npc_ids.len() {
         for j in (i + 1)..npc_ids.len() {
             let (a, b) = bond_key(npc_ids[i], npc_ids[j]);
-            // NEEDS DELTA: UpdateBond { entity_a: a, entity_b: b, delta: BOND_GROWTH_RATE }
             let _ = (a, b); // suppress unused warning until delta exists
         }
     }

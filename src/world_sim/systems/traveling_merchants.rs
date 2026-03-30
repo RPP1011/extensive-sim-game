@@ -7,10 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/traveling_merchants.rs`
 //!
-//! NEEDS STATE: `traveling_merchants: Vec<TravelingMerchant>` on WorldState
-//! NEEDS STATE: `merchant_specialty` on NpcData
-//! NEEDS DELTA: SpawnMerchantEntity { ... }
-//! NEEDS DELTA: DespawnEntity { entity_id }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EconomicIntent, EntityKind, PriceReport, WorldState};

@@ -150,7 +150,7 @@ fn process_births(state: &mut WorldState, tick: u64) {
         if pop >= POP_CAP_PER_SETTLEMENT { continue; }
 
         // Find spouse index.
-        let spouse_idx = state.entities.iter().position(|e| e.id == spouse_id && e.alive);
+        let spouse_idx = state.entity_idx(spouse_id).filter(|&i| state.entities[i].alive);
         let spouse_idx = match spouse_idx { Some(i) => i, None => continue };
 
         // Deterministic birth check (~5% per eligible couple per check).

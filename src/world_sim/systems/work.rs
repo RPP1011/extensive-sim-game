@@ -7,6 +7,7 @@
 //! `advance_work_states` takes `&mut WorldState` and handles state transitions
 //! (called post-apply in runtime.rs since it needs mutable access).
 
+use std::collections::HashMap;
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::*;
 use crate::world_sim::commodity;
@@ -128,6 +129,24 @@ pub fn compute_work(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Handles: Idle->Traveling, Traveling->Working (on arrival),
 /// Working->Carrying (on completion), Carrying->Idle (on deposit).
 pub fn advance_work_states(state: &mut WorldState) {
+    // Pre-compute storage buildings per settlement for O(1) lookup.
+    // Each entry: (building_id, pos, storage_capacity).
+    let mut storage_by_settlement: HashMap<u32, Vec<(u32, (f32, f32), f32)>> = HashMap::new();
+    for entity in &state.entities {
+        if !entity.alive || entity.kind != EntityKind::Building { continue; }
+        let bd = match &entity.building { Some(b) => b, None => continue };
+        if bd.construction_progress < 1.0 { continue; }
+        if let Some(sid) = bd.settlement_id {
+            let is_storage_type = matches!(bd.building_type,
+                BuildingType::Warehouse | BuildingType::Inn | BuildingType::Market);
+            if is_storage_type || bd.storage_capacity > 0.0 {
+                storage_by_settlement.entry(sid)
+                    .or_default()
+                    .push((entity.id, entity.pos, bd.storage_capacity));
+            }
+        }
+    }
+
     // Collect commodity production events to apply after the loop
     // (can't borrow settlements while iterating entities mutably).
     let mut deposits: Vec<(u32, usize, f32)> = Vec::new();
@@ -201,8 +220,9 @@ pub fn advance_work_states(state: &mut WorldState) {
                             .map(|n| n.behavior_value(tags::SMITHING))
                             .unwrap_or(0.0);
                         let tick = state.tick;
+                        let item_id = state.next_entity_id();
                         let item_entity = craft_item(
-                            state, entity_id, entity_pos, smithing_skill,
+                            item_id, entity_id, entity_pos, smithing_skill,
                             home_sid, tick,
                         );
                         item_spawns.push((item_entity,));
@@ -218,10 +238,20 @@ pub fn advance_work_states(state: &mut WorldState) {
                         // Non-forge production: commodity output.
                         let (commodity, amount) = output_for_building(state, building_id);
 
-                        let storage_pos = find_storage_building_pos(state, home_sid, entity_pos)
+                        let storage_pos = home_sid
+                            .and_then(|sid| storage_by_settlement.get(&sid))
+                            .and_then(|buildings| {
+                                buildings.iter()
+                                    .min_by(|a, b| {
+                                        let da = (a.1.0 - entity_pos.0).powi(2) + (a.1.1 - entity_pos.1).powi(2);
+                                        let db = (b.1.0 - entity_pos.0).powi(2) + (b.1.1 - entity_pos.1).powi(2);
+                                        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                                    })
+                                    .map(|b| b.1)
+                            })
                             .or_else(|| {
                                 home_sid
-                                    .and_then(|sid| state.settlements.iter().find(|s| s.id == sid))
+                                    .and_then(|sid| state.settlement(sid))
                                     .map(|s| s.pos)
                             });
 
@@ -258,7 +288,18 @@ pub fn advance_work_states(state: &mut WorldState) {
                 let dist = (dx * dx + dy * dy).sqrt();
                 if dist < ARRIVAL_DIST {
                     // Arrived at storage — deposit into nearest storage building.
-                    let storage_bid = find_nearest_storage_building_id(state, home_sid, entity_pos);
+                    let storage_bid = home_sid
+                        .and_then(|sid| storage_by_settlement.get(&sid))
+                        .and_then(|buildings| {
+                            buildings.iter()
+                                .filter(|b| b.2 > 0.0) // has storage capacity
+                                .min_by(|a, b| {
+                                    let da = (a.1.0 - entity_pos.0).powi(2) + (a.1.1 - entity_pos.1).powi(2);
+                                    let db = (b.1.0 - entity_pos.0).powi(2) + (b.1.1 - entity_pos.1).powi(2);
+                                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                                })
+                                .map(|b| b.0)
+                        });
                     if let Some(bid) = storage_bid {
                         building_deposits.push((bid, commodity as usize, amount));
                     } else {
@@ -280,7 +321,7 @@ pub fn advance_work_states(state: &mut WorldState) {
 
     // Apply commodity deposits to settlement stockpiles.
     for (settlement_id, commodity, amount) in deposits {
-        if let Some(settlement) = state.settlements.iter_mut().find(|s| s.id == settlement_id) {
+        if let Some(settlement) = state.settlement_mut(settlement_id) {
             if commodity < settlement.stockpile.len() {
                 settlement.stockpile[commodity] += amount;
             }
@@ -289,12 +330,12 @@ pub fn advance_work_states(state: &mut WorldState) {
 
     // Pay wages: settlement treasury → NPC gold.
     for (entity_idx, settlement_id, wage) in wages {
-        let treasury = state.settlements.iter().find(|s| s.id == settlement_id)
+        let treasury = state.settlement(settlement_id)
             .map(|s| s.treasury).unwrap_or(0.0);
         // Only pay if settlement can afford it.
         let paid = wage.min(treasury.max(0.0));
         if paid > 0.0 {
-            if let Some(settlement) = state.settlements.iter_mut().find(|s| s.id == settlement_id) {
+            if let Some(settlement) = state.settlement_mut(settlement_id) {
                 settlement.treasury -= paid;
             }
             if let Some(npc) = state.entities[entity_idx].npc.as_mut() {
@@ -305,7 +346,7 @@ pub fn advance_work_states(state: &mut WorldState) {
 
     // Apply deposits to building storage.
     for (building_id, commodity, amount) in building_deposits {
-        if let Some(bld_entity) = state.entities.iter_mut().find(|e| e.id == building_id) {
+        if let Some(bld_entity) = state.entity_mut(building_id) {
             if let Some(bld) = &mut bld_entity.building {
                 bld.deposit(commodity, amount);
             }
@@ -322,14 +363,14 @@ pub fn advance_work_states(state: &mut WorldState) {
 /// Quality and rarity based on crafter's SMITHING skill.
 /// Slot determined by deterministic hash from tick + crafter ID.
 fn craft_item(
-    state: &WorldState,
+    item_id: u32,
     crafter_id: u32,
     pos: (f32, f32),
     smithing_skill: f32,
     settlement_id: Option<u32>,
     tick: u64,
 ) -> Entity {
-    let next_id = state.entities.iter().map(|e| e.id).max().unwrap_or(0) + 1;
+    let next_id = item_id;
 
     // Determine slot from hash.
     let h = entity_hash(crafter_id, tick, 0xC8AF);
@@ -457,70 +498,6 @@ fn output_for_building(state: &WorldState, building_id: u32) -> (usize, f32) {
     }
 }
 
-/// Find the nearest completed Warehouse, Inn, or Market building at the NPC's
-/// home settlement. Returns its position if found, `None` otherwise.
-fn find_storage_building_pos(
-    state: &WorldState,
-    home_sid: Option<u32>,
-    npc_pos: (f32, f32),
-) -> Option<(f32, f32)> {
-    let sid = home_sid?;
-    let mut best_pos: Option<(f32, f32)> = None;
-    let mut best_dist_sq = f32::MAX;
-
-    for entity in &state.entities {
-        if !entity.alive || entity.kind != EntityKind::Building { continue; }
-        let bd = match &entity.building { Some(b) => b, None => continue };
-        if bd.settlement_id != Some(sid) { continue; }
-        if bd.construction_progress < 1.0 { continue; }
-
-        match bd.building_type {
-            BuildingType::Warehouse | BuildingType::Inn | BuildingType::Market => {}
-            _ => continue,
-        }
-
-        let dx = entity.pos.0 - npc_pos.0;
-        let dy = entity.pos.1 - npc_pos.1;
-        let dist_sq = dx * dx + dy * dy;
-        if dist_sq < best_dist_sq {
-            best_dist_sq = dist_sq;
-            best_pos = Some(entity.pos);
-        }
-    }
-
-    best_pos
-}
-
-/// Find the nearest completed storage building at the NPC's settlement.
-/// Returns the building entity ID if found.
-fn find_nearest_storage_building_id(
-    state: &WorldState,
-    home_sid: Option<u32>,
-    npc_pos: (f32, f32),
-) -> Option<u32> {
-    let sid = home_sid?;
-    let mut best_id: Option<u32> = None;
-    let mut best_dist_sq = f32::MAX;
-
-    for entity in &state.entities {
-        if !entity.alive || entity.kind != EntityKind::Building { continue; }
-        let bd = match &entity.building { Some(b) => b, None => continue };
-        if bd.settlement_id != Some(sid) { continue; }
-        if bd.construction_progress < 1.0 { continue; }
-        if bd.storage_capacity <= 0.0 { continue; }
-
-        let dx = entity.pos.0 - npc_pos.0;
-        let dy = entity.pos.1 - npc_pos.1;
-        let dist_sq = dx * dx + dy * dy;
-        if dist_sq < best_dist_sq {
-            best_dist_sq = dist_sq;
-            best_id = Some(entity.id);
-        }
-    }
-
-    best_id
-}
-
 // ---------------------------------------------------------------------------
 // Physical eating — NPCs seek food when hungry
 // ---------------------------------------------------------------------------
@@ -592,7 +569,7 @@ pub fn advance_eating(state: &mut WorldState) {
             .find(|(id, _)| *id == sid)
             .and_then(|(_, info)| *info);
         let food_target = food_info.map(|(_, pos)| pos).unwrap_or(settlement_pos);
-        let food_bid = food_info.map(|(bid, _)| bid);
+        let _food_bid = food_info.map(|(bid, _)| bid);
 
         let dx = food_target.0 - entity.pos.0;
         let dy = food_target.1 - entity.pos.1;
@@ -614,9 +591,13 @@ pub fn advance_eating(state: &mut WorldState) {
             npc.gold -= cost;
 
             // Consume food from settlement stockpile.
-            if let Some(settlement) = state.settlements.iter_mut().find(|s| s.id == sid) {
-                settlement.stockpile[commodity::FOOD] -= FOOD_PER_MEAL;
-                settlement.treasury += cost;
+            let si = sid as usize;
+            if si < state.settlement_index.len() {
+                let idx = state.settlement_index[si] as usize;
+                if idx < state.settlements.len() {
+                    state.settlements[idx].stockpile[commodity::FOOD] -= FOOD_PER_MEAL;
+                    state.settlements[idx].treasury += cost;
+                }
             }
             npc.needs.hunger = (npc.needs.hunger + MEAL_HUNGER_RESTORE).min(100.0);
         }
@@ -647,11 +628,10 @@ pub fn sync_stockpiles_from_buildings(state: &mut WorldState) {
         .collect();
 
     for (si, tid, old_stockpile, old_gold) in &sync_targets {
-        if let Some(treasury_entity) = state.entities.iter_mut().find(|e| e.id == *tid) {
-            if let Some(inv) = &mut treasury_entity.inventory {
+        let eidx = state.entity_idx(*tid);
+        if let Some(idx) = eidx {
+            if let Some(inv) = &mut state.entities[idx].inventory {
                 // Push any deltas from abstract settlement changes into treasury inventory.
-                // If settlement.stockpile changed (from ConsumeCommodity/ProduceCommodity deltas),
-                // apply the difference to the treasury inventory.
                 let current_stockpile = state.settlements[*si].stockpile;
                 for c in 0..8 {
                     let diff = current_stockpile[c] - old_stockpile[c];
@@ -672,8 +652,8 @@ pub fn sync_stockpiles_from_buildings(state: &mut WorldState) {
         }
 
         // Now copy treasury inventory back to settlement cache.
-        if let Some(treasury_entity) = state.entities.iter().find(|e| e.id == *tid) {
-            if let Some(inv) = &treasury_entity.inventory {
+        if let Some(idx) = eidx {
+            if let Some(inv) = &state.entities[idx].inventory {
                 state.settlements[*si].stockpile = inv.commodities;
                 state.settlements[*si].treasury = inv.gold;
             }

@@ -11,11 +11,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/weather.rs`
 //!
-//! NEEDS STATE: `active_weather: Vec<WeatherEvent>` on WorldState
-//! NEEDS STATE: `season` on WorldState (or derived from tick, see seasons.rs)
-//! NEEDS STATE: `region_id` on Entity (to know which region an entity is in)
-//! NEEDS DELTA: SpawnWeather { weather_type, regions, severity, duration }
-//! NEEDS DELTA: ExpireWeather { weather_id }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, RegionState, WorldState};

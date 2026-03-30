@@ -1,3 +1,4 @@
+#![allow(dead_code, unused_variables, unused_imports)]
 //! Headless campaign simulator for automated playtesting.
 //!
 //! Provides a pure-data campaign simulation with no Bevy ECS dependency.

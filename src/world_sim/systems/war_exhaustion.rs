@@ -14,27 +14,11 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
 
-// NEEDS STATE: factions: Vec<FactionState> on WorldState
 //   FactionState { id, diplomatic_stance, at_war_with, military_strength,
 //                  relationship_to_guild, name }
-// NEEDS STATE: war_exhaustion: Vec<WarExhaustionEntry> on WorldState
 //   WarExhaustionEntry { faction_id: u32, exhaustion_level: f32,
 //                        war_start_tick: u64, casualties: u32, gold_spent: f32 }
-// NEEDS STATE: DiplomaticStance enum (AtWar, Hostile, Neutral, Friendly, Coalition)
-// NEEDS STATE: guild_faction_id: u32 on WorldState
-// NEEDS STATE: regions with owner_faction_id and unrest fields
 
-// NEEDS DELTA: AdjustWarExhaustion { faction_id: u32, delta: f32 }
-// NEEDS DELTA: RemoveWarExhaustion { faction_id: u32 }
-// NEEDS DELTA: CreateWarExhaustion { faction_id: u32, war_start_tick: u64 }
-// NEEDS DELTA: AdjustMilitaryStrength { faction_id: u32, delta: f32 }
-// NEEDS DELTA: SetMilitaryStrength { faction_id: u32, value: f32 }
-// NEEDS DELTA: AdjustRegionUnrest { region_id: u32, delta: f32 }
-// NEEDS DELTA: AdjustRelationship { faction_id: u32, delta: f32 }
-// NEEDS DELTA: SetDiplomaticStance { faction_id: u32, stance: DiplomaticStance }
-// NEEDS DELTA: EndWar { faction_a: u32, faction_b: u32 }
-// NEEDS DELTA: ChangeRegionOwner { region_id: u32, new_owner: u32 }
-// NEEDS DELTA: AdjustMorale { entity_id: u32, delta: f32 }
 
 /// Cadence: every 3 ticks.
 const WAR_EXHAUSTION_INTERVAL: u64 = 3;

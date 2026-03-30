@@ -13,16 +13,8 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
 use crate::world_sim::state::entity_hash_f32;
 
-// NEEDS STATE: grudges: Vec<Grudge> on WorldState or Entity
 //   Grudge { id, adventurer_id, target: GrudgeTarget, intensity, cause, formed_tick, resolved }
 //   GrudgeTarget { Faction(id), Region(id), Nemesis(id) }
-// NEEDS STATE: nemeses on WorldState (defeated flag)
-// NEEDS STATE: adventurer morale, stress, history_tags on Entity/NpcData
-// NEEDS DELTA: CreateGrudge { entity_id, target, intensity, cause }
-// NEEDS DELTA: UpdateGrudge { grudge_id, intensity_delta }
-// NEEDS DELTA: ResolveGrudge { grudge_id }
-// NEEDS DELTA: AdjustMorale { entity_id, delta }
-// NEEDS DELTA: AdjustStress { entity_id, delta }
 
 /// Combat power bonus multiplier when fighting a grudge target.
 const GRUDGE_COMBAT_BONUS: f32 = 0.20;
@@ -72,29 +64,23 @@ pub fn compute_grudges(state: &WorldState, out: &mut Vec<WorldDelta>) {
         }
         let hp_ratio = entity.hp / entity.max_hp.max(1.0);
         if hp_ratio < 0.2 && entity.grid_id.is_some() {
-            // NEEDS STATE: check if grudge already exists
-            // NEEDS DELTA: CreateGrudge
             let _roll = entity_hash_f32(entity.id, state.tick, 0);
         }
     }
 
     // --- 2. Region stress ---
-    // NEEDS STATE: for each entity with a region grudge, if on that region's grid:
     //   out.push(WorldDelta::AdjustStress { entity_id, delta: GRUDGE_REGION_STRESS })
 
     // --- 3. Grudge decay (every DECAY_INTERVAL ticks) ---
     if state.tick % DECAY_INTERVAL == 0 {
-        // NEEDS STATE: for each unresolved grudge:
         //   out.push(WorldDelta::UpdateGrudge { grudge_id, intensity_delta: -DECAY_AMOUNT })
         //   if intensity <= 0: out.push(WorldDelta::ResolveGrudge { grudge_id })
     }
 
     // --- 4. Bitterness from old unresolved grudges ---
-    // NEEDS STATE: for each grudge older than BITTERNESS_THRESHOLD:
     //   out.push(WorldDelta::AdjustMorale { entity_id, delta: -BITTERNESS_MORALE_PENALTY })
 
     // --- 5. Vendetta fulfillment ---
-    // NEEDS STATE: check if nemesis defeated or faction destroyed
     //   out.push(WorldDelta::ResolveGrudge { grudge_id })
     //   out.push(WorldDelta::AdjustMorale { entity_id, delta: VENGEANCE_MORALE_BONUS })
 }
@@ -106,13 +92,11 @@ pub fn compute_grudges(state: &WorldState, out: &mut Vec<WorldDelta>) {
 /// Combat power bonus for entity against a given faction.
 /// Requires grudge state.
 pub fn grudge_combat_bonus(_entity_id: u32, _enemy_faction_id: u32) -> f32 {
-    // NEEDS STATE: grudges
     0.0
 }
 
 /// Whether entity acts recklessly due to high-intensity grudge.
 pub fn acts_recklessly(_entity_id: u32, _enemy_faction_id: u32) -> bool {
-    // NEEDS STATE: grudges
     false
 }
 

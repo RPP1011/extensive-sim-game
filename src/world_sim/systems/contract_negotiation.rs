@@ -8,8 +8,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/contract_negotiation.rs`
 //!
-//! NEEDS STATE: `negotiation_rounds: Vec<NegotiationState>` on WorldState
-//! NEEDS DELTA: NegotiationStarted, NegotiationAccepted, NegotiationFailed
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

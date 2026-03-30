@@ -49,7 +49,7 @@ pub fn compute_price_discovery_for_settlement(
     };
 
     for entity in entities {
-        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        if !entity.alive { continue; }
         let npc = match &entity.npc { Some(n) => n, None => continue };
 
         // Check if NPC already has a recent report for this settlement.

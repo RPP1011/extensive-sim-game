@@ -7,8 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/victory_conditions.rs`
 //!
-//! NEEDS STATE: `victory_condition`, `victory_progress` on WorldState
-//! NEEDS DELTA: VictoryAchieved, NearVictoryEscalation
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState};

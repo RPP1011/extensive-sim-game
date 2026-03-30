@@ -60,7 +60,7 @@ pub fn compute_legendary_deeds_for_settlement(
     if state.tick % DEED_INTERVAL != 0 || state.tick == 0 { return; }
 
     for entity in entities {
-        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        if !entity.alive { continue; }
         let npc = match &entity.npc { Some(n) => n, None => continue };
 
         for deed in DEEDS {

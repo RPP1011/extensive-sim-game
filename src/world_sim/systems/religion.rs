@@ -6,8 +6,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/religion.rs`
 //!
-//! NEEDS STATE: `temples: Vec<Temple>` on WorldState with `devotion`, `order`, `blessing_active`
-//! NEEDS DELTA: ModifyDevotion
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{ActionTags, Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState, tags};

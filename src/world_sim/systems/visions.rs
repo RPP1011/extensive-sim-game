@@ -7,9 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/visions.rs`
 //!
-//! NEEDS STATE: `visions: Vec<Vision>` on WorldState
-//! NEEDS STATE: `level`, `archetype` criteria on NpcData
-//! NEEDS DELTA: AddVision, FulfillVision
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};

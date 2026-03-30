@@ -6,10 +6,6 @@
 //! stat buff. Maps dependency/withdrawal to DoT and Debuff status effects.
 //!
 //! Original: `crates/headless_campaign/src/systems/addiction.rs`
-//!
-//! NEEDS STATE: `potion_dependency`, `withdrawal_severity`, `ticks_since_last_potion`
-//!              on NpcData
-//! NEEDS DELTA: ModifyDependency, ModifyWithdrawal
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};
@@ -47,9 +43,7 @@ pub fn compute_addiction_for_settlement(
     out: &mut Vec<WorldDelta>,
 ) {
     for entity in entities {
-        if !entity.alive || entity.kind != EntityKind::Npc {
-            continue;
-        }
+        if !entity.alive { continue; }
 
         // Check if entity has an existing debuff (proxy for addiction state)
         let has_debuff = entity.status_effects.iter().any(|s| {

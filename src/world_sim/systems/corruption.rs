@@ -8,8 +8,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/corruption.rs`
 //!
-//! NEEDS STATE: `corruption: CorruptionState` on WorldState (level, overseer)
-//! NEEDS DELTA: ModifyCorruption
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState};

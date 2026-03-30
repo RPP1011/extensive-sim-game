@@ -10,11 +10,7 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{WorldState, EntityKind, WorldTeam};
 
-// NEEDS STATE: difficulty_scaling: DifficultyState on WorldState
-// NEEDS STATE: DifficultyState { guild_power_rating, current_pressure, target_pressure,
 //              consecutive_wins, consecutive_losses, scaling_events_triggered }
-// NEEDS DELTA: UpdateDifficulty { guild_power_rating: f32, current_pressure: f32, target_pressure: f32 }
-// NEEDS DELTA: SpawnEntity { kind: EntityKind, team: WorldTeam, pos: (f32,f32), level: u32 }
 
 /// How often (in ticks) the difficulty system evaluates.
 const SCALING_INTERVAL: u64 = 10;

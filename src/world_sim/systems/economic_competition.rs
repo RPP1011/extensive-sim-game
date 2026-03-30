@@ -5,18 +5,10 @@
 //! Factions compete for trade dominance, resource control, and market share,
 //! creating economic warfare that affects settlement prices and treasuries.
 //!
-//! NEEDS STATE: `factions: Vec<FactionState>` on WorldState
 //!   (id, name, military_strength, territory_size, diplomatic_stance,
 //!    relationship_to_guild, at_war_with)
-//! NEEDS STATE: `market_dominance: Vec<MarketDominance>` on WorldState
 //!   (faction_id, market_share, trade_routes_controlled, resource_monopolies)
-//! NEEDS STATE: `economic_rivalries: Vec<EconomicRivalry>` on WorldState
 //!   (faction_a, faction_b, trade_war, embargo, price_war, started_tick)
-//! NEEDS STATE: `trade_routes: Vec<TradeRoute>` on WorldState
-//! NEEDS STATE: `diplomacy: DiplomacyState` on WorldState (guild_faction_id)
-//! NEEDS DELTA: DeclareTradeWar { aggressor_id: u32, target_id: u32 }
-//! NEEDS DELTA: ImposeEmbargo { imposer_id: u32, target_id: u32 }
-//! NEEDS DELTA: AdjustMarketShare { faction_id: u32, delta: f32 }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

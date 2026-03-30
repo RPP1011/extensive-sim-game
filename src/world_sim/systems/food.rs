@@ -6,7 +6,6 @@
 //! proportional to their member count. Food is drawn from the settlement
 //! stockpile. Starvation is modeled as status-effect damage.
 //!
-//! NEEDS STATE: `party_id: Option<u32>` on NpcData (to group NPCs into parties)
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{ActionTags, Entity, EntityField, EntityKind, WorldState, tags};
@@ -50,9 +49,7 @@ pub fn compute_food(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // Traveling NPCs (not at any settlement) consume carried food.
     // NOTE: this loop is not settlement-scoped and remains in the top-level function.
     for entity in &state.entities {
-        if entity.kind != EntityKind::Npc || !entity.alive {
-            continue;
-        }
+        if !entity.alive { continue; }
         let npc = match &entity.npc {
             Some(n) => n,
             None => continue,
@@ -110,7 +107,7 @@ pub fn compute_food_for_settlement(
     let mut resident_ids = [0u32; 512];
 
     for entity in entities {
-        if entity.kind != EntityKind::Npc || !entity.alive { continue; }
+        if !entity.alive { continue; }
         let npc = match &entity.npc { Some(n) => n, None => continue };
 
         if resident_count < 512 {

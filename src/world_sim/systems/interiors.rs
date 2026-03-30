@@ -87,7 +87,7 @@ pub fn advance_interiors(state: &mut WorldState) {
                 npc.current_room = None;
                 // Clear room occupancy.
                 if let Some(ri) = room_idx {
-                    if let Some(bld_entity) = state.entities.iter_mut().find(|e| e.id == building_id) {
+                    if let Some(bld_entity) = state.entity_mut(building_id) {
                         if let Some(bld) = &mut bld_entity.building {
                             if (ri as usize) < bld.rooms.len() {
                                 bld.rooms[ri as usize].occupant_id = None;
@@ -168,7 +168,7 @@ pub fn advance_interiors(state: &mut WorldState) {
 
         // Set room occupant.
         let entity_id = state.entities[i].id;
-        if let Some(bld_entity) = state.entities.iter_mut().find(|e| e.id == target_building_id) {
+        if let Some(bld_entity) = state.entity_mut(target_building_id) {
             if let Some(bld) = &mut bld_entity.building {
                 if (room_idx as usize) < bld.rooms.len() {
                     bld.rooms[room_idx as usize].occupant_id = Some(entity_id);

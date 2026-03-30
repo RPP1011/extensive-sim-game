@@ -7,9 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/mercenaries.rs`
 //!
-//! NEEDS STATE: `hired_mercenaries: Vec<MercenaryCompany>` on WorldState
-//! NEEDS STATE: `available_mercenaries: Vec<MercenaryCompany>` on WorldState
-//! NEEDS DELTA: HireMercenary, DismissMercenary, MercenaryBetray
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState};

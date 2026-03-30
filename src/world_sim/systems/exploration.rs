@@ -11,16 +11,6 @@
 //! is paid.
 //!
 //! Ported from `crates/headless_campaign/src/systems/exploration.rs`.
-//!
-//! NEEDS STATE: `exploration: ExplorationState` on WorldState
-//! NEEDS STATE: `ExplorationState { explored_tiles: HashSet<(i32,i32)>, total_tiles: u32,
-//!              exploration_percentage: f32, milestones_fired: Vec<u32>,
-//!              landmarks: Vec<Landmark>, landmarks_discovered: Vec<LandmarkDiscovery> }`
-//! NEEDS STATE: `Landmark { name, position, reward_type, discovered }`
-//! NEEDS STATE: `LandmarkDiscovery { name, position, discovery_tick, reward_type, discovered_by }`
-//! NEEDS DELTA: RevealTile { x: i32, y: i32 }
-//! NEEDS DELTA: DiscoverLandmark { landmark_index: usize, discovered_by: u32 }
-//! NEEDS DELTA: UpdateReputation { entity_id, delta }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::fidelity::Fidelity;

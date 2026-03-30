@@ -157,7 +157,7 @@ fn advance_party_quests(state: &mut WorldState, tick: u64) {
                 for belief in &npc.memory.beliefs {
                     if let BeliefType::Grudge(target_id) = &belief.belief_type {
                         // Find the grudge target's position.
-                        if let Some(target) = state.entities.iter().find(|e| e.id == *target_id && e.alive) {
+                        if let Some(target) = state.entity(*target_id).filter(|e| e.alive) {
                             grudge_target_pos = Some(target.pos);
                             break;
                         }

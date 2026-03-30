@@ -7,14 +7,8 @@
 //! economic network. Expressed as UpdateTreasury deltas propagating
 //! losses and TransferGold for debt service.
 //!
-//! NEEDS STATE: `bankruptcy_cascade: BankruptcyCascadeState` on WorldState
 //!   (defaults_this_cycle, credit_freeze_ticks, systemic_risk, faction_debts,
 //!    defaulted_factions)
-//! NEEDS STATE: `loans: Vec<Loan>` on WorldState (interest_rate)
-//! NEEDS STATE: `caravans: Vec<Caravan>` on WorldState (progress)
-//! NEEDS DELTA: FactionDefault { faction_id: u32, total_debt: f32 }
-//! NEEDS DELTA: CreditFreeze { duration_ticks: u32 }
-//! NEEDS DELTA: AdjustSystemicRisk { delta: f32 }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

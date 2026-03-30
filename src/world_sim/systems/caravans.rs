@@ -7,9 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/caravans.rs`
 //!
-//! NEEDS STATE: `trade_routes: Vec<TradeRoute>` on WorldState
-//! NEEDS STATE: `route_id: Option<u32>` on NpcData (to track caravan entity)
-//! NEEDS DELTA: DestroyEntity { entity_id } (for raided caravans)
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EconomicIntent, Entity, EntityKind, WorldState, WorldTeam};

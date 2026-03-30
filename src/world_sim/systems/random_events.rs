@@ -7,9 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/random_events.rs`
 //!
-//! NEEDS STATE: `pending_choices: Vec<ChoiceEvent>` on WorldState (for player decisions)
-//! NEEDS STATE: `campaign_progress: f32` on WorldState (positive/negative event weighting)
-//! NEEDS DELTA: PresentChoice { ... }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, StatusEffect, StatusEffectKind, WorldState, WorldTeam};

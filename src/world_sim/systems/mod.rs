@@ -324,7 +324,7 @@ pub fn compute_global_systems(state: &WorldState, out: &mut Vec<WorldDelta>) {
     run_system!("council", council::compute_council, state, out);
     run_system!("coup_engine", coup_engine::compute_coup_engine, state, out);
     run_system!("defection_cascade", defection_cascade::compute_defection_cascade, state, out);
-    run_system!("propaganda", propaganda::compute_propaganda, state, out);
+    // propaganda: stub (all logic commented out), skipped
     run_system!("alliance_blocs", alliance_blocs::compute_alliance_blocs, state, out);
     run_system!("vassalage", vassalage::compute_vassalage, state, out);
     run_system!("faction_tech", faction_tech::compute_faction_tech, state, out);
@@ -340,10 +340,10 @@ pub fn compute_global_systems(state: &WorldState, out: &mut Vec<WorldDelta>) {
     run_system!("oaths", oaths::compute_oaths, state, out);
     run_system!("intrigue", intrigue::compute_intrigue, state, out);
     run_system!("secrets", secrets::compute_secrets, state, out);
-    run_system!("prisoners", prisoners::compute_prisoners, state, out);
+    // prisoners: stub (all logic commented out), skipped
     run_system!("wanted", wanted::compute_wanted, state, out);
     run_system!("leadership", leadership::compute_leadership, state, out);
-    run_system!("guild_identity", guild_identity::compute_guild_identity, state, out);
+    // guild_identity: stub (computes signals but emits no deltas), skipped
 
     // Economic global
     run_system!("loans", loans::compute_loans, state, out);

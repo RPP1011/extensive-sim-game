@@ -13,13 +13,8 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, WorldState};
 use crate::world_sim::state::entity_hash;
 
-// NEEDS STATE: nicknames: Vec<Nickname> on Entity/NpcData
 //   Nickname { title, earned_tick, source: NicknameSource, reputation_modifier }
 //   NicknameSource: CombatDeed, DiplomaticAchievement, ExplorationFeat, Sacrifice, etc.
-// NEEDS STATE: history_tags: HashMap<String, u32> on Entity/NpcData
-// NEEDS STATE: guild reputation
-// NEEDS DELTA: GrantNickname { entity_id, title, source, reputation_modifier }
-// NEEDS DELTA: AdjustReputation { delta }
 
 /// Cadence gate.
 const NICKNAME_TICK_INTERVAL: u64 = 17;
@@ -72,8 +67,6 @@ pub fn compute_nicknames_for_settlement(
             continue;
         }
 
-        // NEEDS STATE: read entity.npc.history_tags
-        // NEEDS STATE: read entity.npc.nicknames
         //
         // Check each threshold:
         //   kill_count >= 10 && !has_combat_nickname:

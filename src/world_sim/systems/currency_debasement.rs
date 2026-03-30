@@ -11,14 +11,8 @@
 //! to regions with high threat and low population (stressed) see prices
 //! inflated, draining treasury value.
 //!
-//! NEEDS STATE: `currency_integrity: Vec<CurrencyState>` on WorldState
 //!   (faction_id, purity, inflation_rate, debasement_detected)
-//! NEEDS STATE: `factions: Vec<FactionState>` on WorldState
 //!   (at_war_with, military_strength, max_military_strength, relationship_to_guild)
-//! NEEDS STATE: `spies: Vec<Spy>` on WorldState (target_faction_id)
-//! NEEDS STATE: `guild: GuildState` on WorldState (reputation, gold, investment)
-//! NEEDS DELTA: AdjustInflation { region_id: u32, rate: f32 }
-//! NEEDS DELTA: DetectDebasement { faction_id: u32 }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

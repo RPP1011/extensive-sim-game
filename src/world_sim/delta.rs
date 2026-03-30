@@ -322,9 +322,6 @@ pub struct MergedDeltas {
     /// Per-entity mood updates. Last-write-wins (latest value per entity).
     pub entity_mood_sets: HashMap<u32, u8>,
 
-    /// Per-entity XP additions (commutative sum).
-    pub xp_additions: HashMap<u32, u32>,
-
     /// Per-faction, per-field additive f32 deltas. Key = (faction_id, field discriminant).
     pub faction_field_deltas: HashMap<(u32, u8), f32>,
 
@@ -408,7 +405,6 @@ impl MergedDeltas {
         // Campaign system accumulators.
         self.entity_field_deltas.clear();
         self.entity_mood_sets.clear();
-        self.xp_additions.clear();
         self.faction_field_deltas.clear();
         self.region_field_deltas.clear();
         self.settlement_field_deltas.clear();
@@ -527,8 +523,8 @@ fn merge_one(m: &mut MergedDeltas, delta: WorldDelta) {
         WorldDelta::SetEntityMood { entity_id, mood } => {
             m.entity_mood_sets.insert(entity_id, mood);
         }
-        WorldDelta::AddXp { entity_id, amount } => {
-            *m.xp_additions.entry(entity_id).or_default() += amount;
+        WorldDelta::AddXp { .. } => {
+            // Vestigial: npc.xp is no longer used.
         }
         WorldDelta::UpdateFaction { faction_id, field, value } => {
             *m.faction_field_deltas.entry((faction_id, field as u8)).or_default() += value;
@@ -621,7 +617,6 @@ mod tests {
         // Campaign system sums.
         assert_eq!(forward.entity_field_deltas, backward.entity_field_deltas);
         assert_eq!(forward.entity_mood_sets, backward.entity_mood_sets);
-        assert_eq!(forward.xp_additions, backward.xp_additions);
         assert_eq!(forward.faction_field_deltas, backward.faction_field_deltas);
         assert_eq!(forward.region_field_deltas, backward.region_field_deltas);
         assert_eq!(forward.settlement_field_deltas, backward.settlement_field_deltas);

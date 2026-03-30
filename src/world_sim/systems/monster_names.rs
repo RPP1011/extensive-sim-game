@@ -61,10 +61,11 @@ pub fn advance_monster_naming(state: &mut WorldState) {
     for (monster_id, kills) in &monster_kills {
         if (*kills as usize) < KILLS_FOR_NAME { continue; }
 
-        let monster = match state.entities.iter_mut().find(|e| e.id == *monster_id && e.alive) {
-            Some(m) => m,
+        let mi = match state.entity_idx(*monster_id).filter(|&i| state.entities[i].alive) {
+            Some(i) => i,
             None => continue,
         };
+        let monster = &mut state.entities[mi];
 
         // Already named? (level > 30 means already boosted significantly)
         if monster.level > 30 { continue; }

@@ -8,8 +8,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/messengers.rs`
 //!
-//! NEEDS STATE: `pending_orders: Vec<PendingOrder>` on WorldState
-//! NEEDS DELTA: DeliverOrder, MessengerLost
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EconomicIntent, EntityKind, WorldState};

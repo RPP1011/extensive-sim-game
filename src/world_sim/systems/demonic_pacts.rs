@@ -8,8 +8,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/demonic_pacts.rs`
 //!
-//! NEEDS STATE: `demonic_pacts: Vec<DemonicPact>` on WorldState
-//! NEEDS DELTA: ModifyDebt, SpawnNemesis
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};

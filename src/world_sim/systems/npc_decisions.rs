@@ -44,7 +44,7 @@ pub fn compute_npc_decisions_for_settlement(
     };
 
     for entity in entities {
-        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        if !entity.alive { continue; }
         let npc = match &entity.npc { Some(n) => n, None => continue };
 
         // Handle NPCs already on trade runs — check for arrival + sell.
@@ -546,7 +546,7 @@ fn barter_at_settlement(
     let mut count = 0usize;
 
     for entity in entities {
-        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        if !entity.alive { continue; }
         let npc = match &entity.npc { Some(n) => n, None => continue };
         if count >= 64 { break; }
 

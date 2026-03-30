@@ -10,18 +10,6 @@
 //! treasury (UpdateTreasury drain + TransferGold). No gold is minted.
 //!
 //! Ported from `crates/headless_campaign/src/systems/heist_planning.rs`.
-//!
-//! NEEDS STATE: `active_heists: Vec<HeistPlan>` on WorldState
-//! NEEDS STATE: `HeistPlan { heist_id, target_faction, phase, prep_score, crew_ids,
-//!              reward_estimate, risk_level, started_tick }`
-//! NEEDS STATE: `HeistPhase` enum { Planning, Scouting, Infiltration, Execution, Escape }
-//! NEEDS STATE: `next_heist_id: u32` on WorldState
-//! NEEDS STATE: `spies: Vec<SpyState>` on WorldState (for intel threshold)
-//! NEEDS STATE: `black_market: BlackMarketState` on WorldState (for contacts/heat)
-//! NEEDS STATE: `captured_adventurers: Vec<u32>` on WorldState
-//! NEEDS DELTA: UpdateHeistPhase { heist_id, new_phase, prep_score_delta }
-//! NEEDS DELTA: HeistResolved { heist_id, succeeded }
-//! NEEDS DELTA: CaptureEntity { entity_id }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState, WorldTeam};
@@ -63,7 +51,7 @@ pub fn compute_heist_planning(state: &WorldState, out: &mut Vec<WorldDelta>) {
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
         for entity in &state.entities[range] {
-            if entity.kind != EntityKind::Npc || !entity.alive || entity.team != WorldTeam::Friendly {
+            if !entity.alive || entity.team != WorldTeam::Friendly {
                 continue;
             }
 

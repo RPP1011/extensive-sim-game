@@ -8,9 +8,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/timed_events.rs`
 //!
-//! NEEDS STATE: `timed_events: Vec<TimedEvent>` on WorldState
-//! NEEDS DELTA: SpawnTimedEvent { ... }
-//! NEEDS DELTA: ExpireTimedEvent { event_id }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, StatusEffect, StatusEffectKind, WorldState, WorldTeam};

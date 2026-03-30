@@ -7,9 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/divine_favor.rs`
 //!
-//! NEEDS STATE: `divine_favor: Vec<DivineFavorEntry>` on WorldState
-//! NEEDS STATE: `temples: Vec<Temple>` on WorldState
-//! NEEDS DELTA: ModifyFavor
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, WorldState};

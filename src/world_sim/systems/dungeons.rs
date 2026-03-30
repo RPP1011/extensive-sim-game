@@ -10,13 +10,6 @@
 //! is paid.
 //!
 //! Ported from `crates/headless_campaign/src/systems/dungeons.rs`.
-//!
-//! NEEDS STATE: `dungeons: Vec<DungeonState>` on WorldState
-//! NEEDS STATE: `DungeonState { id, name, region_id, depth, monster_strength,
-//!              loot_remaining, explored, connected_to: Vec<u32> }`
-//! NEEDS STATE: `region_id: Option<u32>` on SettlementState (for region matching)
-//! NEEDS DELTA: UpdateDungeon { dungeon_id, monster_strength_delta, loot_delta, explored_delta }
-//! NEEDS DELTA: UpdateThreat { region_id, delta }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::fidelity::Fidelity;

@@ -47,7 +47,7 @@ pub fn compute_culture_for_settlement(
     let mut spiritual = 0.0f32;
 
     for entity in entities {
-        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        if !entity.alive { continue; }
         let npc = match &entity.npc { Some(n) => n, None => continue };
 
         martial += npc.behavior_value(tags::MELEE)
@@ -104,7 +104,7 @@ pub fn compute_culture_for_settlement(
         let xp_bonus = ((scholarly_pct - 30.0) * 0.1) as u32;
         if xp_bonus > 0 {
             for entity in entities {
-                if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+                if !entity.alive { continue; }
                 out.push(WorldDelta::AddXp {
                     entity_id: entity.id,
                     amount: xp_bonus.min(3),
@@ -117,7 +117,7 @@ pub fn compute_culture_for_settlement(
     if spiritual_pct > 30.0 {
         let morale_boost = (spiritual_pct - 30.0) * 0.01;
         for entity in entities {
-            if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+            if !entity.alive { continue; }
             out.push(WorldDelta::UpdateEntityField {
                 entity_id: entity.id,
                 field: EntityField::Morale,

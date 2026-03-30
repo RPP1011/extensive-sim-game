@@ -7,10 +7,6 @@
 //!
 //! Ported from `crates/headless_campaign/src/systems/last_stand.rs`.
 //!
-//! NEEDS STATE: `traits: Vec<String>` on NpcData (for "The Undying" check)
-//! NEEDS STATE: `loyalty: f32` on NpcData (loyalty > 80 triggers last stand)
-//! NEEDS STATE: `history_tags: HashMap<String, u32>` on NpcData (near_death count)
-//! NEEDS STATE: `bonds: Vec<(u32, u32, f32)>` on WorldState (bond strength lookup)
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{ActionTags, EntityField, EntityKind, WorldState, WorldTeam, tags};

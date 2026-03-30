@@ -279,7 +279,7 @@ fn compute_faction_conquests(state: &WorldState, out: &mut Vec<WorldDelta>) {
             // Weakness score: lower population + treasury = easier target.
             let weakness = settlement.population as f32 + settlement.treasury;
 
-            if best_target.is_none() || weakness < best_target.unwrap().1 {
+            if best_target.map_or(true, |(_, best_w)| weakness < best_w) {
                 best_target = Some((settlement.id, weakness));
                 // Look up target faction name for chronicle text.
                 target_faction_name = state.factions.iter()

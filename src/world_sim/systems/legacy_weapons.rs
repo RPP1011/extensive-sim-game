@@ -7,8 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/legacy_weapons.rs`
 //!
-//! NEEDS STATE: `legacy_weapons: Vec<LegacyWeapon>` on WorldState
-//! NEEDS DELTA: CreateLegacyWeapon, LegacyWeaponLevelUp
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};

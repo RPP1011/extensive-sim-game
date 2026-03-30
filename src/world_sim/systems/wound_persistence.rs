@@ -6,8 +6,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/wound_persistence.rs`
 //!
-//! NEEDS STATE: `wounds: Vec<PersistentWound>` on Entity/NpcData
-//! NEEDS STATE: `activity_status` on NpcData (idle/traveling/fighting)
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EconomicIntent, Entity, EntityKind, WorldState};

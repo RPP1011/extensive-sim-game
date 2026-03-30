@@ -7,8 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/charter.rs`
 //!
-//! NEEDS STATE: `charter: CharterState` on WorldState (articles, legitimacy)
-//! NEEDS DELTA: ModifyLegitimacy
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState};

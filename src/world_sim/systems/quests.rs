@@ -120,7 +120,7 @@ fn accept_quests(state: &WorldState, out: &mut Vec<WorldDelta>) {
         let range = state.group_index.settlement_entities(settlement.id);
 
         for entity in &state.entities[range] {
-            if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+            if !entity.alive { continue; }
             let npc = match &entity.npc { Some(n) => n, None => continue };
 
             // Only idle/producing NPCs consider quests.
@@ -231,7 +231,7 @@ fn run_quest_lifecycle_for_entities(
     out: &mut Vec<WorldDelta>,
 ) {
     for entity in entities {
-        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        if !entity.alive { continue; }
         let npc = match &entity.npc { Some(n) => n, None => continue };
 
         let (quest_id, destination) = match &npc.economic_intent {

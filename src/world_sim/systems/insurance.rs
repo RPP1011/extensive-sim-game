@@ -6,12 +6,8 @@
 //! when matching conditions are detected. Premium payments and claim
 //! payouts are expressed as TransferGold and UpdateTreasury deltas.
 //!
-//! NEEDS STATE: `insurance_policies: Vec<InsurancePolicy>` on WorldState
 //!   (id, policy_type, holder_entity_id, premium_per_tick, coverage,
 //!    started_tick, expires_tick, claims_made, max_claims)
-//! NEEDS STATE: `next_insurance_id: u32` on WorldState
-//! NEEDS DELTA: InsuranceClaim { policy_id: u32, payout: f32 }
-//! NEEDS DELTA: InsuranceLapse { policy_id: u32 }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState};

@@ -7,9 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/seasonal_quests.rs`
 //!
-//! NEEDS STATE: `seasonal_quests: Vec<SeasonalQuest>` on WorldState
-//! NEEDS STATE: `season` on WorldState (or derived from tick)
-//! NEEDS DELTA: CreateSeasonalQuest, ExpireSeasonalQuest
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

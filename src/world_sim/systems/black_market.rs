@@ -10,13 +10,8 @@
 //! settlements: NPCs with low gold engage in risky trade that generates
 //! gold but may trigger negative effects.
 //!
-//! NEEDS STATE: `black_market: BlackMarketState` on WorldState
 //!   (heat, last_refresh_tick, total_profit, available_deals)
-//! NEEDS STATE: `guild: GuildState` on WorldState (gold, reputation, supplies)
-//! NEEDS STATE: `factions: Vec<FactionState>` on WorldState
 //!   (diplomatic_stance, relationship_to_guild)
-//! NEEDS DELTA: AdjustHeat { settlement_id: u32, delta: f32 }
-//! NEEDS DELTA: AdjustReputation { entity_id: u32, delta: f32 }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState};

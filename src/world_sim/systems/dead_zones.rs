@@ -7,11 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/dead_zones.rs`
 //!
-//! NEEDS STATE: `extraction_pressure: Vec<f32>` on WorldState (per region)
-//! NEEDS STATE: `dead_zone_level: Vec<f32>` on WorldState (per region)
-//! NEEDS STATE: `neighbors: Vec<Vec<u32>>` on RegionState
-//! NEEDS DELTA: ModifyRegionThreat { region_id, delta }
-//! NEEDS DELTA: ModifyRegionMorale { region_id, delta }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

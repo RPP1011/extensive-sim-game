@@ -7,8 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/contracts.rs`
 //!
-//! NEEDS STATE: `contracts: Vec<Contract>` on WorldState
-//! NEEDS DELTA: OfferContract, CompleteContract, FailContract
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

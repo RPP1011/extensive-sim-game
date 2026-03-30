@@ -68,10 +68,10 @@ pub fn compute_alliance_blocs(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // surplus treasury to the poorest.
     let richest = friendly_factions
         .iter()
-        .max_by(|a, b| a.treasury.partial_cmp(&b.treasury).unwrap());
+        .max_by(|a, b| a.treasury.partial_cmp(&b.treasury).unwrap_or(std::cmp::Ordering::Equal));
     let poorest = friendly_factions
         .iter()
-        .min_by(|a, b| a.treasury.partial_cmp(&b.treasury).unwrap());
+        .min_by(|a, b| a.treasury.partial_cmp(&b.treasury).unwrap_or(std::cmp::Ordering::Equal));
 
     if let (Some(rich), Some(poor)) = (richest, poorest) {
         if rich.id != poor.id {

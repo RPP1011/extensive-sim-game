@@ -117,9 +117,9 @@ pub fn grow_cities(state: &mut WorldState) {
 
     let mut new_chronicles: Vec<ChronicleEntry> = Vec::new();
     let mut all_new_entities: Vec<Entity> = Vec::new();
-    let base_max_id = state.entities.iter().map(|e| e.id).max().unwrap_or(0);
+    state.sync_next_id();
 
-    for (settlement_id, grid_idx, population, settlement_name, noise_seed, authority, specialty, settlement_pos) in &settlement_info {
+    for (settlement_id, grid_idx, population, settlement_name, noise_seed, _authority, specialty, settlement_pos) in &settlement_info {
         let grid_idx = *grid_idx;
         if grid_idx >= state.city_grids.len() { continue; }
 
@@ -158,7 +158,10 @@ pub fn grow_cities(state: &mut WorldState) {
                 (ZoneType::Noble,       demand.noble),
                 (ZoneType::Arcane,      demand.arcane),
             ];
-            let best = zones.iter().max_by(|a, b| a.1.partial_cmp(&b.1).unwrap()).unwrap();
+            let best = match zones.iter().max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)) {
+                Some(b) => b,
+                None => continue,
+            };
             let (best_zone, best_score) = (best.0, best.1);
             if best_zone != ZoneType::None {
                 scored.push((col, row, best_zone, best_score));
@@ -183,7 +186,7 @@ pub fn grow_cities(state: &mut WorldState) {
             }
 
             // Spawn a real building entity.
-            let new_id = base_max_id + 1 + all_new_entities.len() as u32;
+            let new_id = state.next_entity_id();
             let world_pos = state.city_grids[grid_idx].grid_to_world(col, row, *settlement_pos);
             let building_type = zone_to_building_type(zone, specialty);
 
@@ -1079,186 +1082,10 @@ fn zone_display_name(zone: ZoneType) -> &'static str {
 /// nearby frontier cells are re-scored and 1-2 additional buildings are placed
 /// if they score above threshold — the "cascade" that pulls an entire quarter
 /// into existence around a legendary figure.
-fn apply_npc_influence(state: &mut WorldState) {
+fn apply_npc_influence(_state: &mut WorldState) {
     // NOTE: Cascade building disabled until zone distribution is balanced.
     // The cascade was creating hundreds of Libraries from research-heavy NPCs.
-    return;
-    // Build a mapping: settlement_id -> grid_idx + name + specialty + pos.
-    let settlement_grid_map: Vec<(u32, usize, String, SettlementSpecialty, (f32, f32))> = state.settlements.iter()
-        .filter_map(|s| {
-            let grid_idx = s.city_grid_idx?;
-            if grid_idx >= state.city_grids.len() { return None; }
-            Some((s.id, grid_idx, s.name.clone(), s.specialty, s.pos))
-        })
-        .collect();
-
-    // Scan for legendary NPCs. Extract info to avoid holding a borrow on state.
-    let legendary_npcs: Vec<LegendaryNpc> = state.entities.iter()
-        .filter_map(|entity| {
-            if !entity.alive || entity.kind != EntityKind::Npc { return None; }
-            if entity.level < LEGENDARY_NPC_LEVEL { return None; }
-            let npc = entity.npc.as_ref()?;
-            if npc.classes.len() < LEGENDARY_NPC_MIN_CLASSES { return None; }
-            let settlement_id = npc.home_settlement_id?;
-            Some(LegendaryNpc {
-                entity_id: entity.id,
-                name: npc.name.clone(),
-                level: entity.level,
-                settlement_id,
-                dominant_zone: dominant_zone_for_npc(npc),
-            })
-        })
-        .collect();
-
-    if legendary_npcs.is_empty() { return; }
-
-    let tick = state.tick;
-    let mut new_chronicles: Vec<ChronicleEntry> = Vec::new();
-    let mut cascade_entities: Vec<Entity> = Vec::new();
-    let cascade_base_max_id = state.entities.iter().map(|e| e.id).max().unwrap_or(0);
-
-    for legend in &legendary_npcs {
-        // Find the grid index for this NPC's settlement.
-        let (grid_idx, settlement_name, settlement_specialty, settlement_pos) = match settlement_grid_map.iter()
-            .find(|(sid, _, _, _, _)| *sid == legend.settlement_id)
-        {
-            Some((_, gidx, name, spec, pos)) => (*gidx, name.clone(), *spec, *pos),
-            None => continue,
-        };
-
-        // Propagate influence with strength = level * 0.1 (vs normal 1.0).
-        let strength = legend.level as f32 * 0.1;
-        let zone = legend.dominant_zone;
-
-        // Pick an influence origin: the grid center (legendary figures claim the heart).
-        let origin_col = state.city_grids[grid_idx].center.0;
-        let origin_row = state.city_grids[grid_idx].center.1;
-
-        let grid_ref = state.city_grids[grid_idx].clone();
-        state.influence_maps[grid_idx].propagate_building(
-            origin_col, origin_row, zone, strength, &grid_ref,
-        );
-
-        // Re-score nearby frontier cells and place 1-2 cascade buildings.
-        // Collect frontier within a 20-cell manhattan radius of center.
-        let frontier_snapshot: Vec<(usize, usize)> = state.city_grids[grid_idx].frontier.iter()
-            .filter(|&&(col, row)| {
-                let dx = (col as i32 - origin_col as i32).abs();
-                let dy = (row as i32 - origin_row as i32).abs();
-                dx + dy <= 20
-            })
-            .copied()
-            .collect();
-
-        if frontier_snapshot.is_empty() { continue; }
-
-        let noise_seed = entity_hash(legend.entity_id, tick, 0xB14D) as u64;
-
-        // Score frontier cells for the NPC's dominant zone type.
-        let mut scored: Vec<(usize, usize, f32)> = frontier_snapshot.iter()
-            .map(|&(col, row)| {
-                let score = suitability_score(
-                    &state.city_grids[grid_idx],
-                    &state.influence_maps[grid_idx],
-                    col, row, zone, noise_seed,
-                );
-                (col, row, score)
-            })
-            .filter(|&(_, _, score)| score > CASCADE_SCORE_THRESHOLD)
-            .collect();
-
-        scored.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Place 1-2 cascade buildings.
-        let cascade_budget = scored.len().min(2);
-        let mut placed_any = false;
-
-        for i in 0..cascade_budget {
-            let (col, row, _score) = scored[i];
-
-            {
-                let cell = state.city_grids[grid_idx].cell_mut(col, row);
-                cell.state = CellState::Building;
-                cell.zone = zone;
-                cell.density = 1;
-                cell.age = 0;
-            }
-
-            // Spawn a real building entity for cascade placement.
-            let new_id = cascade_base_max_id + 1 + cascade_entities.len() as u32;
-            let world_pos = state.city_grids[grid_idx].grid_to_world(col, row, settlement_pos);
-            let building_type = zone_to_building_type(zone, &settlement_specialty);
-
-            let mut entity = Entity::new_building(new_id, world_pos);
-            entity.building = Some(BuildingData {
-                building_type,
-                settlement_id: Some(legend.settlement_id),
-                grid_col: col as u16,
-                grid_row: row as u16,
-                tier: 0,
-                room_seed: entity_hash(new_id, tick, 0x800E) as u64,
-                rooms: building_type.default_rooms(),
-                residential_capacity: building_type.residential_capacity(),
-                work_capacity: building_type.work_capacity(),
-                resident_ids: Vec::new(),
-                worker_ids: Vec::new(),
-                construction_progress: 0.0, // must be constructed by NPC builders
-                built_tick: tick,
-                builder_id: None,
-                temporary: false,
-                ttl_ticks: None,
-                name: generate_building_name(building_type, new_id),
-                storage: [0.0; NUM_COMMODITIES],
-                storage_capacity: building_type.storage_capacity(),
-                owner_id: None,
-                builder_modifiers: Vec::new(),
-                owner_modifiers: Vec::new(),
-            });
-
-            state.city_grids[grid_idx].cell_mut(col, row).building_id = Some(new_id);
-            cascade_entities.push(entity);
-
-            state.city_grids[grid_idx].update_frontier_around(col, row);
-
-            let grid_ref = state.city_grids[grid_idx].clone();
-            state.influence_maps[grid_idx].propagate_building(
-                col, row, zone, 1.0, &grid_ref,
-            );
-            placed_any = true;
-        }
-
-        // Chronicle entry for cascade.
-        if placed_any {
-            let npc_name = if legend.name.is_empty() {
-                format!("Entity #{}", legend.entity_id)
-            } else {
-                legend.name.clone()
-            };
-            new_chronicles.push(ChronicleEntry {
-                tick,
-                category: ChronicleCategory::Economy,
-                text: format!(
-                    "{}'s presence transforms the {} quarter of {}",
-                    npc_name,
-                    zone_display_name(zone),
-                    settlement_name,
-                ),
-                entity_ids: vec![legend.entity_id],
-            });
-        }
-    }
-
-    for entry in new_chronicles {
-        state.chronicle.push(entry);
-    }
-
-    // Push cascade-spawned building entities into world state.
-    if !cascade_entities.is_empty() {
-        for e in cascade_entities {
-            state.entities.push(e);
-        }
-        state.rebuild_entity_cache();
-    }
+    // See git history (commit before this cleanup) for the full cascade logic.
 }
 
 // ---------------------------------------------------------------------------

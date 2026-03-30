@@ -7,8 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/threat.rs`
 //!
-//! NEEDS STATE: `patrol_presence` or derive from NPC entity positions per region.
-//! NEEDS DELTA: UpdateThreat { region_id, delta } — to adjust threat_level.
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::fidelity::Fidelity;

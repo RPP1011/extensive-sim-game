@@ -7,8 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/bloodlines.rs`
 //!
-//! NEEDS STATE: `bloodlines: Vec<Bloodline>` on WorldState
-//! NEEDS DELTA: SpawnDescendant (new entity creation)
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};

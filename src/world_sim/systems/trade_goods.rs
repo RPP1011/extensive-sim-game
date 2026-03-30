@@ -7,8 +7,6 @@
 //! between settlements when profitable. All mutations expressed as
 //! TransferGoods, UpdateStockpile, and UpdatePrices deltas.
 //!
-//! NEEDS STATE: `production_rates: [f32; NUM_COMMODITIES]` on SettlementState
-//! NEEDS STATE: `demand: [f32; NUM_COMMODITIES]` on SettlementState
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{ActionTags, WorldState, tags};

@@ -5,13 +5,8 @@
 //! Secret trade routes between settlements for high profit but high risk.
 //! Routes can be busted, causing gold penalties and reputation loss.
 //!
-//! NEEDS STATE: `smuggling_routes: Vec<SmugglingRoute>` on WorldState
 //!   (id, start_settlement_id, end_settlement_id, route_type, profit_per_trip,
 //!    risk, active, trips_completed, busted_count, suspended_until)
-//! NEEDS STATE: `black_market_heat: f32` on WorldState or EconomyState
-//! NEEDS STATE: `total_intel_gathered: f32` on WorldState
-//! NEEDS DELTA: SmugglingBust { route_id: u32, penalty: f32 }
-//! NEEDS DELTA: AdjustReputation { entity_id: u32, delta: f32 }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

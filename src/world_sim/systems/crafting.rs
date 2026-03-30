@@ -7,12 +7,7 @@
 //! the system auto-crafts by consuming commodities and producing
 //! finished goods (represented as commodity transforms).
 //!
-//! NEEDS STATE: `resource_nodes: Vec<ResourceNode>` on WorldState
 //!   (id, region_id, resource_type, amount, regen_rate, max_amount)
-//! NEEDS STATE: `gathering_boosts: HashMap<u32, u32>` on WorldState
-//! NEEDS STATE: `guild: GuildState` on WorldState (inventory)
-//! NEEDS STATE: `adventurers: Vec<Adventurer>` on WorldState (equipment)
-//! NEEDS DELTA: CraftItem { settlement_id: u32, recipe_name: String, quality: f32 }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{ActionTags, WorldState, tags};

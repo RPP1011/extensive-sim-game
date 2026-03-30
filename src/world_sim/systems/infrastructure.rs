@@ -11,9 +11,7 @@
 //! approximates infrastructure effects through settlement-level bonuses
 //! based on treasury and population (proxy for infrastructure investment).
 //!
-//! NEEDS STATE: `infrastructure: Vec<InfrastructureEntry>` on WorldState
 //!   where InfrastructureEntry { id, infra_type, settlement_a_id, settlement_b_id, level, maintenance_cost }
-//! NEEDS STATE: `InfraType` enum { Road, Bridge, Waypoint, TradePost, Watchtower }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

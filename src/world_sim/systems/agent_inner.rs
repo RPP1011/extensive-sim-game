@@ -19,20 +19,20 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
 
     let tick = state.tick;
 
-    // Collect settlement-level data for needs drift and catastrophe detection.
-    let settlement_threats: Vec<(u32, f32)> = state.settlements.iter()
-        .map(|s| (s.id, s.threat_level))
-        .collect();
-
-    // Count alive NPCs per settlement for catastrophe detection.
-    let mut pop_by_settlement: Vec<(u32, u32)> = state.settlements.iter()
-        .map(|s| (s.id, 0u32))
-        .collect();
+    // Build flat arrays indexed by settlement ID for O(1) lookup.
+    let max_sid = state.settlements.iter().map(|s| s.id).max().unwrap_or(0) as usize + 1;
+    let mut threat_by_sid = vec![0.0f32; max_sid];
+    let mut pop_by_sid = vec![0u32; max_sid];
+    for s in &state.settlements {
+        if (s.id as usize) < max_sid {
+            threat_by_sid[s.id as usize] = s.threat_level;
+        }
+    }
     for entity in &state.entities {
         if !entity.alive || entity.kind != EntityKind::Npc { continue; }
         if let Some(sid) = entity.npc.as_ref().and_then(|n| n.home_settlement_id) {
-            if let Some(entry) = pop_by_settlement.iter_mut().find(|(id, _)| *id == sid) {
-                entry.1 += 1;
+            if (sid as usize) < max_sid {
+                pop_by_sid[sid as usize] += 1;
             }
         }
     }
@@ -42,7 +42,7 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
         let npc = match &mut entity.npc { Some(n) => n, None => continue };
 
         // --- Needs Drift ---
-        drift_needs(npc, entity.hp, entity.max_hp, &settlement_threats, tick);
+        drift_needs(npc, entity.hp, entity.max_hp, &threat_by_sid, tick);
 
         // --- Emotion Decay ---
         npc.emotions.decay(0.02); // ~5% decay per interval
@@ -68,14 +68,8 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
 
         // --- Catastrophe tags from settlement state ---
         if let Some(sid) = npc.home_settlement_id {
-            let threat = settlement_threats.iter()
-                .find(|(id, _)| *id == sid)
-                .map(|(_, t)| *t)
-                .unwrap_or(0.0);
-            let pop = pop_by_settlement.iter()
-                .find(|(id, _)| *id == sid)
-                .map(|(_, p)| *p)
-                .unwrap_or(0);
+            let threat = if (sid as usize) < threat_by_sid.len() { threat_by_sid[sid as usize] } else { 0.0 };
+            let pop = if (sid as usize) < pop_by_sid.len() { pop_by_sid[sid as usize] } else { 0 };
 
             // Under siege: high threat for extended period.
             if threat > 0.5 {
@@ -478,7 +472,7 @@ pub fn record_npc_event(
 // ---------------------------------------------------------------------------
 
 /// Drift needs based on world state.
-fn drift_needs(npc: &mut NpcData, hp: f32, max_hp: f32, settlement_threats: &[(u32, f32)], tick: u64) {
+fn drift_needs(npc: &mut NpcData, hp: f32, max_hp: f32, threat_by_sid: &[f32], tick: u64) {
     // Hunger decreases steadily (0=starving, 100=full).
     // Only replenished by physically eating (handled in advance_eating).
     let at_settlement = npc.home_settlement_id.is_some();
@@ -497,8 +491,7 @@ fn drift_needs(npc: &mut NpcData, hp: f32, max_hp: f32, settlement_threats: &[(u
 
     // Safety based on settlement threat level.
     let threat = npc.home_settlement_id
-        .and_then(|sid| settlement_threats.iter().find(|(id, _)| *id == sid))
-        .map(|(_, t)| *t)
+        .map(|sid| if (sid as usize) < threat_by_sid.len() { threat_by_sid[sid as usize] } else { 0.0 })
         .unwrap_or(0.0);
     if threat > 0.3 {
         npc.needs.safety = (npc.needs.safety - threat * 5.0).max(0.0);

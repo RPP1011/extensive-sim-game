@@ -12,10 +12,6 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityField, EntityKind, WorldState};
 use crate::world_sim::state::entity_hash_f32;
 
-// NEEDS STATE: mood_state: MoodState on Entity or NpcData (mood, started_at, expires_at)
-// NEEDS STATE: stress: f32 on Entity or NpcData
-// NEEDS STATE: party_id: Option<u32> on Entity or NpcData
-// NEEDS DELTA: SetMood { entity_id: u32, mood: Mood, started_at: u64, expires_at: u64 }
 
 /// Mood tick cadence (every 7 ticks).
 const MOOD_TICK_INTERVAL: u64 = 7;
@@ -84,7 +80,6 @@ pub fn compute_moods(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     // --- Phase 1: Natural decay — moods expire after their duration ---
-    // NEEDS STATE: for each alive NPC entity with a non-Neutral mood:
     //   if tick >= entity.mood_state.expires_at:
     //     out.push(WorldDelta::SetMood { entity_id, mood: Mood::Neutral, ... });
 
@@ -92,9 +87,7 @@ pub fn compute_moods(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // Until mood_state exists on NpcData, derive mood proxy from entity state
     // and emit morale deltas accordingly.
     for entity in &state.entities {
-        if !entity.alive || entity.kind != EntityKind::Npc {
-            continue;
-        }
+        if !entity.alive { continue; }
         let hp_ratio = if entity.max_hp > 0.0 { entity.hp / entity.max_hp } else { 1.0 };
 
         // Proxy: entity on a high-fidelity grid with low HP → grieving/fearful
@@ -148,7 +141,6 @@ pub fn compute_moods_for_settlement(
     // Contagion — moods spread within shared grids.
     // For each grid, check if any NPC has Excited (20% spread) or Fearful (15% spread).
     // Neutral NPCs on the same grid may catch the mood.
-    // NEEDS STATE: mood_state on NpcData, rng on WorldState (read-only — use tick+id as seed)
     // Note: contagion probability must use deterministic hashing (not mutable rng)
     // since compute phase is read-only. Use (tick ^ entity_id) based deterministic roll.
 
@@ -158,8 +150,6 @@ pub fn compute_moods_for_settlement(
         .map(|e| (e.id, true)) // second field would be mood == Neutral check
         .collect();
 
-    // NEEDS STATE: check if any NPC on grid has Excited/Fearful mood
-    // NEEDS DELTA: SetMood for contagion targets
     // Contagion uses deterministic roll: hash(tick, entity_id) < threshold
 }
 

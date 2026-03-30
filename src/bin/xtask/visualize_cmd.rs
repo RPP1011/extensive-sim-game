@@ -12,8 +12,8 @@ use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
-    style::{self, Color, Print, SetForegroundColor, SetBackgroundColor, ResetColor},
-    terminal::{self, ClearType},
+    style::{Color, Print, SetForegroundColor, SetBackgroundColor, ResetColor},
+    terminal,
 };
 
 use bevy_game::world_sim::trace::WorldSimTrace;

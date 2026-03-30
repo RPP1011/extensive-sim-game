@@ -13,16 +13,9 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, WorldState};
 use crate::world_sim::state::entity_hash_f32;
 
-// NEEDS STATE: journal: Vec<JournalEntry> on Entity/NpcData
 //   JournalEntry { tick, entry_type: JournalType, text, sentiment }
 //   JournalType: BattleMemory, Triumph, QuestReflection, Regret, GriefEntry,
 //                BondMoment, Ambition, Discovery
-// NEEDS STATE: adventurer_bonds (for grief entries)
-// NEEDS STATE: adventurer morale, stress, loyalty
-// NEEDS DELTA: WriteJournalEntry { entity_id, entry_type, text, sentiment }
-// NEEDS DELTA: AdjustMorale { entity_id, delta }
-// NEEDS DELTA: AdjustLoyalty { entity_id, delta }
-// NEEDS DELTA: AdjustStress { entity_id, delta }
 
 /// Cadence gate.
 const JOURNAL_TICK_INTERVAL: u64 = 17;
@@ -73,28 +66,22 @@ pub fn compute_journals_for_settlement(
         if let Some(grid_id) = entity.grid_id {
             if let Some(grid) = state.grid(grid_id) {
                 if grid.fidelity == crate::world_sim::fidelity::Fidelity::High {
-                    // NEEDS DELTA: WriteJournalEntry
                 }
             }
         }
 
         // --- Grief entries for dead allies ---
-        // NEEDS STATE: adventurer_bonds
 
         // --- Bond moments ---
-        // NEEDS STATE: adventurer_bonds
 
         // --- Ambition entries ---
-        // NEEDS STATE: journal history
 
         // --- Discovery entries (5% random chance) ---
         let roll = entity_hash_f32(entity.id, state.tick, 0);
         if roll < 0.05 {
-            // NEEDS DELTA: WriteJournalEntry
         }
 
         // --- Personality drift from journal sentiment ---
-        // NEEDS STATE: journal entries
     }
 }
 

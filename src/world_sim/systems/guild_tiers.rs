@@ -1,7 +1,5 @@
 #![allow(unused)]
 //! Guild tier progression system.
-//! NEEDS STATE: guild_tier, guild_reputation on EconomyState
-//! NEEDS DELTA: AdvanceGuildTier
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

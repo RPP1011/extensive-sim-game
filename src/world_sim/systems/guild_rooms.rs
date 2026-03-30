@@ -1,7 +1,5 @@
 #![allow(unused)]
 //! Guild room building system.
-//! NEEDS STATE: guild_rooms on SettlementState
-//! NEEDS DELTA: UpgradeRoom
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

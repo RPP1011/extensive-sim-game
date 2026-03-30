@@ -11,16 +11,9 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, WorldState};
 
-// NEEDS STATE: trophy_hall: Vec<Trophy> on WorldState
 //   Trophy { id, name, trophy_type, source_description, earned_tick, bonus: TrophyBonus }
 //   TrophyType: NemesisSkull, AncientArtifact, MonsterTrophy, CrisisRelic, FactionBanner, QuestToken
 //   TrophyBonus: RecruitmentBoost, MoraleBoost, ReputationBoost, CombatBoost, GoldBoost, XpBoost
-// NEEDS STATE: completed quests, factions, nemeses for trigger detection
-// NEEDS STATE: guild gold, reputation
-// NEEDS DELTA: EarnTrophy { trophy_type, name, bonus }
-// NEEDS DELTA: ReplaceTrophy { old_id, new_trophy }
-// NEEDS DELTA: AdjustReputation { delta }
-// NEEDS DELTA: AdjustMorale { entity_id, delta }
 
 /// Cadence gate.
 const TROPHY_TICK_INTERVAL: u64 = 17;
@@ -38,7 +31,6 @@ pub fn compute_trophies(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     // --- Check for trophy-earning triggers ---
-    // NEEDS STATE: completed_quests, factions, nemeses
 
     // NemesisSkull: high-threat combat quest victory (threat >= 80)
     //   out.push(WorldDelta::EarnTrophy { NemesisSkull, CombatBoost(0.05) })
@@ -61,7 +53,6 @@ pub fn compute_trophies(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // If at max capacity, replace weakest trophy (lowest bonus magnitude)
 
     // --- Apply passive bonuses ---
-    // NEEDS STATE: iterate trophy_hall, sum bonuses by type
 
     // Reputation boost: out.push(WorldDelta::AdjustReputation { delta: reputation * total_rep_boost })
     // Gold boost: flat gold per application
@@ -87,7 +78,6 @@ pub fn compute_trophies_for_settlement(
         return;
     }
 
-    // NEEDS STATE: total gold boost from trophies
     // out.push(WorldDelta::UpdateTreasury {
     //     location_id: settlement_id,
     //     delta: 10.0 * total_gold_boost,

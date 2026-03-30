@@ -7,9 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/choices.rs`
 //!
-//! NEEDS STATE: `pending_choices: Vec<ChoiceEvent>` on WorldState
-//! NEEDS STATE: `choice_templates` registry
-//! NEEDS DELTA: PresentChoice, ResolveChoice
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

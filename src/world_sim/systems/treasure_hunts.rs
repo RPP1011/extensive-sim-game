@@ -9,17 +9,6 @@
 //! treasury. If the settlement cannot afford the reward, no gold is paid.
 //!
 //! Ported from `crates/headless_campaign/src/systems/treasure_hunts.rs`.
-//!
-//! NEEDS STATE: `treasure_maps: Vec<TreasureMap>` on WorldState
-//! NEEDS STATE: `TreasureMap { id, name, steps, current_step, found_tick,
-//!              assigned_party_id, total_reward, is_combat_themed }`
-//! NEEDS STATE: `TreasureStep { region_id, clue, completed, reward }`
-//! NEEDS STATE: `next_treasure_map_id: u32` on WorldState
-//! NEEDS STATE: `guild_inventory: Vec<InventoryItem>` on WorldState
-//! NEEDS DELTA: CompleteTreasureStep { map_id, step_index, reward }
-//! NEEDS DELTA: CompleteTreasureHunt { map_id, total_reward, artifact_name }
-//! NEEDS DELTA: SpawnItem { recipient_id, item_name, slot, quality, stat_bonuses }
-//! NEEDS DELTA: UpdateReputation { entity_id, delta }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState, WorldTeam};
@@ -54,7 +43,7 @@ pub fn compute_treasure_hunts(state: &WorldState, out: &mut Vec<WorldDelta>) {
     for settlement in &state.settlements {
         let range = state.group_index.settlement_entities(settlement.id);
         for entity in &state.entities[range] {
-            if entity.kind != EntityKind::Npc || !entity.alive || entity.team != WorldTeam::Friendly {
+            if !entity.alive || entity.team != WorldTeam::Friendly {
                 continue;
             }
 

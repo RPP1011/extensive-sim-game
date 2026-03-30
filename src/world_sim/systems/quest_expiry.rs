@@ -8,9 +8,6 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
 
-// NEEDS STATE: request_board: Vec<QuestRequest> on WorldState
-// NEEDS STATE: QuestRequest { id: u32, deadline_tick: u64, ... }
-// NEEDS DELTA: ExpireQuestRequest { quest_id: u32 }
 
 pub fn compute_quest_expiry(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // The original system checks each quest request on the board against the

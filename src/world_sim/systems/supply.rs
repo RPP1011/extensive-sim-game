@@ -6,8 +6,6 @@
 //! (commodity 0) from their carried goods proportional to distance.
 //! Expressed as ConsumeCommodity and Damage deltas.
 //!
-//! NEEDS STATE: `party_id: Option<u32>` on NpcData (to group traveling NPCs)
-//! NEEDS DELTA: ApplyFatigueAndMorale { entity_id, fatigue_delta, morale_delta }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EconomicIntent, Entity, EntityKind, WorldState};

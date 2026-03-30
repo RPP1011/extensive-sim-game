@@ -7,10 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/signal_towers.rs`
 //!
-//! NEEDS STATE: `signal_towers: Vec<SignalTower>` on WorldState (or use Building entities)
-//! NEEDS STATE: `tower_data: Option<TowerData>` on Entity (for Building entities)
-//! NEEDS DELTA: RepairBuilding { entity_id }
-//! NEEDS DELTA: CompromiseBuilding { entity_id, by_faction }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, PriceReport, WorldState, WorldTeam};

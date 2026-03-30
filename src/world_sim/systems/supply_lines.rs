@@ -7,11 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/supply_lines.rs`
 //!
-//! NEEDS STATE: `supply_lines: Vec<SupplyLine>` on WorldState
-//! NEEDS STATE: `patrol_route: Option<(u32, u32)>` on NpcData (region pair)
-//! NEEDS STATE: `faction_id: Option<u32>` on NpcData
-//! NEEDS DELTA: InterdictSupplyLine { supply_line_id, faction_id }
-//! NEEDS DELTA: RestoreSupplyLine { supply_line_id }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EconomicIntent, EntityKind, WorldState, WorldTeam};

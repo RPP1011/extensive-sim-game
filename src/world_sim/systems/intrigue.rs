@@ -12,15 +12,8 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
 use crate::world_sim::state::entity_hash_f32;
 
-// NEEDS STATE: intrigues: Vec<PoliticalIntrigue> on WorldState
 //   PoliticalIntrigue { id, faction_id, intrigue_type, participants, guild_involvement, resolution_tick, resolved }
 //   IntrigueType: SuccessionDispute, NobleRivalry, CourtScandal, PowerGrab, SecretAlliance, Assassination
-// NEEDS STATE: factions with diplomatic_stance, military_strength, at_war_with, relationship_to_guild
-// NEEDS STATE: guild gold, reputation
-// NEEDS DELTA: CreateIntrigue { faction_id, intrigue_type, resolution_tick }
-// NEEDS DELTA: ResolveIntrigue { intrigue_id }
-// NEEDS DELTA: UpdateRelation { faction_id, delta }
-// NEEDS DELTA: AdjustReputation { delta }
 
 /// Cadence gate.
 const INTRIGUE_TICK_INTERVAL: u64 = 17;
@@ -46,7 +39,6 @@ pub fn compute_intrigue(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     // --- Resolve matured intrigues ---
-    // NEEDS STATE: for each unresolved intrigue where tick >= resolution_tick:
     //   Determine outcome based on guild_involvement level
     //   Guild-backed (involvement > 20): +20 faction relation, +50 gold
     //     out.push(WorldDelta::TransferGold { from_id: faction, to_id: guild, amount: 50.0 })
@@ -56,7 +48,6 @@ pub fn compute_intrigue(state: &WorldState, out: &mut Vec<WorldDelta>) {
     //   out.push(WorldDelta::ResolveIntrigue { intrigue_id })
 
     // --- Generate new intrigues ---
-    // NEEDS STATE: for each faction with instability (at war, low strength, hostile stance):
     //   Skip if already has active intrigue, or at max capacity
     //   Deterministic roll < 0.05:
     //   Pick intrigue type weighted by faction situation
@@ -67,7 +58,6 @@ pub fn compute_intrigue(state: &WorldState, out: &mut Vec<WorldDelta>) {
     for region in &state.regions {
         if region.threat_level > 50.0 {
             let _roll = entity_hash_f32(region.id, state.tick, 0);
-            // NEEDS DELTA: CreateIntrigue
         }
     }
 }

@@ -117,7 +117,7 @@ pub fn advance_item_durability(state: &mut WorldState) {
     let entity_count = state.entities.len();
     for i in 0..entity_count {
         let entity = &state.entities[i];
-        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        if !entity.alive { continue; }
         let npc = match &entity.npc { Some(n) => n, None => continue };
 
         // Check settlement treasury.
@@ -155,7 +155,7 @@ pub fn advance_item_durability(state: &mut WorldState) {
 
     // Apply durability loss.
     for (item_id, loss) in &degradations {
-        if let Some(item_entity) = state.entities.iter_mut().find(|e| e.id == *item_id) {
+        if let Some(item_entity) = state.entity_mut(*item_id) {
             if let Some(item) = &mut item_entity.item {
                 item.durability = (item.durability - loss).max(0.0);
             }
@@ -182,8 +182,7 @@ pub fn advance_item_durability(state: &mut WorldState) {
         //
         // Actually, stats are set once on equip and don't track durability changes.
         // We need to recalculate what bonuses the item provided and remove them.
-        let item_bonuses = state.entities.iter()
-            .find(|e| e.id == *item_id)
+        let item_bonuses = state.entity(*item_id)
             .and_then(|e| e.item.as_ref())
             .map(|i| {
                 // Calculate original bonuses (at full durability).
@@ -196,7 +195,7 @@ pub fn advance_item_durability(state: &mut WorldState) {
             });
 
         if let Some((attack, armor, hp, speed)) = item_bonuses {
-            if let Some(owner) = state.entities.iter_mut().find(|e| e.id == *owner_id) {
+            if let Some(owner) = state.entity_mut(*owner_id) {
                 owner.attack_damage = (owner.attack_damage - attack).max(0.0);
                 owner.armor = (owner.armor - armor).max(0.0);
                 owner.max_hp = (owner.max_hp - hp).max(1.0);
@@ -209,7 +208,7 @@ pub fn advance_item_durability(state: &mut WorldState) {
         }
 
         // Clear item owner.
-        if let Some(item_entity) = state.entities.iter_mut().find(|e| e.id == *item_id) {
+        if let Some(item_entity) = state.entity_mut(*item_id) {
             if let Some(item) = &mut item_entity.item {
                 item.owner_id = None;
             }

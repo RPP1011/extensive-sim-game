@@ -7,12 +7,7 @@
 //! market price. New contracts are generated based on current commodity
 //! prices with a random premium or discount.
 //!
-//! NEEDS STATE: `futures_contracts: Vec<FuturesContract>` on WorldState
 //!   (contract_id, commodity: usize, quantity, strike_price, settlement_tick, is_buy)
-//! NEEDS STATE: `next_futures_contract_id: u32` on WorldState or EconomyState
-//! NEEDS STATE: `futures_profit_total: f32` on EconomyState
-//! NEEDS DELTA: SettleFuturesContract { contract_id: u32, entity_id: u32, profit: f32 }
-//! NEEDS DELTA: CreateFuturesContract { contract: FuturesContractData }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

@@ -11,16 +11,7 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
 
-// NEEDS STATE: guild_reputation: f32 on WorldState (or on a dedicated GuildState)
-// NEEDS STATE: reputation_history: ReputationHistory on WorldState
 //   where ReputationHistory { recent_deeds: Vec<ReputationDeed>, trend: ReputationTrend, maintenance_cost: f32 }
-// NEEDS STATE: completed_quests: Vec<CompletedQuest> on WorldState (for inactivity/loss checks)
-// NEEDS STATE: active_crises: Vec<ActiveCrisis> on WorldState (for corruption check)
-// NEEDS STATE: rumors: Vec<Rumor> on WorldState (for negative rumor check)
-// NEEDS STATE: propaganda_campaigns: Vec<PropagandaCampaign> on WorldState
-// NEEDS STATE: active_festivals: Vec<Festival> on WorldState
-// NEEDS STATE: guild_tier: GuildTier on WorldState
-// NEEDS DELTA: AdjustReputation { faction_id: u32, delta: f32, reason: String }
 
 /// Cadence: reputation decay every 7 ticks.
 const TICK_CADENCE: u64 = 7;
@@ -52,58 +43,8 @@ const RECENT_QUEST_WINDOW: u64 = 17;
 /// Since WorldState lacks guild/reputation fields, this is a structural
 /// placeholder. The settlement treasury can serve as a partial proxy:
 /// settlements with high treasury lose less reputation (they're prosperous).
-pub fn compute_reputation_decay(state: &WorldState, out: &mut Vec<WorldDelta>) {
-    if state.tick % TICK_CADENCE != 0 {
-        return;
-    }
-
-    // NEEDS STATE: guild_reputation on WorldState
-    // if current_rep <= REPUTATION_FLOOR { return; }
-
-    // --- Calculate base decay ---
-    // let mut decay = BASE_DECAY;
-
-    // --- Decay accelerators ---
-    // 1. No quest completed in INACTIVITY_THRESHOLD ticks → decay doubles
-    // NEEDS STATE: completed_quests
-    //   let ticks_since_quest = state.tick - last_quest_tick;
-    //   if ticks_since_quest > INACTIVITY_THRESHOLD { decay += BASE_DECAY; }
-
-    // 2. Corruption severity > CORRUPTION_THRESHOLD → +0.3
-    // NEEDS STATE: active_crises (corruption check)
-
-    // 3. Recent battle losses → +0.2 per loss
-    // NEEDS STATE: completed_quests with defeat results
-
-    // 4. Negative rumors → +0.1 per negative rumor
-    // NEEDS STATE: rumors vec
-
-    // --- Decay reducers ---
-    // let mut reduction_mult = 1.0f32;
-
-    // 1. Recent quest completions → ×0.5
-    // 2. Active propaganda → ×0.7
-    // 3. War memorial festivals → ×0.9 each
-    // 4. Guild tier bonus: Silver ×0.9, Gold ×0.8, Legendary ×0.7
-
-    // --- Apply net decay ---
-    // let net_decay = decay * reduction_mult;
-    // let actual_decay = net_decay.min(current_rep - REPUTATION_FLOOR);
-    // if actual_decay > 0.001:
-    //   out.push(WorldDelta::AdjustReputation {
-    //     faction_id: guild_faction_id,
-    //     delta: -actual_decay,
-    //     reason: reasons.join(", "),
-    //   });
-
-    // --- Propaganda maintenance cost ---
-    // If active propaganda, deduct gold from guild treasury.
-    // NEEDS STATE: propaganda_campaigns, guild gold
-    // Can use UpdateTreasury for the guild's settlement:
-    //   out.push(WorldDelta::UpdateTreasury {
-    //     location_id: guild_settlement_id,
-    //     delta: -maintenance_cost,
-    //   });
+pub fn compute_reputation_decay(_state: &WorldState, _out: &mut Vec<WorldDelta>) {
+    // Stub: guild reputation state not yet tracked. See git history for planned design.
 }
 
 // ---------------------------------------------------------------------------

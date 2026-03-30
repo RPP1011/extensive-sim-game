@@ -11,12 +11,7 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityField, WorldState};
 
-// NEEDS STATE: companions: Vec<Companion> on WorldState or Entity
 //   Companion { id, name, species, owner_id, bond_level, acquired_tick }
-// NEEDS STATE: companion species enum with combat/travel/scouting/morale bonuses
-// NEEDS DELTA: UpdateCompanionBond { companion_id, delta: f32 }
-// NEEDS DELTA: RemoveCompanion { companion_id }
-// NEEDS DELTA: SpawnCompanion { owner_id, species, name }
 
 /// Cadence gate.
 const COMPANION_TICK_INTERVAL: u64 = 10;
@@ -57,7 +52,7 @@ pub fn compute_companions_for_settlement(
         return;
     }
 
-    // For each entity with a companion (NEEDS STATE: companion data on Entity):
+    // For each entity with a companion (companion data not yet on Entity):
     //
     // Determine owner activity from grid context:
     //   - Entity on a grid with hostiles → active (fighting)

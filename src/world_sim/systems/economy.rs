@@ -6,13 +6,6 @@
 //! trade income from controlled settlements, and investment drains
 //! as TransferGold/UpdateTreasury deltas.
 //!
-//! NEEDS STATE: `tax_rate: f32` on SettlementState (for trade income scaling)
-//! NEEDS STATE: `infrastructure_level: f32` on SettlementState (for investment bonus)
-//! NEEDS STATE: `unrest: f32` on SettlementState (for trade disruption)
-//! NEEDS STATE: `faction_id: Option<u32>` on SettlementState (for ownership check)
-//! NEEDS STATE: `guild_settlement_id: Option<u32>` on EconomyState (passive income source)
-//! NEEDS STATE: `threat_level: f32` on RegionState (for threat reward bonus)
-//! NEEDS DELTA: ApplyFatigueAndMorale { entity_id, fatigue_delta, morale_delta }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, WorldState};
@@ -69,7 +62,7 @@ pub fn compute_economy_for_settlement(
     let tax_efficiency = 1.0 / (1.0 + settlement.treasury / 10_000.0);
     let mut tax_income = 0.0f32;
     for entity in entities {
-        if entity.kind != EntityKind::Npc || !entity.alive { continue; }
+        if !entity.alive { continue; }
         if let Some(npc) = &entity.npc {
             if npc.gold > 1.0 {
                 let tax = npc.gold * 0.001 * tax_efficiency; // 0.1% base, reduced by wealth
@@ -130,9 +123,7 @@ pub fn compute_economy_maintenance_for_settlement(
     out: &mut Vec<WorldDelta>,
 ) {
     for entity in entities {
-        if entity.kind != EntityKind::Npc || !entity.alive {
-            continue;
-        }
+        if !entity.alive { continue; }
         let _npc = match &entity.npc {
             Some(n) => n,
             None => continue,

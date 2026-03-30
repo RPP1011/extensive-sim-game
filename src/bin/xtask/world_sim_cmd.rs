@@ -124,7 +124,6 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
             let alive_npcs = st.entities.iter().filter(|e| e.alive && e.kind == EntityKind::Npc).count();
             let alive_monsters = st.entities.iter().filter(|e| e.alive && e.kind == EntityKind::Monster).count();
             let tps = total_ticks as f64 / elapsed;
-            let game_hours = (total_ticks as f64 * 0.1) / 3600.0;
 
             // Compute global avg morale, fear, pride across all alive NPCs.
             let npc_data: Vec<&bevy_game::world_sim::state::NpcData> = st.entities.iter()
@@ -178,7 +177,6 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
     println!("Items: {} total ({} equipped, {} unowned)", item_entities, equipped_items, unowned_items);
     // Item rarity breakdown
     {
-        use bevy_game::world_sim::state::ItemRarity;
         let mut rarity_counts = [0u32; 5];
         for e in s.entities.iter().filter(|e| e.alive && e.kind == EntityKind::Item) {
             if let Some(item) = &e.item {
@@ -501,12 +499,11 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
                 .collect();
 
             let display_name = bevy_game::world_sim::naming::entity_display_name(npc_entity);
-            println!("  #{} {} ({}) lv{} xp:{} | tags: {} | classes: [{}]",
+            println!("  #{} {} ({}) lv{} | tags: {} | classes: [{}]",
                 npc_entity.id,
                 display_name,
                 if npc.archetype.is_empty() { "?" } else { &npc.archetype },
                 npc_entity.level,
-                npc.xp,
                 if top_tags.is_empty() { "none".to_string() } else { top_tags.join(", ") },
                 classes.join(", "),
             );
@@ -965,7 +962,6 @@ fn print_creation_myth(state: &WorldState, seed: u64) {
 }
 
 fn export_history_markdown(state: &WorldState, path: &str) {
-    use std::io::Write;
     let mut out = String::new();
 
     let years = state.tick / 4800;
@@ -1454,10 +1450,6 @@ fn print_world_summary(state: &WorldState) {
     for terrain in Terrain::ALL {
         let count = state.regions.iter().filter(|r| r.terrain == terrain).count();
         if count > 0 {
-            let region_names: Vec<&str> = state.regions.iter()
-                .filter(|r| r.terrain == terrain)
-                .map(|r| r.name.as_str())
-                .collect();
             let elev_info: Vec<String> = state.regions.iter()
                 .filter(|r| r.terrain == terrain)
                 .map(|r| {

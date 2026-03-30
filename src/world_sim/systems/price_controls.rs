@@ -7,11 +7,7 @@
 //! create shortages; binding floors drain treasury via subsidies.
 //! Controls expire after 67 ticks.
 //!
-//! NEEDS STATE: `price_controls: Vec<PriceControl>` on WorldState or SettlementState
 //!   (settlement_id, commodity, ceiling: Option<f32>, floor: Option<f32>, enacted_tick)
-//! NEEDS STATE: `unrest: f32` on SettlementState or RegionState (for auto-enact trigger)
-//! NEEDS DELTA: EnactPriceControl { settlement_id, commodity, ceiling, floor }
-//! NEEDS DELTA: RemovePriceControl { settlement_id, commodity }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

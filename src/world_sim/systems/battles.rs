@@ -11,16 +11,8 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::naming::entity_display_name;
 use crate::world_sim::state::{ActionTags, ChronicleCategory, ChronicleEntry, WorldState, tags};
 
-// NEEDS STATE: active_battles: Vec<BattleState> on WorldState
-// NEEDS STATE: BattleState { id, quest_id, party_id, enemy_strength, elapsed_ticks,
 //              predicted_outcome, party_health_ratio, enemy_health_ratio, status,
 //              participant_ids: Vec<u32>, enemy_ids: Vec<u32> }
-// NEEDS STATE: BattleStatus enum { Active, Victory, Defeat, Retreat }
-// NEEDS STATE: config.battle.default_duration_ticks on WorldState
-// NEEDS STATE: config.battle.update_interval_ticks on WorldState
-// NEEDS STATE: config.battle.victory_party_damage on WorldState
-// NEEDS STATE: config.battle.defeat_enemy_damage on WorldState
-// NEEDS DELTA: UpdateBattle { battle_id: u32, elapsed_ticks: u32, party_health_ratio: f32, enemy_health_ratio: f32, status: u8 }
 
 /// Default battle duration in ticks if config is unavailable.
 const DEFAULT_DURATION_TICKS: u32 = 20;

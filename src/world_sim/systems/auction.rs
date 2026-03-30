@@ -7,18 +7,10 @@
 //! AI bidders bid based on gold reserves and need. Auctions last 17 ticks
 //! before resolution. Gold transfers are expressed as TransferGold deltas.
 //!
-//! NEEDS STATE: `auction_house: AuctionHouseState` on WorldState
 //!   (items: Vec<AuctionItem>, last_auction_tick, total_spent, total_won)
-//! NEEDS STATE: `rival_guild: RivalGuildState` on WorldState
 //!   (gold, active, name, power_level)
-//! NEEDS STATE: `guild: GuildState` on WorldState
 //!   (gold, reputation, inventory)
-//! NEEDS STATE: `factions: Vec<FactionState>` on WorldState
 //!   (id, name, military_strength, relationship_to_guild)
-//! NEEDS STATE: `campaign_progress: f32` on WorldState or EconomyState
-//! NEEDS DELTA: AuctionBid { item_id: u32, bidder_entity_id: u32, amount: f32 }
-//! NEEDS DELTA: AuctionResolve { item_id: u32, winner_entity_id: u32, price: f32 }
-//! NEEDS DELTA: CreateAuctionItem { item: AuctionItemData }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
@@ -37,7 +29,7 @@ const AUCTION_DURATION: u64 = 17;
 /// Without auction-specific state on WorldState, this system emits
 /// TransferGold deltas for bid payments and treasury effects.
 /// The full auction lifecycle (create / bid / resolve) requires the
-/// NEEDS STATE and NEEDS DELTA items listed above.
+/// auction-specific state and delta variants (not yet implemented).
 pub fn compute_auction(state: &WorldState, out: &mut Vec<WorldDelta>) {
     if state.tick % AUCTION_TICK_INTERVAL != 0 || state.tick == 0 {
         return;
@@ -97,6 +89,5 @@ pub fn compute_auction(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     // --- New auction creation every NEW_AUCTION_INTERVAL ---
-    // Requires NEEDS DELTA: CreateAuctionItem to properly implement.
-    // Currently a no-op beyond the treasury effects above.
+    // Auction item creation not yet implemented — only treasury effects above.
 }

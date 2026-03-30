@@ -12,20 +12,13 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
 use crate::world_sim::state::entity_hash_f32;
 
-// NEEDS STATE: factions: Vec<FactionState> on WorldState
 //   FactionState { id, diplomatic_stance, coalition_member, relationship_to_guild,
 //                  military_strength, max_military_strength, at_war_with }
 //   DiplomaticStance enum (AtWar, Hostile, Neutral, Friendly, Coalition)
-// NEEDS STATE: faction_techs: Vec<FactionTechState> on WorldState
 //   FactionTechState { faction_id: u32, military_tech: f32, economic_tech: f32,
 //                      diplomatic_tech: f32, research_focus: TechFocus }
 //   TechFocus enum { Military, Economic, Diplomatic, Balanced }
-// NEEDS STATE: guild: GuildState { total_trade_income } on WorldState
 
-// NEEDS DELTA: SetResearchFocus { faction_id: u32, focus: TechFocus }
-// NEEDS DELTA: AdjustTech { faction_id: u32, tech_type: String, delta: f32 }
-// NEEDS DELTA: AdjustMilitaryStrength { faction_id: u32, factor: f32 }
-// NEEDS DELTA: AdjustRelationship { faction_id: u32, delta: f32 }
 
 /// How often faction tech advances (in ticks).
 const TECH_INTERVAL: u64 = 17;

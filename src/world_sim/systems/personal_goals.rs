@@ -91,9 +91,7 @@ pub fn compute_personal_goals_for_settlement(
     }
 
     for entity in entities {
-        if !entity.alive || entity.kind != EntityKind::Npc {
-            continue;
-        }
+        if !entity.alive { continue; }
         let npc = match &entity.npc {
             Some(n) => n,
             None => continue,

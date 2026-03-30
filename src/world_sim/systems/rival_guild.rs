@@ -7,8 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/rival_guild.rs`
 //!
-//! NEEDS STATE: `rival_guild: RivalGuildState` on WorldState
-//! NEEDS DELTA: RivalAction (quest stolen, sabotage, etc.)
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState};

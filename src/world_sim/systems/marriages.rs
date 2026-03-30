@@ -12,15 +12,7 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
 use crate::world_sim::state::entity_hash_f32;
 
-// NEEDS STATE: marriages: Vec<Marriage> on WorldState
 //   Marriage { id, adventurer_id, faction_id, noble_name, married_tick, relation_bonus, dowry_received, produces_heir }
-// NEEDS STATE: factions: Vec<FactionState> on WorldState (relationship_to_guild, diplomatic_stance, military_strength)
-// NEEDS STATE: adventurer morale, loyalty, faction_id, level, status on Entity/NpcData
-// NEEDS DELTA: UpdateRelation { faction_id, delta: f32 }
-// NEEDS DELTA: AdjustMorale { entity_id, delta: f32 }
-// NEEDS DELTA: AdjustLoyalty { entity_id, delta: f32 }
-// NEEDS DELTA: SpawnEntity (for heirs)
-// NEEDS DELTA: RemoveMarriage { marriage_id }
 
 /// Maximum active marriages the guild can maintain.
 const MAX_ACTIVE_MARRIAGES: usize = 3;
@@ -55,7 +47,6 @@ pub fn compute_marriages(state: &WorldState, out: &mut Vec<WorldDelta>) {
         return;
     }
 
-    // NEEDS STATE: iterate state.marriages
     // For each active marriage:
     //
     // 1. Ongoing relation bonus:

@@ -12,14 +12,10 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
 use crate::world_sim::state::{entity_hash, entity_hash_f32};
 
-// NEEDS STATE: rumors: Vec<Rumor> on WorldState
 //   where Rumor { id: u32, text: String, rumor_type: RumorType, accuracy: f32,
 //                 source_tick: u64, revealed: bool, target_region_id: Option<u32>,
 //                 target_faction_id: Option<u32> }
-// NEEDS STATE: next_event_id: u32 on WorldState (for rumor ID generation)
-// NEEDS DELTA: AddRumor { id: u32, rumor_type: RumorType, accuracy: f32, source_tick: u64,
 //                         target_region_id: Option<u32>, target_faction_id: Option<u32> }
-// NEEDS DELTA: ExpireRumor { id: u32 }
 
 /// How often to check for new rumors (in ticks).
 const RUMOR_INTERVAL: u64 = 10;
@@ -60,14 +56,12 @@ pub fn compute_rumors(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     // --- Phase 1: Expire old rumors ---
-    // NEEDS STATE: iterate state.rumors
     // For each rumor in state.rumors where !rumor.revealed:
     //   if state.tick - rumor.source_tick >= RUMOR_EXPIRY_TICKS:
     //     out.push(WorldDelta::ExpireRumor { id: rumor.id });
 
     // --- Phase 2: Generate rumors from NPCs at home settlements ---
     // Count active (unrevealed) rumors.
-    // NEEDS STATE: let active_count = state.rumors.iter().filter(|r| !r.revealed).count();
     // if active_count >= MAX_ACTIVE_RUMORS { return; }
 
     // Find NPCs that are at their home settlement (idle, returned from travel).
@@ -97,7 +91,6 @@ pub fn compute_rumors(state: &WorldState, out: &mut Vec<WorldDelta>) {
             continue;
         }
 
-        // NEEDS STATE: check active_count < MAX_ACTIVE_RUMORS
 
         // Deterministic roll for rumor generation (read-only state).
         let roll = entity_hash_f32(entity.id, state.tick, 0);
@@ -135,7 +128,6 @@ pub fn compute_rumors(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
         let accuracy = (level_factor * 0.6 + vis_factor * 0.4).clamp(0.0, 1.0);
 
-        // NEEDS DELTA: AddRumor { id: next_id, rumor_type, accuracy, source_tick: state.tick,
         //                         target_region_id, target_faction_id: None }
         let _ = (rumor_type, accuracy); // suppress unused until delta exists
     }

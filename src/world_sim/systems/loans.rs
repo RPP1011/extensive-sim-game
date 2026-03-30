@@ -6,13 +6,8 @@
 //! defaulting damages relations and credit rating. Expressed as
 //! TransferGold deltas for payments and UpdateTreasury for interest.
 //!
-//! NEEDS STATE: `loans: Vec<Loan>` on WorldState or EconomyState
 //!   (id, borrower_entity_id, lender_settlement_id, principal, interest_rate,
 //!    amount_owed, due_tick, payments_made)
-//! NEEDS STATE: `credit_rating: f32` on WorldState or EconomyState
-//! NEEDS DELTA: AccrueInterest { loan_id: u32, amount: f32 }
-//! NEEDS DELTA: LoanDefault { loan_id: u32, borrower_id: u32, amount: f32 }
-//! NEEDS DELTA: AdjustCreditRating { delta: f32 }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState};

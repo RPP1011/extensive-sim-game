@@ -14,11 +14,6 @@
 //! - Decline: drain treasury and stockpiles globally
 //! - Unifier: buff hostile entities, drain friendly resources
 //!
-//! NEEDS STATE: `active_crises: Vec<ActiveCrisis>` on WorldState
-//! NEEDS STATE: `campaign_progress: f32` on WorldState
-//! NEEDS DELTA: ActivateCrisis { crisis_type, ... }
-//! NEEDS DELTA: ResolveCrisis { crisis_id }
-//! NEEDS DELTA: SpawnChampion { ... }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::fidelity::Fidelity;

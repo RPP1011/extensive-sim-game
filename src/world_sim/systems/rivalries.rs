@@ -11,14 +11,7 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, WorldState};
 
-// NEEDS STATE: rivalries: Vec<Rivalry> on WorldState
 //   Rivalry { adventurer_a, adventurer_b, intensity, cause: RivalryCause, started_tick }
-// NEEDS STATE: adventurer_bonds: HashMap<(u32,u32), f32> on WorldState
-// NEEDS STATE: adventurer morale, status on Entity/NpcData
-// NEEDS DELTA: CreateRivalry { entity_a, entity_b, intensity, cause }
-// NEEDS DELTA: UpdateRivalry { entity_a, entity_b, intensity_delta }
-// NEEDS DELTA: RemoveRivalry { entity_a, entity_b }
-// NEEDS DELTA: AdjustMorale { entity_id, delta: f32 }
 
 /// Cadence gate.
 const RIVALRY_TICK_INTERVAL: u64 = 10;
@@ -91,7 +84,6 @@ pub fn compute_rivalries_for_settlement(
         .map(|e| e.id)
         .collect();
 
-    // NEEDS STATE: check bonds and existing rivalries for each pair
     let _ = npc_ids;
 }
 
@@ -102,18 +94,15 @@ pub fn compute_rivalries_for_settlement(
 /// Check if two NPCs have an active rivalry.
 /// Requires rivalry state on WorldState.
 pub fn has_rivalry(_a: u32, _b: u32) -> bool {
-    // NEEDS STATE: rivalries
     false
 }
 
 /// Returns true if entity `a` refuses to party with entity `b` due to rivalry.
 pub fn refuses_party(_a: u32, _b: u32) -> bool {
-    // NEEDS STATE: rivalries, threshold > 30
     false
 }
 
 /// Rivalry intensity between two entities (0 if none).
 pub fn rivalry_intensity(_a: u32, _b: u32) -> f32 {
-    // NEEDS STATE: rivalries
     0.0
 }

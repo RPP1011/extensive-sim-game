@@ -12,11 +12,6 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, WorldState};
 use crate::world_sim::state::{entity_hash, entity_hash_f32};
 
-// NEEDS STATE: morale: f32 on NpcData (or Entity)
-// NEEDS STATE: loyalty: f32 on NpcData (or Entity)
-// NEEDS STATE: archetype: String on NpcData (class tag for legacy type selection)
-// NEEDS STATE: retired_adventurers: Vec<RetiredAdventurer> on WorldState
-// NEEDS DELTA: RetireEntity { entity_id: u32, legacy_type: LegacyType, bonus_value: f32 }
 
 /// How often retirement checks run (in ticks).
 const RETIREMENT_INTERVAL: u64 = 17;

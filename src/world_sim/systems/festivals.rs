@@ -8,9 +8,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/festivals.rs`
 //!
-//! NEEDS STATE: `active_festivals: Vec<Festival>` on WorldState
-//! NEEDS STATE: `season` on WorldState
-//! NEEDS DELTA: StartFestival, EndFestival
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

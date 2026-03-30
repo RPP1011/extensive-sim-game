@@ -7,8 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/party_chemistry.rs`
 //!
-//! NEEDS STATE: `party_chemistry: HashMap<(u32,u32), f32>` on WorldState
-//! NEEDS DELTA: ModifyChemistry
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};

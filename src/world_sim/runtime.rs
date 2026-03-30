@@ -24,6 +24,13 @@ const NUM_FACTION_FIELDS: usize = 6;
 const NUM_REGION_FIELDS: usize = 4;
 const NUM_SETTLEMENT_FIELDS: usize = 5;
 
+/// How often (in ticks) to update grid membership for combat proximity.
+const GRID_MEMBERSHIP_INTERVAL: u64 = 10;
+/// How often (in ticks) to run class matching against behavior tags.
+const CLASS_MATCHING_INTERVAL: u64 = 50;
+/// How often (in ticks) to compact dead entities from the array.
+const ENTITY_COMPACTION_INTERVAL: u64 = 500;
+
 /// Flat-array merge accumulator. All per-entity fields are indexed by entity ID.
 /// Per-settlement fields indexed by settlement ID. Dirty lists track which
 /// indices were touched so clear is O(touched) not O(capacity).
@@ -39,7 +46,6 @@ struct FlatMergedDeltas {
 
     // --- Per-entity campaign fields (indexed by entity_id * NUM_ENTITY_FIELDS + field) ---
     entity_fields: Vec<f32>,
-    entity_xp: Vec<u32>,
     entity_mood: Vec<u8>,
     entity_mood_set: Vec<bool>, // whether mood was set this tick
 
@@ -119,7 +125,6 @@ impl FlatMergedDeltas {
             entity_dirty: Vec::with_capacity(max_entities),
 
             entity_fields: vec![0.0; max_entities * NUM_ENTITY_FIELDS],
-            entity_xp: vec![0; max_entities],
             entity_mood: vec![0; max_entities],
             entity_mood_set: vec![false; max_entities],
 
@@ -180,7 +185,6 @@ impl FlatMergedDeltas {
             // Clear entity campaign fields
             let base = i * NUM_ENTITY_FIELDS;
             for f in 0..NUM_ENTITY_FIELDS { self.entity_fields[base + f] = 0.0; }
-            self.entity_xp[i] = 0;
             self.entity_mood_set[i] = false;
         }
         self.entity_dirty.clear();
@@ -247,16 +251,17 @@ impl FlatMergedDeltas {
         self.force_y.resize(new_max, 0.0);
         self.dead.resize(new_max, false);
         self.entity_fields.resize(new_max * NUM_ENTITY_FIELDS, 0.0);
-        self.entity_xp.resize(new_max, 0);
         self.entity_mood_set.resize(new_max, false);
     }
 
+    /// Mark entity as dirty if not already. Returns false if ID exceeds capacity.
     #[inline]
-    fn mark_entity(&mut self, id: u32) {
+    fn mark_entity(&mut self, id: u32) -> bool {
         let i = id as usize;
+        if i >= self.damage.len() { return false; }
         if self.damage[i] == 0.0 && self.heals[i] == 0.0 && self.shields[i] == 0.0
             && self.force_x[i] == 0.0 && self.force_y[i] == 0.0 && !self.dead[i]
-            && self.entity_xp[i] == 0 && !self.entity_mood_set[i]
+            && !self.entity_mood_set[i]
         {
             // Check if any entity_fields are nonzero
             let base = i * NUM_ENTITY_FIELDS;
@@ -265,11 +270,13 @@ impl FlatMergedDeltas {
                 self.entity_dirty.push(id);
             }
         }
+        true
     }
 
     #[inline]
-    fn mark_settlement(&mut self, id: u32) {
+    fn mark_settlement(&mut self, id: u32) -> bool {
         let i = id as usize;
+        if i >= self.production.len() { return false; }
         if self.production[i] == [0.0; NUM_COMMODITIES]
             && self.consumption[i] == [0.0; NUM_COMMODITIES]
             && self.stockpile_adj[i] == [0.0; NUM_COMMODITIES]
@@ -281,6 +288,7 @@ impl FlatMergedDeltas {
                 self.settlement_dirty.push(id);
             }
         }
+        true
     }
 
     #[inline]
@@ -306,26 +314,31 @@ impl FlatMergedDeltas {
     fn merge_one(&mut self, delta: WorldDelta) {
         match delta {
             WorldDelta::Damage { target_id, amount, source_id } => {
-                self.mark_entity(target_id);
-                self.damage[target_id as usize] += amount;
-                self.last_damage_source.insert(target_id, source_id);
+                if self.mark_entity(target_id) {
+                    self.damage[target_id as usize] += amount;
+                    self.last_damage_source.insert(target_id, source_id);
+                }
             }
             WorldDelta::Heal { target_id, amount, .. } => {
-                self.mark_entity(target_id);
-                self.heals[target_id as usize] += amount;
+                if self.mark_entity(target_id) {
+                    self.heals[target_id as usize] += amount;
+                }
             }
             WorldDelta::Shield { target_id, amount, .. } => {
-                self.mark_entity(target_id);
-                self.shields[target_id as usize] += amount;
+                if self.mark_entity(target_id) {
+                    self.shields[target_id as usize] += amount;
+                }
             }
             WorldDelta::Move { entity_id, force } => {
-                self.mark_entity(entity_id);
-                self.force_x[entity_id as usize] += force.0;
-                self.force_y[entity_id as usize] += force.1;
+                if self.mark_entity(entity_id) {
+                    self.force_x[entity_id as usize] += force.0;
+                    self.force_y[entity_id as usize] += force.1;
+                }
             }
             WorldDelta::Die { entity_id } => {
-                self.mark_entity(entity_id);
-                self.dead[entity_id as usize] = true;
+                if self.mark_entity(entity_id) {
+                    self.dead[entity_id as usize] = true;
+                }
             }
             WorldDelta::ApplyStatus { target_id, status } => {
                 self.new_statuses.push((target_id, status));
@@ -334,12 +347,14 @@ impl FlatMergedDeltas {
                 self.remove_statuses.push((target_id, status_discriminant));
             }
             WorldDelta::ProduceCommodity { location_id, commodity, amount } => {
-                self.mark_settlement(location_id);
-                self.production[location_id as usize][commodity] += amount;
+                if self.mark_settlement(location_id) {
+                    self.production[location_id as usize][commodity] += amount;
+                }
             }
             WorldDelta::ConsumeCommodity { location_id, commodity, amount } => {
-                self.mark_settlement(location_id);
-                self.consumption[location_id as usize][commodity] += amount;
+                if self.mark_settlement(location_id) {
+                    self.consumption[location_id as usize][commodity] += amount;
+                }
             }
             WorldDelta::TransferGold { from_id, to_id, amount } => {
                 self.gold_transfers.push((from_id, to_id, amount));
@@ -348,12 +363,14 @@ impl FlatMergedDeltas {
                 self.goods_transfers.push((from_id, to_id, commodity, amount));
             }
             WorldDelta::UpdateStockpile { location_id, commodity, delta } => {
-                self.mark_settlement(location_id);
-                self.stockpile_adj[location_id as usize][commodity] += delta;
+                if self.mark_settlement(location_id) {
+                    self.stockpile_adj[location_id as usize][commodity] += delta;
+                }
             }
             WorldDelta::UpdateTreasury { location_id, delta } => {
-                self.mark_settlement(location_id);
-                self.treasury_adj[location_id as usize] += delta;
+                if self.mark_settlement(location_id) {
+                    self.treasury_adj[location_id as usize] += delta;
+                }
             }
             WorldDelta::UpdatePrices { location_id, prices } => {
                 self.price_updates.push((location_id, prices));
@@ -374,17 +391,18 @@ impl FlatMergedDeltas {
 
             // --- Campaign deltas: flat-array path ---
             WorldDelta::UpdateEntityField { entity_id, field, value } => {
-                self.mark_entity(entity_id);
-                self.entity_fields[entity_id as usize * NUM_ENTITY_FIELDS + field as usize] += value;
+                if self.mark_entity(entity_id) {
+                    self.entity_fields[entity_id as usize * NUM_ENTITY_FIELDS + field as usize] += value;
+                }
             }
             WorldDelta::SetEntityMood { entity_id, mood } => {
-                self.mark_entity(entity_id);
-                self.entity_mood[entity_id as usize] = mood;
-                self.entity_mood_set[entity_id as usize] = true;
+                if self.mark_entity(entity_id) {
+                    self.entity_mood[entity_id as usize] = mood;
+                    self.entity_mood_set[entity_id as usize] = true;
+                }
             }
-            WorldDelta::AddXp { entity_id, amount } => {
-                self.mark_entity(entity_id);
-                self.entity_xp[entity_id as usize] = self.entity_xp[entity_id as usize].saturating_add(amount);
+            WorldDelta::AddXp { .. } => {
+                // Vestigial: npc.xp is no longer used (level derives from class levels).
             }
             WorldDelta::UpdateFaction { faction_id, field, value } => {
                 self.mark_faction(faction_id);
@@ -401,8 +419,9 @@ impl FlatMergedDeltas {
                 }
             }
             WorldDelta::UpdateSettlementField { settlement_id, field, value } => {
-                self.mark_settlement(settlement_id);
-                self.settlement_fields[settlement_id as usize * NUM_SETTLEMENT_FIELDS + field as usize] += value;
+                if self.mark_settlement(settlement_id) {
+                    self.settlement_fields[settlement_id as usize * NUM_SETTLEMENT_FIELDS + field as usize] += value;
+                }
             }
             WorldDelta::UpdateRelation { entity_a, entity_b, kind, delta } => {
                 self.relation_deltas.push((entity_a, entity_b, kind as u8, delta));
@@ -549,7 +568,7 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
     let t = Instant::now();
     for &id in &m.settlement_dirty {
         let i = id as usize;
-        if let Some(s) = state.settlements.iter_mut().find(|s| s.id == id) {
+        if let Some(s) = state.settlement_mut(id) {
             // Stockpile adjustments
             for c in 0..NUM_COMMODITIES {
                 s.stockpile[c] += m.stockpile_adj[i][c];
@@ -573,7 +592,7 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
         }
     }
     for &(loc_id, ref prices) in &m.price_updates {
-        if let Some(s) = state.settlements.iter_mut().find(|s| s.id == loc_id) {
+        if let Some(s) = state.settlement_mut(loc_id) {
             s.prices = *prices;
         }
     }
@@ -611,7 +630,7 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
         }
 
         // Record kills on killer's weapon (item provenance).
-        for &(victim_id, ref victim_name, _, killer_id, victim_level, _) in &death_records {
+        for &(_victim_id, ref victim_name, _, killer_id, victim_level, _) in &death_records {
             if let Some(kid) = killer_id {
                 // Find killer's weapon and record the kill.
                 let weapon_id = state.entity(kid)
@@ -881,10 +900,9 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
         let i = id as usize;
         let base = i * NUM_ENTITY_FIELDS;
         let has_fields = (0..NUM_ENTITY_FIELDS).any(|f| m.entity_fields[base + f] != 0.0);
-        let has_xp = m.entity_xp[i] > 0;
         let has_mood = m.entity_mood_set[i];
 
-        if !has_fields && !has_xp && !has_mood { continue; }
+        if !has_fields && !has_mood { continue; }
 
         let ei = if i < state.entity_index.len() { state.entity_index[i] as usize } else { usize::MAX };
         if ei < state.entities.len() {
@@ -907,11 +925,6 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
                 super::apply::apply_entity_field_delta(entity, 14, m.entity_fields[base + 14]); // AttackRange
                 super::apply::apply_entity_field_delta(entity, 15, m.entity_fields[base + 15]); // MoveSpeed
                 super::apply::apply_entity_field_delta(entity, 16, m.entity_fields[base + 16]); // Level
-            }
-            if has_xp {
-                if let Some(npc) = entity.npc.as_mut() {
-                    npc.xp = npc.xp.saturating_add(m.entity_xp[i]);
-                }
             }
             if has_mood {
                 if let Some(npc) = entity.npc.as_mut() {
@@ -1068,16 +1081,19 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
     }
 
     // Events
+    const MAX_WORLD_EVENTS: usize = 1000;
+    const MAX_CHRONICLE_ENTRIES: usize = 2000;
+
     state.world_events.extend(m.events.iter().cloned());
-    if state.world_events.len() > 1000 {
-        let drain = state.world_events.len() - 1000;
+    if state.world_events.len() > MAX_WORLD_EVENTS {
+        let drain = state.world_events.len() - MAX_WORLD_EVENTS;
         state.world_events.drain(..drain);
     }
 
     // Chronicles
     state.chronicle.extend(m.chronicles.iter().cloned());
-    if state.chronicle.len() > 2000 {
-        let drain = state.chronicle.len() - 2000;
+    if state.chronicle.len() > MAX_CHRONICLE_ENTRIES {
+        let drain = state.chronicle.len() - MAX_CHRONICLE_ENTRIES;
         state.chronicle.drain(..drain);
     }
 
@@ -1409,6 +1425,8 @@ impl WorldSim {
 
         // MERGE (flat arrays, no HashMap)
         let merge_start = Instant::now();
+        // Ensure merger capacity covers any entities spawned this tick.
+        self.merged.ensure_capacity(self.state.next_id as usize + 1);
         self.merged.clear();
         for delta in self.delta_buf.drain(..) {
             self.merged.merge_one(delta);
@@ -1435,12 +1453,12 @@ impl WorldSim {
         // GRID ASSIGNMENT — entities near grids get assigned to them.
         // This enables combat: monsters entering a settlement grid trigger
         // fidelity escalation → High → compute_high runs combat.
-        if self.state.tick % 10 == 0 {
+        if self.state.tick % GRID_MEMBERSHIP_INTERVAL == 0 {
             self.update_grid_membership();
         }
 
         // CLASS MATCHING — run after apply so behavior tags are up to date.
-        if self.state.tick % 50 == 0 && self.state.tick > 0 {
+        if self.state.tick % CLASS_MATCHING_INTERVAL == 0 && self.state.tick > 0 {
             self.run_class_matching();
         }
 
@@ -1542,7 +1560,7 @@ impl WorldSim {
         self.grow_cities();
 
         // ENTITY COMPACTION — remove long-dead items/buildings every 500 ticks.
-        if self.state.tick % 500 == 0 && self.state.tick > 0 {
+        if self.state.tick % ENTITY_COMPACTION_INTERVAL == 0 && self.state.tick > 0 {
             self.state.compact_dead_entities();
         }
 

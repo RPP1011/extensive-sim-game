@@ -9,12 +9,7 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
 
-// NEEDS STATE: request_board: Vec<QuestRequest> on WorldState
-// NEEDS STATE: QuestRequest { id, quest_type, threat_level, deadline_tick, reward_gold,
 //              target_position: (f32, f32), potential_loot: bool }
-// NEEDS STATE: guild_reputation: f32 on WorldState
-// NEEDS STATE: next_quest_id: u32 on WorldState
-// NEEDS DELTA: SpawnQuestRequest { id, quest_type, threat_level, deadline_tick,
 //              reward_gold, target_position, potential_loot }
 
 /// Base interval in ticks between quest arrivals (before reputation scaling).

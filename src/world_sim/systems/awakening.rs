@@ -6,9 +6,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/awakening.rs`
 //!
-//! NEEDS STATE: `awakenings: Vec<Awakening>` on WorldState (tracking who awakened)
-//! NEEDS STATE: `history_tags` on NpcData for condition checks
-//! NEEDS DELTA: PermanentStatBoost (awakening is permanent, not a timed buff)
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, StatusEffect, StatusEffectKind, WorldState};

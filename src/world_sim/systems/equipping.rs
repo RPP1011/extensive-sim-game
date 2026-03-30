@@ -68,7 +68,7 @@ pub fn compute_equipping_for_settlement(
 
             // Current equipped item's effective quality.
             let current_quality = npc.equipped_items.slot_id(slot)
-                .and_then(|iid| state.entities.iter().find(|e| e.id == iid))
+                .and_then(|iid| state.entity(iid))
                 .and_then(|e| e.item.as_ref())
                 .map(|i| i.effective_quality() * i.durability_fraction())
                 .unwrap_or(0.0);

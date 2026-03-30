@@ -12,14 +12,8 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityField, EntityKind, WorldState};
 use crate::world_sim::state::entity_hash_f32;
 
-// NEEDS STATE: fears: Vec<Fear> on Entity/NpcData
 //   Fear { fear_type: FearType, severity, acquired_tick, times_triggered, times_overcome }
 //   FearType: Darkness, Heights, Water, Undead, Fire, Crowds, Isolation, Authority
-// NEEDS STATE: adventurer stress, injury, status on Entity/NpcData
-// NEEDS DELTA: AcquireFear { entity_id, fear_type, severity }
-// NEEDS DELTA: UpdateFearSeverity { entity_id, fear_type, delta }
-// NEEDS DELTA: ConquerFear { entity_id, fear_type }
-// NEEDS DELTA: AdjustStress { entity_id, delta }
 
 /// Cadence gate.
 const FEAR_TICK_INTERVAL: u64 = 10;
@@ -57,9 +51,7 @@ pub fn compute_fears(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // as a proxy for active fear. Low-HP NPCs in combat suffer morale drain
     // representing fear/panic effects.
     for entity in &state.entities {
-        if !entity.alive || entity.kind != EntityKind::Npc {
-            continue;
-        }
+        if !entity.alive { continue; }
         let hp_ratio = entity.hp / entity.max_hp.max(1.0);
         let on_combat_grid = entity.grid_id
             .and_then(|gid| state.grid(gid))
@@ -84,7 +76,6 @@ pub fn compute_fears(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     // --- Phase 3: Fear overcoming (successful exposure) ---
-    // NEEDS STATE: idle entities with triggered fears and low injury
     //   out.push(WorldDelta::UpdateFearSeverity { entity_id, fear_type, delta: -OVERCOME_SEVERITY_REDUCTION })
     //   If times_overcome >= OVERCOME_THRESHOLD:
     //     out.push(WorldDelta::ConquerFear { entity_id, fear_type })
@@ -103,14 +94,12 @@ pub fn compute_fears(state: &WorldState, out: &mut Vec<WorldDelta>) {
             })
             .collect();
 
-        // NEEDS STATE: check if any NPC has no fears (mentor)
         // For fearful NPCs in same grid:
         //   out.push(WorldDelta::UpdateFearSeverity { entity_id, fear_type, delta: -MENTORSHIP_SEVERITY_REDUCTION })
         let _ = npc_ids;
     }
 
     // --- Phase 5: Fear contagion within shared grids ---
-    // NEEDS STATE: for high-stress NPCs with severe fears (>50), spread to co-located NPCs
     //   Deterministic roll < FEAR_CONTAGION_CHANCE:
     //   out.push(WorldDelta::AcquireFear { entity_id, fear_type, severity: source * 0.5 })
 }
@@ -137,7 +126,6 @@ pub fn compute_fears_for_settlement(
         if hp_ratio < 0.2 && entity.grid_id.is_some() {
             let roll = entity_hash_f32(entity.id, state.tick, 0);
             if roll < DARKNESS_FEAR_CHANCE {
-                // NEEDS DELTA: AcquireFear { entity_id, Darkness, severity: 20+rand*40 }
             }
         }
 
@@ -145,11 +133,9 @@ pub fn compute_fears_for_settlement(
         if hp_ratio < 0.4 && entity.grid_id.is_some() {
             let roll = entity_hash_f32(entity.id, state.tick, 1);
             if roll < MONSTER_FEAR_CHANCE {
-                // NEEDS DELTA: AcquireFear { entity_id, Undead, severity: 15+rand*35 }
             }
         }
 
-        // NEEDS STATE: check fears list for existing fears
     }
 }
 

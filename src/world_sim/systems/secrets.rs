@@ -38,7 +38,7 @@ pub fn compute_secrets_for_settlement(
     if state.tick % SECRETS_INTERVAL != 0 || state.tick == 0 { return; }
 
     for entity in entities {
-        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        if !entity.alive { continue; }
         let npc = match &entity.npc { Some(n) => n, None => continue };
 
         // Derive secret type from entity id (deterministic — always the same).

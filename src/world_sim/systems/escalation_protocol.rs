@@ -7,11 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/escalation_protocol.rs`
 //!
-//! NEEDS STATE: `escalation_level: u32` on RegionState
-//! NEEDS STATE: `patrol_losses: u32` on RegionState or faction data
-//! NEEDS STATE: `last_patrol_loss_tick: u64` on RegionState or faction data
-//! NEEDS DELTA: ModifyEscalation { region_id, delta }
-//! NEEDS DELTA: SpawnEliteSquad { region_id, power }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::fidelity::Fidelity;

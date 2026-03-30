@@ -8,9 +8,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/npc_reputation.rs`
 //!
-//! NEEDS STATE: `named_npcs: Vec<NamedNpc>` on WorldState
-//! NEEDS STATE: `npc.reputation`, `npc.role` on NpcData
-//! NEEDS DELTA: ModifyReputation, UnlockService
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityKind, WorldState};

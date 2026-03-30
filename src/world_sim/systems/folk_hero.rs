@@ -12,14 +12,8 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, WorldState};
 
-// NEEDS STATE: folk_reputation on WorldState
 //   FolkReputation { regional_fame: HashMap<u32, f32>, overall_fame: f32, folk_tales: Vec<FolkTale> }
 //   FolkTale { id, adventurer_id, tale, region_id, fame_impact, created_tick }
-// NEEDS STATE: regions with threat_level, unrest
-// NEEDS STATE: guild gold, reputation
-// NEEDS DELTA: UpdateFolkFame { region_id, delta }
-// NEEDS DELTA: CreateFolkTale { region_id, entity_id, tale, fame_impact }
-// NEEDS DELTA: ExpireFolkTale { tale_id }
 
 /// Cadence gate.
 const FOLK_HERO_TICK_INTERVAL: u64 = 17;
@@ -62,17 +56,13 @@ pub fn compute_folk_hero(state: &WorldState, out: &mut Vec<WorldDelta>) {
         let _threat = region.threat_level;
         // High threat + no friendly entities nearby → "ignored crisis"
         // Low threat after reduction → "defeated monsters"
-        // NEEDS STATE: folk_reputation.regional_fame
     }
 
     // --- Phase 2: Apply fame deltas ---
-    // NEEDS DELTA: UpdateFolkFame { region_id, delta }
 
     // --- Phase 3: Generate folk tales from significant events ---
-    // NEEDS DELTA: CreateFolkTale for events with fame impact > 5
 
     // --- Phase 4: Spread tales to adjacent regions (diminished) ---
-    // NEEDS STATE: region neighbors
 
     // --- Phase 5: Fame threshold effects ---
     // fame > 75 (hero): tribute gold, unrest reduction
@@ -87,10 +77,8 @@ pub fn compute_folk_hero(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     // --- Phase 6: Passive decay toward neutral (50) ---
-    // NEEDS STATE: update regional_fame values
 
     // --- Phase 7: Expire old tales ---
-    // NEEDS STATE: remove tales where tick - created_tick >= TALE_LIFETIME
 }
 
 /// Per-settlement variant for parallel dispatch.
@@ -106,7 +94,6 @@ pub fn compute_folk_hero_for_settlement(
         return;
     }
 
-    // NEEDS STATE: regional fame for this settlement's region
     // If fame > FAME_HERO_THRESHOLD:
     //   out.push(WorldDelta::UpdateTreasury {
     //       location_id: settlement_id,

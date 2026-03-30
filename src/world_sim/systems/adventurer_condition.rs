@@ -11,10 +11,6 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityField, EntityKind, WorldState};
 use crate::world_sim::state::entity_hash_f32;
 
-// NEEDS STATE: stress: f32 on NpcData (or Entity)
-// NEEDS STATE: fatigue: f32 on NpcData (or Entity)
-// NEEDS STATE: loyalty: f32 on NpcData (or Entity)
-// NEEDS STATE: activity: ActivityStatus on NpcData (Idle, Fighting, OnMission, Traveling, Injured)
 
 /// How often condition drift runs (in ticks).
 const DRIFT_INTERVAL: u64 = 10;

@@ -7,9 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/scouting.rs`
 //!
-//! NEEDS STATE: `visibility: f32` on RegionState
-//! NEEDS STATE: `faction_id` on Entity/NpcData (to identify guild vs hostile)
-//! NEEDS DELTA: ModifyVisibility { region_id, delta }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EconomicIntent, EntityKind, PriceReport, WorldState};

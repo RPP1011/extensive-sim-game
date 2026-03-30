@@ -9,20 +9,6 @@
 //! treasury. If the settlement cannot afford the reward, no gold is paid.
 //!
 //! Ported from `crates/headless_campaign/src/systems/skill_challenges.rs`.
-//!
-//! NEEDS STATE: `active_quests: Vec<ActiveQuest>` on WorldState
-//! NEEDS STATE: `ActiveQuest { id, quest_type, dispatched_party_id, threat_level, status }`
-//! NEEDS STATE: `parties: Vec<Party>` on WorldState
-//! NEEDS STATE: `Party { id, member_ids, status }`
-//! NEEDS STATE: `skill_challenges: Vec<SkillChallenge>` on WorldState
-//! NEEDS STATE: `SkillChallenge { id, skill_type, difficulty, quest_id, adventurer_id,
-//!              succeeded, resolved }`
-//! NEEDS STATE: `SkillType` enum on WorldState
-//! NEEDS STATE: `archetype: String` on NpcData (for base skill computation)
-//! NEEDS STATE: `morale: f32` on NpcData (mood bonus)
-//! NEEDS DELTA: GrantXp { entity_id, amount }
-//! NEEDS DELTA: UpdateMorale { entity_id, delta }
-//! NEEDS DELTA: UpdateStress { entity_id, delta }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState, WorldTeam};
@@ -74,7 +60,7 @@ pub fn compute_skill_challenges_for_settlement(
     };
 
     for entity in entities {
-        if entity.kind != EntityKind::Npc || !entity.alive || entity.team != WorldTeam::Friendly {
+        if !entity.alive || entity.team != WorldTeam::Friendly {
             continue;
         }
 

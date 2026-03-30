@@ -11,21 +11,12 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
 use crate::world_sim::state::entity_hash_f32;
 
-// NEEDS STATE: factions: Vec<FactionState> on WorldState
 //   FactionState { id, relationship_to_guild }
-// NEEDS STATE: adventurers: Vec<AdventurerState> on WorldState
 //   AdventurerState { id, faction_id: Option<u32>, loyalty: f32, morale: f32,
 //                     level: u32, status: AdventurerStatus, deeds: Vec<LegendaryDeed> }
-// NEEDS STATE: adventurer_bonds: BondGraph on WorldState
 //   bond_strength(bonds, a_id, b_id) -> f32
-// NEEDS STATE: diplomacy: DiplomacyState on WorldState
 //   diplomacy.relations: Vec<Vec<i32>>, guild_faction_id: u32
-// NEEDS STATE: defection_events: Vec<DefectionEvent> on WorldState
 
-// NEEDS DELTA: SetFaction { adventurer_id: u32, faction_id: Option<u32> }
-// NEEDS DELTA: AdjustMorale { adventurer_id: u32, delta: f32 }
-// NEEDS DELTA: AdjustRelationship { faction_id: u32, delta: f32 }
-// NEEDS DELTA: RecordDefection { adventurer_id: u32, from_faction: u32, to_faction: u32,
 //              cascade_count: u32, tick: u64 }
 
 /// Maximum cascade depth to prevent total faction collapse.

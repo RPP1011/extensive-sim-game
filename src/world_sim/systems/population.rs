@@ -6,9 +6,6 @@
 //! health, and threat levels. Population changes are expressed as
 //! UpdateTreasury (tax income) and UpdateStockpile (consumption) deltas.
 //!
-//! NEEDS STATE: `civilian_morale: f32` on SettlementState
-//! NEEDS STATE: `growth_rate: f32` on SettlementState
-//! NEEDS STATE: `tax_rate: f32` on SettlementState
 //!
 //! Population changes are emitted via `UpdateSettlementField { field: Population, .. }`.
 

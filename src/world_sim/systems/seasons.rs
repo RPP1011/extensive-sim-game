@@ -7,8 +7,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/seasons.rs`
 //!
-//! NEEDS STATE: `season` field on WorldState (or derived from tick)
-//! NEEDS STATE: `morale` field on Entity / NpcData for morale drift
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;

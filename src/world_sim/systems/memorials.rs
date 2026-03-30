@@ -11,16 +11,9 @@
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{Entity, EntityField, EntityKind, WorldState};
 
-// NEEDS STATE: pending_funerals: Vec<FuneralPending> on WorldState
 //   FuneralPending { adventurer_id, name, level, death_tick }
-// NEEDS STATE: memorials: Vec<Memorial> on WorldState
 //   Memorial { id, adventurer_name, adventurer_id, memorial_type, created_tick, morale_bonus, description }
 //   MemorialType: SimpleFuneral, HerosFuneral, Monument, NamedBuilding, LegendaryTale
-// NEEDS STATE: adventurer_bonds for grief comfort bonuses
-// NEEDS STATE: guild gold, reputation
-// NEEDS DELTA: CreateMemorial { entity_id, memorial_type }
-// NEEDS DELTA: ExpireMemorial { memorial_id }
-// NEEDS DELTA: AdjustReputation { delta }
 
 /// Cadence gate.
 const MEMORIAL_TICK_INTERVAL: u64 = 10;
@@ -86,32 +79,6 @@ pub fn compute_memorials(state: &WorldState, out: &mut Vec<WorldDelta>) {
         }
     }
 
-    // NEEDS STATE: check if dead NPCs already have pending funerals or memorials
-    // For new deaths:
-    //   Add to pending_funerals (NEEDS DELTA: CreatePendingFuneral)
-
-    // --- Auto-resolve stale pending funerals ---
-    // NEEDS STATE: for each pending funeral where tick >= death_tick + AUTO_FUNERAL_DELAY:
-    //   Create SimpleFuneral memorial
-    //   out.push(WorldDelta::CreateMemorial { entity_id, SimpleFuneral })
-
-    // --- Apply ongoing memorial morale effects ---
-    // NEEDS STATE: for each active memorial:
-    //   Permanent memorials (Monument, NamedBuilding): apply every tick
-    //   Temporary memorials: expire after TEMP_MORALE_DURATION
-    //
-    //   For all living NPC entities:
-    //     effective_bonus = base_bonus + bond_strength * 0.05
-    //     per_tick = effective_bonus / MEMORIAL_TICK_INTERVAL
-
-    // --- Funeral cost when HoldFuneral action is processed ---
-    // HerosFuneral: 30 gold
-    //   out.push(WorldDelta::UpdateTreasury { location_id: guild_settlement, delta: -30.0 })
-    // Monument: 100 gold
-    //   out.push(WorldDelta::UpdateTreasury { location_id: guild_settlement, delta: -100.0 })
-    // NamedBuilding: 50 gold
-    //   out.push(WorldDelta::UpdateTreasury { location_id: guild_settlement, delta: -50.0 })
-
     let _ = dead_npcs;
 }
 
@@ -130,7 +97,6 @@ pub fn compute_memorials_for_settlement(
     }
 
     // Detect dead NPCs at this settlement.
-    // NEEDS DELTA: CreatePendingFuneral when memorial state exists.
     for entity in entities {
         if !entity.alive && entity.kind == EntityKind::Npc {
             // Placeholder: once memorial state exists, emit funeral deltas.

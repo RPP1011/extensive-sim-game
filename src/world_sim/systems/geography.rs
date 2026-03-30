@@ -8,10 +8,6 @@
 //!
 //! Original: `crates/headless_campaign/src/systems/geography.rs`
 //!
-//! NEEDS STATE: `geography_changes: Vec<GeographyChange>` on WorldState
-//! NEEDS STATE: `season` on WorldState
-//! NEEDS DELTA: StartGeographyChange { change_type, region_id }
-//! NEEDS DELTA: CompleteGeographyChange { change_id }
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::WorldState;
