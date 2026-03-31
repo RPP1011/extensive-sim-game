@@ -2668,17 +2668,20 @@ fn run_ws_server(sim: &mut WorldSim, port: u16, args: &WorldSimArgs) -> ExitCode
 
         let mut ticks_this_session = 0u64;
         let mut chronicle_snapshot: Vec<bevy_game::world_sim::state::ChronicleEntry> = Vec::new();
+        let mut ticks_per_frame: u64 = 5;
+        let mut paused = false;
 
         loop {
             let start = std::time::Instant::now();
 
-            // Advance simulation
-            let ticks_per_frame = 5; // 5 sim ticks per frame at 20fps = 100 ticks/sec
+            // Advance simulation (skip if paused)
+            if !paused {
             for _ in 0..ticks_per_frame {
                 if ticks_this_session >= max_ticks { break; }
                 sim.tick();
                 ticks_this_session += 1;
             }
+            } // end if !paused
 
             // Build frame
             let state = sim.state();
@@ -2728,14 +2731,31 @@ fn run_ws_server(sim: &mut WorldSim, port: u16, args: &WorldSimArgs) -> ExitCode
             if let Ok(raw) = ws.get_ref().try_clone() {
                 let _ = raw.set_nonblocking(true);
             }
+            let mut client_closed = false;
             loop {
                 match ws.read() {
-                    Ok(Message::Close(_)) => { println!("Client closed."); break; }
-                    Ok(Message::Text(t)) => { println!("Client: {}", t); }
+                    Ok(Message::Close(_)) => { println!("Client closed."); client_closed = true; break; }
+                    Ok(Message::Text(t)) => {
+                        // Parse JSON commands from client
+                        if let Ok(cmd) = serde_json::from_str::<serde_json::Value>(&*t) {
+                            match cmd.get("command").and_then(|c| c.as_str()) {
+                                Some("speed") => {
+                                    if let Some(v) = cmd.get("value").and_then(|v| v.as_u64()) {
+                                        ticks_per_frame = v.max(1).min(50);
+                                        println!("Speed: {} ticks/frame", ticks_per_frame);
+                                    }
+                                }
+                                Some("pause") => { paused = true; println!("Paused"); }
+                                Some("play") => { paused = false; println!("Resumed"); }
+                                _ => {}
+                            }
+                        }
+                    }
                     Ok(_) => {}
-                    Err(_) => break, // WouldBlock or actual error
+                    Err(_) => break,
                 }
             }
+            if client_closed { break; }
             if let Ok(raw) = ws.get_ref().try_clone() {
                 let _ = raw.set_nonblocking(false);
             }

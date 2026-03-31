@@ -1393,11 +1393,18 @@ function toggleOverlay(name) {
 function togglePlay() {
   playing = !playing;
   document.getElementById('play-btn').innerHTML = playing ? '&#10074;&#10074;' : '&#9654;';
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ command: playing ? 'play' : 'pause' }));
+  }
 }
 
 function setSpeed(val) {
   speed = parseInt(val);
   document.getElementById('speed-label').textContent = val + 'x';
+  // Tell the server to adjust ticks per frame
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ command: 'speed', value: speed }));
+  }
 }
 
 function scrubTimeline(event) {
