@@ -2387,6 +2387,8 @@ pub enum NpcAction {
     Fleeing,
     /// Trading at a market (buying/selling goods).
     Trading { ticks_remaining: u8 },
+    /// Harvesting a resource node (tree, ore vein, herb patch, etc.).
+    Harvesting { resource_id: u32 },
 }
 
 /// Specific work activity for display purposes.
@@ -2433,6 +2435,7 @@ impl NpcAction {
             NpcAction::Building { ticks_remaining, .. } => format!("building ({} ticks left)", ticks_remaining),
             NpcAction::Fleeing => "fleeing".into(),
             NpcAction::Trading { ticks_remaining } => format!("trading ({} ticks left)", ticks_remaining),
+            NpcAction::Harvesting { resource_id } => format!("harvesting resource #{}", resource_id),
         }
     }
 

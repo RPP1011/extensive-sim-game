@@ -282,6 +282,7 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
                     NpcAction::Building { .. } => "building",
                     NpcAction::Fleeing => "fleeing",
                     NpcAction::Trading { .. } => "trading",
+                    NpcAction::Harvesting { .. } => "harvesting",
                 };
                 *action_counts.entry(label).or_default() += 1;
             }

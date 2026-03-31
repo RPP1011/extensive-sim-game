@@ -1546,8 +1546,10 @@ impl WorldSim {
         super::systems::movement::advance_movement(&mut self.state);
         super::systems::death_consequences::advance_death_consequences(&mut self.state);
         super::systems::agent_inner::update_agent_inner_states(&mut self.state);
-        super::systems::goal_eval::evaluate_goals(&mut self.state);
-        super::systems::world_goap::evaluate_world_goap(&mut self.state);
+        // Goal stack replaced by flat utility evaluator:
+        // super::systems::goal_eval::evaluate_goals(&mut self.state);
+        // super::systems::world_goap::evaluate_world_goap(&mut self.state);
+        super::systems::action_eval::evaluate_and_act(&mut self.state);
         super::systems::pathfollow::advance_pathfinding(&mut self.state);
 
         // WORK STATE — advance NPC work state machine.
@@ -1556,8 +1558,8 @@ impl WorldSim {
         // DEBT REPAYMENT — NPCs repay debt from income.
         super::systems::economy::advance_debt(&mut self.state);
 
-        // PLAN EXECUTION — advance NPC goal plans (gathering, building, moving).
-        super::systems::gathering::advance_plans(&mut self.state);
+        // Plan execution replaced by action_eval:
+        // super::systems::gathering::advance_plans(&mut self.state);
 
         // CONTRACTS — match, complete, and expire service contracts.
         super::systems::contracts::advance_contracts(&mut self.state);
@@ -1565,8 +1567,8 @@ impl WorldSim {
         // BUILDING SPECIALIZATION — buildings develop specialties from worker classes.
         super::systems::buildings::update_building_specializations(&mut self.state);
 
-        // EATING — hungry NPCs walk to food and eat.
-        super::systems::work::advance_eating(&mut self.state);
+        // Eating now handled by action_eval:
+        // super::systems::work::advance_eating(&mut self.state);
 
         // SOCIAL GATHERING — NPCs meet at taverns/temples for conversations.
         super::systems::social_gathering::advance_social_gatherings(&mut self.state);
