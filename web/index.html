@@ -662,6 +662,16 @@ function connect() {
   ws.onmessage = (e) => {
     try {
       const data = JSON.parse(e.data);
+      // When paused, still store the latest frame but don't render continuously
+      if (!playing) {
+        frame = data; // keep latest for when we unpause
+        // Update header stats even when paused so you see where you are
+        if (frameHistory.length >= maxHistoryFrames) frameHistory.shift();
+        frameHistory.push({ tick: data.tick, npcs: data.summary.alive_npcs, monsters: data.summary.alive_monsters });
+        updateHeader();
+        renderTimeline();
+        return;
+      }
       onFrame(data);
     } catch(err) { console.error('Parse error:', err); }
   };
@@ -927,22 +937,33 @@ function renderMap() {
       return { sx, sy, r: tc.r, g: tc.g, b: tc.b, region: r };
     });
 
-    // Simple hash-based noise (no library needed)
+    // Improved hash noise — less periodic than sin-based
+    function hash2(x, y) {
+      let h = (x * 374761393 + y * 668265263 + 1013904223) | 0;
+      h = (h ^ (h >> 13)) * 1274126177;
+      h = h ^ (h >> 16);
+      return (h & 0x7fffffff) / 0x7fffffff;
+    }
     function noise2d(x, y) {
-      let n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
-      n = n - Math.floor(n);
-      return n;
+      const ix = Math.floor(x), iy = Math.floor(y);
+      const fx = x - ix, fy = y - iy;
+      // Smoothstep interpolation
+      const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+      const a = hash2(ix, iy), b = hash2(ix + 1, iy);
+      const c = hash2(ix, iy + 1), d = hash2(ix + 1, iy + 1);
+      return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
     }
     function fbm(x, y) {
       let v = 0, amp = 0.5, freq = 1;
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 5; i++) {
         v += amp * noise2d(x * freq, y * freq);
-        amp *= 0.5; freq *= 2.1;
+        amp *= 0.5; freq *= 2.03;
       }
       return v;
     }
 
-    const step = 2;
+    // Adaptive step: finer when zoomed in, coarser when zoomed out
+    const step = cam.zoom > 3 ? 1 : cam.zoom > 1.5 ? 2 : 3;
     for (let py = 0; py < h; py += step) {
       for (let px = 0; px < w; px += step) {
         // Find 2 nearest regions for smooth blending
@@ -1064,27 +1085,67 @@ function renderMap() {
     ctx.setLineDash([]);
   }
 
-  // --- Entities (monsters = diamonds, NPCs = circles) ---
+  // --- Buildings (kind=2) — small squares ---
+  const buildingSize = Math.max(2, 3 * Math.sqrt(cam.zoom));
   for (const ent of frame.entities) {
-    if (!ent.alive) continue;
+    if (!ent.alive || ent.kind !== 2) continue;
     const [sx, sy] = project(ent.pos[0], ent.pos[1]);
-    if (sx < -10 || sx > w + 10 || sy < -10 || sy > h + 10) continue;
+    if (sx < -20 || sx > w + 20 || sy < -20 || sy > h + 20) continue;
+    const bs = buildingSize;
+    ctx.fillStyle = 'rgba(180, 160, 120, 0.5)';
+    ctx.fillRect(sx - bs/2, sy - bs/2, bs, bs);
+    ctx.strokeStyle = 'rgba(200, 180, 140, 0.6)';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(sx - bs/2, sy - bs/2, bs, bs);
+    // Show name at high zoom
+    if (cam.zoom > 3 && ent.name) {
+      ctx.font = `300 ${Math.max(7, 8 * Math.sqrt(cam.zoom / 3))}px "JetBrains Mono", monospace`;
+      ctx.fillStyle = 'rgba(180, 170, 140, 0.5)';
+      ctx.textAlign = 'center';
+      ctx.fillText(ent.name, sx, sy - bs - 2);
+    }
+  }
+
+  // --- Entities (NPCs + monsters) — scale with zoom ---
+  const entityRadius = Math.max(1.5, 2 * Math.sqrt(cam.zoom));
+  const monsterSize = Math.max(2, 3 * Math.sqrt(cam.zoom));
+  const showEntityNames = cam.zoom > 4;
+  for (const ent of frame.entities) {
+    if (!ent.alive || ent.kind === 2) continue; // skip buildings (drawn above)
+    const [sx, sy] = project(ent.pos[0], ent.pos[1]);
+    if (sx < -20 || sx > w + 20 || sy < -20 || sy > h + 20) continue;
 
     if (ent.kind === 1) {
-      // Monster — diamond
+      // Monster — diamond, scales with zoom
+      const ms = monsterSize;
       ctx.beginPath();
-      ctx.moveTo(sx, sy - 3); ctx.lineTo(sx + 2.5, sy);
-      ctx.lineTo(sx, sy + 3); ctx.lineTo(sx - 2.5, sy);
+      ctx.moveTo(sx, sy - ms); ctx.lineTo(sx + ms * 0.7, sy);
+      ctx.lineTo(sx, sy + ms); ctx.lineTo(sx - ms * 0.7, sy);
       ctx.closePath();
       ctx.fillStyle = 'rgba(219, 68, 55, 0.7)';
       ctx.fill();
+      ctx.strokeStyle = 'rgba(240, 80, 60, 0.5)';
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+      if (showEntityNames && ent.name) {
+        ctx.font = `300 ${Math.max(7, 8 * Math.sqrt(cam.zoom / 4))}px "JetBrains Mono", monospace`;
+        ctx.fillStyle = 'rgba(219, 100, 80, 0.7)';
+        ctx.textAlign = 'center';
+        ctx.fillText(ent.name, sx, sy - ms - 3);
+      }
     } else {
-      // NPC — circle
-      const teamColors = ['rgba(100,160,220,0.6)','rgba(219,68,55,0.6)','rgba(160,160,140,0.5)'];
+      // NPC — circle, scales with zoom
+      const teamColors = ['rgba(100,160,220,0.7)','rgba(219,68,55,0.7)','rgba(160,160,140,0.6)'];
       ctx.beginPath();
-      ctx.arc(sx, sy, 2, 0, Math.PI * 2);
+      ctx.arc(sx, sy, entityRadius, 0, Math.PI * 2);
       ctx.fillStyle = teamColors[ent.team] || teamColors[2];
       ctx.fill();
+      if (showEntityNames && ent.name) {
+        ctx.font = `300 ${Math.max(7, 8 * Math.sqrt(cam.zoom / 4))}px "JetBrains Mono", monospace`;
+        ctx.fillStyle = 'rgba(180, 200, 220, 0.7)';
+        ctx.textAlign = 'center';
+        ctx.fillText(ent.name, sx, sy - entityRadius - 3);
+      }
     }
   }
 
@@ -1306,7 +1367,7 @@ window.addEventListener('mouseup', () => { dragging = false; });
 mapCanvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   cam.zoom *= e.deltaY < 0 ? 1.15 : 0.87;
-  cam.zoom = Math.max(0.5, Math.min(10, cam.zoom));
+  cam.zoom = Math.max(0.3, Math.min(50, cam.zoom));
   renderMap();
 }, { passive: false });
 
