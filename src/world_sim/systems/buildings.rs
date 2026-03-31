@@ -216,6 +216,10 @@ pub fn grow_cities(state: &mut WorldState) {
                 owner_id: None,
                 builder_modifiers: Vec::new(),
                 owner_modifiers: Vec::new(),
+                worker_class_ticks: Vec::new(),
+                specialization_tag: None,
+                specialization_strength: 0.0,
+                specialization_name: String::new(),
             });
 
             // Store entity ID in grid cell.
@@ -1353,5 +1357,118 @@ fn apply_city_events(state: &mut WorldState) {
 
     for entry in new_chronicles {
         state.chronicle.push(entry);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Building specialization — emerges from worker class composition
+// ---------------------------------------------------------------------------
+
+/// Minimum accumulated class ticks before a building can specialize.
+const SPECIALIZATION_THRESHOLD: u64 = 1000;
+
+/// Update building specializations based on worker class composition.
+///
+/// Every 50 ticks, accumulates class ticks from current workers and checks
+/// whether a dominant class has emerged. Once the dominant class exceeds the
+/// threshold, the building gains a specialization that boosts matching output.
+pub fn update_building_specializations(state: &mut WorldState) {
+    if state.tick % 50 != 0 || state.tick == 0 { return; }
+
+    // Collect worker class data: (building_entity_idx, vec of (class_hash, display_name)).
+    // We gather this first to avoid aliasing issues with mutable borrow later.
+    let entity_count = state.entities.len();
+    let mut building_worker_classes: Vec<(usize, Vec<(u32, String)>)> = Vec::new();
+
+    for i in 0..entity_count {
+        let entity = &state.entities[i];
+        if !entity.alive || entity.kind != EntityKind::Building { continue; }
+        let bld = match &entity.building { Some(b) => b, None => continue };
+        if bld.worker_ids.is_empty() { continue; }
+        if bld.construction_progress < 1.0 { continue; }
+
+        // Collect primary class from each worker.
+        let mut classes: Vec<(u32, String)> = Vec::new();
+        for &worker_id in &bld.worker_ids {
+            if let Some(worker) = state.entity(worker_id) {
+                if let Some(npc) = &worker.npc {
+                    // Use the worker's highest-level class as their primary.
+                    if let Some(primary) = npc.classes.iter()
+                        .max_by_key(|c| c.level)
+                    {
+                        classes.push((primary.class_name_hash, primary.display_name.clone()));
+                    }
+                }
+            }
+        }
+        if !classes.is_empty() {
+            building_worker_classes.push((i, classes));
+        }
+    }
+
+    // Now apply updates to buildings.
+    for (bld_idx, worker_classes) in building_worker_classes {
+        let bld = match &mut state.entities[bld_idx].building {
+            Some(b) => b,
+            None => continue,
+        };
+
+        // Accumulate 50 ticks (one interval) per worker class present.
+        for (class_hash, _name) in &worker_classes {
+            if let Some(entry) = bld.worker_class_ticks.iter_mut()
+                .find(|(h, _)| *h == *class_hash)
+            {
+                entry.1 += 50;
+            } else {
+                bld.worker_class_ticks.push((*class_hash, 50));
+            }
+        }
+
+        // Find the dominant class (highest accumulated ticks).
+        let total_ticks: u64 = bld.worker_class_ticks.iter().map(|(_, t)| *t).sum();
+        if total_ticks < SPECIALIZATION_THRESHOLD { continue; }
+
+        let dominant = bld.worker_class_ticks.iter()
+            .max_by_key(|(_, t)| *t);
+        let (dom_hash, dom_ticks) = match dominant {
+            Some(&(h, t)) => (h, t),
+            None => continue,
+        };
+
+        // Dominance ratio: what fraction of all accumulated ticks belong to the top class.
+        let ratio = dom_ticks as f32 / total_ticks as f32;
+        // Require at least 40% dominance to specialize.
+        if ratio < 0.4 { continue; }
+
+        // Strength scales from 0.0 at 40% dominance to 1.0 at 80%+.
+        let strength = ((ratio - 0.4) / 0.4).min(1.0);
+
+        bld.specialization_tag = Some(dom_hash);
+        bld.specialization_strength = strength;
+
+        // Generate a specialization name if not already set or if the tag changed.
+        if bld.specialization_name.is_empty() {
+            // Find the display name from the worker classes that contributed.
+            let class_display = worker_classes.iter()
+                .find(|(h, _)| *h == dom_hash)
+                .map(|(_, n)| n.as_str())
+                .unwrap_or("Specialist");
+
+            let btype_name = match bld.building_type {
+                BuildingType::Farm => "Farm",
+                BuildingType::Mine => "Mine",
+                BuildingType::Sawmill => "Sawmill",
+                BuildingType::Forge => "Forge",
+                BuildingType::Apothecary => "Apothecary",
+                BuildingType::Market => "Market",
+                BuildingType::Warehouse => "Warehouse",
+                BuildingType::Barracks => "Barracks",
+                BuildingType::Temple => "Temple",
+                BuildingType::Inn => "Inn",
+                _ => "Workshop",
+            };
+
+            bld.specialization_name = format!("{} {}", class_display, btype_name);
+        }
     }
 }

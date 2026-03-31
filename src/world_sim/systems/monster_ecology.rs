@@ -14,7 +14,7 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{EntityKind, WorldState};
 use crate::world_sim::state::{entity_hash_f32, pair_hash_f32};
 
-use super::seasons::{current_season, season_modifiers};
+use super::seasons::{current_season, season_modifiers, wilderness_food_for_season};
 
 const ECOLOGY_TICK_INTERVAL: u64 = 7;
 const MAX_RESPAWNS_PER_TICK: usize = 5;
@@ -151,10 +151,15 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 
     // ---------------------------------------------------------------
-    // Phase 3: Migration — monsters move toward settlements with food
+    // Phase 3: Migration — season-dependent monster drift
     // ---------------------------------------------------------------
-    // Alive monsters drift toward the nearest settlement with high stockpile
-    // (drawn to abundance). Rate: small force every ecology tick.
+    // Winter:  monsters drift toward nearest settlement with food > 10
+    //          (desperate, seeking warmth and stores).
+    // Summer:  monsters drift away from settlements (abundant wilderness
+    //          food, territorial expansion).
+    // Spring / Autumn: half-strength drift toward settlements.
+    let season_idx = ((state.tick / 1200) % 4) as u8;
+
     for entity in &state.entities {
         if !entity.alive || entity.kind != EntityKind::Monster { continue; }
 
@@ -162,15 +167,31 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
         let roll = entity_hash_f32(entity.id, state.tick, 0xD1F7);
         if roll > 0.2 { continue; }
 
-        // Find nearest settlement with food.
+        // Determine wilderness food at monster's current region.
+        let local_terrain = state.regions.iter()
+            .min_by_key(|r| {
+                let rx = (r.id as f32 * 137.5).sin() * 150.0;
+                let ry = (r.id as f32 * 73.1).cos() * 150.0;
+                let dx = rx - entity.pos.0;
+                let dy = ry - entity.pos.1;
+                (dx * dx + dy * dy) as u32
+            })
+            .map(|r| r.terrain);
+
+        let wild_food = local_terrain
+            .map(|t| wilderness_food_for_season(t, season_idx))
+            .unwrap_or(0.5);
+
+        // Find nearest settlement with food > 10.
         let mut best_target: Option<(f32, f32)> = None;
         let mut best_score = 0.0f32;
         for s in &state.settlements {
+            if s.stockpile[0] <= 10.0 { continue; }
             let dx = s.pos.0 - entity.pos.0;
             let dy = s.pos.1 - entity.pos.1;
             let dist_sq = dx * dx + dy * dy;
             if dist_sq < 100.0 { continue; } // already near settlement
-            let food_draw = s.stockpile[0] * 0.01; // food attracts
+            let food_draw = s.stockpile[0] * 0.01;
             let score = food_draw / (1.0 + dist_sq * 0.0001);
             if score > best_score {
                 best_score = score;
@@ -178,16 +199,27 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
             }
         }
 
+        // Drift direction and strength depend on season.
+        // sign > 0 → toward settlement, sign < 0 → away from settlement.
+        let (sign, strength) = match season_idx {
+            3 => (1.0f32, 0.5),       // Winter: strong pull toward settlements
+            1 => (-1.0f32, 0.4),      // Summer: drift away from settlements
+            0 | 2 => (1.0f32, 0.15),  // Spring/Autumn: half-strength toward
+            _ => (1.0f32, 0.15),
+        };
+
+        // Modulate strength by wilderness food — less wild food ⇒ stronger pull.
+        let hunger_factor = 1.0 - wild_food.min(1.0);
+        let speed = strength * (0.5 + hunger_factor);
+
         if let Some(target) = best_target {
             let dx = target.0 - entity.pos.0;
             let dy = target.1 - entity.pos.1;
             let dist = (dx * dx + dy * dy).sqrt();
             if dist > 5.0 {
-                // Slow drift toward food source.
-                let speed = 0.3;
                 out.push(WorldDelta::Move {
                     entity_id: entity.id,
-                    force: (dx / dist * speed, dy / dist * speed),
+                    force: (sign * dx / dist * speed, sign * dy / dist * speed),
                 });
             }
         }

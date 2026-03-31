@@ -56,10 +56,12 @@ pub fn compute_npc_decisions_for_settlement(
 
                 if dist < 3.0 {
                     // Arrived! Sell carried goods at destination prices.
+                    let mut total_revenue = 0.0f32;
                     for c in 0..crate::world_sim::NUM_COMMODITIES {
                         let amount = entity.inv_commodity(c);
                         if amount > 0.1 {
                             let revenue = amount * dest.prices[c];
+                            total_revenue += revenue;
 
                             // Add goods to destination stockpile.
                             out.push(WorldDelta::UpdateStockpile {
@@ -83,6 +85,17 @@ pub fn compute_npc_decisions_for_settlement(
                                 amount,
                             });
                         }
+                    }
+
+                    // Record profitable trade for route tracking.
+                    if total_revenue > 0.0 {
+                        let home_sid = npc.home_settlement_id.unwrap_or(settlement_id);
+                        out.push(WorldDelta::RecordTradeCompletion {
+                            entity_id: entity.id,
+                            home_settlement_id: home_sid,
+                            dest_settlement_id: dest_id,
+                            profit: total_revenue,
+                        });
                     }
 
                     // Chronicle: notable traders completing runs.
@@ -233,6 +246,11 @@ pub fn compute_npc_decisions_for_settlement(
                     &BeliefType::SettlementProsperous(report.settlement_id)
                 ).unwrap_or(0.0) * 0.2;
 
+                // Utility bonus from established trade routes.
+                let route_bonus = super::trade_routes::route_utility_bonus(
+                    state, settlement_id, report.settlement_id,
+                );
+
                 for c in 0..crate::world_sim::NUM_COMMODITIES {
                     let local_price = settlement.prices[c];
                     let remote_price = report.prices[c];
@@ -248,7 +266,8 @@ pub fn compute_npc_decisions_for_settlement(
                     let effective_base = trade_base + profit_factor * 0.4;
 
                     let trade_util = effective_base
-                        * (1.0 + trade_emotion * 0.3 + belief_mod + trade_personality * 0.2);
+                        * (1.0 + trade_emotion * 0.3 + belief_mod + trade_personality * 0.2)
+                        + route_bonus;
 
                     if trade_util > best_trade_utility {
                         best_trade_utility = trade_util;

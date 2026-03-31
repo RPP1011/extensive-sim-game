@@ -274,9 +274,9 @@ pub fn generate_frame(
     }).collect();
 
     // --- Trade routes ---
-    let trade_routes: Vec<TradeRouteView> = state.trade_routes.iter().filter_map(|&(a, b)| {
-        let sa = state.settlement(a)?;
-        let sb = state.settlement(b)?;
+    let trade_routes: Vec<TradeRouteView> = state.trade_routes.iter().filter_map(|route| {
+        let sa = state.settlement(route.settlement_a)?;
+        let sb = state.settlement(route.settlement_b)?;
         Some(TradeRouteView { from_pos: sa.pos, to_pos: sb.pos })
     }).collect();
 

@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use bevy_game::world_sim::*;
-use bevy_game::world_sim::state::{DungeonSite, SubBiome, MemEventType};
+use bevy_game::world_sim::state::{DungeonSite, SubBiome, MemEventType, TradeRoute};
 use bevy_game::world_sim::runtime::WorldSim;
 // Trace recording is done inline (not via WorldSimTraceRecorder) to avoid borrow conflicts.
 
@@ -1559,7 +1559,7 @@ fn print_world_summary(state: &WorldState) {
 
     if !state.trade_routes.is_empty() {
         println!("\n--- Trade routes ---");
-        for &(a, b) in &state.trade_routes {
+        for route in &state.trade_routes { let (a, b) = (route.settlement_a, route.settlement_b);
             let name_a = state.settlements.iter().find(|s| s.id == a).map(|s| s.name.as_str()).unwrap_or("?");
             let name_b = state.settlements.iter().find(|s| s.id == b).map(|s| s.name.as_str()).unwrap_or("?");
             println!("  {} <-> {}", name_a, name_b);
@@ -2358,7 +2358,7 @@ fn create_trade_routes(state: &mut WorldState, layout: &GridLayout, enabled: boo
             let dy = a.pos.1 - b.pos.1;
             let dist = (dx * dx + dy * dy).sqrt();
             if dist <= max_dist {
-                state.trade_routes.push((a.id, b.id));
+                state.trade_routes.push(TradeRoute { settlement_a: a.id, settlement_b: b.id, established_tick: 0, total_profit: 0.0, trade_count: 0, strength: 0.5 });
             }
         }
     }

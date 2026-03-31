@@ -241,6 +241,16 @@ pub enum WorldDelta {
         to_entity: u32,
         amount: f32,
     },
+
+    /// Record a profitable trade completion for trade route tracking.
+    RecordTradeCompletion {
+        entity_id: u32,
+        home_settlement_id: u32,
+        dest_settlement_id: u32,
+        profit: f32,
+    },
+    FormApprenticeship { mentor_id: u32, apprentice_id: u32, tick: u64 },
+    GraduateApprenticeship { mentor_id: u32, apprentice_id: u32 },
 }
 
 // ---------------------------------------------------------------------------
@@ -361,6 +371,11 @@ pub struct MergedDeltas {
 
     /// Inventory-to-inventory gold transfers: (from_entity, to_entity, amount).
     pub inventory_gold_transfers: Vec<(u32, u32, f32)>,
+    pub apprenticeship_formations: Vec<(u32, u32, u64)>,
+    pub apprenticeship_graduations: Vec<(u32, u32)>,
+
+    /// Profitable trade completions: (entity_id, home_settlement_id, dest_settlement_id, profit).
+    pub trade_completions: Vec<(u32, u32, u32, f32)>,
 }
 
 impl MergedDeltas {
@@ -407,6 +422,9 @@ impl MergedDeltas {
         self.unequip_requests.clear();
         self.inventory_transfers.clear();
         self.inventory_gold_transfers.clear();
+        self.apprenticeship_formations.clear();
+        self.apprenticeship_graduations.clear();
+        self.trade_completions.clear();
     }
 
     /// Merge a single delta into this accumulator (in-place, no alloc).
@@ -559,6 +577,15 @@ fn merge_one(m: &mut MergedDeltas, delta: WorldDelta) {
         }
         WorldDelta::TransferInventoryGold { from_entity, to_entity, amount } => {
             m.inventory_gold_transfers.push((from_entity, to_entity, amount));
+        }
+        WorldDelta::FormApprenticeship { mentor_id, apprentice_id, tick } => {
+            m.apprenticeship_formations.push((mentor_id, apprentice_id, tick));
+        }
+        WorldDelta::GraduateApprenticeship { mentor_id, apprentice_id } => {
+            m.apprenticeship_graduations.push((mentor_id, apprentice_id));
+        }
+        WorldDelta::RecordTradeCompletion { entity_id, home_settlement_id, dest_settlement_id, profit } => {
+            m.trade_completions.push((entity_id, home_settlement_id, dest_settlement_id, profit));
         }
     }
 }

@@ -8,7 +8,7 @@
 //!
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::WorldState;
+use crate::world_sim::state::{Terrain, WorldState};
 
 /// Ticks per season cycle (Spring -> Summer -> Autumn -> Winter).
 /// At the world-sim tick rate this gives a reasonable in-game year.
@@ -260,4 +260,26 @@ pub fn compute_seasons(state: &WorldState, out: &mut Vec<WorldDelta>) {
             });
         }
     }
+}
+
+/// Wilderness food availability based on terrain and season.
+/// Higher values mean more food for monsters in the wild.
+pub fn wilderness_food_for_season(terrain: Terrain, season: u8) -> f32 {
+    // season: 0=Spring, 1=Summer, 2=Autumn, 3=Winter
+    let base = match terrain {
+        Terrain::Plains => 1.0,
+        Terrain::Forest => 0.9,
+        Terrain::Jungle | Terrain::Swamp => 0.8,
+        Terrain::Mountains | Terrain::Tundra | Terrain::Glacier => 0.2,
+        Terrain::Desert | Terrain::Badlands => 0.15,
+        _ => 0.5,
+    };
+    let seasonal_mult = match season {
+        1 => 1.5, // Summer: peak
+        0 => 0.8, // Spring: growing
+        2 => 1.0, // Autumn: harvest
+        3 => 0.2, // Winter: scarce
+        _ => 1.0,
+    };
+    base * seasonal_mult
 }

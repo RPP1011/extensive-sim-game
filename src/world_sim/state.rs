@@ -73,6 +73,7 @@ pub mod tags {
     // Seafaring / terrain-specific
     pub const SEAFARING: u32 = tag(b"seafaring");
     pub const DUNGEONEERING: u32 = tag(b"dungeoneering");
+    pub const MASTERY: u32 = tag(b"mastery");
 }
 
 // ---------------------------------------------------------------------------
@@ -208,8 +209,8 @@ pub struct WorldState {
     /// Global economy (total gold supply, trade routes).
     pub economy: EconomyState,
 
-    /// Trade routes between settlements (settlement_id_a, settlement_id_b).
-    pub trade_routes: Vec<(u32, u32)>,
+    /// Emergent trade routes between settlements, established by repeated profitable trading.
+    pub trade_routes: Vec<TradeRoute>,
 
     // --- Campaign-level collections (migrated from headless_campaign) ---
 
@@ -318,6 +319,10 @@ impl WorldState {
                 owner_id: None,
                 builder_modifiers: Vec::new(),
                 owner_modifiers: Vec::new(),
+                worker_class_ticks: Vec::new(),
+                specialization_tag: None,
+                specialization_strength: 0.0,
+                specialization_name: String::new(),
             });
             // Treasury inventory mirrors settlement stockpile + gold.
             let mut inv = Inventory::with_capacity(500.0);
@@ -1232,6 +1237,16 @@ pub struct BuildingData {
     pub builder_modifiers: Vec<BuildingModifier>,
     /// Active: applied by current owner, fade if owner leaves.
     pub owner_modifiers: Vec<BuildingModifier>,
+
+    // Specialization — emerges from worker class composition over time.
+    /// Accumulated (class_name_hash, tick_count) pairs for workers at this building.
+    pub worker_class_ticks: Vec<(u32, u64)>,
+    /// Dominant class hash once specialization triggers (at 1000 accumulated ticks).
+    pub specialization_tag: Option<u32>,
+    /// 0.0-1.0 strength of specialization (grows with dominance ratio).
+    pub specialization_strength: f32,
+    /// Human-readable specialization name (e.g., "Miners' Forge").
+    pub specialization_name: String,
 }
 
 impl Default for BuildingData {
@@ -1259,6 +1274,10 @@ impl Default for BuildingData {
             owner_id: None,
             builder_modifiers: Vec::new(),
             owner_modifiers: Vec::new(),
+            worker_class_ticks: Vec::new(),
+            specialization_tag: None,
+            specialization_strength: 0.0,
+            specialization_name: String::new(),
         }
     }
 }
@@ -1748,6 +1767,9 @@ pub enum MemEventType {
     Starved,
     FoundShelter,
     MadeNewFriend(u32),
+    BecameApprentice(u32),
+    CompletedApprenticeship(u32),
+    TrainedApprentice(u32),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1921,6 +1943,41 @@ impl Default for WorkState {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Multi-step plan types for goal execution
+// ---------------------------------------------------------------------------
+
+/// A concrete action within a multi-step plan.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum PlannedAction {
+    /// Walk to a specific position.
+    MoveTo { pos: (f32, f32) },
+    /// Sell carried commodity at current location.
+    Sell { commodity: usize },
+    /// Buy commodity at current location.
+    Buy { commodity: usize },
+    /// Wait idle for N ticks.
+    Wait { ticks: u16 },
+    /// Engage in combat (fight hostiles in range).
+    Fight,
+}
+
+/// Execution status of a single plan step.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum StepStatus {
+    Pending,
+    InProgress,
+    Complete,
+}
+
+/// A single step in a multi-step plan attached to a Goal.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlannedStep {
+    pub action: PlannedAction,
+    pub status: StepStatus,
+}
+
 // Goal stack — prioritized NPC goal system with interruption/resumption
 // ---------------------------------------------------------------------------
 
@@ -1940,6 +1997,10 @@ pub struct Goal {
     pub target_pos: Option<(f32, f32)>,
     /// Optional target entity ID (the building, NPC, or item this goal targets).
     pub target_entity: Option<u32>,
+    /// Multi-step plan: ordered steps the NPC executes to fulfill this goal.
+    pub plan: Vec<PlannedStep>,
+    /// Index of the currently active step in `plan`.
+    pub plan_index: u16,
 }
 
 /// What an NPC is trying to accomplish.
@@ -2010,6 +2071,8 @@ impl Goal {
             progress: 0.0,
             target_pos: None,
             target_entity: None,
+            plan: Vec::new(),
+            plan_index: 0,
         }
     }
 
@@ -2023,6 +2086,43 @@ impl Goal {
     pub fn with_target_entity(mut self, id: u32) -> Self {
         self.target_entity = Some(id);
         self
+    }
+
+    /// Attach a multi-step plan to this goal.
+    pub fn with_plan(mut self, steps: Vec<PlannedStep>) -> Self {
+        self.plan = steps;
+        self.plan_index = 0;
+        self
+    }
+
+    /// Get the currently active plan step, if any.
+    pub fn current_step(&self) -> Option<&PlannedStep> {
+        self.plan.get(self.plan_index as usize)
+    }
+
+    /// Get the currently active plan step mutably.
+    pub fn current_step_mut(&mut self) -> Option<&mut PlannedStep> {
+        let idx = self.plan_index as usize;
+        self.plan.get_mut(idx)
+    }
+
+    /// Whether this goal has a plan with remaining steps.
+    pub fn has_active_plan(&self) -> bool {
+        !self.plan.is_empty() && (self.plan_index as usize) < self.plan.len()
+    }
+
+    /// Advance to the next plan step. Returns true if there are more steps.
+    pub fn advance_plan(&mut self) -> bool {
+        if let Some(step) = self.plan.get_mut(self.plan_index as usize) {
+            step.status = StepStatus::Complete;
+        }
+        self.plan_index += 1;
+        (self.plan_index as usize) < self.plan.len()
+    }
+
+    /// Whether the entire plan has been completed.
+    pub fn plan_complete(&self) -> bool {
+        !self.plan.is_empty() && (self.plan_index as usize) >= self.plan.len()
     }
 }
 
@@ -2202,6 +2302,9 @@ pub struct NpcData {
     pub born_tick: u64,
     /// Chain of mentor entity IDs (most recent first). Tracks skill lineage.
     pub mentor_lineage: Vec<u32>,
+    pub apprentice_of: Option<u32>,
+    pub apprentices: Vec<u32>,
+    pub apprenticeship_start_tick: u64,
     /// Which building the NPC is currently inside (entity ID), if any.
     pub inside_building_id: Option<u32>,
     /// Which room within the building the NPC is using (index into building.rooms).
@@ -2214,6 +2317,10 @@ pub struct NpcData {
     /// Index into cached_path — which waypoint we're currently walking toward.
     pub path_index: u16,
     pub price_knowledge: Vec<PriceReport>,
+    /// Index into `WorldState.trade_routes` if this NPC is assigned to a route.
+    pub trade_route_id: Option<usize>,
+    /// History of profitable trade completions: (destination_settlement_id, profit_count).
+    pub trade_history: Vec<(u32, u32)>,
     pub class_tags: Vec<String>,
     /// What commodities this NPC produces (commodity_index, rate_per_tick).
     pub behavior_production: Vec<(usize, f32)>,
@@ -2514,12 +2621,17 @@ impl Default for NpcData {
             parents: Vec::new(),
             born_tick: 0,
             mentor_lineage: Vec::new(),
+            apprentice_of: None,
+            apprentices: Vec::new(),
+            apprenticeship_start_tick: 0,
             inside_building_id: None,
             current_room: None,
             goal_stack: GoalStack::default(),
             cached_path: Vec::new(),
             path_index: 0,
             price_knowledge: Vec::new(),
+            trade_route_id: None,
+            trade_history: Vec::new(),
             class_tags: Vec::new(),
             behavior_production: Vec::new(),
             morale: 50.0,
@@ -3190,6 +3302,24 @@ pub struct RegionState {
 pub struct EconomyState {
     pub total_gold_supply: f32,
     pub total_commodities: [f32; NUM_COMMODITIES],
+}
+
+// ---------------------------------------------------------------------------
+// TradeRoute -- emergent trade route between settlements
+// ---------------------------------------------------------------------------
+
+/// A trade route established by NPCs who repeatedly profit from trading
+/// between two settlements. Strength decays without activity; routes are
+/// abandoned when strength drops below a threshold.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TradeRoute {
+    pub settlement_a: u32,
+    pub settlement_b: u32,
+    pub established_tick: u64,
+    pub total_profit: f32,
+    pub trade_count: u32,
+    /// 0.0-1.0. Decays without activity; route abandoned below 0.1.
+    pub strength: f32,
 }
 
 // ---------------------------------------------------------------------------

@@ -104,12 +104,19 @@ struct FlatMergedDeltas {
     inventory_transfers: Vec<(u32, u32, usize, f32)>,
     inventory_gold_transfers: Vec<(u32, u32, f32)>,
 
+    // --- Apprenticeship tracking ---
+    apprenticeship_formations: Vec<(u32, u32, u64)>,
+    apprenticeship_graduations: Vec<(u32, u32)>,
+
     // --- Campaign collected (no flat-array equivalent) ---
     relation_deltas: Vec<(u32, u32, u8, f32)>,
     spawns: Vec<(super::state::EntityKind, (f32, f32), super::state::WorldTeam, u32)>,
     events: Vec<super::state::WorldEvent>,
     chronicles: Vec<super::state::ChronicleEntry>,
     quest_updates: Vec<(u32, super::state::QuestDelta)>,
+
+    // --- Trade route tracking ---
+    trade_completions: Vec<(u32, u32, u32, f32)>,
 }
 
 impl FlatMergedDeltas {
@@ -165,11 +172,14 @@ impl FlatMergedDeltas {
             unequip_requests: Vec::with_capacity(32),
             inventory_transfers: Vec::with_capacity(64),
             inventory_gold_transfers: Vec::with_capacity(32),
+            apprenticeship_formations: Vec::with_capacity(16),
+            apprenticeship_graduations: Vec::with_capacity(16),
             relation_deltas: Vec::with_capacity(64),
             spawns: Vec::with_capacity(16),
             events: Vec::with_capacity(32),
             chronicles: Vec::with_capacity(16),
             quest_updates: Vec::with_capacity(16),
+            trade_completions: Vec::with_capacity(16),
         }
     }
 
@@ -233,11 +243,14 @@ impl FlatMergedDeltas {
         self.unequip_requests.clear();
         self.inventory_transfers.clear();
         self.inventory_gold_transfers.clear();
+        self.apprenticeship_formations.clear();
+        self.apprenticeship_graduations.clear();
         self.relation_deltas.clear();
         self.spawns.clear();
         self.events.clear();
         self.chronicles.clear();
         self.quest_updates.clear();
+        self.trade_completions.clear();
     }
 
     /// Grow flat arrays to accommodate new entity IDs (after building spawns).
@@ -461,6 +474,15 @@ impl FlatMergedDeltas {
             }
             WorldDelta::TransferInventoryGold { from_entity, to_entity, amount } => {
                 self.inventory_gold_transfers.push((from_entity, to_entity, amount));
+            }
+            WorldDelta::FormApprenticeship { mentor_id, apprentice_id, tick } => {
+                self.apprenticeship_formations.push((mentor_id, apprentice_id, tick));
+            }
+            WorldDelta::GraduateApprenticeship { mentor_id, apprentice_id } => {
+                self.apprenticeship_graduations.push((mentor_id, apprentice_id));
+            }
+            WorldDelta::RecordTradeCompletion { entity_id, home_settlement_id, dest_settlement_id, profit } => {
+                self.trade_completions.push((entity_id, home_settlement_id, dest_settlement_id, profit));
             }
         }
     }
@@ -1074,6 +1096,37 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
         }
     }
 
+
+    for &(mentor_id, apprentice_id, tick) in &m.apprenticeship_formations {
+        if let Some(entity) = state.entity_mut(apprentice_id) {
+            if let Some(npc) = entity.npc.as_mut() {
+                npc.apprentice_of = Some(mentor_id);
+                npc.apprenticeship_start_tick = tick;
+            }
+        }
+        if let Some(entity) = state.entity_mut(mentor_id) {
+            if let Some(npc) = entity.npc.as_mut() {
+                if npc.apprentices.len() < 2 && !npc.apprentices.contains(&apprentice_id) {
+                    npc.apprentices.push(apprentice_id);
+                }
+            }
+        }
+    }
+    for &(mentor_id, apprentice_id) in &m.apprenticeship_graduations {
+        if let Some(entity) = state.entity_mut(apprentice_id) {
+            if let Some(npc) = entity.npc.as_mut() {
+                npc.mentor_lineage.insert(0, mentor_id);
+                npc.apprentice_of = None;
+                npc.apprenticeship_start_tick = 0;
+            }
+        }
+        if let Some(entity) = state.entity_mut(mentor_id) {
+            if let Some(npc) = entity.npc.as_mut() {
+                npc.apprentices.retain(|&id| id != apprentice_id);
+            }
+        }
+    }
+
     // Events
     const MAX_WORLD_EVENTS: usize = 1000;
     const MAX_CHRONICLE_ENTRIES: usize = 2000;
@@ -1444,6 +1497,9 @@ impl WorldSim {
         // POST-APPLY: process world events into state changes.
         self.process_world_events();
 
+        // TRADE COMPLETIONS -- record profitable trades for route establishment.
+        self.process_trade_completions();
+
         // GRID ASSIGNMENT — entities near grids get assigned to them.
         // This enables combat: monsters entering a settlement grid trigger
         // fidelity escalation → High → compute_high runs combat.
@@ -1466,6 +1522,9 @@ impl WorldSim {
 
         // WORK STATE — advance NPC work state machine.
         super::systems::work::advance_work_states(&mut self.state);
+
+        // BUILDING SPECIALIZATION — buildings develop specialties from worker classes.
+        super::systems::buildings::update_building_specializations(&mut self.state);
 
         // EATING — hungry NPCs walk to food and eat.
         super::systems::work::advance_eating(&mut self.state);
@@ -1514,6 +1573,9 @@ impl WorldSim {
 
         // OUTLAWS — bandit camps, caravan raids, redemption.
         super::systems::outlaws::advance_outlaws(&mut self.state);
+
+        // TRADE ROUTES -- decay unused routes, abandon dead ones.
+        super::systems::trade_routes::advance_trade_routes(&mut self.state);
 
         // TRADE GUILDS — merchants form guilds, set prices, fund caravans.
         super::systems::trade_guilds::advance_trade_guilds(&mut self.state);
@@ -1632,6 +1694,15 @@ impl WorldSim {
             } else {
                 None
             };
+        }
+    }
+
+    /// Process recorded trade completions into trade route state.
+    fn process_trade_completions(&mut self) {
+        for &(entity_id, home_sid, dest_sid, profit) in &self.merged.trade_completions {
+            super::systems::trade_routes::record_profitable_trade(
+                &mut self.state, entity_id, home_sid, dest_sid, profit,
+            );
         }
     }
 

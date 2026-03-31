@@ -236,7 +236,29 @@ pub fn advance_work_states(state: &mut WorldState) {
                         npc.work_state = WorkState::Idle;
                     } else {
                         // Non-forge production: commodity output.
-                        let (commodity, amount) = output_for_building(state, building_id);
+                        let (commodity, base_amount) = output_for_building(state, building_id);
+
+                        // Apply building specialization bonus when worker's primary
+                        // class matches the building's specialization tag.
+                        let amount = {
+                            let spec = state.entity(building_id)
+                                .and_then(|e| e.building.as_ref())
+                                .and_then(|b| {
+                                    b.specialization_tag.map(|tag| (tag, b.specialization_strength))
+                                });
+                            if let Some((spec_tag, spec_str)) = spec {
+                                let worker_primary = state.entities[i].npc.as_ref()
+                                    .and_then(|n| n.classes.iter().max_by_key(|c| c.level))
+                                    .map(|c| c.class_name_hash);
+                                if worker_primary == Some(spec_tag) {
+                                    base_amount * (1.0 + spec_str * 0.5)
+                                } else {
+                                    base_amount
+                                }
+                            } else {
+                                base_amount
+                            }
+                        };
 
                         let storage_pos = home_sid
                             .and_then(|sid| storage_by_settlement.get(&sid))

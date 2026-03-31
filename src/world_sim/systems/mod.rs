@@ -132,6 +132,7 @@ pub mod threat;
 pub mod threat_clock;
 pub mod timed_events;
 pub mod trade_goods;
+pub mod trade_routes;
 pub mod travel;
 pub mod traveling_merchants;
 pub mod treasure_hunts;
