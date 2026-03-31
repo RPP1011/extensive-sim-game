@@ -16,8 +16,7 @@
 
 use crate::world_sim::city_grid::{CellState, CityGrid, InfluenceMap, ZoneType, CellTerrain, suitability_score};
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::interior_gen::footprint_size;
-use crate::world_sim::state::{WorldState, Entity, EntityKind, EconomicIntent, ChronicleEntry, ChronicleCategory, tags, BuildingType, BuildingData, SettlementSpecialty, ActionTags, WorkState, MemoryEvent, MemEventType, entity_hash};
+use crate::world_sim::state::{WorldState, Entity, EntityKind, EconomicIntent, ChronicleEntry, ChronicleCategory, tags, BuildingType, BuildingData, SettlementSpecialty, ActionTags, WorkState, MemoryEvent, MemEventType, GoalKind, entity_hash};
 use crate::world_sim::NUM_COMMODITIES;
 
 /// Building tick interval for delta-based compute (treasury upgrades).
@@ -116,11 +115,10 @@ pub fn grow_cities(state: &mut WorldState) {
         })
         .collect();
 
-    let mut new_chronicles: Vec<ChronicleEntry> = Vec::new();
-    let mut all_new_entities: Vec<Entity> = Vec::new();
-    state.sync_next_id();
+    // Building spawning is NPC-driven (attempt_npc_build). grow_cities handles
+    // roads, density aging, construction advancement, and specialization.
 
-    for (settlement_id, grid_idx, population, settlement_name, noise_seed, _authority, specialty, settlement_pos) in &settlement_info {
+    for (_settlement_id, grid_idx, _population, _settlement_name, noise_seed, _authority, _specialty, _settlement_pos) in &settlement_info {
         let grid_idx = *grid_idx;
         if grid_idx >= state.city_grids.len() { continue; }
 
@@ -129,166 +127,7 @@ pub fn grow_cities(state: &mut WorldState) {
             state.city_grids[grid_idx].rebuild_frontier();
         }
 
-        // Calculate demand.
-        let building_counts = state.city_grids[grid_idx].building_counts();
-        let total_buildings: u32 = building_counts.iter().sum();
-        let demand = calculate_demand(*population, &building_counts, total_buildings);
-
-        // Growth limited by resource availability and NPC builder labor — no artificial cap.
-        let budget = 3.min(state.city_grids[grid_idx].frontier.len());
-        if budget == 0 { continue; }
-
-        // Score all frontier cells for each zone type, pick best (zone, score) per cell.
-        let frontier_snapshot: Vec<(usize, usize)> = state.city_grids[grid_idx].frontier.iter().copied().collect();
-
-        let mut scored: Vec<(usize, usize, ZoneType, f32)> = Vec::with_capacity(frontier_snapshot.len());
-
-        for &(col, row) in &frontier_snapshot {
-            // Assign zone directly from demand weights — suitability scoring is disabled
-            // until the affinity matrix tuning is fixed (prevents Library domination).
-            let zones = [
-                (ZoneType::Residential, demand.residential),
-                (ZoneType::Commercial,  demand.commercial),
-                (ZoneType::Industrial,  demand.industrial),
-                (ZoneType::Military,    demand.military),
-                (ZoneType::Religious,   demand.religious),
-                (ZoneType::Noble,       demand.noble),
-                (ZoneType::Arcane,      demand.arcane),
-            ];
-            let best = match zones.iter().max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)) {
-                Some(b) => b,
-                None => continue,
-            };
-            let (best_zone, best_score) = (best.0, best.1);
-            if best_zone != ZoneType::None {
-                scored.push((col, row, best_zone, best_score));
-            }
-        }
-
-        // Sort descending by score.
-        scored.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Pick top N frontier cells, determine footprint, and place buildings.
-        let mut placed_count = 0;
-        for i in 0..scored.len() {
-            if placed_count >= budget { break; }
-            let (col, row, zone, _score) = scored[i];
-
-            // Determine building type and its multi-cell footprint.
-            let building_type = zone_to_building_type(zone, specialty);
-            let (fp_w, fp_h) = footprint_size(building_type, 0); // tier 0 at placement
-
-            // Check that the entire rectangular footprint is available.
-            // The frontier cell (col, row) is the top-left corner of the footprint.
-            let grid = &state.city_grids[grid_idx];
-            let fits = (0..fp_h).all(|dy| {
-                (0..fp_w).all(|dx| {
-                    let c = col + dx;
-                    let r = row + dy;
-                    if !grid.in_bounds(c, r) { return false; }
-                    let cell = grid.cell(c, r);
-                    cell.state == CellState::Empty
-                        && cell.terrain != CellTerrain::Water
-                        && cell.terrain != CellTerrain::Cliff
-                })
-            });
-            if !fits { continue; }
-
-            // Check and deduct construction resources from settlement stockpile.
-            let (wood_cost, iron_cost) = building_type.build_cost();
-            let si = state.settlement_idx(*settlement_id);
-            if let Some(si) = si {
-                let s = &state.settlements[si];
-                if s.stockpile[crate::world_sim::commodity::WOOD] < wood_cost
-                    || s.stockpile[crate::world_sim::commodity::IRON] < iron_cost {
-                    continue; // not enough resources
-                }
-                // Deduct
-                state.settlements[si].stockpile[crate::world_sim::commodity::WOOD] -= wood_cost;
-                state.settlements[si].stockpile[crate::world_sim::commodity::IRON] -= iron_cost;
-            } else {
-                continue; // settlement not found
-            }
-
-            // Spawn a real building entity.
-            let new_id = state.next_entity_id();
-            let world_pos = state.city_grids[grid_idx].grid_to_world(col, row, *settlement_pos);
-
-            let mut entity = Entity::new_building(new_id, world_pos);
-            entity.building = Some(BuildingData {
-                building_type,
-                settlement_id: Some(*settlement_id),
-                grid_col: col as u16,
-                grid_row: row as u16,
-                footprint_w: fp_w as u8,
-                footprint_h: fp_h as u8,
-                tier: 0,
-                room_seed: entity_hash(new_id, state.tick, 0x800E) as u64,
-                rooms: building_type.default_rooms(),
-                residential_capacity: building_type.residential_capacity(),
-                work_capacity: building_type.work_capacity(),
-                resident_ids: Vec::new(),
-                worker_ids: Vec::new(),
-                // First 30 buildings per settlement start complete (bootstrap).
-                // Later buildings require construction by builders.
-                construction_progress: 0.0,
-                built_tick: state.tick,
-                builder_id: None,
-                temporary: false,
-                ttl_ticks: None,
-                name: generate_building_name(building_type, new_id),
-                storage: [0.0; NUM_COMMODITIES],
-                storage_capacity: building_type.storage_capacity(),
-                owner_id: None,
-                builder_modifiers: Vec::new(),
-                owner_modifiers: Vec::new(),
-                worker_class_ticks: Vec::new(),
-                specialization_tag: None,
-                specialization_strength: 0.0,
-                specialization_name: String::new(),
-            });
-
-            // Mark ALL cells in the footprint as Building with this entity ID.
-            for dy in 0..fp_h {
-                for dx in 0..fp_w {
-                    let c = col + dx;
-                    let r = row + dy;
-                    let cell = state.city_grids[grid_idx].cell_mut(c, r);
-                    cell.state = CellState::Building;
-                    cell.zone = zone;
-                    cell.density = 1;
-                    cell.age = 0;
-                    cell.building_id = Some(new_id);
-                }
-            }
-
-            all_new_entities.push(entity);
-
-            // Update frontier incrementally for ALL cells in the footprint.
-            for dy in 0..fp_h {
-                for dx in 0..fp_w {
-                    state.city_grids[grid_idx].update_frontier_around(col + dx, row + dy);
-                }
-            }
-
-            // Update influence map (propagate from top-left corner).
-            let strength = 1.0;
-            let grid_ref = state.city_grids[grid_idx].clone();
-            state.influence_maps[grid_idx].propagate_building(col, row, zone, strength, &grid_ref);
-
-            placed_count += 1;
-        }
-
-        // Chronicle entry for notable construction milestones.
-        let new_total: u32 = state.city_grids[grid_idx].building_counts().iter().sum();
-        if new_total > 0 && new_total % 100 == 0 && total_buildings < new_total {
-            new_chronicles.push(ChronicleEntry {
-                tick: state.tick,
-                category: ChronicleCategory::Economy,
-                text: format!("{} has grown to {} buildings", settlement_name, new_total),
-                entity_ids: Vec::new(),
-            });
-        }
+        // Frontier rebuild (for NPC-driven building placement).
 
         // Road extension (every 50 ticks).
         if do_roads {
@@ -297,19 +136,6 @@ pub fn grow_cities(state: &mut WorldState) {
 
         // Density upgrades: cells with age > 200 and >= 6 developed neighbors.
         age_and_upgrade_density(&mut state.city_grids[grid_idx]);
-    }
-
-    // Append chronicles.
-    for entry in new_chronicles {
-        state.chronicle.push(entry);
-    }
-
-    // Push all newly spawned building entities into the world state.
-    if !all_new_entities.is_empty() {
-        for e in all_new_entities {
-            state.entities.push(e);
-        }
-        state.rebuild_entity_cache();
     }
 
     // Legendary NPC cascade influence (every 100 ticks).
@@ -334,6 +160,194 @@ pub fn grow_cities(state: &mut WorldState) {
 
     // Assign unhoused/unassigned NPCs to buildings.
     assign_npcs_to_buildings(state);
+
+    // NPC-driven building: process NPCs with Build goals that have resources.
+    process_npc_builds(state);
+}
+
+/// NPC-driven building placement. Called each grow_cities tick.
+/// NPCs with GoalKind::Build and sufficient resources in their inventory
+/// pick a frontier cell and spawn a building shell.
+fn process_npc_builds(state: &mut WorldState) {
+    use crate::world_sim::commodity;
+    use super::super::interior_gen::footprint_size;
+
+    // Collect NPCs wanting to build: (entity_idx, settlement_id, building_type)
+    let mut build_requests: Vec<(usize, u32, BuildingType)> = Vec::new();
+
+    for (i, entity) in state.entities.iter().enumerate() {
+        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        let npc = match &entity.npc { Some(n) => n, None => continue };
+        let sid = match npc.home_settlement_id { Some(s) => s, None => continue };
+
+        // Check if NPC has an active Build goal
+        let build_type = npc.goal_stack.goals.iter().find_map(|g| {
+            match g.kind {
+                GoalKind::Build { .. } => Some(BuildingType::House), // default to House for shelter goal
+                _ => None,
+            }
+        });
+        let building_type = match build_type { Some(bt) => bt, None => continue };
+
+        // Check if NPC has resources in their inventory
+        let inv = match &entity.inventory { Some(inv) => inv, None => continue };
+        let (wood_cost, iron_cost) = building_type.build_cost();
+        if inv.commodities[commodity::WOOD] < wood_cost { continue; }
+        if inv.commodities[commodity::IRON] < iron_cost { continue; }
+
+        build_requests.push((i, sid, building_type));
+    }
+
+    if build_requests.is_empty() { return; }
+
+    let tick = state.tick;
+    let mut new_entities: Vec<Entity> = Vec::new();
+
+    for (entity_idx, settlement_id, building_type) in build_requests {
+        // Find the settlement's city grid
+        let (grid_idx, settlement_pos) = match state.settlement(settlement_id) {
+            Some(s) => match s.city_grid_idx {
+                Some(gi) if gi < state.city_grids.len() => (gi, s.pos),
+                _ => continue,
+            },
+            None => continue,
+        };
+
+        // Rebuild frontier if needed
+        if state.city_grids[grid_idx].frontier.is_empty() {
+            state.city_grids[grid_idx].rebuild_frontier();
+        }
+        if state.city_grids[grid_idx].frontier.is_empty() { continue; }
+
+        // Pick a frontier cell (closest to the NPC)
+        let npc_pos = state.entities[entity_idx].pos;
+        let (fp_w, fp_h) = footprint_size(building_type, 0);
+
+        let best_cell = state.city_grids[grid_idx].frontier.iter()
+            .filter(|&&(col, row)| {
+                // Check footprint fits
+                (0..fp_h).all(|dy| (0..fp_w).all(|dx| {
+                    let c = col + dx;
+                    let r = row + dy;
+                    state.city_grids[grid_idx].in_bounds(c, r) && {
+                        let cell = state.city_grids[grid_idx].cell(c, r);
+                        cell.state == CellState::Empty
+                            && cell.terrain != CellTerrain::Water
+                            && cell.terrain != CellTerrain::Cliff
+                    }
+                }))
+            })
+            .min_by(|a, b| {
+                let wa = state.city_grids[grid_idx].grid_to_world(a.0, a.1, settlement_pos);
+                let wb = state.city_grids[grid_idx].grid_to_world(b.0, b.1, settlement_pos);
+                let da = (wa.0 - npc_pos.0).powi(2) + (wa.1 - npc_pos.1).powi(2);
+                let db = (wb.0 - npc_pos.0).powi(2) + (wb.1 - npc_pos.1).powi(2);
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .copied();
+
+        let (col, row) = match best_cell { Some(c) => c, None => continue };
+
+        // Deduct resources from NPC inventory
+        if let Some(inv) = &mut state.entities[entity_idx].inventory {
+            let (wood_cost, iron_cost) = building_type.build_cost();
+            inv.commodities[commodity::WOOD] -= wood_cost;
+            inv.commodities[commodity::IRON] -= iron_cost;
+        }
+
+        // Spawn building shell
+        state.sync_next_id();
+        let new_id = state.next_entity_id();
+        let world_pos = state.city_grids[grid_idx].grid_to_world(col, row, settlement_pos);
+        let zone = building_type_to_zone(building_type);
+
+        let mut entity = Entity::new_building(new_id, world_pos);
+        entity.building = Some(BuildingData {
+            building_type,
+            settlement_id: Some(settlement_id),
+            grid_col: col as u16,
+            grid_row: row as u16,
+            footprint_w: fp_w as u8,
+            footprint_h: fp_h as u8,
+            tier: 0,
+            room_seed: entity_hash(new_id, tick, 0x800E) as u64,
+            rooms: building_type.default_rooms(),
+            residential_capacity: building_type.residential_capacity(),
+            work_capacity: building_type.work_capacity(),
+            resident_ids: Vec::new(),
+            worker_ids: Vec::new(),
+            construction_progress: 0.0,
+            built_tick: tick,
+            builder_id: Some(state.entities[entity_idx].id),
+            temporary: false,
+            ttl_ticks: None,
+            name: generate_building_name(building_type, new_id),
+            storage: [0.0; NUM_COMMODITIES],
+            storage_capacity: building_type.storage_capacity(),
+            owner_id: Some(state.entities[entity_idx].id),
+            builder_modifiers: Vec::new(),
+            owner_modifiers: Vec::new(),
+            worker_class_ticks: Vec::new(),
+            specialization_tag: None,
+            specialization_strength: 0.0,
+            specialization_name: String::new(),
+        });
+
+        // Mark grid cells
+        for dy in 0..fp_h {
+            for dx in 0..fp_w {
+                let cell = state.city_grids[grid_idx].cell_mut(col + dx, row + dy);
+                cell.state = CellState::Building;
+                cell.zone = zone;
+                cell.density = 1;
+                cell.age = 0;
+                cell.building_id = Some(new_id);
+            }
+        }
+        for dy in 0..fp_h {
+            for dx in 0..fp_w {
+                state.city_grids[grid_idx].update_frontier_around(col + dx, row + dy);
+            }
+        }
+
+        new_entities.push(entity);
+
+        // Pop the Build goal from the NPC's stack
+        if let Some(npc) = &mut state.entities[entity_idx].npc {
+            npc.goal_stack.goals.retain(|g| !matches!(g.kind, GoalKind::Build { .. }));
+        }
+
+        // Chronicle
+        let npc_name = state.entities[entity_idx].npc.as_ref()
+            .map(|n| n.name.clone()).unwrap_or_default();
+        state.chronicle.push(ChronicleEntry {
+            tick,
+            category: ChronicleCategory::Economy,
+            text: format!("{} began building a {:?}", npc_name, building_type),
+            entity_ids: vec![state.entities[entity_idx].id, new_id],
+        });
+    }
+
+    if !new_entities.is_empty() {
+        for e in new_entities {
+            state.entities.push(e);
+        }
+        state.rebuild_entity_cache();
+    }
+}
+
+/// Map building type to zone type for grid cell assignment.
+fn building_type_to_zone(bt: BuildingType) -> ZoneType {
+    match bt {
+        BuildingType::House | BuildingType::Longhouse | BuildingType::Manor => ZoneType::Residential,
+        BuildingType::Market | BuildingType::Warehouse | BuildingType::TradePost | BuildingType::Inn => ZoneType::Commercial,
+        BuildingType::Farm | BuildingType::Mine | BuildingType::Sawmill | BuildingType::Forge
+        | BuildingType::Workshop | BuildingType::Apothecary => ZoneType::Industrial,
+        BuildingType::Barracks | BuildingType::Watchtower | BuildingType::Wall | BuildingType::Gate => ZoneType::Military,
+        BuildingType::Temple | BuildingType::Shrine => ZoneType::Religious,
+        BuildingType::GuildHall | BuildingType::CourtHouse | BuildingType::Treasury | BuildingType::Library => ZoneType::Noble,
+        _ => ZoneType::Residential,
+    }
 }
 
 // ---------------------------------------------------------------------------
