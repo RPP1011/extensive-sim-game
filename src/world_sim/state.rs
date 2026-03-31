@@ -2021,7 +2021,7 @@ impl Default for WorkState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PlannedAction {
     /// Walk to a specific position.
-    MoveTo { pos: (f32, f32) },
+    MoveTo { target: (f32, f32) },
     /// Sell carried commodity at current location.
     Sell { commodity: usize },
     /// Buy commodity at current location.
@@ -2030,6 +2030,18 @@ pub enum PlannedAction {
     Wait { ticks: u16 },
     /// Engage in combat (fight hostiles in range).
     Fight,
+    /// Perform a timed action at current location.
+    Perform { activity: String, ticks: u16 },
+    /// Pick up commodity from nearby building.
+    Acquire { commodity: u8, amount: f32 },
+    /// Deposit commodity at nearby building.
+    Deposit { commodity: u8, amount: f32 },
+    /// Pay gold.
+    PayGold { amount: f32 },
+    /// Gather a resource: walk to nearest resource node and harvest into inventory.
+    Gather { commodity: u8, amount: f32 },
+    /// Place a building on the city grid (requires resources in inventory).
+    PlaceBuilding { building_type: u8 },
 }
 
 /// Execution status of a single plan step.
@@ -2038,6 +2050,7 @@ pub enum StepStatus {
     Pending,
     InProgress,
     Complete,
+    Failed,
 }
 
 /// A single step in a multi-step plan attached to a Goal.

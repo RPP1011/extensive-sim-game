@@ -398,7 +398,7 @@ fn evaluate_economic_options(
     let income = npc.income_rate.max(0.01);
 
     // --- Shelter need: build a house ---
-    if npc.needs.shelter < 40.0 && npc.home_building_id.is_none() {
+    if npc.needs.shelter < 80.0 && npc.home_building_id.is_none() {
         let has_build = npc.goal_stack.goals.iter().any(|g| {
             matches!(g.kind, GoalKind::Build { .. })
         });
@@ -417,28 +417,8 @@ fn evaluate_economic_options(
 
             match decision {
                 EconDecision::Diy => {
-                    if wood_cost > 0.0 {
-                        let mut g = Goal::new(
-                            GoalKind::Gather {
-                                commodity: commodity::WOOD as u8,
-                                amount: wood_cost,
-                            },
-                            goal_priority::BUILD, tick,
-                        );
-                        g.target_entity = Some(settlement_id);
-                        npc.goal_stack.push(g);
-                    }
-                    if iron_cost > 0.0 {
-                        let mut g = Goal::new(
-                            GoalKind::Gather {
-                                commodity: commodity::IRON as u8,
-                                amount: iron_cost,
-                            },
-                            goal_priority::BUILD, tick,
-                        );
-                        g.target_entity = Some(settlement_id);
-                        npc.goal_stack.push(g);
-                    }
+                    // Push a single Build goal — GOAP will decompose it into
+                    // Gather(WOOD) → Gather(IRON) → PlaceBuilding → Construct
                     npc.goal_stack.push(Goal::new(
                         GoalKind::Build { building_id: 0 },
                         goal_priority::BUILD, tick,
@@ -473,7 +453,7 @@ fn evaluate_economic_options(
     }
 
     // --- Food need: buy food vs farm ---
-    if npc.needs.hunger < 35.0 {
+    if npc.needs.hunger < 60.0 {
         let has_eat = npc.goal_stack.has(&GoalKind::Eat);
         let has_gather_food = npc.goal_stack.goals.iter().any(|g| {
             matches!(g.kind, GoalKind::Gather { commodity, .. } if commodity == commodity::FOOD as u8)

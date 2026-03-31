@@ -1534,6 +1534,9 @@ impl WorldSim {
         // DEBT REPAYMENT — NPCs repay debt from income.
         super::systems::economy::advance_debt(&mut self.state);
 
+        // PLAN EXECUTION — advance NPC goal plans (gathering, building, moving).
+        super::systems::gathering::advance_plans(&mut self.state);
+
         // CONTRACTS — match, complete, and expire service contracts.
         super::systems::contracts::advance_contracts(&mut self.state);
 

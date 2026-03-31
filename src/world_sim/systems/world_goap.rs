@@ -14,42 +14,13 @@
 //!
 //! Cadence: every 20 ticks (only for NPCs with active goals missing plans).
 
-use serde::{Serialize, Deserialize};
 use crate::world_sim::state::*;
 use crate::world_sim::commodity;
 
 const PLAN_EVAL_INTERVAL: u64 = 20;
 
-/// A planned step within a goal. Sub-goals that the NPC must complete in order.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlannedStep {
-    pub action: PlannedAction,
-    pub status: StepStatus,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum PlannedAction {
-    /// Walk to a specific position.
-    MoveTo { target: (f32, f32) },
-    /// Perform a timed action at current location.
-    Perform { activity: String, ticks: u16 },
-    /// Pick up / withdraw commodity from nearby building.
-    Acquire { commodity: u8, amount: f32 },
-    /// Deposit commodity at nearby building.
-    Deposit { commodity: u8, amount: f32 },
-    /// Pay gold.
-    PayGold { amount: f32 },
-    /// Wait idle for N ticks.
-    Wait { ticks: u16 },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum StepStatus {
-    Pending,
-    InProgress,
-    Complete,
-    Failed,
-}
+// PlannedStep, PlannedAction, and StepStatus are defined in state.rs
+// and re-exported via `use crate::world_sim::state::*`
 
 /// Generate a plan (sequence of steps) for a goal based on current NPC state.
 /// Returns None if the goal can't be planned (missing info).
@@ -170,6 +141,62 @@ fn plan_goal(
                 status: StepStatus::Pending,
             }])
         }
+        GoalKind::Build { .. } => {
+            // Build plan: gather resources → place building
+            let (wood_cost, iron_cost) = BuildingType::House.build_cost();
+            let mut steps = Vec::new();
+
+            // Step 1: Gather wood (if needed)
+            if wood_cost > 0.0 {
+                steps.push(PlannedStep {
+                    action: PlannedAction::Gather {
+                        commodity: commodity::WOOD as u8,
+                        amount: wood_cost,
+                    },
+                    status: StepStatus::Pending,
+                });
+            }
+
+            // Step 2: Gather iron (if needed)
+            if iron_cost > 0.0 {
+                steps.push(PlannedStep {
+                    action: PlannedAction::Gather {
+                        commodity: commodity::IRON as u8,
+                        amount: iron_cost,
+                    },
+                    status: StepStatus::Pending,
+                });
+            }
+
+            // Step 3: Place the building
+            steps.push(PlannedStep {
+                action: PlannedAction::PlaceBuilding {
+                    building_type: BuildingType::House as u8,
+                },
+                status: StepStatus::Pending,
+            });
+
+            // Step 4: Construct (timed action)
+            steps.push(PlannedStep {
+                action: PlannedAction::Perform {
+                    activity: "constructing".into(),
+                    ticks: 200,
+                },
+                status: StepStatus::Pending,
+            });
+
+            Some(steps)
+        }
+        GoalKind::Gather { commodity, amount } => {
+            // Simple gather plan: walk to resource, harvest
+            Some(vec![PlannedStep {
+                action: PlannedAction::Gather {
+                    commodity: *commodity,
+                    amount: *amount,
+                },
+                status: StepStatus::Pending,
+            }])
+        }
         _ => None, // other goals don't need multi-step plans yet
     }
 }
@@ -204,18 +231,16 @@ pub fn evaluate_world_goap(state: &mut WorldState) {
 
         // Generate plan for this goal.
         if let Some(steps) = plan_goal(&goal, npc, entity_pos, food) {
-            // Mark goal as having a plan (progress > 0 = planned).
             if let Some(active) = npc.goal_stack.current_mut() {
+                active.plan = steps;
+                active.plan_index = 0;
                 active.progress = 0.01; // "planned" sentinel
-            }
-            // The plan steps inform the goal's target_pos for pathfinding.
-            // The first MoveTo step's target becomes the goal's target_pos.
-            for step in &steps {
-                if let PlannedAction::MoveTo { target } = &step.action {
-                    if let Some(active) = npc.goal_stack.current_mut() {
+                // Set target_pos from first MoveTo step (if any).
+                for step in &active.plan {
+                    if let PlannedAction::MoveTo { target } = &step.action {
                         active.target_pos = Some(*target);
+                        break;
                     }
-                    break;
                 }
             }
         }
