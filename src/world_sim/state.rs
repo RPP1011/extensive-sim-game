@@ -1078,6 +1078,23 @@ impl BuildingType {
             Self::Well | Self::Tent => ZoneType::None,
         }
     }
+
+    /// Tag hashes relevant to production at this building type.
+    /// Used for class→building affinity scoring (Phase 6 production quality).
+    pub fn production_tags(&self) -> &'static [(u32, f32)] {
+        match self {
+            Self::Farm => &[(tags::FARMING, 1.0), (tags::LABOR, 0.3)],
+            Self::Mine => &[(tags::MINING, 1.0), (tags::ENDURANCE, 0.3)],
+            Self::Sawmill => &[(tags::WOODWORK, 1.0), (tags::LABOR, 0.3)],
+            Self::Forge | Self::Workshop => &[(tags::SMITHING, 0.5), (tags::CRAFTING, 0.5), (tags::LABOR, 0.2)],
+            Self::Apothecary => &[(tags::HERBALISM, 0.6), (tags::MEDICINE, 0.4)],
+            Self::Market | Self::TradePost => &[(tags::TRADE, 0.6), (tags::NEGOTIATION, 0.4)],
+            Self::Library => &[(tags::RESEARCH, 0.5), (tags::LORE, 0.5)],
+            Self::Temple | Self::Shrine => &[(tags::FAITH, 0.6), (tags::MEDICINE, 0.2), (tags::DISCIPLINE, 0.2)],
+            Self::Barracks => &[(tags::COMBAT, 0.4), (tags::DISCIPLINE, 0.3), (tags::TACTICS, 0.3)],
+            _ => &[], // non-production buildings
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -629,3 +629,29 @@ mod tests {
         assert!(!a1.name.is_empty(), "Should have a name");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Public API: class→building relevance for production quality (Phase 6)
+// ---------------------------------------------------------------------------
+
+/// Compute relevance of a class (by name_hash) to a set of building production tags.
+/// Returns [0.0, 1.0] — dot product of class score_tags vs building tags, normalized.
+pub fn class_building_relevance(class_name_hash: u32, building_tags: &[(u32, f32)]) -> f32 {
+    if building_tags.is_empty() { return 0.0; }
+
+    let tmpl = match TEMPLATES.iter().find(|t| t.name_hash == class_name_hash) {
+        Some(t) => t,
+        None => return 0.0, // runtime-generated class — fall back to 0
+    };
+
+    let mut dot = 0.0f32;
+    for &(btag, bweight) in building_tags {
+        for &(ctag, cweight) in tmpl.score_tags {
+            if ctag == btag {
+                dot += bweight * cweight;
+            }
+        }
+    }
+    // Normalize: max possible dot is ~1.0 (both sides sum to ~1.0).
+    dot.min(1.0)
+}

@@ -142,6 +142,8 @@ pub fn advance_work_states(state: &mut WorldState) {
     let mut item_spawns: Vec<(Entity,)> = Vec::new();
     // Collect resource harvests: (resource_entity_index, amount_to_deduct).
     let mut resource_harvests: Vec<(usize, f32)> = Vec::new();
+    // Collect esteem boosts for high-quality production.
+    let mut esteem_boosts: Vec<usize> = Vec::new();
 
     // Pre-compute nearest resource per building position + type for O(1) lookup.
     // Key: (building_id), Value: (resource_entity_idx, distance_sq).
@@ -255,7 +257,7 @@ pub fn advance_work_states(state: &mut WorldState) {
                         if production_allowed {
                             // Apply building specialization bonus when worker's primary
                             // class matches the building's specialization tag.
-                            let amount = {
+                            let mut amount = {
                                 let spec = state.entity(building_id)
                                     .and_then(|e| e.building.as_ref())
                                     .and_then(|b| {
@@ -274,6 +276,36 @@ pub fn advance_work_states(state: &mut WorldState) {
                                     base_amount
                                 }
                             };
+
+                            // Class-level production quality: best matching class ×
+                            // level × focus. Higher-level workers in relevant classes
+                            // produce more, modulated by need satisfaction.
+                            let building_tags = state.entity(building_id)
+                                .and_then(|e| e.building.as_ref())
+                                .map(|b| b.building_type.production_tags())
+                                .unwrap_or(&[]);
+                            if let Some(npc) = state.entities[i].npc.as_ref() {
+                                let mut best_effective_level = 0.0f32;
+                                for class in &npc.classes {
+                                    let rel = crate::world_sim::class_gen::class_building_relevance(
+                                        class.class_name_hash, building_tags,
+                                    );
+                                    if rel > 0.1 {
+                                        let eff = class.level as f32 * rel;
+                                        if eff > best_effective_level {
+                                            best_effective_level = eff;
+                                        }
+                                    }
+                                }
+                                let focus = npc.focus();
+                                let quality_mult = (1.0 + best_effective_level * 0.03) * focus;
+                                amount *= quality_mult;
+
+                                // Esteem boost on high-quality production.
+                                if quality_mult > 1.3 {
+                                    esteem_boosts.push(i);
+                                }
+                            }
 
                             // Deduct from the resource node.
                             if let Some(ridx) = resource_idx {
@@ -386,6 +418,13 @@ pub fn advance_work_states(state: &mut WorldState) {
             if let Some(res) = &mut state.entities[resource_idx].resource {
                 res.remaining = (res.remaining - amount).max(0.0);
             }
+        }
+    }
+
+    // Apply esteem boosts for high-quality production.
+    for entity_idx in esteem_boosts {
+        if let Some(npc) = &mut state.entities[entity_idx].npc {
+            npc.needs.esteem = (npc.needs.esteem + 1.0).min(100.0);
         }
     }
 }
