@@ -1169,14 +1169,7 @@ fn print_warm_summary(state: &WorldState) {
     });
     for (rank, s) in settlements.iter().enumerate() {
         let prosperity = s.treasury + s.population as f32 * 10.0;
-        let bld_info = s.city_grid_idx
-            .and_then(|idx| state.city_grids.get(idx))
-            .map(|g| {
-                let counts = g.building_counts();
-                let total: u32 = counts.iter().sum();
-                format!(" bld:{}", total)
-            })
-            .unwrap_or_default();
+        let bld_info = String::new(); // CityGrid building counts removed — tile system
         println!("  {}. {} ({}) -- pop:{} ${:.0}{} prosperity:{:.0}",
             rank + 1, s.name, s.specialty, s.population, s.treasury, bld_info, prosperity);
     }
@@ -2514,15 +2507,7 @@ fn create_settlements(
 
         state.settlements.push(settlement);
 
-        // Create city grid for this settlement.
-        let terrain_name = state.regions[region_idx].terrain.name();
-        let grid = bevy_game::world_sim::city_grid::CityGrid::new(128, 128, i as u32, terrain_name, args.seed + i as u64);
-        let influence = bevy_game::world_sim::city_grid::InfluenceMap::new(128, 128);
-        let grid_idx = state.city_grids.len();
-        state.city_grids.push(grid);
-        state.influence_maps.push(influence);
-        // Update the settlement with grid index.
-        state.settlements.last_mut().unwrap().city_grid_idx = Some(grid_idx);
+        // CityGrid creation skipped — tile system replaces CityGrid.
 
         state.grids.push(LocalGrid {
             id: i as u32,

@@ -8,7 +8,6 @@
 
 use crate::world_sim::state::*;
 use crate::world_sim::naming;
-use crate::world_sim::city_grid::{CityGrid, InfluenceMap};
 
 const FOUNDING_INTERVAL: u64 = 500;
 const OVERCROWDING_MULT: f32 = 1.5;
@@ -118,13 +117,8 @@ pub fn advance_settlement_founding(state: &mut WorldState) {
     new_settlement.treasury = 50.0;
     new_settlement.stockpile[crate::world_sim::commodity::FOOD] = 20.0;
 
-    // City grid.
-    let grid = CityGrid::new(128, 128, new_sid, target_terrain.name(), tick);
-    let influence = InfluenceMap::new(128, 128);
-    let grid_idx = state.city_grids.len();
-    state.city_grids.push(grid);
-    state.influence_maps.push(influence);
-    new_settlement.city_grid_idx = Some(grid_idx);
+    // City grid creation skipped — tile system replaces CityGrid.
+    // Settlements grow organically via BuildSeed + room growth automaton.
 
     state.settlements.push(new_settlement);
 

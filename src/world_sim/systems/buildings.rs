@@ -97,11 +97,20 @@ pub fn compute_buildings_for_settlement(
 
 /// Grow all settlement city grids. Called from `WorldSim::grow_cities()` after
 /// the apply phase, so it can mutate grids directly.
+///
+/// NOTE: CityGrid-based growth is being replaced by the tile-based construction
+/// system (Level 1 room growth automaton + Level 2 settlement planning).
+/// This function is now a stub that only handles building specialization updates.
 pub fn grow_cities(state: &mut WorldState) {
     if state.tick % GROWTH_TICK_INTERVAL != 0 {
         return;
     }
+    // CityGrid growth disabled — tile system replaces it.
+    // Building placement now happens through BuildSeed + room growth automaton.
+    // Only keep specialization tracking and legacy compatibility.
+    return;
 
+    #[allow(unreachable_code)]
     let do_roads = state.tick % ROAD_EXTENSION_INTERVAL == 0;
 
     // Collect settlement info we need before mutating grids.

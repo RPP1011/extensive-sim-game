@@ -18,6 +18,10 @@ const WAYPOINT_ARRIVE_DIST: f32 = 1.5;
 /// Called post-apply from runtime.rs.
 /// Path computation is staggered: only recompute for a subset of NPCs each tick.
 pub fn advance_pathfinding(state: &mut WorldState) {
+    // CityGrid pathfinding disabled — NPCs use world-space move_target directly.
+    // The tile system handles movement cost modifiers in movement.rs.
+    if state.city_grids.is_empty() { return; }
+
     // Only compute new paths every 10 ticks to reduce A* overhead.
     let compute_paths = state.tick % 10 == 0;
     // Pre-collect settlement grid info: (settlement_id, city_grid_idx, settlement_pos).
