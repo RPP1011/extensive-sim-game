@@ -80,7 +80,7 @@ fn border_glyph(mask: u8) -> char {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::overworld_grid::{MapCell, OverworldGrid, TerrainType};
+    use crate::overworld_grid::{OverworldGrid, TerrainType};
 
     fn make_small_grid() -> OverworldGrid {
         // 4x4 grid with faction 0 on left half, faction 1 on right half

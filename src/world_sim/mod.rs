@@ -21,6 +21,7 @@ pub mod ability_quality;
 pub mod class_dsl;
 pub mod class_gen;
 pub mod grammar_space;
+pub mod interior_gen;
 pub mod naming;
 pub mod runtime;
 pub mod systems;

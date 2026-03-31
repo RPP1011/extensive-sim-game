@@ -233,7 +233,7 @@ pub fn render_entity_layer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::overworld_grid::{OverworldGrid, GRID_W, GRID_H, TerrainType, Settlement, SettlementKind};
+    use crate::overworld_grid::{OverworldGrid, GRID_W, GRID_H, TerrainType};
 
     #[test]
     fn test_viewport_culling_reduces_glyphs() {

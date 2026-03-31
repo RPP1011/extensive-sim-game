@@ -140,6 +140,7 @@ mod tests {
     use super::*;
     use super::super::overworld_types::*;
     use super::super::roster_types::*;
+    #[allow(unused_imports)]
     use super::super::types::*;
 
     fn minimal_roster() -> CampaignRoster {

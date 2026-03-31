@@ -321,7 +321,6 @@ pub fn compute_food_for_settlement(
 mod tests {
     use super::*;
     use crate::world_sim::state::*;
-    use crate::world_sim::NUM_COMMODITIES;
 
     #[test]
     fn consumes_food_from_settlement() {

@@ -392,7 +392,7 @@ fn flashpoint_intent_input_updates_stage_profile_and_telemetry() {
         configure_flashpoint_stage_mission(&mut snap, &chain, overworld, 77);
         rewrite_flashpoint_mission_name(&mut snap, &chain, overworld, None);
         let id = data_ref.id;
-        drop(data_ref); drop(progress_ref); drop(tactics_ref); drop(overworld);
+        let _ = (data_ref, progress_ref, tactics_ref, overworld);
         let (new_data, new_progress, new_tactics) = snap.into_components(id);
         *world.get_mut::<MissionData>(entities[slot]).unwrap() = new_data;
         *world.get_mut::<MissionProgress>(entities[slot]).unwrap() = new_progress;
