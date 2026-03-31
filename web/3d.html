@@ -190,15 +190,55 @@ let monsterList = []; // live monster entity IDs in order
 const LERP_SPEED = 0.12; // per-frame interpolation factor
 
 // ============================================================
-// BUILD TERRAIN FROM REGIONS
+// Wire grid shader — draws tile grid lines on terrain surfaces
+// ============================================================
+const gridVertexShader = `
+  varying vec3 vWorldPos;
+  varying vec3 vNormal;
+  void main() {
+    vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+    vNormal = normalize(normalMatrix * normal);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+const gridFragmentShader = `
+  uniform vec3 uColor;
+  uniform float uTileSize;
+  uniform float uGridOpacity;
+  varying vec3 vWorldPos;
+  varying vec3 vNormal;
+  void main() {
+    // Base color with simple directional light
+    float light = 0.4 + 0.6 * max(dot(vNormal, normalize(vec3(0.3, 0.8, 0.2))), 0.0);
+    vec3 col = uColor * light;
+
+    // Grid lines on top faces (where normal points up)
+    if (abs(vNormal.y) > 0.5) {
+      float gx = abs(fract(vWorldPos.x / uTileSize + 0.5) - 0.5);
+      float gz = abs(fract(vWorldPos.z / uTileSize + 0.5) - 0.5);
+      float lineWidth = 0.03;
+      float line = 1.0 - smoothstep(lineWidth - 0.01, lineWidth + 0.01, min(gx, gz));
+      col = mix(col, col * 0.6, line * uGridOpacity);
+    }
+
+    // Side faces: slight darkening for depth
+    if (abs(vNormal.y) < 0.5) {
+      col *= 0.7;
+    }
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
+
+// ============================================================
+// BUILD TERRAIN — greedy meshing + wire grid shader
 // ============================================================
 function buildTerrain(regions) {
-  // Clear old
   while (terrainGroup.children.length) terrainGroup.remove(terrainGroup.children[0]);
 
-  const worldTileSize = 4.0;
+  const T = 4.0; // world units per tile
 
-  // Find world bounds from regions
+  // World bounds
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const r of regions) {
     minX = Math.min(minX, r.pos[0]); maxX = Math.max(maxX, r.pos[0]);
@@ -207,92 +247,163 @@ function buildTerrain(regions) {
   const pad = Math.max(maxX - minX, maxY - minY) * 0.3;
   minX -= pad; minY -= pad; maxX += pad; maxY += pad;
 
-  const startTx = Math.floor(minX / worldTileSize);
-  const endTx = Math.ceil(maxX / worldTileSize);
-  const startTy = Math.floor(minY / worldTileSize);
-  const endTy = Math.ceil(maxY / worldTileSize);
+  const sx = Math.floor(minX / T), ex = Math.ceil(maxX / T);
+  const sy = Math.floor(minY / T), ey = Math.ceil(maxY / T);
+  const cols = ex - sx + 1, rows = ey - sy + 1;
 
-  // Batch tiles by terrain type for instancing
-  const tilesByTerrain = {};
-
-  for (let ty = startTy; ty <= endTy; ty++) {
-    for (let tx = startTx; tx <= endTx; tx++) {
-      const wx = tx * worldTileSize + worldTileSize / 2;
-      const wy = ty * worldTileSize + worldTileSize / 2;
-
-      // Nearest region
+  // Build 2D grid: terrain type + height per tile
+  const grid = new Array(cols * rows);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const wx = (sx + c) * T + T / 2;
+      const wy = (sy + r) * T + T / 2;
       let minDist = Infinity, nearest = null;
-      for (const r of regions) {
-        const dx = wx - r.pos[0], dy = wy - r.pos[1];
+      for (const reg of regions) {
+        const dx = wx - reg.pos[0], dy = wy - reg.pos[1];
         const d = dx * dx + dy * dy;
-        if (d < minDist) { minDist = d; nearest = r; }
+        if (d < minDist) { minDist = d; nearest = reg; }
       }
-      if (!nearest) continue;
-
-      const terrain = nearest.terrain;
-      const elev = nearest.elevation;
-      const floating = nearest.is_floating;
-
-      // Height from elevation tier
-      let height = elev * 8; // each tier = 8 world units tall
-      if (terrain === 'Caverns') height = -10; // below ground
-      if (floating) height = 60 + elev * 8; // flying islands hover
-
-      if (!tilesByTerrain[terrain]) tilesByTerrain[terrain] = [];
-      tilesByTerrain[terrain].push({ x: wx, z: wy, y: height, floating });
+      let h = nearest ? nearest.elevation * 8 : 0;
+      const terrain = nearest ? nearest.terrain : 'Plains';
+      if (terrain === 'Caverns') h = -10;
+      if (nearest && nearest.is_floating) h = 60 + nearest.elevation * 8;
+      grid[r * cols + c] = { terrain, h, floating: nearest ? nearest.is_floating : false };
     }
   }
 
-  // Create instanced mesh per terrain type
-  const tileGeo = new THREE.BoxGeometry(worldTileSize - 0.2, 2, worldTileSize - 0.2);
-  for (const [terrain, tiles] of Object.entries(tilesByTerrain)) {
-    const color = terrainColors[terrain] || 0x808080;
-    // Slight per-tile color variation
-    const mat = new THREE.MeshStandardMaterial({
-      color, roughness: 0.9, metalness: 0.0, flatShading: true,
+  // Greedy meshing: merge adjacent tiles with same (terrain, height) into quads
+  // Key: "terrain:height" → merged rectangles
+  const visited = new Uint8Array(cols * rows);
+  const quads = []; // { terrain, h, floating, c0, r0, w, d }
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const idx = r * cols + c;
+      if (visited[idx]) continue;
+      const tile = grid[idx];
+      const key = tile.terrain + ':' + tile.h;
+
+      // Expand width (right)
+      let w = 1;
+      while (c + w < cols && !visited[r * cols + c + w]) {
+        const n = grid[r * cols + c + w];
+        if (n.terrain !== tile.terrain || n.h !== tile.h) break;
+        w++;
+      }
+
+      // Expand depth (down) — all columns in the row must match
+      let d = 1;
+      outer: while (r + d < rows) {
+        for (let cc = c; cc < c + w; cc++) {
+          const ni = (r + d) * cols + cc;
+          if (visited[ni]) break outer;
+          const n = grid[ni];
+          if (n.terrain !== tile.terrain || n.h !== tile.h) break outer;
+        }
+        d++;
+      }
+
+      // Mark visited
+      for (let rr = r; rr < r + d; rr++) {
+        for (let cc = c; cc < c + w; cc++) {
+          visited[rr * cols + cc] = 1;
+        }
+      }
+
+      quads.push({ terrain: tile.terrain, h: tile.h, floating: tile.floating, c0: c, r0: r, w, d });
+    }
+  }
+
+  // Build meshes per terrain type (batch quads into one geometry each)
+  const quadsByTerrain = {};
+  for (const q of quads) {
+    if (!quadsByTerrain[q.terrain]) quadsByTerrain[q.terrain] = [];
+    quadsByTerrain[q.terrain].push(q);
+  }
+
+  for (const [terrain, tQuads] of Object.entries(quadsByTerrain)) {
+    const positions = [];
+    const normals = [];
+    const indices = [];
+    let vi = 0;
+
+    for (const q of tQuads) {
+      const x0 = (sx + q.c0) * T;
+      const z0 = (sy + q.r0) * T;
+      const x1 = x0 + q.w * T;
+      const z1 = z0 + q.d * T;
+      const yTop = q.h;
+      const yBot = Math.min(q.h - 2, -2); // pillar extends down
+
+      // Top face (2 triangles)
+      positions.push(x0, yTop, z0, x1, yTop, z0, x1, yTop, z1, x0, yTop, z1);
+      normals.push(0,1,0, 0,1,0, 0,1,0, 0,1,0);
+      indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
+      vi += 4;
+
+      // Front face (z0 side)
+      positions.push(x0, yTop, z0, x1, yTop, z0, x1, yBot, z0, x0, yBot, z0);
+      normals.push(0,0,-1, 0,0,-1, 0,0,-1, 0,0,-1);
+      indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
+      vi += 4;
+
+      // Back face (z1 side)
+      positions.push(x1, yTop, z1, x0, yTop, z1, x0, yBot, z1, x1, yBot, z1);
+      normals.push(0,0,1, 0,0,1, 0,0,1, 0,0,1);
+      indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
+      vi += 4;
+
+      // Left face (x0 side)
+      positions.push(x0, yTop, z1, x0, yTop, z0, x0, yBot, z0, x0, yBot, z1);
+      normals.push(-1,0,0, -1,0,0, -1,0,0, -1,0,0);
+      indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
+      vi += 4;
+
+      // Right face (x1 side)
+      positions.push(x1, yTop, z0, x1, yTop, z1, x1, yBot, z1, x1, yBot, z0);
+      normals.push(1,0,0, 1,0,0, 1,0,0, 1,0,0);
+      indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
+      vi += 4;
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    geo.setIndex(indices);
+
+    const baseColor = new THREE.Color(terrainColors[terrain] || 0x808080);
+    const mat = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: baseColor },
+        uTileSize: { value: T },
+        uGridOpacity: { value: 0.35 },
+      },
+      vertexShader: gridVertexShader,
+      fragmentShader: gridFragmentShader,
     });
 
-    const mesh = new THREE.InstancedMesh(tileGeo, mat, tiles.length);
+    const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-
-    const matrix = new THREE.Matrix4();
-    const colorObj = new THREE.Color();
-    for (let i = 0; i < tiles.length; i++) {
-      const t = tiles[i];
-      // Pillar height: taller for higher elevation
-      const pillarH = Math.max(2, t.y + 4);
-      matrix.makeScale(1, pillarH / 2, 1);
-      matrix.setPosition(t.x, t.y - pillarH / 2 + 1, t.z);
-      mesh.setMatrixAt(i, matrix);
-
-      // Per-instance color variation
-      const baseColor = new THREE.Color(color);
-      const variation = (Math.sin(t.x * 0.7 + t.z * 0.3) * 0.04);
-      colorObj.setRGB(
-        Math.min(1, baseColor.r + variation),
-        Math.min(1, baseColor.g + variation),
-        Math.min(1, baseColor.b + variation)
-      );
-      mesh.setColorAt(i, colorObj);
-    }
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     terrainGroup.add(mesh);
 
-    // For floating islands, add shadow pillars (translucent columns beneath)
+    // Floating island pillars
     if (terrain === 'FlyingIslands') {
       const pillarGeo = new THREE.CylinderGeometry(1.5, 0.5, 60, 6);
       const pillarMat = new THREE.MeshStandardMaterial({
         color: 0x806040, transparent: true, opacity: 0.3, roughness: 1,
       });
-      for (const t of tiles) {
+      for (const q of tQuads) {
+        const cx = (sx + q.c0 + q.w / 2) * T;
+        const cz = (sy + q.r0 + q.d / 2) * T;
         const pillar = new THREE.Mesh(pillarGeo, pillarMat);
-        pillar.position.set(t.x, t.y - 30, t.z);
+        pillar.position.set(cx, q.h - 30, cz);
         terrainGroup.add(pillar);
       }
     }
   }
+
+  console.log(`Terrain: ${quads.length} merged quads from ${cols * rows} tiles (${((1 - quads.length / (cols * rows)) * 100).toFixed(0)}% reduction)`);
 }
 
 // ============================================================
