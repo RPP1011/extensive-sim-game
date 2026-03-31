@@ -167,6 +167,7 @@ pub mod monster_names;
 pub mod world_ages;
 pub mod haunted;
 pub mod titles;
+pub mod biography;
 
 macro_rules! run_system {
     ($name:expr, $func:expr, $state:expr, $out:expr) => {{

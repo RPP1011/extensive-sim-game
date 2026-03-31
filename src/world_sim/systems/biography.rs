@@ -26,7 +26,7 @@ fn tick_to_date(tick: u64) -> (u64, &'static str) {
 }
 
 /// Map a behavior tag hash to a human-readable display name.
-fn tag_display_name(tag_hash: u32) -> &'static str {
+pub fn tag_display_name(tag_hash: u32) -> &'static str {
     // We use a match against compile-time hashes so this stays in sync with the
     // tag constants defined in state::tags.
     match tag_hash {

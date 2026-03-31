@@ -102,6 +102,50 @@ pub struct CityGridView {
     pub road_tier: Vec<u8>,
 }
 
+/// Detailed NPC state for a selected/tracked entity.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NpcDetailView {
+    pub entity_id: u32,
+    pub name: String,
+    pub level: u32,
+    pub hp: f32,
+    pub max_hp: f32,
+    pub gold: f32,
+    pub archetype: String,
+    // Needs
+    pub hunger: f32,
+    pub shelter: f32,
+    pub safety: f32,
+    pub social: f32,
+    pub purpose: f32,
+    pub esteem: f32,
+    // Emotions
+    pub joy: f32,
+    pub sadness: f32,
+    pub anger: f32,
+    pub fear: f32,
+    pub pride: f32,
+    pub anxiety: f32,
+    // State
+    pub morale: f32,
+    pub stress: f32,
+    pub economic_intent: String,
+    pub work_state: String,
+    // Goals
+    pub goals: Vec<String>,
+    // Classes
+    pub classes: Vec<String>,
+    // Top behavior tags
+    pub top_tags: Vec<(String, f32)>,
+    // Recent memory events
+    pub recent_memories: Vec<String>,
+    // Biography (full text)
+    pub biography: String,
+    // Position
+    pub pos: (f32, f32),
+    pub home_settlement: Option<String>,
+}
+
 /// Aggregate stats for a single frame.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FrameSummary {
@@ -126,6 +170,9 @@ pub struct TraceFrame {
     pub city_grids: Vec<CityGridView>,
     pub events: Vec<EventView>,
     pub summary: FrameSummary,
+    /// Detailed state for a selected/tracked NPC (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_npc: Option<NpcDetailView>,
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +230,17 @@ pub fn generate_frame(
     chronicle: &[ChronicleEntry],
     event_window: u64,
     total_ticks: u64,
+) -> TraceFrame {
+    generate_frame_with_selection(state, chronicle, event_window, total_ticks, None)
+}
+
+/// Build a `TraceFrame` with optional NPC detail for a selected entity.
+pub fn generate_frame_with_selection(
+    state: &WorldState,
+    chronicle: &[ChronicleEntry],
+    event_window: u64,
+    total_ticks: u64,
+    selected_entity_id: Option<u32>,
 ) -> TraceFrame {
     let tick = state.tick;
 
@@ -326,6 +384,88 @@ pub fn generate_frame(
         })
     }).collect();
 
+    // --- Selected NPC detail ---
+    let selected_npc = selected_entity_id.and_then(|eid| {
+        let entity = state.entity(eid)?;
+        if entity.kind != super::state::EntityKind::Npc { return None; }
+        let npc = entity.npc.as_ref()?;
+        let display_name = super::naming::entity_display_name(entity);
+
+        let home_settlement = npc.home_settlement_id
+            .and_then(|sid| state.settlement(sid))
+            .map(|s| s.name.clone());
+
+        let goals: Vec<String> = npc.goal_stack.goals.iter().map(|g| {
+            format!("{:?} (prio {:.1}, progress {:.0}%)", g.kind, g.priority, g.progress * 100.0)
+        }).collect();
+
+        let classes: Vec<String> = npc.classes.iter().map(|c| {
+            let name = if c.display_name.is_empty() {
+                format!("Class({})", c.class_name_hash)
+            } else {
+                c.display_name.clone()
+            };
+            format!("{} lv{}", name, c.level)
+        }).collect();
+
+        let top_tags: Vec<(String, f32)> = {
+            let mut tags: Vec<_> = npc.behavior_profile.iter()
+                .map(|&(hash, val)| {
+                    let name = super::systems::biography::tag_display_name(hash);
+                    (name.to_string(), val)
+                })
+                .collect();
+            tags.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            tags.truncate(8);
+            tags
+        };
+
+        let recent_memories: Vec<String> = npc.memory.events.iter().rev().take(10).map(|e| {
+            let date_tick = e.tick;
+            let year = date_tick / 4800;
+            let season = ["Spring", "Summer", "Autumn", "Winter"][(date_tick / 1200 % 4) as usize];
+            format!("Y{} {} — {:?}", year, season, e.event_type)
+        }).collect();
+
+        let biography = super::systems::biography::generate_biography(entity, state);
+
+        let work_state = format!("{:?}", npc.work_state);
+        let economic_intent = format!("{:?}", npc.economic_intent);
+
+        Some(NpcDetailView {
+            entity_id: eid,
+            name: display_name,
+            level: entity.level,
+            hp: entity.hp,
+            max_hp: entity.max_hp,
+            gold: npc.gold,
+            archetype: npc.archetype.clone(),
+            hunger: npc.needs.hunger,
+            shelter: npc.needs.shelter,
+            safety: npc.needs.safety,
+            social: npc.needs.social,
+            purpose: npc.needs.purpose,
+            esteem: npc.needs.esteem,
+            joy: npc.emotions.joy,
+            sadness: npc.emotions.grief,
+            anger: npc.emotions.anger,
+            fear: npc.emotions.fear,
+            pride: npc.emotions.pride,
+            anxiety: npc.emotions.anxiety,
+            morale: npc.morale,
+            stress: npc.stress,
+            economic_intent,
+            work_state,
+            goals,
+            classes,
+            top_tags,
+            recent_memories,
+            biography,
+            pos: entity.pos,
+            home_settlement,
+        })
+    });
+
     TraceFrame {
         tick,
         total_ticks,
@@ -337,6 +477,7 @@ pub fn generate_frame(
         city_grids,
         events,
         summary,
+        selected_npc,
     }
 }
 
@@ -473,6 +614,7 @@ impl PlaybackController {
                 trade_routes: vec![],
                 city_grids: vec![],
                 events: vec![],
+                selected_npc: None,
                 summary: FrameSummary {
                     alive_npcs: 0,
                     alive_monsters: 0,

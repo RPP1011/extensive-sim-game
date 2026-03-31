@@ -34,6 +34,39 @@
     color: #ccc; padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 2px;
   }
   #controls button:hover { border-color: #c9a84c; color: #fff; }
+
+  #npc-panel {
+    position: fixed; top: 40px; right: 0; width: 320px; bottom: 0;
+    background: rgba(13,11,9,0.92); border-left: 1px solid #2a2520;
+    overflow-y: auto; padding: 12px; display: none; z-index: 15;
+    font-size: 12px; color: #b0a890; backdrop-filter: blur(6px);
+  }
+  #npc-panel.visible { display: block; }
+  #npc-panel h2 { font-size: 15px; color: #c9a84c; margin-bottom: 2px; letter-spacing: 1px; }
+  #npc-panel .sub { font-size: 10px; color: #666; margin-bottom: 10px; }
+  #npc-panel .close-btn {
+    position: absolute; top: 8px; right: 8px; background: none; border: none;
+    color: #666; font-size: 16px; cursor: pointer;
+  }
+  #npc-panel .close-btn:hover { color: #ccc; }
+  .npc-section { margin-bottom: 10px; }
+  .npc-section-title {
+    font-size: 9px; text-transform: uppercase; letter-spacing: 2px;
+    color: #5a5245; margin-bottom: 4px; border-bottom: 1px solid #1a1714;
+    padding-bottom: 2px;
+  }
+  .need-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; font-size: 10px; }
+  .need-bar-label { width: 50px; text-align: right; color: #888; }
+  .need-bar-track { flex: 1; height: 4px; background: #1a1714; border-radius: 2px; overflow: hidden; }
+  .need-bar-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+  .need-bar-val { width: 28px; font-size: 9px; color: #777; }
+  .goal-item { font-size: 11px; color: #a09880; padding: 1px 0; }
+  .tag-pill {
+    display: inline-block; padding: 1px 6px; margin: 1px; border-radius: 2px;
+    font-size: 9px; background: #1a1714; border: 1px solid #2a2520; color: #998;
+  }
+  .bio-text { font-size: 11px; line-height: 1.5; color: #908878; white-space: pre-wrap; }
+  .memory-item { font-size: 10px; color: #807060; padding: 1px 0; }
 </style>
 </head>
 <body>
@@ -49,6 +82,10 @@
 </div>
 <div id="status">Connecting...</div>
 <div id="tooltip"></div>
+<div id="npc-panel">
+  <button class="close-btn" onclick="deselectNpc()">&times;</button>
+  <div id="npc-content"></div>
+</div>
 <div id="controls">
   <button onclick="togglePause()">Pause</button>
   <select onchange="setSpeed(this.value)">
@@ -501,6 +538,11 @@ function onFrame(data) {
   updateEntityTargets(data.entities);
   updateSettlements(data.settlements);
   updateTradeRoutes(data.trade_routes);
+
+  // Update NPC detail panel if selected
+  if (data.selected_npc) {
+    updateNpcPanel(data.selected_npc);
+  }
 }
 
 function updateHud() {
@@ -526,6 +568,138 @@ function setSpeed(val) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ command: 'speed', value: parseInt(val) }));
   }
+}
+
+// ============================================================
+// NPC SELECTION — click to track
+// ============================================================
+let selectedEntityId = null;
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+renderer.domElement.addEventListener('click', (event) => {
+  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+
+  // Find nearest entity to click ray
+  if (!frame || !frame.entities) return;
+  let bestId = null, bestDist = 20; // 20 world units max click distance
+
+  for (const ent of frame.entities) {
+    if (!ent.alive) continue;
+    const ep = entityPositions.get(ent.id);
+    if (!ep) continue;
+    const pos = new THREE.Vector3(ep.current.x, ep.current.y, ep.current.z);
+    const dist = raycaster.ray.distanceToPoint(pos);
+    if (dist < bestDist) { bestDist = dist; bestId = ent.id; }
+  }
+
+  if (bestId !== null) {
+    selectNpc(bestId);
+  }
+});
+
+function selectNpc(entityId) {
+  selectedEntityId = entityId;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ command: 'select', entity_id: entityId }));
+  }
+  document.getElementById('npc-panel').classList.add('visible');
+}
+
+function deselectNpc() {
+  selectedEntityId = null;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ command: 'deselect' }));
+  }
+  document.getElementById('npc-panel').classList.remove('visible');
+}
+
+function updateNpcPanel(npc) {
+  if (!npc) return;
+  const c = document.getElementById('npc-content');
+
+  function needBar(label, val, color) {
+    return `<div class="need-bar">
+      <span class="need-bar-label">${label}</span>
+      <div class="need-bar-track"><div class="need-bar-fill" style="width:${val}%;background:${color}"></div></div>
+      <span class="need-bar-val">${val.toFixed(0)}</span>
+    </div>`;
+  }
+
+  const goalsHtml = npc.goals.length > 0
+    ? npc.goals.map(g => `<div class="goal-item">${g}</div>`).join('')
+    : '<div class="goal-item" style="color:#555">No active goals</div>';
+
+  const tagsHtml = npc.top_tags.map(([name, val]) =>
+    `<span class="tag-pill">${name} ${val.toFixed(0)}</span>`
+  ).join('');
+
+  const classesHtml = npc.classes.length > 0
+    ? npc.classes.join(', ')
+    : 'None';
+
+  const memoriesHtml = npc.recent_memories.length > 0
+    ? npc.recent_memories.map(m => `<div class="memory-item">${m}</div>`).join('')
+    : '<div class="memory-item">No memories</div>';
+
+  c.innerHTML = `
+    <h2>${npc.name}</h2>
+    <div class="sub">Lv${npc.level} ${npc.archetype || 'Unknown'} &middot; ${npc.home_settlement || 'Homeless'} &middot; HP ${npc.hp.toFixed(0)}/${npc.max_hp.toFixed(0)} &middot; ${npc.gold.toFixed(0)}g</div>
+
+    <div class="npc-section">
+      <div class="npc-section-title">Needs</div>
+      ${needBar('Hunger', npc.hunger, '#8a6')}
+      ${needBar('Shelter', npc.shelter, '#68a')}
+      ${needBar('Safety', npc.safety, '#a86')}
+      ${needBar('Social', npc.social, '#86a')}
+      ${needBar('Purpose', npc.purpose, '#a8a')}
+      ${needBar('Esteem', npc.esteem, '#aa6')}
+    </div>
+
+    <div class="npc-section">
+      <div class="npc-section-title">Emotions</div>
+      ${needBar('Joy', npc.joy * 100, '#ac4')}
+      ${needBar('Grief', npc.sadness * 100, '#68a')}
+      ${needBar('Anger', npc.anger * 100, '#c44')}
+      ${needBar('Fear', npc.fear * 100, '#a6a')}
+      ${needBar('Pride', npc.pride * 100, '#ca4')}
+      ${needBar('Anxiety', npc.anxiety * 100, '#8aa')}
+    </div>
+
+    <div class="npc-section">
+      <div class="npc-section-title">State</div>
+      <div style="font-size:10px;color:#888">Morale: ${npc.morale.toFixed(0)} &middot; Stress: ${npc.stress.toFixed(1)}</div>
+      <div style="font-size:10px;color:#888">Intent: ${npc.economic_intent}</div>
+      <div style="font-size:10px;color:#888">Work: ${npc.work_state}</div>
+    </div>
+
+    <div class="npc-section">
+      <div class="npc-section-title">Goals</div>
+      ${goalsHtml}
+    </div>
+
+    <div class="npc-section">
+      <div class="npc-section-title">Classes</div>
+      <div style="font-size:11px;color:#998">${classesHtml}</div>
+    </div>
+
+    <div class="npc-section">
+      <div class="npc-section-title">Behavior Tags</div>
+      <div>${tagsHtml}</div>
+    </div>
+
+    <div class="npc-section">
+      <div class="npc-section-title">Recent Memories</div>
+      ${memoriesHtml}
+    </div>
+
+    <div class="npc-section">
+      <div class="npc-section-title">Biography</div>
+      <div class="bio-text">${npc.biography || 'No biography available.'}</div>
+    </div>
+  `;
 }
 
 // ============================================================

@@ -2670,6 +2670,7 @@ fn run_ws_server(sim: &mut WorldSim, port: u16, args: &WorldSimArgs) -> ExitCode
         let mut chronicle_snapshot: Vec<bevy_game::world_sim::state::ChronicleEntry> = Vec::new();
         let mut ticks_per_frame: u64 = 5;
         let mut paused = false;
+        let mut selected_entity_id: Option<u32> = None;
 
         loop {
             let start = std::time::Instant::now();
@@ -2700,11 +2701,12 @@ fn run_ws_server(sim: &mut WorldSim, port: u16, args: &WorldSimArgs) -> ExitCode
                 chronicle_snapshot.drain(..chronicle_snapshot.len() - 500);
             }
 
-            let frame = bevy_game::world_sim::visualizer::generate_frame(
+            let frame = bevy_game::world_sim::visualizer::generate_frame_with_selection(
                 state,
                 &new_entries,
                 100, // event window
                 max_ticks,
+                selected_entity_id,
             );
 
             // Serialize and send
@@ -2747,6 +2749,16 @@ fn run_ws_server(sim: &mut WorldSim, port: u16, args: &WorldSimArgs) -> ExitCode
                                 }
                                 Some("pause") => { paused = true; println!("Paused"); }
                                 Some("play") => { paused = false; println!("Resumed"); }
+                                Some("select") => {
+                                    selected_entity_id = cmd.get("entity_id")
+                                        .and_then(|v| v.as_u64())
+                                        .map(|v| v as u32);
+                                    println!("Selected entity: {:?}", selected_entity_id);
+                                }
+                                Some("deselect") => {
+                                    selected_entity_id = None;
+                                    println!("Deselected");
+                                }
                                 _ => {}
                             }
                         }
