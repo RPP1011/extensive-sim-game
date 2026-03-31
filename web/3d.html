@@ -705,17 +705,23 @@ renderer.domElement.addEventListener('click', (event) => {
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
 
-  // Find nearest entity to click ray
+  // Find nearest entity to click ray — threshold scales with distance from camera
   if (!frame || !frame.entities) return;
-  let bestId = null, bestDist = 20; // 20 world units max click distance
+  let bestId = null, bestScore = Infinity;
 
   for (const ent of frame.entities) {
-    if (!ent.alive) continue;
+    if (!ent.alive || ent.kind === 2) continue; // skip buildings
     const ep = entityPositions.get(ent.id);
     if (!ep) continue;
     const pos = new THREE.Vector3(ep.current.x, ep.current.y, ep.current.z);
-    const dist = raycaster.ray.distanceToPoint(pos);
-    if (dist < bestDist) { bestDist = dist; bestId = ent.id; }
+    const perpDist = raycaster.ray.distanceToPoint(pos);
+    const camDist = camera.position.distanceTo(pos);
+    // Angular threshold: ~1.5 degrees — must click within ~1.5deg of the entity
+    const threshold = camDist * 0.025;
+    if (perpDist < threshold && perpDist < bestScore) {
+      bestScore = perpDist;
+      bestId = ent.id;
+    }
   }
 
   if (bestId !== null) {
