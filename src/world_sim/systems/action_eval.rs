@@ -117,6 +117,8 @@ pub fn evaluate_and_act(state: &mut WorldState) {
         idx: usize,
         action: CandidateAction,
         npc_action: NpcAction,
+        utility: f32,
+        skip_execute: bool, // hysteresis: keep current action, only update intention ticks
     }
 
     let mut deferred: Vec<DeferredAction> = Vec::with_capacity(entity_count / 2);
@@ -137,12 +139,41 @@ pub fn evaluate_and_act(state: &mut WorldState) {
                 // Skip NPCs in non-idle work states (let the work state machine finish).
                 if !matches!(npc.work_state, WorkState::Idle) { continue; }
 
-                let (action, npc_action) = score_npc_actions(e, npc, &snaps);
-                deferred.push(DeferredAction { idx: i, action, npc_action });
+                let (action, npc_action, utility) = score_npc_actions(e, npc, &snaps);
+
+                // --- Hysteresis: prefer continuing current intention ---
+                let interrupt = is_interrupt(npc, e.hp, e.max_hp);
+                if !interrupt {
+                    if let Some((ref cur_action, cur_utility)) = npc.current_intention {
+                        let same_kind = std::mem::discriminant(cur_action) == std::mem::discriminant(&npc_action);
+                        if same_kind {
+                            // Same action type — continue, just bump ticks.
+                            deferred.push(DeferredAction { idx: i, action, npc_action, utility, skip_execute: false });
+                            continue;
+                        }
+                        // Different action: apply continuation bonus + switching threshold.
+                        // Bonus decays over 200 ticks to prevent permanent lock-in.
+                        let bonus = 0.15 * (1.0 - (npc.intention_ticks as f32 / 200.0)).max(0.0);
+                        let boosted_current = cur_utility + bonus;
+                        if utility - boosted_current <= 0.2 {
+                            // New action doesn't beat threshold — keep current, skip execution.
+                            deferred.push(DeferredAction {
+                                idx: i,
+                                action: CandidateAction::Idle,
+                                npc_action: cur_action.clone(),
+                                utility: boosted_current,
+                                skip_execute: true,
+                            });
+                            continue;
+                        }
+                    }
+                }
+
+                deferred.push(DeferredAction { idx: i, action, npc_action, utility, skip_execute: false });
             }
             EntityKind::Monster => {
                 let (action, npc_action) = score_monster_actions(e, &snaps);
-                deferred.push(DeferredAction { idx: i, action, npc_action });
+                deferred.push(DeferredAction { idx: i, action, npc_action, utility: 0.0, skip_execute: false });
             }
             _ => {}
         }
@@ -151,9 +182,20 @@ pub fn evaluate_and_act(state: &mut WorldState) {
     // --- Phase 3: execute deferred actions (mutable access to state). ---
     let tick = state.tick;
     for da in deferred {
-        execute_action(state, da.idx, &da.action, tick);
-        // Set display action on NPCs.
+        if !da.skip_execute {
+            execute_action(state, da.idx, &da.action, tick);
+        }
+        // Update intention tracking on NPCs.
         if let Some(npc) = &mut state.entities[da.idx].npc {
+            let switched = npc.current_intention.as_ref()
+                .map(|(cur, _)| std::mem::discriminant(cur) != std::mem::discriminant(&da.npc_action))
+                .unwrap_or(true);
+            if switched {
+                npc.intention_ticks = 0;
+            } else {
+                npc.intention_ticks += ACTION_EVAL_INTERVAL as u32;
+            }
+            npc.current_intention = Some((da.npc_action.clone(), da.utility));
             npc.action = da.npc_action;
         }
     }
@@ -163,11 +205,22 @@ pub fn evaluate_and_act(state: &mut WorldState) {
 // NPC scoring
 // ---------------------------------------------------------------------------
 
+/// Check whether the NPC is in an emergency that should bypass hysteresis.
+fn is_interrupt(npc: &NpcData, hp: f32, max_hp: f32) -> bool {
+    // Starving with food available
+    if npc.needs.hunger < 15.0 { return true; }
+    // Danger — safety critical
+    if npc.needs.safety < 20.0 { return true; }
+    // Low HP
+    if max_hp > 0.0 && hp < max_hp * 0.3 { return true; }
+    false
+}
+
 fn score_npc_actions(
     entity: &Entity,
     npc: &NpcData,
     snaps: &[EntitySnap],
-) -> (CandidateAction, NpcAction) {
+) -> (CandidateAction, NpcAction, f32) {
     let pos = entity.pos;
     let needs = &npc.needs;
     let pers = &npc.personality;
@@ -404,8 +457,7 @@ fn score_npc_actions(
         }
     }
 
-    let _ = best_utility; // suppress unused warning
-    (best_action, best_npc_action)
+    (best_action, best_npc_action, best_utility)
 }
 
 // ---------------------------------------------------------------------------

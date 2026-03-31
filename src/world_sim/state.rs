@@ -2550,6 +2550,13 @@ pub struct NpcData {
     /// Lifetime behavior tag accumulator. Sorted by tag hash for O(log n) lookup.
     pub behavior_profile: Vec<(u32, f32)>,
 
+    // --- Action commitment (hysteresis) ---
+
+    /// Current committed action and its utility score at time of commitment.
+    pub current_intention: Option<(NpcAction, f32)>,
+    /// How many ticks the NPC has been executing the current intention.
+    pub intention_ticks: u32,
+
     /// Acquired classes from behavior profile matching.
     pub classes: Vec<ClassSlot>,
 
@@ -2846,6 +2853,15 @@ impl NpcData {
             Err(_) => 0.0,
         }
     }
+
+    /// Focus score derived from average need satisfaction.
+    /// Returns a multiplier in `[0.5, 1.5]` — miserable NPCs are unfocused,
+    /// content NPCs are productive.
+    pub fn focus(&self) -> f32 {
+        let avg = (self.needs.hunger + self.needs.safety + self.needs.shelter
+            + self.needs.social + self.needs.purpose + self.needs.esteem) / 6.0;
+        (avg / 100.0).clamp(0.5, 1.5)
+    }
 }
 
 impl Default for NpcData {
@@ -2901,6 +2917,8 @@ impl Default for NpcData {
             personality: Personality::default(),
             emotions: Emotions::default(),
             behavior_profile: Vec::new(),
+            current_intention: None,
+            intention_ticks: 0,
             classes: Vec::new(),
             equipment: Equipment::default(),
             equipped_items: EquippedItems::default(),

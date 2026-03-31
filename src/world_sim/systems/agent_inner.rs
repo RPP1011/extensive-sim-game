@@ -44,6 +44,9 @@ struct WorldView {
 
     // Coworker lookup: building_id → list of NPC entity IDs working there
     coworkers: std::collections::HashMap<u32, Vec<u32>>,
+
+    // Building owner lookup: building entity_id → owner NPC entity_id
+    building_owner: std::collections::HashMap<u32, u32>,
 }
 
 impl WorldView {
@@ -140,11 +143,22 @@ impl WorldView {
             }
         }
 
+        // Building owner lookup (building entity id → owner NPC id)
+        let mut building_owner: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+        for entity in &state.entities {
+            if !entity.alive { continue; }
+            if let Some(b) = &entity.building {
+                if let Some(oid) = b.owner_id {
+                    building_owner.insert(entity.id, oid);
+                }
+            }
+        }
+
         Self {
             tick, threat, population, food, treasury, faction_id, infrastructure,
             faction_stance, faction_at_war,
             recent_deaths, recent_battles, recent_conquests, season,
-            grid_hostile_count, coworkers,
+            grid_hostile_count, coworkers, building_owner,
         }
     }
 
@@ -173,6 +187,9 @@ impl WorldView {
     }
     fn coworker_ids(&self, building_id: u32) -> &[u32] {
         self.coworkers.get(&building_id).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+    fn building_owner_id(&self, building_entity_id: u32) -> Option<u32> {
+        self.building_owner.get(&building_entity_id).copied()
     }
 }
 
@@ -450,10 +467,19 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
             }
         }
 
-        // --- Construction purpose ---
-        if npc.work_building_id.is_some() {
+        // --- Construction purpose + compassion bonus ---
+        if let Some(bid) = npc.work_building_id {
             if npc.behavior_value(tags::CONSTRUCTION) > 10.0 {
                 npc.needs.purpose = (npc.needs.purpose + 0.2).min(70.0);
+            }
+            // Compassionate NPCs get purpose boost when helping build others' buildings.
+            if npc.personality.compassion > 0.6 {
+                let is_others_building = world.building_owner_id(bid)
+                    .map(|oid| oid != entity.id)
+                    .unwrap_or(false);
+                if is_others_building {
+                    npc.needs.purpose = (npc.needs.purpose + 0.3).min(80.0);
+                }
             }
         }
     }
@@ -470,6 +496,9 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
 
 fn drift_needs(npc: &mut NpcData, _hp: f32, _max_hp: f32, world: &WorldView, grid_id: Option<u32>) {
     let at_settlement = npc.home_settlement_id.is_some();
+    let pers = npc.personality; // Copy — Personality is Copy
+
+    // --- Hunger (unchanged by personality) ---
     let hunger_drain = if at_settlement { 0.15 } else { 0.3 };
     npc.needs.hunger = (npc.needs.hunger - hunger_drain).max(0.0);
 
@@ -483,18 +512,26 @@ fn drift_needs(npc: &mut NpcData, _hp: f32, _max_hp: f32, world: &WorldView, gri
         }
     }
 
-    // Shelter from having a home building. No home = shelter decays.
+    // --- Shelter (unchanged by personality) ---
     if npc.home_building_id.is_some() {
         npc.needs.shelter = (npc.needs.shelter + 0.5).min(100.0);
     } else if at_settlement {
-        // At settlement but homeless: slow decay (sleeping rough).
         npc.needs.shelter = (npc.needs.shelter - 0.1).max(0.0);
     } else {
-        // In the wilderness: fast decay.
         npc.needs.shelter = (npc.needs.shelter - 0.3).max(0.0);
     }
 
-    // Safety from settlement threat + grid hostility.
+    // --- Safety (modulated by risk tolerance) ---
+    // High risk tolerance → less bothered by threats (×0.6 decay).
+    // Low risk tolerance → paranoid (×1.5 decay).
+    let safety_mult = if pers.risk_tolerance > 0.7 {
+        0.6
+    } else if pers.risk_tolerance < 0.3 {
+        1.5
+    } else {
+        1.0
+    };
+
     let threat = npc.home_settlement_id
         .map(|sid| world.settlement_threat(sid))
         .unwrap_or(0.0);
@@ -503,17 +540,43 @@ fn drift_needs(npc: &mut NpcData, _hp: f32, _max_hp: f32, world: &WorldView, gri
         .unwrap_or(false);
 
     if on_hostile_grid {
-        npc.needs.safety = (npc.needs.safety - 5.0).max(0.0);
+        npc.needs.safety = (npc.needs.safety - 5.0 * safety_mult).max(0.0);
     } else if threat > 0.3 {
-        npc.needs.safety = (npc.needs.safety - threat * 5.0).max(0.0);
+        npc.needs.safety = (npc.needs.safety - threat * 5.0 * safety_mult).max(0.0);
     } else {
         npc.needs.safety = (npc.needs.safety + 1.0).min(100.0);
     }
 
-    // Social decays when alone (not at settlement and no coworkers).
+    // --- Social (modulated by social drive) ---
+    // High social drive → needs others more (×1.5 decay when isolated).
+    // Low social drive → loner (×0.5 decay).
+    let social_mult = if pers.social_drive > 0.6 {
+        1.5
+    } else if pers.social_drive < 0.3 {
+        0.5
+    } else {
+        1.0
+    };
+
     if !at_settlement {
-        npc.needs.social = (npc.needs.social - 0.2).max(0.0);
+        npc.needs.social = (npc.needs.social - 0.2 * social_mult).max(0.0);
     }
+
+    // --- Purpose (base decay, modulated by ambition) ---
+    // High ambition → needs meaningful work more (×1.5 decay).
+    let purpose_decay = 0.15;
+    let purpose_mult = if pers.ambition > 0.6 { 1.5 } else { 1.0 };
+    npc.needs.purpose = (npc.needs.purpose - purpose_decay * purpose_mult).max(0.0);
+
+    // Curiosity: stationary NPCs with high curiosity lose purpose faster.
+    if pers.curiosity > 0.6 && matches!(npc.work_state, WorkState::Idle) && matches!(npc.action, NpcAction::Idle) {
+        npc.needs.purpose = (npc.needs.purpose - 0.1).max(0.0);
+    }
+
+    // --- Esteem (base decay, modulated by ambition) ---
+    let esteem_decay = 0.1;
+    let esteem_mult = if pers.ambition > 0.6 { 1.3 } else { 1.0 };
+    npc.needs.esteem = (npc.needs.esteem - esteem_decay * esteem_mult).max(0.0);
 }
 
 // ---------------------------------------------------------------------------
