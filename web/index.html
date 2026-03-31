@@ -1052,6 +1052,103 @@ function renderMap() {
 
   }
 
+  // --- City grids (tile-based buildings) ---
+  // Only render when zoomed in enough that cells are at least 3px
+  if (frame.city_grids && frame.city_grids.length > 0) {
+    for (const grid of frame.city_grids) {
+      // Check if this grid is visible at current zoom
+      const gridWorldSize = grid.cols * grid.cell_size;
+      const [gcx, gcy] = project(grid.center_pos[0], grid.center_pos[1]);
+      const halfCols = grid.cols / 2, halfRows = grid.rows / 2;
+
+      // Project one cell to see how big it is on screen
+      const [x0] = project(grid.center_pos[0], grid.center_pos[1]);
+      const [x1] = project(grid.center_pos[0] + grid.cell_size, grid.center_pos[1]);
+      const cellPx = Math.abs(x1 - x0);
+
+      // Skip if cells are too small to see (< 2px) or grid is off screen
+      if (cellPx < 2) continue;
+      if (gcx + halfCols * cellPx < 0 || gcx - halfCols * cellPx > w) continue;
+      if (gcy + halfRows * cellPx < 0 || gcy - halfRows * cellPx > h) continue;
+
+      const centerCol = Math.floor(grid.cols / 2);
+      const centerRow = Math.floor(grid.rows / 2);
+
+      // Cell state colors
+      // state = high nibble: 0=Empty, 1=Road, 2=Building, 3=Plaza, 4=Wall, 5=Water, 6=Ruin
+      // zone  = low nibble:  0=None, 1=Residential, 2=Commercial, 3=Industrial, 4=Religious, 5=Arcane, 6=Noble, 7=Military
+      const zoneColors = [
+        null,                          // 0 None
+        [140, 120, 90],                // 1 Residential (warm tan)
+        [180, 160, 80],                // 2 Commercial (gold)
+        [120, 100, 80],                // 3 Industrial (brown)
+        [130, 110, 160],               // 4 Religious (purple)
+        [80, 120, 160],                // 5 Arcane (blue)
+        [160, 140, 100],               // 6 Noble (cream)
+        [140, 80, 80],                 // 7 Military (red-brown)
+      ];
+
+      for (let row = 0; row < grid.rows; row++) {
+        for (let col = 0; col < grid.cols; col++) {
+          const idx = row * grid.cols + col;
+          const packed = grid.cells[idx];
+          const cellState = packed >> 4;
+          const zone = packed & 0xf;
+
+          if (cellState === 0) continue; // Empty — skip
+
+          // World position of this cell
+          const wx = grid.center_pos[0] + (col - centerCol) * grid.cell_size;
+          const wy = grid.center_pos[1] + (row - centerRow) * grid.cell_size;
+          const [sx, sy] = project(wx, wy);
+
+          // Skip off-screen cells
+          if (sx + cellPx < 0 || sx - cellPx > w || sy + cellPx < 0 || sy - cellPx > h) continue;
+
+          const dens = grid.density[idx];
+          const road = grid.road_tier[idx];
+
+          if (cellState === 1) {
+            // Road
+            const roadAlpha = 0.3 + road * 0.12;
+            const roadWidth = cellPx * (0.3 + road * 0.15);
+            ctx.fillStyle = `rgba(100, 90, 70, ${roadAlpha})`;
+            ctx.fillRect(sx - roadWidth/2, sy - roadWidth/2, roadWidth, roadWidth);
+          } else if (cellState === 2) {
+            // Building — color by zone, size by density
+            const zc = zoneColors[zone] || [130, 120, 100];
+            const densScale = 0.5 + dens * 0.17;
+            const bw = cellPx * densScale;
+            const brightness = 0.5 + dens * 0.1;
+            ctx.fillStyle = `rgba(${zc[0] * brightness}, ${zc[1] * brightness}, ${zc[2] * brightness}, 0.8)`;
+            ctx.fillRect(sx - bw/2, sy - bw/2, bw, bw);
+            // Outline
+            ctx.strokeStyle = `rgba(${zc[0]}, ${zc[1]}, ${zc[2]}, 0.4)`;
+            ctx.lineWidth = Math.max(0.5, cellPx * 0.08);
+            ctx.strokeRect(sx - bw/2, sy - bw/2, bw, bw);
+          } else if (cellState === 3) {
+            // Plaza — open square
+            ctx.fillStyle = 'rgba(160, 150, 120, 0.3)';
+            ctx.fillRect(sx - cellPx * 0.4, sy - cellPx * 0.4, cellPx * 0.8, cellPx * 0.8);
+          } else if (cellState === 4) {
+            // Wall — solid dark line
+            ctx.fillStyle = 'rgba(80, 70, 60, 0.7)';
+            ctx.fillRect(sx - cellPx * 0.45, sy - cellPx * 0.45, cellPx * 0.9, cellPx * 0.9);
+          } else if (cellState === 5) {
+            // Water
+            ctx.fillStyle = 'rgba(50, 80, 120, 0.4)';
+            ctx.fillRect(sx - cellPx * 0.45, sy - cellPx * 0.45, cellPx * 0.9, cellPx * 0.9);
+          } else if (cellState === 6) {
+            // Ruin — faded outline
+            ctx.strokeStyle = 'rgba(100, 90, 70, 0.3)';
+            ctx.lineWidth = Math.max(0.5, cellPx * 0.06);
+            ctx.strokeRect(sx - cellPx * 0.3, sy - cellPx * 0.3, cellPx * 0.6, cellPx * 0.6);
+          }
+        }
+      }
+    }
+  }
+
   // --- Trade routes ---
   for (const route of frame.trade_routes) {
     const [sx1, sy1] = project(route.from_pos[0], route.from_pos[1]);
@@ -1066,43 +1163,8 @@ function renderMap() {
     ctx.setLineDash([]);
   }
 
-  // --- Buildings (kind=2) — house shapes, always visible ---
-  const bs = Math.max(4, 5 * Math.sqrt(cam.zoom));
-  for (const ent of frame.entities) {
-    if (!ent.alive || ent.kind !== 2) continue;
-    const [sx, sy] = project(ent.pos[0], ent.pos[1]);
-    if (sx < -30 || sx > w + 30 || sy < -30 || sy > h + 30) continue;
-
-    // House shape: rectangle with pointed roof
-    const bw = bs, bh = bs * 0.8;
-    ctx.beginPath();
-    // Roof peak
-    ctx.moveTo(sx, sy - bh);
-    ctx.lineTo(sx + bw * 0.6, sy - bh * 0.3);
-    ctx.lineTo(sx + bw * 0.45, sy - bh * 0.3);
-    // Right wall + base
-    ctx.lineTo(sx + bw * 0.45, sy + bh * 0.3);
-    ctx.lineTo(sx - bw * 0.45, sy + bh * 0.3);
-    // Left wall
-    ctx.lineTo(sx - bw * 0.45, sy - bh * 0.3);
-    ctx.lineTo(sx - bw * 0.6, sy - bh * 0.3);
-    ctx.closePath();
-
-    ctx.fillStyle = 'rgba(160, 140, 100, 0.7)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(200, 180, 140, 0.8)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    // Name label at any zoom level > 1.5
-    if (cam.zoom > 1.5 && ent.name) {
-      const fontSize = Math.max(7, 8 * Math.sqrt(cam.zoom / 2));
-      ctx.font = `400 ${fontSize}px "JetBrains Mono", monospace`;
-      ctx.fillStyle = 'rgba(200, 185, 150, 0.7)';
-      ctx.textAlign = 'center';
-      ctx.fillText(ent.name, sx, sy + bh * 0.3 + fontSize + 2);
-    }
-  }
+  // Buildings are now rendered via city grid tiles above.
+  // Entity kind=2 (buildings) are skipped in the entity loop below.
 
   // --- Entities (NPCs + monsters) — scale with zoom ---
   const entityRadius = Math.max(1.5, 2 * Math.sqrt(cam.zoom));

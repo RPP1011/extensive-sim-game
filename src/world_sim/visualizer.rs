@@ -80,6 +80,26 @@ pub struct TradeRouteView {
     pub to_pos: (f32, f32),
 }
 
+/// Compact city grid data for rendering tiles.
+/// Cells are packed as a flat array (row-major, cols × rows).
+/// Each cell is encoded as a single u8: high nibble = CellState, low nibble = ZoneType.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CityGridView {
+    pub settlement_id: u32,
+    /// World-space position of the grid center.
+    pub center_pos: (f32, f32),
+    pub cols: usize,
+    pub rows: usize,
+    /// World units per cell.
+    pub cell_size: f32,
+    /// Packed cells: (state << 4) | zone. Length = cols * rows.
+    pub cells: Vec<u8>,
+    /// Density per cell (0-3). Length = cols * rows.
+    pub density: Vec<u8>,
+    /// Road tier per cell (0-4). Length = cols * rows.
+    pub road_tier: Vec<u8>,
+}
+
 /// Aggregate stats for a single frame.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FrameSummary {
@@ -101,6 +121,7 @@ pub struct TraceFrame {
     pub factions: Vec<FactionView>,
     pub regions: Vec<RegionView>,
     pub trade_routes: Vec<TradeRouteView>,
+    pub city_grids: Vec<CityGridView>,
     pub events: Vec<EventView>,
     pub summary: FrameSummary,
 }
@@ -275,6 +296,32 @@ pub fn generate_frame(
         Some(TradeRouteView { from_pos: sa.pos, to_pos: sb.pos })
     }).collect();
 
+    // --- City grids ---
+    let city_grids: Vec<CityGridView> = state.settlements.iter().filter_map(|s| {
+        let grid_idx = s.city_grid_idx?;
+        if grid_idx >= state.city_grids.len() { return None; }
+        let grid = &state.city_grids[grid_idx];
+        let n = grid.cols * grid.rows;
+        let mut cells = Vec::with_capacity(n);
+        let mut density = Vec::with_capacity(n);
+        let mut road_tier = Vec::with_capacity(n);
+        for cell in &grid.cells {
+            cells.push((cell.state as u8) << 4 | (cell.zone as u8));
+            density.push(cell.density);
+            road_tier.push(cell.road_tier);
+        }
+        Some(CityGridView {
+            settlement_id: s.id,
+            center_pos: s.pos,
+            cols: grid.cols,
+            rows: grid.rows,
+            cell_size: 2.0,
+            cells,
+            density,
+            road_tier,
+        })
+    }).collect();
+
     TraceFrame {
         tick,
         total_ticks,
@@ -283,6 +330,7 @@ pub fn generate_frame(
         factions,
         regions,
         trade_routes,
+        city_grids,
         events,
         summary,
     }
@@ -419,6 +467,7 @@ impl PlaybackController {
                 factions: vec![],
                 regions: vec![],
                 trade_routes: vec![],
+                city_grids: vec![],
                 events: vec![],
                 summary: FrameSummary {
                     alive_npcs: 0,
