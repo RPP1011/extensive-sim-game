@@ -160,6 +160,10 @@ global_factor = 1.0 + (total_level / 100)²
 3. **ability_quality::score_ability(vector)** — scores on coherence (0.3), balance (0.15), purpose (0.2), tag consistency (0.15), variety (0.05+)
 4. Best candidate kept (if `candidates > 1`, generates multiple and picks highest score)
 
+### What Abilities Can Do
+
+The ability system draws from 68 effect types spanning combat, control, economy, and leadership. **Combat effects** include direct damage (burst or damage-over-time with stat scaling), healing (instant or regeneration), shields, and execution (bonus damage to low-HP targets). **Crowd control** covers stuns, roots, silences, fears, polymorphs, banishments, blinds, charms, and confuses — each with distinct counterplay. **Mobility** includes dashes, blinks, knockbacks, pulls, and shadow steps. **Defensive effects** include damage reflection, projectile blocking, immunity windows, stealth, and absorption-to-healing shields. **Summoning** creates temporary allied units with commanded behavior. **Strategic effects** extend into the economic layer: CornerMarket manipulates commodity prices, ForgeTradeRoute establishes trade connections, GoldenTouch converts resources, and TradeEmbargo cuts off enemy supply lines. **Leadership effects** like Rally, Inspire, WarCry, and FieldCommand buff nearby allies. Higher-tier abilities compose multiple effects — a Tier 5 ability might dash to a target, deal damage, apply a stun, and buff the caster's armor, all in one action.
+
 ### Tier Power Scaling
 
 ```
