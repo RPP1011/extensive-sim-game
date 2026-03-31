@@ -682,20 +682,7 @@ function updateSettlements(settlements) {
     const y = getHeightAt(s.pos[0], s.pos[1]) + 2;
     const radius = 3 + Math.sqrt(s.population) * 0.3;
 
-    // Settlement marker — glowing cylinder
-    const [r, g, b] = s.faction_color;
-    const color = new THREE.Color(r / 255, g / 255, b / 255);
-
-    const geo = new THREE.CylinderGeometry(radius, radius * 1.2, 4, 8);
-    const mat = new THREE.MeshStandardMaterial({
-      color, emissive: color.clone().multiplyScalar(0.3), roughness: 0.4, metalness: 0.2,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(s.pos[0], y + 2, s.pos[1]);
-    mesh.castShadow = true;
-    settlementGroup.add(mesh);
-
-    // Name label (sprite)
+    // Name label (sprite) — no marker polygon, buildings show the settlement
     const canvas = document.createElement('canvas');
     canvas.width = 256; canvas.height = 64;
     const ctx = canvas.getContext('2d');
