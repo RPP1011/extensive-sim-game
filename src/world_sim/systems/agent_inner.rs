@@ -47,6 +47,9 @@ struct WorldView {
 
     // Building owner lookup: building entity_id → owner NPC entity_id
     building_owner: std::collections::HashMap<u32, u32>,
+
+    // Resource node positions for perception-based discovery
+    resources: Vec<(u32, (f32, f32), ResourceType)>, // (entity_id, pos, type)
 }
 
 impl WorldView {
@@ -154,11 +157,24 @@ impl WorldView {
             }
         }
 
+        // Resource node snapshot for perception discovery
+        let resources: Vec<(u32, (f32, f32), ResourceType)> = state.entities.iter()
+            .filter(|e| e.alive && e.resource.is_some())
+            .filter_map(|e| {
+                let r = e.resource.as_ref().unwrap();
+                if r.remaining > 0.0 {
+                    Some((e.id, e.pos, r.resource_type))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         Self {
             tick, threat, population, food, treasury, faction_id, infrastructure,
             faction_stance, faction_at_war,
             recent_deaths, recent_battles, recent_conquests, season,
-            grid_hostile_count, coworkers, building_owner,
+            grid_hostile_count, coworkers, building_owner, resources,
         }
     }
 
@@ -497,6 +513,26 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
             }
         }
 
+        // --- Resource perception: discover nearby resource nodes ---
+        {
+            let perception_radius_sq = if npc.personality.curiosity > 0.6 {
+                337.5 // 15 * 1.5 = 22.5 units, squared ≈ 506 → actually (15*1.5)^2
+            } else {
+                225.0 // 15 units squared
+            };
+            for &(rid, rpos, rtype) in &world.resources {
+                let dx = entity.pos.0 - rpos.0;
+                let dy = entity.pos.1 - rpos.1;
+                if dx * dx + dy * dy <= perception_radius_sq {
+                    npc.known_resources.insert(rid, ResourceKnowledge {
+                        pos: rpos,
+                        resource_type: rtype,
+                        observed_tick: world.tick,
+                    });
+                }
+            }
+        }
+
         // --- Relationship decay + social need from trusted companions (every 50 ticks) ---
         if world.tick % 50 == 0 {
             // Decay familiarity and trust.
@@ -515,6 +551,9 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
                 let social_bonus = (trusted_friend_count as f32 * 0.5).min(2.0);
                 npc.needs.social = (npc.needs.social + social_bonus).min(80.0);
             }
+
+            // Resource knowledge decay: remove stale entries (>2000 ticks old).
+            npc.known_resources.retain(|_, k| world.tick.saturating_sub(k.observed_tick) < 2000);
         }
     }
 
@@ -525,6 +564,11 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
 
     // --- Witness Events (death/battle reactions) ---
     process_witness_events(state);
+
+    // --- Resource knowledge sharing (every 100 ticks) ---
+    if state.tick % 100 == 0 {
+        share_resource_knowledge(state);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -808,6 +852,36 @@ fn process_witness_events(state: &mut WorldState) {
 // ---------------------------------------------------------------------------
 // Event recording
 // ---------------------------------------------------------------------------
+
+/// Share resource knowledge between NPCs in the same settlement.
+/// Each settlement pools known resources from all its NPCs, then each NPC
+/// gains entries they didn't already have (with the original observer's tick).
+fn share_resource_knowledge(state: &mut WorldState) {
+    // Phase 1: collect pooled knowledge per settlement.
+    let mut pools: std::collections::HashMap<u32, Vec<(u32, ResourceKnowledge)>> =
+        std::collections::HashMap::new();
+    for entity in &state.entities {
+        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        let npc = match &entity.npc { Some(n) => n, None => continue };
+        let sid = match npc.home_settlement_id { Some(s) => s, None => continue };
+        let pool = pools.entry(sid).or_default();
+        for (&rid, k) in &npc.known_resources {
+            pool.push((rid, k.clone()));
+        }
+    }
+
+    // Phase 2: distribute pooled knowledge to settlement NPCs.
+    for entity in &mut state.entities {
+        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        let npc = match &mut entity.npc { Some(n) => n, None => continue };
+        let sid = match npc.home_settlement_id { Some(s) => s, None => continue };
+        if let Some(pool) = pools.get(&sid) {
+            for (rid, k) in pool {
+                npc.known_resources.entry(*rid).or_insert_with(|| k.clone());
+            }
+        }
+    }
+}
 
 /// Record a memory event on an NPC.
 pub fn record_npc_event(

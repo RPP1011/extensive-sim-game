@@ -2137,6 +2137,21 @@ impl Relationship {
 }
 
 // ---------------------------------------------------------------------------
+// ResourceKnowledge — per-NPC discovered resource tracking
+// ---------------------------------------------------------------------------
+
+/// What an NPC knows about a resource node's location and type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceKnowledge {
+    /// Last-known position.
+    pub pos: (f32, f32),
+    /// Resource type.
+    pub resource_type: ResourceType,
+    /// Tick when this NPC last observed the resource.
+    pub observed_tick: u64,
+}
+
+// ---------------------------------------------------------------------------
 // WorkState — spatial work state machine
 // ---------------------------------------------------------------------------
 
@@ -2677,6 +2692,11 @@ pub struct NpcData {
     /// Pack leader entity ID for pack creatures (regroups when social need is low).
     pub pack_leader_id: Option<u32>,
 
+    /// Known resource locations discovered through perception or trade.
+    /// Key: resource entity ID. Value: (position, resource_type, tick_observed).
+    /// Stale entries (>2000 ticks old) become unreliable.
+    pub known_resources: std::collections::HashMap<u32, ResourceKnowledge>,
+
     /// Maslow-inspired need levels driving goal selection.
     pub needs: Needs,
     /// Event log + semantic beliefs formed from experience.
@@ -3082,6 +3102,7 @@ impl Default for NpcData {
             creature_type: CreatureType::Citizen,
             home_den: None,
             pack_leader_id: None,
+            known_resources: std::collections::HashMap::new(),
             needs: Needs::default(),
             memory: Memory::default(),
             personality: Personality::default(),

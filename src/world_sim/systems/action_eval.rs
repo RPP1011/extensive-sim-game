@@ -278,6 +278,8 @@ fn score_npc_actions(
         match snap.kind {
             EntityKind::Resource if ctype.has_economy_actions() => {
                 if snap.resource_remaining <= 0.0 { continue; }
+                // Information model: only target known resources.
+                if !npc.known_resources.contains_key(&snap.id) { continue; }
                 let rt: ResourceType = match snap.resource_type {
                     Some(t) => t,
                     None => continue,
@@ -513,6 +515,24 @@ fn score_npc_actions(
                     best_npc_action = NpcAction::Fleeing;
                 }
             }
+        }
+    }
+
+    // --- Explore (curious NPCs with nothing better to do) ---
+    // High curiosity + idle → walk in a pseudo-random direction to discover resources.
+    if pers.curiosity > 0.6 && matches!(best_action, CandidateAction::Idle) {
+        let h = entity_hash(entity.id, entity.id as u64, 0xE7D1);
+        let angle = (h % 360) as f32 * std::f32::consts::PI / 180.0;
+        let explore_dist = 15.0;
+        let explore_pos = (
+            pos.0 + angle.cos() * explore_dist,
+            pos.1 + angle.sin() * explore_dist,
+        );
+        let utility = 0.2 * curiosity_mod * grief_dampen;
+        if utility > best_utility {
+            best_utility = utility;
+            best_action = CandidateAction::MoveToPos { target: explore_pos };
+            best_npc_action = NpcAction::Walking { destination: explore_pos };
         }
     }
 
