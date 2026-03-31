@@ -108,6 +108,10 @@ pub struct WorldSimArgs {
     /// Start a WebSocket server on this port to stream TraceFrame JSON to the web visualizer
     #[arg(long)]
     pub ws: Option<u16>,
+    /// Peaceful mode: no monsters, single forest settlement, zero starting gold.
+    /// NPCs must gather resources and build everything from scratch.
+    #[arg(long)]
+    pub peaceful: bool,
 }
 
 #[derive(Debug, Parser)]

@@ -35,6 +35,8 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
+    } else if args.peaceful {
+        build_peaceful_world(&args)
     } else {
         build_world(&args)
     };
@@ -1873,6 +1875,100 @@ struct GridLayout {
     cols: usize,
     rows: usize,
     spacing: f32,
+}
+
+/// Peaceful mode: single forest settlement, no monsters, no gold.
+/// NPCs start with nothing and must gather + build from scratch.
+fn build_peaceful_world(args: &WorldSimArgs) -> WorldState {
+    let mut state = WorldState::new(args.seed);
+    let mut rng = args.seed;
+    let npcs = args.entities.min(50); // small village
+
+    // Single forest region
+    state.regions.push(RegionState {
+        id: 0,
+        name: "Greenwood".into(),
+        terrain: Terrain::Forest,
+        pos: (100.0, 100.0),
+        monster_density: 0.0,
+        faction_id: Some(0),
+        threat_level: 0.0,
+        has_river: true,
+        has_lake: false,
+        is_coastal: false,
+        river_connections: vec![],
+        dungeon_sites: vec![],
+        sub_biome: SubBiome::Standard,
+        neighbors: vec![],
+        is_chokepoint: false,
+        elevation: 1,
+        is_floating: false,
+        unrest: 0.0,
+        control: 1.0,
+    });
+
+    // Single faction
+    state.factions.push(FactionState {
+        id: 0,
+        name: "Forest Folk".into(),
+        diplomatic_stance: DiplomaticStance::Friendly,
+        military_strength: 0.0,
+        max_military_strength: 10.0,
+        treasury: 0.0, // no gold!
+        territory_size: 1,
+        relationship_to_guild: 0.0,
+        at_war_with: vec![],
+        coup_risk: 0.0,
+        escalation_level: 0,
+        tech_level: 0,
+        recent_actions: vec![],
+    });
+
+    // Single settlement — zero treasury, zero stockpile
+    let mut settlement = SettlementState::new(0, "Willowgrove".into(), (100.0, 100.0));
+    settlement.faction_id = Some(0);
+    settlement.treasury = 0.0; // no gold
+    // Zero stockpile — NPCs must gather everything
+    for c in settlement.stockpile.iter_mut() { *c = 0.0; }
+
+    let grid = LocalGrid {
+        id: 0,
+        fidelity: bevy_game::world_sim::fidelity::Fidelity::Medium,
+        center: settlement.pos,
+        radius: 30.0,
+        entity_ids: Vec::new(),
+    };
+    state.grids.push(grid);
+    settlement.grid_id = Some(0);
+    state.settlements.push(settlement);
+
+    // NPCs — zero gold, no equipment, just people
+    let mut id = 0u32;
+    let archetypes = ["farmer", "woodcutter", "miner", "herbalist", "builder",
+                      "smith", "hunter", "healer", "merchant", "scholar"];
+    for i in 0..npcs {
+        let angle = (i as f32 / npcs as f32) * std::f32::consts::TAU;
+        let dist = 5.0 + lcg_f32(&mut rng) * 15.0;
+        let px = 100.0 + angle.cos() * dist;
+        let py = 100.0 + angle.sin() * dist;
+
+        let mut npc = Entity::new_npc(id, (px, py));
+        npc.grid_id = Some(0);
+        let npc_data = npc.npc.as_mut().unwrap();
+        npc_data.home_settlement_id = Some(0);
+        npc_data.faction_id = Some(0);
+        npc_data.gold = 0.0; // no gold!
+        npc_data.morale = 60.0;
+        npc_data.archetype = archetypes[i % archetypes.len()].to_string();
+        npc_data.name = bevy_game::world_sim::naming::generate_personal_name(id, args.seed);
+        npc.inventory = Some(bevy_game::world_sim::state::Inventory::default());
+
+        state.entities.push(npc);
+        id += 1;
+    }
+
+    state.next_id = id;
+    state
 }
 
 fn build_world(args: &WorldSimArgs) -> WorldState {
