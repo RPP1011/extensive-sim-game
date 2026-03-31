@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>World Sim — 3D View</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 16px;
+    background: rgba(0,0,0,0.6); color: #ccc; font-size: 13px;
+    z-index: 10; pointer-events: none;
+  }
+  #hud > * { pointer-events: auto; }
+  #hud h1 { font-size: 14px; letter-spacing: 2px; color: #c9a84c; text-transform: uppercase; }
+  .stat { margin-left: 16px; }
+  .stat span { color: #fff; font-weight: 600; }
+  #status { position: fixed; bottom: 8px; left: 8px; font-size: 11px; color: #666; z-index: 10; }
+  #tooltip {
+    position: fixed; display: none; padding: 6px 10px;
+    background: rgba(20,18,15,0.9); border: 1px solid #3a3530;
+    color: #d4c5a9; font-size: 12px; border-radius: 3px;
+    pointer-events: none; z-index: 20; max-width: 250px;
+  }
+  #controls {
+    position: fixed; bottom: 8px; right: 8px; z-index: 10;
+    display: flex; gap: 6px; align-items: center;
+  }
+  #controls button, #controls select {
+    background: rgba(30,28,25,0.8); border: 1px solid #3a3530;
+    color: #ccc; padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 2px;
+  }
+  #controls button:hover { border-color: #c9a84c; color: #fff; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <h1>World Sim 3D</h1>
+  <div>
+    <span class="stat">Year <span id="year">0</span></span>
+    <span class="stat" id="season-text">Spring</span>
+    <span class="stat">NPCs <span id="npcs">0</span></span>
+    <span class="stat">Monsters <span id="monsters">0</span></span>
+    <span class="stat">Tick <span id="tick">0</span></span>
+  </div>
+</div>
+<div id="status">Connecting...</div>
+<div id="tooltip"></div>
+<div id="controls">
+  <button onclick="togglePause()">Pause</button>
+  <select onchange="setSpeed(this.value)">
+    <option value="1">1x</option>
+    <option value="3">3x</option>
+    <option value="5" selected>5x</option>
+    <option value="10">10x</option>
+    <option value="20">20x</option>
+  </select>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+// ============================================================
+// SCENE SETUP
+// ============================================================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a2e);
+scene.fog = new THREE.Fog(0x1a1a2e, 800, 2000);
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 5000);
+camera.position.set(400, 500, 600);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(400, 0, 300);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI * 0.48;
+controls.minDistance = 50;
+controls.maxDistance = 2000;
+
+// Lighting
+const ambient = new THREE.AmbientLight(0x404060, 0.6);
+scene.add(ambient);
+
+const sun = new THREE.DirectionalLight(0xffeedd, 1.0);
+sun.position.set(300, 400, 200);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -800;
+sun.shadow.camera.right = 800;
+sun.shadow.camera.top = 800;
+sun.shadow.camera.bottom = -800;
+scene.add(sun);
+
+// Water plane
+const waterGeo = new THREE.PlaneGeometry(4000, 4000);
+const waterMat = new THREE.MeshStandardMaterial({
+  color: 0x2a4a6a, transparent: true, opacity: 0.6, metalness: 0.3, roughness: 0.8
+});
+const water = new THREE.Mesh(waterGeo, waterMat);
+water.rotation.x = -Math.PI / 2;
+water.position.y = -2;
+scene.add(water);
+
+// ============================================================
+// TERRAIN COLORS
+// ============================================================
+const terrainColors = {
+  Plains:       0x6a9442, Forest:       0x386e2c, Jungle:       0x266424,
+  Swamp:        0x485e38, Mountains:    0x888074, Tundra:       0xbec6ce,
+  Glacier:      0xd2e2f0, Desert:       0xd2be82, Badlands:     0xaa7850,
+  Coast:        0x82b0be, DeepOcean:    0x305078, CoralReef:    0x468c96,
+  Volcano:      0x8c3c24, Caverns:      0x564e46, FlyingIslands:0xa0bad0,
+  AncientRuins: 0x948874, DeathZone:    0x462c38, Grassland:    0x76a048,
+};
+
+// ============================================================
+// STATE
+// ============================================================
+let frame = null;
+let terrainBuilt = false;
+let terrainGroup = new THREE.Group();
+let entityGroup = new THREE.Group();
+let settlementGroup = new THREE.Group();
+let tradeRouteGroup = new THREE.Group();
+let labelGroup = new THREE.Group();
+scene.add(terrainGroup);
+scene.add(entityGroup);
+scene.add(settlementGroup);
+scene.add(tradeRouteGroup);
+scene.add(labelGroup);
+
+let playing = true;
+let ws = null;
+
+// Entity meshes (instanced)
+let npcMesh = null;
+let monsterMesh = null;
+const npcColor = new THREE.Color(0x64a0dc);
+const monsterColor = new THREE.Color(0xdb4437);
+
+// ============================================================
+// BUILD TERRAIN FROM REGIONS
+// ============================================================
+function buildTerrain(regions) {
+  // Clear old
+  while (terrainGroup.children.length) terrainGroup.remove(terrainGroup.children[0]);
+
+  const worldTileSize = 4.0;
+
+  // Find world bounds from regions
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const r of regions) {
+    minX = Math.min(minX, r.pos[0]); maxX = Math.max(maxX, r.pos[0]);
+    minY = Math.min(minY, r.pos[1]); maxY = Math.max(maxY, r.pos[1]);
+  }
+  const pad = Math.max(maxX - minX, maxY - minY) * 0.3;
+  minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+
+  const startTx = Math.floor(minX / worldTileSize);
+  const endTx = Math.ceil(maxX / worldTileSize);
+  const startTy = Math.floor(minY / worldTileSize);
+  const endTy = Math.ceil(maxY / worldTileSize);
+
+  // Batch tiles by terrain type for instancing
+  const tilesByTerrain = {};
+
+  for (let ty = startTy; ty <= endTy; ty++) {
+    for (let tx = startTx; tx <= endTx; tx++) {
+      const wx = tx * worldTileSize + worldTileSize / 2;
+      const wy = ty * worldTileSize + worldTileSize / 2;
+
+      // Nearest region
+      let minDist = Infinity, nearest = null;
+      for (const r of regions) {
+        const dx = wx - r.pos[0], dy = wy - r.pos[1];
+        const d = dx * dx + dy * dy;
+        if (d < minDist) { minDist = d; nearest = r; }
+      }
+      if (!nearest) continue;
+
+      const terrain = nearest.terrain;
+      const elev = nearest.elevation;
+      const floating = nearest.is_floating;
+
+      // Height from elevation tier
+      let height = elev * 8; // each tier = 8 world units tall
+      if (terrain === 'Caverns') height = -10; // below ground
+      if (floating) height = 60 + elev * 8; // flying islands hover
+
+      if (!tilesByTerrain[terrain]) tilesByTerrain[terrain] = [];
+      tilesByTerrain[terrain].push({ x: wx, z: wy, y: height, floating });
+    }
+  }
+
+  // Create instanced mesh per terrain type
+  const tileGeo = new THREE.BoxGeometry(worldTileSize - 0.2, 2, worldTileSize - 0.2);
+  for (const [terrain, tiles] of Object.entries(tilesByTerrain)) {
+    const color = terrainColors[terrain] || 0x808080;
+    // Slight per-tile color variation
+    const mat = new THREE.MeshStandardMaterial({
+      color, roughness: 0.9, metalness: 0.0, flatShading: true,
+    });
+
+    const mesh = new THREE.InstancedMesh(tileGeo, mat, tiles.length);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    const matrix = new THREE.Matrix4();
+    const colorObj = new THREE.Color();
+    for (let i = 0; i < tiles.length; i++) {
+      const t = tiles[i];
+      // Pillar height: taller for higher elevation
+      const pillarH = Math.max(2, t.y + 4);
+      matrix.makeScale(1, pillarH / 2, 1);
+      matrix.setPosition(t.x, t.y - pillarH / 2 + 1, t.z);
+      mesh.setMatrixAt(i, matrix);
+
+      // Per-instance color variation
+      const baseColor = new THREE.Color(color);
+      const variation = (Math.sin(t.x * 0.7 + t.z * 0.3) * 0.04);
+      colorObj.setRGB(
+        Math.min(1, baseColor.r + variation),
+        Math.min(1, baseColor.g + variation),
+        Math.min(1, baseColor.b + variation)
+      );
+      mesh.setColorAt(i, colorObj);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    terrainGroup.add(mesh);
+
+    // For floating islands, add shadow pillars (translucent columns beneath)
+    if (terrain === 'FlyingIslands') {
+      const pillarGeo = new THREE.CylinderGeometry(1.5, 0.5, 60, 6);
+      const pillarMat = new THREE.MeshStandardMaterial({
+        color: 0x806040, transparent: true, opacity: 0.3, roughness: 1,
+      });
+      for (const t of tiles) {
+        const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+        pillar.position.set(t.x, t.y - 30, t.z);
+        terrainGroup.add(pillar);
+      }
+    }
+  }
+}
+
+// ============================================================
+// UPDATE ENTITIES (every frame)
+// ============================================================
+function updateEntities(entities) {
+  while (entityGroup.children.length) entityGroup.remove(entityGroup.children[0]);
+  if (!entities || entities.length === 0) return;
+
+  const npcs = entities.filter(e => e.alive && e.kind === 0);
+  const monsters = entities.filter(e => e.alive && e.kind === 1);
+
+  // NPCs as small spheres
+  if (npcs.length > 0) {
+    const geo = new THREE.SphereGeometry(1, 6, 4);
+    const mat = new THREE.MeshStandardMaterial({ color: 0x64a0dc, emissive: 0x1a3050, roughness: 0.6 });
+    npcMesh = new THREE.InstancedMesh(geo, mat, npcs.length);
+    const m = new THREE.Matrix4();
+    for (let i = 0; i < npcs.length; i++) {
+      const e = npcs[i];
+      const y = getHeightAt(e.pos[0], e.pos[1]) + 2;
+      m.makeTranslation(e.pos[0], y, e.pos[1]);
+      npcMesh.setMatrixAt(i, m);
+    }
+    npcMesh.instanceMatrix.needsUpdate = true;
+    entityGroup.add(npcMesh);
+  }
+
+  // Monsters as octahedra
+  if (monsters.length > 0) {
+    const geo = new THREE.OctahedronGeometry(1.5);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xdb4437, emissive: 0x401010, roughness: 0.5 });
+    monsterMesh = new THREE.InstancedMesh(geo, mat, monsters.length);
+    const m = new THREE.Matrix4();
+    for (let i = 0; i < monsters.length; i++) {
+      const e = monsters[i];
+      const y = getHeightAt(e.pos[0], e.pos[1]) + 2.5;
+      m.makeTranslation(e.pos[0], y, e.pos[1]);
+      monsterMesh.setMatrixAt(i, m);
+    }
+    monsterMesh.instanceMatrix.needsUpdate = true;
+    entityGroup.add(monsterMesh);
+  }
+}
+
+// Get terrain height at a world position (from nearest region)
+function getHeightAt(wx, wy) {
+  if (!frame || !frame.regions.length) return 0;
+  let minDist = Infinity, nearest = null;
+  for (const r of frame.regions) {
+    const dx = wx - r.pos[0], dy = wy - r.pos[1];
+    const d = dx * dx + dy * dy;
+    if (d < minDist) { minDist = d; nearest = r; }
+  }
+  if (!nearest) return 0;
+  let h = nearest.elevation * 8;
+  if (nearest.terrain === 'Caverns') h = -10;
+  if (nearest.is_floating) h = 60 + nearest.elevation * 8;
+  return h;
+}
+
+// ============================================================
+// UPDATE SETTLEMENTS
+// ============================================================
+function updateSettlements(settlements) {
+  while (settlementGroup.children.length) settlementGroup.remove(settlementGroup.children[0]);
+  if (!settlements) return;
+
+  for (const s of settlements) {
+    const y = getHeightAt(s.pos[0], s.pos[1]) + 2;
+    const radius = 3 + Math.sqrt(s.population) * 0.3;
+
+    // Settlement marker — glowing cylinder
+    const [r, g, b] = s.faction_color;
+    const color = new THREE.Color(r / 255, g / 255, b / 255);
+
+    const geo = new THREE.CylinderGeometry(radius, radius * 1.2, 4, 8);
+    const mat = new THREE.MeshStandardMaterial({
+      color, emissive: color.clone().multiplyScalar(0.3), roughness: 0.4, metalness: 0.2,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(s.pos[0], y + 2, s.pos[1]);
+    mesh.castShadow = true;
+    settlementGroup.add(mesh);
+
+    // Name label (sprite)
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(s.name, 128, 28);
+    ctx.font = '16px sans-serif';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(`pop ${s.population}`, 128, 50);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.position.set(s.pos[0], y + 14, s.pos[1]);
+    sprite.scale.set(40, 10, 1);
+    settlementGroup.add(sprite);
+  }
+}
+
+// ============================================================
+// UPDATE TRADE ROUTES
+// ============================================================
+function updateTradeRoutes(routes) {
+  while (tradeRouteGroup.children.length) tradeRouteGroup.remove(tradeRouteGroup.children[0]);
+  if (!routes) return;
+
+  for (const route of routes) {
+    const y1 = getHeightAt(route.from_pos[0], route.from_pos[1]) + 4;
+    const y2 = getHeightAt(route.to_pos[0], route.to_pos[1]) + 4;
+    const strength = route.strength || 0.5;
+
+    const points = [
+      new THREE.Vector3(route.from_pos[0], y1, route.from_pos[1]),
+      new THREE.Vector3(route.to_pos[0], y2, route.to_pos[1]),
+    ];
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    const mat = new THREE.LineBasicMaterial({
+      color: 0xc9a84c, transparent: true, opacity: strength * 0.5,
+    });
+    tradeRouteGroup.add(new THREE.Line(geo, mat));
+  }
+}
+
+// ============================================================
+// WEBSOCKET
+// ============================================================
+function connect() {
+  document.getElementById('status').textContent = 'Connecting...';
+  ws = new WebSocket('ws://localhost:9090');
+  ws.onopen = () => { document.getElementById('status').textContent = 'Live'; };
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (!playing) { frame = data; updateHud(); return; }
+      onFrame(data);
+    } catch (err) { console.error(err); }
+  };
+  ws.onclose = () => {
+    document.getElementById('status').textContent = 'Disconnected — reconnecting...';
+    setTimeout(connect, 3000);
+  };
+  ws.onerror = () => ws.close();
+}
+
+function onFrame(data) {
+  frame = data;
+  updateHud();
+
+  // Build terrain once (regions don't change)
+  if (!terrainBuilt && data.regions.length > 0) {
+    buildTerrain(data.regions);
+    terrainBuilt = true;
+    // Center camera on world
+    let cx = 0, cy = 0;
+    for (const r of data.regions) { cx += r.pos[0]; cy += r.pos[1]; }
+    cx /= data.regions.length; cy /= data.regions.length;
+    controls.target.set(cx, 0, cy);
+    camera.position.set(cx + 300, 400, cy + 300);
+  }
+
+  updateEntities(data.entities);
+  updateSettlements(data.settlements);
+  updateTradeRoutes(data.trade_routes);
+}
+
+function updateHud() {
+  if (!frame) return;
+  document.getElementById('year').textContent = frame.summary.year;
+  document.getElementById('season-text').textContent = frame.summary.season;
+  document.getElementById('npcs').textContent = frame.summary.alive_npcs;
+  document.getElementById('monsters').textContent = frame.summary.alive_monsters;
+  document.getElementById('tick').textContent = frame.tick;
+}
+
+// ============================================================
+// CONTROLS
+// ============================================================
+function togglePause() {
+  playing = !playing;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ command: playing ? 'play' : 'pause' }));
+  }
+}
+
+function setSpeed(val) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ command: 'speed', value: parseInt(val) }));
+  }
+}
+
+// ============================================================
+// RENDER LOOP
+// ============================================================
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+
+  // Gentle water animation
+  water.position.y = -2 + Math.sin(Date.now() * 0.001) * 0.3;
+
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+connect();
+animate();
+</script>
+</body>
+</html>
