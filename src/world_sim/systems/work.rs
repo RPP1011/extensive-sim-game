@@ -558,7 +558,7 @@ const FOOD_PER_MEAL: f32 = 0.1;
 const MEAL_GOLD_COST: f32 = 0.5;
 
 /// Hunger threshold below which NPCs interrupt work to eat.
-const HUNGER_THRESHOLD: f32 = 30.0;
+const HUNGER_THRESHOLD: f32 = 70.0;
 
 /// Process NPC eating. Called post-apply from runtime.
 ///
@@ -572,82 +572,54 @@ pub fn advance_eating(state: &mut WorldState) {
         .map(|s| (s.id, s.stockpile[commodity::FOOD], s.pos))
         .collect();
 
-    // Pre-compute nearest food building (Inn/Market with food) per settlement.
-    // Map: settlement_id -> Option<(entity_id, pos)>.
-    let food_building_info: Vec<(u32, Option<(u32, (f32, f32))>)> = state.settlements.iter()
-        .map(|s| {
-            let food_bld = state.entities.iter()
-                .filter(|e| {
-                    e.alive && e.kind == EntityKind::Building
-                        && e.building.as_ref().map_or(false, |b| {
-                            b.settlement_id == Some(s.id)
-                                && b.construction_progress >= 1.0
-                                && matches!(b.building_type, BuildingType::Inn | BuildingType::Market)
-                        })
-                })
-                .map(|e| (e.id, e.pos))
-                .next();
-            (s.id, food_bld)
-        })
-        .collect();
-
+    // Eating: NPCs consume food from their own inventory.
+    // If they have food → eat immediately (no travel).
+    // If no food but have gold + nearby Inn/Market → buy then eat.
+    // If nothing → goal_eval handles pushing Gather(FOOD) goals.
     for entity in &mut state.entities {
         if !entity.alive || entity.kind != EntityKind::Npc { continue; }
         let npc = match &mut entity.npc { Some(n) => n, None => continue };
 
-        // Only eat when hungry enough and not in combat.
         if npc.needs.hunger >= HUNGER_THRESHOLD { continue; }
-        // Don't interrupt combat, but DO interrupt work when critically hungry.
         if matches!(npc.economic_intent, EconomicIntent::Adventuring { .. }) { continue; }
-        // If working but critically hungry (<15), interrupt to eat.
-        if !matches!(npc.work_state, WorkState::Idle) && npc.needs.hunger > 15.0 { continue; }
-        // Don't fight the plan executor — if NPC has an active Gather/Build plan, skip eating movement.
-        if npc.goal_stack.goals.first().map_or(false, |g| !g.plan.is_empty()) { continue; }
 
-        // Find food source — settlement with food.
-        let sid = match npc.home_settlement_id { Some(id) => id, None => continue };
-        let (_, food_available, settlement_pos) = match settlement_food.iter()
-            .find(|(id, _, _)| *id == sid) {
-            Some(s) => *s,
-            None => continue,
-        };
+        // Option 1: Eat from own inventory
+        let has_food = entity.inventory.as_ref()
+            .map(|inv| inv.commodities[commodity::FOOD] >= FOOD_PER_MEAL)
+            .unwrap_or(false);
 
-        // Walk toward the nearest food building, falling back to settlement center.
-        let food_info = food_building_info.iter()
-            .find(|(id, _)| *id == sid)
-            .and_then(|(_, info)| *info);
-        let food_target = food_info.map(|(_, pos)| pos).unwrap_or(settlement_pos);
-        let _food_bid = food_info.map(|(bid, _)| bid);
-
-        let dx = food_target.0 - entity.pos.0;
-        let dy = food_target.1 - entity.pos.1;
-        let dist = (dx * dx + dy * dy).sqrt();
-
-        if dist > 5.0 {
-            // Set move_target — movement system will handle actual position updates.
-            entity.move_target = Some(food_target);
+        if has_food {
+            if let Some(inv) = &mut entity.inventory {
+                inv.commodities[commodity::FOOD] -= FOOD_PER_MEAL;
+            }
+            npc.needs.hunger = (npc.needs.hunger + MEAL_HUNGER_RESTORE).min(100.0);
             continue;
         }
 
-        // Arrived at food source — try to eat.
-        if food_available >= FOOD_PER_MEAL {
-            // Pay for the meal: NPC gold → settlement treasury.
-            let can_pay = npc.gold >= MEAL_GOLD_COST;
-            let cost = if can_pay { MEAL_GOLD_COST } else { npc.gold.max(0.0) }; // pay what you can
-            npc.gold -= cost;
+        // Option 2: Buy food from settlement (if gold available and settlement has food)
+        let sid = match npc.home_settlement_id { Some(id) => id, None => continue };
+        let settlement_has_food = settlement_food.iter()
+            .find(|(id, _, _)| *id == sid)
+            .map(|(_, food, _)| *food >= FOOD_PER_MEAL)
+            .unwrap_or(false);
 
-            // Consume food from settlement stockpile.
+        if settlement_has_food && npc.gold >= MEAL_GOLD_COST {
+            npc.gold -= MEAL_GOLD_COST;
+            // Deduct from settlement stockpile, add gold to treasury
             let si = sid as usize;
             if si < state.settlement_index.len() {
                 let idx = state.settlement_index[si] as usize;
                 if idx < state.settlements.len() {
                     state.settlements[idx].stockpile[commodity::FOOD] -= FOOD_PER_MEAL;
-                    state.settlements[idx].treasury += cost;
+                    state.settlements[idx].treasury += MEAL_GOLD_COST;
                 }
             }
+            // Food goes into inventory then consumed immediately
             npc.needs.hunger = (npc.needs.hunger + MEAL_HUNGER_RESTORE).min(100.0);
+            continue;
         }
-        // If no food: hunger stays low, anxiety builds (handled in agent_inner drift).
+
+        // No food and no gold — goal_eval will push Gather(FOOD) goal
     }
 }
 

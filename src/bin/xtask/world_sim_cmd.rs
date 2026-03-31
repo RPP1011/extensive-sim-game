@@ -1968,6 +1968,16 @@ fn build_peaceful_world(args: &WorldSimArgs) -> WorldState {
     };
     state.grids.push(grid);
     settlement.grid_id = Some(0);
+
+    // City grid for building placement
+    let city_grid = bevy_game::world_sim::city_grid::CityGrid::new(
+        128, 128, 0, "forest", args.seed,
+    );
+    let grid_idx = state.city_grids.len();
+    state.city_grids.push(city_grid);
+    state.influence_maps.push(bevy_game::world_sim::city_grid::InfluenceMap::new(128, 128));
+    settlement.city_grid_idx = Some(grid_idx);
+
     state.settlements.push(settlement);
 
     // NPCs — zero gold, no equipment, just people

@@ -956,7 +956,7 @@ impl BuildingType {
     pub fn build_cost(&self) -> (f32, f32) {
         match self {
             Self::Tent | Self::Camp => (1.0, 0.0),
-            Self::House => (5.0, 1.0),
+            Self::House => (5.0, 0.0), // wood-only cabin
             Self::Longhouse | Self::Manor => (10.0, 2.0),
             Self::Farm | Self::Well => (3.0, 0.0),
             Self::Mine => (4.0, 3.0),

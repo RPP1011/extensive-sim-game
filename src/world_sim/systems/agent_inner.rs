@@ -483,10 +483,14 @@ fn drift_needs(npc: &mut NpcData, _hp: f32, _max_hp: f32, world: &WorldView, gri
         }
     }
 
-    // Shelter from settlement presence.
-    if at_settlement {
+    // Shelter from having a home building. No home = shelter decays.
+    if npc.home_building_id.is_some() {
         npc.needs.shelter = (npc.needs.shelter + 0.5).min(100.0);
+    } else if at_settlement {
+        // At settlement but homeless: slow decay (sleeping rough).
+        npc.needs.shelter = (npc.needs.shelter - 0.1).max(0.0);
     } else {
+        // In the wilderness: fast decay.
         npc.needs.shelter = (npc.needs.shelter - 0.3).max(0.0);
     }
 

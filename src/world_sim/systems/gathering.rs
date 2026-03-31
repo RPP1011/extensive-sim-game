@@ -25,11 +25,12 @@ pub fn advance_plans(state: &mut WorldState) {
     let entity_count = state.entities.len();
 
     // Collect actions to execute: (npc_idx, action_to_take)
-    let mut gather_actions: Vec<(usize, u8, f32)> = Vec::new(); // (npc_idx, commodity, amount_needed)
+    let mut gather_actions: Vec<(usize, u8, f32)> = Vec::new();
     let mut move_actions: Vec<(usize, (f32, f32))> = Vec::new();
-    let mut perform_advance: Vec<usize> = Vec::new(); // npc_idx to decrement perform ticks
-    let mut step_complete: Vec<usize> = Vec::new(); // npc_idx whose current step is done
-    let mut goal_complete: Vec<usize> = Vec::new(); // npc_idx whose entire plan is done
+    let mut perform_advance: Vec<usize> = Vec::new();
+    let mut step_complete: Vec<usize> = Vec::new();
+    let mut goal_complete: Vec<usize> = Vec::new();
+    let mut build_actions: Vec<(usize, u8)> = Vec::new(); // (npc_idx, building_type_u8)
 
     for i in 0..entity_count {
         let entity = &state.entities[i];
@@ -85,9 +86,9 @@ pub fn advance_plans(state: &mut WorldState) {
                     perform_advance.push(i);
                 }
             }
-            PlannedAction::PlaceBuilding { .. } => {
-                // Building placement handled by process_npc_builds in buildings.rs
-                // Just mark complete — the Build goal on the stack triggers it
+            PlannedAction::PlaceBuilding { building_type } => {
+                // Collect for building placement after the loop
+                build_actions.push((i, *building_type));
                 step_complete.push(i);
             }
             PlannedAction::PayGold { amount } => {
@@ -162,6 +163,13 @@ pub fn advance_plans(state: &mut WorldState) {
     for (npc_idx, target) in move_actions {
         state.entities[npc_idx].move_target = Some(target);
     }
+
+    // Execute build actions — place buildings BEFORE advancing steps
+    // so the Build goal is still on the stack when process_npc_builds checks.
+    if !build_actions.is_empty() {
+        super::buildings::process_npc_builds(state);
+    }
+
 
     // Advance perform timers
     for npc_idx in perform_advance {

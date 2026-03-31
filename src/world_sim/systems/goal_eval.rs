@@ -424,9 +424,17 @@ fn evaluate_economic_options(
                 EconDecision::Diy => {
                     // Push a single Build goal — GOAP will decompose it into
                     // Gather(WOOD) → Gather(IRON) → PlaceBuilding → Construct
+                    // Priority scales with urgency: shelter < 20 → priority 60 (above Work)
+                    let build_priority = if npc.needs.shelter < 20.0 {
+                        goal_priority::WORK + 10 // 60 — critical, above Work
+                    } else if npc.needs.shelter < 40.0 {
+                        goal_priority::WORK // 50 — equal to Work
+                    } else {
+                        goal_priority::BUILD // 45 — below Work
+                    };
                     npc.goal_stack.push(Goal::new(
                         GoalKind::Build { building_id: 0 },
-                        goal_priority::BUILD, tick,
+                        build_priority, tick,
                     ));
                 }
                 EconDecision::Hire => {

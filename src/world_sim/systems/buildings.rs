@@ -168,7 +168,7 @@ pub fn grow_cities(state: &mut WorldState) {
 /// NPC-driven building placement. Called each grow_cities tick.
 /// NPCs with GoalKind::Build and sufficient resources in their inventory
 /// pick a frontier cell and spawn a building shell.
-fn process_npc_builds(state: &mut WorldState) {
+pub fn process_npc_builds(state: &mut WorldState) {
     use crate::world_sim::commodity;
     use super::super::interior_gen::footprint_size;
 
