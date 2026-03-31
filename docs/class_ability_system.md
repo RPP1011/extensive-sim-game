@@ -162,7 +162,72 @@ global_factor = 1.0 + (total_level / 100)²
 
 ### What Abilities Can Do
 
-The ability system draws from 68 effect types spanning combat, control, economy, and leadership. **Combat effects** include direct damage (burst or damage-over-time with stat scaling), healing (instant or regeneration), shields, and execution (bonus damage to low-HP targets). **Crowd control** covers stuns, roots, silences, fears, polymorphs, banishments, blinds, charms, and confuses — each with distinct counterplay. **Mobility** includes dashes, blinks, knockbacks, pulls, and shadow steps. **Defensive effects** include damage reflection, projectile blocking, immunity windows, stealth, and absorption-to-healing shields. **Summoning** creates temporary allied units with commanded behavior. **Strategic effects** extend into the economic layer: CornerMarket manipulates commodity prices, ForgeTradeRoute establishes trade connections, GoldenTouch converts resources, and TradeEmbargo cuts off enemy supply lines. **Leadership effects** like Rally, Inspire, WarCry, and FieldCommand buff nearby allies. Higher-tier abilities compose multiple effects — a Tier 5 ability might dash to a target, deal damage, apply a stun, and buff the caster's armor, all in one action.
+> Full DSL reference: [docs/dsl_reference.md](dsl_reference.md)
+
+Abilities are defined in a text-based DSL parsed by winnow into an AST, lowered into `AbilityDef`, and dispatched at runtime. Every ability is composed along **five orthogonal dimensions**:
+
+| Dimension | Controls | Examples |
+|-----------|----------|----------|
+| **Effect** (WHAT) | The gameplay action | `damage 55`, `heal 30`, `stun 2s` |
+| **Area** (WHERE) | Spatial extent | `in circle(3.0)`, `in cone(4.0, 60)`, `in self` |
+| **Delivery** (HOW) | How effects reach targets | `deliver projectile { speed: 8 }`, `deliver zone { radius: 5 }` |
+| **Trigger** (WHEN) | Conditions for firing | `when target_hp_below(30%)`, trigger: `on_kill`, `on_hit` |
+| **Tags** (POWER) | Element typing + power scaling | `[FIRE: 60, MAGIC: 40]` |
+
+Any combination is valid: `damage 80 in cone(5.0, 90) [FIRE: 60] when caster_hp_below(50%)` delivered via `deliver projectile { speed: 10, width: 0.5 }`.
+
+#### Effect Categories (~200 parseable keywords)
+
+**Combat primitives**: `damage` (burst/DoT, stat-scaled), `heal` (burst/HoT), `shield`, `execute` (bonus below threshold), `self_damage`, `lifesteal`
+
+**Crowd control**: `stun`, `root`, `silence`, `fear`, `blind`, `charm`, `confuse`, `polymorph`, `banish`, `suppress`, `grounded`, `slow`, `taunt`, `pull`, `knockback`, `leash`
+
+**Mobility**: `dash` (directional/to_target), `blink` (instant teleport), `ghost_walk`, `shadow_step`, `vanish`
+
+**Meta-effects** (abilities that modify other abilities): `amplify` (multiplied next N casts), `echo` (fire twice), `instant_cast`, `free_cast`, `refresh_cooldowns`, `extend_durations`, `spell_shield` (block next ability), `cooldown_lock`, `on_hit_cast` (trigger ability on hit), `grant_ability` (temporary ability), `evolve_after` (permanent upgrade after N uses), `cast_copy`
+
+**Campaign primitives** (composable building blocks for any entity property): `modify_stat` (add/multiply/set on adventurer/party/guild/faction/region), `set_flag`, `reveal_info`, `create_entity` (spawn trade routes/agreements/items), `destroy_entity`, `transfer_value` (move properties between entities)
+
+**Economy**: `corner_market`, `forge_route`, `golden_touch`, `trade_embargo`, `market_maker`, `trade_empire`, `wealth_of_nations`
+
+**Diplomacy**: `ceasefire`, `broker_alliance`, `destabilize`, `demand_audience`, `subvert_loyalty`, `shatter_alliance`
+
+**Leadership**: `rally`, `inspire`, `field_command`, `war_cry`, `coordinated_strike`, `hold_the_line`
+
+**Territory**: `claim_territory`, `fortify`, `sanctuary`, `plague_ward`, `safe_house`
+
+**Information**: `reveal`, `prophetic_vision`, `omniscience`, `beast_lore`, `decipher`, `intel_gathering`
+
+**Legendary**: `living_legend`, `rewrite_history`, `immortal_moment`, `claim_by_right`, `life_eternal`, `the_last_word`
+
+#### Generation Pipeline
+
+Abilities are generated procedurally, not hand-authored:
+
+1. **Grammar space** (48-dim invertible mapping): every point in [0,1]^48 is a syntactically valid DSL program. 100% parse rate guaranteed.
+2. **Flow matching**: text-conditioned generation via 50 Euler steps — archetype description → latent → DSL
+3. **Tree decoder**: autoregressive, 94.8% categorical accuracy, mixed CE/MSE heads
+4. **Quality scoring**: coherence (0.3), balance (0.15), purpose (0.2), tag consistency (0.15), variety (0.05+)
+
+Higher-tier abilities compose multiple effects. A Tier 5 ability might be:
+```
+ability DragonStrike {
+    target: enemy, range: 6.0, cooldown: 12s
+    hint: burst
+
+    deliver projectile { speed: 10, width: 0.5 } {
+        on_hit {
+            damage 80 [FIRE: 60]
+            stun 1.5s
+        }
+        on_arrival {
+            damage 30 in circle(3.0) [FIRE: 40]
+        }
+    }
+    buff armor 1.3 in self for 4s
+}
+```
+Four effects (projectile damage + stun + AoE explosion + self-buff) composed via delivery and area dimensions.
 
 ### Tier Power Scaling
 
