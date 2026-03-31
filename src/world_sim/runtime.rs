@@ -1971,6 +1971,18 @@ impl WorldSim {
             }
         }
 
+        // Refresh world abilities after any new abilities were generated.
+        if abilities_generated > 0 {
+            for entity in &mut self.state.entities {
+                if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+                if let Some(npc) = &mut entity.npc {
+                    if npc.world_abilities.len() != npc.class_tags.len() {
+                        super::systems::agent_inner::refresh_world_abilities(npc);
+                    }
+                }
+            }
+        }
+
         // --- Class pruning: consolidate fragmented classes ---
         // If an NPC has more than 5 classes, drop the weakest (level < 5)
         // and redistribute XP to the strongest class.

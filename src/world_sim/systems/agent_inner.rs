@@ -9,6 +9,8 @@
 
 use crate::world_sim::state::*;
 use crate::world_sim::commodity;
+use tactical_sim::effects::dsl::parse_abilities;
+use tactical_sim::effects::effect_enum::Effect;
 
 const INNER_STATE_INTERVAL: u64 = 10;
 
@@ -663,14 +665,23 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
         update_cultural_norms(state);
     }
 
-    // --- Passive effects recompute (every 200 ticks, Phase F) ---
+    // --- Passive effects recompute + ability refresh (every 200 ticks, Phase F) ---
     if state.tick % 200 == 0 {
         for entity in &mut state.entities {
             if !entity.alive { continue; }
             if let Some(npc) = &mut entity.npc {
                 npc.passive_effects = PassiveEffects::compute(&npc.behavior_profile);
+                // Re-parse DSL abilities if class_tags changed (new abilities generated).
+                if npc.world_abilities.len() != npc.class_tags.len() {
+                    refresh_world_abilities(npc);
+                }
             }
         }
+    }
+
+    // --- Active ability activation (every 50 ticks) ---
+    if state.tick % 50 == 0 {
+        activate_world_abilities(state);
     }
 }
 
@@ -1169,6 +1180,264 @@ fn try_crystallize_from_memory(npc: &mut NpcData, tick: u64) {
         npc.aspiration.crystal_progress = 0.0;
         npc.aspiration.crystal_last_advanced = tick;
         break; // only one crystal at a time
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Active ability system — parse DSL, activate on cooldown, apply effects
+// ---------------------------------------------------------------------------
+
+/// Parse a DSL ability string into a WorldAbility if it has world-sim-relevant effects.
+fn parse_world_ability(dsl: &str) -> Option<WorldAbility> {
+    let (abilities, _passives) = parse_abilities(dsl).ok()?;
+    let ability = abilities.into_iter().next()?;
+
+    for cond_effect in &ability.effects {
+        let (effect, duration, name) = match &cond_effect.effect {
+            Effect::Rally { morale_restore } => {
+                let e = WorldAbilityEffect::Rally { morale_restore: *morale_restore, radius: 20.0 };
+                (e, 0, "Rally")
+            }
+            Effect::Inspire { morale_boost, duration_ticks } => {
+                let e = WorldAbilityEffect::Rally { morale_restore: *morale_boost, radius: 15.0 };
+                (e, *duration_ticks, "Inspire")
+            }
+            Effect::RallyingCry { morale_restore } => {
+                let e = WorldAbilityEffect::Rally { morale_restore: *morale_restore, radius: 25.0 };
+                (e, 0, "Rallying Cry")
+            }
+            Effect::GoldenTouch { duration_ticks } => {
+                let e = WorldAbilityEffect::GoldenTouch { yield_mult: 1.3 };
+                (e, *duration_ticks, "Golden Touch")
+            }
+            Effect::CornerMarket { duration_ticks, .. } => {
+                let e = WorldAbilityEffect::CornerMarket { price_mult: 1.5 };
+                (e, *duration_ticks, "Corner Market")
+            }
+            Effect::Fortify { duration_ticks } => {
+                let e = WorldAbilityEffect::Fortify { safety_bonus: 10.0, radius: 15.0 };
+                (e, *duration_ticks, "Fortify")
+            }
+            Effect::Sanctuary { duration_ticks } => {
+                let e = WorldAbilityEffect::Fortify { safety_bonus: 15.0, radius: 10.0 };
+                (e, *duration_ticks, "Sanctuary")
+            }
+            Effect::Reveal { count } => {
+                let e = WorldAbilityEffect::Reveal { radius: 60.0, count: (*count).max(1) };
+                (e, 0, "Reveal")
+            }
+            Effect::PropheticVision { count } => {
+                let e = WorldAbilityEffect::Reveal { radius: 80.0, count: (*count).max(1) };
+                (e, 0, "Prophetic Vision")
+            }
+            Effect::FieldCommand { duration_ticks } => {
+                let e = WorldAbilityEffect::FieldCommand { work_speed_mult: 1.2, radius: 15.0 };
+                (e, *duration_ticks, "Field Command")
+            }
+            Effect::WarCry { duration_ticks } => {
+                let e = WorldAbilityEffect::FieldCommand { work_speed_mult: 1.15, radius: 20.0 };
+                (e, *duration_ticks, "War Cry")
+            }
+            Effect::ForgeTradeRoute { income_per_tick, duration_ticks } => {
+                let e = WorldAbilityEffect::PassiveIncome { gold_per_tick: *income_per_tick };
+                (e, *duration_ticks, "Forge Trade Route")
+            }
+            Effect::GhostWalk { duration_ticks } => {
+                let e = WorldAbilityEffect::Stealth { duration_ticks: *duration_ticks };
+                (e, *duration_ticks, "Ghost Walk")
+            }
+            Effect::CeasefireDeclaration { duration_ticks } => {
+                let e = WorldAbilityEffect::Diplomacy { trust_bonus: 0.1 };
+                (e, *duration_ticks, "Ceasefire")
+            }
+            Effect::BrokerAlliance { duration_ticks } => {
+                let e = WorldAbilityEffect::Diplomacy { trust_bonus: 0.2 };
+                (e, *duration_ticks, "Broker Alliance")
+            }
+            // Buff-based campaign effects (indices 17-23 from ability_gen).
+            Effect::Buff { stat, factor, duration_ms } => {
+                let dur = if *duration_ms > 0 { *duration_ms / 100 } else { 500 }; // ms→ticks
+                match stat.as_str() {
+                    "morale_aura" => {
+                        let e = WorldAbilityEffect::Rally { morale_restore: *factor, radius: 15.0 };
+                        (e, dur, "Morale Aura")
+                    }
+                    "passive_income" => {
+                        let e = WorldAbilityEffect::PassiveIncome { gold_per_tick: *factor };
+                        (e, dur, "Passive Income")
+                    }
+                    "scout_range" => {
+                        let e = WorldAbilityEffect::Reveal { radius: 40.0 + *factor * 40.0, count: 3 };
+                        (e, dur, "Scout Range")
+                    }
+                    "threat_reduction" => {
+                        let e = WorldAbilityEffect::Fortify { safety_bonus: *factor * 20.0, radius: 15.0 };
+                        (e, dur, "Threat Reduction")
+                    }
+                    "diplomacy_bonus" => {
+                        let e = WorldAbilityEffect::Diplomacy { trust_bonus: *factor * 0.5 };
+                        (e, dur, "Diplomacy Bonus")
+                    }
+                    _ => continue, // combat-only buff stat
+                }
+            }
+            _ => continue, // combat-only effect
+        };
+
+        // Cooldown: 500 ticks base, scaled by duration.
+        let cooldown = if duration > 0 { duration + 100 } else { 500 };
+
+        return Some(WorldAbility {
+            name: name.to_string(),
+            effect,
+            cooldown_ticks: cooldown,
+            last_used: 0,
+            duration_ticks: duration,
+            active_until: 0,
+        });
+    }
+    None
+}
+
+/// Parse all class_tags DSL into world abilities. Called when abilities are first generated.
+pub fn refresh_world_abilities(npc: &mut NpcData) {
+    npc.world_abilities.clear();
+    for dsl in &npc.class_tags {
+        if let Some(wa) = parse_world_ability(dsl) {
+            npc.world_abilities.push(wa);
+        }
+    }
+}
+
+/// Activate ready world abilities and apply their effects.
+fn activate_world_abilities(state: &mut WorldState) {
+    let tick = state.tick;
+
+    // Collect activations: (entity_idx, ability_idx, effect_clone).
+    let mut activations: Vec<(usize, usize, WorldAbilityEffect, (f32, f32))> = Vec::new();
+
+    for (idx, entity) in state.entities.iter().enumerate() {
+        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        let npc = match &entity.npc { Some(n) => n, None => continue };
+
+        for (ai, wa) in npc.world_abilities.iter().enumerate() {
+            if tick.saturating_sub(wa.last_used) < wa.cooldown_ticks as u64 { continue; }
+            activations.push((idx, ai, wa.effect.clone(), entity.pos));
+        }
+    }
+
+    // Apply activations.
+    for (entity_idx, ability_idx, effect, pos) in activations {
+        // Mark as used.
+        if let Some(npc) = &mut state.entities[entity_idx].npc {
+            if ability_idx < npc.world_abilities.len() {
+                npc.world_abilities[ability_idx].last_used = tick;
+                let dur = npc.world_abilities[ability_idx].duration_ticks;
+                npc.world_abilities[ability_idx].active_until = tick + dur as u64;
+            }
+        }
+
+        match effect {
+            WorldAbilityEffect::Rally { morale_restore, radius } => {
+                let radius_sq = radius * radius;
+                for entity in &mut state.entities {
+                    if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+                    let dx = entity.pos.0 - pos.0;
+                    let dy = entity.pos.1 - pos.1;
+                    if dx * dx + dy * dy <= radius_sq {
+                        if let Some(npc) = &mut entity.npc {
+                            npc.morale = (npc.morale + morale_restore * 10.0).min(100.0);
+                            npc.needs.purpose = (npc.needs.purpose + morale_restore * 5.0).min(100.0);
+                            npc.emotions.pride = (npc.emotions.pride + morale_restore * 0.3).min(1.0);
+                        }
+                    }
+                }
+            }
+            WorldAbilityEffect::GoldenTouch { yield_mult } => {
+                // Boost this NPC's passive production mult temporarily.
+                if let Some(npc) = &mut state.entities[entity_idx].npc {
+                    npc.passive_effects.production_mult *= yield_mult;
+                }
+            }
+            WorldAbilityEffect::Fortify { safety_bonus, radius } => {
+                let radius_sq = radius * radius;
+                for entity in &mut state.entities {
+                    if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+                    let dx = entity.pos.0 - pos.0;
+                    let dy = entity.pos.1 - pos.1;
+                    if dx * dx + dy * dy <= radius_sq {
+                        if let Some(npc) = &mut entity.npc {
+                            npc.needs.safety = (npc.needs.safety + safety_bonus).min(100.0);
+                        }
+                    }
+                }
+            }
+            WorldAbilityEffect::Reveal { radius, count: _ } => {
+                // Discover resources in large radius around this NPC.
+                let radius_sq = radius * radius;
+                let mut discovered = Vec::new();
+                for entity in &state.entities {
+                    if !entity.alive { continue; }
+                    if let Some(r) = &entity.resource {
+                        if r.remaining > 0.0 {
+                            let dx = entity.pos.0 - pos.0;
+                            let dy = entity.pos.1 - pos.1;
+                            if dx * dx + dy * dy <= radius_sq {
+                                discovered.push((entity.id, entity.pos, r.resource_type));
+                            }
+                        }
+                    }
+                }
+                if let Some(npc) = &mut state.entities[entity_idx].npc {
+                    for (rid, rpos, rtype) in discovered {
+                        npc.known_resources.insert(rid, ResourceKnowledge {
+                            pos: rpos,
+                            resource_type: rtype,
+                            observed_tick: tick,
+                        });
+                    }
+                }
+            }
+            WorldAbilityEffect::FieldCommand { work_speed_mult: _, radius: _ } => {
+                // Boost nearby NPCs' esteem (proxy for work effectiveness).
+                let radius_sq = 15.0 * 15.0;
+                for entity in &mut state.entities {
+                    if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+                    let dx = entity.pos.0 - pos.0;
+                    let dy = entity.pos.1 - pos.1;
+                    if dx * dx + dy * dy <= radius_sq {
+                        if let Some(npc) = &mut entity.npc {
+                            npc.needs.purpose = (npc.needs.purpose + 2.0).min(100.0);
+                        }
+                    }
+                }
+            }
+            WorldAbilityEffect::PassiveIncome { gold_per_tick } => {
+                if let Some(npc) = &mut state.entities[entity_idx].npc {
+                    npc.gold += gold_per_tick;
+                }
+            }
+            WorldAbilityEffect::CornerMarket { price_mult } => {
+                // Boost this NPC's trade bonus.
+                if let Some(npc) = &mut state.entities[entity_idx].npc {
+                    npc.passive_effects.trade_bonus += (price_mult - 1.0).min(0.3);
+                }
+            }
+            WorldAbilityEffect::Stealth { .. } => {
+                // Reduce threat perception for this NPC.
+                if let Some(npc) = &mut state.entities[entity_idx].npc {
+                    npc.needs.safety = (npc.needs.safety + 20.0).min(100.0);
+                }
+            }
+            WorldAbilityEffect::Diplomacy { trust_bonus } => {
+                // Boost trust with all known relationships.
+                if let Some(npc) = &mut state.entities[entity_idx].npc {
+                    for rel in npc.relationships.values_mut() {
+                        rel.trust = (rel.trust + trust_bonus).min(1.0);
+                    }
+                }
+            }
+        }
     }
 }
 

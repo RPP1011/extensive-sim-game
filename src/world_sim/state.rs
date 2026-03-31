@@ -2265,6 +2265,51 @@ impl PerceivedPersonality {
 }
 
 // ---------------------------------------------------------------------------
+// WorldAbility — parsed ability for active use in world sim
+// ---------------------------------------------------------------------------
+
+/// A parsed ability that can be actively used by NPCs in the world simulation
+/// outside of combat. Extracted from class_tags DSL at level-up time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorldAbility {
+    /// Display name.
+    pub name: String,
+    /// What this ability does in the world sim.
+    pub effect: WorldAbilityEffect,
+    /// Cooldown in ticks between uses.
+    pub cooldown_ticks: u32,
+    /// Tick when last activated.
+    pub last_used: u64,
+    /// Duration of ongoing effect (0 = instant).
+    pub duration_ticks: u32,
+    /// Is this currently active (for duration-based effects)?
+    pub active_until: u64,
+}
+
+/// Concrete world sim effects that abilities can produce.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WorldAbilityEffect {
+    /// Boost morale of nearby NPCs (rally, inspire, rallying_cry).
+    Rally { morale_restore: f32, radius: f32 },
+    /// Boost production yield (golden_touch, trade_empire).
+    GoldenTouch { yield_mult: f32 },
+    /// Reduce threat in area (fortify, sanctuary).
+    Fortify { safety_bonus: f32, radius: f32 },
+    /// Reveal resources in large radius (reveal, prophetic_vision, all_seeing_eye).
+    Reveal { radius: f32, count: u32 },
+    /// Manipulate local trade prices (corner_market, trade_embargo).
+    CornerMarket { price_mult: f32 },
+    /// Boost nearby NPCs' work speed (field_command, war_cry).
+    FieldCommand { work_speed_mult: f32, radius: f32 },
+    /// Generate passive income (forge_trade_route, passive_income).
+    PassiveIncome { gold_per_tick: f32 },
+    /// Hide from threats (ghost_walk, hidden_camp, vanish).
+    Stealth { duration_ticks: u32 },
+    /// Boost diplomacy/trust (ceasefire, broker_alliance).
+    Diplomacy { trust_bonus: f32 },
+}
+
+// ---------------------------------------------------------------------------
 // PassiveEffects — ability-derived simulation bonuses (Phase F)
 // ---------------------------------------------------------------------------
 
@@ -3000,6 +3045,9 @@ pub struct NpcData {
     /// Derived from class composition and behavior profile.
     pub passive_effects: PassiveEffects,
 
+    /// Active abilities usable in the world sim (parsed from class_tags DSL).
+    pub world_abilities: Vec<WorldAbility>,
+
     /// Per-action-type cultural conformity bias (Phase C). Range [-0.3, 0.3].
     /// Index matches NpcAction::action_type_id() (0=idle..11=harvesting).
     pub cultural_bias: [f32; 12],
@@ -3404,6 +3452,7 @@ impl Default for NpcData {
             action_outcomes: std::collections::HashMap::new(),
             aspiration: Aspiration::default(),
             passive_effects: PassiveEffects::default(),
+            world_abilities: Vec::new(),
             price_beliefs: [PriceBelief::default(); crate::world_sim::NUM_COMMODITIES],
             cultural_bias: [0.0; 12],
             current_intention: None,
