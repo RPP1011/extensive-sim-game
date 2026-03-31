@@ -62,6 +62,12 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
     print_world_summary(&state);
 
     let mut sim = WorldSim::new(state);
+
+    // WebSocket mode: stream TraceFrame JSON to browser visualizer
+    if let Some(port) = args.ws {
+        return run_ws_server(&mut sim, port, &args);
+    }
+
     let mut last_profile = TickProfile::default();
     let mut total_ticks = 0u64;
 
@@ -2546,4 +2552,134 @@ fn spawn_sea_monsters(
         state.entities.push(monster);
         id += 1;
     }
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket server — streams TraceFrame JSON to the web visualizer
+// ---------------------------------------------------------------------------
+
+fn run_ws_server(sim: &mut WorldSim, port: u16, args: &WorldSimArgs) -> ExitCode {
+    use std::net::TcpListener;
+    use tungstenite::{accept, Message};
+
+    let addr = format!("0.0.0.0:{}", port);
+    let listener = match TcpListener::bind(&addr) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Failed to bind WebSocket server on {}: {}", addr, e);
+            return ExitCode::FAILURE;
+        }
+    };
+    println!("WebSocket server listening on ws://localhost:{}", port);
+    println!("Open web/index.html in a browser to visualize.");
+    println!("Press Ctrl+C to stop.\n");
+
+    // Accept connections in a loop (one at a time for simplicity)
+    for stream in listener.incoming() {
+        let stream = match stream {
+            Ok(s) => s,
+            Err(e) => { eprintln!("Accept error: {}", e); continue; }
+        };
+        println!("Client connected from {}", stream.peer_addr().unwrap_or_else(|_| "unknown".parse().unwrap()));
+
+        let mut ws = match accept(stream) {
+            Ok(ws) => ws,
+            Err(e) => { eprintln!("WebSocket handshake failed: {}", e); continue; }
+        };
+
+        let max_ticks = args.ticks;
+        let tick_interval = std::time::Duration::from_millis(50); // 20 fps
+
+        let mut ticks_this_session = 0u64;
+        let mut chronicle_snapshot: Vec<bevy_game::world_sim::state::ChronicleEntry> = Vec::new();
+
+        loop {
+            let start = std::time::Instant::now();
+
+            // Advance simulation
+            let ticks_per_frame = 5; // 5 sim ticks per frame at 20fps = 100 ticks/sec
+            for _ in 0..ticks_per_frame {
+                if ticks_this_session >= max_ticks { break; }
+                sim.tick();
+                ticks_this_session += 1;
+            }
+
+            // Build frame
+            let state = sim.state();
+            let chronicle = &state.chronicle;
+            // Collect new chronicle entries
+            let new_entries: Vec<_> = chronicle.iter()
+                .filter(|e| {
+                    let dominated = chronicle_snapshot.iter().any(|prev| prev.tick == e.tick && prev.text == e.text);
+                    !dominated
+                })
+                .cloned()
+                .collect();
+            chronicle_snapshot.extend(new_entries.iter().cloned());
+            // Keep chronicle bounded
+            if chronicle_snapshot.len() > 500 {
+                chronicle_snapshot.drain(..chronicle_snapshot.len() - 500);
+            }
+
+            let frame = bevy_game::world_sim::visualizer::generate_frame(
+                state,
+                &new_entries,
+                100, // event window
+                max_ticks,
+            );
+
+            // Serialize and send
+            let json = match serde_json::to_string(&frame) {
+                Ok(j) => j,
+                Err(e) => { eprintln!("Serialize error: {}", e); break; }
+            };
+
+            match ws.send(Message::Text(json.into())) {
+                Ok(_) => {}
+                Err(tungstenite::Error::ConnectionClosed) |
+                Err(tungstenite::Error::AlreadyClosed) => {
+                    println!("Client disconnected.");
+                    break;
+                }
+                Err(e) => {
+                    eprintln!("Send error: {}", e);
+                    break;
+                }
+            }
+
+            // Drain pending incoming messages non-blockingly.
+            // Set socket to non-blocking for reads, then restore.
+            if let Ok(raw) = ws.get_ref().try_clone() {
+                let _ = raw.set_nonblocking(true);
+            }
+            loop {
+                match ws.read() {
+                    Ok(Message::Close(_)) => { println!("Client closed."); break; }
+                    Ok(Message::Text(t)) => { println!("Client: {}", t); }
+                    Ok(_) => {}
+                    Err(_) => break, // WouldBlock or actual error
+                }
+            }
+            if let Ok(raw) = ws.get_ref().try_clone() {
+                let _ = raw.set_nonblocking(false);
+            }
+
+            if ticks_this_session >= max_ticks {
+                println!("Reached {} ticks, waiting for new client...", max_ticks);
+                break;
+            }
+
+            // Rate limit
+            let elapsed = start.elapsed();
+            if elapsed < tick_interval {
+                std::thread::sleep(tick_interval - elapsed);
+            }
+        }
+
+        // Reset sim for next client
+        let state = build_world(args);
+        *sim = WorldSim::new(state);
+    }
+
+    ExitCode::SUCCESS
 }

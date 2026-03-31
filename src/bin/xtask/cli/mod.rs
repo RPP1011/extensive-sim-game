@@ -105,6 +105,9 @@ pub struct WorldSimArgs {
     /// Format: "bless:SETTLEMENT", "curse:REGION", "champion:SETTLEMENT", "prophecy", "plague:SETTLEMENT"
     #[arg(long)]
     pub intervene: Option<String>,
+    /// Start a WebSocket server on this port to stream TraceFrame JSON to the web visualizer
+    #[arg(long)]
+    pub ws: Option<u16>,
 }
 
 #[derive(Debug, Parser)]
