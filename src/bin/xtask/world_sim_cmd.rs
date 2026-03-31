@@ -99,6 +99,19 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
         let profile = sim.tick();
         total_ticks += 1;
 
+        // Peaceful mode: dump resource positions on first tick
+        if args.peaceful && total_ticks == 1 {
+            let st = sim.state();
+            for e in &st.entities {
+                if let Some(r) = &e.resource {
+                    eprintln!("[resources] {:?} at ({:.0},{:.0}) remaining={:.1}", r.resource_type, e.pos.0, e.pos.1, r.remaining);
+                }
+            }
+            let npc_count = st.entities.iter().filter(|e| e.kind == EntityKind::Npc && e.alive).count();
+            let res_count = st.entities.iter().filter(|e| e.resource.is_some() && e.alive).count();
+            eprintln!("[resources] {} resource nodes, {} NPCs", res_count, npc_count);
+        }
+
         // Peaceful mode NPC debug: print goal stack + inventory every 50 ticks
         if args.peaceful && total_ticks % 50 == 0 {
             let st = sim.state();

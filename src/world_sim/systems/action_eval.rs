@@ -87,6 +87,8 @@ pub fn evaluate_and_act(state: &mut WorldState) {
 
     let entity_count = state.entities.len();
 
+    let debug_tick = false; // set to state.tick <= 20 for debug output
+
     // --- Phase 1: collect read-only snapshots for spatial queries. ---
     let snaps: Vec<EntitySnap> = state.entities.iter().enumerate().map(|(idx, e)| {
         let (rt, rem) = e.resource.as_ref()
@@ -140,6 +142,10 @@ pub fn evaluate_and_act(state: &mut WorldState) {
                 if !matches!(npc.work_state, WorkState::Idle) { continue; }
 
                 let (action, npc_action, utility) = score_npc_actions(e, npc, &snaps);
+
+                if debug_tick && e.id == 0 {
+                    eprintln!("[action_eval t{} NPC#{}] scored {:?} utility={:.3}", state.tick, e.id, npc_action, utility);
+                }
 
                 // --- Hysteresis: prefer continuing current intention ---
                 let interrupt = is_interrupt(npc, e.hp, e.max_hp);
@@ -278,8 +284,10 @@ fn score_npc_actions(
         match snap.kind {
             EntityKind::Resource if ctype.has_economy_actions() => {
                 if snap.resource_remaining <= 0.0 { continue; }
-                // Information model: only target known resources.
-                if !npc.known_resources.contains_key(&snap.id) { continue; }
+                // Information model: resources within scan radius are always
+                // visible (direct line of sight). The known_resources map
+                // extends targeting to resources beyond scan radius that the
+                // NPC has heard about through perception or knowledge sharing.
                 let rt: ResourceType = match snap.resource_type {
                     Some(t) => t,
                     None => continue,
@@ -441,6 +449,38 @@ fn score_npc_actions(
         }
     }
 
+    // --- Known resources beyond scan radius (information model) ---
+    // NPCs can walk toward resources they know about but can't currently see.
+    if ctype.has_economy_actions() {
+        for (rid, knowledge) in &npc.known_resources {
+            // Skip if already in scan radius (handled above).
+            let dx = knowledge.pos.0 - pos.0;
+            let dy = knowledge.pos.1 - pos.1;
+            let dist_sq = dx * dx + dy * dy;
+            if dist_sq <= SCAN_RADIUS_SQ { continue; }
+
+            let dist = dist_sq.sqrt();
+            let commodity_idx = knowledge.resource_type.commodity();
+            let commodity_need = match commodity_idx {
+                c if c == commodity::FOOD => hunger_urgency,
+                c if c == commodity::WOOD => shelter_urgency * 0.5,
+                c if c == commodity::IRON => purpose_urgency * 0.4,
+                c if c == commodity::HERBS => safety_urgency * 0.3,
+                _ => 0.2,
+            };
+            let distance_factor = 1.0 / (1.0 + dist / 10.0);
+            // Lower confidence for stale knowledge.
+            let freshness = if npc.known_resources.get(rid)
+                .map(|k| k.observed_tick + 2000 > 0).unwrap_or(false) { 0.7 } else { 0.4 };
+            let utility = commodity_need * freshness * distance_factor * curiosity_mod * grief_dampen;
+            if utility > best_utility {
+                best_utility = utility;
+                best_action = CandidateAction::MoveToPos { target: knowledge.pos };
+                best_npc_action = NpcAction::Walking { destination: knowledge.pos };
+            }
+        }
+    }
+
     // --- Pack leader regrouping (pack predators only) ---
     if let Some(leader_id) = npc.pack_leader_id {
         if let Some(leader_snap) = snaps.iter().find(|s| s.id == leader_id && s.alive) {
@@ -518,10 +558,11 @@ fn score_npc_actions(
         }
     }
 
-    // --- Explore (curious NPCs with nothing better to do) ---
-    // High curiosity + idle → walk in a pseudo-random direction to discover resources.
+    // --- Explore (curious idle NPCs) ---
+    // Curious NPCs walk in varying directions to discover resources.
     if pers.curiosity > 0.6 && matches!(best_action, CandidateAction::Idle) {
-        let h = entity_hash(entity.id, entity.id as u64, 0xE7D1);
+        let tick_phase = (entity.id as u64).wrapping_mul(7) + (npc.intention_ticks as u64 / 20);
+        let h = entity_hash(entity.id, tick_phase, 0xE7D1);
         let angle = (h % 360) as f32 * std::f32::consts::PI / 180.0;
         let explore_dist = 15.0;
         let explore_pos = (

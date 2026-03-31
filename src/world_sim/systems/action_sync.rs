@@ -80,12 +80,26 @@ pub fn sync_npc_actions(state: &mut WorldState) {
                         NpcAction::Building { building_id: *building_id, ticks_remaining: 30 }
                     }
                     _ => {
-                        // Check if walking (has cached path).
+                        // Check if walking (has cached path or move target from action_eval).
                         if !npc.cached_path.is_empty() {
                             let dest = npc.goal_stack.current()
                                 .and_then(|g| g.target_pos)
                                 .unwrap_or(entity.pos);
                             NpcAction::Walking { destination: dest }
+                        } else if entity.move_target.is_some() {
+                            // action_eval set a move target — preserve the intention action.
+                            npc.current_intention.as_ref()
+                                .map(|(a, _)| a.clone())
+                                .unwrap_or(NpcAction::Walking {
+                                    destination: entity.move_target.unwrap(),
+                                })
+                        } else if let Some((ref intention, _)) = npc.current_intention {
+                            // No movement but action_eval set an intention (e.g., Harvesting).
+                            if !matches!(intention, NpcAction::Idle) {
+                                intention.clone()
+                            } else {
+                                NpcAction::Idle
+                            }
                         } else {
                             NpcAction::Idle
                         }

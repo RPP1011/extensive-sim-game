@@ -515,10 +515,11 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
 
         // --- Resource perception: discover nearby resource nodes ---
         {
+            // Base perception: 30 units. Curious NPCs: 45 units.
             let perception_radius_sq = if npc.personality.curiosity > 0.6 {
-                337.5 // 15 * 1.5 = 22.5 units, squared ≈ 506 → actually (15*1.5)^2
+                2025.0 // 45^2
             } else {
-                225.0 // 15 units squared
+                900.0 // 30^2
             };
             for &(rid, rpos, rtype) in &world.resources {
                 let dx = entity.pos.0 - rpos.0;
