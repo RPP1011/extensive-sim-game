@@ -3256,6 +3256,8 @@ pub struct RegionState {
     pub id: u32,
     pub name: String,
     pub terrain: Terrain,
+    /// World-space center position of this region.
+    pub pos: (f32, f32),
     pub monster_density: f32,
     pub faction_id: Option<u32>,
     pub threat_level: f32,

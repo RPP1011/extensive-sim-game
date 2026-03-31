@@ -24,6 +24,7 @@ fn build_test_world(seed: u64, npcs: usize, settlements: usize) -> WorldState {
             id: i as u32,
             name: format!("Region{}", i),
             terrain: Terrain::Plains,
+            pos: (i as f32 * 100.0, 0.0),
             monster_density: 0.0,
             threat_level: 0.0,
             neighbors: vec![],

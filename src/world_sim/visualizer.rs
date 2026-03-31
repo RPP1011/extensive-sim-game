@@ -255,16 +255,11 @@ pub fn generate_frame(
     // Regions don't store positions — derive from settlement positions.
     // Each settlement maps to its region (settlement_idx → region_idx in worldgen).
     let regions: Vec<RegionView> = state.regions.iter().map(|r| {
-        // Find the settlement in this region (same index, or by faction match).
-        let pos = state.settlements.iter()
-            .find(|s| s.id == r.id) // settlement ID matches region ID in worldgen
-            .map(|s| s.pos)
-            .unwrap_or((r.id as f32 * 100.0, 0.0)); // fallback grid layout
         RegionView {
             id: r.id,
             name: r.name.clone(),
             terrain: r.terrain.name().to_string(),
-            pos,
+            pos: r.pos,
             faction_color: r.faction_id.map(|fid| faction_color(fid)),
             threat_level: r.threat_level,
             monster_density: r.monster_density,

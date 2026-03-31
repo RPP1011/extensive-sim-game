@@ -1855,10 +1855,18 @@ fn create_regions(state: &mut WorldState, layout: &GridLayout, rng: &mut u64) {
         let row = i / layout.cols;
         let col = i % layout.cols;
         let terrain = assign_terrain(col, row, rng);
+        // Jittered position — break the grid pattern for organic Voronoi boundaries
+        let base_x = col as f32 * layout.spacing + layout.spacing * 0.5;
+        let base_y = row as f32 * layout.spacing + layout.spacing * 0.5;
+        let jitter = layout.spacing * 0.35; // up to 35% offset from grid center
+        let jx = (lcg_f32(rng) - 0.5) * 2.0 * jitter;
+        let jy = (lcg_f32(rng) - 0.5) * 2.0 * jitter;
+        let pos = (base_x + jx, base_y + jy);
         state.regions.push(RegionState {
             id: i as u32,
             name: generate_region_name(i, rng),
             terrain,
+            pos,
             monster_density: terrain.threat_multiplier()
                 * Terrain::elevation_threat_mult(terrain.base_elevation())
                 * (0.1 + lcg_f32(rng) * 0.3),
