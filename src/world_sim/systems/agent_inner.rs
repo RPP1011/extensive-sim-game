@@ -522,6 +522,9 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
     if state.tick % 20 == 0 {
         spread_emotions(state);
     }
+
+    // --- Witness Events (death/battle reactions) ---
+    process_witness_events(state);
 }
 
 // ---------------------------------------------------------------------------
@@ -662,12 +665,13 @@ fn drift_personality_from_memory(personality: &mut Personality, memory: &Memory)
     }
 }
 
-/// Spread extreme emotions between nearby NPCs.
+/// Spread extreme emotions between nearby NPCs, weighted by relationships.
 fn spread_emotions(state: &mut WorldState) {
-    const CONTAGION_DIST_SQ: f32 = 100.0;
+    const CONTAGION_DIST_SQ: f32 = 100.0; // 10-unit radius
 
     let snapshots: Vec<(u32, (f32, f32), f32, f32, f32, f32)> = state.entities.iter()
-        .filter(|e| e.alive && e.kind == EntityKind::Npc && e.npc.is_some())
+        .filter(|e| e.alive && e.npc.is_some())
+        .filter(|e| matches!(e.kind, EntityKind::Npc | EntityKind::Monster))
         .filter_map(|e| {
             let em = &e.npc.as_ref().unwrap().emotions;
             if em.fear > 0.7 || em.joy > 0.7 || em.anger > 0.7 || em.grief > 0.5 {
@@ -681,7 +685,8 @@ fn spread_emotions(state: &mut WorldState) {
 
     let slot = (state.tick / 20) % 4;
     for entity in &mut state.entities {
-        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        if !entity.alive { continue; }
+        if !matches!(entity.kind, EntityKind::Npc | EntityKind::Monster) { continue; }
         if entity.id as u64 % 4 != slot { continue; }
         let npc = match &mut entity.npc { Some(n) => n, None => continue };
 
@@ -703,19 +708,100 @@ fn spread_emotions(state: &mut WorldState) {
             neighbors += 1;
             if neighbors > 5 { break; }
 
-            if sfear > 0.7 { fear_absorbed += sfear * 0.30; }
-            if sjoy > 0.7 { joy_absorbed += sjoy * 0.25; }
-            if sanger > 0.7 { anger_absorbed += sanger * 0.20; }
-            if sgrief > 0.5 { grief_absorbed += sgrief * 0.15; }
+            // Relationship trust amplifies emotional contagion from friends.
+            let trust_scale = 1.0 + npc.trust_toward(sid).max(0.0);
+
+            if sfear > 0.7 { fear_absorbed += sfear * 0.30 * trust_scale; }
+            if sjoy > 0.7 { joy_absorbed += sjoy * 0.25 * trust_scale; }
+            if sanger > 0.7 { anger_absorbed += sanger * 0.20 * trust_scale; }
+            if sgrief > 0.5 { grief_absorbed += sgrief * 0.15 * trust_scale; }
         }
 
         if neighbors == 0 { continue; }
 
+        // Cascade guard: cap total emotion change to ±0.3 per tick.
         let n = neighbors as f32;
-        npc.emotions.fear = (npc.emotions.fear + fear_absorbed / n * resist).min(1.0);
-        npc.emotions.joy = (npc.emotions.joy + joy_absorbed / n * resist).min(1.0);
-        npc.emotions.anger = (npc.emotions.anger + anger_absorbed / n * resist).min(1.0);
-        npc.emotions.grief = (npc.emotions.grief + grief_absorbed / n * resist).min(1.0);
+        let clamp = |v: f32| v.min(0.3);
+        npc.emotions.fear = (npc.emotions.fear + clamp(fear_absorbed / n * resist)).min(1.0);
+        npc.emotions.joy = (npc.emotions.joy + clamp(joy_absorbed / n * resist)).min(1.0);
+        npc.emotions.anger = (npc.emotions.anger + clamp(anger_absorbed / n * resist)).min(1.0);
+        npc.emotions.grief = (npc.emotions.grief + clamp(grief_absorbed / n * resist)).min(1.0);
+    }
+}
+
+/// Process witness events from recent world events (deaths, battles).
+/// NPCs nearby react emotionally, scaled by relationship trust.
+fn process_witness_events(state: &mut WorldState) {
+    const WITNESS_RANGE_SQ: f32 = 225.0; // 15-unit radius
+
+    // Collect recent deaths this tick.
+    let deaths: Vec<(u32, (f32, f32))> = state.world_events.iter()
+        .filter_map(|ev| {
+            if let WorldEvent::EntityDied { entity_id, .. } = ev {
+                // Find position of the dead entity (may already be marked dead).
+                state.entities.iter()
+                    .find(|e| e.id == *entity_id)
+                    .map(|e| (*entity_id, e.pos))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Collect recent battle victories this tick.
+    let victories: Vec<(u32, WorldTeam)> = state.world_events.iter()
+        .filter_map(|ev| {
+            if let WorldEvent::BattleEnded { grid_id, victor_team } = ev {
+                Some((*grid_id, *victor_team))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if deaths.is_empty() && victories.is_empty() { return; }
+
+    for entity in &mut state.entities {
+        if !entity.alive { continue; }
+        if !matches!(entity.kind, EntityKind::Npc | EntityKind::Monster) { continue; }
+        let npc = match &mut entity.npc { Some(n) => n, None => continue };
+
+        let mut grief_delta = 0.0f32;
+        let mut fear_delta = 0.0f32;
+        let mut joy_delta = 0.0f32;
+        let mut pride_delta = 0.0f32;
+        let mut anger_delta = 0.0f32;
+
+        // Witness deaths.
+        for &(dead_id, dead_pos) in &deaths {
+            if dead_id == entity.id { continue; }
+            let dx = entity.pos.0 - dead_pos.0;
+            let dy = entity.pos.1 - dead_pos.1;
+            if dx * dx + dy * dy > WITNESS_RANGE_SQ { continue; }
+
+            let trust = npc.trust_toward(dead_id).max(0.0);
+            grief_delta += 0.3 * trust + 0.1; // base grief for any death
+            fear_delta += 0.2;
+            // Attacked by someone who killed a friend → anger.
+            if trust > 0.2 {
+                anger_delta += 0.2 * trust;
+            }
+        }
+
+        // Witness battle victories (monsters killed on our grid → joy/pride).
+        for &(grid_id, _victor_team) in &victories {
+            if entity.grid_id == Some(grid_id) {
+                joy_delta += 0.1;
+                pride_delta += 0.05;
+            }
+        }
+
+        // Apply with cascade guard: cap at ±0.3 per emotion per tick.
+        npc.emotions.grief = (npc.emotions.grief + grief_delta.min(0.3)).min(1.0);
+        npc.emotions.fear = (npc.emotions.fear + fear_delta.min(0.3)).min(1.0);
+        npc.emotions.anger = (npc.emotions.anger + anger_delta.min(0.3)).min(1.0);
+        npc.emotions.joy = (npc.emotions.joy + joy_delta.min(0.3)).min(1.0);
+        npc.emotions.pride = (npc.emotions.pride + pride_delta.min(0.3)).min(1.0);
     }
 }
 
