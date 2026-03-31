@@ -2826,6 +2826,10 @@ pub struct NpcData {
     /// Medium-term behavioral orientation (Phase B).
     pub aspiration: Aspiration,
 
+    /// Per-action-type cultural conformity bias (Phase C). Range [-0.3, 0.3].
+    /// Index matches NpcAction::action_type_id() (0=idle..11=harvesting).
+    pub cultural_bias: [f32; 12],
+
     // --- Action commitment (hysteresis) ---
 
     /// Current committed action and its utility score at time of commitment.
@@ -3225,6 +3229,7 @@ impl Default for NpcData {
             relationships: std::collections::HashMap::new(),
             action_outcomes: std::collections::HashMap::new(),
             aspiration: Aspiration::default(),
+            cultural_bias: [0.0; 12],
             current_intention: None,
             intention_ticks: 0,
             classes: Vec::new(),

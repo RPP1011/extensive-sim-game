@@ -345,6 +345,9 @@ fn score_npc_actions(
     // Crystal bonus: +0.2 utility for actions advancing the crystal target.
     let _has_crystal = npc.aspiration.crystal.is_some();
 
+    // Cultural conformity (Phase C): per-action bias from nearby NPCs.
+    let cultural_bias = &npc.cultural_bias;
+
     // Determine what kinds of entities we consider hostile (attack targets).
     let is_npc = entity.kind == EntityKind::Npc;
     let hostile_kind = if is_npc { EntityKind::Monster } else { EntityKind::Npc };
@@ -355,7 +358,8 @@ fn score_npc_actions(
             .map(|inv| inv.commodities[commodity::FOOD] >= FOOD_PER_MEAL)
             .unwrap_or(false);
         if has_food {
-            let utility = hunger_urgency * 1.5 * grief_dampen * aspiration_mod_for_need(0);
+            let utility = hunger_urgency * 1.5 * grief_dampen * aspiration_mod_for_need(0)
+                * (1.0 + cultural_bias[2]);
             if utility > best_utility {
                 best_utility = utility;
                 best_action = CandidateAction::Eat;
@@ -400,9 +404,10 @@ fn score_npc_actions(
                 let distance_factor = 1.0 / (1.0 + dist / 10.0);
 
                 let harvest_outcome = outcome_mod((11, rt as u32));
+                let harvest_culture = 1.0 + cultural_bias[11];
 
                 if dist_sq <= HARVEST_DIST_SQ {
-                    let utility = commodity_need * distance_factor * curiosity_mod * grief_dampen * harvest_outcome;
+                    let utility = commodity_need * distance_factor * curiosity_mod * grief_dampen * harvest_outcome * harvest_culture;
                     if utility > best_utility {
                         best_utility = utility;
                         best_action = CandidateAction::Harvest {
@@ -412,7 +417,7 @@ fn score_npc_actions(
                         best_npc_action = NpcAction::Harvesting { resource_id: snap.id };
                     }
                 } else {
-                    let utility = commodity_need * 0.8 * distance_factor * curiosity_mod * grief_dampen * harvest_outcome;
+                    let utility = commodity_need * 0.8 * distance_factor * curiosity_mod * grief_dampen * harvest_outcome * harvest_culture;
                     if utility > best_utility {
                         best_utility = utility;
                         best_action = CandidateAction::MoveToResource {
@@ -438,7 +443,8 @@ fn score_npc_actions(
 
                     let attack_outcome = outcome_mod((5, snap.kind as u32));
                     let utility = (safety_urgency * 0.7 + anger_boost * 0.3 + territorial_boost)
-                        * risk_mod * grief_dampen * attack_outcome * aspiration_mod_for_need(1);
+                        * risk_mod * grief_dampen * attack_outcome * aspiration_mod_for_need(1)
+                        * (1.0 + cultural_bias[5]);
                     if utility > best_utility {
                         best_utility = utility;
                         best_action = CandidateAction::Attack {
@@ -505,7 +511,8 @@ fn score_npc_actions(
 
                 if dist < 5.0 {
                     let work_outcome = outcome_mod((3, 0));
-                    let utility = (purpose_urgency * 0.6 + 0.2) * ambition_mod * grief_dampen * work_outcome * aspiration_mod_for_need(4);
+                    let work_culture = 1.0 + cultural_bias[3];
+                    let utility = (purpose_urgency * 0.6 + 0.2) * ambition_mod * grief_dampen * work_outcome * aspiration_mod_for_need(4) * work_culture;
                     if utility > best_utility {
                         best_utility = utility;
                         best_action = CandidateAction::Work;
@@ -517,7 +524,8 @@ fn score_npc_actions(
                     }
                 } else {
                     let work_outcome = outcome_mod((3, 0));
-                    let utility = (purpose_urgency * 0.6 + 0.2) * distance_factor * ambition_mod * grief_dampen * work_outcome * aspiration_mod_for_need(4);
+                    let work_culture = 1.0 + cultural_bias[3];
+                    let utility = (purpose_urgency * 0.6 + 0.2) * distance_factor * ambition_mod * grief_dampen * work_outcome * aspiration_mod_for_need(4) * work_culture;
                     if utility > best_utility {
                         best_utility = utility;
                         best_action = CandidateAction::MoveToWork { pos: work_snap.pos };

@@ -612,6 +612,11 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
     if state.tick % 100 == 0 {
         share_resource_knowledge(state);
     }
+
+    // --- Cultural norm update (every 200 ticks, Phase C) ---
+    if state.tick % 200 == 0 {
+        update_cultural_norms(state);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -895,6 +900,124 @@ fn process_witness_events(state: &mut WorldState) {
 // ---------------------------------------------------------------------------
 // Event recording
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Authority weight (shared by Phase C, D)
+// ---------------------------------------------------------------------------
+
+/// Authority weight from leadership-related behavior tags. Scales with tag accumulation.
+fn authority_weight(npc: &NpcData) -> f32 {
+    let leadership = npc.behavior_value(tags::LEADERSHIP);
+    let discipline = npc.behavior_value(tags::DISCIPLINE);
+    // Every 20 accumulated leadership ≈ 1.0 authority weight.
+    ((leadership + discipline * 0.5) / 20.0).min(3.0)
+}
+
+// ---------------------------------------------------------------------------
+// Cultural emergence (Phase C)
+// ---------------------------------------------------------------------------
+
+/// Update cultural bias via three-channel conformity (frequency/prestige/authority).
+/// Called every 200 ticks from the main loop, as a separate pass.
+fn update_cultural_norms(state: &mut WorldState) {
+    const CULTURE_RADIUS_SQ: f32 = 900.0; // 30 units
+
+    // Phase 1: snapshot NPC positions, action types, esteem, authority.
+    struct CultureSnap {
+        id: u32,
+        pos: (f32, f32),
+        action_type: u8,
+        esteem: f32,
+        authority: f32,
+    }
+    let snaps: Vec<CultureSnap> = state.entities.iter()
+        .filter(|e| e.alive && e.kind == EntityKind::Npc)
+        .filter_map(|e| {
+            let npc = e.npc.as_ref()?;
+            Some(CultureSnap {
+                id: e.id,
+                pos: e.pos,
+                action_type: npc.action.action_type_id(),
+                esteem: npc.needs.esteem,
+                authority: authority_weight(npc),
+            })
+        })
+        .collect();
+
+    // Phase 2: for each NPC, sample nearby NPCs and blend cultural bias.
+    for entity in &mut state.entities {
+        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        let npc = match &mut entity.npc { Some(n) => n, None => continue };
+        // Monsters don't participate in culture.
+        if !matches!(npc.creature_type, CreatureType::Citizen) { continue; }
+
+        let mut freq = [0.0f32; 12];
+        let mut prestige = [0.0f32; 12];
+        let mut authority_ch = [0.0f32; 12];
+        let mut has_authority = false;
+        let mut count = 0u32;
+
+        for snap in &snaps {
+            if snap.id == entity.id { continue; }
+            let dx = entity.pos.0 - snap.pos.0;
+            let dy = entity.pos.1 - snap.pos.1;
+            if dx * dx + dy * dy > CULTURE_RADIUS_SQ { continue; }
+            if count >= 10 { break; } // cap sample
+            count += 1;
+
+            let at = snap.action_type as usize;
+            if at >= 12 { continue; }
+
+            freq[at] += 1.0;
+            prestige[at] += snap.esteem / 100.0;
+            if snap.authority > 0.0 {
+                authority_ch[at] += snap.authority;
+                has_authority = true;
+            }
+        }
+
+        if count == 0 {
+            // Isolated: slow decay toward neutral.
+            for b in &mut npc.cultural_bias { *b *= 0.999; }
+            continue;
+        }
+
+        // Normalize channels.
+        let normalize = |arr: &mut [f32; 12]| {
+            let sum: f32 = arr.iter().sum();
+            if sum > 0.0 { for v in arr.iter_mut() { *v /= sum; } }
+        };
+        normalize(&mut freq);
+        normalize(&mut prestige);
+        if has_authority { normalize(&mut authority_ch); }
+
+        // Blend channels.
+        let mut target = [0.0f32; 12];
+        if has_authority {
+            for i in 0..12 {
+                target[i] = 0.4 * freq[i] + 0.2 * prestige[i] + 0.4 * authority_ch[i];
+            }
+        } else {
+            for i in 0..12 {
+                target[i] = 0.7 * freq[i] + 0.3 * prestige[i];
+            }
+        }
+
+        // Conformity rate modulated by personality.
+        let mut conformity = (0.05
+            + npc.personality.social_drive * 0.05
+            - npc.personality.curiosity * 0.03)
+            .clamp(0.01, 0.1);
+        // Authority figures resist cultural drift.
+        if authority_weight(npc) > 0.5 { conformity *= 0.3; }
+
+        // Drift toward local norm.
+        for i in 0..12 {
+            npc.cultural_bias[i] += conformity * (target[i] - 0.5) * 0.1;
+            npc.cultural_bias[i] = npc.cultural_bias[i].clamp(-0.3, 0.3);
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Aspiration helpers (Phase B)
