@@ -333,37 +333,43 @@ function buildTerrain(regions) {
       const x1 = x0 + q.w * T;
       const z1 = z0 + q.d * T;
       const yTop = q.h;
-      const yBot = Math.min(q.h - 2, -2); // pillar extends down
+      // Thin slab: 1.5 units thick for ground, cliff face down to 0 for elevated
+      const slabThick = 1.5;
+      const yBot = q.h > 2 ? 0 : yTop - slabThick;
 
-      // Top face (2 triangles)
+      // Top face
       positions.push(x0, yTop, z0, x1, yTop, z0, x1, yTop, z1, x0, yTop, z1);
       normals.push(0,1,0, 0,1,0, 0,1,0, 0,1,0);
       indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
       vi += 4;
 
-      // Front face (z0 side)
-      positions.push(x0, yTop, z0, x1, yTop, z0, x1, yBot, z0, x0, yBot, z0);
-      normals.push(0,0,-1, 0,0,-1, 0,0,-1, 0,0,-1);
-      indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
-      vi += 4;
+      // Side faces only if there's visible cliff height (> 2 units)
+      const cliffH = yTop - yBot;
+      if (cliffH > 2) {
+        // Front face (z0 side)
+        positions.push(x0, yTop, z0, x1, yTop, z0, x1, yBot, z0, x0, yBot, z0);
+        normals.push(0,0,-1, 0,0,-1, 0,0,-1, 0,0,-1);
+        indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
+        vi += 4;
 
-      // Back face (z1 side)
-      positions.push(x1, yTop, z1, x0, yTop, z1, x0, yBot, z1, x1, yBot, z1);
-      normals.push(0,0,1, 0,0,1, 0,0,1, 0,0,1);
-      indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
-      vi += 4;
+        // Back face (z1 side)
+        positions.push(x1, yTop, z1, x0, yTop, z1, x0, yBot, z1, x1, yBot, z1);
+        normals.push(0,0,1, 0,0,1, 0,0,1, 0,0,1);
+        indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
+        vi += 4;
 
-      // Left face (x0 side)
-      positions.push(x0, yTop, z1, x0, yTop, z0, x0, yBot, z0, x0, yBot, z1);
-      normals.push(-1,0,0, -1,0,0, -1,0,0, -1,0,0);
-      indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
-      vi += 4;
+        // Left face (x0 side)
+        positions.push(x0, yTop, z1, x0, yTop, z0, x0, yBot, z0, x0, yBot, z1);
+        normals.push(-1,0,0, -1,0,0, -1,0,0, -1,0,0);
+        indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
+        vi += 4;
 
-      // Right face (x1 side)
-      positions.push(x1, yTop, z0, x1, yTop, z1, x1, yBot, z1, x1, yBot, z0);
-      normals.push(1,0,0, 1,0,0, 1,0,0, 1,0,0);
-      indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
-      vi += 4;
+        // Right face (x1 side)
+        positions.push(x1, yTop, z0, x1, yTop, z1, x1, yBot, z1, x1, yBot, z0);
+        normals.push(1,0,0, 1,0,0, 1,0,0, 1,0,0);
+        indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
+        vi += 4;
+      }
     }
 
     const geo = new THREE.BufferGeometry();
