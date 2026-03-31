@@ -67,6 +67,27 @@
   }
   .bio-text { font-size: 11px; line-height: 1.5; color: #908878; white-space: pre-wrap; }
   .memory-item { font-size: 10px; color: #807060; padding: 1px 0; }
+
+  #econ-panel {
+    position: fixed; top: 40px; left: 0; width: 360px; bottom: 0;
+    background: rgba(13,11,9,0.92); border-right: 1px solid #2a2520;
+    overflow-y: auto; padding: 12px; display: none; z-index: 15;
+    font-size: 12px; color: #b0a890; backdrop-filter: blur(6px);
+  }
+  #econ-panel.visible { display: block; }
+  .econ-settlement { margin-bottom: 12px; }
+  .econ-settlement-name { font-size: 13px; color: #c9a84c; font-weight: 600; margin-bottom: 4px; }
+  .econ-stats { font-size: 10px; color: #777; margin-bottom: 4px; }
+  .contract-row {
+    font-size: 10px; padding: 3px 6px; margin-bottom: 2px;
+    background: rgba(30,28,25,0.6); border: 1px solid #1a1714; border-radius: 2px;
+  }
+  .contract-service { color: #b0a070; font-weight: 500; }
+  .contract-detail { color: #777; }
+  .contract-bids { color: #8a8; }
+  .contract-accepted { border-color: #4a8a4a; }
+  .contract-open { border-color: #8a7a3a; }
+  .contract-none { color: #555; font-style: italic; font-size: 10px; }
 </style>
 </head>
 <body>
@@ -89,6 +110,7 @@
 <div id="controls">
   <button onclick="togglePause()">Pause</button>
   <button onclick="toggleNametags()" id="nametag-btn">Names: Off</button>
+  <button onclick="toggleEconomy()" id="econ-btn">Economy</button>
   <button onclick="deselectNpc()">Clear Selection</button>
   <select onchange="setSpeed(this.value)">
     <option value="1">1x</option>
@@ -97,6 +119,11 @@
     <option value="10">10x</option>
     <option value="20">20x</option>
   </select>
+</div>
+<div id="econ-panel">
+  <button class="close-btn" onclick="toggleEconomy()">&times;</button>
+  <h2 style="font-size:14px;color:#c9a84c;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px">Economy Board</h2>
+  <div id="econ-content"></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -912,6 +939,9 @@ function onFrame(data) {
   if (data.selected_npc) {
     updateNpcPanel(data.selected_npc);
   }
+
+  // Update economy board if open
+  if (showEconomy) updateEconomyBoard();
 }
 
 function updateHud() {
@@ -991,6 +1021,42 @@ function deselectNpc() {
   document.getElementById('npc-panel').classList.remove('visible');
 }
 
+let showEconomy = false;
+
+function toggleEconomy() {
+  showEconomy = !showEconomy;
+  document.getElementById('econ-panel').classList.toggle('visible', showEconomy);
+  if (showEconomy && frame) updateEconomyBoard();
+}
+
+function updateEconomyBoard() {
+  if (!frame || !frame.settlements) return;
+  const el = document.getElementById('econ-content');
+  let html = '';
+  for (const s of frame.settlements) {
+    const contracts = s.contracts || [];
+    html += `<div class="econ-settlement">
+      <div class="econ-settlement-name">${s.name}</div>
+      <div class="econ-stats">Pop ${s.population} &middot; Treasury ${s.treasury.toFixed(0)}g &middot; ${contracts.length} contracts</div>`;
+    if (contracts.length === 0) {
+      html += '<div class="contract-none">No active contracts</div>';
+    } else {
+      for (const c of contracts) {
+        const cls = c.accepted ? 'contract-accepted' : 'contract-open';
+        html += `<div class="contract-row ${cls}">
+          <span class="contract-service">${c.service}</span>
+          <span class="contract-detail"> &middot; ${c.requester} offering ${c.max_payment.toFixed(0)}g</span>
+          <span class="contract-bids"> &middot; ${c.num_bids} bid${c.num_bids !== 1 ? 's' : ''}</span>
+          ${c.provider ? `<span class="contract-detail"> &middot; ${c.provider}</span>` : ''}
+          <span class="contract-detail" style="color:#555"> &middot; ${c.ticks_open}t open</span>
+        </div>`;
+      }
+    }
+    html += '</div>';
+  }
+  el.innerHTML = html;
+}
+
 function toggleNametags() {
   showNametags = !showNametags;
   document.getElementById('nametag-btn').textContent = `Names: ${showNametags ? 'On' : 'Off'}`;
@@ -1035,6 +1101,7 @@ function updateNametags() {
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') deselectNpc();
   if (e.key === 'n' || e.key === 'N') toggleNametags();
+  if (e.key === 'e' || e.key === 'E') toggleEconomy();
 });
 
 function updateNpcPanel(npc) {

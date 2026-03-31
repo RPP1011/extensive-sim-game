@@ -1959,7 +1959,9 @@ impl Emotions {
 
 /// State machine for NPC spatial work loop.
 ///
-/// NPCs cycle through: Idle → TravelingToWork → Working → CarryingToStorage → Idle.
+/// NPCs cycle through: Idle → TravelingToWork → Working → Idle.
+/// On work completion, produced commodities go directly into the NPC's inventory.
+/// (CarryingToStorage is a legacy variant kept for backward compatibility.)
 /// The compute function emits movement/production deltas; the advance function
 /// handles state transitions (called post-apply since it needs `&mut WorldState`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2062,6 +2064,79 @@ pub enum GoalKind {
     Haul { commodity: u8, amount: f32, destination: (f32, f32) },
     /// Relocate to a different settlement.
     Relocate { destination_settlement_id: u32 },
+    /// Travel to a resource source, gather commodity into inventory.
+    Gather { commodity: u8, amount: f32 },
+    /// Fulfill a service contract posted at a settlement.
+    FulfillContract { contract_idx: usize },
+}
+
+// ---------------------------------------------------------------------------
+// Service contracts — NPCs post and fulfill work requests
+// ---------------------------------------------------------------------------
+
+/// Payment in gold, commodities, or both. Supports barter (no gold)
+/// and mixed payments (3 gold + 5 wood).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Payment {
+    pub gold: f32,
+    pub commodities: Vec<(u8, f32)>,
+}
+
+impl Payment {
+    pub fn gold_only(amount: f32) -> Self {
+        Self { gold: amount, commodities: Vec::new() }
+    }
+    pub fn commodity(commodity: u8, amount: f32) -> Self {
+        Self { gold: 0.0, commodities: vec![(commodity, amount)] }
+    }
+    pub fn estimated_value(&self) -> f32 {
+        self.gold + self.commodities.iter().map(|(_, a)| a).sum::<f32>()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.gold <= 0.0 && self.commodities.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceContract {
+    pub requester_id: u32,
+    pub service: ServiceType,
+    /// Maximum the requester will pay (gold and/or commodities).
+    pub max_payment: Payment,
+    /// Actual agreed payment (set to winning bid amount on resolution).
+    pub payment: f32,
+    pub provider_id: Option<u32>,
+    pub posted_tick: u64,
+    pub completed: bool,
+    /// Bidding deadline — urgency-driven:
+    /// critical (need < 15): +5 ticks, high (< 30): +15, medium (< 50): +30, low: +100.
+    pub bidding_deadline: u64,
+    pub bids: Vec<ContractBid>,
+    pub accepted_bid: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractBid {
+    pub bidder_id: u32,
+    /// Gold amount the bidder is willing to accept for the work.
+    pub bid_amount: f32,
+    /// Bidder's relevant skill value at time of bid.
+    pub skill_value: f32,
+    /// Bidder's credit history at time of bid.
+    pub credit_history: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ServiceType {
+    Build(BuildingType),
+    Gather(u8, f32),
+    Craft,
+    Heal,
+    Guard(u32),
+    Haul(u8, f32, (f32, f32)),
+    Teach(u32),
+    /// Direct commodity exchange — no service, just swap goods.
+    Barter { offer: (u8, f32), want: (u8, f32) },
 }
 
 /// Standard priority levels for goals.
@@ -2314,6 +2389,14 @@ pub struct NpcData {
     /// Links to campaign Adventurer id.
     pub adventurer_id: u32,
     pub gold: f32,
+    /// Gold owed to another entity (settlement or NPC creditor).
+    pub debt: f32,
+    /// Entity ID of creditor (who this NPC owes gold to).
+    pub creditor_id: Option<u32>,
+    /// Rolling average gold earned per work cycle (EMA, alpha=0.1).
+    pub income_rate: f32,
+    /// Credit history score: 0-255, higher = more reliable contractor.
+    pub credit_history: u8,
     pub home_settlement_id: Option<u32>,
     pub home_building_id: Option<u32>,
     pub work_building_id: Option<u32>,
@@ -2641,6 +2724,10 @@ impl Default for NpcData {
             adventurer_id: 0,
             name: String::new(),
             gold: 0.0,
+            debt: 0.0,
+            creditor_id: None,
+            income_rate: 0.0,
+            credit_history: 128,
             home_settlement_id: None,
             home_building_id: None,
             work_building_id: None,
@@ -2902,6 +2989,9 @@ pub struct SettlementState {
     /// Entity ID of the treasury building. Holds settlement gold and commodity reserves.
     /// All economic transfers should route through this building's inventory.
     pub treasury_building_id: Option<u32>,
+
+    /// Active service contracts posted by NPCs in this settlement.
+    pub service_contracts: Vec<ServiceContract>,
 }
 
 impl SettlementState {
@@ -2922,6 +3012,7 @@ impl SettlementState {
             context_tags: Vec::new(),
             city_grid_idx: None,
             treasury_building_id: None,
+            service_contracts: Vec::new(),
         }
     }
 }

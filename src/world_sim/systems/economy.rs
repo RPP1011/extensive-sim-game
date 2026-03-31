@@ -7,7 +7,7 @@
 //!
 
 use crate::world_sim::delta::WorldDelta;
-use crate::world_sim::state::{Entity, WorldState};
+use crate::world_sim::state::{Entity, EntityKind, WorldState};
 
 /// Passive gold income per tick for each guild-controlled settlement.
 const PASSIVE_INCOME_PER_TICK: f32 = 0.5;
@@ -131,6 +131,53 @@ pub fn compute_economy_maintenance_for_settlement(
             settlement_id: settlement_id,
             delta: -MAINTENANCE_PER_NPC,
         });
+    }
+}
+
+/// How often (in ticks) to run debt repayment.
+const DEBT_REPAYMENT_INTERVAL: u64 = 50;
+
+/// Advance debt repayment for all NPCs.
+/// Runs every 50 ticks. NPCs with debt > 0 attempt partial repayment from gold.
+/// Excessive debt (> 100x income) incurs morale and credit penalties.
+/// Full repayment earns a credit history bonus.
+pub fn advance_debt(state: &mut WorldState) {
+    if state.tick % DEBT_REPAYMENT_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
+    for entity in &mut state.entities {
+        if !entity.alive || entity.kind != EntityKind::Npc {
+            continue;
+        }
+        let npc = match &mut entity.npc {
+            Some(n) => n,
+            None => continue,
+        };
+        if npc.debt <= 0.0 {
+            continue;
+        }
+
+        // Repayment: 20% of income_rate per cycle, capped at remaining debt.
+        let repayment = npc.debt.min(npc.income_rate * 0.2);
+        if repayment > 0.0 && npc.gold >= repayment {
+            npc.gold -= repayment;
+            npc.debt -= repayment;
+        }
+        // If NPC can't afford the repayment (gold < repayment), skip this cycle.
+
+        // Excessive debt penalty: debt > 100x income_rate.
+        if npc.income_rate > 0.0 && npc.debt > npc.income_rate * 100.0 {
+            npc.morale = (npc.morale - 5.0).max(0.0);
+            npc.credit_history = npc.credit_history.saturating_sub(10);
+        }
+
+        // Debt fully repaid: credit history bonus, clear creditor.
+        if npc.debt <= 0.0 {
+            npc.debt = 0.0;
+            npc.credit_history = npc.credit_history.saturating_add(5);
+            npc.creditor_id = None;
+        }
     }
 }
 

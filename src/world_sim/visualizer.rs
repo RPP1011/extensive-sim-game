@@ -25,6 +25,21 @@ pub struct SettlementView {
     pub treasury: f32,
     pub specialty: String,
     pub threat_level: f32,
+    /// Active service contracts at this settlement.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub contracts: Vec<ContractView>,
+}
+
+/// Service contract as seen by a renderer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ContractView {
+    pub service: String,
+    pub requester: String,
+    pub max_payment: f32,
+    pub num_bids: usize,
+    pub accepted: bool,
+    pub provider: Option<String>,
+    pub ticks_open: u64,
 }
 
 /// Entity as seen by a renderer.
@@ -281,6 +296,25 @@ pub fn generate_frame_with_selection(
         let color = s.faction_id
             .map(|fid| faction_color(fid))
             .unwrap_or([158, 158, 158]);
+        let contracts: Vec<ContractView> = s.service_contracts.iter().map(|c| {
+            let service = format!("{:?}", c.service);
+            let requester = state.entity(c.requester_id)
+                .map(|e| super::naming::entity_display_name(e))
+                .unwrap_or_else(|| format!("#{}", c.requester_id));
+            let provider = c.provider_id.and_then(|pid| {
+                state.entity(pid).map(|e| super::naming::entity_display_name(e))
+            });
+            ContractView {
+                service,
+                requester,
+                max_payment: c.max_payment.estimated_value(),
+                num_bids: c.bids.len(),
+                accepted: c.accepted_bid.is_some(),
+                provider,
+                ticks_open: tick.saturating_sub(c.posted_tick),
+            }
+        }).collect();
+
         SettlementView {
             id: s.id,
             name: s.name.clone(),
@@ -290,6 +324,7 @@ pub fn generate_frame_with_selection(
             treasury: s.treasury,
             specialty: s.specialty.name().to_string(),
             threat_level: s.threat_level,
+            contracts,
         }
     }).collect();
 

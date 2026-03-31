@@ -1,7 +1,11 @@
 //! Spatial work state machine — universal work loop for NPC production.
 //!
 //! NPCs with a `work_building_id` cycle through:
-//!   Idle -> TravelingToWork -> Working -> CarryingToStorage -> Idle
+//!   Idle -> TravelingToWork -> Working -> Idle
+//!
+//! When a work cycle completes, the produced commodity goes directly into the
+//! worker NPC's inventory (they keep what they produce). Wages are paid from the
+//! settlement treasury to the NPC at the same time.
 //!
 //! `compute_work` reads immutable `&WorldState` and emits movement/behavior deltas.
 //! `advance_work_states` takes `&mut WorldState` and handles state transitions
@@ -235,7 +239,7 @@ pub fn advance_work_states(state: &mut WorldState) {
                         let npc = state.entities[i].npc.as_mut().unwrap();
                         npc.work_state = WorkState::Idle;
                     } else {
-                        // Non-forge production: commodity output.
+                        // Non-forge production: commodity goes directly into NPC inventory.
                         let (commodity, base_amount) = output_for_building(state, building_id);
 
                         // Apply building specialization bonus when worker's primary
@@ -260,40 +264,18 @@ pub fn advance_work_states(state: &mut WorldState) {
                             }
                         };
 
-                        let storage_pos = home_sid
-                            .and_then(|sid| storage_by_settlement.get(&sid))
-                            .and_then(|buildings| {
-                                buildings.iter()
-                                    .min_by(|a, b| {
-                                        let da = (a.1.0 - entity_pos.0).powi(2) + (a.1.1 - entity_pos.1).powi(2);
-                                        let db = (b.1.0 - entity_pos.0).powi(2) + (b.1.1 - entity_pos.1).powi(2);
-                                        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-                                    })
-                                    .map(|b| b.1)
-                            })
-                            .or_else(|| {
-                                home_sid
-                                    .and_then(|sid| state.settlement(sid))
-                                    .map(|s| s.pos)
-                            });
+                        // Deposit commodity directly into worker's inventory.
+                        if let Some(inv) = &mut state.entities[i].inventory {
+                            inv.deposit(commodity, amount);
+                        }
 
-                        let fallback_sid = state.entity(building_id)
-                            .and_then(|e| e.building.as_ref())
-                            .and_then(|b| b.settlement_id)
-                            .or(home_sid)
-                            .unwrap_or(0);
+                        // Pay wage for completed work cycle.
+                        if let Some(sid) = home_sid {
+                            wages.push((i, sid, BASE_WAGE));
+                        }
 
                         let npc = state.entities[i].npc.as_mut().unwrap();
-                        if let Some(target_pos) = storage_pos {
-                            npc.work_state = WorkState::CarryingToStorage {
-                                commodity: commodity as u8,
-                                amount,
-                                target_pos,
-                            };
-                        } else {
-                            deposits.push((fallback_sid, commodity, amount));
-                            npc.work_state = WorkState::Idle;
-                        }
+                        npc.work_state = WorkState::Idle;
                     }
                 } else {
                     // Decrement ticks remaining.
@@ -362,6 +344,8 @@ pub fn advance_work_states(state: &mut WorldState) {
             }
             if let Some(npc) = state.entities[entity_idx].npc.as_mut() {
                 npc.gold = (npc.gold + paid).min(10000.0); // cap NPC gold
+                // Update rolling average income rate.
+                npc.income_rate = npc.income_rate * 0.9 + paid * 0.1;
             }
         }
     }

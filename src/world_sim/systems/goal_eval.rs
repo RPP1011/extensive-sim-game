@@ -13,8 +13,15 @@
 
 use crate::world_sim::state::*;
 use crate::world_sim::commodity;
+use crate::world_sim::NUM_COMMODITIES;
 
 const GOAL_EVAL_INTERVAL: u64 = 10;
+
+/// Snapshot of settlement economic data needed during evaluation.
+struct SettlementEcon {
+    id: u32,
+    prices: [f32; NUM_COMMODITIES],
+}
 
 /// Evaluate and update goal stacks for all NPCs.
 /// Called post-apply from runtime.rs.
@@ -27,6 +34,14 @@ pub fn evaluate_goals(state: &mut WorldState) {
     let settlement_data: Vec<(u32, f32, f32, (f32, f32))> = state.settlements.iter()
         .map(|s| (s.id, s.threat_level, s.stockpile[commodity::FOOD], s.pos))
         .collect();
+
+    // Collect settlement economic data for economic option evaluation.
+    let settlement_econ: Vec<SettlementEcon> = state.settlements.iter()
+        .map(|s| SettlementEcon { id: s.id, prices: s.prices })
+        .collect();
+
+    // Deferred service contracts to post after the entity loop.
+    let mut deferred_contracts: Vec<(u32, ServiceContract)> = Vec::new();
 
     // Pre-compute food building positions per settlement: (settlement_id, pos).
     let food_buildings: Vec<(u32, (f32, f32))> = state.entities.iter()
@@ -78,7 +93,6 @@ pub fn evaluate_goals(state: &mut WorldState) {
 
         // Flee: safety critically low + immediate danger.
         if npc.needs.safety < 10.0 && threat > 0.6 && !npc.goal_stack.has(&GoalKind::Flee { from: (0.0, 0.0) }) {
-            // Flee away from settlement center (toward wilderness).
             let flee_from = _settlement_pos;
             npc.goal_stack.push(
                 Goal::new(GoalKind::Flee { from: flee_from }, goal_priority::FLEE, tick)
@@ -163,6 +177,17 @@ pub fn evaluate_goals(state: &mut WorldState) {
             }
         }
 
+        // --- Economic decision evaluation ---
+        // Evaluate DIY / Hire / Borrow / Postpone for shelter and food needs.
+        if let Some(econ) = sid
+            .and_then(|id| settlement_econ.iter().find(|se| se.id == id))
+        {
+            evaluate_economic_options(
+                npc, entity.id, econ.id, &econ.prices, tick,
+                &mut deferred_contracts,
+            );
+        }
+
         // --- Goal completion/cleanup ---
 
         // Remove stale Eat goals if hunger is satisfied.
@@ -177,7 +202,6 @@ pub fn evaluate_goals(state: &mut WorldState) {
 
         // Remove Flee goals if safety recovered.
         if npc.needs.safety > 50.0 {
-            // Can't use remove_kind directly because Flee has a payload.
             npc.goal_stack.goals.retain(|g| !matches!(g.kind, GoalKind::Flee { .. }));
         }
 
@@ -192,14 +216,13 @@ pub fn evaluate_goals(state: &mut WorldState) {
         }
 
         // Remove goals that have been active too long (stale, stuck).
-        let stale_threshold = 500; // 500 ticks = ~50 seconds
+        let stale_threshold = 500;
         npc.goal_stack.goals.retain(|g| {
             tick.saturating_sub(g.started_tick) < stale_threshold
                 || matches!(g.kind, GoalKind::Work | GoalKind::Trade { .. } | GoalKind::Quest { .. })
         });
 
-        // --- Sync goal stack → EconomicIntent (backward compat) ---
-        // The current systems still read EconomicIntent. Sync from top goal.
+        // --- Sync goal stack -> EconomicIntent (backward compat) ---
         match npc.goal_stack.current_kind() {
             GoalKind::Idle => { /* leave current intent */ }
             GoalKind::Work => {
@@ -211,7 +234,7 @@ pub fn evaluate_goals(state: &mut WorldState) {
                 };
             }
             GoalKind::Fight => {
-                npc.economic_intent = EconomicIntent::Idle; // combat-ready
+                npc.economic_intent = EconomicIntent::Idle;
             }
             GoalKind::Quest { quest_id, destination } => {
                 npc.economic_intent = EconomicIntent::Adventuring {
@@ -226,8 +249,286 @@ pub fn evaluate_goals(state: &mut WorldState) {
                     .unwrap_or(entity.pos);
                 npc.economic_intent = EconomicIntent::Travel { destination: dest_pos };
             }
-            // Other goals don't map to EconomicIntent — they use their own movement.
             _ => {}
+        }
+    }
+
+    // Apply deferred service contracts to settlements.
+    for (settlement_id, contract) in deferred_contracts {
+        if let Some(settlement) = state.settlements.iter_mut().find(|s| s.id == settlement_id) {
+            settlement.service_contracts.push(contract);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Economic decision evaluation -- DIY / Hire / Borrow / Postpone
+// ---------------------------------------------------------------------------
+
+/// The four possible economic decisions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum EconDecision {
+    Diy,
+    Hire,
+    Borrow,
+    Postpone,
+}
+
+/// Create a service contract with urgency-based bidding deadline.
+fn make_contract(
+    requester_id: u32,
+    service: ServiceType,
+    gold_amount: f32,
+    tick: u64,
+    urgency: f32,
+) -> ServiceContract {
+    let deadline_offset: u64 = if urgency > 0.85 {
+        5
+    } else if urgency > 0.7 {
+        15
+    } else if urgency > 0.5 {
+        30
+    } else {
+        100
+    };
+    ServiceContract {
+        requester_id,
+        service,
+        max_payment: Payment::gold_only(gold_amount),
+        payment: 0.0,
+        provider_id: None,
+        posted_tick: tick,
+        completed: false,
+        bidding_deadline: tick + deadline_offset,
+        bids: Vec::new(),
+        accepted_bid: None,
+    }
+}
+
+/// Compute the credit limit for an NPC based on income and credit history.
+fn credit_limit(npc: &NpcData) -> f32 {
+    npc.income_rate * 50.0 * (npc.credit_history as f32 / 255.0)
+}
+
+/// Pick the best economic option by comparing utilities.
+///
+/// - `urgency`: 0.0-1.0, how badly the need is unmet
+/// - `resource_cost`: gold cost of materials (for DIY)
+/// - `labor_ticks`: estimated ticks of labor (for DIY)
+/// - `income`: NPC income_rate (gold per tick, floored)
+/// - `hire_cost`: total gold cost to hire someone
+fn pick_best_option(
+    npc: &NpcData,
+    urgency: f32,
+    resource_cost: f32,
+    labor_ticks: f32,
+    income: f32,
+    hire_cost: f32,
+) -> EconDecision {
+    let urgency = urgency.max(0.01);
+
+    // 1. DIY utility: can I do this myself?
+    let diy_cost = resource_cost + labor_ticks * income;
+    let diy_utility = if diy_cost > 0.0 { urgency / diy_cost } else { urgency };
+
+    // 2. Hire utility: can I pay someone?
+    let hire_utility = if npc.gold >= hire_cost && hire_cost > 0.0 {
+        urgency / hire_cost
+    } else {
+        0.0
+    };
+
+    // 3. Borrow utility: can I get credit?
+    let available_credit = credit_limit(npc) - npc.debt;
+    let shortfall = (hire_cost - npc.gold).max(0.0);
+    let borrow_utility = if available_credit >= shortfall && hire_cost > 0.0 {
+        urgency / (hire_cost * 1.2)
+    } else {
+        0.0
+    };
+
+    // 4. Postpone utility: can I tolerate this for now?
+    let need_value = (1.0 - urgency) * 100.0;
+    let suffering_rate = ((100.0 - need_value) * 0.01).max(0.001);
+    let ticks_until_affordable = if income > 0.0 {
+        (hire_cost / income).max(1.0)
+    } else {
+        10000.0
+    };
+    let postpone_utility = 1.0 / (suffering_rate * ticks_until_affordable);
+
+    let options = [
+        (EconDecision::Diy, diy_utility),
+        (EconDecision::Hire, hire_utility),
+        (EconDecision::Borrow, borrow_utility),
+        (EconDecision::Postpone, postpone_utility),
+    ];
+    options.into_iter()
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(d, _)| d)
+        .unwrap_or(EconDecision::Postpone)
+}
+
+/// Evaluate economic options for unmet needs: shelter and food.
+///
+/// For each unmet need, scores four strategies:
+/// 1. **DIY** -- gather resources and do it yourself (opportunity cost = labor x income_rate)
+/// 2. **Hire** -- pay someone at market price
+/// 3. **Borrow** -- take on debt and then hire (interest premium)
+/// 4. **Postpone** -- wait until you can afford it naturally
+///
+/// The highest-utility option drives goal generation.
+fn evaluate_economic_options(
+    npc: &mut NpcData,
+    entity_id: u32,
+    settlement_id: u32,
+    prices: &[f32; NUM_COMMODITIES],
+    tick: u64,
+    deferred_contracts: &mut Vec<(u32, ServiceContract)>,
+) {
+    // Don't evaluate if NPC is in a party, fighting, or fleeing.
+    if npc.party_id.is_some() { return; }
+    if npc.goal_stack.goals.iter().any(|g| {
+        matches!(g.kind, GoalKind::Fight | GoalKind::Flee { .. })
+    }) {
+        return;
+    }
+
+    // Income rate floor to avoid division by zero.
+    let income = npc.income_rate.max(0.01);
+
+    // --- Shelter need: build a house ---
+    if npc.needs.shelter < 40.0 && npc.home_building_id.is_none() {
+        let has_build = npc.goal_stack.goals.iter().any(|g| {
+            matches!(g.kind, GoalKind::Build { .. })
+        });
+        if !has_build {
+            let shelter_urgency = (100.0 - npc.needs.shelter) / 100.0;
+            let (wood_cost, iron_cost) = BuildingType::House.build_cost();
+            let resource_gold_cost = wood_cost * prices[commodity::WOOD]
+                + iron_cost * prices[commodity::IRON];
+            let labor_ticks: f32 = 200.0;
+            let hire_cost = resource_gold_cost + labor_ticks * income;
+
+            let decision = pick_best_option(
+                npc, shelter_urgency, resource_gold_cost,
+                labor_ticks, income, hire_cost,
+            );
+
+            match decision {
+                EconDecision::Diy => {
+                    if wood_cost > 0.0 {
+                        let mut g = Goal::new(
+                            GoalKind::Gather {
+                                commodity: commodity::WOOD as u8,
+                                amount: wood_cost,
+                            },
+                            goal_priority::BUILD, tick,
+                        );
+                        g.target_entity = Some(settlement_id);
+                        npc.goal_stack.push(g);
+                    }
+                    if iron_cost > 0.0 {
+                        let mut g = Goal::new(
+                            GoalKind::Gather {
+                                commodity: commodity::IRON as u8,
+                                amount: iron_cost,
+                            },
+                            goal_priority::BUILD, tick,
+                        );
+                        g.target_entity = Some(settlement_id);
+                        npc.goal_stack.push(g);
+                    }
+                    npc.goal_stack.push(Goal::new(
+                        GoalKind::Build { building_id: 0 },
+                        goal_priority::BUILD, tick,
+                    ));
+                }
+                EconDecision::Hire => {
+                    if npc.gold >= hire_cost {
+                        npc.gold -= hire_cost;
+                        deferred_contracts.push((settlement_id, make_contract(
+                            entity_id, ServiceType::Build(BuildingType::House),
+                            hire_cost, tick, shelter_urgency,
+                        )));
+                    }
+                }
+                EconDecision::Borrow => {
+                    let borrow_amount = (hire_cost - npc.gold).max(0.0);
+                    let available_credit = credit_limit(npc) - npc.debt;
+                    if available_credit >= borrow_amount {
+                        npc.debt += borrow_amount;
+                        npc.creditor_id = Some(settlement_id);
+                        npc.gold += borrow_amount;
+                        npc.gold -= hire_cost;
+                        deferred_contracts.push((settlement_id, make_contract(
+                            entity_id, ServiceType::Build(BuildingType::House),
+                            hire_cost, tick, shelter_urgency,
+                        )));
+                    }
+                }
+                EconDecision::Postpone => {}
+            }
+        }
+    }
+
+    // --- Food need: buy food vs farm ---
+    if npc.needs.hunger < 35.0 {
+        let has_eat = npc.goal_stack.has(&GoalKind::Eat);
+        let has_gather_food = npc.goal_stack.goals.iter().any(|g| {
+            matches!(g.kind, GoalKind::Gather { commodity, .. } if commodity == commodity::FOOD as u8)
+        });
+        if !has_eat && !has_gather_food {
+            let hunger_urgency = (100.0 - npc.needs.hunger) / 100.0;
+            let food_price = prices[commodity::FOOD];
+            let food_units_needed: f32 = 5.0;
+            let buy_cost = food_units_needed * food_price;
+            let farm_labor_ticks: f32 = 100.0;
+
+            let decision = pick_best_option(
+                npc, hunger_urgency, 0.0,
+                farm_labor_ticks, income, buy_cost,
+            );
+
+            match decision {
+                EconDecision::Diy => {
+                    let mut g = Goal::new(
+                        GoalKind::Gather {
+                            commodity: commodity::FOOD as u8,
+                            amount: food_units_needed,
+                        },
+                        goal_priority::WORK, tick,
+                    );
+                    g.target_entity = Some(settlement_id);
+                    npc.goal_stack.push(g);
+                }
+                EconDecision::Hire => {
+                    if npc.gold >= buy_cost {
+                        npc.gold -= buy_cost;
+                        deferred_contracts.push((settlement_id, make_contract(
+                            entity_id,
+                            ServiceType::Gather(commodity::FOOD as u8, food_units_needed),
+                            buy_cost, tick, hunger_urgency,
+                        )));
+                    }
+                }
+                EconDecision::Borrow => {
+                    let borrow_amount = (buy_cost - npc.gold).max(0.0);
+                    let available_credit = credit_limit(npc) - npc.debt;
+                    if available_credit >= borrow_amount {
+                        npc.debt += borrow_amount;
+                        npc.creditor_id = Some(settlement_id);
+                        npc.gold += borrow_amount;
+                        npc.gold -= buy_cost;
+                        deferred_contracts.push((settlement_id, make_contract(
+                            entity_id,
+                            ServiceType::Gather(commodity::FOOD as u8, food_units_needed),
+                            buy_cost, tick, hunger_urgency,
+                        )));
+                    }
+                }
+                EconDecision::Postpone => {}
+            }
         }
     }
 }

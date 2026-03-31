@@ -1523,6 +1523,12 @@ impl WorldSim {
         // WORK STATE — advance NPC work state machine.
         super::systems::work::advance_work_states(&mut self.state);
 
+        // DEBT REPAYMENT — NPCs repay debt from income.
+        super::systems::economy::advance_debt(&mut self.state);
+
+        // CONTRACTS — match, complete, and expire service contracts.
+        super::systems::contracts::advance_contracts(&mut self.state);
+
         // BUILDING SPECIALIZATION — buildings develop specialties from worker classes.
         super::systems::buildings::update_building_specializations(&mut self.state);
 
