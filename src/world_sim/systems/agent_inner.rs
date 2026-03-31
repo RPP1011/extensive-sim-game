@@ -206,7 +206,8 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
     let world = WorldView::build(state);
 
     for entity in &mut state.entities {
-        if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+        if !entity.alive { continue; }
+        if !matches!(entity.kind, EntityKind::Npc | EntityKind::Monster) { continue; }
         let npc = match &mut entity.npc { Some(n) => n, None => continue };
 
         // --- Needs Drift ---

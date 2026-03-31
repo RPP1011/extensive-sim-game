@@ -128,7 +128,7 @@ pub fn evaluate_and_act(state: &mut WorldState) {
         if !e.alive { continue; }
 
         match e.kind {
-            EntityKind::Npc => {
+            EntityKind::Npc | EntityKind::Monster => {
                 let npc = match &e.npc { Some(n) => n, None => continue };
                 // Skip NPCs in adventuring parties.
                 if npc.party_id.is_some() { continue; }
@@ -170,10 +170,6 @@ pub fn evaluate_and_act(state: &mut WorldState) {
                 }
 
                 deferred.push(DeferredAction { idx: i, action, npc_action, utility, skip_execute: false });
-            }
-            EntityKind::Monster => {
-                let (action, npc_action) = score_monster_actions(e, &snaps);
-                deferred.push(DeferredAction { idx: i, action, npc_action, utility: 0.0, skip_execute: false });
             }
             _ => {}
         }
@@ -225,12 +221,14 @@ fn score_npc_actions(
     let needs = &npc.needs;
     let pers = &npc.personality;
     let emo = &npc.emotions;
+    let ctype = npc.creature_type;
 
     // Need urgencies: (100 - value) / 100.
     let hunger_urgency = (100.0 - needs.hunger) / 100.0;
     let safety_urgency = (100.0 - needs.safety) / 100.0;
     let shelter_urgency = (100.0 - needs.shelter) / 100.0;
     let purpose_urgency = (100.0 - needs.purpose) / 100.0;
+    let social_urgency = (100.0 - needs.social) / 100.0;
 
     // Emotion modifiers.
     let grief_dampen = 1.0 - emo.grief * 0.5; // grief reduces all utilities
@@ -239,7 +237,7 @@ fn score_npc_actions(
 
     // Personality modifiers per action type.
     let ambition_mod = 1.0 + (pers.ambition - 0.5) * 0.4;       // 0.8-1.2
-    let _risk_mod = 1.0 + (pers.risk_tolerance - 0.5) * 0.4;    // 0.8-1.2
+    let risk_mod = 1.0 + (pers.risk_tolerance - 0.5) * 0.4;     // 0.8-1.2
     let _compassion_mod = 1.0 + (pers.compassion - 0.5) * 0.2;  // 0.9-1.1
     let curiosity_mod = 1.0 + (pers.curiosity - 0.5) * 0.2;     // 0.9-1.1
 
@@ -247,22 +245,29 @@ fn score_npc_actions(
     let mut best_action = CandidateAction::Idle;
     let mut best_npc_action = NpcAction::Idle;
 
-    // --- Eat (requires food in inventory) ---
-    let has_food = entity.inventory.as_ref()
-        .map(|inv| inv.commodities[commodity::FOOD] >= FOOD_PER_MEAL)
-        .unwrap_or(false);
-    if has_food {
-        let utility = hunger_urgency * 1.5 * grief_dampen;
-        if utility > best_utility {
-            best_utility = utility;
-            best_action = CandidateAction::Eat;
-            best_npc_action = NpcAction::Eating { ticks_remaining: 1, building_id: 0 };
+    // Determine what kinds of entities we consider hostile (attack targets).
+    let is_npc = entity.kind == EntityKind::Npc;
+    let hostile_kind = if is_npc { EntityKind::Monster } else { EntityKind::Npc };
+
+    // --- Eat (requires food in inventory, economy creatures only) ---
+    if ctype.has_economy_actions() {
+        let has_food = entity.inventory.as_ref()
+            .map(|inv| inv.commodities[commodity::FOOD] >= FOOD_PER_MEAL)
+            .unwrap_or(false);
+        if has_food {
+            let utility = hunger_urgency * 1.5 * grief_dampen;
+            if utility > best_utility {
+                best_utility = utility;
+                best_action = CandidateAction::Eat;
+                best_npc_action = NpcAction::Eating { ticks_remaining: 1, building_id: 0 };
+            }
         }
     }
 
     // --- Scan nearby entities ---
     for snap in snaps {
         if !snap.alive { continue; }
+        if snap.id == entity.id { continue; } // don't target self
         let dx = snap.pos.0 - pos.0;
         let dy = snap.pos.1 - pos.1;
         let dist_sq = dx * dx + dy * dy;
@@ -271,7 +276,7 @@ fn score_npc_actions(
         let dist = dist_sq.sqrt();
 
         match snap.kind {
-            EntityKind::Resource => {
+            EntityKind::Resource if ctype.has_economy_actions() => {
                 if snap.resource_remaining <= 0.0 { continue; }
                 let rt: ResourceType = match snap.resource_type {
                     Some(t) => t,
@@ -316,11 +321,19 @@ fn score_npc_actions(
                 }
             }
 
-            EntityKind::Monster => {
-                // Attack hostile monster if within aggro range.
+            k if k == hostile_kind => {
+                // Attack hostile entity if within aggro range.
                 if dist_sq <= AGGRO_RANGE_SQ {
-                    let utility = (safety_urgency * 0.7 + anger_boost * 0.3)
-                        * _risk_mod * grief_dampen;
+                    // Territorial creatures get attack boost near den.
+                    let territorial_boost = if let Some(den) = npc.home_den {
+                        let ddx = pos.0 - den.0;
+                        let ddy = pos.1 - den.1;
+                        let den_dist_sq = ddx * ddx + ddy * ddy;
+                        if den_dist_sq < 225.0 { 0.3 } else { 0.0 } // within 15 units
+                    } else { 0.0 };
+
+                    let utility = (safety_urgency * 0.7 + anger_boost * 0.3 + territorial_boost)
+                        * risk_mod * grief_dampen;
                     if utility > best_utility {
                         best_utility = utility;
                         best_action = CandidateAction::Attack {
@@ -332,24 +345,21 @@ fn score_npc_actions(
                 }
             }
 
-            EntityKind::Building => {
+            EntityKind::Building if ctype.can_build() => {
                 // Incomplete building nearby: advance construction (blueprint system).
-                // ANY NPC with wood can contribute — multiple workers stack.
                 if snap.construction_progress < 1.0 {
                     let has_wood = entity.inventory.as_ref()
                         .map(|inv| inv.commodities[commodity::WOOD] >= 0.1)
                         .unwrap_or(false);
                     if has_wood {
-                        // Utility: homeless NPCs want shelter, housed NPCs help for purpose/social.
                         let base = if npc.home_building_id.is_none() {
                             shelter_urgency * 0.9
                         } else {
-                            purpose_urgency * 0.3 + 0.1 // community contribution
+                            purpose_urgency * 0.3 + 0.1
                         };
                         let distance_factor = 1.0 / (1.0 + dist / 10.0);
 
                         if dist_sq <= HARVEST_DIST_SQ {
-                            // Close enough to build
                             let utility = base * distance_factor * ambition_mod * grief_dampen;
                             if utility > best_utility {
                                 best_utility = utility;
@@ -363,7 +373,6 @@ fn score_npc_actions(
                                 };
                             }
                         } else {
-                            // Walk toward the building to help
                             let utility = base * 0.8 * distance_factor * ambition_mod * grief_dampen;
                             if utility > best_utility {
                                 best_utility = utility;
@@ -379,43 +388,41 @@ fn score_npc_actions(
         }
     }
 
-    // --- Work (requires work_building_id set) ---
-    if let Some(work_bid) = npc.work_building_id {
-        if let Some(work_snap) = snaps.iter().find(|s| s.id == work_bid && s.alive) {
-            let dx = work_snap.pos.0 - pos.0;
-            let dy = work_snap.pos.1 - pos.1;
-            let dist_sq = dx * dx + dy * dy;
-            let dist = dist_sq.sqrt();
-            let distance_factor = 1.0 / (1.0 + dist / 10.0);
+    // --- Work (requires work_building_id set, citizens only) ---
+    if ctype.can_build() {
+        if let Some(work_bid) = npc.work_building_id {
+            if let Some(work_snap) = snaps.iter().find(|s| s.id == work_bid && s.alive) {
+                let dx = work_snap.pos.0 - pos.0;
+                let dy = work_snap.pos.1 - pos.1;
+                let dist_sq = dx * dx + dy * dy;
+                let dist = dist_sq.sqrt();
+                let distance_factor = 1.0 / (1.0 + dist / 10.0);
 
-            if dist < 5.0 {
-                // At work building: work
-                let utility = (purpose_urgency * 0.6 + 0.2) * ambition_mod * grief_dampen;
-                if utility > best_utility {
-                    best_utility = utility;
-                    best_action = CandidateAction::Work;
-                    best_npc_action = NpcAction::Working {
-                        ticks_remaining: 10,
-                        building_id: work_bid,
-                        activity: WorkActivity::Crafting,
-                    };
-                }
-            } else {
-                // Move to work building
-                let utility = (purpose_urgency * 0.6 + 0.2) * distance_factor * ambition_mod * grief_dampen;
-                if utility > best_utility {
-                    best_utility = utility;
-                    best_action = CandidateAction::MoveToWork { pos: work_snap.pos };
-                    best_npc_action = NpcAction::Walking { destination: work_snap.pos };
+                if dist < 5.0 {
+                    let utility = (purpose_urgency * 0.6 + 0.2) * ambition_mod * grief_dampen;
+                    if utility > best_utility {
+                        best_utility = utility;
+                        best_action = CandidateAction::Work;
+                        best_npc_action = NpcAction::Working {
+                            ticks_remaining: 10,
+                            building_id: work_bid,
+                            activity: WorkActivity::Crafting,
+                        };
+                    }
+                } else {
+                    let utility = (purpose_urgency * 0.6 + 0.2) * distance_factor * ambition_mod * grief_dampen;
+                    if utility > best_utility {
+                        best_utility = utility;
+                        best_action = CandidateAction::MoveToWork { pos: work_snap.pos };
+                        best_npc_action = NpcAction::Walking { destination: work_snap.pos };
+                    }
                 }
             }
         }
     }
 
-    // --- Place blueprint (requires ANY wood to start, no home) ---
-    // NPC places a building shell (0% progress). Materials deposited over time
-    // via BuildExisting action. Any NPC can contribute.
-    if npc.home_building_id.is_none() {
+    // --- Place blueprint (citizens only, requires wood, no home) ---
+    if ctype.can_build() && npc.home_building_id.is_none() {
         let has_any_wood = entity.inventory.as_ref()
             .map(|inv| inv.commodities[commodity::WOOD] >= 1.0)
             .unwrap_or(false);
@@ -432,92 +439,84 @@ fn score_npc_actions(
         }
     }
 
-    // --- Flee (fear override) ---
-    if fear_boost > 0.5 && entity.hp < entity.max_hp * 0.3 {
-        let mut nearest_hostile: Option<(f32, f32)> = None;
-        let mut nearest_dist_sq = f32::MAX;
-        for snap in snaps {
-            if !snap.alive { continue; }
-            if snap.kind != EntityKind::Monster { continue; }
-            let dx = snap.pos.0 - pos.0;
-            let dy = snap.pos.1 - pos.1;
-            let d2 = dx * dx + dy * dy;
-            if d2 < nearest_dist_sq {
-                nearest_dist_sq = d2;
-                nearest_hostile = Some(snap.pos);
+    // --- Pack leader regrouping (pack predators only) ---
+    if let Some(leader_id) = npc.pack_leader_id {
+        if let Some(leader_snap) = snaps.iter().find(|s| s.id == leader_id && s.alive) {
+            let dx = leader_snap.pos.0 - pos.0;
+            let dy = leader_snap.pos.1 - pos.1;
+            let dist_sq = dx * dx + dy * dy;
+            if dist_sq > 100.0 { // > 10 units from leader
+                let utility = social_urgency * 0.6 * grief_dampen;
+                if utility > best_utility {
+                    best_utility = utility;
+                    best_action = CandidateAction::MoveToPos { target: leader_snap.pos };
+                    best_npc_action = NpcAction::Walking { destination: leader_snap.pos };
+                }
             }
         }
-        if let Some(hostile_pos) = nearest_hostile {
-            let utility = 0.9 * grief_dampen;
-            if utility > best_utility {
-                best_utility = utility;
-                best_action = CandidateAction::Flee { away_from: hostile_pos };
-                best_npc_action = NpcAction::Fleeing;
+    }
+
+    // --- Return to den (territorial creatures, when safe) ---
+    if let Some(den) = npc.home_den {
+        if ctype == CreatureType::Territorial {
+            let dx = pos.0 - den.0;
+            let dy = pos.1 - den.1;
+            let den_dist_sq = dx * dx + dy * dy;
+            if den_dist_sq > 400.0 && safety_urgency < 0.3 { // > 20 units from den, safe
+                let utility = 0.3 * (1.0 - safety_urgency) * grief_dampen;
+                if utility > best_utility {
+                    best_utility = utility;
+                    best_action = CandidateAction::MoveToPos { target: den };
+                    best_npc_action = NpcAction::Walking { destination: den };
+                }
+            }
+        }
+    }
+
+    // --- Flee (creature-type-aware thresholds) ---
+    if let Some(threshold) = ctype.flee_hp_threshold() {
+        let hp_ratio = if entity.max_hp > 0.0 { entity.hp / entity.max_hp } else { 1.0 };
+        let should_flee = if is_npc {
+            fear_boost > 0.5 && hp_ratio < threshold
+        } else {
+            hp_ratio < threshold
+        };
+        if should_flee {
+            let mut nearest_hostile: Option<(f32, f32)> = None;
+            let mut nearest_dist_sq = f32::MAX;
+            for snap in snaps {
+                if !snap.alive { continue; }
+                if snap.kind != hostile_kind { continue; }
+                let dx = snap.pos.0 - pos.0;
+                let dy = snap.pos.1 - pos.1;
+                let d2 = dx * dx + dy * dy;
+                if d2 < nearest_dist_sq {
+                    nearest_dist_sq = d2;
+                    nearest_hostile = Some(snap.pos);
+                }
+            }
+            if let Some(hostile_pos) = nearest_hostile {
+                // Pack predators flee toward pack leader if possible.
+                let flee_target = if let Some(leader_id) = npc.pack_leader_id {
+                    snaps.iter().find(|s| s.id == leader_id && s.alive)
+                        .map(|s| s.pos)
+                } else { None };
+
+                let utility = 0.9 * grief_dampen;
+                if utility > best_utility {
+                    best_utility = utility;
+                    if let Some(leader_pos) = flee_target {
+                        best_action = CandidateAction::MoveToPos { target: leader_pos };
+                    } else {
+                        best_action = CandidateAction::Flee { away_from: hostile_pos };
+                    }
+                    best_npc_action = NpcAction::Fleeing;
+                }
             }
         }
     }
 
     (best_action, best_npc_action, best_utility)
-}
-
-// ---------------------------------------------------------------------------
-// Monster scoring
-// ---------------------------------------------------------------------------
-
-fn score_monster_actions(
-    entity: &Entity,
-    snaps: &[EntitySnap],
-) -> (CandidateAction, NpcAction) {
-    let pos = entity.pos;
-    let hp_ratio = if entity.max_hp > 0.0 { entity.hp / entity.max_hp } else { 1.0 };
-
-    // Flee: hp < 20%
-    if hp_ratio < 0.2 {
-        let mut nearest_hostile: Option<(f32, f32)> = None;
-        let mut nearest_dist_sq = f32::MAX;
-        for snap in snaps {
-            if !snap.alive || snap.kind != EntityKind::Npc { continue; }
-            let dx = snap.pos.0 - pos.0;
-            let dy = snap.pos.1 - pos.1;
-            let d2 = dx * dx + dy * dy;
-            if d2 < nearest_dist_sq {
-                nearest_dist_sq = d2;
-                nearest_hostile = Some(snap.pos);
-            }
-        }
-        if let Some(hostile_pos) = nearest_hostile {
-            return (
-                CandidateAction::Flee { away_from: hostile_pos },
-                NpcAction::Fleeing,
-            );
-        }
-    }
-
-    // Attack: find nearest NPC within aggro range.
-    let mut best_attack: Option<(f32, usize, u32)> = None;
-    for snap in snaps {
-        if !snap.alive || snap.kind != EntityKind::Npc { continue; }
-        let dx = snap.pos.0 - pos.0;
-        let dy = snap.pos.1 - pos.1;
-        let dist_sq = dx * dx + dy * dy;
-        if dist_sq <= AGGRO_RANGE_SQ {
-            let utility = 0.8;
-            match &best_attack {
-                Some((u, _, _)) if utility <= *u => {}
-                _ => { best_attack = Some((utility, snap.idx, snap.id)); }
-            }
-        }
-    }
-
-    if let Some((_, target_idx, target_id)) = best_attack {
-        return (
-            CandidateAction::Attack { target_idx, target_id },
-            NpcAction::Fighting { target_id },
-        );
-    }
-
-    // Idle: monsters like to stand around.
-    (CandidateAction::Idle, NpcAction::Idle)
 }
 
 // ---------------------------------------------------------------------------

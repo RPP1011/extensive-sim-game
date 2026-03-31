@@ -1581,6 +1581,14 @@ impl Entity {
     }
 
     pub fn new_monster(id: u32, pos: (f32, f32), level: u32) -> Self {
+        Self::new_monster_typed(id, pos, level, CreatureType::Territorial)
+    }
+
+    pub fn new_monster_typed(id: u32, pos: (f32, f32), level: u32, creature_type: CreatureType) -> Self {
+        let mut npc_data = NpcData::default();
+        npc_data.creature_type = creature_type;
+        npc_data.personality = creature_type.personality();
+        npc_data.home_den = Some(pos); // spawn position is home den
         Self {
             id,
             kind: EntityKind::Monster,
@@ -1599,7 +1607,7 @@ impl Entity {
             move_speed: 2.0,
             level,
             status_effects: Vec::new(),
-            npc: None,
+            npc: Some(npc_data),
             building: None,
             item: None,
             resource: None,
@@ -1947,6 +1955,92 @@ impl Default for Personality {
             compassion: 0.5,
             curiosity: 0.5,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CreatureType — differentiates agent archetypes for unified AI
+// ---------------------------------------------------------------------------
+
+/// Creature archetype controlling personality presets and allowed action sets.
+/// NPCs default to `Citizen`. Monsters get a type at spawn time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CreatureType {
+    /// Standard NPC — full action space.
+    Citizen,
+    /// Pack predator (wolves) — high social drive, clusters with pack leader.
+    PackPredator,
+    /// Territorial predator (bears) — defends den, solitary.
+    Territorial,
+    /// Raider (goblins) — high ambition, can loot.
+    Raider,
+    /// Megabeast (dragons) — near-zero personality, never flees.
+    Megabeast,
+}
+
+impl Default for CreatureType {
+    fn default() -> Self { CreatureType::Citizen }
+}
+
+impl CreatureType {
+    /// Default personality for this creature type.
+    pub fn personality(self) -> Personality {
+        match self {
+            CreatureType::Citizen => Personality::default(),
+            CreatureType::PackPredator => Personality {
+                ambition: 0.3, risk_tolerance: 0.6, compassion: 0.0,
+                social_drive: 0.9, curiosity: 0.4,
+            },
+            CreatureType::Territorial => Personality {
+                ambition: 0.2, risk_tolerance: 0.7, compassion: 0.0,
+                social_drive: 0.1, curiosity: 0.2,
+            },
+            CreatureType::Raider => Personality {
+                ambition: 0.8, risk_tolerance: 0.5, compassion: 0.1,
+                social_drive: 0.4, curiosity: 0.3,
+            },
+            CreatureType::Megabeast => Personality {
+                ambition: 0.1, risk_tolerance: 0.95, compassion: 0.0,
+                social_drive: 0.0, curiosity: 0.1,
+            },
+        }
+    }
+
+    /// Hunger drain multiplier for this creature type.
+    pub fn hunger_drain_mult(self) -> f32 {
+        match self {
+            CreatureType::Citizen => 1.0,
+            CreatureType::PackPredator => 3.0,
+            CreatureType::Territorial => 2.0,
+            CreatureType::Raider => 1.5,
+            CreatureType::Megabeast => 0.5,
+        }
+    }
+
+    /// Whether this creature type can flee (megabeasts never flee).
+    pub fn can_flee(self) -> bool {
+        !matches!(self, CreatureType::Megabeast)
+    }
+
+    /// HP ratio threshold at which this creature flees. Returns None if never flees.
+    pub fn flee_hp_threshold(self) -> Option<f32> {
+        match self {
+            CreatureType::Citizen => Some(0.3),
+            CreatureType::PackPredator => Some(0.3),
+            CreatureType::Territorial => Some(0.25),
+            CreatureType::Raider => Some(0.25),
+            CreatureType::Megabeast => None,
+        }
+    }
+
+    /// Whether this creature type can use economy actions (trade, build, work, harvest).
+    pub fn has_economy_actions(self) -> bool {
+        matches!(self, CreatureType::Citizen | CreatureType::Raider)
+    }
+
+    /// Whether this creature type can build/place blueprints.
+    pub fn can_build(self) -> bool {
+        matches!(self, CreatureType::Citizen)
     }
 }
 
@@ -2538,6 +2632,13 @@ pub struct NpcData {
 
     // --- Agent inner state (needs-driven behavior) ---
 
+    /// Creature archetype — controls personality presets and allowed actions.
+    pub creature_type: CreatureType,
+    /// Home den position for territorial creatures (returns home when safe).
+    pub home_den: Option<(f32, f32)>,
+    /// Pack leader entity ID for pack creatures (regroups when social need is low).
+    pub pack_leader_id: Option<u32>,
+
     /// Maslow-inspired need levels driving goal selection.
     pub needs: Needs,
     /// Event log + semantic beliefs formed from experience.
@@ -2912,6 +3013,9 @@ impl Default for NpcData {
             deeds: Vec::new(),
             resolve: 50.0,
             guild_relationship: 0.0,
+            creature_type: CreatureType::Citizen,
+            home_den: None,
+            pack_leader_id: None,
             needs: Needs::default(),
             memory: Memory::default(),
             personality: Personality::default(),
