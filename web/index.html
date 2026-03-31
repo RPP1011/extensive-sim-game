@@ -1166,46 +1166,44 @@ function renderMap() {
   // Buildings are now rendered via city grid tiles above.
   // Entity kind=2 (buildings) are skipped in the entity loop below.
 
-  // --- Entities (NPCs + monsters) — scale with zoom ---
-  const entityRadius = Math.max(1.5, 2 * Math.sqrt(cam.zoom));
-  const monsterSize = Math.max(2, 3 * Math.sqrt(cam.zoom));
-  const showEntityNames = cam.zoom > 4;
+  // --- Entities (NPCs + monsters) ---
+  // Fixed small size — entities are dots, not circles that grow with zoom
+  const npcRadius = Math.min(3, Math.max(1.5, 2 * cam.zoom * 0.3));
+  const monsterR = Math.min(4, Math.max(2, 2.5 * cam.zoom * 0.3));
   for (const ent of frame.entities) {
-    if (!ent.alive || ent.kind === 2) continue; // skip buildings (drawn above)
+    if (!ent.alive || ent.kind === 2) continue;
     const [sx, sy] = project(ent.pos[0], ent.pos[1]);
-    if (sx < -20 || sx > w + 20 || sy < -20 || sy > h + 20) continue;
+    if (sx < -10 || sx > w + 10 || sy < -10 || sy > h + 10) continue;
 
     if (ent.kind === 1) {
-      // Monster — diamond, scales with zoom
-      const ms = monsterSize;
+      // Monster — small diamond
       ctx.beginPath();
-      ctx.moveTo(sx, sy - ms); ctx.lineTo(sx + ms * 0.7, sy);
-      ctx.lineTo(sx, sy + ms); ctx.lineTo(sx - ms * 0.7, sy);
+      ctx.moveTo(sx, sy - monsterR); ctx.lineTo(sx + monsterR * 0.7, sy);
+      ctx.lineTo(sx, sy + monsterR); ctx.lineTo(sx - monsterR * 0.7, sy);
       ctx.closePath();
       ctx.fillStyle = 'rgba(219, 68, 55, 0.7)';
       ctx.fill();
-      ctx.strokeStyle = 'rgba(240, 80, 60, 0.5)';
-      ctx.lineWidth = 0.5;
-      ctx.stroke();
-      if (showEntityNames && ent.name) {
-        ctx.font = `300 ${Math.max(7, 8 * Math.sqrt(cam.zoom / 4))}px "JetBrains Mono", monospace`;
-        ctx.fillStyle = 'rgba(219, 100, 80, 0.7)';
-        ctx.textAlign = 'center';
-        ctx.fillText(ent.name, sx, sy - ms - 3);
-      }
     } else {
-      // NPC — circle, scales with zoom
-      const teamColors = ['rgba(100,160,220,0.7)','rgba(219,68,55,0.7)','rgba(160,160,140,0.6)'];
+      // NPC — small circle
+      const teamColors = ['rgba(100,160,220,0.6)','rgba(219,68,55,0.6)','rgba(160,160,140,0.5)'];
       ctx.beginPath();
-      ctx.arc(sx, sy, entityRadius, 0, Math.PI * 2);
+      ctx.arc(sx, sy, npcRadius, 0, Math.PI * 2);
       ctx.fillStyle = teamColors[ent.team] || teamColors[2];
       ctx.fill();
-      if (showEntityNames && ent.name) {
-        ctx.font = `300 ${Math.max(7, 8 * Math.sqrt(cam.zoom / 4))}px "JetBrains Mono", monospace`;
-        ctx.fillStyle = 'rgba(180, 200, 220, 0.7)';
-        ctx.textAlign = 'center';
-        ctx.fillText(ent.name, sx, sy - entityRadius - 3);
-      }
+    }
+  }
+
+  // --- Entity names: only for NAMED entities (not "Entity #1234") at high zoom ---
+  if (cam.zoom > 6) {
+    ctx.font = `400 ${Math.max(7, 9)}px "JetBrains Mono", monospace`;
+    ctx.textAlign = 'center';
+    for (const ent of frame.entities) {
+      if (!ent.alive || ent.kind === 2) continue;
+      if (!ent.name || ent.name.startsWith('Entity #')) continue; // skip generic IDs
+      const [sx, sy] = project(ent.pos[0], ent.pos[1]);
+      if (sx < 0 || sx > w || sy < 0 || sy > h) continue;
+      ctx.fillStyle = ent.kind === 1 ? 'rgba(200, 90, 70, 0.7)' : 'rgba(160, 180, 200, 0.6)';
+      ctx.fillText(ent.name, sx, sy - 6);
     }
   }
 
