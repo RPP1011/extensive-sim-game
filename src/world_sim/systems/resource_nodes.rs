@@ -36,9 +36,9 @@ pub fn spawn_initial_resources(state: &mut WorldState) {
         let spawn_specs: &[(ResourceType, u32, u32, f32, f32, f32)] = match region.terrain {
             // (type, min_count, max_count, remaining, max_capacity, regrow_rate)
             Terrain::Forest => &[
-                (ResourceType::Tree, 5, 10, 20.0, 20.0, 0.01),
-                (ResourceType::HerbPatch, 1, 2, 8.0, 8.0, 0.015),
-                (ResourceType::BerryBush, 2, 4, 10.0, 10.0, 0.02), // food source
+                (ResourceType::Tree, 3, 6, 10.0, 10.0, 0.003),   // slow regrow — wood is scarce
+                (ResourceType::HerbPatch, 1, 2, 4.0, 4.0, 0.002),
+                (ResourceType::BerryBush, 2, 3, 5.0, 5.0, 0.003), // supports ~10 NPCs
             ],
             Terrain::Mountains => &[
                 (ResourceType::OreVein, 3, 5, 50.0, 50.0, 0.0),
