@@ -38,6 +38,7 @@ enum CandidateAction {
     Eat,
     Harvest { resource_idx: usize, resource_id: u32 },
     MoveToResource { resource_idx: usize, resource_id: u32, pos: (f32, f32) },
+    MoveToPos { target: (f32, f32) },
     Work,
     MoveToWork { pos: (f32, f32) },
     BuildExisting { building_idx: usize, building_id: u32 },
@@ -279,27 +280,43 @@ fn score_npc_actions(
             }
 
             EntityKind::Building => {
-                // Incomplete building nearby: advance construction
+                // Incomplete building nearby: advance construction (blueprint system).
+                // ANY NPC with wood can contribute — multiple workers stack.
                 if snap.construction_progress < 1.0 {
                     let has_wood = entity.inventory.as_ref()
                         .map(|inv| inv.commodities[commodity::WOOD] >= 0.1)
                         .unwrap_or(false);
                     if has_wood {
-                        let utility = if npc.home_building_id.is_none() {
-                            shelter_urgency * 0.8
+                        // Utility: homeless NPCs want shelter, housed NPCs help for purpose/social.
+                        let base = if npc.home_building_id.is_none() {
+                            shelter_urgency * 0.9
                         } else {
-                            shelter_urgency * 0.3
-                        } * ambition_mod * grief_dampen;
-                        if utility > best_utility {
-                            best_utility = utility;
-                            best_action = CandidateAction::BuildExisting {
-                                building_idx: snap.idx,
-                                building_id: snap.id,
-                            };
-                            best_npc_action = NpcAction::Building {
-                                building_id: snap.id,
-                                ticks_remaining: 1,
-                            };
+                            purpose_urgency * 0.3 + 0.1 // community contribution
+                        };
+                        let distance_factor = 1.0 / (1.0 + dist / 10.0);
+
+                        if dist_sq <= HARVEST_DIST_SQ {
+                            // Close enough to build
+                            let utility = base * distance_factor * ambition_mod * grief_dampen;
+                            if utility > best_utility {
+                                best_utility = utility;
+                                best_action = CandidateAction::BuildExisting {
+                                    building_idx: snap.idx,
+                                    building_id: snap.id,
+                                };
+                                best_npc_action = NpcAction::Building {
+                                    building_id: snap.id,
+                                    ticks_remaining: 1,
+                                };
+                            }
+                        } else {
+                            // Walk toward the building to help
+                            let utility = base * 0.8 * distance_factor * ambition_mod * grief_dampen;
+                            if utility > best_utility {
+                                best_utility = utility;
+                                best_action = CandidateAction::MoveToPos { target: snap.pos };
+                                best_npc_action = NpcAction::Walking { destination: snap.pos };
+                            }
                         }
                     }
                 }
@@ -342,16 +359,14 @@ fn score_npc_actions(
         }
     }
 
-    // --- Build new (requires enough materials for a house, no home) ---
+    // --- Place blueprint (requires ANY wood to start, no home) ---
+    // NPC places a building shell (0% progress). Materials deposited over time
+    // via BuildExisting action. Any NPC can contribute.
     if npc.home_building_id.is_none() {
-        let (wood_cost, iron_cost) = BuildingType::House.build_cost();
-        let has_materials = entity.inventory.as_ref()
-            .map(|inv| {
-                inv.commodities[commodity::WOOD] >= wood_cost
-                    && inv.commodities[commodity::IRON] >= iron_cost
-            })
+        let has_any_wood = entity.inventory.as_ref()
+            .map(|inv| inv.commodities[commodity::WOOD] >= 1.0)
             .unwrap_or(false);
-        if has_materials {
+        if has_any_wood {
             let utility = shelter_urgency * 0.8 * ambition_mod * grief_dampen;
             if utility > best_utility {
                 best_utility = utility;
@@ -496,7 +511,9 @@ fn execute_action(state: &mut WorldState, entity_idx: usize, action: &CandidateA
             }
         }
 
-        CandidateAction::MoveToResource { pos, .. } | CandidateAction::MoveToWork { pos } => {
+        CandidateAction::MoveToResource { pos, .. }
+        | CandidateAction::MoveToWork { pos }
+        | CandidateAction::MoveToPos { target: pos } => {
             state.entities[entity_idx].move_target = Some(*pos);
         }
 
@@ -510,27 +527,99 @@ fn execute_action(state: &mut WorldState, entity_idx: usize, action: &CandidateA
             }
         }
 
-        CandidateAction::BuildExisting { building_idx, .. } => {
+        CandidateAction::BuildExisting { building_idx, building_id } => {
             let b_idx = *building_idx;
-            if let Some(bd) = &mut state.entities[b_idx].building {
-                bd.construction_progress = (bd.construction_progress + BUILD_PROGRESS_PER_TICK).min(1.0);
+            let bid = *building_id;
+
+            // Recipe-based construction: NPC deposits materials from inventory
+            // into building storage. Progress = materials_deposited / materials_required.
+            let building_type = state.entities[b_idx].building.as_ref()
+                .map(|b| b.building_type).unwrap_or(BuildingType::House);
+            let (wood_needed, iron_needed) = building_type.build_cost();
+
+            // How much has been deposited so far? Tracked in building.storage.
+            let (wood_deposited, iron_deposited) = state.entities[b_idx].building.as_ref()
+                .map(|b| (b.storage[commodity::WOOD], b.storage[commodity::IRON]))
+                .unwrap_or((0.0, 0.0));
+
+            // Deposit what we can from NPC inventory.
+            if wood_deposited < wood_needed {
+                let can_give = state.entities[entity_idx].inventory.as_ref()
+                    .map(|inv| inv.commodities[commodity::WOOD].min(1.0)) // up to 1.0 per tick
+                    .unwrap_or(0.0);
+                let need = (wood_needed - wood_deposited).min(can_give);
+                if need > 0.0 {
+                    if let Some(inv) = &mut state.entities[entity_idx].inventory {
+                        inv.commodities[commodity::WOOD] -= need;
+                    }
+                    if let Some(bd) = &mut state.entities[b_idx].building {
+                        bd.storage[commodity::WOOD] += need;
+                    }
+                    // material deposited
+                }
             }
-            if let Some(inv) = &mut state.entities[entity_idx].inventory {
-                inv.withdraw(commodity::WOOD, 0.1);
+            if iron_deposited < iron_needed {
+                let can_give = state.entities[entity_idx].inventory.as_ref()
+                    .map(|inv| inv.commodities[commodity::IRON].min(1.0))
+                    .unwrap_or(0.0);
+                let need = (iron_needed - iron_deposited).min(can_give);
+                if need > 0.0 {
+                    if let Some(inv) = &mut state.entities[entity_idx].inventory {
+                        inv.commodities[commodity::IRON] -= need;
+                    }
+                    if let Some(bd) = &mut state.entities[b_idx].building {
+                        bd.storage[commodity::IRON] += need;
+                    }
+                    // material deposited
+                }
+            }
+
+            // Recalculate progress from deposited materials.
+            let total_needed = wood_needed + iron_needed;
+            if total_needed > 0.0 {
+                let total_deposited = state.entities[b_idx].building.as_ref()
+                    .map(|b| b.storage[commodity::WOOD] + b.storage[commodity::IRON])
+                    .unwrap_or(0.0);
+                let progress = (total_deposited / total_needed).min(1.0);
+                if let Some(bd) = &mut state.entities[b_idx].building {
+                    bd.construction_progress = progress;
+                }
+            }
+
+            // If all materials deposited, building is complete even without extra labor.
+            // (Labor IS depositing materials — no separate construction phase.)
+            let just_completed = state.entities[b_idx].building.as_ref()
+                .map(|b| b.construction_progress >= 1.0).unwrap_or(false);
+
+            if just_completed {
+                let npc_id = state.entities[entity_idx].id;
+                if let Some(bd) = &mut state.entities[b_idx].building {
+                    bd.built_tick = tick;
+                    if bd.owner_id.is_none() {
+                        bd.owner_id = Some(npc_id);
+                    }
+                }
+                if let Some(npc) = &mut state.entities[entity_idx].npc {
+                    if npc.home_building_id.is_none() {
+                        npc.home_building_id = Some(bid);
+                    }
+                }
+                let builder_name = state.entities[entity_idx].npc.as_ref()
+                    .map(|n| n.name.clone()).unwrap_or_default();
+                state.chronicle.push(ChronicleEntry {
+                    tick,
+                    category: ChronicleCategory::Economy,
+                    text: format!("{} completed construction of a {:?}", builder_name, building_type),
+                    entity_ids: vec![npc_id, bid],
+                });
             }
         }
 
         CandidateAction::BuildNew => {
-            // Place a building entity directly at the NPC's position.
+            // Place a building blueprint at the NPC's position.
+            // No materials consumed now — they're deposited via BuildExisting over time.
             let npc_pos = state.entities[entity_idx].pos;
             let npc_id = state.entities[entity_idx].id;
-            let (wood_cost, iron_cost) = BuildingType::House.build_cost();
-
-            // Deduct resources from NPC inventory.
-            if let Some(inv) = &mut state.entities[entity_idx].inventory {
-                inv.commodities[commodity::WOOD] -= wood_cost;
-                if iron_cost > 0.0 { inv.commodities[commodity::IRON] -= iron_cost; }
-            }
 
             // Spawn building entity.
             state.sync_next_id();
