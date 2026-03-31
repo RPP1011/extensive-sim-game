@@ -607,25 +607,26 @@ const tlCtx = tlCanvas.getContext('2d');
 // ============================================================
 // TERRAIN COLORS
 // ============================================================
+// Rimworld-style bright saturated terrain colors
 const terrainColors = {
-  Plains:      { r: 140, g: 160, b: 90 },
-  Grassland:   { r: 120, g: 150, b: 80 },
-  Forest:      { r: 60, g: 100, b: 50 },
-  Jungle:      { r: 40, g: 90, b: 40 },
-  Swamp:       { r: 70, g: 85, b: 55 },
-  Mountains:   { r: 110, g: 100, b: 90 },
-  Tundra:      { r: 160, g: 170, b: 180 },
-  Glacier:     { r: 180, g: 200, b: 220 },
-  Desert:      { r: 180, g: 160, b: 110 },
-  Badlands:    { r: 150, g: 110, b: 80 },
-  Coast:       { r: 100, g: 140, b: 160 },
-  DeepOcean:   { r: 30, g: 50, b: 80 },
-  CoralReef:   { r: 60, g: 110, b: 120 },
-  Volcano:     { r: 120, g: 60, b: 40 },
-  Caverns:     { r: 60, g: 55, b: 50 },
-  FlyingIslands:{ r: 140, g: 160, b: 200 },
-  AncientRuins:{ r: 120, g: 110, b: 100 },
-  DeathZone:   { r: 50, g: 30, b: 40 },
+  Plains:      { r: 106, g: 148, b: 66 },
+  Grassland:   { r: 118, g: 160, b: 72 },
+  Forest:      { r: 56, g: 110, b: 44 },
+  Jungle:      { r: 38, g: 100, b: 36 },
+  Swamp:       { r: 72, g: 96, b: 56 },
+  Mountains:   { r: 136, g: 128, b: 116 },
+  Tundra:      { r: 190, g: 198, b: 206 },
+  Glacier:     { r: 210, g: 226, b: 240 },
+  Desert:      { r: 210, g: 190, b: 130 },
+  Badlands:    { r: 170, g: 120, b: 80 },
+  Coast:       { r: 130, g: 176, b: 190 },
+  DeepOcean:   { r: 48, g: 80, b: 120 },
+  CoralReef:   { r: 70, g: 140, b: 150 },
+  Volcano:     { r: 140, g: 60, b: 36 },
+  Caverns:     { r: 86, g: 78, b: 70 },
+  FlyingIslands:{ r: 160, g: 186, b: 220 },
+  AncientRuins:{ r: 148, g: 136, b: 116 },
+  DeathZone:   { r: 70, g: 44, b: 56 },
 };
 
 const seasonTints = {
@@ -927,129 +928,111 @@ function renderMap() {
     ];
   }
 
-  // --- Terrain: smooth blended Voronoi with noise texture ---
+  // --- Terrain: Rimworld-style discrete tile grid ---
   if (frame.regions.length > 0) {
-    const imgData = ctx.createImageData(w, h);
-    const data = imgData.data;
     const projRegions = frame.regions.map(r => {
       const [sx, sy] = project(r.pos[0], r.pos[1]);
       const tc = terrainColors[r.terrain] || { r: 80, g: 80, b: 80 };
-      return { sx, sy, r: tc.r, g: tc.g, b: tc.b, region: r };
+      return { sx, sy, tc, region: r };
     });
 
-    // Improved hash noise — less periodic than sin-based
-    function hash2(x, y) {
+    // Per-tile hash for subtle color variation
+    function tileHash(x, y) {
       let h = (x * 374761393 + y * 668265263 + 1013904223) | 0;
       h = (h ^ (h >> 13)) * 1274126177;
-      h = h ^ (h >> 16);
-      return (h & 0x7fffffff) / 0x7fffffff;
-    }
-    function noise2d(x, y) {
-      const ix = Math.floor(x), iy = Math.floor(y);
-      const fx = x - ix, fy = y - iy;
-      // Smoothstep interpolation
-      const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
-      const a = hash2(ix, iy), b = hash2(ix + 1, iy);
-      const c = hash2(ix, iy + 1), d = hash2(ix + 1, iy + 1);
-      return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
-    }
-    function fbm(x, y) {
-      let v = 0, amp = 0.5, freq = 1;
-      for (let i = 0; i < 5; i++) {
-        v += amp * noise2d(x * freq, y * freq);
-        amp *= 0.5; freq *= 2.03;
-      }
-      return v;
+      return ((h ^ (h >> 16)) & 0x7fffffff) / 0x7fffffff;
     }
 
-    // Adaptive step: finer when zoomed in, coarser when zoomed out
-    const step = cam.zoom > 3 ? 1 : cam.zoom > 1.5 ? 2 : 3;
-    for (let py = 0; py < h; py += step) {
-      for (let px = 0; px < w; px += step) {
-        // Find 2 nearest regions for smooth blending
-        let d1 = Infinity, d2 = Infinity, n1 = null, n2 = null;
-        for (const pr of projRegions) {
-          const dx = px - pr.sx, dy = py - pr.sy;
-          const d = Math.sqrt(dx * dx + dy * dy);
-          if (d < d1) { d2 = d1; n2 = n1; d1 = d; n1 = pr; }
-          else if (d < d2) { d2 = d; n2 = pr; }
-        }
-        if (!n1) continue;
+    // Each world tile = 4 world units
+    const worldTileSize = 4.0;
+    const [refX0] = project(0, 0);
+    const [refX1] = project(worldTileSize, 0);
+    const tilePx = Math.abs(refX1 - refX0);
 
-        // Blend factor: smooth transition at biome boundaries
-        const blendWidth = 40; // pixels of smooth transition
-        let blend = n2 ? Math.min(1, Math.max(0, (d2 - d1) / blendWidth)) : 1;
-        // Add noise to the boundary for natural jaggedness
-        const boundaryNoise = fbm(px * 0.03, py * 0.03) * 0.4 - 0.2;
-        blend = Math.min(1, Math.max(0, blend + boundaryNoise));
+    if (tilePx >= 1) {
+      // Visible world bounds
+      const visMinWx = cx - rangeX / 2;
+      const visMaxWx = cx + rangeX / 2;
+      const visMinWy = cy - rangeY / 2;
+      const visMaxWy = cy + rangeY / 2;
 
-        // Interpolate colors between nearest two regions
-        let cr, cg, cb;
-        if (n2 && blend < 1) {
-          cr = n1.r * blend + n2.r * (1 - blend);
-          cg = n1.g * blend + n2.g * (1 - blend);
-          cb = n1.b * blend + n2.b * (1 - blend);
-        } else {
-          cr = n1.r; cg = n1.g; cb = n1.b;
-        }
+      const startTx = Math.floor(visMinWx / worldTileSize);
+      const endTx = Math.ceil(visMaxWx / worldTileSize);
+      const startTy = Math.floor(visMinWy / worldTileSize);
+      const endTy = Math.ceil(visMaxWy / worldTileSize);
 
-        // Multi-octave terrain texture noise
-        const texNoise = fbm(px * 0.015 + 100, py * 0.015 + 200);
-        const fineNoise = noise2d(px * 0.08, py * 0.08);
-        const texVar = (texNoise - 0.5) * 25 + (fineNoise - 0.5) * 8;
-        cr += texVar; cg += texVar; cb += texVar;
+      for (let ty = startTy; ty <= endTy; ty++) {
+        for (let tx = startTx; tx <= endTx; tx++) {
+          const wx = tx * worldTileSize;
+          const wy = ty * worldTileSize;
 
-        // Elevation shading: distance from region center = higher elevation feel
-        const centerDist = d1;
-        const elevShade = 1.0 - Math.min(0.15, centerDist / 800);
-        cr *= elevShade; cg *= elevShade; cb *= elevShade;
-
-        // Season tint
-        cr += tint.r; cg += tint.g; cb += tint.b;
-
-        // Heatmap overlays
-        const activeRegion = n1.region;
-        if (activeOverlay === 'threat') {
-          const t = activeRegion.threat_level;
-          cr = cr * (1 - t * 0.5) + 200 * t * 0.5;
-          cg *= (1 - t * 0.6); cb *= (1 - t * 0.6);
-        } else if (activeOverlay === 'pop') {
-          let popDensity = 0;
-          for (const s of frame.settlements) {
-            const dx = activeRegion.pos[0] - s.pos[0], dy = activeRegion.pos[1] - s.pos[1];
-            const d = Math.sqrt(dx*dx + dy*dy);
-            if (d < 200) popDensity += s.population / (d + 50);
+          // Nearest region
+          let minDist = Infinity, nearest = null;
+          for (const pr of projRegions) {
+            const dx = wx - pr.region.pos[0], dy = wy - pr.region.pos[1];
+            const d = dx * dx + dy * dy;
+            if (d < minDist) { minDist = d; nearest = pr; }
           }
-          popDensity = Math.min(1, popDensity / 5);
-          cb += 80 * popDensity; cr *= (1 - popDensity * 0.2);
-        } else if (activeOverlay === 'food') {
-          const food = 1 - activeRegion.monster_density;
-          cg += 40 * food;
-        } else if (activeOverlay === 'trade') {
-          for (const tr of frame.trade_routes) {
-            const mx = (tr.from_pos[0] + tr.to_pos[0]) / 2;
-            const my = (tr.from_pos[1] + tr.to_pos[1]) / 2;
-            const dx = activeRegion.pos[0] - mx, dy = activeRegion.pos[1] - my;
-            if (dx*dx + dy*dy < 40000) { cr += 30 * tr.strength; cg += 20 * tr.strength; }
-          }
-        }
+          if (!nearest) continue;
 
-        // Final: darken for map atmosphere
-        cr = Math.max(0, Math.min(255, cr * 0.38));
-        cg = Math.max(0, Math.min(255, cg * 0.38));
-        cb = Math.max(0, Math.min(255, cb * 0.38));
+          const [sx, sy] = project(wx, wy);
+          const tc = nearest.tc;
 
-        // Fill block
-        for (let sy = py; sy < Math.min(py + step, h); sy++) {
-          for (let sx = px; sx < Math.min(px + step, w); sx++) {
-            const idx = (sy * w + sx) * 4;
-            data[idx] = cr; data[idx+1] = cg; data[idx+2] = cb; data[idx+3] = 255;
+          // Per-tile variation ±12
+          const tv = (tileHash(tx, ty) - 0.5) * 24;
+          let cr = tc.r + tv;
+          let cg = tc.g + tv;
+          let cb = tc.b + tv;
+
+          // Season tint
+          cr += tint.r * 2; cg += tint.g * 2; cb += tint.b * 2;
+
+          // Heatmap overlays
+          const ar = nearest.region;
+          if (activeOverlay === 'threat') {
+            const t = ar.threat_level;
+            cr = cr * (1 - t * 0.4) + 220 * t * 0.4;
+            cg *= (1 - t * 0.5); cb *= (1 - t * 0.5);
+          } else if (activeOverlay === 'pop') {
+            let pd = 0;
+            for (const s of frame.settlements) {
+              const dx2 = ar.pos[0] - s.pos[0], dy2 = ar.pos[1] - s.pos[1];
+              const d2 = Math.sqrt(dx2*dx2 + dy2*dy2);
+              if (d2 < 200) pd += s.population / (d2 + 50);
+            }
+            pd = Math.min(1, pd / 5);
+            cb += 100 * pd; cr *= (1 - pd * 0.2);
+          } else if (activeOverlay === 'food') {
+            cg += 50 * (1 - ar.monster_density);
+          } else if (activeOverlay === 'trade') {
+            for (const tr of frame.trade_routes) {
+              const mx = (tr.from_pos[0] + tr.to_pos[0]) / 2;
+              const my = (tr.from_pos[1] + tr.to_pos[1]) / 2;
+              const dx2 = ar.pos[0] - mx, dy2 = ar.pos[1] - my;
+              if (dx2*dx2 + dy2*dy2 < 40000) { cr += 40 * tr.strength; cg += 25 * tr.strength; }
+            }
           }
+
+          cr = Math.max(0, Math.min(255, cr));
+          cg = Math.max(0, Math.min(255, cg));
+          cb = Math.max(0, Math.min(255, cb));
+
+          ctx.fillStyle = `rgb(${cr|0},${cg|0},${cb|0})`;
+          const gap = tilePx > 8 ? 0.5 : 0;
+          ctx.fillRect(sx, sy, Math.ceil(tilePx) - gap, Math.ceil(tilePx) - gap);
         }
       }
+    } else {
+      // Too zoomed out — fill solid per region
+      for (const pr of projRegions) {
+        const radius = 80 / cam.zoom;
+        const tc = pr.tc;
+        ctx.fillStyle = `rgba(${tc.r},${tc.g},${tc.b},0.7)`;
+        ctx.beginPath();
+        ctx.arc(pr.sx, pr.sy, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
-    ctx.putImageData(imgData, 0, 0);
-
   }
 
   // --- City grids (tile-based buildings) ---
