@@ -13,6 +13,7 @@ use super::resolve::resolve_cast;
 use super::intent::*;
 use super::tick_systems::*;
 use super::tick_world::*;
+#[cfg(debug_assertions)]
 use super::verify::verify_tick;
 use crate::pathing::has_line_of_sight;
 

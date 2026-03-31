@@ -1601,33 +1601,99 @@ fn lcg_range(state: &mut u64, lo: usize, hi: usize) -> usize {
 // Terrain assignment: simple 2D hash noise
 // ---------------------------------------------------------------------------
 
-fn assign_terrain(col: usize, row: usize, rng: &mut u64) -> Terrain {
-    // Mix position into RNG for spatial coherence with some randomness.
-    let hash = (col as u64).wrapping_mul(2654435761)
-        ^ (row as u64).wrapping_mul(40503)
-        ^ *rng;
-    let roll = (hash % 1000) as u32;
+// ---------------------------------------------------------------------------
+// Perlin-style noise for terrain generation
+// ---------------------------------------------------------------------------
 
-    // Weighted terrain distribution — common biomes frequent, exotic ones rare.
-    // Total weights = 1000.
-    match roll {
-        0..=179   => Terrain::Plains,       // 18% — most common
-        180..=319 => Terrain::Forest,       // 14%
-        320..=439 => Terrain::Mountains,    // 12%
-        440..=549 => Terrain::Coast,        // 11%
-        550..=619 => Terrain::Swamp,        // 7%
-        620..=689 => Terrain::Desert,       // 7%
-        690..=749 => Terrain::Tundra,       // 6%
-        750..=809 => Terrain::Jungle,       // 6%
-        810..=849 => Terrain::Badlands,     // 4%
-        850..=889 => Terrain::Glacier,      // 4%
-        890..=919 => Terrain::Caverns,      // 3%
-        920..=944 => Terrain::DeepOcean,    // 2.5%
-        945..=964 => Terrain::AncientRuins, // 2%
-        965..=979 => Terrain::CoralReef,    // 1.5%
-        980..=989 => Terrain::Volcano,      // 1%
-        990..=996 => Terrain::DeathZone,    // 0.7%
-        _         => Terrain::FlyingIslands,// 0.3% — rarest
+/// Integer hash → float in [0, 1).
+fn noise_hash(x: i32, y: i32, seed: u64) -> f32 {
+    let mut h = (x as u64).wrapping_mul(374761393)
+        .wrapping_add((y as u64).wrapping_mul(668265263))
+        .wrapping_add(seed.wrapping_mul(1013904223));
+    h = (h ^ (h >> 13)).wrapping_mul(1274126177);
+    h = h ^ (h >> 16);
+    (h & 0x7fffffff) as f32 / 0x7fffffff as f32
+}
+
+/// Smoothstep-interpolated 2D value noise.
+fn value_noise(x: f32, y: f32, seed: u64) -> f32 {
+    let ix = x.floor() as i32;
+    let iy = y.floor() as i32;
+    let fx = x - ix as f32;
+    let fy = y - iy as f32;
+    let ux = fx * fx * (3.0 - 2.0 * fx);
+    let uy = fy * fy * (3.0 - 2.0 * fy);
+    let a = noise_hash(ix, iy, seed);
+    let b = noise_hash(ix + 1, iy, seed);
+    let c = noise_hash(ix, iy + 1, seed);
+    let d = noise_hash(ix + 1, iy + 1, seed);
+    a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy
+}
+
+/// Fractal Brownian Motion — multi-octave noise in [0, 1).
+fn fbm(x: f32, y: f32, seed: u64, octaves: u32) -> f32 {
+    let mut v = 0.0f32;
+    let mut amp = 0.5;
+    let mut freq = 1.0f32;
+    for i in 0..octaves {
+        v += amp * value_noise(x * freq, y * freq, seed.wrapping_add(i as u64 * 7919));
+        amp *= 0.5;
+        freq *= 2.03;
+    }
+    v
+}
+
+/// Assign terrain from continuous noise fields (temperature, moisture, elevation).
+/// Spatially coherent — nearby regions get similar terrain.
+fn assign_terrain(x: f32, y: f32, seed: u64) -> Terrain {
+    // Three orthogonal noise fields at different scales
+    let scale = 0.008; // world-scale frequency
+    let temperature = fbm(x * scale, y * scale, seed, 5);                    // 0=cold, 1=hot
+    let moisture    = fbm(x * scale, y * scale, seed.wrapping_add(99991), 5); // 0=dry, 1=wet
+    let elevation   = fbm(x * scale, y * scale, seed.wrapping_add(77773), 4); // 0=low, 1=high
+
+    // Small-scale detail noise for rare biome placement
+    let detail = fbm(x * scale * 3.0, y * scale * 3.0, seed.wrapping_add(55537), 3);
+
+    // Map (temperature, moisture, elevation) → terrain type
+    if elevation > 0.75 {
+        // High altitude
+        if temperature < 0.3 { return Terrain::Glacier; }
+        if detail > 0.85 { return Terrain::FlyingIslands; }
+        return Terrain::Mountains;
+    }
+    if elevation < 0.15 {
+        // Low altitude — water
+        if moisture > 0.6 { return Terrain::DeepOcean; }
+        if detail > 0.7 { return Terrain::CoralReef; }
+        return Terrain::Coast;
+    }
+
+    // Mid elevations — climate-driven
+    match (temperature > 0.5, moisture > 0.5) {
+        (true, true) => {
+            // Hot + wet
+            if moisture > 0.7 { Terrain::Swamp }
+            else { Terrain::Jungle }
+        }
+        (true, false) => {
+            // Hot + dry
+            if detail > 0.8 { Terrain::Volcano }
+            else if moisture < 0.25 { Terrain::Desert }
+            else { Terrain::Badlands }
+        }
+        (false, true) => {
+            // Cold + wet
+            if temperature < 0.25 { Terrain::Tundra }
+            else { Terrain::Forest }
+        }
+        (false, false) => {
+            // Cold + dry
+            if detail > 0.85 { Terrain::AncientRuins }
+            else if detail > 0.8 { Terrain::DeathZone }
+            else if temperature < 0.3 { Terrain::Caverns }
+            else { Terrain::Plains }
+        }
     }
 }
 
@@ -1851,17 +1917,19 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
 /// Phase 1: Create regions with terrain types.
 fn create_regions(state: &mut WorldState, layout: &GridLayout, rng: &mut u64) {
     let num_regions = layout.cols * layout.rows;
+    let terrain_seed = *rng;
     for i in 0..num_regions {
         let row = i / layout.cols;
         let col = i % layout.cols;
-        let terrain = assign_terrain(col, row, rng);
-        // Jittered position — break the grid pattern for organic Voronoi boundaries
+        // Jittered position — break the grid for organic Voronoi boundaries
         let base_x = col as f32 * layout.spacing + layout.spacing * 0.5;
         let base_y = row as f32 * layout.spacing + layout.spacing * 0.5;
-        let jitter = layout.spacing * 0.35; // up to 35% offset from grid center
+        let jitter = layout.spacing * 0.35;
         let jx = (lcg_f32(rng) - 0.5) * 2.0 * jitter;
         let jy = (lcg_f32(rng) - 0.5) * 2.0 * jitter;
         let pos = (base_x + jx, base_y + jy);
+        // Terrain from continuous noise fields — nearby regions get similar biomes
+        let terrain = assign_terrain(pos.0, pos.1, terrain_seed);
         state.regions.push(RegionState {
             id: i as u32,
             name: generate_region_name(i, rng),
