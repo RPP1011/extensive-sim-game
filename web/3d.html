@@ -88,6 +88,8 @@
 </div>
 <div id="controls">
   <button onclick="togglePause()">Pause</button>
+  <button onclick="toggleNametags()" id="nametag-btn">Names: Off</button>
+  <button onclick="deselectNpc()">Clear Selection</button>
   <select onchange="setSpeed(this.value)">
     <option value="1">1x</option>
     <option value="3">3x</option>
@@ -168,11 +170,14 @@ let frame = null;
 let terrainBuilt = false;
 let terrainGroup = new THREE.Group();
 let entityGroup = new THREE.Group();
+let nametagGroup = new THREE.Group();
 let settlementGroup = new THREE.Group();
 let tradeRouteGroup = new THREE.Group();
+let showNametags = false;
 let labelGroup = new THREE.Group();
 scene.add(terrainGroup);
 scene.add(entityGroup);
+scene.add(nametagGroup);
 scene.add(settlementGroup);
 scene.add(tradeRouteGroup);
 scene.add(labelGroup);
@@ -745,6 +750,52 @@ function deselectNpc() {
   document.getElementById('npc-panel').classList.remove('visible');
 }
 
+function toggleNametags() {
+  showNametags = !showNametags;
+  document.getElementById('nametag-btn').textContent = `Names: ${showNametags ? 'On' : 'Off'}`;
+  if (!showNametags) {
+    while (nametagGroup.children.length) nametagGroup.remove(nametagGroup.children[0]);
+  }
+}
+
+function updateNametags() {
+  while (nametagGroup.children.length) nametagGroup.remove(nametagGroup.children[0]);
+  if (!showNametags || !frame || !frame.entities) return;
+
+  for (const ent of frame.entities) {
+    if (!ent.alive || ent.kind === 2) continue;
+    if (!ent.name || ent.name.startsWith('Entity #')) continue;
+    const ep = entityPositions.get(ent.id);
+    if (!ep) continue;
+
+    // Only show nametags for entities within reasonable distance of camera
+    const dist = camera.position.distanceTo(new THREE.Vector3(ep.current.x, ep.current.y, ep.current.z));
+    if (dist > 300) continue;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 128; canvas.height = 32;
+    const ctx = canvas.getContext('2d');
+    ctx.font = 'bold 16px sans-serif';
+    ctx.textAlign = 'center';
+    // Color by kind
+    ctx.fillStyle = ent.kind === 1 ? '#e08080' : '#90b8e0';
+    ctx.fillText(ent.name, 64, 20);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.position.set(ep.current.x, ep.current.y + 4, ep.current.z);
+    sprite.scale.set(16, 4, 1);
+    nametagGroup.add(sprite);
+  }
+}
+
+// Keyboard: Escape to clear selection
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') deselectNpc();
+  if (e.key === 'n' || e.key === 'N') toggleNametags();
+});
+
 function updateNpcPanel(npc) {
   if (!npc) return;
   const c = document.getElementById('npc-content');
@@ -840,6 +891,9 @@ function animate() {
 
   // Interpolate entity positions every render frame (60fps)
   lerpEntities();
+
+  // Update nametag positions (every 5th frame to save perf)
+  if (showNametags && performance.now() % 5 < 1) updateNametags();
 
   // Gentle water animation
   water.position.y = -2 + Math.sin(Date.now() * 0.001) * 0.3;
