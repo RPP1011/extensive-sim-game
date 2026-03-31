@@ -143,11 +143,14 @@ scene.add(labelGroup);
 let playing = true;
 let ws = null;
 
-// Entity meshes (instanced)
+// Entity position tracking for interpolation
+// Maps entity ID → { current: {x,y,z}, target: {x,y,z}, kind }
+const entityPositions = new Map();
 let npcMesh = null;
 let monsterMesh = null;
-const npcColor = new THREE.Color(0x64a0dc);
-const monsterColor = new THREE.Color(0xdb4437);
+let npcList = []; // live NPC entity IDs in order
+let monsterList = []; // live monster entity IDs in order
+const LERP_SPEED = 0.12; // per-frame interpolation factor
 
 // ============================================================
 // BUILD TERRAIN FROM REGIONS
@@ -256,45 +259,120 @@ function buildTerrain(regions) {
 }
 
 // ============================================================
-// UPDATE ENTITIES (every frame)
+// UPDATE ENTITIES — set target positions, rebuild meshes only when count changes
 // ============================================================
-function updateEntities(entities) {
-  while (entityGroup.children.length) entityGroup.remove(entityGroup.children[0]);
+function updateEntityTargets(entities) {
   if (!entities || entities.length === 0) return;
 
   const npcs = entities.filter(e => e.alive && e.kind === 0);
   const monsters = entities.filter(e => e.alive && e.kind === 1);
 
-  // NPCs as small spheres
-  if (npcs.length > 0) {
+  // Track which entities are still alive
+  const aliveIds = new Set();
+
+  // Update target positions for NPCs
+  const newNpcList = [];
+  for (const e of npcs) {
+    aliveIds.add(e.id);
+    newNpcList.push(e.id);
+    const ty = getHeightAt(e.pos[0], e.pos[1]) + 2;
+    if (!entityPositions.has(e.id)) {
+      // New entity — snap to position (no lerp)
+      entityPositions.set(e.id, {
+        current: { x: e.pos[0], y: ty, z: e.pos[1] },
+        target: { x: e.pos[0], y: ty, z: e.pos[1] },
+        kind: 0,
+      });
+    } else {
+      const ep = entityPositions.get(e.id);
+      ep.target.x = e.pos[0];
+      ep.target.y = ty;
+      ep.target.z = e.pos[1];
+    }
+  }
+
+  // Update target positions for monsters
+  const newMonsterList = [];
+  for (const e of monsters) {
+    aliveIds.add(e.id);
+    newMonsterList.push(e.id);
+    const ty = getHeightAt(e.pos[0], e.pos[1]) + 2.5;
+    if (!entityPositions.has(e.id)) {
+      entityPositions.set(e.id, {
+        current: { x: e.pos[0], y: ty, z: e.pos[1] },
+        target: { x: e.pos[0], y: ty, z: e.pos[1] },
+        kind: 1,
+      });
+    } else {
+      const ep = entityPositions.get(e.id);
+      ep.target.x = e.pos[0];
+      ep.target.y = ty;
+      ep.target.z = e.pos[1];
+    }
+  }
+
+  // Remove dead entities from tracking
+  for (const id of entityPositions.keys()) {
+    if (!aliveIds.has(id)) entityPositions.delete(id);
+  }
+
+  // Rebuild instanced meshes only when entity count changes
+  if (newNpcList.length !== npcList.length || !npcMesh) {
+    if (npcMesh) entityGroup.remove(npcMesh);
     const geo = new THREE.SphereGeometry(1, 6, 4);
     const mat = new THREE.MeshStandardMaterial({ color: 0x64a0dc, emissive: 0x1a3050, roughness: 0.6 });
-    npcMesh = new THREE.InstancedMesh(geo, mat, npcs.length);
-    const m = new THREE.Matrix4();
-    for (let i = 0; i < npcs.length; i++) {
-      const e = npcs[i];
-      const y = getHeightAt(e.pos[0], e.pos[1]) + 2;
-      m.makeTranslation(e.pos[0], y, e.pos[1]);
+    npcMesh = new THREE.InstancedMesh(geo, mat, Math.max(1, newNpcList.length));
+    entityGroup.add(npcMesh);
+  }
+  npcList = newNpcList;
+
+  if (newMonsterList.length !== monsterList.length || !monsterMesh) {
+    if (monsterMesh) entityGroup.remove(monsterMesh);
+    const geo = new THREE.OctahedronGeometry(1.5);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xdb4437, emissive: 0x401010, roughness: 0.5 });
+    monsterMesh = new THREE.InstancedMesh(geo, mat, Math.max(1, newMonsterList.length));
+    entityGroup.add(monsterMesh);
+  }
+  monsterList = newMonsterList;
+}
+
+// Interpolate entity positions and update instanced mesh matrices
+function lerpEntities() {
+  const m = new THREE.Matrix4();
+
+  // Lerp all tracked entities toward their targets
+  for (const ep of entityPositions.values()) {
+    ep.current.x += (ep.target.x - ep.current.x) * LERP_SPEED;
+    ep.current.y += (ep.target.y - ep.current.y) * LERP_SPEED;
+    ep.current.z += (ep.target.z - ep.current.z) * LERP_SPEED;
+  }
+
+  // Update NPC instanced mesh
+  if (npcMesh && npcList.length > 0) {
+    for (let i = 0; i < npcList.length; i++) {
+      const ep = entityPositions.get(npcList[i]);
+      if (ep) {
+        m.makeTranslation(ep.current.x, ep.current.y, ep.current.z);
+      } else {
+        m.makeTranslation(0, -100, 0); // hide
+      }
       npcMesh.setMatrixAt(i, m);
     }
     npcMesh.instanceMatrix.needsUpdate = true;
-    entityGroup.add(npcMesh);
   }
 
-  // Monsters as octahedra
-  if (monsters.length > 0) {
-    const geo = new THREE.OctahedronGeometry(1.5);
-    const mat = new THREE.MeshStandardMaterial({ color: 0xdb4437, emissive: 0x401010, roughness: 0.5 });
-    monsterMesh = new THREE.InstancedMesh(geo, mat, monsters.length);
-    const m = new THREE.Matrix4();
-    for (let i = 0; i < monsters.length; i++) {
-      const e = monsters[i];
-      const y = getHeightAt(e.pos[0], e.pos[1]) + 2.5;
-      m.makeTranslation(e.pos[0], y, e.pos[1]);
+  // Update monster instanced mesh
+  if (monsterMesh && monsterList.length > 0) {
+    for (let i = 0; i < monsterList.length; i++) {
+      const ep = entityPositions.get(monsterList[i]);
+      if (ep) {
+        m.makeTranslation(ep.current.x, ep.current.y, ep.current.z);
+      } else {
+        m.makeTranslation(0, -100, 0);
+      }
       monsterMesh.setMatrixAt(i, m);
     }
     monsterMesh.instanceMatrix.needsUpdate = true;
-    entityGroup.add(monsterMesh);
   }
 }
 
@@ -420,7 +498,7 @@ function onFrame(data) {
     camera.position.set(cx + 300, 400, cy + 300);
   }
 
-  updateEntities(data.entities);
+  updateEntityTargets(data.entities);
   updateSettlements(data.settlements);
   updateTradeRoutes(data.trade_routes);
 }
@@ -456,6 +534,9 @@ function setSpeed(val) {
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
+
+  // Interpolate entity positions every render frame (60fps)
+  lerpEntities();
 
   // Gentle water animation
   water.position.y = -2 + Math.sin(Date.now() * 0.001) * 0.3;
