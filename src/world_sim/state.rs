@@ -2099,6 +2099,27 @@ impl Emotions {
 }
 
 // ---------------------------------------------------------------------------
+// Relationship — per-pair NPC relationship tracking
+// ---------------------------------------------------------------------------
+
+/// Directional relationship from one NPC toward another.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Relationship {
+    /// Trust level: [-1.0, 1.0]. Starts at 0.0, positive = friendly, negative = hostile.
+    pub trust: f32,
+    /// Familiarity: [0.0, 1.0]. Grows with proximity and interaction.
+    pub familiarity: f32,
+    /// Tick of last meaningful interaction (trade, co-construction, combat, etc.).
+    pub last_interaction: u64,
+}
+
+impl Relationship {
+    pub fn new() -> Self {
+        Self { trust: 0.0, familiarity: 0.0, last_interaction: 0 }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // WorkState — spatial work state machine
 // ---------------------------------------------------------------------------
 
@@ -2651,6 +2672,9 @@ pub struct NpcData {
     /// Lifetime behavior tag accumulator. Sorted by tag hash for O(log n) lookup.
     pub behavior_profile: Vec<(u32, f32)>,
 
+    /// Per-pair relationships with other NPCs. Capped at 20 entries.
+    pub relationships: std::collections::HashMap<u32, Relationship>,
+
     // --- Action commitment (hysteresis) ---
 
     /// Current committed action and its utility score at time of commitment.
@@ -2963,6 +2987,31 @@ impl NpcData {
             + self.needs.social + self.needs.purpose + self.needs.esteem) / 6.0;
         (avg / 100.0).clamp(0.5, 1.5)
     }
+
+    /// Modify relationship trust and familiarity with another entity.
+    /// Creates the relationship entry if it doesn't exist. Enforces cap of 20.
+    pub fn modify_relationship(&mut self, other_id: u32, trust_delta: f32, familiarity_delta: f32, tick: u64) {
+        let rel = self.relationships.entry(other_id).or_insert_with(Relationship::new);
+        rel.trust = (rel.trust + trust_delta).clamp(-1.0, 1.0);
+        rel.familiarity = (rel.familiarity + familiarity_delta).clamp(0.0, 1.0);
+        rel.last_interaction = tick;
+
+        // Enforce cap: evict lowest familiarity if over 20.
+        if self.relationships.len() > 20 {
+            let evict = self.relationships.iter()
+                .filter(|(&id, _)| id != other_id)
+                .min_by(|a, b| a.1.familiarity.partial_cmp(&b.1.familiarity).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(&id, _)| id);
+            if let Some(id) = evict {
+                self.relationships.remove(&id);
+            }
+        }
+    }
+
+    /// Get trust toward another entity. Returns 0.0 if no relationship exists.
+    pub fn trust_toward(&self, other_id: u32) -> f32 {
+        self.relationships.get(&other_id).map(|r| r.trust).unwrap_or(0.0)
+    }
 }
 
 impl Default for NpcData {
@@ -3021,6 +3070,7 @@ impl Default for NpcData {
             personality: Personality::default(),
             emotions: Emotions::default(),
             behavior_profile: Vec::new(),
+            relationships: std::collections::HashMap::new(),
             current_intention: None,
             intention_ticks: 0,
             classes: Vec::new(),

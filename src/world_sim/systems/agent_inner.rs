@@ -383,10 +383,20 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
             });
         }
 
-        // --- Social: real coworker interaction ---
+        // --- Social: real coworker interaction + relationship building ---
         if let Some(bid) = npc.work_building_id {
             if !matches!(npc.work_state, WorkState::Idle) {
                 npc.needs.social = (npc.needs.social + 0.3).min(75.0);
+
+                // Co-construction relationship bonus (every 50 ticks).
+                if world.tick % 50 == 0 {
+                    let coworker_ids: Vec<u32> = world.coworker_ids(bid).iter()
+                        .filter(|&&cid| cid != entity.id)
+                        .copied().collect();
+                    for cid in &coworker_ids {
+                        npc.modify_relationship(*cid, 0.03, 0.05, world.tick);
+                    }
+                }
 
                 // Befriend an actual coworker (not a pseudo-ID)
                 if entity_hash(entity.id, world.tick, 0xF81E) % 200 == 0 {
@@ -448,7 +458,7 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
             }
         }
 
-        // --- Trade detection ---
+        // --- Trade detection + relationship boost ---
         if matches!(npc.economic_intent, EconomicIntent::Trade { .. }) {
             let has_goods = entity.inventory.as_ref()
                 .map(|inv| inv.commodities.iter().any(|&g| g > 0.1))
@@ -460,9 +470,12 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
                 });
                 if !recent_trade {
                     if let EconomicIntent::Trade { destination_settlement_id } = &npc.economic_intent {
-                        record_npc_event(npc, MemEventType::TradedWith(*destination_settlement_id),
+                        let dest_sid = *destination_settlement_id;
+                        record_npc_event(npc, MemEventType::TradedWith(dest_sid),
                             entity.pos, vec![], 0.3, world.tick);
                         npc.needs.purpose = (npc.needs.purpose + 5.0).min(80.0);
+                        // Trade builds trust with destination settlement NPCs.
+                        npc.modify_relationship(dest_sid, 0.05, 0.1, world.tick);
                     }
                 }
             }
@@ -481,6 +494,26 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
                 if is_others_building {
                     npc.needs.purpose = (npc.needs.purpose + 0.3).min(80.0);
                 }
+            }
+        }
+
+        // --- Relationship decay + social need from trusted companions (every 50 ticks) ---
+        if world.tick % 50 == 0 {
+            // Decay familiarity and trust.
+            for rel in npc.relationships.values_mut() {
+                rel.familiarity = (rel.familiarity - 0.005).max(0.0);
+                rel.trust *= 0.999; // slow drift toward 0
+            }
+            // Prune negligible relationships.
+            npc.relationships.retain(|_, r| r.familiarity >= 0.01 || r.trust.abs() >= 0.05);
+
+            // Proximity to trusted, familiar NPCs satisfies social need at 2× rate.
+            let trusted_friend_count = npc.relationships.values()
+                .filter(|r| r.trust > 0.3 && r.familiarity > 0.3)
+                .count();
+            if trusted_friend_count > 0 && npc.home_settlement_id.is_some() {
+                let social_bonus = (trusted_friend_count as f32 * 0.5).min(2.0);
+                npc.needs.social = (npc.needs.social + social_bonus).min(80.0);
             }
         }
     }
