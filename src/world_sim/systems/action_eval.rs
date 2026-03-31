@@ -342,12 +342,16 @@ fn score_npc_actions(
         }
     }
 
-    // --- Build new (requires wood, no home, frontier cell) ---
+    // --- Build new (requires enough materials for a house, no home) ---
     if npc.home_building_id.is_none() {
-        let has_wood = entity.inventory.as_ref()
-            .map(|inv| inv.commodities[commodity::WOOD] >= 1.0)
+        let (wood_cost, iron_cost) = BuildingType::House.build_cost();
+        let has_materials = entity.inventory.as_ref()
+            .map(|inv| {
+                inv.commodities[commodity::WOOD] >= wood_cost
+                    && inv.commodities[commodity::IRON] >= iron_cost
+            })
             .unwrap_or(false);
-        if has_wood {
+        if has_materials {
             let utility = shelter_urgency * 0.8 * ambition_mod * grief_dampen;
             if utility > best_utility {
                 best_utility = utility;
@@ -517,16 +521,69 @@ fn execute_action(state: &mut WorldState, entity_idx: usize, action: &CandidateA
         }
 
         CandidateAction::BuildNew => {
-            let entity = &mut state.entities[entity_idx];
-            if let Some(npc) = &mut entity.npc {
-                if !npc.goal_stack.has(&GoalKind::Build { building_id: 0 }) {
-                    npc.goal_stack.push(Goal::new(
-                        GoalKind::Build { building_id: 0 },
-                        90,
-                        tick,
-                    ));
-                }
+            // Place a building entity directly at the NPC's position.
+            let npc_pos = state.entities[entity_idx].pos;
+            let npc_id = state.entities[entity_idx].id;
+            let (wood_cost, iron_cost) = BuildingType::House.build_cost();
+
+            // Deduct resources from NPC inventory.
+            if let Some(inv) = &mut state.entities[entity_idx].inventory {
+                inv.commodities[commodity::WOOD] -= wood_cost;
+                if iron_cost > 0.0 { inv.commodities[commodity::IRON] -= iron_cost; }
             }
+
+            // Spawn building entity.
+            state.sync_next_id();
+            let new_id = state.next_entity_id();
+            let mut bld = Entity::new_building(new_id, npc_pos);
+            bld.building = Some(BuildingData {
+                building_type: BuildingType::House,
+                settlement_id: state.entities[entity_idx].npc.as_ref()
+                    .and_then(|n| n.home_settlement_id),
+                grid_col: 0,
+                grid_row: 0,
+                footprint_w: 1,
+                footprint_h: 1,
+                tier: 0,
+                room_seed: entity_hash(new_id, tick, 0x800E) as u64,
+                rooms: BuildingType::House.default_rooms(),
+                residential_capacity: BuildingType::House.residential_capacity(),
+                work_capacity: BuildingType::House.work_capacity(),
+                resident_ids: vec![npc_id],
+                worker_ids: Vec::new(),
+                construction_progress: 0.0,
+                built_tick: tick,
+                builder_id: Some(npc_id),
+                temporary: false,
+                ttl_ticks: None,
+                name: format!("{}'s House", state.entities[entity_idx].npc.as_ref()
+                    .map(|n| n.name.as_str()).unwrap_or("NPC")),
+                storage: [0.0; crate::world_sim::NUM_COMMODITIES],
+                storage_capacity: BuildingType::House.storage_capacity(),
+                owner_id: Some(npc_id),
+                builder_modifiers: Vec::new(),
+                owner_modifiers: Vec::new(),
+                worker_class_ticks: Vec::new(),
+                specialization_tag: None,
+                specialization_strength: 0.0,
+                specialization_name: String::new(),
+            });
+            state.entities.push(bld);
+            state.rebuild_entity_cache();
+
+            // Assign the NPC to their new home.
+            if let Some(npc) = &mut state.entities[entity_idx].npc {
+                npc.home_building_id = Some(new_id);
+            }
+
+            state.chronicle.push(ChronicleEntry {
+                tick,
+                category: ChronicleCategory::Economy,
+                text: format!("{} built a house",
+                    state.entities[entity_idx].npc.as_ref()
+                        .map(|n| n.name.as_str()).unwrap_or("NPC")),
+                entity_ids: vec![npc_id, new_id],
+            });
         }
 
         CandidateAction::Attack { target_idx, .. } => {

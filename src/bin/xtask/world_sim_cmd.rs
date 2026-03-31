@@ -105,7 +105,7 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
             for e in &st.entities {
                 if e.kind != EntityKind::Npc || !e.alive { continue; }
                 let npc = match &e.npc { Some(n) => n, None => continue };
-                let goals: Vec<String> = npc.goal_stack.goals.iter().map(|g| {
+                let _goals: Vec<String> = npc.goal_stack.goals.iter().map(|g| {
                     let plan_info = if g.plan.is_empty() {
                         String::new()
                     } else {
@@ -121,9 +121,10 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
                         .collect();
                     if commodities.is_empty() { "empty".to_string() } else { commodities.join(", ") }
                 }).unwrap_or_else(|| "no inv".to_string());
-                eprintln!("[t{}] {} pos=({:.0},{:.0}) goals=[{}] inv=[{}] gold={:.1} hunger={:.0} shelter={:.0}",
+                let home_bid = npc.home_building_id.map(|id| format!("#{}", id)).unwrap_or_else(|| "none".into());
+                eprintln!("[t{}] {} pos=({:.0},{:.0}) inv=[{}] gold={:.1} hunger={:.0} shelter={:.0} home={} action={:?}",
                     total_ticks, npc.name, e.pos.0, e.pos.1,
-                    goals.join(" | "), inv, npc.gold, npc.needs.hunger, npc.needs.shelter);
+                    inv, npc.gold, npc.needs.hunger, npc.needs.shelter, home_bid, npc.action);
             }
         }
 
@@ -1936,50 +1937,8 @@ fn build_peaceful_world(args: &WorldSimArgs) -> WorldState {
         control: 1.0,
     });
 
-    // Single faction
-    state.factions.push(FactionState {
-        id: 0,
-        name: "Forest Folk".into(),
-        diplomatic_stance: DiplomaticStance::Friendly,
-        military_strength: 0.0,
-        max_military_strength: 10.0,
-        treasury: 0.0, // no gold!
-        territory_size: 1,
-        relationship_to_guild: 0.0,
-        at_war_with: vec![],
-        coup_risk: 0.0,
-        escalation_level: 0,
-        tech_level: 0,
-        recent_actions: vec![],
-    });
-
-    // Single settlement — zero treasury, zero stockpile
-    let mut settlement = SettlementState::new(0, "Willowgrove".into(), (100.0, 100.0));
-    settlement.faction_id = Some(0);
-    settlement.treasury = 0.0; // no gold
-    // Zero stockpile — NPCs must gather everything
-    for c in settlement.stockpile.iter_mut() { *c = 0.0; }
-
-    let grid = LocalGrid {
-        id: 0,
-        fidelity: bevy_game::world_sim::fidelity::Fidelity::Medium,
-        center: settlement.pos,
-        radius: 30.0,
-        entity_ids: Vec::new(),
-    };
-    state.grids.push(grid);
-    settlement.grid_id = Some(0);
-
-    // City grid for building placement
-    let city_grid = bevy_game::world_sim::city_grid::CityGrid::new(
-        128, 128, 0, "forest", args.seed,
-    );
-    let grid_idx = state.city_grids.len();
-    state.city_grids.push(city_grid);
-    state.influence_maps.push(bevy_game::world_sim::city_grid::InfluenceMap::new(128, 128));
-    settlement.city_grid_idx = Some(grid_idx);
-
-    state.settlements.push(settlement);
+    // No settlement, no faction — just a lone NPC in the wilderness.
+    // Resources will be spawned by spawn_initial_resources from the region.
 
     // NPCs — zero gold, no equipment, just people
     let mut id = 0u32;
@@ -1992,11 +1951,11 @@ fn build_peaceful_world(args: &WorldSimArgs) -> WorldState {
         let py = 100.0 + angle.sin() * dist;
 
         let mut npc = Entity::new_npc(id, (px, py));
-        npc.grid_id = Some(0);
         let npc_data = npc.npc.as_mut().unwrap();
-        npc_data.home_settlement_id = Some(0);
-        npc_data.faction_id = Some(0);
-        npc_data.gold = 0.0; // no gold!
+        // No settlement, no faction — wilderness survival
+        npc_data.home_settlement_id = None;
+        npc_data.faction_id = None;
+        npc_data.gold = 0.0;
         npc_data.morale = 60.0;
         npc_data.archetype = archetypes[i % archetypes.len()].to_string();
         npc_data.name = bevy_game::world_sim::naming::generate_personal_name(id, args.seed);

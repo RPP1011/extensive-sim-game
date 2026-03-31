@@ -982,21 +982,8 @@ pub fn assign_npcs_to_buildings(state: &mut WorldState) {
             }
         }
 
-        // Assign homes: workers try workplace first (if residential capacity),
-        // then fall back to nearest House/Longhouse.
-        let home_count = unhoused.len().min(available_homes.len());
-        for i in 0..home_count {
-            let eidx = unhoused[i];
-            let (bidx, bid) = available_homes[i];
-            let npc_id = state.entities[eidx].id;
-            if let Some(npc) = &mut state.entities[eidx].npc {
-                npc.home_building_id = Some(bid);
-            }
-            // Push NPC ID into building's resident list.
-            if let Some(bd) = &mut state.entities[bidx].building {
-                bd.resident_ids.push(npc_id);
-            }
-        }
+        // Home assignment is now NPC-driven: NPCs build or rent homes.
+        // Auto-assignment disabled — NPCs must earn their shelter.
 
         // -----------------------------------------------------------------
         // (b) Work assignment: match workers to work buildings by tag affinity
