@@ -147,6 +147,195 @@ pub fn pair_hash_f32(id_a: u32, id_b: u32, tick: u64, salt: u64) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
+// Tile system — sparse world-space terrain modifications
+// ---------------------------------------------------------------------------
+
+/// Integer tile position. 2.0 world units per tile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TilePos {
+    pub x: i32,
+    pub y: i32,
+}
+
+impl TilePos {
+    pub fn new(x: i32, y: i32) -> Self { Self { x, y } }
+
+    /// Convert world-space coordinates to tile position.
+    pub fn from_world(wx: f32, wy: f32) -> Self {
+        Self { x: (wx / 2.0).floor() as i32, y: (wy / 2.0).floor() as i32 }
+    }
+
+    /// Convert tile position to world-space center.
+    pub fn to_world(self) -> (f32, f32) {
+        (self.x as f32 * 2.0 + 1.0, self.y as f32 * 2.0 + 1.0)
+    }
+
+    /// 8-connected neighbors.
+    pub fn neighbors8(self) -> [TilePos; 8] {
+        [
+            TilePos::new(self.x - 1, self.y - 1), TilePos::new(self.x, self.y - 1), TilePos::new(self.x + 1, self.y - 1),
+            TilePos::new(self.x - 1, self.y),                                         TilePos::new(self.x + 1, self.y),
+            TilePos::new(self.x - 1, self.y + 1), TilePos::new(self.x, self.y + 1), TilePos::new(self.x + 1, self.y + 1),
+        ]
+    }
+
+    /// 4-connected neighbors (cardinal).
+    pub fn neighbors4(self) -> [TilePos; 4] {
+        [
+            TilePos::new(self.x, self.y - 1), TilePos::new(self.x - 1, self.y),
+            TilePos::new(self.x + 1, self.y), TilePos::new(self.x, self.y + 1),
+        ]
+    }
+}
+
+/// What type of tile is placed here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TileType {
+    // Terrain
+    Dirt,
+    Stone,
+    Water,
+
+    // Structural
+    Floor(TileMaterial),
+    Wall(TileMaterial),
+    Door,
+    Window,
+
+    // Infrastructure
+    Path,
+    Bridge,
+    Fence,
+
+    // Agricultural
+    Farmland,
+
+    // Functional furniture (placed inside rooms)
+    Workspace(WorkspaceType),
+    Bed,
+    Altar,
+    Bookshelf,
+    StorageContainer,
+    MarketStall,
+    WeaponRack,
+    TrainingDummy,
+    Hearth,
+
+    // Defensive
+    Moat,
+    TowerBase,
+    GateHouse,
+    ArcherPosition,
+    Trap,
+}
+
+/// Construction material for walls/floors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TileMaterial {
+    Wood,
+    Stone,
+    Iron,
+}
+
+/// Type of workstation placed as a tile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkspaceType {
+    Forge,
+    Anvil,
+    Loom,
+    AlchemyBench,
+    Kitchen,
+    Sawbench,
+}
+
+/// A placed tile in the world.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Tile {
+    pub tile_type: TileType,
+    pub placed_by: Option<u32>,
+    pub placed_tick: u64,
+}
+
+impl TileType {
+    /// Movement speed multiplier. <1.0 = slower, >1.0 = faster, f32::MAX = impassable.
+    pub fn movement_cost(self) -> f32 {
+        match self {
+            TileType::Path | TileType::Floor(_) | TileType::Bridge => 0.7,
+            TileType::Dirt | TileType::Door => 1.0,
+            TileType::Farmland | TileType::Bed | TileType::Hearth => 1.3,
+            TileType::Stone | TileType::Fence => 2.0,
+            TileType::Moat => 3.0,
+            TileType::Wall(_) | TileType::Water | TileType::Window
+            | TileType::TowerBase | TileType::GateHouse => f32::MAX,
+            _ => 1.0, // furniture walkable at normal speed
+        }
+    }
+
+    /// Whether this tile blocks monster movement but not NPC movement.
+    pub fn blocks_monsters_only(self) -> bool {
+        matches!(self, TileType::Fence)
+    }
+
+    /// Whether this tile is solid (blocks all movement and building placement).
+    pub fn is_solid(self) -> bool {
+        self.movement_cost() == f32::MAX
+    }
+
+    /// Whether this tile is a wall (for room enclosure detection).
+    pub fn is_wall(self) -> bool {
+        matches!(self, TileType::Wall(_) | TileType::Window | TileType::TowerBase)
+    }
+
+    /// Whether this tile is a floor (interior of a room).
+    pub fn is_floor(self) -> bool {
+        matches!(self, TileType::Floor(_))
+    }
+
+    /// Whether this tile is furniture (placed inside rooms).
+    pub fn is_furniture(self) -> bool {
+        matches!(self, TileType::Workspace(_) | TileType::Bed | TileType::Altar
+            | TileType::Bookshelf | TileType::StorageContainer | TileType::MarketStall
+            | TileType::WeaponRack | TileType::TrainingDummy | TileType::Hearth)
+    }
+}
+
+/// Building function — what need a room addresses. Not a building type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BuildingFunction {
+    Shelter,
+    Production,
+    Worship,
+    Knowledge,
+    Defense,
+    Trade,
+    Storage,
+}
+
+impl BuildingFunction {
+    /// Minimum interior tile count for this function.
+    pub fn minimum_interior(self) -> u32 {
+        match self {
+            BuildingFunction::Shelter | BuildingFunction::Storage => 4,
+            BuildingFunction::Production | BuildingFunction::Knowledge
+            | BuildingFunction::Trade => 9,
+            BuildingFunction::Worship => 12,
+            BuildingFunction::Defense => 6,
+        }
+    }
+}
+
+/// A seed for room growth — placed by an NPC, grown by the automaton.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildSeed {
+    pub pos: TilePos,
+    pub intended_function: BuildingFunction,
+    pub minimum_interior: u32,
+    pub placed_by: u32,
+    pub tick: u64,
+    pub complete: bool,
+}
+
+// ---------------------------------------------------------------------------
 // WorldState — the complete snapshot, immutable during COMPUTE phase
 // ---------------------------------------------------------------------------
 
@@ -206,6 +395,13 @@ pub struct WorldState {
     /// Influence maps for city grids. Parallel to city_grids.
     pub influence_maps: Vec<super::city_grid::InfluenceMap>,
 
+    /// Sparse tile map: world-space tile modifications (walls, floors, ditches, farmland, etc.).
+    /// Key: integer tile position (2.0 world units per tile). Only modified tiles are stored.
+    pub tiles: std::collections::HashMap<TilePos, Tile>,
+
+    /// Active build seeds waiting for room growth automaton to process.
+    pub build_seeds: Vec<BuildSeed>,
+
     /// Global economy (total gold supply, trade routes).
     pub economy: EconomyState,
 
@@ -259,6 +455,8 @@ impl WorldState {
             settlement_index: Vec::new(),
             city_grids: Vec::new(),
             influence_maps: Vec::new(),
+            tiles: std::collections::HashMap::new(),
+            build_seeds: Vec::new(),
             economy: EconomyState::default(),
             trade_routes: Vec::new(),
             factions: Vec::new(),
