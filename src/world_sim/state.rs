@@ -951,6 +951,30 @@ pub enum BuildingType {
 }
 
 impl BuildingType {
+    /// Construction cost: (wood, iron) required from settlement stockpile.
+    pub fn build_cost(&self) -> (f32, f32) {
+        match self {
+            Self::Tent | Self::Camp => (1.0, 0.0),
+            Self::House => (5.0, 1.0),
+            Self::Longhouse | Self::Manor => (10.0, 2.0),
+            Self::Farm | Self::Well => (3.0, 0.0),
+            Self::Mine => (4.0, 3.0),
+            Self::Sawmill => (6.0, 2.0),
+            Self::Forge => (5.0, 5.0),
+            Self::Workshop | Self::Apothecary => (4.0, 2.0),
+            Self::Market | Self::TradePost => (8.0, 3.0),
+            Self::Warehouse => (10.0, 4.0),
+            Self::Inn => (8.0, 2.0),
+            Self::GuildHall | Self::CourtHouse => (15.0, 8.0),
+            Self::Temple | Self::Library => (12.0, 5.0),
+            Self::Barracks => (10.0, 6.0),
+            Self::Watchtower => (6.0, 4.0),
+            Self::Wall | Self::Gate => (3.0, 2.0),
+            Self::Shrine => (4.0, 1.0),
+            Self::Treasury => (15.0, 10.0),
+        }
+    }
+
     /// Base residential capacity (how many people can LIVE here).
     pub fn residential_capacity(&self) -> u8 {
         match self {

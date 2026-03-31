@@ -198,6 +198,22 @@ pub fn grow_cities(state: &mut WorldState) {
             });
             if !fits { continue; }
 
+            // Check and deduct construction resources from settlement stockpile.
+            let (wood_cost, iron_cost) = building_type.build_cost();
+            let si = state.settlement_idx(*settlement_id);
+            if let Some(si) = si {
+                let s = &state.settlements[si];
+                if s.stockpile[crate::world_sim::commodity::WOOD] < wood_cost
+                    || s.stockpile[crate::world_sim::commodity::IRON] < iron_cost {
+                    continue; // not enough resources
+                }
+                // Deduct
+                state.settlements[si].stockpile[crate::world_sim::commodity::WOOD] -= wood_cost;
+                state.settlements[si].stockpile[crate::world_sim::commodity::IRON] -= iron_cost;
+            } else {
+                continue; // settlement not found
+            }
+
             // Spawn a real building entity.
             let new_id = state.next_entity_id();
             let world_pos = state.city_grids[grid_idx].grid_to_world(col, row, *settlement_pos);
@@ -219,7 +235,7 @@ pub fn grow_cities(state: &mut WorldState) {
                 worker_ids: Vec::new(),
                 // First 30 buildings per settlement start complete (bootstrap).
                 // Later buildings require construction by builders.
-                construction_progress: if total_buildings < 30 { 1.0 } else { 0.0 },
+                construction_progress: 0.0,
                 built_tick: state.tick,
                 builder_id: None,
                 temporary: false,
@@ -345,8 +361,8 @@ fn advance_construction(state: &mut WorldState) {
     let mut new_chronicles: Vec<ChronicleEntry> = Vec::new();
 
     for settlement_id in settlement_ids {
-        // Find the first incomplete building at this settlement.
-        let incomplete_building: Option<(usize, u32, String)> = state.entities.iter()
+        // Find ALL incomplete buildings at this settlement (up to 5 per tick).
+        let incomplete_buildings: Vec<(usize, u32, String)> = state.entities.iter()
             .enumerate()
             .filter_map(|(idx, e)| {
                 if !e.alive || e.kind != EntityKind::Building { return None; }
@@ -355,12 +371,12 @@ fn advance_construction(state: &mut WorldState) {
                 if bd.construction_progress >= 1.0 { return None; }
                 Some((idx, e.id, bd.name.clone()))
             })
-            .next();
+            .take(5)
+            .collect();
 
-        let (building_idx, building_id, building_name) = match incomplete_building {
-            Some(b) => b,
-            None => continue,
-        };
+        if incomplete_buildings.is_empty() { continue; }
+
+        for (building_idx, building_id, building_name) in incomplete_buildings {
 
         // Find the best idle builder at this settlement.
         // A builder is an NPC with CONSTRUCTION or LABOR behavior tags who
@@ -451,6 +467,7 @@ fn advance_construction(state: &mut WorldState) {
                 entity_ids: vec![builder_entity_id, building_id],
             });
         }
+        } // end for incomplete_buildings
     }
 
     for entry in new_chronicles {

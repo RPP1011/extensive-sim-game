@@ -10,7 +10,7 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::*;
 use crate::world_sim::commodity;
 
-const DECISION_INTERVAL: u64 = 100;
+const DECISION_INTERVAL: u64 = 20;
 
 /// Minimum profit margin to initiate a trade run.
 const MIN_TRADE_MARGIN: f32 = 2.0;
@@ -139,36 +139,12 @@ pub fn compute_npc_decisions_for_settlement(
 
         // --- Commuting: NPCs with home and work buildings follow schedules ---
         // Skip commuting if the NPC is actively in the work state machine (non-Idle).
-        // The work system handles movement for traveling/working/carrying states.
-        if let (Some(home_bid), Some(work_bid)) = (npc.home_building_id, npc.work_building_id) {
+        if let (Some(_home_bid), Some(_work_bid)) = (npc.home_building_id, npc.work_building_id) {
             if !matches!(npc.work_state, WorkState::Idle) {
                 continue; // work system handles movement
             }
-
-            // Look up building positions from real entity IDs.
-            let home_pos = state.entity(home_bid).map(|e| e.pos);
-            let work_pos = state.entity(work_bid).map(|e| e.pos);
-
-            if let (Some(home_pos), Some(work_pos)) = (home_pos, work_pos) {
-                // Commute schedule: first half of cycle at work, second half at home.
-                let target = if state.tick % 200 < 100 {
-                    work_pos
-                } else {
-                    home_pos
-                };
-
-                let dx = target.0 - entity.pos.0;
-                let dy = target.1 - entity.pos.1;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist > 1.0 {
-                    let speed = entity.move_speed * crate::world_sim::DT_SEC;
-                    out.push(WorldDelta::Move {
-                        entity_id: entity.id,
-                        force: (dx / dist * speed, dy / dist * speed),
-                    });
-                }
-                continue; // structured schedule, skip normal decision tree
-            }
+            // Idle NPCs with a work assignment: the work system's advance_work_states
+            // will transition them to TravelingToWork. Don't override with commuting.
         }
 
         // Only re-evaluate idle or producing NPCs.
