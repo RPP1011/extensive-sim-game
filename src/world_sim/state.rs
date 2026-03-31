@@ -2116,6 +2116,66 @@ impl Emotions {
 }
 
 // ---------------------------------------------------------------------------
+// Aspiration — medium-term behavioral orientation (Phase B)
+// ---------------------------------------------------------------------------
+
+/// Number of need dimensions for aspiration vectors.
+pub const NUM_NEEDS: usize = 6; // hunger, safety, shelter, social, purpose, esteem
+
+/// Persistent medium-term orientation biasing NPC behavior over hundreds of ticks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Aspiration {
+    /// Personality-weighted need gap vector, normalized. Recomputed every 500 ticks.
+    pub need_vector: [f32; NUM_NEEDS],
+    /// Tick when need_vector was last recomputed.
+    pub vector_formed_at: u64,
+    /// Optional concrete target crystallized from a salient event.
+    pub crystal: Option<Crystal>,
+    /// Progress toward crystal completion [0.0, 1.0].
+    pub crystal_progress: f32,
+    /// Tick when crystal progress last increased.
+    pub crystal_last_advanced: u64,
+}
+
+impl Default for Aspiration {
+    fn default() -> Self {
+        Self {
+            need_vector: [0.0; NUM_NEEDS],
+            vector_formed_at: 0,
+            crystal: None,
+            crystal_progress: 0.0,
+            crystal_last_advanced: 0,
+        }
+    }
+}
+
+/// A concrete target bound to an aspiration need dimension.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Crystal {
+    /// Which need dimension this crystal addresses (index into need_vector).
+    pub need_idx: usize,
+    /// What the NPC is concretely pursuing.
+    pub target: CrystalTarget,
+    /// Tick when the crystal formed.
+    pub formed_at: u64,
+}
+
+/// Target types for aspiration crystals — enum over ID types, not goal types.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CrystalTarget {
+    /// Pursue a relationship with or emulate this entity.
+    Entity(u32),
+    /// Pursue this class (by class name hash).
+    Class(u32),
+    /// Build or work at this building.
+    Building(u32),
+    /// Reach this location.
+    Location((f32, f32), f32),
+    /// Harvest/find this resource type.
+    Resource(ResourceType),
+}
+
+// ---------------------------------------------------------------------------
 // Relationship — per-pair NPC relationship tracking
 // ---------------------------------------------------------------------------
 
@@ -2763,6 +2823,9 @@ pub struct NpcData {
     /// Key: (action_type_discriminant, target_type_hash). Value: EMA of outcomes.
     pub action_outcomes: std::collections::HashMap<(u8, u32), OutcomeEMA>,
 
+    /// Medium-term behavioral orientation (Phase B).
+    pub aspiration: Aspiration,
+
     // --- Action commitment (hysteresis) ---
 
     /// Current committed action and its utility score at time of commitment.
@@ -3161,6 +3224,7 @@ impl Default for NpcData {
             behavior_profile: Vec::new(),
             relationships: std::collections::HashMap::new(),
             action_outcomes: std::collections::HashMap::new(),
+            aspiration: Aspiration::default(),
             current_intention: None,
             intention_ticks: 0,
             classes: Vec::new(),

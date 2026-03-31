@@ -337,6 +337,14 @@ fn score_npc_actions(
             .unwrap_or(1.0) // no history → neutral (1.0, not 0.85)
     };
 
+    // Aspiration alignment (Phase B): boost actions that serve the dominant need.
+    let aspiration_vec = &npc.aspiration.need_vector;
+    let aspiration_mod_for_need = |need_idx: usize| -> f32 {
+        1.0 + 0.15 * aspiration_vec[need_idx]
+    };
+    // Crystal bonus: +0.2 utility for actions advancing the crystal target.
+    let _has_crystal = npc.aspiration.crystal.is_some();
+
     // Determine what kinds of entities we consider hostile (attack targets).
     let is_npc = entity.kind == EntityKind::Npc;
     let hostile_kind = if is_npc { EntityKind::Monster } else { EntityKind::Npc };
@@ -347,7 +355,7 @@ fn score_npc_actions(
             .map(|inv| inv.commodities[commodity::FOOD] >= FOOD_PER_MEAL)
             .unwrap_or(false);
         if has_food {
-            let utility = hunger_urgency * 1.5 * grief_dampen;
+            let utility = hunger_urgency * 1.5 * grief_dampen * aspiration_mod_for_need(0);
             if utility > best_utility {
                 best_utility = utility;
                 best_action = CandidateAction::Eat;
@@ -430,7 +438,7 @@ fn score_npc_actions(
 
                     let attack_outcome = outcome_mod((5, snap.kind as u32));
                     let utility = (safety_urgency * 0.7 + anger_boost * 0.3 + territorial_boost)
-                        * risk_mod * grief_dampen * attack_outcome;
+                        * risk_mod * grief_dampen * attack_outcome * aspiration_mod_for_need(1);
                     if utility > best_utility {
                         best_utility = utility;
                         best_action = CandidateAction::Attack {
@@ -497,7 +505,7 @@ fn score_npc_actions(
 
                 if dist < 5.0 {
                     let work_outcome = outcome_mod((3, 0));
-                    let utility = (purpose_urgency * 0.6 + 0.2) * ambition_mod * grief_dampen * work_outcome;
+                    let utility = (purpose_urgency * 0.6 + 0.2) * ambition_mod * grief_dampen * work_outcome * aspiration_mod_for_need(4);
                     if utility > best_utility {
                         best_utility = utility;
                         best_action = CandidateAction::Work;
@@ -509,7 +517,7 @@ fn score_npc_actions(
                     }
                 } else {
                     let work_outcome = outcome_mod((3, 0));
-                    let utility = (purpose_urgency * 0.6 + 0.2) * distance_factor * ambition_mod * grief_dampen * work_outcome;
+                    let utility = (purpose_urgency * 0.6 + 0.2) * distance_factor * ambition_mod * grief_dampen * work_outcome * aspiration_mod_for_need(4);
                     if utility > best_utility {
                         best_utility = utility;
                         best_action = CandidateAction::MoveToWork { pos: work_snap.pos };

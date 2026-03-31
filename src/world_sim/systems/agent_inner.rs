@@ -513,6 +513,41 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
             }
         }
 
+        // --- Aspiration: recompute need-vector every 500 ticks (Phase B) ---
+        if world.tick.saturating_sub(npc.aspiration.vector_formed_at) >= 500 || npc.aspiration.vector_formed_at == 0 {
+            compute_aspiration_vector(npc, world.tick);
+        }
+
+        // --- Aspiration crystal lifecycle ---
+        if let Some(ref crystal) = npc.aspiration.crystal {
+            // Expiry: no progress in 1000 ticks → dissolve with frustration.
+            if world.tick.saturating_sub(npc.aspiration.crystal_last_advanced) > 1000 {
+                npc.emotions.anxiety = (npc.emotions.anxiety + 0.2).min(1.0);
+                npc.aspiration.crystal = None;
+                npc.aspiration.crystal_progress = 0.0;
+            }
+            // Hard cap: 5000 ticks max lifetime.
+            else if world.tick.saturating_sub(crystal.formed_at) > 5000 {
+                npc.aspiration.crystal = None;
+                npc.aspiration.crystal_progress = 0.0;
+            }
+            // Completion check.
+            else if npc.aspiration.crystal_progress >= 1.0 {
+                npc.needs.esteem = (npc.needs.esteem + 20.0).min(100.0);
+                npc.needs.purpose = (npc.needs.purpose + 20.0).min(100.0);
+                npc.emotions.pride = (npc.emotions.pride + 0.3).min(1.0);
+                npc.aspiration.crystal = None;
+                npc.aspiration.crystal_progress = 0.0;
+                // Immediate recompute.
+                compute_aspiration_vector(npc, world.tick);
+            }
+        }
+
+        // --- Crystal formation from memory events ---
+        if npc.aspiration.crystal.is_none() || npc.aspiration.crystal_progress < 0.1 {
+            try_crystallize_from_memory(npc, world.tick);
+        }
+
         // --- Resource perception: discover nearby resource nodes ---
         {
             // Base perception: 30 units. Curious NPCs: 45 units.
@@ -860,6 +895,104 @@ fn process_witness_events(state: &mut WorldState) {
 // ---------------------------------------------------------------------------
 // Event recording
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Aspiration helpers (Phase B)
+// ---------------------------------------------------------------------------
+
+/// Compute the aspiration need-vector from personality-weighted need gaps.
+fn compute_aspiration_vector(npc: &mut NpcData, tick: u64) {
+    let pers = npc.personality;
+    let needs = &npc.needs;
+
+    // Personality-weighted need importance.
+    let weights = [
+        1.0,                                                          // hunger (universal)
+        if pers.risk_tolerance < 0.3 { 1.5 } else { 1.0 },         // safety
+        1.0,                                                          // shelter
+        if pers.social_drive > 0.6 { 1.5 } else { 1.0 },           // social
+        {                                                              // purpose
+            let mut w = 1.0;
+            if pers.ambition > 0.6 { w *= 1.5; }
+            if pers.compassion > 0.6 { w *= 1.2; }
+            if pers.curiosity > 0.6 { w *= 1.2; }
+            w
+        },
+        if pers.ambition > 0.6 { 1.5 } else { 1.0 },               // esteem
+    ];
+
+    let need_values = [needs.hunger, needs.safety, needs.shelter,
+                       needs.social, needs.purpose, needs.esteem];
+
+    let mut gap = [0.0f32; NUM_NEEDS];
+    let mut sum = 0.0f32;
+    for i in 0..NUM_NEEDS {
+        gap[i] = weights[i] * (100.0 - need_values[i]) / 100.0;
+        // Emotional blending: grief/fear boost safety gap.
+        if i == 1 && (npc.emotions.grief > 0.3 || npc.emotions.fear > 0.3) {
+            gap[i] += 0.2;
+        }
+        // Frustration from chronic action failure boosts the relevant need.
+        // (Simplified: boost purpose when any work-related outcome is negative.)
+        if i == 4 { // purpose
+            for ema in npc.action_outcomes.values() {
+                if ema.value < -0.3 {
+                    gap[i] += 0.15;
+                    break; // one boost is enough
+                }
+            }
+        }
+        sum += gap[i];
+    }
+    // Normalize.
+    if sum > 0.0 {
+        for g in &mut gap { *g /= sum; }
+    }
+    npc.aspiration.need_vector = gap;
+    npc.aspiration.vector_formed_at = tick;
+}
+
+/// Try to form a crystal from recent memory events.
+fn try_crystallize_from_memory(npc: &mut NpcData, tick: u64) {
+    // Scan last 5 memory events for crystallization candidates.
+    for event in npc.memory.events.iter().rev().take(5) {
+        if tick.saturating_sub(event.tick) > 500 { continue; }
+
+        let (need_idx, target) = match &event.event_type {
+            MemEventType::BuiltSomething => (4, None), // purpose, no specific target
+            MemEventType::LearnedSkill => {
+                // Crystal on highest-level class.
+                let class_target = npc.classes.iter().max_by_key(|c| c.level)
+                    .map(|c| CrystalTarget::Class(c.class_name_hash));
+                (5, class_target) // esteem
+            }
+            MemEventType::TradedWith(partner_id) => {
+                (3, Some(CrystalTarget::Entity(*partner_id))) // social
+            }
+            MemEventType::WasAttacked => {
+                (1, None) // safety, no specific attacker target available
+            }
+            MemEventType::MadeNewFriend(friend_id) => {
+                (3, Some(CrystalTarget::Entity(*friend_id))) // social
+            }
+            _ => continue,
+        };
+
+        let Some(target) = target else { continue };
+
+        // Check if this need is a dominant aspiration dimension.
+        if npc.aspiration.need_vector[need_idx] < 0.25 { continue; }
+
+        npc.aspiration.crystal = Some(Crystal {
+            need_idx,
+            target,
+            formed_at: tick,
+        });
+        npc.aspiration.crystal_progress = 0.0;
+        npc.aspiration.crystal_last_advanced = tick;
+        break; // only one crystal at a time
+    }
+}
 
 /// Share resource knowledge between NPCs in the same settlement.
 /// Each settlement pools known resources from all its NPCs, then each NPC
