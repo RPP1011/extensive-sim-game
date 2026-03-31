@@ -16,6 +16,7 @@
 
 use crate::world_sim::city_grid::{CellState, CityGrid, InfluenceMap, ZoneType, CellTerrain, suitability_score};
 use crate::world_sim::delta::WorldDelta;
+use crate::world_sim::interior_gen::footprint_size;
 use crate::world_sim::state::{WorldState, Entity, EntityKind, EconomicIntent, ChronicleEntry, ChronicleCategory, tags, BuildingType, BuildingData, SettlementSpecialty, ActionTags, WorkState, MemoryEvent, MemEventType, entity_hash};
 use crate::world_sim::NUM_COMMODITIES;
 
@@ -171,24 +172,35 @@ pub fn grow_cities(state: &mut WorldState) {
         // Sort descending by score.
         scored.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Pick top N cells and place buildings.
-        let placed = scored.len().min(budget);
-        for i in 0..placed {
+        // Pick top N frontier cells, determine footprint, and place buildings.
+        let mut placed_count = 0;
+        for i in 0..scored.len() {
+            if placed_count >= budget { break; }
             let (col, row, zone, _score) = scored[i];
 
-            // Assign zone and transition cell.
-            {
-                let cell = state.city_grids[grid_idx].cell_mut(col, row);
-                cell.state = CellState::Building;
-                cell.zone = zone;
-                cell.density = 1;
-                cell.age = 0;
-            }
+            // Determine building type and its multi-cell footprint.
+            let building_type = zone_to_building_type(zone, specialty);
+            let (fp_w, fp_h) = footprint_size(building_type, 0); // tier 0 at placement
+
+            // Check that the entire rectangular footprint is available.
+            // The frontier cell (col, row) is the top-left corner of the footprint.
+            let grid = &state.city_grids[grid_idx];
+            let fits = (0..fp_h).all(|dy| {
+                (0..fp_w).all(|dx| {
+                    let c = col + dx;
+                    let r = row + dy;
+                    if !grid.in_bounds(c, r) { return false; }
+                    let cell = grid.cell(c, r);
+                    cell.state == CellState::Empty
+                        && cell.terrain != CellTerrain::Water
+                        && cell.terrain != CellTerrain::Cliff
+                })
+            });
+            if !fits { continue; }
 
             // Spawn a real building entity.
             let new_id = state.next_entity_id();
             let world_pos = state.city_grids[grid_idx].grid_to_world(col, row, *settlement_pos);
-            let building_type = zone_to_building_type(zone, specialty);
 
             let mut entity = Entity::new_building(new_id, world_pos);
             entity.building = Some(BuildingData {
@@ -196,6 +208,8 @@ pub fn grow_cities(state: &mut WorldState) {
                 settlement_id: Some(*settlement_id),
                 grid_col: col as u16,
                 grid_row: row as u16,
+                footprint_w: fp_w as u8,
+                footprint_h: fp_h as u8,
                 tier: 0,
                 room_seed: entity_hash(new_id, state.tick, 0x800E) as u64,
                 rooms: building_type.default_rooms(),
@@ -222,19 +236,35 @@ pub fn grow_cities(state: &mut WorldState) {
                 specialization_name: String::new(),
             });
 
-            // Store entity ID in grid cell.
-            state.city_grids[grid_idx].cell_mut(col, row).building_id = Some(new_id);
+            // Mark ALL cells in the footprint as Building with this entity ID.
+            for dy in 0..fp_h {
+                for dx in 0..fp_w {
+                    let c = col + dx;
+                    let r = row + dy;
+                    let cell = state.city_grids[grid_idx].cell_mut(c, r);
+                    cell.state = CellState::Building;
+                    cell.zone = zone;
+                    cell.density = 1;
+                    cell.age = 0;
+                    cell.building_id = Some(new_id);
+                }
+            }
+
             all_new_entities.push(entity);
 
-            // Update frontier incrementally.
-            state.city_grids[grid_idx].update_frontier_around(col, row);
+            // Update frontier incrementally for ALL cells in the footprint.
+            for dy in 0..fp_h {
+                for dx in 0..fp_w {
+                    state.city_grids[grid_idx].update_frontier_around(col + dx, row + dy);
+                }
+            }
 
-            // Update influence map.
+            // Update influence map (propagate from top-left corner).
             let strength = 1.0;
-            // We need to propagate influence but can't borrow both mutably.
-            // Copy the grid reference data we need for propagation.
             let grid_ref = state.city_grids[grid_idx].clone();
             state.influence_maps[grid_idx].propagate_building(col, row, zone, strength, &grid_ref);
+
+            placed_count += 1;
         }
 
         // Chronicle entry for notable construction milestones.

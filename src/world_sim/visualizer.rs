@@ -37,6 +37,18 @@ pub struct EntityView {
     pub alive: bool,
     pub level: u32,
     pub name: Option<String>,
+    /// For buildings: building type name (e.g. "Farm", "Mine"). None for non-buildings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub building_type: Option<String>,
+}
+
+/// Inventory item as seen by a renderer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InventoryItemView {
+    pub name: String,
+    pub slot: String,
+    pub quality: f32,
+    pub durability: f32,
 }
 
 /// Faction as seen by a renderer.
@@ -144,6 +156,23 @@ pub struct NpcDetailView {
     // Position
     pub pos: (f32, f32),
     pub home_settlement: Option<String>,
+    // Inventory
+    pub equipped_items: Vec<InventoryItemView>,
+    pub carried_gold: f32,
+    pub inventory_commodities: Vec<(String, f32)>,
+}
+
+/// WFC building interior layout for 3D rendering.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BuildingInteriorView {
+    pub building_id: u32,
+    pub world_x: f32,
+    pub world_z: f32,
+    pub interior_w: u8,
+    pub interior_h: u8,
+    pub num_floors: u8,
+    /// Tile as u8 (see interior_gen::tiles::Tile repr), length = w * h * floors.
+    pub tiles: Vec<u8>,
 }
 
 /// Aggregate stats for a single frame.
@@ -173,6 +202,9 @@ pub struct TraceFrame {
     /// Detailed state for a selected/tracked NPC (if any).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selected_npc: Option<NpcDetailView>,
+    /// WFC building interiors near the selected entity (if any).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub building_interiors: Vec<BuildingInteriorView>,
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +308,7 @@ pub fn generate_frame_with_selection(
             alive: e.alive,
             level: e.level,
             name,
+            building_type: e.building.as_ref().map(|b| format!("{:?}", b.building_type)),
         }
     }).collect();
 
@@ -384,32 +417,103 @@ pub fn generate_frame_with_selection(
         })
     }).collect();
 
-    // --- Selected NPC detail ---
+    // --- Building interiors (near selected entity) ---
+    let building_interiors: Vec<BuildingInteriorView> = selected_entity_id
+        .and_then(|eid| {
+            let entity = state.entity(eid)?;
+            let settlement_id = entity.settlement_id()?;
+            let settlement = state.settlement(settlement_id)?;
+            let grid_idx = settlement.city_grid_idx?;
+            if grid_idx >= state.city_grids.len() { return None; }
+            let grid = &state.city_grids[grid_idx];
+            let center_col = grid.cols / 2;
+            let center_row = grid.rows / 2;
+            let cell_size = 2.0_f32;
+
+            let building_range = state.group_index.settlement_buildings(settlement_id);
+            let mut interiors = Vec::new();
+
+            for idx in building_range {
+                if idx >= state.entities.len() { continue; }
+                let bld_entity = &state.entities[idx];
+                let bld = match &bld_entity.building {
+                    Some(b) => b,
+                    None => continue,
+                };
+
+                let (fp_w, fp_h) = super::interior_gen::footprint_size(bld.building_type, bld.tier);
+
+                let world_x = settlement.pos.0
+                    + (bld.grid_col as f32 - center_col as f32) * cell_size;
+                let world_z = settlement.pos.1
+                    + (bld.grid_row as f32 - center_row as f32) * cell_size;
+
+                // Limit to ~20 buildings near the selected entity
+                if interiors.len() >= 20 { break; }
+
+                if let Some(layout) = super::interior_gen::generate_interior(
+                    bld.building_type,
+                    bld.tier,
+                    bld.room_seed,
+                    fp_w,
+                    fp_h,
+                ) {
+                    let mut tiles: Vec<u8> = Vec::with_capacity(
+                        layout.width * layout.height * layout.floors.len(),
+                    );
+                    for floor in &layout.floors {
+                        for tile in floor {
+                            tiles.push(*tile as u8);
+                        }
+                    }
+                    interiors.push(BuildingInteriorView {
+                        building_id: bld_entity.id,
+                        world_x,
+                        world_z,
+                        interior_w: layout.width as u8,
+                        interior_h: layout.height as u8,
+                        num_floors: layout.floors.len() as u8,
+                        tiles,
+                    });
+                }
+            }
+            Some(interiors)
+        })
+        .unwrap_or_default();
+
+    // --- Selected entity detail (NPCs and monsters) ---
     let selected_npc = selected_entity_id.and_then(|eid| {
         let entity = state.entity(eid)?;
-        if entity.kind != super::state::EntityKind::Npc { return None; }
-        let npc = entity.npc.as_ref()?;
+        if !entity.alive { return None; }
         let display_name = super::naming::entity_display_name(entity);
 
-        let home_settlement = npc.home_settlement_id
+        // NPC-specific fields (default for monsters)
+        let npc = entity.npc.as_ref();
+
+        let home_settlement = npc
+            .and_then(|n| n.home_settlement_id)
             .and_then(|sid| state.settlement(sid))
             .map(|s| s.name.clone());
 
-        let goals: Vec<String> = npc.goal_stack.goals.iter().map(|g| {
-            format!("{:?} (prio {:.1}, progress {:.0}%)", g.kind, g.priority, g.progress * 100.0)
-        }).collect();
+        let goals: Vec<String> = npc.map(|n| {
+            n.goal_stack.goals.iter().map(|g| {
+                format!("{:?} (prio {:.1}, progress {:.0}%)", g.kind, g.priority, g.progress * 100.0)
+            }).collect()
+        }).unwrap_or_default();
 
-        let classes: Vec<String> = npc.classes.iter().map(|c| {
-            let name = if c.display_name.is_empty() {
-                format!("Class({})", c.class_name_hash)
-            } else {
-                c.display_name.clone()
-            };
-            format!("{} lv{}", name, c.level)
-        }).collect();
+        let classes: Vec<String> = npc.map(|n| {
+            n.classes.iter().map(|c| {
+                let name = if c.display_name.is_empty() {
+                    format!("Class({})", c.class_name_hash)
+                } else {
+                    c.display_name.clone()
+                };
+                format!("{} lv{}", name, c.level)
+            }).collect()
+        }).unwrap_or_default();
 
-        let top_tags: Vec<(String, f32)> = {
-            let mut tags: Vec<_> = npc.behavior_profile.iter()
+        let top_tags: Vec<(String, f32)> = npc.map(|n| {
+            let mut tags: Vec<_> = n.behavior_profile.iter()
                 .map(|&(hash, val)| {
                     let name = super::systems::biography::tag_display_name(hash);
                     (name.to_string(), val)
@@ -418,19 +522,59 @@ pub fn generate_frame_with_selection(
             tags.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             tags.truncate(8);
             tags
-        };
+        }).unwrap_or_default();
 
-        let recent_memories: Vec<String> = npc.memory.events.iter().rev().take(10).map(|e| {
-            let date_tick = e.tick;
-            let year = date_tick / 4800;
-            let season = ["Spring", "Summer", "Autumn", "Winter"][(date_tick / 1200 % 4) as usize];
-            format!("Y{} {} — {:?}", year, season, e.event_type)
-        }).collect();
+        let recent_memories: Vec<String> = npc.map(|n| {
+            n.memory.events.iter().rev().take(10).map(|e| {
+                let year = e.tick / 4800;
+                let season = ["Spring", "Summer", "Autumn", "Winter"][(e.tick / 1200 % 4) as usize];
+                format!("Y{} {} — {:?}", year, season, e.event_type)
+            }).collect()
+        }).unwrap_or_default();
 
         let biography = super::systems::biography::generate_biography(entity, state);
 
-        let work_state = format!("{:?}", npc.work_state);
-        let economic_intent = format!("{:?}", npc.economic_intent);
+        let work_state = npc.map(|n| format!("{:?}", n.work_state)).unwrap_or_default();
+        let economic_intent = npc.map(|n| format!("{:?}", n.economic_intent)).unwrap_or_default();
+        let archetype = npc.map(|n| n.archetype.clone()).unwrap_or_else(|| {
+            if entity.kind == super::state::EntityKind::Monster { "Monster".to_string() }
+            else { "Unknown".to_string() }
+        });
+
+        // Equipped items
+        let equipped_items: Vec<InventoryItemView> = npc.map(|n| {
+            let mut items = Vec::new();
+            for slot_id in [n.equipped_items.weapon_id, n.equipped_items.armor_id, n.equipped_items.accessory_id] {
+                if let Some(iid) = slot_id {
+                    if let Some(item_entity) = state.entity(iid) {
+                        if let Some(item) = &item_entity.item {
+                            items.push(InventoryItemView {
+                                name: item_entity.npc.as_ref()
+                                    .map(|n| n.name.clone())
+                                    .unwrap_or_else(|| format!("Item #{}", iid)),
+                                slot: format!("{:?}", item.slot),
+                                quality: item.effective_quality(),
+                                durability: item.durability,
+                            });
+                        }
+                    }
+                }
+            }
+            items
+        }).unwrap_or_default();
+
+        let carried_gold = npc.map(|n| n.gold).unwrap_or(0.0);
+
+        // Inventory commodities
+        let commodity_names = ["Food", "Iron", "Wood", "Equipment", "Medicine", "Leather", "Stone", "Cloth"];
+        let inventory_commodities: Vec<(String, f32)> = entity.inventory.as_ref()
+            .map(|inv| {
+                inv.commodities.iter().enumerate()
+                    .filter(|(_, &v)| v > 0.01)
+                    .map(|(i, &v)| (commodity_names.get(i).unwrap_or(&"?").to_string(), v))
+                    .collect()
+            })
+            .unwrap_or_default();
 
         Some(NpcDetailView {
             entity_id: eid,
@@ -438,22 +582,22 @@ pub fn generate_frame_with_selection(
             level: entity.level,
             hp: entity.hp,
             max_hp: entity.max_hp,
-            gold: npc.gold,
-            archetype: npc.archetype.clone(),
-            hunger: npc.needs.hunger,
-            shelter: npc.needs.shelter,
-            safety: npc.needs.safety,
-            social: npc.needs.social,
-            purpose: npc.needs.purpose,
-            esteem: npc.needs.esteem,
-            joy: npc.emotions.joy,
-            sadness: npc.emotions.grief,
-            anger: npc.emotions.anger,
-            fear: npc.emotions.fear,
-            pride: npc.emotions.pride,
-            anxiety: npc.emotions.anxiety,
-            morale: npc.morale,
-            stress: npc.stress,
+            gold: carried_gold,
+            archetype,
+            hunger: npc.map(|n| n.needs.hunger).unwrap_or(100.0),
+            shelter: npc.map(|n| n.needs.shelter).unwrap_or(100.0),
+            safety: npc.map(|n| n.needs.safety).unwrap_or(100.0),
+            social: npc.map(|n| n.needs.social).unwrap_or(100.0),
+            purpose: npc.map(|n| n.needs.purpose).unwrap_or(100.0),
+            esteem: npc.map(|n| n.needs.esteem).unwrap_or(100.0),
+            joy: npc.map(|n| n.emotions.joy).unwrap_or(0.0),
+            sadness: npc.map(|n| n.emotions.grief).unwrap_or(0.0),
+            anger: npc.map(|n| n.emotions.anger).unwrap_or(0.0),
+            fear: npc.map(|n| n.emotions.fear).unwrap_or(0.0),
+            pride: npc.map(|n| n.emotions.pride).unwrap_or(0.0),
+            anxiety: npc.map(|n| n.emotions.anxiety).unwrap_or(0.0),
+            morale: npc.map(|n| n.morale).unwrap_or(50.0),
+            stress: npc.map(|n| n.stress).unwrap_or(0.0),
             economic_intent,
             work_state,
             goals,
@@ -463,6 +607,9 @@ pub fn generate_frame_with_selection(
             biography,
             pos: entity.pos,
             home_settlement,
+            equipped_items,
+            carried_gold,
+            inventory_commodities,
         })
     });
 
@@ -478,6 +625,7 @@ pub fn generate_frame_with_selection(
         events,
         summary,
         selected_npc,
+        building_interiors,
     }
 }
 
@@ -615,6 +763,7 @@ impl PlaybackController {
                 city_grids: vec![],
                 events: vec![],
                 selected_npc: None,
+                building_interiors: vec![],
                 summary: FrameSummary {
                     alive_npcs: 0,
                     alive_monsters: 0,

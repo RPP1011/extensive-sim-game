@@ -177,6 +177,7 @@ let settlementGroup = new THREE.Group();
 let tradeRouteGroup = new THREE.Group();
 let showNametags = false;
 let labelGroup = new THREE.Group();
+let interiorGroup = new THREE.Group();
 scene.add(terrainGroup);
 scene.add(buildingGroup);
 scene.add(entityGroup);
@@ -184,6 +185,7 @@ scene.add(nametagGroup);
 scene.add(settlementGroup);
 scene.add(tradeRouteGroup);
 scene.add(labelGroup);
+scene.add(interiorGroup);
 
 let playing = true;
 let ws = null;
@@ -538,6 +540,131 @@ function buildBuildings(cityGrids) {
 }
 
 // ============================================================
+// BUILD INTERIORS — WFC building interior tiles as 3D geometry
+// ============================================================
+// Tile enum values (matches interior_gen::tiles::Tile repr(u8))
+const TILE_EMPTY = 0, TILE_FLOOR = 1, TILE_WALL = 2, TILE_DOOR = 3,
+      TILE_WINDOW = 4, TILE_PILLAR = 5, TILE_STAIRS = 6,
+      TILE_TABLE = 7, TILE_BED = 8, TILE_ANVIL = 9, TILE_BOOKSHELF = 10,
+      TILE_ALTAR = 11, TILE_COUNTER = 12, TILE_CHEST = 13,
+      TILE_HEARTH = 14, TILE_BARREL = 15;
+
+const interiorTileColors = {
+  [TILE_FLOOR]: 0x8a7d6a,     // warm stone
+  [TILE_WALL]: 0x5a5248,      // dark stone
+  [TILE_DOOR]: 0x6e5030,      // wood brown
+  [TILE_WINDOW]: 0x6090b0,    // glass blue
+  [TILE_PILLAR]: 0x707068,    // grey stone
+  [TILE_STAIRS]: 0x9a8a70,    // light wood
+  [TILE_TABLE]: 0x7a5a30,     // wood
+  [TILE_BED]: 0x8060a0,       // purple fabric
+  [TILE_ANVIL]: 0x404040,     // dark iron
+  [TILE_BOOKSHELF]: 0x6a4020, // dark wood
+  [TILE_ALTAR]: 0xc0a850,     // gold
+  [TILE_COUNTER]: 0x8a6a40,   // wood
+  [TILE_CHEST]: 0x906830,     // brown
+  [TILE_HEARTH]: 0xb04020,    // warm red
+  [TILE_BARREL]: 0x704828,    // barrel brown
+};
+
+function buildInteriors(interiors) {
+  // Clear previous interior geometry
+  while (interiorGroup.children.length) interiorGroup.remove(interiorGroup.children[0]);
+  if (!interiors || interiors.length === 0) return;
+
+  // Interior tiles are 0.5 world units each (TILES_PER_CELL=4, cell_size=2.0)
+  const TS = 0.5;  // tile size in world units
+  const FLOOR_H = 2.0; // height per floor
+  const WALL_H = 2.0;
+  const DOOR_H = 1.0;
+  const FURNITURE_H = 0.4;
+  const FLOOR_THICK = 0.08;
+
+  // Collect instances by type for batching
+  const batches = {}; // key: "color:scaleY" → [{x, y, z}]
+
+  function addInstance(tileType, x, y, z, h) {
+    const color = interiorTileColors[tileType] || 0x808080;
+    const key = color + ':' + h.toFixed(2);
+    if (!batches[key]) batches[key] = { color, h, instances: [] };
+    batches[key].instances.push({ x, y, z });
+  }
+
+  for (const b of interiors) {
+    const w = b.interior_w;
+    const h = b.interior_h;
+    const terrainY = getHeightAt(b.world_x, b.world_z);
+    // The building's grid position is the center of the footprint cell.
+    // Interior tiles span from (world_x - w*TS/2) to (world_x + w*TS/2).
+    const ox = b.world_x - (w * TS) / 2;
+    const oz = b.world_z - (h * TS) / 2;
+
+    for (let floor = 0; floor < b.num_floors; floor++) {
+      const floorBase = terrainY + floor * FLOOR_H;
+      const tileOffset = floor * w * h;
+
+      for (let row = 0; row < h; row++) {
+        for (let col = 0; col < w; col++) {
+          const ti = tileOffset + row * w + col;
+          const tile = b.tiles[ti];
+          if (tile === TILE_EMPTY) continue;
+
+          const tx = ox + (col + 0.5) * TS;
+          const tz = oz + (row + 0.5) * TS;
+
+          if (tile === TILE_FLOOR) {
+            addInstance(TILE_FLOOR, tx, floorBase + FLOOR_THICK / 2, tz, FLOOR_THICK);
+          } else if (tile === TILE_WALL || tile === TILE_WINDOW || tile === TILE_PILLAR) {
+            addInstance(tile, tx, floorBase + WALL_H / 2, tz, WALL_H);
+          } else if (tile === TILE_DOOR) {
+            // Short wall with gap at bottom (render upper portion)
+            addInstance(TILE_DOOR, tx, floorBase + DOOR_H + (WALL_H - DOOR_H) / 2, tz, WALL_H - DOOR_H);
+            // Floor under the door
+            addInstance(TILE_FLOOR, tx, floorBase + FLOOR_THICK / 2, tz, FLOOR_THICK);
+          } else if (tile === TILE_STAIRS) {
+            // Stepped blocks: 4 steps spanning the tile
+            for (let s = 0; s < 4; s++) {
+              const stepH = (s + 1) / 4 * FLOOR_H;
+              const stepZ = tz - TS / 2 + (s + 0.5) * (TS / 4);
+              addInstance(TILE_STAIRS, tx, floorBase + stepH / 2, stepZ, stepH);
+            }
+          } else {
+            // Furniture tiles: small box on floor
+            addInstance(tile, tx, floorBase + FURNITURE_H / 2, tz, FURNITURE_H);
+            // Floor underneath
+            addInstance(TILE_FLOOR, tx, floorBase + FLOOR_THICK / 2, tz, FLOOR_THICK);
+          }
+        }
+      }
+    }
+  }
+
+  // Create instanced meshes per batch
+  const boxGeo = new THREE.BoxGeometry(TS * 0.95, 1, TS * 0.95);
+  for (const batch of Object.values(batches)) {
+    const mat = new THREE.MeshStandardMaterial({
+      color: batch.color, roughness: 0.8, metalness: 0.05, flatShading: true,
+    });
+    const mesh = new THREE.InstancedMesh(boxGeo, mat, batch.instances.length);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    const m = new THREE.Matrix4();
+    const s = new THREE.Matrix4();
+    for (let i = 0; i < batch.instances.length; i++) {
+      const inst = batch.instances[i];
+      s.makeScale(1, batch.h, 1);
+      s.setPosition(inst.x, inst.y, inst.z);
+      mesh.setMatrixAt(i, s);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    interiorGroup.add(mesh);
+  }
+
+  console.log(`Interiors: ${interiors.length} buildings, ${Object.keys(batches).length} batches`);
+}
+
+// ============================================================
 // UPDATE ENTITIES — set target positions, rebuild meshes only when count changes
 // ============================================================
 function updateEntityTargets(entities) {
@@ -778,6 +905,9 @@ function onFrame(data) {
   updateSettlements(data.settlements);
   updateTradeRoutes(data.trade_routes);
 
+  // Build/clear interior geometry (only present near selected entity)
+  buildInteriors(data.building_interiors);
+
   // Update NPC detail panel if selected
   if (data.selected_npc) {
     updateNpcPanel(data.selected_npc);
@@ -989,6 +1119,21 @@ function updateNpcPanel(npc) {
     <div class="npc-section">
       <div class="npc-section-title">Biography</div>
       <div class="bio-text">${npc.biography || 'No biography available.'}</div>
+    </div>
+
+    <div class="npc-section">
+      <div class="npc-section-title">Equipment</div>
+      ${(npc.equipped_items && npc.equipped_items.length > 0)
+        ? npc.equipped_items.map(i => `<div style="font-size:10px;color:#998">${i.slot}: ${i.name} (q${i.quality.toFixed(1)}, dur ${i.durability.toFixed(0)})</div>`).join('')
+        : '<div style="font-size:10px;color:#555">None equipped</div>'}
+    </div>
+
+    <div class="npc-section">
+      <div class="npc-section-title">Inventory</div>
+      <div style="font-size:10px;color:#998">Gold: ${(npc.carried_gold || 0).toFixed(1)}</div>
+      ${(npc.inventory_commodities && npc.inventory_commodities.length > 0)
+        ? npc.inventory_commodities.map(([name, val]) => `<div style="font-size:10px;color:#998">${name}: ${val.toFixed(1)}</div>`).join('')
+        : '<div style="font-size:10px;color:#555">No commodities</div>'}
     </div>
   `;
 }

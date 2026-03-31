@@ -6,6 +6,7 @@
 
 pub mod tiles;
 pub mod solver;
+pub mod rooms;
 
 use tiles::{Tile, Socket, build_rules, apply_weight_overrides};
 use super::state::BuildingType;

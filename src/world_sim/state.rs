@@ -301,6 +301,8 @@ impl WorldState {
                 settlement_id: Some(sid),
                 grid_col: 64, // center of 128x128 grid
                 grid_row: 64,
+                footprint_w: 2, // Treasury is 2x2 at tier 1
+                footprint_h: 2,
                 tier: 1,
                 room_seed: new_id as u64,
                 rooms: BuildingType::Treasury.default_rooms(),
@@ -1190,9 +1192,13 @@ pub struct BuildingData {
     pub building_type: BuildingType,
     /// None for wilderness buildings.
     pub settlement_id: Option<u32>,
-    /// Position on settlement grid.
+    /// Position on settlement grid (top-left corner of footprint).
     pub grid_col: u16,
     pub grid_row: u16,
+    /// Footprint width in grid cells (1 = single cell).
+    pub footprint_w: u8,
+    /// Footprint height in grid cells (1 = single cell).
+    pub footprint_h: u8,
     /// 0-3 quality/upgrade level.
     pub tier: u8,
     /// Deterministic room_gen interior seed.
@@ -1256,6 +1262,8 @@ impl Default for BuildingData {
             settlement_id: None,
             grid_col: 0,
             grid_row: 0,
+            footprint_w: 1,
+            footprint_h: 1,
             tier: 0,
             room_seed: 0,
             rooms: BuildingType::House.default_rooms(),
