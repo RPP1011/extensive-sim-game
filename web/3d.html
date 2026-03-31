@@ -337,35 +337,41 @@ function buildTerrain(regions) {
       const slabThick = 1.5;
       const yBot = q.h > 2 ? 0 : yTop - slabThick;
 
-      // Top face
-      positions.push(x0, yTop, z0, x1, yTop, z0, x1, yTop, z1, x0, yTop, z1);
+      // Top face (CCW winding when viewed from above: +Y)
+      positions.push(x0, yTop, z1, x1, yTop, z1, x1, yTop, z0, x0, yTop, z0);
       normals.push(0,1,0, 0,1,0, 0,1,0, 0,1,0);
+      indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
+      vi += 4;
+
+      // Bottom face (CCW winding when viewed from below: -Y)
+      positions.push(x0, yBot, z0, x1, yBot, z0, x1, yBot, z1, x0, yBot, z1);
+      normals.push(0,-1,0, 0,-1,0, 0,-1,0, 0,-1,0);
       indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
       vi += 4;
 
       // Side faces only if there's visible cliff height (> 2 units)
       const cliffH = yTop - yBot;
       if (cliffH > 2) {
-        // Front face (z0 side)
-        positions.push(x0, yTop, z0, x1, yTop, z0, x1, yBot, z0, x0, yBot, z0);
+        // Front face (-Z, CCW from outside)
+        positions.push(x0, yBot, z0, x1, yBot, z0, x1, yTop, z0, x0, yTop, z0);
         normals.push(0,0,-1, 0,0,-1, 0,0,-1, 0,0,-1);
         indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
         vi += 4;
 
-        // Back face (z1 side)
-        positions.push(x1, yTop, z1, x0, yTop, z1, x0, yBot, z1, x1, yBot, z1);
+        // Back face (+Z, CCW from outside)
+        positions.push(x1, yBot, z1, x0, yBot, z1, x0, yTop, z1, x1, yTop, z1);
         normals.push(0,0,1, 0,0,1, 0,0,1, 0,0,1);
         indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
         vi += 4;
 
-        // Left face (x0 side)
-        positions.push(x0, yTop, z1, x0, yTop, z0, x0, yBot, z0, x0, yBot, z1);
+        // Left face (-X, CCW from outside)
+        positions.push(x0, yBot, z1, x0, yBot, z0, x0, yTop, z0, x0, yTop, z1);
         normals.push(-1,0,0, -1,0,0, -1,0,0, -1,0,0);
         indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
         vi += 4;
 
-        // Right face (x1 side)
-        positions.push(x1, yTop, z0, x1, yTop, z1, x1, yBot, z1, x1, yBot, z0);
+        // Right face (+X, CCW from outside)
+        positions.push(x1, yBot, z0, x1, yBot, z1, x1, yTop, z1, x1, yTop, z0);
         normals.push(1,0,0, 1,0,0, 1,0,0, 1,0,0);
         indices.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
         vi += 4;
