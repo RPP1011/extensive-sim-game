@@ -99,6 +99,99 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
         let profile = sim.tick();
         total_ticks += 1;
 
+        // Tile map + stats every 250 ticks (when tiles exist)
+        if total_ticks % 250 == 0 {
+            let st = sim.state();
+            let tile_count = st.tiles.len();
+            let seed_count = st.build_seeds.len();
+            let complete_seeds = st.build_seeds.iter().filter(|s| s.complete).count();
+
+            if tile_count > 0 {
+                // Find bounding box of all tiles.
+                let min_x = st.tiles.keys().map(|p| p.x).min().unwrap_or(0);
+                let max_x = st.tiles.keys().map(|p| p.x).max().unwrap_or(0);
+                let min_y = st.tiles.keys().map(|p| p.y).min().unwrap_or(0);
+                let max_y = st.tiles.keys().map(|p| p.y).max().unwrap_or(0);
+
+                eprintln!("\n[t{} TILE MAP] {} tiles, {} seeds ({} complete), bounds ({},{})-({},{})",
+                    total_ticks, tile_count, seed_count, complete_seeds, min_x, min_y, max_x, max_y);
+
+                // Render ASCII map (cap to 60x30 for readability).
+                let render_min_x = min_x.max(max_x - 59);
+                let render_min_y = min_y.max(max_y - 29);
+                let render_max_x = max_x.min(render_min_x + 59);
+                let render_max_y = max_y.min(render_min_y + 29);
+
+                // Header with x coordinates.
+                eprint!("     ");
+                for x in render_min_x..=render_max_x {
+                    if x % 5 == 0 { eprint!("{:<5}", x); }
+                }
+                eprintln!();
+
+                for y in render_min_y..=render_max_y {
+                    eprint!("{:>4} ", y);
+                    for x in render_min_x..=render_max_x {
+                        let pos = bevy_game::world_sim::state::TilePos::new(x, y);
+                        let ch = match st.tiles.get(&pos) {
+                            Some(t) => match t.tile_type {
+                                bevy_game::world_sim::state::TileType::Floor(_) => '.',
+                                bevy_game::world_sim::state::TileType::Wall(_) => '#',
+                                bevy_game::world_sim::state::TileType::Door => '+',
+                                bevy_game::world_sim::state::TileType::Path => ':',
+                                bevy_game::world_sim::state::TileType::Fence => '|',
+                                bevy_game::world_sim::state::TileType::Farmland => '%',
+                                bevy_game::world_sim::state::TileType::Moat => '~',
+                                bevy_game::world_sim::state::TileType::Water => '≈',
+                                bevy_game::world_sim::state::TileType::Bed => 'b',
+                                bevy_game::world_sim::state::TileType::Hearth => 'h',
+                                bevy_game::world_sim::state::TileType::Workspace(_) => 'w',
+                                bevy_game::world_sim::state::TileType::Altar => 'a',
+                                bevy_game::world_sim::state::TileType::Bookshelf => 'B',
+                                bevy_game::world_sim::state::TileType::StorageContainer => 's',
+                                bevy_game::world_sim::state::TileType::MarketStall => 'M',
+                                bevy_game::world_sim::state::TileType::WeaponRack => 'W',
+                                bevy_game::world_sim::state::TileType::TowerBase => 'T',
+                                bevy_game::world_sim::state::TileType::GateHouse => 'G',
+                                bevy_game::world_sim::state::TileType::Trap => '^',
+                                _ => '?',
+                            },
+                            None => {
+                                // Check if an NPC is here.
+                                let has_npc = st.entities.iter().any(|e| {
+                                    e.alive && e.kind == EntityKind::Npc
+                                        && bevy_game::world_sim::state::TilePos::from_world(e.pos.0, e.pos.1) == pos
+                                });
+                                if has_npc { '@' } else { ' ' }
+                            }
+                        };
+                        eprint!("{}", ch);
+                    }
+                    eprintln!();
+                }
+
+                // Tile type counts.
+                let mut type_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+                for t in st.tiles.values() {
+                    let name = match t.tile_type {
+                        bevy_game::world_sim::state::TileType::Floor(_) => "Floor",
+                        bevy_game::world_sim::state::TileType::Wall(_) => "Wall",
+                        bevy_game::world_sim::state::TileType::Door => "Door",
+                        bevy_game::world_sim::state::TileType::Path => "Path",
+                        bevy_game::world_sim::state::TileType::Fence => "Fence",
+                        bevy_game::world_sim::state::TileType::Farmland => "Farmland",
+                        bevy_game::world_sim::state::TileType::Moat => "Moat",
+                        _ => "Other",
+                    };
+                    *type_counts.entry(name).or_default() += 1;
+                }
+                let counts: Vec<String> = type_counts.iter().map(|(k, v)| format!("{}:{}", k, v)).collect();
+                eprintln!("[tiles] {}", counts.join(", "));
+            } else {
+                eprintln!("\n[t{} TILE MAP] no tiles placed yet ({} seeds)", total_ticks, seed_count);
+            }
+        }
+
         // Peaceful mode: dump resource positions on first tick
         if args.peaceful && total_ticks == 1 {
             let st = sim.state();
