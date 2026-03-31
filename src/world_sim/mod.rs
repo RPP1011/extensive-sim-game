@@ -38,6 +38,8 @@ pub use state::{
     EntityField, FactionField, RegionField, SettlementField, RelationKind, QuestDelta,
     // Tag-based action system
     ActionTags, ClassSlot, Equipment, tag, EconomicIntent,
+    // Resource nodes
+    ResourceType, ResourceData,
 };
 pub use state::tags;
 pub use tick::{tick, tick_par, tick_profiled, TickProfile, ProfileAccumulator};

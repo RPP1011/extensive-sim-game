@@ -564,6 +564,13 @@ pub(super) fn apply_campaign_deltas(state: &mut WorldState, merged: &MergedDelta
                 // Items are spawned via SpawnItem delta, not SpawnEntity.
                 Entity::new_building(id, pos)
             }
+            EntityKind::Resource => {
+                // Resources are spawned via spawn_initial_resources, not SpawnEntity.
+                // Fallback: create a minimal entity.
+                let mut e = Entity::new_building(id, pos);
+                e.kind = EntityKind::Resource;
+                e
+            }
         };
         state.entities.push(entity);
     }

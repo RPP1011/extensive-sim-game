@@ -895,7 +895,7 @@ impl WorldState {
             if e.alive { return true; }
             // Keep dead NPCs and Monsters — they get recycled by recruitment/monster_ecology.
             // Only compact dead Items, Buildings, and Projectiles.
-            !matches!(e.kind, EntityKind::Item | EntityKind::Building | EntityKind::Projectile)
+            !matches!(e.kind, EntityKind::Item | EntityKind::Building | EntityKind::Projectile | EntityKind::Resource)
         });
         // Note: after compaction, rebuild_all_indices() must be called by the caller.
     }
@@ -912,6 +912,7 @@ pub enum EntityKind {
     Building,
     Projectile,
     Item,
+    Resource,
 }
 
 // ---------------------------------------------------------------------------
@@ -1498,6 +1499,8 @@ pub struct Entity {
     pub npc: Option<NpcData>,
     pub building: Option<BuildingData>,
     pub item: Option<ItemData>,
+    /// Physical resource node data (trees, ore veins, herb patches, etc.).
+    pub resource: Option<ResourceData>,
     /// Unified inventory — commodities + gold. Any entity can have one.
     pub inventory: Option<Inventory>,
 }
@@ -1538,7 +1541,7 @@ impl Entity {
             attack_damage: hot.attack_damage, attack_range: hot.attack_range,
             move_speed: hot.move_speed, level: hot.level,
             status_effects: cold.status_effects.clone(), npc: cold.npc.clone(),
-            building: None, item: None, inventory: None,
+            building: None, item: None, resource: None, inventory: None,
         }
     }
 
@@ -1564,6 +1567,7 @@ impl Entity {
             npc: Some(NpcData::default()),
             building: None,
             item: None,
+            resource: None,
             inventory: Some(Inventory::with_capacity(50.0)), // NPC backpack
         }
     }
@@ -1590,6 +1594,7 @@ impl Entity {
             npc: None,
             building: None,
             item: None,
+            resource: None,
             inventory: None,
         }
     }
@@ -1616,6 +1621,7 @@ impl Entity {
             npc: None,
             building: None,
             item: None,
+            resource: None,
             inventory: None, // set by caller based on building type
         }
     }
@@ -1642,6 +1648,35 @@ impl Entity {
             npc: None,
             building: None,
             item: Some(item_data),
+            resource: None,
+            inventory: None,
+        }
+    }
+
+    /// Create a new resource node entity at the given position.
+    pub fn new_resource(id: u32, pos: (f32, f32), resource_data: ResourceData) -> Self {
+        Self {
+            id,
+            kind: EntityKind::Resource,
+            team: WorldTeam::Neutral,
+            pos,
+            grid_id: None,
+            local_pos: None,
+            alive: true,
+            hp: 1.0,
+            max_hp: 1.0,
+            shield_hp: 0.0,
+            armor: 0.0,
+            magic_resist: 0.0,
+            attack_damage: 0.0,
+            attack_range: 0.0,
+            move_speed: 0.0,
+            level: 0,
+            status_effects: Vec::new(),
+            npc: None,
+            building: None,
+            item: None,
+            resource: Some(resource_data),
             inventory: None,
         }
     }
@@ -2646,6 +2681,69 @@ impl ItemData {
     pub fn speed_bonus(&self) -> f32 {
         if self.slot != ItemSlot::Accessory { return 0.0; }
         self.effective_quality() * 0.02 * self.durability_fraction()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ResourceType / ResourceData — physical resource nodes in the world
+// ---------------------------------------------------------------------------
+
+/// Type of harvestable resource node in the world.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ResourceType {
+    /// Produces WOOD. Renewable (regrows).
+    Tree,
+    /// Produces IRON. Non-renewable (depletes permanently).
+    OreVein,
+    /// Produces HERBS. Renewable.
+    HerbPatch,
+    /// Produces FOOD. Renewable (seasonal).
+    BerryBush,
+    /// Produces CRYSTAL (stone). Non-renewable.
+    StoneOutcrop,
+    /// Produces FOOD (coastal). Renewable.
+    FishingSpot,
+}
+
+/// Data for a physical resource node entity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceData {
+    /// What kind of resource this node provides.
+    pub resource_type: ResourceType,
+    /// Units currently available for harvesting. Depletes when harvested.
+    pub remaining: f32,
+    /// Maximum capacity when fully regenerated.
+    pub max_capacity: f32,
+    /// Units per tick that regenerate (0.0 for non-renewable like ore).
+    pub regrow_rate: f32,
+    /// Which region this resource belongs to.
+    pub region_id: u32,
+}
+
+impl ResourceType {
+    /// Which commodity index this resource type produces.
+    pub fn commodity(&self) -> usize {
+        use super::commodity;
+        match self {
+            ResourceType::Tree => commodity::WOOD,
+            ResourceType::OreVein => commodity::IRON,
+            ResourceType::HerbPatch => commodity::HERBS,
+            ResourceType::BerryBush => commodity::FOOD,
+            ResourceType::StoneOutcrop => commodity::CRYSTAL,
+            ResourceType::FishingSpot => commodity::FOOD,
+        }
+    }
+
+    /// Display name for the visualizer.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ResourceType::Tree => "Tree",
+            ResourceType::OreVein => "Ore Vein",
+            ResourceType::HerbPatch => "Herb Patch",
+            ResourceType::BerryBush => "Berry Bush",
+            ResourceType::StoneOutcrop => "Stone Outcrop",
+            ResourceType::FishingSpot => "Fishing Spot",
+        }
     }
 }
 

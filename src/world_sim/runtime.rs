@@ -1002,6 +1002,11 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
             EntityKind::Building => Entity::new_building(id, pos),
             EntityKind::Projectile => Entity::new_monster(id, pos, 0),
             EntityKind::Item => Entity::new_building(id, pos), // items spawned via SpawnItem
+            EntityKind::Resource => {
+                let mut e = Entity::new_building(id, pos);
+                e.kind = EntityKind::Resource;
+                e
+            }
         };
         entity.team = team;
         entity.level = level;
@@ -1250,6 +1255,9 @@ impl WorldSim {
 
         // Ensure every settlement has a Treasury building.
         initial.ensure_treasury_buildings();
+
+        // Spawn physical resource nodes based on region terrain.
+        super::systems::resource_nodes::spawn_initial_resources(&mut initial);
 
         // Sort entities by settlement/party, build hot/cold + all indices.
         initial.rebuild_all_indices();
@@ -1598,6 +1606,9 @@ impl WorldSim {
         // STOCKPILE SYNC — rebuild settlement stockpiles from building inventories.
         super::systems::work::sync_stockpiles_from_buildings(&mut self.state);
 
+        // RESOURCE REGROWTH — renewable resources regenerate, depleted non-renewables die.
+        super::systems::resource_nodes::tick_resource_regrowth(&mut self.state);
+
         // INVENTORY SYNC — cap gold and sync building storage → entity.inventory.
         for entity in &mut self.state.entities {
             // Cap NPC gold to prevent infinity.
@@ -1655,9 +1666,10 @@ impl WorldSim {
 
             for entity in &self.state.entities {
                 if !entity.alive { continue; }
-                // Items and buildings don't enter combat grids.
+                // Items, buildings, and resources don't enter combat grids.
                 if entity.kind == super::state::EntityKind::Item
-                    || entity.kind == super::state::EntityKind::Building { continue; }
+                    || entity.kind == super::state::EntityKind::Building
+                    || entity.kind == super::state::EntityKind::Resource { continue; }
                 let dx = entity.pos.0 - grid.center.0;
                 let dy = entity.pos.1 - grid.center.1;
                 if dx * dx + dy * dy > r2 { continue; }

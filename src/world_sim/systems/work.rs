@@ -16,6 +16,7 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::*;
 use crate::world_sim::commodity;
 use crate::world_sim::DT_SEC;
+use super::resource_nodes::find_nearest_resource;
 
 /// Base work ticks for farming before skill scaling.
 const FARM_WORK_TICKS: u16 = 20;
@@ -160,6 +161,13 @@ pub fn advance_work_states(state: &mut WorldState) {
     let mut wages: Vec<(usize, u32, f32)> = Vec::new();
     // Collect item spawns from Forge production (applied after entity loop).
     let mut item_spawns: Vec<(Entity,)> = Vec::new();
+    // Collect resource harvests: (resource_entity_index, amount_to_deduct).
+    let mut resource_harvests: Vec<(usize, f32)> = Vec::new();
+
+    // Pre-compute nearest resource per building position + type for O(1) lookup.
+    // Key: (building_id), Value: (resource_entity_idx, distance_sq).
+    // This avoids repeated linear scans of entities for each worker.
+    let mut resource_cache: HashMap<u32, Option<usize>> = HashMap::new();
 
     let entity_count = state.entities.len();
     for i in 0..entity_count {
@@ -242,37 +250,71 @@ pub fn advance_work_states(state: &mut WorldState) {
                         // Non-forge production: commodity goes directly into NPC inventory.
                         let (commodity, base_amount) = output_for_building(state, building_id);
 
-                        // Apply building specialization bonus when worker's primary
-                        // class matches the building's specialization tag.
-                        let amount = {
-                            let spec = state.entity(building_id)
-                                .and_then(|e| e.building.as_ref())
-                                .and_then(|b| {
-                                    b.specialization_tag.map(|tag| (tag, b.specialization_strength))
-                                });
-                            if let Some((spec_tag, spec_str)) = spec {
-                                let worker_primary = state.entities[i].npc.as_ref()
-                                    .and_then(|n| n.classes.iter().max_by_key(|c| c.level))
-                                    .map(|c| c.class_name_hash);
-                                if worker_primary == Some(spec_tag) {
-                                    base_amount * (1.0 + spec_str * 0.5)
+                        // Look up building type and required resource.
+                        let btype = state.entity(building_id)
+                            .and_then(|e| e.building.as_ref())
+                            .map(|b| b.building_type);
+                        let req_resource = btype.and_then(required_resource_type);
+
+                        // Check if a matching resource node is nearby.
+                        // Production fails (0 output) if the building requires a resource
+                        // but none is available within range.
+                        let resource_idx = if let Some(rtype) = req_resource {
+                            let bld_pos = state.entity(building_id)
+                                .map(|e| e.pos)
+                                .unwrap_or(entity_pos);
+                            let cached = resource_cache.entry(building_id).or_insert_with(|| {
+                                find_nearest_resource(state, bld_pos, rtype, RESOURCE_SEARCH_RADIUS)
+                                    .map(|(idx, _)| idx)
+                            });
+                            *cached
+                        } else {
+                            None // No resource requirement (e.g. fallback buildings).
+                        };
+
+                        // If a resource is required but none found, production fails.
+                        let production_allowed = req_resource.is_none() || resource_idx.is_some();
+
+                        if production_allowed {
+                            // Apply building specialization bonus when worker's primary
+                            // class matches the building's specialization tag.
+                            let amount = {
+                                let spec = state.entity(building_id)
+                                    .and_then(|e| e.building.as_ref())
+                                    .and_then(|b| {
+                                        b.specialization_tag.map(|tag| (tag, b.specialization_strength))
+                                    });
+                                if let Some((spec_tag, spec_str)) = spec {
+                                    let worker_primary = state.entities[i].npc.as_ref()
+                                        .and_then(|n| n.classes.iter().max_by_key(|c| c.level))
+                                        .map(|c| c.class_name_hash);
+                                    if worker_primary == Some(spec_tag) {
+                                        base_amount * (1.0 + spec_str * 0.5)
+                                    } else {
+                                        base_amount
+                                    }
                                 } else {
                                     base_amount
                                 }
-                            } else {
-                                base_amount
+                            };
+
+                            // Deduct from the resource node.
+                            if let Some(ridx) = resource_idx {
+                                resource_harvests.push((ridx, amount));
                             }
-                        };
 
-                        // Deposit commodity directly into worker's inventory.
-                        if let Some(inv) = &mut state.entities[i].inventory {
-                            inv.deposit(commodity, amount);
-                        }
+                            // Deposit commodity directly into worker's inventory.
+                            if let Some(inv) = &mut state.entities[i].inventory {
+                                inv.deposit(commodity, amount);
+                            }
 
-                        // Pay wage for completed work cycle.
-                        if let Some(sid) = home_sid {
-                            wages.push((i, sid, BASE_WAGE));
+                            // Pay wage for completed work cycle.
+                            if let Some(sid) = home_sid {
+                                wages.push((i, sid, BASE_WAGE));
+                            }
                         }
+                        // If production failed (no resource), NPC still returns to idle
+                        // but produces nothing and earns no wage.
 
                         let npc = state.entities[i].npc.as_mut().unwrap();
                         npc.work_state = WorkState::Idle;
@@ -362,6 +404,15 @@ pub fn advance_work_states(state: &mut WorldState) {
     // Spawn crafted item entities.
     for (item,) in item_spawns {
         state.entities.push(item);
+    }
+
+    // Deduct harvested amounts from resource nodes.
+    for (resource_idx, amount) in resource_harvests {
+        if resource_idx < state.entities.len() {
+            if let Some(res) = &mut state.entities[resource_idx].resource {
+                res.remaining = (res.remaining - amount).max(0.0);
+            }
+        }
     }
 }
 
@@ -503,6 +554,21 @@ fn output_for_building(state: &WorldState, building_id: u32) -> (usize, f32) {
         _ => (commodity::FOOD, 0.5), // fallback
     }
 }
+
+/// Map building type to the resource type it harvests from.
+/// Returns `None` for buildings that don't harvest physical resources (e.g. Forge).
+fn required_resource_type(building_type: BuildingType) -> Option<ResourceType> {
+    match building_type {
+        BuildingType::Farm => Some(ResourceType::BerryBush),
+        BuildingType::Mine => Some(ResourceType::OreVein),
+        BuildingType::Sawmill => Some(ResourceType::Tree),
+        BuildingType::Apothecary => Some(ResourceType::HerbPatch),
+        _ => None,
+    }
+}
+
+/// Maximum distance (world units) to search for a matching resource node.
+const RESOURCE_SEARCH_RADIUS: f32 = 50.0;
 
 // ---------------------------------------------------------------------------
 // Physical eating — NPCs seek food when hungry

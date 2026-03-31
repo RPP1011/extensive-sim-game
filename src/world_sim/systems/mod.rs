@@ -111,6 +111,7 @@ pub mod quest_lifecycle;
 pub mod random_events;
 pub mod recruitment;
 pub mod religion;
+pub mod resource_nodes;
 pub mod reputation_decay;
 pub mod reputation_stories;
 pub mod retirement;

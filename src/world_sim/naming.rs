@@ -149,6 +149,11 @@ pub fn entity_display_name(entity: &Entity) -> String {
             format!("Entity #{}", entity.id)
         }
         EntityKind::Monster => monster_display_name(entity.id, entity.level),
+        EntityKind::Resource => {
+            entity.resource.as_ref()
+                .map(|r| r.resource_type.display_name().to_string())
+                .unwrap_or_else(|| format!("Resource #{}", entity.id))
+        }
         _ => format!("Entity #{}", entity.id),
     }
 }

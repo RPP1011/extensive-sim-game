@@ -17,7 +17,7 @@ pub fn compute_entity_deltas(entity: &Entity, state: &WorldState) -> Vec<WorldDe
 pub fn compute_entity_deltas_into(entity: &Entity, state: &WorldState, out: &mut Vec<WorldDelta>) {
     match entity.kind {
         EntityKind::Npc | EntityKind::Monster => compute_combatant_into(entity, state, out),
-        EntityKind::Building | EntityKind::Projectile | EntityKind::Item => {}
+        EntityKind::Building | EntityKind::Projectile | EntityKind::Item | EntityKind::Resource => {}
     }
 }
 

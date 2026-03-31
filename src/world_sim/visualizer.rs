@@ -55,6 +55,12 @@ pub struct EntityView {
     /// For buildings: building type name (e.g. "Farm", "Mine"). None for non-buildings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub building_type: Option<String>,
+    /// For resources: resource type name (e.g. "Tree", "Ore Vein"). None for non-resources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_type: Option<String>,
+    /// For resources: fraction remaining (0.0–1.0). None for non-resources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_remaining: Option<f32>,
 }
 
 /// Inventory item as seen by a renderer.
@@ -344,6 +350,10 @@ pub fn generate_frame_with_selection(
             level: e.level,
             name,
             building_type: e.building.as_ref().map(|b| format!("{:?}", b.building_type)),
+            resource_type: e.resource.as_ref().map(|r| r.resource_type.display_name().to_string()),
+            resource_remaining: e.resource.as_ref().map(|r| {
+                if r.max_capacity > 0.0 { r.remaining / r.max_capacity } else { 0.0 }
+            }),
         }
     }).collect();
 

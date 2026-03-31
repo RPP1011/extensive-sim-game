@@ -222,8 +222,10 @@ let ws = null;
 const entityPositions = new Map();
 let npcMesh = null;
 let monsterMesh = null;
+let resourceMeshes = {}; // keyed by resource_type string
 let npcList = []; // live NPC entity IDs in order
 let monsterList = []; // live monster entity IDs in order
+let resourceLists = {}; // keyed by resource_type string
 const LERP_SPEED = 0.12; // per-frame interpolation factor
 
 // ============================================================
@@ -744,6 +746,31 @@ function updateEntityTargets(entities) {
     }
   }
 
+  // Update target positions for resource nodes (kind === 5)
+  const resources = entities.filter(e => e.alive && e.kind === 5);
+  // Group resources by type for separate instanced meshes.
+  const resByType = {};
+  for (const e of resources) {
+    const rt = e.resource_type || 'Unknown';
+    if (!resByType[rt]) resByType[rt] = [];
+    resByType[rt].push(e);
+    aliveIds.add(e.id);
+    const ty = getHeightAt(e.pos[0], e.pos[1]) + 1;
+    if (!entityPositions.has(e.id)) {
+      entityPositions.set(e.id, {
+        current: { x: e.pos[0], y: ty, z: e.pos[1] },
+        target: { x: e.pos[0], y: ty, z: e.pos[1] },
+        kind: 5,
+        resourceType: rt,
+      });
+    } else {
+      const ep = entityPositions.get(e.id);
+      ep.target.x = e.pos[0];
+      ep.target.y = ty;
+      ep.target.z = e.pos[1];
+    }
+  }
+
   // Remove dead entities from tracking
   for (const id of entityPositions.keys()) {
     if (!aliveIds.has(id)) entityPositions.delete(id);
@@ -767,6 +794,43 @@ function updateEntityTargets(entities) {
     entityGroup.add(monsterMesh);
   }
   monsterList = newMonsterList;
+
+  // Rebuild resource instanced meshes per type when count changes.
+  const resourceGeoConfig = {
+    'Tree':          { geo: () => new THREE.ConeGeometry(1.5, 5, 6), color: 0x2d8a4e, emissive: 0x0a2a15, yOff: 2.5 },
+    'Ore Vein':      { geo: () => new THREE.DodecahedronGeometry(1.5), color: 0x808080, emissive: 0x202020, yOff: 0.8 },
+    'Herb Patch':    { geo: () => new THREE.CylinderGeometry(1.5, 1.5, 0.4, 8), color: 0x6abf69, emissive: 0x1a3a1a, yOff: 0.2 },
+    'Berry Bush':    { geo: () => new THREE.SphereGeometry(1.2, 6, 4), color: 0x3a9e3a, emissive: 0x102a10, yOff: 1.2 },
+    'Stone Outcrop': { geo: () => new THREE.DodecahedronGeometry(1.8), color: 0x9a9080, emissive: 0x252015, yOff: 1.0 },
+    'Fishing Spot':  { geo: () => new THREE.TorusGeometry(1.2, 0.3, 6, 8), color: 0x4488cc, emissive: 0x102040, yOff: 0.3 },
+  };
+  const defaultResConfig = { geo: () => new THREE.BoxGeometry(1, 1, 1), color: 0xaaaa00, emissive: 0x222200, yOff: 0.5 };
+
+  // Detect which resource types are present or gone.
+  const allTypes = new Set([...Object.keys(resByType), ...Object.keys(resourceLists)]);
+  for (const rt of allTypes) {
+    const newList = [];
+    if (resByType[rt]) {
+      for (const e of resByType[rt]) newList.push(e.id);
+    }
+    const oldList = resourceLists[rt] || [];
+    if (newList.length !== oldList.length || !resourceMeshes[rt]) {
+      // Remove old mesh.
+      if (resourceMeshes[rt]) entityGroup.remove(resourceMeshes[rt]);
+      if (newList.length === 0) {
+        delete resourceMeshes[rt];
+        delete resourceLists[rt];
+        continue;
+      }
+      const cfg = resourceGeoConfig[rt] || defaultResConfig;
+      const geo = cfg.geo();
+      const mat = new THREE.MeshStandardMaterial({ color: cfg.color, emissive: cfg.emissive, roughness: 0.7 });
+      resourceMeshes[rt] = new THREE.InstancedMesh(geo, mat, Math.max(1, newList.length));
+      resourceMeshes[rt]._yOff = cfg.yOff;
+      entityGroup.add(resourceMeshes[rt]);
+    }
+    resourceLists[rt] = newList;
+  }
 }
 
 // Interpolate entity positions and update instanced mesh matrices
@@ -806,6 +870,23 @@ function lerpEntities() {
       monsterMesh.setMatrixAt(i, m);
     }
     monsterMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  // Update resource instanced meshes
+  for (const rt of Object.keys(resourceLists)) {
+    const mesh = resourceMeshes[rt];
+    const list = resourceLists[rt];
+    if (!mesh || !list || list.length === 0) continue;
+    for (let i = 0; i < list.length; i++) {
+      const ep = entityPositions.get(list[i]);
+      if (ep) {
+        m.makeTranslation(ep.current.x, ep.current.y, ep.current.z);
+      } else {
+        m.makeTranslation(0, -100, 0);
+      }
+      mesh.setMatrixAt(i, m);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
   }
 }
 
