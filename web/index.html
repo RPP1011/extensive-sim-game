@@ -1050,25 +1050,6 @@ function renderMap() {
     }
     ctx.putImageData(imgData, 0, 0);
 
-    // Border lines along biome edges (subtle)
-    ctx.strokeStyle = 'rgba(30, 25, 20, 0.3)';
-    ctx.lineWidth = 0.5;
-    for (let i = 0; i < projRegions.length; i++) {
-      for (let j = i + 1; j < projRegions.length; j++) {
-        const a = projRegions[i], b = projRegions[j];
-        const dx = a.sx - b.sx, dy = a.sy - b.sy;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < 300 && a.region.terrain !== b.region.terrain) {
-          // Draw perpendicular bisector segment as a subtle boundary hint
-          const mx = (a.sx + b.sx) / 2, my = (a.sy + b.sy) / 2;
-          const nx = -dy / dist * 60, ny = dx / dist * 60;
-          ctx.beginPath();
-          ctx.moveTo(mx - nx, my - ny);
-          ctx.lineTo(mx + nx, my + ny);
-          ctx.stroke();
-        }
-      }
-    }
   }
 
   // --- Trade routes ---
@@ -1085,24 +1066,41 @@ function renderMap() {
     ctx.setLineDash([]);
   }
 
-  // --- Buildings (kind=2) — small squares ---
-  const buildingSize = Math.max(2, 3 * Math.sqrt(cam.zoom));
+  // --- Buildings (kind=2) — house shapes, always visible ---
+  const bs = Math.max(4, 5 * Math.sqrt(cam.zoom));
   for (const ent of frame.entities) {
     if (!ent.alive || ent.kind !== 2) continue;
     const [sx, sy] = project(ent.pos[0], ent.pos[1]);
-    if (sx < -20 || sx > w + 20 || sy < -20 || sy > h + 20) continue;
-    const bs = buildingSize;
-    ctx.fillStyle = 'rgba(180, 160, 120, 0.5)';
-    ctx.fillRect(sx - bs/2, sy - bs/2, bs, bs);
-    ctx.strokeStyle = 'rgba(200, 180, 140, 0.6)';
-    ctx.lineWidth = 0.5;
-    ctx.strokeRect(sx - bs/2, sy - bs/2, bs, bs);
-    // Show name at high zoom
-    if (cam.zoom > 3 && ent.name) {
-      ctx.font = `300 ${Math.max(7, 8 * Math.sqrt(cam.zoom / 3))}px "JetBrains Mono", monospace`;
-      ctx.fillStyle = 'rgba(180, 170, 140, 0.5)';
+    if (sx < -30 || sx > w + 30 || sy < -30 || sy > h + 30) continue;
+
+    // House shape: rectangle with pointed roof
+    const bw = bs, bh = bs * 0.8;
+    ctx.beginPath();
+    // Roof peak
+    ctx.moveTo(sx, sy - bh);
+    ctx.lineTo(sx + bw * 0.6, sy - bh * 0.3);
+    ctx.lineTo(sx + bw * 0.45, sy - bh * 0.3);
+    // Right wall + base
+    ctx.lineTo(sx + bw * 0.45, sy + bh * 0.3);
+    ctx.lineTo(sx - bw * 0.45, sy + bh * 0.3);
+    // Left wall
+    ctx.lineTo(sx - bw * 0.45, sy - bh * 0.3);
+    ctx.lineTo(sx - bw * 0.6, sy - bh * 0.3);
+    ctx.closePath();
+
+    ctx.fillStyle = 'rgba(160, 140, 100, 0.7)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(200, 180, 140, 0.8)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Name label at any zoom level > 1.5
+    if (cam.zoom > 1.5 && ent.name) {
+      const fontSize = Math.max(7, 8 * Math.sqrt(cam.zoom / 2));
+      ctx.font = `400 ${fontSize}px "JetBrains Mono", monospace`;
+      ctx.fillStyle = 'rgba(200, 185, 150, 0.7)';
       ctx.textAlign = 'center';
-      ctx.fillText(ent.name, sx, sy - bs - 2);
+      ctx.fillText(ent.name, sx, sy + bh * 0.3 + fontSize + 2);
     }
   }
 
