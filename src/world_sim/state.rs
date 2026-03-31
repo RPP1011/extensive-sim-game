@@ -2137,6 +2137,35 @@ impl Relationship {
 }
 
 // ---------------------------------------------------------------------------
+// OutcomeEMA — per-action-type exponential moving average of outcomes
+// ---------------------------------------------------------------------------
+
+/// Tracks success/failure history for an action type, enabling adaptive behavior.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutcomeEMA {
+    /// Running average of outcome valence, [-1.0, 1.0].
+    pub value: f32,
+    /// Number of samples (first 10 learn faster).
+    pub sample_count: u32,
+}
+
+impl OutcomeEMA {
+    pub fn new() -> Self { Self { value: 0.0, sample_count: 0 } }
+
+    /// Update with a new outcome valence (1.0=success, -1.0=failure, 0.0=neutral).
+    pub fn update(&mut self, valence: f32) {
+        let alpha = if self.sample_count < 10 { 0.3 } else { 0.1 };
+        self.value = self.value * (1.0 - alpha) + valence * alpha;
+        self.sample_count += 1;
+    }
+
+    /// Utility multiplier: maps [-1, 1] → [floor, 1.0].
+    pub fn utility_mod(&self, floor: f32) -> f32 {
+        floor + (1.0 - floor) * (self.value + 1.0) / 2.0
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ResourceKnowledge — per-NPC discovered resource tracking
 // ---------------------------------------------------------------------------
 
@@ -2590,6 +2619,24 @@ impl NpcAction {
     pub fn is_active(&self) -> bool {
         !matches!(self, NpcAction::Idle)
     }
+
+    /// Action type discriminant for outcome tracking (0-11).
+    pub fn action_type_id(&self) -> u8 {
+        match self {
+            NpcAction::Idle => 0,
+            NpcAction::Walking { .. } => 1,
+            NpcAction::Eating { .. } => 2,
+            NpcAction::Working { .. } => 3,
+            NpcAction::Hauling { .. } => 4,
+            NpcAction::Fighting { .. } => 5,
+            NpcAction::Socializing { .. } => 6,
+            NpcAction::Resting { .. } => 7,
+            NpcAction::Building { .. } => 8,
+            NpcAction::Fleeing => 9,
+            NpcAction::Trading { .. } => 10,
+            NpcAction::Harvesting { .. } => 11,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2711,6 +2758,10 @@ pub struct NpcData {
 
     /// Per-pair relationships with other NPCs. Capped at 20 entries.
     pub relationships: std::collections::HashMap<u32, Relationship>,
+
+    /// Per-action-type outcome tracking for adaptive behavior (Phase A).
+    /// Key: (action_type_discriminant, target_type_hash). Value: EMA of outcomes.
+    pub action_outcomes: std::collections::HashMap<(u8, u32), OutcomeEMA>,
 
     // --- Action commitment (hysteresis) ---
 
@@ -3109,6 +3160,7 @@ impl Default for NpcData {
             emotions: Emotions::default(),
             behavior_profile: Vec::new(),
             relationships: std::collections::HashMap::new(),
+            action_outcomes: std::collections::HashMap::new(),
             current_intention: None,
             intention_ticks: 0,
             classes: Vec::new(),

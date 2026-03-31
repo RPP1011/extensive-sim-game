@@ -555,6 +555,13 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
 
             // Resource knowledge decay: remove stale entries (>2000 ticks old).
             npc.known_resources.retain(|_, k| world.tick.saturating_sub(k.observed_tick) < 2000);
+
+            // Outcome EMA decay: curious NPCs forget bad outcomes faster (Phase A).
+            if npc.personality.curiosity > 0.6 {
+                for ema in npc.action_outcomes.values_mut() {
+                    ema.value *= 0.995; // drift toward neutral
+                }
+            }
         }
     }
 

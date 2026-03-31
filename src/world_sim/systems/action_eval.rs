@@ -48,6 +48,41 @@ enum CandidateAction {
     Idle,
 }
 
+impl CandidateAction {
+    /// Outcome tracking key: (action_type_id, target_type_hash).
+    /// General enough to transfer learning, specific enough to distinguish contexts.
+    fn outcome_key(&self, snaps: &[EntitySnap]) -> (u8, u32) {
+        match self {
+            CandidateAction::Harvest { resource_idx, .. } => {
+                let rtype = snaps.get(*resource_idx)
+                    .and_then(|s| s.resource_type)
+                    .map(|rt| rt as u32)
+                    .unwrap_or(0);
+                (11, rtype) // Harvesting + resource_type
+            }
+            CandidateAction::MoveToResource { resource_idx, .. } => {
+                let rtype = snaps.get(*resource_idx)
+                    .and_then(|s| s.resource_type)
+                    .map(|rt| rt as u32)
+                    .unwrap_or(0);
+                (1, rtype) // Walking + resource_type context
+            }
+            CandidateAction::Attack { target_idx, .. } => {
+                let kind = snaps.get(*target_idx)
+                    .map(|s| s.kind as u32)
+                    .unwrap_or(0);
+                (5, kind) // Fighting + target_kind
+            }
+            CandidateAction::Work => (3, 0),
+            CandidateAction::BuildExisting { .. } | CandidateAction::BuildNew => (8, 0),
+            CandidateAction::Eat => (2, 0),
+            CandidateAction::Flee { .. } => (9, 0),
+            CandidateAction::MoveToWork { .. } | CandidateAction::MoveToPos { .. } => (1, 0),
+            CandidateAction::Idle => (0, 0),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Lightweight entity snapshot for read-only spatial queries
 // ---------------------------------------------------------------------------
@@ -184,6 +219,18 @@ pub fn evaluate_and_act(state: &mut WorldState) {
     // --- Phase 3: execute deferred actions (mutable access to state). ---
     let tick = state.tick;
     for da in deferred {
+        // Record outcome of previous action before executing new one (Phase A).
+        if let Some(npc) = &mut state.entities[da.idx].npc {
+            if let Some((ref prev_action, _)) = npc.current_intention {
+                let switched = std::mem::discriminant(prev_action) != std::mem::discriminant(&da.npc_action);
+                if switched && prev_action.is_active() {
+                    let key = (prev_action.action_type_id(), 0u32); // simplified key
+                    let valence = classify_outcome(prev_action, npc);
+                    npc.action_outcomes.entry(key).or_insert_with(OutcomeEMA::new).update(valence);
+                }
+            }
+        }
+
         if !da.skip_execute {
             execute_action(state, da.idx, &da.action, tick);
         }
@@ -218,6 +265,37 @@ fn is_interrupt(npc: &NpcData, hp: f32, max_hp: f32) -> bool {
     false
 }
 
+/// Classify the outcome of a completed action for the outcome EMA.
+/// Returns +1.0 (success), -1.0 (failure), or 0.0 (neutral).
+fn classify_outcome(action: &NpcAction, npc: &NpcData) -> f32 {
+    match action {
+        // Harvesting: success if the NPC was stationary long enough (implying harvest happened).
+        NpcAction::Harvesting { .. } => {
+            if npc.intention_ticks >= 5 { 1.0 } else { -0.5 }
+        }
+        // Working: always mildly positive (production happened if they stayed).
+        NpcAction::Working { .. } => 0.5,
+        // Building: positive if they stayed at it.
+        NpcAction::Building { .. } => {
+            if npc.intention_ticks >= 5 { 0.5 } else { -0.3 }
+        }
+        // Fighting: positive if HP is still reasonable, negative if badly hurt.
+        NpcAction::Fighting { .. } => {
+            // Can't check HP here (no entity ref), use need state as proxy.
+            if npc.needs.safety > 30.0 { 0.5 } else { -0.5 }
+        }
+        // Fleeing: positive if safety need recovered.
+        NpcAction::Fleeing => {
+            if npc.needs.safety > 50.0 { 1.0 } else { -0.3 }
+        }
+        // Walking: neutral (intermediate action).
+        NpcAction::Walking { .. } => 0.0,
+        // Eating: always positive.
+        NpcAction::Eating { .. } => 1.0,
+        _ => 0.0,
+    }
+}
+
 fn score_npc_actions(
     entity: &Entity,
     npc: &NpcData,
@@ -250,6 +328,14 @@ fn score_npc_actions(
     let mut best_utility = 0.01_f32; // Idle baseline
     let mut best_action = CandidateAction::Idle;
     let mut best_npc_action = NpcAction::Idle;
+
+    // Outcome adaptation (Phase A): floor depends on risk tolerance.
+    let outcome_floor = if pers.risk_tolerance > 0.7 { 0.8 } else { 0.7 };
+    let outcome_mod = |key: (u8, u32)| -> f32 {
+        npc.action_outcomes.get(&key)
+            .map(|ema| ema.utility_mod(outcome_floor))
+            .unwrap_or(1.0) // no history → neutral (1.0, not 0.85)
+    };
 
     // Determine what kinds of entities we consider hostile (attack targets).
     let is_npc = entity.kind == EntityKind::Npc;
@@ -305,9 +391,10 @@ fn score_npc_actions(
 
                 let distance_factor = 1.0 / (1.0 + dist / 10.0);
 
+                let harvest_outcome = outcome_mod((11, rt as u32));
+
                 if dist_sq <= HARVEST_DIST_SQ {
-                    // Harvest (in range)
-                    let utility = commodity_need * distance_factor * curiosity_mod * grief_dampen;
+                    let utility = commodity_need * distance_factor * curiosity_mod * grief_dampen * harvest_outcome;
                     if utility > best_utility {
                         best_utility = utility;
                         best_action = CandidateAction::Harvest {
@@ -317,8 +404,7 @@ fn score_npc_actions(
                         best_npc_action = NpcAction::Harvesting { resource_id: snap.id };
                     }
                 } else {
-                    // MoveTo resource (out of range)
-                    let utility = commodity_need * 0.8 * distance_factor * curiosity_mod * grief_dampen;
+                    let utility = commodity_need * 0.8 * distance_factor * curiosity_mod * grief_dampen * harvest_outcome;
                     if utility > best_utility {
                         best_utility = utility;
                         best_action = CandidateAction::MoveToResource {
@@ -342,8 +428,9 @@ fn score_npc_actions(
                         if den_dist_sq < 225.0 { 0.3 } else { 0.0 } // within 15 units
                     } else { 0.0 };
 
+                    let attack_outcome = outcome_mod((5, snap.kind as u32));
                     let utility = (safety_urgency * 0.7 + anger_boost * 0.3 + territorial_boost)
-                        * risk_mod * grief_dampen;
+                        * risk_mod * grief_dampen * attack_outcome;
                     if utility > best_utility {
                         best_utility = utility;
                         best_action = CandidateAction::Attack {
@@ -409,7 +496,8 @@ fn score_npc_actions(
                 let distance_factor = 1.0 / (1.0 + dist / 10.0);
 
                 if dist < 5.0 {
-                    let utility = (purpose_urgency * 0.6 + 0.2) * ambition_mod * grief_dampen;
+                    let work_outcome = outcome_mod((3, 0));
+                    let utility = (purpose_urgency * 0.6 + 0.2) * ambition_mod * grief_dampen * work_outcome;
                     if utility > best_utility {
                         best_utility = utility;
                         best_action = CandidateAction::Work;
@@ -420,7 +508,8 @@ fn score_npc_actions(
                         };
                     }
                 } else {
-                    let utility = (purpose_urgency * 0.6 + 0.2) * distance_factor * ambition_mod * grief_dampen;
+                    let work_outcome = outcome_mod((3, 0));
+                    let utility = (purpose_urgency * 0.6 + 0.2) * distance_factor * ambition_mod * grief_dampen * work_outcome;
                     if utility > best_utility {
                         best_utility = utility;
                         best_action = CandidateAction::MoveToWork { pos: work_snap.pos };
