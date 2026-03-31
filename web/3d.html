@@ -168,7 +168,9 @@ const terrainColors = {
 // ============================================================
 let frame = null;
 let terrainBuilt = false;
+let buildingsBuilt = false;
 let terrainGroup = new THREE.Group();
+let buildingGroup = new THREE.Group();
 let entityGroup = new THREE.Group();
 let nametagGroup = new THREE.Group();
 let settlementGroup = new THREE.Group();
@@ -176,6 +178,7 @@ let tradeRouteGroup = new THREE.Group();
 let showNametags = false;
 let labelGroup = new THREE.Group();
 scene.add(terrainGroup);
+scene.add(buildingGroup);
 scene.add(entityGroup);
 scene.add(nametagGroup);
 scene.add(settlementGroup);
@@ -424,6 +427,117 @@ function buildTerrain(regions) {
 }
 
 // ============================================================
+// BUILD BUILDINGS FROM CITY GRIDS
+// ============================================================
+const zoneColors3d = {
+  1: 0x8c7858, // Residential (warm brown)
+  2: 0xb09840, // Commercial (gold)
+  3: 0x786450, // Industrial (dark brown)
+  4: 0x826898, // Religious (purple)
+  5: 0x507898, // Arcane (blue)
+  6: 0xa09070, // Noble (cream)
+  7: 0x8c5050, // Military (red-brown)
+};
+
+function buildBuildings(cityGrids) {
+  while (buildingGroup.children.length) buildingGroup.remove(buildingGroup.children[0]);
+  if (!cityGrids || cityGrids.length === 0) return;
+
+  // Collect all building cells across all grids
+  const buildings = []; // { x, z, y, w, h, zone, density }
+
+  for (const grid of cityGrids) {
+    const centerCol = Math.floor(grid.cols / 2);
+    const centerRow = Math.floor(grid.rows / 2);
+    const cs = grid.cell_size;
+
+    for (let row = 0; row < grid.rows; row++) {
+      for (let col = 0; col < grid.cols; col++) {
+        const idx = row * grid.cols + col;
+        const packed = grid.cells[idx];
+        const cellState = packed >> 4;
+        const zone = packed & 0xf;
+        const density = grid.density[idx];
+        const roadTier = grid.road_tier[idx];
+
+        if (cellState === 0) continue; // Empty
+
+        const wx = grid.center_pos[0] + (col - centerCol) * cs;
+        const wz = grid.center_pos[1] + (row - centerRow) * cs;
+        const terrainY = getHeightAt(wx, wz);
+
+        if (cellState === 1) {
+          // Road — flat dark slab
+          buildings.push({ x: wx, z: wz, y: terrainY + 0.1, w: cs * 0.9, h: 0.2, zone: -1, road: roadTier });
+        } else if (cellState === 2) {
+          // Building — height from density (0-3)
+          const bh = 1.5 + density * 1.5; // 1.5 to 6 units tall
+          buildings.push({ x: wx, z: wz, y: terrainY + bh / 2, w: cs * 0.7, h: bh, zone, density });
+        } else if (cellState === 3) {
+          // Plaza — very thin lighter slab
+          buildings.push({ x: wx, z: wz, y: terrainY + 0.15, w: cs * 0.85, h: 0.3, zone: -2 });
+        } else if (cellState === 4) {
+          // Wall — tall narrow
+          buildings.push({ x: wx, z: wz, y: terrainY + 2, w: cs * 0.4, h: 4, zone: -3 });
+        }
+      }
+    }
+  }
+
+  if (buildings.length === 0) return;
+
+  // Batch by zone type for instancing
+  const byZone = {};
+  for (const b of buildings) {
+    const key = b.zone;
+    if (!byZone[key]) byZone[key] = [];
+    byZone[key].push(b);
+  }
+
+  for (const [zoneStr, blds] of Object.entries(byZone)) {
+    const zone = parseInt(zoneStr);
+    let color;
+    if (zone === -1) color = 0x3a3530; // road
+    else if (zone === -2) color = 0x706850; // plaza
+    else if (zone === -3) color = 0x504840; // wall
+    else color = zoneColors3d[zone] || 0x6a6050;
+
+    const geo = new THREE.BoxGeometry(1, 1, 1);
+    const mat = new THREE.MeshStandardMaterial({
+      color, roughness: 0.85, metalness: 0.05, flatShading: true,
+    });
+
+    const mesh = new THREE.InstancedMesh(geo, mat, blds.length);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    const matrix = new THREE.Matrix4();
+    const colorVar = new THREE.Color();
+    for (let i = 0; i < blds.length; i++) {
+      const b = blds[i];
+      matrix.makeScale(b.w, b.h, b.w);
+      matrix.setPosition(b.x, b.y, b.z);
+      mesh.setMatrixAt(i, matrix);
+
+      // Per-instance color variation
+      const base = new THREE.Color(color);
+      const v = (Math.sin(b.x * 1.3 + b.z * 0.7) * 0.06);
+      colorVar.setRGB(
+        Math.min(1, base.r + v),
+        Math.min(1, base.g + v),
+        Math.min(1, base.b + v)
+      );
+      mesh.setColorAt(i, colorVar);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    buildingGroup.add(mesh);
+  }
+
+  console.log(`Buildings: ${buildings.length} cells across ${cityGrids.length} grids`);
+}
+
+// ============================================================
 // UPDATE ENTITIES — set target positions, rebuild meshes only when count changes
 // ============================================================
 function updateEntityTargets(entities) {
@@ -661,6 +775,16 @@ function onFrame(data) {
     cx /= data.regions.length; cy /= data.regions.length;
     controls.target.set(cx, 0, cy);
     camera.position.set(cx + 300, 400, cy + 300);
+  }
+
+  // Build buildings once (city grids are mostly static)
+  if (!buildingsBuilt && data.city_grids && data.city_grids.length > 0) {
+    buildBuildings(data.city_grids);
+    buildingsBuilt = true;
+  }
+  // Rebuild buildings periodically (every 500 ticks) to catch new construction
+  if (buildingsBuilt && data.tick % 500 === 0 && data.city_grids && data.city_grids.length > 0) {
+    buildBuildings(data.city_grids);
   }
 
   updateEntityTargets(data.entities);
