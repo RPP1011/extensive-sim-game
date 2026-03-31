@@ -118,9 +118,9 @@ fn revive_npc(
         source_id: 0,
     });
     // Teleport to settlement.
-    out.push(WorldDelta::Move {
+    out.push(WorldDelta::SetPos {
         entity_id,
-        force: (settlement.pos.0, settlement.pos.1), // absolute position as force (one-tick teleport)
+        pos: settlement.pos,
     });
     // Set to producing.
     out.push(WorldDelta::SetIntent {

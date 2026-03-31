@@ -11,7 +11,6 @@
 //! Cadence: every 20 ticks (voyage initiation), every tick (voyage progress).
 
 use crate::world_sim::state::*;
-use crate::world_sim::DT_SEC;
 
 const VOYAGE_CHECK_INTERVAL: u64 = 20;
 /// Sea travel speed multiplier vs overland.
@@ -133,9 +132,10 @@ pub fn advance_sea_travel(state: &mut WorldState) {
         let dist = (dx * dx + dy * dy).sqrt();
         if dist < 1.0 { continue; }
 
-        let speed = entity.move_speed * DT_SEC * SEA_SPEED_MULT;
-        entity.pos.0 += dx / dist * speed;
-        entity.pos.1 += dy / dist * speed;
+        // Set move_target — advance_movement() handles position updates.
+        // Sea speed multiplier is applied via move_speed_mult.
+        entity.move_speed_mult = SEA_SPEED_MULT;
+        entity.move_target = Some(dest);
 
         // Sea monster attack chance.
         let roll = entity_hash_f32(entity.id, tick, 0x5EA2);

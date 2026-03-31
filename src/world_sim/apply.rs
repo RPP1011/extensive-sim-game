@@ -165,6 +165,12 @@ fn apply_movement(state: &mut WorldState, merged: &MergedDeltas) {
     for entity in &mut state.entities {
         if !entity.alive { continue; }
 
+        // SetPos (teleport) takes priority over force-based movement.
+        if let Some(&pos) = merged.pos_sets.get(&entity.id) {
+            entity.pos = pos;
+            continue;
+        }
+
         if let Some(&(fx, fy)) = merged.forces_by_entity.get(&entity.id) {
             let mag = (fx * fx + fy * fy).sqrt();
             let max_speed = entity.move_speed * crate::world_sim::DT_SEC;

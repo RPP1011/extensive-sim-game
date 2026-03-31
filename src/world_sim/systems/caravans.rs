@@ -14,9 +14,6 @@ use crate::world_sim::NUM_COMMODITIES;
 /// Cadence: runs every tick.
 const CARAVAN_TICK_INTERVAL: u64 = 1;
 
-/// Base caravan speed (force magnitude per tick).
-const CARAVAN_SPEED: f32 = 0.05;
-
 /// Distance (squared) at which a caravan is considered "arrived".
 const ARRIVAL_DIST_SQ: f32 = 4.0;
 
@@ -77,15 +74,8 @@ pub fn compute_caravans(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 });
             }
         } else {
-            // Move toward destination.
-            let dist = dist_sq.sqrt();
-            let nx = dx / dist;
-            let ny = dy / dist;
-            let speed = entity.move_speed * CARAVAN_SPEED;
-            out.push(WorldDelta::Move {
-                entity_id: entity.id,
-                force: (nx * speed, ny * speed),
-            });
+            // Movement toward destination is handled by move_target + advance_movement().
+            // Goal systems set entity.move_target from the Trade intent.
         }
     }
 

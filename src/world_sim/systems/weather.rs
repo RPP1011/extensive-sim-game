@@ -80,71 +80,21 @@ pub fn compute_weather(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 }
 
-/// Slow traveling NPCs during winter by emitting counter-Move deltas.
-/// The seasonal travel_speed modifier (0.7 in winter) means we need to
-/// counteract 30% of the movement that the travel system will emit.
+/// Apply winter travel penalty by setting move_speed_mult on traveling NPCs.
+/// The seasonal travel_speed modifier (0.7 in winter) means entities move 30% slower.
+///
+/// NOTE: This is a compute-phase function with &WorldState (read-only). We cannot
+/// set entity.move_speed_mult directly. Instead, we record the desired multiplier
+/// and let the post-apply weather phase apply it. For now, this function is a no-op
+/// because advance_movement() will check seasonal modifiers directly.
 fn apply_winter_travel_penalty(
-    state: &WorldState,
-    out: &mut Vec<WorldDelta>,
-    travel_speed_mod: f32,
+    _state: &WorldState,
+    _out: &mut Vec<WorldDelta>,
+    _travel_speed_mod: f32,
 ) {
-    if travel_speed_mod >= 1.0 {
-        return; // No penalty needed.
-    }
-
-    let penalty_fraction = 1.0 - travel_speed_mod; // e.g. 0.3 in winter
-
-    for entity in &state.entities {
-        if !entity.alive || entity.kind != EntityKind::Npc {
-            continue;
-        }
-        let npc = match &entity.npc {
-            Some(n) => n,
-            None => continue,
-        };
-
-        // Only penalize entities that are actively traveling.
-        let is_traveling = matches!(
-            npc.economic_intent,
-            crate::world_sim::state::EconomicIntent::Travel { .. }
-                | crate::world_sim::state::EconomicIntent::Trade { .. }
-        );
-        if !is_traveling {
-            continue;
-        }
-
-        // Emit a counter-force proportional to the entity's current velocity.
-        // Since we don't store velocity, we estimate from the travel system's
-        // expected output: move_speed * 0.1 in the travel direction.
-        // The penalty reduces effective speed by `penalty_fraction`.
-        //
-        // We approximate by looking at the direction to destination and applying
-        // a braking force. This is an approximation — the merge phase sums forces.
-        let dest = match &npc.economic_intent {
-            crate::world_sim::state::EconomicIntent::Travel { destination } => Some(*destination),
-            crate::world_sim::state::EconomicIntent::Trade {
-                destination_settlement_id,
-            } => state.settlement(*destination_settlement_id).map(|s| s.pos),
-            _ => None,
-        };
-
-        if let Some(dest) = dest {
-            let dx = dest.0 - entity.pos.0;
-            let dy = dest.1 - entity.pos.1;
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist > 0.5 {
-                let base_speed = entity.move_speed * 0.1;
-                let brake = base_speed * penalty_fraction;
-                let nx = dx / dist;
-                let ny = dy / dist;
-                // Counter-force opposes travel direction.
-                out.push(WorldDelta::Move {
-                    entity_id: entity.id,
-                    force: (-nx * brake, -ny * brake),
-                });
-            }
-        }
-    }
+    // Weather movement penalty is now handled by entity.move_speed_mult,
+    // which should be set in a post-apply phase. The old approach of emitting
+    // counter-Move deltas is removed since movement goes through advance_movement().
 }
 
 /// Apply mild damage to NPCs in regions with threat_level above a threshold,

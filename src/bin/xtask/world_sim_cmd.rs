@@ -99,6 +99,34 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
         let profile = sim.tick();
         total_ticks += 1;
 
+        // Peaceful mode NPC debug: print goal stack + inventory every 50 ticks
+        if args.peaceful && total_ticks % 50 == 0 {
+            let st = sim.state();
+            for e in &st.entities {
+                if e.kind != EntityKind::Npc || !e.alive { continue; }
+                let npc = match &e.npc { Some(n) => n, None => continue };
+                let goals: Vec<String> = npc.goal_stack.goals.iter().map(|g| {
+                    let plan_info = if g.plan.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" plan[{}/{}]", g.plan_index, g.plan.len())
+                    };
+                    format!("{:?}(p{}){}", g.kind, g.priority, plan_info)
+                }).collect();
+                let inv = e.inventory.as_ref().map(|i| {
+                    let commodities: Vec<String> = ["food","iron","wood","herbs","hide","crystal","equip","med"]
+                        .iter().enumerate()
+                        .filter(|(ci, _)| i.commodities[*ci] > 0.01)
+                        .map(|(ci, name)| format!("{}:{:.1}", name, i.commodities[ci]))
+                        .collect();
+                    if commodities.is_empty() { "empty".to_string() } else { commodities.join(", ") }
+                }).unwrap_or_else(|| "no inv".to_string());
+                eprintln!("[t{}] {} pos=({:.0},{:.0}) goals=[{}] inv=[{}] gold={:.1} hunger={:.0} shelter={:.0}",
+                    total_ticks, npc.name, e.pos.0, e.pos.1,
+                    goals.join(" | "), inv, npc.gold, npc.needs.hunger, npc.needs.shelter);
+            }
+        }
+
         // Divine intervention — trigger at tick 1000 (early enough to see effects).
         if total_ticks == 1000 {
             if let Some(ref cmd) = args.intervene {

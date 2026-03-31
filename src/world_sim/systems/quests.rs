@@ -159,17 +159,8 @@ fn accept_quests(state: &WorldState, out: &mut Vec<WorldDelta>) {
                     },
                 });
 
-                // Move toward quest destination.
-                let dx = quest.destination.0 - entity.pos.0;
-                let dy = quest.destination.1 - entity.pos.1;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist > 1.0 {
-                    let speed = entity.move_speed * crate::world_sim::DT_SEC;
-                    out.push(WorldDelta::Move {
-                        entity_id: entity.id,
-                        force: (dx / dist * speed, dy / dist * speed),
-                    });
-                }
+                // Movement toward quest destination is handled by goal system
+                // setting entity.move_target from the Adventuring intent.
 
                 // Behavior: taking on a quest.
                 let mut action = ActionTags::empty();
@@ -237,12 +228,7 @@ fn run_quest_lifecycle_for_entities(
         let dist = (dx * dx + dy * dy).sqrt();
 
         if dist > 2.0 {
-            // Still traveling.
-            let speed = entity.move_speed * crate::world_sim::DT_SEC;
-            out.push(WorldDelta::Move {
-                entity_id: entity.id,
-                force: (dx / dist * speed, dy / dist * speed),
-            });
+            // Still traveling — movement handled by move_target + advance_movement().
         } else {
             // At destination — check if quest is done.
             // Quest completes if:
@@ -296,21 +282,8 @@ fn run_quest_lifecycle_for_entities(
                     intent: EconomicIntent::Produce,
                 });
 
-                // Move back toward home settlement.
-                if let Some(home_id) = npc.home_settlement_id {
-                    if let Some(home) = state.settlement(home_id) {
-                        let dx = home.pos.0 - entity.pos.0;
-                        let dy = home.pos.1 - entity.pos.1;
-                        let dist = (dx * dx + dy * dy).sqrt();
-                        if dist > 1.0 {
-                            let speed = entity.move_speed * crate::world_sim::DT_SEC;
-                            out.push(WorldDelta::Move {
-                                entity_id: entity.id,
-                                force: (dx / dist * speed, dy / dist * speed),
-                            });
-                        }
-                    }
-                }
+                // Return movement toward home settlement is handled by
+                // move_target set from the Produce intent by the goal system.
             }
         }
     }

@@ -117,6 +117,9 @@ struct FlatMergedDeltas {
 
     // --- Trade route tracking ---
     trade_completions: Vec<(u32, u32, u32, f32)>,
+
+    // --- Absolute position sets (teleport, last-write-wins) ---
+    pos_sets: Vec<(u32, (f32, f32))>,
 }
 
 impl FlatMergedDeltas {
@@ -180,6 +183,7 @@ impl FlatMergedDeltas {
             chronicles: Vec::with_capacity(16),
             quest_updates: Vec::with_capacity(16),
             trade_completions: Vec::with_capacity(16),
+            pos_sets: Vec::with_capacity(16),
         }
     }
 
@@ -251,6 +255,7 @@ impl FlatMergedDeltas {
         self.chronicles.clear();
         self.quest_updates.clear();
         self.trade_completions.clear();
+        self.pos_sets.clear();
     }
 
     /// Grow flat arrays to accommodate new entity IDs (after building spawns).
@@ -346,6 +351,9 @@ impl FlatMergedDeltas {
                     self.force_x[entity_id as usize] += force.0;
                     self.force_y[entity_id as usize] += force.1;
                 }
+            }
+            WorldDelta::SetPos { entity_id, pos } => {
+                self.pos_sets.push((entity_id, pos));
             }
             WorldDelta::Die { entity_id } => {
                 if self.mark_entity(entity_id) {
@@ -530,9 +538,22 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
     }
     p.hp_us = t.elapsed().as_micros() as u64;
 
-    // Movement
+    // Movement: SetPos (teleport) first, then force-based movement.
     let t = Instant::now();
+    // Apply teleports (SetPos). Collect IDs to skip force-based movement.
+    let mut teleported = std::collections::HashSet::new();
+    for &(entity_id, pos) in &m.pos_sets {
+        let i = entity_id as usize;
+        if i < idx.len() {
+            let ei = idx[i] as usize;
+            if ei < ents.len() {
+                ents[ei].pos = pos;
+                teleported.insert(entity_id);
+            }
+        }
+    }
     for &id in &m.entity_dirty {
+        if teleported.contains(&id) { continue; }
         let i = id as usize;
         let fx = m.force_x[i];
         let fy = m.force_y[i];
@@ -1522,6 +1543,7 @@ impl WorldSim {
 
         let postapply_start = Instant::now();
 
+        super::systems::movement::advance_movement(&mut self.state);
         super::systems::death_consequences::advance_death_consequences(&mut self.state);
         super::systems::agent_inner::update_agent_inner_states(&mut self.state);
         super::systems::goal_eval::evaluate_goals(&mut self.state);

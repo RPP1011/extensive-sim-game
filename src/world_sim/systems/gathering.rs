@@ -134,13 +134,10 @@ pub fn advance_plans(state: &mut WorldState) {
         let dist_sq = dx * dx + dy * dy;
 
         if dist_sq > HARVEST_DIST_SQ {
-            // Move toward resource
-            let dist = dist_sq.sqrt();
-            let speed = state.entities[npc_idx].move_speed * 0.5 * (PLAN_EXEC_INTERVAL as f32 * crate::world_sim::DT_SEC);
-            state.entities[npc_idx].pos.0 += dx / dist * speed;
-            state.entities[npc_idx].pos.1 += dy / dist * speed;
+            // Set move_target — movement system will handle actual position updates.
+            state.entities[npc_idx].move_target = Some(res_pos);
         } else {
-            // Harvest
+            // Close enough — harvest directly.
             let available = state.entities[ri].resource.as_ref()
                 .map(|r| r.remaining).unwrap_or(0.0);
             let harvest = HARVEST_PER_CYCLE.min(available);
@@ -161,16 +158,9 @@ pub fn advance_plans(state: &mut WorldState) {
         }
     }
 
-    // Execute move actions
+    // Execute move actions — set move_target for the movement system.
     for (npc_idx, target) in move_actions {
-        let dx = target.0 - state.entities[npc_idx].pos.0;
-        let dy = target.1 - state.entities[npc_idx].pos.1;
-        let dist = (dx * dx + dy * dy).sqrt();
-        if dist > 0.1 {
-            let speed = state.entities[npc_idx].move_speed * (PLAN_EXEC_INTERVAL as f32 * crate::world_sim::DT_SEC);
-            state.entities[npc_idx].pos.0 += dx / dist * speed;
-            state.entities[npc_idx].pos.1 += dy / dist * speed;
-        }
+        state.entities[npc_idx].move_target = Some(target);
     }
 
     // Advance perform timers

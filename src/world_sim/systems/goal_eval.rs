@@ -109,6 +109,7 @@ pub fn evaluate_goals(state: &mut WorldState) {
             let mut goal = Goal::new(GoalKind::Eat, goal_priority::EAT_CRITICAL, tick);
             goal.target_pos = food_pos;
             npc.goal_stack.push(goal);
+            entity.move_target = food_pos;
         }
         // Eat (moderate): hunger below threshold.
         else if npc.needs.hunger < 30.0 && food_available > 0.0
@@ -120,6 +121,7 @@ pub fn evaluate_goals(state: &mut WorldState) {
             let mut goal = Goal::new(GoalKind::Eat, goal_priority::EAT, tick);
             goal.target_pos = food_pos;
             npc.goal_stack.push(goal);
+            entity.move_target = food_pos;
         }
 
         // Fight: settlement under serious threat and NPC is a combatant.
@@ -145,6 +147,7 @@ pub fn evaluate_goals(state: &mut WorldState) {
                 goal.target_pos = work_pos;
                 goal.target_entity = Some(wbid);
                 npc.goal_stack.push(goal);
+                entity.move_target = work_pos;
             }
         }
 
@@ -159,6 +162,7 @@ pub fn evaluate_goals(state: &mut WorldState) {
             let mut goal = Goal::new(GoalKind::Socialize, goal_priority::SOCIALIZE, tick);
             goal.target_pos = social_pos;
             npc.goal_stack.push(goal);
+            entity.move_target = social_pos;
         }
 
         // Rest: shelter need low.
@@ -174,6 +178,7 @@ pub fn evaluate_goals(state: &mut WorldState) {
                 goal.target_pos = home_pos;
                 goal.target_entity = Some(hbid);
                 npc.goal_stack.push(goal);
+                entity.move_target = home_pos;
             }
         }
 

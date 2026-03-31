@@ -47,6 +47,11 @@ pub enum WorldDelta {
         entity_id: u32,
         force: (f32, f32),
     },
+    /// Absolute position set (teleport). Last-write-wins per entity.
+    SetPos {
+        entity_id: u32,
+        pos: (f32, f32),
+    },
     Die {
         entity_id: u32,
     },
@@ -271,6 +276,9 @@ pub struct MergedDeltas {
     /// Per-entity movement forces (commutative vector sum).
     pub forces_by_entity: HashMap<u32, (f32, f32)>,
 
+    /// Absolute position sets (teleport). Last-write-wins per entity.
+    pub pos_sets: HashMap<u32, (f32, f32)>,
+
     /// Deaths (idempotent set).
     pub deaths: HashSet<u32>,
 
@@ -385,6 +393,7 @@ impl MergedDeltas {
         self.heals_by_target.clear();
         self.shields_by_target.clear();
         self.forces_by_entity.clear();
+        self.pos_sets.clear();
         self.deaths.clear();
         self.new_statuses.clear();
         self.remove_statuses.clear();
@@ -469,6 +478,9 @@ fn merge_one(m: &mut MergedDeltas, delta: WorldDelta) {
             let entry = m.forces_by_entity.entry(entity_id).or_default();
             entry.0 += force.0;
             entry.1 += force.1;
+        }
+        WorldDelta::SetPos { entity_id, pos } => {
+            m.pos_sets.insert(entity_id, pos);
         }
         WorldDelta::Die { entity_id } => {
             m.deaths.insert(entity_id);

@@ -365,13 +365,9 @@ fn advance_party_quests(state: &mut WorldState, tick: u64) {
                 }
             }
         } else {
-            // Move party toward destination.
-            let dist = dist_sq.sqrt();
+            // Set move_target for each party member — advance_movement() handles position updates.
             for &mi in members {
-                let entity = &mut state.entities[mi];
-                let speed = entity.move_speed * crate::world_sim::DT_SEC;
-                entity.pos.0 += dx / dist * speed;
-                entity.pos.1 += dy / dist * speed;
+                state.entities[mi].move_target = Some(dest);
             }
         }
     }

@@ -118,10 +118,10 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
             amount: entity.max_hp * 2.0, // overheal to guarantee full HP
             source_id: 0,
         });
-        // Move delta: force = desired_pos - current_pos (teleport in one tick)
-        out.push(WorldDelta::Move {
+        // Teleport to spawn location.
+        out.push(WorldDelta::SetPos {
             entity_id: entity.id,
-            force: (spawn_pos.0 - entity.pos.0, spawn_pos.1 - entity.pos.1),
+            pos: spawn_pos,
         });
 
         respawned += 1;
@@ -212,17 +212,9 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
         let hunger_factor = 1.0 - wild_food.min(1.0);
         let speed = strength * (0.5 + hunger_factor);
 
-        if let Some(target) = best_target {
-            let dx = target.0 - entity.pos.0;
-            let dy = target.1 - entity.pos.1;
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist > 5.0 {
-                out.push(WorldDelta::Move {
-                    entity_id: entity.id,
-                    force: (sign * dx / dist * speed, sign * dy / dist * speed),
-                });
-            }
-        }
+        // Monster migration movement is handled by move_target set in the
+        // post-apply phase (advance_monster_ecology) and advance_movement().
+        let _ = (best_target, sign, speed);
     }
 
     // ---------------------------------------------------------------
@@ -274,9 +266,9 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
                         amount: entity.max_hp * 2.0,
                         source_id: 0,
                     });
-                    out.push(WorldDelta::Move {
+                    out.push(WorldDelta::SetPos {
                         entity_id: entity.id,
-                        force: (baby_pos.0 - entity.pos.0, baby_pos.1 - entity.pos.1),
+                        pos: baby_pos,
                     });
                     bred += 1;
                     break;
@@ -341,36 +333,9 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
             // Sea monsters are level 20+ with high HP (5× base).
             if entity.level < 20 || entity.max_hp < 300.0 { continue; }
 
-            // Patrol: circle around a coastal settlement.
-            if let Some(&target_pos) = coastal_pos.first() {
-                let dx = target_pos.0 - entity.pos.0;
-                let dy = target_pos.1 - entity.pos.1;
-                let dist = (dx * dx + dy * dy).sqrt();
-
-                if dist > 80.0 {
-                    // Too far — drift toward coast.
-                    let speed = 0.5;
-                    out.push(WorldDelta::Move {
-                        entity_id: entity.id,
-                        force: (dx / dist * speed, dy / dist * speed),
-                    });
-                } else if dist < 30.0 {
-                    // Too close to shore — drift away.
-                    let speed = 0.3;
-                    out.push(WorldDelta::Move {
-                        entity_id: entity.id,
-                        force: (-dx / dist * speed, -dy / dist * speed),
-                    });
-                } else {
-                    // Patrol circle: perpendicular drift.
-                    let perp_x = -dy / dist * 0.2;
-                    let perp_y = dx / dist * 0.2;
-                    out.push(WorldDelta::Move {
-                        entity_id: entity.id,
-                        force: (perp_x, perp_y),
-                    });
-                }
-            }
+            // Sea monster patrol movement is handled by move_target set in
+            // the post-apply phase and advance_movement().
+            let _ = &coastal_pos;
         }
     }
 }

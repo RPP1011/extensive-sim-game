@@ -482,27 +482,8 @@ pub fn compute_npc_decisions_for_settlement(
             });
         }
 
-        // Movement toward destination (regardless of intent change — keep moving if already traveling).
-        let dest_pos = match &chosen_intent {
-            EconomicIntent::Trade { destination_settlement_id } => {
-                state.settlement(*destination_settlement_id).map(|s| s.pos)
-            }
-            EconomicIntent::Travel { destination } => Some(*destination),
-            _ => None,
-        };
-
-        if let Some(dest) = dest_pos {
-            let dx = dest.0 - entity.pos.0;
-            let dy = dest.1 - entity.pos.1;
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist > 1.0 {
-                let speed = entity.move_speed * crate::world_sim::DT_SEC;
-                out.push(WorldDelta::Move {
-                    entity_id: entity.id,
-                    force: (dx / dist * speed, dy / dist * speed),
-                });
-            }
-        }
+        // Movement toward destination is handled by goal system setting
+        // entity.move_target, which advance_movement() processes each tick.
     }
 
     // --- Barter: NPCs at the same settlement swap commodities ---

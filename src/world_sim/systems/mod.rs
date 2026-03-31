@@ -170,6 +170,7 @@ pub mod haunted;
 pub mod titles;
 pub mod biography;
 pub mod gathering;
+pub mod movement;
 
 macro_rules! run_system {
     ($name:expr, $func:expr, $state:expr, $out:expr) => {{

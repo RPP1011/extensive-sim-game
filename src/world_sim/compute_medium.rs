@@ -6,7 +6,7 @@
 //! which use price signals and economic intent.
 
 use super::delta::WorldDelta;
-use super::state::{Entity, EntityKind, EconomicIntent, WorldState};
+use super::state::{Entity, EntityKind, WorldState};
 
 /// Compute deltas for an entity at Medium fidelity (settlement).
 pub fn compute_entity_deltas(entity: &Entity, state: &WorldState) -> Vec<WorldDelta> {
@@ -16,29 +16,15 @@ pub fn compute_entity_deltas(entity: &Entity, state: &WorldState) -> Vec<WorldDe
 }
 
 /// Push deltas into `out` without allocating.
-pub fn compute_entity_deltas_into(entity: &Entity, _state: &WorldState, out: &mut Vec<WorldDelta>) {
+pub fn compute_entity_deltas_into(entity: &Entity, _state: &WorldState, _out: &mut Vec<WorldDelta>) {
     match entity.kind {
         EntityKind::Npc => {}
         _ => return,
     }
-    let npc = match &entity.npc {
-        Some(n) => n,
-        None => return,
-    };
-
-    // Movement toward economic destination.
-    if let EconomicIntent::Travel { destination } = &npc.economic_intent {
-        let dx = destination.0 - entity.pos.0;
-        let dy = destination.1 - entity.pos.1;
-        let dist = (dx * dx + dy * dy).sqrt();
-        if dist > 0.1 {
-            let speed = entity.move_speed * crate::world_sim::DT_SEC;
-            out.push(WorldDelta::Move {
-                entity_id: entity.id,
-                force: (dx / dist * speed, dy / dist * speed),
-            });
-        }
-    }
+    // Movement toward economic destination is handled by goal_eval setting
+    // entity.move_target, which advance_movement() processes each tick.
+    // No deltas emitted at medium fidelity.
+    let _ = &entity.npc;
 }
 
 #[cfg(test)]
@@ -47,15 +33,16 @@ mod tests {
     use crate::world_sim::state::*;
 
     #[test]
-    fn npc_moves_toward_destination() {
+    fn npc_travel_no_move_delta() {
         let mut state = WorldState::new(42);
         let mut npc = Entity::new_npc(1, (0.0, 0.0));
         let npc_data = npc.npc.as_mut().unwrap();
         npc_data.economic_intent = EconomicIntent::Travel { destination: (10.0, 0.0) };
         state.entities.push(npc);
 
+        // Movement is now handled by move_target + advance_movement, not deltas.
         let deltas = compute_entity_deltas(&state.entities[0], &state);
-        assert!(deltas.iter().any(|d| matches!(d, WorldDelta::Move { entity_id: 1, .. })));
+        assert!(!deltas.iter().any(|d| matches!(d, WorldDelta::Move { .. })));
     }
 
     #[test]

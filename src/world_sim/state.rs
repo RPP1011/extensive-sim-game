@@ -1503,6 +1503,11 @@ pub struct Entity {
     pub resource: Option<ResourceData>,
     /// Unified inventory — commodities + gold. Any entity can have one.
     pub inventory: Option<Inventory>,
+    /// Current movement target — cleared on arrival. Set by other systems;
+    /// only the unified movement system actually moves entities.
+    pub move_target: Option<(f32, f32)>,
+    /// Speed multiplier (default 1.0). Stacks with `move_speed`.
+    pub move_speed_mult: f32,
 }
 
 impl Entity {
@@ -1542,6 +1547,7 @@ impl Entity {
             move_speed: hot.move_speed, level: hot.level,
             status_effects: cold.status_effects.clone(), npc: cold.npc.clone(),
             building: None, item: None, resource: None, inventory: None,
+            move_target: None, move_speed_mult: 1.0,
         }
     }
 
@@ -1569,6 +1575,8 @@ impl Entity {
             item: None,
             resource: None,
             inventory: Some(Inventory::with_capacity(50.0)), // NPC backpack
+            move_target: None,
+            move_speed_mult: 1.0,
         }
     }
 
@@ -1596,6 +1604,8 @@ impl Entity {
             item: None,
             resource: None,
             inventory: None,
+            move_target: None,
+            move_speed_mult: 1.0,
         }
     }
 
@@ -1623,6 +1633,8 @@ impl Entity {
             item: None,
             resource: None,
             inventory: None, // set by caller based on building type
+            move_target: None,
+            move_speed_mult: 1.0,
         }
     }
 
@@ -1650,6 +1662,8 @@ impl Entity {
             item: Some(item_data),
             resource: None,
             inventory: None,
+            move_target: None,
+            move_speed_mult: 1.0,
         }
     }
 
@@ -1678,6 +1692,8 @@ impl Entity {
             item: None,
             resource: Some(resource_data),
             inventory: None,
+            move_target: None,
+            move_speed_mult: 1.0,
         }
     }
 

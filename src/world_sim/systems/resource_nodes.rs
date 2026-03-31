@@ -38,6 +38,7 @@ pub fn spawn_initial_resources(state: &mut WorldState) {
             Terrain::Forest => &[
                 (ResourceType::Tree, 5, 10, 20.0, 20.0, 0.01),
                 (ResourceType::HerbPatch, 1, 2, 8.0, 8.0, 0.015),
+                (ResourceType::BerryBush, 2, 4, 10.0, 10.0, 0.02), // food source
             ],
             Terrain::Mountains => &[
                 (ResourceType::OreVein, 3, 5, 50.0, 50.0, 0.0),

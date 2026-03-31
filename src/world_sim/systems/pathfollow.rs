@@ -7,7 +7,6 @@
 //! Cadence: every tick (movement is per-tick for smooth tile-by-tile walking).
 
 use crate::world_sim::state::*;
-use crate::world_sim::DT_SEC;
 
 /// Maximum path length to cache (prevent memory bloat from huge paths).
 const MAX_PATH_LEN: usize = 128;
@@ -50,7 +49,6 @@ pub fn advance_pathfinding(state: &mut WorldState) {
         };
 
         let entity_pos = entity.pos;
-        let entity_speed = entity.move_speed;
 
         // Check if we need to compute a new path.
         let needs_path = npc.cached_path.is_empty()
@@ -61,16 +59,11 @@ pub fn advance_pathfinding(state: &mut WorldState) {
         let compute_my_path = compute_paths && (state.tick / 10) % 10 == my_slot;
 
         if needs_path && compute_my_path {
-            // Skip A* for short distances — direct movement is fine.
+            // Skip A* for short distances — set move_target directly.
             let dx = target_pos.0 - entity_pos.0;
             let dy = target_pos.1 - entity_pos.1;
             if dx * dx + dy * dy < 100.0 { // within ~10 world units (~5 cells)
-                let speed = entity_speed * crate::world_sim::DT_SEC;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist > 1.0 {
-                    state.entities[i].pos.0 += dx / dist * speed;
-                    state.entities[i].pos.1 += dy / dist * speed;
-                }
+                state.entities[i].move_target = Some(target_pos);
                 continue;
             }
 
@@ -87,17 +80,10 @@ pub fn advance_pathfinding(state: &mut WorldState) {
             };
 
             if goal_near_center && !grid.center_flow.is_empty() {
-                // Follow flow field: get next step toward center, walk there.
+                // Follow flow field: set move_target to next step toward center.
                 if let Some(next) = grid.flow_field_next(&grid.center_flow, start) {
                     let wp_world = grid.grid_to_world(next.0, next.1, settlement_pos);
-                    let dx = wp_world.0 - entity_pos.0;
-                    let dy = wp_world.1 - entity_pos.1;
-                    let dist = (dx * dx + dy * dy).sqrt();
-                    if dist > 0.5 {
-                        let speed = entity_speed * crate::world_sim::DT_SEC;
-                        state.entities[i].pos.0 += dx / dist * speed.min(dist);
-                        state.entities[i].pos.1 += dy / dist * speed.min(dist);
-                    }
+                    state.entities[i].move_target = Some(wp_world);
                     continue;
                 }
             }
@@ -111,20 +97,12 @@ pub fn advance_pathfinding(state: &mut WorldState) {
                     .collect();
                 npc.path_index = 0;
             } else {
-                // No path found — clear cache and fall back to direct movement.
+                // No path found — clear cache and fall back to move_target.
                 let npc = state.entities[i].npc.as_mut().unwrap();
                 npc.cached_path.clear();
                 npc.path_index = 0;
 
-                // Direct movement fallback (force vector).
-                let dx = target_pos.0 - entity_pos.0;
-                let dy = target_pos.1 - entity_pos.1;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist > 1.0 {
-                    let speed = entity_speed * DT_SEC;
-                    state.entities[i].pos.0 += dx / dist * speed;
-                    state.entities[i].pos.1 += dy / dist * speed;
-                }
+                state.entities[i].move_target = Some(target_pos);
                 continue;
             }
         }
@@ -153,11 +131,8 @@ pub fn advance_pathfinding(state: &mut WorldState) {
                 npc.path_index = 0;
             }
         } else {
-            // Move toward waypoint at walk speed.
-            let speed = entity_speed * DT_SEC;
-            let step = speed.min(dist); // don't overshoot
-            state.entities[i].pos.0 += dx / dist * step;
-            state.entities[i].pos.1 += dy / dist * step;
+            // Set move_target to the current waypoint — advance_movement() handles stepping.
+            state.entities[i].move_target = Some(wp_world);
         }
     }
 }

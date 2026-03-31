@@ -133,33 +133,8 @@ pub fn compute_threat(state: &WorldState, out: &mut Vec<WorldDelta>) {
             }
         }
 
-        // When monsters are present and threat is high, move hostile entities
-        // toward settlements to create pressure.
-        if projected > ESCALATE_MEDIUM_THRESHOLD {
-            for entity in &state.entities {
-                if !entity.alive || entity.kind != EntityKind::Monster {
-                    continue;
-                }
-                // Find nearest settlement and push monsters toward it.
-                if let Some(nearest) = state.settlements.iter().min_by(|a, b| {
-                    let da = dist_sq(entity.pos, a.pos);
-                    let db = dist_sq(entity.pos, b.pos);
-                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-                }) {
-                    let dx = nearest.pos.0 - entity.pos.0;
-                    let dy = nearest.pos.1 - entity.pos.1;
-                    let dist = (dx * dx + dy * dy).sqrt();
-                    if dist > 2.0 {
-                        // Small additional force from threat pressure.
-                        let pressure = (projected / 100.0) * 0.02;
-                        out.push(WorldDelta::Move {
-                            entity_id: entity.id,
-                            force: (dx / dist * pressure, dy / dist * pressure),
-                        });
-                    }
-                }
-            }
-        }
+        // Monster threat pressure movement is handled by move_target set in
+        // the monster_ecology post-apply phase and advance_movement().
     }
 
     // --- Propagate regional threat to settlements ---

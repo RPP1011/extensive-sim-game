@@ -15,7 +15,6 @@ use std::collections::HashMap;
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::*;
 use crate::world_sim::commodity;
-use crate::world_sim::DT_SEC;
 use super::resource_nodes::find_nearest_resource;
 
 /// Base work ticks for farming before skill scaling.
@@ -53,18 +52,8 @@ pub fn compute_work(state: &WorldState, out: &mut Vec<WorldDelta>) {
             WorkState::Idle => {
                 // Transitions handled in advance_work_states.
             }
-            WorkState::TravelingToWork { target_pos } => {
-                let dx = target_pos.0 - entity.pos.0;
-                let dy = target_pos.1 - entity.pos.1;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist >= ARRIVAL_DIST {
-                    // Move toward work building.
-                    let speed = entity.move_speed * DT_SEC;
-                    out.push(WorldDelta::Move {
-                        entity_id: entity.id,
-                        force: (dx / dist * speed, dy / dist * speed),
-                    });
-                }
+            WorkState::TravelingToWork { .. } => {
+                // Movement handled via entity.move_target (set in advance_work_states).
                 // Arrival transition handled in advance_work_states.
             }
             WorkState::Working { building_id, ticks_remaining } => {
@@ -110,18 +99,8 @@ pub fn compute_work(state: &WorldState, out: &mut Vec<WorldDelta>) {
                 }
                 // Completion transition handled in advance_work_states.
             }
-            WorkState::CarryingToStorage { commodity: _, amount: _, target_pos } => {
-                let dx = target_pos.0 - entity.pos.0;
-                let dy = target_pos.1 - entity.pos.1;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist >= ARRIVAL_DIST {
-                    // Move toward storage (home settlement).
-                    let speed = entity.move_speed * DT_SEC;
-                    out.push(WorldDelta::Move {
-                        entity_id: entity.id,
-                        force: (dx / dist * speed, dy / dist * speed),
-                    });
-                }
+            WorkState::CarryingToStorage { .. } => {
+                // Movement handled via entity.move_target (set in advance_work_states).
                 // Deposit transition handled in advance_work_states.
             }
         }
@@ -200,16 +179,14 @@ pub fn advance_work_states(state: &mut WorldState) {
                 // Find work building position and start traveling.
                 let target = state.entity(work_bid).map(|e| e.pos);
                 if let Some(target_pos) = target {
+                    state.entities[i].move_target = Some(target_pos);
                     let npc = state.entities[i].npc.as_mut().unwrap();
                     npc.work_state = WorkState::TravelingToWork { target_pos };
                 }
             }
-            WorkState::TravelingToWork { target_pos } => {
-                let dx = target_pos.0 - entity_pos.0;
-                let dy = target_pos.1 - entity_pos.1;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist < ARRIVAL_DIST {
-                    // Arrived — look up building type to determine work ticks.
+            WorkState::TravelingToWork { target_pos: _ } => {
+                if state.entities[i].move_target.is_none() {
+                    // Movement system cleared move_target — we've arrived.
                     let work_ticks = compute_work_ticks(state, work_bid, i);
                     let npc = state.entities[i].npc.as_mut().unwrap();
                     npc.work_state = WorkState::Working {
@@ -328,11 +305,8 @@ pub fn advance_work_states(state: &mut WorldState) {
                     };
                 }
             }
-            WorkState::CarryingToStorage { commodity, amount, target_pos } => {
-                let dx = target_pos.0 - entity_pos.0;
-                let dy = target_pos.1 - entity_pos.1;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist < ARRIVAL_DIST {
+            WorkState::CarryingToStorage { commodity, amount, target_pos: _ } => {
+                if state.entities[i].move_target.is_none() {
                     // Arrived at storage — deposit into nearest storage building.
                     let storage_bid = home_sid
                         .and_then(|sid| storage_by_settlement.get(&sid))
@@ -627,6 +601,8 @@ pub fn advance_eating(state: &mut WorldState) {
         if matches!(npc.economic_intent, EconomicIntent::Adventuring { .. }) { continue; }
         // If working but critically hungry (<15), interrupt to eat.
         if !matches!(npc.work_state, WorkState::Idle) && npc.needs.hunger > 15.0 { continue; }
+        // Don't fight the plan executor — if NPC has an active Gather/Build plan, skip eating movement.
+        if npc.goal_stack.goals.first().map_or(false, |g| !g.plan.is_empty()) { continue; }
 
         // Find food source — settlement with food.
         let sid = match npc.home_settlement_id { Some(id) => id, None => continue };
@@ -648,10 +624,8 @@ pub fn advance_eating(state: &mut WorldState) {
         let dist = (dx * dx + dy * dy).sqrt();
 
         if dist > 5.0 {
-            // Move toward food. Use a moderate speed.
-            let speed = entity.move_speed * DT_SEC * 0.5;
-            entity.pos.0 += dx / dist * speed;
-            entity.pos.1 += dy / dist * speed;
+            // Set move_target — movement system will handle actual position updates.
+            entity.move_target = Some(food_target);
             continue;
         }
 

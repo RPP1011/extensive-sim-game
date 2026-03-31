@@ -57,15 +57,8 @@ pub fn compute_traveling_merchants(state: &WorldState, out: &mut Vec<WorldDelta>
         let dx = entity.pos.0 - settlement.pos.0;
         let dy = entity.pos.1 - settlement.pos.1;
         if dx * dx + dy * dy > MERCHANT_RANGE_SQ {
-            // Move toward the settlement.
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist > 0.5 {
-                let speed = entity.move_speed * 0.1;
-                out.push(WorldDelta::Move {
-                    entity_id: entity.id,
-                    force: (-dx / dist * speed, -dy / dist * speed),
-                });
-            }
+            // Movement toward settlement is handled by move_target + advance_movement().
+            // Goal systems set entity.move_target from the Sell intent.
             continue;
         }
 

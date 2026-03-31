@@ -12,9 +12,6 @@ use crate::world_sim::state::{EconomicIntent, EntityKind, WorldState};
 /// Distance threshold below which an entity is considered "arrived".
 const ARRIVAL_THRESHOLD: f32 = 0.5;
 
-/// Speed multiplier for overworld travel (tiles per tick).
-const OVERWORLD_SPEED_SCALE: f32 = 0.1;
-
 pub fn compute_travel(state: &WorldState, out: &mut Vec<WorldDelta>) {
     for entity in &state.entities {
         if !entity.alive || entity.kind != EntityKind::Npc {
@@ -51,16 +48,8 @@ pub fn compute_travel(state: &WorldState, out: &mut Vec<WorldDelta>) {
             continue;
         }
 
-        // Normalize direction and scale by entity speed.
-        let speed = entity.move_speed * OVERWORLD_SPEED_SCALE;
-        let move_dist = speed.min(dist); // Don't overshoot.
-        let nx = dx / dist;
-        let ny = dy / dist;
-
-        out.push(WorldDelta::Move {
-            entity_id: entity.id,
-            force: (nx * move_dist, ny * move_dist),
-        });
+        // Movement is handled by move_target + advance_movement().
+        // Goal systems set entity.move_target from economic intent destinations.
 
         // Consume food while traveling (commodity 0 = food).
         let food_drain: f32 = 0.005;
