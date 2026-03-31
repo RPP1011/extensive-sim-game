@@ -134,12 +134,8 @@ pub fn grow_cities(state: &mut WorldState) {
         let total_buildings: u32 = building_counts.iter().sum();
         let demand = calculate_demand(*population, &building_counts, total_buildings);
 
-        // ~1 building per 3 people (houses hold families, workshops employ multiple).
-        let max_buildings = (*population as f32 / 3.0).max(10.0) as u32;
-        if total_buildings >= max_buildings { continue; } // at capacity
-
-        let base_budget = if *population > 200 { 2 } else { 1 };
-        let budget = base_budget.min(state.city_grids[grid_idx].frontier.len());
+        // Growth limited by resource availability and NPC builder labor — no artificial cap.
+        let budget = 3.min(state.city_grids[grid_idx].frontier.len());
         if budget == 0 { continue; }
 
         // Score all frontier cells for each zone type, pick best (zone, score) per cell.
