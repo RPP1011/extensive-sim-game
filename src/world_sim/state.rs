@@ -2188,11 +2188,79 @@ pub struct Relationship {
     pub familiarity: f32,
     /// Tick of last meaningful interaction (trade, co-construction, combat, etc.).
     pub last_interaction: u64,
+    /// Mental model of the other NPC's personality (Phase D: theory of mind).
+    pub perceived_personality: PerceivedPersonality,
 }
 
 impl Relationship {
     pub fn new() -> Self {
-        Self { trust: 0.0, familiarity: 0.0, last_interaction: 0 }
+        Self {
+            trust: 0.0,
+            familiarity: 0.0,
+            last_interaction: 0,
+            perceived_personality: PerceivedPersonality::default(),
+        }
+    }
+}
+
+/// Number of personality traits tracked in perceived personality.
+pub const NUM_TRAITS: usize = 5; // risk_tolerance, social_drive, ambition, compassion, curiosity
+
+/// An NPC's mental model of another NPC's personality, built from observation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerceivedPersonality {
+    /// Estimated trait values [0.0, 1.0]. Indices: 0=risk_tolerance, 1=social_drive,
+    /// 2=ambition, 3=compassion, 4=curiosity.
+    pub traits: [f32; NUM_TRAITS],
+    /// Per-trait confidence [0.0, 1.0]. Higher = more observations.
+    pub confidence: [f32; NUM_TRAITS],
+    /// Total number of action observations.
+    pub observation_count: u32,
+}
+
+impl Default for PerceivedPersonality {
+    fn default() -> Self {
+        Self {
+            traits: [0.5; NUM_TRAITS], // neutral assumption
+            confidence: [0.0; NUM_TRAITS],
+            observation_count: 0,
+        }
+    }
+}
+
+impl PerceivedPersonality {
+    /// Update perception from an observed action. Authority figures are
+    /// observed more closely (higher alpha).
+    pub fn observe_action(&mut self, action_type: u8, authority: f32) {
+        let attention = 1.0 + authority;
+        // Action→trait signal mapping.
+        let signals: &[(usize, f32)] = match action_type {
+            3 => &[(2, 0.7)],                  // Working → ambition up
+            8 => &[(3, 0.6), (2, 0.4)],        // Building → compassion + ambition
+            5 => &[(0, 0.8)],                   // Fighting → risk tolerance up
+            9 => &[(0, 0.2)],                   // Fleeing → risk tolerance down
+            10 => &[(1, 0.7)],                  // Trading → social drive up
+            0 => &[(2, 0.3)],                   // Idle → ambition down
+            11 => &[(4, 0.5)],                  // Harvesting → curiosity (varied resources)
+            _ => &[],
+        };
+        for &(trait_idx, signal) in signals {
+            let base_alpha = 0.05 / (1.0 + self.confidence[trait_idx]);
+            let alpha = base_alpha * attention;
+            self.traits[trait_idx] += alpha * (signal - self.traits[trait_idx]);
+            self.confidence[trait_idx] = (self.confidence[trait_idx] + 0.01 * attention).min(1.0);
+        }
+        self.observation_count += 1;
+    }
+
+    /// Perceived compatibility with own personality (0.0 = opposite, 1.0 = identical).
+    pub fn compatibility(&self, own: &Personality) -> f32 {
+        let own_arr = [own.risk_tolerance, own.social_drive, own.ambition, own.compassion, own.curiosity];
+        let mut sum_diff = 0.0f32;
+        for i in 0..NUM_TRAITS {
+            sum_diff += (own_arr[i] - self.traits[i]).abs();
+        }
+        1.0 - sum_diff / NUM_TRAITS as f32
     }
 }
 

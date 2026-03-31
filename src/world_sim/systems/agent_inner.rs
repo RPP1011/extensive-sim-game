@@ -50,6 +50,9 @@ struct WorldView {
 
     // Resource node positions for perception-based discovery
     resources: Vec<(u32, (f32, f32), ResourceType)>, // (entity_id, pos, type)
+
+    // NPC action types and authority weights for theory of mind (Phase D)
+    npc_actions: std::collections::HashMap<u32, (u8, f32)>, // entity_id → (action_type, authority)
 }
 
 impl WorldView {
@@ -170,11 +173,26 @@ impl WorldView {
             })
             .collect();
 
+        // NPC action + authority snapshot for theory of mind
+        let mut npc_actions: std::collections::HashMap<u32, (u8, f32)> = std::collections::HashMap::new();
+        for entity in &state.entities {
+            if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+            if let Some(npc) = &entity.npc {
+                let action_type = npc.action.action_type_id();
+                let auth = {
+                    let leadership = npc.behavior_value(tags::LEADERSHIP);
+                    let discipline = npc.behavior_value(tags::DISCIPLINE);
+                    ((leadership + discipline * 0.5) / 20.0).min(3.0)
+                };
+                npc_actions.insert(entity.id, (action_type, auth));
+            }
+        }
+
         Self {
             tick, threat, population, food, treasury, faction_id, infrastructure,
             faction_stance, faction_at_war,
             recent_deaths, recent_battles, recent_conquests, season,
-            grid_hostile_count, coworkers, building_owner, resources,
+            grid_hostile_count, coworkers, building_owner, resources, npc_actions,
         }
     }
 
@@ -206,6 +224,9 @@ impl WorldView {
     }
     fn building_owner_id(&self, building_entity_id: u32) -> Option<u32> {
         self.building_owner.get(&building_entity_id).copied()
+    }
+    fn npc_action_and_authority(&self, entity_id: u32) -> (u8, f32) {
+        self.npc_actions.get(&entity_id).copied().unwrap_or((0, 0.0))
     }
 }
 
@@ -579,17 +600,35 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
             // Prune negligible relationships.
             npc.relationships.retain(|_, r| r.familiarity >= 0.01 || r.trust.abs() >= 0.05);
 
-            // Proximity to trusted, familiar NPCs satisfies social need at 2× rate.
-            let trusted_friend_count = npc.relationships.values()
-                .filter(|r| r.trust > 0.3 && r.familiarity > 0.3)
-                .count();
-            if trusted_friend_count > 0 && npc.home_settlement_id.is_some() {
-                let social_bonus = (trusted_friend_count as f32 * 0.5).min(2.0);
-                npc.needs.social = (npc.needs.social + social_bonus).min(80.0);
+            // Proximity to trusted, familiar NPCs satisfies social need.
+            // Compatibility (Phase D) amplifies satisfaction from perceived-similar NPCs.
+            let pers_copy = npc.personality;
+            let mut social_bonus = 0.0f32;
+            for rel in npc.relationships.values() {
+                if rel.trust > 0.3 && rel.familiarity > 0.3 {
+                    let compat = rel.perceived_personality.compatibility(&pers_copy);
+                    social_bonus += 0.5 * (0.5 + 0.5 * compat); // 0.25-0.5 per friend
+                }
+            }
+            if social_bonus > 0.0 && npc.home_settlement_id.is_some() {
+                npc.needs.social = (npc.needs.social + social_bonus.min(2.0)).min(80.0);
             }
 
             // Resource knowledge decay: remove stale entries (>2000 ticks old).
             npc.known_resources.retain(|_, k| world.tick.saturating_sub(k.observed_tick) < 2000);
+
+            // Theory of mind: observe coworker actions to build personality models (Phase D).
+            if let Some(bid) = npc.work_building_id {
+                let coworker_ids: Vec<u32> = world.coworker_ids(bid).iter()
+                    .filter(|&&cid| cid != entity.id)
+                    .copied().collect();
+                for cid in coworker_ids {
+                    let (action_type, auth) = world.npc_action_and_authority(cid);
+                    if let Some(rel) = npc.relationships.get_mut(&cid) {
+                        rel.perceived_personality.observe_action(action_type, auth);
+                    }
+                }
+            }
 
             // Outcome EMA decay: curious NPCs forget bad outcomes faster (Phase A).
             if npc.personality.curiosity > 0.6 {
