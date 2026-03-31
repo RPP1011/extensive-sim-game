@@ -305,6 +305,9 @@ pub fn advance_work_states(state: &mut WorldState) {
                                 if quality_mult > 1.3 {
                                     esteem_boosts.push(i);
                                 }
+
+                                // Passive ability production bonus (Phase F).
+                                amount *= npc.passive_effects.production_mult;
                             }
 
                             // Deduct from the resource node.

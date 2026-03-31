@@ -2265,6 +2265,52 @@ impl PerceivedPersonality {
 }
 
 // ---------------------------------------------------------------------------
+// PassiveEffects — ability-derived simulation bonuses (Phase F)
+// ---------------------------------------------------------------------------
+
+/// Passive bonuses from class abilities that affect the world simulation
+/// outside of combat. Derived from behavior profile tag composition.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct PassiveEffects {
+    /// Production yield multiplier (stacks with Phase 6 quality). From economy tags.
+    pub production_mult: f32,
+    /// Trade ratio bonus. From TRADE/NEGOTIATION tags.
+    pub trade_bonus: f32,
+    /// Morale aura radius (0 = no aura). From LEADERSHIP tags.
+    pub morale_aura_radius: f32,
+    /// Safety aura radius (0 = no aura). From DEFENSE/TACTICS tags.
+    pub safety_aura_radius: f32,
+    /// Perception radius multiplier. From AWARENESS/STEALTH tags.
+    pub perception_mult: f32,
+}
+
+impl PassiveEffects {
+    /// Recompute from behavior profile. Called on class level-up.
+    pub fn compute(behavior_profile: &[(u32, f32)]) -> Self {
+        let lookup = |tag: u32| -> f32 {
+            match behavior_profile.binary_search_by_key(&tag, |&(t, _)| t) {
+                Ok(idx) => behavior_profile[idx].1,
+                Err(_) => 0.0,
+            }
+        };
+
+        let trade_val = lookup(tags::TRADE) + lookup(tags::NEGOTIATION) * 0.5;
+        let leadership_val = lookup(tags::LEADERSHIP) + lookup(tags::DISCIPLINE) * 0.3;
+        let defense_val = lookup(tags::DEFENSE) + lookup(tags::TACTICS) * 0.5;
+        let awareness_val = lookup(tags::AWARENESS) + lookup(tags::STEALTH) * 0.3;
+        let economy_val = lookup(tags::CRAFTING) + lookup(tags::SMITHING) + lookup(tags::FARMING);
+
+        Self {
+            production_mult: 1.0 + (economy_val / 200.0).min(0.5), // max +50%
+            trade_bonus: (trade_val / 100.0).min(0.3),              // max +30%
+            morale_aura_radius: if leadership_val > 50.0 { (leadership_val / 10.0).min(20.0) } else { 0.0 },
+            safety_aura_radius: if defense_val > 50.0 { (defense_val / 10.0).min(15.0) } else { 0.0 },
+            perception_mult: 1.0 + (awareness_val / 200.0).min(0.5), // max +50%
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // PriceBelief — per-commodity value estimate for information asymmetry (Phase E)
 // ---------------------------------------------------------------------------
 
@@ -2950,6 +2996,10 @@ pub struct NpcData {
     /// Key: commodity index. Value: belief about value/scarcity.
     pub price_beliefs: [PriceBelief; super::NUM_COMMODITIES],
 
+    /// Passive ability effects on the simulation (Phase F: ability divergence).
+    /// Derived from class composition and behavior profile.
+    pub passive_effects: PassiveEffects,
+
     /// Per-action-type cultural conformity bias (Phase C). Range [-0.3, 0.3].
     /// Index matches NpcAction::action_type_id() (0=idle..11=harvesting).
     pub cultural_bias: [f32; 12],
@@ -3353,6 +3403,7 @@ impl Default for NpcData {
             relationships: std::collections::HashMap::new(),
             action_outcomes: std::collections::HashMap::new(),
             aspiration: Aspiration::default(),
+            passive_effects: PassiveEffects::default(),
             price_beliefs: [PriceBelief::default(); crate::world_sim::NUM_COMMODITIES],
             cultural_bias: [0.0; 12],
             current_intention: None,

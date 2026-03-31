@@ -572,11 +572,10 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
         // --- Resource perception: discover nearby resource nodes ---
         {
             // Base perception: 30 units. Curious NPCs: 45 units.
-            let perception_radius_sq = if npc.personality.curiosity > 0.6 {
-                2025.0 // 45^2
-            } else {
-                900.0 // 30^2
-            };
+            // Passive ability perception bonus (Phase F) stacks multiplicatively.
+            let base_radius = if npc.personality.curiosity > 0.6 { 45.0 } else { 30.0 };
+            let effective_radius = base_radius * npc.passive_effects.perception_mult;
+            let perception_radius_sq = effective_radius * effective_radius;
             for &(rid, rpos, rtype) in &world.resources {
                 let dx = entity.pos.0 - rpos.0;
                 let dy = entity.pos.1 - rpos.1;
@@ -662,6 +661,16 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
     // --- Cultural norm update (every 200 ticks, Phase C) ---
     if state.tick % 200 == 0 {
         update_cultural_norms(state);
+    }
+
+    // --- Passive effects recompute (every 200 ticks, Phase F) ---
+    if state.tick % 200 == 0 {
+        for entity in &mut state.entities {
+            if !entity.alive { continue; }
+            if let Some(npc) = &mut entity.npc {
+                npc.passive_effects = PassiveEffects::compute(&npc.behavior_profile);
+            }
+        }
     }
 }
 
