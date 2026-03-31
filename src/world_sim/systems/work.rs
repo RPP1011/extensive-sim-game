@@ -317,6 +317,15 @@ pub fn advance_work_states(state: &mut WorldState) {
                                 inv.deposit(commodity, amount);
                             }
 
+                            // Update price belief from direct production (Phase E).
+                            if commodity < crate::world_sim::NUM_COMMODITIES {
+                                if let Some(npc) = &mut state.entities[i].npc {
+                                    // Value based on scarcity: less produced → higher perceived value.
+                                    let scarcity_value = 1.0 / (amount + 0.1);
+                                    npc.price_beliefs[commodity].update_direct(scarcity_value, state.tick);
+                                }
+                            }
+
                             // Pay wage for completed work cycle.
                             if let Some(sid) = home_sid {
                                 wages.push((i, sid, BASE_WAGE));

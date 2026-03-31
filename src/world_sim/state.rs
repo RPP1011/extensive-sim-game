@@ -2265,6 +2265,58 @@ impl PerceivedPersonality {
 }
 
 // ---------------------------------------------------------------------------
+// PriceBelief — per-commodity value estimate for information asymmetry (Phase E)
+// ---------------------------------------------------------------------------
+
+/// An NPC's belief about the value of a commodity, formed from experience.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct PriceBelief {
+    /// Estimated value (abstract units). Higher = more valuable/scarce.
+    pub estimated_value: f32,
+    /// Confidence [0.0, 1.0]. Decays without updates.
+    pub confidence: f32,
+    /// Tick when last updated.
+    pub last_updated: u64,
+}
+
+impl Default for PriceBelief {
+    fn default() -> Self {
+        Self { estimated_value: 1.0, confidence: 0.0, last_updated: 0 }
+    }
+}
+
+impl PriceBelief {
+    /// Update from direct observation (production or consumption).
+    pub fn update_direct(&mut self, observed_value: f32, tick: u64) {
+        let alpha = 0.3;
+        self.estimated_value = self.estimated_value * (1.0 - alpha) + observed_value * alpha;
+        self.confidence = 1.0;
+        self.last_updated = tick;
+    }
+
+    /// Update from trade experience.
+    pub fn update_trade(&mut self, trade_value: f32, tick: u64) {
+        let alpha = 0.2;
+        self.estimated_value = self.estimated_value * (1.0 - alpha) + trade_value * alpha;
+        self.confidence = (self.confidence + 0.3).min(1.0);
+        self.last_updated = tick;
+    }
+
+    /// Update from secondhand information (gossip during trade).
+    pub fn update_secondhand(&mut self, value: f32, teller_confidence: f32, tick: u64) {
+        let alpha = 0.1 * teller_confidence;
+        self.estimated_value = self.estimated_value * (1.0 - alpha) + value * alpha;
+        self.confidence = (self.confidence + 0.05 * teller_confidence).min(1.0);
+        self.last_updated = tick;
+    }
+
+    /// Decay confidence when not updated.
+    pub fn decay(&mut self) {
+        self.confidence *= 0.95;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // OutcomeEMA — per-action-type exponential moving average of outcomes
 // ---------------------------------------------------------------------------
 
@@ -2894,6 +2946,10 @@ pub struct NpcData {
     /// Medium-term behavioral orientation (Phase B).
     pub aspiration: Aspiration,
 
+    /// Per-commodity price beliefs (Phase E: information asymmetry).
+    /// Key: commodity index. Value: belief about value/scarcity.
+    pub price_beliefs: [PriceBelief; super::NUM_COMMODITIES],
+
     /// Per-action-type cultural conformity bias (Phase C). Range [-0.3, 0.3].
     /// Index matches NpcAction::action_type_id() (0=idle..11=harvesting).
     pub cultural_bias: [f32; 12],
@@ -3297,6 +3353,7 @@ impl Default for NpcData {
             relationships: std::collections::HashMap::new(),
             action_outcomes: std::collections::HashMap::new(),
             aspiration: Aspiration::default(),
+            price_beliefs: [PriceBelief::default(); crate::world_sim::NUM_COMMODITIES],
             cultural_bias: [0.0; 12],
             current_intention: None,
             intention_ticks: 0,

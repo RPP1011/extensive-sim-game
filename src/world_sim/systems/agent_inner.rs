@@ -636,6 +636,13 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
                     ema.value *= 0.995; // drift toward neutral
                 }
             }
+
+            // Price belief decay (Phase E): stale beliefs lose confidence.
+            for belief in &mut npc.price_beliefs {
+                if world.tick.saturating_sub(belief.last_updated) > 200 {
+                    belief.decay();
+                }
+            }
         }
     }
 
