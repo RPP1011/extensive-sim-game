@@ -172,6 +172,7 @@ pub mod biography;
 pub mod gathering;
 pub mod movement;
 pub mod action_eval;
+pub mod construction;
 
 macro_rules! run_system {
     ($name:expr, $func:expr, $state:expr, $out:expr) => {{

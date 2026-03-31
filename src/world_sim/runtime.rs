@@ -1655,8 +1655,11 @@ impl WorldSim {
 
         profile.postapply_us = postapply_start.elapsed().as_micros() as u64;
 
-        // CITY GROWTH — CA-driven building placement on city grids.
+        // CITY GROWTH — CA-driven building placement on city grids (legacy, disabled).
         self.grow_cities();
+
+        // ROOM GROWTH — tile-based construction automaton.
+        super::systems::construction::advance_construction(&mut self.state);
 
         // ENTITY COMPACTION — remove long-dead items/buildings every 500 ticks.
         if self.state.tick % ENTITY_COMPACTION_INTERVAL == 0 && self.state.tick > 0 {

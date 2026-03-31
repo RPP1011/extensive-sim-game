@@ -45,6 +45,9 @@ enum CandidateAction {
     BuildNew,
     Attack { target_idx: usize, target_id: u32 },
     Flee { away_from: (f32, f32) },
+    // Tile-based construction actions
+    PlaceSeed { function: BuildingFunction },
+    PlaceTile { pos: TilePos, tile_type: TileType },
     Idle,
 }
 
@@ -78,6 +81,8 @@ impl CandidateAction {
             CandidateAction::Eat => (2, 0),
             CandidateAction::Flee { .. } => (9, 0),
             CandidateAction::MoveToWork { .. } | CandidateAction::MoveToPos { .. } => (1, 0),
+            CandidateAction::PlaceSeed { .. } => (8, 1), // building category
+            CandidateAction::PlaceTile { .. } => (8, 2),  // building category
             CandidateAction::Idle => (0, 0),
         }
     }
@@ -176,7 +181,7 @@ pub fn evaluate_and_act(state: &mut WorldState) {
                 // Skip NPCs in non-idle work states (let the work state machine finish).
                 if !matches!(npc.work_state, WorkState::Idle) { continue; }
 
-                let (action, npc_action, utility) = score_npc_actions(e, npc, &snaps);
+                let (action, npc_action, utility) = score_npc_actions(e, npc, &snaps, &state.tiles);
 
                 if debug_tick && e.id == 0 {
                     eprintln!("[action_eval t{} NPC#{}] scored {:?} utility={:.3}", state.tick, e.id, npc_action, utility);
@@ -300,6 +305,7 @@ fn score_npc_actions(
     entity: &Entity,
     npc: &NpcData,
     snaps: &[EntitySnap],
+    tiles: &std::collections::HashMap<TilePos, Tile>,
 ) -> (CandidateAction, NpcAction, f32) {
     let pos = entity.pos;
     let needs = &npc.needs;
@@ -549,6 +555,102 @@ fn score_npc_actions(
                 best_npc_action = NpcAction::Building {
                     building_id: 0,
                     ticks_remaining: 1,
+                };
+            }
+        }
+    }
+
+    // --- Tile construction actions (citizens only) ---
+    if ctype.can_build() {
+        let tile_pos = TilePos::from_world(pos.0, pos.1);
+        let has_room_nearby = tiles.values().any(|t| t.tile_type.is_floor());
+
+        // PlaceSeed: start building a room if homeless and no room nearby.
+        if npc.home_building_id.is_none() && !has_room_nearby {
+            let utility = shelter_urgency * 0.7 * ambition_mod * grief_dampen;
+            if utility > best_utility {
+                best_utility = utility;
+                best_action = CandidateAction::PlaceSeed { function: BuildingFunction::Shelter };
+                best_npc_action = NpcAction::Building { building_id: 0, ticks_remaining: 1 };
+            }
+        }
+
+        // TillFarmland: create farmland when food is scarce.
+        if hunger_urgency > 0.5 {
+            let has_farmland = tile_pos.neighbors8().iter()
+                .any(|n| tiles.get(n).map(|t| matches!(t.tile_type, TileType::Farmland)).unwrap_or(false));
+            if !has_farmland {
+                let has_food_to_plant = entity.inventory.as_ref()
+                    .map(|inv| inv.commodities[commodity::FOOD] >= 0.3)
+                    .unwrap_or(false);
+                if has_food_to_plant {
+                    let utility = hunger_urgency * 0.4 * ambition_mod * grief_dampen;
+                    if utility > best_utility {
+                        best_utility = utility;
+                        best_action = CandidateAction::PlaceTile {
+                            pos: tile_pos,
+                            tile_type: TileType::Farmland,
+                        };
+                        best_npc_action = NpcAction::Working {
+                            ticks_remaining: 5,
+                            building_id: 0,
+                            activity: WorkActivity::Farming,
+                        };
+                    }
+                }
+            }
+        }
+
+        // BuildFence: when safety is low and there are nearby hostiles.
+        if safety_urgency > 0.4 {
+            let has_wood = entity.inventory.as_ref()
+                .map(|inv| inv.commodities[commodity::WOOD] >= 0.5)
+                .unwrap_or(false);
+            if has_wood {
+                let utility = safety_urgency * 0.3 * grief_dampen;
+                if utility > best_utility {
+                    best_utility = utility;
+                    let fence_pos = tile_pos.neighbors4()[0]; // place adjacent
+                    best_action = CandidateAction::PlaceTile {
+                        pos: fence_pos,
+                        tile_type: TileType::Fence,
+                    };
+                    best_npc_action = NpcAction::Building { building_id: 0, ticks_remaining: 1 };
+                }
+            }
+        }
+
+        // DigDitch: defensive when under threat.
+        if safety_urgency > 0.5 && fear_boost > 0.3 {
+            let utility = safety_urgency * 0.35 * grief_dampen;
+            if utility > best_utility {
+                best_utility = utility;
+                let ditch_pos = tile_pos.neighbors4()[2]; // place to the right
+                best_action = CandidateAction::PlaceTile {
+                    pos: ditch_pos,
+                    tile_type: TileType::Moat,
+                };
+                best_npc_action = NpcAction::Working {
+                    ticks_remaining: 10,
+                    building_id: 0,
+                    activity: WorkActivity::Mining, // digging
+                };
+            }
+        }
+
+        // ClearPath: lay a path tile for faster movement.
+        if purpose_urgency > 0.3 && !tiles.contains_key(&tile_pos) {
+            let utility = purpose_urgency * 0.15 * curiosity_mod * grief_dampen;
+            if utility > best_utility {
+                best_utility = utility;
+                best_action = CandidateAction::PlaceTile {
+                    pos: tile_pos,
+                    tile_type: TileType::Path,
+                };
+                best_npc_action = NpcAction::Working {
+                    ticks_remaining: 3,
+                    building_id: 0,
+                    activity: WorkActivity::Crafting,
                 };
             }
         }
@@ -910,6 +1012,43 @@ fn execute_action(state: &mut WorldState, entity_idx: usize, action: &CandidateA
             let flee_x = entity.pos.0 + dx / mag * flee_dist;
             let flee_y = entity.pos.1 + dy / mag * flee_dist;
             entity.move_target = Some((flee_x, flee_y));
+        }
+
+        CandidateAction::PlaceSeed { function } => {
+            let npc_pos = state.entities[entity_idx].pos;
+            let npc_id = state.entities[entity_idx].id;
+            let tile_pos = TilePos::from_world(npc_pos.0, npc_pos.1);
+            state.build_seeds.push(BuildSeed {
+                pos: tile_pos,
+                intended_function: *function,
+                minimum_interior: function.minimum_interior(),
+                placed_by: npc_id,
+                tick,
+                complete: false,
+            });
+        }
+
+        CandidateAction::PlaceTile { pos, tile_type } => {
+            // Deduct resources based on tile type.
+            match tile_type {
+                TileType::Farmland => {
+                    if let Some(inv) = &mut state.entities[entity_idx].inventory {
+                        inv.commodities[commodity::FOOD] -= 0.3;
+                    }
+                }
+                TileType::Fence => {
+                    if let Some(inv) = &mut state.entities[entity_idx].inventory {
+                        inv.commodities[commodity::WOOD] -= 0.5;
+                    }
+                }
+                _ => {} // labor-only actions (ditch, path)
+            }
+            let npc_id = state.entities[entity_idx].id;
+            state.tiles.insert(*pos, Tile {
+                tile_type: *tile_type,
+                placed_by: Some(npc_id),
+                placed_tick: tick,
+            });
         }
 
         CandidateAction::Idle => {}
