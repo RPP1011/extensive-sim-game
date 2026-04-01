@@ -6,6 +6,7 @@
 //! 3. **Merge**: All deltas combine into the next world state (commutative + associative)
 
 pub mod city_grid;
+pub mod voxel;
 pub mod delta;
 pub mod state;
 pub mod tick;

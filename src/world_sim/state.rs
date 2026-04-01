@@ -402,6 +402,9 @@ pub struct WorldState {
     /// Active build seeds waiting for room growth automaton to process.
     pub build_seeds: Vec<BuildSeed>,
 
+    /// 3D voxel world — chunked terrain with materials, the physical source of truth.
+    pub voxel_world: super::voxel::VoxelWorld,
+
     /// Global economy (total gold supply, trade routes).
     pub economy: EconomyState,
 
@@ -457,6 +460,7 @@ impl WorldState {
             influence_maps: Vec::new(),
             tiles: std::collections::HashMap::new(),
             build_seeds: Vec::new(),
+            voxel_world: super::voxel::VoxelWorld::default(),
             economy: EconomyState::default(),
             trade_routes: Vec::new(),
             factions: Vec::new(),
