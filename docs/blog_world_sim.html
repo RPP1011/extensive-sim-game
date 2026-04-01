@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Building a DF-Style World Simulation in Rust</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --surface: #13161d;
+  --surface2: #1c2029;
+  --surface3: #252a36;
+  --border: #2a2f3e;
+  --border-bright: #3d4459;
+  --text: #b8c0cc;
+  --text-muted: #6b7280;
+  --heading: #e2e8f0;
+  --accent: #60a5fa;
+  --accent-dim: #2563eb;
+  --purple: #a78bfa;
+  --purple-dim: #7c3aed;
+  --green: #34d399;
+  --green-dim: #059669;
+  --red: #f87171;
+  --red-dim: #dc2626;
+  --orange: #fbbf24;
+  --orange-dim: #d97706;
+  --cyan: #22d3ee;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.78;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 4rem 2rem 8rem;
+}
+
+header {
+  margin-bottom: 3.5rem;
+  padding-bottom: 2.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.65;
+  max-width: 680px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 2rem 0 0;
+}
+
+.stat {
+  background: var(--surface);
+  padding: 1.2rem 1rem;
+  text-align: center;
+}
+
+.stat .value {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.stat .label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 0.3rem;
+}
+
+h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--heading);
+  margin-top: 4rem;
+  margin-bottom: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--purple);
+  margin-top: 2.5rem;
+  margin-bottom: 0.8rem;
+}
+
+p { margin-bottom: 1.1rem; }
+strong { color: var(--heading); font-weight: 600; }
+em { color: var(--text); }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+a:hover { border-bottom-color: var(--accent); }
+
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.2rem 1.5rem;
+  overflow-x: auto;
+  margin: 1.5rem 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.88em;
+}
+
+p code, li code, td code {
+  background: var(--surface2);
+  padding: 0.15em 0.45em;
+  border-radius: 4px;
+  font-size: 0.82em;
+  color: var(--accent);
+}
+
+pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+  font-family: 'DM Sans', sans-serif;
+}
+
+th {
+  background: var(--surface2);
+  color: var(--heading);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 2px solid var(--border-bright);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+td {
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+tr:hover td { background: var(--surface); }
+
+.good { color: var(--green); font-weight: 600; }
+.bad { color: var(--red); font-weight: 600; }
+.warn { color: var(--orange); font-weight: 600; }
+
+.callout {
+  background: var(--surface);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: 0 8px 8px 0;
+  padding: 1.1rem 1.4rem;
+  margin: 1.8rem 0;
+  font-size: 0.95rem;
+}
+
+.callout.bug { border-left-color: var(--red-dim); background: #18100f; }
+.callout.success { border-left-color: var(--green-dim); background: #0d1712; }
+.callout p:last-child { margin-bottom: 0; }
+
+ol, ul { margin: 0.8rem 0 1.2rem 1.6rem; }
+li { margin-bottom: 0.4rem; }
+
+hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
+
+.footer-note {
+  font-style: italic;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 2.5rem;
+  margin-top: 4rem;
+}
+
+@media (max-width: 720px) {
+  .article { padding: 2rem 1.25rem 4rem; }
+  h1 { font-size: 1.9rem; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+<div class="article">
+
+<p><a href="index.html">&larr; Back</a></p>
+
+<header>
+  <h1>Building a Dwarf Fortress-Style World Simulation in Rust</h1>
+  <p class="subtitle">How 167 systems, commutative deltas, and a flat-array merge accumulator produce a living world at 200 ticks/sec.</p>
+  <div class="stats">
+    <div class="stat"><div class="value">167</div><div class="label">Systems</div></div>
+    <div class="stat"><div class="value">2,000+</div><div class="label">Entities</div></div>
+    <div class="stat"><div class="value">~300&micro;s</div><div class="label">Per Tick</div></div>
+    <div class="stat"><div class="value">0</div><div class="label">Scripted Events</div></div>
+  </div>
+</header>
+
+<h2>The Goal</h2>
+
+<p>We wanted a zero-player sandbox &mdash; a world that generates its own stories. NPCs with inner lives form grudges, fall in love, start businesses, betray allies, and die in sieges they didn't see coming. No scripted events. No quest designers. Just systems interacting with systems until history happens.</p>
+
+<p>The constraint: it has to run fast. Fast enough to simulate thousands of years of history during world generation, and fast enough to keep ticking in real-time once the player shows up.</p>
+
+<p>This post is a technical walkthrough of how the world sim works, from the tick architecture down to the NPC decision loop.</p>
+
+<hr>
+
+<h2>Architecture: Snapshot &rarr; Compute &rarr; Merge &rarr; Apply</h2>
+
+<p>Every tick follows a four-phase pipeline:</p>
+
+<pre><code>&#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;     &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;     &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;     &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+&#9474; Snapshot &#9474; &#9472;&#9472;&#9654; &#9474; Compute &#9474; &#9472;&#9472;&#9654; &#9474;  Merge  &#9474; &#9472;&#9472;&#9654; &#9474;  Apply  &#9474;
+&#9474;  freeze  &#9474;     &#9474;   167   &#9474;     &#9474; commut. &#9474;     &#9474; produce &#9474;
+&#9474;  state   &#9474;     &#9474; systems &#9474;     &#9474;  fold   &#9474;     &#9474;  next   &#9474;
+&#9474;          &#9474;     &#9474;         &#9474;     &#9474;         &#9474;     &#9474;  state  &#9474;
+&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;     &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;     &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;     &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</code></pre>
+
+<p><strong>Why not just mutate in place?</strong> Two reasons: parallelism and determinism.</p>
+
+<p>If system A writes to an NPC's HP while system B reads it, you get data races or order-dependent results. Instead, every system reads the same frozen snapshot and emits pure data &mdash; <code>WorldDelta</code> enums. No closures, no references to mutable state. Just plain structs describing what changed.</p>
+
+<pre><code>#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WorldDelta {
+    Damage { target_id: u32, amount: f32, source_id: u32 },
+    Heal { target_id: u32, amount: f32, source_id: u32 },
+    Move { entity_id: u32, force: (f32, f32) },
+    ProduceCommodity { settlement_id: u32, commodity: usize, amount: f32 },
+    UpdateEntityField { entity_id: u32, field: EntityField, value: f32 },
+    AddBehaviorTags { entity_id: u32, tags: [(u32, f32); 8], count: u8 },
+    RecordChronicle { entry: ChronicleEntry },
+    SpawnEntity { kind: EntityKind, pos: (f32, f32), team: WorldTeam, level: u32 },
+    Die { entity_id: u32 },
+    // ... 30+ more variants
+}</code></pre>
+
+<p>The merge phase folds all deltas commutatively &mdash; damage sums, movement forces add as vectors, deaths union into a set, position teleports are last-write-wins. Because the fold is commutative, the order systems run in doesn't affect the result. The simulation is deterministic regardless of thread scheduling.</p>
+
+<hr>
+
+<h2>The Merge: Zero-HashMap Flat Arrays</h2>
+
+<p>The naive approach &mdash; <code>HashMap&lt;EntityId, AccumulatedChanges&gt;</code> &mdash; allocates on every insert. With 2,000+ entities and 167 systems producing deltas, that's thousands of hash lookups per tick.</p>
+
+<p>Instead, we pre-allocate flat arrays indexed by entity ID:</p>
+
+<pre><code>struct FlatMergedDeltas {
+    // Per-entity combat (indexed by entity ID)
+    damage: Vec&lt;f32&gt;,
+    heals: Vec&lt;f32&gt;,
+    shields: Vec&lt;f32&gt;,
+    force_x: Vec&lt;f32&gt;,
+    force_y: Vec&lt;f32&gt;,
+    dead: Vec&lt;bool&gt;,
+    entity_dirty: Vec&lt;u32&gt;,  // only touched indices
+
+    // Per-settlement economy (indexed by settlement ID)
+    production: Vec&lt;[f32; NUM_COMMODITIES]&gt;,
+    consumption: Vec&lt;[f32; NUM_COMMODITIES]&gt;,
+    treasury_adj: Vec&lt;f32&gt;,
+    settlement_dirty: Vec&lt;u32&gt;,
+
+    // Per-faction, per-region &mdash; same pattern
+    faction_fields: Vec&lt;f32&gt;,
+    region_fields: Vec&lt;f32&gt;,
+    // ...
+}</code></pre>
+
+<p>Merging a <code>Damage { target_id: 42, amount: 15.0 }</code> is a single indexed add: <code>self.damage[42] += 15.0</code>. No hashing. No allocation.</p>
+
+<p>The dirty lists track which indices were touched, so clearing between ticks is O(touched) not O(capacity). With ~200 entities taking damage per tick out of 2,000 total, that's a <strong>10x speedup on the clear path alone</strong>.</p>
+
+<div class="callout success">
+<p>Result: the merge phase consistently runs in <strong>5&ndash;50&micro;s</strong>.</p>
+</div>
+
+<hr>
+
+<h2>167 Systems</h2>
+
+<p>The compute phase dispatches 167 independent systems. Each reads the frozen <code>WorldState</code> and returns <code>Vec&lt;WorldDelta&gt;</code>. Here's a sample:</p>
+
+<pre><code>// src/world_sim/systems/mod.rs
+pub mod agent_inner;        // NPC needs, emotions, memory
+pub mod economy;            // production, consumption, pricing
+pub mod faction_ai;         // military buildup, diplomatic stance
+pub mod warfare;            // sieges, conquest, wall damage
+pub mod adventuring;        // party formation, quest execution
+pub mod monster_ecology;    // reproduction, migration, den formation
+pub mod legends;            // legendary NPC detection
+pub mod death_consequences; // funerals, inheritance, mourning
+pub mod civil_war;          // internal faction tension &rarr; revolt
+pub mod espionage;          // spy missions, information gathering
+pub mod romance;            // relationship formation
+pub mod bloodlines;         // family lineages
+pub mod oaths;              // loyalty, vengeance, trade oaths
+pub mod religion;           // divine favor, temples, rituals
+pub mod smuggling;          // black market trade routes
+pub mod prophecy;           // visions and foreshadowing
+// ... 150+ more</code></pre>
+
+<p>Systems break into two scheduling categories:</p>
+
+<ul>
+<li><strong>Settlement-scoped</strong> systems (economy, food, population, buildings, battles, etc.) run in parallel across settlements via <code>rayon</code>. Two different settlements never share mutable state, so these parallelize cleanly.</li>
+<li><strong>Global</strong> systems (seasons, weather, diplomacy, faction AI, quest lifecycle) must see the whole world and run sequentially.</li>
+</ul>
+
+<p>A <code>run_system!</code> macro wraps each call with optional profiling:</p>
+
+<pre><code>macro_rules! run_system {
+    ($name:expr, $func:expr, $state:expr, $out:expr) =&gt; {{
+        #[cfg(feature = "profile-systems")]
+        let _t = Instant::now();
+        $func($state, $out);
+        // ...
+    }};
+}</code></pre>
+
+<hr>
+
+<h2>Fidelity Levels: Simulating What Matters</h2>
+
+<p>Not every entity needs the same resolution. A merchant traveling between cities doesn't need per-ability combat ticks. A settlement the player has never visited doesn't need per-NPC movement.</p>
+
+<p>Four fidelity levels control how much work the sim does per entity:</p>
+
+<table>
+<thead>
+<tr><th>Level</th><th>Resolution</th><th>What Runs</th></tr>
+</thead>
+<tbody>
+<tr><td><code>High</code></td><td>100ms tactical</td><td>Per-ability, per-tick combat</td></tr>
+<tr><td><code>Medium</code></td><td>Settlement</td><td>Movement, production, work, trade</td></tr>
+<tr><td><code>Low</code></td><td>Overworld</td><td>Coarse movement, encounter detection</td></tr>
+<tr><td><code>Background</code></td><td>Off-screen</td><td>Aggregate stats only, zero per-entity deltas</td></tr>
+</tbody>
+</table>
+
+<p>Fidelity is <strong>location-based</strong>, not entity-based. A grid escalates to <code>High</code> when both hostile and friendly entities are present &mdash; combat is happening. It drops back to <code>Medium</code> when one side is eliminated.</p>
+
+<div class="callout">
+<p>The practical effect: during a siege, the besieged settlement runs at full tactical resolution while distant settlements tick at Background. The sim stays at <strong>140&ndash;200 ticks/sec</strong> with 2,000 entities because most of them aren't doing expensive work.</p>
+</div>
+
+<hr>
+
+<h2>NPC Inner Life</h2>
+
+<p>The agent inner state system (<code>agent_inner.rs</code>, ~1,500 lines) is where NPCs stop being stat blocks and start being characters.</p>
+
+<h3>Needs</h3>
+
+<p>Six needs drift and spike based on events:</p>
+
+<table>
+<thead>
+<tr><th>Need</th><th>Drift Source</th><th>Event Spikes</th></tr>
+</thead>
+<tbody>
+<tr><td>Hunger</td><td>Time (always rising)</td><td>Eating (drops to 0)</td></tr>
+<tr><td>Safety</td><td>Settlement threat level</td><td>Battles, sieges, monster proximity</td></tr>
+<tr><td>Shelter</td><td>Has home building?</td><td>Eviction, building destruction</td></tr>
+<tr><td>Social</td><td>Isolation duration</td><td>Conversations, festivals, funerals</td></tr>
+<tr><td>Purpose</td><td>Has active goal?</td><td>Quest completion, class progression</td></tr>
+<tr><td>Esteem</td><td>Reputation, level</td><td>Chronicle mentions, legendary deeds</td></tr>
+</tbody>
+</table>
+
+<h3>Emotions</h3>
+
+<p>Six emotions spike from events and decay at ~0.005 per 100 ticks:</p>
+
+<ul>
+<li><strong>Joy</strong> &mdash; quest success, festival attendance, romance</li>
+<li><strong>Anger</strong> &mdash; friend death (if killer known), betrayal, theft</li>
+<li><strong>Fear</strong> &mdash; monster proximity, siege, low safety need</li>
+<li><strong>Grief</strong> &mdash; friend death, settlement destruction, exile</li>
+<li><strong>Pride</strong> &mdash; chronicle mention, legendary status, oath fulfillment</li>
+<li><strong>Anxiety</strong> &mdash; low purpose, threatening world events, debt</li>
+</ul>
+
+<h3>Memory &amp; Beliefs</h3>
+
+<p>Each NPC has a 20-event ring buffer and a list of semantic beliefs with decaying confidence:</p>
+
+<pre><code>NPC sees friend die in battle
+  &rarr; MemEvent { kind: WitnessedDeath, tick: 4200, entity_id: 17 }
+  &rarr; Belief { content: "the northern frontier is dangerous", confidence: 0.8 }
+  &rarr; Emotion spike: grief +0.6, anger +0.3 (if killer known)
+  &rarr; Grudge formed against killer (decays at 0.001/100 ticks)</code></pre>
+
+<p>Beliefs decay over time but influence decisions. An NPC who believes a route is dangerous will avoid it even after the threat is gone &mdash; until the belief fades or a contradicting event overwrites it.</p>
+
+<h3>Personality</h3>
+
+<p>Personality is <strong>experience-shaped</strong>, not assigned at birth. An NPC who survives three sieges develops high <code>risk_tolerance</code>. One who mentors many apprentices develops high <code>compassion</code>. The personality then modifies decision weights: a high-ambition NPC prioritizes purpose over safety; a high-compassion NPC prioritizes social bonds.</p>
+
+<h3>WorldView Optimization</h3>
+
+<p>The agent loop pre-computes a <code>WorldView</code> snapshot before iterating over entities:</p>
+
+<pre><code>struct WorldView {
+    threat: Vec&lt;f32&gt;,                        // per-settlement
+    population: Vec&lt;u32&gt;,                     // per-settlement
+    faction_stance: Vec&lt;DiplomaticStance&gt;,    // per-faction
+    recent_deaths: Vec&lt;u32&gt;,                  // entity IDs
+    grid_hostile_count: Vec&lt;u32&gt;,
+    coworkers: HashMap&lt;u32, Vec&lt;u32&gt;&gt;,
+    building_owner: HashMap&lt;u32, u32&gt;,
+    resources: Vec&lt;(u32, (f32, f32), ResourceType)&gt;,
+    npc_actions: HashMap&lt;u32, (u8, f32)&gt;,    // theory of mind
+    // ...
+}</code></pre>
+
+<p>Every NPC lookup during the agent loop is O(1) by ID &mdash; no scanning, no filtering. The <code>WorldView</code> is built once every 10 ticks, not every tick.</p>
+
+<hr>
+
+<h2>Tags, Classes, and Emergent Roles</h2>
+
+<p>NPCs don't choose a class at character creation. They <em>become</em> their class through behavior.</p>
+
+<h3>Compile-Time Tag Hashing</h3>
+
+<p>Every action in the sim emits behavior tags &mdash; stack-allocated bundles of up to 8 (tag, weight) pairs:</p>
+
+<pre><code>pub const fn tag(name: &amp;[u8]) -&gt; u32 {
+    let mut hash: u32 = 2166136261;  // FNV-1a
+    let mut i = 0;
+    while i &lt; name.len() {
+        hash ^= name[i] as u32;
+        hash = hash.wrapping_mul(16777619);
+        i += 1;
+    }
+    hash
+}
+
+pub const MELEE: u32    = tag(b"melee");
+pub const SMITHING: u32 = tag(b"smithing");
+pub const FAITH: u32    = tag(b"faith");
+// 35+ tags total</code></pre>
+
+<p>Tags are FNV-1a hashed at compile time &mdash; zero runtime cost to create, and comparing two tags is a single <code>u32 ==</code>.</p>
+
+<p>When an NPC mines ore, they accumulate <code>MINING</code> and <code>ENDURANCE</code> tags. When they fight, they get <code>COMBAT</code> and <code>MELEE</code> or <code>RANGED</code>. When they trade between settlements, <code>TRADE</code> and <code>NAVIGATION</code>.</p>
+
+<h3>Class Matching</h3>
+
+<p>Every 50 ticks, the system compares each NPC's accumulated behavior profile against 12 class templates:</p>
+
+<table>
+<thead>
+<tr><th>Class</th><th>Key Tags</th></tr>
+</thead>
+<tbody>
+<tr><td>Warrior</td><td><code>combat</code>, <code>melee</code>, <code>endurance</code></td></tr>
+<tr><td>Ranger</td><td><code>ranged</code>, <code>navigation</code>, <code>survival</code></td></tr>
+<tr><td>Merchant</td><td><code>trade</code>, <code>negotiation</code>, <code>navigation</code></td></tr>
+<tr><td>Paladin</td><td><code>combat</code>, <code>faith</code>, <code>discipline</code></td></tr>
+<tr><td>Rogue</td><td><code>stealth</code>, <code>deception</code>, <code>awareness</code></td></tr>
+<tr><td>Healer</td><td><code>medicine</code>, <code>herbalism</code>, <code>compassion</code></td></tr>
+<tr><td>Scholar</td><td><code>research</code>, <code>lore</code>, <code>teaching</code></td></tr>
+</tbody>
+</table>
+
+<p>NPCs can hold <strong>multiple classes simultaneously</strong>, each with independent level tracking. A level increments every 50 ticks if the behavior tags still match. An NPC who fought for 200 ticks then switched to smithing full-time would be a Warrior 4 / Blacksmith 2.</p>
+
+<p>If no template matches but behavior tags are significant, the system generates a <strong>procedural class</strong> &mdash; unique to that NPC, named from their dominant tag combinations.</p>
+
+<h3>Ability Generation</h3>
+
+<p>When an NPC gains a class, the ability generator synthesizes abilities using grammar-driven DSL generation:</p>
+
+<ul>
+<li>Walk the ability DSL tree with archetype-conditioned distributions (knight &rarr; physical damage, mage &rarr; area effects)</li>
+<li>Name abilities thematically: archetype prefix (iron/wild/arcane) + effect suffix (strike/mend/ward)</li>
+<li>Score quality to prevent degenerate combinations</li>
+<li>Rate-limited to 10 abilities per class-assignment pass</li>
+</ul>
+
+<p>The generated abilities are real &mdash; the same DSL format used by hand-authored hero templates, runnable in the tactical combat sim.</p>
+
+<hr>
+
+<h2>Economy</h2>
+
+<p>Eight commodities flow through the settlement network:</p>
+
+<pre><code>FOOD &middot; IRON &middot; WOOD &middot; HERBS &middot; HIDE &middot; CRYSTAL &middot; EQUIPMENT &middot; MEDICINE</code></pre>
+
+<p>Each settlement has per-commodity stockpiles, production rates, and consumption rates. Prices emerge from supply and demand &mdash; the <code>price_discovery</code> system adjusts prices based on stockpile levels relative to consumption.</p>
+
+<p>NPCs make economic decisions: a miner in a settlement with excess IRON and scarce FOOD might switch to farming. Merchants spot price differentials between settlements and run trade routes, buying low and selling high. The <code>trade_routes</code> system tracks profitable routes, and NPCs who complete profitable trades accumulate <code>TRADE</code> tags &mdash; eventually becoming Merchant-class.</p>
+
+<div class="callout bug">
+<p><strong>Known tech debt:</strong> gold can appear from thin air (treasure hunts, bounties, dungeon loot). There's no rent or housing costs yet. This causes slow inflation over long runs.</p>
+</div>
+
+<hr>
+
+<h2>Warfare and Sieges</h2>
+
+<p>The warfare system models multi-phase sieges:</p>
+
+<ol>
+<li><strong>Approach</strong> (50 ticks): monster forces converge on a walled settlement</li>
+<li><strong>Assault</strong> (100 ticks): attackers damage walls, defenders fight from watchtowers (+range)</li>
+<li><strong>Breach</strong>: if walls fall, attackers enter the settlement grid &mdash; fidelity escalates to <code>High</code>, and the tactical combat sim takes over</li>
+</ol>
+
+<p>The trigger: 100+ hostile monsters near a walled settlement with 10+ within 50 distance units.</p>
+
+<p>Survivors of sieges gain massive <code>RESILIENCE</code> and <code>COMBAT</code> tags. Siege survivors who were already legendary get chronicle entries that echo through the world &mdash; other NPCs hear about the defense, morale shifts, grudges form against the attacking faction.</p>
+
+<hr>
+
+<h2>Legends and Death</h2>
+
+<p>NPCs become legendary through deeds, not levels. The criteria:</p>
+
+<ul>
+<li>5+ chronicle mentions</li>
+<li>2+ distinct classes</li>
+<li>Survived 3+ friend deaths</li>
+</ul>
+
+<p>Legends boost settlement morale (+5 for all residents), attract followers seeking purpose, and get "the Legendary" appended to their name.</p>
+
+<p>When a legend dies, the consequences cascade:</p>
+
+<ul>
+<li><strong>Worldwide mourning:</strong> all NPCs with a relationship take grief spikes</li>
+<li><strong>Funeral:</strong> 20-tick ceremony at the settlement</li>
+<li><strong>Legacy:</strong> top apprentice inherits 30% of the mentor's behavior tags</li>
+<li><strong>Grudge formation:</strong> witnesses who saw the killer form vengeance grudges (decay 5x slower than normal beliefs)</li>
+<li><strong>Chronicle entry:</strong> rate-limited to 5 per tick, gated to level 30+ for notable deaths</li>
+</ul>
+
+<p>The apprentice lineage system means skills propagate through generations. A legendary smith's apprentice carries forward smithing tags, and if they reach legendary status themselves, the chronicle tracks the unbroken lineage.</p>
+
+<hr>
+
+<h2>Performance</h2>
+
+<p>Measured on a typical run with 2,000 entities and 8 settlements:</p>
+
+<table>
+<thead>
+<tr><th>Phase</th><th>Time</th></tr>
+</thead>
+<tbody>
+<tr><td>Compute (167 systems)</td><td class="good">140&ndash;180&micro;s</td></tr>
+<tr><td>Merge (flat-array fold)</td><td class="good">5&ndash;50&micro;s</td></tr>
+<tr><td>Apply (next state)</td><td class="good">50&ndash;100&micro;s</td></tr>
+<tr><td>Post-apply (agent inner, pathfinding, etc.)</td><td>50&ndash;150&micro;s</td></tr>
+<tr><td><strong>Total per tick</strong></td><td class="good"><strong>~300&ndash;500&micro;s</strong></td></tr>
+</tbody>
+</table>
+
+<p>Key performance decisions:</p>
+
+<ul>
+<li><strong>Dirty-list clearing:</strong> O(touched) not O(capacity) &mdash; with 200 entities taking damage out of 2,000, 10x faster clear</li>
+<li><strong>WorldView pre-computation:</strong> built once every 10 ticks, not every tick</li>
+<li><strong>Entity compaction:</strong> dead entities removed from the array every 500 ticks, not immediately</li>
+<li><strong>Class matching:</strong> every 50 ticks, not every tick</li>
+<li><strong>Fidelity scaling:</strong> Background entities produce zero per-entity deltas</li>
+</ul>
+
+<hr>
+
+<h2>What Emerges</h2>
+
+<p>None of the following behaviors are scripted. They emerge from system interactions:</p>
+
+<div class="callout">
+<p>An NPC witnesses their mentor's murder &rarr; forms a grudge &rarr; joins an adventuring party biased toward the killer's region &rarr; finds and kills the murderer &rarr; pride spike &rarr; gains "Avenger" chronicle entry &rarr; becomes legendary</p>
+</div>
+
+<div class="callout">
+<p>A faction goes hostile &rarr; military buildup &rarr; siege on a border settlement &rarr; wall breach &rarr; tactical combat at High fidelity &rarr; survivors gain resilience tags &rarr; NPC with enough combat + faith tags becomes a Paladin &rarr; attracts followers &rarr; settlement morale recovers</p>
+</div>
+
+<div class="callout">
+<p>A merchant discovers a price differential &rarr; runs a trade route &rarr; accumulates trade tags &rarr; becomes Merchant-class &rarr; gains ability "Iron Negotiation" &rarr; their apprentice inherits trade tags &rarr; continues the route after the mentor retires</p>
+</div>
+
+<div class="callout">
+<p>A settlement's food production drops &rarr; hunger need spikes &rarr; NPCs migrate to better settlements &rarr; depopulated settlement produces refugees with trauma beliefs &rarr; refugees spread rumors about the failing settlement &rarr; neighboring settlements increase food production in response</p>
+</div>
+
+<p>The simulation doesn't know about "stories." It knows about needs, deltas, tags, and thresholds. Stories are what happens when 167 systems talk to each other through 2,000 NPCs over 10,000 ticks.</p>
+
+<p class="footer-note">Next post: training a neural network to play the tactical combat layer that activates when sieges breach the walls.</p>
+
+</div>
+</body>
+</html>
