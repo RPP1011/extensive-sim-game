@@ -392,6 +392,46 @@ impl VoxelWorld {
         }
     }
 
+    /// Apply mining damage to a voxel. Returns Some((material, yield)) if broken.
+    pub fn mine_voxel(&mut self, vx: i32, vy: i32, vz: i32, damage: u8) -> Option<(VoxelMaterial, Option<(usize, f32)>)> {
+        let (cp, idx) = voxel_to_chunk_local(vx, vy, vz);
+        let chunk = self.chunks.get_mut(&cp)?;
+        let voxel = &mut chunk.voxels[idx];
+
+        if !voxel.material.is_solid() { return None; }
+        let hardness = voxel.material.hardness();
+        if hardness == u32::MAX { return None; } // unbreakable
+
+        voxel.damage = voxel.damage.saturating_add(damage);
+        if (voxel.damage as u32) >= hardness {
+            let mat = voxel.material;
+            let yield_info = mat.mine_yield();
+            voxel.material = VoxelMaterial::Air;
+            voxel.damage = 0;
+            chunk.dirty = true;
+            Some((mat, yield_info))
+        } else {
+            None // still mining
+        }
+    }
+
+    /// Get the 6 face-adjacent neighbors of a voxel position.
+    pub fn neighbors6(vx: i32, vy: i32, vz: i32) -> [(i32, i32, i32); 6] {
+        [
+            (vx - 1, vy, vz), (vx + 1, vy, vz),
+            (vx, vy - 1, vz), (vx, vy + 1, vz),
+            (vx, vy, vz - 1), (vx, vy, vz + 1),
+        ]
+    }
+
+    /// Check if a voxel is at a chunk boundary (any local coord is 0 or 15).
+    pub fn is_chunk_boundary(vx: i32, vy: i32, vz: i32) -> bool {
+        let lx = vx.rem_euclid(CHUNK_SIZE as i32);
+        let ly = vy.rem_euclid(CHUNK_SIZE as i32);
+        let lz = vz.rem_euclid(CHUNK_SIZE as i32);
+        lx == 0 || lx == 15 || ly == 0 || ly == 15 || lz == 0 || lz == 15
+    }
+
     /// Count loaded chunks.
     pub fn chunk_count(&self) -> usize { self.chunks.len() }
 
@@ -520,5 +560,286 @@ mod tests {
         let h = world.surface_height(8, 8);
         // Should be around 25-35 (surface ≈ 30 ± 5)
         assert!(h >= 20 && h <= 40, "surface height {} out of expected range", h);
+    }
+
+    // -----------------------------------------------------------------------
+    // Destruction tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn mine_dirt_breaks_in_one_hit() {
+        let mut world = VoxelWorld::default();
+        world.set_voxel(0, 0, 0, Voxel::new(VoxelMaterial::Dirt));
+        assert!(world.get_voxel(0, 0, 0).material.is_solid());
+
+        // Dirt hardness = 5. One hit with damage=10 should break it.
+        let result = world.mine_voxel(0, 0, 0, 10);
+        assert!(result.is_some(), "dirt should break with damage 10 >= hardness 5");
+        let (mat, yield_info) = result.unwrap();
+        assert_eq!(mat, VoxelMaterial::Dirt);
+        assert!(yield_info.is_some(), "dirt should yield something when mined");
+
+        // Voxel should now be air.
+        assert_eq!(world.get_voxel(0, 0, 0).material, VoxelMaterial::Air);
+    }
+
+    #[test]
+    fn mine_stone_requires_multiple_hits() {
+        let mut world = VoxelWorld::default();
+        world.set_voxel(5, 5, 5, Voxel::new(VoxelMaterial::Stone));
+
+        // Stone hardness = 30. Hit with 10 damage three times.
+        let r1 = world.mine_voxel(5, 5, 5, 10);
+        assert!(r1.is_none(), "stone should NOT break after 10/30 damage");
+        assert_eq!(world.get_voxel(5, 5, 5).damage, 10);
+
+        let r2 = world.mine_voxel(5, 5, 5, 10);
+        assert!(r2.is_none(), "stone should NOT break after 20/30 damage");
+        assert_eq!(world.get_voxel(5, 5, 5).damage, 20);
+
+        let r3 = world.mine_voxel(5, 5, 5, 10);
+        assert!(r3.is_some(), "stone SHOULD break after 30/30 damage");
+        assert_eq!(world.get_voxel(5, 5, 5).material, VoxelMaterial::Air);
+    }
+
+    #[test]
+    fn mine_granite_is_unbreakable() {
+        let mut world = VoxelWorld::default();
+        world.set_voxel(0, 0, 0, Voxel::new(VoxelMaterial::Granite));
+
+        let result = world.mine_voxel(0, 0, 0, 255);
+        assert!(result.is_none(), "granite should be unbreakable");
+        assert_eq!(world.get_voxel(0, 0, 0).material, VoxelMaterial::Granite);
+    }
+
+    #[test]
+    fn mine_air_returns_none() {
+        let mut world = VoxelWorld::default();
+        // Default is air — mining air should do nothing.
+        world.set_voxel(0, 0, 0, Voxel::new(VoxelMaterial::Air));
+        let result = world.mine_voxel(0, 0, 0, 10);
+        assert!(result.is_none(), "mining air should return None");
+    }
+
+    #[test]
+    fn mine_ore_yields_correct_commodity() {
+        let mut world = VoxelWorld::default();
+        world.set_voxel(0, 0, 0, Voxel::new(VoxelMaterial::IronOre));
+
+        // IronOre hardness = 35
+        let result = world.mine_voxel(0, 0, 0, 255); // one-shot
+        let (mat, yield_info) = result.unwrap();
+        assert_eq!(mat, VoxelMaterial::IronOre);
+        let (commodity, amount) = yield_info.unwrap();
+        assert_eq!(commodity, crate::world_sim::commodity::IRON);
+        assert!(amount > 0.0);
+    }
+
+    #[test]
+    fn destruction_marks_chunk_dirty() {
+        let mut world = VoxelWorld::default();
+        world.set_voxel(0, 0, 0, Voxel::new(VoxelMaterial::Dirt));
+
+        // Clear dirty flag manually.
+        let cp = ChunkPos::from_voxel(0, 0, 0);
+        world.chunks.get_mut(&cp).unwrap().dirty = false;
+
+        world.mine_voxel(0, 0, 0, 255);
+        assert!(world.chunks.get(&cp).unwrap().dirty, "chunk should be dirty after mining");
+    }
+
+    // -----------------------------------------------------------------------
+    // Cross-chunk boundary tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn cross_chunk_set_and_get() {
+        let mut world = VoxelWorld::default();
+
+        // Place voxels straddling a chunk boundary at x=15 and x=16.
+        world.set_voxel(15, 0, 0, Voxel::new(VoxelMaterial::Stone));
+        world.set_voxel(16, 0, 0, Voxel::new(VoxelMaterial::IronOre));
+
+        // They should be in different chunks.
+        let cp1 = ChunkPos::from_voxel(15, 0, 0);
+        let cp2 = ChunkPos::from_voxel(16, 0, 0);
+        assert_ne!(cp1, cp2, "voxels at x=15 and x=16 must be in different chunks");
+
+        // Both should be readable.
+        assert_eq!(world.get_voxel(15, 0, 0).material, VoxelMaterial::Stone);
+        assert_eq!(world.get_voxel(16, 0, 0).material, VoxelMaterial::IronOre);
+    }
+
+    #[test]
+    fn cross_chunk_negative_coords() {
+        let mut world = VoxelWorld::default();
+
+        // Negative coordinates should work correctly.
+        world.set_voxel(-1, -1, -1, Voxel::new(VoxelMaterial::Clay));
+        world.set_voxel(0, 0, 0, Voxel::new(VoxelMaterial::Sand));
+
+        assert_eq!(world.get_voxel(-1, -1, -1).material, VoxelMaterial::Clay);
+        assert_eq!(world.get_voxel(0, 0, 0).material, VoxelMaterial::Sand);
+
+        // Should be in different chunks.
+        let cp_neg = ChunkPos::from_voxel(-1, -1, -1);
+        let cp_pos = ChunkPos::from_voxel(0, 0, 0);
+        assert_ne!(cp_neg, cp_pos);
+    }
+
+    #[test]
+    fn neighbors6_across_chunk_boundary() {
+        let mut world = VoxelWorld::default();
+
+        // Place stone at the boundary between two chunks.
+        world.set_voxel(15, 8, 8, Voxel::new(VoxelMaterial::Stone));
+        world.set_voxel(16, 8, 8, Voxel::new(VoxelMaterial::Stone));
+
+        // Check that neighbors6 of x=15 includes x=16 (cross-chunk).
+        let neighbors = VoxelWorld::neighbors6(15, 8, 8);
+        assert!(neighbors.contains(&(16, 8, 8)));
+        assert!(neighbors.contains(&(14, 8, 8)));
+
+        // Both neighbors should be queryable across chunk boundaries.
+        for (nx, ny, nz) in &neighbors {
+            let _v = world.get_voxel(*nx, *ny, *nz); // should not panic
+        }
+    }
+
+    #[test]
+    fn mine_at_chunk_boundary() {
+        let mut world = VoxelWorld::default();
+
+        // Place stone at x=15 (last voxel in chunk 0).
+        world.set_voxel(15, 0, 0, Voxel::new(VoxelMaterial::Dirt));
+
+        // Mine it — should work fine across boundary math.
+        let result = world.mine_voxel(15, 0, 0, 255);
+        assert!(result.is_some());
+        assert_eq!(world.get_voxel(15, 0, 0).material, VoxelMaterial::Air);
+
+        // Adjacent voxel in next chunk should be unaffected.
+        assert_eq!(world.get_voxel(16, 0, 0).material, VoxelMaterial::Air);
+    }
+
+    // -----------------------------------------------------------------------
+    // Water at chunk boundaries
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn water_visible_across_chunk_boundary() {
+        let mut world = VoxelWorld::default();
+
+        // Place water at the very edge of chunk (0,0,0) — local x=15.
+        let mut water = Voxel::new(VoxelMaterial::Water);
+        water.set_water_level(8);
+        water.set_source(true);
+        world.set_voxel(15, 0, 0, water);
+
+        // Query from the perspective of the neighboring chunk.
+        let v = world.get_voxel(15, 0, 0);
+        assert_eq!(v.material, VoxelMaterial::Water);
+        assert_eq!(v.water_level(), 8);
+        assert!(v.is_source());
+
+        // The next-door voxel (x=16, in chunk 1,0,0) should be air.
+        assert_eq!(world.get_voxel(16, 0, 0).material, VoxelMaterial::Air);
+    }
+
+    #[test]
+    fn water_column_spans_chunks_vertically() {
+        let mut world = VoxelWorld::default();
+
+        // Fill a column of water from z=10 to z=20, crossing the chunk boundary at z=16.
+        for z in 10..=20 {
+            let mut w = Voxel::new(VoxelMaterial::Water);
+            w.set_water_level(15);
+            world.set_voxel(0, 0, z, w);
+        }
+
+        // Verify all are water, including across the z=15/16 chunk boundary.
+        for z in 10..=20 {
+            let v = world.get_voxel(0, 0, z);
+            assert_eq!(v.material, VoxelMaterial::Water,
+                "water at z={} should be present (crosses chunk at z=16)", z);
+            assert_eq!(v.water_level(), 15);
+        }
+
+        // Verify it's in two different chunks.
+        let cp_low = ChunkPos::from_voxel(0, 0, 10);
+        let cp_high = ChunkPos::from_voxel(0, 0, 20);
+        assert_ne!(cp_low, cp_high, "z=10 and z=20 should be in different chunks");
+    }
+
+    // -----------------------------------------------------------------------
+    // Terrain generation consistency at chunk boundaries
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn terrain_consistent_across_chunk_boundary() {
+        let mut world = VoxelWorld::default();
+        let seed = 42;
+
+        // Generate two horizontally adjacent chunks.
+        world.generate_chunk(ChunkPos::new(0, 0, 0), seed);
+        world.generate_chunk(ChunkPos::new(1, 0, 0), seed);
+
+        // The voxel at x=15 (end of chunk 0) and x=16 (start of chunk 1)
+        // should have consistent terrain — no seams.
+        // At z=0-2, both should be bedrock (granite).
+        assert_eq!(world.get_voxel(15, 8, 0).material, VoxelMaterial::Granite);
+        assert_eq!(world.get_voxel(16, 8, 0).material, VoxelMaterial::Granite);
+
+        // At z=10 (deep stone), both should be solid.
+        assert!(world.get_voxel(15, 8, 10).material.is_solid(),
+            "x=15 at z=10 should be solid stone layer");
+        assert!(world.get_voxel(16, 8, 10).material.is_solid(),
+            "x=16 at z=10 should be solid stone layer");
+
+        // Surface heights should be close (within 1-2 voxels) since they're
+        // adjacent columns.
+        let h_left = world.surface_height(15, 8);
+        let h_right = world.surface_height(16, 8);
+        let diff = (h_left - h_right).abs();
+        // Not guaranteed to be equal (noise), but shouldn't be wildly different.
+        // With ±5 noise range, adjacent columns could differ by up to 10 in worst case.
+        assert!(diff <= 10, "surface heights at x=15 ({}) and x=16 ({}) differ by {} — terrain may have seams",
+            h_left, h_right, diff);
+    }
+
+    #[test]
+    fn terrain_deterministic_across_generation_order() {
+        let seed = 99;
+
+        // Generate chunks in order A, B.
+        let mut world1 = VoxelWorld::default();
+        world1.generate_chunk(ChunkPos::new(0, 0, 0), seed);
+        world1.generate_chunk(ChunkPos::new(1, 0, 0), seed);
+
+        // Generate chunks in order B, A.
+        let mut world2 = VoxelWorld::default();
+        world2.generate_chunk(ChunkPos::new(1, 0, 0), seed);
+        world2.generate_chunk(ChunkPos::new(0, 0, 0), seed);
+
+        // Voxels should be identical regardless of generation order.
+        for vx in 0..32 {
+            for vy in 0..16 {
+                for vz in 0..16 {
+                    let v1 = world1.get_voxel(vx, vy, vz);
+                    let v2 = world2.get_voxel(vx, vy, vz);
+                    assert_eq!(v1.material, v2.material,
+                        "voxel at ({},{},{}) differs based on chunk generation order", vx, vy, vz);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn is_chunk_boundary_detects_edges() {
+        assert!(VoxelWorld::is_chunk_boundary(0, 5, 5));   // x=0 → local x=0
+        assert!(VoxelWorld::is_chunk_boundary(15, 5, 5));  // x=15 → local x=15
+        assert!(VoxelWorld::is_chunk_boundary(16, 5, 5));  // x=16 → local x=0 (next chunk)
+        assert!(!VoxelWorld::is_chunk_boundary(8, 8, 8));  // center of chunk
+        assert!(VoxelWorld::is_chunk_boundary(-1, 0, 0));  // x=-1 → local x=15
     }
 }
