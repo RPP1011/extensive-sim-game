@@ -552,10 +552,31 @@ impl VoxelWorld {
 // Terrain generation helpers
 // ---------------------------------------------------------------------------
 
-/// Simple hash-based noise for terrain height variation (±5 voxels).
+/// Smooth terrain height variation via bilinear interpolation of hash noise.
+/// Grid spacing of 8 voxels ensures adjacent columns have similar heights.
 fn terrain_height_offset(vx: i32, vy: i32, seed: u64) -> i32 {
-    let h = hash_3d(vx, vy, 0, seed);
-    ((h % 11) as i32) - 5 // range: -5 to +5
+    let scale = 8; // grid spacing — larger = smoother hills
+    // Grid corners
+    let gx0 = vx.div_euclid(scale) * scale;
+    let gy0 = vy.div_euclid(scale) * scale;
+    let gx1 = gx0 + scale;
+    let gy1 = gy0 + scale;
+    // Fractional position within grid cell [0, 1)
+    let fx = (vx - gx0) as f32 / scale as f32;
+    let fy = (vy - gy0) as f32 / scale as f32;
+    // Smooth interpolation (smoothstep)
+    let fx = fx * fx * (3.0 - 2.0 * fx);
+    let fy = fy * fy * (3.0 - 2.0 * fy);
+    // Hash at four corners → heights in [-5, 5]
+    let h00 = (hash_3d(gx0, gy0, 0, seed) % 11) as f32 - 5.0;
+    let h10 = (hash_3d(gx1, gy0, 0, seed) % 11) as f32 - 5.0;
+    let h01 = (hash_3d(gx0, gy1, 0, seed) % 11) as f32 - 5.0;
+    let h11 = (hash_3d(gx1, gy1, 0, seed) % 11) as f32 - 5.0;
+    // Bilinear interpolation
+    let h0 = h00 + (h10 - h00) * fx;
+    let h1 = h01 + (h11 - h01) * fx;
+    let h = h0 + (h1 - h0) * fy;
+    h.round() as i32
 }
 
 /// Determine if an ore vein exists at this position.
