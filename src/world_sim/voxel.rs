@@ -432,6 +432,113 @@ impl VoxelWorld {
         lx == 0 || lx == 15 || ly == 0 || ly == 15 || lz == 0 || lz == 15
     }
 
+    // -----------------------------------------------------------------------
+    // Area operations
+    // -----------------------------------------------------------------------
+
+    /// Remove all solid voxels in an axis-aligned box. Returns list of (material, yield) for each broken voxel.
+    pub fn remove_box(&mut self, min: (i32, i32, i32), max: (i32, i32, i32)) -> Vec<(VoxelMaterial, Option<(usize, f32)>)> {
+        let mut results = Vec::new();
+        for vz in min.2..=max.2 {
+            for vy in min.1..=max.1 {
+                for vx in min.0..=max.0 {
+                    let (cp, idx) = voxel_to_chunk_local(vx, vy, vz);
+                    if let Some(chunk) = self.chunks.get_mut(&cp) {
+                        let voxel = &mut chunk.voxels[idx];
+                        if voxel.material.is_solid() && voxel.material.hardness() < u32::MAX {
+                            let mat = voxel.material;
+                            let yield_info = mat.mine_yield();
+                            results.push((mat, yield_info));
+                            voxel.material = VoxelMaterial::Air;
+                            voxel.damage = 0;
+                            chunk.dirty = true;
+                        }
+                    }
+                }
+            }
+        }
+        results
+    }
+
+    /// Remove all solid voxels within a sphere. Returns list of (material, yield).
+    pub fn remove_sphere(&mut self, center: (i32, i32, i32), radius: i32) -> Vec<(VoxelMaterial, Option<(usize, f32)>)> {
+        let mut results = Vec::new();
+        let r2 = (radius * radius) as i64;
+        for vz in (center.2 - radius)..=(center.2 + radius) {
+            for vy in (center.1 - radius)..=(center.1 + radius) {
+                for vx in (center.0 - radius)..=(center.0 + radius) {
+                    let dx = (vx - center.0) as i64;
+                    let dy = (vy - center.1) as i64;
+                    let dz = (vz - center.2) as i64;
+                    if dx * dx + dy * dy + dz * dz > r2 { continue; }
+
+                    let (cp, idx) = voxel_to_chunk_local(vx, vy, vz);
+                    if let Some(chunk) = self.chunks.get_mut(&cp) {
+                        let voxel = &mut chunk.voxels[idx];
+                        if voxel.material.is_solid() && voxel.material.hardness() < u32::MAX {
+                            let mat = voxel.material;
+                            let yield_info = mat.mine_yield();
+                            results.push((mat, yield_info));
+                            voxel.material = VoxelMaterial::Air;
+                            voxel.damage = 0;
+                            chunk.dirty = true;
+                        }
+                    }
+                }
+            }
+        }
+        results
+    }
+
+    /// Fill an axis-aligned box with a material. Overwrites existing voxels.
+    pub fn fill_box(&mut self, min: (i32, i32, i32), max: (i32, i32, i32), material: VoxelMaterial) {
+        for vz in min.2..=max.2 {
+            for vy in min.1..=max.1 {
+                for vx in min.0..=max.0 {
+                    self.set_voxel(vx, vy, vz, Voxel::new(material));
+                }
+            }
+        }
+    }
+
+    /// Fill a sphere with a material.
+    pub fn fill_sphere(&mut self, center: (i32, i32, i32), radius: i32, material: VoxelMaterial) {
+        let r2 = (radius * radius) as i64;
+        for vz in (center.2 - radius)..=(center.2 + radius) {
+            for vy in (center.1 - radius)..=(center.1 + radius) {
+                for vx in (center.0 - radius)..=(center.0 + radius) {
+                    let dx = (vx - center.0) as i64;
+                    let dy = (vy - center.1) as i64;
+                    let dz = (vz - center.2) as i64;
+                    if dx * dx + dy * dy + dz * dz <= r2 {
+                        self.set_voxel(vx, vy, vz, Voxel::new(material));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Replace all voxels of one material with another in a box region.
+    pub fn replace_in_box(&mut self, min: (i32, i32, i32), max: (i32, i32, i32),
+                          from: VoxelMaterial, to: VoxelMaterial) -> u32 {
+        let mut count = 0u32;
+        for vz in min.2..=max.2 {
+            for vy in min.1..=max.1 {
+                for vx in min.0..=max.0 {
+                    let (cp, idx) = voxel_to_chunk_local(vx, vy, vz);
+                    if let Some(chunk) = self.chunks.get_mut(&cp) {
+                        if chunk.voxels[idx].material == from {
+                            chunk.voxels[idx].material = to;
+                            chunk.dirty = true;
+                            count += 1;
+                        }
+                    }
+                }
+            }
+        }
+        count
+    }
+
     /// Count loaded chunks.
     pub fn chunk_count(&self) -> usize { self.chunks.len() }
 
@@ -841,5 +948,138 @@ mod tests {
         assert!(VoxelWorld::is_chunk_boundary(16, 5, 5));  // x=16 → local x=0 (next chunk)
         assert!(!VoxelWorld::is_chunk_boundary(8, 8, 8));  // center of chunk
         assert!(VoxelWorld::is_chunk_boundary(-1, 0, 0));  // x=-1 → local x=15
+    }
+
+    // -----------------------------------------------------------------------
+    // Area operation tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn remove_box_clears_region() {
+        let mut world = VoxelWorld::default();
+        // Fill a 4x4x4 solid cube.
+        world.fill_box((0, 0, 0), (3, 3, 3), VoxelMaterial::Stone);
+        for vx in 0..=3 { for vy in 0..=3 { for vz in 0..=3 {
+            assert!(world.get_voxel(vx, vy, vz).material.is_solid());
+        }}}
+
+        // Remove a 2x2x2 subregion.
+        let results = world.remove_box((1, 1, 1), (2, 2, 2));
+        assert_eq!(results.len(), 8, "should have removed 2x2x2 = 8 voxels");
+        for (mat, _) in &results {
+            assert_eq!(*mat, VoxelMaterial::Stone);
+        }
+
+        // Inner region should be air.
+        for vx in 1..=2 { for vy in 1..=2 { for vz in 1..=2 {
+            assert_eq!(world.get_voxel(vx, vy, vz).material, VoxelMaterial::Air);
+        }}}
+        // Outer shell should still be stone.
+        assert_eq!(world.get_voxel(0, 0, 0).material, VoxelMaterial::Stone);
+        assert_eq!(world.get_voxel(3, 3, 3).material, VoxelMaterial::Stone);
+    }
+
+    #[test]
+    fn remove_box_across_chunk_boundary() {
+        let mut world = VoxelWorld::default();
+        // Fill stone across the chunk boundary at x=14..17.
+        world.fill_box((14, 0, 0), (17, 0, 0), VoxelMaterial::Stone);
+
+        let results = world.remove_box((14, 0, 0), (17, 0, 0));
+        assert_eq!(results.len(), 4);
+
+        // All four should be air now — even across chunks.
+        for vx in 14..=17 {
+            assert_eq!(world.get_voxel(vx, 0, 0).material, VoxelMaterial::Air,
+                "voxel at x={} should be air after cross-chunk remove_box", vx);
+        }
+    }
+
+    #[test]
+    fn remove_box_skips_granite() {
+        let mut world = VoxelWorld::default();
+        world.fill_box((0, 0, 0), (2, 2, 2), VoxelMaterial::Granite);
+
+        let results = world.remove_box((0, 0, 0), (2, 2, 2));
+        assert_eq!(results.len(), 0, "granite is unbreakable, nothing should be removed");
+
+        // All should still be granite.
+        assert_eq!(world.get_voxel(1, 1, 1).material, VoxelMaterial::Granite);
+    }
+
+    #[test]
+    fn remove_sphere_shape() {
+        let mut world = VoxelWorld::default();
+        // Fill a big cube.
+        world.fill_box((-5, -5, -5), (5, 5, 5), VoxelMaterial::Dirt);
+
+        // Remove a sphere of radius 3 at the center.
+        let results = world.remove_sphere((0, 0, 0), 3);
+        assert!(results.len() > 0, "sphere removal should clear some voxels");
+
+        // Center should be air.
+        assert_eq!(world.get_voxel(0, 0, 0).material, VoxelMaterial::Air);
+        // Just outside radius should still be solid.
+        assert_eq!(world.get_voxel(4, 0, 0).material, VoxelMaterial::Dirt);
+        assert_eq!(world.get_voxel(0, 4, 0).material, VoxelMaterial::Dirt);
+        // Corner of sphere (3,0,0) should be air (3^2 = 9 <= 9).
+        assert_eq!(world.get_voxel(3, 0, 0).material, VoxelMaterial::Air);
+        // Diagonal (2,2,2) distance^2 = 12 > 9, should still be solid.
+        assert_eq!(world.get_voxel(2, 2, 2).material, VoxelMaterial::Dirt);
+    }
+
+    #[test]
+    fn remove_sphere_across_chunks() {
+        let mut world = VoxelWorld::default();
+        // Sphere centered at chunk boundary.
+        world.fill_box((12, 12, 12), (20, 20, 20), VoxelMaterial::Stone);
+        let results = world.remove_sphere((16, 16, 16), 3);
+        assert!(results.len() > 0);
+        // Center (16,16,16 — chunk boundary) should be air.
+        assert_eq!(world.get_voxel(16, 16, 16).material, VoxelMaterial::Air);
+        // Far corner should still be stone.
+        assert_eq!(world.get_voxel(20, 20, 20).material, VoxelMaterial::Stone);
+    }
+
+    #[test]
+    fn fill_box_and_replace() {
+        let mut world = VoxelWorld::default();
+        world.fill_box((0, 0, 0), (9, 9, 9), VoxelMaterial::Dirt);
+
+        // Replace dirt with stone in a subregion.
+        let count = world.replace_in_box((2, 2, 2), (7, 7, 7), VoxelMaterial::Dirt, VoxelMaterial::Stone);
+        assert_eq!(count, 6 * 6 * 6); // 216 replaced
+
+        // Inner should be stone, outer should still be dirt.
+        assert_eq!(world.get_voxel(5, 5, 5).material, VoxelMaterial::Stone);
+        assert_eq!(world.get_voxel(0, 0, 0).material, VoxelMaterial::Dirt);
+    }
+
+    #[test]
+    fn replace_only_matches_target_material() {
+        let mut world = VoxelWorld::default();
+        world.fill_box((0, 0, 0), (3, 3, 3), VoxelMaterial::Stone);
+        world.set_voxel(1, 1, 1, Voxel::new(VoxelMaterial::IronOre));
+
+        // Replace Stone→Dirt, should not touch the IronOre voxel.
+        let count = world.replace_in_box((0, 0, 0), (3, 3, 3), VoxelMaterial::Stone, VoxelMaterial::Dirt);
+        assert_eq!(count, 4 * 4 * 4 - 1); // all except the ore
+        assert_eq!(world.get_voxel(1, 1, 1).material, VoxelMaterial::IronOre);
+        assert_eq!(world.get_voxel(0, 0, 0).material, VoxelMaterial::Dirt);
+    }
+
+    #[test]
+    fn remove_box_returns_yields() {
+        let mut world = VoxelWorld::default();
+        world.fill_box((0, 0, 0), (1, 1, 1), VoxelMaterial::IronOre);
+
+        let results = world.remove_box((0, 0, 0), (1, 1, 1));
+        assert_eq!(results.len(), 8);
+        for (mat, yield_info) in &results {
+            assert_eq!(*mat, VoxelMaterial::IronOre);
+            let (commodity, amount) = yield_info.unwrap();
+            assert_eq!(commodity, crate::world_sim::commodity::IRON);
+            assert!(amount > 0.0);
+        }
     }
 }
