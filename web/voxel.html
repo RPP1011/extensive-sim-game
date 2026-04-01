@@ -578,6 +578,15 @@ async function init() {
     camPos[2] = centerY - 30;  // slightly behind
     camPitch = -0.4; // look downward
     console.log(`Camera at volume-local (${camPos[0].toFixed(1)}, ${camPos[1].toFixed(1)}, ${camPos[2].toFixed(1)})`);
+
+    // Count non-air voxels in the uploaded data
+    let nonAirCount = 0;
+    for (let i = 0; i < materialData.length; i++) {
+      if (materialData[i] !== 0) nonAirCount++;
+    }
+    console.log(`Material data: ${nonAirCount} non-air voxels out of ${materialData.length} total (${(nonAirCount/materialData.length*100).toFixed(1)}%)`);
+    console.log(`Volume origin (chunk): [${volumeOrigin}], volume origin (voxel): [${volumeOrigin[0]*16}, ${volumeOrigin[1]*16}, ${volumeOrigin[2]*16}]`);
+    console.log(`Volume size: ${VOL_W}x${VOL_H}x${VOL_D}`);
   }
 }
 
@@ -822,6 +831,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (t > MAX_DIST) { break; }
     }
 
+    // DEBUG: show what the ray sees at a fixed depth into the volume
+    // Red channel = SDF value at ray start, Green = material at ray start
+    let debug_pos = ray_origin + ray_dir * 5.0;
+    let debug_sdf = sample_sdf(ray_origin);
+    let debug_mat = sample_material(ray_origin);
+    let vs = vec3<f32>(cam.vol_size.xyz);
+    let in_volume = all(ray_origin >= vec3<f32>(0.0)) && all(ray_origin < vs);
+
     var color: vec4<f32>;
     if (hit) {
         let n = sdf_normal(hit_pos);
@@ -837,8 +854,54 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let lit = base * (amb + diff * 0.75);
         color = vec4<f32>(mix(lit, sky, fog_t), 1.0);
     } else {
-        let sky_t = ray_dir.y * 0.5 + 0.5;
-        color = vec4<f32>(mix(vec3<f32>(0.55,0.70,0.90), vec3<f32>(0.30,0.50,0.85), sky_t), 1.0);
+        // Debug visualization: show volume bounds and SDF data
+        if (in_volume) {
+            // Inside volume but no hit — show SDF value as grayscale
+            // Negative (solid) = red, positive (air) = blue, near-zero = green
+            let sv = debug_sdf;
+            if (sv < -0.5) {
+                color = vec4<f32>(min(-sv / 10.0, 1.0), 0.0, 0.0, 1.0); // red = inside solid
+            } else if (sv > 0.5) {
+                color = vec4<f32>(0.0, 0.0, min(sv / 10.0, 1.0), 1.0); // blue = in air
+            } else {
+                color = vec4<f32>(0.0, 1.0, 0.0, 1.0); // green = near surface
+            }
+            // Mark material presence: brighten if non-air material at camera
+            if (debug_mat > 0u) {
+                color = vec4<f32>(1.0, 0.5, 0.0, 1.0); // orange = solid material at camera pos
+            }
+        } else {
+            // Outside volume — sky with subtle grid showing volume edges
+            let sky_t = ray_dir.y * 0.5 + 0.5;
+            color = vec4<f32>(mix(vec3<f32>(0.55,0.70,0.90), vec3<f32>(0.30,0.50,0.85), sky_t), 1.0);
+
+            // Draw volume bounding box outline
+            // Check if ray intersects the AABB [0, vol_size]
+            let inv_dir = 1.0 / ray_dir;
+            let t1 = (vec3<f32>(0.0) - ray_origin) * inv_dir;
+            let t2 = (vs - ray_origin) * inv_dir;
+            let tmin_v = min(t1, t2);
+            let tmax_v = max(t1, t2);
+            let tmin = max(tmin_v.x, max(tmin_v.y, tmin_v.z));
+            let tmax = min(tmax_v.x, min(tmax_v.y, tmax_v.z));
+            if (tmin < tmax && tmax > 0.0) {
+                // Ray hits volume box — draw a white outline
+                let entry = ray_origin + ray_dir * max(tmin, 0.0);
+                let edge_dist = min(
+                    min(min(entry.x, vs.x - entry.x), min(entry.y, vs.y - entry.y)),
+                    min(entry.z, vs.z - entry.z)
+                );
+                if (edge_dist < 1.0) {
+                    color = vec4<f32>(1.0, 1.0, 1.0, 1.0); // white edge
+                } else {
+                    // Inside volume box from outside — show SDF at entry point
+                    let entry_sdf = sample_sdf(entry);
+                    if (entry_sdf < 0.0) {
+                        color = vec4<f32>(0.8, 0.2, 0.2, 1.0); // red = solid at entry
+                    }
+                }
+            }
+        }
     }
 
     textureStore(output, vec2<i32>(gid.xy), color);
