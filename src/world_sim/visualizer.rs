@@ -226,6 +226,19 @@ pub struct TraceFrame {
     /// WFC building interiors near the selected entity (if any).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub building_interiors: Vec<BuildingInteriorView>,
+    /// Voxel surface data for 3D terrain rendering.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub voxel_surfaces: Vec<VoxelSurfaceEntry>,
+}
+
+/// A visible surface voxel for the 3D renderer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VoxelSurfaceEntry {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub material: u8,       // VoxelMaterial as u8
+    pub normal: [f32; 3],   // surface normal for lighting
 }
 
 // ---------------------------------------------------------------------------
@@ -671,7 +684,76 @@ pub fn generate_frame_with_selection(
         summary,
         selected_npc,
         building_interiors,
+        voxel_surfaces: extract_voxel_surfaces(state),
     }
+}
+
+/// Extract visible surface voxels from the voxel world for 3D rendering.
+/// Only sends surface voxels (solid adjacent to air), capped for bandwidth.
+fn extract_voxel_surfaces(state: &WorldState) -> Vec<VoxelSurfaceEntry> {
+    use super::voxel::*;
+
+    let vw = &state.voxel_world;
+    if vw.chunks.is_empty() { return Vec::new(); }
+
+    let mut surfaces = Vec::new();
+    let max_surfaces = 8000; // bandwidth cap
+
+    for chunk in vw.chunks.values() {
+        if surfaces.len() >= max_surfaces { break; }
+
+        let base_x = chunk.pos.x * CHUNK_SIZE as i32;
+        let base_y = chunk.pos.y * CHUNK_SIZE as i32;
+        let base_z = chunk.pos.z * CHUNK_SIZE as i32;
+
+        for lz in 0..CHUNK_SIZE {
+            for ly in 0..CHUNK_SIZE {
+                for lx in 0..CHUNK_SIZE {
+                    if surfaces.len() >= max_surfaces { break; }
+
+                    let voxel = chunk.get(lx, ly, lz);
+                    if !voxel.material.is_solid() { continue; }
+
+                    // Check if any face-neighbor is air (surface detection).
+                    let gx = base_x + lx as i32;
+                    let gy = base_y + ly as i32;
+                    let gz = base_z + lz as i32;
+
+                    let is_surface = [(1i32,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1)]
+                        .iter()
+                        .any(|&(dx, dy, dz)| {
+                            !vw.get_voxel(gx + dx, gy + dy, gz + dz).material.is_solid()
+                        });
+
+                    if !is_surface { continue; }
+
+                    // Compute normal from exposed faces.
+                    let mut nx = 0.0f32;
+                    let mut ny = 0.0f32;
+                    let mut nz = 0.0f32;
+                    for &(dx, dy, dz) in &[(1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1)] {
+                        if !vw.get_voxel(gx + dx, gy + dy, gz + dz).material.is_solid() {
+                            nx += dx as f32;
+                            ny += dy as f32;
+                            nz += dz as f32;
+                        }
+                    }
+                    let mag = (nx * nx + ny * ny + nz * nz).sqrt().max(0.001);
+
+                    let (wx, wy, wz) = voxel_to_world(gx, gy, gz);
+                    surfaces.push(VoxelSurfaceEntry {
+                        x: wx,
+                        y: wy,
+                        z: wz,
+                        material: voxel.material as u8,
+                        normal: [nx / mag, ny / mag, nz / mag],
+                    });
+                }
+            }
+        }
+    }
+
+    surfaces
 }
 
 // ---------------------------------------------------------------------------
@@ -809,6 +891,7 @@ impl PlaybackController {
                 events: vec![],
                 selected_npc: None,
                 building_interiors: vec![],
+                voxel_surfaces: vec![],
                 summary: FrameSummary {
                     alive_npcs: 0,
                     alive_monsters: 0,

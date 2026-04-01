@@ -1016,6 +1016,11 @@ function onFrame(data) {
   // Build/clear interior geometry (only present near selected entity)
   buildInteriors(data.building_interiors);
 
+  // Voxel terrain rendering
+  if (data.voxel_surfaces && data.voxel_surfaces.length > 0) {
+    updateVoxelTerrain(data.voxel_surfaces);
+  }
+
   // Update NPC detail panel if selected
   if (data.selected_npc) {
     updateNpcPanel(data.selected_npc);
@@ -1284,6 +1289,99 @@ function updateNpcPanel(npc) {
         : '<div style="font-size:10px;color:#555">No commodities</div>'}
     </div>
   `;
+}
+
+// ============================================================
+// VOXEL TERRAIN RENDERING
+// ============================================================
+let voxelGroup = new THREE.Group();
+scene.add(voxelGroup);
+let voxelMeshes = {};    // keyed by material id
+let lastVoxelCount = 0;
+
+const VOXEL_MATERIAL_COLORS = {
+  1: 0x73522e,   // Dirt
+  2: 0x808080,   // Stone
+  3: 0x595451,   // Granite
+  4: 0xd9c78c,   // Sand
+  5: 0x99734d,   // Clay
+  6: 0x8c8579,   // Gravel
+  7: 0x408c2e,   // Grass
+  8: 0x2659a6,   // Water
+  9: 0xe64d0d,   // Lava
+  10: 0xb3d9f2,  // Ice
+  11: 0xe6ebf2,  // Snow
+  12: 0x8c664d,  // IronOre
+  13: 0x997340,  // CopperOre
+  14: 0xccb333,  // GoldOre
+  15: 0x262626,  // Coal
+  16: 0x994dcc,  // Crystal
+  17: 0x805933,  // WoodLog
+  18: 0xa6804d,  // WoodPlanks
+  19: 0x99948c,  // StoneBlock
+  20: 0x8c8780,  // StoneBrick
+  21: 0xb39959,  // Thatch
+  22: 0x80808c,  // Iron
+  23: 0xccd9e6,  // Glass
+  24: 0x59401f,  // Farmland
+  25: 0x339919,  // Crop
+};
+
+function updateVoxelTerrain(surfaces) {
+  // Only rebuild when count changes significantly (avoid per-frame rebuild)
+  if (Math.abs(surfaces.length - lastVoxelCount) < 10) return;
+  lastVoxelCount = surfaces.length;
+
+  // Clear old meshes
+  while (voxelGroup.children.length > 0) {
+    const child = voxelGroup.children[0];
+    voxelGroup.remove(child);
+    if (child.geometry) child.geometry.dispose();
+    if (child.material) child.material.dispose();
+  }
+
+  if (surfaces.length === 0) return;
+
+  // Group surfaces by material
+  const groups = {};
+  for (const s of surfaces) {
+    const key = s.material;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(s);
+  }
+
+  const geo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+
+  for (const [matId, group] of Object.entries(groups)) {
+    const color = VOXEL_MATERIAL_COLORS[matId] || 0xcc33cc;
+    const mat = new THREE.MeshStandardMaterial({
+      color: color,
+      roughness: 0.85,
+      metalness: 0.05,
+      flatShading: true,
+    });
+    // Water gets transparency
+    if (parseInt(matId) === 8) {
+      mat.transparent = true;
+      mat.opacity = 0.5;
+    }
+
+    const mesh = new THREE.InstancedMesh(geo, mat, group.length);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    const m = new THREE.Matrix4();
+    for (let i = 0; i < group.length; i++) {
+      const s = group[i];
+      // Swap y/z: Rust uses y=horizontal, z=vertical. Three.js uses y=up.
+      m.setPosition(s.x, s.z, s.y);
+      mesh.setMatrixAt(i, m);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    voxelGroup.add(mesh);
+  }
+
+  console.log(`Voxels: ${surfaces.length} surface voxels, ${Object.keys(groups).length} materials`);
 }
 
 // ============================================================

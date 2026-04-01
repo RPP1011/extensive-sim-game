@@ -65,6 +65,16 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
 
     let mut sim = WorldSim::new(state);
 
+    // Report voxel world stats.
+    {
+        let st = sim.state();
+        let chunks = st.voxel_world.chunk_count();
+        let solid = st.voxel_world.total_solid();
+        if chunks > 0 {
+            println!("Voxel world: {} chunks loaded, {} solid voxels", chunks, solid);
+        }
+    }
+
     // WebSocket mode: stream TraceFrame JSON to browser visualizer
     if let Some(port) = args.ws {
         return run_ws_server(&mut sim, port, &args);

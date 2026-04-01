@@ -1280,6 +1280,22 @@ impl WorldSim {
         // Spawn physical resource nodes based on region terrain.
         super::systems::resource_nodes::spawn_initial_resources(&mut initial);
 
+        // Generate voxel terrain chunks around settlements and NPC positions.
+        {
+            let seed = initial.rng_state;
+            // Load chunks around each settlement center.
+            for s in &initial.settlements {
+                initial.voxel_world.ensure_loaded_around(s.pos.0, s.pos.1, 30.0, 2, seed);
+            }
+            // Load chunks around NPC positions.
+            for e in &initial.entities {
+                if e.alive && e.kind == super::state::EntityKind::Npc {
+                    let sz = initial.voxel_world.surface_height(e.pos.0 as i32, e.pos.1 as i32) as f32;
+                    initial.voxel_world.ensure_loaded_around(e.pos.0, e.pos.1, sz, 1, seed);
+                }
+            }
+        }
+
         // Sort entities by settlement/party, build hot/cold + all indices.
         initial.rebuild_all_indices();
 
