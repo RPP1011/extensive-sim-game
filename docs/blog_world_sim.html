@@ -386,7 +386,7 @@ pub mod faction_ai;         // military buildup, diplomatic stance
 pub mod warfare;            // sieges, conquest, wall damage
 pub mod adventuring;        // party formation, quest execution
 pub mod monster_ecology;    // reproduction, migration, den formation
-pub mod legends;            // legendary NPC detection
+pub mod legends;            // renowned NPC detection
 pub mod death_consequences; // funerals, inheritance, mourning
 pub mod civil_war;          // internal faction tension &rarr; revolt
 pub mod espionage;          // spy missions, information gathering
@@ -472,7 +472,7 @@ pub mod prophecy;           // visions and foreshadowing
 <tr><td>Shelter</td><td>Has home building?</td><td>Eviction, building destruction</td></tr>
 <tr><td>Social</td><td>Isolation duration</td><td>Conversations, festivals, funerals</td></tr>
 <tr><td>Purpose</td><td>Has active goal?</td><td>Quest completion, class progression</td></tr>
-<tr><td>Esteem</td><td>Reputation, level</td><td>Chronicle mentions, legendary deeds</td></tr>
+<tr><td>Esteem</td><td>Reputation, level</td><td>Chronicle mentions, notable deeds</td></tr>
 </tbody>
 </table>
 
@@ -485,7 +485,7 @@ pub mod prophecy;           // visions and foreshadowing
 <li><strong>Anger</strong> &mdash; friend death (if killer known), betrayal, theft</li>
 <li><strong>Fear</strong> &mdash; monster proximity, siege, low safety need</li>
 <li><strong>Grief</strong> &mdash; friend death, settlement destruction, exile</li>
-<li><strong>Pride</strong> &mdash; chronicle mention, legendary status, oath fulfillment</li>
+<li><strong>Pride</strong> &mdash; chronicle mention, renowned status, oath fulfillment</li>
 <li><strong>Anxiety</strong> &mdash; low purpose, threatening world events, debt</li>
 </ul>
 
@@ -620,13 +620,13 @@ pub const FAITH: u32    = tag(b"faith");
 
 <p>The trigger: 100+ hostile monsters near a walled settlement with 10+ within 50 distance units.</p>
 
-<p>Survivors of sieges gain massive <code>RESILIENCE</code> and <code>COMBAT</code> tags. Siege survivors who were already legendary get chronicle entries that echo through the world &mdash; other NPCs hear about the defense, morale shifts, grudges form against the attacking faction.</p>
+<p>Survivors of sieges gain massive <code>RESILIENCE</code> and <code>COMBAT</code> tags. Siege survivors who were already renowned get chronicle entries that echo through the world &mdash; other NPCs hear about the defense, morale shifts, grudges form against the attacking faction.</p>
 
 <hr>
 
-<h2>Legends and Death</h2>
+<h2>Renown and Death</h2>
 
-<p>NPCs become legendary through deeds, not levels. The criteria:</p>
+<p>NPCs become renowned through deeds, not levels. The criteria:</p>
 
 <ul>
 <li>5+ chronicle mentions</li>
@@ -634,9 +634,9 @@ pub const FAITH: u32    = tag(b"faith");
 <li>Survived 3+ friend deaths</li>
 </ul>
 
-<p>Legends boost settlement morale (+5 for all residents), attract followers seeking purpose, and get "the Legendary" appended to their name.</p>
+<p>Renowned NPCs boost settlement morale (+5 for all residents), attract followers seeking purpose, and earn a title.</p>
 
-<p>When a legend dies, the consequences cascade:</p>
+<p>When a renowned NPC dies, the consequences cascade:</p>
 
 <ul>
 <li><strong>Worldwide mourning:</strong> all NPCs with a relationship take grief spikes</li>
@@ -646,7 +646,7 @@ pub const FAITH: u32    = tag(b"faith");
 <li><strong>Chronicle entry:</strong> rate-limited to 5 per tick, gated to level 30+ for notable deaths</li>
 </ul>
 
-<p>The apprentice lineage system means skills propagate through generations. A legendary smith's apprentice carries forward smithing tags, and if they reach legendary status themselves, the chronicle tracks the unbroken lineage.</p>
+<p>The apprentice lineage system means skills propagate through generations. A renowned smith's apprentice carries forward smithing tags, and if they reach renown themselves, the chronicle tracks the unbroken lineage.</p>
 
 <hr>
 
@@ -684,7 +684,7 @@ pub const FAITH: u32    = tag(b"faith");
 <p>None of the following behaviors are scripted. They emerge from system interactions:</p>
 
 <div class="callout">
-<p>An NPC witnesses their mentor's murder &rarr; forms a grudge &rarr; joins an adventuring party biased toward the killer's region &rarr; finds and kills the murderer &rarr; pride spike &rarr; gains "Avenger" chronicle entry &rarr; becomes legendary</p>
+<p>An NPC witnesses their mentor's murder &rarr; forms a grudge &rarr; joins an adventuring party biased toward the killer's region &rarr; finds and kills the murderer &rarr; pride spike &rarr; gains "Avenger" chronicle entry &rarr; becomes renowned</p>
 </div>
 
 <div class="callout">
