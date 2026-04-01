@@ -4,13 +4,13 @@
 //! across random seeds and tick counts.
 
 use proptest::prelude::*;
-use bevy_game::world_sim::runtime::WorldSim;
-use bevy_game::world_sim::state::{
+use game::world_sim::runtime::WorldSim;
+use game::world_sim::state::{
     WorldState, Entity, EntityKind, SettlementState,
     FactionState, DiplomaticStance, RegionState, Terrain, LocalGrid,
     Inventory,
 };
-use bevy_game::world_sim::fidelity::Fidelity;
+use game::world_sim::fidelity::Fidelity;
 use std::collections::HashSet;
 
 /// Build a small but complete world state for property testing.

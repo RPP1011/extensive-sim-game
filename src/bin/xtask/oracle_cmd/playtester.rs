@@ -317,8 +317,8 @@ struct AgentSummary {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn run_playtester(args: crate::cli::PlaytesterArgs) -> ExitCode {
-    use bevy_game::ai::core::ability_transformer::tokenizer::AbilityTokenizer;
-    use bevy_game::scenario::load_scenario_file;
+    use game::ai::core::ability_transformer::tokenizer::AbilityTokenizer;
+    use game::scenario::load_scenario_file;
 
     let paths: Vec<_> = args.path.iter().flat_map(|p| collect_toml_paths(p)).collect();
     if paths.is_empty() {

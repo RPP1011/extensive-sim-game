@@ -2,8 +2,8 @@
 //!
 //! Run with: cargo test --test terrain_visualize -- --nocapture
 
-use bevy_game::mission::room_gen::generate_room;
-use bevy_game::game_core::RoomType;
+use game::mission::room_gen::generate_room;
+use game::game_core::RoomType;
 
 fn render_room(seed: u64) {
     let layout = generate_room(seed, RoomType::Entry);

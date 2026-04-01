@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use bevy::prelude::*;
 use super::schema::ContentData;
 use super::validation::{self, ValidationError};
 
@@ -115,7 +114,7 @@ pub struct ContentEntry {
 }
 
 /// Typed content registry — the central store for all game content.
-#[derive(Resource, Default)]
+#[derive(Default)]
 pub struct ContentRegistry {
     entries: HashMap<ContentId, ContentEntry>,
 }

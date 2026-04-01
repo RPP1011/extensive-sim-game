@@ -52,7 +52,7 @@ pub struct CampaignProgressState {
     pub local_source_region_id: Option<usize>,
 }
 
-#[derive(bevy::prelude::Resource, Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default)]
 pub struct CharacterCreationState {
     #[serde(default)]
     pub selected_faction_id: Option<String>,

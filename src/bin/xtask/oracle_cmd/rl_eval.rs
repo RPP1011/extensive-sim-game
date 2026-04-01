@@ -7,8 +7,8 @@ use super::collect_toml_paths;
 use super::transformer_rl::{Policy, run_rl_episode};
 
 pub(crate) fn run_eval(args: crate::cli::TransformerRlEvalArgs) -> ExitCode {
-    use bevy_game::ai::core::ability_transformer::tokenizer::AbilityTokenizer;
-    use bevy_game::scenario::{load_scenario_file, run_scenario_to_state_with_room};
+    use game::ai::core::ability_transformer::tokenizer::AbilityTokenizer;
+    use game::scenario::{load_scenario_file, run_scenario_to_state_with_room};
 
     let policy = match Policy::load(&args.weights) {
         Ok(p) => p,
@@ -31,7 +31,7 @@ pub(crate) fn run_eval(args: crate::cli::TransformerRlEvalArgs) -> ExitCode {
 
     // Load embedding registry if provided
     let registry = if let Some(ref reg_path) = args.embedding_registry {
-        match bevy_game::ai::core::ability_transformer::EmbeddingRegistry::from_file(
+        match game::ai::core::ability_transformer::EmbeddingRegistry::from_file(
             reg_path.to_str().unwrap_or(""),
         ) {
             Ok(r) => {
@@ -58,7 +58,7 @@ pub(crate) fn run_eval(args: crate::cli::TransformerRlEvalArgs) -> ExitCode {
         None
     };
     let enemy_registry = if let Some(ref reg_path) = args.enemy_registry {
-        match bevy_game::ai::core::ability_transformer::EmbeddingRegistry::from_file(
+        match game::ai::core::ability_transformer::EmbeddingRegistry::from_file(
             reg_path.to_str().unwrap_or(""),
         ) {
             Ok(r) => {

@@ -167,13 +167,13 @@ pub(crate) const MAX_ABILITIES: usize = 8;
 
 /// V5 actor-critic policy, combined squad AI, or random baseline.
 pub(crate) enum Policy {
-    ActorCriticV5(bevy_game::ai::core::ability_transformer::ActorCriticWeightsV5),
+    ActorCriticV5(game::ai::core::ability_transformer::ActorCriticWeightsV5),
     /// GPU inference via Burn/LibTorch (in-process, no SHM) — V5 model.
     #[cfg(feature = "burn-gpu")]
-    BurnServer(std::sync::Arc<bevy_game::ai::core::burn_model::inference::BurnInferenceClient>),
+    BurnServer(std::sync::Arc<game::ai::core::burn_model::inference::BurnInferenceClient>),
     /// GPU inference via Burn/LibTorch — V6 model (spatial cross-attn + latent interface).
     #[cfg(feature = "burn-gpu")]
-    BurnServerV6(std::sync::Arc<bevy_game::ai::core::burn_model::inference_v6::BurnInferenceClientV6>),
+    BurnServerV6(std::sync::Arc<game::ai::core::burn_model::inference_v6::BurnInferenceClientV6>),
     /// Uses existing squad AI -- no transformer.
     Combined,
     /// Uniformly random actions -- no model inference.
@@ -184,7 +184,7 @@ impl Policy {
     pub(crate) fn load(path: &std::path::Path) -> Result<Self, String> {
         let json_str = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
-        Ok(Policy::ActorCriticV5(bevy_game::ai::core::ability_transformer::ActorCriticWeightsV5::from_json(&json_str)?))
+        Ok(Policy::ActorCriticV5(game::ai::core::ability_transformer::ActorCriticWeightsV5::from_json(&json_str)?))
     }
 
     pub(crate) fn encode_cls(&self, token_ids: &[u32]) -> Vec<f32> {
@@ -239,8 +239,8 @@ pub(crate) fn apply_action_mask(combat_mask: &mut [bool], action_mask: Option<&s
 
 #[allow(dead_code)]
 pub(crate) struct PrecomputedScenario {
-    pub(crate) sim: bevy_game::ai::core::SimState,
-    pub(crate) squad_ai: bevy_game::ai::squad::SquadAiState,
+    pub(crate) sim: game::ai::core::SimState,
+    pub(crate) squad_ai: game::ai::squad::SquadAiState,
     pub(crate) scenario_name: String,
     pub(crate) max_ticks: u64,
     pub(crate) unit_abilities: std::collections::HashMap<u32, Vec<Vec<u32>>>,
@@ -257,19 +257,19 @@ pub(crate) struct PrecomputedScenario {
     pub(crate) drill_target_position: Option<[f32; 2]>,
     pub(crate) drill_target_radius: Option<f32>,
     pub(crate) action_mask: Option<String>,
-    pub(crate) objective: Option<bevy_game::scenario::ObjectiveDef>,
+    pub(crate) objective: Option<game::scenario::ObjectiveDef>,
 }
 
 /// Build all scenario templates once. Returns one `PrecomputedScenario` per scenario.
 pub(crate) fn precompute_scenarios(
-    scenario_files: &[bevy_game::scenario::ScenarioFile],
+    scenario_files: &[game::scenario::ScenarioFile],
     max_ticks_override: Option<u64>,
-    tokenizer: &bevy_game::ai::core::ability_transformer::tokenizer::AbilityTokenizer,
-    registry: Option<&bevy_game::ai::core::ability_transformer::EmbeddingRegistry>,
+    tokenizer: &game::ai::core::ability_transformer::tokenizer::AbilityTokenizer,
+    registry: Option<&game::ai::core::ability_transformer::EmbeddingRegistry>,
 ) -> Vec<PrecomputedScenario> {
-    use bevy_game::ai::core::Team;
-    use bevy_game::ai::effects::dsl::emit::emit_ability_dsl;
-    use bevy_game::scenario::run_scenario_to_state_with_room;
+    use game::ai::core::Team;
+    use game::ai::effects::dsl::emit::emit_ability_dsl;
+    use game::scenario::run_scenario_to_state_with_room;
 
     scenario_files.iter().map(|sf| {
         let cfg = &sf.scenario;

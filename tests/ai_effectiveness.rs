@@ -4,7 +4,7 @@
 //! different enemy group sizes, compositions, difficulties, and room types.
 //! Results are printed as a summary table.
 
-use bevy_game::scenario::{run_scenario, ScenarioCfg};
+use game::scenario::{run_scenario, ScenarioCfg};
 
 fn cfg(
     name: &str,

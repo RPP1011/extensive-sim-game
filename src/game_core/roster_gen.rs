@@ -1,5 +1,3 @@
-use bevy::prelude::*;
-
 use super::generation::*;
 use super::overworld_types::OverworldMap;
 use super::roster_types::*;
@@ -59,32 +57,6 @@ pub fn generate_recruit_for_overworld(
         resolve: 52.0 + rand01(seed, id as u64 + 11) * 34.0,
         loyalty_bias: 44.0 + rand01(seed, id as u64 + 31) * 30.0,
         risk_tolerance: 28.0 + rand01(seed, id as u64 + 53) * 55.0,
-    }
-}
-
-pub fn sync_roster_lore_with_overworld_system(
-    overworld: Res<OverworldMap>,
-    mut roster: ResMut<CampaignRoster>,
-) {
-    if overworld.regions.is_empty() || overworld.factions.is_empty() {
-        return;
-    }
-    for recruit in &mut roster.recruit_pool {
-        let seed = overworld.map_seed ^ 0xA11C_E555_u64;
-        let refreshed = generate_recruit_for_overworld(seed, recruit.id, &overworld);
-        recruit.origin_faction_id = refreshed.origin_faction_id;
-        recruit.origin_region_id = refreshed.origin_region_id;
-        recruit.backstory = refreshed.backstory;
-    }
-    for hero in &mut roster.heroes {
-        if !hero.backstory.is_empty() {
-            continue;
-        }
-        let seed = overworld.map_seed ^ 0xBACC_5700_u64;
-        let generated = generate_recruit_for_overworld(seed, hero.id, &overworld);
-        hero.origin_faction_id = generated.origin_faction_id;
-        hero.origin_region_id = generated.origin_region_id;
-        hero.backstory = generated.backstory;
     }
 }
 

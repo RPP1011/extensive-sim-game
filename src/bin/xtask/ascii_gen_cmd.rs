@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use bevy_game::ascii_gen::{AsciiArtGenerator, AsciiArtRequest, AsciiArtStyle};
+use game::ascii_gen::{AsciiArtGenerator, AsciiArtRequest, AsciiArtStyle};
 
 use super::cli::{AsciiGenCommand, AsciiGenSubcommand};
 

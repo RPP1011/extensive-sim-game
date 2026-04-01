@@ -1,8 +1,8 @@
 use std::process::ExitCode;
 
-use bevy_game::world_sim::*;
-use bevy_game::world_sim::state::{DungeonSite, SubBiome, MemEventType, TradeRoute};
-use bevy_game::world_sim::runtime::WorldSim;
+use game::world_sim::*;
+use game::world_sim::state::{DungeonSite, SubBiome, MemEventType, TradeRoute};
+use game::world_sim::runtime::WorldSim;
 // Trace recording is done inline (not via WorldSimTraceRecorder) to avoid borrow conflicts.
 
 use super::cli::WorldSimArgs;
@@ -151,35 +151,35 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
                 for y in render_min_y..=render_max_y {
                     eprint!("{:>4} ", y);
                     for x in render_min_x..=render_max_x {
-                        let pos = bevy_game::world_sim::state::TilePos::new(x, y);
+                        let pos = game::world_sim::state::TilePos::new(x, y);
                         let ch = match st.tiles.get(&pos) {
                             Some(t) => match t.tile_type {
-                                bevy_game::world_sim::state::TileType::Floor(_) => '.',
-                                bevy_game::world_sim::state::TileType::Wall(_) => '#',
-                                bevy_game::world_sim::state::TileType::Door => '+',
-                                bevy_game::world_sim::state::TileType::Path => ':',
-                                bevy_game::world_sim::state::TileType::Fence => '|',
-                                bevy_game::world_sim::state::TileType::Farmland => '%',
-                                bevy_game::world_sim::state::TileType::Moat => '~',
-                                bevy_game::world_sim::state::TileType::Water => '≈',
-                                bevy_game::world_sim::state::TileType::Bed => 'b',
-                                bevy_game::world_sim::state::TileType::Hearth => 'h',
-                                bevy_game::world_sim::state::TileType::Workspace(_) => 'w',
-                                bevy_game::world_sim::state::TileType::Altar => 'a',
-                                bevy_game::world_sim::state::TileType::Bookshelf => 'B',
-                                bevy_game::world_sim::state::TileType::StorageContainer => 's',
-                                bevy_game::world_sim::state::TileType::MarketStall => 'M',
-                                bevy_game::world_sim::state::TileType::WeaponRack => 'W',
-                                bevy_game::world_sim::state::TileType::TowerBase => 'T',
-                                bevy_game::world_sim::state::TileType::GateHouse => 'G',
-                                bevy_game::world_sim::state::TileType::Trap => '^',
+                                game::world_sim::state::TileType::Floor(_) => '.',
+                                game::world_sim::state::TileType::Wall(_) => '#',
+                                game::world_sim::state::TileType::Door => '+',
+                                game::world_sim::state::TileType::Path => ':',
+                                game::world_sim::state::TileType::Fence => '|',
+                                game::world_sim::state::TileType::Farmland => '%',
+                                game::world_sim::state::TileType::Moat => '~',
+                                game::world_sim::state::TileType::Water => '≈',
+                                game::world_sim::state::TileType::Bed => 'b',
+                                game::world_sim::state::TileType::Hearth => 'h',
+                                game::world_sim::state::TileType::Workspace(_) => 'w',
+                                game::world_sim::state::TileType::Altar => 'a',
+                                game::world_sim::state::TileType::Bookshelf => 'B',
+                                game::world_sim::state::TileType::StorageContainer => 's',
+                                game::world_sim::state::TileType::MarketStall => 'M',
+                                game::world_sim::state::TileType::WeaponRack => 'W',
+                                game::world_sim::state::TileType::TowerBase => 'T',
+                                game::world_sim::state::TileType::GateHouse => 'G',
+                                game::world_sim::state::TileType::Trap => '^',
                                 _ => '?',
                             },
                             None => {
                                 // Check if an NPC is here.
                                 let has_npc = st.entities.iter().any(|e| {
                                     e.alive && e.kind == EntityKind::Npc
-                                        && bevy_game::world_sim::state::TilePos::from_world(e.pos.0, e.pos.1) == pos
+                                        && game::world_sim::state::TilePos::from_world(e.pos.0, e.pos.1) == pos
                                 });
                                 if has_npc { '@' } else { ' ' }
                             }
@@ -193,13 +193,13 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
                 let mut type_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
                 for t in st.tiles.values() {
                     let name = match t.tile_type {
-                        bevy_game::world_sim::state::TileType::Floor(_) => "Floor",
-                        bevy_game::world_sim::state::TileType::Wall(_) => "Wall",
-                        bevy_game::world_sim::state::TileType::Door => "Door",
-                        bevy_game::world_sim::state::TileType::Path => "Path",
-                        bevy_game::world_sim::state::TileType::Fence => "Fence",
-                        bevy_game::world_sim::state::TileType::Farmland => "Farmland",
-                        bevy_game::world_sim::state::TileType::Moat => "Moat",
+                        game::world_sim::state::TileType::Floor(_) => "Floor",
+                        game::world_sim::state::TileType::Wall(_) => "Wall",
+                        game::world_sim::state::TileType::Door => "Door",
+                        game::world_sim::state::TileType::Path => "Path",
+                        game::world_sim::state::TileType::Fence => "Fence",
+                        game::world_sim::state::TileType::Farmland => "Farmland",
+                        game::world_sim::state::TileType::Moat => "Moat",
                         _ => "Other",
                     };
                     *type_counts.entry(name).or_default() += 1;
@@ -291,7 +291,7 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
             let tps = total_ticks as f64 / elapsed;
 
             // Compute global avg morale, fear, pride across all alive NPCs.
-            let npc_data: Vec<&bevy_game::world_sim::state::NpcData> = st.entities.iter()
+            let npc_data: Vec<&game::world_sim::state::NpcData> = st.entities.iter()
                 .filter(|e| e.alive && e.kind == EntityKind::Npc)
                 .filter_map(|e| e.npc.as_ref())
                 .collect();
@@ -355,7 +355,7 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
     }
     // Forge worker stats
     {
-        use bevy_game::world_sim::state::BuildingType;
+        use game::world_sim::state::BuildingType;
         let forge_buildings = s.entities.iter()
             .filter(|e| e.alive && e.kind == EntityKind::Building)
             .filter(|e| e.building.as_ref().map(|b| b.building_type == BuildingType::Forge).unwrap_or(false))
@@ -377,10 +377,10 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
             .filter(|e| e.alive && e.kind == EntityKind::Npc)
             .filter_map(|e| e.npc.as_ref())
             .map(|n| match &n.work_state {
-                bevy_game::world_sim::state::WorkState::Idle => "idle",
-                bevy_game::world_sim::state::WorkState::TravelingToWork { .. } => "traveling",
-                bevy_game::world_sim::state::WorkState::Working { .. } => "working",
-                bevy_game::world_sim::state::WorkState::CarryingToStorage { .. } => "carrying",
+                game::world_sim::state::WorkState::Idle => "idle",
+                game::world_sim::state::WorkState::TravelingToWork { .. } => "traveling",
+                game::world_sim::state::WorkState::Working { .. } => "working",
+                game::world_sim::state::WorkState::CarryingToStorage { .. } => "carrying",
             })
             .collect();
         let idle = work_states.iter().filter(|&&s| s == "idle").count();
@@ -392,7 +392,7 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
     }
     // Observable actions breakdown
     {
-        use bevy_game::world_sim::state::NpcAction;
+        use game::world_sim::state::NpcAction;
         let mut action_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for e in s.entities.iter().filter(|e| e.alive && e.kind == EntityKind::Npc) {
             if let Some(npc) = &e.npc {
@@ -420,7 +420,7 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
     }
     // Building storage stats
     {
-        use bevy_game::world_sim::state::BuildingType;
+        use game::world_sim::state::BuildingType;
         let storage_buildings = s.entities.iter()
             .filter(|e| e.alive && e.kind == EntityKind::Building)
             .filter(|e| e.building.as_ref().map(|b| b.storage_capacity > 0.0 && b.construction_progress >= 1.0).unwrap_or(false))
@@ -488,7 +488,7 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
     println!("\n--- Settlement morale & emotions ---");
     for settlement in &s.settlements {
         let range = s.group_index.settlement_entities(settlement.id);
-        let npcs: Vec<&bevy_game::world_sim::state::Entity> = s.entities[range.clone()].iter()
+        let npcs: Vec<&game::world_sim::state::Entity> = s.entities[range.clone()].iter()
             .filter(|e| e.alive && e.kind == EntityKind::Npc && e.npc.is_some())
             .collect();
         let n = npcs.len();
@@ -496,7 +496,7 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
             println!("  {} — 0 NPCs (depopulated)", settlement.name);
             continue;
         }
-        let avg = |f: fn(&bevy_game::world_sim::state::NpcData) -> f32| -> f32 {
+        let avg = |f: fn(&game::world_sim::state::NpcData) -> f32| -> f32 {
             npcs.iter()
                 .filter_map(|e| e.npc.as_ref())
                 .map(f)
@@ -525,7 +525,7 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
 
     // --- Survivor profiles: top 5 NPCs by level ---
     {
-        let mut survivors: Vec<&bevy_game::world_sim::state::Entity> = s.entities.iter()
+        let mut survivors: Vec<&game::world_sim::state::Entity> = s.entities.iter()
             .filter(|e| e.alive && e.kind == EntityKind::Npc && e.npc.is_some())
             .collect();
         survivors.sort_by(|a, b| b.level.cmp(&a.level));
@@ -533,7 +533,7 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
             println!("\n--- Top survivors ---");
             for e in survivors.iter().take(5) {
                 let npc = e.npc.as_ref().unwrap();
-                let display = bevy_game::world_sim::naming::entity_display_name(e);
+                let display = game::world_sim::naming::entity_display_name(e);
                 let home = npc.home_settlement_id
                     .and_then(|sid| s.settlement(sid))
                     .map(|s| s.name.as_str())
@@ -561,10 +561,10 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
                     npc.personality.ambition, npc.personality.compassion, npc.personality.curiosity);
                 // Memory: count events by type
                 let mem = &npc.memory;
-                let friend_deaths = mem.events.iter().filter(|e| matches!(e.event_type, bevy_game::world_sim::state::MemEventType::FriendDied(_))).count();
-                let attacks = mem.events.iter().filter(|e| matches!(e.event_type, bevy_game::world_sim::state::MemEventType::WasAttacked)).count();
-                let wins = mem.events.iter().filter(|e| matches!(e.event_type, bevy_game::world_sim::state::MemEventType::WonFight)).count();
-                let starved = mem.events.iter().filter(|e| matches!(e.event_type, bevy_game::world_sim::state::MemEventType::Starved)).count();
+                let friend_deaths = mem.events.iter().filter(|e| matches!(e.event_type, game::world_sim::state::MemEventType::FriendDied(_))).count();
+                let attacks = mem.events.iter().filter(|e| matches!(e.event_type, game::world_sim::state::MemEventType::WasAttacked)).count();
+                let wins = mem.events.iter().filter(|e| matches!(e.event_type, game::world_sim::state::MemEventType::WonFight)).count();
+                let starved = mem.events.iter().filter(|e| matches!(e.event_type, game::world_sim::state::MemEventType::Starved)).count();
                 let beliefs = mem.beliefs.len();
                 // Equipped items
                 let weapon_name = npc.equipped_items.weapon_id
@@ -586,11 +586,11 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
 
     // Behavior profile samples — show top tags for a few alive NPCs
     // Sample NPCs evenly across the entity array (different settlements).
-    let alive_all: Vec<&bevy_game::world_sim::state::Entity> = s.entities.iter()
+    let alive_all: Vec<&game::world_sim::state::Entity> = s.entities.iter()
         .filter(|e| e.alive && e.kind == EntityKind::Npc && e.npc.is_some())
         .collect();
     let stride = (alive_all.len() / 10).max(1);
-    let alive_npcs: Vec<&bevy_game::world_sim::state::Entity> = alive_all.iter()
+    let alive_npcs: Vec<&game::world_sim::state::Entity> = alive_all.iter()
         .step_by(stride)
         .take(10)
         .copied()
@@ -599,7 +599,7 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
     if !alive_npcs.is_empty() {
         println!("\n--- NPC behavior profiles (sample) ---");
         // Build reverse tag lookup
-        use bevy_game::world_sim::state::tags;
+        use game::world_sim::state::tags;
         let tag_names: &[(u32, &str)] = &[
             (tags::MELEE, "melee"), (tags::RANGED, "ranged"), (tags::COMBAT, "combat"),
             (tags::DEFENSE, "defense"), (tags::TACTICS, "tactics"), (tags::MINING, "mining"),
@@ -633,23 +633,23 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
 
             // Resolve class name hashes
             let class_name_table: &[(u32, &str)] = &[
-                (bevy_game::world_sim::state::tag(b"Warrior"), "Warrior"),
-                (bevy_game::world_sim::state::tag(b"Ranger"), "Ranger"),
-                (bevy_game::world_sim::state::tag(b"Guardian"), "Guardian"),
-                (bevy_game::world_sim::state::tag(b"Healer"), "Healer"),
-                (bevy_game::world_sim::state::tag(b"Merchant"), "Merchant"),
-                (bevy_game::world_sim::state::tag(b"Scholar"), "Scholar"),
-                (bevy_game::world_sim::state::tag(b"Rogue"), "Rogue"),
-                (bevy_game::world_sim::state::tag(b"Artisan"), "Artisan"),
-                (bevy_game::world_sim::state::tag(b"Diplomat"), "Diplomat"),
-                (bevy_game::world_sim::state::tag(b"Commander"), "Commander"),
-                (bevy_game::world_sim::state::tag(b"Farmer"), "Farmer"),
-                (bevy_game::world_sim::state::tag(b"Miner"), "Miner"),
-                (bevy_game::world_sim::state::tag(b"Woodsman"), "Woodsman"),
-                (bevy_game::world_sim::state::tag(b"Alchemist"), "Alchemist"),
-                (bevy_game::world_sim::state::tag(b"Herbalist"), "Herbalist"),
-                (bevy_game::world_sim::state::tag(b"Explorer"), "Explorer"),
-                (bevy_game::world_sim::state::tag(b"Mentor"), "Mentor"),
+                (game::world_sim::state::tag(b"Warrior"), "Warrior"),
+                (game::world_sim::state::tag(b"Ranger"), "Ranger"),
+                (game::world_sim::state::tag(b"Guardian"), "Guardian"),
+                (game::world_sim::state::tag(b"Healer"), "Healer"),
+                (game::world_sim::state::tag(b"Merchant"), "Merchant"),
+                (game::world_sim::state::tag(b"Scholar"), "Scholar"),
+                (game::world_sim::state::tag(b"Rogue"), "Rogue"),
+                (game::world_sim::state::tag(b"Artisan"), "Artisan"),
+                (game::world_sim::state::tag(b"Diplomat"), "Diplomat"),
+                (game::world_sim::state::tag(b"Commander"), "Commander"),
+                (game::world_sim::state::tag(b"Farmer"), "Farmer"),
+                (game::world_sim::state::tag(b"Miner"), "Miner"),
+                (game::world_sim::state::tag(b"Woodsman"), "Woodsman"),
+                (game::world_sim::state::tag(b"Alchemist"), "Alchemist"),
+                (game::world_sim::state::tag(b"Herbalist"), "Herbalist"),
+                (game::world_sim::state::tag(b"Explorer"), "Explorer"),
+                (game::world_sim::state::tag(b"Mentor"), "Mentor"),
             ];
             let resolve_class = |hash: u32| -> &str {
                 class_name_table.iter().find(|(h, _)| *h == hash).map(|(_, n)| *n).unwrap_or("?")
@@ -664,7 +664,7 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
                 })
                 .collect();
 
-            let display_name = bevy_game::world_sim::naming::entity_display_name(npc_entity);
+            let display_name = game::world_sim::naming::entity_display_name(npc_entity);
             println!("  #{} {} ({}) lv{} | tags: {} | classes: [{}]",
                 npc_entity.id,
                 display_name,
@@ -699,7 +699,7 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
     // Serialize world state to disk if --output specified.
     // Save trace file if --trace specified.
     if let Some(ref trace_path) = args.trace {
-        let trace = bevy_game::world_sim::trace::WorldSimTrace {
+        let trace = game::world_sim::trace::WorldSimTrace {
             seed: args.seed,
             snapshots: trace_snapshots,
             chronicle_log: trace_chronicle,
@@ -734,8 +734,8 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
 // Chronicle output (Phase 3)
 // ---------------------------------------------------------------------------
 
-fn chronicle_category_name(cat: &bevy_game::world_sim::state::ChronicleCategory) -> &'static str {
-    use bevy_game::world_sim::state::ChronicleCategory::*;
+fn chronicle_category_name(cat: &game::world_sim::state::ChronicleCategory) -> &'static str {
+    use game::world_sim::state::ChronicleCategory::*;
     match cat {
         Battle => "Battle",
         Quest => "Quest",
@@ -769,7 +769,7 @@ fn print_chronicle(state: &WorldState) {
     }
 
     // Summary counts by category
-    use bevy_game::world_sim::state::ChronicleCategory;
+    use game::world_sim::state::ChronicleCategory;
     let categories = [
         ChronicleCategory::Battle,
         ChronicleCategory::Quest,
@@ -794,7 +794,7 @@ fn print_chronicle(state: &WorldState) {
 // Warm-up summary (Phase 5)
 // ---------------------------------------------------------------------------
 
-fn npc_display_name(npc: &bevy_game::world_sim::state::NpcData, entity_id: u32) -> String {
+fn npc_display_name(npc: &game::world_sim::state::NpcData, entity_id: u32) -> String {
     if !npc.name.is_empty() {
         npc.name.clone()
     } else {
@@ -818,7 +818,7 @@ fn apply_intervention(state: &mut WorldState, cmd: &str, tick: u64) {
                 name_matches(&s.name, &target));
             if let Some(settlement) = found {
                 let sid = settlement.id;
-                settlement.stockpile[bevy_game::world_sim::commodity::FOOD] += 50.0;
+                settlement.stockpile[game::world_sim::commodity::FOOD] += 50.0;
                 settlement.treasury += 30.0;
                 let name = settlement.name.clone();
                 state.chronicle.push(ChronicleEntry {
@@ -929,7 +929,7 @@ fn apply_intervention(state: &mut WorldState, cmd: &str, tick: u64) {
                     }
                 }
                 if let Some(s) = state.settlements.iter_mut().find(|s| s.id == sid) {
-                    s.stockpile[bevy_game::world_sim::commodity::FOOD] *= 0.3;
+                    s.stockpile[game::world_sim::commodity::FOOD] *= 0.3;
                 }
                 state.chronicle.push(ChronicleEntry {
                     tick,
@@ -1288,7 +1288,7 @@ fn print_warm_summary(state: &WorldState) {
 
     // --- Top 5 notable NPCs ---
     println!("\n--- Top 5 notable NPCs ---");
-    let mut npc_entries: Vec<(u32, &bevy_game::world_sim::state::Entity)> = state.entities.iter()
+    let mut npc_entries: Vec<(u32, &game::world_sim::state::Entity)> = state.entities.iter()
         .filter(|e| e.alive && e.kind == EntityKind::Npc && e.npc.is_some())
         .map(|e| (e.id, e))
         .collect();
@@ -1304,23 +1304,23 @@ fn print_warm_summary(state: &WorldState) {
     });
 
     let class_name_table: &[(u32, &str)] = &[
-        (bevy_game::world_sim::state::tag(b"Warrior"), "Warrior"),
-        (bevy_game::world_sim::state::tag(b"Ranger"), "Ranger"),
-        (bevy_game::world_sim::state::tag(b"Guardian"), "Guardian"),
-        (bevy_game::world_sim::state::tag(b"Healer"), "Healer"),
-        (bevy_game::world_sim::state::tag(b"Merchant"), "Merchant"),
-        (bevy_game::world_sim::state::tag(b"Scholar"), "Scholar"),
-        (bevy_game::world_sim::state::tag(b"Rogue"), "Rogue"),
-        (bevy_game::world_sim::state::tag(b"Artisan"), "Artisan"),
-        (bevy_game::world_sim::state::tag(b"Diplomat"), "Diplomat"),
-        (bevy_game::world_sim::state::tag(b"Commander"), "Commander"),
-        (bevy_game::world_sim::state::tag(b"Farmer"), "Farmer"),
-        (bevy_game::world_sim::state::tag(b"Miner"), "Miner"),
-        (bevy_game::world_sim::state::tag(b"Woodsman"), "Woodsman"),
-        (bevy_game::world_sim::state::tag(b"Alchemist"), "Alchemist"),
-        (bevy_game::world_sim::state::tag(b"Herbalist"), "Herbalist"),
-        (bevy_game::world_sim::state::tag(b"Explorer"), "Explorer"),
-        (bevy_game::world_sim::state::tag(b"Mentor"), "Mentor"),
+        (game::world_sim::state::tag(b"Warrior"), "Warrior"),
+        (game::world_sim::state::tag(b"Ranger"), "Ranger"),
+        (game::world_sim::state::tag(b"Guardian"), "Guardian"),
+        (game::world_sim::state::tag(b"Healer"), "Healer"),
+        (game::world_sim::state::tag(b"Merchant"), "Merchant"),
+        (game::world_sim::state::tag(b"Scholar"), "Scholar"),
+        (game::world_sim::state::tag(b"Rogue"), "Rogue"),
+        (game::world_sim::state::tag(b"Artisan"), "Artisan"),
+        (game::world_sim::state::tag(b"Diplomat"), "Diplomat"),
+        (game::world_sim::state::tag(b"Commander"), "Commander"),
+        (game::world_sim::state::tag(b"Farmer"), "Farmer"),
+        (game::world_sim::state::tag(b"Miner"), "Miner"),
+        (game::world_sim::state::tag(b"Woodsman"), "Woodsman"),
+        (game::world_sim::state::tag(b"Alchemist"), "Alchemist"),
+        (game::world_sim::state::tag(b"Herbalist"), "Herbalist"),
+        (game::world_sim::state::tag(b"Explorer"), "Explorer"),
+        (game::world_sim::state::tag(b"Mentor"), "Mentor"),
     ];
     let resolve_class = |hash: u32| -> &str {
         class_name_table.iter().find(|(h, _)| *h == hash).map(|(_, n)| *n).unwrap_or("?")
@@ -1367,7 +1367,7 @@ fn print_warm_summary(state: &WorldState) {
             if let Some(entity) = state.entity(*eid) {
                 // Skip low-level monsters (not legendary).
                 if entity.kind == EntityKind::Monster && entity.level < 10 { continue; }
-                let name = bevy_game::world_sim::naming::entity_display_name(entity);
+                let name = game::world_sim::naming::entity_display_name(entity);
                 let detail = if entity.alive {
                     let npc_info = entity.npc.as_ref().map(|n| {
                         format!("lv{} {} at {}", entity.level, n.archetype,
@@ -1441,13 +1441,13 @@ fn print_warm_summary(state: &WorldState) {
             "The Age of Foundations".to_string()
         };
 
-        let year = state.tick / (bevy_game::world_sim::systems::seasons::TICKS_PER_SEASON * 4) + 1;
-        let season = bevy_game::world_sim::systems::seasons::current_season(state.tick);
+        let year = state.tick / (game::world_sim::systems::seasons::TICKS_PER_SEASON * 4) + 1;
+        let season = game::world_sim::systems::seasons::current_season(state.tick);
         let season_name = match season {
-            bevy_game::world_sim::systems::seasons::Season::Spring => "Spring",
-            bevy_game::world_sim::systems::seasons::Season::Summer => "Summer",
-            bevy_game::world_sim::systems::seasons::Season::Autumn => "Autumn",
-            bevy_game::world_sim::systems::seasons::Season::Winter => "Winter",
+            game::world_sim::systems::seasons::Season::Spring => "Spring",
+            game::world_sim::systems::seasons::Season::Summer => "Summer",
+            game::world_sim::systems::seasons::Season::Autumn => "Autumn",
+            game::world_sim::systems::seasons::Season::Winter => "Winter",
         };
         println!("  Current era: {} (Year {}, {}, pop {}, avg threat {:.0})",
             era_name, year, season_name, total_pop, avg_threat);
@@ -1455,7 +1455,7 @@ fn print_warm_summary(state: &WorldState) {
 
     // --- Faction power standings ---
     println!("\n--- Faction power standings ---");
-    let mut factions: Vec<&bevy_game::world_sim::state::FactionState> = state.factions.iter().collect();
+    let mut factions: Vec<&game::world_sim::state::FactionState> = state.factions.iter().collect();
     factions.sort_by(|a, b| b.military_strength.partial_cmp(&a.military_strength).unwrap_or(std::cmp::Ordering::Equal));
     for f in &factions {
         let settlement_count = state.settlements.iter().filter(|s| s.faction_id == Some(f.id)).count();
@@ -1477,7 +1477,7 @@ fn print_warm_summary(state: &WorldState) {
     } else {
         // Pick the most recent entry from each non-Death category, then fill remaining
         // slots with the most recent entries overall. This ensures variety.
-        use bevy_game::world_sim::state::ChronicleCategory;
+        use game::world_sim::state::ChronicleCategory;
         let categories = [
             ChronicleCategory::Crisis, ChronicleCategory::Quest,
             ChronicleCategory::Diplomacy, ChronicleCategory::Achievement,
@@ -1526,7 +1526,7 @@ fn print_warm_summary(state: &WorldState) {
 fn print_world_history(state: &WorldState) {
     println!("\n--- World History ---");
 
-    let year = state.tick / (bevy_game::world_sim::systems::seasons::TICKS_PER_SEASON * 4) + 1;
+    let year = state.tick / (game::world_sim::systems::seasons::TICKS_PER_SEASON * 4) + 1;
 
     // Count key events.
     let total_deaths = state.world_events.iter()
@@ -1601,7 +1601,7 @@ fn print_world_history(state: &WorldState) {
         .collect();
     if !nemeses.is_empty() {
         let top = nemeses.iter().max_by_key(|e| e.level).unwrap();
-        let name = bevy_game::world_sim::naming::entity_display_name(top);
+        let name = game::world_sim::naming::entity_display_name(top);
         println!("  {} (level {}) terrorizes the land as the greatest monster threat.",
             name, top.level);
     }
@@ -2076,8 +2076,8 @@ fn build_peaceful_world(args: &WorldSimArgs) -> WorldState {
         npc_data.gold = 0.0;
         npc_data.morale = 60.0;
         npc_data.archetype = archetypes[i % archetypes.len()].to_string();
-        npc_data.name = bevy_game::world_sim::naming::generate_personal_name(id, args.seed);
-        npc.inventory = Some(bevy_game::world_sim::state::Inventory::default());
+        npc_data.name = game::world_sim::naming::generate_personal_name(id, args.seed);
+        npc.inventory = Some(game::world_sim::state::Inventory::default());
 
         state.entities.push(npc);
         id += 1;
@@ -2675,7 +2675,7 @@ fn populate_npcs(
         npc.level = 1 + (id % 10) as u32;
 
         let npc_data = npc.npc.as_mut().unwrap();
-        npc_data.name = bevy_game::world_sim::naming::generate_personal_name(id, args.seed);
+        npc_data.name = game::world_sim::naming::generate_personal_name(id, args.seed);
         npc_data.home_settlement_id = Some(settlement_idx as u32);
         npc_data.faction_id = settlement_faction;
 
@@ -2871,7 +2871,7 @@ fn run_ws_server(sim: &mut WorldSim, port: u16, args: &WorldSimArgs) -> ExitCode
         let tick_interval = std::time::Duration::from_millis(50); // 20 fps
 
         let mut ticks_this_session = 0u64;
-        let mut chronicle_snapshot: Vec<bevy_game::world_sim::state::ChronicleEntry> = Vec::new();
+        let mut chronicle_snapshot: Vec<game::world_sim::state::ChronicleEntry> = Vec::new();
         let mut ticks_per_frame: u64 = 5;
         let mut paused = false;
         let mut selected_entity_id: Option<u32> = None;
@@ -2905,7 +2905,7 @@ fn run_ws_server(sim: &mut WorldSim, port: u16, args: &WorldSimArgs) -> ExitCode
                 chronicle_snapshot.drain(..chronicle_snapshot.len() - 500);
             }
 
-            let frame = bevy_game::world_sim::visualizer::generate_frame_with_selection(
+            let frame = game::world_sim::visualizer::generate_frame_with_selection(
                 state,
                 &new_entries,
                 100, // event window

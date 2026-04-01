@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use bevy_game::ai::core::{SimEvent, SimState, Team};
-use bevy_game::ai::goap::dsl::{load_goap_file, GoapDef};
-use bevy_game::ai::goap::GoapAiState;
-use bevy_game::ai::personality::PersonalityProfile;
-use bevy_game::ai::roles::Role;
+use game::ai::core::{SimEvent, SimState, Team};
+use game::ai::goap::dsl::{load_goap_file, GoapDef};
+use game::ai::goap::GoapAiState;
+use game::ai::personality::PersonalityProfile;
+use game::ai::roles::Role;
 
 use super::types::*;
 
@@ -29,11 +29,11 @@ fn role_str(role: Role) -> &'static str {
 }
 
 #[allow(dead_code)]
-fn formation_str(mode: bevy_game::ai::squad::FormationMode) -> &'static str {
+fn formation_str(mode: game::ai::squad::FormationMode) -> &'static str {
     match mode {
-        bevy_game::ai::squad::FormationMode::Hold => "Hold",
-        bevy_game::ai::squad::FormationMode::Advance => "Advance",
-        bevy_game::ai::squad::FormationMode::Retreat => "Retreat",
+        game::ai::squad::FormationMode::Hold => "Hold",
+        game::ai::squad::FormationMode::Advance => "Advance",
+        game::ai::squad::FormationMode::Retreat => "Retreat",
     }
 }
 
@@ -212,7 +212,7 @@ pub fn build_goap_for_heroes(
     let behaviors_dir = game_root.join("assets").join("behaviors");
     let mut defs: HashMap<u32, GoapDef> = HashMap::new();
 
-    let heroes: Vec<&bevy_game::ai::core::UnitState> = state
+    let heroes: Vec<&game::ai::core::UnitState> = state
         .units
         .iter()
         .filter(|u| u.team == Team::Hero && u.hp > 0)

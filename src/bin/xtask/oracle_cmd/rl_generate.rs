@@ -10,8 +10,8 @@ use super::transformer_rl::{Policy, RlEpisode};
 use super::rl_policies::run_single_episode;
 
 pub(crate) fn run_generate(args: crate::cli::TransformerRlGenerateArgs) -> ExitCode {
-    use bevy_game::ai::core::ability_transformer::tokenizer::AbilityTokenizer;
-    use bevy_game::scenario::load_scenario_file;
+    use game::ai::core::ability_transformer::tokenizer::AbilityTokenizer;
+    use game::scenario::load_scenario_file;
 
     let policy = if args.random_policy {
         Policy::Random
@@ -23,7 +23,7 @@ pub(crate) fn run_generate(args: crate::cli::TransformerRlGenerateArgs) -> ExitC
         }
         #[cfg(feature = "burn-gpu")]
         {
-            use bevy_game::ai::core::burn_model::{ActorCriticV6Config, inference_v6::BurnInferenceClientV6, checkpoint};
+            use game::ai::core::burn_model::{ActorCriticV6Config, inference_v6::BurnInferenceClientV6, checkpoint};
             use burn::backend::libtorch::LibTorchDevice;
             let device = LibTorchDevice::Cuda(0);
             let config = ActorCriticV6Config {
@@ -58,7 +58,7 @@ pub(crate) fn run_generate(args: crate::cli::TransformerRlGenerateArgs) -> ExitC
         }
         #[cfg(feature = "burn-gpu")]
         {
-            use bevy_game::ai::core::burn_model::{ActorCriticV5Config, inference::BurnInferenceClient};
+            use game::ai::core::burn_model::{ActorCriticV5Config, inference::BurnInferenceClient};
             use burn::backend::libtorch::LibTorchDevice;
             let device = LibTorchDevice::Cuda(0);
             let model = ActorCriticV5Config {
@@ -128,7 +128,7 @@ pub(crate) fn run_generate(args: crate::cli::TransformerRlGenerateArgs) -> ExitC
 
     // Load embedding registry if provided
     let registry = if let Some(ref reg_path) = args.embedding_registry {
-        match bevy_game::ai::core::ability_transformer::EmbeddingRegistry::from_file(
+        match game::ai::core::ability_transformer::EmbeddingRegistry::from_file(
             reg_path.to_str().unwrap_or(""),
         ) {
             Ok(r) => {
@@ -155,7 +155,7 @@ pub(crate) fn run_generate(args: crate::cli::TransformerRlGenerateArgs) -> ExitC
         None
     };
     let enemy_registry = if let Some(ref reg_path) = args.enemy_registry {
-        match bevy_game::ai::core::ability_transformer::EmbeddingRegistry::from_file(
+        match game::ai::core::ability_transformer::EmbeddingRegistry::from_file(
             reg_path.to_str().unwrap_or(""),
         ) {
             Ok(r) => {
@@ -187,7 +187,7 @@ pub(crate) fn run_generate(args: crate::cli::TransformerRlGenerateArgs) -> ExitC
             std::mem::swap(&mut cfg.hero_templates, &mut cfg.enemy_hero_templates);
             cfg.name = format!("{}_swapped", cfg.name);
             std::mem::swap(&mut cfg.hero_count, &mut cfg.enemy_count);
-            swapped.push(bevy_game::scenario::ScenarioFile { scenario: cfg, assert: None });
+            swapped.push(game::scenario::ScenarioFile { scenario: cfg, assert: None });
         }
         scenarios.extend(swapped);
         eprintln!("Swap-sides: {} original + {} swapped = {} total scenarios",

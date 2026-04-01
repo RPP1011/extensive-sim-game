@@ -1,7 +1,7 @@
 use std::fs;
 use std::process::ExitCode;
 
-use bevy_game::mapgen_voronoi::{build_prompt, build_spec, load_overworld};
+use game::mapgen_voronoi::{build_prompt, build_spec, load_overworld};
 
 use super::cli::MapVoronoiArgs;
 

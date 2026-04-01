@@ -31,7 +31,7 @@ pub(crate) fn run_impala_train(_args: ImpalaTrainArgs) -> ExitCode {
 
 #[cfg(feature = "burn-gpu")]
 fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
-    use bevy_game::ai::core::burn_model::{
+    use game::ai::core::burn_model::{
         ActorCriticV6Config,
         actor_critic_v6::V6_H_DIM,
         checkpoint,
@@ -183,7 +183,7 @@ fn run_impala_train_inner(args: ImpalaTrainArgs) -> ExitCode {
 
         // Re-score V-trace advantages periodically using current value head
         if iteration % RESCORE_INTERVAL == 0 {
-            use bevy_game::ai::core::burn_model::training::rescore_replay_buffer;
+            use game::ai::core::burn_model::training::rescore_replay_buffer;
             let inner_model = model.valid();
             let inner_device = burn::backend::libtorch::LibTorchDevice::Cuda(0);
             let gamma_eff = train_config.gamma.powi(train_config.step_interval as i32);
@@ -341,11 +341,11 @@ fn load_episodes(path: &std::path::Path) -> Vec<RlEpisode> {
 #[cfg(feature = "burn-gpu")]
 fn extract_training_samples(
     episodes: &[RlEpisode],
-    config: &bevy_game::ai::core::burn_model::training::ImpalaConfig,
-    model: &bevy_game::ai::core::burn_model::ActorCriticV6<burn::backend::Autodiff<burn::backend::LibTorch>>,
+    config: &game::ai::core::burn_model::training::ImpalaConfig,
+    model: &game::ai::core::burn_model::ActorCriticV6<burn::backend::Autodiff<burn::backend::LibTorch>>,
     device: &burn::backend::libtorch::LibTorchDevice,
-) -> Vec<bevy_game::ai::core::burn_model::training::TrainingSample> {
-    use bevy_game::ai::core::burn_model::training::{TrainingSample, vtrace_targets, predict_values};
+) -> Vec<game::ai::core::burn_model::training::TrainingSample> {
+    use game::ai::core::burn_model::training::{TrainingSample, vtrace_targets, predict_values};
     use burn::module::AutodiffModule;
 
     let gamma_eff = config.gamma.powi(config.step_interval as i32);

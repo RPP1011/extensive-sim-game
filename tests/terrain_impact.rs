@@ -5,10 +5,10 @@
 //!
 //! Run with: cargo test --test terrain_impact -- --nocapture
 
-use bevy_game::ai::core::{distance, step, SimState, Team, FIXED_TICK_MS};
-use bevy_game::ai::pathing::{cover_factor, GridNav};
-use bevy_game::ai::squad;
-use bevy_game::scenario::{run_scenario_to_state_with_room, ScenarioCfg};
+use game::ai::core::{distance, step, SimState, Team, FIXED_TICK_MS};
+use game::ai::pathing::{cover_factor, GridNav};
+use game::ai::squad;
+use game::scenario::{run_scenario_to_state_with_room, ScenarioCfg};
 
 const MAX_TICKS: u64 = 3000;
 const SEEDS: u64 = 30;

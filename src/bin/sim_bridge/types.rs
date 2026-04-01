@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use bevy_game::ai::personality::PersonalityProfile;
-use bevy_game::ai::squad::FormationMode;
+use game::ai::personality::PersonalityProfile;
+use game::ai::squad::FormationMode;
 
 use serde::{Deserialize, Serialize};
 

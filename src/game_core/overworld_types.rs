@@ -1,9 +1,8 @@
-use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::generation::build_seeded_overworld;
 
-#[derive(Resource, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AttentionState {
     pub switch_cooldown_turns: u32,
     pub switch_cooldown_max: u32,
@@ -74,7 +73,7 @@ pub struct FactionState {
     pub vassals: Vec<FactionVassal>,
 }
 
-#[derive(Resource, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OverworldMap {
     pub regions: Vec<OverworldRegion>,
     pub factions: Vec<FactionState>,
@@ -118,7 +117,7 @@ pub struct FlashpointChain {
     pub objective: String,
 }
 
-#[derive(Resource, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlashpointState {
     pub chains: Vec<FlashpointChain>,
     pub next_id: u32,
@@ -170,7 +169,7 @@ pub struct CommanderIntent {
     pub kind: CommanderIntentKind,
 }
 
-#[derive(Resource, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommanderState {
     pub commanders: Vec<FactionCommander>,
     pub intents: Vec<CommanderIntent>,
@@ -207,7 +206,7 @@ impl Default for CommanderState {
     }
 }
 
-#[derive(Resource, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiplomacyState {
     pub player_faction_id: usize,
     pub relations: Vec<Vec<i32>>,
@@ -240,7 +239,7 @@ pub struct InteractionOffer {
     pub summary: String,
 }
 
-#[derive(Resource, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InteractionBoard {
     pub offers: Vec<InteractionOffer>,
     pub selected: usize,

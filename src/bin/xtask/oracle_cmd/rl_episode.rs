@@ -34,28 +34,28 @@ use super::rl_policies::{
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_rl_episode(
-    initial_sim: bevy_game::ai::core::SimState,
-    initial_squad_ai: bevy_game::ai::squad::SquadAiState,
+    initial_sim: game::ai::core::SimState,
+    initial_squad_ai: game::ai::squad::SquadAiState,
     scenario_name: &str,
     max_ticks: u64,
     policy: &Policy,
-    tokenizer: &bevy_game::ai::core::ability_transformer::tokenizer::AbilityTokenizer,
+    tokenizer: &game::ai::core::ability_transformer::tokenizer::AbilityTokenizer,
     temperature: f32,
     rng_seed: u64,
     step_interval: u64,
-    grid_nav: Option<bevy_game::ai::pathing::GridNav>,
-    embedding_registry: Option<&bevy_game::ai::core::ability_transformer::EmbeddingRegistry>,
+    grid_nav: Option<game::ai::pathing::GridNav>,
+    embedding_registry: Option<&game::ai::core::ability_transformer::EmbeddingRegistry>,
     enemy_policy: Option<&Policy>,
-    enemy_registry: Option<&bevy_game::ai::core::ability_transformer::EmbeddingRegistry>,
-    drill_objective: Option<&bevy_game::scenario::ObjectiveDef>,
+    enemy_registry: Option<&game::ai::core::ability_transformer::EmbeddingRegistry>,
+    drill_objective: Option<&game::scenario::ObjectiveDef>,
     scenario_action_mask: Option<&str>,
 ) -> RlEpisode {
-    use bevy_game::ai::core::{is_alive, step, distance, Team, FIXED_TICK_MS};
-    use bevy_game::ai::core::ability_eval::{extract_game_state_v2, extract_game_state_v2_spatial, extract_game_state_v2_with_objectives, ZoneObjective};
-    use bevy_game::ai::core::self_play::actions::{action_mask, intent_to_action};
-    use bevy_game::ai::effects::dsl::emit::emit_ability_dsl;
-    use bevy_game::ai::goap::spatial::VisibilityMap;
-    use bevy_game::ai::squad::generate_intents;
+    use game::ai::core::{is_alive, step, distance, Team, FIXED_TICK_MS};
+    use game::ai::core::ability_eval::{extract_game_state_v2, extract_game_state_v2_spatial, extract_game_state_v2_with_objectives, ZoneObjective};
+    use game::ai::core::self_play::actions::{action_mask, intent_to_action};
+    use game::ai::effects::dsl::emit::emit_ability_dsl;
+    use game::ai::goap::spatial::VisibilityMap;
+    use game::ai::squad::generate_intents;
 
     let mut sim = initial_sim;
     if let Some(nav) = grid_nav {
@@ -206,7 +206,7 @@ pub(crate) fn run_rl_episode(
         // Combined policy path: use squad AI as-is, just record
         if matches!(policy, Policy::Combined) {
             if record {
-                use bevy_game::ai::core::self_play::actions::{
+                use game::ai::core::self_play::actions::{
                     build_token_infos, intent_to_v3_action, intent_to_v4_action,
                 };
                 for &uid in &hero_ids {
@@ -220,7 +220,7 @@ pub(crate) fn run_rl_episode(
                         .find(|i| i.unit_id == uid)
                         .map(|i| &i.action)
                         .cloned()
-                        .unwrap_or(bevy_game::ai::core::IntentAction::Hold);
+                        .unwrap_or(game::ai::core::IntentAction::Hold);
                     let action = intent_to_action(&intent_action, uid, &sim);
                     let gs_v2 = if !zone_objectives.is_empty() {
                         extract_game_state_v2_with_objectives(
@@ -243,21 +243,21 @@ pub(crate) fn run_rl_episode(
                     ).unwrap_or((8, 1, 0));
                     // Derive target_move_pos from intent for V6 movement head training
                     let target_move_pos = match &intent_action {
-                        bevy_game::ai::core::IntentAction::MoveTo { position } => Some([position.x, position.y]),
-                        bevy_game::ai::core::IntentAction::Skulk { objective } => Some([objective.x, objective.y]),
-                        bevy_game::ai::core::IntentAction::Attack { target_id }
-                        | bevy_game::ai::core::IntentAction::CastAbility { target_id }
-                        | bevy_game::ai::core::IntentAction::CastHeal { target_id }
-                        | bevy_game::ai::core::IntentAction::CastControl { target_id } => {
+                        game::ai::core::IntentAction::MoveTo { position } => Some([position.x, position.y]),
+                        game::ai::core::IntentAction::Skulk { objective } => Some([objective.x, objective.y]),
+                        game::ai::core::IntentAction::Attack { target_id }
+                        | game::ai::core::IntentAction::CastAbility { target_id }
+                        | game::ai::core::IntentAction::CastHeal { target_id }
+                        | game::ai::core::IntentAction::CastControl { target_id } => {
                             sim.units.iter().find(|u| u.id == *target_id)
                                 .map(|t| [t.position.x, t.position.y])
                         }
-                        bevy_game::ai::core::IntentAction::UseAbility { target, .. } => {
+                        game::ai::core::IntentAction::UseAbility { target, .. } => {
                             match target {
-                                bevy_game::ai::effects::AbilityTarget::Unit(tid) =>
+                                game::ai::effects::AbilityTarget::Unit(tid) =>
                                     sim.units.iter().find(|u| u.id == *tid).map(|t| [t.position.x, t.position.y]),
-                                bevy_game::ai::effects::AbilityTarget::Position(p) => Some([p.x, p.y]),
-                                bevy_game::ai::effects::AbilityTarget::None => Some([unit.position.x, unit.position.y]),
+                                game::ai::effects::AbilityTarget::Position(p) => Some([p.x, p.y]),
+                                game::ai::effects::AbilityTarget::None => Some([unit.position.x, unit.position.y]),
                             }
                         }
                         _ => Some([unit.position.x, unit.position.y]), // Hold/Hide → stay at current position
@@ -341,8 +341,8 @@ pub(crate) fn run_rl_episode(
                 // V6 Burn GPU inference
                 #[cfg(feature = "burn-gpu")]
                 if let Policy::BurnServerV6(client) = policy {
-                    use bevy_game::ai::core::burn_model::inference::{InferenceRequest, InferenceClient};
-                    use bevy_game::ai::core::{UnitIntent, Team};
+                    use game::ai::core::burn_model::inference::{InferenceRequest, InferenceClient};
+                    use game::ai::core::{UnitIntent, Team};
 
                     let h_dim = client.h_dim();
                     let req = InferenceRequest {
@@ -367,15 +367,15 @@ pub(crate) fn run_rl_episode(
 
                         let combat_intent = if combat_type == 0 {
                             // Attack: find target entity
-                            let enemy_entities: Vec<&bevy_game::ai::core::UnitState> = sim.units.iter()
+                            let enemy_entities: Vec<&game::ai::core::UnitState> = sim.units.iter()
                                 .filter(|u| u.team == Team::Enemy && u.hp > 0).collect();
                             if let Some(target) = enemy_entities.get(target_idx.min(enemy_entities.len().saturating_sub(1))) {
-                                bevy_game::ai::core::IntentAction::Attack { target_id: target.id }
+                                game::ai::core::IntentAction::Attack { target_id: target.id }
                             } else {
-                                bevy_game::ai::core::IntentAction::Hold
+                                game::ai::core::IntentAction::Hold
                             }
                         } else if combat_type == 1 {
-                            bevy_game::ai::core::IntentAction::Hold
+                            game::ai::core::IntentAction::Hold
                         } else {
                             // Ability usage
                             let ability_idx = combat_type - 2;
@@ -383,22 +383,22 @@ pub(crate) fn run_rl_episode(
                                 let enemy = sim.units.iter()
                                     .filter(|u| u.team == Team::Enemy && u.hp > 0).next();
                                 if let Some(e) = enemy {
-                                    bevy_game::ai::core::IntentAction::UseAbility {
+                                    game::ai::core::IntentAction::UseAbility {
                                         ability_index: ability_idx,
-                                        target: bevy_game::ai::effects::AbilityTarget::Unit(e.id),
+                                        target: game::ai::effects::AbilityTarget::Unit(e.id),
                                     }
                                 } else {
-                                    bevy_game::ai::core::IntentAction::Hold
+                                    game::ai::core::IntentAction::Hold
                                 }
                             } else {
-                                bevy_game::ai::core::IntentAction::Hold
+                                game::ai::core::IntentAction::Hold
                             }
                         };
 
-                        let move_intent = bevy_game::ai::core::IntentAction::MoveTo {
-                            position: bevy_game::ai::core::SimVec2 { x: target_pos[0], y: target_pos[1] },
+                        let move_intent = game::ai::core::IntentAction::MoveTo {
+                            position: game::ai::core::SimVec2 { x: target_pos[0], y: target_pos[1] },
                         };
-                        let final_intent = if !matches!(combat_intent, bevy_game::ai::core::IntentAction::Hold) {
+                        let final_intent = if !matches!(combat_intent, game::ai::core::IntentAction::Hold) {
                             combat_intent
                         } else {
                             move_intent
@@ -475,29 +475,29 @@ pub(crate) fn run_rl_episode(
         // Dense event-based rewards
         for ev in &events {
             match ev {
-                bevy_game::ai::core::SimEvent::UnitDied { unit_id, .. } => {
+                game::ai::core::SimEvent::UnitDied { unit_id, .. } => {
                     if let Some(dead_unit) = new_sim.units.iter().find(|u| u.id == *unit_id) {
                         if dead_unit.team == Team::Enemy {
                             pending_event_reward += 0.3 / initial_enemy_count.max(1.0);
                         }
                     }
                 }
-                bevy_game::ai::core::SimEvent::AbilityUsed { unit_id, .. }
-                | bevy_game::ai::core::SimEvent::AbilityCastStarted { unit_id, .. } => {
+                game::ai::core::SimEvent::AbilityUsed { unit_id, .. }
+                | game::ai::core::SimEvent::AbilityCastStarted { unit_id, .. } => {
                     if let Some(u) = new_sim.units.iter().find(|u| u.id == *unit_id) {
                         if u.team == Team::Hero {
                             pending_event_reward += 0.05;
                         }
                     }
                 }
-                bevy_game::ai::core::SimEvent::ControlApplied { target_id, .. } => {
+                game::ai::core::SimEvent::ControlApplied { target_id, .. } => {
                     if let Some(t) = new_sim.units.iter().find(|u| u.id == *target_id) {
                         if t.team == Team::Enemy {
                             pending_event_reward += 0.1;
                         }
                     }
                 }
-                bevy_game::ai::core::SimEvent::HealApplied { target_id, amount, .. } => {
+                game::ai::core::SimEvent::HealApplied { target_id, amount, .. } => {
                     if *amount > 0 {
                         if let Some(t) = new_sim.units.iter().find(|u| u.id == *target_id) {
                             if t.team == Team::Hero {
@@ -515,7 +515,7 @@ pub(crate) fn run_rl_episode(
         // Update terrain-derived properties (cover_bonus, elevation)
         let t0 = std::time::Instant::now();
         if let Some(ref nav) = sim.grid_nav.clone() {
-            use bevy_game::ai::pathing::cover_factor;
+            use game::ai::pathing::cover_factor;
             let unit_count = sim.units.len();
             for i in 0..unit_count {
                 if sim.units[i].hp <= 0 {

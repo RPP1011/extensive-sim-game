@@ -15,14 +15,14 @@ mod helpers;
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 
-use bevy_game::ai::control::ControlAiState;
-use bevy_game::ai::core::{IntentAction, SimEvent, Team, UnitIntent, FIXED_TICK_MS};
-use bevy_game::ai::pathing::clamp_step_to_walkable;
-use bevy_game::ai::personality::{
+use game::ai::control::ControlAiState;
+use game::ai::core::{IntentAction, SimEvent, Team, UnitIntent, FIXED_TICK_MS};
+use game::ai::pathing::clamp_step_to_walkable;
+use game::ai::personality::{
     apply_personality_overrides, PersonalityAiState, PersonalityProfile,
 };
-use bevy_game::ai::squad::{FormationMode, SquadBlackboard};
-use bevy_game::scenario::{load_scenario_file, run_scenario_to_state_with_room};
+use game::ai::squad::{FormationMode, SquadBlackboard};
+use game::scenario::{load_scenario_file, run_scenario_to_state_with_room};
 
 use serde_json::Value;
 
@@ -181,7 +181,7 @@ fn main() {
 
             // Step simulation
             let (new_state, events) =
-                bevy_game::ai::core::step(state, &clamped_intents, FIXED_TICK_MS);
+                game::ai::core::step(state, &clamped_intents, FIXED_TICK_MS);
             control_ai.update_from_events(new_state.tick, &events);
 
             interval_events.extend(events.iter().cloned());

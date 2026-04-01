@@ -14,7 +14,7 @@ pub fn run_scenario_cmd(cmd: ScenarioCommand) -> ExitCode {
 }
 
 fn run_scenario_generate(args: ScenarioGenerateArgs) -> ExitCode {
-    use bevy_game::scenario::gen::{GenConfig, generate, write_scenarios};
+    use game::scenario::gen::{GenConfig, generate, write_scenarios};
 
     let config = GenConfig {
         seed: args.seed,
@@ -46,7 +46,7 @@ fn run_scenario_generate(args: ScenarioGenerateArgs) -> ExitCode {
     }
 }
 
-fn print_unit_stats_table(result: &bevy_game::scenario::ScenarioResult) {
+fn print_unit_stats_table(result: &game::scenario::ScenarioResult) {
     println!(
         "  {:>5}  {:<6} {:<10} {:>10}  {:>8}  {:>8}  {:>8}  {:>8}  {:>4}  {:>5}  {:>9}",
         "Unit", "Team", "Class", "HP", "Dmg Out", "Dmg In", "Healing", "Shields", "CC", "Kills", "Abilities"
@@ -101,7 +101,7 @@ fn print_unit_stats_table(result: &bevy_game::scenario::ScenarioResult) {
 }
 
 fn run_scenario_run(args: ScenarioRunArgs) -> ExitCode {
-    use bevy_game::scenario::{check_assertions, load_scenario_file, run_scenario, ScenarioResult};
+    use game::scenario::{check_assertions, load_scenario_file, run_scenario, ScenarioResult};
 
     let path = &args.path;
 
@@ -248,7 +248,7 @@ fn run_scenario_run(args: ScenarioRunArgs) -> ExitCode {
 }
 
 fn run_scenario_bench(args: ScenarioBenchArgs) -> ExitCode {
-    use bevy_game::scenario::{load_scenario_file, run_scenario};
+    use game::scenario::{load_scenario_file, run_scenario};
     use rayon::prelude::*;
     use std::time::Instant;
 
@@ -340,8 +340,8 @@ fn run_scenario_bench(args: ScenarioBenchArgs) -> ExitCode {
 }
 
 fn run_scenario_profile(args: ScenarioBenchArgs) -> ExitCode {
-    use bevy_game::ai::core::{step, FIXED_TICK_MS};
-    use bevy_game::scenario::{load_scenario_file, run_scenario_to_state};
+    use game::ai::core::{step, FIXED_TICK_MS};
+    use game::scenario::{load_scenario_file, run_scenario_to_state};
     use std::time::Instant;
 
     let scenario_file = match load_scenario_file(&args.path) {
@@ -378,7 +378,7 @@ fn run_scenario_profile(args: ScenarioBenchArgs) -> ExitCode {
             // Phase 1: Intent generation (AI decisions)
             let t0 = Instant::now();
             let all_intents =
-                bevy_game::ai::squad::generate_intents(&sim, &mut squad_state, FIXED_TICK_MS);
+                game::ai::squad::generate_intents(&sim, &mut squad_state, FIXED_TICK_MS);
             iter_intent_us += t0.elapsed().as_micros() as u64;
 
             // Phase 2: Simulation step (physics + effects)
@@ -389,10 +389,10 @@ fn run_scenario_profile(args: ScenarioBenchArgs) -> ExitCode {
             // Phase 3: Event processing (stats bookkeeping)
             let t2 = Instant::now();
             let _hero_dead = new_sim.units.iter().any(|u| {
-                u.team == bevy_game::ai::core::Team::Hero && u.hp <= 0
+                u.team == game::ai::core::Team::Hero && u.hp <= 0
             });
             let _enemy_alive = new_sim.units.iter().any(|u| {
-                u.team == bevy_game::ai::core::Team::Enemy && u.hp > 0
+                u.team == game::ai::core::Team::Enemy && u.hp > 0
             });
             iter_events_us += t2.elapsed().as_micros() as u64;
 
@@ -401,10 +401,10 @@ fn run_scenario_profile(args: ScenarioBenchArgs) -> ExitCode {
 
             // Check for end conditions
             let all_heroes_dead = !sim.units.iter().any(|u| {
-                u.team == bevy_game::ai::core::Team::Hero && u.hp > 0
+                u.team == game::ai::core::Team::Hero && u.hp > 0
             });
             let all_enemies_dead = !sim.units.iter().any(|u| {
-                u.team == bevy_game::ai::core::Team::Enemy && u.hp > 0
+                u.team == game::ai::core::Team::Enemy && u.hp > 0
             });
             if all_heroes_dead || all_enemies_dead {
                 break;

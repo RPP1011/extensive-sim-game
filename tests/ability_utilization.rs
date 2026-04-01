@@ -10,9 +10,9 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use bevy_game::ai::core::{step, sim_vec2, SimEvent, SimState, Team, UnitState, FIXED_TICK_MS};
-use bevy_game::ai::squad;
-use bevy_game::scenario::{run_scenario_to_state, ScenarioCfg};
+use game::ai::core::{step, sim_vec2, SimEvent, SimState, Team, UnitState, FIXED_TICK_MS};
+use game::ai::squad;
+use game::scenario::{run_scenario_to_state, ScenarioCfg};
 
 const MAX_TICKS: u64 = 3000;
 const SEEDS: u64 = 50;
@@ -475,7 +475,7 @@ fn ability_utilization_party() {
 // Test: rogue vs dummy — isolated ability rotation analysis
 // ---------------------------------------------------------------------------
 
-fn make_dummy(id: u32, hp: i32, position: bevy_game::ai::core::SimVec2) -> UnitState {
+fn make_dummy(id: u32, hp: i32, position: game::ai::core::SimVec2) -> UnitState {
     UnitState {
         id,
         team: Team::Enemy,

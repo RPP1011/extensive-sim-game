@@ -1,36 +1,29 @@
-use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Component)]
 pub struct Hero {
     pub name: String,
 }
 
-#[derive(Component)]
 pub struct Enemy {
     pub name: String,
 }
 
-#[derive(Component)]
 pub struct Stress {
     pub value: f32,
     pub max: f32,
 }
 
-#[derive(Component)]
 pub struct Health {
     pub current: f32,
     pub max: f32,
 }
 
-#[derive(Component)]
 pub struct HeroAbilities {
     pub focus_fire_cooldown: u32,
     pub stabilize_cooldown: u32,
     pub sabotage_charge_cooldown: u32,
 }
 
-#[derive(Component)]
 pub struct EnemyAI {
     pub base_attack_power: f32,
     pub turns_until_attack: u32,
@@ -38,7 +31,6 @@ pub struct EnemyAI {
     pub enraged_threshold: f32,
 }
 
-#[derive(Component)]
 pub struct MissionObjective {
     pub description: String,
     pub completed: bool,
@@ -86,7 +78,7 @@ pub struct RoomMetadata {
     pub sabotage_threshold: f32,
 }
 
-#[derive(Resource, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MissionMap {
     pub map_name: String,
     pub rooms: Vec<RoomMetadata>,
@@ -174,7 +166,7 @@ impl Default for MissionMap {
     }
 }
 
-#[derive(Resource, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct RunState {
     pub global_turn: u32,
 }
@@ -269,16 +261,14 @@ impl MissionSnapshot {
     }
 }
 
-/// Component: static identity of a mission entity.
-#[derive(Component, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MissionData {
     pub id: u32,
     pub mission_name: String,
     pub bound_region_id: Option<usize>,
 }
 
-/// Component: runtime mutable state of a mission.
-#[derive(Component, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MissionProgress {
     pub mission_active: bool,
     pub result: MissionResult,
@@ -292,8 +282,7 @@ pub struct MissionProgress {
     pub outcome_recorded: bool,
 }
 
-/// Component: tactical directives for a mission.
-#[derive(Component, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MissionTactics {
     pub tactical_mode: TacticalMode,
     pub command_cooldown_turns: u32,
@@ -301,20 +290,15 @@ pub struct MissionTactics {
     pub force_stabilize_order: bool,
 }
 
-/// Component: which hero companion is assigned to a mission entity.
-#[derive(Component, Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AssignedHero {
     pub hero_id: Option<u32>,
 }
 
-/// Marker component: the mission entity currently receiving focused attention.
-#[derive(Component, Default)]
 pub struct ActiveMission;
 
-/// Resource: lightweight registry mapping entity handles to mission slots.
-#[derive(Resource, Default)]
+#[derive(Default)]
 pub struct MissionBoard {
-    pub entities: Vec<Entity>,
     pub next_id: u32,
 }
 

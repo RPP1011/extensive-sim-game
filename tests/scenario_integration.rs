@@ -1,4 +1,4 @@
-use bevy_game::scenario::{run_scenario, ScenarioCfg};
+use game::scenario::{run_scenario, ScenarioCfg};
 
 fn basic_cfg(seed: u64, heroes: usize, enemies: usize) -> ScenarioCfg {
     ScenarioCfg {

@@ -16,8 +16,8 @@ use crossterm::{
     terminal,
 };
 
-use bevy_game::world_sim::trace::WorldSimTrace;
-use bevy_game::world_sim::visualizer::{
+use game::world_sim::trace::WorldSimTrace;
+use game::world_sim::visualizer::{
     PlaybackCommand, PlaybackController, TraceFrame, VisualizerBackend,
 };
 

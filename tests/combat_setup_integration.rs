@@ -5,13 +5,13 @@
 //! 2. Recording — verify frame accumulation matches tick count
 //! 3. Chaos sim — random intent selection across many seeds, invariant verification
 
-use bevy_game::ai::core::{
+use game::ai::core::{
     self, IntentAction, SimState, Team, UnitIntent, FIXED_TICK_MS,
 };
-use bevy_game::ai::effects::AbilityTarget;
-use bevy_game::ai::core::verify::verify_tick;
-use bevy_game::game_core::RoomType;
-use bevy_game::scenario::{build_combat, scenario_from_campaign, ScenarioCfg};
+use game::ai::effects::AbilityTarget;
+use game::ai::core::verify::verify_tick;
+use game::game_core::RoomType;
+use game::scenario::{build_combat, scenario_from_campaign, ScenarioCfg};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -20,11 +20,11 @@ use bevy_game::scenario::{build_combat, scenario_from_campaign, ScenarioCfg};
 /// Run a SimState to completion (or max_ticks), returning (outcome, tick, final_state).
 fn run_sim_to_completion(
     mut sim: SimState,
-    squad_ai: &mut bevy_game::ai::squad::SquadAiState,
+    squad_ai: &mut game::ai::squad::SquadAiState,
     max_ticks: u64,
 ) -> (&'static str, u64, SimState) {
     for tick in 0..max_ticks {
-        let intents = bevy_game::ai::squad::generate_intents(&sim, squad_ai, FIXED_TICK_MS);
+        let intents = game::ai::squad::generate_intents(&sim, squad_ai, FIXED_TICK_MS);
         let (next, _events) = core::step(sim, &intents, FIXED_TICK_MS);
         sim = next;
 
@@ -224,7 +224,7 @@ fn recording_accumulates_frames() {
 
     let target_ticks: u64 = 50;
     for _ in 0..target_ticks {
-        let intents = bevy_game::ai::squad::generate_intents(&sim, &mut squad_ai, FIXED_TICK_MS);
+        let intents = game::ai::squad::generate_intents(&sim, &mut squad_ai, FIXED_TICK_MS);
         let (next, events) = core::step(sim, &intents, FIXED_TICK_MS);
         sim = next;
         frames.push(sim.clone());
@@ -267,7 +267,7 @@ fn recording_replay_matches_live() {
     let mut frames: Vec<SimState> = vec![sim.clone()];
 
     for _ in 0..100 {
-        let intents = bevy_game::ai::squad::generate_intents(&sim, &mut squad_ai, FIXED_TICK_MS);
+        let intents = game::ai::squad::generate_intents(&sim, &mut squad_ai, FIXED_TICK_MS);
         let (next, _events) = core::step(sim, &intents, FIXED_TICK_MS);
         sim = next;
         frames.push(sim.clone());
@@ -295,7 +295,7 @@ fn recording_replay_matches_live() {
                 u2.position.y,
             );
         }
-        let intents = bevy_game::ai::squad::generate_intents(&sim2, &mut squad_ai2, FIXED_TICK_MS);
+        let intents = game::ai::squad::generate_intents(&sim2, &mut squad_ai2, FIXED_TICK_MS);
         let (next, _) = core::step(sim2, &intents, FIXED_TICK_MS);
         sim2 = next;
     }

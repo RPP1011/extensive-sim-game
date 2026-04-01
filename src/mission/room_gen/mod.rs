@@ -5,14 +5,12 @@ mod nav;
 mod primitives;
 mod templates;
 mod validation;
-mod visuals;
 
 #[allow(unused_imports)]
 pub use lcg::{ObstacleRegion, ObstacleType, RampRegion};
 #[allow(unused_imports)]
 pub use lcg::{OBS_FLOOR, OBS_WALL, OBS_PILLAR, OBS_BARRICADE, OBS_L_SHAPE, OBS_COVER_CLUSTER, OBS_SANDBAG, OBS_PLATFORM_EDGE, OBS_RAMP};
 pub use nav::{NavGrid, SpawnZone};
-pub use visuals::{spawn_room, RoomFloor, RoomObstacle, RoomWall};
 
 use crate::game_core;
 

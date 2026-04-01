@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use bevy_game::model_backend::{
+use game::model_backend::{
     detect_best_tier, detect_gpu_available, ModelClient, ModelConfig, ModelTier, ProviderConfig,
 };
 

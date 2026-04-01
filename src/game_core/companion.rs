@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use bevy::prelude::*;
 
 use super::generation::splitmix64;
 use super::overworld_types::OverworldMap;
@@ -35,7 +34,7 @@ pub struct CompanionQuest {
     pub reward_resolve: f32,
 }
 
-#[derive(Resource, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompanionStoryState {
     pub quests: Vec<CompanionQuest>,
     pub next_id: u32,

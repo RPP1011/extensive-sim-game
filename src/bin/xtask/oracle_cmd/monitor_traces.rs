@@ -8,8 +8,8 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use bevy_game::ai::core::monitor::SimMonitor;
-use bevy_game::ai::core::{step, SimState, UnitIntent, Team, FIXED_TICK_MS};
+use game::ai::core::monitor::SimMonitor;
+use game::ai::core::{step, SimState, UnitIntent, Team, FIXED_TICK_MS};
 
 use serde::Deserialize;
 

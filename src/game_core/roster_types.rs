@@ -1,4 +1,3 @@
-use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::overworld_types::OverworldMap;
@@ -95,7 +94,7 @@ pub struct RecruitCandidate {
     pub risk_tolerance: f32,
 }
 
-#[derive(Resource, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CampaignRoster {
     pub heroes: Vec<HeroCompanion>,
     pub recruit_pool: Vec<RecruitCandidate>,
@@ -128,7 +127,7 @@ pub struct CampaignParty {
     pub order_target_region_id: Option<usize>,
 }
 
-#[derive(Resource, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CampaignParties {
     pub parties: Vec<CampaignParty>,
     pub selected_party_id: Option<u32>,
@@ -340,7 +339,7 @@ pub struct ConsequenceRecord {
     pub summary: String,
 }
 
-#[derive(Resource, Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CampaignLedger {
     pub records: Vec<ConsequenceRecord>,
 }
@@ -351,7 +350,7 @@ pub struct CampaignEvent {
     pub summary: String,
 }
 
-#[derive(Resource, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CampaignEventLog {
     pub entries: Vec<CampaignEvent>,
     pub max_entries: usize,

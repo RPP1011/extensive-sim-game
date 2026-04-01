@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
-use bevy_game::content::aot_pipeline::{AotPipeline, AotPipelineConfig, StageId};
-use bevy_game::content::ContentRegistry;
+use game::content::aot_pipeline::{AotPipeline, AotPipelineConfig, StageId};
+use game::content::ContentRegistry;
 
 use super::cli::{ContentGenCommand, ContentGenSubcommand};
 
@@ -81,7 +81,7 @@ fn run_inspect(args: super::cli::ContentGenInspectArgs) -> ExitCode {
         }
     };
 
-    let ctx: bevy_game::content::aot_pipeline::WorldContext = match serde_json::from_str(&data) {
+    let ctx: game::content::aot_pipeline::WorldContext = match serde_json::from_str(&data) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Failed to parse context: {e}");
@@ -95,7 +95,7 @@ fn run_inspect(args: super::cli::ContentGenInspectArgs) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn print_context_summary(ctx: &bevy_game::content::aot_pipeline::WorldContext) {
+fn print_context_summary(ctx: &game::content::aot_pipeline::WorldContext) {
     if let Some(ref theme) = ctx.theme {
         println!("Theme: \"{}\" (mood: {})", theme.name, theme.mood);
         println!("  Keywords: {}", theme.keywords.join(", "));

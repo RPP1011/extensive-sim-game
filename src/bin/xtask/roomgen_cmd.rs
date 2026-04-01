@@ -20,8 +20,8 @@ pub(crate) fn run_roomgen_cmd(cmd: RoomgenCommand) -> ExitCode {
 // ---------------------------------------------------------------------------
 
 fn run_export(args: RoomgenExportArgs) -> ExitCode {
-    use bevy_game::game_core::RoomType;
-    use bevy_game::mission::room_gen::generate_room_varied;
+    use game::game_core::RoomType;
+    use game::mission::room_gen::generate_room_varied;
 
     let room_types = [
         RoomType::Entry,
@@ -73,7 +73,7 @@ fn run_export(args: RoomgenExportArgs) -> ExitCode {
                         let layout = if varied {
                             generate_room_varied(seed, rt, None)
                         } else {
-                            bevy_game::mission::room_gen::generate_room(seed, rt)
+                            game::mission::room_gen::generate_room(seed, rt)
                         };
                         lines.push(layout_to_json(&layout, seed));
                     }
@@ -104,18 +104,18 @@ fn run_export(args: RoomgenExportArgs) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn layout_to_json(layout: &bevy_game::mission::room_gen::RoomLayout, seed: u64) -> String {
+fn layout_to_json(layout: &game::mission::room_gen::RoomLayout, seed: u64) -> String {
     let grid = layout.to_grid();
     let metrics = layout.compute_metrics();
 
     let rt_str = match layout.room_type {
-        bevy_game::game_core::RoomType::Entry => "Entry",
-        bevy_game::game_core::RoomType::Pressure => "Pressure",
-        bevy_game::game_core::RoomType::Pivot => "Pivot",
-        bevy_game::game_core::RoomType::Setpiece => "Setpiece",
-        bevy_game::game_core::RoomType::Recovery => "Recovery",
-        bevy_game::game_core::RoomType::Climax => "Climax",
-        bevy_game::game_core::RoomType::Open => "Open",
+        game::game_core::RoomType::Entry => "Entry",
+        game::game_core::RoomType::Pressure => "Pressure",
+        game::game_core::RoomType::Pivot => "Pivot",
+        game::game_core::RoomType::Setpiece => "Setpiece",
+        game::game_core::RoomType::Recovery => "Recovery",
+        game::game_core::RoomType::Climax => "Climax",
+        game::game_core::RoomType::Open => "Open",
     };
 
     // Build 2D arrays as JSON strings manually for efficiency
@@ -196,7 +196,7 @@ fn layout_to_json(layout: &bevy_game::mission::room_gen::RoomLayout, seed: u64) 
 // ---------------------------------------------------------------------------
 
 fn run_render(args: RoomgenRenderArgs) -> ExitCode {
-    use bevy_game::mission::room_gen::*;
+    use game::mission::room_gen::*;
 
     let input = match std::fs::File::open(&args.input) {
         Ok(f) => f,
@@ -339,8 +339,8 @@ fn run_render(args: RoomgenRenderArgs) -> ExitCode {
 // ---------------------------------------------------------------------------
 
 fn run_floorplan(args: RoomgenFloorplanArgs) -> ExitCode {
-    use bevy_game::mission::room_gen::floorplan::{generate_floorplan, FloorplanConfig};
-    use bevy_game::mission::room_gen::*;
+    use game::mission::room_gen::floorplan::{generate_floorplan, FloorplanConfig};
+    use game::mission::room_gen::*;
 
     std::fs::create_dir_all(&args.output).ok();
 
@@ -436,7 +436,7 @@ fn run_floorplan(args: RoomgenFloorplanArgs) -> ExitCode {
 // ---------------------------------------------------------------------------
 
 fn run_retrieve(args: RoomgenRetrieveArgs) -> ExitCode {
-    use bevy_game::ai::effects::HeroToml;
+    use game::ai::effects::HeroToml;
 
     let hero_tomls = load_hero_dir(&args.heroes);
     if hero_tomls.is_empty() {
@@ -578,7 +578,7 @@ fn run_retrieve(args: RoomgenRetrieveArgs) -> ExitCode {
 // ---------------------------------------------------------------------------
 
 fn run_simulate(args: RoomgenSimulateArgs) -> ExitCode {
-    use bevy_game::ai::effects::HeroToml;
+    use game::ai::effects::HeroToml;
 
     // 1. Discover hero templates from directory
     let hero_tomls = load_hero_dir(&args.heroes);
@@ -721,13 +721,13 @@ fn run_simulate(args: RoomgenSimulateArgs) -> ExitCode {
 /// Hero wins by reaching the objective point (enemy spawn centroid).
 fn run_retrieval_match(
     room: &RoomRecord,
-    hero_toml: &bevy_game::ai::effects::HeroToml,
+    hero_toml: &game::ai::effects::HeroToml,
     hero_name: &str,
-    enemy_tomls: &[bevy_game::ai::effects::HeroToml],
+    enemy_tomls: &[game::ai::effects::HeroToml],
     seed: u64,
 ) -> String {
-    use bevy_game::ai::core::{step, distance, SimVec2, Team, IntentAction, FIXED_TICK_MS};
-    use bevy_game::scenario::build_unified_ai;
+    use game::ai::core::{step, distance, SimVec2, Team, IntentAction, FIXED_TICK_MS};
+    use game::scenario::build_unified_ai;
 
     let nav = room_record_to_navgrid(room);
     let grid_nav = nav.to_gridnav();
@@ -752,7 +752,7 @@ fn run_retrieval_match(
         }
     }
 
-    let mut sim = bevy_game::scenario::build_hvh_with_spawns_and_tomls(
+    let mut sim = game::scenario::build_hvh_with_spawns_and_tomls(
         &[hero_toml.clone()], enemy_tomls, seed,
         &hero_spawns, &enemy_spawns,
     );
@@ -773,7 +773,7 @@ fn run_retrieval_match(
     let mut outcome = "Timeout";
 
     for _ in 0..max_ticks {
-        let mut intents = bevy_game::ai::squad::generate_intents(&sim, &mut squad_state, FIXED_TICK_MS);
+        let mut intents = game::ai::squad::generate_intents(&sim, &mut squad_state, FIXED_TICK_MS);
 
         // Override hero intent: move toward objective, auto-use stealth
         for intent in &mut intents {
@@ -787,17 +787,17 @@ fn run_retrieval_match(
 
                 // Auto-cast stealth abilities when off cooldown and not stealthed
                 let is_stealthed = unit.status_effects.iter()
-                    .any(|s| matches!(s.kind, bevy_game::ai::effects::StatusKind::Stealth { .. }));
+                    .any(|s| matches!(s.kind, game::ai::effects::StatusKind::Stealth { .. }));
                 if !is_stealthed && unit.casting.is_none() {
                     // Find a stealth ability that's ready
                     let stealth_ability = unit.abilities.iter().enumerate().find(|(_, ab)| {
                         ab.cooldown_remaining_ms == 0
-                            && ab.def.effects.iter().any(|ce| matches!(ce.effect, bevy_game::ai::effects::Effect::Stealth { .. }))
+                            && ab.def.effects.iter().any(|ce| matches!(ce.effect, game::ai::effects::Effect::Stealth { .. }))
                     });
                     if let Some((ai, _)) = stealth_ability {
                         intent.action = IntentAction::UseAbility {
                             ability_index: ai,
-                            target: bevy_game::ai::effects::AbilityTarget::None,
+                            target: game::ai::effects::AbilityTarget::None,
                         };
                         continue;
                     }
@@ -839,21 +839,21 @@ fn run_retrieval_match(
 /// Run a single HvH match on a room. Returns a JSON line.
 fn run_single_match(
     room: &RoomRecord,
-    hero_tomls: &[bevy_game::ai::effects::HeroToml],
-    enemy_tomls: &[bevy_game::ai::effects::HeroToml],
+    hero_tomls: &[game::ai::effects::HeroToml],
+    enemy_tomls: &[game::ai::effects::HeroToml],
     hero_names: &[&str],
     enemy_names: &[&str],
     seed: u64,
 ) -> String {
-    use bevy_game::ai::core::{step, SimVec2, Team, FIXED_TICK_MS};
-    use bevy_game::scenario::build_unified_ai;
+    use game::ai::core::{step, SimVec2, Team, FIXED_TICK_MS};
+    use game::scenario::build_unified_ai;
 
     // Reconstruct NavGrid from room record
     let nav = room_record_to_navgrid(room);
     let grid_nav = nav.to_gridnav();
 
     // Build sim with hero templates, placing on spawn positions
-    let mut sim = bevy_game::scenario::build_hvh_with_spawns_and_tomls(
+    let mut sim = game::scenario::build_hvh_with_spawns_and_tomls(
         hero_tomls, enemy_tomls, seed,
         &room.player_spawn, &room.enemy_spawn,
     );
@@ -881,7 +881,7 @@ fn run_single_match(
     let mut outcome = "Timeout";
 
     for _ in 0..max_ticks {
-        let mut intents = bevy_game::ai::squad::generate_intents(&sim, &mut squad_state, FIXED_TICK_MS);
+        let mut intents = game::ai::squad::generate_intents(&sim, &mut squad_state, FIXED_TICK_MS);
 
         // Seek override: units far from all enemies move directly toward enemy spawn.
         // This forces engagement instead of units wandering around obstacles.
@@ -895,12 +895,12 @@ fn run_single_match(
             // Find nearest enemy distance
             let nearest_enemy_dist = sim.units.iter()
                 .filter(|e| e.team != unit.team && e.hp > 0)
-                .map(|e| bevy_game::ai::core::distance(unit.position, e.position))
+                .map(|e| game::ai::core::distance(unit.position, e.position))
                 .fold(f32::MAX, f32::min);
             // If no enemy within 8 cells, override to seek toward enemy spawn
             if nearest_enemy_dist > 8.0 {
                 let target = if unit.team == Team::Hero { hero_target } else { enemy_target };
-                intent.action = bevy_game::ai::core::IntentAction::MoveTo { position: target };
+                intent.action = game::ai::core::IntentAction::MoveTo { position: target };
             }
         }
 
@@ -955,8 +955,8 @@ struct RoomRecord {
     depth: usize,
     obstacle_type: Vec<Vec<u8>>,
     elevation: Vec<Vec<f32>>,
-    player_spawn: Vec<bevy_game::ai::core::SimVec2>,
-    enemy_spawn: Vec<bevy_game::ai::core::SimVec2>,
+    player_spawn: Vec<game::ai::core::SimVec2>,
+    enemy_spawn: Vec<game::ai::core::SimVec2>,
 }
 
 fn load_room_records(path: &PathBuf) -> Vec<RoomRecord> {
@@ -1003,12 +1003,12 @@ fn load_room_records(path: &PathBuf) -> Vec<RoomRecord> {
     records
 }
 
-fn parse_spawn_positions(v: &serde_json::Value) -> Vec<bevy_game::ai::core::SimVec2> {
+fn parse_spawn_positions(v: &serde_json::Value) -> Vec<game::ai::core::SimVec2> {
     v.as_array()
         .map(|arr| {
             arr.iter()
                 .filter_map(|p| {
-                    Some(bevy_game::ai::core::SimVec2 {
+                    Some(game::ai::core::SimVec2 {
                         x: p[0].as_f64()? as f32,
                         y: p[1].as_f64()? as f32,
                     })
@@ -1042,8 +1042,8 @@ fn parse_grid_f32(v: &serde_json::Value, w: usize, d: usize) -> Option<Vec<Vec<f
     Some(out)
 }
 
-fn room_record_to_navgrid(room: &RoomRecord) -> bevy_game::mission::room_gen::NavGrid {
-    let mut nav = bevy_game::mission::room_gen::NavGrid::new(room.width, room.depth, 1.0);
+fn room_record_to_navgrid(room: &RoomRecord) -> game::mission::room_gen::NavGrid {
+    let mut nav = game::mission::room_gen::NavGrid::new(room.width, room.depth, 1.0);
 
     // Perimeter
     nav.set_walkable_rect(0, 0, room.width - 1, 0, false);
@@ -1068,8 +1068,8 @@ fn room_record_to_navgrid(room: &RoomRecord) -> bevy_game::mission::room_gen::Na
     nav
 }
 
-fn load_hero_dir(dir: &PathBuf) -> Vec<(String, bevy_game::ai::effects::HeroToml)> {
-    use bevy_game::mission::hero_templates::parse_hero_toml_with_dsl;
+fn load_hero_dir(dir: &PathBuf) -> Vec<(String, game::ai::effects::HeroToml)> {
+    use game::mission::hero_templates::parse_hero_toml_with_dsl;
 
     let mut heroes = Vec::new();
     let entries = match std::fs::read_dir(dir) {

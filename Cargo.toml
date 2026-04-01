@@ -7,22 +7,18 @@ exclude = ["crates/combat-trainer"]  # depends on rl4burn which may not build
 rl4burn = { path = "../rl4burn/rl4burn" }
 
 [package]
-name = "bevy_game"
+name = "game"
 version = "0.1.0"
 edition = "2021"
 autobins = false
-
-[[bin]]
-name = "bevy_game"
-path = "src/main.rs"
 
 [[bin]]
 name = "xtask"
 path = "src/bin/xtask/main.rs"
 
 [[bin]]
-name = "voxel_view"
-path = "src/bin/voxel_view.rs"
+name = "sim_bridge"
+path = "src/bin/sim_bridge/main.rs"
 
 [features]
 default = []
@@ -35,8 +31,6 @@ profile-systems = []
 [dependencies]
 # tack = { workspace = true }  # disabled — project not present locally
 tactical_sim = { path = "crates/tactical_sim" }
-bevy = { version = "0.13.2", features = ["jpeg"] }
-bevy_egui = "0.27"
 clap = { version = "4.5", features = ["derive"] }
 rand = "0.10.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -54,4 +48,3 @@ tungstenite = "0.29.0"
 
 [dev-dependencies]
 proptest = "1.6"
-

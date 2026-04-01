@@ -1,5 +1,3 @@
-use bevy::prelude::*;
-
 use super::generation::*;
 use super::overworld_types::FlashpointState;
 use super::roster_types::*;
@@ -206,7 +204,6 @@ impl HubScreen {
     }
 }
 
-#[derive(Resource)]
 pub struct HubUiState {
     pub screen: HubScreen,
     pub show_credits: bool,
