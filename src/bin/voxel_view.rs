@@ -1,19 +1,19 @@
-//! Standalone voxel terrain viewer.
+//! Standalone voxel terrain viewer with SDF raymarching.
 //!
-//! Generates a voxel world, extracts surface voxels, and renders them
-//! in a Bevy window with orbit camera.
+//! Generates a voxel world, computes SDF per chunk, packs into 3D textures,
+//! and renders via a raymarching fragment shader on a volume-enclosing box.
 //!
-//! Usage: cargo run --bin voxel_view [--release]
+//! Usage: cargo run --release --bin voxel_view
 
 use bevy::prelude::*;
 use bevy_game::world_sim::voxel::*;
-use bevy_game::sdf_renderer::{SdfRendererPlugin, VoxelRenderData, extract_surfaces};
+use bevy_game::sdf_renderer::{SdfRendererPlugin, VoxelRenderData, pack_voxel_world};
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Voxel Terrain Viewer".into(),
+                title: "Voxel SDF Viewer".into(),
                 resolution: (1280., 720.).into(),
                 ..default()
             }),
@@ -32,7 +32,6 @@ fn setup_scene(
     let mut world = VoxelWorld::default();
     let seed = 42u64;
 
-    // Load a 5x5x4 region of chunks around the center
     for cz in 0..4 {
         for cy in 0..5 {
             for cx in 0..5 {
@@ -41,34 +40,43 @@ fn setup_scene(
         }
     }
 
-    let chunk_count = world.chunk_count();
-    let solid_count = world.total_solid();
-    info!("Generated {} chunks, {} solid voxels", chunk_count, solid_count);
+    info!("Generated {} chunks, {} solid voxels", world.chunk_count(), world.total_solid());
 
-    // Extract surface voxels (cap at 50K for performance)
-    let surfaces = extract_surfaces(&world, 50_000);
-    info!("Extracted {} surface voxels", surfaces.len());
+    // Pack into flat arrays for GPU upload
+    let (sdf_data, material_data, volume_size, volume_origin) = pack_voxel_world(&world);
+    info!("Volume: {}x{}x{}, origin: ({},{},{})",
+        volume_size.0, volume_size.1, volume_size.2,
+        volume_origin.0, volume_origin.1, volume_origin.2);
+    info!("SDF data: {} values, material data: {} values", sdf_data.len(), material_data.len());
 
     // Insert render data
     commands.insert_resource(VoxelRenderData {
-        surfaces,
+        surfaces: Vec::new(),
+        sdf_data,
+        material_data,
+        volume_size,
+        volume_origin,
         dirty: true,
     });
 
-    // Camera — positioned above terrain looking down
-    // Terrain is at x=0..80, y=0..80, z=0..64 in voxel space
-    // Bevy: x=voxel_x, y=voxel_z (up), z=voxel_y
+    // Camera
+    let center = Vec3::new(
+        volume_origin.0 + volume_size.0 as f32 * 0.5,
+        volume_origin.2 + volume_size.2 as f32 * 0.8, // above terrain (z→y in Bevy)
+        volume_origin.1 + volume_size.1 as f32 * 0.5,
+    );
+
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(40.0, 60.0, -20.0)
-                .looking_at(Vec3::new(40.0, 25.0, 40.0), Vec3::Y),
+            transform: Transform::from_xyz(center.x - 40.0, center.y + 30.0, center.z - 40.0)
+                .looking_at(center, Vec3::Y),
             ..default()
         },
         OrbitCam {
-            focus: Vec3::new(40.0, 25.0, 40.0),
+            focus: center,
             radius: 80.0,
-            yaw: 0.0,
-            pitch: -0.6,
+            yaw: -0.8,
+            pitch: -0.5,
         },
     ));
 
@@ -76,29 +84,14 @@ fn setup_scene(
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
             illuminance: 15000.0,
-            shadows_enabled: true,
+            shadows_enabled: false,
             ..default()
         },
-        transform: Transform::from_rotation(Quat::from_euler(
-            EulerRot::XYZ, -0.8, 0.3, 0.0,
-        )),
+        transform: Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.8, 0.3, 0.0)),
         ..default()
     });
-
-    commands.spawn(PointLightBundle {
-        point_light: PointLight {
-            intensity: 500000.0,
-            range: 200.0,
-            ..default()
-        },
-        transform: Transform::from_xyz(40.0, 80.0, 40.0),
-        ..default()
-    });
-
-    info!("Voxel viewer ready. Drag to orbit, scroll to zoom.");
 }
 
-// Simple orbit camera
 #[derive(Component)]
 struct OrbitCam {
     focus: Vec3,
@@ -115,7 +108,6 @@ fn orbit_camera(
 ) {
     let Ok((mut transform, mut orbit)) = query.get_single_mut() else { return };
 
-    // Rotate on drag
     if mouse.pressed(MouseButton::Left) {
         for ev in motion.read() {
             orbit.yaw -= ev.delta.x * 0.005;
@@ -126,13 +118,11 @@ fn orbit_camera(
         motion.clear();
     }
 
-    // Zoom on scroll
     for ev in scroll.read() {
         orbit.radius -= ev.y * 5.0;
         orbit.radius = orbit.radius.clamp(10.0, 300.0);
     }
 
-    // Update camera position from orbit params
     let x = orbit.focus.x + orbit.radius * orbit.pitch.cos() * orbit.yaw.sin();
     let y = orbit.focus.y + orbit.radius * (-orbit.pitch).sin();
     let z = orbit.focus.z + orbit.radius * orbit.pitch.cos() * orbit.yaw.cos();

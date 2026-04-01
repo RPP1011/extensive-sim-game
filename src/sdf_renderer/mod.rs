@@ -1,148 +1,167 @@
-//! Voxel terrain renderer — Bevy plugin for visualizing the voxel world.
+//! SDF Voxel Renderer — Bevy plugin for raymarched voxel terrain.
 //!
-//! Generates instanced cube meshes for surface voxels (solid adjacent to air),
-//! colored by material. Uses Bevy's standard PBR pipeline.
+//! Renders the voxel world by raymarching through a 3D SDF texture in a
+//! custom fragment shader. No mesh generation — a single fullscreen quad
+//! does all the work.
 //!
-//! Usage: add `SdfRendererPlugin` to the Bevy app, then insert a
-//! `VoxelRenderData` resource containing the voxel world to render.
+//! Usage: add `SdfRendererPlugin`, insert `VoxelRenderData` with chunk SDF data.
 
 use bevy::prelude::*;
+use bevy::render::render_resource::{
+    AsBindGroup, ShaderRef, ShaderType, Extent3d, TextureDimension, TextureFormat, TextureUsages,
+};
+use bevy::render::render_asset::RenderAssetUsages;
+use bevy::render::texture::ImageSampler;
+use bevy::pbr::{MaterialPlugin, MaterialMeshBundle};
 
-/// Plugin that renders voxel terrain as instanced cubes.
+/// Plugin that renders voxel terrain via SDF raymarching.
 pub struct SdfRendererPlugin;
 
 impl Plugin for SdfRendererPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<VoxelRenderState>()
-            .add_systems(Update, update_voxel_meshes);
+        app.add_plugins(MaterialPlugin::<SdfRaymarchMaterial>::default())
+            .init_resource::<SdfRenderState>()
+            .add_systems(Update, update_sdf_material);
     }
 }
 
-/// Resource containing the voxel world data to render.
-/// Set this from outside (e.g., from the world sim).
+/// Resource containing voxel world data for rendering.
 #[derive(Resource, Default)]
 pub struct VoxelRenderData {
-    /// Surface voxels: (world_x, world_y, world_z, material_id)
+    /// Surface voxels: (world_x, world_y, world_z, material_id) — kept for compatibility
     pub surfaces: Vec<(f32, f32, f32, u8)>,
-    /// Whether the data changed and meshes need rebuilding.
+    /// Raw SDF distances packed into a flat array (for 3D texture upload)
+    pub sdf_data: Vec<f32>,
+    /// Raw material IDs packed into a flat array
+    pub material_data: Vec<u8>,
+    /// Volume dimensions in voxels
+    pub volume_size: (u32, u32, u32),
+    /// Volume origin in world space
+    pub volume_origin: (f32, f32, f32),
+    /// Whether data changed
     pub dirty: bool,
 }
 
-/// Internal render state.
+/// Internal state tracking
 #[derive(Resource, Default)]
-struct VoxelRenderState {
-    /// Entity holding all voxel mesh children.
-    root: Option<Entity>,
-    /// Last surface count (to detect changes).
-    last_count: usize,
+struct SdfRenderState {
+    quad_entity: Option<Entity>,
+    initialized: bool,
 }
 
-/// Marker for the voxel root entity.
-#[derive(Component)]
-struct VoxelRoot;
+/// Custom material that does SDF raymarching in the fragment shader.
+#[derive(Asset, TypePath, AsBindGroup, Clone)]
+pub struct SdfRaymarchMaterial {
+    /// 3D SDF texture — signed distance field
+    #[texture(0, dimension = "3d")]
+    #[sampler(1)]
+    pub sdf_texture: Handle<Image>,
 
-/// Marker for voxel mesh children.
-#[derive(Component)]
-struct VoxelMesh;
+    /// 3D material ID texture
+    #[texture(2, dimension = "3d", sample_type = "u_int")]
+    pub material_texture: Handle<Image>,
 
-fn update_voxel_meshes(
+    /// Volume dimensions and origin
+    #[uniform(3)]
+    pub volume_info: VolumeInfo,
+}
+
+#[derive(Clone, Copy, Default, ShaderType)]
+pub struct VolumeInfo {
+    pub size: Vec3,
+    pub _pad0: f32,
+    pub origin: Vec3,
+    pub _pad1: f32,
+}
+
+impl Material for SdfRaymarchMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/sdf_raymarch_bevy.wgsl".into()
+    }
+
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Opaque
+    }
+}
+
+fn update_sdf_material(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut sdf_materials: ResMut<Assets<SdfRaymarchMaterial>>,
     render_data: Option<ResMut<VoxelRenderData>>,
-    mut render_state: ResMut<VoxelRenderState>,
-    root_query: Query<Entity, With<VoxelRoot>>,
-    mesh_query: Query<Entity, With<VoxelMesh>>,
+    mut render_state: ResMut<SdfRenderState>,
 ) {
     let Some(mut data) = render_data else { return };
-    if !data.dirty && data.surfaces.len() == render_state.last_count { return; }
+    if !data.dirty { return; }
     data.dirty = false;
-    render_state.last_count = data.surfaces.len();
 
-    // Despawn old meshes
-    for entity in mesh_query.iter() {
+    let (w, h, d) = data.volume_size;
+    if w == 0 || h == 0 || d == 0 { return; }
+    if data.sdf_data.is_empty() || data.material_data.is_empty() { return; }
+
+    info!("Uploading SDF volume: {}x{}x{} ({} voxels)", w, h, d, data.sdf_data.len());
+
+    // Create 3D SDF texture (R32Float)
+    let sdf_bytes: Vec<u8> = data.sdf_data.iter().flat_map(|f| f.to_le_bytes()).collect();
+    let mut sdf_image = Image::new(
+        Extent3d { width: w, height: h, depth_or_array_layers: d },
+        TextureDimension::D3,
+        sdf_bytes,
+        TextureFormat::R32Float,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    sdf_image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST;
+    sdf_image.sampler = ImageSampler::nearest(); // manual trilinear in shader
+    let sdf_handle = images.add(sdf_image);
+
+    // Create 3D material texture (R8Uint)
+    let mut mat_image = Image::new(
+        Extent3d { width: w, height: h, depth_or_array_layers: d },
+        TextureDimension::D3,
+        data.material_data.clone(),
+        TextureFormat::R8Uint,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    mat_image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST;
+    let mat_handle = images.add(mat_image);
+
+    // Create material
+    let material = sdf_materials.add(SdfRaymarchMaterial {
+        sdf_texture: sdf_handle,
+        material_texture: mat_handle,
+        volume_info: VolumeInfo {
+            size: Vec3::new(w as f32, h as f32, d as f32),
+            origin: Vec3::new(data.volume_origin.0, data.volume_origin.1, data.volume_origin.2),
+            ..default()
+        },
+    });
+
+    // Despawn old quad
+    if let Some(entity) = render_state.quad_entity {
         commands.entity(entity).despawn();
     }
 
-    // Get or create root
-    let _root = if let Ok(e) = root_query.get_single() {
-        e
-    } else {
-        commands.spawn((VoxelRoot, SpatialBundle::default())).id()
-    };
+    // Spawn a large quad that the camera looks at — the fragment shader does the raymarching.
+    // Using a large box that fills the view. The shader ignores the mesh geometry and
+    // traces rays from the camera through each fragment.
+    let quad = meshes.add(Mesh::from(Cuboid::new(200.0, 200.0, 200.0)));
+    let entity = commands.spawn(MaterialMeshBundle {
+        mesh: quad,
+        material,
+        transform: Transform::from_xyz(
+            data.volume_origin.0 + w as f32 * 0.5,
+            data.volume_origin.2 + d as f32 * 0.5, // z→y in Bevy
+            data.volume_origin.1 + h as f32 * 0.5,
+        ),
+        ..default()
+    }).id();
 
-    if data.surfaces.is_empty() { return; }
-
-    // Group surfaces by material for instanced rendering
-    let mut groups: std::collections::HashMap<u8, Vec<(f32, f32, f32)>> = std::collections::HashMap::new();
-    for &(x, y, z, mat) in &data.surfaces {
-        groups.entry(mat).or_default().push((x, y, z));
-    }
-
-    let cube = meshes.add(Mesh::from(Cuboid::new(0.95, 0.95, 0.95)));
-
-    for (mat_id, positions) in &groups {
-        let color = material_color(*mat_id);
-        let mat = materials.add(StandardMaterial {
-            base_color: color,
-            perceptual_roughness: 0.85,
-            ..default()
-        });
-
-        // Spawn each voxel as a child of root
-        // For large counts, batched InstancedMesh would be better,
-        // but individual PbrBundles work for < 10K voxels.
-        for &(x, y, z) in positions {
-            commands.spawn((
-                PbrBundle {
-                    mesh: cube.clone(),
-                    material: mat.clone(),
-                    // Bevy uses Y-up: voxel x→bevy x, voxel z→bevy y, voxel y→bevy z
-                    transform: Transform::from_xyz(x, z, y),
-                    ..default()
-                },
-                VoxelMesh,
-            ));
-        }
-    }
-
-    info!("Voxel renderer: {} surfaces, {} materials", data.surfaces.len(), groups.len());
-}
-
-/// Map VoxelMaterial u8 to Bevy Color.
-fn material_color(mat_id: u8) -> Color {
-    match mat_id {
-        1 => Color::rgb(0.45, 0.32, 0.18),   // Dirt
-        2 => Color::rgb(0.50, 0.50, 0.50),   // Stone
-        3 => Color::rgb(0.35, 0.33, 0.32),   // Granite
-        4 => Color::rgb(0.85, 0.78, 0.55),   // Sand
-        5 => Color::rgb(0.60, 0.45, 0.30),   // Clay
-        6 => Color::rgb(0.55, 0.52, 0.48),   // Gravel
-        7 => Color::rgb(0.25, 0.55, 0.18),   // Grass
-        8 => Color::rgba(0.15, 0.35, 0.65, 0.6), // Water
-        9 => Color::rgb(0.90, 0.30, 0.05),   // Lava
-        10 => Color::rgb(0.70, 0.85, 0.95),  // Ice
-        11 => Color::rgb(0.90, 0.92, 0.95),  // Snow
-        12 => Color::rgb(0.55, 0.40, 0.30),  // IronOre
-        13 => Color::rgb(0.60, 0.45, 0.25),  // CopperOre
-        14 => Color::rgb(0.80, 0.70, 0.20),  // GoldOre
-        15 => Color::rgb(0.15, 0.15, 0.15),  // Coal
-        16 => Color::rgb(0.60, 0.30, 0.80),  // Crystal
-        17 => Color::rgb(0.50, 0.35, 0.20),  // WoodLog
-        18 => Color::rgb(0.65, 0.50, 0.30),  // WoodPlanks
-        19 => Color::rgb(0.60, 0.58, 0.55),  // StoneBlock
-        20 => Color::rgb(0.55, 0.53, 0.50),  // StoneBrick
-        21 => Color::rgb(0.70, 0.60, 0.35),  // Thatch
-        22 => Color::rgb(0.50, 0.50, 0.55),  // Iron
-        23 => Color::rgba(0.80, 0.85, 0.90, 0.3), // Glass
-        24 => Color::rgb(0.35, 0.25, 0.12),  // Farmland
-        25 => Color::rgb(0.20, 0.60, 0.10),  // Crop
-        _ => Color::rgb(0.80, 0.20, 0.80),   // Unknown = magenta
-    }
+    render_state.quad_entity = Some(entity);
+    render_state.initialized = true;
 }
 
 /// Extract surface voxels from a VoxelWorld into VoxelRenderData.
-/// Only includes solid voxels adjacent to air (visible surfaces).
 pub fn extract_surfaces(
     voxel_world: &crate::world_sim::voxel::VoxelWorld,
     max_surfaces: usize,
@@ -186,4 +205,64 @@ pub fn extract_surfaces(
     }
 
     surfaces
+}
+
+/// Pack a VoxelWorld into flat arrays for 3D texture upload.
+/// Returns (sdf_data, material_data, volume_size, volume_origin).
+pub fn pack_voxel_world(
+    voxel_world: &crate::world_sim::voxel::VoxelWorld,
+) -> (Vec<f32>, Vec<u8>, (u32, u32, u32), (f32, f32, f32)) {
+    use crate::world_sim::voxel::*;
+    use crate::world_sim::sdf;
+
+    if voxel_world.chunks.is_empty() {
+        return (vec![0.0], vec![0], (1, 1, 1), (0.0, 0.0, 0.0));
+    }
+
+    // Find chunk bounds
+    let min_cx = voxel_world.chunks.keys().map(|c| c.x).min().unwrap();
+    let max_cx = voxel_world.chunks.keys().map(|c| c.x).max().unwrap();
+    let min_cy = voxel_world.chunks.keys().map(|c| c.y).min().unwrap();
+    let max_cy = voxel_world.chunks.keys().map(|c| c.y).max().unwrap();
+    let min_cz = voxel_world.chunks.keys().map(|c| c.z).min().unwrap();
+    let max_cz = voxel_world.chunks.keys().map(|c| c.z).max().unwrap();
+
+    let nx = ((max_cx - min_cx + 1) as u32) * CHUNK_SIZE as u32;
+    let ny = ((max_cy - min_cy + 1) as u32) * CHUNK_SIZE as u32;
+    let nz = ((max_cz - min_cz + 1) as u32) * CHUNK_SIZE as u32;
+    let total = (nx * ny * nz) as usize;
+
+    let mut sdf_data = vec![8.0f32; total]; // default: far from surface (air)
+    let mut mat_data = vec![0u8; total];
+
+    // Pack each chunk into the flat arrays
+    for (cp, chunk) in &voxel_world.chunks {
+        let ox = ((cp.x - min_cx) as usize) * CHUNK_SIZE;
+        let oy = ((cp.y - min_cy) as usize) * CHUNK_SIZE;
+        let oz = ((cp.z - min_cz) as usize) * CHUNK_SIZE;
+
+        // Generate SDF for this chunk
+        let chunk_sdf = sdf::generate_chunk_sdf(chunk, Some(&|gx, gy, gz| {
+            voxel_world.get_voxel(gx, gy, gz)
+        }));
+
+        for lz in 0..CHUNK_SIZE {
+            for ly in 0..CHUNK_SIZE {
+                for lx in 0..CHUNK_SIZE {
+                    let flat_idx = ((oz + lz) * ny as usize + (oy + ly)) * nx as usize + (ox + lx);
+                    let local_idx = local_index(lx, ly, lz);
+                    sdf_data[flat_idx] = chunk_sdf.distances[local_idx];
+                    mat_data[flat_idx] = chunk.voxels[local_idx].material as u8;
+                }
+            }
+        }
+    }
+
+    let origin = (
+        (min_cx * CHUNK_SIZE as i32) as f32,
+        (min_cy * CHUNK_SIZE as i32) as f32,
+        (min_cz * CHUNK_SIZE as i32) as f32,
+    );
+
+    (sdf_data, mat_data, (nx, ny, nz), origin)
 }
