@@ -126,7 +126,7 @@ async function init() {
   // SDF volume: 3D storage texture (R32Float), written by JFA compute
   let sdfTexture = device.createTexture({
     size: [VOL_W, VOL_H, VOL_D],
-    format: 'r16float',
+    format: 'r32float',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
     dimension: '3d',
   });
@@ -173,7 +173,7 @@ async function init() {
   const jfaBindGroupLayout = device.createBindGroupLayout({
     entries: [
       { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'uint', viewDimension: '3d' } },
-      { binding: 1, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'r16float', viewDimension: '3d' } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'r32float', viewDimension: '3d' } },
       { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
     ],
   });
@@ -187,9 +187,8 @@ async function init() {
     entries: [
       { binding: 0, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba8unorm', viewDimension: '2d' } },
       { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
-      { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float', viewDimension: '3d' } },
-      { binding: 3, visibility: GPUShaderStage.COMPUTE, sampler: { type: 'filtering' } },
-      { binding: 4, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'uint', viewDimension: '3d' } },
+      { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float', viewDimension: '3d' } },
+      { binding: 3, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'uint', viewDimension: '3d' } },
     ],
   });
   const raymarchPipeline = device.createComputePipeline({
@@ -268,8 +267,7 @@ async function init() {
         { binding: 0, resource: outputTexture.createView() },
         { binding: 1, resource: { buffer: cameraBuffer } },
         { binding: 2, resource: sdfTexture.createView() },
-        { binding: 3, resource: sdfSampler },
-        { binding: 4, resource: materialTexture.createView() },
+        { binding: 3, resource: materialTexture.createView() },
       ],
     });
 
@@ -559,7 +557,7 @@ async function init() {
     sdfTexture.destroy();
     sdfTexture = dev.createTexture({
       size: [VOL_W, VOL_H, VOL_D],
-      format: 'r16float',
+      format: 'r32float',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
       dimension: '3d',
     });
@@ -629,7 +627,7 @@ const JFA_SHADER = `
 // If solid↔air boundary, distance = 0.5. Otherwise estimate from neighbors.
 
 @group(0) @binding(0) var materials: texture_3d<u32>;
-@group(0) @binding(1) var sdf_out: texture_storage_3d<r16float, write>;
+@group(0) @binding(1) var sdf_out: texture_storage_3d<r32float, write>;
 @group(0) @binding(2) var<uniform> vol_size: vec4<i32>;
 
 fn is_solid(mat: u32) -> bool {
@@ -707,19 +705,48 @@ struct Camera {
 @group(0) @binding(0) var output: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(1) var<uniform> cam: Camera;
 @group(0) @binding(2) var sdf_tex: texture_3d<f32>;
-@group(0) @binding(3) var sdf_samp: sampler;
-@group(0) @binding(4) var mat_tex: texture_3d<u32>;
+@group(0) @binding(3) var mat_tex: texture_3d<u32>;
 
 const MAX_STEPS: i32 = 96;
 const MAX_DIST: f32 = 300.0;
 const HIT_DIST: f32 = 0.3;
 const NORMAL_EPS: f32 = 1.0;
 
+fn sdf_load(ix: i32, iy: i32, iz: i32) -> f32 {
+    let vs = cam.vol_size.xyz;
+    let cx = clamp(ix, 0, vs.x - 1);
+    let cy = clamp(iy, 0, vs.y - 1);
+    let cz = clamp(iz, 0, vs.z - 1);
+    return textureLoad(sdf_tex, vec3<i32>(cx, cy, cz), 0).r;
+}
+
 fn sample_sdf(p: vec3<f32>) -> f32 {
     let vs = vec3<f32>(cam.vol_size.xyz);
-    let uv = p / vs;
-    if (any(uv < vec3<f32>(0.0)) || any(uv > vec3<f32>(1.0))) { return MAX_DIST; }
-    return textureSampleLevel(sdf_tex, sdf_samp, uv, 0.0).r;
+    if (any(p < vec3<f32>(0.0)) || any(p >= vs)) { return MAX_DIST; }
+
+    // Manual trilinear interpolation
+    let fp = floor(p);
+    let f = p - fp;
+    let ip = vec3<i32>(fp);
+
+    let c000 = sdf_load(ip.x, ip.y, ip.z);
+    let c100 = sdf_load(ip.x+1, ip.y, ip.z);
+    let c010 = sdf_load(ip.x, ip.y+1, ip.z);
+    let c110 = sdf_load(ip.x+1, ip.y+1, ip.z);
+    let c001 = sdf_load(ip.x, ip.y, ip.z+1);
+    let c101 = sdf_load(ip.x+1, ip.y, ip.z+1);
+    let c011 = sdf_load(ip.x, ip.y+1, ip.z+1);
+    let c111 = sdf_load(ip.x+1, ip.y+1, ip.z+1);
+
+    let c00 = mix(c000, c100, f.x);
+    let c10 = mix(c010, c110, f.x);
+    let c01 = mix(c001, c101, f.x);
+    let c11 = mix(c011, c111, f.x);
+
+    let c0 = mix(c00, c10, f.y);
+    let c1 = mix(c01, c11, f.y);
+
+    return mix(c0, c1, f.z);
 }
 
 fn sample_material(p: vec3<f32>) -> u32 {
@@ -773,8 +800,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let pixel = vec2<f32>(gid.xy);
     if (pixel.x >= cam.resolution.x || pixel.y >= cam.resolution.y) { return; }
 
-    // Transform camera position to volume space
-    let ray_origin = cam.camera_pos.xyz - cam.vol_origin.xyz;
+    // Camera is already in volume-local space
+    let ray_origin = cam.camera_pos.xyz;
     let ray_dir = get_ray(pixel);
 
     var t: f32 = 0.0;
