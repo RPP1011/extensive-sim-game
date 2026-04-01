@@ -7,6 +7,7 @@
 
 pub mod city_grid;
 pub mod voxel;
+pub mod sdf;
 pub mod delta;
 pub mod state;
 pub mod tick;
