@@ -113,6 +113,11 @@ async function init() {
 
   document.getElementById('status').textContent = 'WebGPU ready. Connecting to server...';
 
+  // Volume state (declared early so test mode can access)
+  let volumeInitialized = false;
+  let chunkMinX = Infinity, chunkMinY = Infinity, chunkMinZ = Infinity;
+  let chunkMaxX = -Infinity, chunkMaxY = -Infinity, chunkMaxZ = -Infinity;
+
   // --- GPU Resources ---
 
   // Material volume: 3D texture (R8Uint) — recreated when volume size changes
@@ -524,10 +529,6 @@ async function init() {
     };
     ws.onerror = () => ws.close();
   }
-
-  let volumeInitialized = false;
-  let chunkMinX = Infinity, chunkMinY = Infinity, chunkMinZ = Infinity;
-  let chunkMaxX = -Infinity, chunkMaxY = -Infinity, chunkMaxZ = -Infinity;
 
   function loadChunkFromJSON(chunk) {
     // Track chunk bounds to set volume origin on first batch
