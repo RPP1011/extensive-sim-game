@@ -783,7 +783,7 @@ fn extract_voxel_chunks(state: &WorldState) -> Vec<VoxelChunkView> {
     // For simplicity, send all chunks every frame (the client deduplicates).
     // Cap at 27 chunks per frame (3x3x3) to manage bandwidth.
     let mut chunks = Vec::new();
-    let max_chunks = 27;
+    let max_chunks = 125; // 5×5×5, enough for initial load
 
     for chunk in vw.chunks.values() {
         if chunks.len() >= max_chunks { break; }

@@ -379,9 +379,10 @@ async function init() {
     i32[25] = VOL_H;
     i32[26] = VOL_D;
     i32[27] = 0;
-    f32[28] = volumeOrigin[0]; // offset 112: volume origin
-    f32[29] = volumeOrigin[1];
-    f32[30] = volumeOrigin[2];
+    // Volume origin in voxel-space (chunk coords × CHUNK_SIZE)
+    f32[28] = volumeOrigin[0] * CHUNK_SIZE;
+    f32[29] = volumeOrigin[1] * CHUNK_SIZE;
+    f32[30] = volumeOrigin[2] * CHUNK_SIZE;
     f32[31] = 0;
 
     device.queue.writeBuffer(cameraBuffer, 0, buf);
@@ -450,11 +451,20 @@ async function init() {
             data.voxel_chunk_count || 0;
 
           // Process voxel chunk data if present
-          if (data.voxel_chunks) {
-            for (const chunk of data.voxel_chunks) {
-              loadChunkFromJSON(chunk);
+          if (data.voxel_chunks && data.voxel_chunks.length > 0) {
+            if (!volumeInitialized) {
+              // First batch: scan bounds, initialize volume, load all
+              for (const chunk of data.voxel_chunks) {
+                loadChunkFromJSON(chunk); // just tracks bounds
+              }
+              initializeVolume(data.voxel_chunks);
+            } else {
+              for (const chunk of data.voxel_chunks) {
+                loadChunkFromJSON(chunk);
+              }
             }
             volumeDirty = true;
+            console.log(`Loaded ${data.voxel_chunks.length} chunks, volumeDirty=true`);
           }
         } catch (err) { console.error('JSON parse:', err); }
       } else {
@@ -471,26 +481,80 @@ async function init() {
     ws.onerror = () => ws.close();
   }
 
+  let volumeInitialized = false;
+  let chunkMinX = Infinity, chunkMinY = Infinity, chunkMinZ = Infinity;
+  let chunkMaxX = -Infinity, chunkMaxY = -Infinity, chunkMaxZ = -Infinity;
+
   function loadChunkFromJSON(chunk) {
-    // chunk: { cx, cy, cz, materials: [4096 u8 values] }
+    // Track chunk bounds to set volume origin on first batch
+    chunkMinX = Math.min(chunkMinX, chunk.cx);
+    chunkMinY = Math.min(chunkMinY, chunk.cy);
+    chunkMinZ = Math.min(chunkMinZ, chunk.cz);
+    chunkMaxX = Math.max(chunkMaxX, chunk.cx);
+    chunkMaxY = Math.max(chunkMaxY, chunk.cy);
+    chunkMaxZ = Math.max(chunkMaxZ, chunk.cz);
+
+    if (!volumeInitialized) {
+      // Defer until we've seen all chunks in this frame
+      return;
+    }
+
     const ox = (chunk.cx - volumeOrigin[0]) * CHUNK_SIZE;
     const oy = (chunk.cy - volumeOrigin[1]) * CHUNK_SIZE;
     const oz = (chunk.cz - volumeOrigin[2]) * CHUNK_SIZE;
 
     if (ox < 0 || oy < 0 || oz < 0 ||
         ox + CHUNK_SIZE > VOL_W || oy + CHUNK_SIZE > VOL_H || oz + CHUNK_SIZE > VOL_D) {
-      return; // out of volume bounds
+      console.warn(`Chunk (${chunk.cx},${chunk.cy},${chunk.cz}) out of volume bounds: offset (${ox},${oy},${oz})`);
+      return;
     }
 
+    let nonAir = 0;
     for (let lz = 0; lz < CHUNK_SIZE; lz++) {
       for (let ly = 0; ly < CHUNK_SIZE; ly++) {
         for (let lx = 0; lx < CHUNK_SIZE; lx++) {
           const srcIdx = (lz * CHUNK_SIZE + ly) * CHUNK_SIZE + lx;
           const dstIdx = ((oz + lz) * VOL_H + (oy + ly)) * VOL_W + (ox + lx);
           materialData[dstIdx] = chunk.materials[srcIdx];
+          if (chunk.materials[srcIdx] !== 0) nonAir++;
         }
       }
     }
+  }
+
+  function initializeVolume(chunks) {
+    // Set volume origin from chunk bounds
+    volumeOrigin[0] = chunkMinX;
+    volumeOrigin[1] = chunkMinY;
+    volumeOrigin[2] = chunkMinZ;
+
+    const neededX = (chunkMaxX - chunkMinX + 1) * CHUNK_SIZE;
+    const neededY = (chunkMaxY - chunkMinY + 1) * CHUNK_SIZE;
+    const neededZ = (chunkMaxZ - chunkMinZ + 1) * CHUNK_SIZE;
+
+    console.log(`Chunk bounds: (${chunkMinX},${chunkMinY},${chunkMinZ}) to (${chunkMaxX},${chunkMaxY},${chunkMaxZ})`);
+    console.log(`Volume needed: ${neededX}x${neededY}x${neededZ}, allocated: ${VOL_W}x${VOL_H}x${VOL_D}`);
+
+    if (neededX > VOL_W || neededY > VOL_H || neededZ > VOL_D) {
+      console.warn('Volume too small for chunks! Some will be clipped.');
+    }
+
+    volumeInitialized = true;
+
+    // Now load all the chunks we deferred
+    for (const chunk of chunks) {
+      loadChunkFromJSON(chunk);
+    }
+
+    // Position camera above the center of the volume
+    const centerX = (chunkMinX + chunkMaxX + 1) * CHUNK_SIZE / 2;
+    const centerY = (chunkMinY + chunkMaxY + 1) * CHUNK_SIZE / 2;
+    const surfaceZ = (chunkMaxZ) * CHUNK_SIZE; // top of terrain
+    camPos[0] = centerX;
+    camPos[1] = surfaceZ + 30; // above terrain
+    camPos[2] = centerY - 40;  // slightly behind
+    camPitch = -0.4; // look downward
+    console.log(`Camera at (${camPos[0].toFixed(1)}, ${camPos[1].toFixed(1)}, ${camPos[2].toFixed(1)})`);
   }
 }
 
