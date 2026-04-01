@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Voxel World — WebGPU SDF</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 16px;
+    background: rgba(0,0,0,0.6); color: #ccc; font-size: 13px;
+    z-index: 10; pointer-events: none;
+  }
+  #hud > * { pointer-events: auto; }
+  #hud h1 { font-size: 14px; letter-spacing: 2px; color: #c9a84c; text-transform: uppercase; }
+  .stat { margin-left: 16px; }
+  .stat span { color: #fff; font-weight: 600; }
+  #status { position: fixed; bottom: 8px; left: 8px; font-size: 11px; color: #888; z-index: 10; }
+  #no-webgpu {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    color: #c44; font-size: 18px; text-align: center; display: none;
+  }
+</style>
+</head>
+<body>
+<div id="hud">
+  <h1>Voxel SDF</h1>
+  <div>
+    <span class="stat">Chunks <span id="chunks">0</span></span>
+    <span class="stat">FPS <span id="fps">0</span></span>
+    <span class="stat">Tick <span id="tick">0</span></span>
+  </div>
+</div>
+<div id="status">Initializing WebGPU...</div>
+<div id="no-webgpu">WebGPU not supported in this browser.<br>Use Chrome 113+ or Edge 113+.</div>
+<canvas id="canvas"></canvas>
+
+<script>
+// ============================================================
+// WEBGPU VOXEL SDF RENDERER
+//
+// Pipeline:
+// 1. Server sends raw chunk materials (1 byte/voxel) via WebSocket binary
+// 2. GPU compute: JFA builds SDF from materials
+// 3. GPU compute: Raymarch SDF → color output
+// 4. Camera controlled client-side (orbit)
+// ============================================================
+
+const CHUNK_SIZE = 16;
+const CHUNK_VOL = CHUNK_SIZE ** 3; // 4096
+
+// Volume dimensions (how many chunks packed into one 3D texture)
+let VOLUME_CHUNKS_X = 8, VOLUME_CHUNKS_Y = 8, VOLUME_CHUNKS_Z = 4;
+let VOL_W = VOLUME_CHUNKS_X * CHUNK_SIZE; // 128
+let VOL_H = VOLUME_CHUNKS_Y * CHUNK_SIZE; // 128
+let VOL_D = VOLUME_CHUNKS_Z * CHUNK_SIZE; // 64
+let VOL_TOTAL = VOL_W * VOL_H * VOL_D;
+
+// Camera state
+let camPos = [64, 50, 100]; // start above center
+let camYaw = -0.5, camPitch = -0.6;
+let camSpeed = 0.5;
+let keys = {};
+
+// Volume data (CPU side, uploaded to GPU)
+let materialData = new Uint8Array(VOL_TOTAL); // 1 byte per voxel
+let volumeOrigin = [0, 0, 0]; // world-space offset of volume (0,0,0) corner
+let volumeDirty = true;
+
+// Timing
+let lastTime = performance.now();
+let frameCount = 0;
+let fpsDisplay = 0;
+
+// ============================================================
+// WEBGPU INIT
+// ============================================================
+async function init() {
+  if (!navigator.gpu) {
+    document.getElementById('no-webgpu').style.display = 'block';
+    document.getElementById('status').textContent = 'WebGPU not available';
+    return;
+  }
+
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) {
+    document.getElementById('status').textContent = 'No WebGPU adapter found';
+    return;
+  }
+  const device = await adapter.requestDevice({
+    requiredLimits: {
+      maxStorageBufferBindingSize: 256 * 1024 * 1024,
+      maxBufferSize: 256 * 1024 * 1024,
+    }
+  });
+
+  const canvas = document.getElementById('canvas');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  const ctx = canvas.getContext('webgpu');
+  const format = navigator.gpu.getPreferredCanvasFormat();
+  ctx.configure({ device, format, alphaMode: 'opaque' });
+
+  window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    ctx.configure({ device, format, alphaMode: 'opaque' });
+    createOutputTexture();
+  });
+
+  document.getElementById('status').textContent = 'WebGPU ready. Connecting to server...';
+
+  // --- GPU Resources ---
+
+  // Material volume: 3D texture (R8Uint)
+  let materialTexture = device.createTexture({
+    size: [VOL_W, VOL_H, VOL_D],
+    format: 'r8uint',
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    dimension: '3d',
+  });
+
+  // SDF volume: 3D storage texture (R32Float), written by JFA compute
+  let sdfTexture = device.createTexture({
+    size: [VOL_W, VOL_H, VOL_D],
+    format: 'r32float',
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
+    dimension: '3d',
+  });
+
+  // Output texture for raymarch (written by compute, read by render pass)
+  let outputTexture;
+  function createOutputTexture() {
+    if (outputTexture) outputTexture.destroy();
+    outputTexture = device.createTexture({
+      size: [canvas.width, canvas.height],
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
+    });
+  }
+  createOutputTexture();
+
+  // Camera uniform buffer
+  const cameraBuffer = device.createBuffer({
+    size: 128, // mat4(64) + vec4(16) + vec2(8) + f32(4) + f32(4) + ivec4(16) + padding
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+
+  // Sampler for SDF (trilinear)
+  const sdfSampler = device.createSampler({
+    magFilter: 'linear',
+    minFilter: 'linear',
+  });
+
+  // --- Shaders ---
+
+  // JFA compute shader: build SDF from materials
+  const jfaModule = device.createShaderModule({ code: JFA_SHADER });
+  // Raymarch compute shader: trace rays through SDF
+  const raymarchModule = device.createShaderModule({ code: RAYMARCH_SHADER });
+  // Fullscreen blit shader: display output texture
+  const blitModule = device.createShaderModule({ code: BLIT_SHADER });
+
+  // --- Pipelines ---
+
+  // JFA: seed + N passes
+  const jfaBindGroupLayout = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'uint', viewDimension: '3d' } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'r32float', viewDimension: '3d' } },
+      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+    ],
+  });
+  const jfaPipeline = device.createComputePipeline({
+    layout: device.createPipelineLayout({ bindGroupLayouts: [jfaBindGroupLayout] }),
+    compute: { module: jfaModule, entryPoint: 'main' },
+  });
+
+  // Raymarch
+  const raymarchBindGroupLayout = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba8unorm', viewDimension: '2d' } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+      { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float', viewDimension: '3d' } },
+      { binding: 3, visibility: GPUShaderStage.COMPUTE, sampler: { type: 'filtering' } },
+      { binding: 4, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'uint', viewDimension: '3d' } },
+    ],
+  });
+  const raymarchPipeline = device.createComputePipeline({
+    layout: device.createPipelineLayout({ bindGroupLayouts: [raymarchBindGroupLayout] }),
+    compute: { module: raymarchModule, entryPoint: 'main' },
+  });
+
+  // Blit: fullscreen quad
+  const blitBindGroupLayout = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+    ],
+  });
+  const blitPipeline = device.createRenderPipeline({
+    layout: device.createPipelineLayout({ bindGroupLayouts: [blitBindGroupLayout] }),
+    vertex: { module: blitModule, entryPoint: 'vs_main' },
+    fragment: {
+      module: blitModule, entryPoint: 'fs_main',
+      targets: [{ format }],
+    },
+    primitive: { topology: 'triangle-list' },
+  });
+
+  const blitSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+
+  // --- JFA Params buffer ---
+  const jfaParamsBuffer = device.createBuffer({
+    size: 16,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+
+  // --- Upload and render ---
+
+  function uploadMaterials() {
+    device.queue.writeTexture(
+      { texture: materialTexture },
+      materialData,
+      { bytesPerRow: VOL_W, rowsPerImage: VOL_H },
+      [VOL_W, VOL_H, VOL_D],
+    );
+  }
+
+  function buildSDF(encoder) {
+    // Simple SDF: for each voxel, distance to nearest surface.
+    // We use a single-pass approximation: just check 6 neighbors.
+    // For proper JFA we'd need multiple passes with ping-pong textures.
+    // This simplified version writes directly.
+    const bg = device.createBindGroup({
+      layout: jfaBindGroupLayout,
+      entries: [
+        { binding: 0, resource: materialTexture.createView() },
+        { binding: 1, resource: sdfTexture.createView() },
+        { binding: 2, resource: { buffer: jfaParamsBuffer } },
+      ],
+    });
+
+    // Upload volume dimensions
+    device.queue.writeBuffer(jfaParamsBuffer, 0, new Int32Array([VOL_W, VOL_H, VOL_D, 0]));
+
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(jfaPipeline);
+    pass.setBindGroup(0, bg);
+    pass.dispatchWorkgroups(
+      Math.ceil(VOL_W / 4),
+      Math.ceil(VOL_H / 4),
+      Math.ceil(VOL_D / 4),
+    );
+    pass.end();
+  }
+
+  function raymarch(encoder) {
+    const bg = device.createBindGroup({
+      layout: raymarchBindGroupLayout,
+      entries: [
+        { binding: 0, resource: outputTexture.createView() },
+        { binding: 1, resource: { buffer: cameraBuffer } },
+        { binding: 2, resource: sdfTexture.createView() },
+        { binding: 3, resource: sdfSampler },
+        { binding: 4, resource: materialTexture.createView() },
+      ],
+    });
+
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(raymarchPipeline);
+    pass.setBindGroup(0, bg);
+    pass.dispatchWorkgroups(
+      Math.ceil(canvas.width / 8),
+      Math.ceil(canvas.height / 8),
+      1,
+    );
+    pass.end();
+  }
+
+  function blit(encoder, targetView) {
+    const bg = device.createBindGroup({
+      layout: blitBindGroupLayout,
+      entries: [
+        { binding: 0, resource: outputTexture.createView() },
+        { binding: 1, resource: blitSampler },
+      ],
+    });
+
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [{
+        view: targetView,
+        loadOp: 'clear', clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        storeOp: 'store',
+      }],
+    });
+    pass.setPipeline(blitPipeline);
+    pass.setBindGroup(0, bg);
+    pass.draw(3); // fullscreen triangle
+    pass.end();
+  }
+
+  function updateCamera() {
+    // Fly camera
+    const forward = [
+      Math.cos(camPitch) * Math.sin(camYaw),
+      Math.sin(camPitch),
+      Math.cos(camPitch) * Math.cos(camYaw),
+    ];
+    const right = [Math.cos(camYaw), 0, -Math.sin(camYaw)];
+
+    if (keys['w'] || keys['ArrowUp']) {
+      camPos[0] += forward[0] * camSpeed;
+      camPos[1] += forward[1] * camSpeed;
+      camPos[2] += forward[2] * camSpeed;
+    }
+    if (keys['s'] || keys['ArrowDown']) {
+      camPos[0] -= forward[0] * camSpeed;
+      camPos[1] -= forward[1] * camSpeed;
+      camPos[2] -= forward[2] * camSpeed;
+    }
+    if (keys['a'] || keys['ArrowLeft']) {
+      camPos[0] -= right[0] * camSpeed;
+      camPos[2] -= right[2] * camSpeed;
+    }
+    if (keys['d'] || keys['ArrowRight']) {
+      camPos[0] += right[0] * camSpeed;
+      camPos[2] += right[2] * camSpeed;
+    }
+    if (keys[' ']) camPos[1] += camSpeed;
+    if (keys['Shift']) camPos[1] -= camSpeed;
+
+    // Build view-projection inverse matrix
+    const aspect = canvas.width / canvas.height;
+    const fov = 60 * Math.PI / 180;
+    const near = 0.1, far = 500;
+
+    // Perspective projection matrix
+    const f = 1 / Math.tan(fov / 2);
+    const proj = new Float32Array([
+      f / aspect, 0, 0, 0,
+      0, f, 0, 0,
+      0, 0, (far + near) / (near - far), -1,
+      0, 0, 2 * far * near / (near - far), 0,
+    ]);
+
+    // View matrix (look direction from yaw/pitch)
+    const cx = Math.cos(camYaw), sx = Math.sin(camYaw);
+    const cy = Math.cos(camPitch), sy = Math.sin(camPitch);
+    const view = new Float32Array([
+      cx, sx*sy, -sx*cy, 0,
+      0, cy, sy, 0,
+      sx, -cx*sy, cx*cy, 0,
+      -(cx*camPos[0]+sx*camPos[2]), -(sx*sy*camPos[0]+cy*camPos[1]-cx*sy*camPos[2]),
+       (sx*cy*camPos[0]-sy*camPos[1]-cx*cy*camPos[2]), 1,
+    ]);
+
+    // VP = proj * view, then invert for ray generation
+    const vp = mat4Mul(proj, view);
+    const vpInv = mat4Inv(vp);
+
+    // Upload: vpInv(64) + camPos(16) + resolution(8) + time(4) + pad(4) + volumeSize(16)
+    const buf = new ArrayBuffer(128);
+    const f32 = new Float32Array(buf);
+    const i32 = new Int32Array(buf);
+    f32.set(vpInv, 0);        // offset 0: mat4 (16 floats)
+    f32[16] = camPos[0];      // offset 64: camera pos
+    f32[17] = camPos[1];
+    f32[18] = camPos[2];
+    f32[19] = 0;
+    f32[20] = canvas.width;   // offset 80: resolution
+    f32[21] = canvas.height;
+    f32[22] = performance.now() / 1000; // time
+    f32[23] = 0;
+    i32[24] = VOL_W;          // offset 96: volume dimensions
+    i32[25] = VOL_H;
+    i32[26] = VOL_D;
+    i32[27] = 0;
+    f32[28] = volumeOrigin[0]; // offset 112: volume origin
+    f32[29] = volumeOrigin[1];
+    f32[30] = volumeOrigin[2];
+    f32[31] = 0;
+
+    device.queue.writeBuffer(cameraBuffer, 0, buf);
+  }
+
+  // --- Frame loop ---
+  function frame() {
+    requestAnimationFrame(frame);
+
+    updateCamera();
+
+    if (volumeDirty) {
+      uploadMaterials();
+      volumeDirty = false;
+    }
+
+    const encoder = device.createCommandEncoder();
+    buildSDF(encoder);
+    raymarch(encoder);
+    blit(encoder, ctx.getCurrentTexture().createView());
+    device.queue.submit([encoder.finish()]);
+
+    // FPS counter
+    frameCount++;
+    const now = performance.now();
+    if (now - lastTime > 1000) {
+      fpsDisplay = Math.round(frameCount * 1000 / (now - lastTime));
+      document.getElementById('fps').textContent = fpsDisplay;
+      frameCount = 0;
+      lastTime = now;
+    }
+  }
+
+  // --- Input ---
+  document.addEventListener('keydown', e => { keys[e.key] = true; });
+  document.addEventListener('keyup', e => { keys[e.key] = false; });
+  canvas.addEventListener('mousemove', e => {
+    if (e.buttons & 1) {
+      camYaw -= e.movementX * 0.003;
+      camPitch -= e.movementY * 0.003;
+      camPitch = Math.max(-1.5, Math.min(1.5, camPitch));
+    }
+  });
+  canvas.addEventListener('click', () => canvas.requestPointerLock());
+
+  // --- WebSocket: receive chunk data ---
+  connectWS();
+  requestAnimationFrame(frame);
+
+  function connectWS() {
+    const port = new URLSearchParams(window.location.search).get('port') || '9090';
+    const ws = new WebSocket(`ws://localhost:${port}`);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      document.getElementById('status').textContent = 'Connected';
+    };
+
+    ws.onmessage = (e) => {
+      if (typeof e.data === 'string') {
+        // JSON frame (entity data, tick info)
+        try {
+          const data = JSON.parse(e.data);
+          document.getElementById('tick').textContent = data.tick || 0;
+          document.getElementById('chunks').textContent =
+            data.voxel_chunk_count || 0;
+
+          // Process voxel chunk data if present
+          if (data.voxel_chunks) {
+            for (const chunk of data.voxel_chunks) {
+              loadChunkFromJSON(chunk);
+            }
+            volumeDirty = true;
+          }
+        } catch (err) { console.error('JSON parse:', err); }
+      } else {
+        // Binary: raw chunk material data
+        loadChunkFromBinary(new Uint8Array(e.data));
+        volumeDirty = true;
+      }
+    };
+
+    ws.onclose = () => {
+      document.getElementById('status').textContent = 'Disconnected — reconnecting...';
+      setTimeout(connectWS, 3000);
+    };
+    ws.onerror = () => ws.close();
+  }
+
+  function loadChunkFromJSON(chunk) {
+    // chunk: { cx, cy, cz, materials: [4096 u8 values] }
+    const ox = (chunk.cx - volumeOrigin[0]) * CHUNK_SIZE;
+    const oy = (chunk.cy - volumeOrigin[1]) * CHUNK_SIZE;
+    const oz = (chunk.cz - volumeOrigin[2]) * CHUNK_SIZE;
+
+    if (ox < 0 || oy < 0 || oz < 0 ||
+        ox + CHUNK_SIZE > VOL_W || oy + CHUNK_SIZE > VOL_H || oz + CHUNK_SIZE > VOL_D) {
+      return; // out of volume bounds
+    }
+
+    for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+      for (let ly = 0; ly < CHUNK_SIZE; ly++) {
+        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+          const srcIdx = (lz * CHUNK_SIZE + ly) * CHUNK_SIZE + lx;
+          const dstIdx = ((oz + lz) * VOL_H + (oy + ly)) * VOL_W + (ox + lx);
+          materialData[dstIdx] = chunk.materials[srcIdx];
+        }
+      }
+    }
+  }
+}
+
+// ============================================================
+// MATRIX UTILITIES
+// ============================================================
+function mat4Mul(a, b) {
+  const o = new Float32Array(16);
+  for (let i = 0; i < 4; i++)
+    for (let j = 0; j < 4; j++)
+      o[j*4+i] = a[i]*b[j*4] + a[4+i]*b[j*4+1] + a[8+i]*b[j*4+2] + a[12+i]*b[j*4+3];
+  return o;
+}
+
+function mat4Inv(m) {
+  const inv = new Float32Array(16);
+  inv[0] = m[5]*m[10]*m[15]-m[5]*m[11]*m[14]-m[9]*m[6]*m[15]+m[9]*m[7]*m[14]+m[13]*m[6]*m[11]-m[13]*m[7]*m[10];
+  inv[4] = -m[4]*m[10]*m[15]+m[4]*m[11]*m[14]+m[8]*m[6]*m[15]-m[8]*m[7]*m[14]-m[12]*m[6]*m[11]+m[12]*m[7]*m[10];
+  inv[8] = m[4]*m[9]*m[15]-m[4]*m[11]*m[13]-m[8]*m[5]*m[15]+m[8]*m[7]*m[13]+m[12]*m[5]*m[11]-m[12]*m[7]*m[9];
+  inv[12] = -m[4]*m[9]*m[14]+m[4]*m[10]*m[13]+m[8]*m[5]*m[14]-m[8]*m[6]*m[13]-m[12]*m[5]*m[10]+m[12]*m[6]*m[9];
+  inv[1] = -m[1]*m[10]*m[15]+m[1]*m[11]*m[14]+m[9]*m[2]*m[15]-m[9]*m[3]*m[14]-m[13]*m[2]*m[11]+m[13]*m[3]*m[10];
+  inv[5] = m[0]*m[10]*m[15]-m[0]*m[11]*m[14]-m[8]*m[2]*m[15]+m[8]*m[3]*m[14]+m[12]*m[2]*m[11]-m[12]*m[3]*m[10];
+  inv[9] = -m[0]*m[9]*m[15]+m[0]*m[11]*m[13]+m[8]*m[1]*m[15]-m[8]*m[3]*m[13]-m[12]*m[1]*m[11]+m[12]*m[3]*m[9];
+  inv[13] = m[0]*m[9]*m[14]-m[0]*m[10]*m[13]-m[8]*m[1]*m[14]+m[8]*m[2]*m[13]+m[12]*m[1]*m[10]-m[12]*m[2]*m[9];
+  inv[2] = m[1]*m[6]*m[15]-m[1]*m[7]*m[14]-m[5]*m[2]*m[15]+m[5]*m[3]*m[14]+m[13]*m[2]*m[7]-m[13]*m[3]*m[6];
+  inv[6] = -m[0]*m[6]*m[15]+m[0]*m[7]*m[14]+m[4]*m[2]*m[15]-m[4]*m[3]*m[14]-m[12]*m[2]*m[7]+m[12]*m[3]*m[6];
+  inv[10] = m[0]*m[5]*m[15]-m[0]*m[7]*m[13]-m[4]*m[1]*m[15]+m[4]*m[3]*m[13]+m[12]*m[1]*m[7]-m[12]*m[3]*m[5];
+  inv[14] = -m[0]*m[5]*m[14]+m[0]*m[6]*m[13]+m[4]*m[1]*m[14]-m[4]*m[2]*m[13]-m[12]*m[1]*m[6]+m[12]*m[2]*m[5];
+  inv[3] = -m[1]*m[6]*m[11]+m[1]*m[7]*m[10]+m[5]*m[2]*m[11]-m[5]*m[3]*m[10]-m[9]*m[2]*m[7]+m[9]*m[3]*m[6];
+  inv[7] = m[0]*m[6]*m[11]-m[0]*m[7]*m[10]-m[4]*m[2]*m[11]+m[4]*m[3]*m[10]+m[8]*m[2]*m[7]-m[8]*m[3]*m[6];
+  inv[11] = -m[0]*m[5]*m[11]+m[0]*m[7]*m[9]+m[4]*m[1]*m[11]-m[4]*m[3]*m[9]-m[8]*m[1]*m[7]+m[8]*m[3]*m[5];
+  inv[15] = m[0]*m[5]*m[10]-m[0]*m[6]*m[9]-m[4]*m[1]*m[10]+m[4]*m[2]*m[9]+m[8]*m[1]*m[6]-m[8]*m[2]*m[5];
+  let det = m[0]*inv[0]+m[1]*inv[4]+m[2]*inv[8]+m[3]*inv[12];
+  if (Math.abs(det) < 1e-10) return new Float32Array(16);
+  det = 1/det;
+  for (let i=0;i<16;i++) inv[i]*=det;
+  return inv;
+}
+
+// ============================================================
+// WGSL SHADERS
+// ============================================================
+
+const JFA_SHADER = `
+// Build SDF from material volume.
+// Single-pass approximation: for each voxel, check 6 neighbors.
+// If solid↔air boundary, distance = 0.5. Otherwise estimate from neighbors.
+
+@group(0) @binding(0) var materials: texture_3d<u32>;
+@group(0) @binding(1) var sdf_out: texture_storage_3d<r32float, write>;
+@group(0) @binding(2) var<uniform> vol_size: vec4<i32>;
+
+fn is_solid(mat: u32) -> bool {
+    return mat != 0u && mat != 8u && mat != 9u; // not Air, Water, Lava
+}
+
+@compute @workgroup_size(4, 4, 4)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let pos = vec3<i32>(gid);
+    if (pos.x >= vol_size.x || pos.y >= vol_size.y || pos.z >= vol_size.z) { return; }
+
+    let mat = textureLoad(materials, pos, 0).r;
+    let solid = is_solid(mat);
+
+    // Check 6 face neighbors for surface detection
+    var is_surface = false;
+    let offsets = array<vec3<i32>, 6>(
+        vec3<i32>(1,0,0), vec3<i32>(-1,0,0),
+        vec3<i32>(0,1,0), vec3<i32>(0,-1,0),
+        vec3<i32>(0,0,1), vec3<i32>(0,0,-1),
+    );
+
+    for (var i = 0; i < 6; i++) {
+        let np = pos + offsets[i];
+        if (np.x >= 0 && np.x < vol_size.x &&
+            np.y >= 0 && np.y < vol_size.y &&
+            np.z >= 0 && np.z < vol_size.z) {
+            let n_mat = textureLoad(materials, np, 0).r;
+            if (is_solid(n_mat) != solid) {
+                is_surface = true;
+                break;
+            }
+        } else {
+            // At volume boundary, treat as surface
+            is_surface = true;
+        }
+    }
+
+    var dist: f32;
+    if (is_surface) {
+        dist = 0.5;
+    } else if (solid) {
+        // Deep inside solid: estimate distance (negative = inside)
+        // Simple: count distance to nearest volume edge as proxy
+        let dx = min(f32(pos.x), f32(vol_size.x - 1 - pos.x));
+        let dy = min(f32(pos.y), f32(vol_size.y - 1 - pos.y));
+        let dz = min(f32(pos.z), f32(vol_size.z - 1 - pos.z));
+        dist = -min(dx, min(dy, dz));
+    } else {
+        // Deep in air
+        let dx = min(f32(pos.x), f32(vol_size.x - 1 - pos.x));
+        let dy = min(f32(pos.y), f32(vol_size.y - 1 - pos.y));
+        let dz = min(f32(pos.z), f32(vol_size.z - 1 - pos.z));
+        dist = min(dx, min(dy, dz));
+    }
+
+    // Sign: negative inside solid
+    if (solid) { dist = -abs(dist); } else { dist = abs(dist); }
+
+    textureStore(sdf_out, pos, vec4<f32>(dist, 0.0, 0.0, 0.0));
+}
+`;
+
+const RAYMARCH_SHADER = `
+struct Camera {
+    view_proj_inv: mat4x4<f32>,
+    camera_pos: vec4<f32>,
+    resolution: vec2<f32>,
+    time: f32,
+    _pad: f32,
+    vol_size: vec4<i32>,
+    vol_origin: vec4<f32>,
+};
+
+@group(0) @binding(0) var output: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(1) var<uniform> cam: Camera;
+@group(0) @binding(2) var sdf_tex: texture_3d<f32>;
+@group(0) @binding(3) var sdf_samp: sampler;
+@group(0) @binding(4) var mat_tex: texture_3d<u32>;
+
+const MAX_STEPS: i32 = 96;
+const MAX_DIST: f32 = 300.0;
+const HIT_DIST: f32 = 0.3;
+const NORMAL_EPS: f32 = 1.0;
+
+fn sample_sdf(p: vec3<f32>) -> f32 {
+    let vs = vec3<f32>(cam.vol_size.xyz);
+    let uv = p / vs;
+    if (any(uv < vec3<f32>(0.0)) || any(uv > vec3<f32>(1.0))) { return MAX_DIST; }
+    return textureSampleLevel(sdf_tex, sdf_samp, uv, 0.0).r;
+}
+
+fn sample_material(p: vec3<f32>) -> u32 {
+    let ip = vec3<i32>(floor(p));
+    let vs = cam.vol_size.xyz;
+    if (any(ip < vec3<i32>(0)) || any(ip >= vs)) { return 0u; }
+    return textureLoad(mat_tex, ip, 0).r;
+}
+
+fn sdf_normal(p: vec3<f32>) -> vec3<f32> {
+    let e = NORMAL_EPS;
+    return normalize(vec3<f32>(
+        sample_sdf(p + vec3<f32>(e,0,0)) - sample_sdf(p - vec3<f32>(e,0,0)),
+        sample_sdf(p + vec3<f32>(0,e,0)) - sample_sdf(p - vec3<f32>(0,e,0)),
+        sample_sdf(p + vec3<f32>(0,0,e)) - sample_sdf(p - vec3<f32>(0,0,e)),
+    ));
+}
+
+fn mat_color(m: u32) -> vec3<f32> {
+    switch m {
+        case 1u: { return vec3<f32>(0.45,0.32,0.18); }
+        case 2u: { return vec3<f32>(0.50,0.50,0.50); }
+        case 3u: { return vec3<f32>(0.35,0.33,0.32); }
+        case 4u: { return vec3<f32>(0.85,0.78,0.55); }
+        case 5u: { return vec3<f32>(0.60,0.45,0.30); }
+        case 6u: { return vec3<f32>(0.55,0.52,0.48); }
+        case 7u: { return vec3<f32>(0.25,0.55,0.18); }
+        case 8u: { return vec3<f32>(0.15,0.35,0.65); }
+        case 12u: { return vec3<f32>(0.55,0.40,0.30); }
+        case 14u: { return vec3<f32>(0.80,0.70,0.20); }
+        case 15u: { return vec3<f32>(0.15,0.15,0.15); }
+        case 16u: { return vec3<f32>(0.60,0.30,0.80); }
+        case 17u: { return vec3<f32>(0.50,0.35,0.20); }
+        case 24u: { return vec3<f32>(0.35,0.25,0.12); }
+        default: { return vec3<f32>(0.60,0.55,0.50); }
+    }
+}
+
+fn get_ray(pixel: vec2<f32>) -> vec3<f32> {
+    let ndc = vec2<f32>(
+        (pixel.x / cam.resolution.x) * 2.0 - 1.0,
+        1.0 - (pixel.y / cam.resolution.y) * 2.0,
+    );
+    let near = cam.view_proj_inv * vec4<f32>(ndc, -1.0, 1.0);
+    let far = cam.view_proj_inv * vec4<f32>(ndc, 1.0, 1.0);
+    return normalize(far.xyz / far.w - near.xyz / near.w);
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let pixel = vec2<f32>(gid.xy);
+    if (pixel.x >= cam.resolution.x || pixel.y >= cam.resolution.y) { return; }
+
+    // Transform camera position to volume space
+    let ray_origin = cam.camera_pos.xyz - cam.vol_origin.xyz;
+    let ray_dir = get_ray(pixel);
+
+    var t: f32 = 0.0;
+    var hit = false;
+    var hit_pos = vec3<f32>(0.0);
+
+    for (var i: i32 = 0; i < MAX_STEPS; i++) {
+        let pos = ray_origin + ray_dir * t;
+        let d = sample_sdf(pos);
+
+        if (d < HIT_DIST) {
+            hit = true;
+            hit_pos = pos;
+            break;
+        }
+
+        t += max(abs(d), 0.5);
+        if (t > MAX_DIST) { break; }
+    }
+
+    var color: vec4<f32>;
+    if (hit) {
+        let n = sdf_normal(hit_pos);
+        let mat_id = sample_material(hit_pos);
+        let base = mat_color(mat_id);
+
+        let light = normalize(vec3<f32>(0.3, 0.8, 0.4));
+        let diff = max(dot(n, light), 0.0);
+        let amb = 0.25;
+
+        let fog_t = clamp((t - 80.0) / 200.0, 0.0, 1.0);
+        let sky = vec3<f32>(0.55, 0.70, 0.90);
+        let lit = base * (amb + diff * 0.75);
+        color = vec4<f32>(mix(lit, sky, fog_t), 1.0);
+    } else {
+        let sky_t = ray_dir.y * 0.5 + 0.5;
+        color = vec4<f32>(mix(vec3<f32>(0.55,0.70,0.90), vec3<f32>(0.30,0.50,0.85), sky_t), 1.0);
+    }
+
+    textureStore(output, vec2<i32>(gid.xy), color);
+}
+`;
+
+const BLIT_SHADER = `
+@group(0) @binding(0) var tex: texture_2d<f32>;
+@group(0) @binding(1) var tex_sampler: sampler;
+
+struct VertexOutput {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
+    // Fullscreen triangle
+    var out: VertexOutput;
+    let x = f32(i32(vi) / 2) * 4.0 - 1.0;
+    let y = f32(i32(vi) % 2) * 4.0 - 1.0;
+    out.pos = vec4<f32>(x, y, 0.0, 1.0);
+    out.uv = vec2<f32>((x + 1.0) / 2.0, 1.0 - (y + 1.0) / 2.0);
+    return out;
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    return textureSample(tex, tex_sampler, in.uv);
+}
+`;
+
+// ============================================================
+// START
+// ============================================================
+init();
+</script>
+</body>
+</html>

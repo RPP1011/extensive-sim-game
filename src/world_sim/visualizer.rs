@@ -226,9 +226,26 @@ pub struct TraceFrame {
     /// WFC building interiors near the selected entity (if any).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub building_interiors: Vec<BuildingInteriorView>,
-    /// Voxel surface data for 3D terrain rendering.
+    /// Voxel surface data for 3D terrain rendering (legacy instanced mesh path).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub voxel_surfaces: Vec<VoxelSurfaceEntry>,
+    /// Raw voxel chunk data for WebGPU SDF renderer.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub voxel_chunks: Vec<VoxelChunkView>,
+    /// Number of loaded voxel chunks (for HUD display).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub voxel_chunk_count: usize,
+}
+
+fn is_zero(v: &usize) -> bool { *v == 0 }
+
+/// A chunk's material data for the WebGPU SDF renderer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VoxelChunkView {
+    pub cx: i32,
+    pub cy: i32,
+    pub cz: i32,
+    pub materials: Vec<u8>, // 4096 bytes: material enum as u8 per voxel
 }
 
 /// A visible surface voxel for the 3D renderer.
@@ -685,6 +702,8 @@ pub fn generate_frame_with_selection(
         selected_npc,
         building_interiors,
         voxel_surfaces: extract_voxel_surfaces(state),
+        voxel_chunks: extract_voxel_chunks(state),
+        voxel_chunk_count: state.voxel_world.chunk_count(),
     }
 }
 
@@ -754,6 +773,30 @@ fn extract_voxel_surfaces(state: &WorldState) -> Vec<VoxelSurfaceEntry> {
     }
 
     surfaces
+}
+
+/// Extract raw chunk material data for the WebGPU SDF renderer.
+/// Only sends chunks once (when first loaded) by checking dirty flag.
+fn extract_voxel_chunks(state: &WorldState) -> Vec<VoxelChunkView> {
+    let vw = &state.voxel_world;
+    // Send all chunks on first frame, then only dirty chunks.
+    // For simplicity, send all chunks every frame (the client deduplicates).
+    // Cap at 27 chunks per frame (3x3x3) to manage bandwidth.
+    let mut chunks = Vec::new();
+    let max_chunks = 27;
+
+    for chunk in vw.chunks.values() {
+        if chunks.len() >= max_chunks { break; }
+        let materials: Vec<u8> = chunk.voxels.iter().map(|v| v.material as u8).collect();
+        chunks.push(VoxelChunkView {
+            cx: chunk.pos.x,
+            cy: chunk.pos.y,
+            cz: chunk.pos.z,
+            materials,
+        });
+    }
+
+    chunks
 }
 
 // ---------------------------------------------------------------------------
@@ -892,6 +935,8 @@ impl PlaybackController {
                 selected_npc: None,
                 building_interiors: vec![],
                 voxel_surfaces: vec![],
+                voxel_chunks: vec![],
+                voxel_chunk_count: 0,
                 summary: FrameSummary {
                     alive_npcs: 0,
                     alive_monsters: 0,
