@@ -779,12 +779,10 @@ fn extract_voxel_surfaces(state: &WorldState) -> Vec<VoxelSurfaceEntry> {
 /// Only sends chunks once (when first loaded) by checking dirty flag.
 fn extract_voxel_chunks(state: &WorldState) -> Vec<VoxelChunkView> {
     let vw = &state.voxel_world;
-    // Send all chunks on first frame, then only dirty chunks.
-    // For simplicity, send all chunks every frame (the client deduplicates).
-    // Cap at 27 chunks per frame (3x3x3) to manage bandwidth.
     let mut chunks = Vec::new();
-    let max_chunks = 125; // 5×5×5, enough for initial load
+    let max_chunks = 125;
 
+    // Also send volume metadata so client can size the volume correctly.
     for chunk in vw.chunks.values() {
         if chunks.len() >= max_chunks { break; }
         let materials: Vec<u8> = chunk.voxels.iter().map(|v| v.material as u8).collect();

@@ -115,7 +115,7 @@ async function init() {
 
   // --- GPU Resources ---
 
-  // Material volume: 3D texture (R8Uint)
+  // Material volume: 3D texture (R8Uint) — recreated when volume size changes
   let materialTexture = device.createTexture({
     size: [VOL_W, VOL_H, VOL_D],
     format: 'r8uint',
@@ -130,6 +130,9 @@ async function init() {
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
     dimension: '3d',
   });
+
+  // Make device accessible to initializeVolume
+  window._gpuDevice = device;
 
   // Output texture for raymarch (written by compute, read by render pass)
   let outputTexture;
@@ -528,16 +531,38 @@ async function init() {
     volumeOrigin[1] = chunkMinY;
     volumeOrigin[2] = chunkMinZ;
 
-    const neededX = (chunkMaxX - chunkMinX + 1) * CHUNK_SIZE;
-    const neededY = (chunkMaxY - chunkMinY + 1) * CHUNK_SIZE;
-    const neededZ = (chunkMaxZ - chunkMinZ + 1) * CHUNK_SIZE;
+    // Resize volume to fit actual chunk bounds
+    VOLUME_CHUNKS_X = chunkMaxX - chunkMinX + 1;
+    VOLUME_CHUNKS_Y = chunkMaxY - chunkMinY + 1;
+    VOLUME_CHUNKS_Z = chunkMaxZ - chunkMinZ + 1;
+    VOL_W = VOLUME_CHUNKS_X * CHUNK_SIZE;
+    VOL_H = VOLUME_CHUNKS_Y * CHUNK_SIZE;
+    VOL_D = VOLUME_CHUNKS_Z * CHUNK_SIZE;
+    VOL_TOTAL = VOL_W * VOL_H * VOL_D;
 
     console.log(`Chunk bounds: (${chunkMinX},${chunkMinY},${chunkMinZ}) to (${chunkMaxX},${chunkMaxY},${chunkMaxZ})`);
-    console.log(`Volume needed: ${neededX}x${neededY}x${neededZ}, allocated: ${VOL_W}x${VOL_H}x${VOL_D}`);
+    console.log(`Volume: ${VOLUME_CHUNKS_X}x${VOLUME_CHUNKS_Y}x${VOLUME_CHUNKS_Z} chunks = ${VOL_W}x${VOL_H}x${VOL_D} voxels`);
 
-    if (neededX > VOL_W || neededY > VOL_H || neededZ > VOL_D) {
-      console.warn('Volume too small for chunks! Some will be clipped.');
-    }
+    // Reallocate CPU material array
+    materialData = new Uint8Array(VOL_TOTAL);
+
+    // Recreate GPU textures with correct size
+    const dev = window._gpuDevice;
+    materialTexture.destroy();
+    materialTexture = dev.createTexture({
+      size: [VOL_W, VOL_H, VOL_D],
+      format: 'r8uint',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      dimension: '3d',
+    });
+
+    sdfTexture.destroy();
+    sdfTexture = dev.createTexture({
+      size: [VOL_W, VOL_H, VOL_D],
+      format: 'r32float',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
+      dimension: '3d',
+    });
 
     volumeInitialized = true;
 
@@ -547,14 +572,14 @@ async function init() {
     }
 
     // Position camera above the center of the volume
-    const centerX = (chunkMinX + chunkMaxX + 1) * CHUNK_SIZE / 2;
-    const centerY = (chunkMinY + chunkMaxY + 1) * CHUNK_SIZE / 2;
-    const surfaceZ = (chunkMaxZ) * CHUNK_SIZE; // top of terrain
+    const centerX = VOL_W / 2;
+    const centerY = VOL_H / 2;
+    const surfaceZ = VOL_D * 0.8; // near top of terrain
     camPos[0] = centerX;
-    camPos[1] = surfaceZ + 30; // above terrain
-    camPos[2] = centerY - 40;  // slightly behind
+    camPos[1] = surfaceZ + 20; // above terrain
+    camPos[2] = centerY - 30;  // slightly behind
     camPitch = -0.4; // look downward
-    console.log(`Camera at (${camPos[0].toFixed(1)}, ${camPos[1].toFixed(1)}, ${camPos[2].toFixed(1)})`);
+    console.log(`Camera at volume-local (${camPos[0].toFixed(1)}, ${camPos[1].toFixed(1)}, ${camPos[2].toFixed(1)})`);
   }
 }
 
