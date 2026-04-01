@@ -308,12 +308,10 @@ svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
 
 <p>Every tick follows a four-phase pipeline:</p>
 
-<pre><code>&#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;     &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;     &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;     &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
-&#9474; Snapshot &#9474; &#9472;&#9472;&#9654; &#9474; Compute &#9474; &#9472;&#9472;&#9654; &#9474;  Merge  &#9474; &#9472;&#9472;&#9654; &#9474;  Apply  &#9474;
-&#9474;  freeze  &#9474;     &#9474;   167   &#9474;     &#9474; commut. &#9474;     &#9474; produce &#9474;
-&#9474;  state   &#9474;     &#9474; systems &#9474;     &#9474;  fold   &#9474;     &#9474;  next   &#9474;
-&#9474;          &#9474;     &#9474;         &#9474;     &#9474;         &#9474;     &#9474;  state  &#9474;
-&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;     &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;     &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;     &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</code></pre>
+<div class="fig-container">
+  <div id="fig-pipeline"></div>
+  <div class="fig-caption">Each tick: freeze state, run 167 systems in parallel, fold deltas commutatively, produce next state.</div>
+</div>
 
 <p><strong>Why not just mutate in place?</strong> Two reasons: parallelism and determinism.</p>
 
@@ -493,17 +491,46 @@ pub mod prophecy;           // visions and foreshadowing
 
 <p>Each NPC has a 20-event ring buffer and a list of semantic beliefs with decaying confidence:</p>
 
-<pre><code>NPC sees friend die in battle
-  &rarr; MemEvent { kind: WitnessedDeath, tick: 4200, entity_id: 17 }
-  &rarr; Belief { content: "the northern frontier is dangerous", confidence: 0.8 }
-  &rarr; Emotion spike: grief +0.6, anger +0.3 (if killer known)
-  &rarr; Grudge formed against killer (decays at 0.001/100 ticks)</code></pre>
+<div class="fig-container">
+  <div id="fig-inner-state"></div>
+  <div class="fig-controls">
+    <button id="inner-play">Play Event</button>
+    <button id="inner-reset">Reset</button>
+  </div>
+  <div class="fig-caption">An NPC witnesses a friend's death. The event ripples through memory, beliefs, emotions, and grudge formation.</div>
+</div>
 
 <p>Beliefs decay over time but influence decisions. An NPC who believes a route is dangerous will avoid it even after the threat is gone &mdash; until the belief fades or a contradicting event overwrites it.</p>
 
 <h3>Personality</h3>
 
 <p>Personality is <strong>experience-shaped</strong>, not assigned at birth. An NPC who survives three sieges develops high <code>risk_tolerance</code>. One who mentors many apprentices develops high <code>compassion</code>. The personality then modifies decision weights: a high-ambition NPC prioritizes purpose over safety; a high-compassion NPC prioritizes social bonds.</p>
+
+<h3>Aspirations &amp; Crystallization</h3>
+
+<p>Needs and emotions drive moment-to-moment decisions, but NPCs also form <strong>medium-term aspirations</strong> that bias behavior over hundreds of ticks.</p>
+
+<p>Each NPC carries an <code>Aspiration</code> &mdash; a personality-weighted need gap vector recomputed every 500 ticks. On its own, this vector is abstract: "I need more safety" or "I need purpose." The interesting part is what happens next.</p>
+
+<p>When a salient memory event aligns with a dominant need dimension, the abstract aspiration <strong>crystallizes</strong> into a concrete target:</p>
+
+<pre><code>pub struct Crystal {
+    pub need_idx: usize,        // which need this addresses
+    pub target: CrystalTarget,  // what the NPC is pursuing
+    pub formed_at: u64,
+}
+
+pub enum CrystalTarget {
+    Entity(u32),      // pursue a relationship, emulate this NPC
+    Class(u32),       // pursue this class (by tag hash)
+    Building(u32),    // build or work at this building
+    Location(f32,f32),// reach this place
+    Resource(ResourceType),  // find this resource
+}</code></pre>
+
+<p>For example: an NPC with a high <code>social</code> need gap who just made a friend crystallizes into <code>CrystalTarget::Entity(friend_id)</code>. An NPC with a high <code>esteem</code> gap who just leveled a class crystallizes into <code>CrystalTarget::Class(best_class_hash)</code>. The crystal gives the NPC a concrete thing to pursue, with tracked progress that advances toward 1.0.</p>
+
+<p>Only one crystal can be active at a time. If progress stalls (no advancement for ~200 ticks), the crystal dissolves and the NPC falls back to need-driven behavior until a new salient event triggers crystallization again. This prevents NPCs from fixating on unreachable goals while still giving them the persistence to pursue multi-step plans.</p>
 
 <h3>WorldView Optimization</h3>
 
@@ -596,7 +623,10 @@ pub const FAITH: u32    = tag(b"faith");
 
 <p>Eight commodities flow through the settlement network:</p>
 
-<pre><code>FOOD &middot; IRON &middot; WOOD &middot; HERBS &middot; HIDE &middot; CRYSTAL &middot; EQUIPMENT &middot; MEDICINE</code></pre>
+<div class="fig-container">
+  <div id="fig-economy"></div>
+  <div class="fig-caption">Commodity production and trade flows between settlements. Arrow thickness shows trade volume.</div>
+</div>
 
 <p>Each settlement has per-commodity stockpiles, production rates, and consumption rates. Prices emerge from supply and demand &mdash; the <code>price_discovery</code> system adjusts prices based on stockpile levels relative to consumption.</p>
 
@@ -706,6 +736,528 @@ pub const FAITH: u32    = tag(b"faith");
 </div>
 
 <script>
+// =========================================================================
+// Fig 1: Tick Pipeline
+// =========================================================================
+(function() {
+  const C = {
+    surface: '#13161d', surface2: '#1c2029', surface3: '#252a36',
+    border: '#2a2f3e', borderBright: '#3d4459',
+    text: '#b8c0cc', muted: '#6b7280', heading: '#e2e8f0',
+    accent: '#60a5fa', purple: '#a78bfa', green: '#34d399',
+    orange: '#fbbf24', cyan: '#22d3ee', red: '#f87171',
+    accentDim: '#2563eb', purpleDim: '#7c3aed', greenDim: '#059669'
+  };
+
+  const W = 860, H = 200;
+  const svg = d3.select('#fig-pipeline').append('svg')
+    .attr('viewBox', `0 0 ${W} ${H}`).attr('width', '100%');
+
+  const phases = [
+    { name: 'Snapshot', sub: 'freeze state', time: '~1\u00b5s', color: C.accent, x: 30 },
+    { name: 'Compute', sub: '167 systems', time: '140\u2013180\u00b5s', color: C.purple, x: 240 },
+    { name: 'Merge', sub: 'commutative fold', time: '5\u201350\u00b5s', color: C.green, x: 450 },
+    { name: 'Apply', sub: 'next state', time: '50\u2013100\u00b5s', color: C.orange, x: 660 }
+  ];
+
+  const boxW = 160, boxH = 80, boxY = 50;
+
+  // Draw phase boxes
+  phases.forEach((p, i) => {
+    const g = svg.append('g');
+
+    // Box
+    g.append('rect')
+      .attr('x', p.x).attr('y', boxY).attr('width', boxW).attr('height', boxH)
+      .attr('rx', 8).attr('fill', C.surface).attr('stroke', p.color).attr('stroke-width', 1.5);
+
+    // Glow bar at top
+    g.append('rect')
+      .attr('x', p.x + 1).attr('y', boxY + 1).attr('width', boxW - 2).attr('height', 3)
+      .attr('rx', 2).attr('fill', p.color).attr('opacity', 0.5);
+
+    // Name
+    g.append('text')
+      .attr('x', p.x + boxW / 2).attr('y', boxY + 30)
+      .attr('text-anchor', 'middle').attr('fill', C.heading)
+      .attr('font-size', 15).attr('font-weight', 700)
+      .text(p.name);
+
+    // Subtitle
+    g.append('text')
+      .attr('x', p.x + boxW / 2).attr('y', boxY + 48)
+      .attr('text-anchor', 'middle').attr('fill', C.muted)
+      .attr('font-size', 11).attr('class', 'label-mono')
+      .text(p.sub);
+
+    // Timing
+    g.append('text')
+      .attr('x', p.x + boxW / 2).attr('y', boxY + 67)
+      .attr('text-anchor', 'middle').attr('fill', p.color)
+      .attr('font-size', 11).attr('font-weight', 600).attr('class', 'label-mono')
+      .text(p.time);
+
+    // Arrow to next
+    if (i < phases.length - 1) {
+      const ax1 = p.x + boxW + 4;
+      const ax2 = phases[i + 1].x - 4;
+      const ay = boxY + boxH / 2;
+
+      // Arrow line
+      g.append('line')
+        .attr('x1', ax1).attr('y1', ay).attr('x2', ax2 - 8).attr('y2', ay)
+        .attr('stroke', C.borderBright).attr('stroke-width', 2);
+
+      // Arrowhead
+      g.append('path')
+        .attr('d', `M${ax2 - 10},${ay - 5} L${ax2},${ay} L${ax2 - 10},${ay + 5}`)
+        .attr('fill', 'none').attr('stroke', C.borderBright).attr('stroke-width', 2)
+        .attr('stroke-linejoin', 'round');
+    }
+  });
+
+  // Delta particles annotation under Compute
+  const deltas = svg.append('g');
+  deltas.append('text')
+    .attr('x', phases[1].x + boxW / 2).attr('y', boxY + boxH + 22)
+    .attr('text-anchor', 'middle').attr('fill', C.muted).attr('font-size', 10)
+    .text('Vec<WorldDelta>');
+
+  // Small delta dots flowing from Compute to Merge
+  for (let i = 0; i < 5; i++) {
+    const cx = phases[1].x + boxW + 15 + i * 16;
+    deltas.append('circle')
+      .attr('cx', cx).attr('cy', boxY + boxH / 2)
+      .attr('r', 3).attr('fill', C.purple).attr('opacity', 0.3 + i * 0.12);
+  }
+
+  // Total timing label
+  svg.append('text')
+    .attr('x', W / 2).attr('y', boxY + boxH + 45)
+    .attr('text-anchor', 'middle').attr('fill', C.heading)
+    .attr('font-size', 12).attr('font-weight', 600)
+    .text('Total: ~300\u2013500\u00b5s per tick \u2192 2,000\u20133,000 ticks/sec');
+})();
+
+// =========================================================================
+// Fig 2: NPC Inner State Cascade
+// =========================================================================
+(function() {
+  const C = {
+    surface: '#13161d', surface2: '#1c2029', surface3: '#252a36',
+    border: '#2a2f3e', borderBright: '#3d4459',
+    text: '#b8c0cc', muted: '#6b7280', heading: '#e2e8f0',
+    accent: '#60a5fa', purple: '#a78bfa', green: '#34d399',
+    orange: '#fbbf24', cyan: '#22d3ee', red: '#f87171',
+    redDim: '#dc2626', greenDim: '#059669'
+  };
+
+  const W = 860, H = 340;
+  const svg = d3.select('#fig-inner-state').append('svg')
+    .attr('viewBox', `0 0 ${W} ${H}`).attr('width', '100%');
+
+  // --- Left side: event cascade ---
+  const cascadeX = 30;
+  const steps = [
+    { label: 'Event', detail: 'WitnessedDeath', detail2: 'tick 4200, friend #17', color: C.red, y: 25 },
+    { label: 'Memory', detail: 'MemEvent pushed', detail2: 'ring buffer [18/20]', color: C.orange, y: 90 },
+    { label: 'Belief', detail: '"northern frontier is dangerous"', detail2: 'confidence: 0.80', color: C.purple, y: 155 },
+    { label: 'Emotions', detail: 'grief +0.6, anger +0.3', detail2: 'from witness + killer known', color: C.cyan, y: 220 },
+    { label: 'Grudge', detail: 'vengeance vs entity #42', detail2: 'decay: 0.001/100 ticks', color: C.red, y: 285 },
+  ];
+
+  const stepW = 320, stepH = 48;
+
+  steps.forEach((s, i) => {
+    const g = svg.append('g').attr('class', `cascade-step cascade-step-${i}`);
+
+    // Connector line from previous
+    if (i > 0) {
+      g.append('line')
+        .attr('x1', cascadeX + 20).attr('y1', s.y - 17)
+        .attr('x2', cascadeX + 20).attr('y2', s.y)
+        .attr('stroke', C.border).attr('stroke-width', 1.5)
+        .attr('stroke-dasharray', '4,3');
+    }
+
+    // Badge
+    g.append('rect')
+      .attr('x', cascadeX).attr('y', s.y).attr('width', 40).attr('height', stepH)
+      .attr('rx', 6).attr('fill', s.color).attr('opacity', 0.15);
+    g.append('text')
+      .attr('x', cascadeX + 20).attr('y', s.y + stepH / 2 + 4)
+      .attr('text-anchor', 'middle').attr('fill', s.color)
+      .attr('font-size', 9).attr('font-weight', 700).attr('class', 'label-mono')
+      .text(s.label.substring(0, 4).toUpperCase());
+
+    // Detail box
+    g.append('rect')
+      .attr('x', cascadeX + 50).attr('y', s.y).attr('width', stepW - 50).attr('height', stepH)
+      .attr('rx', 6).attr('fill', C.surface).attr('stroke', C.border).attr('stroke-width', 1);
+
+    g.append('text')
+      .attr('x', cascadeX + 60).attr('y', s.y + 19)
+      .attr('fill', C.heading).attr('font-size', 12).attr('font-weight', 600)
+      .text(s.detail);
+
+    g.append('text')
+      .attr('x', cascadeX + 60).attr('y', s.y + 36)
+      .attr('fill', C.muted).attr('font-size', 10).attr('class', 'label-mono')
+      .text(s.detail2);
+
+    // Start hidden for animation
+    g.attr('opacity', 0);
+  });
+
+  // --- Right side: emotion gauges ---
+  const gaugeX = 420, gaugeY = 25;
+
+  svg.append('text')
+    .attr('x', gaugeX + 100).attr('y', gaugeY - 5)
+    .attr('text-anchor', 'middle').attr('fill', C.heading)
+    .attr('font-size', 13).attr('font-weight', 700)
+    .text('Emotions');
+
+  const emotions = [
+    { name: 'Joy', base: 0.3, spike: 0, color: C.green },
+    { name: 'Anger', base: 0.1, spike: 0.3, color: C.orange },
+    { name: 'Fear', base: 0.15, spike: 0.05, color: C.purple },
+    { name: 'Grief', base: 0.05, spike: 0.6, color: C.accent },
+    { name: 'Pride', base: 0.4, spike: 0, color: C.cyan },
+    { name: 'Anxiety', base: 0.2, spike: 0.1, color: C.red },
+  ];
+
+  const barW = 180, barH = 16, barGap = 8;
+  const emotionBars = [];
+
+  emotions.forEach((e, i) => {
+    const y = gaugeY + 10 + i * (barH + barGap);
+
+    // Label
+    svg.append('text')
+      .attr('x', gaugeX - 5).attr('y', y + barH / 2 + 4)
+      .attr('text-anchor', 'end').attr('fill', C.muted)
+      .attr('font-size', 11).attr('font-weight', 500)
+      .text(e.name);
+
+    // Track
+    svg.append('rect')
+      .attr('x', gaugeX).attr('y', y).attr('width', barW).attr('height', barH)
+      .attr('rx', 3).attr('fill', C.surface2);
+
+    // Fill bar
+    const bar = svg.append('rect')
+      .attr('x', gaugeX).attr('y', y).attr('width', barW * e.base).attr('height', barH)
+      .attr('rx', 3).attr('fill', e.color).attr('opacity', 0.7);
+
+    // Value text
+    const val = svg.append('text')
+      .attr('x', gaugeX + barW + 8).attr('y', y + barH / 2 + 4)
+      .attr('fill', e.color).attr('font-size', 10).attr('font-weight', 600)
+      .attr('class', 'label-mono')
+      .text(e.base.toFixed(2));
+
+    emotionBars.push({ bar, val, base: e.base, spike: e.spike, color: e.color });
+  });
+
+  // --- Right side: needs gauges ---
+  const needX = 640, needY = 25;
+
+  svg.append('text')
+    .attr('x', needX + 100).attr('y', needY - 5)
+    .attr('text-anchor', 'middle').attr('fill', C.heading)
+    .attr('font-size', 13).attr('font-weight', 700)
+    .text('Needs');
+
+  const needs = [
+    { name: 'Hunger', base: 0.3, spike: 0, color: C.orange },
+    { name: 'Safety', base: 0.6, spike: -0.35, color: C.red },
+    { name: 'Shelter', base: 0.8, spike: 0, color: C.green },
+    { name: 'Social', base: 0.5, spike: 0.1, color: C.purple },
+    { name: 'Purpose', base: 0.4, spike: 0.15, color: C.accent },
+    { name: 'Esteem', base: 0.3, spike: 0.05, color: C.cyan },
+  ];
+
+  const needBars = [];
+
+  needs.forEach((n, i) => {
+    const y = needY + 10 + i * (barH + barGap);
+
+    svg.append('text')
+      .attr('x', needX - 5).attr('y', y + barH / 2 + 4)
+      .attr('text-anchor', 'end').attr('fill', C.muted)
+      .attr('font-size', 11).attr('font-weight', 500)
+      .text(n.name);
+
+    svg.append('rect')
+      .attr('x', needX).attr('y', y).attr('width', barW).attr('height', barH)
+      .attr('rx', 3).attr('fill', C.surface2);
+
+    const bar = svg.append('rect')
+      .attr('x', needX).attr('y', y).attr('width', barW * n.base).attr('height', barH)
+      .attr('rx', 3).attr('fill', n.color).attr('opacity', 0.7);
+
+    const val = svg.append('text')
+      .attr('x', needX + barW + 8).attr('y', y + barH / 2 + 4)
+      .attr('fill', n.color).attr('font-size', 10).attr('font-weight', 600)
+      .attr('class', 'label-mono')
+      .text(n.base.toFixed(2));
+
+    needBars.push({ bar, val, base: n.base, spike: n.spike, color: n.color });
+  });
+
+  // --- Belief decay label ---
+  const decayY = 210;
+  svg.append('text')
+    .attr('x', gaugeX + 100).attr('y', decayY + 20)
+    .attr('text-anchor', 'middle').attr('fill', C.muted)
+    .attr('font-size', 10).attr('class', 'label-mono')
+    .text('belief confidence over time');
+
+  // Mini sparkline for belief decay
+  const sparkX = gaugeX + 10, sparkY = decayY + 30, sparkW = 180, sparkH = 50;
+  svg.append('rect')
+    .attr('x', sparkX).attr('y', sparkY).attr('width', sparkW).attr('height', sparkH)
+    .attr('rx', 4).attr('fill', C.surface2);
+
+  const decayData = d3.range(0, 1, 0.01).map(t => ({ t, v: 0.8 * Math.exp(-2.5 * t) }));
+  const sx = d3.scaleLinear().domain([0, 1]).range([sparkX + 4, sparkX + sparkW - 4]);
+  const sy = d3.scaleLinear().domain([0, 0.85]).range([sparkY + sparkH - 4, sparkY + 4]);
+
+  const sparkLine = svg.append('path')
+    .attr('d', d3.line().x(d => sx(d.t)).y(d => sy(d.v))(decayData))
+    .attr('fill', 'none').attr('stroke', C.purple).attr('stroke-width', 1.5).attr('opacity', 0.8);
+
+  // Threshold line
+  svg.append('line')
+    .attr('x1', sparkX + 4).attr('y1', sy(0.2)).attr('x2', sparkX + sparkW - 4).attr('y2', sy(0.2))
+    .attr('stroke', C.muted).attr('stroke-width', 0.5).attr('stroke-dasharray', '3,3');
+  svg.append('text')
+    .attr('x', sparkX + sparkW - 2).attr('y', sy(0.2) - 3)
+    .attr('text-anchor', 'end').attr('fill', C.muted).attr('font-size', 8).attr('class', 'label-mono')
+    .text('action threshold');
+
+  // Grudge decay sparkline
+  svg.append('text')
+    .attr('x', gaugeX + 320).attr('y', decayY + 20)
+    .attr('text-anchor', 'middle').attr('fill', C.muted)
+    .attr('font-size', 10).attr('class', 'label-mono')
+    .text('grudge intensity (5\u00d7 slower decay)');
+
+  const spark2X = gaugeX + 230, spark2W = 180;
+  svg.append('rect')
+    .attr('x', spark2X).attr('y', sparkY).attr('width', spark2W).attr('height', sparkH)
+    .attr('rx', 4).attr('fill', C.surface2);
+
+  const grudgeData = d3.range(0, 1, 0.01).map(t => ({ t, v: 1.0 * Math.exp(-0.5 * t) }));
+  const sx2 = d3.scaleLinear().domain([0, 1]).range([spark2X + 4, spark2X + spark2W - 4]);
+
+  svg.append('path')
+    .attr('d', d3.line().x(d => sx2(d.t)).y(d => sy(d.v))(grudgeData))
+    .attr('fill', 'none').attr('stroke', C.red).attr('stroke-width', 1.5).attr('opacity', 0.8);
+
+  svg.append('line')
+    .attr('x1', spark2X + 4).attr('y1', sy(0.2)).attr('x2', spark2X + spark2W - 4).attr('y2', sy(0.2))
+    .attr('stroke', C.muted).attr('stroke-width', 0.5).attr('stroke-dasharray', '3,3');
+
+  // --- Animation ---
+  let animating = false;
+  const playBtn = document.getElementById('inner-play');
+  const resetBtn = document.getElementById('inner-reset');
+
+  function animateCascade() {
+    if (animating) return;
+    animating = true;
+
+    // Reset
+    d3.selectAll('.cascade-step').attr('opacity', 0);
+    emotionBars.forEach(b => {
+      b.bar.attr('width', barW * b.base);
+      b.val.text(b.base.toFixed(2));
+    });
+    needBars.forEach(b => {
+      b.bar.attr('width', barW * b.base);
+      b.val.text(b.base.toFixed(2));
+    });
+
+    // Cascade steps with delays
+    const delays = [0, 400, 800, 1200, 1700];
+    steps.forEach((_, i) => {
+      setTimeout(() => {
+        d3.select(`.cascade-step-${i}`)
+          .transition().duration(300)
+          .attr('opacity', 1);
+      }, delays[i]);
+    });
+
+    // Animate emotion bars at step 4
+    setTimeout(() => {
+      emotionBars.forEach(b => {
+        const target = Math.min(1, b.base + b.spike);
+        b.bar.transition().duration(600).attr('width', barW * target);
+        b.val.transition().duration(600)
+          .tween('text', function() {
+            const interp = d3.interpolateNumber(b.base, target);
+            return function(t) { d3.select(this).text(interp(t).toFixed(2)); };
+          })
+          .attr('fill', target > b.base ? C.red : b.color);
+      });
+      needBars.forEach(b => {
+        const target = Math.max(0, Math.min(1, b.base + b.spike));
+        b.bar.transition().duration(600).attr('width', barW * target);
+        b.val.transition().duration(600)
+          .tween('text', function() {
+            const interp = d3.interpolateNumber(b.base, target);
+            return function(t) { d3.select(this).text(interp(t).toFixed(2)); };
+          })
+          .attr('fill', target < b.base ? C.red : b.color);
+      });
+    }, 1200);
+
+    setTimeout(() => { animating = false; }, 2200);
+  }
+
+  function resetCascade() {
+    animating = false;
+    d3.selectAll('.cascade-step').attr('opacity', 0);
+    emotionBars.forEach(b => {
+      b.bar.interrupt().attr('width', barW * b.base);
+      b.val.interrupt().text(b.base.toFixed(2)).attr('fill', b.color);
+    });
+    needBars.forEach(b => {
+      b.bar.interrupt().attr('width', barW * b.base);
+      b.val.interrupt().text(b.base.toFixed(2)).attr('fill', b.color);
+    });
+  }
+
+  playBtn.addEventListener('click', animateCascade);
+  resetBtn.addEventListener('click', resetCascade);
+})();
+
+// =========================================================================
+// Fig 3: Economy — Settlement Trade Network
+// =========================================================================
+(function() {
+  const C = {
+    surface: '#13161d', surface2: '#1c2029',
+    border: '#2a2f3e', borderBright: '#3d4459',
+    text: '#b8c0cc', muted: '#6b7280', heading: '#e2e8f0',
+    accent: '#60a5fa', purple: '#a78bfa', green: '#34d399',
+    orange: '#fbbf24', cyan: '#22d3ee', red: '#f87171'
+  };
+
+  const commodityColors = {
+    FOOD: '#34d399', IRON: '#94a3b8', WOOD: '#a16207',
+    HERBS: '#a78bfa', HIDE: '#d97706', CRYSTAL: '#22d3ee',
+    EQUIPMENT: '#f87171', MEDICINE: '#60a5fa'
+  };
+
+  const W = 860, H = 300;
+  const svg = d3.select('#fig-economy').append('svg')
+    .attr('viewBox', `0 0 ${W} ${H}`).attr('width', '100%');
+
+  // Settlements as nodes
+  const settlements = [
+    { name: 'Ironvale', x: 140, y: 80, produces: ['IRON','EQUIPMENT'], consumes: ['FOOD','WOOD'] },
+    { name: 'Millhaven', x: 430, y: 50, produces: ['FOOD','HERBS'], consumes: ['IRON','EQUIPMENT'] },
+    { name: 'Goldreach', x: 720, y: 80, produces: ['EQUIPMENT','MEDICINE'], consumes: ['IRON','HERBS'] },
+    { name: 'Thornwatch', x: 140, y: 220, produces: ['WOOD','HIDE'], consumes: ['FOOD','MEDICINE'] },
+    { name: 'Sunspire', x: 430, y: 240, produces: ['CRYSTAL','HERBS'], consumes: ['FOOD','WOOD'] },
+    { name: 'Duskhollow', x: 720, y: 220, produces: ['IRON','CRYSTAL'], consumes: ['FOOD','EQUIPMENT'] },
+  ];
+
+  // Trade routes (from, to, commodity, volume 1-3)
+  const routes = [
+    { from: 0, to: 1, commodity: 'IRON', vol: 3 },
+    { from: 1, to: 0, commodity: 'FOOD', vol: 2 },
+    { from: 1, to: 2, commodity: 'HERBS', vol: 2 },
+    { from: 2, to: 1, commodity: 'EQUIPMENT', vol: 1 },
+    { from: 3, to: 0, commodity: 'WOOD', vol: 2 },
+    { from: 3, to: 4, commodity: 'HIDE', vol: 1 },
+    { from: 4, to: 1, commodity: 'HERBS', vol: 2 },
+    { from: 5, to: 2, commodity: 'CRYSTAL', vol: 2 },
+    { from: 4, to: 5, commodity: 'FOOD', vol: 1 },
+    { from: 0, to: 3, commodity: 'EQUIPMENT', vol: 1 },
+  ];
+
+  // Draw trade routes first (behind nodes)
+  routes.forEach(r => {
+    const s = settlements[r.from], e = settlements[r.to];
+    // Offset parallel routes slightly
+    const dx = e.x - s.x, dy = e.y - s.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const nx = -dy / len * 6, ny = dx / len * 6;
+
+    const color = commodityColors[r.commodity] || C.muted;
+
+    svg.append('line')
+      .attr('x1', s.x + nx).attr('y1', s.y + ny)
+      .attr('x2', e.x + nx).attr('y2', e.y + ny)
+      .attr('stroke', color).attr('stroke-width', r.vol * 1.2)
+      .attr('opacity', 0.25);
+
+    // Animated dot along route
+    const dot = svg.append('circle')
+      .attr('r', r.vol + 1).attr('fill', color).attr('opacity', 0.7);
+
+    function animateDot() {
+      dot.attr('cx', s.x + nx).attr('cy', s.y + ny)
+        .transition()
+        .duration(2000 + Math.random() * 1500)
+        .delay(Math.random() * 3000)
+        .ease(d3.easeLinear)
+        .attr('cx', e.x + nx).attr('cy', e.y + ny)
+        .attr('opacity', 0)
+        .on('end', function() {
+          d3.select(this).attr('opacity', 0.7);
+          animateDot();
+        });
+    }
+    animateDot();
+  });
+
+  // Draw settlement nodes
+  settlements.forEach(s => {
+    const g = svg.append('g');
+    const r = 30;
+
+    // Outer circle
+    g.append('circle')
+      .attr('cx', s.x).attr('cy', s.y).attr('r', r)
+      .attr('fill', C.surface).attr('stroke', C.borderBright).attr('stroke-width', 1.5);
+
+    // Name
+    g.append('text')
+      .attr('x', s.x).attr('y', s.y - 2)
+      .attr('text-anchor', 'middle').attr('fill', C.heading)
+      .attr('font-size', 10).attr('font-weight', 700)
+      .text(s.name);
+
+    // Production dots
+    s.produces.forEach((c, i) => {
+      g.append('circle')
+        .attr('cx', s.x - 8 + i * 16).attr('cy', s.y + 12)
+        .attr('r', 4).attr('fill', commodityColors[c]).attr('opacity', 0.8);
+    });
+  });
+
+  // Commodity legend
+  const lgX = 30, lgY = H - 20;
+  let lx = lgX;
+  Object.entries(commodityColors).forEach(([name, color]) => {
+    svg.append('circle')
+      .attr('cx', lx).attr('cy', lgY).attr('r', 4).attr('fill', color).attr('opacity', 0.8);
+    svg.append('text')
+      .attr('x', lx + 8).attr('y', lgY + 4)
+      .attr('fill', C.muted).attr('font-size', 9).attr('class', 'label-mono')
+      .text(name);
+    lx += name.length * 6 + 22;
+  });
+})();
+
+// =========================================================================
+// Fig 4: Fidelity Transitions (existing)
+// =========================================================================
 (function() {
   const C = {
     bg: '#0a0c10', surface: '#13161d', surface2: '#1c2029', surface3: '#252a36',
