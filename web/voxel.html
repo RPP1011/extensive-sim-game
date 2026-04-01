@@ -126,7 +126,7 @@ async function init() {
   // SDF volume: 3D storage texture (R32Float), written by JFA compute
   let sdfTexture = device.createTexture({
     size: [VOL_W, VOL_H, VOL_D],
-    format: 'r32float',
+    format: 'r16float',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
     dimension: '3d',
   });
@@ -173,7 +173,7 @@ async function init() {
   const jfaBindGroupLayout = device.createBindGroupLayout({
     entries: [
       { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'uint', viewDimension: '3d' } },
-      { binding: 1, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'r32float', viewDimension: '3d' } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'r16float', viewDimension: '3d' } },
       { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
     ],
   });
@@ -559,7 +559,7 @@ async function init() {
     sdfTexture.destroy();
     sdfTexture = dev.createTexture({
       size: [VOL_W, VOL_H, VOL_D],
-      format: 'r32float',
+      format: 'r16float',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
       dimension: '3d',
     });
@@ -629,7 +629,7 @@ const JFA_SHADER = `
 // If solid↔air boundary, distance = 0.5. Otherwise estimate from neighbors.
 
 @group(0) @binding(0) var materials: texture_3d<u32>;
-@group(0) @binding(1) var sdf_out: texture_storage_3d<r32float, write>;
+@group(0) @binding(1) var sdf_out: texture_storage_3d<r16float, write>;
 @group(0) @binding(2) var<uniform> vol_size: vec4<i32>;
 
 fn is_solid(mat: u32) -> bool {
