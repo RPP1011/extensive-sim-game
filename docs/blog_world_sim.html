@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Building a DF-Style World Simulation in Rust</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -214,10 +215,66 @@ hr { border: none; border-top: 1px solid var(--border); margin: 3.5rem 0; }
   margin-top: 4rem;
 }
 
+.fig-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.5rem;
+  margin: 2rem 0;
+}
+
+.fig-container svg { display: block; margin: 0 auto; }
+.fig-caption {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 0.8rem;
+}
+
+svg text { font-family: 'DM Sans', sans-serif; }
+svg .label-mono { font-family: 'IBM Plex Mono', monospace; }
+
+.fig-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+}
+
+.fig-controls button {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--heading);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.4rem 1rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.fig-controls button:hover {
+  background: var(--surface3);
+  border-color: var(--border-bright);
+}
+
+.fig-controls .tick-display {
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--accent);
+  min-width: 8ch;
+  text-align: center;
+}
+
 @media (max-width: 720px) {
   .article { padding: 2rem 1.25rem 4rem; }
   h1 { font-size: 1.9rem; }
   .stats { grid-template-columns: repeat(2, 1fr); }
+  .fig-container { padding: 1rem 0.5rem; }
 }
 </style>
 </head>
@@ -383,6 +440,16 @@ pub mod prophecy;           // visions and foreshadowing
 
 <div class="callout">
 <p>The practical effect: during a siege, the besieged settlement runs at full tactical resolution while distant settlements tick at Background. The sim stays at <strong>140&ndash;200 ticks/sec</strong> with 2,000 entities because most of them aren't doing expensive work.</p>
+</div>
+
+<div class="fig-container">
+  <div id="fig-fidelity"></div>
+  <div class="fig-controls">
+    <button id="fidelity-play">Play</button>
+    <button id="fidelity-reset">Reset</button>
+    <span class="tick-display" id="fidelity-tick">tick 0</span>
+  </div>
+  <div class="fig-caption">Fidelity transitions during a siege on Ironvale. Monsters converge at tick ~80, triggering escalation to High. Distant settlements stay at Background throughout.</div>
 </div>
 
 <hr>
@@ -637,5 +704,312 @@ pub const FAITH: u32    = tag(b"faith");
 <p class="footer-note">Next post: training a neural network to play the tactical combat layer that activates when sieges breach the walls.</p>
 
 </div>
+
+<script>
+(function() {
+  const C = {
+    bg: '#0a0c10', surface: '#13161d', surface2: '#1c2029', surface3: '#252a36',
+    border: '#2a2f3e', borderBright: '#3d4459',
+    text: '#b8c0cc', muted: '#6b7280', heading: '#e2e8f0',
+    accent: '#60a5fa', purple: '#a78bfa', green: '#34d399', red: '#f87171',
+    orange: '#fbbf24', cyan: '#22d3ee',
+    // Fidelity colors
+    high: '#f87171', medium: '#fbbf24', low: '#60a5fa', background: '#2a2f3e'
+  };
+
+  const fidelityColor = { High: C.high, Medium: C.medium, Low: C.low, Background: C.background };
+  const fidelityLabel = { High: 'HIGH', Medium: 'MED', Low: 'LOW', Background: 'BG' };
+
+  // Settlement data: name, y-position, fidelity timeline
+  // Each settlement has transition points: [tick, fidelity]
+  const settlements = [
+    { name: 'Ironvale', subtitle: 'border fortress', transitions: [
+      [0,'Background'],[40,'Low'],[60,'Medium'],[80,'High'],[200,'Medium'],[230,'Low'],[260,'Background']
+    ]},
+    { name: 'Thornwatch', subtitle: 'nearby outpost', transitions: [
+      [0,'Background'],[70,'Low'],[90,'Medium'],[140,'Medium'],[180,'Low'],[220,'Background']
+    ]},
+    { name: 'Millhaven', subtitle: 'farming village', transitions: [
+      [0,'Background'],[100,'Low'],[130,'Low'],[160,'Background']
+    ]},
+    { name: 'Goldreach', subtitle: 'trade hub', transitions: [[0,'Background']] },
+    { name: 'Sunspire', subtitle: 'capital', transitions: [[0,'Background']] },
+    { name: 'Duskhollow', subtitle: 'remote mine', transitions: [[0,'Background']] },
+  ];
+
+  // Events overlay
+  const events = [
+    { tick: 40, label: 'Scouts spot monsters', y: 0 },
+    { tick: 60, label: 'Militia mobilizes', y: 0 },
+    { tick: 80, label: 'Siege begins', y: 0, major: true },
+    { tick: 70, label: 'Refugees arrive', y: 1 },
+    { tick: 100, label: 'Rumors spread', y: 2 },
+    { tick: 200, label: 'Siege broken', y: 0, major: true },
+  ];
+
+  const W = 860, H = 380;
+  const margin = { top: 40, right: 30, bottom: 50, left: 130 };
+  const plotW = W - margin.left - margin.right;
+  const plotH = H - margin.top - margin.bottom;
+  const maxTick = 300;
+  const rowH = plotH / settlements.length;
+
+  const svg = d3.select('#fig-fidelity').append('svg')
+    .attr('viewBox', `0 0 ${W} ${H}`)
+    .attr('width', '100%');
+
+  const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+  const x = d3.scaleLinear().domain([0, maxTick]).range([0, plotW]);
+
+  // Grid lines
+  for (let t = 0; t <= maxTick; t += 50) {
+    g.append('line')
+      .attr('x1', x(t)).attr('y1', 0).attr('x2', x(t)).attr('y2', plotH)
+      .attr('stroke', C.border).attr('stroke-width', 0.5);
+    g.append('text')
+      .attr('x', x(t)).attr('y', plotH + 20)
+      .attr('text-anchor', 'middle').attr('fill', C.muted).attr('font-size', 10)
+      .attr('class', 'label-mono')
+      .text(t);
+  }
+
+  // X axis label
+  g.append('text')
+    .attr('x', plotW / 2).attr('y', plotH + 38)
+    .attr('text-anchor', 'middle').attr('fill', C.muted).attr('font-size', 11)
+    .text('Simulation Tick');
+
+  // Legend
+  const legendG = svg.append('g').attr('transform', `translate(${margin.left}, 12)`);
+  const legendItems = ['High','Medium','Low','Background'];
+  let lx = 0;
+  legendItems.forEach(level => {
+    legendG.append('rect')
+      .attr('x', lx).attr('y', 0).attr('width', 12).attr('height', 12)
+      .attr('rx', 2).attr('fill', fidelityColor[level]).attr('opacity', level === 'Background' ? 0.5 : 0.85);
+    legendG.append('text')
+      .attr('x', lx + 16).attr('y', 10)
+      .attr('fill', C.text).attr('font-size', 10).attr('font-weight', 500)
+      .text(level);
+    lx += level.length * 6.5 + 30;
+  });
+
+  // Helper: get fidelity at a given tick for a settlement
+  function fidelityAt(settlement, tick) {
+    let fid = settlement.transitions[0][1];
+    for (const [t, f] of settlement.transitions) {
+      if (t <= tick) fid = f; else break;
+    }
+    return fid;
+  }
+
+  // Draw settlement rows
+  const rows = [];
+  settlements.forEach((s, i) => {
+    const y = i * rowH;
+
+    // Row background
+    g.append('rect')
+      .attr('x', 0).attr('y', y).attr('width', plotW).attr('height', rowH)
+      .attr('fill', i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)');
+
+    // Row separator
+    if (i > 0) {
+      g.append('line')
+        .attr('x1', 0).attr('y1', y).attr('x2', plotW).attr('y2', y)
+        .attr('stroke', C.border).attr('stroke-width', 0.5);
+    }
+
+    // Settlement label
+    svg.append('text')
+      .attr('x', margin.left - 12).attr('y', margin.top + y + rowH / 2 - 4)
+      .attr('text-anchor', 'end').attr('fill', C.heading).attr('font-size', 12).attr('font-weight', 600)
+      .text(s.name);
+    svg.append('text')
+      .attr('x', margin.left - 12).attr('y', margin.top + y + rowH / 2 + 10)
+      .attr('text-anchor', 'end').attr('fill', C.muted).attr('font-size', 9)
+      .attr('class', 'label-mono')
+      .text(s.subtitle);
+
+    // Build fidelity band segments
+    const bandG = g.append('g');
+    const segs = [];
+    for (let j = 0; j < s.transitions.length; j++) {
+      const [t0, fid] = s.transitions[j];
+      const t1 = j + 1 < s.transitions.length ? s.transitions[j + 1][0] : maxTick;
+      const rect = bandG.append('rect')
+        .attr('x', x(t0)).attr('y', y + 4).attr('width', x(t1) - x(t0)).attr('height', rowH - 8)
+        .attr('rx', 3)
+        .attr('fill', fidelityColor[fid])
+        .attr('opacity', fid === 'Background' ? 0.15 : 0.25);
+      segs.push({ t0, t1, fid, rect });
+
+      // Small fidelity label in each segment if wide enough
+      if (x(t1) - x(t0) > 35) {
+        bandG.append('text')
+          .attr('x', x(t0) + (x(t1) - x(t0)) / 2)
+          .attr('y', y + rowH / 2 + 4)
+          .attr('text-anchor', 'middle')
+          .attr('fill', fid === 'Background' ? C.muted : fidelityColor[fid])
+          .attr('font-size', 9).attr('font-weight', 600)
+          .attr('opacity', fid === 'Background' ? 0.6 : 0.8)
+          .attr('class', 'label-mono')
+          .text(fidelityLabel[fid]);
+      }
+    }
+    rows.push({ settlement: s, segs, y });
+  });
+
+  // Event markers
+  const eventG = g.append('g');
+  events.forEach(ev => {
+    const y = ev.y * rowH;
+    const ex = x(ev.tick);
+
+    // Vertical tick mark
+    eventG.append('line')
+      .attr('x1', ex).attr('y1', y + 2).attr('x2', ex).attr('y2', y + rowH - 2)
+      .attr('stroke', ev.major ? C.red : C.cyan)
+      .attr('stroke-width', ev.major ? 2 : 1)
+      .attr('stroke-dasharray', ev.major ? 'none' : '3,3')
+      .attr('opacity', 0.7);
+
+    // Small diamond marker at top
+    const dy = y + 4;
+    eventG.append('path')
+      .attr('d', `M${ex},${dy - 3} L${ex + 3},${dy} L${ex},${dy + 3} L${ex - 3},${dy} Z`)
+      .attr('fill', ev.major ? C.red : C.cyan)
+      .attr('opacity', 0.9);
+  });
+
+  // Playhead
+  const playhead = g.append('line')
+    .attr('x1', 0).attr('y1', -5).attr('x2', 0).attr('y2', plotH + 5)
+    .attr('stroke', C.heading).attr('stroke-width', 1.5)
+    .attr('opacity', 0);
+
+  const playheadLabel = g.append('text')
+    .attr('x', 0).attr('y', -10)
+    .attr('text-anchor', 'middle').attr('fill', C.heading).attr('font-size', 10)
+    .attr('font-weight', 600).attr('class', 'label-mono')
+    .attr('opacity', 0);
+
+  // Tooltip for events
+  const tooltip = svg.append('g').attr('opacity', 0);
+  const tooltipBg = tooltip.append('rect')
+    .attr('rx', 4).attr('fill', C.surface2).attr('stroke', C.borderBright).attr('stroke-width', 1);
+  const tooltipText = tooltip.append('text')
+    .attr('fill', C.heading).attr('font-size', 11).attr('font-weight', 500);
+
+  // Animation state
+  let currentTick = 0;
+  let playing = false;
+  let animId = null;
+  let lastTime = null;
+  const tickSpeed = 80; // ticks per second
+
+  const tickDisplay = document.getElementById('fidelity-tick');
+  const playBtn = document.getElementById('fidelity-play');
+  const resetBtn = document.getElementById('fidelity-reset');
+
+  function updatePlayhead(tick) {
+    currentTick = Math.min(tick, maxTick);
+    const px = x(currentTick);
+    playhead.attr('x1', px).attr('x2', px).attr('opacity', 1);
+    playheadLabel.attr('x', px).text(`t=${Math.round(currentTick)}`).attr('opacity', 1);
+    tickDisplay.textContent = `tick ${Math.round(currentTick)}`;
+
+    // Highlight active fidelity segments
+    rows.forEach(row => {
+      row.segs.forEach(seg => {
+        const active = currentTick >= seg.t0 && currentTick < seg.t1;
+        const baseOpacity = seg.fid === 'Background' ? 0.15 : 0.25;
+        seg.rect.attr('opacity', active ? (seg.fid === 'Background' ? 0.25 : 0.55) : baseOpacity);
+      });
+    });
+
+    // Show nearest event tooltip
+    let nearest = null;
+    let nearDist = Infinity;
+    events.forEach(ev => {
+      const d = Math.abs(ev.tick - currentTick);
+      if (d < nearDist && d < 8) { nearDist = d; nearest = ev; }
+    });
+    if (nearest) {
+      const tx = x(nearest.tick) + margin.left;
+      const ty = margin.top + nearest.y * rowH - 18;
+      tooltipText.text(nearest.label);
+      const bbox = tooltipText.node().getBBox();
+      tooltipBg.attr('x', -bbox.width / 2 - 8).attr('y', -bbox.height - 4)
+        .attr('width', bbox.width + 16).attr('height', bbox.height + 8);
+      tooltipText.attr('text-anchor', 'middle').attr('y', -6);
+      tooltip.attr('transform', `translate(${tx},${ty})`).attr('opacity', 1);
+    } else {
+      tooltip.attr('opacity', 0);
+    }
+  }
+
+  function animate(time) {
+    if (!lastTime) lastTime = time;
+    const dt = (time - lastTime) / 1000;
+    lastTime = time;
+    currentTick += dt * tickSpeed;
+    if (currentTick >= maxTick) {
+      currentTick = maxTick;
+      updatePlayhead(currentTick);
+      stopPlaying();
+      return;
+    }
+    updatePlayhead(currentTick);
+    animId = requestAnimationFrame(animate);
+  }
+
+  function startPlaying() {
+    if (currentTick >= maxTick) currentTick = 0;
+    playing = true;
+    lastTime = null;
+    playBtn.textContent = 'Pause';
+    animId = requestAnimationFrame(animate);
+  }
+
+  function stopPlaying() {
+    playing = false;
+    playBtn.textContent = 'Play';
+    if (animId) { cancelAnimationFrame(animId); animId = null; }
+  }
+
+  playBtn.addEventListener('click', () => {
+    if (playing) stopPlaying(); else startPlaying();
+  });
+
+  resetBtn.addEventListener('click', () => {
+    stopPlaying();
+    currentTick = 0;
+    updatePlayhead(0);
+    playhead.attr('opacity', 0);
+    playheadLabel.attr('opacity', 0);
+    tooltip.attr('opacity', 0);
+    rows.forEach(row => {
+      row.segs.forEach(seg => {
+        const baseOpacity = seg.fid === 'Background' ? 0.15 : 0.25;
+        seg.rect.attr('opacity', baseOpacity);
+      });
+    });
+    tickDisplay.textContent = 'tick 0';
+  });
+
+  // Click on timeline to scrub
+  svg.on('click', function(event) {
+    const [mx] = d3.pointer(event);
+    const tick = x.invert(mx - margin.left);
+    if (tick >= 0 && tick <= maxTick) {
+      stopPlaying();
+      updatePlayhead(tick);
+    }
+  });
+})();
+</script>
+
 </body>
 </html>
