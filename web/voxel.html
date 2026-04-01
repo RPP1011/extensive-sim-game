@@ -429,8 +429,51 @@ async function init() {
   });
   canvas.addEventListener('click', () => canvas.requestPointerLock());
 
+  // --- Generate a single test chunk directly in front of the camera ---
+  // Bottom half solid stone, top half air. One chunk at origin.
+  VOLUME_CHUNKS_X = 1; VOLUME_CHUNKS_Y = 1; VOLUME_CHUNKS_Z = 1;
+  VOL_W = 16; VOL_H = 16; VOL_D = 16;
+  VOL_TOTAL = VOL_W * VOL_H * VOL_D;
+  materialData = new Uint8Array(VOL_TOTAL);
+  volumeOrigin = [0, 0, 0];
+
+  // Fill bottom half with stone (material 2), top half air (0)
+  for (let z = 0; z < 16; z++) {
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 16; x++) {
+        const idx = (z * 16 + y) * 16 + x;
+        materialData[idx] = z < 8 ? 2 : 0; // stone below z=8, air above
+      }
+    }
+  }
+
+  // Recreate textures at 16x16x16
+  materialTexture.destroy();
+  materialTexture = device.createTexture({
+    size: [16, 16, 16], format: 'r8uint',
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    dimension: '3d',
+  });
+  sdfTexture.destroy();
+  sdfTexture = device.createTexture({
+    size: [16, 16, 16], format: 'r32float',
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
+    dimension: '3d',
+  });
+
+  // Camera: inside the volume, just above the stone surface, looking down
+  camPos = [8, 12, 8];  // center x/z, above surface at z=8
+  camPitch = -0.6;
+  camYaw = 0;
+  volumeDirty = true;
+  volumeInitialized = true;
+
+  console.log('TEST MODE: single 16x16x16 chunk, stone below z=8');
+  console.log(`Camera at (${camPos[0]}, ${camPos[1]}, ${camPos[2]})`);
+  console.log(`Material data: ${materialData.filter(v => v > 0).length} non-air voxels`);
+
   // --- WebSocket: receive chunk data ---
-  connectWS();
+  // connectWS();  // disabled for test mode
   requestAnimationFrame(frame);
 
   function connectWS() {
@@ -569,14 +612,14 @@ async function init() {
       loadChunkFromJSON(chunk);
     }
 
-    // Position camera above the center of the volume
+    // Position camera INSIDE the volume, above the center, looking down
     const centerX = VOL_W / 2;
     const centerY = VOL_H / 2;
-    const surfaceZ = VOL_D * 0.8; // near top of terrain
+    const centerZ = VOL_D / 2;
     camPos[0] = centerX;
-    camPos[1] = surfaceZ + 20; // above terrain
-    camPos[2] = centerY - 30;  // slightly behind
-    camPitch = -0.4; // look downward
+    camPos[1] = centerZ + 10; // above center (y=up in camera space maps to z in volume)
+    camPos[2] = centerY;
+    camPitch = -0.8; // look steeply downward
     console.log(`Camera at volume-local (${camPos[0].toFixed(1)}, ${camPos[1].toFixed(1)}, ${camPos[2].toFixed(1)})`);
 
     // Count non-air voxels in the uploaded data

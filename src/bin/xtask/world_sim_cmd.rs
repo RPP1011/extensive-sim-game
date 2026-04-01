@@ -72,6 +72,15 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
         let solid = st.voxel_world.total_solid();
         if chunks > 0 {
             println!("Voxel world: {} chunks loaded, {} solid voxels", chunks, solid);
+            // Print chunk position bounds
+            let min_x = st.voxel_world.chunks.keys().map(|c| c.x).min().unwrap_or(0);
+            let max_x = st.voxel_world.chunks.keys().map(|c| c.x).max().unwrap_or(0);
+            let min_y = st.voxel_world.chunks.keys().map(|c| c.y).min().unwrap_or(0);
+            let max_y = st.voxel_world.chunks.keys().map(|c| c.y).max().unwrap_or(0);
+            let min_z = st.voxel_world.chunks.keys().map(|c| c.z).min().unwrap_or(0);
+            let max_z = st.voxel_world.chunks.keys().map(|c| c.z).max().unwrap_or(0);
+            println!("  Chunk bounds: ({},{},{}) to ({},{},{})", min_x, min_y, min_z, max_x, max_y, max_z);
+            println!("  Span: {}x{}x{} chunks", max_x-min_x+1, max_y-min_y+1, max_z-min_z+1);
         }
     }
 
