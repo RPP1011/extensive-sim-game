@@ -33,6 +33,7 @@ pub mod ai {
 }
 
 pub mod world_sim;
+pub mod sdf_renderer;
 pub mod content;
 pub mod model_backend;
 pub mod ascii_gen;

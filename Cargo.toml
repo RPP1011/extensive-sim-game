@@ -20,6 +20,10 @@ path = "src/main.rs"
 name = "xtask"
 path = "src/bin/xtask/main.rs"
 
+[[bin]]
+name = "voxel_view"
+path = "src/bin/voxel_view.rs"
+
 [features]
 default = []
 app = []
