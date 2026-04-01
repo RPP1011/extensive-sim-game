@@ -675,16 +675,39 @@ function mat4Inv(m) {
 // ============================================================
 
 const JFA_SHADER = `
-// Build SDF from material volume.
-// Single-pass approximation: for each voxel, check 6 neighbors.
-// If solid↔air boundary, distance = 0.5. Otherwise estimate from neighbors.
+// Build SDF from material volume via brute-force nearest-surface search.
+// For each voxel, search within a radius for the nearest surface voxel
+// (solid adjacent to air). Distance = euclidean to that surface voxel,
+// negative if inside solid, positive if in air.
 
 @group(0) @binding(0) var materials: texture_3d<u32>;
 @group(0) @binding(1) var sdf_out: texture_storage_3d<r32float, write>;
 @group(0) @binding(2) var<uniform> vol_size: vec4<i32>;
 
 fn is_solid(mat: u32) -> bool {
-    return mat != 0u && mat != 8u && mat != 9u; // not Air, Water, Lava
+    return mat != 0u && mat != 8u && mat != 9u;
+}
+
+fn is_surface_at(p: vec3<i32>) -> bool {
+    if (p.x < 0 || p.x >= vol_size.x || p.y < 0 || p.y >= vol_size.y || p.z < 0 || p.z >= vol_size.z) {
+        return false;
+    }
+    let solid = is_solid(textureLoad(materials, p, 0).r);
+    // Check 6 neighbors
+    let offsets = array<vec3<i32>, 6>(
+        vec3<i32>(1,0,0), vec3<i32>(-1,0,0),
+        vec3<i32>(0,1,0), vec3<i32>(0,-1,0),
+        vec3<i32>(0,0,1), vec3<i32>(0,0,-1),
+    );
+    for (var i = 0; i < 6; i++) {
+        let np = p + offsets[i];
+        if (np.x >= 0 && np.x < vol_size.x && np.y >= 0 && np.y < vol_size.y && np.z >= 0 && np.z < vol_size.z) {
+            if (is_solid(textureLoad(materials, np, 0).r) != solid) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 @compute @workgroup_size(4, 4, 4)
@@ -695,50 +718,31 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let mat = textureLoad(materials, pos, 0).r;
     let solid = is_solid(mat);
 
-    // Check 6 face neighbors for surface detection
-    var is_surface = false;
-    let offsets = array<vec3<i32>, 6>(
-        vec3<i32>(1,0,0), vec3<i32>(-1,0,0),
-        vec3<i32>(0,1,0), vec3<i32>(0,-1,0),
-        vec3<i32>(0,0,1), vec3<i32>(0,0,-1),
-    );
+    // Search for nearest surface voxel within radius 8
+    var best_dist_sq: f32 = 999.0;
+    let R: i32 = 8;
 
-    for (var i = 0; i < 6; i++) {
-        let np = pos + offsets[i];
-        if (np.x >= 0 && np.x < vol_size.x &&
-            np.y >= 0 && np.y < vol_size.y &&
-            np.z >= 0 && np.z < vol_size.z) {
-            let n_mat = textureLoad(materials, np, 0).r;
-            if (is_solid(n_mat) != solid) {
-                is_surface = true;
-                break;
+    for (var dz: i32 = -R; dz <= R; dz++) {
+        for (var dy: i32 = -R; dy <= R; dy++) {
+            for (var dx: i32 = -R; dx <= R; dx++) {
+                let d2 = f32(dx*dx + dy*dy + dz*dz);
+                if (d2 >= best_dist_sq) { continue; }
+
+                let sp = pos + vec3<i32>(dx, dy, dz);
+                if (is_surface_at(sp)) {
+                    best_dist_sq = d2;
+                }
             }
-        } else {
-            // At volume boundary, treat as surface
-            is_surface = true;
         }
     }
 
-    var dist: f32;
-    if (is_surface) {
-        dist = 0.5;
-    } else if (solid) {
-        // Deep inside solid: estimate distance (negative = inside)
-        // Simple: count distance to nearest volume edge as proxy
-        let dx = min(f32(pos.x), f32(vol_size.x - 1 - pos.x));
-        let dy = min(f32(pos.y), f32(vol_size.y - 1 - pos.y));
-        let dz = min(f32(pos.z), f32(vol_size.z - 1 - pos.z));
-        dist = -min(dx, min(dy, dz));
-    } else {
-        // Deep in air
-        let dx = min(f32(pos.x), f32(vol_size.x - 1 - pos.x));
-        let dy = min(f32(pos.y), f32(vol_size.y - 1 - pos.y));
-        let dz = min(f32(pos.z), f32(vol_size.z - 1 - pos.z));
-        dist = min(dx, min(dy, dz));
-    }
+    var dist = sqrt(best_dist_sq);
 
-    // Sign: negative inside solid
-    if (solid) { dist = -abs(dist); } else { dist = abs(dist); }
+    // Sign: negative inside solid, positive in air
+    if (solid) { dist = -dist; }
+
+    // Clamp for half-float range
+    dist = clamp(dist, -15.0, 15.0);
 
     textureStore(sdf_out, pos, vec4<f32>(dist, 0.0, 0.0, 0.0));
 }
