@@ -61,7 +61,7 @@ pub fn compute_bounties(state: &WorldState, out: &mut Vec<WorldDelta>) {
     let mut bounty_events = 0usize;
 
     // --- Phase 1: Auto-complete bounties for dead high-value targets on grids ---
-    for grid in &state.grids {
+    for grid in &state.fidelity_zones {
         let dead_hv_targets: Vec<&crate::world_sim::state::Entity> = grid
             .entity_ids
             .iter()

@@ -77,7 +77,7 @@ pub fn compute_companions_for_settlement(
         if on_grid {
             // Count friendly allies on the same grid as a proxy for companion effect.
             let ally_count = entity.grid_id
-                .and_then(|gid| state.grid(gid))
+                .and_then(|gid| state.fidelity_zone(gid))
                 .map(|g| {
                     g.entity_ids.iter().filter(|&&eid| {
                         eid != entity.id && state.entity(eid)

@@ -64,7 +64,7 @@ pub fn compute_adventurer_condition_for_settlement(
         // Determine activity from entity state.
         let on_hostile_grid = entity
             .grid_id
-            .and_then(|gid| state.grid(gid))
+            .and_then(|gid| state.fidelity_zone(gid))
             .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
             .unwrap_or(false);
 

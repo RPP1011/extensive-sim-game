@@ -117,6 +117,18 @@ pub enum VoxelMaterial {
     // Agricultural
     Farmland,
     Crop,
+    // New materials (appended to preserve repr(u8) ordering)
+    Basalt,
+    Sandstone,
+    Marble,
+    Bone,
+    Brick,
+    CutStone,
+    Concrete,
+    Ceramic,
+    Steel,
+    Bronze,
+    Obsidian,
 }
 
 impl Default for VoxelMaterial {
@@ -153,6 +165,15 @@ impl VoxelMaterial {
             VoxelMaterial::GoldOre | VoxelMaterial::Crystal => 40,
             VoxelMaterial::Iron | VoxelMaterial::Glass | VoxelMaterial::Ice => 25,
             VoxelMaterial::Granite => u32::MAX, // bedrock
+            // New materials
+            VoxelMaterial::Bone => 10,
+            VoxelMaterial::Sandstone => 20,
+            VoxelMaterial::Brick | VoxelMaterial::Ceramic => 25,
+            VoxelMaterial::Marble | VoxelMaterial::Basalt => 35,
+            VoxelMaterial::Bronze => 40,
+            VoxelMaterial::Steel => 50,
+            VoxelMaterial::Obsidian => 60,
+            VoxelMaterial::CutStone | VoxelMaterial::Concrete => 30,
         }
     }
 
@@ -173,13 +194,98 @@ impl VoxelMaterial {
             _ => None,
         }
     }
+
+    /// Physical and construction properties of this material.
+    pub fn properties(self) -> MaterialProperties {
+        match self {
+            VoxelMaterial::Air => MaterialProperties { hp_multiplier: 0.0, fire_resistance: 0.0, load_bearing: false, weight: 0.0, rubble_move_cost: 0.0, construction_cost: 0.0, blast_resistance: 0.0 },
+            VoxelMaterial::Stone => MaterialProperties { hp_multiplier: 100.0, fire_resistance: 1.0, load_bearing: true, weight: 2.5, rubble_move_cost: 3.0, construction_cost: 5.0, blast_resistance: 0.6 },
+            VoxelMaterial::Granite => MaterialProperties { hp_multiplier: 200.0, fire_resistance: 1.0, load_bearing: true, weight: 2.7, rubble_move_cost: 4.0, construction_cost: 10.0, blast_resistance: 0.9 },
+            VoxelMaterial::Basalt => MaterialProperties { hp_multiplier: 150.0, fire_resistance: 1.0, load_bearing: true, weight: 2.8, rubble_move_cost: 3.5, construction_cost: 8.0, blast_resistance: 0.8 },
+            VoxelMaterial::Sandstone => MaterialProperties { hp_multiplier: 60.0, fire_resistance: 0.9, load_bearing: true, weight: 2.2, rubble_move_cost: 2.0, construction_cost: 3.0, blast_resistance: 0.3 },
+            VoxelMaterial::Marble => MaterialProperties { hp_multiplier: 80.0, fire_resistance: 1.0, load_bearing: true, weight: 2.6, rubble_move_cost: 3.0, construction_cost: 12.0, blast_resistance: 0.5 },
+            VoxelMaterial::Dirt => MaterialProperties { hp_multiplier: 20.0, fire_resistance: 0.8, load_bearing: true, weight: 1.5, rubble_move_cost: 1.5, construction_cost: 1.0, blast_resistance: 0.1 },
+            VoxelMaterial::Clay => MaterialProperties { hp_multiplier: 25.0, fire_resistance: 0.9, load_bearing: true, weight: 1.8, rubble_move_cost: 2.0, construction_cost: 2.0, blast_resistance: 0.15 },
+            VoxelMaterial::Sand => MaterialProperties { hp_multiplier: 10.0, fire_resistance: 1.0, load_bearing: false, weight: 1.6, rubble_move_cost: 2.5, construction_cost: 1.0, blast_resistance: 0.05 },
+            VoxelMaterial::Gravel => MaterialProperties { hp_multiplier: 15.0, fire_resistance: 1.0, load_bearing: false, weight: 1.7, rubble_move_cost: 2.0, construction_cost: 1.0, blast_resistance: 0.1 },
+            VoxelMaterial::Ice => MaterialProperties { hp_multiplier: 30.0, fire_resistance: 0.0, load_bearing: true, weight: 0.9, rubble_move_cost: 1.0, construction_cost: 0.0, blast_resistance: 0.2 },
+            VoxelMaterial::Snow => MaterialProperties { hp_multiplier: 5.0, fire_resistance: 0.0, load_bearing: false, weight: 0.3, rubble_move_cost: 1.5, construction_cost: 0.0, blast_resistance: 0.0 },
+            VoxelMaterial::Grass => MaterialProperties { hp_multiplier: 15.0, fire_resistance: 0.3, load_bearing: true, weight: 1.4, rubble_move_cost: 1.0, construction_cost: 0.0, blast_resistance: 0.05 },
+            VoxelMaterial::Water => MaterialProperties { hp_multiplier: 0.0, fire_resistance: 1.0, load_bearing: false, weight: 1.0, rubble_move_cost: 0.0, construction_cost: 0.0, blast_resistance: 0.0 },
+            VoxelMaterial::Lava => MaterialProperties { hp_multiplier: 0.0, fire_resistance: 1.0, load_bearing: false, weight: 3.0, rubble_move_cost: 0.0, construction_cost: 0.0, blast_resistance: 0.0 },
+            VoxelMaterial::IronOre => MaterialProperties { hp_multiplier: 120.0, fire_resistance: 1.0, load_bearing: true, weight: 3.5, rubble_move_cost: 3.0, construction_cost: 0.0, blast_resistance: 0.7 },
+            VoxelMaterial::CopperOre => MaterialProperties { hp_multiplier: 100.0, fire_resistance: 1.0, load_bearing: true, weight: 3.2, rubble_move_cost: 3.0, construction_cost: 0.0, blast_resistance: 0.6 },
+            VoxelMaterial::GoldOre => MaterialProperties { hp_multiplier: 80.0, fire_resistance: 1.0, load_bearing: true, weight: 4.0, rubble_move_cost: 3.0, construction_cost: 0.0, blast_resistance: 0.5 },
+            VoxelMaterial::Coal => MaterialProperties { hp_multiplier: 40.0, fire_resistance: 0.2, load_bearing: true, weight: 1.4, rubble_move_cost: 2.0, construction_cost: 0.0, blast_resistance: 0.2 },
+            VoxelMaterial::Crystal => MaterialProperties { hp_multiplier: 50.0, fire_resistance: 0.8, load_bearing: false, weight: 2.3, rubble_move_cost: 2.5, construction_cost: 15.0, blast_resistance: 0.3 },
+            VoxelMaterial::WoodLog => MaterialProperties { hp_multiplier: 40.0, fire_resistance: 0.2, load_bearing: true, weight: 0.7, rubble_move_cost: 2.0, construction_cost: 3.0, blast_resistance: 0.2 },
+            VoxelMaterial::WoodPlanks => MaterialProperties { hp_multiplier: 35.0, fire_resistance: 0.2, load_bearing: true, weight: 0.5, rubble_move_cost: 1.5, construction_cost: 2.0, blast_resistance: 0.15 },
+            VoxelMaterial::Thatch => MaterialProperties { hp_multiplier: 15.0, fire_resistance: 0.1, load_bearing: false, weight: 0.2, rubble_move_cost: 1.0, construction_cost: 1.0, blast_resistance: 0.05 },
+            VoxelMaterial::Bone => MaterialProperties { hp_multiplier: 30.0, fire_resistance: 0.5, load_bearing: true, weight: 1.0, rubble_move_cost: 2.0, construction_cost: 2.0, blast_resistance: 0.2 },
+            VoxelMaterial::StoneBlock => MaterialProperties { hp_multiplier: 110.0, fire_resistance: 1.0, load_bearing: true, weight: 2.6, rubble_move_cost: 3.0, construction_cost: 7.0, blast_resistance: 0.7 },
+            VoxelMaterial::StoneBrick => MaterialProperties { hp_multiplier: 120.0, fire_resistance: 1.0, load_bearing: true, weight: 2.5, rubble_move_cost: 3.0, construction_cost: 8.0, blast_resistance: 0.75 },
+            VoxelMaterial::Brick => MaterialProperties { hp_multiplier: 90.0, fire_resistance: 1.0, load_bearing: true, weight: 2.0, rubble_move_cost: 2.5, construction_cost: 5.0, blast_resistance: 0.5 },
+            VoxelMaterial::CutStone => MaterialProperties { hp_multiplier: 130.0, fire_resistance: 1.0, load_bearing: true, weight: 2.7, rubble_move_cost: 3.5, construction_cost: 10.0, blast_resistance: 0.8 },
+            VoxelMaterial::Concrete => MaterialProperties { hp_multiplier: 140.0, fire_resistance: 1.0, load_bearing: true, weight: 2.4, rubble_move_cost: 4.0, construction_cost: 6.0, blast_resistance: 0.85 },
+            VoxelMaterial::Glass => MaterialProperties { hp_multiplier: 10.0, fire_resistance: 0.7, load_bearing: false, weight: 2.5, rubble_move_cost: 3.0, construction_cost: 8.0, blast_resistance: 0.05 },
+            VoxelMaterial::Ceramic => MaterialProperties { hp_multiplier: 50.0, fire_resistance: 1.0, load_bearing: false, weight: 2.0, rubble_move_cost: 2.5, construction_cost: 6.0, blast_resistance: 0.3 },
+            VoxelMaterial::Iron => MaterialProperties { hp_multiplier: 150.0, fire_resistance: 0.8, load_bearing: true, weight: 7.8, rubble_move_cost: 4.0, construction_cost: 10.0, blast_resistance: 0.8 },
+            VoxelMaterial::Steel => MaterialProperties { hp_multiplier: 200.0, fire_resistance: 0.9, load_bearing: true, weight: 7.9, rubble_move_cost: 4.5, construction_cost: 15.0, blast_resistance: 0.95 },
+            VoxelMaterial::Bronze => MaterialProperties { hp_multiplier: 120.0, fire_resistance: 0.85, load_bearing: true, weight: 8.5, rubble_move_cost: 4.0, construction_cost: 12.0, blast_resistance: 0.7 },
+            VoxelMaterial::Obsidian => MaterialProperties { hp_multiplier: 70.0, fire_resistance: 1.0, load_bearing: true, weight: 2.4, rubble_move_cost: 3.5, construction_cost: 20.0, blast_resistance: 0.4 },
+            VoxelMaterial::Farmland => MaterialProperties { hp_multiplier: 15.0, fire_resistance: 0.5, load_bearing: true, weight: 1.3, rubble_move_cost: 1.0, construction_cost: 1.0, blast_resistance: 0.05 },
+            VoxelMaterial::Crop => MaterialProperties { hp_multiplier: 5.0, fire_resistance: 0.1, load_bearing: false, weight: 0.1, rubble_move_cost: 0.5, construction_cost: 0.0, blast_resistance: 0.0 },
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MaterialProperties
+// ---------------------------------------------------------------------------
+
+/// Physical and structural properties of a voxel material.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MaterialProperties {
+    /// HP multiplier relative to base (0.0 = no HP, e.g. Air/fluids).
+    pub hp_multiplier: f32,
+    /// Fire resistance in [0, 1]: 0 = burns instantly, 1 = immune.
+    pub fire_resistance: f32,
+    /// Whether this material can bear structural load above it.
+    pub load_bearing: bool,
+    /// Mass per unit volume (tonnes/m³ equivalent).
+    pub weight: f32,
+    /// Movement cost multiplier when navigating through rubble.
+    pub rubble_move_cost: f32,
+    /// Resource cost to place one voxel of this material.
+    pub construction_cost: f32,
+    /// Fraction of explosion energy absorbed (0 = none, 1 = perfect).
+    pub blast_resistance: f32,
+}
+
+// ---------------------------------------------------------------------------
+// VoxelZone
+// ---------------------------------------------------------------------------
+
+/// Functional designation of a voxel — used for building zone tracking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[repr(u8)]
+pub enum VoxelZone {
+    #[default]
+    None = 0,
+    Residential = 1,
+    Commercial = 2,
+    Industrial = 3,
+    Military = 4,
+    Agricultural = 5,
+    Sacred = 6,
+    Underground = 7,
 }
 
 // ---------------------------------------------------------------------------
 // Voxel
 // ---------------------------------------------------------------------------
 
-/// Per-voxel data. 4 bytes — millions of these exist.
+/// Per-voxel data. Stores material, light, damage, flags, and building metadata.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[repr(C)]
 pub struct Voxel {
@@ -194,17 +300,31 @@ pub struct Voxel {
     /// - bit 6: is_source (spring/sea boundary)
     /// - bit 7: is_support (load-bearing)
     pub flags: u8,
+    /// Structural health in [0.0, 1.0]. 1.0 = intact, 0.0 = collapsed.
+    pub integrity: f32,
+    /// Building entity ID this voxel belongs to, if any.
+    pub building_id: Option<u32>,
+    /// Functional zone designation.
+    pub zone: VoxelZone,
 }
 
 impl Default for Voxel {
     fn default() -> Self {
-        Self { material: VoxelMaterial::Air, light: 0, damage: 0, flags: 0 }
+        Self {
+            material: VoxelMaterial::Air,
+            light: 0,
+            damage: 0,
+            flags: 0,
+            integrity: 1.0,
+            building_id: None,
+            zone: VoxelZone::None,
+        }
     }
 }
 
 impl Voxel {
     pub fn new(material: VoxelMaterial) -> Self {
-        Self { material, light: 0, damage: 0, flags: 0 }
+        Self { material, light: 0, damage: 0, flags: 0, integrity: 1.0, building_id: None, zone: VoxelZone::None }
     }
 
     pub fn water_level(self) -> u8 { self.flags & 0x0F }
@@ -214,6 +334,11 @@ impl Voxel {
     pub fn is_source(self) -> bool { self.flags & 0x40 != 0 }
     pub fn set_source(&mut self, v: bool) {
         if v { self.flags |= 0x40; } else { self.flags &= !0x40; }
+    }
+
+    /// Effective HP: structural integrity scaled by material HP multiplier.
+    pub fn effective_hp(&self) -> f32 {
+        self.integrity * self.material.properties().hp_multiplier
     }
 }
 
@@ -546,6 +671,87 @@ impl VoxelWorld {
     pub fn total_solid(&self) -> usize {
         self.chunks.values().map(|c| c.solid_count()).sum()
     }
+
+    // -----------------------------------------------------------------------
+    // Destructible terrain
+    // -----------------------------------------------------------------------
+
+    /// Apply structural damage to a voxel. Returns true if the voxel was destroyed.
+    /// Triggers cascading collapse for unsupported voxels above.
+    pub fn damage_voxel(&mut self, vx: i32, vy: i32, vz: i32, damage: f32) -> bool {
+        let (cp, idx) = voxel_to_chunk_local(vx, vy, vz);
+        let chunk = match self.chunks.get_mut(&cp) {
+            Some(c) => c,
+            None => return false,
+        };
+        let voxel = &mut chunk.voxels[idx];
+        if !voxel.material.is_solid() { return false; }
+
+        let props = voxel.material.properties();
+        let effective_hp = voxel.integrity * props.hp_multiplier;
+        let new_hp = effective_hp - damage;
+
+        if new_hp <= 0.0 {
+            if props.load_bearing {
+                voxel.integrity = 0.0;
+                voxel.zone = VoxelZone::None;
+                voxel.building_id = None;
+            } else {
+                *voxel = Voxel::default();
+            }
+            chunk.dirty = true;
+            self.cascade_collapse(vx, vy, vz + 1);
+            true
+        } else {
+            voxel.integrity = new_hp / props.hp_multiplier;
+            chunk.dirty = true;
+            false
+        }
+    }
+
+    /// Check structural support for voxels above (vx, vy, vz) and collapse upward if unsupported.
+    fn cascade_collapse(&mut self, vx: i32, vy: i32, start_vz: i32) {
+        let mut vz = start_vz;
+        loop {
+            let voxel = self.get_voxel(vx, vy, vz);
+            if !voxel.material.is_solid() || voxel.integrity == 0.0 { return; }
+            if self.is_supported(vx, vy, vz) { return; }
+
+            let (cp, idx) = voxel_to_chunk_local(vx, vy, vz);
+            if let Some(chunk) = self.chunks.get_mut(&cp) {
+                let v = &mut chunk.voxels[idx];
+                if v.material.properties().load_bearing {
+                    v.integrity = 0.0;
+                    v.zone = VoxelZone::None;
+                    v.building_id = None;
+                } else {
+                    *v = Voxel::default();
+                }
+                chunk.dirty = true;
+            }
+
+            vz += 1;
+        }
+    }
+
+    /// Check if a voxel position is structurally supported.
+    fn is_supported(&self, vx: i32, vy: i32, vz: i32) -> bool {
+        if vz <= 0 { return true; }
+
+        let below = self.get_voxel(vx, vy, vz - 1);
+        if below.material.is_solid() && below.integrity > 0.0 && below.material.properties().load_bearing {
+            return true;
+        }
+
+        let mut solid_neighbors = 0u8;
+        for &(dx, dy) in &[(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+            let n = self.get_voxel(vx + dx, vy + dy, vz);
+            if n.material.is_solid() && n.integrity > 0.0 {
+                solid_neighbors += 1;
+            }
+        }
+        solid_neighbors >= 2
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -621,6 +827,26 @@ fn hash_3d(x: i32, y: i32, z: i32, seed: u64) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn voxel_building_metadata() {
+        let mut v = Voxel::new(VoxelMaterial::StoneBrick);
+        assert_eq!(v.zone, VoxelZone::None);
+        assert_eq!(v.building_id, None);
+        assert_eq!(v.integrity, 1.0);
+
+        v.building_id = Some(42);
+        v.zone = VoxelZone::Residential;
+        v.integrity = 0.75;
+
+        assert_eq!(v.building_id, Some(42));
+        assert_eq!(v.zone, VoxelZone::Residential);
+        assert!((v.integrity - 0.75).abs() < f32::EPSILON);
+
+        let ehp = v.effective_hp();
+        let expected = 0.75 * VoxelMaterial::StoneBrick.properties().hp_multiplier;
+        assert!((ehp - expected).abs() < f32::EPSILON);
+    }
 
     #[test]
     fn chunk_pos_from_voxel() {
@@ -1102,5 +1328,127 @@ mod tests {
             assert_eq!(commodity, crate::world_sim::commodity::IRON);
             assert!(amount > 0.0);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // MaterialProperties tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn material_properties_all_variants() {
+        let all = [
+            VoxelMaterial::Air, VoxelMaterial::Stone, VoxelMaterial::Granite,
+            VoxelMaterial::Basalt, VoxelMaterial::Sandstone, VoxelMaterial::Marble,
+            VoxelMaterial::Dirt, VoxelMaterial::Clay, VoxelMaterial::Sand,
+            VoxelMaterial::Gravel, VoxelMaterial::Ice, VoxelMaterial::Snow,
+            VoxelMaterial::Water, VoxelMaterial::Lava,
+            VoxelMaterial::WoodLog, VoxelMaterial::WoodPlanks, VoxelMaterial::Thatch,
+            VoxelMaterial::Bone,
+            VoxelMaterial::Brick, VoxelMaterial::CutStone, VoxelMaterial::Concrete,
+            VoxelMaterial::Glass, VoxelMaterial::Ceramic,
+            VoxelMaterial::Iron, VoxelMaterial::Steel, VoxelMaterial::Bronze,
+            VoxelMaterial::CopperOre, VoxelMaterial::GoldOre,
+            VoxelMaterial::Obsidian, VoxelMaterial::Crystal,
+            VoxelMaterial::IronOre, VoxelMaterial::Coal,
+            VoxelMaterial::Grass, VoxelMaterial::Farmland, VoxelMaterial::Crop,
+            VoxelMaterial::StoneBlock, VoxelMaterial::StoneBrick,
+        ];
+        for mat in &all {
+            let props = mat.properties();
+            assert!(props.hp_multiplier > 0.0 || mat.is_fluid() || *mat == VoxelMaterial::Air);
+            if mat.is_solid() {
+                assert!(props.weight > 0.0, "{:?} should have positive weight", mat);
+            }
+        }
+    }
+
+    #[test]
+    fn material_properties_values() {
+        let steel = VoxelMaterial::Steel.properties();
+        assert!(steel.hp_multiplier > VoxelMaterial::WoodLog.properties().hp_multiplier);
+        assert!(steel.blast_resistance > VoxelMaterial::Glass.properties().blast_resistance);
+        assert!(VoxelMaterial::Glass.properties().load_bearing == false);
+        assert!(VoxelMaterial::Stone.properties().load_bearing == true);
+    }
+
+    // -----------------------------------------------------------------------
+    // Destructible terrain tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn voxel_world_damage_destroys() {
+        let mut world = VoxelWorld::default();
+        let cp = ChunkPos::new(0, 0, 0);
+        world.generate_chunk(cp, 42);
+
+        // Find a solid voxel that isn't bedrock
+        let vx = 8;
+        let vy = 8;
+        let vz = 10; // stone layer
+        let mat = world.get_voxel(vx, vy, vz).material;
+        assert!(mat.is_solid(), "expected solid at z=10");
+
+        let hp = mat.properties().hp_multiplier;
+        // Damage it to destruction
+        let destroyed = world.damage_voxel(vx, vy, vz, hp + 1.0);
+        assert!(destroyed);
+
+        let after = world.get_voxel(vx, vy, vz);
+        // Load-bearing materials become rubble (integrity 0), non-load-bearing become Air
+        if mat.properties().load_bearing {
+            assert_eq!(after.integrity, 0.0);
+            assert_eq!(after.zone, VoxelZone::None);
+        } else {
+            assert_eq!(after.material, VoxelMaterial::Air);
+        }
+    }
+
+    #[test]
+    fn voxel_world_damage_partial() {
+        let mut world = VoxelWorld::default();
+        let cp = ChunkPos::new(0, 0, 0);
+        world.generate_chunk(cp, 42);
+
+        let vx = 8;
+        let vy = 8;
+        let vz = 10;
+        let mat = world.get_voxel(vx, vy, vz).material;
+        let hp = mat.properties().hp_multiplier;
+
+        // Partial damage
+        let destroyed = world.damage_voxel(vx, vy, vz, hp * 0.3);
+        assert!(!destroyed);
+
+        let after = world.get_voxel(vx, vy, vz);
+        assert!(after.integrity > 0.0 && after.integrity < 1.0);
+    }
+
+    #[test]
+    fn cascading_collapse() {
+        // Column at z=10,11,12 — z=10 supported by solid below
+        let mut world = VoxelWorld::default();
+        // Fill z=0..10 with stone as foundation
+        for z in 0..=10 {
+            world.set_voxel(5, 5, z, Voxel::new(VoxelMaterial::Stone));
+        }
+        // Add z=11, 12 on top
+        world.set_voxel(5, 5, 11, Voxel::new(VoxelMaterial::Stone));
+        world.set_voxel(5, 5, 12, Voxel::new(VoxelMaterial::Stone));
+
+        // Destroy z=10 (the top of the foundation)
+        let hp = VoxelMaterial::Stone.properties().hp_multiplier;
+        world.damage_voxel(5, 5, 10, hp + 1.0);
+
+        // z=10 is now rubble (integrity 0, load_bearing → stays as stone rubble)
+        let v10 = world.get_voxel(5, 5, 10);
+        assert_eq!(v10.integrity, 0.0);
+
+        // z=11 should collapse — z=10 below is rubble (integrity 0), no horizontal support
+        let v11 = world.get_voxel(5, 5, 11);
+        assert_eq!(v11.integrity, 0.0, "z=11 should collapse without support");
+
+        // z=12 should also cascade
+        let v12 = world.get_voxel(5, 5, 12);
+        assert_eq!(v12.integrity, 0.0, "z=12 should cascade");
     }
 }

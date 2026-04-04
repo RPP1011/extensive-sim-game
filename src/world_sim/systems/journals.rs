@@ -63,7 +63,7 @@ pub fn compute_journals_for_settlement(
 
         // --- Battle memories ---
         if let Some(grid_id) = entity.grid_id {
-            if let Some(grid) = state.grid(grid_id) {
+            if let Some(grid) = state.fidelity_zone(grid_id) {
                 if grid.fidelity == crate::world_sim::fidelity::Fidelity::High {
                 }
             }

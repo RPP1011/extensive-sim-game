@@ -8,7 +8,6 @@ use crate::world_sim::building_ai::features::compute_spatial_features;
 use crate::world_sim::building_ai::oracle::strategic_oracle;
 use crate::world_sim::building_ai::scoring::apply_actions;
 use crate::world_sim::building_ai::types::*;
-use crate::world_sim::city_grid::{CellState, CellTerrain, CityGrid, InfluenceMap};
 use crate::world_sim::state::{
     BuildingType, Entity, EntityKind, SettlementState, WorldState,
 };
@@ -60,13 +59,7 @@ pub fn probe_single_cell() -> ProbeResult {
     stockpile[1] = 1000.0; // iron
     settlement.stockpile = stockpile;
 
-    let grid = CityGrid::new(3, 3, sid, "Plains", 1001);
-    // Grid has road cross at center (1,1). Cells around it are empty+flat.
-
-    settlement.city_grid_idx = Some(0);
     state.settlements.push(settlement);
-    state.city_grids.push(grid);
-    state.influence_maps.push(InfluenceMap::new(3, 3));
 
     // Build observation
     let features = compute_spatial_features(&state, sid);
@@ -148,24 +141,8 @@ pub fn probe_two_cells() -> ProbeResult {
     stockpile[1] = 1000.0;
     settlement.stockpile = stockpile;
 
-    let mut grid = CityGrid::new(5, 5, sid, "Plains", 1002);
-
-    // (1,2) is flat and good
-    // (3,2) is slope with adjacent water — flood-prone
-    {
-        let cell = grid.cell_mut(3, 2);
-        cell.terrain = CellTerrain::Slope;
-    }
-    {
-        let cell = grid.cell_mut(4, 2);
-        cell.terrain = CellTerrain::Water;
-        cell.state = CellState::Water;
-    }
-
-    settlement.city_grid_idx = Some(0);
+    // (1,2) is flat and good; (3,2) is flood-prone (expressed through features below).
     state.settlements.push(settlement);
-    state.city_grids.push(grid);
-    state.influence_maps.push(InfluenceMap::new(5, 5));
 
     // Inject flood challenge
     let flood_challenge = Challenge {
@@ -257,12 +234,7 @@ pub fn probe_resource_constraint() -> ProbeResult {
     stockpile[1] = 500.0; // iron/stone
     settlement.stockpile = stockpile;
 
-    let grid = CityGrid::new(5, 5, sid, "Plains", 1003);
-
-    settlement.city_grid_idx = Some(0);
     state.settlements.push(settlement);
-    state.city_grids.push(grid);
-    state.influence_maps.push(InfluenceMap::new(5, 5));
 
     // Housing pressure challenge
     let housing_challenge = Challenge {
@@ -343,12 +315,7 @@ pub fn probe_wall_then_gate() -> ProbeResult {
     }
     settlement.stockpile = stockpile;
 
-    let grid = CityGrid::new(7, 7, sid, "Plains", 1004);
-
-    settlement.city_grid_idx = Some(0);
     state.settlements.push(settlement);
-    state.city_grids.push(grid);
-    state.influence_maps.push(InfluenceMap::new(7, 7));
 
     // Military challenge from north
     let military_challenge = Challenge {
@@ -470,20 +437,7 @@ pub fn probe_threat_response() -> ProbeResult {
     }
     settlement.stockpile = stockpile;
 
-    let mut grid = CityGrid::new(9, 9, sid, "Plains", 1005);
-
-    // Existing wall coverage on south (rows 7-8)
-    for col in 3..=5 {
-        for row in 7..=8 {
-            if grid.in_bounds(col, row) {
-                let cell = grid.cell_mut(col, row);
-                cell.state = CellState::Wall;
-                cell.building_id = Some(100 + col as u32 + row as u32 * 100);
-            }
-        }
-    }
-
-    // Create corresponding wall entities
+    // Create wall entities on south (rows 7-8) — existing coverage there.
     for col in 3..=5u32 {
         for row in 7..=8u32 {
             let eid = 100 + col + row * 100;
@@ -499,10 +453,7 @@ pub fn probe_threat_response() -> ProbeResult {
         }
     }
 
-    settlement.city_grid_idx = Some(0);
     state.settlements.push(settlement);
-    state.city_grids.push(grid);
-    state.influence_maps.push(InfluenceMap::new(9, 9));
 
     // Threat from north
     let military_challenge = Challenge {

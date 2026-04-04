@@ -48,7 +48,7 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
     println!("Regions: {}", state.regions.len());
     println!("Factions: {}", state.factions.len());
     println!("Trade routes: {}", state.trade_routes.len());
-    println!("Grids: {}", state.grids.len());
+    println!("Grids: {}", state.fidelity_zones.len());
     if let Some(dur) = args.duration_secs {
         println!("Duration: {}s", dur);
     } else {
@@ -2621,7 +2621,7 @@ fn create_settlements(
 
         // CityGrid creation skipped — tile system replaces CityGrid.
 
-        state.grids.push(LocalGrid {
+        state.fidelity_zones.push(FidelityZone {
             id: i as u32,
             fidelity: Fidelity::Medium,
             center: pos,
@@ -2740,7 +2740,7 @@ fn populate_npcs(
             npc_data.economic_intent = EconomicIntent::Produce; // will flee
         }
 
-        state.grids[settlement_idx].entity_ids.push(id);
+        state.fidelity_zones[settlement_idx].entity_ids.push(id);
         state.entities.push(npc);
         id += 1;
     }

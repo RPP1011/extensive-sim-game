@@ -62,7 +62,7 @@ impl WorldView {
         let tick = state.tick;
         let max_sid = state.settlements.iter().map(|s| s.id).max().unwrap_or(0) as usize + 1;
         let max_fid = state.factions.iter().map(|f| f.id).max().unwrap_or(0) as usize + 1;
-        let max_gid = state.grids.iter().map(|g| g.id).max().unwrap_or(0) as usize + 1;
+        let max_gid = state.fidelity_zones.iter().map(|g| g.id).max().unwrap_or(0) as usize + 1;
 
         // Settlement data
         let mut threat = vec![0.0f32; max_sid];

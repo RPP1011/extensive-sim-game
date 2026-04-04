@@ -70,7 +70,7 @@ fn add_environment_tags(entity: &Entity, state: &WorldState, tags_out: &mut Acti
 
     // In combat (High fidelity grid)
     if let Some(gid) = entity.grid_id {
-        if let Some(g) = state.grid(gid) {
+        if let Some(g) = state.fidelity_zone(gid) {
             if g.fidelity == crate::world_sim::fidelity::Fidelity::High {
                 tags_out.add(tags::COMBAT, 0.3);
             }

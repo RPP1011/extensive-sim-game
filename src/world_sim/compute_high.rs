@@ -165,7 +165,7 @@ mod tests {
 
         s.entities.push(npc);
         s.entities.push(monster);
-        s.grids.push(LocalGrid {
+        s.fidelity_zones.push(FidelityZone {
             id: 100,
             fidelity: super::super::fidelity::Fidelity::High,
             center: (0.0, 0.0),

@@ -4,11 +4,10 @@
 //! grid-entity cross-references, grid bounds, entity invariants,
 //! settlement invariants.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use super::{ErrorContext, Severity, ValidationError};
-use crate::world_sim::city_grid::{CellState, CellTerrain};
-use crate::world_sim::state::{BuildingType, EntityKind, WorldState};
+use crate::world_sim::state::{EntityKind, WorldState};
 
 /// Run all WorldState consistency checks. O(E + G + S).
 pub fn validate_world_state(state: &WorldState) -> Vec<ValidationError> {
@@ -253,349 +252,27 @@ fn check_entity_invariants(state: &WorldState) -> Vec<ValidationError> {
         }
     }
 
-    // WS-ENT-005: dead entities not referenced by any grid cell
-    let dead_ids: HashSet<u32> = state
-        .entities
-        .iter()
-        .filter(|e| !e.alive)
-        .map(|e| e.id)
-        .collect();
-
-    if !dead_ids.is_empty() {
-        for grid in &state.city_grids {
-            for (cell_idx, cell) in grid.cells.iter().enumerate() {
-                if let Some(bid) = cell.building_id {
-                    if dead_ids.contains(&bid) {
-                        let col = (cell_idx % grid.cols) as u16;
-                        let row = (cell_idx / grid.cols) as u16;
-                        errors.push(ValidationError {
-                            code: "WS-ENT-005",
-                            severity: Severity::Fatal,
-                            message: format!(
-                                "Grid cell ({}, {}) references dead entity {}",
-                                col, row, bid
-                            ),
-                            context: ErrorContext {
-                                entity_id: Some(bid),
-                                grid_cell: Some((col, row)),
-                                ..Default::default()
-                            },
-                        });
-                    }
-                }
-            }
-        }
-    }
-
     errors
 }
 
+
 // ---------------------------------------------------------------------------
-// WS-GRID-*: Grid bounds and terrain
+// WS-GRID-*: Grid invariants (CityGrid removed — stubs)
 // ---------------------------------------------------------------------------
 
-fn check_grid_invariants(state: &WorldState) -> Vec<ValidationError> {
-    let mut errors = Vec::new();
-
-    for (gi, grid) in state.city_grids.iter().enumerate() {
-        // WS-GRID-001: cols * rows == cells.len()
-        if grid.cols * grid.rows != grid.cells.len() {
-            errors.push(ValidationError {
-                code: "WS-GRID-001",
-                severity: Severity::Fatal,
-                message: format!(
-                    "Grid {}: cols({}) * rows({}) = {} but cells.len() = {}",
-                    gi,
-                    grid.cols,
-                    grid.rows,
-                    grid.cols * grid.rows,
-                    grid.cells.len()
-                ),
-                context: ErrorContext::default(),
-            });
-            // Can't do further grid checks if buffer is wrong size
-            continue;
-        }
-
-        for (cell_idx, cell) in grid.cells.iter().enumerate() {
-            let col = (cell_idx % grid.cols) as u16;
-            let row = (cell_idx / grid.cols) as u16;
-
-            // WS-GRID-002: no building on Water or Cliff terrain
-            if (cell.state == CellState::Building || cell.state == CellState::Wall)
-                && (cell.terrain == CellTerrain::Water || cell.terrain == CellTerrain::Cliff)
-            {
-                errors.push(ValidationError {
-                    code: "WS-GRID-002",
-                    severity: Severity::Fatal,
-                    message: format!(
-                        "Grid {}: building at ({}, {}) on unbuildable terrain {:?}",
-                        gi, col, row, cell.terrain
-                    ),
-                    context: ErrorContext {
-                        grid_cell: Some((col, row)),
-                        ..Default::default()
-                    },
-                });
-            }
-
-            // WS-GRID-004: Building/Wall state with no building_id
-            if (cell.state == CellState::Building || cell.state == CellState::Wall)
-                && cell.building_id.is_none()
-            {
-                errors.push(ValidationError {
-                    code: "WS-GRID-004",
-                    severity: Severity::Fatal,
-                    message: format!(
-                        "Grid {}: cell ({}, {}) is {:?} but has no building_id",
-                        gi, col, row, cell.state
-                    ),
-                    context: ErrorContext {
-                        grid_cell: Some((col, row)),
-                        ..Default::default()
-                    },
-                });
-            }
-
-            // WS-GRID-005: Empty state with building_id
-            if cell.state == CellState::Empty && cell.building_id.is_some() {
-                errors.push(ValidationError {
-                    code: "WS-GRID-005",
-                    severity: Severity::Fatal,
-                    message: format!(
-                        "Grid {}: cell ({}, {}) is Empty but has building_id {:?}",
-                        gi, col, row, cell.building_id
-                    ),
-                    context: ErrorContext {
-                        grid_cell: Some((col, row)),
-                        entity_id: cell.building_id,
-                        ..Default::default()
-                    },
-                });
-            }
-        }
-    }
-
-    errors
+fn check_grid_invariants(_state: &WorldState) -> Vec<ValidationError> {
+    // CityGrid has been removed. Grid invariant checks are no longer applicable.
+    Vec::new()
 }
 
 // ---------------------------------------------------------------------------
-// WS-XREF-*: Grid-entity cross-reference
+// WS-GRID-ENT-*: Grid-entity cross-references (CityGrid removed — stubs)
 // ---------------------------------------------------------------------------
 
-fn check_grid_entity_xref(state: &WorldState) -> Vec<ValidationError> {
-    let mut errors = Vec::new();
-
-    // Build a map of entity_id -> &Entity for alive buildings
-    let alive_buildings: HashMap<u32, &crate::world_sim::state::Entity> = state
-        .entities
-        .iter()
-        .filter(|e| e.alive && e.kind == EntityKind::Building)
-        .map(|e| (e.id, e))
-        .collect();
-
-    // WS-XREF-001: Every cell with building_id has a corresponding alive Building entity
-    for (gi, grid) in state.city_grids.iter().enumerate() {
-        if grid.cols * grid.rows != grid.cells.len() {
-            continue; // Skip malformed grids (caught by WS-GRID-001)
-        }
-
-        // Track which building_ids appear at which cells for overlap detection
-        let mut building_cells: HashMap<u32, Vec<(u16, u16)>> = HashMap::new();
-
-        for (cell_idx, cell) in grid.cells.iter().enumerate() {
-            let col = (cell_idx % grid.cols) as u16;
-            let row = (cell_idx / grid.cols) as u16;
-
-            if let Some(bid) = cell.building_id {
-                building_cells
-                    .entry(bid)
-                    .or_default()
-                    .push((col, row));
-
-                if !alive_buildings.contains_key(&bid) {
-                    errors.push(ValidationError {
-                        code: "WS-XREF-001",
-                        severity: Severity::Fatal,
-                        message: format!(
-                            "Grid {}: cell ({}, {}) references building_id {} but no alive Building entity exists",
-                            gi, col, row, bid
-                        ),
-                        context: ErrorContext {
-                            entity_id: Some(bid),
-                            grid_cell: Some((col, row)),
-                            ..Default::default()
-                        },
-                    });
-                }
-
-                // WS-XREF-005: cell state matches entity type
-                if let Some(entity) = alive_buildings.get(&bid) {
-                    if let Some(bdata) = &entity.building {
-                        let expected_state = if bdata.building_type == BuildingType::Wall {
-                            CellState::Wall
-                        } else {
-                            CellState::Building
-                        };
-                        if cell.state != expected_state {
-                            errors.push(ValidationError {
-                                code: "WS-XREF-005",
-                                severity: Severity::Warning,
-                                message: format!(
-                                    "Grid {}: cell ({}, {}) state is {:?} but building {} is {:?} (expected {:?})",
-                                    gi, col, row, cell.state, bid, bdata.building_type, expected_state
-                                ),
-                                context: ErrorContext {
-                                    entity_id: Some(bid),
-                                    grid_cell: Some((col, row)),
-                                    ..Default::default()
-                                },
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        // WS-XREF-003: no two alive building entities share the same grid cell
-        // (detected via multiple different building_ids occupying same cell)
-        // This is checked implicitly since each cell has one building_id.
-        // But check for overlapping footprints: different building entities at same cell.
-        let mut cell_owners: HashMap<(u16, u16), u32> = HashMap::new();
-        for (cell_idx, cell) in grid.cells.iter().enumerate() {
-            if let Some(bid) = cell.building_id {
-                let col = (cell_idx % grid.cols) as u16;
-                let row = (cell_idx / grid.cols) as u16;
-                if let Some(&prev_bid) = cell_owners.get(&(col, row)) {
-                    if prev_bid != bid {
-                        errors.push(ValidationError {
-                            code: "WS-XREF-003",
-                            severity: Severity::Fatal,
-                            message: format!(
-                                "Grid {}: cell ({}, {}) claimed by both entity {} and {}",
-                                gi, col, row, prev_bid, bid
-                            ),
-                            context: ErrorContext {
-                                grid_cell: Some((col, row)),
-                                ..Default::default()
-                            },
-                        });
-                    }
-                } else {
-                    cell_owners.insert((col, row), bid);
-                }
-            }
-        }
-    }
-
-    // WS-XREF-002: Every alive building entity with settlement_id has its grid position
-    // pointing to a cell whose building_id == entity.id
-    for entity in &state.entities {
-        if !entity.alive || entity.kind != EntityKind::Building {
-            continue;
-        }
-        let bdata = match &entity.building {
-            Some(b) => b,
-            None => continue,
-        };
-        let sid = match bdata.settlement_id {
-            Some(s) => s,
-            None => continue,
-        };
-
-        // Find the grid for this settlement
-        let grid = state.city_grids.iter().find(|g| g.settlement_id == sid);
-        let grid = match grid {
-            Some(g) => g,
-            None => continue, // No grid for this settlement (caught by WS-SET-003)
-        };
-
-        let col = bdata.grid_col as usize;
-        let row = bdata.grid_row as usize;
-
-        if !grid.in_bounds(col, row) {
-            errors.push(ValidationError {
-                code: "WS-XREF-002",
-                severity: Severity::Fatal,
-                message: format!(
-                    "Building entity {} at ({}, {}) is out of bounds for grid ({}x{})",
-                    entity.id, col, row, grid.cols, grid.rows
-                ),
-                context: ErrorContext {
-                    entity_id: Some(entity.id),
-                    grid_cell: Some((col as u16, row as u16)),
-                    ..Default::default()
-                },
-            });
-            continue;
-        }
-
-        let cell = &grid.cells[grid.idx(col, row)];
-        if cell.building_id != Some(entity.id) {
-            errors.push(ValidationError {
-                code: "WS-XREF-002",
-                severity: Severity::Fatal,
-                message: format!(
-                    "Building entity {} thinks it's at ({}, {}) but grid cell has building_id {:?}",
-                    entity.id, col, row, cell.building_id
-                ),
-                context: ErrorContext {
-                    entity_id: Some(entity.id),
-                    grid_cell: Some((col as u16, row as u16)),
-                    ..Default::default()
-                },
-            });
-        }
-
-        // WS-XREF-004: multi-cell footprints must have all covered cells in-bounds and marked
-        if bdata.footprint_w > 1 || bdata.footprint_h > 1 {
-            for dc in 0..bdata.footprint_w as usize {
-                for dr in 0..bdata.footprint_h as usize {
-                    let fc = col + dc;
-                    let fr = row + dr;
-                    if !grid.in_bounds(fc, fr) {
-                        errors.push(ValidationError {
-                            code: "WS-XREF-004",
-                            severity: Severity::Fatal,
-                            message: format!(
-                                "Building {} footprint cell ({}, {}) is out of bounds",
-                                entity.id, fc, fr
-                            ),
-                            context: ErrorContext {
-                                entity_id: Some(entity.id),
-                                grid_cell: Some((fc as u16, fr as u16)),
-                                ..Default::default()
-                            },
-                        });
-                        continue;
-                    }
-                    let fcell = &grid.cells[grid.idx(fc, fr)];
-                    if fcell.building_id != Some(entity.id) {
-                        errors.push(ValidationError {
-                            code: "WS-XREF-004",
-                            severity: Severity::Fatal,
-                            message: format!(
-                                "Building {} footprint cell ({}, {}) has building_id {:?} instead of {}",
-                                entity.id, fc, fr, fcell.building_id, entity.id
-                            ),
-                            context: ErrorContext {
-                                entity_id: Some(entity.id),
-                                grid_cell: Some((fc as u16, fr as u16)),
-                                ..Default::default()
-                            },
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    errors
+fn check_grid_entity_xref(_state: &WorldState) -> Vec<ValidationError> {
+    // CityGrid has been removed. Grid-entity cross-reference checks are no longer applicable.
+    Vec::new()
 }
-
-// ---------------------------------------------------------------------------
-// WS-SET-*: Settlement invariants
-// ---------------------------------------------------------------------------
 
 fn check_settlement_invariants(state: &WorldState) -> Vec<ValidationError> {
     let mut errors = Vec::new();
@@ -648,44 +325,7 @@ fn check_settlement_invariants(state: &WorldState) -> Vec<ValidationError> {
             });
         }
 
-        // WS-SET-003: settlement has a city grid (required for building AI)
-        match settlement.city_grid_idx {
-            None => {
-                errors.push(ValidationError {
-                    code: "WS-SET-003",
-                    severity: Severity::Warning,
-                    message: format!(
-                        "Settlement {} has no city_grid_idx",
-                        settlement.id
-                    ),
-                    context: Default::default(),
-                });
-            }
-            Some(idx) => {
-                // WS-GRID-003: city_grid_idx valid and cross-linked
-                if idx >= state.city_grids.len() {
-                    errors.push(ValidationError {
-                        code: "WS-GRID-003",
-                        severity: Severity::Fatal,
-                        message: format!(
-                            "Settlement {} city_grid_idx {} >= city_grids.len() ({})",
-                            settlement.id, idx, state.city_grids.len()
-                        ),
-                        context: Default::default(),
-                    });
-                } else if state.city_grids[idx].settlement_id != settlement.id {
-                    errors.push(ValidationError {
-                        code: "WS-GRID-003",
-                        severity: Severity::Fatal,
-                        message: format!(
-                            "Settlement {} city_grid_idx {} points to grid with settlement_id {} (expected {})",
-                            settlement.id, idx, state.city_grids[idx].settlement_id, settlement.id
-                        ),
-                        context: Default::default(),
-                    });
-                }
-            }
-        }
+        // WS-SET-003: city_grid_idx check removed — CityGrid has been replaced by VoxelWorld.
     }
 
     errors
@@ -694,7 +334,6 @@ fn check_settlement_invariants(state: &WorldState) -> Vec<ValidationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world_sim::city_grid::{CellState, CityGrid};
     use crate::world_sim::state::{BuildingData, Entity, WorldState};
 
     fn minimal_state() -> WorldState {
@@ -739,23 +378,6 @@ mod tests {
         assert!(
             errors.iter().any(|e| e.code == "WS-ENT-004"),
             "Expected WS-ENT-004 error"
-        );
-    }
-
-    #[test]
-    fn ghost_building_detected() {
-        let mut state = minimal_state();
-        let mut grid = CityGrid::new(3, 3, 1, "Plains", 0);
-        // Mark a cell as Building with no building_id
-        let cell = grid.cell_mut(1, 1);
-        cell.state = CellState::Building;
-        // No building_id set — ghost building
-        state.city_grids.push(grid);
-
-        let errors = validate_world_state(&state);
-        assert!(
-            errors.iter().any(|e| e.code == "WS-GRID-004"),
-            "Expected WS-GRID-004 error"
         );
     }
 

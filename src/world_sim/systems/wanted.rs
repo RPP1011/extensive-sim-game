@@ -149,7 +149,7 @@ pub fn compute_wanted(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // When a hostile entity has died on a grid near a settlement, reward
     // friendly NPCs on the same grid as bounty collectors.
     // Bounties are funded by the nearest settlement treasury.
-    for grid in &state.grids {
+    for grid in &state.fidelity_zones {
         // Find dead hostiles on this grid.
         let dead_hostiles: Vec<(u32, u32)> = grid
             .entity_ids

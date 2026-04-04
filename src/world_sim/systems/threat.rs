@@ -112,7 +112,7 @@ pub fn compute_threat(state: &WorldState, out: &mut Vec<WorldDelta>) {
             };
 
             let current_fidelity = state
-                .grid(grid_id)
+                .fidelity_zone(grid_id)
                 .map(|g| g.fidelity)
                 .unwrap_or(Fidelity::Low);
 

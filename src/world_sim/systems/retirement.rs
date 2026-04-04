@@ -178,7 +178,7 @@ pub fn compute_retirement_for_settlement(
         // Don't retire during combat.
         let on_hostile_grid = entity
             .grid_id
-            .and_then(|gid| state.grid(gid))
+            .and_then(|gid| state.fidelity_zone(gid))
             .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
             .unwrap_or(false);
         if on_hostile_grid {

@@ -53,7 +53,7 @@ pub fn compute_fears(state: &WorldState, out: &mut Vec<WorldDelta>) {
         if !entity.alive { continue; }
         let hp_ratio = entity.hp / entity.max_hp.max(1.0);
         let on_combat_grid = entity.grid_id
-            .and_then(|gid| state.grid(gid))
+            .and_then(|gid| state.fidelity_zone(gid))
             .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
             .unwrap_or(false);
 
@@ -80,7 +80,7 @@ pub fn compute_fears(state: &WorldState, out: &mut Vec<WorldDelta>) {
     //     out.push(WorldDelta::ConquerFear { entity_id, fear_type })
 
     // --- Phase 4: Mentorship (fearless entity in same grid reduces severity) ---
-    for grid in &state.grids {
+    for grid in &state.fidelity_zones {
         let npc_ids: Vec<u32> = grid
             .entity_ids
             .iter()

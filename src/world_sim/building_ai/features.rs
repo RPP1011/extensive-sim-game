@@ -8,11 +8,11 @@ use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
 
 use super::types::BuildMaterial;
-use crate::world_sim::city_grid::{CellState, CellTerrain, ZoneType};
 use crate::world_sim::state::{
     BuildingType, WorldState,
     tags,
 };
+use crate::world_sim::voxel::{world_to_voxel, VoxelMaterial};
 
 // ---------------------------------------------------------------------------
 // Top-level spatial features
@@ -366,37 +366,56 @@ fn find_chokepoints(
     chokepoints
 }
 
-/// Perimeter cell detection: cells on the outermost ring of developed area.
-/// A developed cell is "perimeter" if it has at least one non-developed 4-neighbor
-/// or is on the grid edge.
-fn perimeter_cells(
-    grid: &crate::world_sim::city_grid::CityGrid,
-) -> Vec<(usize, usize)> {
+/// Virtual grid size for spatial feature computations (VoxelWorld is unbounded).
+const VIRT: usize = 64;
+
+/// Convert a world-space position to a virtual grid cell coordinate.
+/// Settlement center maps to (VIRT/2, VIRT/2); each grid cell = 1 voxel unit.
+fn world_to_virtual(wx: f32, wy: f32, settlement_x: f32, settlement_y: f32) -> (usize, usize) {
+    let half = (VIRT / 2) as f32;
+    let c = (wx - settlement_x + half).round() as i32;
+    let r = (wy - settlement_y + half).round() as i32;
+    let c = c.clamp(0, VIRT as i32 - 1) as usize;
+    let r = r.clamp(0, VIRT as i32 - 1) as usize;
+    (c, r)
+}
+
+/// Build a set of developed cells (cells occupied by a building entity) in the virtual grid.
+fn build_developed_cells(state: &WorldState, settlement_id: u32) -> Vec<bool> {
+    let settlement = match state.settlement(settlement_id) {
+        Some(s) => s,
+        None => return vec![false; VIRT * VIRT],
+    };
+    let mut developed = vec![false; VIRT * VIRT];
+    let building_range = state.group_index.settlement_buildings(settlement_id);
+    for idx in building_range {
+        if idx >= state.entities.len() { break; }
+        let e = &state.entities[idx];
+        if !e.alive { continue; }
+        let (c, r) = world_to_virtual(e.pos.0, e.pos.1, settlement.pos.0, settlement.pos.1);
+        developed[r * VIRT + c] = true;
+    }
+    developed
+}
+
+/// Perimeter cells: virtual grid cells that contain a building and have at least one
+/// non-developed 4-neighbor (or lie on the grid edge).
+fn perimeter_cells_virtual(developed: &[bool]) -> Vec<(usize, usize)> {
     let mut result = Vec::new();
-    for r in 0..grid.rows {
-        for c in 0..grid.cols {
-            let cell = grid.cell(c, r);
-            if !matches!(cell.state, CellState::Building | CellState::Wall | CellState::Road | CellState::Plaza) {
+    for r in 0..VIRT {
+        for c in 0..VIRT {
+            if !developed[r * VIRT + c] {
                 continue;
             }
-            // On edge of grid = perimeter.
-            if c == 0 || r == 0 || c + 1 >= grid.cols || r + 1 >= grid.rows {
+            if c == 0 || r == 0 || c + 1 >= VIRT || r + 1 >= VIRT {
                 result.push((c, r));
                 continue;
             }
-            // Check 4-neighbors for undeveloped.
-            let mut on_perimeter = false;
-            for &(dx, dy) in &[(0i32, 1i32), (0, -1), (1, 0), (-1, 0)] {
+            let on_perimeter = [(0i32, 1i32), (0, -1), (1, 0), (-1, 0)].iter().any(|&(dx, dy)| {
                 let nx = (c as i32 + dx) as usize;
                 let ny = (r as i32 + dy) as usize;
-                if grid.in_bounds(nx, ny) {
-                    let ns = grid.cell(nx, ny).state;
-                    if matches!(ns, CellState::Empty | CellState::Water) {
-                        on_perimeter = true;
-                        break;
-                    }
-                }
-            }
+                !developed[ny * VIRT + nx]
+            });
             if on_perimeter {
                 result.push((c, r));
             }
@@ -415,20 +434,21 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
         Some(s) => s,
         None => return SpatialFeatures::default(),
     };
-    let grid_idx = match settlement.city_grid_idx {
-        Some(idx) if idx < state.city_grids.len() => idx,
-        _ => return SpatialFeatures::default(),
-    };
-    let grid = &state.city_grids[grid_idx];
-    let cols = grid.cols;
-    let rows = grid.rows;
+    let cols = VIRT;
+    let rows = VIRT;
+    let sx = settlement.pos.0;
+    let sy = settlement.pos.1;
+
+    let developed = build_developed_cells(state, settlement_id);
+    let is_developed = |c: usize, r: usize| developed[r * VIRT + c];
 
     // -----------------------------------------------------------------------
     // 1. Connectivity
     // -----------------------------------------------------------------------
 
-    // Collect key buildings: one per type that matters.
     let building_range = state.group_index.settlement_buildings(settlement_id);
+
+    // Collect key buildings: one per type that matters.
     let mut key_buildings: Vec<(u32, usize, usize)> = Vec::new(); // (entity_id, col, row)
     for idx in building_range.clone() {
         if idx >= state.entities.len() { break; }
@@ -439,7 +459,8 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
                 BuildingType::Barracks | BuildingType::Market | BuildingType::Warehouse
                 | BuildingType::Gate | BuildingType::Temple | BuildingType::GuildHall
                 | BuildingType::Treasury | BuildingType::Watchtower => {
-                    key_buildings.push((e.id, bd.grid_col as usize, bd.grid_row as usize));
+                    let (c, r) = world_to_virtual(e.pos.0, e.pos.1, sx, sy);
+                    key_buildings.push((e.id, c, r));
                 }
                 _ => {}
             }
@@ -453,28 +474,27 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
         for j in (i + 1)..key_buildings.len() {
             let (id_a, ca, ra) = key_buildings[i];
             let (id_b, cb, rb) = key_buildings[j];
-            let path = grid.find_path((ca, ra), (cb, rb));
-            let (path_exists, distance) = match &path {
-                Some(p) => (true, p.len() as f32),
-                None => (false, f32::MAX),
-            };
+            // Simple Euclidean distance (BFS over entities would be expensive without a nav grid).
+            let dx = ca as f32 - cb as f32;
+            let dy = ra as f32 - rb as f32;
+            let distance = (dx * dx + dy * dy).sqrt();
             key_building_paths.push(BuildingPathEntry {
                 id_a,
                 id_b,
-                path_exists,
+                path_exists: true,
                 distance,
             });
         }
     }
 
-    // Connected components among walkable cells.
-    let connected_components = count_connected_components(cols, rows, |c, r| grid.is_walkable(c, r));
+    // Connected components among developed cells.
+    let connected_components = count_connected_components(cols, rows, is_developed);
 
-    // Chokepoints (articulation points, capped to 60 candidates).
-    let chokepoints = find_chokepoints(cols, rows, &|c, r| grid.is_walkable(c, r), 60);
+    // Chokepoints (articulation points among developed cells, capped to 60).
+    let chokepoints = find_chokepoints(cols, rows, &is_developed, 60);
 
-    // Evacuation reachability: fraction of residential cells within 20 steps of a gate.
-    let gate_cells: Vec<(usize, usize)> = {
+    // Evacuation reachability: fraction of residential buildings within 20 cells of a gate.
+    let gate_positions_vc: Vec<(usize, usize)> = {
         let mut v = Vec::new();
         for idx in building_range.clone() {
             if idx >= state.entities.len() { break; }
@@ -482,20 +502,24 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
             if !e.alive { continue; }
             if let Some(bd) = &e.building {
                 if bd.building_type == BuildingType::Gate {
-                    v.push((bd.grid_col as usize, bd.grid_row as usize));
+                    let (c, r) = world_to_virtual(e.pos.0, e.pos.1, sx, sy);
+                    v.push((c, r));
                 }
             }
         }
         v
     };
-    let gate_dist = bfs_distances(cols, rows, &gate_cells, |c, r| grid.is_walkable(c, r), 20);
+    let gate_dist = bfs_distances(cols, rows, &gate_positions_vc, is_developed, 20);
     let mut residential_count = 0u32;
     let mut residential_reachable = 0u32;
-    for r in 0..rows {
-        for c in 0..cols {
-            let cell = grid.cell(c, r);
-            if cell.state == CellState::Building && cell.zone == ZoneType::Residential {
+    for idx in building_range.clone() {
+        if idx >= state.entities.len() { break; }
+        let e = &state.entities[idx];
+        if !e.alive { continue; }
+        if let Some(bd) = &e.building {
+            if bd.building_type == BuildingType::House || bd.building_type == BuildingType::Longhouse {
                 residential_count += 1;
+                let (c, r) = world_to_virtual(e.pos.0, e.pos.1, sx, sy);
                 if gate_dist[r * cols + c] <= 20 {
                     residential_reachable += 1;
                 }
@@ -519,25 +543,29 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
     // 2. Defensive
     // -----------------------------------------------------------------------
 
-    let perimeter = perimeter_cells(grid);
+    let perimeter = perimeter_cells_virtual(&developed);
     let perimeter_total = perimeter.len() as f32;
 
-    // Wall coverage: fraction of perimeter cells that are Wall or Gate.
     let mut wall_perimeter_count = 0u32;
     let mut wall_segments: Vec<WallSegmentInfo> = Vec::new();
-    let mut gate_positions: Vec<GateInfo> = Vec::new();
+    let mut gate_infos: Vec<GateInfo> = Vec::new();
     let mut watchtower_positions: Vec<(usize, usize)> = Vec::new();
 
+    // Build set of wall entity virtual positions for perimeter counting.
+    let mut wall_cells: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+
+    let half = (VIRT / 2) as f32;
     for idx in building_range.clone() {
         if idx >= state.entities.len() { break; }
         let e = &state.entities[idx];
         if !e.alive { continue; }
         if let Some(bd) = &e.building {
+            let (vc, vr) = world_to_virtual(e.pos.0, e.pos.1, sx, sy);
             match bd.building_type {
                 BuildingType::Wall => {
-                    let start = (bd.grid_col, bd.grid_row);
-                    let end_col = bd.grid_col.saturating_add(bd.footprint_w as u16).saturating_sub(1);
-                    let end_row = bd.grid_row.saturating_add(bd.footprint_h as u16).saturating_sub(1);
+                    let start = (vc as u16, vr as u16);
+                    let end_col = (vc as u16).saturating_add(bd.footprint_w as u16).saturating_sub(1);
+                    let end_row = (vr as u16).saturating_add(bd.footprint_h as u16).saturating_sub(1);
                     wall_segments.push(WallSegmentInfo {
                         start,
                         end: (end_col, end_row),
@@ -546,11 +574,11 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
                         material: if bd.tier >= 2 { BuildMaterial::Stone } else { BuildMaterial::Wood },
                         condition: bd.construction_progress,
                     });
+                    wall_cells.insert((vc, vr));
                 }
                 BuildingType::Gate => {
-                    // Determine facing heuristically from position relative to center.
-                    let dc = bd.grid_col as f32 - grid.center.0 as f32;
-                    let dr = bd.grid_row as f32 - grid.center.1 as f32;
+                    let dc = e.pos.0 - sx;
+                    let dr = e.pos.1 - sy;
                     let facing = if dc.abs() > dr.abs() {
                         if dc > 0.0 { super::types::Direction::East } else { super::types::Direction::West }
                     } else if dr > 0.0 {
@@ -558,22 +586,23 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
                     } else {
                         super::types::Direction::North
                     };
-                    gate_positions.push(GateInfo {
-                        position: (bd.grid_col, bd.grid_row),
+                    gate_infos.push(GateInfo {
+                        position: (vc as u16, vr as u16),
                         facing,
                         reinforced: bd.tier >= 2,
                     });
+                    wall_cells.insert((vc, vr));
                 }
                 BuildingType::Watchtower => {
-                    watchtower_positions.push((bd.grid_col as usize, bd.grid_row as usize));
+                    watchtower_positions.push((vc, vr));
                 }
                 _ => {}
             }
         }
     }
-    // Count perimeter cells occupied by Wall state.
+    // Count perimeter cells occupied by wall entities.
     for &(pc, pr) in &perimeter {
-        if grid.cell(pc, pr).state == CellState::Wall {
+        if wall_cells.contains(&(pc, pr)) {
             wall_perimeter_count += 1;
         }
     }
@@ -583,7 +612,7 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
         0.0
     };
 
-    // Watchtower coverage: fraction of perimeter cells within LOS range (10 cells, simple distance).
+    // Watchtower coverage: fraction of perimeter cells within tower range.
     let tower_range: f32 = 10.0;
     let mut tower_visible = 0u32;
     for &(pc, pr) in &perimeter {
@@ -607,117 +636,113 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
         wall_segments,
         breach_history: Vec::new(), // populated from ConstructionMemory by caller
         watchtower_coverage,
-        gate_positions,
+        gate_positions: gate_infos,
     };
 
     // -----------------------------------------------------------------------
     // 3. Environmental
     // -----------------------------------------------------------------------
 
-    // Elevation from cell terrain (CellTerrain → synthetic elevation).
+    // Elevation from VoxelWorld surface height (relative to sea level).
     let mut elevation_map = Vec::new();
-    for r in 0..rows {
-        for c in 0..cols {
-            let cell = grid.cell(c, r);
-            let elev = match cell.terrain {
-                CellTerrain::Flat => continue,
-                CellTerrain::Slope => 1.0,
-                CellTerrain::Steep => 2.0,
-                CellTerrain::Water => -1.0,
-                CellTerrain::Cliff => 3.0,
-            };
-            elevation_map.push(ElevationEntry {
-                cell: (c as u16, r as u16),
-                elevation: elev,
-            });
+    // Sample every 4th cell to avoid O(VIRT^2) per-cell voxel lookups being too slow.
+    for r in (0..VIRT).step_by(4) {
+        for c in (0..VIRT).step_by(4) {
+            let wx = sx + (c as f32 - half);
+            let wy = sy + (r as f32 - half);
+            let (vx, vy, _) = world_to_voxel(wx, wy, 0.0);
+            let sz = state.voxel_world.surface_height(vx, vy);
+            let elev = sz as f32 - state.voxel_world.sea_level as f32;
+            if elev.abs() > 0.5 {
+                elevation_map.push(ElevationEntry {
+                    cell: (c as u16, r as u16),
+                    elevation: elev,
+                });
+            }
         }
     }
 
-    // Flood risk: water-adjacent cells at low elevation (Flat terrain next to Water).
+    // Flood risk: cells at or below sea level adjacent to water voxels.
     let mut flood_risk_cells = Vec::new();
-    for r in 0..rows {
-        for c in 0..cols {
-            let cell = grid.cell(c, r);
-            if cell.terrain == CellTerrain::Water {
-                continue;
+    for r in (0..VIRT).step_by(4) {
+        for c in (0..VIRT).step_by(4) {
+            let wx = sx + (c as f32 - half);
+            let wy = sy + (r as f32 - half);
+            let (vx, vy, _) = world_to_voxel(wx, wy, 0.0);
+            let sz = state.voxel_world.surface_height(vx, vy);
+            if sz > state.voxel_world.sea_level + 2 {
+                continue; // high ground
             }
-            if cell.terrain != CellTerrain::Flat {
-                continue;
-            }
-            // Check if any 4-neighbor is water.
-            let mut near_water = false;
-            for &(dx, dy) in &[(0i32, 1i32), (0, -1), (1, 0), (-1, 0)] {
-                let nx = c as i32 + dx;
-                let ny = r as i32 + dy;
-                if nx >= 0 && ny >= 0 && (nx as usize) < cols && (ny as usize) < rows {
-                    if grid.cell(nx as usize, ny as usize).terrain == CellTerrain::Water {
-                        near_water = true;
-                        break;
-                    }
-                }
-            }
+            // Check if any 4-neighbor has water surface.
+            let near_water = [(0i32, 1i32), (0, -1), (1, 0), (-1, 0)].iter().any(|&(dx, dy)| {
+                let nsz = state.voxel_world.surface_height(vx + dx, vy + dy);
+                let nv = state.voxel_world.get_voxel(vx + dx, vy + dy, nsz - 1);
+                matches!(nv.material, VoxelMaterial::Water)
+            });
             if near_water {
                 flood_risk_cells.push((c as u16, r as u16));
             }
         }
     }
 
-    // Fire risk: clusters of adjacent wood buildings (Wood = tier < 2 buildings).
-    // Simple flood-fill on building cells that are likely wood.
-    let mut fire_visited = vec![false; cols * rows];
+    // Fire risk: clusters of adjacent low-tier building entities.
+    let mut fire_visited: std::collections::HashSet<u32> = std::collections::HashSet::new();
     let mut fire_risk_clusters = Vec::new();
-    for r in 0..rows {
-        for c in 0..cols {
-            let fi = r * cols + c;
-            if fire_visited[fi] {
-                continue;
-            }
-            let cell = grid.cell(c, r);
-            if cell.state != CellState::Building {
-                continue;
-            }
-            // Heuristic: low density or residential zone ≈ wood buildings.
-            if cell.density >= 2 {
-                continue; // stone/landmark
-            }
-            fire_visited[fi] = true;
-            let mut cluster_cells = vec![(c as u16, r as u16)];
-            let mut queue = VecDeque::new();
-            queue.push_back((c, r));
-            while let Some((cx, cy)) = queue.pop_front() {
-                for &(dx, dy) in &[(0i32, 1i32), (0, -1), (1, 0), (-1, 0)] {
-                    let nx = cx as i32 + dx;
-                    let ny = cy as i32 + dy;
-                    if nx < 0 || ny < 0 || nx >= cols as i32 || ny >= rows as i32 {
-                        continue;
-                    }
-                    let (nx, ny) = (nx as usize, ny as usize);
-                    let ni = ny * cols + nx;
-                    if fire_visited[ni] {
-                        continue;
-                    }
-                    let nc = grid.cell(nx, ny);
-                    if nc.state == CellState::Building && nc.density < 2 {
-                        fire_visited[ni] = true;
-                        cluster_cells.push((nx as u16, ny as u16));
-                        queue.push_back((nx, ny));
-                    }
+    for idx in building_range.clone() {
+        if idx >= state.entities.len() { break; }
+        let e = &state.entities[idx];
+        if !e.alive { continue; }
+        let bd = match &e.building {
+            Some(bd) => bd,
+            None => continue,
+        };
+        if fire_visited.contains(&e.id) { continue; }
+        if bd.tier >= 2 { continue; } // stone/landmark
+        fire_visited.insert(e.id);
+        let (c0, r0) = world_to_virtual(e.pos.0, e.pos.1, sx, sy);
+        let mut cluster_cells = vec![(c0 as u16, r0 as u16)];
+        // BFS over nearby low-tier building entities.
+        let mut queue = VecDeque::new();
+        queue.push_back(e.id);
+        // Collect all low-tier buildings for proximity check.
+        let low_tier: Vec<(u32, usize, usize)> = building_range.clone()
+            .filter_map(|i| {
+                let ent = state.entities.get(i)?;
+                if !ent.alive { return None; }
+                let bdata = ent.building.as_ref()?;
+                if bdata.tier >= 2 { return None; }
+                let (c, r) = world_to_virtual(ent.pos.0, ent.pos.1, sx, sy);
+                Some((ent.id, c, r))
+            })
+            .collect();
+        while let Some(bid) = queue.pop_front() {
+            let (_, bc, br) = match low_tier.iter().find(|&&(id, _, _)| id == bid) {
+                Some(x) => *x,
+                None => continue,
+            };
+            for &(other_id, oc, or_) in &low_tier {
+                if fire_visited.contains(&other_id) { continue; }
+                let dx = (bc as i32 - oc as i32).abs();
+                let dy = (br as i32 - or_ as i32).abs();
+                if dx <= 2 && dy <= 2 {
+                    fire_visited.insert(other_id);
+                    cluster_cells.push((oc as u16, or_ as u16));
+                    queue.push_back(other_id);
                 }
             }
-            if cluster_cells.len() >= 3 {
-                let bcount = cluster_cells.len() as u8;
-                fire_risk_clusters.push(FireCluster {
-                    cells: cluster_cells,
-                    building_count: bcount,
-                    total_wood_fraction: 1.0, // all low-density ≈ wood
-                });
-            }
+        }
+        if cluster_cells.len() >= 3 {
+            let bcount = cluster_cells.len() as u8;
+            fire_risk_clusters.push(FireCluster {
+                cells: cluster_cells,
+                building_count: bcount,
+                total_wood_fraction: 1.0,
+            });
         }
     }
 
-    // Wind direction and season: derive from tick.
+    // Wind direction and season.
     let season = ((state.tick / 2000) % 4) as u8;
-    // Simple deterministic wind from settlement position hash.
     let wind_angle = ((settlement_id.wrapping_mul(2654435761)) as f32 / u32::MAX as f32) * std::f32::consts::TAU;
     let wind_direction = (wind_angle.cos(), wind_angle.sin());
 
@@ -736,14 +761,11 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
     let stockpiles = {
         let mut s = [0.0f32; 8];
         for (i, val) in settlement.stockpile.iter().enumerate() {
-            if i < 8 {
-                s[i] = *val;
-            }
+            if i < 8 { s[i] = *val; }
         }
         s
     };
 
-    // Worker counts by skill tag.
     let npc_range = state.group_index.settlement_npcs(settlement_id);
     let mut wc = WorkerCounts::default();
     for idx in npc_range.clone() {
@@ -770,7 +792,6 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
         }
     }
 
-    // Building utilization.
     let mut utilization = Vec::new();
     let mut total_storage_used = 0.0f32;
     let mut total_storage_cap = 0.0f32;
@@ -806,7 +827,7 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
         worker_counts: wc,
         utilization,
         storage_utilization,
-        resource_access_distances: [0.0; 8], // TODO: compute from resource node BFS
+        resource_access_distances: [0.0; 8],
     };
 
     // -----------------------------------------------------------------------
@@ -836,14 +857,14 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
         0.0
     };
 
-    // Crowding hotspots: grid cells with >3 NPCs in the same cell.
+    // Crowding hotspots: virtual grid cells with >3 NPCs.
     let mut cell_npc_counts: std::collections::HashMap<(u16, u16), u16> = std::collections::HashMap::new();
     for idx in npc_range {
         if idx >= state.entities.len() { break; }
         let e = &state.entities[idx];
         if !e.alive { continue; }
-        let gc = grid.world_to_grid(e.pos, settlement.pos);
-        let key = (gc.0 as u16, gc.1 as u16);
+        let (c, r) = world_to_virtual(e.pos.0, e.pos.1, sx, sy);
+        let key = (c as u16, r as u16);
         *cell_npc_counts.entry(key).or_insert(0) += 1;
     }
     let crowding_hotspots: Vec<(u16, u16)> = cell_npc_counts
@@ -852,7 +873,6 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
         .map(|(pos, _)| pos)
         .collect();
 
-    // Growth trend: approximated from population vs capacity. Positive if pop < capacity.
     let growth_trend = if total_residential_capacity > 0 {
         (total_residential_capacity as f32 - total_population as f32)
             / total_residential_capacity as f32
@@ -870,7 +890,7 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
     };
 
     // -----------------------------------------------------------------------
-    // 6. Garrison (embedded in spatial features)
+    // 6. Garrison
     // -----------------------------------------------------------------------
 
     let garrison = compute_garrison_features(state, settlement_id);
@@ -895,20 +915,15 @@ pub fn compute_garrison_features(state: &WorldState, settlement_id: u32) -> Garr
         Some(s) => s,
         None => return GarrisonFeatures::default(),
     };
-    let grid_idx = match settlement.city_grid_idx {
-        Some(idx) if idx < state.city_grids.len() => idx,
-        _ => return GarrisonFeatures::default(),
-    };
-    let grid = &state.city_grids[grid_idx];
-    let cols = grid.cols;
-    let rows = grid.rows;
+    let sx = settlement.pos.0;
+    let sy = settlement.pos.1;
+    let cols = VIRT;
+    let rows = VIRT;
 
-    // Identify garrison NPCs: combat-tagged NPCs assigned to defensive buildings
-    // (Barracks, Watchtower, Wall, Gate).
     let npc_range = state.group_index.settlement_npcs(settlement_id);
     let building_range = state.group_index.settlement_buildings(settlement_id);
 
-    // Collect defensive building positions and IDs.
+    // Collect defensive building virtual positions.
     struct DefBuilding {
         id: u32,
         col: usize,
@@ -924,10 +939,11 @@ pub fn compute_garrison_features(state: &WorldState, settlement_id: u32) -> Garr
             match bd.building_type {
                 BuildingType::Barracks | BuildingType::Watchtower
                 | BuildingType::Wall | BuildingType::Gate => {
+                    let (col, row) = world_to_virtual(e.pos.0, e.pos.1, sx, sy);
                     def_buildings.push(DefBuilding {
                         id: e.id,
-                        col: bd.grid_col as usize,
-                        row: bd.grid_row as usize,
+                        col,
+                        row,
                         btype: bd.building_type,
                     });
                 }
@@ -936,8 +952,7 @@ pub fn compute_garrison_features(state: &WorldState, settlement_id: u32) -> Garr
         }
     }
 
-    // Collect garrison NPCs: those with combat tags in behavior_profile whose
-    // work_building_id points to a defensive building, or who are inside one.
+    // Collect garrison NPCs.
     struct GarrisonNpc {
         id: u32,
         col: usize,
@@ -957,35 +972,23 @@ pub fn compute_garrison_features(state: &WorldState, settlement_id: u32) -> Garr
             Some(n) => n,
             None => continue,
         };
-        // Check if assigned to or inside a defensive building.
         let in_garrison = npc.work_building_id.map_or(false, |wid| def_building_ids.contains(&wid))
             || npc.inside_building_id.map_or(false, |bid| def_building_ids.contains(&bid));
-        if !in_garrison {
-            continue;
-        }
-        // Check for combat tags.
+        if !in_garrison { continue; }
         let has_combat = npc.behavior_profile.iter().any(|&(t, w)| {
             w > 0.1 && (t == tags::COMBAT || t == tags::MELEE || t == tags::RANGED || t == tags::DEFENSE)
         });
-        if !has_combat {
-            continue;
-        }
+        if !has_combat { continue; }
         let is_ranged = npc.behavior_profile.iter().any(|&(t, w)| w > 0.1 && t == tags::RANGED);
-        let gc = grid.world_to_grid(e.pos, settlement.pos);
+        let (col, row) = world_to_virtual(e.pos.0, e.pos.1, sx, sy);
         let combat_value = e.attack_damage + e.hp * 0.1 + e.armor * 0.5;
-        garrison_npcs.push(GarrisonNpc {
-            id: e.id,
-            col: gc.0,
-            row: gc.1,
-            combat_value,
-            is_ranged,
-        });
+        garrison_npcs.push(GarrisonNpc { id: e.id, col, row, combat_value, is_ranged });
     }
 
     let total_garrison_strength: f32 = garrison_npcs.iter().map(|g| g.combat_value).sum();
 
-    // Perimeter cells.
-    let perim = perimeter_cells(grid);
+    let developed = build_developed_cells(state, settlement_id);
+    let perim = perimeter_cells_virtual(&developed);
     if perim.is_empty() {
         return GarrisonFeatures {
             coverage_map: Vec::new(),
@@ -995,9 +998,10 @@ pub fn compute_garrison_features(state: &WorldState, settlement_id: u32) -> Garr
         };
     }
 
-    // BFS from all garrison NPC positions to get response times.
+    // BFS from garrison NPC positions.
     let garrison_sources: Vec<(usize, usize)> = garrison_npcs.iter().map(|g| (g.col, g.row)).collect();
-    let garrison_dist = bfs_distances(cols, rows, &garrison_sources, |c, r| grid.is_walkable(c, r), 30);
+    let is_developed = |c: usize, r: usize| developed[r * VIRT + c];
+    let garrison_dist = bfs_distances(cols, rows, &garrison_sources, is_developed, 30);
 
     let mut coverage_map = Vec::with_capacity(perim.len());
     let mut response_time_map = Vec::with_capacity(perim.len());
@@ -1006,14 +1010,13 @@ pub fn compute_garrison_features(state: &WorldState, settlement_id: u32) -> Garr
     for &(pc, pr) in &perim {
         let pi = pr * cols + pc;
 
-        // Structural defense value from cell state.
-        let structural = match grid.cell(pc, pr).state {
-            CellState::Wall => 3.0,
-            CellState::Building => 1.0,
-            _ => 0.5,
-        };
+        // Structural defense: wall entity at this cell = 3.0, any building = 1.0.
+        let has_wall = def_buildings.iter().any(|db| {
+            db.col == pc && db.row == pr
+                && matches!(db.btype, BuildingType::Wall | BuildingType::Gate)
+        });
+        let structural = if has_wall { 3.0 } else if developed[pi] { 1.0 } else { 0.5 };
 
-        // Garrison contribution: sum of garrison NPCs weighted by proximity.
         let mut garrison_value = 0.0f32;
         for g in &garrison_npcs {
             let dx = (pc as f32 - g.col as f32).abs();
@@ -1022,24 +1025,19 @@ pub fn compute_garrison_features(state: &WorldState, settlement_id: u32) -> Garr
             garrison_value += g.combat_value / dist;
         }
 
-        // Synergy: check for force-multiplying combinations.
         for g in &garrison_npcs {
             let dx = (pc as f32 - g.col as f32).abs();
             let dy = (pr as f32 - g.row as f32).abs();
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist > 5.0 { continue; }
+            if (dx * dx + dy * dy).sqrt() > 5.0 { continue; }
 
-            // Check synergy with nearby defensive buildings.
             for db in &def_buildings {
                 let bx = (g.col as f32 - db.col as f32).abs();
                 let by = (g.row as f32 - db.row as f32).abs();
-                let bdist = (bx * bx + by * by).sqrt();
-                if bdist > 3.0 { continue; }
-
+                if (bx * bx + by * by).sqrt() > 3.0 { continue; }
                 let multiplier = match (g.is_ranged, db.btype) {
-                    (true, BuildingType::Watchtower) => 1.5,  // archer on tower
-                    (false, BuildingType::Gate) => 1.3,        // fighter at gate
-                    (false, BuildingType::Wall) => 1.2,        // fighter on wall
+                    (true, BuildingType::Watchtower) => 1.5,
+                    (false, BuildingType::Gate) => 1.3,
+                    (false, BuildingType::Wall) => 1.2,
                     _ => 1.0,
                 };
                 if multiplier > 1.0 {
@@ -1054,15 +1052,11 @@ pub fn compute_garrison_features(state: &WorldState, settlement_id: u32) -> Garr
             }
         }
 
-        let effective_defense = structural + garrison_value;
-        coverage_map.push(effective_defense);
-
-        // Response time for this perimeter cell.
+        coverage_map.push(structural + garrison_value);
         let resp = garrison_dist[pi];
         response_time_map.push(if resp == u16::MAX { f32::MAX } else { resp as f32 });
     }
 
-    // Deduplicate synergy hotspots (keep highest multiplier per position).
     synergy_hotspots.sort_by(|a, b| {
         a.position.cmp(&b.position)
             .then(b.multiplier.partial_cmp(&a.multiplier).unwrap_or(std::cmp::Ordering::Equal))

@@ -40,7 +40,7 @@ pub fn compute_last_stand_for_settlement(
         Some(gid) => gid,
         None => return,
     };
-    let grid = match state.grid(grid_id) {
+    let grid = match state.fidelity_zone(grid_id) {
         Some(g) => g,
         None => return,
     };

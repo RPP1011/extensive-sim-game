@@ -49,7 +49,7 @@ pub fn compute_rival_guild(state: &WorldState, out: &mut Vec<WorldDelta>) {
         // 5% chance of raiding NPCs in the settlement
         if roll > 0.95 {
             if let Some(grid_id) = settlement.grid_id {
-                if let Some(grid) = state.grid(grid_id) {
+                if let Some(grid) = state.fidelity_zone(grid_id) {
                     for &entity_id in &grid.entity_ids {
                         if let Some(entity) = state.entity(entity_id) {
                             if entity.alive && entity.kind == EntityKind::Npc {

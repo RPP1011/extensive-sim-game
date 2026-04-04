@@ -187,19 +187,12 @@ fn check_numeric_sanity(features: &SpatialFeatures) -> Vec<ValidationError> {
 fn check_structural_sanity(
     features: &SpatialFeatures,
     state: &WorldState,
-    settlement_id: u32,
+    _settlement_id: u32,
 ) -> Vec<ValidationError> {
     let mut errors = Vec::new();
 
-    // Find the grid for bounds checking
-    let grid = state
-        .settlements
-        .iter()
-        .find(|s| s.id == settlement_id)
-        .and_then(|s| s.city_grid_idx)
-        .and_then(|idx| state.city_grids.get(idx));
-
-    let (cols, rows) = grid.map(|g| (g.cols as u16, g.rows as u16)).unwrap_or((0, 0));
+    // Grid bounds — VoxelWorld doesn't have explicit cols/rows; use a large virtual grid.
+    let (cols, rows) = (64u16, 64u16);
 
     // FEAT-STRUCT-001: key_building_paths reference existing entities
     for (i, entry) in features.connectivity.key_building_paths.iter().enumerate() {

@@ -57,7 +57,7 @@ pub fn compute_heist_planning(state: &WorldState, out: &mut Vec<WorldDelta>) {
             // Skip NPCs on combat grids (they're fighting, not heisting)
             if let Some(gid) = entity.grid_id {
                 if state
-                    .grid(gid)
+                    .fidelity_zone(gid)
                     .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
                     .unwrap_or(false)
                 {

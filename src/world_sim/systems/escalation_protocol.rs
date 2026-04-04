@@ -85,7 +85,7 @@ pub fn compute_escalation_protocol_for_settlement(
         if dead_hostiles > alive_hostiles_nearby && alive_hostiles_nearby > 0 {
             // Player is winning — escalate grid fidelity.
             if let Some(grid_id) = settlement.grid_id {
-                if let Some(grid) = state.grid(grid_id) {
+                if let Some(grid) = state.fidelity_zone(grid_id) {
                     if grid.fidelity != Fidelity::High {
                         out.push(WorldDelta::EscalateFidelity {
                             grid_id,
@@ -105,7 +105,7 @@ pub fn compute_escalation_protocol_for_settlement(
         } else if dead_hostiles == 0 {
             // De-escalate.
             if let Some(grid_id) = settlement.grid_id {
-                if let Some(grid) = state.grid(grid_id) {
+                if let Some(grid) = state.fidelity_zone(grid_id) {
                     if grid.fidelity == Fidelity::High {
                         out.push(WorldDelta::EscalateFidelity {
                             grid_id,

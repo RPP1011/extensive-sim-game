@@ -8,8 +8,11 @@ use super::{ErrorContext, Severity, ValidationError};
 use crate::world_sim::building_ai::types::{
     ActionPayload, BuildingAction, BuildingObservation,
 };
-use crate::world_sim::city_grid::{CellState, CellTerrain};
+use crate::world_sim::voxel::VoxelMaterial;
 use crate::world_sim::state::{BuildingType, EntityKind, WorldState};
+
+/// Virtual grid size used for bounds checking (VoxelWorld is unbounded).
+const VIRTUAL_GRID_SIZE: usize = 64;
 
 // ---------------------------------------------------------------------------
 // ACT-PRE-*: Pre-application checks
@@ -23,9 +26,6 @@ pub fn validate_action_batch(
 ) -> Vec<ValidationError> {
     let mut errors = Vec::new();
 
-    // Find the grid for this observation's settlement
-    let grid = find_grid(state, obs.settlement_id);
-
     for (ai, action) in actions.iter().enumerate() {
         match &action.action {
             ActionPayload::PlaceBuilding {
@@ -34,7 +34,6 @@ pub fn validate_action_batch(
             } => {
                 errors.extend(check_place_building(
                     state,
-                    grid,
                     *building_type,
                     *grid_cell,
                     obs,
@@ -74,27 +73,25 @@ pub fn validate_action_batch(
                         },
                     });
                 }
-                // Check footprint fits within grid bounds
-                if let Some(g) = grid {
-                    if let Some(entity) = state.entities.iter().find(|e| e.id == *building_id) {
-                        if let Some(bdata) = &entity.building {
-                            let end_col = bdata.grid_col as usize + dimensions.0 as usize;
-                            let end_row = bdata.grid_row as usize + dimensions.1 as usize;
-                            if end_col > g.cols || end_row > g.rows {
-                                errors.push(ValidationError {
-                                    code: "ACT-PRE-012",
-                                    severity: Severity::Fatal,
-                                    message: format!(
-                                        "Action {}: SetFootprint from ({}, {}) with dims ({}, {}) overflows grid ({}x{})",
-                                        ai, bdata.grid_col, bdata.grid_row,
-                                        dimensions.0, dimensions.1, g.cols, g.rows
-                                    ),
-                                    context: ErrorContext {
-                                        entity_id: Some(*building_id),
-                                        ..Default::default()
-                                    },
-                                });
-                            }
+                // Check footprint fits within virtual grid bounds
+                if let Some(entity) = state.entities.iter().find(|e| e.id == *building_id) {
+                    if let Some(bdata) = &entity.building {
+                        let end_col = bdata.grid_col as usize + dimensions.0 as usize;
+                        let end_row = bdata.grid_row as usize + dimensions.1 as usize;
+                        if end_col > VIRTUAL_GRID_SIZE || end_row > VIRTUAL_GRID_SIZE {
+                            errors.push(ValidationError {
+                                code: "ACT-PRE-012",
+                                severity: Severity::Fatal,
+                                message: format!(
+                                    "Action {}: SetFootprint from ({}, {}) with dims ({}, {}) overflows virtual grid ({}x{})",
+                                    ai, bdata.grid_col, bdata.grid_row,
+                                    dimensions.0, dimensions.1, VIRTUAL_GRID_SIZE, VIRTUAL_GRID_SIZE
+                                ),
+                                context: ErrorContext {
+                                    entity_id: Some(*building_id),
+                                    ..Default::default()
+                                },
+                            });
                         }
                     }
                 }
@@ -161,43 +158,39 @@ pub fn validate_action_batch(
                 ));
             }
             ActionPayload::RouteRoad { waypoints } => {
-                // ACT-PRE-008: all waypoints in bounds
-                if let Some(g) = grid {
-                    for (wi, wp) in waypoints.iter().enumerate() {
-                        if !g.in_bounds(wp.0 as usize, wp.1 as usize) {
-                            errors.push(ValidationError {
-                                code: "ACT-PRE-008",
-                                severity: Severity::Fatal,
-                                message: format!(
-                                    "Action {}: RouteRoad waypoint {} ({}, {}) out of bounds ({}x{})",
-                                    ai, wi, wp.0, wp.1, g.cols, g.rows
-                                ),
-                                context: ErrorContext {
-                                    grid_cell: Some(*wp),
-                                    ..Default::default()
-                                },
-                            });
-                        }
-                    }
-                }
-            }
-            ActionPayload::SetZone { grid_cell, .. } => {
-                // ACT-PRE-009: grid_cell in bounds
-                if let Some(g) = grid {
-                    if !g.in_bounds(grid_cell.0 as usize, grid_cell.1 as usize) {
+                // ACT-PRE-008: all waypoints in virtual bounds
+                for (wi, wp) in waypoints.iter().enumerate() {
+                    if wp.0 as usize >= VIRTUAL_GRID_SIZE || wp.1 as usize >= VIRTUAL_GRID_SIZE {
                         errors.push(ValidationError {
-                            code: "ACT-PRE-009",
+                            code: "ACT-PRE-008",
                             severity: Severity::Fatal,
                             message: format!(
-                                "Action {}: SetZone grid_cell ({}, {}) out of bounds ({}x{})",
-                                ai, grid_cell.0, grid_cell.1, g.cols, g.rows
+                                "Action {}: RouteRoad waypoint {} ({}, {}) out of virtual bounds ({}x{})",
+                                ai, wi, wp.0, wp.1, VIRTUAL_GRID_SIZE, VIRTUAL_GRID_SIZE
                             ),
                             context: ErrorContext {
-                                grid_cell: Some(*grid_cell),
+                                grid_cell: Some(*wp),
                                 ..Default::default()
                             },
                         });
                     }
+                }
+            }
+            ActionPayload::SetZone { grid_cell, .. } => {
+                // ACT-PRE-009: grid_cell in virtual bounds
+                if grid_cell.0 as usize >= VIRTUAL_GRID_SIZE || grid_cell.1 as usize >= VIRTUAL_GRID_SIZE {
+                    errors.push(ValidationError {
+                        code: "ACT-PRE-009",
+                        severity: Severity::Fatal,
+                        message: format!(
+                            "Action {}: SetZone grid_cell ({}, {}) out of virtual bounds ({}x{})",
+                            ai, grid_cell.0, grid_cell.1, VIRTUAL_GRID_SIZE, VIRTUAL_GRID_SIZE
+                        ),
+                        context: ErrorContext {
+                            grid_cell: Some(*grid_cell),
+                            ..Default::default()
+                        },
+                    });
                 }
             }
         }
@@ -209,7 +202,6 @@ pub fn validate_action_batch(
 /// Validate PlaceBuilding action specifics.
 fn check_place_building(
     state: &WorldState,
-    grid: Option<&crate::world_sim::city_grid::CityGrid>,
     building_type: BuildingType,
     grid_cell: (u16, u16),
     obs: &BuildingObservation,
@@ -217,35 +209,16 @@ fn check_place_building(
 ) -> Vec<ValidationError> {
     let mut errors = Vec::new();
 
-    let g = match grid {
-        Some(g) => g,
-        None => {
-            errors.push(ValidationError {
-                code: "ACT-PRE-001",
-                severity: Severity::Fatal,
-                message: format!(
-                    "Action {}: PlaceBuilding but settlement {} has no grid",
-                    action_idx, obs.settlement_id
-                ),
-                context: ErrorContext {
-                    grid_cell: Some(grid_cell),
-                    ..Default::default()
-                },
-            });
-            return errors;
-        }
-    };
-
     let (c, r) = (grid_cell.0 as usize, grid_cell.1 as usize);
 
-    // ACT-PRE-001: in bounds
-    if !g.in_bounds(c, r) {
+    // ACT-PRE-001: in virtual bounds
+    if c >= VIRTUAL_GRID_SIZE || r >= VIRTUAL_GRID_SIZE {
         errors.push(ValidationError {
             code: "ACT-PRE-001",
             severity: Severity::Fatal,
             message: format!(
-                "Action {}: PlaceBuilding at ({}, {}) out of bounds ({}x{})",
-                action_idx, c, r, g.cols, g.rows
+                "Action {}: PlaceBuilding at ({}, {}) out of virtual bounds ({}x{})",
+                action_idx, c, r, VIRTUAL_GRID_SIZE, VIRTUAL_GRID_SIZE
             ),
             context: ErrorContext {
                 grid_cell: Some(grid_cell),
@@ -255,35 +228,34 @@ fn check_place_building(
         return errors;
     }
 
-    let cell = &g.cells[g.idx(c, r)];
-
-    // ACT-PRE-002: target cell must be Empty or Road
-    match cell.state {
-        CellState::Empty | CellState::Road => {}
-        _ => {
-            errors.push(ValidationError {
-                code: "ACT-PRE-002",
-                severity: Severity::Fatal,
-                message: format!(
-                    "Action {}: PlaceBuilding at ({}, {}) but cell state is {:?} (must be Empty or Road)",
-                    action_idx, c, r, cell.state
-                ),
-                context: ErrorContext {
-                    grid_cell: Some(grid_cell),
-                    ..Default::default()
-                },
-            });
-        }
+    // ACT-PRE-002: target voxel column must not already have a building
+    let vx = grid_cell.0 as i32;
+    let vy = grid_cell.1 as i32;
+    let surface_z = state.voxel_world.surface_height(vx, vy);
+    let surface_voxel = state.voxel_world.get_voxel(vx, vy, surface_z);
+    if surface_voxel.building_id.is_some() {
+        errors.push(ValidationError {
+            code: "ACT-PRE-002",
+            severity: Severity::Fatal,
+            message: format!(
+                "Action {}: PlaceBuilding at ({}, {}) but cell already contains building {:?}",
+                action_idx, c, r, surface_voxel.building_id
+            ),
+            context: ErrorContext {
+                grid_cell: Some(grid_cell),
+                ..Default::default()
+            },
+        });
     }
 
-    // ACT-PRE-003: terrain not Water or Cliff
-    if cell.terrain == CellTerrain::Water || cell.terrain == CellTerrain::Cliff {
+    // ACT-PRE-003: terrain not Water or Lava
+    if matches!(surface_voxel.material, VoxelMaterial::Water | VoxelMaterial::Lava) {
         errors.push(ValidationError {
             code: "ACT-PRE-003",
             severity: Severity::Fatal,
             message: format!(
                 "Action {}: PlaceBuilding at ({}, {}) on unbuildable terrain {:?}",
-                action_idx, c, r, cell.terrain
+                action_idx, c, r, surface_voxel.material
             ),
             context: ErrorContext {
                 grid_cell: Some(grid_cell),
@@ -490,44 +462,29 @@ pub fn validate_post_action(
     errors
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn find_grid(state: &WorldState, settlement_id: u32) -> Option<&crate::world_sim::city_grid::CityGrid> {
-    state
-        .settlements
-        .iter()
-        .find(|s| s.id == settlement_id)
-        .and_then(|s| s.city_grid_idx)
-        .and_then(|idx| state.city_grids.get(idx))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::world_sim::building_ai::types::*;
-    use crate::world_sim::city_grid::CityGrid;
-    use crate::world_sim::state::{
-        BuildingType, SettlementState, WorldState,
-    };
+    use crate::world_sim::state::{BuildingType, SettlementState, WorldState};
     use crate::world_sim::building_ai::features::SpatialFeatures;
+    use crate::world_sim::voxel::{Voxel, VoxelMaterial};
 
-    fn test_state_with_grid() -> (WorldState, u32) {
+    fn test_state_with_voxels() -> (WorldState, u32) {
         let mut state = WorldState::new(42);
         let sid = 1u32;
         let mut settlement = SettlementState::new(sid, "Test".into(), (0.0, 0.0));
         settlement.stockpile[0] = 1000.0; // food
         settlement.stockpile[2] = 1000.0; // wood
-
-        let mut grid = CityGrid::new(5, 5, sid, "Plains", 0);
-        // Center is road
-        grid.cell_mut(2, 2).state = CellState::Road;
-        grid.cell_mut(2, 2).road_tier = 3;
-
-        settlement.city_grid_idx = Some(0);
         state.settlements.push(settlement);
-        state.city_grids.push(grid);
+
+        // Place solid stone ground at test positions so surface_height works deterministically.
+        // surface_height returns the z above the topmost solid, so we place stone at z=0.
+        for x in 0..10i32 {
+            for y in 0..10i32 {
+                state.voxel_world.set_voxel(x, y, 0, Voxel::new(VoxelMaterial::Stone));
+            }
+        }
 
         (state, sid)
     }
@@ -549,7 +506,7 @@ mod tests {
 
     #[test]
     fn valid_placement_passes() {
-        let (state, sid) = test_state_with_grid();
+        let (state, sid) = test_state_with_voxels();
         let obs = test_obs(sid);
         let actions = vec![BuildingAction {
             decision_type: DecisionType::Placement,
@@ -569,14 +526,14 @@ mod tests {
 
     #[test]
     fn out_of_bounds_placement_detected() {
-        let (state, sid) = test_state_with_grid();
+        let (state, sid) = test_state_with_voxels();
         let obs = test_obs(sid);
         let actions = vec![BuildingAction {
             decision_type: DecisionType::Placement,
             tier: DecisionTier::Strategic,
             action: ActionPayload::PlaceBuilding {
                 building_type: BuildingType::House,
-                grid_cell: (10, 10), // grid is 5x5
+                grid_cell: (200, 200), // beyond virtual grid size
             },
             priority: 1.0,
             reasoning_tag: 0,
@@ -591,11 +548,14 @@ mod tests {
 
     #[test]
     fn placement_on_occupied_cell_detected() {
-        let (mut state, sid) = test_state_with_grid();
-        // Place a building at (1,1)
-        let grid = &mut state.city_grids[0];
-        grid.cell_mut(1, 1).state = CellState::Building;
-        grid.cell_mut(1, 1).building_id = Some(99);
+        let (mut state, sid) = test_state_with_voxels();
+        // Mark the surface slot at (1,1) as occupied by an existing building.
+        // surface_height returns z+1 above the topmost solid, so the "surface slot" is Air at that z.
+        // Setting building_id on the Air voxel at that z marks it as occupied.
+        let surface_z = state.voxel_world.surface_height(1, 1);
+        let mut occupied_voxel = crate::world_sim::voxel::Voxel::default(); // Air
+        occupied_voxel.building_id = Some(99);
+        state.voxel_world.set_voxel(1, 1, surface_z, occupied_voxel);
 
         let obs = test_obs(sid);
         let actions = vec![BuildingAction {
@@ -618,7 +578,7 @@ mod tests {
 
     #[test]
     fn zero_dimension_wall_detected() {
-        let (state, sid) = test_state_with_grid();
+        let (state, sid) = test_state_with_voxels();
         let obs = test_obs(sid);
         let actions = vec![BuildingAction {
             decision_type: DecisionType::WallComposition,

@@ -54,7 +54,7 @@ pub fn compute_treasure_hunts(state: &WorldState, out: &mut Vec<WorldDelta>) {
             // Skip NPCs on combat grids (fighting, not treasure hunting)
             if let Some(gid) = entity.grid_id {
                 if state
-                    .grid(gid)
+                    .fidelity_zone(gid)
                     .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
                     .unwrap_or(false)
                 {

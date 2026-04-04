@@ -77,7 +77,7 @@ pub fn compute_crisis(state: &WorldState, out: &mut Vec<WorldDelta>) {
             }
 
             // Escalate fidelity for grids in the region.
-            for grid in &state.grids {
+            for grid in &state.fidelity_zones {
                 let dx = grid.center.0 - (ri as f32 * 20.0);
                 let dy = grid.center.1 - (ri as f32 * 15.0);
                 if dx * dx + dy * dy < 400.0 && grid.fidelity != Fidelity::High {
