@@ -709,27 +709,29 @@ impl VoxelWorld {
         }
     }
 
-    /// Check structural support for voxel at (vx, vy, vz) and collapse if unsupported.
-    fn cascade_collapse(&mut self, vx: i32, vy: i32, vz: i32) {
-        let voxel = self.get_voxel(vx, vy, vz);
-        if !voxel.material.is_solid() || voxel.integrity == 0.0 { return; }
+    /// Check structural support for voxels above (vx, vy, vz) and collapse upward if unsupported.
+    fn cascade_collapse(&mut self, vx: i32, vy: i32, start_vz: i32) {
+        let mut vz = start_vz;
+        loop {
+            let voxel = self.get_voxel(vx, vy, vz);
+            if !voxel.material.is_solid() || voxel.integrity == 0.0 { return; }
+            if self.is_supported(vx, vy, vz) { return; }
 
-        if self.is_supported(vx, vy, vz) { return; }
-
-        let (cp, idx) = voxel_to_chunk_local(vx, vy, vz);
-        if let Some(chunk) = self.chunks.get_mut(&cp) {
-            let v = &mut chunk.voxels[idx];
-            if v.material.properties().load_bearing {
-                v.integrity = 0.0;
-                v.zone = VoxelZone::None;
-                v.building_id = None;
-            } else {
-                *v = Voxel::default();
+            let (cp, idx) = voxel_to_chunk_local(vx, vy, vz);
+            if let Some(chunk) = self.chunks.get_mut(&cp) {
+                let v = &mut chunk.voxels[idx];
+                if v.material.properties().load_bearing {
+                    v.integrity = 0.0;
+                    v.zone = VoxelZone::None;
+                    v.building_id = None;
+                } else {
+                    *v = Voxel::default();
+                }
+                chunk.dirty = true;
             }
-            chunk.dirty = true;
-        }
 
-        self.cascade_collapse(vx, vy, vz + 1);
+            vz += 1;
+        }
     }
 
     /// Check if a voxel position is structurally supported.
