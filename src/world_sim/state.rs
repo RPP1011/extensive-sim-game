@@ -405,6 +405,9 @@ pub struct WorldState {
     /// 3D voxel world — chunked terrain with materials, the physical source of truth.
     pub voxel_world: super::voxel::VoxelWorld,
 
+    /// Baked 2D walkable surfaces derived from voxel_world. One per settlement area.
+    pub nav_grids: Vec<super::nav_grid::NavGrid>,
+
     /// Global economy (total gold supply, trade routes).
     pub economy: EconomyState,
 
@@ -465,6 +468,7 @@ impl WorldState {
             tiles: std::collections::HashMap::new(),
             build_seeds: Vec::new(),
             voxel_world: super::voxel::VoxelWorld::default(),
+            nav_grids: Vec::new(),
             economy: EconomyState::default(),
             trade_routes: Vec::new(),
             factions: Vec::new(),

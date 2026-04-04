@@ -32,6 +32,7 @@ pub mod systems;
 pub mod trace;
 pub mod visualizer;
 
+pub use nav_grid::NavGrid;
 pub use delta::{WorldDelta, MergedDeltas, merge_deltas};
 pub use state::{
     WorldState, Entity, HotEntity, ColdEntity, EntityKind, GroupIndex, FidelityZone, SettlementState, RegionState, EconomyState,
