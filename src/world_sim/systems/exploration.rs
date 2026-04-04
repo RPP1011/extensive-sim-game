@@ -129,7 +129,7 @@ pub fn compute_exploration_for_settlement(
 
     if nearby_npc_count >= 3 {
         let current_fidelity = state
-            .grid(grid_id)
+            .fidelity_zone(grid_id)
             .map(|g| g.fidelity)
             .unwrap_or(Fidelity::Low);
 

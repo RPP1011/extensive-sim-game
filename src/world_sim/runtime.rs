@@ -883,7 +883,7 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
     // Grid transitions
     let t = Instant::now();
     for &(entity_id, grid_id) in &m.grid_leaves {
-        if let Some(grid) = state.grid_mut(grid_id) {
+        if let Some(grid) = state.fidelity_zone_mut(grid_id) {
             grid.entity_ids.retain(|&id| id != entity_id);
         }
         if let Some(e) = state.entity_mut(entity_id) {
@@ -894,7 +894,7 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
         }
     }
     for &(entity_id, grid_id) in &m.grid_enters {
-        if let Some(grid) = state.grid_mut(grid_id) {
+        if let Some(grid) = state.fidelity_zone_mut(grid_id) {
             if !grid.entity_ids.contains(&entity_id) {
                 grid.entity_ids.push(entity_id);
             }
@@ -908,7 +908,7 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
     // Fidelity
     let t = Instant::now();
     for &(grid_id, new_fidelity) in &m.fidelity_changes {
-        if let Some(grid) = state.grid_mut(grid_id) {
+        if let Some(grid) = state.fidelity_zone_mut(grid_id) {
             grid.fidelity = new_fidelity;
         }
     }
@@ -1512,8 +1512,8 @@ impl WorldSim {
         }
 
         let grid_start = Instant::now();
-        for i in 0..self.state.grids.len() {
-            compute_grid_deltas_into(&self.state.grids[i], &self.spatial, &mut self.delta_buf);
+        for i in 0..self.state.fidelity_zones.len() {
+            compute_grid_deltas_into(&self.state.fidelity_zones[i], &self.spatial, &mut self.delta_buf);
         }
         profile.compute_grid_us = grid_start.elapsed().as_micros() as u64;
         profile.compute_us = compute_start.elapsed().as_micros() as u64;
@@ -1707,13 +1707,13 @@ impl WorldSim {
     /// Runs after apply so behavior_profile is up to date.
     /// Assign entities to grids based on proximity.
     fn update_grid_membership(&mut self) {
-        let num_grids = self.state.grids.len();
+        let num_grids = self.state.fidelity_zones.len();
 
         // Phase 1: compute new membership for each grid.
         // Collect (grid_index, new_entity_ids) without borrowing conflicts.
         let mut new_memberships: Vec<Vec<u32>> = Vec::with_capacity(num_grids);
 
-        for grid in &self.state.grids {
+        for grid in &self.state.fidelity_zones {
             let r2 = grid.radius * grid.radius;
             let mut members = Vec::new();
 
@@ -1745,14 +1745,14 @@ impl WorldSim {
         }
 
         // Phase 2: apply.
-        for (i, grid) in self.state.grids.iter_mut().enumerate() {
+        for (i, grid) in self.state.fidelity_zones.iter_mut().enumerate() {
             grid.entity_ids = std::mem::take(&mut new_memberships[i]);
         }
 
         // Phase 3: update entity grid_id.
         // Build a quick lookup: entity_id → grid_id.
         let mut entity_grid: Vec<Option<u32>> = vec![None; self.state.max_entity_id as usize + 1];
-        for grid in &self.state.grids {
+        for grid in &self.state.fidelity_zones {
             for &eid in &grid.entity_ids {
                 if (eid as usize) < entity_grid.len() {
                     entity_grid[eid as usize] = Some(grid.id);
@@ -2090,7 +2090,7 @@ fn generate_legendary_name(slot: super::state::ItemSlot, kills: usize, tick: u64
 
 fn hot_entity_fidelity(h: &super::state::HotEntity, state: &WorldState) -> Fidelity {
     if let Some(grid_id) = h.grid_id {
-        state.grid(grid_id)
+        state.fidelity_zone(grid_id)
             .map(|g| g.fidelity)
             .unwrap_or(Fidelity::Low)
     } else {
@@ -2099,7 +2099,7 @@ fn hot_entity_fidelity(h: &super::state::HotEntity, state: &WorldState) -> Fidel
 }
 
 fn compute_grid_deltas_into(
-    grid: &super::state::LocalGrid,
+    grid: &super::state::FidelityZone,
     spatial: &SpatialIndex,
     out: &mut Vec<WorldDelta>,
 ) {

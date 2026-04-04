@@ -42,7 +42,7 @@ pub fn compute_battles_for_settlement(
         Some(gid) => gid,
         None => return,
     };
-    let grid = match state.grid(grid_id) {
+    let grid = match state.fidelity_zone(grid_id) {
         Some(g) => g,
         None => return,
     };
@@ -51,7 +51,7 @@ pub fn compute_battles_for_settlement(
 
 fn compute_battles_for_grid(
     state: &WorldState,
-    grid: &crate::world_sim::state::LocalGrid,
+    grid: &crate::world_sim::state::FidelityZone,
     out: &mut Vec<WorldDelta>,
 ) {
     // Only process High-fidelity grids (combat already happening).

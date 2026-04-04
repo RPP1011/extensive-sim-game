@@ -74,7 +74,7 @@ pub fn compute_dungeons_for_settlement(
         if region.monster_density > 40.0 {
             if let Some(grid_id) = settlement.grid_id {
                 let current_fidelity = state
-                    .grid(grid_id)
+                    .fidelity_zone(grid_id)
                     .map(|g| g.fidelity)
                     .unwrap_or(Fidelity::Low);
 
@@ -93,7 +93,7 @@ pub fn compute_dungeons_for_settlement(
         Some(gid) => gid,
         None => return,
     };
-    let grid = match state.grid(grid_id) {
+    let grid = match state.fidelity_zone(grid_id) {
         Some(g) => g,
         None => return,
     };

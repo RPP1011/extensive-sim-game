@@ -64,7 +64,7 @@ pub fn compute_equipment_durability_for_settlement(
 
         // Check if the entity is on a High-fidelity grid (combat).
         let in_combat = entity.grid_id
-            .and_then(|gid| state.grid(gid))
+            .and_then(|gid| state.fidelity_zone(gid))
             .map(|g| g.fidelity == Fidelity::High)
             .unwrap_or(false);
 
@@ -127,7 +127,7 @@ pub fn advance_item_durability(state: &mut WorldState) {
         if !treasury_ok { continue; }
 
         let in_combat = entity.grid_id
-            .and_then(|gid| state.grid(gid))
+            .and_then(|gid| state.fidelity_zone(gid))
             .map(|g| g.fidelity == Fidelity::High)
             .unwrap_or(false);
 

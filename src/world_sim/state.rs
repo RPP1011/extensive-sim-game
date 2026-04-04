@@ -375,8 +375,8 @@ pub struct WorldState {
     #[serde(skip)]
     pub group_index: GroupIndex,
 
-    /// Active local grids (settlements, encounter zones).
-    pub grids: Vec<LocalGrid>,
+    /// Active fidelity zones (settlements, encounter zones).
+    pub fidelity_zones: Vec<FidelityZone>,
 
     /// Regional data (monster populations, faction control).
     pub regions: Vec<RegionState>,
@@ -456,7 +456,7 @@ impl WorldState {
             entity_index: Vec::new(),
             max_entity_id: 0,
             group_index: GroupIndex::default(),
-            grids: Vec::new(),
+            fidelity_zones: Vec::new(),
             regions: Vec::new(),
             settlements: Vec::new(),
             settlement_index: Vec::new(),
@@ -756,8 +756,8 @@ impl WorldState {
         self.settlements.iter().position(|s| s.id == id)
     }
 
-    pub fn grid_mut(&mut self, id: u32) -> Option<&mut LocalGrid> {
-        self.grids.iter_mut().find(|g| g.id == id)
+    pub fn fidelity_zone_mut(&mut self, id: u32) -> Option<&mut FidelityZone> {
+        self.fidelity_zones.iter_mut().find(|g| g.id == id)
     }
 
     /// Get the treasury building entity ID for a settlement.
@@ -818,8 +818,8 @@ impl WorldState {
         None // no path
     }
 
-    pub fn grid(&self, id: u32) -> Option<&LocalGrid> {
-        self.grids.iter().find(|g| g.id == id)
+    pub fn fidelity_zone(&self, id: u32) -> Option<&FidelityZone> {
+        self.fidelity_zones.iter().find(|g| g.id == id)
     }
 
     pub fn faction(&self, id: u32) -> Option<&FactionState> {
@@ -3747,11 +3747,11 @@ pub struct PriceReport {
 }
 
 // ---------------------------------------------------------------------------
-// LocalGrid — a spatial grid for a settlement or encounter zone
+// FidelityZone — a proximity bubble that controls simulation fidelity
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LocalGrid {
+pub struct FidelityZone {
     pub id: u32,
     pub fidelity: Fidelity,
     pub center: (f32, f32),
@@ -3760,7 +3760,7 @@ pub struct LocalGrid {
     pub entity_ids: Vec<u32>,
 }
 
-impl LocalGrid {
+impl FidelityZone {
     pub fn has_hostiles(&self, state: &super::WorldState) -> bool {
         self.entity_ids.iter().any(|id| {
             state.entity(*id)

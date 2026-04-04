@@ -212,7 +212,7 @@ fn compute_all_deltas_seq_counted(state: &WorldState) -> (Vec<WorldDelta>, Fidel
     }
 
     let grid_start = Instant::now();
-    for grid in &state.grids {
+    for grid in &state.fidelity_zones {
         all_deltas.extend(compute_grid_deltas(grid, &spatial));
     }
     timings.3 = grid_start.elapsed().as_micros() as u64;
@@ -252,10 +252,10 @@ fn compute_all_deltas_par_counted(state: &WorldState) -> (Vec<WorldDelta>, Fidel
     let entity_compute_us = compute_start.elapsed().as_micros() as u64;
 
     let grid_start = Instant::now();
-    for _grid in &state.grids {
+    for _grid in &state.fidelity_zones {
         // Grid deltas are cheap with spatial index — no need to parallelize.
     }
-    let grid_deltas: Vec<WorldDelta> = state.grids
+    let grid_deltas: Vec<WorldDelta> = state.fidelity_zones
         .iter()
         .flat_map(|grid| compute_grid_deltas(grid, &spatial))
         .collect();
@@ -279,7 +279,7 @@ fn compute_entity_at(entity: &super::state::Entity, state: &WorldState, fid: Fid
 /// Determine an entity's simulation fidelity from its location.
 fn entity_fidelity(entity: &super::state::Entity, state: &WorldState) -> Fidelity {
     if let Some(grid_id) = entity.grid_id {
-        state.grid(grid_id)
+        state.fidelity_zone(grid_id)
             .map(|g| g.fidelity)
             .unwrap_or(Fidelity::Low)
     } else {
@@ -290,7 +290,7 @@ fn entity_fidelity(entity: &super::state::Entity, state: &WorldState) -> Fidelit
 
 /// Compute fidelity change deltas for a grid using the spatial index.
 fn compute_grid_deltas(
-    grid: &super::state::LocalGrid,
+    grid: &super::state::FidelityZone,
     spatial: &super::spatial::SpatialIndex,
 ) -> Vec<WorldDelta> {
     let has_hostiles = spatial.has_hostiles_in_radius(grid.center, grid.radius);
@@ -352,7 +352,7 @@ mod tests {
         state.entities.push(Entity::new_monster(2, (1.0, 0.0), 1));
         state.entities[0].grid_id = Some(100);
         state.entities[1].grid_id = Some(100);
-        state.grids.push(LocalGrid {
+        state.fidelity_zones.push(FidelityZone {
             id: 100,
             fidelity: Fidelity::Medium,
             center: (0.0, 0.0),
@@ -362,7 +362,7 @@ mod tests {
 
         let next = tick(&state);
         // Should escalate to High because both hostile and friendly present.
-        assert_eq!(next.grid(100).unwrap().fidelity, Fidelity::High);
+        assert_eq!(next.fidelity_zone(100).unwrap().fidelity, Fidelity::High);
     }
 
     #[test]
@@ -370,7 +370,7 @@ mod tests {
         let mut state = WorldState::new(42);
         state.entities.push(Entity::new_npc(1, (0.0, 0.0)));
         state.entities[0].grid_id = Some(100);
-        state.grids.push(LocalGrid {
+        state.fidelity_zones.push(FidelityZone {
             id: 100,
             fidelity: Fidelity::High,
             center: (0.0, 0.0),
@@ -380,7 +380,7 @@ mod tests {
 
         let next = tick(&state);
         // Only friendlies → Medium.
-        assert_eq!(next.grid(100).unwrap().fidelity, Fidelity::Medium);
+        assert_eq!(next.fidelity_zone(100).unwrap().fidelity, Fidelity::Medium);
     }
 
     /// Build a world with many entities for determinism testing.
@@ -391,7 +391,7 @@ mod tests {
             10, "Town".into(), (50.0, 50.0),
         ));
         state.settlements[0].stockpile[0] = 1000.0; // food
-        state.grids.push(LocalGrid {
+        state.fidelity_zones.push(FidelityZone {
             id: 10,
             fidelity: Fidelity::Medium,
             center: (50.0, 50.0),
@@ -407,7 +407,7 @@ mod tests {
             npc_data.home_settlement_id = Some(10);
             npc_data.behavior_production = vec![(0, 0.1)]; // produce food
             state.entities.push(npc);
-            state.grids[0].entity_ids.push(i);
+            state.fidelity_zones[0].entity_ids.push(i);
         }
 
         // 20 monsters approaching.

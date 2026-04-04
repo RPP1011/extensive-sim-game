@@ -431,7 +431,7 @@ fn apply_deaths(state: &mut WorldState, merged: &MergedDeltas) {
 fn apply_grid_transitions(state: &mut WorldState, merged: &MergedDeltas) {
     // Process leaves first.
     for &(entity_id, grid_id) in &merged.grid_leaves {
-        if let Some(grid) = state.grid_mut(grid_id) {
+        if let Some(grid) = state.fidelity_zone_mut(grid_id) {
             grid.entity_ids.retain(|&id| id != entity_id);
         }
         if let Some(e) = state.entity_mut(entity_id) {
@@ -444,7 +444,7 @@ fn apply_grid_transitions(state: &mut WorldState, merged: &MergedDeltas) {
 
     // Then enters.
     for &(entity_id, grid_id) in &merged.grid_enters {
-        if let Some(grid) = state.grid_mut(grid_id) {
+        if let Some(grid) = state.fidelity_zone_mut(grid_id) {
             if !grid.entity_ids.contains(&entity_id) {
                 grid.entity_ids.push(entity_id);
             }
@@ -461,7 +461,7 @@ fn apply_grid_transitions(state: &mut WorldState, merged: &MergedDeltas) {
 
 fn apply_fidelity(state: &mut WorldState, merged: &MergedDeltas) {
     for (&grid_id, &new_fidelity) in &merged.fidelity_changes {
-        if let Some(grid) = state.grid_mut(grid_id) {
+        if let Some(grid) = state.fidelity_zone_mut(grid_id) {
             grid.fidelity = new_fidelity;
         }
     }

@@ -71,7 +71,7 @@ pub fn compute_skill_challenges_for_settlement(
 
         // Check if the grid has hostiles (challenge context)
         let grid_has_hostiles = state
-            .grid(grid_id)
+            .fidelity_zone(grid_id)
             .map(|g| g.fidelity == crate::world_sim::fidelity::Fidelity::High)
             .unwrap_or(false);
 
@@ -84,7 +84,7 @@ pub fn compute_skill_challenges_for_settlement(
 
         // Difficulty scales with number of hostiles on grid
         let hostile_count = state
-            .grid(grid_id)
+            .fidelity_zone(grid_id)
             .map(|g| {
                 g.entity_ids
                     .iter()

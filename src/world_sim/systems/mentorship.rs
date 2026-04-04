@@ -63,7 +63,7 @@ pub fn compute_mentorship_for_settlement(
 
         // Skip NPCs in combat.
         if let Some(gid) = entity.grid_id {
-            if let Some(g) = state.grid(gid) {
+            if let Some(g) = state.fidelity_zone(gid) {
                 if g.fidelity == crate::world_sim::fidelity::Fidelity::High {
                     continue;
                 }

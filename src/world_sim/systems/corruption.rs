@@ -71,7 +71,7 @@ pub fn compute_corruption(state: &WorldState, out: &mut Vec<WorldDelta>) {
         // Severe corruption (1.5+): NPC damage (desertion)
         if corruption_proxy >= 1.5 {
             if let Some(grid_id) = settlement.grid_id {
-                if let Some(grid) = state.grid(grid_id) {
+                if let Some(grid) = state.fidelity_zone(grid_id) {
                     for &entity_id in &grid.entity_ids {
                         if let Some(entity) = state.entity(entity_id) {
                             if entity.alive && entity.kind == EntityKind::Npc {

@@ -8,6 +8,7 @@
 pub mod building_ai;
 pub mod city_grid;
 pub mod voxel;
+pub mod nav_grid;
 pub mod sdf;
 pub mod delta;
 pub mod state;
@@ -33,7 +34,7 @@ pub mod visualizer;
 
 pub use delta::{WorldDelta, MergedDeltas, merge_deltas};
 pub use state::{
-    WorldState, Entity, HotEntity, ColdEntity, EntityKind, GroupIndex, LocalGrid, SettlementState, RegionState, EconomyState,
+    WorldState, Entity, HotEntity, ColdEntity, EntityKind, GroupIndex, FidelityZone, SettlementState, RegionState, EconomyState,
     Terrain, SettlementSpecialty,
     // Campaign system types
     FactionState, DiplomaticStance, GuildState, Quest, QuestPosting, QuestType, QuestStatus,
