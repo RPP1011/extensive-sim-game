@@ -1,0 +1,11 @@
+name = "Flyer"
+kind = "creature"
+
+[stats]
+hp = 50.0
+attack = 12.0
+armor = 1.0
+speed = 5.0
+
+[capabilities]
+can_fly = true

@@ -1,0 +1,12 @@
+name = "Siege Engine"
+kind = "creature"
+
+[stats]
+hp = 200.0
+attack = 5.0
+armor = 15.0
+speed = 1.0
+
+[capabilities]
+has_siege = true
+siege_damage = 50.0

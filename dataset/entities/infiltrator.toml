@@ -1,0 +1,8 @@
+name = "Infiltrator"
+kind = "creature"
+
+[stats]
+hp = 60.0
+attack = 15.0
+armor = 0.0
+speed = 4.0

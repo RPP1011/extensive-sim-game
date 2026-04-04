@@ -1,0 +1,15 @@
+name = "Archmage"
+kind = "npc"
+
+[stats]
+hp = 100.0
+attack = 10.0
+armor = 0.0
+speed = 3.0
+
+[[classes.starting]]
+name = "Scholar"
+level = 1
+
+[abilities]
+list = []
