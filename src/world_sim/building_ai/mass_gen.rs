@@ -18,8 +18,8 @@ use super::oracle::{strategic_oracle, structural_oracle};
 use super::scenario_gen::{build_observation, populate_memory};
 use super::types::*;
 use crate::world_sim::state::{
-    tag, BuildingData, BuildingType, EnemyCapabilities, Entity, EntityKind, SettlementState,
-    WorldState,
+    tag, BuildingData, BuildingType, ClassSlot, EnemyCapabilities, Entity, EntityKind,
+    SettlementState, WorldState,
 };
 use crate::world_sim::NUM_COMMODITIES;
 
@@ -576,7 +576,86 @@ fn apply_resource_profile(
     };
 }
 
+// ---------------------------------------------------------------------------
+// Fallback NPC constructors (used when no registry is loaded)
+// ---------------------------------------------------------------------------
+
+fn make_combat_npc_fallback(eid: u32, pos: (f32, f32), idx: usize, class_level: u16) -> Entity {
+    let combat_classes: &[(&str, &[u8])] = &[
+        ("warrior", b"Warrior"),
+        ("archer", b"Ranger"),
+        ("defender", b"Guardian"),
+    ];
+    let (class_tag, class_key) = combat_classes[idx % combat_classes.len()];
+    let mut entity = Entity::new_npc(eid, pos);
+    entity.level = 0;
+    if let Some(npc) = entity.npc.as_mut() {
+        npc.class_tags = vec![class_tag.to_string()];
+        npc.classes.push(ClassSlot {
+            class_name_hash: tag(class_key),
+            level: class_level,
+            xp: 0.0,
+            display_name: String::new(),
+        });
+    }
+    entity
+}
+
+fn make_worker_npc_fallback(eid: u32, pos: (f32, f32), idx: usize, class_level: u16) -> Entity {
+    let worker_classes: &[(&str, &[u8])] = &[
+        ("farmer", b"Farmer"),
+        ("builder", b"Artisan"),
+        ("miner", b"Miner"),
+        ("craftsman", b"Artisan"),
+        ("merchant", b"Merchant"),
+    ];
+    let (class_tag, class_key) = worker_classes[idx % worker_classes.len()];
+    let mut entity = Entity::new_npc(eid, pos);
+    entity.level = 0;
+    if let Some(npc) = entity.npc.as_mut() {
+        npc.class_tags = vec![class_tag.to_string()];
+        npc.classes.push(ClassSlot {
+            class_name_hash: tag(class_key),
+            level: class_level,
+            xp: 0.0,
+            display_name: String::new(),
+        });
+    }
+    entity
+}
+
+fn make_hv_npc_fallback(eid: u32, pos: (f32, f32), role: &str) -> Entity {
+    let hv_class_map: &[(&str, &[u8])] = &[
+        ("Leader", b"Commander"),
+        ("Master Smith", b"Artisan"),
+        ("Archmage", b"Scholar"),
+        ("High Priest", b"Healer"),
+        ("Guild Master", b"Merchant"),
+    ];
+    let class_key = hv_class_map
+        .iter()
+        .find(|(name, _)| *name == role)
+        .map(|(_, key)| *key)
+        .unwrap_or(b"Commander");
+    let mut entity = Entity::new_npc(eid, pos);
+    entity.level = 0;
+    if let Some(npc) = entity.npc.as_mut() {
+        npc.archetype = role.to_lowercase();
+        npc.classes.push(ClassSlot {
+            class_name_hash: tag(class_key),
+            level: 1,
+            xp: 0.0,
+            display_name: String::new(),
+        });
+    }
+    entity
+}
+
 /// Generate NPC roster with appropriate class/level distributions.
+///
+/// When a registry is loaded, entities are created from templates via
+/// `Entity::from_template()`. Falls back to hardcoded constructors when
+/// no registry is available or the template is not found.
 fn generate_npc_roster(
     composition: NpcComposition,
     state: &mut WorldState,
@@ -631,55 +710,96 @@ fn generate_npc_roster(
     let combat_count = (total as f32 * combat_frac) as usize;
     let worker_count = total - combat_count;
 
+    // Clone registry so we can borrow state mutably for next_entity_id / push.
+    let registry = state.registry.clone();
+
+    // Template names for each NPC category.
+    let combat_templates = ["Town Guard", "Archer", "Defender"];
+    let worker_templates = ["Farmer", "Builder", "Miner", "Craftsman", "Merchant NPC"];
+    let hv_templates = [
+        "Leader",
+        "Master Smith",
+        "Archmage",
+        "High Priest",
+        "Leader",
+        "Guild Master",
+    ];
+
     // Spawn combat NPCs.
-    let combat_classes = ["warrior", "archer", "defender"];
     for i in 0..combat_count {
         let eid = state.next_entity_id();
-        let level = rng.range_u32(level_range.0, level_range.1);
-        let class = combat_classes[i % combat_classes.len()];
-        let mut entity = Entity::new_npc(eid, settlement_pos);
-        entity.level = level;
+        let class_level = rng.range_u32(level_range.0, level_range.1) as u16;
+        let template_name = combat_templates[i % combat_templates.len()];
+
+        let mut entity = if let Some(ref reg) = registry {
+            if let Some(tmpl) = reg.entity_by_name(template_name) {
+                let mut e = Entity::from_template(eid, settlement_pos, tmpl, reg);
+                // Override class level from the composition's level range.
+                if let Some(npc) = e.npc.as_mut() {
+                    for cs in &mut npc.classes {
+                        cs.level = class_level;
+                    }
+                }
+                e
+            } else {
+                make_combat_npc_fallback(eid, settlement_pos, i, class_level)
+            }
+        } else {
+            make_combat_npc_fallback(eid, settlement_pos, i, class_level)
+        };
+
         if let Some(npc) = entity.npc.as_mut() {
             npc.home_settlement_id = Some(settlement_id);
-            npc.class_tags = vec![class.to_string()];
-            npc.archetype = "garrison".into();
         }
         state.entities.push(entity);
     }
 
     // Spawn worker NPCs.
-    let worker_classes = ["farmer", "builder", "miner", "craftsman", "merchant"];
     for i in 0..worker_count {
         let eid = state.next_entity_id();
-        let level = rng.range_u32(1, level_range.1.min(3));
-        let class = worker_classes[i % worker_classes.len()];
-        let mut entity = Entity::new_npc(eid, settlement_pos);
-        entity.level = level;
+        let class_level = rng.range_u32(1, level_range.1.min(3)) as u16;
+        let template_name = worker_templates[i % worker_templates.len()];
+
+        let mut entity = if let Some(ref reg) = registry {
+            if let Some(tmpl) = reg.entity_by_name(template_name) {
+                let mut e = Entity::from_template(eid, settlement_pos, tmpl, reg);
+                if let Some(npc) = e.npc.as_mut() {
+                    for cs in &mut npc.classes {
+                        cs.level = class_level;
+                    }
+                }
+                e
+            } else {
+                make_worker_npc_fallback(eid, settlement_pos, i, class_level)
+            }
+        } else {
+            make_worker_npc_fallback(eid, settlement_pos, i, class_level)
+        };
+
         if let Some(npc) = entity.npc.as_mut() {
             npc.home_settlement_id = Some(settlement_id);
-            npc.class_tags = vec![class.to_string()];
         }
         state.entities.push(entity);
     }
 
     // Spawn high-value NPCs.
-    let hv_roles = [
-        "leader",
-        "master_smith",
-        "archmage",
-        "high_priest",
-        "commander",
-        "guild_master",
-    ];
     for i in 0..hv_count {
         let eid = state.next_entity_id();
-        let level = rng.range_u32(level_range.1, level_range.1 + 3);
-        let role = hv_roles[i % hv_roles.len()];
-        let mut entity = Entity::new_npc(eid, settlement_pos);
-        entity.level = level;
+        let template_name = hv_templates[i % hv_templates.len()];
+
+        let mut entity = if let Some(ref reg) = registry {
+            if let Some(tmpl) = reg.entity_by_name(template_name) {
+                Entity::from_template(eid, settlement_pos, tmpl, reg)
+            } else {
+                make_hv_npc_fallback(eid, settlement_pos, template_name)
+            }
+        } else {
+            make_hv_npc_fallback(eid, settlement_pos, template_name)
+        };
+
+        entity.level = 0;
         if let Some(npc) = entity.npc.as_mut() {
             npc.home_settlement_id = Some(settlement_id);
-            npc.archetype = role.to_string();
         }
         state.entities.push(entity);
     }
