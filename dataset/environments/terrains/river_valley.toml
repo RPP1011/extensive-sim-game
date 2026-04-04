@@ -1,0 +1,23 @@
+name = "River Valley"
+size = [64, 64]
+biome = "temperate"
+
+[[resources]]
+type = "wood"
+amount = 300.0
+pos = [20, 15]
+
+[[resources]]
+type = "stone"
+amount = 150.0
+pos = [40, 30]
+
+[[resources]]
+type = "food"
+amount = 200.0
+pos = [32, 45]
+
+[[features]]
+type = "river"
+from = [0, 32]
+to = [64, 32]

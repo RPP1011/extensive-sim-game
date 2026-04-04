@@ -1,0 +1,23 @@
+name = "Mountain Pass"
+size = [64, 64]
+biome = "alpine"
+
+[[resources]]
+type = "stone"
+amount = 500.0
+pos = [30, 30]
+
+[[resources]]
+type = "iron"
+amount = 300.0
+pos = [40, 20]
+
+[[features]]
+type = "cliff"
+from = [0, 10]
+to = [64, 10]
+
+[[features]]
+type = "cliff"
+from = [0, 54]
+to = [64, 54]

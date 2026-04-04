@@ -1,0 +1,44 @@
+name = "Frontier Outpost"
+terrain = "River Valley"
+
+[[npcs]]
+template = "Town Guard"
+count = 5
+level_range = [2, 4]
+
+[[npcs]]
+template = "Farmer"
+count = 8
+level_range = [1, 2]
+
+[[npcs]]
+template = "Builder"
+count = 3
+level_range = [1, 2]
+
+[[buildings]]
+type = "Barracks"
+pos = [30, 30]
+
+[[buildings]]
+type = "Farm"
+pos = [25, 35]
+
+[[threats]]
+name = "Raider Scouts"
+approach_direction = [0.0, -1.0]
+trigger_tick = 500
+duration_ticks = 300
+
+[threats.resolution]
+check = "hostiles_dead"
+
+[[threats.entities]]
+template = "Raider Infantry"
+count = 6
+level_range = [2, 4]
+
+[completion]
+mode = "all"
+max_ticks = 2000
+failure = "settlement_wiped"
