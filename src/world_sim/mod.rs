@@ -6,6 +6,7 @@
 //! 3. **Merge**: All deltas combine into the next world state (commutative + associative)
 
 pub mod building_ai;
+pub mod registry;
 pub mod voxel;
 pub mod nav_grid;
 pub mod sdf;
