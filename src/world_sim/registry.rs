@@ -1,8 +1,9 @@
-//! Data-driven registry types for TOML-defined classes, entity templates,
+//! Data-driven registry for TOML-defined classes, entity templates,
 //! terrain templates, and scenario definitions.
 //!
-//! These types are the serde layer between TOML files on disk and the runtime
-//! world simulation. They are plain data — no logic lives here.
+//! Defines the serde types for each TOML format and the `Registry` loader
+//! that scans `dataset/` subdirectories, parses files, and validates
+//! cross-references between them.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -463,6 +464,8 @@ impl std::fmt::Display for RegistryError {
     }
 }
 
+impl std::error::Error for RegistryError {}
+
 impl Registry {
     /// Load registry from a dataset directory.
     ///
@@ -482,7 +485,14 @@ impl Registry {
                 match toml::from_str::<ClassDefToml>(&content) {
                     Ok(def) => {
                         let hash = tag(def.name.as_bytes());
-                        registry.classes.insert(hash, def);
+                        if registry.classes.contains_key(&hash) {
+                            errors.push(RegistryError {
+                                file: path.display().to_string(),
+                                message: format!("duplicate class name '{}'", def.name),
+                            });
+                        } else {
+                            registry.classes.insert(hash, def);
+                        }
                     }
                     Err(e) => errors.push(RegistryError {
                         file: path.display().to_string(),
@@ -500,7 +510,14 @@ impl Registry {
                 match toml::from_str::<EntityTemplateToml>(&content) {
                     Ok(tmpl) => {
                         let hash = tag(tmpl.name.as_bytes());
-                        registry.entities.insert(hash, tmpl);
+                        if registry.entities.contains_key(&hash) {
+                            errors.push(RegistryError {
+                                file: path.display().to_string(),
+                                message: format!("duplicate entity name '{}'", tmpl.name),
+                            });
+                        } else {
+                            registry.entities.insert(hash, tmpl);
+                        }
                     }
                     Err(e) => errors.push(RegistryError {
                         file: path.display().to_string(),
@@ -518,7 +535,14 @@ impl Registry {
                 match toml::from_str::<TerrainTemplateToml>(&content) {
                     Ok(tmpl) => {
                         let hash = tag(tmpl.name.as_bytes());
-                        registry.terrains.insert(hash, tmpl);
+                        if registry.terrains.contains_key(&hash) {
+                            errors.push(RegistryError {
+                                file: path.display().to_string(),
+                                message: format!("duplicate terrain name '{}'", tmpl.name),
+                            });
+                        } else {
+                            registry.terrains.insert(hash, tmpl);
+                        }
                     }
                     Err(e) => errors.push(RegistryError {
                         file: path.display().to_string(),
@@ -535,7 +559,14 @@ impl Registry {
             for (path, content) in files {
                 match toml::from_str::<ScenarioToml>(&content) {
                     Ok(scenario) => {
-                        registry.scenarios.insert(scenario.name.clone(), scenario);
+                        if registry.scenarios.contains_key(&scenario.name) {
+                            errors.push(RegistryError {
+                                file: path.display().to_string(),
+                                message: format!("duplicate scenario name '{}'", scenario.name),
+                            });
+                        } else {
+                            registry.scenarios.insert(scenario.name.clone(), scenario);
+                        }
                     }
                     Err(e) => errors.push(RegistryError {
                         file: path.display().to_string(),
@@ -573,7 +604,17 @@ impl Registry {
                 return results;
             }
         };
-        for entry in entries.flatten() {
+        for entry_result in entries {
+            let entry = match entry_result {
+                Ok(e) => e,
+                Err(e) => {
+                    errors.push(RegistryError {
+                        file: dir.display().to_string(),
+                        message: format!("directory entry error: {e}"),
+                    });
+                    continue;
+                }
+            };
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some(ext) {
                 continue;
@@ -617,7 +658,17 @@ impl Registry {
                 return;
             }
         };
-        for entry in entries.flatten() {
+        for entry_result in entries {
+            let entry = match entry_result {
+                Ok(e) => e,
+                Err(e) => {
+                    errors.push(RegistryError {
+                        file: dir.display().to_string(),
+                        message: format!("directory entry error: {e}"),
+                    });
+                    continue;
+                }
+            };
             let path = entry.path();
             if path.is_dir() {
                 Self::read_dir_files_recursive_inner(&path, ext, errors, results);
