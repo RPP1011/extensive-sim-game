@@ -1,0 +1,177 @@
+# EVAL SET — High-Value NPC × Structural Defense
+# Assassination threat against settlement leader and master smith.
+# Tests HV NPC protection: safe rooms, escape routes, reinforced doors,
+# interior chokepoints, specialist housing proximity.
+
+[meta]
+name = "HV NPC Protection — Assassination Threat"
+description = "Assassins targeting the leader and master smith. Oracle must structurally protect high-value NPCs with safe rooms, escape routes, and interior chokepoints."
+tags = ["high_value_npc", "assassination", "safe_room", "interior_defense", "eval"]
+matrix_cells = [
+    { challenge = "high_value_npc", decision = "placement" },
+    { challenge = "high_value_npc", decision = "interior_flow" },
+    { challenge = "high_value_npc", decision = "openings" },
+    { challenge = "high_value_npc", decision = "defensive_integration" },
+]
+
+[seed]
+template = "seeds/village_river.toml"
+settlement_level = 3
+tech_tier = 2
+
+[seed.stockpiles]
+wood = [25, 40]
+iron = [10, 20]
+food = [40, 60]
+
+# --- Layout: River village, leader/smith deep inside walled compound ---
+# Grid layout (20x20):
+#   - River runs along east edge (cols 16-19, natural barrier)
+#   - Settlement west of river, dense stone walls
+#   - Manor (leader) and Forge (smith) in deep interior
+#   - Few gates = chokepoint defense against infiltration
+#   - Key test: safe room, escape route, interior flow for HV NPCs
+[seed.layout]
+grid_size = [20, 20]
+
+# --- Stone wall circuit (tight perimeter, few entry points) ---
+[[seed.layout.wall_circuits]]
+waypoints = [[1, 1], [14, 1], [14, 18], [1, 18]]
+material = "stone"
+height = 4
+thickness = 1
+
+# --- Gates (minimal — chokepoint defense) ---
+[[seed.layout.gates]]
+cell = [7, 18]
+facing = "south"
+width = 2
+
+[[seed.layout.gates]]
+cell = [14, 9]
+facing = "east"
+width = 1
+
+# --- HV NPC buildings (deep interior, hard to reach) ---
+[[seed.layout.buildings]]
+type = "Manor"
+cell = [5, 3]
+footprint = [4, 3]
+material = "stone"
+facing = "south"
+
+[[seed.layout.buildings]]
+type = "Forge"
+cell = [10, 4]
+footprint = [3, 2]
+material = "stone"
+
+# --- Guard towers flanking HV buildings ---
+[[seed.layout.buildings]]
+type = "Watchtower"
+cell = [2, 2]
+footprint = [2, 2]
+material = "stone"
+
+[[seed.layout.buildings]]
+type = "Watchtower"
+cell = [12, 2]
+footprint = [2, 2]
+material = "stone"
+
+# --- Residential buffer (between HV and perimeter) ---
+[[seed.layout.buildings]]
+type = "House"
+cell = [3, 7]
+footprint = [2, 2]
+
+[[seed.layout.buildings]]
+type = "House"
+cell = [6, 7]
+footprint = [2, 2]
+
+[[seed.layout.buildings]]
+type = "House"
+cell = [9, 7]
+footprint = [2, 2]
+
+[[seed.layout.buildings]]
+type = "House"
+cell = [12, 7]
+footprint = [2, 2]
+
+# --- Barracks (garrison between gate and HV NPCs) ---
+[[seed.layout.buildings]]
+type = "Barracks"
+cell = [3, 11]
+footprint = [4, 3]
+material = "stone"
+facing = "south"
+
+# --- Market and temple ---
+[[seed.layout.buildings]]
+type = "Market"
+cell = [8, 11]
+footprint = [3, 2]
+
+[[seed.layout.buildings]]
+type = "Temple"
+cell = [3, 15]
+footprint = [3, 3]
+material = "stone"
+
+# --- Well ---
+[[seed.layout.buildings]]
+type = "Well"
+cell = [8, 14]
+footprint = [1, 1]
+
+# --- Roads ---
+# Main road: south gate → barracks → manor (single path = defensible)
+[[seed.layout.roads]]
+waypoints = [[7, 18], [7, 14], [7, 11], [7, 7], [7, 4]]
+
+# Cross road: east gate → barracks → temple
+[[seed.layout.roads]]
+waypoints = [[14, 9], [10, 9], [5, 11]]
+
+# --- Zones ---
+[[seed.layout.zones]]
+zone = "residential"
+from = [2, 6]
+to = [13, 9]
+
+[[seed.layout.zones]]
+zone = "military"
+from = [2, 10]
+to = [7, 14]
+
+[[seed.npcs]]
+class = "warrior"
+level = [5, 8]
+count = 3
+is_garrison = true
+
+[[seed.high_value_npcs]]
+role = "leader"
+level = [10, 14]
+class = "noble"
+protection_priority = 0.9
+
+[[seed.high_value_npcs]]
+role = "master_smith"
+level = [8, 12]
+class = "artisan"
+protection_priority = 0.7
+
+[[challenges]]
+category = "high_value_npc"
+sub_type = "assassination_threat"
+severity = [0.6, 0.8]
+
+[[challenges.enemies]]
+profile = "enemy_profiles/assassins.toml"
+count = [3, 5]
+
+sim_ticks = 300
+num_random_baselines = 5

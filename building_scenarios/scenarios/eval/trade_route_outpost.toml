@@ -1,0 +1,162 @@
+# EVAL SET — Multi-Settlement × Routing/Placement
+# Two settlements need a trade connection. Frontier outpost establishment.
+# Tests road network planning, outpost placement, resource relay.
+
+[meta]
+name = "Trade Route — Frontier Outpost"
+description = "Establish a frontier outpost between two settlements and connect them via trade road. Tests multi-settlement routing and minimal viable outpost placement."
+tags = ["multi_settlement", "trade_route", "outpost", "routing", "eval"]
+matrix_cells = [
+    { challenge = "multi_settlement", decision = "placement" },
+    { challenge = "multi_settlement", decision = "routing" },
+    { challenge = "economic", decision = "zone_composition" },
+    { challenge = "terrain", decision = "routing" },
+]
+
+[seed]
+template = "seeds/hamlet_flat.toml"
+settlement_level = 2
+population = [30, 45]
+tech_tier = 2
+
+[seed.stockpiles]
+wood = [30, 50]
+iron = [10, 20]
+food = [50, 80]
+
+# --- Layout: Main settlement west, open outpost area east ---
+# Grid layout (24x24, flat terrain):
+#   - West half: walled settlement with market, warehouse, houses
+#   - East half: open area where oracle should place outpost
+#   - Trade road runs east-west through gate
+[seed.layout]
+grid_size = [24, 24]
+
+# --- Wall circuit around main settlement (west half) ---
+[[seed.layout.wall_circuits]]
+waypoints = [[2, 2], [14, 2], [14, 18], [2, 18]]
+material = "wood"
+height = 3
+thickness = 1
+
+# --- Gates ---
+[[seed.layout.gates]]
+cell = [14, 10]
+facing = "east"
+width = 2
+
+[[seed.layout.gates]]
+cell = [7, 18]
+facing = "south"
+width = 1
+
+# --- Commercial / storage (north) ---
+[[seed.layout.buildings]]
+type = "Market"
+cell = [4, 3]
+footprint = [3, 3]
+material = "stone"
+
+[[seed.layout.buildings]]
+type = "Warehouse"
+cell = [8, 3]
+footprint = [4, 2]
+material = "wood"
+
+[[seed.layout.buildings]]
+type = "Stable"
+cell = [8, 6]
+footprint = [3, 2]
+material = "wood"
+
+# --- Residential row ---
+[[seed.layout.buildings]]
+type = "House"
+cell = [3, 8]
+footprint = [2, 2]
+
+[[seed.layout.buildings]]
+type = "House"
+cell = [6, 8]
+footprint = [2, 2]
+
+[[seed.layout.buildings]]
+type = "House"
+cell = [9, 8]
+footprint = [2, 2]
+
+[[seed.layout.buildings]]
+type = "House"
+cell = [12, 8]
+footprint = [2, 2]
+
+# --- Inn and well (near gate, for traders) ---
+[[seed.layout.buildings]]
+type = "Inn"
+cell = [4, 11]
+footprint = [3, 2]
+material = "wood"
+
+[[seed.layout.buildings]]
+type = "Well"
+cell = [8, 11]
+footprint = [1, 1]
+
+# --- Farms (south) ---
+[[seed.layout.buildings]]
+type = "Farm"
+cell = [3, 14]
+footprint = [3, 3]
+
+[[seed.layout.buildings]]
+type = "Farm"
+cell = [8, 14]
+footprint = [3, 3]
+
+# --- Roads ---
+# Main trade road: gate eastward to outpost area
+[[seed.layout.roads]]
+waypoints = [[14, 10], [18, 10], [22, 10]]
+
+# Internal: gate to market
+[[seed.layout.roads]]
+waypoints = [[14, 10], [10, 10], [7, 8], [5, 4]]
+
+# South gate road
+[[seed.layout.roads]]
+waypoints = [[7, 18], [7, 14], [7, 10]]
+
+# --- Zones ---
+[[seed.layout.zones]]
+zone = "commercial"
+from = [3, 2]
+to = [12, 7]
+
+[[seed.layout.zones]]
+zone = "residential"
+from = [2, 7]
+to = [13, 10]
+
+[[seed.layout.zones]]
+zone = "agricultural"
+from = [2, 13]
+to = [11, 17]
+
+[[seed.npcs]]
+class = "laborer"
+level = [2, 4]
+count = 8
+
+[[seed.npcs]]
+class = "warrior"
+level = [3, 5]
+count = 2
+is_garrison = true
+
+[[challenges]]
+category = "multi_settlement"
+sub_type = "trade_route"
+severity = [0.4, 0.6]
+
+sim_ticks = 600
+num_random_baselines = 5

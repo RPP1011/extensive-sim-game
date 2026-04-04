@@ -1,0 +1,109 @@
+settlement_level = 3
+population = [60, 150]
+tech_tier = 3
+terrain = "hill"
+age_ticks = [2000, 5000]
+
+[stockpiles]
+wood = [60, 150]
+iron = [20, 60]
+food = [80, 200]
+stone = [40, 100]
+
+[[buildings]]
+building_type = "House"
+count = 15
+
+[[buildings]]
+building_type = "Longhouse"
+count = 2
+
+[[buildings]]
+building_type = "Manor"
+count = 1
+
+[[buildings]]
+building_type = "Farm"
+count = 4
+
+[[buildings]]
+building_type = "Forge"
+count = 1
+
+[[buildings]]
+building_type = "Sawmill"
+count = 1
+
+[[buildings]]
+building_type = "Market"
+count = 1
+
+[[buildings]]
+building_type = "Warehouse"
+count = 1
+
+[[buildings]]
+building_type = "Barracks"
+count = 1
+
+[[buildings]]
+building_type = "Watchtower"
+count = 2
+
+[[buildings]]
+building_type = "Temple"
+count = 1
+
+[[buildings]]
+building_type = "Wall"
+count = 12
+
+[[npcs]]
+class = "farmer"
+level = [3, 7]
+count = 12
+
+[[npcs]]
+class = "laborer"
+level = [2, 5]
+count = 8
+
+[[npcs]]
+class = "guard"
+level = [4, 8]
+count = 6
+is_garrison = true
+
+[[npcs]]
+class = "archer"
+level = [3, 7]
+count = 4
+is_garrison = true
+
+[[npcs]]
+class = "smith"
+level = [4, 6]
+count = 2
+
+[[npcs]]
+class = "merchant"
+level = [3, 5]
+count = 3
+
+[[high_value_npcs]]
+role = "lord"
+level = [8, 12]
+class = "warrior"
+protection_priority = 0.9
+
+[[high_value_npcs]]
+role = "master_smith"
+level = [6, 9]
+class = "smith"
+protection_priority = 0.6
+
+[[high_value_npcs]]
+role = "priest"
+level = [5, 8]
+class = "cleric"
+protection_priority = 0.5

@@ -42,6 +42,8 @@ pub enum TaskCommand {
     WorldSim(WorldSimArgs),
     /// Visualize a world sim trace file
     Visualize(VisualizeArgs),
+    /// Building AI dataset generation and coverage analysis
+    BuildingAi(BuildingAiCommand),
 }
 
 #[derive(Debug, Parser)]
@@ -464,3 +466,91 @@ pub struct AsciiGenExportArgs {
     pub seed: u64,
 }
 
+// ---------------------------------------------------------------------------
+// Building AI dataset generation subcommand tree
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Parser)]
+#[command(about = "Building AI dataset generation and coverage analysis")]
+pub struct BuildingAiCommand {
+    #[command(subcommand)]
+    pub sub: BuildingAiSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum BuildingAiSubcommand {
+    /// Run a single scenario TOML: load, generate world state, run oracle, validate
+    Run(BuildingAiRunArgs),
+    /// Generate labeled (observation, action) pairs for behavioral cloning
+    Generate(BuildingAiGenerateArgs),
+    /// Compute coverage matrix from an existing dataset
+    Coverage(BuildingAiCoverageArgs),
+    /// Generate supplemental data targeting under-represented matrix cells
+    FillGaps(BuildingAiFillGapsArgs),
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Run a single building AI scenario")]
+pub struct BuildingAiRunArgs {
+    /// Path to the scenario TOML file
+    pub scenario: PathBuf,
+    /// Base directory for resolving template/profile references
+    #[arg(long, default_value = "building_scenarios")]
+    pub base_dir: PathBuf,
+    /// Run validation checks on the generated state and oracle output
+    #[arg(long)]
+    pub validate: bool,
+    /// After oracle pipeline, run the world sim for N ticks
+    #[arg(long)]
+    pub sim_ticks: Option<u64>,
+    /// Save final WorldState as JSON
+    #[arg(long)]
+    pub output: Option<PathBuf>,
+    /// Print spatial sanity checks after sim
+    #[arg(long)]
+    pub diagnostics: bool,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Generate building AI BC dataset")]
+pub struct BuildingAiGenerateArgs {
+    /// Target number of (obs, action) pairs
+    #[arg(long, default_value_t = 50000)]
+    pub pairs: u64,
+    /// Minimum pairs per active coverage matrix cell
+    #[arg(long, default_value_t = 100)]
+    pub min_cell: u32,
+    /// Output JSONL file
+    #[arg(long, default_value = "generated/building_bc.jsonl")]
+    pub output: PathBuf,
+    /// Coverage report output JSON file
+    #[arg(long, default_value = "generated/building_coverage.json")]
+    pub coverage: PathBuf,
+    /// RNG seed
+    #[arg(long, default_value_t = 42)]
+    pub seed: u64,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Compute coverage matrix from existing dataset")]
+pub struct BuildingAiCoverageArgs {
+    /// Path to the JSONL dataset file
+    pub dataset: PathBuf,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Generate supplemental data targeting coverage gaps")]
+pub struct BuildingAiFillGapsArgs {
+    /// Path to the existing JSONL dataset file
+    #[arg(long)]
+    pub dataset: PathBuf,
+    /// Minimum pairs per active coverage matrix cell
+    #[arg(long, default_value_t = 100)]
+    pub min_cell: u32,
+    /// Output JSONL file for supplemental data
+    #[arg(long, default_value = "generated/building_bc_supplement.jsonl")]
+    pub output: PathBuf,
+    /// RNG seed
+    #[arg(long, default_value_t = 43)]
+    pub seed: u64,
+}

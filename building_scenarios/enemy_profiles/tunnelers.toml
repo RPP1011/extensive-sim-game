@@ -1,0 +1,10 @@
+# Tunnelers — bypass walls entirely, countered by deep foundations
+
+[defaults]
+type_name = "tunneler"
+level_range = [4, 8]
+can_climb = false
+can_jump = false
+can_tunnel = true
+can_fly = false
+has_siege = false

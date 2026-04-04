@@ -1,0 +1,39 @@
+[meta]
+name = "Compound: Spring Flood + Opportunistic Raid"
+description = "Flood damages low-ground buildings, then raiders exploit the chaos. Tests both environmental adaptation and defensive recovery under pressure."
+tags = ["environmental", "military", "compound", "flood", "raid"]
+matrix_cells = [
+    { challenge = "environmental", decision = "foundation" },
+    { challenge = "environmental", decision = "routing" },
+    { challenge = "military", decision = "placement" },
+    { challenge = "military", decision = "wall_composition" },
+    { challenge = "economic", decision = "prioritization" },
+]
+
+[seed]
+template = "seeds/village_river.toml"
+
+# Phase 1: flood
+[[challenges]]
+category = "environmental"
+sub_type = "flood"
+severity = [0.5, 0.7]
+delay_ticks = 0
+
+[challenges.env_params]
+flood_severity = [0.4, 0.7]
+
+# Phase 2: raid exploiting flood damage (delayed)
+[[challenges]]
+category = "military"
+sub_type = "opportunistic_raid"
+severity = [0.4, 0.6]
+direction = "south"
+delay_ticks = 100
+
+[[challenges.enemies]]
+profile = "enemy_profiles/bandits.toml"
+count = [8, 15]
+
+sim_ticks = 500
+num_random_baselines = 5

@@ -1,0 +1,10 @@
+type_name = "orc_warrior"
+level_range = [3, 8]
+count = 20
+can_jump = true
+jump_height = 3
+can_climb = false
+can_tunnel = false
+can_fly = false
+has_siege = false
+siege_damage = 0.0

@@ -1,0 +1,200 @@
+# EVAL SET — Terrain/Geography × Military
+# Hillside settlement attacked from the south (low ground).
+# Oracle should exploit elevation advantage, fortify the slope approach,
+# and place archers on high ground.
+#
+# Grid layout (24x24, north=top):
+#   - High ground (north): residential, market, leader manor
+#   - Mid slope: barracks, forge, warehouse
+#   - Low ground (south): farms, approach from enemy
+#   - Stone wall circuit on the south/east/west (north is cliff)
+#   - Two gates: south main gate, west trade gate
+
+[meta]
+name = "Terrain Exploitation — Hillside Raid"
+description = "Hillside village raided from the low ground. Oracle must leverage elevation for defense rather than building flat-terrain walls."
+tags = ["terrain", "hillside", "elevation_advantage", "eval"]
+matrix_cells = [
+    { challenge = "terrain", decision = "placement" },
+    { challenge = "terrain", decision = "foundation" },
+    { challenge = "terrain", decision = "vertical_design" },
+    { challenge = "military", decision = "wall_composition" },
+]
+
+[seed]
+template = "seeds/town_hill.toml"
+settlement_level = 2
+tech_tier = 2
+
+[seed.stockpiles]
+wood = [20, 35]
+iron = [5, 15]
+food = [40, 60]
+
+[seed.layout]
+grid_size = [24, 24]
+
+# --- Wall circuit: encloses settlement, cliff is open high ground above ---
+# Rows 0-3: cliff / high ground (empty — oracle should place ranged units here)
+# Rows 4-20: walled settlement
+[[seed.layout.wall_circuits]]
+waypoints = [[3, 4], [20, 4], [20, 20], [3, 20]]
+material = "stone"
+height = 4
+thickness = 1
+
+# --- Gates ---
+[[seed.layout.gates]]
+cell = [11, 20]
+facing = "south"
+width = 2
+
+[[seed.layout.gates]]
+cell = [3, 12]
+facing = "west"
+width = 1
+
+# --- Civic (inside wall, high slope, rows 5-7) ---
+[[seed.layout.buildings]]
+type = "Manor"
+cell = [10, 5]
+footprint = [4, 3]
+material = "stone"
+facing = "south"
+
+[[seed.layout.buildings]]
+type = "Market"
+cell = [5, 5]
+footprint = [3, 3]
+material = "stone"
+
+[[seed.layout.buildings]]
+type = "Temple"
+cell = [15, 5]
+footprint = [3, 3]
+material = "stone"
+
+# --- Houses (rows 9-10) ---
+[[seed.layout.buildings]]
+type = "House"
+cell = [5, 9]
+footprint = [2, 2]
+
+[[seed.layout.buildings]]
+type = "House"
+cell = [8, 9]
+footprint = [2, 2]
+
+[[seed.layout.buildings]]
+type = "House"
+cell = [11, 9]
+footprint = [2, 2]
+
+[[seed.layout.buildings]]
+type = "House"
+cell = [14, 9]
+footprint = [2, 2]
+
+[[seed.layout.buildings]]
+type = "House"
+cell = [17, 9]
+footprint = [2, 2]
+
+# --- Mid slope — military + industrial (rows 12-14) ---
+[[seed.layout.buildings]]
+type = "Barracks"
+cell = [15, 12]
+footprint = [4, 3]
+material = "stone"
+facing = "south"
+
+[[seed.layout.buildings]]
+type = "Forge"
+cell = [5, 12]
+footprint = [3, 2]
+
+[[seed.layout.buildings]]
+type = "Warehouse"
+cell = [9, 12]
+footprint = [4, 3]
+
+[[seed.layout.buildings]]
+type = "Well"
+cell = [13, 13]
+footprint = [1, 1]
+
+# --- Watchtowers flanking south gate ---
+[[seed.layout.buildings]]
+type = "Watchtower"
+cell = [4, 19]
+footprint = [2, 2]
+material = "stone"
+
+[[seed.layout.buildings]]
+type = "Watchtower"
+cell = [17, 19]
+footprint = [2, 2]
+material = "stone"
+
+# --- Farms (rows 16-18) ---
+[[seed.layout.buildings]]
+type = "Farm"
+cell = [6, 16]
+footprint = [3, 3]
+
+[[seed.layout.buildings]]
+type = "Farm"
+cell = [12, 16]
+footprint = [3, 3]
+
+# --- Roads ---
+# Main road: south gate → center → manor
+[[seed.layout.roads]]
+waypoints = [[11, 19], [11, 16], [11, 12], [11, 9], [11, 6]]
+
+# Cross road: west gate → forge → barracks
+[[seed.layout.roads]]
+waypoints = [[4, 12], [7, 13], [13, 13], [16, 13]]
+
+# --- Zones ---
+[[seed.layout.zones]]
+zone = "residential"
+from = [4, 4]
+to = [19, 10]
+
+[[seed.layout.zones]]
+zone = "military"
+from = [14, 11]
+to = [19, 15]
+
+[[seed.layout.zones]]
+zone = "industrial"
+from = [4, 11]
+to = [13, 15]
+
+# --- NPCs ---
+[[seed.npcs]]
+class = "warrior"
+level = [3, 6]
+count = 4
+is_garrison = true
+
+[[seed.npcs]]
+class = "archer"
+level = [4, 7]
+count = 3
+is_garrison = true
+
+# --- Challenge ---
+[[challenges]]
+category = "military"
+sub_type = "raid"
+severity = [0.5, 0.7]
+direction = "south"
+
+[[challenges.enemies]]
+profile = "enemy_profiles/orcs.toml"
+count = [12, 20]
+
+sim_ticks = 400
+num_random_baselines = 5

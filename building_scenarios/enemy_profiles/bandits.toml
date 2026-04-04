@@ -1,0 +1,9 @@
+type_name = "bandit_raider"
+level_range = [2, 6]
+count = 12
+can_jump = false
+can_climb = true
+can_tunnel = false
+can_fly = false
+has_siege = false
+siege_damage = 0.0

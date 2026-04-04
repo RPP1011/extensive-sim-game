@@ -1,0 +1,47 @@
+settlement_level = 1
+population = [10, 20]
+tech_tier = 1
+terrain = "mountain_pass"
+age_ticks = [200, 800]
+
+[stockpiles]
+wood = [10, 20]
+iron = [5, 15]
+food = [15, 30]
+stone = [20, 50]
+
+# Mountain pass — stone is abundant, wood is scarce
+# Natural chokepoint limits buildable area but gives defensive advantage
+
+[[buildings]]
+building_type = "House"
+count = 4
+
+[[buildings]]
+building_type = "Farm"
+count = 1
+
+[[buildings]]
+building_type = "Well"
+count = 1
+
+# Natural rock walls on two sides — only need to fortify the pass openings
+[[buildings]]
+building_type = "Wall"
+count = 4
+
+[[npcs]]
+class = "farmer"
+level = [1, 3]
+count = 3
+
+[[npcs]]
+class = "laborer"
+level = [1, 3]
+count = 3
+
+[[npcs]]
+class = "warrior"
+level = [3, 5]
+count = 2
+is_garrison = true

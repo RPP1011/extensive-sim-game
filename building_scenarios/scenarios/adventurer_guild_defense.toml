@@ -1,0 +1,54 @@
+[meta]
+name = "Garrison Compensation — Adventurer Guild Placement"
+description = "Resource-poor settlement with high-level adventurers. Tests whether oracle places guild at weak perimeter instead of investing in expensive structural defense."
+tags = ["unit_capability", "garrison_vs_structure", "resource_scarcity", "high_value_npc"]
+matrix_cells = [
+    { challenge = "unit_capability", decision = "placement" },
+    { challenge = "military", decision = "placement" },
+    { challenge = "economic", decision = "prioritization" },
+    { challenge = "high_value_npc", decision = "placement" },
+]
+
+[seed]
+template = "seeds/village_river.toml"
+tech_tier = 1
+
+# Scarce building resources
+[seed.stockpiles]
+wood = [5, 12]
+iron = [0, 3]
+food = [30, 50]
+
+# But we have strong fighters
+[[seed.npcs]]
+class = "adventurer"
+level = [10, 15]
+count = 4
+is_garrison = true
+
+[[seed.npcs]]
+class = "adventurer"
+level = [7, 10]
+count = 3
+is_garrison = true
+
+[[seed.high_value_npcs]]
+role = "guild_master"
+level = [14, 18]
+class = "warrior"
+protection_priority = 0.4
+
+# The guild master IS the defense — low protection priority for themselves
+
+[[challenges]]
+category = "military"
+sub_type = "raid"
+severity = [0.5, 0.7]
+direction = "west"
+
+[[challenges.enemies]]
+profile = "enemy_profiles/bandits.toml"
+count = [10, 18]
+
+sim_ticks = 400
+num_random_baselines = 8

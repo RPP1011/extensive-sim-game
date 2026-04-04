@@ -3,9 +3,11 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use super::fidelity::Fidelity;
+use super::building_ai::types::ConstructionEvent;
 use super::state::{
-    ChronicleEntry, EntityField, EntityKind, FactionField, ItemData, PriceReport, QuestDelta,
-    RegionField, RelationKind, SettlementField, StatusEffect, WorldEvent, WorldTeam,
+    BuildingStructural, ChronicleEntry, EnemyCapabilities, EntityField, EntityKind, FactionField,
+    ItemData, PriceReport, QuestDelta, RegionField, RelationKind, SettlementField, StatusEffect,
+    WorldEvent, WorldTeam,
 };
 use super::NUM_COMMODITIES;
 
@@ -256,6 +258,14 @@ pub enum WorldDelta {
     },
     FormApprenticeship { mentor_id: u32, apprentice_id: u32, tick: u64 },
     GraduateApprenticeship { mentor_id: u32, apprentice_id: u32 },
+
+    // --- Building intelligence ---
+    /// Set detailed structural specification on a building entity.
+    SetBuildingStructural { building_id: u32, structural: BuildingStructural },
+    /// Record a construction event into a settlement's memory.
+    RecordConstructionEvent { settlement_id: u32, event: ConstructionEvent },
+    /// Set enemy capability flags on an entity.
+    SetEnemyCapabilities { entity_id: u32, capabilities: EnemyCapabilities },
 }
 
 // ---------------------------------------------------------------------------
@@ -384,6 +394,14 @@ pub struct MergedDeltas {
 
     /// Profitable trade completions: (entity_id, home_settlement_id, dest_settlement_id, profit).
     pub trade_completions: Vec<(u32, u32, u32, f32)>,
+
+    // --- Building intelligence accumulators ---
+    /// Building structural updates. Last-write-wins per building_id.
+    pub building_structural_sets: HashMap<u32, super::state::BuildingStructural>,
+    /// Construction events to record into settlement memory.
+    pub construction_events: Vec<(u32, ConstructionEvent)>,
+    /// Enemy capability updates. Last-write-wins per entity_id.
+    pub enemy_capability_sets: HashMap<u32, super::state::EnemyCapabilities>,
 }
 
 impl MergedDeltas {
@@ -434,6 +452,9 @@ impl MergedDeltas {
         self.apprenticeship_formations.clear();
         self.apprenticeship_graduations.clear();
         self.trade_completions.clear();
+        self.building_structural_sets.clear();
+        self.construction_events.clear();
+        self.enemy_capability_sets.clear();
     }
 
     /// Merge a single delta into this accumulator (in-place, no alloc).
@@ -598,6 +619,17 @@ fn merge_one(m: &mut MergedDeltas, delta: WorldDelta) {
         }
         WorldDelta::RecordTradeCompletion { entity_id, home_settlement_id, dest_settlement_id, profit } => {
             m.trade_completions.push((entity_id, home_settlement_id, dest_settlement_id, profit));
+        }
+
+        // --- Building intelligence ---
+        WorldDelta::SetBuildingStructural { building_id, structural } => {
+            m.building_structural_sets.insert(building_id, structural);
+        }
+        WorldDelta::RecordConstructionEvent { settlement_id, event } => {
+            m.construction_events.push((settlement_id, event));
+        }
+        WorldDelta::SetEnemyCapabilities { entity_id, capabilities } => {
+            m.enemy_capability_sets.insert(entity_id, capabilities);
         }
     }
 }

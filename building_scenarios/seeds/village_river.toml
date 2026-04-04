@@ -1,0 +1,53 @@
+settlement_level = 2
+population = [20, 50]
+tech_tier = 2
+terrain = "river"
+age_ticks = [500, 2000]
+
+[stockpiles]
+wood = [30, 80]
+iron = [5, 20]
+food = [40, 100]
+stone = [10, 40]
+
+[[buildings]]
+building_type = "House"
+count = 8
+
+[[buildings]]
+building_type = "Farm"
+count = 2
+
+[[buildings]]
+building_type = "Sawmill"
+count = 1
+
+[[buildings]]
+building_type = "Market"
+count = 1
+
+[[buildings]]
+building_type = "Well"
+count = 1
+
+[[npcs]]
+class = "farmer"
+level = [2, 5]
+count = 6
+
+[[npcs]]
+class = "laborer"
+level = [1, 4]
+count = 5
+
+[[npcs]]
+class = "militia"
+level = [2, 4]
+count = 3
+is_garrison = true
+
+[[high_value_npcs]]
+role = "village_elder"
+level = [5, 8]
+class = "leader"
+protection_priority = 0.7

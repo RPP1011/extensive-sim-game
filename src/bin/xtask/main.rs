@@ -11,6 +11,7 @@ mod ascii_gen_cmd;
 mod champion_gen;
 mod world_sim_cmd;
 mod visualize_cmd;
+mod building_ai_cmd;
 
 use std::process::ExitCode;
 
@@ -46,5 +47,6 @@ fn main() -> ExitCode {
         }
         TaskCommand::WorldSim(args) => world_sim_cmd::run_world_sim(args),
         TaskCommand::Visualize(args) => visualize_cmd::run_visualize(args),
+        TaskCommand::BuildingAi(cmd) => building_ai_cmd::run_building_ai(cmd),
     }
 }

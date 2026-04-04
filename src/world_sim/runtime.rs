@@ -492,6 +492,10 @@ impl FlatMergedDeltas {
             WorldDelta::RecordTradeCompletion { entity_id, home_settlement_id, dest_settlement_id, profit } => {
                 self.trade_completions.push((entity_id, home_settlement_id, dest_settlement_id, profit));
             }
+            // Building intelligence system deltas — handled by building_ai apply pass.
+            WorldDelta::SetBuildingStructural { .. }
+            | WorldDelta::RecordConstructionEvent { .. }
+            | WorldDelta::SetEnemyCapabilities { .. } => {}
         }
     }
 }
@@ -1278,7 +1282,9 @@ impl WorldSim {
         initial.ensure_treasury_buildings();
 
         // Spawn physical resource nodes based on region terrain.
-        super::systems::resource_nodes::spawn_initial_resources(&mut initial);
+        if !initial.skip_resource_init {
+            super::systems::resource_nodes::spawn_initial_resources(&mut initial);
+        }
 
         // Generate voxel terrain chunks around settlements and NPC positions.
         {
@@ -1560,6 +1566,7 @@ impl WorldSim {
         let postapply_start = Instant::now();
 
         super::systems::movement::advance_movement(&mut self.state);
+        super::systems::monster_ecology::advance_monster_ecology(&mut self.state);
         super::systems::death_consequences::advance_death_consequences(&mut self.state);
         super::systems::agent_inner::update_agent_inner_states(&mut self.state);
         // Goal stack replaced by flat utility evaluator:

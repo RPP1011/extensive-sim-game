@@ -1,0 +1,24 @@
+[meta]
+name = "Population Surge — Refugee Wave"
+description = "Large influx of refugees. Must rapidly expand housing, manage crowding, maintain food access, and potentially expand defenses for larger population."
+tags = ["population", "surge", "housing", "prioritization", "expansion"]
+matrix_cells = [
+    { challenge = "population", decision = "placement" },
+    { challenge = "population", decision = "zone_composition" },
+    { challenge = "population", decision = "footprint_geometry" },
+    { challenge = "population", decision = "prioritization" },
+    { challenge = "economic", decision = "sizing" },
+]
+
+[seed]
+template = "seeds/village_river.toml"
+# Already near capacity
+population = [45, 50]
+
+[[challenges]]
+category = "population"
+sub_type = "refugee_wave"
+severity = [0.6, 0.9]
+
+sim_ticks = 500
+num_random_baselines = 5

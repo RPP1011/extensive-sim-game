@@ -300,6 +300,7 @@ pub fn process_npc_builds(state: &mut WorldState) {
             specialization_tag: None,
             specialization_strength: 0.0,
             specialization_name: String::new(),
+            structural: None,
         });
 
         // Mark grid cells

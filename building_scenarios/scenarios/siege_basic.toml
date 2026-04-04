@@ -1,0 +1,26 @@
+[meta]
+name = "Basic Siege — Orc Warband"
+description = "Standard orc siege against a town with partial walls. Tests wall placement, height decisions, garrison positioning."
+tags = ["military", "defensive", "siege"]
+matrix_cells = [
+    { challenge = "military", decision = "placement" },
+    { challenge = "military", decision = "wall_composition" },
+    { challenge = "military", decision = "openings" },
+    { challenge = "unit_capability", decision = "placement" },
+]
+
+[seed]
+template = "seeds/town_hill.toml"
+
+[[challenges]]
+category = "military"
+sub_type = "siege"
+severity = [0.5, 0.8]
+direction = "north"
+
+[[challenges.enemies]]
+profile = "enemy_profiles/orcs.toml"
+count = [15, 30]
+
+sim_ticks = 600
+num_random_baselines = 5

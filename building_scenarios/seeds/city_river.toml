@@ -1,0 +1,135 @@
+settlement_level = 4
+population = [150, 250]
+tech_tier = 3
+terrain = "river"
+age_ticks = [5000, 10000]
+
+[stockpiles]
+wood = [100, 200]
+iron = [40, 80]
+food = [120, 250]
+stone = [60, 120]
+
+# Large city bisected by river — two districts connected by bridges
+# Dense, established, needs optimization and renovation more than greenfield placement
+
+[[buildings]]
+building_type = "House"
+count = 30
+
+[[buildings]]
+building_type = "Longhouse"
+count = 5
+
+[[buildings]]
+building_type = "Manor"
+count = 2
+
+[[buildings]]
+building_type = "Farm"
+count = 6
+
+[[buildings]]
+building_type = "Forge"
+count = 2
+
+[[buildings]]
+building_type = "Sawmill"
+count = 2
+
+[[buildings]]
+building_type = "Market"
+count = 3
+
+[[buildings]]
+building_type = "Warehouse"
+count = 3
+
+[[buildings]]
+building_type = "Barracks"
+count = 2
+
+[[buildings]]
+building_type = "Watchtower"
+count = 4
+
+[[buildings]]
+building_type = "Temple"
+count = 1
+
+[[buildings]]
+building_type = "GuildHall"
+count = 1
+
+[[buildings]]
+building_type = "CourtHouse"
+count = 1
+
+[[buildings]]
+building_type = "Library"
+count = 1
+
+[[buildings]]
+building_type = "Wall"
+count = 24
+
+[[npcs]]
+class = "farmer"
+level = [3, 7]
+count = 15
+
+[[npcs]]
+class = "laborer"
+level = [2, 6]
+count = 12
+
+[[npcs]]
+class = "guard"
+level = [5, 9]
+count = 10
+is_garrison = true
+
+[[npcs]]
+class = "archer"
+level = [4, 8]
+count = 6
+is_garrison = true
+
+[[npcs]]
+class = "smith"
+level = [5, 8]
+count = 3
+
+[[npcs]]
+class = "merchant"
+level = [4, 7]
+count = 6
+
+[[npcs]]
+class = "mason"
+level = [4, 7]
+count = 4
+
+[[high_value_npcs]]
+role = "lord"
+level = [10, 15]
+class = "warrior"
+protection_priority = 0.9
+
+[[high_value_npcs]]
+role = "master_smith"
+level = [8, 12]
+class = "smith"
+protection_priority = 0.6
+
+[[high_value_npcs]]
+role = "guild_master"
+level = [7, 10]
+class = "merchant"
+protection_priority = 0.5
+
+[[high_value_npcs]]
+role = "high_priest"
+level = [8, 11]
+class = "cleric"
+protection_priority = 0.7

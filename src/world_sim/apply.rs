@@ -655,6 +655,31 @@ pub(super) fn apply_campaign_deltas(state: &mut WorldState, merged: &MergedDelta
     if merged.guild_reputation_delta != 0.0 {
         state.guild.reputation = (state.guild.reputation + merged.guild_reputation_delta).clamp(0.0, 100.0);
     }
+
+    // --- Building intelligence ---
+
+    // Building structural updates (last-write-wins per building_id).
+    for (&building_id, structural) in &merged.building_structural_sets {
+        if let Some(entity) = state.entity_mut(building_id) {
+            if let Some(building) = entity.building.as_mut() {
+                building.structural = Some(structural.clone());
+            }
+        }
+    }
+
+    // Construction memory events.
+    for (settlement_id, event) in &merged.construction_events {
+        if let Some(settlement) = state.settlement_mut(*settlement_id) {
+            settlement.construction_memory.short_term.push(event.clone());
+        }
+    }
+
+    // Enemy capability updates (last-write-wins per entity_id).
+    for (&entity_id, &capabilities) in &merged.enemy_capability_sets {
+        if let Some(entity) = state.entity_mut(entity_id) {
+            entity.enemy_capabilities = Some(capabilities);
+        }
+    }
 }
 
 /// Apply an additive delta to the correct field on an entity.

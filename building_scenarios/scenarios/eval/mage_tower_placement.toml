@@ -1,0 +1,208 @@
+# EVAL SET — Unit Capability × Class-Specific Infrastructure
+# Settlement with mages and archers needs class-specific buildings.
+# Tests mage tower placement (spell range coverage), archer platform sizing,
+# training yard near threat, garrison capacity planning.
+
+[meta]
+name = "Unit Infrastructure — Mage Tower & Archer Platforms"
+description = "Settlement with mixed ranged garrison needs class-specific infrastructure. Oracle should place mage tower for maximum spell coverage and archer platforms at optimal engagement range."
+tags = ["unit_capability", "class_infrastructure", "mage_tower", "archer_platform", "eval"]
+matrix_cells = [
+    { challenge = "unit_capability", decision = "placement" },
+    { challenge = "unit_capability", decision = "vertical_design" },
+    { challenge = "unit_capability", decision = "footprint_geometry" },
+    { challenge = "unit_capability", decision = "openings" },
+]
+
+[seed]
+template = "seeds/town_hill.toml"
+settlement_level = 3
+tech_tier = 2
+
+[seed.stockpiles]
+wood = [20, 35]
+iron = [10, 20]
+food = [40, 60]
+
+# --- Layout: Hill town, threat from west, ranged garrison ---
+# Grid layout (24x24, north=high ground):
+#   - Elevation rises west→east (high ground east)
+#   - Threat from west (low approach)
+#   - Mage tower should go on high ground for max spell range
+#   - Archer platforms along west wall at engagement range
+#   - Warriors at west gate
+#   - Key test: class-specific placement exploiting terrain
+[seed.layout]
+grid_size = [24, 24]
+
+# --- Stone wall circuit ---
+[[seed.layout.wall_circuits]]
+waypoints = [[3, 1], [20, 1], [20, 19], [3, 19]]
+material = "stone"
+height = 4
+thickness = 1
+
+# --- Gates ---
+[[seed.layout.gates]]
+cell = [3, 10]
+facing = "west"
+width = 2
+
+[[seed.layout.gates]]
+cell = [12, 19]
+facing = "south"
+width = 1
+
+# --- Civic (east / high ground) ---
+[[seed.layout.buildings]]
+type = "Manor"
+cell = [14, 2]
+footprint = [3, 3]
+material = "stone"
+facing = "west"
+
+[[seed.layout.buildings]]
+type = "Temple"
+cell = [18, 2]
+footprint = [2, 3]
+material = "stone"
+
+[[seed.layout.buildings]]
+type = "Market"
+cell = [10, 3]
+footprint = [3, 2]
+
+# --- Residential (center) ---
+[[seed.layout.buildings]]
+type = "House"
+cell = [6, 5]
+footprint = [2, 2]
+
+[[seed.layout.buildings]]
+type = "House"
+cell = [9, 5]
+footprint = [2, 2]
+
+[[seed.layout.buildings]]
+type = "House"
+cell = [12, 5]
+footprint = [2, 2]
+
+[[seed.layout.buildings]]
+type = "House"
+cell = [15, 5]
+footprint = [2, 2]
+
+[[seed.layout.buildings]]
+type = "House"
+cell = [18, 5]
+footprint = [2, 2]
+
+# --- Military (west side, facing threat) ---
+[[seed.layout.buildings]]
+type = "Barracks"
+cell = [5, 9]
+footprint = [4, 3]
+material = "stone"
+facing = "west"
+
+[[seed.layout.buildings]]
+type = "Watchtower"
+cell = [4, 4]
+footprint = [2, 2]
+material = "stone"
+
+[[seed.layout.buildings]]
+type = "Watchtower"
+cell = [4, 15]
+footprint = [2, 2]
+material = "stone"
+
+# --- Industrial (center-east) ---
+[[seed.layout.buildings]]
+type = "Forge"
+cell = [10, 10]
+footprint = [3, 2]
+
+[[seed.layout.buildings]]
+type = "Warehouse"
+cell = [14, 10]
+footprint = [4, 3]
+
+[[seed.layout.buildings]]
+type = "Well"
+cell = [10, 13]
+footprint = [1, 1]
+
+# --- Farms (south) ---
+[[seed.layout.buildings]]
+type = "Farm"
+cell = [6, 14]
+footprint = [3, 3]
+
+[[seed.layout.buildings]]
+type = "Farm"
+cell = [12, 14]
+footprint = [3, 3]
+
+# --- Roads ---
+# West gate → barracks → east
+[[seed.layout.roads]]
+waypoints = [[3, 10], [5, 10], [10, 10], [14, 10], [20, 10]]
+
+# North-south spine
+[[seed.layout.roads]]
+waypoints = [[12, 1], [12, 5], [12, 10], [12, 14], [12, 19]]
+
+# --- Zones ---
+[[seed.layout.zones]]
+zone = "residential"
+from = [5, 4]
+to = [19, 7]
+
+[[seed.layout.zones]]
+zone = "military"
+from = [3, 8]
+to = [9, 13]
+
+[[seed.layout.zones]]
+zone = "industrial"
+from = [10, 9]
+to = [18, 14]
+
+# Strong ranged garrison
+[[seed.npcs]]
+class = "mage"
+level = [6, 10]
+count = 3
+is_garrison = true
+
+[[seed.npcs]]
+class = "archer"
+level = [5, 8]
+count = 4
+is_garrison = true
+
+[[seed.npcs]]
+class = "warrior"
+level = [4, 6]
+count = 3
+is_garrison = true
+
+[[challenges]]
+category = "unit_capability"
+sub_type = "class_infrastructure"
+severity = [0.5, 0.7]
+
+[[challenges]]
+category = "military"
+sub_type = "raid"
+severity = [0.6, 0.8]
+direction = "west"
+
+[[challenges.enemies]]
+profile = "enemy_profiles/orcs.toml"
+count = [15, 25]
+
+sim_ticks = 400
+num_random_baselines = 5

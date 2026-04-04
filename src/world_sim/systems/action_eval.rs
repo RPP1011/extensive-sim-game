@@ -975,6 +975,7 @@ fn execute_action(state: &mut WorldState, entity_idx: usize, action: &CandidateA
                 specialization_tag: None,
                 specialization_strength: 0.0,
                 specialization_name: String::new(),
+                structural: None,
             });
             state.entities.push(bld);
             state.rebuild_entity_cache();

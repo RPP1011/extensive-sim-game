@@ -5,6 +5,7 @@
 //! 2. **Compute**: Every entity reads the snapshot, computes its delta independently
 //! 3. **Merge**: All deltas combine into the next world state (commutative + associative)
 
+pub mod building_ai;
 pub mod city_grid;
 pub mod voxel;
 pub mod sdf;

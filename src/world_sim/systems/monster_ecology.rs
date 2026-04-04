@@ -212,8 +212,8 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
         let hunger_factor = 1.0 - wild_food.min(1.0);
         let speed = strength * (0.5 + hunger_factor);
 
-        // Monster migration movement is handled by move_target set in the
-        // post-apply phase (advance_monster_ecology) and advance_movement().
+        // Migration movement is handled by advance_monster_ecology (post-apply).
+        // That function reads settlement positions and sets move_target directly.
         let _ = (best_target, sign, speed);
     }
 
@@ -333,9 +333,73 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
             // Sea monsters are level 20+ with high HP (5× base).
             if entity.level < 20 || entity.max_hp < 300.0 { continue; }
 
-            // Sea monster patrol movement is handled by move_target set in
-            // the post-apply phase and advance_movement().
+            // Sea monster patrol movement handled by advance_monster_ecology.
             let _ = &coastal_pos;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Post-apply phase: set move_target for alive monsters toward settlements
+// ---------------------------------------------------------------------------
+
+/// Called after delta application. Sets `move_target` on alive monsters
+/// that don't already have one, directing them toward the nearest settlement.
+/// Seasonal modifiers control direction (toward vs. away).
+pub fn advance_monster_ecology(state: &mut WorldState) {
+    // Only run on ecology ticks.
+    if state.tick % ECOLOGY_TICK_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
+
+    // Pre-collect settlement positions.
+    let settlements: Vec<(f32, f32)> = state.settlements.iter().map(|s| s.pos).collect();
+    if settlements.is_empty() {
+        return;
+    }
+
+    // Determine seasonal drift direction.
+    let season = super::seasons::current_season(state.tick);
+    let sign: f32 = match season {
+        super::seasons::Season::Winter => 1.0,    // toward settlements
+        super::seasons::Season::Summer => -1.0,   // away from settlements
+        _ => 1.0,                                 // Spring/Autumn: toward
+    };
+
+    for i in 0..state.entities.len() {
+        let entity = &state.entities[i];
+        if !entity.alive || entity.kind != EntityKind::Monster {
+            continue;
+        }
+        // Skip monsters that already have a move target.
+        if entity.move_target.is_some() {
+            continue;
+        }
+
+        // Find nearest settlement.
+        let mut nearest = settlements[0];
+        let mut best_dist_sq = f32::MAX;
+        for &spos in &settlements {
+            let dx = spos.0 - entity.pos.0;
+            let dy = spos.1 - entity.pos.1;
+            let d2 = dx * dx + dy * dy;
+            if d2 < best_dist_sq {
+                best_dist_sq = d2;
+                nearest = spos;
+            }
+        }
+
+        // Direction toward settlement, modulated by season sign.
+        // sign > 0 → toward settlement, sign < 0 → away.
+        let dx = nearest.0 - entity.pos.0;
+        let dy = nearest.1 - entity.pos.1;
+        let dist = best_dist_sq.sqrt().max(1.0);
+        let nx = dx / dist;
+        let ny = dy / dist;
+
+        // Target: 30 units in the chosen direction from current position.
+        let step = 30.0 * sign;
+        let target = (entity.pos.0 + nx * step, entity.pos.1 + ny * step);
+        state.entities[i].move_target = Some(target);
     }
 }

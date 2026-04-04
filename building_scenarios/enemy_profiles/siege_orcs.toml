@@ -1,0 +1,10 @@
+type_name = "orc_siege_crew"
+level_range = [5, 10]
+count = 15
+can_jump = true
+jump_height = 3
+can_climb = false
+can_tunnel = false
+can_fly = false
+has_siege = true
+siege_damage = 5.0

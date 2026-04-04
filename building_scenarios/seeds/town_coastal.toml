@@ -1,0 +1,90 @@
+settlement_level = 3
+population = [60, 100]
+tech_tier = 2
+terrain = "coastal"
+age_ticks = [2000, 4000]
+
+[stockpiles]
+wood = [50, 100]
+iron = [15, 40]
+food = [60, 120]
+stone = [20, 50]
+
+# Coastal town — one side is ocean, dock access, trade-oriented
+
+[[buildings]]
+building_type = "House"
+count = 12
+
+[[buildings]]
+building_type = "Longhouse"
+count = 2
+
+[[buildings]]
+building_type = "Farm"
+count = 3
+
+[[buildings]]
+building_type = "Market"
+count = 2
+
+[[buildings]]
+building_type = "Warehouse"
+count = 2
+
+[[buildings]]
+building_type = "Forge"
+count = 1
+
+[[buildings]]
+building_type = "Sawmill"
+count = 1
+
+[[buildings]]
+building_type = "Watchtower"
+count = 1
+
+[[buildings]]
+building_type = "Wall"
+count = 8
+
+# Sea wall / dock area not walled — only landward side
+
+[[npcs]]
+class = "farmer"
+level = [2, 5]
+count = 8
+
+[[npcs]]
+class = "laborer"
+level = [2, 4]
+count = 6
+
+[[npcs]]
+class = "merchant"
+level = [3, 6]
+count = 4
+
+[[npcs]]
+class = "guard"
+level = [3, 6]
+count = 4
+is_garrison = true
+
+[[npcs]]
+class = "archer"
+level = [3, 5]
+count = 2
+is_garrison = true
+
+[[high_value_npcs]]
+role = "harbor_master"
+level = [6, 9]
+class = "merchant"
+protection_priority = 0.5
+
+[[high_value_npcs]]
+role = "lord"
+level = [7, 10]
+class = "warrior"
+protection_priority = 0.8

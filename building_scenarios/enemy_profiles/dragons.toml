@@ -1,0 +1,9 @@
+type_name = "young_dragon"
+level_range = [12, 18]
+count = 1
+can_jump = false
+can_climb = false
+can_tunnel = false
+can_fly = true
+has_siege = false
+siege_damage = 0.0

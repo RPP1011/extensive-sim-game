@@ -1,0 +1,29 @@
+[meta]
+name = "Winter Preparation — Resource Scarce"
+description = "Winter approaching, limited wood and iron. Must prioritize: insulate housing, build granary, or reinforce walls against winter raiders? Tests prioritization under constraint."
+tags = ["temporal", "economic", "seasonal", "prioritization", "resource_scarcity"]
+matrix_cells = [
+    { challenge = "temporal", decision = "prioritization" },
+    { challenge = "economic", decision = "material_selection" },
+    { challenge = "economic", decision = "renovation_upgrade" },
+    { challenge = "population", decision = "sizing" },
+]
+
+[seed]
+template = "seeds/village_river.toml"
+tech_tier = 2
+
+# Override: scarce resources
+[seed.stockpiles]
+wood = [8, 15]
+iron = [2, 5]
+food = [20, 35]
+
+[[challenges]]
+category = "temporal"
+sub_type = "winter_preparation"
+severity = 0.7
+deadline_ticks = 200
+
+sim_ticks = 300
+num_random_baselines = 5

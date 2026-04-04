@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Settlement Layout Visualizer</title>
+<style>
+  body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; margin: 20px; }
+  h1 { color: #e94560; margin-bottom: 5px; }
+  h2 { color: #8a8aaa; font-weight: normal; margin-top: 0; }
+  .grid-container { display: inline-block; border: 2px solid #333; }
+  canvas { display: block; }
+  .legend { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 15px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .legend-swatch { width: 16px; height: 16px; border: 1px solid #555; }
+  .info { margin-top: 15px; background: #16213e; padding: 12px; border-radius: 4px; max-width: 700px; }
+  .info p { margin: 4px 0; }
+  .threat { color: #e94560; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<h1>Hillside Raid — Eval Scenario Layout</h1>
+<h2>Terrain/Geography x Military | 24x24 grid</h2>
+
+<div class="grid-container">
+  <canvas id="grid" width="720" height="720"></canvas>
+</div>
+
+<div class="legend" id="legend"></div>
+
+<div class="info">
+  <p><strong>Scenario:</strong> Hillside village raided from the south (low ground)</p>
+  <p><strong>Terrain:</strong> North = cliff/high ground (elevation), South = low approach</p>
+  <p class="threat">Enemy approach: SOUTH (orcs, 12-20 count, severity 0.5-0.7)</p>
+  <p><strong>Key test:</strong> Oracle should exploit elevation, fortify slope, place ranged units high</p>
+</div>
+
+<script>
+const CELL = 30;
+const GRID = 24;
+const canvas = document.getElementById('grid');
+const ctx = canvas.getContext('2d');
+
+// Colors
+const COLORS = {
+  bg: '#0f3460',
+  grid: '#1a1a4e',
+  wall: '#8b8b00',
+  gate: '#ffd700',
+  road: '#7a6a5a',
+  zone_residential: 'rgba(100, 180, 255, 0.15)',
+  zone_military: 'rgba(255, 80, 80, 0.15)',
+  zone_industrial: 'rgba(255, 180, 60, 0.15)',
+  Manor: '#9b59b6',
+  Market: '#e67e22',
+  Temple: '#f1c40f',
+  House: '#3498db',
+  Barracks: '#e74c3c',
+  Forge: '#e67e22',
+  Warehouse: '#95a5a6',
+  Well: '#00bcd4',
+  Watchtower: '#c0392b',
+  Farm: '#27ae60',
+  threat: '#ff1744',
+};
+
+// Layout data from TOML
+const layout = {
+  grid_size: [24, 24],
+  wall_circuits: [
+    { waypoints: [[3,4],[20,4],[20,20],[3,20]], material: 'stone', height: 4 }
+  ],
+  gates: [
+    { cell: [11,20], facing: 'south', width: 2 },
+    { cell: [3,12], facing: 'west', width: 1 },
+  ],
+  buildings: [
+    { type: 'Manor', cell: [10,5], footprint: [4,3] },
+    { type: 'Market', cell: [5,5], footprint: [3,3] },
+    { type: 'Temple', cell: [15,5], footprint: [3,3] },
+    { type: 'House', cell: [5,9], footprint: [2,2] },
+    { type: 'House', cell: [8,9], footprint: [2,2] },
+    { type: 'House', cell: [11,9], footprint: [2,2] },
+    { type: 'House', cell: [14,9], footprint: [2,2] },
+    { type: 'House', cell: [17,9], footprint: [2,2] },
+    { type: 'Barracks', cell: [15,12], footprint: [4,3] },
+    { type: 'Forge', cell: [5,12], footprint: [3,2] },
+    { type: 'Warehouse', cell: [9,12], footprint: [4,3] },
+    { type: 'Well', cell: [13,13], footprint: [1,1] },
+    { type: 'Watchtower', cell: [4,19], footprint: [2,2] },
+    { type: 'Watchtower', cell: [19,19], footprint: [2,2] },
+    { type: 'Farm', cell: [6,16], footprint: [3,3] },
+    { type: 'Farm', cell: [12,16], footprint: [3,3] },
+  ],
+  roads: [
+    { waypoints: [[11,19],[11,16],[11,12],[11,9],[11,6]] },
+    { waypoints: [[4,12],[7,13],[13,13],[16,13]] },
+  ],
+  zones: [
+    { zone: 'residential', from: [4,4], to: [19,10] },
+    { zone: 'military', from: [14,11], to: [19,15] },
+    { zone: 'industrial', from: [4,11], to: [13,15] },
+  ],
+};
+
+// Elevation gradient (north = high, south = low)
+function elevationColor(row) {
+  const t = row / GRID;
+  const r = Math.floor(15 + t * 30);
+  const g = Math.floor(52 - t * 20);
+  const b = Math.floor(96 - t * 40);
+  return `rgb(${r},${g},${b})`;
+}
+
+// Draw background with elevation gradient
+for (let r = 0; r < GRID; r++) {
+  for (let c = 0; c < GRID; c++) {
+    ctx.fillStyle = elevationColor(r);
+    ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+  }
+}
+
+// Draw cliff edge (north, rows 0-1)
+for (let c = 0; c < GRID; c++) {
+  for (let r = 0; r < 2; r++) {
+    ctx.fillStyle = 'rgba(80, 60, 40, 0.7)';
+    ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+  }
+}
+// Cliff label
+ctx.fillStyle = '#a08060';
+ctx.font = '11px monospace';
+ctx.textAlign = 'center';
+ctx.fillText('CLIFF (natural defense)', GRID * CELL / 2, 14);
+
+// Draw zones
+for (const z of layout.zones) {
+  const key = 'zone_' + z.zone;
+  ctx.fillStyle = COLORS[key] || 'rgba(255,255,255,0.1)';
+  const x = z.from[0] * CELL;
+  const y = z.from[1] * CELL;
+  const w = (z.to[0] - z.from[0] + 1) * CELL;
+  const h = (z.to[1] - z.from[1] + 1) * CELL;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = COLORS[key]?.replace('0.15', '0.4') || '#333';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.strokeRect(x, y, w, h);
+  ctx.setLineDash([]);
+  // Zone label
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(z.zone, x + 4, y + 12);
+}
+
+// Draw grid lines
+ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+ctx.lineWidth = 0.5;
+for (let i = 0; i <= GRID; i++) {
+  ctx.beginPath(); ctx.moveTo(i * CELL, 0); ctx.lineTo(i * CELL, GRID * CELL); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, i * CELL); ctx.lineTo(GRID * CELL, i * CELL); ctx.stroke();
+}
+
+// Draw roads
+for (const road of layout.roads) {
+  ctx.strokeStyle = COLORS.road;
+  ctx.lineWidth = 4;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  for (let i = 0; i < road.waypoints.length; i++) {
+    const [c, r] = road.waypoints[i];
+    const x = c * CELL + CELL / 2;
+    const y = r * CELL + CELL / 2;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  // Road dots
+  for (const [c, r] of road.waypoints) {
+    ctx.fillStyle = COLORS.road;
+    ctx.beginPath();
+    ctx.arc(c * CELL + CELL / 2, r * CELL + CELL / 2, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// Draw wall circuit
+for (const wc of layout.wall_circuits) {
+  ctx.strokeStyle = COLORS.wall;
+  ctx.lineWidth = 3;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  for (let i = 0; i < wc.waypoints.length; i++) {
+    const [c, r] = wc.waypoints[i];
+    const x = c * CELL + CELL / 2;
+    const y = r * CELL + CELL / 2;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.stroke();
+  // Wall dots at corners
+  for (const [c, r] of wc.waypoints) {
+    ctx.fillStyle = COLORS.wall;
+    ctx.beginPath();
+    ctx.arc(c * CELL + CELL / 2, r * CELL + CELL / 2, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// Draw gates
+for (const g of layout.gates) {
+  ctx.fillStyle = COLORS.gate;
+  ctx.fillRect(g.cell[0] * CELL - 1, g.cell[1] * CELL - 1, g.width * CELL + 2, CELL + 2);
+  ctx.fillStyle = '#000';
+  ctx.font = 'bold 9px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('G', g.cell[0] * CELL + (g.width * CELL) / 2, g.cell[1] * CELL + CELL / 2 + 3);
+}
+
+// Draw buildings
+for (const b of layout.buildings) {
+  const color = COLORS[b.type] || '#888';
+  const x = b.cell[0] * CELL + 1;
+  const y = b.cell[1] * CELL + 1;
+  const w = b.footprint[0] * CELL - 2;
+  const h = b.footprint[1] * CELL - 2;
+
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.85;
+  ctx.fillRect(x, y, w, h);
+  ctx.globalAlpha = 1.0;
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, w, h);
+
+  // Label
+  ctx.fillStyle = '#fff';
+  ctx.font = b.footprint[0] >= 3 ? '10px monospace' : '8px monospace';
+  ctx.textAlign = 'center';
+  const label = b.type.length > 6 ? b.type.slice(0, 6) : b.type;
+  ctx.fillText(label, x + w / 2, y + h / 2 + 3);
+}
+
+// Draw threat arrow
+ctx.strokeStyle = COLORS.threat;
+ctx.lineWidth = 3;
+ctx.setLineDash([8, 4]);
+const arrowX = GRID * CELL / 2;
+const arrowY1 = GRID * CELL + 0;
+const arrowY2 = GRID * CELL - 40;
+ctx.beginPath();
+ctx.moveTo(arrowX - 60, arrowY1);
+ctx.lineTo(arrowX - 60, arrowY2);
+ctx.moveTo(arrowX, arrowY1);
+ctx.lineTo(arrowX, arrowY2);
+ctx.moveTo(arrowX + 60, arrowY1);
+ctx.lineTo(arrowX + 60, arrowY2);
+ctx.stroke();
+ctx.setLineDash([]);
+
+// Arrow heads
+for (const dx of [-60, 0, 60]) {
+  ctx.beginPath();
+  ctx.moveTo(arrowX + dx - 6, arrowY2 + 10);
+  ctx.lineTo(arrowX + dx, arrowY2);
+  ctx.lineTo(arrowX + dx + 6, arrowY2 + 10);
+  ctx.stroke();
+}
+
+ctx.fillStyle = COLORS.threat;
+ctx.font = 'bold 12px monospace';
+ctx.textAlign = 'center';
+ctx.fillText('ENEMY APPROACH (south)', arrowX, GRID * CELL - 4);
+
+// Elevation labels on right side
+ctx.save();
+ctx.fillStyle = 'rgba(255,255,255,0.3)';
+ctx.font = '10px monospace';
+ctx.textAlign = 'right';
+ctx.fillText('HIGH', GRID * CELL - 4, 3 * CELL + 12);
+ctx.fillText('MID', GRID * CELL - 4, 11 * CELL + 12);
+ctx.fillText('LOW', GRID * CELL - 4, 18 * CELL + 12);
+ctx.restore();
+
+// Build legend
+const legendEl = document.getElementById('legend');
+const items = [
+  ['Manor', COLORS.Manor], ['Market', COLORS.Market], ['Temple', COLORS.Temple],
+  ['House', COLORS.House], ['Barracks', COLORS.Barracks], ['Forge', COLORS.Forge],
+  ['Warehouse', COLORS.Warehouse], ['Well', COLORS.Well], ['Watchtower', COLORS.Watchtower],
+  ['Farm', COLORS.Farm], ['Wall', COLORS.wall], ['Gate', COLORS.gate],
+  ['Road', COLORS.road], ['Threat', COLORS.threat],
+];
+for (const [name, color] of items) {
+  const div = document.createElement('div');
+  div.className = 'legend-item';
+  div.innerHTML = `<div class="legend-swatch" style="background:${color}"></div>${name}`;
+  legendEl.appendChild(div);
+}
+</script>
+</body>
+</html>

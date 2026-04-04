@@ -1,0 +1,58 @@
+settlement_level = 2
+population = [25, 40]
+tech_tier = 1
+terrain = "swamp"
+age_ticks = [400, 1500]
+
+[stockpiles]
+wood = [40, 80]
+iron = [2, 8]
+food = [25, 50]
+
+# Wood is abundant in swamp, stone/iron is scarce
+# Buildings are on stilts or raised platforms — no basements
+
+[[buildings]]
+building_type = "House"
+count = 6
+
+[[buildings]]
+building_type = "Longhouse"
+count = 1
+
+[[buildings]]
+building_type = "Farm"
+count = 2
+
+[[buildings]]
+building_type = "Sawmill"
+count = 1
+
+[[buildings]]
+building_type = "Well"
+count = 1
+
+# No walls — swamp terrain makes palisade difficult
+# Wooden walkways serve as roads between raised buildings
+
+[[npcs]]
+class = "farmer"
+level = [2, 4]
+count = 5
+
+[[npcs]]
+class = "laborer"
+level = [1, 3]
+count = 4
+
+[[npcs]]
+class = "hunter"
+level = [3, 5]
+count = 3
+is_garrison = true
+
+[[high_value_npcs]]
+role = "village_elder"
+level = [5, 7]
+class = "leader"
+protection_priority = 0.6

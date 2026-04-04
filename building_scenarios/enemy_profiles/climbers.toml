@@ -1,0 +1,10 @@
+# Nimble climbers — scale walls, ignore height, countered by smooth/overhang walls
+
+[defaults]
+type_name = "climber"
+level_range = [3, 7]
+can_climb = true
+can_jump = false
+can_tunnel = false
+can_fly = false
+has_siege = false

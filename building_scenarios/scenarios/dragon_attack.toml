@@ -1,0 +1,25 @@
+[meta]
+name = "Aerial Threat — Dragon"
+description = "Flying enemy bypasses all walls. Tests garrison-based defense, fire-resistant materials, safe rooms for high-value NPCs, and whether walls are deprioritized entirely."
+tags = ["military", "aerial", "garrison_vs_structure", "fire", "high_value_npc"]
+matrix_cells = [
+    { challenge = "military", decision = "material_selection" },
+    { challenge = "military", decision = "roof_design" },
+    { challenge = "unit_capability", decision = "placement" },
+    { challenge = "high_value_npc", decision = "interior_flow" },
+    { challenge = "high_value_npc", decision = "room_specialization" },
+]
+
+[seed]
+template = "seeds/town_hill.toml"
+
+[[challenges]]
+category = "military"
+sub_type = "aerial_attack"
+severity = [0.7, 1.0]
+
+[[challenges.enemies]]
+profile = "enemy_profiles/dragons.toml"
+
+sim_ticks = 300
+num_random_baselines = 5

@@ -438,6 +438,10 @@ pub struct WorldState {
 
     /// World events log (recent events for system queries, bounded).
     pub world_events: Vec<WorldEvent>,
+
+    /// When true, WorldSim::new skips resource node spawning (for building AI scenarios).
+    #[serde(default)]
+    pub skip_resource_init: bool,
 }
 
 impl WorldState {
@@ -472,6 +476,7 @@ impl WorldState {
             prophecies: super::systems::prophecy::generate_prophecies(seed),
             relations: HashMap::new(),
             world_events: Vec::new(),
+            skip_resource_init: false,
         }
     }
 
@@ -527,6 +532,7 @@ impl WorldState {
                 specialization_tag: None,
                 specialization_strength: 0.0,
                 specialization_name: String::new(),
+                structural: None,
             });
             // Treasury inventory mirrors settlement stockpile + gold.
             let mut inv = Inventory::with_capacity(500.0);
@@ -1431,6 +1437,45 @@ impl BuildingType {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Building structural detail (integrates with building_ai::types)
+// ---------------------------------------------------------------------------
+
+use super::building_ai::types::{
+    BuildMaterial, ConstructionMemory, Direction, FootprintShape,
+    FoundationType, OpeningSpec, RoofType, WallComponentSpec,
+};
+
+/// Detailed structural specification for a building.
+/// Added as an optional field on BuildingData so existing serialized data is unaffected.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BuildingStructural {
+    pub shape: FootprintShape,
+    pub material: BuildMaterial,
+    pub roof_type: RoofType,
+    pub roof_material: BuildMaterial,
+    pub foundation_type: FoundationType,
+    pub foundation_depth: u8,
+    pub stories: u8,
+    pub has_basement: bool,
+    pub wall_specs: [WallComponentSpec; 4], // N, E, S, W
+    pub openings: Vec<OpeningSpec>,
+    pub defensive_integration: bool,
+    pub expansion_stubs: Vec<Direction>,
+}
+
+/// Capability flags for enemy entities (jump, climb, tunnel, fly, siege).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub struct EnemyCapabilities {
+    pub can_jump: bool,
+    pub jump_height: u8,
+    pub can_climb: bool,
+    pub can_tunnel: bool,
+    pub can_fly: bool,
+    pub has_siege: bool,
+    pub siege_damage: f32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildingData {
     pub building_type: BuildingType,
@@ -1497,6 +1542,11 @@ pub struct BuildingData {
     pub specialization_strength: f32,
     /// Human-readable specialization name (e.g., "Miners' Forge").
     pub specialization_name: String,
+
+    // Structural detail (building intelligence system)
+    /// Detailed structural specification — wall composition, roof, foundation, etc.
+    #[serde(default)]
+    pub structural: Option<BuildingStructural>,
 }
 
 impl Default for BuildingData {
@@ -1530,6 +1580,7 @@ impl Default for BuildingData {
             specialization_tag: None,
             specialization_strength: 0.0,
             specialization_name: String::new(),
+            structural: None,
         }
     }
 }
@@ -1727,6 +1778,11 @@ pub struct Entity {
     pub move_target: Option<(f32, f32)>,
     /// Speed multiplier (default 1.0). Stacks with `move_speed`.
     pub move_speed_mult: f32,
+
+    // Building intelligence integration
+    /// Enemy capability flags (jump, climb, tunnel, fly, siege).
+    #[serde(default)]
+    pub enemy_capabilities: Option<EnemyCapabilities>,
 }
 
 impl Entity {
@@ -1766,7 +1822,7 @@ impl Entity {
             move_speed: hot.move_speed, level: hot.level,
             status_effects: cold.status_effects.clone(), npc: cold.npc.clone(),
             building: None, item: None, resource: None, inventory: None,
-            move_target: None, move_speed_mult: 1.0,
+            move_target: None, move_speed_mult: 1.0, enemy_capabilities: None,
         }
     }
 
@@ -1796,6 +1852,7 @@ impl Entity {
             inventory: Some(Inventory::with_capacity(50.0)), // NPC backpack
             move_target: None,
             move_speed_mult: 1.0,
+            enemy_capabilities: None,
         }
     }
 
@@ -1833,6 +1890,7 @@ impl Entity {
             inventory: None,
             move_target: None,
             move_speed_mult: 1.0,
+            enemy_capabilities: None,
         }
     }
 
@@ -1862,6 +1920,7 @@ impl Entity {
             inventory: None, // set by caller based on building type
             move_target: None,
             move_speed_mult: 1.0,
+            enemy_capabilities: None,
         }
     }
 
@@ -1891,6 +1950,7 @@ impl Entity {
             inventory: None,
             move_target: None,
             move_speed_mult: 1.0,
+            enemy_capabilities: None,
         }
     }
 
@@ -1921,6 +1981,7 @@ impl Entity {
             inventory: None,
             move_target: None,
             move_speed_mult: 1.0,
+            enemy_capabilities: None,
         }
     }
 
@@ -3880,6 +3941,11 @@ pub struct SettlementState {
 
     /// Active service contracts posted by NPCs in this settlement.
     pub service_contracts: Vec<ServiceContract>,
+
+    // Building intelligence integration
+    /// Per-settlement construction memory (short/medium/long-term event history).
+    #[serde(default)]
+    pub construction_memory: ConstructionMemory,
 }
 
 impl SettlementState {
@@ -3901,6 +3967,7 @@ impl SettlementState {
             city_grid_idx: None,
             treasury_building_id: None,
             service_contracts: Vec::new(),
+            construction_memory: ConstructionMemory::default(),
         }
     }
 }
