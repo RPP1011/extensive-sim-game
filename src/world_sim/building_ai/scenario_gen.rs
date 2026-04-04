@@ -10,7 +10,6 @@ use std::path::Path;
 use super::features::{compute_spatial_features, SpatialFeatures};
 use super::scenario_config::*;
 use super::types::*;
-use crate::world_sim::city_grid::{CellState, CityGrid, InfluenceMap};
 use crate::world_sim::state::{
     tag, BuildingData, BuildingType, Entity, EntityKind, SettlementState, WorldState,
 };
@@ -123,14 +122,6 @@ pub fn generate_from_seed(seed: &SeedConfig, rng_seed: u64) -> WorldState {
         state.tick = ticks;
     }
 
-    // --- City grid ---
-    let terrain_str = seed.terrain.as_deref().unwrap_or("plains");
-    let grid = CityGrid::new(128, 128, settlement_id, terrain_str, effective_seed);
-    let influence = InfluenceMap::new(128, 128);
-    settlement.city_grid_idx = Some(state.city_grids.len());
-    state.city_grids.push(grid);
-    state.influence_maps.push(influence);
-
     state.settlements.push(settlement);
 
     // --- Buildings (from layout if present, else from buildings list) ---
@@ -151,12 +142,11 @@ pub fn generate_from_seed(seed: &SeedConfig, rng_seed: u64) -> WorldState {
             let (col, row) = (lb.cell.0 + offset_col, lb.cell.1 + offset_row);
             let (fw, fh) = lb.footprint;
 
-            // Compute world position from grid cell.
-            let world_pos = if let Some(gi) = state.settlements[0].city_grid_idx {
-                state.city_grids[gi].grid_to_world(col as usize, row as usize, settlement_pos)
-            } else {
-                settlement_pos
-            };
+            // Compute world position from grid cell (1:1 voxel mapping).
+            let world_pos = (
+                settlement_pos.0 + col as f32,
+                settlement_pos.1 + row as f32,
+            );
             let mut entity = Entity::new_building(eid, world_pos);
             entity.building = Some(BuildingData {
                 building_type: btype,
@@ -190,130 +180,48 @@ pub fn generate_from_seed(seed: &SeedConfig, rng_seed: u64) -> WorldState {
                 structural: None,
             });
             state.entities.push(entity);
-
-            // Stamp footprint on city grid.
-            if let Some(gi) = state.settlements[0].city_grid_idx {
-                let g = &mut state.city_grids[gi];
-                for dr in 0..fh {
-                    for dc in 0..fw {
-                        let c = (col + dc) as usize;
-                        let r = (row + dr) as usize;
-                        if g.in_bounds(c, r) {
-                            let cell = g.cell_mut(c, r);
-                            cell.state = CellState::Building;
-                            cell.building_id = Some(eid);
-                        }
-                    }
-                }
-            }
         }
 
-        // Create Wall entities and stamp wall circuits on the grid.
-        if let Some(gi) = state.settlements[0].city_grid_idx {
-            let mut wall_entity_positions: Vec<(u32, usize, usize)> = Vec::new();
-            for wc in &layout.wall_circuits {
-                // One Wall entity per circuit segment (between consecutive waypoints).
-                let pts = &wc.waypoints;
-                for i in 0..pts.len() {
-                    let (x0, y0) = (pts[i].0 + offset_col, pts[i].1 + offset_row);
-                    let (x1, y1) = (pts[(i + 1) % pts.len()].0 + offset_col, pts[(i + 1) % pts.len()].1 + offset_row);
-                    let wall_eid = state.next_entity_id();
-                    let wall_world_pos = state.city_grids[gi].grid_to_world(
-                        x0 as usize, y0 as usize, settlement_pos,
-                    );
-                    let mut wall_entity = Entity::new_building(wall_eid, wall_world_pos);
-                    wall_entity.building = Some(BuildingData {
-                        building_type: BuildingType::Wall,
-                        settlement_id: Some(settlement_id),
-                        grid_col: x0,
-                        grid_row: y0,
-                        footprint_w: 1,
-                        footprint_h: 1,
-                        tier: 1,
-                        room_seed: wall_eid as u64,
-                        rooms: Vec::new(),
-                        residential_capacity: 0,
-                        work_capacity: 0,
-                        resident_ids: Vec::new(),
-                        worker_ids: Vec::new(),
-                        construction_progress: 1.0,
-                        built_tick: 0,
-                        builder_id: None,
-                        temporary: false,
-                        ttl_ticks: None,
-                        name: format!("Wall segment #{}", i),
-                        storage: [0.0; NUM_COMMODITIES],
-                        storage_capacity: 0.0,
-                        owner_id: None,
-                        builder_modifiers: Vec::new(),
-                        owner_modifiers: Vec::new(),
-                        worker_class_ticks: Vec::new(),
-                        specialization_tag: None,
-                        specialization_strength: 0.0,
-                        specialization_name: String::new(),
-                        structural: None,
-                    });
-                    wall_entity_positions.push((wall_eid, x0 as usize, y0 as usize));
-                    state.entities.push(wall_entity);
-
-                    // Bresenham between waypoints.
-                    for (cx, cy) in bresenham_line(x0 as i32, y0 as i32, x1 as i32, y1 as i32) {
-                        let g = &mut state.city_grids[gi];
-                        if g.in_bounds(cx, cy) {
-                            let cell = g.cell_mut(cx, cy);
-                            // Overwrite empty, road, and existing wall cells.
-                            // Preserve building footprints.
-                            if cell.state != CellState::Building {
-                                cell.state = CellState::Wall;
-                                cell.building_id = Some(wall_eid);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Fixup: ensure each wall entity's position cell has its building_id.
-            // At circuit corners, the last segment overwrites the first; fix that.
-            for (eid, col, row) in &wall_entity_positions {
-                let g = &mut state.city_grids[gi];
-                if g.in_bounds(*col, *row) {
-                    let cell = g.cell_mut(*col, *row);
-                    if cell.state == CellState::Wall {
-                        cell.building_id = Some(*eid);
-                    }
-                }
-            }
-
-            // Stamp roads.
-            for road in &layout.roads {
-                for i in 0..road.waypoints.len().saturating_sub(1) {
-                    let (x0, y0) = (road.waypoints[i].0 + offset_col, road.waypoints[i].1 + offset_row);
-                    let (x1, y1) = (road.waypoints[i + 1].0 + offset_col, road.waypoints[i + 1].1 + offset_row);
-                    for (cx, cy) in bresenham_line(x0 as i32, y0 as i32, x1 as i32, y1 as i32) {
-                        let g = &mut state.city_grids[gi];
-                        if g.in_bounds(cx as usize, cy as usize) {
-                            let cell = g.cell_mut(cx as usize, cy as usize);
-                            if cell.state == CellState::Empty {
-                                cell.state = CellState::Road;
-                                cell.road_tier = 2;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Stamp gates.
-            for gate in &layout.gates {
-                let g = &mut state.city_grids[gi];
-                for dx in 0..gate.width as u16 {
-                    let c = (gate.cell.0 + offset_col + dx) as usize;
-                    let r = (gate.cell.1 + offset_row) as usize;
-                    if g.in_bounds(c, r) {
-                        let cell = g.cell_mut(c, r);
-                        cell.state = CellState::Road; // gates are passable
-                        cell.building_id = None;
-                    }
-                }
+        // Create Wall entities from wall circuits.
+        for wc in &layout.wall_circuits {
+            let pts = &wc.waypoints;
+            for i in 0..pts.len() {
+                let (x0, y0) = (pts[i].0 + offset_col, pts[i].1 + offset_row);
+                let wall_eid = state.next_entity_id();
+                let wall_world_pos = (settlement_pos.0 + x0 as f32, settlement_pos.1 + y0 as f32);
+                let mut wall_entity = Entity::new_building(wall_eid, wall_world_pos);
+                wall_entity.building = Some(BuildingData {
+                    building_type: BuildingType::Wall,
+                    settlement_id: Some(settlement_id),
+                    grid_col: x0,
+                    grid_row: y0,
+                    footprint_w: 1,
+                    footprint_h: 1,
+                    tier: 1,
+                    room_seed: wall_eid as u64,
+                    rooms: Vec::new(),
+                    residential_capacity: 0,
+                    work_capacity: 0,
+                    resident_ids: Vec::new(),
+                    worker_ids: Vec::new(),
+                    construction_progress: 1.0,
+                    built_tick: 0,
+                    builder_id: None,
+                    temporary: false,
+                    ttl_ticks: None,
+                    name: format!("Wall segment #{}", i),
+                    storage: [0.0; NUM_COMMODITIES],
+                    storage_capacity: 0.0,
+                    owner_id: None,
+                    builder_modifiers: Vec::new(),
+                    owner_modifiers: Vec::new(),
+                    worker_class_ticks: Vec::new(),
+                    specialization_tag: None,
+                    specialization_strength: 0.0,
+                    specialization_name: String::new(),
+                    structural: None,
+                });
+                state.entities.push(wall_entity);
             }
         }
     } else {
@@ -367,16 +275,6 @@ pub fn generate_from_seed(seed: &SeedConfig, rng_seed: u64) -> WorldState {
                     structural: None,
                 });
                 state.entities.push(entity);
-
-                // Mark grid cell.
-                if let Some(gi) = state.settlements[0].city_grid_idx {
-                    let g = &mut state.city_grids[gi];
-                    if g.in_bounds(col as usize, row as usize) {
-                        let c = g.cell_mut(col as usize, row as usize);
-                        c.state = CellState::Building;
-                        c.building_id = Some(eid);
-                    }
-                }
             }
         }
     }
@@ -622,45 +520,12 @@ fn inject_military(state: &mut WorldState, challenge: &Challenge, settlement_pos
 }
 
 fn inject_environmental(
-    state: &mut WorldState,
-    challenge: &Challenge,
+    _state: &mut WorldState,
+    _challenge: &Challenge,
     _settlement_pos: (f32, f32),
 ) {
-    let sub = challenge.sub_type_name.as_str();
-
-    if let Some(gi) = state.settlements.first().and_then(|s| s.city_grid_idx) {
-        let grid = &mut state.city_grids[gi];
-
-        match sub {
-            "flood" | "river_flood" => {
-                // Lower terrain on one side to simulate flood plain.
-                let rows_to_flood = (grid.rows as f32 * challenge.severity * 0.3) as usize;
-                for row in 0..rows_to_flood.min(grid.rows) {
-                    for col in 0..grid.cols {
-                        let cell = grid.cell_mut(col, row);
-                        if cell.state == CellState::Empty {
-                            cell.state = CellState::Water;
-                        }
-                    }
-                }
-            }
-            "fire" | "wildfire" => {
-                // Place wood-marked cells at edges (fire starts outside, spreads in).
-                // In a full sim, fire spread is handled by a system. Here we mark
-                // the starting conditions.
-                let edge = if challenge.severity > 0.5 { 10 } else { 5 };
-                for col in 0..edge.min(grid.cols) {
-                    for row in 0..grid.rows {
-                        let cell = grid.cell_mut(col, row);
-                        if cell.state == CellState::Empty {
-                            cell.density = 1; // wood-density marker
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
+    // VoxelWorld terrain injection not performed by scenario_gen.
+    // Environmental challenges are represented through memory events and challenge structs.
 }
 
 // ---------------------------------------------------------------------------

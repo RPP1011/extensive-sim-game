@@ -17,7 +17,6 @@ use super::features::compute_spatial_features;
 use super::oracle::{strategic_oracle, structural_oracle};
 use super::scenario_gen::{build_observation, populate_memory};
 use super::types::*;
-use crate::world_sim::city_grid::{CellState, CellTerrain, CityGrid, InfluenceMap};
 use crate::world_sim::state::{
     tag, BuildingData, BuildingType, EnemyCapabilities, Entity, EntityKind, SettlementState,
     WorldState,
@@ -288,176 +287,24 @@ impl PressureType {
 // Layer 1: World State Generators
 // ===========================================================================
 
-/// Generate terrain on the city grid. Modifies the grid's cell terrain, water cells,
-/// and returns a resource modifier array [food, iron, wood, herbs, hide, crystal, equipment, medicine].
+/// Returns resource modifier array [food, iron, wood, herbs, hide, crystal, equipment, medicine]
+/// based on terrain type. VoxelWorld terrain is not pre-populated by mass_gen.
 fn generate_terrain(
     terrain_type: TerrainType,
-    grid: &mut CityGrid,
-    rng: &mut SimpleRng,
+    _rng: &mut SimpleRng,
 ) -> [f32; NUM_COMMODITIES] {
-    let cols = grid.cols;
-    let rows = grid.rows;
     let mut resource_mods = [1.0_f32; NUM_COMMODITIES];
-
     match terrain_type {
-        TerrainType::FlatOpen => {
-            // ~90% buildable, all flat. Baseline.
-            for r in 0..rows {
-                for c in 0..cols {
-                    grid.cell_mut(c, r).terrain = CellTerrain::Flat;
-                }
-            }
-            resource_mods[0] = 1.5; // food bonus on open plains
-        }
-        TerrainType::RiverBisect => {
-            // ~70% buildable. River runs through the middle.
-            let river_col = cols / 2;
-            let river_width = 3 + (rng.next_u32() % 3) as usize;
-            for r in 0..rows {
-                for c in 0..cols {
-                    let cell = grid.cell_mut(c, r);
-                    // Meander the river slightly.
-                    let offset = ((r as f32 / 10.0).sin() * 3.0) as i32;
-                    let rc = river_col as i32 + offset;
-                    let dist = (c as i32 - rc).unsigned_abs() as usize;
-                    if dist < river_width / 2 {
-                        cell.terrain = CellTerrain::Water;
-                        cell.state = CellState::Water;
-                    } else if dist < river_width {
-                        cell.terrain = CellTerrain::Flat; // river bank, flood risk
-                    }
-                }
-            }
-            resource_mods[0] = 1.3; // food from fishing
-        }
-        TerrainType::Hillside => {
-            // ~75% buildable. Elevation gradient from south to north.
-            for r in 0..rows {
-                let row_frac = r as f32 / rows as f32;
-                for c in 0..cols {
-                    let cell = grid.cell_mut(c, r);
-                    let noise = rng.next_f32() * 0.15;
-                    let elev = row_frac + noise;
-                    if elev > 0.85 {
-                        cell.terrain = CellTerrain::Steep;
-                    } else if elev > 0.5 {
-                        cell.terrain = CellTerrain::Slope;
-                    }
-                }
-            }
-            resource_mods[1] = 1.3; // iron in hills
-            resource_mods[5] = 1.2; // crystal
-        }
-        TerrainType::CliffEdge => {
-            // ~60% buildable. One side is cliff/impassable.
-            let cliff_start = (cols as f32 * 0.6) as usize;
-            for r in 0..rows {
-                for c in 0..cols {
-                    let cell = grid.cell_mut(c, r);
-                    if c >= cliff_start {
-                        let noise = rng.next_f32() * 0.1;
-                        let frac = (c - cliff_start) as f32 / (cols - cliff_start) as f32;
-                        if frac + noise > 0.3 {
-                            cell.terrain = CellTerrain::Cliff;
-                        } else {
-                            cell.terrain = CellTerrain::Steep;
-                        }
-                    }
-                }
-            }
-            resource_mods[1] = 1.5; // iron from cliff face
-        }
-        TerrainType::Coastal => {
-            // ~65% buildable. Water on one side, dock access.
-            let water_depth = (cols as f32 * 0.25) as usize;
-            for r in 0..rows {
-                for c in 0..cols {
-                    let cell = grid.cell_mut(c, r);
-                    let noise = ((rng.next_f32() - 0.5) * 4.0) as i32;
-                    let adjusted = c as i32 + noise;
-                    if adjusted < water_depth as i32 {
-                        cell.terrain = CellTerrain::Water;
-                        cell.state = CellState::Water;
-                    } else if adjusted < (water_depth + 3) as i32 {
-                        cell.terrain = CellTerrain::Flat; // beach/dock area
-                    }
-                }
-            }
-            resource_mods[0] = 1.2; // fishing
-        }
-        TerrainType::Swamp => {
-            // ~50% buildable. Scattered water and difficult ground.
-            for r in 0..rows {
-                for c in 0..cols {
-                    let cell = grid.cell_mut(c, r);
-                    let noise = rng.next_f32();
-                    if noise > 0.7 {
-                        cell.terrain = CellTerrain::Water;
-                        cell.state = CellState::Water;
-                    }
-                }
-            }
-            resource_mods[3] = 2.0; // herbs abundant in swamp
-            resource_mods[7] = 1.5; // medicine
-        }
-        TerrainType::ForestClearing => {
-            // ~55% buildable. Dense trees on edges, clearing in center.
-            let cx = cols / 2;
-            let cy = rows / 2;
-            let clearing_r = (cols.min(rows) as f32 * 0.25) as usize;
-            for r in 0..rows {
-                for c in 0..cols {
-                    let dx = (c as i32 - cx as i32).unsigned_abs() as usize;
-                    let dy = (r as i32 - cy as i32).unsigned_abs() as usize;
-                    let dist = ((dx * dx + dy * dy) as f32).sqrt() as usize;
-                    let cell = grid.cell_mut(c, r);
-                    if dist > clearing_r {
-                        // Forest = slope terrain (heuristic for "tree-covered")
-                        let noise = rng.next_f32();
-                        if noise > 0.3 {
-                            cell.terrain = CellTerrain::Slope;
-                        }
-                    }
-                }
-            }
-            resource_mods[2] = 3.0; // wood abundant
-            resource_mods[3] = 1.5; // herbs
-        }
-        TerrainType::MountainPass => {
-            // ~40% buildable. Natural chokepoint between two mountain walls.
-            let pass_center = rows / 2;
-            let pass_width = (rows as f32 * 0.2) as usize;
-            for r in 0..rows {
-                for c in 0..cols {
-                    let cell = grid.cell_mut(c, r);
-                    let dist_from_pass = (r as i32 - pass_center as i32).unsigned_abs() as usize;
-                    let noise = (rng.next_f32() * 5.0) as usize;
-                    if dist_from_pass > pass_width + noise {
-                        cell.terrain = CellTerrain::Cliff;
-                    } else if dist_from_pass > pass_width / 2 + noise / 2 {
-                        cell.terrain = CellTerrain::Steep;
-                    } else {
-                        cell.terrain = CellTerrain::Slope;
-                    }
-                }
-            }
-            resource_mods[1] = 2.0; // iron/stone in mountains
-            resource_mods[5] = 1.5; // crystal
-        }
+        TerrainType::FlatOpen    => { resource_mods[0] = 1.5; }
+        TerrainType::RiverBisect => { resource_mods[0] = 1.3; }
+        TerrainType::Hillside    => { resource_mods[1] = 1.3; resource_mods[5] = 1.2; }
+        TerrainType::CliffEdge   => { resource_mods[1] = 1.5; }
+        TerrainType::Coastal     => { resource_mods[0] = 1.2; }
+        TerrainType::Swamp       => { resource_mods[3] = 2.0; resource_mods[7] = 1.5; }
+        TerrainType::ForestClearing => { resource_mods[2] = 3.0; resource_mods[3] = 1.5; }
+        TerrainType::MountainPass => { resource_mods[1] = 2.0; resource_mods[5] = 1.5; }
     }
-
     resource_mods
-}
-
-/// Check if a cell is buildable (not water, not cliff).
-fn is_buildable(grid: &CityGrid, col: usize, row: usize) -> bool {
-    if !grid.in_bounds(col, row) {
-        return false;
-    }
-    let cell = grid.cell(col, row);
-    cell.state != CellState::Water
-        && cell.terrain != CellTerrain::Water
-        && cell.terrain != CellTerrain::Cliff
 }
 
 /// Place buildings for a given maturity level. Returns building entity list (not yet in state).
@@ -472,10 +319,6 @@ fn generate_maturity(
         .first()
         .map(|s| s.pos)
         .unwrap_or((0.0, 0.0));
-    let gi = match state.settlements.first().and_then(|s| s.city_grid_idx) {
-        Some(idx) => idx,
-        None => return,
-    };
 
     let (building_count, wall_coverage, settlement_level, organized) = match level {
         MaturityLevel::Empty => (rng.range_u32(0, 2) as usize, 0.0_f32, 1, false),
@@ -586,11 +429,6 @@ fn generate_maturity(
             (c.clamp(1, 126), r.clamp(1, 126))
         };
 
-        // Skip if not buildable.
-        if !is_buildable(&state.city_grids[gi], col, row) {
-            continue;
-        }
-
         let eid = state.next_entity_id();
         let mut entity = Entity::new_building(eid, settlement_pos);
         entity.building = Some(BuildingData {
@@ -625,14 +463,6 @@ fn generate_maturity(
             structural: None,
         });
         state.entities.push(entity);
-
-        // Mark grid cell.
-        let g = &mut state.city_grids[gi];
-        if g.in_bounds(col, row) {
-            let c = g.cell_mut(col, row);
-            c.state = CellState::Building;
-            c.building_id = Some(eid);
-        }
     }
 
     // Place wall segments according to wall_coverage fraction.
@@ -641,10 +471,6 @@ fn generate_maturity(
         let wall_count = (perimeter_cells.len() as f32 * wall_coverage) as usize;
 
         for (wi, &(wc, wr)) in perimeter_cells.iter().take(wall_count).enumerate() {
-            if !is_buildable(&state.city_grids[gi], wc, wr) {
-                continue;
-            }
-
             let eid = state.next_entity_id();
             let btype = if wi % 15 == 0 {
                 BuildingType::Gate
@@ -684,13 +510,6 @@ fn generate_maturity(
                 structural: None,
             });
             state.entities.push(entity);
-
-            let g = &mut state.city_grids[gi];
-            if g.in_bounds(wc, wr) {
-                let c = g.cell_mut(wc, wr);
-                c.state = CellState::Wall;
-                c.building_id = Some(eid);
-            }
         }
     }
 }
@@ -877,11 +696,6 @@ fn apply_building_quality(
     state: &mut WorldState,
     rng: &mut SimpleRng,
 ) {
-    let gi = match state.settlements.first().and_then(|s| s.city_grid_idx) {
-        Some(idx) => idx,
-        None => return,
-    };
-
     let building_ids: Vec<u32> = state
         .entities
         .iter()
@@ -924,53 +738,9 @@ fn apply_building_quality(
             }
         }
     }
-
-    // Set zone types on grid cells for quality types that affect zoning.
-    match quality {
-        BuildingQuality::WellPlanned => {
-            // Proper zones: residential in center, military on perimeter.
-            apply_grid_zones(
-                &mut state.city_grids[gi],
-                &[
-                    crate::world_sim::city_grid::ZoneType::Residential,
-                    crate::world_sim::city_grid::ZoneType::Commercial,
-                ],
-                rng,
-            );
-        }
-        BuildingQuality::OrganicGrowth => {
-            // Mixed zones everywhere.
-            apply_grid_zones(
-                &mut state.city_grids[gi],
-                &[
-                    crate::world_sim::city_grid::ZoneType::Residential,
-                    crate::world_sim::city_grid::ZoneType::Commercial,
-                    crate::world_sim::city_grid::ZoneType::Industrial,
-                ],
-                rng,
-            );
-        }
-        _ => {} // Other qualities don't need zone changes.
-    }
-}
-
-fn apply_grid_zones(
-    grid: &mut CityGrid,
-    zones: &[crate::world_sim::city_grid::ZoneType],
-    rng: &mut SimpleRng,
-) {
-    if zones.is_empty() {
-        return;
-    }
-    for r in 0..grid.rows {
-        for c in 0..grid.cols {
-            let cell = grid.cell_mut(c, r);
-            if cell.state == CellState::Building {
-                let idx = rng.range_u32(0, zones.len().saturating_sub(1) as u32) as usize;
-                cell.zone = zones[idx];
-            }
-        }
-    }
+    // Zone types previously tracked on grid cells are now tracked on entities.
+    // No grid cell zone updates needed.
+    let _ = rng; // suppress unused warning
 }
 
 // ===========================================================================
@@ -1385,19 +1155,7 @@ fn inject_flood(
     severity: f32,
     _rng: &mut SimpleRng,
 ) -> (Challenge, PressureMetadata) {
-    if let Some(gi) = state.settlements.first().and_then(|s| s.city_grid_idx) {
-        let grid = &mut state.city_grids[gi];
-        let rows_to_flood = (grid.rows as f32 * severity * 0.3) as usize;
-        for row in 0..rows_to_flood.min(grid.rows) {
-            for col in 0..grid.cols {
-                let cell = grid.cell_mut(col, row);
-                if cell.state == CellState::Empty {
-                    cell.terrain = CellTerrain::Water;
-                    cell.state = CellState::Water;
-                }
-            }
-        }
-    }
+    // VoxelWorld terrain modification not performed by mass_gen; flood is tracked via memory events.
 
     // Add flood damage memory.
     if let Some(s) = state.settlements.first_mut() {
@@ -1434,18 +1192,7 @@ fn inject_fire_outbreak(
     severity: f32,
     _rng: &mut SimpleRng,
 ) -> (Challenge, PressureMetadata) {
-    if let Some(gi) = state.settlements.first().and_then(|s| s.city_grid_idx) {
-        let grid = &mut state.city_grids[gi];
-        let edge = if severity > 0.5 { 10 } else { 5 };
-        for col in 0..edge.min(grid.cols) {
-            for row in 0..grid.rows {
-                let cell = grid.cell_mut(col, row);
-                if cell.state == CellState::Empty {
-                    cell.density = 1; // wood-density marker
-                }
-            }
-        }
-    }
+    // VoxelWorld terrain modification not performed by mass_gen; fire is tracked via memory events.
 
     if let Some(s) = state.settlements.first_mut() {
         s.construction_memory.short_term.push(ConstructionEvent {
@@ -1524,25 +1271,11 @@ fn inject_earthquake(
 }
 
 fn inject_landslide(
-    state: &mut WorldState,
+    _state: &mut WorldState,
     severity: f32,
-    rng: &mut SimpleRng,
+    _rng: &mut SimpleRng,
 ) -> (Challenge, PressureMetadata) {
-    // Mark steep terrain cells as collapsed.
-    if let Some(gi) = state.settlements.first().and_then(|s| s.city_grid_idx) {
-        let grid = &mut state.city_grids[gi];
-        let affected_cols = (grid.cols as f32 * severity * 0.2) as usize;
-        for col in 0..affected_cols.min(grid.cols) {
-            for row in 0..grid.rows {
-                let cell = grid.cell_mut(col, row);
-                if cell.terrain == CellTerrain::Slope || cell.terrain == CellTerrain::Steep {
-                    if rng.next_f32() < severity {
-                        cell.terrain = CellTerrain::Cliff; // collapsed
-                    }
-                }
-            }
-        }
-    }
+    // VoxelWorld terrain modification not performed by mass_gen.
 
     let challenge = make_challenge(
         ChallengeCategory::Environmental,
@@ -1662,23 +1395,11 @@ fn inject_trade_boom(
 }
 
 fn inject_supply_disruption(
-    state: &mut WorldState,
+    _state: &mut WorldState,
     severity: f32,
-    rng: &mut SimpleRng,
+    _rng: &mut SimpleRng,
 ) -> (Challenge, PressureMetadata) {
-    // Damage roads/paths.
-    if let Some(gi) = state.settlements.first().and_then(|s| s.city_grid_idx) {
-        let grid = &mut state.city_grids[gi];
-        for r in 0..grid.rows {
-            for c in 0..grid.cols {
-                let cell = grid.cell_mut(c, r);
-                if cell.state == CellState::Road && rng.next_f32() < severity * 0.3 {
-                    cell.state = CellState::Ruin;
-                    cell.road_tier = 0;
-                }
-            }
-        }
-    }
+    // Road damage tracked via memory events; VoxelWorld road state not modified by mass_gen.
 
     let challenge = make_challenge(
         ChallengeCategory::Economic,
@@ -2009,23 +1730,8 @@ pub fn compose_world_state(
     let settlement = SettlementState::new(settlement_id, "Generated Settlement".into(), settlement_pos);
     state.settlements.push(settlement);
 
-    // Create city grid with generic terrain (we'll overwrite it).
-    let terrain_str = match terrain {
-        TerrainType::Hillside | TerrainType::MountainPass => "Mountains",
-        TerrainType::Coastal => "Coast",
-        TerrainType::Swamp => "Swamp",
-        TerrainType::ForestClearing => "Forest",
-        _ => "Plains",
-    };
-    let grid = CityGrid::new(128, 128, settlement_id, terrain_str, seed);
-    let influence = InfluenceMap::new(128, 128);
-    state.settlements[0].city_grid_idx = Some(state.city_grids.len());
-    state.city_grids.push(grid);
-    state.influence_maps.push(influence);
-
     // Layer 1: Apply the 5 axes.
-    let gi = state.settlements[0].city_grid_idx.unwrap();
-    let resource_mods = generate_terrain(terrain, &mut state.city_grids[gi], &mut rng);
+    let resource_mods = generate_terrain(terrain, &mut rng);
     generate_maturity(maturity, &mut state, &mut rng);
     apply_resource_profile(resources, &mut state, &resource_mods, &mut rng);
     generate_npc_roster(npcs, &mut state, &mut rng);
@@ -2221,11 +1927,6 @@ fn make_dummy_metadata(pressure: PressureType) -> (ChallengeCategory, PressureMe
     let mut dummy_state = WorldState::new(0);
     let settlement = SettlementState::new(1, "dummy".into(), (0.0, 0.0));
     dummy_state.settlements.push(settlement);
-    let grid = CityGrid::new(4, 4, 1, "Plains", 0);
-    let influence = InfluenceMap::new(4, 4);
-    dummy_state.settlements[0].city_grid_idx = Some(0);
-    dummy_state.city_grids.push(grid);
-    dummy_state.influence_maps.push(influence);
 
     let (_, meta) = inject_pressure(pressure, &mut dummy_state, 0.5, &mut rng);
     (pressure.category(), meta)

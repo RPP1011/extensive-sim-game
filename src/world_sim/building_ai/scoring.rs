@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use super::types::{
     ActionPayload, BuildingAction, BuildingObservation, Challenge, ChallengeCategory, DecisionType,
 };
-use crate::world_sim::city_grid::CellState;
 use crate::world_sim::state::{BuildingType, Entity, EntityKind, WorldState, WorldTeam};
 
 // ---------------------------------------------------------------------------
@@ -178,13 +177,9 @@ pub fn apply_actions(state: &mut WorldState, actions: &[BuildingAction]) {
                 grid_cell,
             } => {
                 let id = state.next_entity_id();
-                // Compute world position from grid cell via settlement's city grid.
-                let pos = state.settlements.first()
-                    .and_then(|s| s.city_grid_idx.map(|gi| (gi, s.pos)))
-                    .map(|(gi, spos)| state.city_grids[gi].grid_to_world(
-                        grid_cell.0 as usize, grid_cell.1 as usize, spos,
-                    ))
-                    .unwrap_or((grid_cell.0 as f32, grid_cell.1 as f32));
+                // World position: settlement center + grid cell offset (1:1 voxel mapping).
+                let spos = state.settlements.first().map(|s| s.pos).unwrap_or((0.0, 0.0));
+                let pos = (spos.0 + grid_cell.0 as f32, spos.1 + grid_cell.1 as f32);
                 let mut entity = Entity::new_building(id, pos);
                 let mut bdata = crate::world_sim::state::BuildingData::default();
                 bdata.building_type = *building_type;
@@ -194,27 +189,6 @@ pub fn apply_actions(state: &mut WorldState, actions: &[BuildingAction]) {
                 bdata.built_tick = state.tick;
                 entity.building = Some(bdata);
                 state.entities.push(entity);
-
-                // Stamp the city grid if the settlement has one.
-                for settlement in &state.settlements {
-                    if let Some(cg_idx) = settlement.city_grid_idx {
-                        if cg_idx < state.city_grids.len()
-                            && state.city_grids[cg_idx].settlement_id == settlement.id
-                        {
-                            let cg = &mut state.city_grids[cg_idx];
-                            let (c, r) = (grid_cell.0 as usize, grid_cell.1 as usize);
-                            if cg.in_bounds(c, r) {
-                                let cell = cg.cell_mut(c, r);
-                                if *building_type == BuildingType::Wall {
-                                    cell.state = CellState::Wall;
-                                } else {
-                                    cell.state = CellState::Building;
-                                }
-                                cell.building_id = Some(id);
-                            }
-                        }
-                    }
-                }
             }
             ActionPayload::SetBuildPriority {
                 building_id,
@@ -228,55 +202,15 @@ pub fn apply_actions(state: &mut WorldState, actions: &[BuildingAction]) {
                     }
                 }
             }
-            ActionPayload::RouteRoad { waypoints } => {
-                // Stamp road cells on every settlement city grid that contains the waypoints.
-                for cg in &mut state.city_grids {
-                    for &(cx, cy) in waypoints {
-                        let (c, r) = (cx as usize, cy as usize);
-                        if cg.in_bounds(c, r) {
-                            let cell = cg.cell_mut(c, r);
-                            if cell.state == CellState::Empty {
-                                cell.state = CellState::Road;
-                                cell.road_tier = 2; // street
-                            }
-                        }
-                    }
-                }
+            ActionPayload::RouteRoad { .. } => {
+                // Road routing in VoxelWorld not implemented in scoring simulation.
             }
-            ActionPayload::SetZone { grid_cell, zone } => {
-                let zt = match zone.as_str() {
-                    "residential" => crate::world_sim::city_grid::ZoneType::Residential,
-                    "commercial" => crate::world_sim::city_grid::ZoneType::Commercial,
-                    "industrial" => crate::world_sim::city_grid::ZoneType::Industrial,
-                    "religious" => crate::world_sim::city_grid::ZoneType::Religious,
-                    "arcane" => crate::world_sim::city_grid::ZoneType::Arcane,
-                    "noble" => crate::world_sim::city_grid::ZoneType::Noble,
-                    "military" => crate::world_sim::city_grid::ZoneType::Military,
-                    _ => crate::world_sim::city_grid::ZoneType::None,
-                };
-                for cg in &mut state.city_grids {
-                    let (c, r) = (grid_cell.0 as usize, grid_cell.1 as usize);
-                    if cg.in_bounds(c, r) {
-                        cg.cell_mut(c, r).zone = zt;
-                    }
-                }
+            ActionPayload::SetZone { .. } => {
+                // Zone assignment tracked on entities; VoxelWorld zones not modified here.
             }
             ActionPayload::Demolish { building_id } => {
                 if let Some(e) = state.entities.iter_mut().find(|e| e.id == *building_id) {
                     e.alive = false;
-                    // Clear from city grid.
-                    if let Some(ref bd) = e.building {
-                        let (gc, gr) = (bd.grid_col as usize, bd.grid_row as usize);
-                        for cg in &mut state.city_grids {
-                            if cg.in_bounds(gc, gr) {
-                                let cell = cg.cell_mut(gc, gr);
-                                if cell.building_id == Some(*building_id) {
-                                    cell.state = CellState::Empty;
-                                    cell.building_id = None;
-                                }
-                            }
-                        }
-                    }
                 }
             }
             ActionPayload::SetFootprint {
@@ -745,23 +679,15 @@ pub fn score_spatial_quality(
         None => return SpatialQualityScore::default(),
     };
 
-    let cg_idx = match settlement.city_grid_idx {
-        Some(idx) if idx < state.city_grids.len() => idx,
-        _ => return SpatialQualityScore::default(),
-    };
-    let cg = &state.city_grids[cg_idx];
-    let total_cells = (cg.cols * cg.rows) as f32;
-    if total_cells < 1.0 {
-        return SpatialQualityScore::default();
-    }
-
     // --- Settlement level weight (0.0 for hamlets, 1.0 for cities) ---
     let level_weight = (context.settlement_level as f32 / 5.0).clamp(0.0, 1.0);
     let scarcity_mult = if context.resource_scarcity > 0.5 { 0.5 } else { 1.0 };
 
-    // --- Connectivity resilience ---
-    // Collect key building IDs (non-wall, non-road buildings).
-    let key_buildings: Vec<u32> = state
+    let building_range = state.group_index.settlement_buildings(settlement_id);
+
+    // --- Connectivity resilience (entity-based) ---
+    // Collect key building IDs (non-wall buildings).
+    let key_buildings: Vec<(u32, f32, f32)> = state
         .entities
         .iter()
         .filter(|e| {
@@ -775,81 +701,55 @@ pub fn score_spatial_quality(
                     })
                     .unwrap_or(false)
         })
-        .map(|e| e.id)
+        .map(|e| (e.id, e.pos.0, e.pos.1))
         .collect();
     let num_key = key_buildings.len().max(1);
 
-    // Test how many key buildings are connected to the center via roads.
-    let _center = cg.center;
+    // Connectivity resilience: fraction of buildings within a 30-unit radius of settlement center.
     let connected_count = key_buildings
         .iter()
-        .filter(|&&bid| {
-            state
-                .entities
-                .iter()
-                .find(|e| e.id == bid)
-                .and_then(|e| e.building.as_ref())
-                .map(|bd| {
-                    let (c, r) = (bd.grid_col as usize, bd.grid_row as usize);
-                    if !cg.in_bounds(c, r) {
-                        return false;
-                    }
-                    // Check if there's a road-connected path (use road_distance as proxy).
-                    let idx = cg.idx(c, r);
-                    cg.road_distance.get(idx).map(|&d| d < u16::MAX).unwrap_or(false)
-                })
-                .unwrap_or(false)
+        .filter(|&&(_, bx, by)| {
+            let dx = bx - settlement.pos.0;
+            let dy = by - settlement.pos.1;
+            (dx * dx + dy * dy).sqrt() < 30.0
         })
         .count();
-    let base_resilience = connected_count as f32 / num_key as f32;
-    let connectivity_resilience = base_resilience * level_weight * scarcity_mult;
+    let connectivity_resilience = (connected_count as f32 / num_key as f32) * level_weight * scarcity_mult;
 
-    // --- Redundant pathing ---
-    // Count road cells as a proxy for path redundancy.
-    let road_cells = cg
-        .cells
-        .iter()
-        .filter(|c| c.state == CellState::Road)
-        .count();
+    // --- Redundant pathing (entity-based proxy) ---
+    // Use building density in core area as a connectivity proxy.
+    let core_buildings = key_buildings.iter().filter(|&&(_, bx, by)| {
+        let dx = bx - settlement.pos.0;
+        let dy = by - settlement.pos.1;
+        (dx * dx + dy * dy).sqrt() < 15.0
+    }).count();
     let redundant_pathing = if num_key > 1 {
-        (road_cells as f32 / num_key as f32).min(5.0) / 5.0 * 3.0
+        (core_buildings as f32 / num_key as f32).min(1.0) * 3.0
     } else {
         1.0
     };
 
-    // --- Dead space ---
-    let functional_cells = cg
-        .cells
-        .iter()
-        .filter(|c| !matches!(c.state, CellState::Empty | CellState::Water))
-        .count();
-    let dead_space = 1.0 - (functional_cells as f32 / total_cells);
+    // --- Dead space (entity-based proxy) ---
+    // Fraction of a 64x64 virtual area actually occupied by buildings.
+    let building_count = building_range.clone().filter(|&idx| {
+        idx < state.entities.len() && state.entities[idx].alive
+    }).count();
+    let total_cells = 64.0 * 64.0_f32;
+    let dead_space = 1.0 - (building_count as f32 / total_cells).min(1.0);
 
-    // --- Chokepoint quality ---
-    // Walls at the perimeter are intentional chokepoints (good).
-    // Road bottlenecks on civilian routes are unintentional (bad).
-    let wall_cells = cg
-        .cells
-        .iter()
-        .filter(|c| c.state == CellState::Wall)
-        .count();
-    let perimeter_length = 2 * (cg.cols + cg.rows);
-    let intentional_chokepoints = (wall_cells as f32 / perimeter_length.max(1) as f32).min(1.0);
-    // Penalize if road network is too narrow (few road cells relative to buildings).
-    let building_cells = cg
-        .cells
-        .iter()
-        .filter(|c| c.state == CellState::Building)
-        .count();
-    let road_adequacy = if building_cells > 0 {
-        (road_cells as f32 / building_cells as f32).clamp(0.0, 1.0)
-    } else {
-        1.0
-    };
-    let chokepoint_quality = intentional_chokepoints * 0.5 + road_adequacy * 0.5;
+    // --- Chokepoint quality (entity-based) ---
+    let wall_count = state.entities.iter().filter(|e| {
+        e.alive && e.kind == EntityKind::Building
+            && e.building.as_ref().map(|bd| {
+                bd.settlement_id == Some(settlement_id)
+                    && matches!(bd.building_type, BuildingType::Wall | BuildingType::Gate)
+            }).unwrap_or(false)
+    }).count();
+    let perimeter_estimate = 4 * 20_usize; // assume ~20-unit radius settlement
+    let intentional_chokepoints = (wall_count as f32 / perimeter_estimate.max(1) as f32).min(1.0);
+    let chokepoint_quality = intentional_chokepoints;
 
-    // --- Garrison coverage ---
-    // Count garrison NPCs (combat entities near settlement).
+    // --- Garrison coverage (entity-based) ---
     let garrison_npcs: Vec<&Entity> = state
         .entities
         .iter()
@@ -865,12 +765,11 @@ pub fn score_spatial_quality(
             (dx * dx + dy * dy).sqrt() < 40.0
         })
         .collect();
-    // Coverage: each garrison NPC covers ~8 cells of perimeter (attack_range * 2).
     let covered_perimeter = garrison_npcs
         .iter()
         .map(|e| (e.attack_range * 2.0) as usize)
         .sum::<usize>();
-    let garrison_coverage = (covered_perimeter as f32 / perimeter_length.max(1) as f32).min(1.0);
+    let garrison_coverage = (covered_perimeter as f32 / perimeter_estimate.max(1) as f32).min(1.0);
 
     SpatialQualityScore {
         connectivity_resilience,

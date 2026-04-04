@@ -14,7 +14,6 @@ fn print_diagnostics(state: &WorldState) {
     println!("\n=== Spatial Diagnostics ===");
 
     let settlement_pos = state.settlements.first().map(|s| s.pos).unwrap_or((0.0, 0.0));
-    let gi = state.settlements.first().and_then(|s| s.city_grid_idx);
 
     // 1. Building positions — are they spread out or clustered at origin?
     println!("\n[1] Building Positions");
@@ -51,20 +50,9 @@ fn print_diagnostics(state: &WorldState) {
         .filter(|e| e.kind == EntityKind::Npc && e.alive)
         .collect();
     let mut npc_at_origin = 0;
-    let mut npc_inside_walls = 0;
-    let mut npc_outside_walls = 0;
     for npc in &npcs {
         let dist = ((npc.pos.0 - settlement_pos.0).powi(2) + (npc.pos.1 - settlement_pos.1).powi(2)).sqrt();
         if dist < 0.1 { npc_at_origin += 1; }
-
-        // Check if NPC grid position is inside walls.
-        if let Some(gi) = gi {
-            let g = &state.city_grids[gi];
-            let (gc, gr) = g.world_to_grid(npc.pos, settlement_pos);
-            let cell = g.cell(gc, gr);
-            let inside = cell.state != game::world_sim::city_grid::CellState::Empty;
-            if inside { npc_inside_walls += 1; } else { npc_outside_walls += 1; }
-        }
 
         let name = npc.npc.as_ref().map(|n| n.name.as_str()).unwrap_or("?");
         println!(
@@ -72,7 +60,7 @@ fn print_diagnostics(state: &WorldState) {
             name, npc.id, npc.pos.0, npc.pos.1, npc.hp, npc.max_hp,
         );
     }
-    println!("  {} at origin, {} on settlement grid, {} on empty/outside", npc_at_origin, npc_inside_walls, npc_outside_walls);
+    println!("  {} at origin (total {})", npc_at_origin, npcs.len());
 
     // 3. Monster positions — are they outside walls? Did walls block them?
     println!("\n[3] Monster Positions");
@@ -95,45 +83,8 @@ fn print_diagnostics(state: &WorldState) {
     }
     println!("  {} alive, {} dead, {} near settlement (<50 units)", alive_monsters, dead_monsters, monster_near_settlement);
 
-    // 4. Wall coverage — do wall cells form a perimeter?
-    if let Some(gi) = gi {
-        println!("\n[4] Wall Coverage");
-        let g = &state.city_grids[gi];
-        let mut wall_cells = 0;
-        let mut gate_cells = 0;
-        let mut building_cells = 0;
-        let mut road_cells = 0;
-        let mut empty_cells = 0;
-        for r in 0..g.rows {
-            for c in 0..g.cols {
-                match g.cell(c, r).state {
-                    game::world_sim::city_grid::CellState::Wall => wall_cells += 1,
-                    game::world_sim::city_grid::CellState::Building => building_cells += 1,
-                    game::world_sim::city_grid::CellState::Road => {
-                        // Check if this is a gate (road cell near wall).
-                        let adj_wall = [(c+1,r),(c.wrapping_sub(1),r),(c,r+1),(c,r.wrapping_sub(1))]
-                            .iter()
-                            .any(|&(ac,ar)| g.in_bounds(ac, ar) && g.cell(ac, ar).state == game::world_sim::city_grid::CellState::Wall);
-                        if adj_wall { gate_cells += 1; } else { road_cells += 1; }
-                    }
-                    game::world_sim::city_grid::CellState::Empty => empty_cells += 1,
-                    _ => {}
-                }
-            }
-        }
-        println!(
-            "  Wall: {} | Building: {} | Road: {} | Gate(road+adj wall): {} | Empty: {}",
-            wall_cells, building_cells, road_cells, gate_cells, empty_cells,
-        );
-        if wall_cells > 0 {
-            println!("  PASS: wall cells present on grid");
-        } else {
-            println!("  FAIL: no wall cells on grid");
-        }
-    }
-
-    // 5. NPC work/home assignments
-    println!("\n[5] NPC Assignments");
+    // 4. NPC work/home assignments
+    println!("\n[4] NPC Assignments");
     let mut has_home = 0;
     let mut has_work = 0;
     let mut unassigned = 0;
@@ -249,27 +200,9 @@ pub fn run_building_ai(cmd: BuildingAiCommand) -> ExitCode {
                 print_validation("Strategic", &errors);
             }
 
-            // Filter out PlaceBuilding actions targeting occupied cells.
-            let grid_idx = state.settlements[0].city_grid_idx;
-            let valid_strat_actions: Vec<_> = strat_actions.iter().enumerate().filter(|(_, a)| {
-                use game::world_sim::building_ai::types::ActionPayload;
-                if let ActionPayload::PlaceBuilding { grid_cell, .. } = &a.action {
-                    if let Some(gi) = grid_idx {
-                        let g = &state.city_grids[gi];
-                        let (c, r) = *grid_cell;
-                        if g.in_bounds(c as usize, r as usize) {
-                            let cell = g.cell(c as usize, r as usize);
-                            let ok = cell.state == game::world_sim::city_grid::CellState::Empty
-                                || cell.state == game::world_sim::city_grid::CellState::Road;
-                            if !ok {
-                                println!("  [filter] Skipping PlaceBuilding at ({}, {}): cell is {:?}", c, r, cell.state);
-                            }
-                            return ok;
-                        }
-                    }
-                }
-                true
-            }).collect::<Vec<_>>();
+            // All strategic actions pass through — CityGrid cell-state filtering has been removed.
+            // VoxelWorld collision checks happen during apply_actions instead.
+            let valid_strat_actions: Vec<_> = strat_actions.iter().enumerate().collect::<Vec<_>>();
 
             let filtered_actions: Vec<_> = valid_strat_actions.iter().map(|(_, a)| (*a).clone()).collect();
             let filtered_indices: Vec<usize> = valid_strat_actions.iter().map(|(i, _)| *i).collect();

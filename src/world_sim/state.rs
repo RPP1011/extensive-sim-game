@@ -389,12 +389,6 @@ pub struct WorldState {
     #[serde(skip)]
     pub settlement_index: Vec<u32>,
 
-    /// City grids for settlements with spatial layout. Indexed by SettlementState.city_grid_idx.
-    pub city_grids: Vec<super::city_grid::CityGrid>,
-
-    /// Influence maps for city grids. Parallel to city_grids.
-    pub influence_maps: Vec<super::city_grid::InfluenceMap>,
-
     /// Sparse tile map: world-space tile modifications (walls, floors, ditches, farmland, etc.).
     /// Key: integer tile position (2.0 world units per tile). Only modified tiles are stored.
     pub tiles: std::collections::HashMap<TilePos, Tile>,
@@ -463,8 +457,6 @@ impl WorldState {
             regions: Vec::new(),
             settlements: Vec::new(),
             settlement_index: Vec::new(),
-            city_grids: Vec::new(),
-            influence_maps: Vec::new(),
             tiles: std::collections::HashMap::new(),
             build_seeds: Vec::new(),
             voxel_world: super::voxel::VoxelWorld::default(),
@@ -1267,27 +1259,6 @@ impl BuildingType {
             Self::Apothecary => 20.0,
             Self::Treasury => 500.0,  // main settlement reserve
             _ => 0.0, // houses, temples, etc. don't store commodities
-        }
-    }
-
-    /// Zone affinity for this building type.
-    pub fn zone(&self) -> super::city_grid::ZoneType {
-        use super::city_grid::ZoneType;
-        match self {
-            Self::House | Self::Longhouse => ZoneType::Residential,
-            Self::Farm | Self::Mine | Self::Sawmill | Self::Forge | Self::Workshop => {
-                ZoneType::Industrial
-            }
-            Self::Apothecary | Self::Market | Self::Warehouse | Self::Inn | Self::TradePost => {
-                ZoneType::Commercial
-            }
-            Self::Manor | Self::GuildHall | Self::CourtHouse | Self::Treasury => ZoneType::Noble,
-            Self::Temple | Self::Shrine => ZoneType::Religious,
-            Self::Library => ZoneType::Arcane,
-            Self::Barracks | Self::Watchtower | Self::Wall | Self::Gate | Self::Camp => {
-                ZoneType::Military
-            }
-            Self::Well | Self::Tent => ZoneType::None,
         }
     }
 
@@ -3936,9 +3907,6 @@ pub struct SettlementState {
     /// Context tags applied to all actions at this settlement.
     pub context_tags: Vec<(u32, f32)>,
 
-    /// Index into WorldState.city_grids (if this settlement has a spatial grid).
-    pub city_grid_idx: Option<usize>,
-
     /// Entity ID of the treasury building. Holds settlement gold and commodity reserves.
     /// All economic transfers should route through this building's inventory.
     pub treasury_building_id: Option<u32>,
@@ -3968,7 +3936,6 @@ impl SettlementState {
             threat_level: 0.0,
             infrastructure_level: 0.0,
             context_tags: Vec::new(),
-            city_grid_idx: None,
             treasury_building_id: None,
             service_contracts: Vec::new(),
             construction_memory: ConstructionMemory::default(),
