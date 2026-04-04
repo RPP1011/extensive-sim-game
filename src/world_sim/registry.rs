@@ -8,8 +8,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-#[allow(unused_imports)]
-use crate::world_sim::state::tag;
+
 
 // ---------------------------------------------------------------------------
 // Shared
@@ -274,7 +273,7 @@ pub struct ScenarioBuilding {
 
 /// Consequence variant keyed by the `type` field in TOML.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum HistoryConsequence {
     Casualties {
         template: String,
@@ -334,7 +333,7 @@ pub struct InitialStateOverrides {
 pub struct ResolutionCheck {
     pub check: String,
     #[serde(flatten, default)]
-    pub params: HashMap<String, serde_json::Value>,
+    pub params: HashMap<String, toml::Value>,
 }
 
 /// How a threat or event resolves.
@@ -349,7 +348,7 @@ pub enum ResolutionConfig {
     Single {
         check: String,
         #[serde(flatten, default)]
-        params: HashMap<String, serde_json::Value>,
+        params: HashMap<String, toml::Value>,
     },
 }
 
@@ -606,11 +605,11 @@ mod tests {
             severity = 0.7
             summary = "A band of orcs pillaged the outer farms."
             [[history.consequences]]
-            type = "Casualties"
+            type = "casualties"
             template = "farmer"
             count = 3
             [[history.consequences]]
-            type = "MoraleImpact"
+            type = "morale_impact"
             amount = -0.15
 
             [initial_state]
@@ -656,9 +655,7 @@ mod tests {
         assert_eq!(scenario.npcs.len(), 2);
         assert_eq!(scenario.npcs[0].template, "town_guard");
         assert_eq!(scenario.npcs[0].count, 4);
-        assert_eq!(scenario.npcs[0].level_range, Some([2, 3_u32].map(|_| 0)
-            .into_iter().enumerate().map(|(i, _)| [2u32, 5][i]).collect::<Vec<_>>()
-            .try_into().unwrap()));
+        assert_eq!(scenario.npcs[0].level_range, Some([2, 5]));
         let npc_state = scenario.npcs[0].state.as_ref().expect("npc state present");
         assert_eq!(npc_state.morale, Some(0.8));
 
