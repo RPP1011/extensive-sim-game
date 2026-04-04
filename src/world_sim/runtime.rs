@@ -1406,7 +1406,7 @@ fn run_settlement_systems(
     mentorship::compute_mentorship_for_settlement(state, sid, entities, buf);
     adventurer_condition::compute_adventurer_condition_for_settlement(state, sid, entities, buf);
     adventurer_recovery::compute_adventurer_recovery_for_settlement(state, sid, entities, buf);
-    progression::compute_progression_for_settlement(state, sid, entities, buf);
+    progression::compute_progression_for_settlement(state, sid, entities, state.registry.as_deref(), buf);
     class_progression::compute_class_progression_for_settlement(state, sid, entities, buf);
     recruitment::compute_recruitment_for_settlement(state, sid, entities, buf);
     npc_decisions::compute_npc_decisions_for_settlement(state, sid, entities, buf);
