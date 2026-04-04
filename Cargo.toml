@@ -16,10 +16,6 @@ autobins = false
 name = "xtask"
 path = "src/bin/xtask/main.rs"
 
-[[bin]]
-name = "sim_bridge"
-path = "src/bin/sim_bridge/main.rs"
-
 [features]
 default = []
 app = []

@@ -1,4 +1,4 @@
-// Items in this lib crate are used by binary targets (xtask, sim_bridge, etc.)
+// Items in this lib crate are used by binary targets (xtask, etc.)
 // but appear as dead code when the lib is compiled standalone.
 #![allow(dead_code)]
 
