@@ -1120,6 +1120,81 @@ level = 2
     }
 
     #[test]
+    fn entity_from_template() {
+        use crate::world_sim::state::Entity;
+
+        let class_toml = r#"
+name = "Warrior"
+tags = ["melee"]
+[base_stats]
+hp = 10.0
+attack = 2.5
+armor = 1.7
+speed = 0.02
+[per_level]
+hp = 10.0
+attack = 2.5
+armor = 1.7
+speed = 0.02
+"#;
+        let entity_toml = r#"
+name = "Town Guard"
+kind = "npc"
+[stats]
+hp = 100.0
+attack = 10.0
+armor = 0.0
+speed = 3.0
+[[classes.starting]]
+name = "Warrior"
+level = 3
+"#;
+        let class_def: ClassDefToml = toml::from_str(class_toml).unwrap();
+        let entity_tmpl: EntityTemplateToml = toml::from_str(entity_toml).unwrap();
+
+        let mut registry = Registry::default();
+        registry.classes.insert(tag(b"Warrior"), class_def);
+        registry.entities.insert(tag(b"Town Guard"), entity_tmpl.clone());
+
+        let entity = Entity::from_template(1, (10.0, 20.0), &entity_tmpl, &registry);
+        assert_eq!(entity.hp, 100.0);
+        assert_eq!(entity.attack_damage, 10.0);
+        assert_eq!(entity.level, 0); // starts at 0 for progression
+        let npc = entity.npc.as_ref().unwrap();
+        assert_eq!(npc.classes.len(), 1);
+        assert_eq!(npc.classes[0].level, 3);
+        assert_eq!(npc.classes[0].class_name_hash, tag(b"Warrior"));
+    }
+
+    #[test]
+    fn entity_from_template_creature() {
+        use crate::world_sim::state::Entity;
+
+        let entity_toml = r#"
+name = "Wall Jumper"
+kind = "creature"
+[stats]
+hp = 70.0
+attack = 10.0
+armor = 3.0
+speed = 3.5
+[capabilities]
+can_jump = true
+jump_height = 4
+"#;
+        let entity_tmpl: EntityTemplateToml = toml::from_str(entity_toml).unwrap();
+        let registry = Registry::default();
+
+        let entity = Entity::from_template(2, (5.0, 5.0), &entity_tmpl, &registry);
+        assert_eq!(entity.kind, crate::world_sim::state::EntityKind::Monster);
+        assert_eq!(entity.team, crate::world_sim::state::WorldTeam::Hostile);
+        assert_eq!(entity.hp, 70.0);
+        let caps = entity.enemy_capabilities.as_ref().unwrap();
+        assert!(caps.can_jump);
+        assert_eq!(caps.jump_height, 4);
+    }
+
+    #[test]
     fn load_real_class_files() {
         let dataset_path = std::path::Path::new("dataset");
         if !dataset_path.join("classes").is_dir() {

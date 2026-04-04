@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -436,6 +437,11 @@ pub struct WorldState {
     /// World events log (recent events for system queries, bounded).
     pub world_events: Vec<WorldEvent>,
 
+    /// Data-driven registry loaded from dataset/ directory.
+    /// None if no registry has been loaded (bare WorldState).
+    #[serde(skip)]
+    pub registry: Option<Arc<super::registry::Registry>>,
+
     /// When true, WorldSim::new skips resource node spawning (for building AI scenarios).
     #[serde(default)]
     pub skip_resource_init: bool,
@@ -472,6 +478,7 @@ impl WorldState {
             prophecies: super::systems::prophecy::generate_prophecies(seed),
             relations: HashMap::new(),
             world_events: Vec::new(),
+            registry: None,
             skip_resource_init: false,
         }
     }
@@ -1828,6 +1835,91 @@ impl Entity {
             move_target: None,
             move_speed_mult: 1.0,
             enemy_capabilities: None,
+        }
+    }
+
+    /// Create an entity from a registry template.
+    ///
+    /// Sets base stats from the template and grants starting ClassSlot entries.
+    /// Entity level starts at 0 so the progression system applies class bonuses
+    /// on the first cycle.
+    pub fn from_template(
+        id: u32,
+        pos: (f32, f32),
+        template: &super::registry::EntityTemplateToml,
+        _registry: &super::registry::Registry,
+    ) -> Self {
+        let kind = match template.kind.as_str() {
+            "hero" => EntityKind::Npc,
+            "npc" => EntityKind::Npc,
+            "creature" => EntityKind::Monster,
+            _ => EntityKind::Npc,
+        };
+        let team = match template.kind.as_str() {
+            "creature" => WorldTeam::Hostile,
+            _ => WorldTeam::Friendly,
+        };
+
+        let mut npc_data = NpcData::default();
+        if kind == EntityKind::Monster {
+            npc_data.creature_type = CreatureType::Territorial;
+            npc_data.personality = CreatureType::Territorial.personality();
+            npc_data.home_den = Some(pos);
+        }
+
+        // Grant starting classes.
+        for sc in &template.classes.starting {
+            let class_hash = tag(sc.name.as_bytes());
+            npc_data.classes.push(ClassSlot {
+                class_name_hash: class_hash,
+                level: sc.level,
+                xp: 0.0,
+                display_name: String::new(),
+            });
+            npc_data.class_tags.push(sc.name.to_lowercase());
+        }
+
+        // Apply capabilities if present.
+        let enemy_capabilities = template.capabilities.as_ref().map(|c| EnemyCapabilities {
+            can_jump: c.can_jump,
+            jump_height: c.jump_height,
+            can_climb: c.can_climb,
+            can_tunnel: c.can_tunnel,
+            can_fly: c.can_fly,
+            has_siege: c.has_siege,
+            siege_damage: c.siege_damage,
+        });
+
+        Self {
+            id,
+            kind,
+            team,
+            pos,
+            grid_id: None,
+            local_pos: None,
+            alive: true,
+            hp: template.stats.hp,
+            max_hp: template.stats.hp,
+            shield_hp: 0.0,
+            armor: template.stats.armor,
+            magic_resist: 0.0,
+            attack_damage: template.stats.attack,
+            attack_range: template.stats.attack_range,
+            move_speed: template.stats.speed,
+            level: 0, // progression detects class_level_sum > 0 and applies stats
+            status_effects: Vec::new(),
+            npc: Some(npc_data),
+            building: None,
+            item: None,
+            resource: None,
+            inventory: if kind == EntityKind::Npc {
+                Some(Inventory::with_capacity(50.0))
+            } else {
+                None
+            },
+            move_target: None,
+            move_speed_mult: 1.0,
+            enemy_capabilities,
         }
     }
 
