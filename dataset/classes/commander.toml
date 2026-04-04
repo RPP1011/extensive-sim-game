@@ -1,0 +1,27 @@
+name = "Commander"
+tags = ["leadership", "tactics", "combat", "discipline"]
+
+[base_stats]
+hp = 10.0
+attack = 1.5
+armor = 1.2
+speed = 0.02
+
+[per_level]
+hp = 10.0
+attack = 1.5
+armor = 1.2
+speed = 0.02
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+leadership = 50.0
+tactics = 30.0
+
+[score_weights]
+leadership = 0.3
+tactics = 0.3
+combat = 0.2
+discipline = 0.2

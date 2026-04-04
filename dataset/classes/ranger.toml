@@ -1,0 +1,26 @@
+name = "Ranger"
+tags = ["ranged", "awareness", "survival", "navigation"]
+
+[base_stats]
+hp = 7.0
+attack = 2.0
+armor = 0.5
+speed = 0.12
+
+[per_level]
+hp = 7.0
+attack = 2.0
+armor = 0.5
+speed = 0.12
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+ranged = 100.0
+
+[score_weights]
+ranged = 0.4
+awareness = 0.2
+survival = 0.2
+navigation = 0.2

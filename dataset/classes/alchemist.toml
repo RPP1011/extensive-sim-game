@@ -1,0 +1,26 @@
+name = "Alchemist"
+tags = ["alchemy", "research", "herbalism", "medicine"]
+
+[base_stats]
+hp = 7.0
+attack = 0.5
+armor = 0.4
+speed = 0.02
+
+[per_level]
+hp = 7.0
+attack = 0.5
+armor = 0.4
+speed = 0.02
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+alchemy = 100.0
+
+[score_weights]
+alchemy = 0.4
+research = 0.2
+herbalism = 0.2
+medicine = 0.2

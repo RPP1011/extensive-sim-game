@@ -1,0 +1,27 @@
+name = "Scholar"
+tags = ["research", "lore", "medicine", "discipline"]
+
+[base_stats]
+hp = 7.0
+attack = 0.5
+armor = 0.4
+speed = 0.02
+
+[per_level]
+hp = 7.0
+attack = 0.5
+armor = 0.4
+speed = 0.02
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+research = 50.0
+lore = 30.0
+
+[score_weights]
+research = 0.4
+lore = 0.3
+medicine = 0.15
+discipline = 0.15

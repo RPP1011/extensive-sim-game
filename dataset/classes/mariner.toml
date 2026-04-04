@@ -1,0 +1,27 @@
+name = "Mariner"
+tags = ["seafaring", "navigation", "survival", "trade"]
+
+[base_stats]
+hp = 10.0
+attack = 1.0
+armor = 0.7
+speed = 0.12
+
+[per_level]
+hp = 10.0
+attack = 1.0
+armor = 0.7
+speed = 0.12
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+seafaring = 50.0
+navigation = 30.0
+
+[score_weights]
+seafaring = 0.4
+navigation = 0.3
+survival = 0.2
+trade = 0.1

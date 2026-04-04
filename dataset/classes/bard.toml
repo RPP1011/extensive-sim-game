@@ -1,0 +1,27 @@
+name = "Bard"
+tags = ["teaching", "diplomacy", "leadership", "trade"]
+
+[base_stats]
+hp = 8.0
+attack = 0.5
+armor = 0.4
+speed = 0.12
+
+[per_level]
+hp = 8.0
+attack = 0.5
+armor = 0.4
+speed = 0.12
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+teaching = 100.0
+diplomacy = 50.0
+
+[score_weights]
+teaching = 0.3
+diplomacy = 0.3
+leadership = 0.2
+trade = 0.2

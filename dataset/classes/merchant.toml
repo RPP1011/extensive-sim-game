@@ -1,0 +1,26 @@
+name = "Merchant"
+tags = ["trade", "negotiation", "diplomacy", "navigation"]
+
+[base_stats]
+hp = 8.0
+attack = 0.5
+armor = 0.5
+speed = 0.07
+
+[per_level]
+hp = 8.0
+attack = 0.5
+armor = 0.5
+speed = 0.07
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+trade = 100.0
+
+[score_weights]
+trade = 0.4
+negotiation = 0.3
+diplomacy = 0.2
+navigation = 0.1

@@ -1,0 +1,26 @@
+name = "Rogue"
+tags = ["stealth", "deception", "awareness", "survival"]
+
+[base_stats]
+hp = 6.0
+attack = 1.5
+armor = 0.2
+speed = 0.17
+
+[per_level]
+hp = 6.0
+attack = 1.5
+armor = 0.2
+speed = 0.17
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+stealth = 50.0
+
+[score_weights]
+stealth = 0.4
+deception = 0.3
+awareness = 0.2
+survival = 0.1

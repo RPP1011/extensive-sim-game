@@ -1,0 +1,27 @@
+name = "Betrayer"
+tags = ["deception", "stealth", "awareness", "combat"]
+
+[base_stats]
+hp = 7.0
+attack = 2.0
+armor = 0.2
+speed = 0.22
+
+[per_level]
+hp = 7.0
+attack = 2.0
+armor = 0.2
+speed = 0.22
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+deception = 80.0
+stealth = 50.0
+
+[score_weights]
+deception = 0.4
+stealth = 0.3
+awareness = 0.2
+combat = 0.1

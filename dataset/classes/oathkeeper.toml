@@ -1,0 +1,27 @@
+name = "Oathkeeper"
+tags = ["faith", "discipline", "resilience", "leadership"]
+
+[base_stats]
+hp = 13.0
+attack = 1.0
+armor = 2.2
+speed = 0.02
+
+[per_level]
+hp = 13.0
+attack = 1.0
+armor = 2.2
+speed = 0.02
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+faith = 50.0
+discipline = 30.0
+
+[score_weights]
+faith = 0.4
+discipline = 0.3
+resilience = 0.2
+leadership = 0.1

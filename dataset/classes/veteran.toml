@@ -1,0 +1,27 @@
+name = "Veteran"
+tags = ["combat", "tactics", "melee", "endurance"]
+
+[base_stats]
+hp = 9.0
+attack = 2.5
+armor = 1.2
+speed = 0.02
+
+[per_level]
+hp = 9.0
+attack = 2.5
+armor = 1.2
+speed = 0.02
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+combat = 80.0
+tactics = 30.0
+
+[score_weights]
+combat = 0.3
+tactics = 0.3
+melee = 0.2
+endurance = 0.2

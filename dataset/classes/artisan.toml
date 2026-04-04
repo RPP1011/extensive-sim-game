@@ -1,0 +1,26 @@
+name = "Artisan"
+tags = ["crafting", "smithing", "labor", "endurance"]
+
+[base_stats]
+hp = 8.0
+attack = 0.8
+armor = 0.7
+speed = 0.02
+
+[per_level]
+hp = 8.0
+attack = 0.8
+armor = 0.7
+speed = 0.02
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+crafting = 100.0
+
+[score_weights]
+crafting = 0.3
+smithing = 0.3
+labor = 0.2
+endurance = 0.2

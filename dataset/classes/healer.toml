@@ -1,0 +1,26 @@
+name = "Healer"
+tags = ["medicine", "faith", "herbalism", "resilience"]
+
+[base_stats]
+hp = 15.0
+attack = 0.5
+armor = 0.7
+speed = 0.02
+
+[per_level]
+hp = 15.0
+attack = 0.5
+armor = 0.7
+speed = 0.02
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+medicine = 50.0
+
+[score_weights]
+medicine = 0.4
+faith = 0.2
+herbalism = 0.2
+resilience = 0.2

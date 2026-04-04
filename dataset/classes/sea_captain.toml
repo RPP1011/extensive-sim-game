@@ -1,0 +1,27 @@
+name = "Sea Captain"
+tags = ["seafaring", "leadership", "navigation", "combat"]
+
+[base_stats]
+hp = 10.0
+attack = 1.5
+armor = 1.2
+speed = 0.07
+
+[per_level]
+hp = 10.0
+attack = 1.5
+armor = 1.2
+speed = 0.07
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+seafaring = 100.0
+leadership = 50.0
+
+[score_weights]
+seafaring = 0.3
+leadership = 0.3
+navigation = 0.2
+combat = 0.2

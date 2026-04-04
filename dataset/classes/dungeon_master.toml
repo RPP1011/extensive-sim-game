@@ -1,0 +1,27 @@
+name = "Dungeon Master"
+tags = ["dungeoneering", "tactics", "combat", "leadership"]
+
+[base_stats]
+hp = 8.0
+attack = 2.0
+armor = 1.7
+speed = 0.02
+
+[per_level]
+hp = 8.0
+attack = 2.0
+armor = 1.7
+speed = 0.02
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+dungeoneering = 100.0
+tactics = 50.0
+
+[score_weights]
+dungeoneering = 0.3
+tactics = 0.3
+combat = 0.2
+leadership = 0.2

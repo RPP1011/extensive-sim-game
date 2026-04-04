@@ -1118,4 +1118,27 @@ level = 2
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn load_real_class_files() {
+        let dataset_path = std::path::Path::new("dataset");
+        if !dataset_path.join("classes").is_dir() {
+            return; // skip if dataset not present
+        }
+        let classes_dir = dataset_path.join("classes");
+        let mut count = 0;
+        for entry in std::fs::read_dir(&classes_dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path).unwrap();
+            let def: ClassDefToml = toml::from_str(&content)
+                .unwrap_or_else(|e| panic!("Failed to parse {}: {e}", path.display()));
+            assert!(!def.name.is_empty(), "{}: name is empty", path.display());
+            assert!(def.per_level.hp > 0.0, "{}: per_level.hp should be > 0", path.display());
+            count += 1;
+        }
+        assert!(count >= 31, "Expected at least 31 class files, found {count}");
+    }
 }

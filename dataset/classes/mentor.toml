@@ -1,0 +1,27 @@
+name = "Mentor"
+tags = ["teaching", "leadership", "discipline", "labor"]
+
+[base_stats]
+hp = 9.0
+attack = 0.5
+armor = 0.7
+speed = 0.02
+
+[per_level]
+hp = 9.0
+attack = 0.5
+armor = 0.7
+speed = 0.02
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+teaching = 50.0
+leadership = 30.0
+
+[score_weights]
+teaching = 0.4
+leadership = 0.3
+discipline = 0.2
+labor = 0.1

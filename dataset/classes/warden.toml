@@ -1,0 +1,27 @@
+name = "Warden"
+tags = ["defense", "combat", "resilience", "leadership"]
+
+[base_stats]
+hp = 10.0
+attack = 1.5
+armor = 2.2
+speed = 0.02
+
+[per_level]
+hp = 10.0
+attack = 1.5
+armor = 2.2
+speed = 0.02
+
+[requirements]
+min_level = 0
+
+[requirements.behavior]
+defense = 80.0
+combat = 50.0
+
+[score_weights]
+defense = 0.3
+combat = 0.3
+resilience = 0.2
+leadership = 0.2
