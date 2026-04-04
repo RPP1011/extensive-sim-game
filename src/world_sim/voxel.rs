@@ -671,6 +671,85 @@ impl VoxelWorld {
     pub fn total_solid(&self) -> usize {
         self.chunks.values().map(|c| c.solid_count()).sum()
     }
+
+    // -----------------------------------------------------------------------
+    // Destructible terrain
+    // -----------------------------------------------------------------------
+
+    /// Apply structural damage to a voxel. Returns true if the voxel was destroyed.
+    /// Triggers cascading collapse for unsupported voxels above.
+    pub fn damage_voxel(&mut self, vx: i32, vy: i32, vz: i32, damage: f32) -> bool {
+        let (cp, idx) = voxel_to_chunk_local(vx, vy, vz);
+        let chunk = match self.chunks.get_mut(&cp) {
+            Some(c) => c,
+            None => return false,
+        };
+        let voxel = &mut chunk.voxels[idx];
+        if !voxel.material.is_solid() { return false; }
+
+        let props = voxel.material.properties();
+        let effective_hp = voxel.integrity * props.hp_multiplier;
+        let new_hp = effective_hp - damage;
+
+        if new_hp <= 0.0 {
+            if props.load_bearing {
+                voxel.integrity = 0.0;
+                voxel.zone = VoxelZone::None;
+                voxel.building_id = None;
+            } else {
+                *voxel = Voxel::default();
+            }
+            chunk.dirty = true;
+            self.cascade_collapse(vx, vy, vz + 1);
+            true
+        } else {
+            voxel.integrity = new_hp / props.hp_multiplier;
+            chunk.dirty = true;
+            false
+        }
+    }
+
+    /// Check structural support for voxel at (vx, vy, vz) and collapse if unsupported.
+    fn cascade_collapse(&mut self, vx: i32, vy: i32, vz: i32) {
+        let voxel = self.get_voxel(vx, vy, vz);
+        if !voxel.material.is_solid() || voxel.integrity == 0.0 { return; }
+
+        if self.is_supported(vx, vy, vz) { return; }
+
+        let (cp, idx) = voxel_to_chunk_local(vx, vy, vz);
+        if let Some(chunk) = self.chunks.get_mut(&cp) {
+            let v = &mut chunk.voxels[idx];
+            if v.material.properties().load_bearing {
+                v.integrity = 0.0;
+                v.zone = VoxelZone::None;
+                v.building_id = None;
+            } else {
+                *v = Voxel::default();
+            }
+            chunk.dirty = true;
+        }
+
+        self.cascade_collapse(vx, vy, vz + 1);
+    }
+
+    /// Check if a voxel position is structurally supported.
+    fn is_supported(&self, vx: i32, vy: i32, vz: i32) -> bool {
+        if vz <= 0 { return true; }
+
+        let below = self.get_voxel(vx, vy, vz - 1);
+        if below.material.is_solid() && below.integrity > 0.0 && below.material.properties().load_bearing {
+            return true;
+        }
+
+        let mut solid_neighbors = 0u8;
+        for &(dx, dy) in &[(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+            let n = self.get_voxel(vx + dx, vy + dy, vz);
+            if n.material.is_solid() && n.integrity > 0.0 {
+                solid_neighbors += 1;
+            }
+        }
+        solid_neighbors >= 2
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1288,5 +1367,86 @@ mod tests {
         assert!(steel.blast_resistance > VoxelMaterial::Glass.properties().blast_resistance);
         assert!(VoxelMaterial::Glass.properties().load_bearing == false);
         assert!(VoxelMaterial::Stone.properties().load_bearing == true);
+    }
+
+    // -----------------------------------------------------------------------
+    // Destructible terrain tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn voxel_world_damage_destroys() {
+        let mut world = VoxelWorld::default();
+        let cp = ChunkPos::new(0, 0, 0);
+        world.generate_chunk(cp, 42);
+
+        // Find a solid voxel that isn't bedrock
+        let vx = 8;
+        let vy = 8;
+        let vz = 10; // stone layer
+        let mat = world.get_voxel(vx, vy, vz).material;
+        assert!(mat.is_solid(), "expected solid at z=10");
+
+        let hp = mat.properties().hp_multiplier;
+        // Damage it to destruction
+        let destroyed = world.damage_voxel(vx, vy, vz, hp + 1.0);
+        assert!(destroyed);
+
+        let after = world.get_voxel(vx, vy, vz);
+        // Load-bearing materials become rubble (integrity 0), non-load-bearing become Air
+        if mat.properties().load_bearing {
+            assert_eq!(after.integrity, 0.0);
+            assert_eq!(after.zone, VoxelZone::None);
+        } else {
+            assert_eq!(after.material, VoxelMaterial::Air);
+        }
+    }
+
+    #[test]
+    fn voxel_world_damage_partial() {
+        let mut world = VoxelWorld::default();
+        let cp = ChunkPos::new(0, 0, 0);
+        world.generate_chunk(cp, 42);
+
+        let vx = 8;
+        let vy = 8;
+        let vz = 10;
+        let mat = world.get_voxel(vx, vy, vz).material;
+        let hp = mat.properties().hp_multiplier;
+
+        // Partial damage
+        let destroyed = world.damage_voxel(vx, vy, vz, hp * 0.3);
+        assert!(!destroyed);
+
+        let after = world.get_voxel(vx, vy, vz);
+        assert!(after.integrity > 0.0 && after.integrity < 1.0);
+    }
+
+    #[test]
+    fn cascading_collapse() {
+        // Column at z=10,11,12 — z=10 supported by solid below
+        let mut world = VoxelWorld::default();
+        // Fill z=0..10 with stone as foundation
+        for z in 0..=10 {
+            world.set_voxel(5, 5, z, Voxel::new(VoxelMaterial::Stone));
+        }
+        // Add z=11, 12 on top
+        world.set_voxel(5, 5, 11, Voxel::new(VoxelMaterial::Stone));
+        world.set_voxel(5, 5, 12, Voxel::new(VoxelMaterial::Stone));
+
+        // Destroy z=10 (the top of the foundation)
+        let hp = VoxelMaterial::Stone.properties().hp_multiplier;
+        world.damage_voxel(5, 5, 10, hp + 1.0);
+
+        // z=10 is now rubble (integrity 0, load_bearing → stays as stone rubble)
+        let v10 = world.get_voxel(5, 5, 10);
+        assert_eq!(v10.integrity, 0.0);
+
+        // z=11 should collapse — z=10 below is rubble (integrity 0), no horizontal support
+        let v11 = world.get_voxel(5, 5, 11);
+        assert_eq!(v11.integrity, 0.0, "z=11 should collapse without support");
+
+        // z=12 should also cascade
+        let v12 = world.get_voxel(5, 5, 12);
+        assert_eq!(v12.integrity, 0.0, "z=12 should cascade");
     }
 }
