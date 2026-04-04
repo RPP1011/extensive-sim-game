@@ -6,6 +6,7 @@
 //! last-damage-source attribution. Vecs accumulate non-commutative items
 //! (status effects, spawns, transfers).
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use super::delta::WorldDelta;
@@ -1324,6 +1325,13 @@ impl WorldSim {
             (None, Vec::new())
         };
 
+        let class_gen: Box<dyn super::class_gen::ClassGenerator> =
+            if let Some(ref reg) = initial.registry {
+                Box::new(super::class_gen::RegistryClassGenerator::new(Arc::clone(reg)))
+            } else {
+                Box::new(super::class_gen::DefaultClassGenerator::new())
+            };
+
         WorldSim {
             delta_buf: Vec::with_capacity(initial.entities.len() * 4),
             merged: FlatMergedDeltas::new(max_entity_id, max_settlement_id),
@@ -1332,7 +1340,7 @@ impl WorldSim {
             thread_bufs,
             profile_acc: ProfileAccumulator::default(),
             state: initial,
-            class_gen: Box::new(super::class_gen::DefaultClassGenerator::new()),
+            class_gen,
             ability_gen: Box::new(super::class_gen::DefaultAbilityGenerator::new()),
             naming: super::naming::NamingService::new(),
         }

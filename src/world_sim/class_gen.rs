@@ -470,6 +470,123 @@ impl ClassGenerator for DefaultClassGenerator {
 }
 
 // ---------------------------------------------------------------------------
+// RegistryClassGenerator — reads class templates from the data-driven registry
+// ---------------------------------------------------------------------------
+
+use std::sync::Arc;
+
+/// Class generator that reads templates from the data-driven registry.
+pub struct RegistryClassGenerator {
+    registry: Arc<super::registry::Registry>,
+}
+
+impl RegistryClassGenerator {
+    pub fn new(registry: Arc<super::registry::Registry>) -> Self {
+        Self { registry }
+    }
+}
+
+impl ClassGenerator for RegistryClassGenerator {
+    fn match_classes(&self, behavior_profile: &[(u32, f32)]) -> Vec<ClassMatch> {
+        let mut matches = Vec::new();
+
+        for def in self.registry.classes.values() {
+            // Check all behavior requirements are met.
+            let mut qualified = true;
+            for (tag_name, &min_val) in &def.requirements.behavior {
+                let tag_hash = tag(tag_name.as_bytes());
+                if lookup_tag(behavior_profile, tag_hash) < min_val {
+                    qualified = false;
+                    break;
+                }
+            }
+            if !qualified {
+                continue;
+            }
+
+            // Compute weighted dot product using score_weights.
+            let mut score = 0.0f32;
+            let mut best_tag_hash = 0u32;
+            let mut best_weighted = 0.0f32;
+            let mut second_tag_hash = 0u32;
+            let mut second_weighted = 0.0f32;
+
+            if def.score_weights.is_empty() {
+                // No score_weights: use tags with equal weights.
+                let w = if def.tags.is_empty() { 1.0 } else { 1.0 / def.tags.len() as f32 };
+                for tag_name in &def.tags {
+                    let tag_hash = tag(tag_name.as_bytes());
+                    let val = lookup_tag(behavior_profile, tag_hash);
+                    let weighted = val * w;
+                    score += weighted;
+                    if weighted > best_weighted {
+                        second_tag_hash = best_tag_hash;
+                        second_weighted = best_weighted;
+                        best_tag_hash = tag_hash;
+                        best_weighted = weighted;
+                    } else if weighted > second_weighted {
+                        second_tag_hash = tag_hash;
+                        second_weighted = weighted;
+                    }
+                }
+            } else {
+                for (tag_name, &weight) in &def.score_weights {
+                    let tag_hash = tag(tag_name.as_bytes());
+                    let val = lookup_tag(behavior_profile, tag_hash);
+                    let weighted = val * weight;
+                    score += weighted;
+                    if weighted > best_weighted {
+                        second_tag_hash = best_tag_hash;
+                        second_weighted = best_weighted;
+                        best_tag_hash = tag_hash;
+                        best_weighted = weighted;
+                    } else if weighted > second_weighted {
+                        second_tag_hash = tag_hash;
+                        second_weighted = weighted;
+                    }
+                }
+            }
+
+            // Normalize with sigmoid: raw/(raw+100).
+            let normalized_score = score / (score + 100.0);
+            if normalized_score < SCORE_THRESHOLD {
+                continue;
+            }
+
+            // Variant naming.
+            let display_name = if best_weighted > 0.0
+                && second_weighted > best_weighted * 0.8
+                && second_tag_hash != 0
+            {
+                if let Some(suffix) = tag_display_name(second_tag_hash) {
+                    format!("{} of {}", def.name, suffix)
+                } else {
+                    def.name.clone()
+                }
+            } else {
+                def.name.clone()
+            };
+
+            matches.push(ClassMatch {
+                class_name_hash: tag(def.name.as_bytes()),
+                display_name,
+                score: normalized_score,
+            });
+        }
+
+        matches
+    }
+
+    fn generate_unique_class(
+        &self,
+        _behavior_profile: &[(u32, f32)],
+        _seed: u64,
+    ) -> Option<ClassDef> {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
 // DefaultAbilityGenerator
 // ---------------------------------------------------------------------------
 
