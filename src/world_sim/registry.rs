@@ -1216,4 +1216,66 @@ jump_height = 4
         }
         assert!(count >= 31, "Expected at least 31 class files, found {count}");
     }
+
+    #[test]
+    fn load_real_dataset() {
+        let dataset_path = std::path::Path::new("dataset");
+        if !dataset_path.join("classes").is_dir() {
+            return; // skip if dataset not present
+        }
+        let registry = Registry::load(dataset_path)
+            .unwrap_or_else(|errs| {
+                for e in &errs {
+                    eprintln!("  {e}");
+                }
+                panic!("{} registry errors", errs.len());
+            });
+        assert!(registry.classes.len() >= 31, "Expected 31+ classes, got {}", registry.classes.len());
+        assert!(registry.entities.len() >= 10, "Expected 10+ entities, got {}", registry.entities.len());
+        assert!(registry.terrains.len() >= 3, "Expected 3+ terrains, got {}", registry.terrains.len());
+        assert!(registry.scenarios.len() >= 3, "Expected 3+ scenarios, got {}", registry.scenarios.len());
+    }
+
+    #[test]
+    fn full_lifecycle_registry_to_entity() {
+        use crate::world_sim::state::{Entity, WorldState};
+        use std::sync::Arc;
+
+        let dataset_path = std::path::Path::new("dataset");
+        if !dataset_path.join("classes").is_dir() {
+            return;
+        }
+
+        let registry = Registry::load(dataset_path).unwrap();
+        let registry = Arc::new(registry);
+
+        // Create a WorldState with the registry.
+        let mut state = WorldState::new(42);
+        state.registry = Some(Arc::clone(&registry));
+
+        // Create an entity from template.
+        let guard_tmpl = registry.entity_by_name("Town Guard").expect("Town Guard template missing");
+        let guard = Entity::from_template(1, (10.0, 20.0), guard_tmpl, &registry);
+        assert_eq!(guard.hp, 100.0);
+        assert_eq!(guard.level, 0);
+        let npc = guard.npc.as_ref().unwrap();
+        assert!(!npc.classes.is_empty(), "Should have starting class");
+
+        // Create a creature from template.
+        let jumper_tmpl = registry.entity_by_name("Wall Jumper").expect("Wall Jumper template missing");
+        let jumper = Entity::from_template(2, (5.0, 5.0), jumper_tmpl, &registry);
+        assert_eq!(jumper.kind, crate::world_sim::state::EntityKind::Monster);
+        let caps = jumper.enemy_capabilities.as_ref().unwrap();
+        assert!(caps.can_jump);
+
+        // Verify class definition is accessible via registry.
+        let warrior_class = registry.class_by_name("Warrior").expect("Warrior class missing");
+        assert!(warrior_class.per_level.hp > 0.0);
+        assert!(warrior_class.per_level.attack > 0.0);
+
+        // Verify scenario is loadable.
+        let scenario = registry.scenario_by_name("Post-Raid Recovery").expect("scenario missing");
+        assert!(!scenario.history.is_empty());
+        assert!(!scenario.threats.is_empty());
+    }
 }
