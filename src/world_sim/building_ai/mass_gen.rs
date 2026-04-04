@@ -27,10 +27,10 @@ use crate::world_sim::NUM_COMMODITIES;
 // SimpleRng — deterministic RNG (same as scenario_gen.rs)
 // ---------------------------------------------------------------------------
 
-struct SimpleRng(u64);
+pub struct SimpleRng(u64);
 
 impl SimpleRng {
-    fn new(seed: u64) -> Self {
+    pub fn new(seed: u64) -> Self {
         Self(seed)
     }
     fn next_u32(&mut self) -> u32 {
@@ -43,7 +43,7 @@ impl SimpleRng {
     fn next_f64(&mut self) -> f64 {
         self.next_u32() as f64 / u32::MAX as f64
     }
-    fn next_f32(&mut self) -> f32 {
+    pub fn next_f32(&mut self) -> f32 {
         self.next_f64() as f32
     }
     /// Random integer in [lo, hi] inclusive.
@@ -430,7 +430,12 @@ fn generate_maturity(
         };
 
         let eid = state.next_entity_id();
-        let mut entity = Entity::new_building(eid, settlement_pos);
+        // World position from grid cell: offset from settlement center.
+        let world_pos = (
+            settlement_pos.0 + (col as f32 - grid_center as f32),
+            settlement_pos.1 + (row as f32 - grid_center as f32),
+        );
+        let mut entity = Entity::new_building(eid, world_pos);
         entity.building = Some(BuildingData {
             building_type: btype,
             settlement_id: Some(settlement_id),
@@ -477,7 +482,11 @@ fn generate_maturity(
             } else {
                 BuildingType::Wall
             };
-            let mut entity = Entity::new_building(eid, settlement_pos);
+            let wall_world_pos = (
+                settlement_pos.0 + (wc as f32 - grid_center as f32),
+                settlement_pos.1 + (wr as f32 - grid_center as f32),
+            );
+            let mut entity = Entity::new_building(eid, wall_world_pos);
             entity.building = Some(BuildingData {
                 building_type: btype,
                 settlement_id: Some(settlement_id),
@@ -750,6 +759,7 @@ fn generate_npc_roster(
 
         if let Some(npc) = entity.npc.as_mut() {
             npc.home_settlement_id = Some(settlement_id);
+            npc.archetype = "garrison".into();
         }
         state.entities.push(entity);
     }
@@ -876,7 +886,7 @@ pub struct PressureMetadata {
 }
 
 /// Inject a pressure into the world state and return a Challenge + metadata.
-fn inject_pressure(
+pub fn inject_pressure(
     pressure: PressureType,
     state: &mut WorldState,
     severity: f32,

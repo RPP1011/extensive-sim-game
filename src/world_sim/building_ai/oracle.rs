@@ -271,7 +271,7 @@ fn compute_ideal_point(obs: &BuildingObservation) -> [f32; 8] {
 fn strategic_rule_layer(obs: &BuildingObservation) -> Vec<BuildingAction> {
     let mut actions = Vec::new();
 
-    // Rule 1: Threat from direction D + no wall coverage on D → place wall segment.
+    // Rule 1: Threat from direction D + no defensive coverage on D → place watchtower.
     for ch in &obs.challenges {
         if let Some(dir) = ch.direction {
             let threat_severity = ch.severity;
@@ -287,7 +287,7 @@ fn strategic_rule_layer(obs: &BuildingObservation) -> Vec<BuildingAction> {
                     decision_type: DecisionType::Placement,
                     tier: DecisionTier::Strategic,
                     action: ActionPayload::PlaceBuilding {
-                        building_type: BuildingType::Wall,
+                        building_type: BuildingType::Watchtower,
                         grid_cell: cell,
                     },
                     priority: threat_severity,
@@ -367,25 +367,32 @@ fn strategic_rule_layer(obs: &BuildingObservation) -> Vec<BuildingAction> {
         }
     }
 
-    // Rule 5: High-level combat NPCs → bias barracks toward weakest defensive segment.
-    let combat_npcs: Vec<_> = obs
-        .friendly_roster
-        .iter()
-        .filter(|u| u.combat_effectiveness > 5.0 && u.level >= 3)
-        .collect();
-    if combat_npcs.len() >= 2 {
-        // Find weakest segment of defensive perimeter.
-        if let Some(weak_cell) = weakest_defensive_cell(obs) {
-            actions.push(BuildingAction {
-                decision_type: DecisionType::Placement,
-                tier: DecisionTier::Strategic,
-                action: ActionPayload::PlaceBuilding {
-                    building_type: BuildingType::Barracks,
-                    grid_cell: weak_cell,
-                },
-                priority: 0.6,
-                reasoning_tag: bi_tags::GARRISON_SYNERGY,
-            });
+    // Rule 5: High-level combat NPCs + active military threat + low garrison coverage
+    //         → place barracks toward weakest defensive segment.
+    let has_military_threat = obs.challenges.iter().any(|c| {
+        c.category == ChallengeCategory::Military && c.severity > 0.3
+    });
+    let garrison_coverage = obs.spatial.garrison.coverage_map.iter()
+        .copied().fold(0.0f32, f32::max);
+    if has_military_threat && garrison_coverage < 0.5 {
+        let combat_npcs: Vec<_> = obs
+            .friendly_roster
+            .iter()
+            .filter(|u| u.combat_effectiveness > 5.0 && u.level >= 3)
+            .collect();
+        if combat_npcs.len() >= 2 {
+            if let Some(weak_cell) = weakest_defensive_cell(obs) {
+                actions.push(BuildingAction {
+                    decision_type: DecisionType::Placement,
+                    tier: DecisionTier::Strategic,
+                    action: ActionPayload::PlaceBuilding {
+                        building_type: BuildingType::Barracks,
+                        grid_cell: weak_cell,
+                    },
+                    priority: 0.6,
+                    reasoning_tag: bi_tags::GARRISON_SYNERGY,
+                });
+            }
         }
     }
 
@@ -487,7 +494,37 @@ fn strategic_rule_layer(obs: &BuildingObservation) -> Vec<BuildingAction> {
         }
     }
 
+    // Deduplicate placement actions by (building_type, grid_cell), keeping highest priority.
+    dedup_placement_actions(&mut actions);
+
     actions
+}
+
+/// Remove duplicate PlaceBuilding actions at the same (building_type, grid_cell),
+/// keeping only the one with the highest priority.
+fn dedup_placement_actions(actions: &mut Vec<BuildingAction>) {
+    let mut seen = std::collections::HashMap::<(u16, u16, u16), usize>::new(); // (col, row, btype_disc) → index
+    let mut to_remove = Vec::new();
+    for (i, a) in actions.iter().enumerate() {
+        if let ActionPayload::PlaceBuilding { building_type, grid_cell } = &a.action {
+            let key = (grid_cell.0, grid_cell.1, *building_type as u16);
+            if let Some(&prev_idx) = seen.get(&key) {
+                // Keep the one with higher priority.
+                if a.priority > actions[prev_idx].priority {
+                    to_remove.push(prev_idx);
+                    seen.insert(key, i);
+                } else {
+                    to_remove.push(i);
+                }
+            } else {
+                seen.insert(key, i);
+            }
+        }
+    }
+    to_remove.sort_unstable();
+    for i in to_remove.into_iter().rev() {
+        actions.remove(i);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -504,8 +541,8 @@ fn strategic_utility_layer(
     let r_star = compute_ideal_point(obs);
 
     // Candidate building types to consider at each cell.
+    // Must be a subset of PLACEABLE_TYPES from env_config.
     let candidate_types = [
-        BuildingType::Wall,
         BuildingType::Watchtower,
         BuildingType::Barracks,
         BuildingType::House,
@@ -513,6 +550,8 @@ fn strategic_utility_layer(
         BuildingType::Market,
         BuildingType::GuildHall,
         BuildingType::Forge,
+        BuildingType::Farm,
+        BuildingType::Inn,
     ];
 
     // Collect cells already used by rule actions so we don't double-place.
@@ -634,17 +673,10 @@ fn estimate_strategic_impact(
     let mut impact = [0.5f32; 8]; // baseline neutral impact
 
     let has_threat = obs.challenges.iter().any(|c| c.severity > 0.3);
-    let near_perimeter = is_near_perimeter(obs, cell);
 
     match building_type {
-        BuildingType::Wall => {
-            impact[0] = if has_threat && near_perimeter { 0.9 } else { 0.6 }; // threat_mitigation
-            impact[1] = 0.2; // economic (walls cost, don't earn)
-            impact[4] = 0.4; // resource_feasibility (moderate cost)
-            impact[7] = 0.7; // garrison_synergy
-        }
         BuildingType::Watchtower => {
-            impact[0] = 0.8; // threat_mitigation
+            impact[0] = if has_threat { 0.9 } else { 0.6 }; // threat_mitigation
             impact[1] = 0.3;
             impact[4] = 0.3;
             impact[7] = if has_ranged_garrison(obs) { 0.95 } else { 0.6 };
@@ -691,6 +723,17 @@ fn estimate_strategic_impact(
             impact[5] = 0.7;
             impact[6] = level_appropriateness(obs, building_type);
         }
+        BuildingType::Farm => {
+            impact[1] = 0.6; // economic (food production)
+            impact[2] = 0.6; // population_relief (food capacity)
+            impact[4] = 0.7; // resource_feasibility (low cost)
+            impact[5] = 0.6; // workforce_match
+        }
+        BuildingType::Inn => {
+            impact[1] = 0.6; // economic (trade income)
+            impact[2] = 0.5; // population_relief (temporary housing)
+            impact[3] = 0.7; // connectivity (social hub)
+        }
         _ => {}
     }
 
@@ -701,7 +744,7 @@ fn estimate_strategic_impact(
         .flood_risk_cells
         .iter()
         .any(|&(c, r)| c == cell.0 && r == cell.1);
-    if in_flood && !matches!(building_type, BuildingType::Wall) {
+    if in_flood && !matches!(building_type, BuildingType::Watchtower | BuildingType::Barracks) {
         impact[4] *= 0.5; // resource_feasibility tanks in flood zone
     }
 
@@ -714,6 +757,42 @@ fn estimate_strategic_impact(
         .any(|fc| fc.cells.iter().any(|&(c, r)| c == cell.0 && r == cell.1));
     if in_fire_cluster && matches!(building_type, BuildingType::House) {
         impact[4] *= 0.6;
+    }
+
+    // Position-dependent adjustment: distance from settlement center affects value.
+    let center = settlement_center(obs);
+    let dx = cell.0 as f32 - center.0;
+    let dy = cell.1 as f32 - center.1;
+    let dist = (dx * dx + dy * dy).sqrt();
+    let near_center = dist < 8.0;
+    let near_perimeter = is_near_perimeter(obs, cell);
+
+    match building_type {
+        // Economic buildings benefit from central placement.
+        BuildingType::Market | BuildingType::GuildHall | BuildingType::Forge
+        | BuildingType::Warehouse | BuildingType::Inn => {
+            if near_center {
+                impact[3] += 0.1; // connectivity boost
+            } else {
+                impact[3] -= 0.1;
+            }
+        }
+        // Defensive buildings benefit from perimeter placement.
+        BuildingType::Watchtower | BuildingType::Barracks => {
+            if near_perimeter {
+                impact[0] += 0.1; // threat mitigation boost
+                impact[7] += 0.1; // garrison synergy boost
+            } else {
+                impact[0] -= 0.1;
+            }
+        }
+        // Residential buildings: moderate distance (not on perimeter, not crammed at center).
+        BuildingType::House | BuildingType::Longhouse | BuildingType::Manor => {
+            if dist > 3.0 && dist < 15.0 {
+                impact[2] += 0.1; // population relief
+            }
+        }
+        _ => {}
     }
 
     impact
@@ -1429,7 +1508,8 @@ fn settlement_center(obs: &BuildingObservation) -> (f32, f32) {
     if count > 0 {
         (sum_x / count as f32, sum_y / count as f32)
     } else {
-        (10.0, 10.0)
+        // Default to virtual grid center (VIRT/2 = 32).
+        (32.0, 32.0)
     }
 }
 
@@ -1440,13 +1520,12 @@ fn find_empty_cell_near_center(obs: &BuildingObservation) -> (u16, u16) {
     let cx = center.0 as u16;
     let cy = center.1 as u16;
 
-    // Collect occupied cells from existing building positions.
+    // Use full occupied cell set from spatial features.
     let occupied: std::collections::HashSet<(u16, u16)> = obs
         .spatial
-        .defensive
-        .wall_segments
+        .occupied_cells
         .iter()
-        .flat_map(|s| vec![s.start, s.end])
+        .copied()
         .collect();
 
     // Spiral outward from center.
@@ -1542,6 +1621,15 @@ fn generate_candidate_cells(
 ) -> Vec<(u16, u16)> {
     let mut cells = Vec::new();
 
+    // Build occupied set from spatial features + rule exclusions.
+    let occupied: std::collections::HashSet<(u16, u16)> = obs
+        .spatial
+        .occupied_cells
+        .iter()
+        .copied()
+        .chain(exclude.iter().copied())
+        .collect();
+
     // Estimate grid bounds.
     let mut max_col: u16 = 20;
     let mut max_row: u16 = 20;
@@ -1553,22 +1641,40 @@ fn generate_candidate_cells(
         max_col = max_col.max(elev.cell.0 + 1);
         max_row = max_row.max(elev.cell.1 + 1);
     }
+    // Ensure we scan at least through the virtual grid center area.
+    max_col = max_col.max(40);
+    max_row = max_row.max(40);
 
-    // Systematic scan with stride 3 to keep candidate count manageable.
-    let stride = 3u16;
-    for r in (1..max_row).step_by(stride as usize) {
-        for c in (1..max_col).step_by(stride as usize) {
-            let cell = (c, r);
-            if exclude.contains(&cell) {
-                continue;
+    // Scan candidates in spiral order from settlement center outward,
+    // stepping by 3 to keep count manageable.
+    let center = settlement_center(obs);
+    let cx = center.0 as i16;
+    let cy = center.1 as i16;
+    let stride = 3i16;
+
+    for radius in 0..20i16 {
+        for dr in -radius..=radius {
+            for dc in -radius..=radius {
+                if dr.abs() != radius && dc.abs() != radius {
+                    continue; // only scan perimeter of this ring
+                }
+                let c = cx + dc * stride;
+                let r = cy + dr * stride;
+                if c < 1 || r < 1 || c >= max_col as i16 || r >= max_row as i16 {
+                    continue;
+                }
+                let cell = (c as u16, r as u16);
+                if occupied.contains(&cell) {
+                    continue;
+                }
+                cells.push(cell);
+                if cells.len() >= 30 {
+                    return cells;
+                }
             }
-            // Skip flood risk cells for most purposes (utility layer will penalize anyway).
-            cells.push(cell);
         }
     }
 
-    // Cap at 30 candidates to keep oracle fast.
-    cells.truncate(30);
     cells
 }
 

@@ -487,6 +487,8 @@ pub enum BuildingAiSubcommand {
     Coverage(BuildingAiCoverageArgs),
     /// Generate supplemental data targeting under-represented matrix cells
     FillGaps(BuildingAiFillGapsArgs),
+    /// Collect RL trajectories by running BuildingEnv episodes with oracle policy
+    EnvCollect(BuildingAiEnvCollectArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -553,4 +555,24 @@ pub struct BuildingAiFillGapsArgs {
     /// RNG seed
     #[arg(long, default_value_t = 43)]
     pub seed: u64,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Collect RL trajectories from BuildingEnv with oracle policy")]
+pub struct BuildingAiEnvCollectArgs {
+    /// Number of episodes to run
+    #[arg(long, default_value_t = 100)]
+    pub episodes: usize,
+    /// Curriculum level (1-4)
+    #[arg(long, default_value_t = 1)]
+    pub level: u8,
+    /// Output NPZ file for flat trajectories
+    #[arg(long, default_value = "generated/building_env_trajectories.npz")]
+    pub output: PathBuf,
+    /// RNG seed
+    #[arg(long, default_value_t = 42)]
+    pub seed: u64,
+    /// Fraction of actions that are random (epsilon-greedy exploration)
+    #[arg(long, default_value_t = 0.1)]
+    pub epsilon: f32,
 }

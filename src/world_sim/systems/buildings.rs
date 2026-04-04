@@ -11,6 +11,8 @@
 
 use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::{WorldState, Entity, EntityKind, EconomicIntent, ChronicleEntry, ChronicleCategory, tags, BuildingType, BuildingData, ActionTags, WorkState, MemoryEvent, MemEventType, GoalKind, entity_hash};
+use crate::world_sim::voxel::{Voxel, VoxelMaterial, VoxelZone, world_to_voxel};
+use crate::world_sim::nav_grid::NavGrid;
 use crate::world_sim::NUM_COMMODITIES;
 
 /// Building tick interval for delta-based compute (treasury upgrades).
@@ -53,6 +55,152 @@ fn building_type_to_zone(bt: BuildingType) -> ZoneType {
         BuildingType::Temple | BuildingType::Shrine => ZoneType::Religious,
         BuildingType::GuildHall | BuildingType::CourtHouse | BuildingType::Treasury | BuildingType::Library => ZoneType::Noble,
         _ => ZoneType::Residential,
+    }
+}
+
+/// Map building type to VoxelZone for stamping into the voxel world.
+fn building_type_to_voxel_zone(bt: BuildingType) -> VoxelZone {
+    match bt {
+        BuildingType::House | BuildingType::Longhouse | BuildingType::Manor => VoxelZone::Residential,
+        BuildingType::Market | BuildingType::Warehouse | BuildingType::TradePost | BuildingType::Inn => VoxelZone::Commercial,
+        BuildingType::Farm => VoxelZone::Agricultural,
+        BuildingType::Mine | BuildingType::Sawmill | BuildingType::Forge
+        | BuildingType::Workshop | BuildingType::Apothecary => VoxelZone::Industrial,
+        BuildingType::Barracks | BuildingType::Watchtower | BuildingType::Wall | BuildingType::Gate => VoxelZone::Military,
+        BuildingType::Temple | BuildingType::Shrine => VoxelZone::Sacred,
+        _ => VoxelZone::None,
+    }
+}
+
+/// Primary wall material for a building type.
+fn building_wall_material(bt: BuildingType) -> VoxelMaterial {
+    match bt {
+        BuildingType::Wall | BuildingType::Gate | BuildingType::Watchtower
+        | BuildingType::Barracks | BuildingType::CourtHouse | BuildingType::Treasury => VoxelMaterial::StoneBlock,
+        BuildingType::Temple | BuildingType::Shrine | BuildingType::Library => VoxelMaterial::StoneBrick,
+        BuildingType::Manor | BuildingType::GuildHall => VoxelMaterial::StoneBrick,
+        BuildingType::Tent | BuildingType::Camp => VoxelMaterial::Thatch,
+        _ => VoxelMaterial::WoodPlanks,
+    }
+}
+
+/// Floor material for a building type.
+fn building_floor_material(bt: BuildingType) -> VoxelMaterial {
+    match bt {
+        BuildingType::Farm => VoxelMaterial::Dirt,
+        BuildingType::Mine => VoxelMaterial::Stone,
+        BuildingType::Wall | BuildingType::Gate | BuildingType::Watchtower => VoxelMaterial::StoneBlock,
+        BuildingType::Tent | BuildingType::Camp => VoxelMaterial::Dirt,
+        BuildingType::Temple | BuildingType::Shrine | BuildingType::Manor
+        | BuildingType::CourtHouse | BuildingType::Treasury | BuildingType::Library
+        | BuildingType::GuildHall | BuildingType::Barracks => VoxelMaterial::StoneBrick,
+        _ => VoxelMaterial::WoodPlanks,
+    }
+}
+
+/// Check if a footprint area is clear of other buildings in the voxel world.
+/// Scans each column in the footprint for any voxel with a building_id.
+fn is_footprint_clear(state: &WorldState, vx: i32, vy: i32, fp_w: usize, fp_h: usize) -> bool {
+    for dy in 0..fp_h as i32 {
+        for dx in 0..fp_w as i32 {
+            // Scan from ground level up through potential wall heights
+            let surface = state.voxel_world.surface_height(vx + dx, vy + dy);
+            for vz in (surface - 1)..=(surface + 5) {
+                let v = state.voxel_world.get_voxel(vx + dx, vy + dy, vz);
+                if v.building_id.is_some() {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Stamp building voxels into VoxelWorld: floor + perimeter walls.
+/// Returns the voxel-space base position used for stamping.
+pub fn stamp_building_voxels(
+    state: &mut WorldState,
+    world_pos: (f32, f32),
+    fp_w: usize,
+    fp_h: usize,
+    building_id: u32,
+    building_type: BuildingType,
+) -> (i32, i32, i32) {
+    let (base_vx, base_vy, _) = world_to_voxel(world_pos.0, world_pos.1, 0.0);
+    let zone = building_type_to_voxel_zone(building_type);
+    let wall_mat = building_wall_material(building_type);
+    let floor_mat = building_floor_material(building_type);
+
+    // Find ground level at the center of the footprint
+    let center_vx = base_vx + fp_w as i32 / 2;
+    let center_vy = base_vy + fp_h as i32 / 2;
+    let ground_z = state.voxel_world.surface_height(center_vx, center_vy);
+
+    // Stamp floor at ground level
+    for dy in 0..fp_h as i32 {
+        for dx in 0..fp_w as i32 {
+            let mut voxel = Voxel::new(floor_mat);
+            voxel.building_id = Some(building_id);
+            voxel.zone = zone;
+            state.voxel_world.set_voxel(base_vx + dx, base_vy + dy, ground_z, voxel);
+        }
+    }
+
+    // Stamp walls (perimeter, 2 voxels high for most buildings, 1 for small/temporary)
+    let wall_height = match building_type {
+        BuildingType::Tent | BuildingType::Camp | BuildingType::Well | BuildingType::Shrine => 1,
+        BuildingType::Watchtower => 4,
+        BuildingType::Wall | BuildingType::Gate => 3,
+        _ => 2,
+    };
+
+    for story in 0..wall_height {
+        let wall_z = ground_z + 1 + story;
+        for dy in 0..fp_h as i32 {
+            for dx in 0..fp_w as i32 {
+                let is_perimeter = dx == 0 || dx == (fp_w as i32 - 1)
+                    || dy == 0 || dy == (fp_h as i32 - 1);
+                // For 1x1 footprints, everything is perimeter
+                if is_perimeter || (fp_w <= 1 && fp_h <= 1) {
+                    let mut voxel = Voxel::new(wall_mat);
+                    voxel.building_id = Some(building_id);
+                    voxel.zone = zone;
+                    state.voxel_world.set_voxel(base_vx + dx, base_vy + dy, wall_z, voxel);
+                }
+            }
+        }
+    }
+
+    (base_vx, base_vy, ground_z)
+}
+
+/// Rebake NavGrid columns affected by a building placement.
+/// Updates any existing NavGrid that covers the affected area.
+/// If no NavGrid covers this area yet, creates one centered on the footprint.
+fn rebake_nav_grids(state: &mut WorldState, base_vx: i32, base_vy: i32, fp_w: usize, fp_h: usize) {
+    let min_vx = base_vx - 1; // include neighbors for walkability
+    let min_vy = base_vy - 1;
+    let max_vx = base_vx + fp_w as i32;
+    let max_vy = base_vy + fp_h as i32;
+
+    let mut any_covered = false;
+    for nav in &mut state.nav_grids {
+        if nav.contains_voxel(min_vx, min_vy) || nav.contains_voxel(max_vx, max_vy) {
+            nav.rebake_columns(&state.voxel_world, min_vx, min_vy, max_vx, max_vy, 63);
+            any_covered = true;
+        }
+    }
+
+    // If no existing NavGrid covers this area, bake a new one around the footprint
+    if !any_covered {
+        let nav_radius = 64i32;
+        let center_vx = base_vx + fp_w as i32 / 2;
+        let center_vy = base_vy + fp_h as i32 / 2;
+        let origin_vx = center_vx - nav_radius;
+        let origin_vy = center_vy - nav_radius;
+        let size = (nav_radius * 2) as u32;
+        let nav = NavGrid::bake(&state.voxel_world, origin_vx, origin_vy, size, size, 63);
+        state.nav_grids.push(nav);
     }
 }
 
@@ -182,6 +330,12 @@ pub fn process_npc_builds(state: &mut WorldState) {
         let row = row.max(0) as usize;
 
         let (fp_w, fp_h) = footprint_size(building_type, 0);
+
+        // Collision check: ensure the footprint area is clear in the voxel world.
+        let (check_vx, check_vy, _) = world_to_voxel(world_pos.0, world_pos.1, 0.0);
+        if !is_footprint_clear(state, check_vx, check_vy, fp_w, fp_h) {
+            continue;
+        }
 
         // Deduct resources from NPC inventory
         if let Some(inv) = &mut state.entities[entity_idx].inventory {
@@ -363,6 +517,20 @@ fn advance_construction(state: &mut WorldState) {
         }
 
         if completed {
+            // Stamp building voxels into the world now that construction is done.
+            let building_pos = state.entities[building_idx].pos;
+            let (bt, fp_w, fp_h) = {
+                let bd = state.entities[building_idx].building.as_ref().unwrap();
+                (bd.building_type, bd.footprint_w as usize, bd.footprint_h as usize)
+            };
+            let (bvx, bvy, _) = stamp_building_voxels(
+                state,
+                (building_pos.0, building_pos.1),
+                fp_w, fp_h,
+                building_id, bt,
+            );
+            rebake_nav_grids(state, bvx, bvy, fp_w, fp_h);
+
             // Chronicle entry for building completion.
             let settlement_name = state.settlements.iter()
                 .find(|s| s.id == settlement_id)
@@ -664,5 +832,152 @@ pub fn update_building_specializations(state: &mut WorldState) {
 
             bld.specialization_name = format!("{} {}", class_display, btype_name);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world_sim::voxel::{VoxelMaterial, VoxelZone, ChunkPos};
+
+    /// Create a minimal WorldState with generated terrain around the origin.
+    fn make_test_state() -> WorldState {
+        let mut state = WorldState::new(42);
+        // Generate terrain chunks so surface_height works (~z=30)
+        for cz in 0..3 {
+            for cy in -1..=1 {
+                for cx in -1..=1 {
+                    state.voxel_world.generate_chunk(ChunkPos::new(cx, cy, cz), 42);
+                }
+            }
+        }
+        state
+    }
+
+    #[test]
+    fn stamp_building_places_floor_and_walls() {
+        let mut state = make_test_state();
+        let building_id = 100;
+        let world_pos = (8.0, 8.0);
+        let fp_w = 3;
+        let fp_h = 3;
+
+        let (bvx, bvy, bvz) = stamp_building_voxels(
+            &mut state, world_pos, fp_w, fp_h, building_id, BuildingType::House,
+        );
+
+        // Floor: all cells in footprint should have building_id and floor material
+        for dy in 0..fp_h as i32 {
+            for dx in 0..fp_w as i32 {
+                let v = state.voxel_world.get_voxel(bvx + dx, bvy + dy, bvz);
+                assert_eq!(v.building_id, Some(building_id), "floor at ({}, {})", dx, dy);
+                assert_eq!(v.zone, VoxelZone::Residential);
+                assert_eq!(v.material, VoxelMaterial::WoodPlanks);
+            }
+        }
+
+        // Walls: perimeter at z+1 and z+2 (House = 2 stories)
+        for wall_z in [bvz + 1, bvz + 2] {
+            // Corners should be walls
+            let corner = state.voxel_world.get_voxel(bvx, bvy, wall_z);
+            assert_eq!(corner.building_id, Some(building_id));
+            assert_eq!(corner.material, VoxelMaterial::WoodPlanks);
+
+            // Interior (1,1) should be air (no wall for 3x3)
+            let interior = state.voxel_world.get_voxel(bvx + 1, bvy + 1, wall_z);
+            assert_eq!(interior.building_id, None);
+            assert_eq!(interior.material, VoxelMaterial::Air);
+        }
+    }
+
+    #[test]
+    fn stamp_stone_building_uses_stone_material() {
+        let mut state = make_test_state();
+        let (bvx, bvy, bvz) = stamp_building_voxels(
+            &mut state, (8.0, 8.0), 2, 2, 200, BuildingType::Barracks,
+        );
+
+        let floor = state.voxel_world.get_voxel(bvx, bvy, bvz);
+        assert_eq!(floor.material, VoxelMaterial::StoneBrick);
+        assert_eq!(floor.zone, VoxelZone::Military);
+
+        let wall = state.voxel_world.get_voxel(bvx, bvy, bvz + 1);
+        assert_eq!(wall.material, VoxelMaterial::StoneBlock);
+    }
+
+    #[test]
+    fn footprint_clear_detects_existing_building() {
+        let mut state = make_test_state();
+
+        // Place a building at (8, 8)
+        stamp_building_voxels(&mut state, (8.0, 8.0), 2, 2, 100, BuildingType::House);
+
+        let (vx, vy, _) = world_to_voxel(8.0, 8.0, 0.0);
+
+        // Same spot should be blocked
+        assert!(!is_footprint_clear(&state, vx, vy, 2, 2));
+
+        // Adjacent spot should be clear
+        assert!(is_footprint_clear(&state, vx + 3, vy + 3, 2, 2));
+    }
+
+    #[test]
+    fn rebake_updates_nav_grid_after_building() {
+        let mut state = make_test_state();
+
+        // Bake an initial NavGrid
+        let nav = NavGrid::bake(&state.voxel_world, 0, 0, 32, 32, 63);
+        state.nav_grids.push(nav);
+
+        // Stamp a building (walls will block walkability above floor)
+        let (bvx, bvy, _) = stamp_building_voxels(
+            &mut state, (8.0, 8.0), 3, 3, 100, BuildingType::House,
+        );
+
+        // Rebake affected columns
+        rebake_nav_grids(&mut state, bvx, bvy, 3, 3);
+
+        // The building's wall columns should no longer be walkable at the old surface
+        // (walls now sit above the floor, making the surface higher)
+        let nav = &state.nav_grids[0];
+        let dx = (bvx - nav.origin_vx) as u32;
+        let dy = (bvy - nav.origin_vy) as u32;
+
+        // Corner (perimeter wall): surface should be at the top of the wall
+        let corner_z = nav.surface_z_at(dx, dy);
+        let old_surface = state.voxel_world.surface_height(bvx - 1, bvy - 1);
+        // Wall is 2 voxels high on top of the floor, so surface should be higher
+        assert!(corner_z > old_surface - 3, "wall surface {} should be near or above natural {}", corner_z, old_surface);
+    }
+
+    #[test]
+    fn rebake_creates_new_nav_grid_when_none_covers() {
+        let mut state = make_test_state();
+        assert!(state.nav_grids.is_empty());
+
+        stamp_building_voxels(&mut state, (8.0, 8.0), 2, 2, 100, BuildingType::House);
+        rebake_nav_grids(&mut state, 8, 8, 2, 2);
+
+        // Should have created a new NavGrid
+        assert_eq!(state.nav_grids.len(), 1);
+        let nav = &state.nav_grids[0];
+        assert!(nav.contains_voxel(8, 8));
+    }
+
+    #[test]
+    fn watchtower_has_taller_walls() {
+        let mut state = make_test_state();
+        let (bvx, bvy, bvz) = stamp_building_voxels(
+            &mut state, (8.0, 8.0), 1, 1, 300, BuildingType::Watchtower,
+        );
+
+        // Watchtower should be 4 voxels tall
+        for dz in 1..=4 {
+            let v = state.voxel_world.get_voxel(bvx, bvy, bvz + dz);
+            assert_eq!(v.building_id, Some(300), "wall at z+{}", dz);
+        }
+        // z+5 should be air
+        let above = state.voxel_world.get_voxel(bvx, bvy, bvz + 5);
+        assert_eq!(above.building_id, None);
     }
 }

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use super::types::BuildMaterial;
 use crate::world_sim::state::{
-    BuildingType, WorldState,
+    BuildingType, EntityKind, WorldState,
     tags,
 };
 use crate::world_sim::voxel::{world_to_voxel, VoxelMaterial};
@@ -26,6 +26,8 @@ pub struct SpatialFeatures {
     pub economic: EconomicFeatures,
     pub population: PopulationFeatures,
     pub garrison: GarrisonFeatures,
+    /// Virtual grid cells occupied by existing buildings (col, row in 0..VIRT).
+    pub occupied_cells: Vec<(u16, u16)>,
 }
 
 // ---------------------------------------------------------------------------
@@ -367,11 +369,11 @@ fn find_chokepoints(
 }
 
 /// Virtual grid size for spatial feature computations (VoxelWorld is unbounded).
-const VIRT: usize = 64;
+pub(super) const VIRT: usize = 64;
 
 /// Convert a world-space position to a virtual grid cell coordinate.
 /// Settlement center maps to (VIRT/2, VIRT/2); each grid cell = 1 voxel unit.
-fn world_to_virtual(wx: f32, wy: f32, settlement_x: f32, settlement_y: f32) -> (usize, usize) {
+pub(super) fn world_to_virtual(wx: f32, wy: f32, settlement_x: f32, settlement_y: f32) -> (usize, usize) {
     let half = (VIRT / 2) as f32;
     let c = (wx - settlement_x + half).round() as i32;
     let r = (wy - settlement_y + half).round() as i32;
@@ -387,11 +389,13 @@ fn build_developed_cells(state: &WorldState, settlement_id: u32) -> Vec<bool> {
         None => return vec![false; VIRT * VIRT],
     };
     let mut developed = vec![false; VIRT * VIRT];
-    let building_range = state.group_index.settlement_buildings(settlement_id);
-    for idx in building_range {
+    // Use the full settlement range and filter to buildings, because
+    // per-kind sub-ranges (settlement_buildings) are not populated.
+    let range = state.group_index.settlement_entities(settlement_id);
+    for idx in range {
         if idx >= state.entities.len() { break; }
         let e = &state.entities[idx];
-        if !e.alive { continue; }
+        if !e.alive || e.kind != EntityKind::Building { continue; }
         let (c, r) = world_to_virtual(e.pos.0, e.pos.1, settlement.pos.0, settlement.pos.1);
         developed[r * VIRT + c] = true;
     }
@@ -446,14 +450,15 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
     // 1. Connectivity
     // -----------------------------------------------------------------------
 
-    let building_range = state.group_index.settlement_buildings(settlement_id);
+    // Use full settlement range (per-kind sub-ranges not populated).
+    let building_range = state.group_index.settlement_entities(settlement_id);
 
     // Collect key buildings: one per type that matters.
     let mut key_buildings: Vec<(u32, usize, usize)> = Vec::new(); // (entity_id, col, row)
     for idx in building_range.clone() {
         if idx >= state.entities.len() { break; }
         let e = &state.entities[idx];
-        if !e.alive { continue; }
+        if !e.alive || e.kind != EntityKind::Building { continue; }
         if let Some(bd) = &e.building {
             match bd.building_type {
                 BuildingType::Barracks | BuildingType::Market | BuildingType::Warehouse
@@ -766,12 +771,13 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
         s
     };
 
-    let npc_range = state.group_index.settlement_npcs(settlement_id);
+    // Use full settlement range for NPCs (per-kind sub-ranges not populated).
+    let npc_range = state.group_index.settlement_entities(settlement_id);
     let mut wc = WorkerCounts::default();
     for idx in npc_range.clone() {
         if idx >= state.entities.len() { break; }
         let e = &state.entities[idx];
-        if !e.alive { continue; }
+        if !e.alive || e.kind != EntityKind::Npc { continue; }
         wc.total += 1;
         if let Some(npc) = &e.npc {
             for &(tag_hash, weight) in &npc.behavior_profile {
@@ -834,13 +840,16 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
     // 5. Population
     // -----------------------------------------------------------------------
 
-    let total_population = npc_range.len() as u16;
+    // Count NPCs only (npc_range is full settlement range).
+    let total_population = npc_range.clone().filter(|&idx| {
+        idx < state.entities.len() && state.entities[idx].alive && state.entities[idx].kind == EntityKind::Npc
+    }).count() as u16;
     let mut total_residential_capacity = 0u16;
     let mut housed_set = std::collections::HashSet::new();
     for idx in building_range.clone() {
         if idx >= state.entities.len() { break; }
         let e = &state.entities[idx];
-        if !e.alive { continue; }
+        if !e.alive || e.kind != EntityKind::Building { continue; }
         if let Some(bd) = &e.building {
             total_residential_capacity += bd.residential_capacity as u16;
             for &rid in &bd.resident_ids {
@@ -862,7 +871,7 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
     for idx in npc_range {
         if idx >= state.entities.len() { break; }
         let e = &state.entities[idx];
-        if !e.alive { continue; }
+        if !e.alive || e.kind != EntityKind::Npc { continue; }
         let (c, r) = world_to_virtual(e.pos.0, e.pos.1, sx, sy);
         let key = (c as u16, r as u16);
         *cell_npc_counts.entry(key).or_insert(0) += 1;
@@ -895,6 +904,16 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
 
     let garrison = compute_garrison_features(state, settlement_id);
 
+    // Collect occupied cells from the developed grid.
+    let mut occupied_cells = Vec::new();
+    for r in 0..rows {
+        for c in 0..cols {
+            if developed[r * VIRT + c] {
+                occupied_cells.push((c as u16, r as u16));
+            }
+        }
+    }
+
     SpatialFeatures {
         connectivity,
         defensive,
@@ -902,6 +921,7 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
         economic,
         population,
         garrison,
+        occupied_cells,
     }
 }
 
@@ -920,8 +940,8 @@ pub fn compute_garrison_features(state: &WorldState, settlement_id: u32) -> Garr
     let cols = VIRT;
     let rows = VIRT;
 
-    let npc_range = state.group_index.settlement_npcs(settlement_id);
-    let building_range = state.group_index.settlement_buildings(settlement_id);
+    // Use full settlement range (per-kind sub-ranges not populated).
+    let full_range = state.group_index.settlement_entities(settlement_id);
 
     // Collect defensive building virtual positions.
     struct DefBuilding {
@@ -931,10 +951,10 @@ pub fn compute_garrison_features(state: &WorldState, settlement_id: u32) -> Garr
         btype: BuildingType,
     }
     let mut def_buildings: Vec<DefBuilding> = Vec::new();
-    for idx in building_range {
+    for idx in full_range.clone() {
         if idx >= state.entities.len() { break; }
         let e = &state.entities[idx];
-        if !e.alive { continue; }
+        if !e.alive || e.kind != EntityKind::Building { continue; }
         if let Some(bd) = &e.building {
             match bd.building_type {
                 BuildingType::Barracks | BuildingType::Watchtower
@@ -964,10 +984,10 @@ pub fn compute_garrison_features(state: &WorldState, settlement_id: u32) -> Garr
         def_buildings.iter().map(|b| b.id).collect();
     let mut garrison_npcs: Vec<GarrisonNpc> = Vec::new();
 
-    for idx in npc_range {
+    for idx in full_range {
         if idx >= state.entities.len() { break; }
         let e = &state.entities[idx];
-        if !e.alive { continue; }
+        if !e.alive || e.kind != EntityKind::Npc { continue; }
         let npc = match &e.npc {
             Some(n) => n,
             None => continue,

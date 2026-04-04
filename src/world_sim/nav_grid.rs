@@ -207,6 +207,59 @@ impl NavGrid {
         None
     }
 
+    /// Check if a voxel-space position falls within this NavGrid's coverage.
+    pub fn contains_voxel(&self, vx: i32, vy: i32) -> bool {
+        vx >= self.origin_vx
+            && vx < self.origin_vx + self.width as i32
+            && vy >= self.origin_vy
+            && vy < self.origin_vy + self.height as i32
+    }
+
+    /// Rebake a rectangular sub-region of columns. Use after voxel modifications
+    /// to avoid rebaking the entire grid.
+    pub fn rebake_columns(&mut self, world: &VoxelWorld, min_vx: i32, min_vy: i32, max_vx: i32, max_vy: i32, max_z: i32) {
+        for vy in min_vy..=max_vy {
+            for vx in min_vx..=max_vx {
+                if !self.contains_voxel(vx, vy) { continue; }
+
+                let dx = (vx - self.origin_vx) as u32;
+                let dy = (vy - self.origin_vy) as u32;
+                let idx = self.idx(dx, dy);
+
+                let mut surface_z = -1i32;
+                for vz in (0..=max_z).rev() {
+                    let v = world.get_voxel(vx, vy, vz);
+                    if v.material.is_solid() && v.integrity > 0.0 {
+                        surface_z = vz;
+                        break;
+                    }
+                }
+
+                if surface_z < 0 {
+                    self.nodes[idx] = NavNode { walkable: false, surface_z: 0, move_cost: 0.0 };
+                    continue;
+                }
+
+                let above = world.get_voxel(vx, vy, surface_z + 1);
+                let walkable = !above.material.is_solid();
+
+                let surface_mat = world.get_voxel(vx, vy, surface_z);
+                let props = surface_mat.material.properties();
+                let move_cost = if walkable {
+                    if surface_mat.integrity == 0.0 {
+                        1.0 + props.rubble_move_cost
+                    } else {
+                        1.0
+                    }
+                } else {
+                    0.0
+                };
+
+                self.nodes[idx] = NavNode { walkable, surface_z, move_cost };
+            }
+        }
+    }
+
     /// BFS flow field toward a target. Returns direction map where
     /// `flow[idx] = next_idx` (u32::MAX if unreachable). 4-connected.
     pub fn compute_flow_field(&self, target: (u32, u32)) -> Vec<u32> {

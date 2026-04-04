@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use super::features::{compute_spatial_features, SpatialFeatures};
+use super::features::{compute_spatial_features, world_to_virtual, SpatialFeatures};
 use super::scenario_config::*;
 use super::types::*;
 use crate::world_sim::state::{
@@ -782,6 +782,14 @@ pub fn build_observation(
     spatial: &SpatialFeatures,
     tier: DecisionTier,
 ) -> BuildingObservation {
+    // Settlement position for world-to-virtual-grid conversion.
+    let settlement_pos = state
+        .settlements
+        .iter()
+        .find(|s| s.id == settlement_id)
+        .map(|s| s.pos)
+        .unwrap_or((0.0, 0.0));
+
     // --- Extract friendly roster ---
     let friendly_roster: Vec<UnitSummary> = state
         .entities
@@ -804,13 +812,15 @@ pub fn build_observation(
                 .map(|s| tag(s.as_bytes()))
                 .unwrap_or(0);
             let combat_effectiveness = e.attack_damage * (e.hp / e.max_hp.max(1.0));
+            // Convert world-space position to virtual grid coords (0..64, center=32).
+            let (vc, vr) = world_to_virtual(e.pos.0, e.pos.1, settlement_pos.0, settlement_pos.1);
 
             UnitSummary {
                 entity_id: e.id,
                 level: e.level.min(255) as u8,
                 class_tag,
                 combat_effectiveness,
-                position: e.pos,
+                position: (vc as f32, vr as f32),
                 is_garrison,
             }
         })
@@ -831,13 +841,15 @@ pub fn build_observation(
         })
         .map(|e| {
             let npc = e.npc.as_ref().unwrap();
+            // Convert world-space position to virtual grid coords (0..64, center=32).
+            let (vc, vr) = world_to_virtual(e.pos.0, e.pos.1, settlement_pos.0, settlement_pos.1);
             HighValueNpc {
                 entity_id: e.id,
                 role_tag: tag(npc.archetype.as_bytes()),
                 role_name: npc.archetype.clone(),
                 level: e.level.min(255) as u8,
                 protection_priority: protection_priority_for_role(&npc.archetype),
-                position: e.pos,
+                position: (vc as f32, vr as f32),
             }
         })
         .collect();

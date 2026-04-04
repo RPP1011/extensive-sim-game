@@ -2631,12 +2631,14 @@ dependencies = [
  "proptest",
  "rand 0.10.0",
  "rayon",
+ "rl4burn",
  "serde",
  "serde_json",
  "tactical_sim",
  "toml 0.8.23",
  "tungstenite 0.29.0",
  "ureq 3.3.0",
+ "zip 2.4.2",
 ]
 
 [[package]]

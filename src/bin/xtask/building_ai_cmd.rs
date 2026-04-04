@@ -10,6 +10,11 @@ use game::world_sim::building_ai::types::DecisionTier;
 use game::world_sim::building_ai::validation;
 use game::world_sim::state::{EntityKind, WorldState, WorldTeam};
 
+use game::world_sim::building_ai::env::BuildingEnv;
+use game::world_sim::building_ai::env_config::{self, CurriculumLevel};
+use game::world_sim::building_ai::env_obs::OBS_DIM;
+use rl4burn::Env;
+
 fn print_diagnostics(state: &WorldState) {
     println!("\n=== Spatial Diagnostics ===");
 
@@ -464,5 +469,204 @@ pub fn run_building_ai(cmd: BuildingAiCommand) -> ExitCode {
             );
             ExitCode::SUCCESS
         }
+        BuildingAiSubcommand::EnvCollect(args) => {
+            run_env_collect(args)
+        }
     }
+}
+
+fn oracle_action_for_env(env: &BuildingEnv) -> usize {
+    let state = env.state();
+    let settlement_id = state.settlements.first().map(|s| s.id).unwrap_or(1);
+    let challenge = env.challenge();
+    let challenges = vec![challenge.clone()];
+    let memory = scenario_gen::populate_memory(state, challenge, settlement_id);
+    let spatial = game::world_sim::building_ai::features::compute_spatial_features(state, settlement_id);
+    let obs = scenario_gen::build_observation(
+        state, settlement_id, &challenges, &memory, &spatial,
+        DecisionTier::Strategic,
+    );
+    let actions = oracle::strategic_oracle(&obs);
+
+    // Convert the top placement action to a discrete env action index.
+    // Oracle grid cells are in virtual grid coords (0..64, center=32).
+    // Env grid offsets are (0..128, center=64).
+    // Translation: env_col = oracle_col - 32 + 64 = oracle_col + 32
+    for a in &actions {
+        match &a.action {
+            game::world_sim::building_ai::types::ActionPayload::PlaceBuilding { building_type, grid_cell } => {
+                let env_col = (grid_cell.0 as i32 + 32).clamp(0, 127);
+                let env_row = (grid_cell.1 as i32 + 32).clamp(0, 127);
+                return env_config::encode_action(env_col, env_row, *building_type);
+            }
+            _ => continue,
+        }
+    }
+    0 // no placement actions → pass
+}
+
+fn run_env_collect(args: super::cli::BuildingAiEnvCollectArgs) -> ExitCode {
+    let curriculum = match args.level {
+        1 => CurriculumLevel::level_1(),
+        2 => CurriculumLevel::level_2(),
+        3 => CurriculumLevel::level_3(),
+        4 => CurriculumLevel::level_4(),
+        _ => {
+            eprintln!("Invalid level {}. Use 1-4.", args.level);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    println!(
+        "Collecting RL trajectories: {} episodes, level {}, epsilon={:.2}",
+        args.episodes, args.level, args.epsilon
+    );
+    println!(
+        "  Budget: {} ticks, {} max actions, heartbeat every {} ticks",
+        curriculum.tick_budget, curriculum.max_actions, curriculum.heartbeat_interval
+    );
+
+    let mut env = BuildingEnv::new(curriculum, args.seed);
+
+    let mut all_obs: Vec<f32> = Vec::new();
+    let mut all_actions: Vec<i32> = Vec::new();
+    let mut all_rewards: Vec<f32> = Vec::new();
+    let mut all_dones: Vec<u8> = Vec::new();
+    let mut episode_returns: Vec<f32> = Vec::new();
+    let mut episode_lengths: Vec<u32> = Vec::new();
+
+    let mut rng_state = args.seed;
+    let mut total_steps = 0u64;
+    let start = std::time::Instant::now();
+
+    for ep in 0..args.episodes {
+        let _obs = env.reset();
+        let mut ep_return = 0.0f32;
+        let mut ep_len = 0u32;
+
+        // Diagnostic for first 3 episodes
+        if ep < 3 {
+            let s = env.state();
+            let buildings = s.entities.iter().filter(|e| e.building.is_some()).count();
+            let npcs = s.entities.iter().filter(|e| e.kind == game::world_sim::state::EntityKind::Npc && e.alive).count();
+            let hostiles = s.entities.iter().filter(|e| e.team == game::world_sim::state::WorldTeam::Hostile && e.alive).count();
+            let vox_chunks = s.voxel_world.chunk_count();
+            let spos = s.settlements.first().map(|sp| sp.pos).unwrap_or((0.0,0.0));
+            // Check building voxels around settlement
+            let (cvx, cvy, _) = game::world_sim::voxel::world_to_voxel(spos.0, spos.1, 0.0);
+            let mut bld_vox = 0;
+            for dy in -20..20 {
+                for dx in -20..20 {
+                    let v = s.voxel_world.get_voxel(cvx+dx, cvy+dy,
+                        s.voxel_world.surface_height(cvx+dx, cvy+dy).saturating_sub(1));
+                    if v.building_id.is_some() { bld_vox += 1; }
+                }
+            }
+            println!(
+                "  [ep {}] tick={} buildings={} npcs={} hostiles={} chunks={} bld_voxels={} cat={:?}",
+                ep, s.tick, buildings, npcs, hostiles, vox_chunks, bld_vox, env.challenge_category()
+            );
+        }
+
+        loop {
+            // Epsilon-greedy: oracle with probability (1-epsilon), random otherwise
+            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let r = (rng_state >> 33) as f32 / (u32::MAX >> 1) as f32;
+            let action_idx = if r < args.epsilon {
+                // Random action
+                rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(3);
+                ((rng_state >> 33) as usize) % env_config::NUM_ACTIONS
+            } else {
+                oracle_action_for_env(&env)
+            };
+
+            // Diagnostic: show oracle action choices for first 3 episodes.
+            if ep < 3 && ep_len < 3 {
+                let decoded = env_config::decode_action(action_idx);
+                match &decoded {
+                    env_config::ActionChoice::Pass => print!("    step {}: PASS", ep_len),
+                    env_config::ActionChoice::Place { grid_offset, building_type } => {
+                        print!("    step {}: {:?} at ({},{})", ep_len, building_type, grid_offset.0, grid_offset.1);
+                    }
+                }
+            }
+
+            // Record observation using the env's own observe() for consistency.
+            // We call observe() which uses the env's challenge_severity/direction.
+            let obs_vec = env.observe();
+            all_obs.extend_from_slice(&obs_vec);
+            all_actions.push(action_idx as i32);
+
+            let step = env.step(vec![action_idx as f32]);
+            all_rewards.push(step.reward);
+            all_dones.push(if step.done() { 1 } else { 0 });
+
+            if ep < 3 && ep_len < 3 {
+                println!(" → reward={:.4}{}", step.reward, if step.done() { " DONE" } else { "" });
+            }
+
+            ep_return += step.reward;
+            ep_len += 1;
+            total_steps += 1;
+
+            if step.done() {
+                break;
+            }
+        }
+
+        episode_returns.push(ep_return);
+        episode_lengths.push(ep_len);
+
+        if (ep + 1) % 10 == 0 || ep + 1 == args.episodes {
+            let mean_ret: f32 = episode_returns.iter().sum::<f32>() / episode_returns.len() as f32;
+            let mean_len: f32 = episode_lengths.iter().sum::<u32>() as f32 / episode_lengths.len() as f32;
+            println!(
+                "  [{}/{}] steps={}, mean_return={:.4}, mean_len={:.1}",
+                ep + 1, args.episodes, total_steps, mean_ret, mean_len
+            );
+        }
+    }
+
+    let elapsed = start.elapsed();
+    println!(
+        "\nDone: {} episodes, {} steps in {:.1}s ({:.0} steps/s)",
+        args.episodes, total_steps, elapsed.as_secs_f64(),
+        total_steps as f64 / elapsed.as_secs_f64()
+    );
+
+    // Save as NPZ
+    use ndarray::Array2;
+    use ndarray_npy::NpzWriter;
+
+    let n = all_actions.len();
+    let obs_array = Array2::from_shape_vec((n, OBS_DIM), all_obs)
+        .expect("obs shape mismatch");
+    let actions_array = ndarray::Array1::from(all_actions);
+    let rewards_array = ndarray::Array1::from(all_rewards);
+    let dones_array = ndarray::Array1::from(all_dones);
+    let returns_array = ndarray::Array1::from(episode_returns.clone());
+    let lengths_array = ndarray::Array1::from(episode_lengths.iter().map(|&x| x as i32).collect::<Vec<_>>());
+
+    let file = std::fs::File::create(&args.output).expect("create output file");
+    use zip::write::SimpleFileOptions;
+    let options = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Stored)
+        .large_file(true);
+    let mut npz = NpzWriter::new_with_options(file, options);
+    npz.add_array("obs", &obs_array).expect("write obs");
+    npz.add_array("actions", &actions_array).expect("write actions");
+    npz.add_array("rewards", &rewards_array).expect("write rewards");
+    npz.add_array("dones", &dones_array).expect("write dones");
+    npz.add_array("episode_returns", &returns_array).expect("write returns");
+    npz.add_array("episode_lengths", &lengths_array).expect("write lengths");
+    npz.finish().expect("finalize npz");
+
+    println!("Saved {} transitions to {}", n, args.output.display());
+    println!(
+        "  Mean return: {:.4}, Mean length: {:.1}",
+        episode_returns.iter().sum::<f32>() / episode_returns.len() as f32,
+        episode_lengths.iter().sum::<u32>() as f32 / episode_lengths.len() as f32,
+    );
+
+    ExitCode::SUCCESS
 }

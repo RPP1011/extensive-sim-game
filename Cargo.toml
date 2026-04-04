@@ -4,7 +4,7 @@ exclude = ["crates/combat-trainer"]  # depends on rl4burn which may not build
 
 [workspace.dependencies]
 # tack = { path = "../tack" }  # disabled — project not present locally
-rl4burn = { path = "../rl4burn/rl4burn" }
+rl4burn = { git = "https://github.com/RPP1011/rl4burn", version = "0.2.0" }
 
 [package]
 name = "game"
@@ -27,6 +27,7 @@ profile-systems = []
 [dependencies]
 # tack = { workspace = true }  # disabled — project not present locally
 tactical_sim = { path = "crates/tactical_sim" }
+rl4burn = { workspace = true }
 clap = { version = "4.5", features = ["derive"] }
 rand = "0.10.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -37,6 +38,7 @@ rayon = "1.10"
 crossbeam-channel = "0.5"
 ndarray = "0.16"
 ndarray-npy = { version = "0.9", features = ["npz"] }
+zip = { version = "2.4", default-features = false }
 memmap2 = "0.9"
 ureq = { version = "3", features = ["json"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
