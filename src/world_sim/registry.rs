@@ -5,8 +5,11 @@
 //! world simulation. They are plain data — no logic lives here.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use crate::world_sim::state::tag;
 
 
 
@@ -445,6 +448,273 @@ pub struct Registry {
 }
 
 // ---------------------------------------------------------------------------
+// Registry loading
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub struct RegistryError {
+    pub file: String,
+    pub message: String,
+}
+
+impl std::fmt::Display for RegistryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.file, self.message)
+    }
+}
+
+impl Registry {
+    /// Load registry from a dataset directory.
+    ///
+    /// Scans `classes/`, `entities/`, `environments/terrains/`, and
+    /// `environments/scenarios/` subdirectories. Parses each TOML file and
+    /// validates cross-references. Returns collected errors rather than
+    /// failing on the first.
+    pub fn load(dataset_path: &Path) -> Result<Self, Vec<RegistryError>> {
+        let mut registry = Registry::default();
+        let mut errors = Vec::new();
+
+        // Load classes from dataset/classes/*.toml
+        let classes_dir = dataset_path.join("classes");
+        if classes_dir.is_dir() {
+            let files = Self::read_dir_files(&classes_dir, "toml", &mut errors);
+            for (path, content) in files {
+                match toml::from_str::<ClassDefToml>(&content) {
+                    Ok(def) => {
+                        let hash = tag(def.name.as_bytes());
+                        registry.classes.insert(hash, def);
+                    }
+                    Err(e) => errors.push(RegistryError {
+                        file: path.display().to_string(),
+                        message: format!("parse error: {e}"),
+                    }),
+                }
+            }
+        }
+
+        // Load entities from dataset/entities/*.toml (and subdirs)
+        let entities_dir = dataset_path.join("entities");
+        if entities_dir.is_dir() {
+            let files = Self::read_dir_files_recursive(&entities_dir, "toml", &mut errors);
+            for (path, content) in files {
+                match toml::from_str::<EntityTemplateToml>(&content) {
+                    Ok(tmpl) => {
+                        let hash = tag(tmpl.name.as_bytes());
+                        registry.entities.insert(hash, tmpl);
+                    }
+                    Err(e) => errors.push(RegistryError {
+                        file: path.display().to_string(),
+                        message: format!("parse error: {e}"),
+                    }),
+                }
+            }
+        }
+
+        // Load terrains from dataset/environments/terrains/*.toml
+        let terrains_dir = dataset_path.join("environments").join("terrains");
+        if terrains_dir.is_dir() {
+            let files = Self::read_dir_files(&terrains_dir, "toml", &mut errors);
+            for (path, content) in files {
+                match toml::from_str::<TerrainTemplateToml>(&content) {
+                    Ok(tmpl) => {
+                        let hash = tag(tmpl.name.as_bytes());
+                        registry.terrains.insert(hash, tmpl);
+                    }
+                    Err(e) => errors.push(RegistryError {
+                        file: path.display().to_string(),
+                        message: format!("parse error: {e}"),
+                    }),
+                }
+            }
+        }
+
+        // Load scenarios from dataset/environments/scenarios/*.toml
+        let scenarios_dir = dataset_path.join("environments").join("scenarios");
+        if scenarios_dir.is_dir() {
+            let files = Self::read_dir_files(&scenarios_dir, "toml", &mut errors);
+            for (path, content) in files {
+                match toml::from_str::<ScenarioToml>(&content) {
+                    Ok(scenario) => {
+                        registry.scenarios.insert(scenario.name.clone(), scenario);
+                    }
+                    Err(e) => errors.push(RegistryError {
+                        file: path.display().to_string(),
+                        message: format!("parse error: {e}"),
+                    }),
+                }
+            }
+        }
+
+        // Validate cross-references.
+        Self::validate(&registry, &mut errors);
+
+        if errors.is_empty() {
+            Ok(registry)
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Read all files with the given extension from a directory (non-recursive).
+    /// Returns `(path, content)` pairs. Pushes IO errors to the error list.
+    fn read_dir_files(
+        dir: &Path,
+        ext: &str,
+        errors: &mut Vec<RegistryError>,
+    ) -> Vec<(PathBuf, String)> {
+        let mut results = Vec::new();
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(e) => {
+                errors.push(RegistryError {
+                    file: dir.display().to_string(),
+                    message: format!("cannot read directory: {e}"),
+                });
+                return results;
+            }
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some(ext) {
+                continue;
+            }
+            match std::fs::read_to_string(&path) {
+                Ok(content) => results.push((path, content)),
+                Err(e) => errors.push(RegistryError {
+                    file: path.display().to_string(),
+                    message: format!("read error: {e}"),
+                }),
+            }
+        }
+        results
+    }
+
+    /// Read all files with the given extension from a directory tree (recursive).
+    /// Returns `(path, content)` pairs. Pushes IO errors to the error list.
+    fn read_dir_files_recursive(
+        dir: &Path,
+        ext: &str,
+        errors: &mut Vec<RegistryError>,
+    ) -> Vec<(PathBuf, String)> {
+        let mut results = Vec::new();
+        Self::read_dir_files_recursive_inner(dir, ext, errors, &mut results);
+        results
+    }
+
+    fn read_dir_files_recursive_inner(
+        dir: &Path,
+        ext: &str,
+        errors: &mut Vec<RegistryError>,
+        results: &mut Vec<(PathBuf, String)>,
+    ) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(e) => {
+                errors.push(RegistryError {
+                    file: dir.display().to_string(),
+                    message: format!("cannot read directory: {e}"),
+                });
+                return;
+            }
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                Self::read_dir_files_recursive_inner(&path, ext, errors, results);
+            } else if path.extension().and_then(|e| e.to_str()) == Some(ext) {
+                match std::fs::read_to_string(&path) {
+                    Ok(content) => results.push((path, content)),
+                    Err(e) => errors.push(RegistryError {
+                        file: path.display().to_string(),
+                        message: format!("read error: {e}"),
+                    }),
+                }
+            }
+        }
+    }
+
+    fn validate(registry: &Registry, errors: &mut Vec<RegistryError>) {
+        // Validate entity starting classes reference existing class definitions.
+        for (_, entity) in &registry.entities {
+            for sc in &entity.classes.starting {
+                let class_hash = tag(sc.name.as_bytes());
+                if !registry.classes.contains_key(&class_hash) {
+                    errors.push(RegistryError {
+                        file: format!("entity:{}", entity.name),
+                        message: format!(
+                            "starting class '{}' not found in class registry",
+                            sc.name
+                        ),
+                    });
+                }
+            }
+        }
+
+        // Validate scenario entity/terrain references.
+        for (name, scenario) in &registry.scenarios {
+            if let Some(ref terrain_name) = scenario.terrain {
+                let terrain_hash = tag(terrain_name.as_bytes());
+                if !registry.terrains.contains_key(&terrain_hash) {
+                    errors.push(RegistryError {
+                        file: format!("scenario:{name}"),
+                        message: format!(
+                            "terrain '{}' not found in terrain registry",
+                            terrain_name
+                        ),
+                    });
+                }
+            }
+            for npc in &scenario.npcs {
+                let tmpl_hash = tag(npc.template.as_bytes());
+                if !registry.entities.contains_key(&tmpl_hash) {
+                    errors.push(RegistryError {
+                        file: format!("scenario:{name}"),
+                        message: format!(
+                            "NPC template '{}' not found in entity registry",
+                            npc.template
+                        ),
+                    });
+                }
+            }
+            for threat in &scenario.threats {
+                for te in &threat.entities {
+                    let tmpl_hash = tag(te.template.as_bytes());
+                    if !registry.entities.contains_key(&tmpl_hash) {
+                        errors.push(RegistryError {
+                            file: format!("scenario:{name}"),
+                            message: format!(
+                                "threat entity template '{}' not found in entity registry",
+                                te.template
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Look up a class definition by name.
+    pub fn class_by_name(&self, name: &str) -> Option<&ClassDefToml> {
+        self.classes.get(&tag(name.as_bytes()))
+    }
+
+    /// Look up an entity template by name.
+    pub fn entity_by_name(&self, name: &str) -> Option<&EntityTemplateToml> {
+        self.entities.get(&tag(name.as_bytes()))
+    }
+
+    /// Look up a terrain template by name.
+    pub fn terrain_by_name(&self, name: &str) -> Option<&TerrainTemplateToml> {
+        self.terrains.get(&tag(name.as_bytes()))
+    }
+
+    /// Look up a scenario by name.
+    pub fn scenario_by_name(&self, name: &str) -> Option<&ScenarioToml> {
+        self.scenarios.get(name)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -711,5 +981,90 @@ mod tests {
         assert_eq!(completion.mode, "all");
         assert_eq!(completion.max_ticks, 1500);
         assert_eq!(completion.failure.as_deref(), Some("settlement_destroyed"));
+    }
+
+    #[test]
+    fn registry_load_from_temp_dir() {
+        let dir = std::env::temp_dir().join("registry_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("classes")).unwrap();
+        std::fs::create_dir_all(dir.join("entities")).unwrap();
+
+        std::fs::write(
+            dir.join("classes/warrior.toml"),
+            r#"
+name = "Warrior"
+tags = ["melee"]
+[base_stats]
+hp = 120.0
+attack = 15.0
+armor = 5.0
+speed = 3.0
+[per_level]
+hp = 10.0
+attack = 2.5
+armor = 1.7
+speed = 0.02
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            dir.join("entities/town_guard.toml"),
+            r#"
+name = "Town Guard"
+kind = "npc"
+[stats]
+hp = 100.0
+attack = 10.0
+armor = 0.0
+speed = 3.0
+[[classes.starting]]
+name = "Warrior"
+level = 2
+"#,
+        )
+        .unwrap();
+
+        let registry = Registry::load(&dir).unwrap();
+        assert_eq!(registry.classes.len(), 1);
+        assert!(registry.class_by_name("Warrior").is_some());
+        assert_eq!(registry.entities.len(), 1);
+        assert!(registry.entity_by_name("Town Guard").is_some());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn registry_validates_missing_class_ref() {
+        let dir = std::env::temp_dir().join("registry_test_validate");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("classes")).unwrap();
+        std::fs::create_dir_all(dir.join("entities")).unwrap();
+
+        // Entity references "Warrior" class but no class file exists.
+        std::fs::write(
+            dir.join("entities/guard.toml"),
+            r#"
+name = "Guard"
+kind = "npc"
+[stats]
+hp = 100.0
+attack = 10.0
+armor = 0.0
+speed = 3.0
+[[classes.starting]]
+name = "Warrior"
+level = 2
+"#,
+        )
+        .unwrap();
+
+        let result = Registry::load(&dir);
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|e| e.message.contains("Warrior")));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
