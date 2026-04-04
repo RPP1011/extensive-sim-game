@@ -263,10 +263,29 @@ pub struct MaterialProperties {
 }
 
 // ---------------------------------------------------------------------------
+// VoxelZone
+// ---------------------------------------------------------------------------
+
+/// Functional designation of a voxel — used for building zone tracking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[repr(u8)]
+pub enum VoxelZone {
+    #[default]
+    None = 0,
+    Residential = 1,
+    Commercial = 2,
+    Industrial = 3,
+    Military = 4,
+    Agricultural = 5,
+    Sacred = 6,
+    Underground = 7,
+}
+
+// ---------------------------------------------------------------------------
 // Voxel
 // ---------------------------------------------------------------------------
 
-/// Per-voxel data. 4 bytes — millions of these exist.
+/// Per-voxel data. Stores material, light, damage, flags, and building metadata.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[repr(C)]
 pub struct Voxel {
@@ -281,17 +300,31 @@ pub struct Voxel {
     /// - bit 6: is_source (spring/sea boundary)
     /// - bit 7: is_support (load-bearing)
     pub flags: u8,
+    /// Structural health in [0.0, 1.0]. 1.0 = intact, 0.0 = collapsed.
+    pub integrity: f32,
+    /// Building entity ID this voxel belongs to, if any.
+    pub building_id: Option<u32>,
+    /// Functional zone designation.
+    pub zone: VoxelZone,
 }
 
 impl Default for Voxel {
     fn default() -> Self {
-        Self { material: VoxelMaterial::Air, light: 0, damage: 0, flags: 0 }
+        Self {
+            material: VoxelMaterial::Air,
+            light: 0,
+            damage: 0,
+            flags: 0,
+            integrity: 1.0,
+            building_id: None,
+            zone: VoxelZone::None,
+        }
     }
 }
 
 impl Voxel {
     pub fn new(material: VoxelMaterial) -> Self {
-        Self { material, light: 0, damage: 0, flags: 0 }
+        Self { material, light: 0, damage: 0, flags: 0, integrity: 1.0, building_id: None, zone: VoxelZone::None }
     }
 
     pub fn water_level(self) -> u8 { self.flags & 0x0F }
@@ -301,6 +334,11 @@ impl Voxel {
     pub fn is_source(self) -> bool { self.flags & 0x40 != 0 }
     pub fn set_source(&mut self, v: bool) {
         if v { self.flags |= 0x40; } else { self.flags &= !0x40; }
+    }
+
+    /// Effective HP: structural integrity scaled by material HP multiplier.
+    pub fn effective_hp(&self) -> f32 {
+        self.integrity * self.material.properties().hp_multiplier
     }
 }
 
@@ -708,6 +746,26 @@ fn hash_3d(x: i32, y: i32, z: i32, seed: u64) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn voxel_building_metadata() {
+        let mut v = Voxel::new(VoxelMaterial::StoneBrick);
+        assert_eq!(v.zone, VoxelZone::None);
+        assert_eq!(v.building_id, None);
+        assert_eq!(v.integrity, 1.0);
+
+        v.building_id = Some(42);
+        v.zone = VoxelZone::Residential;
+        v.integrity = 0.75;
+
+        assert_eq!(v.building_id, Some(42));
+        assert_eq!(v.zone, VoxelZone::Residential);
+        assert!((v.integrity - 0.75).abs() < f32::EPSILON);
+
+        let ehp = v.effective_hp();
+        let expected = 0.75 * VoxelMaterial::StoneBrick.properties().hp_multiplier;
+        assert!((ehp - expected).abs() < f32::EPSILON);
+    }
 
     #[test]
     fn chunk_pos_from_voxel() {
