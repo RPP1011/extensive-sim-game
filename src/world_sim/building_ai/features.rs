@@ -382,21 +382,22 @@ pub(super) fn world_to_virtual(wx: f32, wy: f32, settlement_x: f32, settlement_y
     (c, r)
 }
 
+/// Convert a virtual grid cell back to world-space position.
+/// Inverse of `world_to_virtual`: `world = centroid + (cell - VIRT/2)`.
+pub(super) fn virtual_to_world(vc: u16, vr: u16, settlement_x: f32, settlement_y: f32) -> (f32, f32) {
+    let half = (VIRT / 2) as f32;
+    (settlement_x + vc as f32 - half, settlement_y + vr as f32 - half)
+}
+
 /// Build a set of developed cells (cells occupied by a building entity) in the virtual grid.
-fn build_developed_cells(state: &WorldState, settlement_id: u32) -> Vec<bool> {
-    let settlement = match state.settlement(settlement_id) {
-        Some(s) => s,
-        None => return vec![false; VIRT * VIRT],
-    };
+fn build_developed_cells(state: &WorldState, settlement_id: u32, sx: f32, sy: f32) -> Vec<bool> {
     let mut developed = vec![false; VIRT * VIRT];
-    // Use the full settlement range and filter to buildings, because
-    // per-kind sub-ranges (settlement_buildings) are not populated.
     let range = state.group_index.settlement_entities(settlement_id);
     for idx in range {
         if idx >= state.entities.len() { break; }
         let e = &state.entities[idx];
         if !e.alive || e.kind != EntityKind::Building { continue; }
-        let (c, r) = world_to_virtual(e.pos.0, e.pos.1, settlement.pos.0, settlement.pos.1);
+        let (c, r) = world_to_virtual(e.pos.0, e.pos.1, sx, sy);
         developed[r * VIRT + c] = true;
     }
     developed
@@ -440,10 +441,23 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
     };
     let cols = VIRT;
     let rows = VIRT;
-    let sx = settlement.pos.0;
-    let sy = settlement.pos.1;
 
-    let developed = build_developed_cells(state, settlement_id);
+    // Use building centroid as settlement center for virtual grid conversion.
+    // settlement.pos is (0,0) used as grid offset by apply_actions, not the
+    // actual location of buildings.
+    let building_positions: Vec<(f32, f32)> = state.entities.iter()
+        .filter(|e| e.building.is_some() && e.pos != (0.0, 0.0))
+        .map(|e| e.pos)
+        .collect();
+    let (sx, sy) = if !building_positions.is_empty() {
+        let cx = building_positions.iter().map(|p| p.0).sum::<f32>() / building_positions.len() as f32;
+        let cy = building_positions.iter().map(|p| p.1).sum::<f32>() / building_positions.len() as f32;
+        (cx, cy)
+    } else {
+        (settlement.pos.0, settlement.pos.1)
+    };
+
+    let developed = build_developed_cells(state, settlement_id, sx, sy);
     let is_developed = |c: usize, r: usize| developed[r * VIRT + c];
 
     // -----------------------------------------------------------------------
@@ -859,9 +873,9 @@ pub fn compute_spatial_features(state: &WorldState, settlement_id: u32) -> Spati
     }
     let unhoused_count = total_population.saturating_sub(housed_set.len() as u16);
     let housing_pressure = if total_residential_capacity > 0 {
-        total_population as f32 / total_residential_capacity as f32
+        (total_population as f32 / total_residential_capacity as f32).min(10.0)
     } else if total_population > 0 {
-        f32::MAX
+        10.0 // cap: no capacity → max pressure, not f32::MAX
     } else {
         0.0
     };
@@ -1007,7 +1021,7 @@ pub fn compute_garrison_features(state: &WorldState, settlement_id: u32) -> Garr
 
     let total_garrison_strength: f32 = garrison_npcs.iter().map(|g| g.combat_value).sum();
 
-    let developed = build_developed_cells(state, settlement_id);
+    let developed = build_developed_cells(state, settlement_id, sx, sy);
     let perim = perimeter_cells_virtual(&developed);
     if perim.is_empty() {
         return GarrisonFeatures {

@@ -1,6 +1,5 @@
 # Assassins — small numbers, bypass outer defense, target HV NPCs
 
-[defaults]
 type_name = "assassin"
 level_range = [8, 14]
 can_climb = true

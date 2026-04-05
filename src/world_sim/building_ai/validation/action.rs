@@ -11,8 +11,8 @@ use crate::world_sim::building_ai::types::{
 use crate::world_sim::voxel::VoxelMaterial;
 use crate::world_sim::state::{BuildingType, EntityKind, WorldState};
 
-/// Virtual grid size used for bounds checking (VoxelWorld is unbounded).
-const VIRTUAL_GRID_SIZE: usize = 64;
+/// Virtual grid size used for bounds checking — matches env GRID_SIZE (128).
+const VIRTUAL_GRID_SIZE: usize = 128;
 
 // ---------------------------------------------------------------------------
 // ACT-PRE-*: Pre-application checks

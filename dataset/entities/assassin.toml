@@ -1,0 +1,13 @@
+name = "Assassin"
+kind = "creature"
+
+[stats]
+hp = 55.0
+attack = 18.0
+armor = 1.0
+speed = 4.5
+
+[capabilities]
+can_climb = true
+can_jump = true
+jump_height = 3

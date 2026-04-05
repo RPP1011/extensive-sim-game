@@ -2,6 +2,9 @@
 # Two settlements need a trade connection. Frontier outpost establishment.
 # Tests road network planning, outpost placement, resource relay.
 
+sim_ticks = 600
+num_random_baselines = 5
+
 [meta]
 name = "Trade Route — Frontier Outpost"
 description = "Establish a frontier outpost between two settlements and connect them via trade road. Tests multi-settlement routing and minimal viable outpost placement."
@@ -157,6 +160,3 @@ is_garrison = true
 category = "multi_settlement"
 sub_type = "trade_route"
 severity = [0.4, 0.6]
-
-sim_ticks = 600
-num_random_baselines = 5

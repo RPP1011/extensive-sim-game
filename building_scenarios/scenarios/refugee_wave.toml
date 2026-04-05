@@ -1,3 +1,6 @@
+sim_ticks = 500
+num_random_baselines = 5
+
 [meta]
 name = "Population Surge — Refugee Wave"
 description = "Large influx of refugees. Must rapidly expand housing, manage crowding, maintain food access, and potentially expand defenses for larger population."
@@ -19,6 +22,3 @@ population = [45, 50]
 category = "population"
 sub_type = "refugee_wave"
 severity = [0.6, 0.9]
-
-sim_ticks = 500
-num_random_baselines = 5

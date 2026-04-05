@@ -3,6 +3,9 @@
 # Tests HV NPC protection: safe rooms, escape routes, reinforced doors,
 # interior chokepoints, specialist housing proximity.
 
+sim_ticks = 300
+num_random_baselines = 5
+
 [meta]
 name = "HV NPC Protection — Assassination Threat"
 description = "Assassins targeting the leader and master smith. Oracle must structurally protect high-value NPCs with safe rooms, escape routes, and interior chokepoints."
@@ -172,6 +175,3 @@ severity = [0.6, 0.8]
 [[challenges.enemies]]
 profile = "enemy_profiles/assassins.toml"
 count = [3, 5]
-
-sim_ticks = 300
-num_random_baselines = 5

@@ -354,12 +354,12 @@ fn score_npc_actions(
     // Cultural conformity (Phase C): per-action bias from nearby NPCs.
     let cultural_bias = &npc.cultural_bias;
 
-    // Determine what kinds of entities we consider hostile (attack targets).
-    let is_npc = entity.kind == EntityKind::Npc;
-    let hostile_kind = if is_npc { EntityKind::Monster } else { EntityKind::Npc };
+    // Determine which team we consider hostile (attack targets).
+    let my_team = entity.team;
+    let is_hostile = my_team == WorldTeam::Hostile;
 
-    // --- Eat (requires food in inventory, economy creatures only) ---
-    if ctype.has_economy_actions() {
+    // --- Eat (requires food in inventory, economy creatures only, not hostiles) ---
+    if ctype.has_economy_actions() && !is_hostile {
         let has_food = entity.inventory.as_ref()
             .map(|inv| inv.commodities[commodity::FOOD] >= FOOD_PER_MEAL)
             .unwrap_or(false);
@@ -436,8 +436,9 @@ fn score_npc_actions(
                 }
             }
 
-            k if k == hostile_kind => {
-                // Attack hostile entity if within aggro range.
+            _ if snap.team != my_team && snap.alive
+                && matches!(snap.kind, EntityKind::Npc | EntityKind::Monster) => {
+                // Attack entities on the opposing team within aggro range.
                 if dist_sq <= AGGRO_RANGE_SQ {
                     // Territorial creatures get attack boost near den.
                     let territorial_boost = if let Some(den) = npc.home_den {
@@ -462,7 +463,7 @@ fn score_npc_actions(
                 }
             }
 
-            EntityKind::Building if ctype.can_build() => {
+            EntityKind::Building if ctype.can_build() && !is_hostile => {
                 // Incomplete building nearby: advance construction (blueprint system).
                 if snap.construction_progress < 1.0 {
                     let has_wood = entity.inventory.as_ref()
@@ -505,8 +506,8 @@ fn score_npc_actions(
         }
     }
 
-    // --- Work (requires work_building_id set, citizens only) ---
-    if ctype.can_build() {
+    // --- Work (requires work_building_id set, citizens only, not hostiles) ---
+    if ctype.can_build() && !is_hostile {
         if let Some(work_bid) = npc.work_building_id {
             if let Some(work_snap) = snaps.iter().find(|s| s.id == work_bid && s.alive) {
                 let dx = work_snap.pos.0 - pos.0;
@@ -705,12 +706,21 @@ fn score_npc_actions(
         }
     }
 
-    // --- Return to den (territorial creatures, when safe) ---
+    // --- Return to den / advance on target ---
     if let Some(den) = npc.home_den {
-        if ctype == CreatureType::Territorial {
-            let dx = pos.0 - den.0;
-            let dy = pos.1 - den.1;
-            let den_dist_sq = dx * dx + dy * dy;
+        let dx = pos.0 - den.0;
+        let dy = pos.1 - den.1;
+        let den_dist_sq = dx * dx + dy * dy;
+
+        if entity.team == WorldTeam::Hostile && den_dist_sq > 25.0 {
+            // Hostile monsters with a den target (injected threats) advance aggressively.
+            let utility = 0.8 * grief_dampen;
+            if utility > best_utility {
+                best_utility = utility;
+                best_action = CandidateAction::MoveToPos { target: den };
+                best_npc_action = NpcAction::Walking { destination: den };
+            }
+        } else if ctype == CreatureType::Territorial {
             if den_dist_sq > 400.0 && safety_urgency < 0.3 { // > 20 units from den, safe
                 let utility = 0.3 * (1.0 - safety_urgency) * grief_dampen;
                 if utility > best_utility {
@@ -725,7 +735,7 @@ fn score_npc_actions(
     // --- Flee (creature-type-aware thresholds) ---
     if let Some(threshold) = ctype.flee_hp_threshold() {
         let hp_ratio = if entity.max_hp > 0.0 { entity.hp / entity.max_hp } else { 1.0 };
-        let should_flee = if is_npc {
+        let should_flee = if !is_hostile {
             fear_boost > 0.5 && hp_ratio < threshold
         } else {
             hp_ratio < threshold
@@ -735,7 +745,7 @@ fn score_npc_actions(
             let mut nearest_dist_sq = f32::MAX;
             for snap in snaps {
                 if !snap.alive { continue; }
-                if snap.kind != hostile_kind { continue; }
+                if snap.team == my_team { continue; }
                 let dx = snap.pos.0 - pos.0;
                 let dy = snap.pos.1 - pos.1;
                 let d2 = dx * dx + dy * dy;

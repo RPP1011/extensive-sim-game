@@ -143,12 +143,27 @@ pub fn entity_display_name(entity: &Entity) -> String {
         EntityKind::Npc => {
             if let Some(npc) = entity.npc.as_ref() {
                 if !npc.name.is_empty() {
+                    // Hostile NPCs with an archetype show "Name the Assassin"
+                    if entity.team == crate::world_sim::state::WorldTeam::Hostile
+                        && !npc.archetype.is_empty()
+                        && npc.archetype != "unknown"
+                    {
+                        return format!("{} the {}", npc.name, npc.archetype);
+                    }
                     return npc.name.clone();
                 }
             }
             format!("Entity #{}", entity.id)
         }
-        EntityKind::Monster => monster_display_name(entity.id, entity.level),
+        EntityKind::Monster => {
+            // Use archetype name if set (template-based monsters), else procedural name.
+            if let Some(npc) = entity.npc.as_ref() {
+                if !npc.archetype.is_empty() && npc.archetype != "unknown" {
+                    return format!("{} (lv{})", npc.archetype, entity.level);
+                }
+            }
+            monster_display_name(entity.id, entity.level)
+        }
         EntityKind::Resource => {
             entity.resource.as_ref()
                 .map(|r| r.resource_type.display_name().to_string())

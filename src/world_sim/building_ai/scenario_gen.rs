@@ -279,12 +279,22 @@ pub fn generate_from_seed(seed: &SeedConfig, rng_seed: u64) -> WorldState {
         }
     }
 
-    // --- NPCs ---
-    // Collect building world positions for NPC spawning near buildings.
+    // --- Compute actual settlement center from placed buildings ---
+    // Settlement pos stays at (0,0) because apply_actions uses it as an offset
+    // for oracle grid_cell → world coords. We compute building_center separately
+    // for monster spawning and NPC fallback positions.
     let building_positions: Vec<(f32, f32)> = state.entities.iter()
         .filter(|e| e.building.is_some())
         .map(|e| e.pos)
         .collect();
+
+    let building_center = if !building_positions.is_empty() {
+        let cx = building_positions.iter().map(|p| p.0).sum::<f32>() / building_positions.len() as f32;
+        let cy = building_positions.iter().map(|p| p.1).sum::<f32>() / building_positions.len() as f32;
+        (cx, cy)
+    } else {
+        settlement_pos
+    };
 
     for ncfg in &seed.npcs {
         let count = ncfg.count;
@@ -294,14 +304,16 @@ pub fn generate_from_seed(seed: &SeedConfig, rng_seed: u64) -> WorldState {
                 let mut r = SimpleRng::new(effective_seed.wrapping_add(eid as u64));
                 ncfg.level.resolve(&mut || r.next_f64()) as u32
             };
-            // Spawn near a building (deterministic pick based on entity id).
+            // Spawn near a building, or spread around settlement center if none.
             let spawn_pos = if !building_positions.is_empty() {
                 let idx = eid as usize % building_positions.len();
                 let bp = building_positions[idx];
                 let jitter = ((eid as f32) * 0.7).sin() * 2.0;
                 (bp.0 + jitter, bp.1 + jitter)
             } else {
-                settlement_pos
+                let jitter_x = ((eid as f32) * 0.7).sin() * 3.0;
+                let jitter_y = ((eid as f32) * 1.3).cos() * 3.0;
+                (building_center.0 + jitter_x, building_center.1 + jitter_y)
             };
             let mut entity = Entity::new_npc(eid, spawn_pos);
             entity.level = level;
@@ -327,7 +339,10 @@ pub fn generate_from_seed(seed: &SeedConfig, rng_seed: u64) -> WorldState {
         let spawn_pos = if !building_positions.is_empty() {
             building_positions[eid as usize % building_positions.len()]
         } else {
-            settlement_pos
+            let sc = state.settlements.first().map(|s| s.pos).unwrap_or(settlement_pos);
+            let jitter_x = ((eid as f32) * 0.7).sin() * 3.0;
+            let jitter_y = ((eid as f32) * 1.3).cos() * 3.0;
+            (sc.0 + jitter_x, sc.1 + jitter_y)
         };
         let mut entity = Entity::new_npc(eid, spawn_pos);
         entity.level = level;
@@ -448,14 +463,22 @@ fn bresenham_line(x0: i32, y0: i32, x1: i32, y1: i32) -> Vec<(usize, usize)> {
 /// For environmental: set up conditions (lower terrain for flood, wood clusters for fire).
 /// For temporal: set the tick deadline on the state.
 pub fn inject_challenge(state: &mut WorldState, challenge: &Challenge) {
-    let settlement_pos = state
-        .settlements
-        .first()
-        .map(|s| s.pos)
-        .unwrap_or((0.0, 0.0));
+    // Use building centroid as the actual settlement center for monster spawning,
+    // since settlement_pos is (0,0) used as grid offset by apply_actions.
+    let building_positions: Vec<(f32, f32)> = state.entities.iter()
+        .filter(|e| e.building.is_some())
+        .map(|e| e.pos)
+        .collect();
+    let settlement_pos = if !building_positions.is_empty() {
+        let cx = building_positions.iter().map(|p| p.0).sum::<f32>() / building_positions.len() as f32;
+        let cy = building_positions.iter().map(|p| p.1).sum::<f32>() / building_positions.len() as f32;
+        (cx, cy)
+    } else {
+        state.settlements.first().map(|s| s.pos).unwrap_or((0.0, 0.0))
+    };
 
     match challenge.category {
-        ChallengeCategory::Military | ChallengeCategory::UnitCapability => {
+        ChallengeCategory::Military | ChallengeCategory::UnitCapability | ChallengeCategory::HighValueNpc => {
             inject_military(state, challenge, settlement_pos);
         }
         ChallengeCategory::Environmental => {
@@ -481,11 +504,24 @@ pub fn inject_challenge(state: &mut WorldState, challenge: &Challenge) {
 
 fn inject_military(state: &mut WorldState, challenge: &Challenge, settlement_pos: (f32, f32)) {
     let (dx, dy) = challenge.direction.unwrap_or((0.0, -1.0));
-    let perimeter_dist = 80.0_f32; // world units from settlement center
+    let perimeter_dist = 40.0_f32; // world units from settlement center
+
+    // Try to load entity templates from dataset for each profile type.
+    let dataset_dir = std::path::Path::new("dataset/entities");
 
     for profile in &challenge.enemy_profiles {
         let base_x = settlement_pos.0 + dx * perimeter_dist;
         let base_y = settlement_pos.1 + dy * perimeter_dist;
+
+        // Try loading the entity template for this profile's type_name.
+        let template = if !profile.type_name.is_empty() {
+            let path = dataset_dir.join(format!("{}.toml", profile.type_name));
+            std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|content| toml::from_str::<crate::world_sim::registry::EntityTemplateToml>(&content).ok())
+        } else {
+            None
+        };
 
         for i in 0..profile.count {
             let eid = state.next_entity_id();
@@ -495,16 +531,49 @@ fn inject_military(state: &mut WorldState, challenge: &Challenge, settlement_pos
             let level = profile.level_range.0 as u32
                 + (i as u32 % (profile.level_range.1.saturating_sub(profile.level_range.0) as u32 + 1));
 
-            let mut entity = Entity::new_monster(eid, spawn_pos, level);
+            // Create as a full NPC on the hostile team — gets full internal
+            // state (needs, personality, goals) but team-based targeting makes
+            // them attack settlement NPCs.
+            let mut entity = if let Some(ref tmpl) = template {
+                let dummy_registry = crate::world_sim::registry::Registry::default();
+                Entity::from_template(eid, spawn_pos, tmpl, &dummy_registry)
+            } else {
+                Entity::new_npc(eid, spawn_pos)
+            };
+            entity.kind = EntityKind::Npc;
+            entity.team = crate::world_sim::state::WorldTeam::Hostile;
+            entity.level = level;
+            if entity.inventory.is_none() {
+                entity.inventory = Some(crate::world_sim::state::Inventory::with_capacity(20.0));
+            }
+
+            // Scale stats by severity.
             entity.hp *= 1.0 + challenge.severity * 0.5;
             entity.max_hp = entity.hp;
             entity.attack_damage *= 1.0 + challenge.severity * 0.3;
 
+            // Apply capabilities from the profile.
+            entity.enemy_capabilities = Some(crate::world_sim::state::EnemyCapabilities {
+                can_jump: profile.can_jump,
+                jump_height: profile.jump_height,
+                can_climb: profile.can_climb,
+                can_tunnel: profile.can_tunnel,
+                can_fly: profile.can_fly,
+                has_siege: profile.has_siege,
+                siege_damage: 0.0,
+            });
+
             // Set move target toward settlement.
             entity.move_target = Some(settlement_pos);
 
+            // Injected threats treat the settlement as their "den" — the hostile
+            // advance logic (utility 0.8) pulls them toward it.
             if let Some(npc) = entity.npc.as_mut() {
                 npc.archetype = profile.type_name.clone();
+                npc.name = crate::world_sim::naming::generate_personal_name(
+                    eid, eid as u64 * 31337,
+                );
+                npc.home_den = Some(settlement_pos);
             }
 
             state.entities.push(entity);
@@ -783,12 +852,23 @@ pub fn build_observation(
     tier: DecisionTier,
 ) -> BuildingObservation {
     // Settlement position for world-to-virtual-grid conversion.
-    let settlement_pos = state
-        .settlements
-        .iter()
-        .find(|s| s.id == settlement_id)
-        .map(|s| s.pos)
-        .unwrap_or((0.0, 0.0));
+    // Use building centroid rather than settlement entity pos (which is (0,0) and
+    // used as a grid offset by apply_actions). This ensures HV NPCs and buildings
+    // map to meaningful virtual grid positions instead of clamping to the edge.
+    let building_positions: Vec<(f32, f32)> = state.entities.iter()
+        .filter(|e| e.building.is_some() && e.pos != (0.0, 0.0))
+        .map(|e| e.pos)
+        .collect();
+    let settlement_pos = if !building_positions.is_empty() {
+        let cx = building_positions.iter().map(|p| p.0).sum::<f32>() / building_positions.len() as f32;
+        let cy = building_positions.iter().map(|p| p.1).sum::<f32>() / building_positions.len() as f32;
+        (cx, cy)
+    } else {
+        state.settlements.iter()
+            .find(|s| s.id == settlement_id)
+            .map(|s| s.pos)
+            .unwrap_or((0.0, 0.0))
+    };
 
     // --- Extract friendly roster ---
     let friendly_roster: Vec<UnitSummary> = state
@@ -915,11 +995,15 @@ pub fn run_scenario_pipeline(
     // 2. Generate world state.
     let mut state = generate_from_seed(&seed, 42);
 
-    // 3. Convert and inject challenges.
+    // 3. Convert and inject challenges, resolving implicit directions.
     let mut challenges = Vec::new();
     for ccfg in &scenario.challenges {
-        let challenge = resolve_challenge(ccfg, base_dir);
+        let mut challenge = resolve_challenge(ccfg, base_dir);
         inject_challenge(&mut state, &challenge);
+        // Resolve implicit direction so the oracle can orient defenses.
+        if challenge.direction.is_none() && !challenge.enemy_profiles.is_empty() {
+            challenge.direction = Some((0.0, -1.0)); // default spawn direction
+        }
         challenges.push(challenge);
     }
 
@@ -1101,7 +1185,7 @@ fn parse_challenge_category(s: &str) -> ChallengeCategory {
 fn resolve_enemy_profile(ecfg: &EnemyConfig, base_dir: &Path) -> EnemyProfile {
     // Load from profile template if referenced.
     if let Some(ref profile_path) = ecfg.profile {
-        let path = base_dir.join("enemy_profiles").join(profile_path);
+        let path = base_dir.join(profile_path);
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Ok(template) = toml::from_str::<EnemyConfig>(&content) {
                 return enemy_config_to_profile(&merge_enemy_config(&template, ecfg));

@@ -1,3 +1,6 @@
+sim_ticks = 300
+num_random_baselines = 5
+
 [meta]
 name = "Winter Preparation — Resource Scarce"
 description = "Winter approaching, limited wood and iron. Must prioritize: insulate housing, build granary, or reinforce walls against winter raiders? Tests prioritization under constraint."
@@ -24,6 +27,3 @@ category = "temporal"
 sub_type = "winter_preparation"
 severity = 0.7
 deadline_ticks = 200
-
-sim_ticks = 300
-num_random_baselines = 5

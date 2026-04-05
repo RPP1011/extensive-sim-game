@@ -170,6 +170,24 @@ pub struct QualityTags {
 /// Maps each `ActionPayload` variant to direct state mutations. Where possible
 /// we create real entities so that forward simulation (tick) can pick them up.
 pub fn apply_actions(state: &mut WorldState, actions: &[BuildingAction]) {
+    // Compute building centroid — same reference point used by world_to_virtual
+    // when building the spatial features / observation that the oracle consumed.
+    let building_centroid = {
+        let positions: Vec<(f32, f32)> = state
+            .entities
+            .iter()
+            .filter(|e| e.alive && e.building.is_some() && e.pos != (0.0, 0.0))
+            .map(|e| e.pos)
+            .collect();
+        if positions.is_empty() {
+            state.settlements.first().map(|s| s.pos).unwrap_or((0.0, 0.0))
+        } else {
+            let cx = positions.iter().map(|p| p.0).sum::<f32>() / positions.len() as f32;
+            let cy = positions.iter().map(|p| p.1).sum::<f32>() / positions.len() as f32;
+            (cx, cy)
+        }
+    };
+
     for action in actions {
         match &action.action {
             ActionPayload::PlaceBuilding {
@@ -177,9 +195,11 @@ pub fn apply_actions(state: &mut WorldState, actions: &[BuildingAction]) {
                 grid_cell,
             } => {
                 let id = state.next_entity_id();
-                // World position: settlement center + grid cell offset (1:1 voxel mapping).
-                let spos = state.settlements.first().map(|s| s.pos).unwrap_or((0.0, 0.0));
-                let pos = (spos.0 + grid_cell.0 as f32, spos.1 + grid_cell.1 as f32);
+                // Convert VIRT grid cell back to world space using building centroid.
+                let pos = super::features::virtual_to_world(
+                    grid_cell.0, grid_cell.1,
+                    building_centroid.0, building_centroid.1,
+                );
                 let mut entity = Entity::new_building(id, pos);
                 let mut bdata = crate::world_sim::state::BuildingData::default();
                 bdata.building_type = *building_type;

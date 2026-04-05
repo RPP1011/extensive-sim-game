@@ -153,11 +153,14 @@ pub fn run_building_ai(cmd: BuildingAiCommand) -> ExitCode {
             let resolved = scenario_gen::resolve_seed(&scenario.seed, &args.base_dir);
             let mut state = scenario_gen::generate_from_seed(&resolved, 42);
 
-            // Inject challenges.
+            // Inject challenges, resolving implicit directions.
             let mut challenges = Vec::new();
             for ccfg in &scenario.challenges {
-                let challenge = scenario_gen::resolve_challenge(ccfg, &args.base_dir);
+                let mut challenge = scenario_gen::resolve_challenge(ccfg, &args.base_dir);
                 scenario_gen::inject_challenge(&mut state, &challenge);
+                if challenge.direction.is_none() && !challenge.enemy_profiles.is_empty() {
+                    challenge.direction = Some((0.0, -1.0));
+                }
                 challenges.push(challenge);
             }
 

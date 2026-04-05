@@ -11,6 +11,14 @@ use super::types::{
 };
 use crate::world_sim::state::BuildingType;
 
+/// Virtual grid is 128×128; max valid coordinate is 127.
+const VGRID_MAX: u16 = 127;
+
+/// Clamp a grid cell to valid virtual-grid bounds.
+fn clamp_cell(col: u16, row: u16) -> (u16, u16) {
+    (col.min(VGRID_MAX), row.min(VGRID_MAX))
+}
+
 // ---------------------------------------------------------------------------
 // Oracle entry points
 // ---------------------------------------------------------------------------
@@ -45,8 +53,11 @@ pub fn strategic_oracle(obs: &BuildingObservation) -> Vec<BuildingAction> {
         cell_a.cmp(&cell_b)
     });
 
-    // Return top 8.
-    all.truncate(8);
+    // Dynamic action limit: base 4 + 2 per challenge + 1 per 10 existing buildings, capped at 16.
+    let n_challenges = obs.challenges.len();
+    let n_buildings = obs.spatial.occupied_cells.len();
+    let max_actions = (4 + n_challenges * 2 + n_buildings / 10).clamp(4, 16);
+    all.truncate(max_actions);
     all
 }
 
@@ -70,6 +81,15 @@ pub fn structural_oracle(
                 // Generate structural specs for this building.
                 let mut specs =
                     structural_for_building(obs, &weights, *building_type, grid_cell, building_id, segment_id);
+                // Clamp footprint dimensions so they don't overflow the virtual grid.
+                for spec in &mut specs {
+                    if let ActionPayload::SetFootprint { dimensions, .. } = &mut spec.action {
+                        let max_w = ((VGRID_MAX + 1).saturating_sub(grid_cell.0)).max(1) as u8;
+                        let max_h = ((VGRID_MAX + 1).saturating_sub(grid_cell.1)).max(1) as u8;
+                        dimensions.0 = dimensions.0.min(max_w);
+                        dimensions.1 = dimensions.1.min(max_h);
+                    }
+                }
                 results.append(&mut specs);
             }
             ActionPayload::SetZone { .. } | ActionPayload::Demolish { .. } => {
@@ -1087,13 +1107,30 @@ fn structural_for_building(
                 reasoning_tag: bi_tags::THREAT_PROXIMITY,
             });
 
-            // Arrow slits on all faces.
+            // Arrow slits concentrated toward threat direction, fewer on safe sides.
             let mut openings = Vec::new();
-            for dir in &[Direction::North, Direction::East, Direction::South, Direction::West] {
+            let threat_dirs = if let Some(td) = threat_dir {
+                // 3 slits on threat-facing walls, 1 on others.
+                vec![
+                    (td, 3u8),
+                    (opposite_direction(td), 1),
+                    (rotate_cw(td), 2),
+                    (rotate_ccw(td), 2),
+                ]
+            } else {
+                // No threat — uniform 2 per face.
+                vec![
+                    (Direction::North, 2),
+                    (Direction::East, 2),
+                    (Direction::South, 2),
+                    (Direction::West, 2),
+                ]
+            };
+            for (dir, count) in threat_dirs {
                 openings.push(OpeningSpec {
                     opening_type: OpeningType::ArrowSlit,
-                    wall_facing: *dir,
-                    count: 2,
+                    wall_facing: dir,
+                    count,
                 });
             }
             actions.push(BuildingAction {
@@ -1470,6 +1507,10 @@ fn direction_to_perimeter_cell(obs: &BuildingObservation, dir: (f32, f32)) -> (u
         .max()
         .unwrap_or(20);
 
+    // Clamp to virtual grid bounds — wall segments can be in world coords > 63.
+    let max_col = max_col.min(VGRID_MAX);
+    let max_row = max_row.min(VGRID_MAX);
+
     let center_col = max_col / 2;
     let center_row = max_row / 2;
 
@@ -1478,7 +1519,7 @@ fn direction_to_perimeter_cell(obs: &BuildingObservation, dir: (f32, f32)) -> (u
     let col = (center_col as f32 + dir.0 * scale).clamp(0.0, max_col as f32) as u16;
     let row = (center_row as f32 + dir.1 * scale).clamp(0.0, max_row as f32) as u16;
 
-    (col, row)
+    clamp_cell(col, row)
 }
 
 /// Find a good cell for residential placement, weighted away from industrial zone.
@@ -1490,16 +1531,34 @@ fn find_residential_cell(obs: &BuildingObservation) -> (u16, u16) {
     find_empty_cell_near_center(obs)
 }
 
-/// Compute approximate settlement center from wall segments and elevation map.
+/// Compute approximate settlement center from occupied cells, wall segments,
+/// and elevation data. Occupied cells (buildings) are the strongest signal.
 fn settlement_center(obs: &BuildingObservation) -> (f32, f32) {
     let mut sum_x = 0.0f32;
     let mut sum_y = 0.0f32;
     let mut count = 0u32;
+
+    // Occupied cells (building positions) — strongest signal, weight 2x.
+    for &(cx, cy) in &obs.spatial.occupied_cells {
+        sum_x += cx as f32 * 2.0;
+        sum_y += cy as f32 * 2.0;
+        count += 2;
+    }
+
+    // NPC positions from friendly roster.
+    for unit in &obs.friendly_roster {
+        sum_x += unit.position.0;
+        sum_y += unit.position.1;
+        count += 1;
+    }
+
+    // Wall segment endpoints.
     for seg in &obs.spatial.defensive.wall_segments {
         sum_x += seg.start.0 as f32 + seg.end.0 as f32;
         sum_y += seg.start.1 as f32 + seg.end.1 as f32;
         count += 2;
     }
+
     for elev in &obs.spatial.environmental.elevation_map {
         sum_x += elev.cell.0 as f32;
         sum_y += elev.cell.1 as f32;
@@ -1508,7 +1567,6 @@ fn settlement_center(obs: &BuildingObservation) -> (f32, f32) {
     if count > 0 {
         (sum_x / count as f32, sum_y / count as f32)
     } else {
-        // Default to virtual grid center (VIRT/2 = 32).
         (32.0, 32.0)
     }
 }
@@ -1535,7 +1593,7 @@ fn find_empty_cell_near_center(obs: &BuildingObservation) -> (u16, u16) {
                 if dr.unsigned_abs() != radius && dc.unsigned_abs() != radius {
                     continue; // only check perimeter of this radius
                 }
-                let cell = (
+                let cell = clamp_cell(
                     (cx as i32 + dc as i32).max(0) as u16,
                     (cy as i32 + dr as i32).max(0) as u16,
                 );
@@ -1548,9 +1606,9 @@ fn find_empty_cell_near_center(obs: &BuildingObservation) -> (u16, u16) {
     (cx, cy)
 }
 
-/// Offset a cell by (dc, dr), clamping to 0.
+/// Offset a cell by (dc, dr), clamping to virtual grid bounds.
 fn offset_cell(cell: (u16, u16), dc: i16, dr: i16) -> (u16, u16) {
-    (
+    clamp_cell(
         (cell.0 as i32 + dc as i32).max(0) as u16,
         (cell.1 as i32 + dr as i32).max(0) as u16,
     )
@@ -1630,29 +1688,37 @@ fn generate_candidate_cells(
         .chain(exclude.iter().copied())
         .collect();
 
-    // Estimate grid bounds.
+    // Estimate grid bounds from settlement extents, clamped to virtual grid.
+    let mut min_col: u16 = u16::MAX;
+    let mut min_row: u16 = u16::MAX;
     let mut max_col: u16 = 20;
     let mut max_row: u16 = 20;
+    for &(cx, cy) in &obs.spatial.occupied_cells {
+        min_col = min_col.min(cx);
+        min_row = min_row.min(cy);
+        max_col = max_col.max(cx + 3);
+        max_row = max_row.max(cy + 3);
+    }
     for seg in &obs.spatial.defensive.wall_segments {
+        min_col = min_col.min(seg.start.0.min(seg.end.0));
+        min_row = min_row.min(seg.start.1.min(seg.end.1));
         max_col = max_col.max(seg.end.0 + 2).max(seg.start.0 + 2);
         max_row = max_row.max(seg.end.1 + 2).max(seg.start.1 + 2);
     }
-    for elev in &obs.spatial.environmental.elevation_map {
-        max_col = max_col.max(elev.cell.0 + 1);
-        max_row = max_row.max(elev.cell.1 + 1);
-    }
-    // Ensure we scan at least through the virtual grid center area.
-    max_col = max_col.max(40);
-    max_row = max_row.max(40);
+    // Clamp to virtual grid bounds.
+    max_col = max_col.min(VGRID_MAX);
+    max_row = max_row.min(VGRID_MAX);
+    if min_col == u16::MAX { min_col = 0; }
+    if min_row == u16::MAX { min_row = 0; }
 
     // Scan candidates in spiral order from settlement center outward,
-    // stepping by 3 to keep count manageable.
+    // stepping by 2 for denser coverage near the settlement.
     let center = settlement_center(obs);
     let cx = center.0 as i16;
     let cy = center.1 as i16;
-    let stride = 3i16;
+    let stride = 2i16;
 
-    for radius in 0..20i16 {
+    for radius in 0..30i16 {
         for dr in -radius..=radius {
             for dc in -radius..=radius {
                 if dr.abs() != radius && dc.abs() != radius {
@@ -1660,7 +1726,9 @@ fn generate_candidate_cells(
                 }
                 let c = cx + dc * stride;
                 let r = cy + dr * stride;
-                if c < 1 || r < 1 || c >= max_col as i16 || r >= max_row as i16 {
+                if c < min_col as i16 || r < min_row as i16
+                    || c > max_col as i16 || r > max_row as i16
+                {
                     continue;
                 }
                 let cell = (c as u16, r as u16);
@@ -1668,7 +1736,7 @@ fn generate_candidate_cells(
                     continue;
                 }
                 cells.push(cell);
-                if cells.len() >= 30 {
+                if cells.len() >= 40 {
                     return cells;
                 }
             }
@@ -1729,6 +1797,24 @@ fn opposite_direction(dir: Direction) -> Direction {
         Direction::South => Direction::North,
         Direction::East => Direction::West,
         Direction::West => Direction::East,
+    }
+}
+
+fn rotate_cw(dir: Direction) -> Direction {
+    match dir {
+        Direction::North => Direction::East,
+        Direction::East => Direction::South,
+        Direction::South => Direction::West,
+        Direction::West => Direction::North,
+    }
+}
+
+fn rotate_ccw(dir: Direction) -> Direction {
+    match dir {
+        Direction::North => Direction::West,
+        Direction::West => Direction::South,
+        Direction::South => Direction::East,
+        Direction::East => Direction::North,
     }
 }
 
