@@ -1,10 +1,6 @@
 [workspace]
-members = [".", "crates/ability_operator", "crates/tactical_sim", "crates/ability-vae"]
-exclude = ["crates/combat-trainer"]  # depends on rl4burn which may not build
+members = ["."]
 
-[workspace.dependencies]
-# tack = { path = "../tack" }  # disabled — project not present locally
-rl4burn = { git = "https://github.com/RPP1011/rl4burn", version = "0.2.0" }
 
 [package]
 name = "game"
@@ -19,15 +15,17 @@ path = "src/bin/xtask/main.rs"
 [features]
 default = []
 app = []
-stream-monitor = ["tactical_sim/stream-monitor"]
-burn-gpu = ["tactical_sim/burn-gpu"]
-burn-cpu = ["tactical_sim/burn-cpu"]
+stream-monitor = []
+burn-gpu = ["dep:burn", "burn/tch", "burn/autodiff"]
+burn-cpu = ["dep:burn", "burn/ndarray"]
 profile-systems = []
 
 [dependencies]
-# tack = { workspace = true }  # disabled — project not present locally
-tactical_sim = { path = "crates/tactical_sim" }
-rl4burn = { workspace = true }
+voxel_engine = { path = "../voxel_engine" }
+contracts = "0.6"
+winnow = "0.7"
+burn = { version = "0.20", default-features = false, features = ["std"], optional = true }
+rl4burn = { git = "https://github.com/RPP1011/rl4burn", features = ["tensorboard"] }
 clap = { version = "4.5", features = ["derive"] }
 rand = "0.10.0"
 serde = { version = "1.0", features = ["derive"] }

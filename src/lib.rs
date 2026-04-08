@@ -2,33 +2,28 @@
 // but appear as dead code when the lib is compiled standalone.
 #![allow(dead_code)]
 
+pub mod rendering;
 pub mod game_core;
 pub mod mission;
+pub mod ai;
 
-// ---------------------------------------------------------------------------
-// Re-export tactical_sim modules under familiar paths for backward compat.
-// All simulation / AI code now lives in the `tactical_sim` crate.
-// ---------------------------------------------------------------------------
-
-/// Re-export of `tactical_sim::sim` under the familiar `sim` alias.
-pub use tactical_sim::sim;
-
-/// Re-export all AI sub-modules so existing `crate::ai::*` paths keep working.
-pub mod ai {
-    pub use tactical_sim::sim as core;
-    pub use tactical_sim::effects;
-    pub use tactical_sim::pathing;
-    pub use tactical_sim::squad;
-    pub use tactical_sim::goap;
-    pub use tactical_sim::control;
-    pub use tactical_sim::personality;
-    pub use tactical_sim::roles;
-    pub use tactical_sim::utility;
-    pub use tactical_sim::phase;
-    pub use tactical_sim::advanced;
-    pub use tactical_sim::student;
-    pub use tactical_sim::tooling;
-}
+// Re-export AI sub-modules at crate root so internal paths (crate::sim, etc.)
+// continue to resolve after the tactical_sim merge.
+pub use ai::sim;
+pub use ai::effects;
+pub use ai::pathing;
+pub use ai::squad;
+pub use ai::goap;
+pub use ai::control;
+pub use ai::personality;
+pub use ai::roles;
+pub use ai::utility;
+pub use ai::phase;
+pub use ai::advanced;
+pub use ai::student;
+pub use ai::tooling;
+pub use ai::mapgen_voronoi;
+pub use ai::morale;
 
 pub mod world_sim;
 pub mod content;
@@ -37,4 +32,3 @@ pub mod ascii_gen;
 pub mod scenario;
 pub mod narrative;
 pub mod overworld_grid;
-pub use tactical_sim::mapgen_voronoi;
