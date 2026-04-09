@@ -2122,9 +2122,11 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
     let spacing = game::world_sim::terrain::CELL_SIZE as f32;
     let layout = GridLayout { cols, rows, spacing };
 
-    // Generate continental plan and use it to populate regions.
-    let plan_cols = (cols + 2).max(5);
-    let plan_rows = (rows + 2).max(4);
+    // Generate continental plan. The plan must be much larger than the settlement
+    // grid so that settlements land in the interior (not ocean border).
+    // At minimum 3× the settlement grid in each dimension.
+    let plan_cols = (cols * 3).max(12);
+    let plan_rows = (rows * 3).max(10);
     let plan = game::world_sim::terrain::generate_continent(plan_cols, plan_rows, terrain_seed);
     populate_regions_from_plan(&mut state, &plan, &layout, &mut rng);
     state.region_plan = Some(plan.clone());
@@ -2177,18 +2179,22 @@ fn populate_regions_from_plan(
         }
     }
 
+    // Offset layout grid to center of the plan so settlements are in the interior.
+    let offset_col = (plan.cols.saturating_sub(layout.cols)) / 2;
+    let offset_row = (plan.rows.saturating_sub(layout.rows)) / 2;
+
     for i in 0..num_regions {
         let row = i / layout.cols;
         let col = i % layout.cols;
 
-        // Map layout cell to plan cell (plan may be larger than layout).
-        let pcol = col.min(plan.cols - 1);
-        let prow = row.min(plan.rows - 1);
+        // Map layout cell to plan cell, centered in the plan.
+        let pcol = (col + offset_col).min(plan.cols - 1);
+        let prow = (row + offset_row).min(plan.rows - 1);
         let cell = plan.get(pcol, prow);
 
-        // World-space position: layout.spacing == CELL_SIZE so positions align with terrain.
-        let base_x = col as f32 * layout.spacing + layout.spacing * 0.5;
-        let base_y = row as f32 * layout.spacing + layout.spacing * 0.5;
+        // World-space position: use plan cell coordinates so terrain aligns.
+        let base_x = pcol as f32 * layout.spacing + layout.spacing * 0.5;
+        let base_y = prow as f32 * layout.spacing + layout.spacing * 0.5;
         let jitter = layout.spacing * 0.2;
         let jx = (lcg_f32(rng) - 0.5) * 2.0 * jitter;
         let jy = (lcg_f32(rng) - 0.5) * 2.0 * jitter;
@@ -2614,12 +2620,13 @@ fn create_settlements(
     for i in 0..args.settlements {
         let row = i / cols;
         let col = i % cols;
-        // Jitter settlement positions so the world isn't a perfect grid.
-        let jx = (lcg_f32(rng) - 0.5) * spacing * 0.6;
-        let jy = (lcg_f32(rng) - 0.5) * spacing * 0.6;
-        let pos = (col as f32 * spacing + jx, row as f32 * spacing + jy);
         let region_idx = row * cols + col;
         let region_idx = region_idx.min(state.regions.len().saturating_sub(1));
+        // Use the region's position (already offset to plan center).
+        let rpos = state.regions[region_idx].pos;
+        let jx = (lcg_f32(rng) - 0.5) * spacing * 0.3;
+        let jy = (lcg_f32(rng) - 0.5) * spacing * 0.3;
+        let pos = (rpos.0 + jx, rpos.1 + jy);
         let terrain = state.regions[region_idx].terrain;
 
         // Skip non-settleable terrain — find nearest settleable region and use its position.
@@ -2636,6 +2643,7 @@ fn create_settlements(
             (ri, (rpos.0 + jx, rpos.1 + jy))
         } else { (region_idx, pos) };
         let terrain = state.regions[region_idx].terrain;
+        eprintln!("[world] Settlement {} at ({:.0}, {:.0}) terrain={:?} region={}", i, pos.0, pos.1, terrain, region_idx);
 
         // Generate a unique settlement name (retry on collision).
         let mut name = generate_settlement_name(rng);
