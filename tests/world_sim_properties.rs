@@ -7,10 +7,9 @@ use proptest::prelude::*;
 use game::world_sim::runtime::WorldSim;
 use game::world_sim::state::{
     WorldState, Entity, EntityKind, SettlementState,
-    FactionState, DiplomaticStance, RegionState, Terrain, LocalGrid,
+    FactionState, DiplomaticStance, RegionState, Terrain,
     Inventory,
 };
-use game::world_sim::fidelity::Fidelity;
 use std::collections::HashSet;
 
 /// Build a small but complete world state for property testing.
@@ -68,14 +67,6 @@ fn build_test_world(seed: u64, npcs: usize, settlements: usize) -> WorldState {
         s.stockpile[0] = 100.0; // food
         s.stockpile[1] = 50.0;  // iron
 
-        let grid = LocalGrid {
-            id: i as u32,
-            fidelity: Fidelity::Medium,
-            center: s.pos,
-            radius: 30.0,
-            entity_ids: Vec::new(),
-        };
-        state.grids.push(grid);
         s.grid_id = Some(i as u32);
 
         state.settlements.push(s);

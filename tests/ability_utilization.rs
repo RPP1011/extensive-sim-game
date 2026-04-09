@@ -8,6 +8,8 @@
 //!
 //! Run with: cargo test --test ability_utilization -- --nocapture
 
+#![allow(dead_code, unused_variables, unused_imports)]
+
 use std::collections::{HashMap, VecDeque};
 
 use game::ai::core::{step, sim_vec2, SimEvent, SimState, Team, UnitState, FIXED_TICK_MS};
