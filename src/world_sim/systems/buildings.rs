@@ -101,7 +101,7 @@ pub(crate) fn building_floor_material(bt: BuildingType) -> VoxelMaterial {
 /// Wall height (in voxels) for a building type.
 pub(crate) fn wall_height(bt: BuildingType) -> u32 {
     match bt {
-        BuildingType::Tent | BuildingType::Camp => 1,
+        BuildingType::Tent | BuildingType::Camp | BuildingType::Well | BuildingType::Shrine => 1,
         BuildingType::Watchtower => 4,
         BuildingType::Wall | BuildingType::Gate => 3,
         _ => 2,
@@ -389,6 +389,7 @@ pub fn process_npc_builds(state: &mut WorldState) {
             specialization_strength: 0.0,
             specialization_name: String::new(),
             structural: None,
+        blueprint: None,
         });
 
         new_entities.push(entity);

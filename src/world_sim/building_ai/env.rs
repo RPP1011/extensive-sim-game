@@ -432,6 +432,7 @@ impl BuildingEnv {
             specialization_strength: 0.0,
             specialization_name: String::new(),
             structural: None,
+        blueprint: None,
         });
 
         state.entities.push(entity);

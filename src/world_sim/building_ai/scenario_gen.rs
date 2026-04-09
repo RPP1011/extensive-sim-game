@@ -178,6 +178,7 @@ pub fn generate_from_seed(seed: &SeedConfig, rng_seed: u64) -> WorldState {
                 specialization_strength: 0.0,
                 specialization_name: String::new(),
                 structural: None,
+            blueprint: None,
             });
             state.entities.push(entity);
         }
@@ -220,6 +221,7 @@ pub fn generate_from_seed(seed: &SeedConfig, rng_seed: u64) -> WorldState {
                     specialization_strength: 0.0,
                     specialization_name: String::new(),
                     structural: None,
+                blueprint: None,
                 });
                 state.entities.push(wall_entity);
             }
@@ -273,6 +275,7 @@ pub fn generate_from_seed(seed: &SeedConfig, rng_seed: u64) -> WorldState {
                     specialization_strength: 0.0,
                     specialization_name: String::new(),
                     structural: None,
+                blueprint: None,
                 });
                 state.entities.push(entity);
             }

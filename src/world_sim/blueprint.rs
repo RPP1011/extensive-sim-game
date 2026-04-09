@@ -26,6 +26,8 @@ pub struct BlueprintVoxel {
 #[derive(Clone, Debug)]
 pub struct Blueprint {
     pub voxels: Vec<BlueprintVoxel>,
+    /// World-space voxel origin (bottom-left corner). Set when attached to a building.
+    pub origin: (i32, i32, i32),
 }
 
 impl Blueprint {
@@ -101,7 +103,7 @@ impl Blueprint {
             }
         }
 
-        let mut bp = Blueprint { voxels };
+        let mut bp = Blueprint { voxels, origin: (0, 0, 0) };
         bp.sort_by_support_order();
         bp
     }
@@ -126,6 +128,7 @@ mod tests {
     #[test]
     fn sort_by_support_order_puts_ground_first() {
         let mut bp = Blueprint {
+            origin: (0, 0, 0),
             voxels: vec![
                 BlueprintVoxel {
                     offset: (0, 0, 2),

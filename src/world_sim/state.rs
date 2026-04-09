@@ -579,6 +579,7 @@ impl WorldState {
                 specialization_strength: 0.0,
                 specialization_name: String::new(),
                 structural: None,
+            blueprint: None,
             });
             // Treasury inventory mirrors settlement stockpile + gold.
             let mut inv = Inventory::with_capacity(500.0);
@@ -1572,6 +1573,11 @@ pub struct BuildingData {
     /// Detailed structural specification — wall composition, roof, foundation, etc.
     #[serde(default)]
     pub structural: Option<BuildingStructural>,
+
+    /// Blueprint for NPC-driven voxel-by-voxel construction.
+    /// `None` for instantly-stamped buildings or completed constructions.
+    #[serde(skip)]
+    pub blueprint: Option<crate::world_sim::blueprint::Blueprint>,
 }
 
 impl Default for BuildingData {
@@ -1606,6 +1612,7 @@ impl Default for BuildingData {
             specialization_strength: 0.0,
             specialization_name: String::new(),
             structural: None,
+            blueprint: None,
         }
     }
 }
