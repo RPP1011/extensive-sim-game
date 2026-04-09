@@ -4308,6 +4308,21 @@ pub enum SubBiome {
     // Jungle variants
     /// Overgrown ruins, hidden temples.
     TempleJungle,
+    // Underground variants
+    /// Default cave — stone walls, stalactites.
+    NaturalCave,
+    /// Basalt walls, lava pools. Under volcano/mountains.
+    LavaTubes,
+    /// Ice walls, frozen lakes. Under tundra/glacier.
+    FrozenCavern,
+    /// Bioluminescent mushrooms, organic. Under forest/jungle.
+    MushroomGrove,
+    /// Crystal clusters, high ore density. Rare.
+    CrystalVein,
+    /// Flooded chambers. Under swamp/coast.
+    Aquifer,
+    /// Ancient remains. Under death zone/ruins.
+    BoneOssuary,
 }
 
 impl Default for SubBiome {
@@ -4327,6 +4342,13 @@ impl SubBiome {
             SubBiome::HotSprings => " (hot springs)",
             SubBiome::GlowingMarsh => " (glowing)",
             SubBiome::TempleJungle => " (temple)",
+            SubBiome::NaturalCave => " (cave)",
+            SubBiome::LavaTubes => " (lava tubes)",
+            SubBiome::FrozenCavern => " (frozen)",
+            SubBiome::MushroomGrove => " (mushroom)",
+            SubBiome::CrystalVein => " (crystal)",
+            SubBiome::Aquifer => " (aquifer)",
+            SubBiome::BoneOssuary => " (ossuary)",
         }
     }
 
