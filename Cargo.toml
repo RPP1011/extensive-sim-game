@@ -1,5 +1,5 @@
 [workspace]
-members = ["."]
+members = [".", "crates/tactical_sim"]
 
 
 [package]
@@ -21,7 +21,8 @@ burn-cpu = ["dep:burn", "burn/ndarray"]
 profile-systems = []
 
 [dependencies]
-voxel_engine = { path = "../voxel_engine" }
+voxel_engine = { path = "/home/ricky/Projects/voxel_engine" }
+tactical_sim = { path = "crates/tactical_sim" }
 contracts = "0.6"
 winnow = "0.7"
 burn = { version = "0.20", default-features = false, features = ["std"], optional = true }

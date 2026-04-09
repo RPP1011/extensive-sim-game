@@ -1,4 +1,5 @@
 use voxel_engine::scene::{Scene, SceneConfig};
+#[allow(unused_imports)]
 use voxel_engine::camera::Camera;
 
 pub struct GameRenderer {

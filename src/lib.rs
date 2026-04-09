@@ -9,7 +9,7 @@ pub mod ai;
 
 // Re-export AI sub-modules at crate root so internal paths (crate::sim, etc.)
 // continue to resolve after the tactical_sim merge.
-pub use ai::sim;
+pub use ai::core as sim;
 pub use ai::effects;
 pub use ai::pathing;
 pub use ai::squad;
@@ -22,8 +22,6 @@ pub use ai::phase;
 pub use ai::advanced;
 pub use ai::student;
 pub use ai::tooling;
-pub use ai::mapgen_voronoi;
-pub use ai::morale;
 
 pub mod world_sim;
 pub mod content;
