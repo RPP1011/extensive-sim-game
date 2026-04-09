@@ -239,17 +239,27 @@ impl VoxelBridge {
     // Entity sync
     // -----------------------------------------------------------------------
 
-    /// Build a 2×2×2 marker grid filled with the given palette index.
-    fn make_marker_grid(palette_idx: u8) -> VoxelGrid {
-        let mut grid = VoxelGrid::new(2, 2, 2);
-        for z in 0..2 {
-            for y in 0..2 {
-                for x in 0..2 {
-                    grid.set(x, y, z, palette_idx);
+    /// Build a marker grid of the given dimensions filled with the given palette index.
+    /// Dimensions are (width_x, depth_y, height_z) in voxels.
+    fn make_marker_grid(palette_idx: u8, sx: u32, sy: u32, sz: u32) -> VoxelGrid {
+        let mut grid = VoxelGrid::new(sx, sz, sy); // engine is Y-up: (x, height, depth)
+        for z in 0..sz {
+            for y in 0..sy {
+                for x in 0..sx {
+                    grid.set(x, z, y, palette_idx);
                 }
             }
         }
         grid
+    }
+
+    /// Return (width_x, depth_y, height_z) marker dimensions for an entity kind.
+    fn marker_dims(kind: EntityKind) -> (u32, u32, u32) {
+        match kind {
+            EntityKind::Npc      => (2, 2, 4),  // 5×5×10cm at 2.5cm/voxel
+            EntityKind::Monster  => (3, 3, 5),  // 7.5×7.5×12.5cm
+            _                    => (2, 2, 2),  // buildings, resources, etc.
+        }
     }
 
     /// Sync all alive entities from world state into the scene.
@@ -289,7 +299,8 @@ impl VoxelBridge {
             } else {
                 // Spawn new marker.
                 let idx = marker_index_for_kind(entity.kind);
-                let grid = Self::make_marker_grid(idx);
+                let (sx, sy, sz) = Self::marker_dims(entity.kind);
+                let grid = Self::make_marker_grid(idx, sx, sy, sz);
                 let handle = self.scene.spawn(&grid, transform, &self.palette);
                 self.entity_handles.insert(entity.id, handle);
             }
