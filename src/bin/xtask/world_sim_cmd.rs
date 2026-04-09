@@ -2622,14 +2622,19 @@ fn create_settlements(
         let region_idx = region_idx.min(state.regions.len().saturating_sub(1));
         let terrain = state.regions[region_idx].terrain;
 
-        // Skip non-settleable terrain — find nearest settleable region.
-        let region_idx = if !terrain.is_settleable() {
-            state.regions.iter().enumerate()
+        // Skip non-settleable terrain — find nearest settleable region and use its position.
+        let (region_idx, pos) = if !terrain.is_settleable() {
+            let ri = state.regions.iter().enumerate()
                 .filter(|(_, r)| r.terrain.is_settleable())
                 .min_by_key(|(ri, _)| ((*ri as i32 - region_idx as i32).abs()) as u32)
                 .map(|(ri, _)| ri)
-                .unwrap_or(region_idx)
-        } else { region_idx };
+                .unwrap_or(region_idx);
+            // Move settlement to the settleable region's position (with jitter).
+            let rpos = state.regions[ri].pos;
+            let jx = (lcg_f32(rng) - 0.5) * spacing * 0.3;
+            let jy = (lcg_f32(rng) - 0.5) * spacing * 0.3;
+            (ri, (rpos.0 + jx, rpos.1 + jy))
+        } else { (region_idx, pos) };
         let terrain = state.regions[region_idx].terrain;
 
         // Generate a unique settlement name (retry on collision).
