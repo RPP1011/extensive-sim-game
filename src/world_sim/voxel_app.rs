@@ -4,6 +4,7 @@
 //! Only uploads mega-chunks within camera radius. Uses GPU blit presentation.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::mpsc;
 use std::time::Instant;
 
 use anyhow::Result;
@@ -22,7 +23,7 @@ use voxel_engine::vulkan::voxel_gpu::{self, GpuVoxelTexture};
 use voxel_engine::voxel::grid::VoxelGrid;
 
 use super::runtime::WorldSim;
-use super::voxel::{ChunkPos, CHUNK_SIZE, CHUNK_VOLUME};
+use super::voxel::{Chunk, ChunkPos, CHUNK_SIZE, CHUNK_VOLUME};
 use super::voxel_bridge::VoxelBridge;
 
 const WIDTH: u32 = 1280;
@@ -116,101 +117,116 @@ struct AppState {
     frame_count: u32,
     fps_timer: Instant,
     last_fps: f32,
+
+    // Background chunk generation
+    chunk_rx: mpsc::Receiver<(ChunkPos, Chunk)>,
+    chunks_pending: usize,
+    chunks_loaded: usize,
 }
 
 impl AppState {
-    fn new(window: Window, mut sim: WorldSim) -> Result<Self> {
+    fn new(window: Window, sim: WorldSim) -> Result<Self> {
         let ctx = VulkanContext::new_with_surface_extensions(&window)?;
         let alloc = VulkanAllocator::new(&ctx)?;
         let swapchain = SwapchainContext::new(&ctx, &window)?;
         let renderer = VoxelRenderer::new(&ctx, WIDTH, HEIGHT)?;
 
-        let mut bridge = VoxelBridge::new();
+        let bridge = VoxelBridge::new();
 
-        // Generate terrain chunks covering the entire world.
-        {
-            let state = sim.state_mut();
-            let seed = state.rng_state;
-            let mut positions: Vec<(f32, f32)> = state.settlements.iter()
-                .map(|s| s.pos)
-                .collect();
-            for e in &state.entities {
-                if e.alive { positions.push(e.pos); }
-            }
-            if !positions.is_empty() {
-                let min_x = positions.iter().map(|p| p.0).fold(f32::MAX, f32::min);
-                let max_x = positions.iter().map(|p| p.0).fold(f32::MIN, f32::max);
-                let min_y = positions.iter().map(|p| p.1).fold(f32::MAX, f32::min);
-                let max_y = positions.iter().map(|p| p.1).fold(f32::MIN, f32::max);
+        // Compute chunk positions to generate, but don't block — spawn background thread.
+        let state = sim.state();
+        let seed = state.rng_state;
+        let plan = state.voxel_world.region_plan.clone();
 
-                let cs = CHUNK_SIZE as f32;
-                let pad = 2;
-                let c_min_x = (min_x / cs).floor() as i32 - pad;
-                let c_max_x = (max_x / cs).ceil() as i32 + pad;
-                let c_min_y = (min_y / cs).floor() as i32 - pad;
-                let c_max_y = (max_y / cs).ceil() as i32 + pad;
+        let mut chunk_positions: Vec<ChunkPos> = Vec::new();
+        let mut positions: Vec<(f32, f32)> = state.settlements.iter()
+            .map(|s| s.pos)
+            .collect();
+        for e in &state.entities {
+            if e.alive { positions.push(e.pos); }
+        }
+        if !positions.is_empty() {
+            let min_x = positions.iter().map(|p| p.0).fold(f32::MAX, f32::min);
+            let max_x = positions.iter().map(|p| p.0).fold(f32::MIN, f32::max);
+            let min_y = positions.iter().map(|p| p.1).fold(f32::MAX, f32::min);
+            let max_y = positions.iter().map(|p| p.1).fold(f32::MIN, f32::max);
 
-                // Determine Z range from terrain plan heights.
-                let (c_min_z, c_max_z) = if let Some(ref plan) = state.voxel_world.region_plan {
-                    use crate::world_sim::terrain::MAX_SURFACE_Z;
-                    let mut min_h = f32::MAX;
-                    let mut max_h = f32::MIN;
-                    // Sample heights at entity positions to find the Z range we need.
-                    for &(px, py) in &positions {
-                        let h = plan.interpolate_height(px, py);
-                        min_h = min_h.min(h);
-                        max_h = max_h.max(h);
-                    }
-                    let surface_min = (min_h * MAX_SURFACE_Z as f32) as i32;
-                    let surface_max = (max_h * MAX_SURFACE_Z as f32) as i32;
-                    // Generate from a few chunks below surface to a few above.
-                    let z_lo = (surface_min / CHUNK_SIZE as i32) - 3;
-                    let z_hi = (surface_max / CHUNK_SIZE as i32) + 3;
-                    (z_lo, z_hi)
-                } else {
-                    (0, 3) // legacy fallback
-                };
+            let cs = CHUNK_SIZE as f32;
+            let pad = 2;
+            let c_min_x = (min_x / cs).floor() as i32 - pad;
+            let c_max_x = (max_x / cs).ceil() as i32 + pad;
+            let c_min_y = (min_y / cs).floor() as i32 - pad;
+            let c_max_y = (max_y / cs).ceil() as i32 + pad;
 
-                let mut count = 0;
-                for cx in c_min_x..=c_max_x {
-                    for cy in c_min_y..=c_max_y {
-                        for cz in c_min_z..=c_max_z {
-                            state.voxel_world.generate_chunk(ChunkPos::new(cx, cy, cz), seed);
-                            count += 1;
-                        }
-                    }
+            let (c_min_z, c_max_z) = if let Some(ref plan) = plan {
+                use crate::world_sim::terrain::MAX_SURFACE_Z;
+                let mut min_h = f32::MAX;
+                let mut max_h = f32::MIN;
+                for &(px, py) in &positions {
+                    let h = plan.interpolate_height(px, py);
+                    min_h = min_h.min(h);
+                    max_h = max_h.max(h);
                 }
-                eprintln!("[voxel] Generated {} chunks (z range: {}..{})", count, c_min_z, c_max_z);
+                let surface_min = (min_h * MAX_SURFACE_Z as f32) as i32;
+                let surface_max = (max_h * MAX_SURFACE_Z as f32) as i32;
+                let z_lo = (surface_min / CHUNK_SIZE as i32) - 3;
+                let z_hi = (surface_max / CHUNK_SIZE as i32) + 3;
+                (z_lo, z_hi)
+            } else {
+                (0, 3)
+            };
 
-                // Debug: material distribution
-                let mut mat_counts = [0u64; 256];
-                for chunk in state.voxel_world.chunks.values() {
-                    for v in &chunk.voxels {
-                        mat_counts[v.material as u8 as usize] += 1;
-                    }
-                }
-                eprintln!("[voxel] Material distribution:");
-                for (i, &c) in mat_counts.iter().enumerate() {
-                    if c > 0 {
-                        eprintln!("  [{:>3}] {:>12} voxels", i, c);
+            for cx in c_min_x..=c_max_x {
+                for cy in c_min_y..=c_max_y {
+                    for cz in c_min_z..=c_max_z {
+                        chunk_positions.push(ChunkPos::new(cx, cy, cz));
                     }
                 }
             }
         }
 
-        bridge.load_all_chunks(&mut sim.state_mut().voxel_world);
-        bridge.sync_entities(sim.state());
+        let total_chunks = chunk_positions.len();
+        eprintln!("[voxel] Queued {} chunks for background generation", total_chunks);
+
+        // Sort by distance from camera so nearby chunks load first.
+        // Camera will be above first settlement.
+        let cam_center = if let Some(s) = state.settlements.first() {
+            (s.pos.0, s.pos.1)
+        } else {
+            (0.0, 0.0)
+        };
+        chunk_positions.sort_by(|a, b| {
+            let s = CHUNK_SIZE as f32;
+            let da = (a.x as f32 * s - cam_center.0).powi(2) + (a.y as f32 * s - cam_center.1).powi(2);
+            let db = (b.x as f32 * s - cam_center.0).powi(2) + (b.y as f32 * s - cam_center.1).powi(2);
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Spawn background thread to generate chunks.
+        let (chunk_tx, chunk_rx) = mpsc::channel::<(ChunkPos, Chunk)>();
+        if let Some(plan_clone) = plan.clone() {
+            std::thread::spawn(move || {
+                for (i, cp) in chunk_positions.iter().enumerate() {
+                    let chunk = crate::world_sim::terrain::materialize_chunk(*cp, &plan_clone, seed);
+                    if chunk_tx.send((*cp, chunk)).is_err() {
+                        break; // receiver dropped, app closed
+                    }
+                    if (i + 1) % 500 == 0 {
+                        eprintln!("[voxel] Generated {}/{} chunks", i + 1, total_chunks);
+                    }
+                }
+                eprintln!("[voxel] Background generation complete: {} chunks", total_chunks);
+            });
+        }
 
         // Camera above first settlement.
         let (cam_pos, cam_target) = if let Some(s) = sim.state().settlements.first() {
-            // Try voxel surface height first, fall back to plan interpolation.
-            let mut z = sim.state().voxel_world.surface_height(s.pos.0 as i32, s.pos.1 as i32) as f32;
-            if z <= 0.0 {
-                if let Some(ref plan) = sim.state().voxel_world.region_plan {
-                    let h = plan.interpolate_height(s.pos.0, s.pos.1);
-                    z = h * crate::world_sim::terrain::MAX_SURFACE_Z as f32;
-                }
-            }
+            let z = if let Some(ref plan) = sim.state().voxel_world.region_plan {
+                let h = plan.interpolate_height(s.pos.0, s.pos.1);
+                h * crate::world_sim::terrain::MAX_SURFACE_Z as f32
+            } else {
+                80.0
+            };
             eprintln!("[voxel] Camera target: settlement at ({:.0}, {:.0}), surface z={:.0}", s.pos.0, s.pos.1, z);
             let target = glam::Vec3::new(s.pos.0, z, s.pos.1);
             let eye = target + glam::Vec3::new(-80.0, 120.0, -80.0);
@@ -221,18 +237,12 @@ impl AppState {
         let mut camera = FreeCamera::new(cam_pos, cam_target);
         camera.set_move_speed(50.0);
 
-        // Mark all existing chunks as dirty so they get uploaded.
-        let mut dirty_megas = HashSet::new();
-        for cp in sim.state().voxel_world.chunks.keys() {
-            dirty_megas.insert(MegaPos::from_chunk(*cp));
-        }
-
         Ok(Self {
             window, ctx, alloc, swapchain, renderer, camera,
             bridge, sim,
             gpu_megas: HashMap::new(),
-            dirty_megas,
-            paused: false,
+            dirty_megas: HashSet::new(),
+            paused: true, // start paused so sim doesn't run during chunk loading
             ticks_per_frame: 10,
             last_frame: Instant::now(),
             keys_held: HashSet::new(),
@@ -242,6 +252,9 @@ impl AppState {
             frame_count: 0,
             fps_timer: Instant::now(),
             last_fps: 0.0,
+            chunk_rx,
+            chunks_pending: total_chunks,
+            chunks_loaded: 0,
         })
     }
 
@@ -324,6 +337,24 @@ impl AppState {
         }
 
         Some(grid)
+    }
+
+    /// Drain ready chunks from the background generation thread.
+    /// Processes up to `budget` chunks per call to avoid stalling the frame.
+    fn drain_ready_chunks(&mut self, budget: usize) {
+        let mut count = 0;
+        while count < budget {
+            match self.chunk_rx.try_recv() {
+                Ok((cp, chunk)) => {
+                    self.sim.state_mut().voxel_world.chunks.insert(cp, chunk);
+                    self.dirty_megas.insert(MegaPos::from_chunk(cp));
+                    self.chunks_loaded += 1;
+                    count += 1;
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
     }
 
     /// Upload dirty mega-chunks within camera radius to the GPU.
@@ -575,6 +606,9 @@ impl ApplicationHandler for WorldSimVoxelApp {
                 let dt = (now - app.last_frame).as_secs_f32().min(0.1);
                 app.last_frame = now;
 
+                // Drain background-generated chunks (up to 64 per frame to stay responsive).
+                app.drain_ready_chunks(64);
+
                 // FPS tracking
                 app.frame_count += 1;
                 let fps_elapsed = now.duration_since(app.fps_timer).as_secs_f32();
@@ -584,10 +618,15 @@ impl ApplicationHandler for WorldSimVoxelApp {
                     app.fps_timer = now;
                     let cam = app.camera.eye_position();
                     let status = if app.paused { "PAUSED" } else { "RUNNING" };
+                    let loading = if app.chunks_loaded < app.chunks_pending {
+                        format!(" | loading {}/{}", app.chunks_loaded, app.chunks_pending)
+                    } else {
+                        String::new()
+                    };
                     app.window.set_title(&format!(
-                        "World Sim — {:.0} FPS | {} | {:.0},{:.0},{:.0} | {} megas | speed {}x",
+                        "World Sim — {:.0} FPS | {} | {:.0},{:.0},{:.0} | {} megas | speed {}x{}",
                         app.last_fps, status, cam[0], cam[1], cam[2],
-                        app.gpu_megas.len(), app.ticks_per_frame,
+                        app.gpu_megas.len(), app.ticks_per_frame, loading,
                     ));
                 }
 
