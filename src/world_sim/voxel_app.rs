@@ -126,10 +126,16 @@ struct AppState {
 
 impl AppState {
     fn new(window: Window, sim: WorldSim) -> Result<Self> {
+        let t0 = Instant::now();
         let ctx = VulkanContext::new_with_surface_extensions(&window)?;
+        eprintln!("[voxel] Vulkan context: {:.1}ms", t0.elapsed().as_secs_f32() * 1000.0);
         let alloc = VulkanAllocator::new(&ctx)?;
-        let swapchain = SwapchainContext::new(&ctx, &window)?;
+        let mut swapchain = SwapchainContext::new(&ctx, &window)?;
         let renderer = VoxelRenderer::new(&ctx, WIDTH, HEIGHT)?;
+        eprintln!("[voxel] Renderer ready: {:.1}ms total", t0.elapsed().as_secs_f32() * 1000.0);
+
+        // Show a blank frame immediately so the window isn't frozen.
+        let _ = swapchain.present_cleared_frame(&ctx, [0.05, 0.05, 0.08, 1.0]);
 
         let bridge = VoxelBridge::new();
 
@@ -540,13 +546,8 @@ impl ApplicationHandler for WorldSimVoxelApp {
 
         let sim = self.sim.take().expect("sim should be set");
         match AppState::new(window, sim) {
-            Ok(mut app) => {
-                if let Err(e) = app.upload_megas() {
-                    eprintln!("[voxel] Failed to upload: {}", e);
-                    event_loop.exit();
-                    return;
-                }
-                eprintln!("[voxel] Initialized: {} mega-chunks on GPU", app.gpu_megas.len());
+            Ok(app) => {
+                eprintln!("[voxel] Initialized, loading terrain in background...");
                 self.state = Some(app);
             }
             Err(e) => {
