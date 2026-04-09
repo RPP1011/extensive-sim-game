@@ -33,6 +33,9 @@ pub mod runtime;
 pub mod systems;
 pub mod trace;
 pub mod visualizer;
+pub mod voxel_bridge;
+#[cfg(feature = "app")]
+pub mod voxel_app;
 
 pub use nav_grid::NavGrid;
 pub use delta::{WorldDelta, MergedDeltas, merge_deltas};

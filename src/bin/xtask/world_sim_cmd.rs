@@ -84,6 +84,23 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
         }
     }
 
+    // Render mode: open Vulkan window
+    #[cfg(feature = "app")]
+    if args.render {
+        match game::world_sim::voxel_app::run_with_renderer(sim) {
+            Ok(()) => return ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("Renderer error: {}", e);
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    #[cfg(not(feature = "app"))]
+    if args.render {
+        eprintln!("--render requires: cargo run --features app");
+        return ExitCode::FAILURE;
+    }
+
     // WebSocket mode: stream TraceFrame JSON to browser visualizer
     if let Some(port) = args.ws {
         return run_ws_server(&mut sim, port, &args);

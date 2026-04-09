@@ -1,0 +1,558 @@
+//! Windowed voxel renderer for the world sim.
+//!
+//! Merges 4×4×4 sim chunks into 64³ mega-grid GPU textures to reduce draw calls.
+//! Only uploads mega-chunks within camera radius. Uses GPU blit presentation.
+
+use std::collections::{HashMap, HashSet};
+use std::time::Instant;
+
+use anyhow::Result;
+use winit::application::ApplicationHandler;
+use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::window::{Window, WindowId};
+
+use voxel_engine::camera::FreeCamera;
+use voxel_engine::render::VoxelRenderer;
+use voxel_engine::vulkan::allocator::VulkanAllocator;
+use voxel_engine::vulkan::instance::VulkanContext;
+use voxel_engine::vulkan::swapchain::SwapchainContext;
+use voxel_engine::vulkan::voxel_gpu::{self, GpuVoxelTexture};
+use voxel_engine::voxel::grid::VoxelGrid;
+
+use super::runtime::WorldSim;
+use super::voxel::{ChunkPos, CHUNK_SIZE, CHUNK_VOLUME};
+use super::voxel_bridge::VoxelBridge;
+
+const WIDTH: u32 = 1280;
+const HEIGHT: u32 = 720;
+
+/// How many sim chunks per mega-chunk axis. 4 × 16 = 64 voxels per side.
+const MEGA: i32 = 4;
+const MEGA_VOXELS: u32 = (MEGA as u32) * (CHUNK_SIZE as u32); // 64
+
+/// Maximum distance (in world units) from camera to mega-chunk center for it to be loaded.
+const LOAD_RADIUS: f32 = 512.0;
+
+// ---------------------------------------------------------------------------
+// MegaChunkPos — groups 4×4×4 sim chunks
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct MegaPos {
+    x: i32,
+    y: i32,
+    z: i32,
+}
+
+impl MegaPos {
+    fn from_chunk(cp: ChunkPos) -> Self {
+        Self {
+            x: cp.x.div_euclid(MEGA),
+            y: cp.y.div_euclid(MEGA),
+            z: cp.z.div_euclid(MEGA),
+        }
+    }
+
+    /// World-space center of this mega-chunk (in engine coords: x, y-up, z).
+    fn world_center(&self) -> [f32; 3] {
+        let half = (MEGA_VOXELS as f32) / 2.0;
+        [
+            self.x as f32 * MEGA_VOXELS as f32 + half,
+            self.z as f32 * MEGA_VOXELS as f32 + half, // sim z → engine y
+            self.y as f32 * MEGA_VOXELS as f32 + half, // sim y → engine z
+        ]
+    }
+
+    /// World-space position (min corner) in engine coords.
+    fn world_position(&self) -> [f32; 3] {
+        [
+            (self.x * MEGA * CHUNK_SIZE as i32) as f32,
+            (self.z * MEGA * CHUNK_SIZE as i32) as f32,
+            (self.y * MEGA * CHUNK_SIZE as i32) as f32,
+        ]
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GPU mega-chunk
+// ---------------------------------------------------------------------------
+
+struct GpuMega {
+    texture: GpuVoxelTexture,
+    position: [f32; 3],
+}
+
+// ---------------------------------------------------------------------------
+// AppState
+// ---------------------------------------------------------------------------
+
+struct AppState {
+    window: Window,
+    ctx: VulkanContext,
+    alloc: VulkanAllocator,
+    swapchain: SwapchainContext,
+    renderer: VoxelRenderer,
+    camera: FreeCamera,
+
+    bridge: VoxelBridge,
+    sim: WorldSim,
+
+    gpu_megas: HashMap<MegaPos, GpuMega>,
+    /// Tracks which mega-chunks have been dirtied since last upload.
+    dirty_megas: HashSet<MegaPos>,
+
+    paused: bool,
+    ticks_per_frame: u32,
+    last_frame: Instant,
+
+    keys_held: HashSet<KeyCode>,
+    mouse_captured: bool,
+    last_mouse: Option<(f64, f64)>,
+    move_speed: f32,
+}
+
+impl AppState {
+    fn new(window: Window, mut sim: WorldSim) -> Result<Self> {
+        let ctx = VulkanContext::new_with_surface_extensions(&window)?;
+        let alloc = VulkanAllocator::new(&ctx)?;
+        let swapchain = SwapchainContext::new(&ctx, &window)?;
+        let renderer = VoxelRenderer::new(&ctx, WIDTH, HEIGHT)?;
+
+        let mut bridge = VoxelBridge::new();
+
+        // Generate terrain chunks covering the entire world.
+        {
+            let state = sim.state_mut();
+            let seed = state.rng_state;
+            let mut positions: Vec<(f32, f32)> = state.settlements.iter()
+                .map(|s| s.pos)
+                .collect();
+            for e in &state.entities {
+                if e.alive { positions.push(e.pos); }
+            }
+            if !positions.is_empty() {
+                let min_x = positions.iter().map(|p| p.0).fold(f32::MAX, f32::min);
+                let max_x = positions.iter().map(|p| p.0).fold(f32::MIN, f32::max);
+                let min_y = positions.iter().map(|p| p.1).fold(f32::MAX, f32::min);
+                let max_y = positions.iter().map(|p| p.1).fold(f32::MIN, f32::max);
+
+                let pad = 2;
+                let c_min_x = (min_x / 16.0).floor() as i32 - pad;
+                let c_max_x = (max_x / 16.0).ceil() as i32 + pad;
+                let c_min_y = (min_y / 16.0).floor() as i32 - pad;
+                let c_max_y = (max_y / 16.0).ceil() as i32 + pad;
+
+                let mut count = 0;
+                for cx in c_min_x..=c_max_x {
+                    for cy in c_min_y..=c_max_y {
+                        for cz in 0..=3 {
+                            state.voxel_world.generate_chunk(ChunkPos::new(cx, cy, cz), seed);
+                            count += 1;
+                        }
+                    }
+                }
+                eprintln!("[voxel] Generated {} chunks", count);
+            }
+        }
+
+        bridge.load_all_chunks(&mut sim.state_mut().voxel_world);
+        bridge.sync_entities(sim.state());
+
+        // Camera above first settlement.
+        let (cam_pos, cam_target) = if let Some(s) = sim.state().settlements.first() {
+            let z = sim.state().voxel_world.surface_height(s.pos.0 as i32, s.pos.1 as i32) as f32;
+            let target = glam::Vec3::new(s.pos.0, z, s.pos.1);
+            let eye = target + glam::Vec3::new(-40.0, 60.0, -40.0);
+            (eye, target)
+        } else {
+            (glam::Vec3::new(0.0, 80.0, 0.0), glam::Vec3::ZERO)
+        };
+        let mut camera = FreeCamera::new(cam_pos, cam_target);
+        camera.set_move_speed(50.0);
+
+        // Mark all existing chunks as dirty so they get uploaded.
+        let mut dirty_megas = HashSet::new();
+        for cp in sim.state().voxel_world.chunks.keys() {
+            dirty_megas.insert(MegaPos::from_chunk(*cp));
+        }
+
+        Ok(Self {
+            window, ctx, alloc, swapchain, renderer, camera,
+            bridge, sim,
+            gpu_megas: HashMap::new(),
+            dirty_megas,
+            paused: false,
+            ticks_per_frame: 10,
+            last_frame: Instant::now(),
+            keys_held: HashSet::new(),
+            mouse_captured: false,
+            last_mouse: None,
+            move_speed: 50.0,
+        })
+    }
+
+    /// Build a 64³ mega-grid from up to 4×4×4 sim chunks.
+    fn build_mega_grid(&self, mp: MegaPos) -> Option<VoxelGrid> {
+        let world = &self.sim.state().voxel_world;
+        let mut any_content = false;
+
+        // Check if this mega-chunk is fully occluded (all constituent chunks solid
+        // and all 6 mega-neighbors also fully solid).
+        let mut all_solid = true;
+        for dz in 0..MEGA {
+            for dy in 0..MEGA {
+                for dx in 0..MEGA {
+                    let cp = ChunkPos::new(mp.x * MEGA + dx, mp.y * MEGA + dy, mp.z * MEGA + dz);
+                    match world.chunks.get(&cp) {
+                        Some(c) => {
+                            if c.solid_count() != CHUNK_VOLUME { all_solid = false; }
+                            any_content = true;
+                        }
+                        None => { all_solid = false; }
+                    }
+                }
+            }
+        }
+        if !any_content { return None; }
+
+        // Check neighbor mega-chunks for occlusion.
+        if all_solid {
+            let neighbors_solid = [
+                MegaPos { x: mp.x - 1, y: mp.y, z: mp.z },
+                MegaPos { x: mp.x + 1, y: mp.y, z: mp.z },
+                MegaPos { x: mp.x, y: mp.y - 1, z: mp.z },
+                MegaPos { x: mp.x, y: mp.y + 1, z: mp.z },
+                MegaPos { x: mp.x, y: mp.y, z: mp.z - 1 },
+                MegaPos { x: mp.x, y: mp.y, z: mp.z + 1 },
+            ].iter().all(|nmp| {
+                (0..MEGA).all(|dz| (0..MEGA).all(|dy| (0..MEGA).all(|dx| {
+                    let cp = ChunkPos::new(nmp.x * MEGA + dx, nmp.y * MEGA + dy, nmp.z * MEGA + dz);
+                    world.chunks.get(&cp).map_or(false, |c| c.solid_count() == CHUNK_VOLUME)
+                })))
+            });
+            if neighbors_solid { return None; }
+        }
+
+        let mut grid = VoxelGrid::new(MEGA_VOXELS, MEGA_VOXELS, MEGA_VOXELS);
+
+        for dz in 0..MEGA {
+            for dy in 0..MEGA {
+                for dx in 0..MEGA {
+                    let cp = ChunkPos::new(mp.x * MEGA + dx, mp.y * MEGA + dy, mp.z * MEGA + dz);
+                    let chunk = match world.chunks.get(&cp) {
+                        Some(c) => c,
+                        None => continue,
+                    };
+
+                    let base_x = (dx * CHUNK_SIZE as i32) as u32;
+                    let base_y = (dy * CHUNK_SIZE as i32) as u32;
+                    let base_z = (dz * CHUNK_SIZE as i32) as u32;
+
+                    for lz in 0..CHUNK_SIZE {
+                        for ly in 0..CHUNK_SIZE {
+                            for lx in 0..CHUNK_SIZE {
+                                let voxel = chunk.get(lx, ly, lz);
+                                let mat = voxel.material as u8;
+                                if mat != 0 {
+                                    // Swap Y↔Z for engine coords.
+                                    grid.set(
+                                        base_x + lx as u32,
+                                        base_z + lz as u32, // sim z → engine y
+                                        base_y + ly as u32, // sim y → engine z
+                                        mat,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Some(grid)
+    }
+
+    /// Upload dirty mega-chunks within camera radius to the GPU.
+    fn upload_megas(&mut self) -> Result<()> {
+        let palette_rgba = self.bridge.palette_rgba();
+        let cam_pos = self.camera.eye_position();
+        let r2 = LOAD_RADIUS * LOAD_RADIUS;
+
+        // Collect dirty megas to process (can't borrow self mutably in loop).
+        let to_process: Vec<MegaPos> = self.dirty_megas.drain().collect();
+
+        for mp in to_process {
+            // Camera distance check.
+            let center = mp.world_center();
+            let dx = cam_pos[0] - center[0];
+            let dy = cam_pos[1] - center[1];
+            let dz = cam_pos[2] - center[2];
+            if dx * dx + dy * dy + dz * dz > r2 {
+                // Out of range — mark dirty again so it uploads when we get closer.
+                self.dirty_megas.insert(mp);
+                continue;
+            }
+
+            let grid = match self.build_mega_grid(mp) {
+                Some(g) => g,
+                None => {
+                    // Fully occluded or empty — evict if previously uploaded.
+                    if let Some(old) = self.gpu_megas.remove(&mp) {
+                        old.texture.destroy(&self.ctx, &mut self.alloc);
+                    }
+                    continue;
+                }
+            };
+
+            let texture = voxel_gpu::upload_grid_to_gpu(
+                &self.ctx, &mut self.alloc, &grid, palette_rgba,
+            )?;
+
+            if let Some(old) = self.gpu_megas.remove(&mp) {
+                old.texture.destroy(&self.ctx, &mut self.alloc);
+            }
+
+            self.gpu_megas.insert(mp, GpuMega {
+                texture,
+                position: mp.world_position(),
+            });
+        }
+
+        // Evict mega-chunks that are too far from camera.
+        let far_keys: Vec<MegaPos> = self.gpu_megas.keys()
+            .filter(|mp| {
+                let c = mp.world_center();
+                let dx = cam_pos[0] - c[0];
+                let dy = cam_pos[1] - c[1];
+                let dz = cam_pos[2] - c[2];
+                dx * dx + dy * dy + dz * dz > r2 * 1.5 // hysteresis
+            })
+            .copied()
+            .collect();
+        for mp in far_keys {
+            if let Some(old) = self.gpu_megas.remove(&mp) {
+                old.texture.destroy(&self.ctx, &mut self.alloc);
+            }
+            self.dirty_megas.insert(mp); // re-dirty so it reloads when close again
+        }
+
+        Ok(())
+    }
+
+    /// Render one frame.
+    fn render(&mut self) -> Result<()> {
+        if self.gpu_megas.is_empty() {
+            self.swapchain.present_cleared_frame(&self.ctx, [0.1, 0.1, 0.15, 1.0])?;
+            return Ok(());
+        }
+
+        let dims = MEGA_VOXELS as f32;
+
+        let objects: Vec<(&GpuVoxelTexture, [f32; 4], [f32; 3], [f32; 3])> =
+            self.gpu_megas.values()
+                .map(|gm| (&gm.texture, [1.0, 1.0, 1.0, 1.0], gm.position, [dims, dims, dims]))
+                .collect();
+
+        // GPU render + blit to swapchain (no CPU readback).
+        self.renderer.render_frame_gpu(&self.ctx, &self.camera, &objects)?;
+        let src = self.renderer.light_output_image();
+        self.swapchain.present_blit(&self.ctx, src, WIDTH, HEIGHT)?;
+
+        Ok(())
+    }
+
+    fn tick_sim(&mut self) {
+        if self.paused { return; }
+
+        for _ in 0..self.ticks_per_frame {
+            self.sim.tick();
+        }
+
+        self.bridge.sync_all(self.sim.state_mut());
+
+        // Mark mega-chunks dirty for any sim chunks that changed.
+        for chunk in self.sim.state().voxel_world.chunks.values() {
+            if chunk.dirty {
+                self.dirty_megas.insert(MegaPos::from_chunk(chunk.pos));
+            }
+        }
+    }
+
+    fn handle_key(&mut self, key: KeyCode, pressed: bool) {
+        if pressed {
+            self.keys_held.insert(key);
+        } else {
+            self.keys_held.remove(&key);
+        }
+
+        if !pressed { return; }
+        match key {
+            KeyCode::Space => {
+                self.paused = !self.paused;
+                eprintln!("[voxel] {}", if self.paused { "PAUSED" } else { "RUNNING" });
+            }
+            KeyCode::Equal | KeyCode::NumpadAdd => {
+                self.ticks_per_frame = (self.ticks_per_frame * 2).min(1000);
+                eprintln!("[voxel] speed: {} ticks/frame", self.ticks_per_frame);
+            }
+            KeyCode::Minus | KeyCode::NumpadSubtract => {
+                self.ticks_per_frame = (self.ticks_per_frame / 2).max(1);
+                eprintln!("[voxel] speed: {} ticks/frame", self.ticks_per_frame);
+            }
+            _ => {}
+        }
+    }
+
+    fn update_camera(&mut self, dt: f32) {
+        use voxel_engine::camera::{CameraController, InputState};
+
+        let forward = if self.keys_held.contains(&KeyCode::KeyW) { 1.0 }
+            else if self.keys_held.contains(&KeyCode::KeyS) { -1.0 }
+            else { 0.0 };
+        let right = if self.keys_held.contains(&KeyCode::KeyD) { 1.0 }
+            else if self.keys_held.contains(&KeyCode::KeyA) { -1.0 }
+            else { 0.0 };
+        let up = if self.keys_held.contains(&KeyCode::KeyE) { 1.0 }
+            else if self.keys_held.contains(&KeyCode::KeyQ) { -1.0 }
+            else { 0.0 };
+
+        self.camera.update(&InputState {
+            move_forward: forward,
+            move_right: right,
+            move_up: up,
+            mouse_dx: 0.0,
+            mouse_dy: 0.0,
+            scroll_delta: 0.0,
+        }, dt);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Winit ApplicationHandler
+// ---------------------------------------------------------------------------
+
+struct WorldSimVoxelApp {
+    state: Option<AppState>,
+    sim: Option<WorldSim>,
+}
+
+impl ApplicationHandler for WorldSimVoxelApp {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.state.is_some() { return; }
+
+        let attrs = Window::default_attributes()
+            .with_title("World Sim — Voxel Renderer")
+            .with_inner_size(winit::dpi::LogicalSize::new(WIDTH, HEIGHT));
+
+        let window = match event_loop.create_window(attrs) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("[voxel] Failed to create window: {}", e);
+                event_loop.exit();
+                return;
+            }
+        };
+
+        let sim = self.sim.take().expect("sim should be set");
+        match AppState::new(window, sim) {
+            Ok(mut app) => {
+                if let Err(e) = app.upload_megas() {
+                    eprintln!("[voxel] Failed to upload: {}", e);
+                    event_loop.exit();
+                    return;
+                }
+                eprintln!("[voxel] Initialized: {} mega-chunks on GPU", app.gpu_megas.len());
+                self.state = Some(app);
+            }
+            Err(e) => {
+                eprintln!("[voxel] Failed to initialize: {}", e);
+                event_loop.exit();
+            }
+        }
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        let app = match &mut self.state {
+            Some(a) => a,
+            None => return,
+        };
+
+        match event {
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let PhysicalKey::Code(key) = event.physical_key {
+                    if key == KeyCode::Escape && event.state == ElementState::Pressed {
+                        event_loop.exit();
+                        return;
+                    }
+                    app.handle_key(key, event.state == ElementState::Pressed);
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                if button == MouseButton::Right {
+                    app.mouse_captured = state == ElementState::Pressed;
+                    if !app.mouse_captured { app.last_mouse = None; }
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                if app.mouse_captured {
+                    if let Some((lx, ly)) = app.last_mouse {
+                        use voxel_engine::camera::{CameraController, InputState};
+                        app.camera.update(&InputState {
+                            move_forward: 0.0, move_right: 0.0, move_up: 0.0,
+                            mouse_dx: (position.x - lx) as f32,
+                            mouse_dy: (position.y - ly) as f32,
+                            scroll_delta: 0.0,
+                        }, 0.0);
+                    }
+                    app.last_mouse = Some((position.x, position.y));
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let scroll = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => y,
+                    winit::event::MouseScrollDelta::PixelDelta(p) => p.y as f32 * 0.1,
+                };
+                app.move_speed = (app.move_speed + scroll * 10.0).clamp(5.0, 500.0);
+                app.camera.set_move_speed(app.move_speed);
+            }
+            WindowEvent::RedrawRequested => {
+                let now = Instant::now();
+                let dt = (now - app.last_frame).as_secs_f32().min(0.1);
+                app.last_frame = now;
+
+                app.update_camera(dt);
+                app.tick_sim();
+
+                if let Err(e) = app.upload_megas() {
+                    eprintln!("[voxel] upload error: {}", e);
+                }
+                if let Err(e) = app.render() {
+                    eprintln!("[voxel] render error: {}", e);
+                }
+
+                app.window.request_redraw();
+            }
+            _ => {}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
+pub fn run_with_renderer(sim: WorldSim) -> Result<()> {
+    let event_loop = EventLoop::new()?;
+    event_loop.set_control_flow(ControlFlow::Poll);
+
+    let mut app = WorldSimVoxelApp {
+        state: None,
+        sim: Some(sim),
+    };
+
+    event_loop.run_app(&mut app)?;
+    Ok(())
+}

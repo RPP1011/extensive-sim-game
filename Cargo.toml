@@ -14,7 +14,7 @@ path = "src/bin/xtask/main.rs"
 
 [features]
 default = []
-app = []
+app = ["voxel_engine/app-harness", "dep:winit"]
 stream-monitor = []
 burn-gpu = ["dep:burn", "burn/tch", "burn/autodiff"]
 burn-cpu = ["dep:burn", "burn/ndarray"]
@@ -22,6 +22,9 @@ profile-systems = []
 
 [dependencies]
 voxel_engine = { path = "/home/ricky/Projects/voxel_engine" }
+anyhow = "1"
+glam = "0.29"
+winit = { version = "0.30", optional = true }
 tactical_sim = { path = "crates/tactical_sim" }
 contracts = "0.6"
 winnow = "0.7"

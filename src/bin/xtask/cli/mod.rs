@@ -114,6 +114,9 @@ pub struct WorldSimArgs {
     /// NPCs must gather resources and build everything from scratch.
     #[arg(long)]
     pub peaceful: bool,
+    /// Open a Vulkan window and render the voxel world (requires --features app)
+    #[arg(long)]
+    pub render: bool,
 }
 
 #[derive(Debug, Parser)]
