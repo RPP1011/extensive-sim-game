@@ -174,6 +174,7 @@ pub mod movement;
 pub mod action_eval;
 pub mod construction;
 pub mod structural_tick;
+pub mod voxel_harvest;
 
 macro_rules! run_system {
     ($name:expr, $func:expr, $state:expr, $out:expr) => {{
