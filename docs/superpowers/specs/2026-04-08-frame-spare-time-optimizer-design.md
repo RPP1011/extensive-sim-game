@@ -1,6 +1,6 @@
 # Frame Spare-Time Optimizer
 
-**Date:** 2026-04-08 (v3)
+**Date:** 2026-04-08 (v4)
 
 ## Goal
 
@@ -40,48 +40,67 @@ This instrumentation is permanent — always available via a debug HUD toggle.
 
 ```rust
 struct FrameOptimizer {
-    pool: rayon::ThreadPool,                       // N-1 workers
+    pool: rayon::ThreadPool,                          // N-1 workers
     queue: Mutex<BinaryHeap<Job>>,
     pending: Mutex<HashSet<(JobKind, MegaPos)>>,
-    generation: AtomicU64,                         // bumped on teleport/major discontinuity
-    // Double-buffered results: workers push to back, main thread swaps and drains front.
-    results_back: Mutex<Vec<JobResult>>,
-    results_front: Vec<JobResult>,                 // only touched by main thread
+    generation: Arc<AtomicU64>,                       // Acquire/Release, shared with workers
+    results_back: Arc<Mutex<Vec<JobResult>>>,         // workers push here
+    results_front: Vec<JobResult>,                    // main thread only
     dirty: DirtyCoalescer,
-    cache: OptCache,                               // only touched by main thread
+    cache: OptCache,                                  // main thread only
     tier_budget: TierBudget,
+    loaded_megas: HashSet<MegaPos>,                   // main thread tracks what's loaded
 }
 ```
 
 **Submission** (main thread, after present):
 ```rust
-fn submit_jobs(&self, deadline: Instant) {
-    let gen = self.generation.load(Relaxed);
-    let mut queue = self.queue.lock();
-    let mut budget = self.tier_budget.reset(deadline);
+fn submit_jobs(&mut self, spare_ms: f32) {
+    let gen = self.generation.load(Acquire);
+    let deadline = Instant::now() + Duration::from_secs_f32(spare_ms / 1000.0);
 
-    while Instant::now() < deadline {
-        let job = match queue.pop() {
-            Some(j) => j,
-            None => break,
-        };
-        if !budget.can_submit(job.tier, job.estimated_ms) {
-            // This tier's budget is spent — skip, but don't discard.
-            // Put it back for next frame.
+    self.tier_budget.reset(spare_ms);
+
+    // Drain queue into local batch to avoid holding locks in the hot loop.
+    let mut batch = Vec::new();
+    {
+        let mut queue = self.queue.lock();
+        let mut pending = self.pending.lock();
+        while let Some(job) = queue.pop() {
+            pending.remove(&(job.kind, job.target));
+            batch.push(job);
+            if batch.len() >= 64 { break; } // cap batch size per frame
+        }
+    }
+    // No locks held from here.
+
+    for job in batch {
+        if Instant::now() >= deadline { 
+            // Re-enqueue unsubmitted jobs.
+            let mut queue = self.queue.lock();
+            let mut pending = self.pending.lock();
             queue.push(job);
+            pending.insert((job.kind, job.target));
+            // (remaining batch items also re-enqueued — omitted for brevity)
+            break;
+        }
+        if !self.tier_budget.can_submit(job.tier, job.estimated_ms) {
+            // Tier budget spent — re-enqueue.
+            let mut queue = self.queue.lock();
+            let mut pending = self.pending.lock();
+            queue.push(job);
+            pending.insert((job.kind, job.target));
             continue;
         }
-        budget.charge(job.tier, job.estimated_ms);
-        self.pending.lock().remove(&(job.kind, job.target));
+        self.tier_budget.charge(job.tier, job.estimated_ms);
 
-        // Clone the Arc for the worker. Results go through channel.
         let results = Arc::clone(&self.results_back);
+        let generation = Arc::clone(&self.generation);
         let gen_snapshot = gen;
-        let generation = Arc::clone(&self.generation_arc);
 
         self.pool.spawn(move || {
             // Bail if generation changed (player teleported).
-            if generation.load(Relaxed) != gen_snapshot { return; }
+            if generation.load(Acquire) != gen_snapshot { return; }
             let result = job.execute();
             results.lock().push(result);
         });
@@ -89,19 +108,21 @@ fn submit_jobs(&self, deadline: Instant) {
 }
 ```
 
-`results_back` is `Arc<Mutex<Vec<JobResult>>>` shared with workers. The `FrameOptimizer` itself is owned by the main thread; only the results vec and generation counter are shared via Arc.
-
 **Collection** (main thread, start of frame, before upload):
 ```rust
 fn collect_results(&mut self) {
-    // Swap: grab completed results, give workers a fresh empty vec.
-    // Lock held only for the swap — O(1), no contention.
-    let mut back = self.results_back.lock();
-    std::mem::swap(&mut self.results_front, &mut *back);
-    drop(back);
-
-    // Process unlocked — workers can push to the new back vec freely.
+    // Swap: grab completed results, give workers a fresh vec.
+    // Lock held only for the pointer swap — O(1).
+    {
+        let mut back = self.results_back.lock();
+        std::mem::swap(&mut self.results_front, &mut *back);
+    }
+    // Process unlocked — workers push to the new back vec freely.
     for result in self.results_front.drain(..) {
+        // Liveness check: skip results for unloaded megas.
+        if !self.loaded_megas.contains(&result.target()) {
+            continue;
+        }
         match result {
             JobResult::SurfaceShell { target, grid } => {
                 self.staged_uploads.insert(target, grid);
@@ -115,26 +136,74 @@ fn collect_results(&mut self) {
 }
 ```
 
+**Backpressure**: `results_back` has a soft capacity check. If `results_back.len() > 256`, workers skip pushing and the result is discarded (the job will be re-dirtied and re-enqueued). This bounds memory growth if the main thread stalls.
+
+## Memory Ordering
+
+The generation counter uses `Acquire` on worker loads and `Release` on the main thread's `fetch_add`. This ensures that when a worker reads a generation value, it also sees the fully constructed job data that was prepared before the generation was published. `Relaxed` is incorrect here — on ARM or high-core-count systems, a worker could see the new generation but stale job fields.
+
+```rust
+// Main thread — teleport:
+fn on_teleport(&self) {
+    self.generation.fetch_add(1, Release);
+    self.queue.lock().clear();
+    self.pending.lock().clear();
+}
+
+// Worker thread — job execution:
+fn execute(job: Job, generation: &AtomicU64, gen_snapshot: u64) -> Option<JobResult> {
+    if generation.load(Acquire) != gen_snapshot { return None; }
+    // Safe to read job data — Release/Acquire guarantees visibility.
+    Some(job.run())
+}
+```
+
 ## Tier Budget
 
-Submission-time estimated-ms caps per tier, not wall-clock percentages:
+Proportional to available spare time, not fixed caps.
 
 ```rust
 struct TierBudget {
-    /// Max estimated ms to submit per tier per frame.
+    /// Fraction of spare time allocated to each tier. Must sum to 1.0.
+    fractions: [f32; 6],
+    /// Computed ms cap per tier for this frame (fractions × spare_ms).
     caps: [f32; 6],
     /// Estimated ms submitted so far this frame.
     spent: [f32; 6],
 }
 
 impl TierBudget {
-    fn reset(&mut self, _deadline: Instant) -> &mut Self {
+    fn reset(&mut self, spare_ms: f32) {
         self.spent = [0.0; 6];
-        self
+        // Compute per-tier caps proportional to this frame's spare time.
+        for i in 0..6 {
+            self.caps[i] = self.fractions[i] * spare_ms;
+        }
+        // Redistribute from empty tiers: scan for tiers with no pending work
+        // and give their budget to the next lower tier.
+        // (Caller passes pending-work-per-tier counts for this.)
+    }
+    fn redistribute(&mut self, has_work: [bool; 6]) {
+        // Tiers with no work donate their cap downward.
+        let mut surplus = 0.0;
+        for i in 0..6 {
+            self.caps[i] += surplus;
+            surplus = 0.0;
+            if !has_work[i] {
+                surplus = self.caps[i];
+                self.caps[i] = 0.0;
+            }
+        }
+        // Any remaining surplus goes to last tier with work.
+        for i in (0..6).rev() {
+            if has_work[i] {
+                self.caps[i] += surplus;
+                break;
+            }
+        }
     }
     fn can_submit(&self, tier: u8, estimated_ms: f32) -> bool {
-        let t = tier as usize;
-        self.spent[t] + estimated_ms <= self.caps[t]
+        self.spent[tier as usize] + estimated_ms <= self.caps[tier as usize]
     }
     fn charge(&mut self, tier: u8, estimated_ms: f32) {
         self.spent[tier as usize] += estimated_ms;
@@ -142,61 +211,79 @@ impl TierBudget {
 }
 ```
 
-Default caps (tuned after instrumentation — these are starting points):
-- Tier 0 (culling): 3.0ms
-- Tier 1 (geometry): 2.0ms
-- Tier 2 (LOD): 1.0ms
-- Tier 3 (lighting): 0.5ms
-- Tier 4 (sim support): 0.5ms
-- Tier 5 (memory): 0.3ms
+Default fractions:
+- Tier 0 (culling): 0.35
+- Tier 1 (geometry): 0.25
+- Tier 2 (LOD): 0.15
+- Tier 3 (lighting): 0.10
+- Tier 4 (sim support): 0.10
+- Tier 5 (memory): 0.05
 
-If a tier has no pending work, its budget is NOT redistributed (avoids starving higher-priority work that arrives next frame). The caps are configurable and should be tuned based on Phase 0 instrumentation data.
+A frame with 8ms spare gives tier 0 = 2.8ms, tier 1 = 2.0ms, etc. A frame with 0.5ms spare gives tier 0 = 0.175ms (maybe one face mask job). If tier 0 has no work, its 2.8ms redistributes to tier 1.
 
 ## Starvation Prevention
 
-**Age promotion**: Jobs queued for >100 frames get priority boosted by 5 per 100 frames. A tier-4 job (priority 40) reaches tier-2 (priority 20) after 400 frames (~6.6s). Promoted jobs consume the budget of their new tier — this is intentional; if a job has been starving for 6 seconds, it deserves tier-2 treatment.
+**Age promotion**: Jobs queued for >100 frames get priority boosted by 5 per 100 frames. Promoted jobs consume a **dedicated promotion budget** — 10% of spare time — not the target tier's regular budget. This prevents a flood of promoted tier-4 jobs from starving fresh tier-2 work.
 
-The math for expected queue depths: with ~200 loaded megas and 20 job types, worst case is 4000 jobs. At ~20 jobs/frame throughput, full drain takes ~200 frames (~3.3s). Age promotion ensures the tail clears within ~10s even under sustained camera movement.
+```rust
+// In TierBudget, a 7th slot for promoted jobs:
+promoted_cap: f32,   // 0.10 * spare_ms
+promoted_spent: f32,
+```
+
+When a promoted job is popped, it checks `promoted_cap` instead of the target tier's cap.
 
 ## Cancellation
 
-**Generation counter**: Incremented on teleport, fast-travel, or camera discontinuity (movement >100 units in one frame). Every in-flight job checks the generation at start of `execute()` and bails immediately if stale.
+**Generation counter** (Acquire/Release): Incremented on teleport or camera discontinuity (>100 units in one frame). In-flight workers bail on stale generation. Queue and pending set are cleared.
 
-**Queue clearing**: On generation bump, the queue is also cleared and `pending` is reset. Dirty megas around the new position are re-enqueued fresh.
-
-```rust
-fn on_teleport(&self) {
-    self.generation.fetch_add(1, Relaxed);
-    self.queue.lock().clear();
-    self.pending.lock().clear();
-    // Re-enqueue for new camera position happens in next frame's dirty scan.
-}
-```
+**Mega unload liveness**: When results are collected, each result's target `MegaPos` is checked against `loaded_megas`. Results for unloaded megas are silently discarded. This handles the case where a mega is unloaded by normal camera drift while a nav mesh bake was in-flight.
 
 ## Dirty Coalescing
 
 Two classes:
 
-**Structural dirty** (voxel changed — must rebuild immediately):
+**Structural dirty** (voxel changed — visible immediately):
 - Surface shell extraction
 - Mip refinement
 - Face mask update
-These are enqueued in the very next frame's submission, no settle delay. They produce the minimum viable visual update so the player sees the edit within 1-2 frames.
+
+Enqueued next frame, no settle delay. The player sees the edit within 1-2 frames.
 
 **Cosmetic dirty** (appearance/support — can settle):
 - AO bake, light flood, shadow cache, normal smoothing
 - Nav mesh, structural graph, collision mesh
 - LOD re-evaluation
-These go through the `DirtyCoalescer` with a settle period of 30 frames (~0.5s). Rapid edits (mining, building) don't trigger expensive cosmetic rebuilds until the dust settles.
+
+These go through the `DirtyCoalescer` with a settle period of 30 frames (~0.5s). The coalescer tracks **last dirty frame** (not first), so the settle window restarts on each edit:
 
 ```rust
 struct DirtyCoalescer {
-    cosmetic_dirty: HashMap<MegaPos, u64>,  // MegaPos → frame when first dirtied
-    settle_frames: u64,                      // 30
+    /// MegaPos → frame of most recent dirty event.
+    last_dirty: HashMap<MegaPos, u64>,
+    settle_frames: u64,  // 30
+}
+
+impl DirtyCoalescer {
+    fn mark_dirty(&mut self, mp: MegaPos, current_frame: u64) {
+        // Always update to latest frame — settle window restarts.
+        self.last_dirty.insert(mp, current_frame);
+    }
+
+    fn drain_settled(&mut self, current_frame: u64) -> Vec<MegaPos> {
+        let mut settled = Vec::new();
+        self.last_dirty.retain(|mp, last| {
+            if current_frame - *last >= self.settle_frames {
+                settled.push(*mp);
+                false
+            } else {
+                true
+            }
+        });
+        settled
+    }
 }
 ```
-
-Structural jobs are separate individual jobs enqueued directly, not combined. Shell is yielding (~1ms), face mask is fast (~0.2ms), mip is fast (~0.5ms). They run independently on the pool. The combined "rebuild" concept from v2 is dropped.
 
 ## Cooperative Yielding
 
@@ -204,7 +291,7 @@ Large jobs implement `IncrementalJob`:
 
 ```rust
 enum StepResult {
-    Continue(Box<dyn IncrementalJob + Send>),  // re-enqueue continuation
+    Continue(Box<dyn IncrementalJob + Send>),
     Done(JobResult),
 }
 
@@ -213,9 +300,23 @@ trait IncrementalJob: Send {
 }
 ```
 
-A step targets ~0.3ms. Jobs that exceed this on pathological input only block one worker thread for one step. The continuation is re-enqueued at the same priority.
+A step targets ~0.3ms. Continuations are re-enqueued with `(priority, sequence_number)` ordering. The `BinaryHeap` is ordered by:
 
-Jobs that don't need yielding (face mask, height map, mip) implement `execute()` directly and return `Done`.
+1. `priority` (ascending — lower = higher priority)
+2. `distance_sq` (ascending — closer to camera first)
+3. `sequence_number` (ascending — older jobs first)
+
+This ensures continuations don't livelock: a continuation gets the same `(priority, distance_sq)` as the original job but an incrementing `sequence_number`, so fresh jobs at the same priority and distance interleave fairly.
+
+```rust
+impl Ord for Job {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.priority.cmp(&other.priority)
+            .then(self.distance_sq.partial_cmp(&other.distance_sq).unwrap_or(Ordering::Equal))
+            .then(self.sequence.cmp(&other.sequence))
+    }
+}
+```
 
 ## Cache Budget
 
@@ -223,6 +324,7 @@ Fixed 64MB limit. LRU eviction by last-access frame.
 
 | Data | Size per mega |
 |------|--------------|
+| Surface shell grid | ~10-50 KB (sparse, varies by surface area) |
 | AO texture | 256 KB |
 | Light levels | 256 KB |
 | Column heights | 4 KB |
@@ -231,7 +333,9 @@ Fixed 64MB limit. LRU eviction by last-access frame.
 | Nav mesh | ~10-50 KB |
 | Structural graph | ~5-20 KB |
 
-At 100 megas with full cache: ~55 MB. Exceeding 64MB triggers LRU eviction of entire mega cache entries.
+Worst case per mega: ~624 KB (with large shell + nav mesh). At 64MB budget: ~102 megas at full cache. Tight but workable. If profiling shows the shell grids are larger than expected, raise the budget to 96MB or evict shell grids more aggressively (they can be recomputed from the source chunks).
+
+LRU eviction drops an entire mega's cache entries. The mega is re-dirtied (cosmetic) so its cache rebuilds on access.
 
 ## Job Catalog
 
@@ -252,8 +356,8 @@ Flag 100% air megas. Computed at generation, invalidated on voxel placement.
 **3. Face visibility masks** (priority 5, ~0.2ms per mega, structural-dirty)
 6-bit exposed face mask. Renderer skips ray entry from masked faces.
 
-**4. Interior cavity detection** (priority 9, ~1ms per mega, yielding per Z-layer)
-Flood-fill from exposed faces. Sealed cavities flagged for skip.
+**4. Interior cavity detection** (priority 7, ~1ms per mega, yielding per Z-layer)
+Flood-fill from exposed faces. Sealed cavities flagged for skip. Feeds into culling — must be available early.
 
 ### Tier 1 — Geometry (priority 10-19)
 
@@ -303,7 +407,7 @@ Averaged surface normals for smoother shading.
 Load-bearing connectivity for collapse detection.
 
 **18. Collision mesh** (priority 44, ~1ms, yielding)
-Simplified convex decomposition for physics. Note: NPCs use raw voxel grid queries (`get_voxel`, `surface_height`) for collision until the collision mesh is built. The raw grid is always available and correct — the mesh is an acceleration, not a prerequisite.
+Simplified convex decomposition for physics. Note: NPCs use raw voxel grid queries (`get_voxel`, `surface_height`) for collision at all times. The collision mesh is a fast-path acceleration, not a prerequisite. NPCs never clip through terrain because the raw grid is always available and authoritative.
 
 **19. Nav mesh bake** (priority 46, ~1.5ms, yielding)
 Walkable surfaces with adjacency for pathfinding.
@@ -323,54 +427,65 @@ Block-compress stable megas for ~4× bandwidth reduction.
 **Greedy mesh**: Extract visible surface voxels, merge coplanar same-material faces into quads. Orders of magnitude fewer fragments for flat terrain.
 
 **Transition criteria with hysteresis**:
-- Ray-march → mesh: quad count < 2000 AND stable > 50 frames AND not meshed-then-reverted in last 200 frames
-- Mesh → ray-march: voxel edit in the mega (immediate, for responsiveness)
-- The 200-frame cooldown prevents thrash when a mega is near the quad threshold and getting repeated small edits.
+- Ray-march → mesh: quad count < 2000 AND stable > 50 frames AND `cooldown_remaining == 0`
+- Mesh → ray-march: voxel edit in the mega (immediate)
+- On revert: set `cooldown_remaining = 200` frames before the mega is eligible for mesh again
 
-**Coexistence**: Both paths write to the same G-buffer. In any frame, some megas are ray-marched and others are rasterized. The deferred lighting pass is agnostic to which path produced the fragments.
+**Transition frame sequence** (edit to a meshed mega):
+1. Frame N: voxel edit happens during sim tick
+2. Frame N: `upload_megas()` detects the dirty source chunk, rebuilds the 64³ mega-grid, uploads new 3D texture
+3. Frame N: renderer switches this mega from mesh to ray-march path (flag flip, no work)
+4. Frame N: the new 3D texture renders via ray-march — correct geometry from this frame onward
+5. Frame N+1: structural-dirty jobs enqueued (shell, mip, face mask) for acceleration
+6. Frame N+200+: mesh re-evaluation eligible after cooldown
 
-**Implementation**: Phase 3 (after core framework and culling). Requires a second graphics pipeline (vertex + fragment shaders writing to G-buffer).
+The key: `upload_megas()` already rebuilds the full 3D texture from source chunks on dirty. The ray-march path always has a correct texture. There is no gap where stale data renders.
+
+**Coexistence**: Both paths write to the same G-buffer. The deferred lighting pass is agnostic.
+
+**Implementation**: Phase 3. Requires a second graphics pipeline (vertex + fragment shaders writing to G-buffer).
 
 ## SVDAG
 
-Deferred. At 64³ (4 octree levels), pointer overhead and traversal indirection likely cost more than the flat mip hierarchy. Do not implement until profiling shows ray traversal is the bottleneck, and benchmark against existing mips first. If the data eventually shows it's worthwhile, it would operate on merged mega groups — but that architecture is out of scope for this spec.
+Deferred. At 64³ (4 octree levels), pointer overhead and traversal indirection likely cost more than the flat mip hierarchy. Do not implement until profiling shows ray traversal is the bottleneck, and benchmark against existing mips first.
 
 ## Implementation Order
 
 **Phase 1 — Instrumentation + Framework**
 1. Frame timing instrumentation (CPU stages + GPU profiling via RenderDoc)
-2. `FrameOptimizer` struct with thread pool, Arc-shared results, generation counter
+2. `FrameOptimizer` struct with thread pool, Arc-shared results, generation counter (Acquire/Release)
 3. Mandatory per-frame frustum cull + draw order sort
-4. Double-buffered result collection + staged upload pipeline
-5. Dirty coalescer (structural vs cosmetic split)
-6. Tier budget tracking during submission
+4. Double-buffered result collection with liveness check + backpressure cap
+5. Dirty coalescer (structural immediate, cosmetic settle-after-last-edit)
+6. Proportional tier budget with redistribution from empty tiers
+7. Promoted-job budget (separate 10% slice)
 
-**Phase 2 — Culling**
-7. Hierarchical occlusion culling
-8. Face visibility masks
-9. Empty mega flags
-10. Surface shell extraction
+**Phase 2 — Culling + Core Geometry**
+8. Hierarchical occlusion culling
+9. Face visibility masks
+10. Empty mega flags
+11. Interior cavity detection (feeds culling — must be early)
+12. Surface shell extraction
 
 **Phase 3 — Geometry + Hybrid Rendering**
-11. Column height cache
-12. Mip refinement
-13. Greedy mesh builder + rasterization pipeline
-14. Hybrid render path with hysteresis
+13. Column height cache
+14. Mip refinement
+15. Greedy mesh builder + rasterization pipeline
+16. Hybrid render path with hysteresis + cooldown
 
 **Phase 4 — LOD**
-15. LOD demotion/promotion
-16. VRAM eviction improvements
-17. Disk serialization (I/O thread)
+17. LOD demotion/promotion
+18. VRAM eviction improvements
+19. Disk serialization (I/O thread)
 
 **Phase 5 — Visual Quality**
-18. AO bake
-19. Light flood fill
-20. Shadow cache
-21. Normal smoothing
+20. AO bake
+21. Light flood fill
+22. Shadow cache
+23. Normal smoothing
 
 **Phase 6 — Sim Support + Memory**
-22. Height map bake
-23. Structural graph
-24. Nav mesh bake
-25. Texture atlas
-26. Interior cavity detection
+24. Height map bake
+25. Structural graph
+26. Nav mesh bake
+27. Texture atlas
