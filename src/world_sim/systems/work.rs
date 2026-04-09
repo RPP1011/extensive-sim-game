@@ -16,6 +16,7 @@ use crate::world_sim::delta::WorldDelta;
 use crate::world_sim::state::*;
 use crate::world_sim::commodity;
 use super::resource_nodes::find_nearest_resource;
+use super::voxel_harvest;
 
 /// Base work ticks for farming before skill scaling.
 const FARM_WORK_TICKS: u16 = 20;
@@ -341,6 +342,39 @@ pub fn advance_work_states(state: &mut WorldState) {
                         npc.work_state = WorkState::Idle;
                     }
                 } else {
+                    // Voxel harvest: if the building uses voxel harvesting
+                    // (Sawmill, Mine), apply harvest damage each work tick.
+                    let btype_for_harvest = state.entity(building_id)
+                        .and_then(|e| e.building.as_ref())
+                        .map(|b| b.building_type);
+                    let harvest_material = btype_for_harvest
+                        .and_then(voxel_harvest::required_harvest_material);
+
+                    if let Some(desired_material) = harvest_material {
+                        // Ensure NPC has a harvest target.
+                        let has_target = state.entities[i].npc.as_ref()
+                            .map(|n| n.harvest_target.is_some())
+                            .unwrap_or(false);
+                        if !has_target {
+                            let building_pos = state.entity(building_id)
+                                .map(|e| e.pos)
+                                .unwrap_or(state.entities[i].pos);
+                            let target = voxel_harvest::select_harvest_target(
+                                state, i, desired_material, building_pos, 200,
+                            );
+                            if let Some(npc) = state.entities[i].npc.as_mut() {
+                                npc.harvest_target = target;
+                            }
+                        }
+                        // Apply harvest damage if target exists.
+                        let has_target = state.entities[i].npc.as_ref()
+                            .map(|n| n.harvest_target.is_some())
+                            .unwrap_or(false);
+                        if has_target {
+                            voxel_harvest::harvest_tick(state, i);
+                        }
+                    }
+
                     // Decrement ticks remaining.
                     let npc = state.entities[i].npc.as_mut().unwrap();
                     npc.work_state = WorkState::Working {

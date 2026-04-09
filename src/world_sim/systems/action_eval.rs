@@ -181,7 +181,7 @@ pub fn evaluate_and_act(state: &mut WorldState) {
                 // Skip NPCs in non-idle work states (let the work state machine finish).
                 if !matches!(npc.work_state, WorkState::Idle) { continue; }
 
-                let (action, npc_action, utility) = score_npc_actions(e, npc, &snaps, &state.tiles);
+                let (action, npc_action, utility) = score_npc_actions(e, npc, &snaps, &state.tiles, state.tick);
 
                 if debug_tick && e.id == 0 {
                     eprintln!("[action_eval t{} NPC#{}] scored {:?} utility={:.3}", state.tick, e.id, npc_action, utility);
@@ -306,6 +306,7 @@ fn score_npc_actions(
     npc: &NpcData,
     snaps: &[EntitySnap],
     tiles: &std::collections::HashMap<TilePos, Tile>,
+    current_tick: u64,
 ) -> (CandidateAction, NpcAction, f32) {
     let pos = entity.pos;
     let needs = &npc.needs;
@@ -503,6 +504,41 @@ fn score_npc_actions(
             }
 
             _ => {}
+        }
+    }
+
+    // --- Voxel resource harvest (known deposits from exploration) ---
+    if ctype.has_economy_actions() && !npc.known_voxel_resources.is_empty() {
+        let best_deposit = npc.known_voxel_resources.iter()
+            .filter(|k| k.estimated_count > 0 && (current_tick.saturating_sub(k.tick_observed)) < 2000)
+            .min_by_key(|k| {
+                let dx = pos.0 - k.center.0;
+                let dy = pos.1 - k.center.1;
+                (dx * dx + dy * dy) as i32
+            });
+        if let Some(deposit) = best_deposit {
+            let dx = deposit.center.0 - pos.0;
+            let dy = deposit.center.1 - pos.1;
+            let dist_sq = dx * dx + dy * dy;
+            let dist = dist_sq.sqrt();
+            let distance_factor = 1.0 / (1.0 + dist / 10.0);
+
+            // Score based on material type commodity need.
+            let commodity_need = match deposit.material {
+                crate::world_sim::voxel::VoxelMaterial::IronOre => purpose_urgency * 0.5,
+                crate::world_sim::voxel::VoxelMaterial::WoodLog => shelter_urgency * 0.5,
+                crate::world_sim::voxel::VoxelMaterial::Stone => shelter_urgency * 0.3,
+                _ => 0.2,
+            };
+
+            let harvest_outcome = outcome_mod((11, 0));
+            let harvest_culture = 1.0 + cultural_bias[11];
+            let utility = commodity_need * distance_factor * curiosity_mod * grief_dampen * harvest_outcome * harvest_culture;
+            if utility > best_utility {
+                best_utility = utility;
+                best_action = CandidateAction::MoveToPos { target: deposit.center };
+                best_npc_action = NpcAction::Walking { destination: deposit.center };
+            }
         }
     }
 
