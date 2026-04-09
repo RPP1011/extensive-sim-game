@@ -139,89 +139,58 @@ impl AppState {
 
         let bridge = VoxelBridge::new();
 
-        // Compute chunk positions to generate, but don't block — spawn background thread.
+        // Pre-generate terrain only around settlements (small radius for sim queries).
+        // Rendering chunks are generated on-demand as the camera moves.
         let state = sim.state();
         let seed = state.rng_state;
         let plan = state.voxel_world.region_plan.clone();
 
-        let mut chunk_positions: Vec<ChunkPos> = Vec::new();
-        let mut positions: Vec<(f32, f32)> = state.settlements.iter()
-            .map(|s| s.pos)
-            .collect();
-        for e in &state.entities {
-            if e.alive { positions.push(e.pos); }
-        }
-        if !positions.is_empty() {
-            let min_x = positions.iter().map(|p| p.0).fold(f32::MAX, f32::min);
-            let max_x = positions.iter().map(|p| p.0).fold(f32::MIN, f32::max);
-            let min_y = positions.iter().map(|p| p.1).fold(f32::MAX, f32::min);
-            let max_y = positions.iter().map(|p| p.1).fold(f32::MIN, f32::max);
-
+        let mut settlement_chunks: Vec<ChunkPos> = Vec::new();
+        if let Some(ref plan) = plan {
+            use crate::world_sim::terrain::MAX_SURFACE_Z;
             let cs = CHUNK_SIZE as f32;
-            let pad = 2;
-            let c_min_x = (min_x / cs).floor() as i32 - pad;
-            let c_max_x = (max_x / cs).ceil() as i32 + pad;
-            let c_min_y = (min_y / cs).floor() as i32 - pad;
-            let c_max_y = (max_y / cs).ceil() as i32 + pad;
+            let radius = 3i32; // 3 chunks each direction around each settlement
 
-            let (c_min_z, c_max_z) = if let Some(ref plan) = plan {
-                use crate::world_sim::terrain::MAX_SURFACE_Z;
-                let mut min_h = f32::MAX;
-                let mut max_h = f32::MIN;
-                for &(px, py) in &positions {
-                    let h = plan.interpolate_height(px, py);
-                    min_h = min_h.min(h);
-                    max_h = max_h.max(h);
-                }
-                let surface_min = (min_h * MAX_SURFACE_Z as f32) as i32;
-                let surface_max = (max_h * MAX_SURFACE_Z as f32) as i32;
-                let z_lo = (surface_min / CHUNK_SIZE as i32) - 3;
-                let z_hi = (surface_max / CHUNK_SIZE as i32) + 3;
-                (z_lo, z_hi)
-            } else {
-                (0, 3)
-            };
+            for settlement in &state.settlements {
+                let (sx, sy) = settlement.pos;
+                let h = plan.interpolate_height(sx, sy);
+                let surface_cz = (h * MAX_SURFACE_Z as f32) as i32 / CHUNK_SIZE as i32;
+                let center_cx = (sx / cs).floor() as i32;
+                let center_cy = (sy / cs).floor() as i32;
 
-            for cx in c_min_x..=c_max_x {
-                for cy in c_min_y..=c_max_y {
-                    for cz in c_min_z..=c_max_z {
-                        chunk_positions.push(ChunkPos::new(cx, cy, cz));
+                for dx in -radius..=radius {
+                    for dy in -radius..=radius {
+                        for dz in -2..=2 {
+                            let cp = ChunkPos::new(center_cx + dx, center_cy + dy, surface_cz + dz);
+                            settlement_chunks.push(cp);
+                        }
                     }
                 }
             }
+            settlement_chunks.sort_by(|a, b| {
+                (a.x, a.y, a.z).cmp(&(b.x, b.y, b.z))
+            });
+            settlement_chunks.dedup();
         }
 
-        let total_chunks = chunk_positions.len();
-        eprintln!("[voxel] Queued {} chunks for background generation", total_chunks);
+        let total_settlement_chunks = settlement_chunks.len();
+        eprintln!("[voxel] Pre-generating {} chunks around {} settlements",
+            total_settlement_chunks, state.settlements.len());
 
-        // Sort by distance from camera so nearby chunks load first.
-        // Camera will be above first settlement.
-        let cam_center = if let Some(s) = state.settlements.first() {
-            (s.pos.0, s.pos.1)
-        } else {
-            (0.0, 0.0)
-        };
-        chunk_positions.sort_by(|a, b| {
-            let s = CHUNK_SIZE as f32;
-            let da = (a.x as f32 * s - cam_center.0).powi(2) + (a.y as f32 * s - cam_center.1).powi(2);
-            let db = (b.x as f32 * s - cam_center.0).powi(2) + (b.y as f32 * s - cam_center.1).powi(2);
-            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        // Spawn background thread to generate chunks.
+        // Spawn background thread for settlement chunk pre-generation.
         let (chunk_tx, chunk_rx) = mpsc::channel::<(ChunkPos, Chunk)>();
         if let Some(plan_clone) = plan.clone() {
             std::thread::spawn(move || {
-                for (i, cp) in chunk_positions.iter().enumerate() {
+                for (i, cp) in settlement_chunks.iter().enumerate() {
                     let chunk = crate::world_sim::terrain::materialize_chunk(*cp, &plan_clone, seed);
                     if chunk_tx.send((*cp, chunk)).is_err() {
-                        break; // receiver dropped, app closed
+                        break;
                     }
-                    if (i + 1) % 500 == 0 {
-                        eprintln!("[voxel] Generated {}/{} chunks", i + 1, total_chunks);
+                    if (i + 1) % 200 == 0 {
+                        eprintln!("[voxel] Pre-gen {}/{}", i + 1, total_settlement_chunks);
                     }
                 }
-                eprintln!("[voxel] Background generation complete: {} chunks", total_chunks);
+                eprintln!("[voxel] Settlement pre-gen complete: {} chunks", total_settlement_chunks);
             });
         }
 
@@ -259,7 +228,7 @@ impl AppState {
             fps_timer: Instant::now(),
             last_fps: 0.0,
             chunk_rx,
-            chunks_pending: total_chunks,
+            chunks_pending: total_settlement_chunks,
             chunks_loaded: 0,
         })
     }
@@ -359,6 +328,55 @@ impl AppState {
                 }
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+    }
+
+    /// Generate chunks near the camera that don't exist yet.
+    /// CPU fallback — generates `budget` chunks per frame on the main thread.
+    /// TODO: Replace with GPU compute dispatch.
+    fn generate_camera_chunks(&mut self, budget: usize) {
+        let plan = match &self.sim.state().voxel_world.region_plan {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        let seed = self.sim.state().rng_state;
+        let cam = self.camera.eye_position();
+        // Convert engine coords (x, y-up, z) back to sim coords (x, y, z-up).
+        let cam_vx = cam[0];
+        let cam_vy = cam[2]; // engine z → sim y
+        let cam_vz = cam[1]; // engine y → sim z
+
+        let cs = CHUNK_SIZE as f32;
+        let center_cx = (cam_vx / cs).floor() as i32;
+        let center_cy = (cam_vy / cs).floor() as i32;
+        let center_cz = (cam_vz / cs).floor() as i32;
+
+        // Radius in chunks to check around camera.
+        let radius = (LOAD_RADIUS / (MEGA as f32 * cs)).ceil() as i32 + 1;
+
+        let mut generated = 0;
+        // Spiral outward from camera for priority ordering.
+        for dist in 0..=radius {
+            if generated >= budget { break; }
+            for dx in -dist..=dist {
+                if generated >= budget { break; }
+                for dy in -dist..=dist {
+                    if generated >= budget { break; }
+                    for dz in -2..=2 { // limited vertical range
+                        if generated >= budget { break; }
+                        // Only process shell of current distance.
+                        if dx.abs() != dist && dy.abs() != dist { continue; }
+
+                        let cp = ChunkPos::new(center_cx + dx, center_cy + dy, center_cz + dz);
+                        if self.sim.state().voxel_world.chunks.contains_key(&cp) { continue; }
+
+                        let chunk = crate::world_sim::terrain::materialize_chunk(cp, &plan, seed);
+                        self.sim.state_mut().voxel_world.chunks.insert(cp, chunk);
+                        self.dirty_megas.insert(MegaPos::from_chunk(cp));
+                        generated += 1;
+                    }
+                }
             }
         }
     }
@@ -607,8 +625,11 @@ impl ApplicationHandler for WorldSimVoxelApp {
                 let dt = (now - app.last_frame).as_secs_f32().min(0.1);
                 app.last_frame = now;
 
-                // Drain background-generated chunks (up to 64 per frame to stay responsive).
+                // Drain background-generated settlement chunks.
                 app.drain_ready_chunks(64);
+
+                // Generate chunks near camera on-demand (CPU fallback, TODO: GPU compute).
+                app.generate_camera_chunks(16);
 
                 // FPS tracking
                 app.frame_count += 1;
