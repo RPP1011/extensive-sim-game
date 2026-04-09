@@ -111,6 +111,11 @@ struct AppState {
     mouse_captured: bool,
     last_mouse: Option<(f64, f64)>,
     move_speed: f32,
+
+    // FPS tracking
+    frame_count: u32,
+    fps_timer: Instant,
+    last_fps: f32,
 }
 
 impl AppState {
@@ -176,6 +181,20 @@ impl AppState {
                     }
                 }
                 eprintln!("[voxel] Generated {} chunks (z range: {}..{})", count, c_min_z, c_max_z);
+
+                // Debug: material distribution
+                let mut mat_counts = [0u64; 256];
+                for chunk in state.voxel_world.chunks.values() {
+                    for v in &chunk.voxels {
+                        mat_counts[v.material as u8 as usize] += 1;
+                    }
+                }
+                eprintln!("[voxel] Material distribution:");
+                for (i, &c) in mat_counts.iter().enumerate() {
+                    if c > 0 {
+                        eprintln!("  [{:>3}] {:>12} voxels", i, c);
+                    }
+                }
             }
         }
 
@@ -220,6 +239,9 @@ impl AppState {
             mouse_captured: false,
             last_mouse: None,
             move_speed: 50.0,
+            frame_count: 0,
+            fps_timer: Instant::now(),
+            last_fps: 0.0,
         })
     }
 
@@ -552,6 +574,22 @@ impl ApplicationHandler for WorldSimVoxelApp {
                 let now = Instant::now();
                 let dt = (now - app.last_frame).as_secs_f32().min(0.1);
                 app.last_frame = now;
+
+                // FPS tracking
+                app.frame_count += 1;
+                let fps_elapsed = now.duration_since(app.fps_timer).as_secs_f32();
+                if fps_elapsed >= 1.0 {
+                    app.last_fps = app.frame_count as f32 / fps_elapsed;
+                    app.frame_count = 0;
+                    app.fps_timer = now;
+                    let cam = app.camera.eye_position();
+                    let status = if app.paused { "PAUSED" } else { "RUNNING" };
+                    app.window.set_title(&format!(
+                        "World Sim — {:.0} FPS | {} | {:.0},{:.0},{:.0} | {} megas | speed {}x",
+                        app.last_fps, status, cam[0], cam[1], cam[2],
+                        app.gpu_megas.len(), app.ticks_per_frame,
+                    ));
+                }
 
                 app.update_camera(dt);
                 app.tick_sim();
