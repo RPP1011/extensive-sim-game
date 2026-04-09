@@ -410,11 +410,15 @@ pub struct VoxelWorld {
     pub chunks: HashMap<ChunkPos, Chunk>,
     /// Global water level (z coordinate). Sea/lake surfaces.
     pub sea_level: i32,
+    /// Optional region plan for biome-driven terrain generation.
+    /// When `Some`, `generate_chunk` delegates to the materializer;
+    /// when `None`, the legacy flat-terrain generator is used.
+    pub region_plan: Option<crate::world_sim::terrain::RegionPlan>,
 }
 
 impl Default for VoxelWorld {
     fn default() -> Self {
-        Self { chunks: HashMap::new(), sea_level: 28 }
+        Self { chunks: HashMap::new(), sea_level: 28, region_plan: None }
     }
 }
 
@@ -448,10 +452,23 @@ impl VoxelWorld {
     }
 
     /// Generate terrain for a chunk based on world position.
-    /// Layered: bedrock (0-2), stone (2-20), subsoil (20-28), surface (28-30+).
+    ///
+    /// If a `region_plan` is set on this world, delegates to the biome-driven
+    /// materializer (`terrain::materialize_chunk`).  Otherwise falls back to the
+    /// legacy flat-terrain generator (`generate_chunk_legacy`).
     pub fn generate_chunk(&mut self, cp: ChunkPos, seed: u64) {
         if self.chunks.contains_key(&cp) { return; }
+        let chunk = if let Some(ref plan) = self.region_plan {
+            crate::world_sim::terrain::materialize_chunk(cp, plan, seed)
+        } else {
+            self.generate_chunk_legacy(cp, seed)
+        };
+        self.chunks.insert(cp, chunk);
+    }
 
+    /// Legacy flat-terrain chunk generator.
+    /// Layered: bedrock (0-2), stone (2-20), subsoil (20-28), surface (28-30+).
+    fn generate_chunk_legacy(&self, cp: ChunkPos, seed: u64) -> Chunk {
         let mut chunk = Chunk::new_air(cp);
         let base_x = cp.x * CHUNK_SIZE as i32;
         let base_y = cp.y * CHUNK_SIZE as i32;
@@ -500,7 +517,7 @@ impl VoxelWorld {
         }
 
         chunk.dirty = true;
-        self.chunks.insert(cp, chunk);
+        chunk
     }
 
     /// Ensure chunks are loaded around a world position (loading radius in chunks).
