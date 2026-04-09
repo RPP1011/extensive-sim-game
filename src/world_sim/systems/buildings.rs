@@ -73,7 +73,7 @@ fn building_type_to_voxel_zone(bt: BuildingType) -> VoxelZone {
 }
 
 /// Primary wall material for a building type.
-fn building_wall_material(bt: BuildingType) -> VoxelMaterial {
+pub(crate) fn building_wall_material(bt: BuildingType) -> VoxelMaterial {
     match bt {
         BuildingType::Wall | BuildingType::Gate | BuildingType::Watchtower
         | BuildingType::Barracks | BuildingType::CourtHouse | BuildingType::Treasury => VoxelMaterial::StoneBlock,
@@ -85,7 +85,7 @@ fn building_wall_material(bt: BuildingType) -> VoxelMaterial {
 }
 
 /// Floor material for a building type.
-fn building_floor_material(bt: BuildingType) -> VoxelMaterial {
+pub(crate) fn building_floor_material(bt: BuildingType) -> VoxelMaterial {
     match bt {
         BuildingType::Farm => VoxelMaterial::Dirt,
         BuildingType::Mine => VoxelMaterial::Stone,
@@ -95,6 +95,16 @@ fn building_floor_material(bt: BuildingType) -> VoxelMaterial {
         | BuildingType::CourtHouse | BuildingType::Treasury | BuildingType::Library
         | BuildingType::GuildHall | BuildingType::Barracks => VoxelMaterial::StoneBrick,
         _ => VoxelMaterial::WoodPlanks,
+    }
+}
+
+/// Wall height (in voxels) for a building type.
+pub(crate) fn wall_height(bt: BuildingType) -> u32 {
+    match bt {
+        BuildingType::Tent | BuildingType::Camp => 1,
+        BuildingType::Watchtower => 4,
+        BuildingType::Wall | BuildingType::Gate => 3,
+        _ => 2,
     }
 }
 
@@ -842,12 +852,21 @@ mod tests {
 
     /// Create a minimal WorldState with generated terrain around the origin.
     fn make_test_state() -> WorldState {
+        use crate::world_sim::voxel::{VOXEL_SCALE, CHUNK_SIZE};
         let mut state = WorldState::new(42);
-        // Generate terrain chunks so surface_height works (~z=30)
-        for cz in 0..3 {
-            for cy in -1..=1 {
-                for cx in -1..=1 {
-                    state.voxel_world.generate_chunk(ChunkPos::new(cx, cy, cz), 42);
+        // Generate terrain chunks centred on the world position (8.0, 8.0)
+        // used by the tests.  With varying VOXEL_SCALE, the voxel coordinates
+        // shift, so we compute the required chunk range dynamically.
+        let center_vx = (8.0 / VOXEL_SCALE).floor() as i32;
+        let center_vy = (8.0 / VOXEL_SCALE).floor() as i32;
+        let center_cx = center_vx.div_euclid(CHUNK_SIZE as i32);
+        let center_cy = center_vy.div_euclid(CHUNK_SIZE as i32);
+        for cz in 0..4 {
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    state.voxel_world.generate_chunk(
+                        ChunkPos::new(center_cx + dx, center_cy + dy, cz), 42,
+                    );
                 }
             }
         }
@@ -923,10 +942,13 @@ mod tests {
 
     #[test]
     fn rebake_updates_nav_grid_after_building() {
+        use crate::world_sim::voxel::VOXEL_SCALE;
         let mut state = make_test_state();
 
-        // Bake an initial NavGrid
-        let nav = NavGrid::bake(&state.voxel_world, 0, 0, 32, 32, 63);
+        // Bake an initial NavGrid centred on where the building will go
+        let center_vx = (8.0 / VOXEL_SCALE).floor() as i32;
+        let center_vy = (8.0 / VOXEL_SCALE).floor() as i32;
+        let nav = NavGrid::bake(&state.voxel_world, center_vx - 16, center_vy - 16, 32, 32, 63);
         state.nav_grids.push(nav);
 
         // Stamp a building (walls will block walkability above floor)
