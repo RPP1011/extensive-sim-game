@@ -26,15 +26,7 @@ use super::runtime::WorldSim;
 use super::voxel::{Chunk, ChunkPos, CHUNK_SIZE, CHUNK_VOLUME};
 use super::voxel_bridge::VoxelBridge;
 
-const WIDTH: u32 = 1280;
-const HEIGHT: u32 = 720;
-
-/// How many sim chunks per mega-chunk axis. 4 × 16 = 64 voxels per side.
-const MEGA: i32 = 4;
-const MEGA_VOXELS: u32 = (MEGA as u32) * (CHUNK_SIZE as u32); // 64
-
-/// Maximum distance (in world units) from camera to mega-chunk center for it to be loaded.
-const LOAD_RADIUS: f32 = 2048.0;
+use super::constants::{MEGA, MEGA_VOXELS, LOAD_RADIUS, RENDER_WIDTH as WIDTH, RENDER_HEIGHT as HEIGHT};
 
 // ---------------------------------------------------------------------------
 // MegaChunkPos — groups 4×4×4 sim chunks
@@ -336,6 +328,11 @@ impl AppState {
     /// CPU fallback — generates `budget` chunks per frame on the main thread.
     /// TODO: Replace with GPU compute dispatch.
     fn generate_camera_chunks(&mut self, budget: usize) {
+        let has_plan = self.sim.state().voxel_world.region_plan.is_some();
+        static LOGGED_PLAN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !LOGGED_PLAN.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            eprintln!("[voxel] generate_camera_chunks: has_plan={}", has_plan);
+        }
         let plan = match &self.sim.state().voxel_world.region_plan {
             Some(p) => p.clone(),
             None => return,

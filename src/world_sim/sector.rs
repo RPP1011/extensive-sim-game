@@ -1,8 +1,7 @@
 use serde::{Serialize, Deserialize};
 use std::collections::HashSet;
 
-/// Voxels per sector edge.
-pub const SECTOR_SIZE: i32 = 4096;
+pub use super::constants::SECTOR_SIZE;
 
 /// 3D sector coordinate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

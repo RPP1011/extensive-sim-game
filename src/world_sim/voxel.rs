@@ -14,11 +14,7 @@ use std::collections::HashMap;
 // Constants
 // ---------------------------------------------------------------------------
 
-pub const CHUNK_SIZE: usize = 16;
-pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE; // 4096
-
-/// World units per voxel (1 voxel = 1.0 world unit).
-pub const VOXEL_SCALE: f32 = 1.0;
+pub use super::constants::{CHUNK_SIZE, CHUNK_VOLUME, VOXEL_SCALE};
 
 // ---------------------------------------------------------------------------
 // Coordinates

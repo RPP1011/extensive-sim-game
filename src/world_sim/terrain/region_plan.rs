@@ -2,14 +2,7 @@ use serde::{Serialize, Deserialize};
 use crate::world_sim::state::{Terrain, SubBiome};
 use super::noise;
 
-/// Voxels per region cell (horizontal).
-pub const CELL_SIZE: i32 = 4096;
-
-/// Maximum surface height in voxels (mountains).
-pub const MAX_SURFACE_Z: i32 = 400;
-
-/// Sea level in voxels.
-pub const SEA_LEVEL: i32 = 80;
+pub use crate::world_sim::constants::{CELL_SIZE, MAX_SURFACE_Z, SEA_LEVEL};
 
 // ---------------------------------------------------------------------------
 // Settlement / dungeon / road / river data

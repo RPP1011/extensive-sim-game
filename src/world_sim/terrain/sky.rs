@@ -9,8 +9,7 @@
 use crate::world_sim::voxel::{Chunk, ChunkPos, Voxel, VoxelMaterial, CHUNK_SIZE, local_index};
 use super::noise;
 
-/// World-Z origin for the flying island layer.
-pub const SKY_BASE_Z: i32 = 300;
+pub use crate::world_sim::constants::SKY_BASE_Z;
 
 // ---------------------------------------------------------------------------
 // Island grid
