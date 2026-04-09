@@ -112,8 +112,8 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
                     } else {
                         mats.surface
                     }
-                } else if vz <= SEA_LEVEL && !matches!(terrain, Terrain::Mountains | Terrain::FlyingIslands) {
-                    // Above terrain surface but below sea level → water
+                } else if vz <= SEA_LEVEL && matches!(terrain, Terrain::DeepOcean | Terrain::Coast | Terrain::CoralReef | Terrain::Swamp) {
+                    // Above terrain surface but below sea level → water (only for water biomes)
                     VoxelMaterial::Water
                 } else {
                     VoxelMaterial::Air
