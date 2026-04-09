@@ -2118,7 +2118,8 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
 
     let cols = (args.settlements as f32).sqrt().ceil() as usize;
     let rows = (args.settlements + cols - 1) / cols;
-    let spacing = if args.rich { 200.0 } else { 100.0 };
+    // Spacing must match terrain CELL_SIZE so entity positions align with terrain.
+    let spacing = game::world_sim::terrain::CELL_SIZE as f32;
     let layout = GridLayout { cols, rows, spacing };
 
     // Generate continental plan and use it to populate regions.
@@ -2185,11 +2186,10 @@ fn populate_regions_from_plan(
         let prow = row.min(plan.rows - 1);
         let cell = plan.get(pcol, prow);
 
-        // World-space position: same formula as old create_regions.
+        // World-space position: layout.spacing == CELL_SIZE so positions align with terrain.
         let base_x = col as f32 * layout.spacing + layout.spacing * 0.5;
         let base_y = row as f32 * layout.spacing + layout.spacing * 0.5;
-        // Light jitter using a deterministic hash.
-        let jitter = layout.spacing * 0.35;
+        let jitter = layout.spacing * 0.2;
         let jx = (lcg_f32(rng) - 0.5) * 2.0 * jitter;
         let jy = (lcg_f32(rng) - 0.5) * 2.0 * jitter;
         let pos = (base_x + jx, base_y + jy);

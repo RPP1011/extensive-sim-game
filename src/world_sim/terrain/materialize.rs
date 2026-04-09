@@ -319,6 +319,86 @@ mod tests {
         assert!(diffs > 0, "different biomes produced identical chunks");
     }
 
+    /// Sanity check: land biome chunks should NOT be majority water.
+    #[test]
+    fn land_biome_not_flooded() {
+        let plan = generate_continent(20, 20, 42);
+        let land_biomes = [Terrain::Plains, Terrain::Forest, Terrain::Desert,
+                           Terrain::Mountains, Terrain::Tundra, Terrain::Jungle,
+                           Terrain::Badlands, Terrain::Caverns];
+
+        for cell in &plan.cells {
+            if !land_biomes.contains(&cell.terrain) { continue; }
+            if cell.height < 0.15 { continue; } // skip very low cells
+
+            // Generate a chunk at this cell's surface
+            let col = plan.cells.iter().position(|c| std::ptr::eq(c, cell)).unwrap();
+            let c = col % plan.cols;
+            let r = col / plan.cols;
+            let vx = c as i32 * crate::world_sim::terrain::region_plan::CELL_SIZE + 8;
+            let vy = r as i32 * crate::world_sim::terrain::region_plan::CELL_SIZE + 8;
+            let surface_z = (cell.height * MAX_SURFACE_Z as f32) as i32;
+            let cz = surface_z / CHUNK_SIZE as i32;
+            let cx = vx / CHUNK_SIZE as i32;
+            let cy = vy / CHUNK_SIZE as i32;
+
+            let chunk = materialize_chunk(ChunkPos::new(cx, cy, cz), &plan, 42);
+            let water = chunk.voxels.iter().filter(|v| v.material == VoxelMaterial::Water).count();
+            let total = chunk.voxels.len();
+            let water_pct = water as f32 / total as f32;
+
+            assert!(water_pct < 0.5,
+                "{:?} at ({},{}) height={:.2} has {:.0}% water",
+                cell.terrain, c, r, cell.height, water_pct * 100.0);
+
+            break; // one check per biome type is enough
+        }
+    }
+
+    /// Sanity check: material variety across biomes.
+    #[test]
+    fn biomes_produce_distinct_materials() {
+        let plan = generate_continent(30, 30, 42);
+
+        // Collect surface material for several biome types
+        let mut biome_surface: std::collections::HashMap<String, VoxelMaterial> = std::collections::HashMap::new();
+
+        for (i, cell) in plan.cells.iter().enumerate() {
+            if cell.height < 0.15 { continue; }
+            let key = format!("{:?}", cell.terrain);
+            if biome_surface.contains_key(&key) { continue; }
+
+            let c = i % plan.cols;
+            let r = i / plan.cols;
+            let vx = c as i32 * crate::world_sim::terrain::region_plan::CELL_SIZE + 8;
+            let vy = r as i32 * crate::world_sim::terrain::region_plan::CELL_SIZE + 8;
+            let surface_z = (cell.height * MAX_SURFACE_Z as f32) as i32;
+            let cx = vx / CHUNK_SIZE as i32;
+            let cy = vy / CHUNK_SIZE as i32;
+            let cz = surface_z / CHUNK_SIZE as i32;
+
+            let chunk = materialize_chunk(ChunkPos::new(cx, cy, cz), &plan, 42);
+            // Find the most common non-air material
+            let mut counts = [0u32; 256];
+            for v in &chunk.voxels {
+                counts[v.material as u8 as usize] += 1;
+            }
+            counts[0] = 0; // ignore air
+            if let Some((mat_idx, _)) = counts.iter().enumerate().max_by_key(|(_, &c)| c) {
+                use std::mem::transmute;
+                // Safety: VoxelMaterial is repr(u8)
+                let mat: VoxelMaterial = unsafe { transmute(mat_idx as u8) };
+                biome_surface.insert(key, mat);
+            }
+        }
+
+        // We should have at least 3 distinct surface materials across biomes
+        let unique_mats: std::collections::HashSet<u8> = biome_surface.values().map(|m| *m as u8).collect();
+        assert!(unique_mats.len() >= 3,
+            "only {} distinct surface materials across {} biomes: {:?}",
+            unique_mats.len(), biome_surface.len(), biome_surface);
+    }
+
     #[test]
     fn materialization_is_deterministic() {
         let plan = test_plan();

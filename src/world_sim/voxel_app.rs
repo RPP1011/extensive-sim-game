@@ -33,7 +33,7 @@ const MEGA: i32 = 4;
 const MEGA_VOXELS: u32 = (MEGA as u32) * (CHUNK_SIZE as u32); // 64
 
 /// Maximum distance (in world units) from camera to mega-chunk center for it to be loaded.
-const LOAD_RADIUS: f32 = 512.0;
+const LOAD_RADIUS: f32 = 2048.0;
 
 // ---------------------------------------------------------------------------
 // MegaChunkPos — groups 4×4×4 sim chunks
