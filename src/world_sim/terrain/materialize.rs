@@ -8,8 +8,9 @@
 use crate::world_sim::voxel::{Chunk, ChunkPos, Voxel, VoxelMaterial, CHUNK_SIZE, local_index};
 use crate::world_sim::state::Terrain;
 use crate::world_sim::terrain::region_plan::{RegionPlan, SEA_LEVEL, MAX_SURFACE_Z};
-use crate::world_sim::terrain::biome::surface_materials;
+use crate::world_sim::terrain::biome::{surface_materials, resolve_biome};
 use crate::world_sim::terrain::noise;
+use crate::world_sim::terrain::{caves, rivers, features, sky, dungeons};
 
 // ---------------------------------------------------------------------------
 // Ore vein helper
@@ -122,6 +123,99 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
                     chunk.voxels[local_index(lx, ly, lz)] = Voxel::new(material);
                 }
             }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Post-pass feature integration
+    // -----------------------------------------------------------------------
+
+    // 1. Cave carving — for chunks that are predominantly underground.
+    //    We sample the biome at the chunk centre to decide which cave type.
+    {
+        let cx = base_x + CHUNK_SIZE as i32 / 2;
+        let cy = base_y + CHUNK_SIZE as i32 / 2;
+        let cz = base_z + CHUNK_SIZE as i32 / 2;
+        let (cell, _, _) = plan.sample(cx as f32, cy as f32);
+        let base_h = plan.interpolate_height(cx as f32, cy as f32);
+        let surface_z_centre = (base_h * MAX_SURFACE_Z as f32).round() as i32;
+        let depth_below = surface_z_centre - cz;
+        if depth_below > 20 {
+            let bv = resolve_biome(cell.terrain, cell.sub_biome, depth_below, seed);
+            caves::carve_caves(&mut chunk, cp, bv.underground, seed);
+        }
+    }
+
+    // 2. River carving — for all rivers in the plan.
+    for river in &plan.rivers {
+        // Build a closure that reproduces the surface-height formula used above.
+        let plan_ref: &RegionPlan = plan;
+        let seed_inner = seed;
+        let surface_z_fn = |vx: f32, vy: f32| -> i32 {
+            let bh = plan_ref.interpolate_height(vx, vy);
+            let detail = noise::fbm_2d(
+                vx * 0.02,
+                vy * 0.02,
+                seed_inner.wrapping_add(0xface_cafe),
+                3, 2.0, 0.5,
+            );
+            let detail_offset = (detail * 2.0 - 1.0) * 10.0;
+            (bh * MAX_SURFACE_Z as f32 + detail_offset).round() as i32
+        };
+        rivers::carve_river_in_chunk(&mut chunk, cp, river, &surface_z_fn);
+    }
+
+    // 3. Surface features — check each column's surface_z and see if it falls
+    //    in this chunk.
+    {
+        let cx = base_x + CHUNK_SIZE as i32 / 2;
+        let cy = base_y + CHUNK_SIZE as i32 / 2;
+        let (cell, _, _) = plan.sample(cx as f32, cy as f32);
+        let terrain = cell.terrain;
+        let sub_biome = cell.sub_biome;
+        let base_h = plan.interpolate_height(cx as f32, cy as f32);
+        let detail = noise::fbm_2d(
+            cx as f32 * 0.02,
+            cy as f32 * 0.02,
+            seed.wrapping_add(0xface_cafe),
+            3, 2.0, 0.5,
+        );
+        let detail_offset = (detail * 2.0 - 1.0) * 10.0;
+        let surface_z = (base_h * MAX_SURFACE_Z as f32 + detail_offset).round() as i32;
+        let surface_z_local = surface_z - base_z;
+        features::place_surface_features(&mut chunk, cp, terrain, sub_biome, surface_z_local, seed);
+    }
+
+    // 4. Flying islands — only for sky-level chunks in FlyingIslands biome.
+    {
+        let cx = base_x + CHUNK_SIZE as i32 / 2;
+        let cy = base_y + CHUNK_SIZE as i32 / 2;
+        let (cell, _, _) = plan.sample(cx as f32, cy as f32);
+        if matches!(cell.terrain, Terrain::FlyingIslands) {
+            // Blend in island voxels — stamp any non-air voxel from the island
+            // generator into this chunk (island generator is standalone).
+            let island_chunk = sky::generate_flying_island_chunk(cp, seed);
+            for i in 0..island_chunk.voxels.len() {
+                if island_chunk.voxels[i].material != VoxelMaterial::Air {
+                    chunk.voxels[i] = island_chunk.voxels[i];
+                }
+            }
+        }
+    }
+
+    // 5. Dungeon carving — for chunks that overlap dungeon sites in the plan.
+    {
+        let cx = base_x + CHUNK_SIZE as i32 / 2;
+        let cy = base_y + CHUNK_SIZE as i32 / 2;
+        let (cell, _, _) = plan.sample(cx as f32, cy as f32);
+        // Determine which plan cell we're in
+        let col = (cx as f32 / crate::world_sim::terrain::region_plan::CELL_SIZE as f32)
+            .floor().clamp(0.0, (plan.cols - 1) as f32) as i32;
+        let row = (cy as f32 / crate::world_sim::terrain::region_plan::CELL_SIZE as f32)
+            .floor().clamp(0.0, (plan.rows - 1) as f32) as i32;
+        for dungeon_plan in &cell.dungeons {
+            let layout = dungeons::DungeonLayout::generate(col, row, base_z, dungeon_plan.depth, seed);
+            layout.carve_into_chunk(&mut chunk, cp);
         }
     }
 
