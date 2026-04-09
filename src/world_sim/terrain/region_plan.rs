@@ -468,11 +468,10 @@ pub fn generate_continent(cols: usize, rows: usize, seed: u64) -> RegionPlan {
     let half_rows = rows as f32 * 0.5;
     let max_dist = (half_cols * half_cols + half_rows * half_rows).sqrt();
 
-    // World-scale frequency: we want several full noise wavelengths across the
-    // grid so both ocean and land appear.  value_noise_2d uses integer lattice
-    // at scale=1.0, so coordinates should span ~[0, cols/4] to see multiple
-    // wavelengths. A scale of 0.08 gives 0..4 across 50 cols which works well.
-    let scale = 0.08f32;
+    // World-scale frequency: we want ~4-6 noise wavelengths across the grid
+    // for good biome variety. Scale adapts to grid size.
+    let max_dim = cols.max(rows) as f32;
+    let scale = 4.0 / max_dim; // ~4 wavelengths across the largest dimension
 
     // Phase 1: noise fields + continent mask.
     let mut cells: Vec<RegionCell> = (0..rows)

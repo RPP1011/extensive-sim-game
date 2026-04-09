@@ -2122,11 +2122,10 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
     let spacing = game::world_sim::terrain::CELL_SIZE as f32;
     let layout = GridLayout { cols, rows, spacing };
 
-    // Generate continental plan. The plan must be much larger than the settlement
-    // grid so that settlements land in the interior (not ocean border).
-    // At minimum 3× the settlement grid in each dimension.
-    let plan_cols = (cols * 3).max(12);
-    let plan_rows = (rows * 3).max(10);
+    // Generate continental plan. Must be large enough for biome diversity
+    // and ocean borders. Settlements occupy the center ~1/5 of the plan.
+    let plan_cols = (cols * 5).max(20);
+    let plan_rows = (rows * 5).max(15);
     let plan = game::world_sim::terrain::generate_continent(plan_cols, plan_rows, terrain_seed);
     populate_regions_from_plan(&mut state, &plan, &layout, &mut rng);
     state.region_plan = Some(plan.clone());
@@ -2163,38 +2162,27 @@ fn populate_regions_from_plan(
 ) {
     use game::world_sim::terrain::CELL_SIZE;
 
-    let num_regions = layout.cols * layout.rows;
+    // Create one region per plan cell — gives proper biome diversity across the continent.
+    let num_regions = plan.cols * plan.rows;
 
     // Build a set of cell indices that have a river passing through them.
-    // Rivers are polylines in voxel space; map each segment endpoint to a cell index.
     let mut river_cells: std::collections::HashSet<usize> = std::collections::HashSet::new();
     for river in &plan.rivers {
         for &(px, py) in &river.points {
             let col = ((px / CELL_SIZE as f32).floor() as usize).min(plan.cols - 1);
             let row = ((py / CELL_SIZE as f32).floor() as usize).min(plan.rows - 1);
-            // Map plan cell (col, row) to layout cell index if in bounds.
-            if col < layout.cols && row < layout.rows {
-                river_cells.insert(row * layout.cols + col);
-            }
+            river_cells.insert(row * plan.cols + col);
         }
     }
 
-    // Offset layout grid to center of the plan so settlements are in the interior.
-    let offset_col = (plan.cols.saturating_sub(layout.cols)) / 2;
-    let offset_row = (plan.rows.saturating_sub(layout.rows)) / 2;
-
     for i in 0..num_regions {
-        let row = i / layout.cols;
-        let col = i % layout.cols;
+        let row = i / plan.cols;
+        let col = i % plan.cols;
+        let cell = plan.get(col, row);
 
-        // Map layout cell to plan cell, centered in the plan.
-        let pcol = (col + offset_col).min(plan.cols - 1);
-        let prow = (row + offset_row).min(plan.rows - 1);
-        let cell = plan.get(pcol, prow);
-
-        // World-space position: use plan cell coordinates so terrain aligns.
-        let base_x = pcol as f32 * layout.spacing + layout.spacing * 0.5;
-        let base_y = prow as f32 * layout.spacing + layout.spacing * 0.5;
+        // World-space position: aligned to plan cell coordinates.
+        let base_x = col as f32 * CELL_SIZE as f32 + CELL_SIZE as f32 * 0.5;
+        let base_y = row as f32 * CELL_SIZE as f32 + CELL_SIZE as f32 * 0.5;
         let jitter = layout.spacing * 0.2;
         let jx = (lcg_f32(rng) - 0.5) * 2.0 * jitter;
         let jy = (lcg_f32(rng) - 0.5) * 2.0 * jitter;
@@ -2457,9 +2445,11 @@ fn assign_sub_biomes(state: &mut WorldState) {
 }
 
 /// Phase 1e: Build region adjacency graph + detect chokepoints.
-fn build_adjacency_graph(state: &mut WorldState, layout: &GridLayout) {
-    let GridLayout { cols, rows, .. } = *layout;
+fn build_adjacency_graph(state: &mut WorldState, _layout: &GridLayout) {
+    // Regions cover the full plan grid. Derive cols/rows from region count and positions.
     let num_regions = state.regions.len();
+    let cols = state.region_plan.as_ref().map_or(1, |p| p.cols);
+    let rows = state.region_plan.as_ref().map_or(num_regions, |p| p.rows);
     for i in 0..num_regions {
         let row = i / cols;
         let col = i % cols;
@@ -2618,11 +2608,18 @@ fn create_settlements(
 
     let mut used_names = std::collections::HashSet::new();
     for i in 0..args.settlements {
-        let row = i / cols;
-        let col = i % cols;
-        let region_idx = row * cols + col;
-        let region_idx = region_idx.min(state.regions.len().saturating_sub(1));
-        // Use the region's position (already offset to plan center).
+        let srow = i / cols;
+        let scol = i % cols;
+        // Map settlement grid position to plan-centered region index.
+        // Regions now cover the full plan (plan.cols × plan.rows).
+        // Settlements go in the center of the plan.
+        let plan_cols = state.region_plan.as_ref().map_or(cols, |p| p.cols);
+        let plan_rows = state.region_plan.as_ref().map_or(cols, |p| p.rows);
+        let offset_col = (plan_cols.saturating_sub(cols)) / 2;
+        let offset_row = (plan_rows.saturating_sub(cols)) / 2;  // rows not cols for settlement grid
+        let pcol = scol + offset_col;
+        let prow = srow + offset_row;
+        let region_idx = (prow * plan_cols + pcol).min(state.regions.len().saturating_sub(1));
         let rpos = state.regions[region_idx].pos;
         let jx = (lcg_f32(rng) - 0.5) * spacing * 0.3;
         let jy = (lcg_f32(rng) - 0.5) * spacing * 0.3;

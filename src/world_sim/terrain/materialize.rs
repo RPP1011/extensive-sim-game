@@ -231,7 +231,7 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world_sim::terrain::region_plan::{generate_continent, SEA_LEVEL};
+    use crate::world_sim::terrain::region_plan::generate_continent;
     use crate::world_sim::voxel::{ChunkPos, VoxelMaterial, CHUNK_SIZE};
     use crate::world_sim::state::Terrain;
 
@@ -297,22 +297,36 @@ mod tests {
     #[test]
     fn different_biomes_produce_different_surfaces() {
         let plan = test_plan();
-        let plains_idx = plan.cells.iter().position(|c| c.terrain == Terrain::Plains);
+        let plains_idx = plan.cells.iter().position(|c| c.terrain == Terrain::Plains && c.height > 0.2);
         let other_idx = plan.cells.iter().position(|c| {
-            c.terrain != Terrain::Plains
+            c.height > 0.2
+                && c.terrain != Terrain::Plains
                 && c.terrain != Terrain::DeepOcean
                 && c.terrain != Terrain::Coast
         });
         if plains_idx.is_none() || other_idx.is_none() {
-            return; // not enough biome variety in this seed — skip
+            return;
         }
         let pi = plains_idx.unwrap();
         let oi = other_idx.unwrap();
         let pc = (pi % plan.cols, pi / plan.cols);
         let oc = (oi % plan.cols, oi / plan.cols);
-        let surface_z = (SEA_LEVEL / CHUNK_SIZE as i32) + 2;
-        let chunk_a = materialize_chunk(ChunkPos::new(pc.0 as i32, pc.1 as i32, surface_z), &plan, 42);
-        let chunk_b = materialize_chunk(ChunkPos::new(oc.0 as i32, oc.1 as i32, surface_z), &plan, 42);
+        use crate::world_sim::terrain::region_plan::CELL_SIZE;
+        // Use actual surface height for each biome cell
+        let vx_a = pc.0 as f32 * CELL_SIZE as f32 + 8.0;
+        let vy_a = pc.1 as f32 * CELL_SIZE as f32 + 8.0;
+        let vx_b = oc.0 as f32 * CELL_SIZE as f32 + 8.0;
+        let vy_b = oc.1 as f32 * CELL_SIZE as f32 + 8.0;
+        let sz_a = surface_height_at(vx_a, vy_a, &plan, 42);
+        let sz_b = surface_height_at(vx_b, vy_b, &plan, 42);
+        let cz_a = sz_a / CHUNK_SIZE as i32;
+        let cz_b = sz_b / CHUNK_SIZE as i32;
+        let cx_a = vx_a as i32 / CHUNK_SIZE as i32;
+        let cy_a = vy_a as i32 / CHUNK_SIZE as i32;
+        let cx_b = vx_b as i32 / CHUNK_SIZE as i32;
+        let cy_b = vy_b as i32 / CHUNK_SIZE as i32;
+        let chunk_a = materialize_chunk(ChunkPos::new(cx_a, cy_a, cz_a), &plan, 42);
+        let chunk_b = materialize_chunk(ChunkPos::new(cx_b, cy_b, cz_b), &plan, 42);
         let diffs = chunk_a.voxels.iter()
             .zip(chunk_b.voxels.iter())
             .filter(|(a, b)| a.material != b.material)
@@ -362,7 +376,7 @@ mod tests {
         let plan = generate_continent(30, 30, 42);
 
         // Collect surface material for several biome types
-        let mut biome_surface: std::collections::HashMap<String, VoxelMaterial> = std::collections::HashMap::new();
+        let mut biome_surface: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
 
         for (i, cell) in plan.cells.iter().enumerate() {
             if cell.height < 0.15 { continue; }
@@ -379,22 +393,23 @@ mod tests {
             let cz = surface_z / CHUNK_SIZE as i32;
 
             let chunk = materialize_chunk(ChunkPos::new(cx, cy, cz), &plan, 42);
-            // Find the most common non-air material
-            let mut counts = [0u32; 256];
+            // Find the most common non-air material (only check valid material indices)
+            let mut counts = [0u32; 36]; // VoxelMaterial has ~35 variants
             for v in &chunk.voxels {
-                counts[v.material as u8 as usize] += 1;
+                let idx = v.material as u8 as usize;
+                if idx > 0 && idx < counts.len() {
+                    counts[idx] += 1;
+                }
             }
-            counts[0] = 0; // ignore air
-            if let Some((mat_idx, _)) = counts.iter().enumerate().max_by_key(|(_, &c)| c) {
-                use std::mem::transmute;
-                // Safety: VoxelMaterial is repr(u8)
-                let mat: VoxelMaterial = unsafe { transmute(mat_idx as u8) };
-                biome_surface.insert(key, mat);
+            if let Some((mat_idx, &count)) = counts.iter().enumerate().max_by_key(|(_, &c)| c) {
+                if count > 0 {
+                    biome_surface.insert(key, mat_idx as u8);
+                }
             }
         }
 
         // We should have at least 3 distinct surface materials across biomes
-        let unique_mats: std::collections::HashSet<u8> = biome_surface.values().map(|m| *m as u8).collect();
+        let unique_mats: std::collections::HashSet<u8> = biome_surface.values().copied().collect();
         assert!(unique_mats.len() >= 3,
             "only {} distinct surface materials across {} biomes: {:?}",
             unique_mats.len(), biome_surface.len(), biome_surface);
