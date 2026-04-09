@@ -79,7 +79,7 @@ pub fn voxel_to_chunk_local(vx: i32, vy: i32, vz: i32) -> (ChunkPos, usize) {
 // Voxel materials
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum VoxelMaterial {
     Air = 0,

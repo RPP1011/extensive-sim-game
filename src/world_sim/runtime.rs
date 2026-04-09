@@ -1589,6 +1589,9 @@ impl WorldSim {
         // WORK STATE — advance NPC work state machine.
         super::systems::work::advance_work_states(&mut self.state);
 
+        // VOXEL RESOURCE SCANNING — NPCs discover nearby harvestable voxels.
+        super::systems::exploration::scan_all_npc_resources(&mut self.state);
+
         // STRUCTURAL INTEGRITY — collapse unsupported voxels every 10 ticks.
         if self.state.tick % 10 == 0 {
             super::systems::structural_tick::structural_tick(&mut self.state);
