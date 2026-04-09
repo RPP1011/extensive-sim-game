@@ -29,4 +29,3 @@ pub mod model_backend;
 pub mod ascii_gen;
 pub mod scenario;
 pub mod narrative;
-pub mod overworld_grid;
