@@ -6,6 +6,7 @@
 
 use crate::world_sim::voxel::{Chunk, ChunkPos, Voxel, VoxelMaterial, CHUNK_SIZE, local_index};
 use crate::world_sim::state::{Terrain, SubBiome};
+use crate::world_sim::terrain::region_plan::RegionPlan;
 use super::noise;
 
 // ---------------------------------------------------------------------------
@@ -148,19 +149,19 @@ fn feature_params(terrain: Terrain, sub_biome: SubBiome) -> FeatureParams {
 
 /// Place surface features (trees, boulders) into `chunk`.
 ///
-/// Only operates if `surface_z_local` (the surface height expressed as a local
-/// Z coordinate 0..CHUNK_SIZE) is within this chunk.  One voxel above the
-/// surface layer is the placement point.
+/// Computes per-column surface height from the plan so features sit on the
+/// actual ground, not the chunk-center approximation.
 pub fn place_surface_features(
     chunk: &mut Chunk,
     cp: ChunkPos,
     terrain: Terrain,
     sub_biome: SubBiome,
-    surface_z_local: i32,
+    surface_z_local: i32, // approximate, used for range check only
     seed: u64,
+    plan: Option<&RegionPlan>,
 ) {
-    // Surface must be within this chunk
-    if surface_z_local < 0 || surface_z_local >= CHUNK_SIZE as i32 {
+    // Surface must be roughly within this chunk
+    if surface_z_local < -10 || surface_z_local >= CHUNK_SIZE as i32 + 10 {
         return;
     }
 
@@ -172,13 +173,23 @@ pub fn place_surface_features(
     let base_x = cp.x * CHUNK_SIZE as i32;
     let base_y = cp.y * CHUNK_SIZE as i32;
     let base_z = cp.z * CHUNK_SIZE as i32;
-    // Feature base sits one voxel above the surface layer
-    let feature_base_z = base_z + surface_z_local + 1;
 
     for ly in 0..CHUNK_SIZE {
         for lx in 0..CHUNK_SIZE {
             let vx = base_x + lx as i32;
             let vy = base_y + ly as i32;
+
+            // Per-column surface height
+            let col_surface_z = if let Some(p) = plan {
+                super::materialize::surface_height_at(vx as f32, vy as f32, p, seed)
+            } else {
+                base_z + surface_z_local
+            };
+            // Feature base one voxel above surface
+            let feature_base_z = col_surface_z + 1;
+            // Skip if this column's surface isn't in this chunk's Z range
+            let local_z = feature_base_z - base_z;
+            if local_z < 0 || local_z >= CHUNK_SIZE as i32 { continue; }
 
             // Tree placement
             if params.tree_density > 0.0 {
@@ -241,7 +252,7 @@ mod tests {
         let mut chunk = make_surface_chunk(cp);
         // surface_z_local = CHUNK_SIZE/2 - 1 so features spawn at CHUNK_SIZE/2
         let surface_local = (CHUNK_SIZE / 2 - 1) as i32;
-        place_surface_features(&mut chunk, cp, Terrain::Forest, SubBiome::DenseForest, surface_local, 42);
+        place_surface_features(&mut chunk, cp, Terrain::Forest, SubBiome::DenseForest, surface_local, 42, None);
         let log_count = chunk.voxels.iter().filter(|v| v.material == VoxelMaterial::WoodLog).count();
         assert!(log_count > 0, "dense forest produced no trees");
     }
@@ -251,7 +262,7 @@ mod tests {
         // surface_z_local = CHUNK_SIZE (outside chunk) → nothing placed
         let cp = ChunkPos::new(0, 0, 0);
         let mut chunk = Chunk::new_air(cp);
-        place_surface_features(&mut chunk, cp, Terrain::Forest, SubBiome::DenseForest, CHUNK_SIZE as i32, 42);
+        place_surface_features(&mut chunk, cp, Terrain::Forest, SubBiome::DenseForest, CHUNK_SIZE as i32, 42, None);
         let any_solid = chunk.voxels.iter().any(|v| v.material.is_solid());
         assert!(!any_solid, "features placed when surface_z_local is out of range");
     }

@@ -184,7 +184,7 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
         let (cell, _, _) = plan.sample(cx as f32, cy as f32);
         let surface_z = surface_height_at(cx as f32, cy as f32, plan, seed);
         let surface_z_local = surface_z - base_z;
-        features::place_surface_features(&mut chunk, cp, cell.terrain, cell.sub_biome, surface_z_local, seed);
+        features::place_surface_features(&mut chunk, cp, cell.terrain, cell.sub_biome, surface_z_local, seed, Some(plan));
     }
 
     // 4. Flying islands — only for sky-level chunks in FlyingIslands biome.
