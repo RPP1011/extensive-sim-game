@@ -347,6 +347,15 @@ impl AppState {
         let cam_vy = cam[2]; // engine z → sim y
         let cam_vz = cam[1]; // engine y → sim z
 
+        // One-time debug: log camera position and what biome we're looking at
+        static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            let (cell, _, _) = plan.sample(cam_vx, cam_vy);
+            let surface = crate::world_sim::terrain::surface_height_at(cam_vx, cam_vy, &plan, seed);
+            eprintln!("[voxel] Camera sim coords: ({:.0}, {:.0}, {:.0}), surface_z={}, terrain={:?}, height={:.3}",
+                cam_vx, cam_vy, cam_vz, surface, cell.terrain, cell.height);
+        }
+
         let cs = CHUNK_SIZE as f32;
         let center_cx = (cam_vx / cs).floor() as i32;
         let center_cy = (cam_vy / cs).floor() as i32;
