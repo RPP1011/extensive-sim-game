@@ -445,6 +445,11 @@ pub struct WorldState {
     /// When true, WorldSim::new skips resource node spawning (for building AI scenarios).
     #[serde(default)]
     pub skip_resource_init: bool,
+
+    /// Continental terrain plan used to generate this world.
+    /// Stored so chunk generation can reference the same plan after world creation.
+    #[serde(skip)]
+    pub region_plan: Option<crate::world_sim::terrain::RegionPlan>,
 }
 
 impl WorldState {
@@ -480,6 +485,7 @@ impl WorldState {
             world_events: Vec::new(),
             registry: None,
             skip_resource_init: false,
+            region_plan: None,
         }
     }
 

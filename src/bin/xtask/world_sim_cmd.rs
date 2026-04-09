@@ -1756,6 +1756,7 @@ fn lcg_range(state: &mut u64, lo: usize, hi: usize) -> usize {
 // ---------------------------------------------------------------------------
 
 /// Integer hash → float in [0, 1).
+#[allow(dead_code)]
 fn noise_hash(x: i32, y: i32, seed: u64) -> f32 {
     let mut h = (x as u64).wrapping_mul(374761393)
         .wrapping_add((y as u64).wrapping_mul(668265263))
@@ -1766,6 +1767,7 @@ fn noise_hash(x: i32, y: i32, seed: u64) -> f32 {
 }
 
 /// Smoothstep-interpolated 2D value noise.
+#[allow(dead_code)]
 fn value_noise(x: f32, y: f32, seed: u64) -> f32 {
     let ix = x.floor() as i32;
     let iy = y.floor() as i32;
@@ -1781,6 +1783,7 @@ fn value_noise(x: f32, y: f32, seed: u64) -> f32 {
 }
 
 /// Fractal Brownian Motion — multi-octave noise in [0, 1).
+#[allow(dead_code)]
 fn fbm(x: f32, y: f32, seed: u64, octaves: u32) -> f32 {
     let mut v = 0.0f32;
     let mut amp = 0.5;
@@ -1795,6 +1798,7 @@ fn fbm(x: f32, y: f32, seed: u64, octaves: u32) -> f32 {
 
 /// Assign terrain from continuous noise fields (temperature, moisture, elevation).
 /// Spatially coherent — nearby regions get similar terrain.
+#[allow(dead_code)]
 fn assign_terrain(x: f32, y: f32, seed: u64) -> Terrain {
     // Three orthogonal noise fields at different scales
     let scale = 0.008; // world-scale frequency
@@ -2100,10 +2104,13 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
     let spacing = if args.rich { 200.0 } else { 100.0 };
     let layout = GridLayout { cols, rows, spacing };
 
-    create_regions(&mut state, &layout, &mut rng);
-    create_water_features(&mut state, &layout);
-    assign_elevations(&mut state);
-    assign_sub_biomes(&mut state);
+    // Generate continental plan and use it to populate regions.
+    let plan_cols = (cols + 2).max(5);
+    let plan_rows = (rows + 2).max(4);
+    let plan = game::world_sim::terrain::generate_continent(plan_cols, plan_rows, terrain_seed);
+    populate_regions_from_plan(&mut state, &plan, &layout, &mut rng);
+    state.region_plan = Some(plan.clone());
+    state.voxel_world.region_plan = Some(plan);
     build_adjacency_graph(&mut state, &layout);
     create_dungeon_sites(&mut state, &layout);
     create_factions(&mut state, num_factions, &mut rng);
@@ -2126,7 +2133,86 @@ fn build_world(args: &WorldSimArgs) -> WorldState {
 // build_world helpers — one per generation phase
 // ---------------------------------------------------------------------------
 
+/// Phase 1 (plan-based): Populate regions from a generated RegionPlan.
+/// Replaces create_regions + create_water_features + assign_elevations + assign_sub_biomes.
+fn populate_regions_from_plan(
+    state: &mut WorldState,
+    plan: &game::world_sim::terrain::RegionPlan,
+    layout: &GridLayout,
+    rng: &mut u64,
+) {
+    use game::world_sim::terrain::CELL_SIZE;
+
+    let num_regions = layout.cols * layout.rows;
+
+    // Build a set of cell indices that have a river passing through them.
+    // Rivers are polylines in voxel space; map each segment endpoint to a cell index.
+    let mut river_cells: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    for river in &plan.rivers {
+        for &(px, py) in &river.points {
+            let col = ((px / CELL_SIZE as f32).floor() as usize).min(plan.cols - 1);
+            let row = ((py / CELL_SIZE as f32).floor() as usize).min(plan.rows - 1);
+            // Map plan cell (col, row) to layout cell index if in bounds.
+            if col < layout.cols && row < layout.rows {
+                river_cells.insert(row * layout.cols + col);
+            }
+        }
+    }
+
+    for i in 0..num_regions {
+        let row = i / layout.cols;
+        let col = i % layout.cols;
+
+        // Map layout cell to plan cell (plan may be larger than layout).
+        let pcol = col.min(plan.cols - 1);
+        let prow = row.min(plan.rows - 1);
+        let cell = plan.get(pcol, prow);
+
+        // World-space position: same formula as old create_regions.
+        let base_x = col as f32 * layout.spacing + layout.spacing * 0.5;
+        let base_y = row as f32 * layout.spacing + layout.spacing * 0.5;
+        // Light jitter using a deterministic hash.
+        let jitter = layout.spacing * 0.35;
+        let jx = (lcg_f32(rng) - 0.5) * 2.0 * jitter;
+        let jy = (lcg_f32(rng) - 0.5) * 2.0 * jitter;
+        let pos = (base_x + jx, base_y + jy);
+
+        let terrain = cell.terrain;
+        let sub_biome = cell.sub_biome;
+        let elevation = terrain.base_elevation();
+        let has_river = river_cells.contains(&i);
+        let is_coastal = matches!(terrain, Terrain::Coast | Terrain::CoralReef);
+        let is_floating = terrain == Terrain::FlyingIslands;
+
+        state.regions.push(RegionState {
+            id: i as u32,
+            name: generate_region_name(i, rng),
+            terrain,
+            pos,
+            monster_density: terrain.threat_multiplier()
+                * Terrain::elevation_threat_mult(elevation)
+                * (0.1 + lcg_f32(rng) * 0.3),
+            faction_id: None,
+            threat_level: (terrain.threat_multiplier() - 1.0).max(0.0) * 0.2
+                + (elevation as f32 - 1.0).max(0.0) * 0.1,
+            has_river,
+            has_lake: false,
+            is_coastal,
+            river_connections: Vec::new(),
+            dungeon_sites: Vec::new(),
+            sub_biome,
+            neighbors: Vec::new(),
+            is_chokepoint: false,
+            elevation,
+            is_floating,
+            unrest: lcg_f32(rng) * 0.2,
+            control: 0.5 + lcg_f32(rng) * 0.5,
+        });
+    }
+}
+
 /// Phase 1: Create regions with terrain types.
+#[allow(dead_code)]
 fn create_regions(state: &mut WorldState, layout: &GridLayout, rng: &mut u64) {
     let num_regions = layout.cols * layout.rows;
     let terrain_seed = *rng;
@@ -2170,6 +2256,7 @@ fn create_regions(state: &mut WorldState, layout: &GridLayout, rng: &mut u64) {
 }
 
 /// Phase 1b: Generate water features — rivers, lakes, ocean borders.
+#[allow(dead_code)]
 fn create_water_features(state: &mut WorldState, layout: &GridLayout) {
     let GridLayout { cols, rows, .. } = *layout;
     let num_regions = state.regions.len();
@@ -2289,6 +2376,7 @@ fn create_water_features(state: &mut WorldState, layout: &GridLayout) {
 }
 
 /// Phase 1c: Elevation variation — Mountains/Glacier get random height tiers.
+#[allow(dead_code)]
 fn assign_elevations(state: &mut WorldState) {
     for i in 0..state.regions.len() {
         let terrain = state.regions[i].terrain;
@@ -2316,6 +2404,7 @@ fn assign_elevations(state: &mut WorldState) {
 }
 
 /// Phase 1d: Sub-biome assignment — terrain variants for richer geography.
+#[allow(dead_code)]
 fn assign_sub_biomes(state: &mut WorldState) {
     for i in 0..state.regions.len() {
         let terrain = state.regions[i].terrain;
