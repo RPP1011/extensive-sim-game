@@ -330,10 +330,11 @@ Fixed 64MB limit. LRU eviction by last-access frame.
 | Column heights | 4 KB |
 | Face masks | 1 byte |
 | Height map | 16 KB |
+| Billboard sprites | 32 KB (8 × 32×32 × 4 bytes RGBA) |
 | Nav mesh | ~10-50 KB |
 | Structural graph | ~5-20 KB |
 
-Worst case per mega: ~624 KB (with large shell + nav mesh). At 64MB budget: ~102 megas at full cache. Tight but workable. If profiling shows the shell grids are larger than expected, raise the budget to 96MB or evict shell grids more aggressively (they can be recomputed from the source chunks).
+Worst case per mega: ~656 KB (with large shell + nav mesh + billboard). At 64MB budget: ~97 megas at full cache. Tight but workable. Billboard sprites are cheap and should resist eviction (tiny size, expensive to rebuild). If profiling shows shell grids are larger than expected, raise the budget to 96MB or evict shell grids more aggressively (they can be recomputed from source chunks).
 
 LRU eviction drops an entire mega's cache entries. The mega is re-dirtied (cosmetic) so its cache rebuilds on access.
 
@@ -372,52 +373,76 @@ Rebuild mip1/mip2 from current grid after shell extraction.
 
 ### Tier 2 — LOD and Streaming (priority 20-29)
 
+Four LOD tiers with distance-based transitions:
+
+| Tier | Representation | Transition distance | VRAM per mega |
+|------|---------------|-------------------|---------------|
+| Full | 64³ ray-march or greedy mesh | 0 — 256 | ~280 KB (3D tex + mips + palette) |
+| Half | 32³ ray-march | 256 — 512 | ~35 KB |
+| Quarter | 16³ ray-march | 512 — 820 | ~5 KB |
+| Billboard | Sprite atlas (8 views × 32×32 RGBA) | 820+ (~100px on screen) | ~32 KB |
+
+The 820-unit billboard threshold comes from: at 1280px wide with 90° FOV, a 64-unit mega at 820 units subtends ~100 pixels. Below 100px, parallax errors from a flat sprite are imperceptible.
+
+**LOD transitions — alpha crossfade**:
+
+When a mega crosses a LOD boundary, both representations render simultaneously for 10 frames. The outgoing representation fades `alpha: 1.0 → 0.0` while the incoming fades `alpha: 0.0 → 1.0`. This eliminates hard pops.
+
+During crossfade, the mega costs 2 draw calls. At most ~5-10 megas transition per frame during smooth flight, so the overhead is 5-10 extra draw calls for 10 frames — negligible.
+
+**Distance hysteresis**: Promote (increase detail) at distance D. Demote (decrease detail) at D × 1.2. A mega at 255 units promotes to Full; it doesn't demote back to Half until 307 units. Prevents flicker at boundaries.
+
+Both crossfade and hysteresis apply to all LOD transitions including billboard ↔ quarter.
+
 **8. LOD demotion** (priority 20, ~1ms, yielding)
-Downsample distant megas: 64³→32³→16³. Criteria: distance >256, stable >200 frames.
+Downsample a mega to the next lower tier. For billboard: render 8 axis-aligned views (±X, ±Y, ±Z, plus 2 diagonal views for common camera angles) into 32×32 RGBA sprites using the existing ray-march renderer at low resolution. Criteria: distance exceeds tier threshold, stable >200 frames.
 
 **9. LOD promotion** (priority 21, ~1ms)
-Camera approaching — rebuild full 64³.
+Camera approaching — rebuild higher-detail representation. Higher priority than demotion so near terrain sharpens first.
 
-**10. VRAM eviction** (priority 25, ~0.1ms)
-Destroy GPU textures beyond load radius × 1.5.
+**10. Billboard render** (priority 22, ~0.5ms per mega)
+Pre-render the 8-view sprite atlas for a distant mega. Uses the existing `render_frame()` with a temporary 32×32 viewport aimed at the mega from each direction. Rebuild when the mega changes or when no cached view is within 30° of the current camera angle.
 
-**11. Disk serialization** (priority 28, ~2ms, dedicated I/O thread)
+**11. VRAM eviction** (priority 25, ~0.1ms)
+Destroy GPU textures beyond load radius × 1.5. Billboard sprites are kept longer (tiny VRAM cost) for smooth re-entry.
+
+**12. Disk serialization** (priority 28, ~2ms, dedicated I/O thread)
 Write evicted data to disk cache. Separate thread, not compute pool.
 
 ### Tier 3 — Lighting (priority 30-39, cosmetic-dirty)
 
-**12. AO bake** (priority 30, ~1.5ms, yielding per Z-layer)
+**13. AO bake** (priority 30, ~1.5ms, yielding per Z-layer)
 Per-surface-voxel hemisphere occlusion. 64³ u8 texture.
 
-**13. Light flood fill** (priority 32, ~1ms, yielding per BFS wavefront)
+**14. Light flood fill** (priority 32, ~1ms, yielding per BFS wavefront)
 Sky + emissive light propagation through air. 64³ u8 texture.
 
-**14. Shadow cache** (priority 34, ~1ms)
+**15. Shadow cache** (priority 34, ~1ms)
 Baked sun shadow map for static terrain.
 
-**15. Normal smoothing** (priority 36, ~0.5ms)
+**16. Normal smoothing** (priority 36, ~0.5ms)
 Averaged surface normals for smoother shading.
 
 ### Tier 4 — Sim Support (priority 40-49, cosmetic-dirty)
 
-**16. Height map bake** (priority 40, ~0.3ms)
+**17. Height map bake** (priority 40, ~0.3ms)
 2D height array for O(1) surface_height().
 
-**17. Structural graph** (priority 42, ~1ms, yielding)
+**18. Structural graph** (priority 42, ~1ms, yielding)
 Load-bearing connectivity for collapse detection.
 
-**18. Collision mesh** (priority 44, ~1ms, yielding)
+**19. Collision mesh** (priority 44, ~1ms, yielding)
 Simplified convex decomposition for physics. Note: NPCs use raw voxel grid queries (`get_voxel`, `surface_height`) for collision at all times. The collision mesh is a fast-path acceleration, not a prerequisite. NPCs never clip through terrain because the raw grid is always available and authoritative.
 
-**19. Nav mesh bake** (priority 46, ~1.5ms, yielding)
+**20. Nav mesh bake** (priority 46, ~1.5ms, yielding)
 Walkable surfaces with adjacency for pathfinding.
 
 ### Tier 5 — Memory (priority 50-59)
 
-**20. Texture atlas** (priority 50, ~0.5ms per batch)
+**21. Texture atlas** (priority 50, ~0.5ms per batch)
 Pack entity markers into one texture.
 
-**21. BC compression** (priority 55, ~1ms per mega)
+**22. BC compression** (priority 55, ~1ms per mega)
 Block-compress stable megas for ~4× bandwidth reduction.
 
 ## Hybrid Rendering: Ray-March vs Greedy Mesh
@@ -473,19 +498,22 @@ Deferred. At 64³ (4 octree levels), pointer overhead and traversal indirection 
 15. Greedy mesh builder + rasterization pipeline
 16. Hybrid render path with hysteresis + cooldown
 
-**Phase 4 — LOD**
-17. LOD demotion/promotion
-18. VRAM eviction improvements
-19. Disk serialization (I/O thread)
+**Phase 4 — LOD + Billboard**
+17. LOD demotion/promotion (full → half → quarter)
+18. Billboard sprite renderer (8-view atlas per mega)
+19. Alpha crossfade transitions (10-frame blend between LOD tiers)
+20. Distance hysteresis (promote at D, demote at D × 1.2)
+21. VRAM eviction improvements
+22. Disk serialization (I/O thread)
 
 **Phase 5 — Visual Quality**
-20. AO bake
-21. Light flood fill
-22. Shadow cache
-23. Normal smoothing
+23. AO bake
+24. Light flood fill
+25. Shadow cache
+26. Normal smoothing
 
 **Phase 6 — Sim Support + Memory**
-24. Height map bake
-25. Structural graph
-26. Nav mesh bake
-27. Texture atlas
+27. Height map bake
+28. Structural graph
+29. Nav mesh bake
+30. Texture atlas
