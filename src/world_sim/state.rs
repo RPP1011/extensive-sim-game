@@ -2788,6 +2788,23 @@ pub struct ResourceKnowledge {
 }
 
 // ---------------------------------------------------------------------------
+// VoxelResourceKnowledge — per-NPC discovered voxel deposit tracking
+// ---------------------------------------------------------------------------
+
+/// What an NPC knows about a voxel resource deposit (e.g. ore vein, stone outcrop).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VoxelResourceKnowledge {
+    /// Approximate center of the deposit in world-space.
+    pub center: (f32, f32),
+    /// What material the deposit contains.
+    pub material: super::voxel::VoxelMaterial,
+    /// Estimated number of matching voxels remaining.
+    pub estimated_count: u32,
+    /// Tick when this deposit was last observed/updated.
+    pub tick_observed: u64,
+}
+
+// ---------------------------------------------------------------------------
 // WorkState — spatial work state machine
 // ---------------------------------------------------------------------------
 
@@ -3351,6 +3368,11 @@ pub struct NpcData {
     /// Stale entries (>2000 ticks old) become unreliable.
     pub known_resources: std::collections::HashMap<u32, ResourceKnowledge>,
 
+    /// Known voxel resource deposits (ore veins, stone outcrops, etc.).
+    pub known_voxel_resources: Vec<VoxelResourceKnowledge>,
+    /// Current voxel being harvested (voxel coordinates), if any.
+    pub harvest_target: Option<(i32, i32, i32)>,
+
     /// Maslow-inspired need levels driving goal selection.
     pub needs: Needs,
     /// Event log + semantic beliefs formed from experience.
@@ -3779,6 +3801,8 @@ impl Default for NpcData {
             home_den: None,
             pack_leader_id: None,
             known_resources: std::collections::HashMap::new(),
+            known_voxel_resources: Vec::new(),
+            harvest_target: None,
             needs: Needs::default(),
             memory: Memory::default(),
             personality: Personality::default(),

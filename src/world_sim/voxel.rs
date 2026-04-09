@@ -765,6 +765,37 @@ impl VoxelWorld {
         }
         solid_neighbors >= 2
     }
+
+    /// Find the nearest voxel of a given material within a horizontal radius.
+    /// Scans a square from -radius to +radius around (center_vx, center_vy),
+    /// scanning each column from surface downward for matching material.
+    /// Returns the closest match by horizontal distance squared.
+    pub fn find_nearest_harvestable(&self, center_vx: i32, center_vy: i32, material: VoxelMaterial, radius: i32) -> Option<(i32, i32, i32)> {
+        let mut best: Option<(i32, i32, i32)> = None;
+        let mut best_dist_sq = i64::MAX;
+
+        for dx in -radius..=radius {
+            for dy in -radius..=radius {
+                let vx = center_vx + dx;
+                let vy = center_vy + dy;
+                let dist_sq = (dx as i64) * (dx as i64) + (dy as i64) * (dy as i64);
+                if dist_sq >= best_dist_sq { continue; }
+
+                // Scan column from surface down
+                let surface = self.surface_height(vx, vy);
+                for vz in (0..surface).rev() {
+                    let v = self.get_voxel(vx, vy, vz);
+                    if v.material == material {
+                        best = Some((vx, vy, vz));
+                        best_dist_sq = dist_sq;
+                        break; // only need topmost match per column
+                    }
+                }
+            }
+        }
+
+        best
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1463,5 +1494,61 @@ mod tests {
         // z=12 should also cascade
         let v12 = world.get_voxel(5, 5, 12);
         assert_eq!(v12.integrity, 0.0, "z=12 should cascade");
+    }
+
+    #[test]
+    fn mine_voxel_applies_damage_and_breaks() {
+        let mut world = VoxelWorld::default();
+        world.set_voxel(3, 3, 3, Voxel::new(VoxelMaterial::Dirt));
+
+        // Dirt hardness = 5. Mine with damage=1 five times.
+        for _ in 0..4 {
+            let result = world.mine_voxel(3, 3, 3, 1);
+            assert!(result.is_none(), "dirt should not break before 5 damage");
+            assert!(world.get_voxel(3, 3, 3).material.is_solid());
+        }
+
+        // 5th hit: should break
+        let result = world.mine_voxel(3, 3, 3, 1);
+        assert!(result.is_some(), "dirt should break at 5 cumulative damage");
+        let (mat, yield_info) = result.unwrap();
+        assert_eq!(mat, VoxelMaterial::Dirt);
+        assert!(yield_info.is_some(), "dirt yields food");
+
+        // Voxel should now be air
+        assert_eq!(world.get_voxel(3, 3, 3).material, VoxelMaterial::Air);
+    }
+
+    #[test]
+    fn find_nearest_harvestable_returns_closest() {
+        let mut world = VoxelWorld::default();
+
+        // Place two iron ore voxels at different distances
+        world.set_voxel(5, 5, 5, Voxel::new(VoxelMaterial::IronOre));
+        world.set_voxel(10, 5, 5, Voxel::new(VoxelMaterial::IronOre));
+
+        // Place a solid surface above them so surface_height finds them
+        for vx in 0..16 {
+            for vy in 0..16 {
+                world.set_voxel(vx, vy, 6, Voxel::new(VoxelMaterial::Dirt));
+            }
+        }
+
+        // Search from (5, 5) — the iron at (5,5,5) is closest
+        let result = world.find_nearest_harvestable(5, 5, VoxelMaterial::IronOre, 10);
+        assert_eq!(result, Some((5, 5, 5)));
+
+        // Search from (9, 5) — the iron at (10,5,5) is closest
+        let result = world.find_nearest_harvestable(9, 5, VoxelMaterial::IronOre, 10);
+        assert_eq!(result, Some((10, 5, 5)));
+    }
+
+    #[test]
+    fn find_nearest_harvestable_no_match() {
+        let mut world = VoxelWorld::default();
+        world.set_voxel(5, 5, 5, Voxel::new(VoxelMaterial::Stone));
+
+        let result = world.find_nearest_harvestable(5, 5, VoxelMaterial::IronOre, 10);
+        assert!(result.is_none());
     }
 }
