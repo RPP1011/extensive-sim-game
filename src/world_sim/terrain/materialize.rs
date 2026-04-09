@@ -13,6 +13,39 @@ use crate::world_sim::terrain::noise;
 use crate::world_sim::terrain::{caves, rivers, features, sky, dungeons};
 
 // ---------------------------------------------------------------------------
+// Surface height computation (shared by main pass + post-passes)
+// ---------------------------------------------------------------------------
+
+/// Compute the surface Z at a given voxel (x, y) position.
+/// Uses plan height + multi-scale detail noise with biome-dependent amplitude.
+pub fn surface_height_at(vx: f32, vy: f32, plan: &RegionPlan, seed: u64) -> i32 {
+    let base_height = plan.interpolate_height(vx, vy);
+    let (cell, _, _) = plan.sample(vx, vy);
+    let terrain = cell.terrain;
+
+    let large = noise::fbm_2d(vx * 0.004, vy * 0.004, seed.wrapping_add(0xface_cafe), 4, 2.0, 0.5);
+    let medium = noise::fbm_2d(vx * 0.015, vy * 0.015, seed.wrapping_add(0xdead_beef), 3, 2.0, 0.5);
+    let small = noise::fbm_2d(vx * 0.06, vy * 0.06, seed.wrapping_add(0xcafe_babe), 2, 2.0, 0.5);
+
+    let (large_amp, medium_amp, small_amp) = match terrain {
+        Terrain::Mountains | Terrain::Glacier => (80.0, 30.0, 5.0),
+        Terrain::Volcano => (60.0, 25.0, 4.0),
+        Terrain::Badlands => (40.0, 20.0, 4.0),
+        Terrain::Forest | Terrain::Jungle => (30.0, 12.0, 3.0),
+        Terrain::Tundra => (25.0, 10.0, 2.0),
+        Terrain::Desert => (20.0, 15.0, 2.0),
+        Terrain::Swamp | Terrain::Coast => (5.0, 3.0, 1.0),
+        Terrain::DeepOcean | Terrain::CoralReef => (10.0, 5.0, 1.0),
+        _ => (25.0, 10.0, 3.0),
+    };
+
+    let detail_offset = (large * 2.0 - 1.0) * large_amp
+        + (medium * 2.0 - 1.0) * medium_amp
+        + (small * 2.0 - 1.0) * small_amp;
+    (base_height * MAX_SURFACE_Z as f32 + detail_offset).round() as i32
+}
+
+// ---------------------------------------------------------------------------
 // Ore vein helper
 // ---------------------------------------------------------------------------
 
@@ -64,18 +97,7 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
                 let terrain = cell.terrain;
 
                 // --- Surface height ---
-                let base_height = plan.interpolate_height(vx as f32, vy as f32); // [0, 1]
-                let detail = noise::fbm_2d(
-                    vx as f32 * 0.02,
-                    vy as f32 * 0.02,
-                    seed.wrapping_add(0xface_cafe),
-                    3,
-                    2.0,
-                    0.5,
-                );
-                // detail is [0,1]; map to [-10, +10]
-                let detail_offset = (detail * 2.0 - 1.0) * 10.0;
-                let surface_z = (base_height * MAX_SURFACE_Z as f32 + detail_offset).round() as i32;
+                let surface_z = surface_height_at(vx as f32, vy as f32, plan, seed);
 
                 // Depth: positive → underground (below surface), negative → above surface
                 let depth = surface_z - vz;
@@ -131,14 +153,12 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
     // -----------------------------------------------------------------------
 
     // 1. Cave carving — for chunks that are predominantly underground.
-    //    We sample the biome at the chunk centre to decide which cave type.
     {
         let cx = base_x + CHUNK_SIZE as i32 / 2;
         let cy = base_y + CHUNK_SIZE as i32 / 2;
         let cz = base_z + CHUNK_SIZE as i32 / 2;
         let (cell, _, _) = plan.sample(cx as f32, cy as f32);
-        let base_h = plan.interpolate_height(cx as f32, cy as f32);
-        let surface_z_centre = (base_h * MAX_SURFACE_Z as f32).round() as i32;
+        let surface_z_centre = surface_height_at(cx as f32, cy as f32, plan, seed);
         let depth_below = surface_z_centre - cz;
         if depth_below > 20 {
             let bv = resolve_biome(cell.terrain, cell.sub_biome, depth_below, seed);
@@ -148,19 +168,10 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
 
     // 2. River carving — for all rivers in the plan.
     for river in &plan.rivers {
-        // Build a closure that reproduces the surface-height formula used above.
         let plan_ref: &RegionPlan = plan;
         let seed_inner = seed;
         let surface_z_fn = |vx: f32, vy: f32| -> i32 {
-            let bh = plan_ref.interpolate_height(vx, vy);
-            let detail = noise::fbm_2d(
-                vx * 0.02,
-                vy * 0.02,
-                seed_inner.wrapping_add(0xface_cafe),
-                3, 2.0, 0.5,
-            );
-            let detail_offset = (detail * 2.0 - 1.0) * 10.0;
-            (bh * MAX_SURFACE_Z as f32 + detail_offset).round() as i32
+            surface_height_at(vx, vy, plan_ref, seed_inner)
         };
         rivers::carve_river_in_chunk(&mut chunk, cp, river, &surface_z_fn);
     }
@@ -171,19 +182,9 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
         let cx = base_x + CHUNK_SIZE as i32 / 2;
         let cy = base_y + CHUNK_SIZE as i32 / 2;
         let (cell, _, _) = plan.sample(cx as f32, cy as f32);
-        let terrain = cell.terrain;
-        let sub_biome = cell.sub_biome;
-        let base_h = plan.interpolate_height(cx as f32, cy as f32);
-        let detail = noise::fbm_2d(
-            cx as f32 * 0.02,
-            cy as f32 * 0.02,
-            seed.wrapping_add(0xface_cafe),
-            3, 2.0, 0.5,
-        );
-        let detail_offset = (detail * 2.0 - 1.0) * 10.0;
-        let surface_z = (base_h * MAX_SURFACE_Z as f32 + detail_offset).round() as i32;
+        let surface_z = surface_height_at(cx as f32, cy as f32, plan, seed);
         let surface_z_local = surface_z - base_z;
-        features::place_surface_features(&mut chunk, cp, terrain, sub_biome, surface_z_local, seed);
+        features::place_surface_features(&mut chunk, cp, cell.terrain, cell.sub_biome, surface_z_local, seed);
     }
 
     // 4. Flying islands — only for sky-level chunks in FlyingIslands biome.
