@@ -340,6 +340,37 @@ pub struct BuildSeed {
 // WorldState — the complete snapshot, immutable during COMPUTE phase
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Structural events — voxel collapse / fracture tracking
+// ---------------------------------------------------------------------------
+
+/// What caused a structural collapse.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum CollapseCase {
+    NpcHarvest,
+    NpcConstruction,
+    Natural,
+}
+
+/// Events emitted by the structural integrity tick.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum StructuralEvent {
+    FragmentCollapse {
+        chunk_x: i32,
+        chunk_y: i32,
+        chunk_z: i32,
+        fragment_voxel_count: u32,
+        cause: CollapseCase,
+    },
+    StressFracture {
+        chunk_x: i32,
+        chunk_y: i32,
+        chunk_z: i32,
+        cluster_mass: f32,
+        material_strength: f32,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldState {
     pub tick: u64,
@@ -442,6 +473,11 @@ pub struct WorldState {
     #[serde(skip)]
     pub registry: Option<Arc<super::registry::Registry>>,
 
+    /// Structural events emitted during this tick (collapses, fractures).
+    /// Cleared at the start of each tick.
+    #[serde(default)]
+    pub structural_events: Vec<StructuralEvent>,
+
     /// When true, WorldSim::new skips resource node spawning (for building AI scenarios).
     #[serde(default)]
     pub skip_resource_init: bool,
@@ -484,6 +520,7 @@ impl WorldState {
             relations: HashMap::new(),
             world_events: Vec::new(),
             registry: None,
+            structural_events: Vec::new(),
             skip_resource_init: false,
             region_plan: None,
         }

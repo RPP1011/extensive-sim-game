@@ -1473,6 +1473,9 @@ impl WorldSim {
         let tick_start = Instant::now();
         let mut profile = TickProfile::default();
 
+        // Clear per-tick event buffers.
+        self.state.structural_events.clear();
+
         // SPATIAL INDEX — rebuild from hot entities (position data).
         self.spatial.rebuild(&self.state.entities);
 
@@ -1585,6 +1588,11 @@ impl WorldSim {
 
         // WORK STATE — advance NPC work state machine.
         super::systems::work::advance_work_states(&mut self.state);
+
+        // STRUCTURAL INTEGRITY — collapse unsupported voxels every 10 ticks.
+        if self.state.tick % 10 == 0 {
+            super::systems::structural_tick::structural_tick(&mut self.state);
+        }
 
         // DEBT REPAYMENT — NPCs repay debt from income.
         super::systems::economy::advance_debt(&mut self.state);

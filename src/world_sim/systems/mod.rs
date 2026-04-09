@@ -173,6 +173,7 @@ pub mod gathering;
 pub mod movement;
 pub mod action_eval;
 pub mod construction;
+pub mod structural_tick;
 
 macro_rules! run_system {
     ($name:expr, $func:expr, $state:expr, $out:expr) => {{
