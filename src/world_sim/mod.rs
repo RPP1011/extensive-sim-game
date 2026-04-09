@@ -7,6 +7,7 @@
 
 pub mod building_ai;
 pub mod registry;
+pub mod sector;
 pub mod terrain;
 pub mod voxel;
 pub mod nav_grid;
