@@ -138,22 +138,44 @@ impl AppState {
                 let min_y = positions.iter().map(|p| p.1).fold(f32::MAX, f32::min);
                 let max_y = positions.iter().map(|p| p.1).fold(f32::MIN, f32::max);
 
+                let cs = CHUNK_SIZE as f32;
                 let pad = 2;
-                let c_min_x = (min_x / 16.0).floor() as i32 - pad;
-                let c_max_x = (max_x / 16.0).ceil() as i32 + pad;
-                let c_min_y = (min_y / 16.0).floor() as i32 - pad;
-                let c_max_y = (max_y / 16.0).ceil() as i32 + pad;
+                let c_min_x = (min_x / cs).floor() as i32 - pad;
+                let c_max_x = (max_x / cs).ceil() as i32 + pad;
+                let c_min_y = (min_y / cs).floor() as i32 - pad;
+                let c_max_y = (max_y / cs).ceil() as i32 + pad;
+
+                // Determine Z range from terrain plan heights.
+                let (c_min_z, c_max_z) = if let Some(ref plan) = state.voxel_world.region_plan {
+                    use crate::world_sim::terrain::MAX_SURFACE_Z;
+                    let mut min_h = f32::MAX;
+                    let mut max_h = f32::MIN;
+                    // Sample heights at entity positions to find the Z range we need.
+                    for &(px, py) in &positions {
+                        let h = plan.interpolate_height(px, py);
+                        min_h = min_h.min(h);
+                        max_h = max_h.max(h);
+                    }
+                    let surface_min = (min_h * MAX_SURFACE_Z as f32) as i32;
+                    let surface_max = (max_h * MAX_SURFACE_Z as f32) as i32;
+                    // Generate from a few chunks below surface to a few above.
+                    let z_lo = (surface_min / CHUNK_SIZE as i32) - 3;
+                    let z_hi = (surface_max / CHUNK_SIZE as i32) + 3;
+                    (z_lo, z_hi)
+                } else {
+                    (0, 3) // legacy fallback
+                };
 
                 let mut count = 0;
                 for cx in c_min_x..=c_max_x {
                     for cy in c_min_y..=c_max_y {
-                        for cz in 0..=3 {
+                        for cz in c_min_z..=c_max_z {
                             state.voxel_world.generate_chunk(ChunkPos::new(cx, cy, cz), seed);
                             count += 1;
                         }
                     }
                 }
-                eprintln!("[voxel] Generated {} chunks", count);
+                eprintln!("[voxel] Generated {} chunks (z range: {}..{})", count, c_min_z, c_max_z);
             }
         }
 
@@ -162,12 +184,20 @@ impl AppState {
 
         // Camera above first settlement.
         let (cam_pos, cam_target) = if let Some(s) = sim.state().settlements.first() {
-            let z = sim.state().voxel_world.surface_height(s.pos.0 as i32, s.pos.1 as i32) as f32;
+            // Try voxel surface height first, fall back to plan interpolation.
+            let mut z = sim.state().voxel_world.surface_height(s.pos.0 as i32, s.pos.1 as i32) as f32;
+            if z <= 0.0 {
+                if let Some(ref plan) = sim.state().voxel_world.region_plan {
+                    let h = plan.interpolate_height(s.pos.0, s.pos.1);
+                    z = h * crate::world_sim::terrain::MAX_SURFACE_Z as f32;
+                }
+            }
+            eprintln!("[voxel] Camera target: settlement at ({:.0}, {:.0}), surface z={:.0}", s.pos.0, s.pos.1, z);
             let target = glam::Vec3::new(s.pos.0, z, s.pos.1);
-            let eye = target + glam::Vec3::new(-40.0, 60.0, -40.0);
+            let eye = target + glam::Vec3::new(-80.0, 120.0, -80.0);
             (eye, target)
         } else {
-            (glam::Vec3::new(0.0, 80.0, 0.0), glam::Vec3::ZERO)
+            (glam::Vec3::new(0.0, 200.0, 0.0), glam::Vec3::ZERO)
         };
         let mut camera = FreeCamera::new(cam_pos, cam_target);
         camera.set_move_speed(50.0);
