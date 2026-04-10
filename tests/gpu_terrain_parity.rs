@@ -90,14 +90,13 @@ fn gpu_cpu_parity_baseline() {
     eprintln!("TASK8 PARITY: {}/{} mismatches ({:.1}%)", mismatches, total, pct);
     eprintln!("CPU air voxels: {}, GPU air voxels: {}", cpu_air, gpu_air);
 
-    // Task 8 goal: region plan uploaded, so surface height and biome
-    // amplitudes should match. Remaining mismatches come from features
-    // the GPU shader doesn't implement yet (ore veins, badlands banding,
-    // jungle floor, desert dunes, snow-line, grass patches, caves, rivers,
-    // dungeons, etc. — Tasks 9-12).
+    // Task 9: full biome-aware material assignment ported to GPU shader.
+    // Remaining mismatches come from surface-height float precision edges
+    // and post-passes (caves, rivers, dungeons, features) that Tasks 10-12
+    // will address.
     assert!(
-        pct < 10.0,
-        "parity regressed: {:.1}% mismatches (expected <10% after Task 8)",
+        pct < 2.0,
+        "parity regressed: {:.1}% mismatches (expected <2% after Task 9)",
         pct
     );
     pipeline.destroy(&ctx, &mut alloc);
