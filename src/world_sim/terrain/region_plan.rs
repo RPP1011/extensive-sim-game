@@ -92,6 +92,25 @@ impl RegionPlan {
         (self.get(col, row), local_x, local_y)
     }
 
+    /// Convert the region cell grid to GPU-uploadable format.
+    /// Callers pass the result to `TerrainComputePipeline::upload_region_plan`.
+    #[cfg(feature = "app")]
+    pub fn to_gpu_cells(&self) -> Vec<voxel_engine::terrain_compute::RegionCellGpu> {
+        self.cells
+            .iter()
+            .map(|c| voxel_engine::terrain_compute::RegionCellGpu {
+                height: c.height,
+                moisture: c.moisture,
+                temperature: c.temperature,
+                terrain: c.terrain.to_u32(),
+                sub_biome: c.sub_biome.to_u32(),
+                _pad0: 0,
+                _pad1: 0,
+                _pad2: 0,
+            })
+            .collect()
+    }
+
     /// Bilinear interpolation of height at a voxel-space position.
     pub fn interpolate_height(&self, vx: f32, vy: f32) -> f32 {
         let cx = vx / CELL_SIZE as f32;

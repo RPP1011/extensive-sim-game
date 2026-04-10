@@ -4162,6 +4162,30 @@ impl Terrain {
         Terrain::CoralReef,
     ];
 
+    /// Stable u32 discriminant for GPU upload. Must match the GLSL terrain
+    /// enum values in `shaders/terrain_materialize.comp`.
+    pub fn to_u32(self) -> u32 {
+        match self {
+            Terrain::Plains => 0,
+            Terrain::Forest => 1,
+            Terrain::Mountains => 2,
+            Terrain::Coast => 3,
+            Terrain::Swamp => 4,
+            Terrain::Desert => 5,
+            Terrain::Tundra => 6,
+            Terrain::Volcano => 7,
+            Terrain::DeepOcean => 8,
+            Terrain::Jungle => 9,
+            Terrain::Glacier => 10,
+            Terrain::Caverns => 11,
+            Terrain::Badlands => 12,
+            Terrain::FlyingIslands => 13,
+            Terrain::DeathZone => 14,
+            Terrain::AncientRuins => 15,
+            Terrain::CoralReef => 16,
+        }
+    }
+
     /// Name for display.
     pub fn name(self) -> &'static str {
         match self {
@@ -4234,8 +4258,8 @@ impl Terrain {
     /// Whether settlements can be founded here.
     pub fn is_settleable(self) -> bool {
         match self {
-            Terrain::DeepOcean | Terrain::FlyingIslands | Terrain::CoralReef => false,
-            Terrain::Volcano | Terrain::DeathZone => false, // too dangerous
+            Terrain::DeepOcean | Terrain::Coast | Terrain::CoralReef | Terrain::FlyingIslands => false,
+            Terrain::Volcano | Terrain::DeathZone => false,
             _ => true,
         }
     }
@@ -4404,6 +4428,30 @@ impl Default for SubBiome {
 }
 
 impl SubBiome {
+    /// Stable u32 discriminant for GPU upload. The GPU doesn't currently use
+    /// sub_biome for materialization, but it's carried through for future
+    /// Task 9+ work. Value matches enum declaration order.
+    pub fn to_u32(self) -> u32 {
+        match self {
+            SubBiome::Standard => 0,
+            SubBiome::LightForest => 1,
+            SubBiome::DenseForest => 2,
+            SubBiome::AncientForest => 3,
+            SubBiome::SandDunes => 4,
+            SubBiome::RockyDesert => 5,
+            SubBiome::HotSprings => 6,
+            SubBiome::GlowingMarsh => 7,
+            SubBiome::TempleJungle => 8,
+            SubBiome::NaturalCave => 9,
+            SubBiome::LavaTubes => 10,
+            SubBiome::FrozenCavern => 11,
+            SubBiome::MushroomGrove => 12,
+            SubBiome::CrystalVein => 13,
+            SubBiome::Aquifer => 14,
+            SubBiome::BoneOssuary => 15,
+        }
+    }
+
     /// Display suffix for region names.
     pub fn suffix(self) -> &'static str {
         match self {
