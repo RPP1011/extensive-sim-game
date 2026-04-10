@@ -451,10 +451,17 @@ impl AppState {
     /// convert each one into a sim `Chunk`. Non-blocking — if nothing is ready,
     /// this is a cheap fence status check per slot.
     fn drain_completed_gpu_chunks(&mut self) {
-        let completed = match self.terrain_compute.try_take_completed(&self.ctx) {
+        // Phase 2: the pool keeps chunks GPU-resident. Until Phase 3 wires
+        // the renderer to sample the pool directly, we still need the bytes
+        // on the CPU side, so use the deprecated compat shim that performs
+        // an explicit readback per completed chunk.
+        let completed = match self
+            .terrain_compute
+            .try_take_completed_with_bytes(&self.ctx)
+        {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("[voxel] try_take_completed failed: {}", e);
+                eprintln!("[voxel] try_take_completed_with_bytes failed: {}", e);
                 return;
             }
         };
