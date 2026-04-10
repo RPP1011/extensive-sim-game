@@ -22,7 +22,7 @@ use voxel_engine::voxel::grid::VoxelGrid;
 
 const TILE_W: u32 = 400;
 const TILE_H: u32 = 300;
-const CHUNK_RADIUS: i32 = 5; // generates (2*R)^3 chunks per biome
+const CHUNK_RADIUS: i32 = 2; // (2*R)^3 = 64 chunks per biome. At 64³ chunks, 2 = 256m across
 
 fn try_vulkan() -> Option<VulkanContext> {
     VulkanContext::new().ok()
@@ -61,7 +61,7 @@ fn generate_biome_chunks(
     let r = CHUNK_RADIUS;
     let mut positions = Vec::new();
     // Bias downward: more underground chunks so bottom edge isn't visible
-    for dz in (-r - 3)..(r - 1) {
+    for dz in (-r - 1)..(r) {
         for dy in -r..r {
             for dx in -r..r {
                 let cp = ChunkPos::new(center_cx + dx, center_cy + dy, surface_cz + dz);

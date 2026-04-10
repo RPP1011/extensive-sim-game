@@ -156,22 +156,25 @@ mod tests {
     /// A perfectly straight river running through the middle of chunk (0,0,z)
     /// in the X direction.
     fn straight_river_x(y_world: f32, width: f32) -> RiverPath {
+        let edge = (CHUNK_SIZE as f32) * 4.0;
         RiverPath {
-            points: vec![(-100.0, y_world), (300.0, y_world)],
+            points: vec![(-edge, y_world), (edge, y_world)],
             widths: vec![width, width],
         }
     }
 
     #[test]
     fn river_carves_water_channel() {
-        // Surface chunk: cp.z=5 → base_z=80, so voxels 80..96
+        // Surface chunk: cp.z=5 → base_z=5*CHUNK_SIZE
         let cp = ChunkPos::new(0, 0, 5);
         let mut chunk = fill_chunk(cp, VoxelMaterial::Dirt);
+        let cs = CHUNK_SIZE as i32;
+        let mid_y = (cs / 2) as f32;
+        let mid_z = 5 * cs + cs / 2;
 
-        // River centered at y=8 (middle of chunk column), width=20
-        // Surface z function returns 88 (roughly middle of chunk)
-        let river = straight_river_x(8.0, 20.0);
-        let surface_fn = |_vx: f32, _vy: f32| -> i32 { 88 };
+        // River through middle of chunk
+        let river = straight_river_x(mid_y, cs as f32);
+        let surface_fn = move |_vx: f32, _vy: f32| -> i32 { mid_z };
 
         carve_river_in_chunk(&mut chunk, cp, &river, &surface_fn);
 
@@ -182,8 +185,11 @@ mod tests {
     #[test]
     fn river_carving_is_deterministic() {
         let cp = ChunkPos::new(1, 0, 5);
-        let river = straight_river_x(8.0, 16.0);
-        let surface_fn = |_: f32, _: f32| -> i32 { 85 };
+        let cs = CHUNK_SIZE as i32;
+        let mid_y = (cs / 2) as f32;
+        let mid_z = 5 * cs + cs / 2 - 3;
+        let river = straight_river_x(mid_y, cs as f32);
+        let surface_fn = move |_: f32, _: f32| -> i32 { mid_z };
 
         let mut a = fill_chunk(cp, VoxelMaterial::Dirt);
         let mut b = fill_chunk(cp, VoxelMaterial::Dirt);

@@ -435,32 +435,35 @@ mod tests {
         let chunk = make_half_solid_chunk();
         let sdf = generate_chunk_sdf(&chunk, None);
 
-        // Surface is a 16x16 plane at z=7/8 boundary.
-        // Surface voxels: z=7 (solid side) + z=8 (air side) = 2 * 16 * 16 = 512.
+        // Surface is a CHUNK_SIZE x CHUNK_SIZE plane at half-height boundary.
+        // Surface voxels: 2 layers * CHUNK_SIZE^2.
+        let plane = (CHUNK_SIZE * CHUNK_SIZE) as usize;
         let count = sdf.surface_count();
-        assert!(count >= 256, "should have at least 256 surface voxels, got {}", count);
-        assert!(count <= 1024, "should have at most 1024 surface voxels, got {}", count);
+        assert!(count >= plane, "should have at least {} surface voxels, got {}", plane, count);
+        assert!(count <= 4 * plane, "should have at most {} surface voxels, got {}", 4 * plane, count);
     }
 
     #[test]
     fn sdf_with_neighbor_fn() {
         // Create a chunk that's all solid, with a neighbor function that returns air above.
         let chunk = Chunk::new_filled(ChunkPos::new(0, 0, 0), VoxelMaterial::Stone);
+        let cs = CHUNK_SIZE as i32;
 
-        let neighbor = |_gx: i32, _gy: i32, gz: i32| -> Voxel {
-            // Everything above chunk (z >= 16) is air.
-            if gz >= 16 { Voxel::default() } else { Voxel::new(VoxelMaterial::Stone) }
+        let neighbor = move |_gx: i32, _gy: i32, gz: i32| -> Voxel {
+            if gz >= cs { Voxel::default() } else { Voxel::new(VoxelMaterial::Stone) }
         };
 
         let sdf = generate_chunk_sdf(&chunk, Some(&neighbor));
 
-        // Top layer (z=15) should be near-surface (neighbor above is air).
-        let d_top = sdf.distance_at(8, 8, 15);
+        // Top layer should be near-surface (neighbor above is air).
+        let mid = (CHUNK_SIZE / 2) as usize;
+        let top = (CHUNK_SIZE - 1) as usize;
+        let d_top = sdf.distance_at(mid, mid, top);
         assert!(d_top < 0.0, "top of solid chunk should be negative");
         assert!(d_top > -2.0, "top of solid chunk should be near surface with air above");
 
         // Deep interior should be more negative.
-        let d_deep = sdf.distance_at(8, 8, 0);
+        let d_deep = sdf.distance_at(mid, mid, 0);
         assert!(d_deep < d_top, "deep interior {} should be more negative than surface {}", d_deep, d_top);
     }
 

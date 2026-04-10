@@ -597,10 +597,12 @@ impl VoxelWorld {
 
     /// Check if a voxel is at a chunk boundary (any local coord is 0 or 15).
     pub fn is_chunk_boundary(vx: i32, vy: i32, vz: i32) -> bool {
-        let lx = vx.rem_euclid(CHUNK_SIZE as i32);
-        let ly = vy.rem_euclid(CHUNK_SIZE as i32);
-        let lz = vz.rem_euclid(CHUNK_SIZE as i32);
-        lx == 0 || lx == 15 || ly == 0 || ly == 15 || lz == 0 || lz == 15
+        let cs = CHUNK_SIZE as i32;
+        let max = cs - 1;
+        let lx = vx.rem_euclid(cs);
+        let ly = vy.rem_euclid(cs);
+        let lz = vz.rem_euclid(cs);
+        lx == 0 || lx == max || ly == 0 || ly == max || lz == 0 || lz == max
     }
 
     // -----------------------------------------------------------------------
@@ -927,23 +929,24 @@ mod tests {
 
     #[test]
     fn chunk_pos_from_voxel() {
+        let cs = CHUNK_SIZE as i32;
         assert_eq!(ChunkPos::from_voxel(0, 0, 0), ChunkPos::new(0, 0, 0));
-        assert_eq!(ChunkPos::from_voxel(15, 15, 15), ChunkPos::new(0, 0, 0));
-        assert_eq!(ChunkPos::from_voxel(16, 0, 0), ChunkPos::new(1, 0, 0));
+        assert_eq!(ChunkPos::from_voxel(cs - 1, cs - 1, cs - 1), ChunkPos::new(0, 0, 0));
+        assert_eq!(ChunkPos::from_voxel(cs, 0, 0), ChunkPos::new(1, 0, 0));
         assert_eq!(ChunkPos::from_voxel(-1, 0, 0), ChunkPos::new(-1, 0, 0));
-        assert_eq!(ChunkPos::from_voxel(-16, 0, 0), ChunkPos::new(-1, 0, 0));
-        assert_eq!(ChunkPos::from_voxel(-17, 0, 0), ChunkPos::new(-2, 0, 0));
+        assert_eq!(ChunkPos::from_voxel(-cs, 0, 0), ChunkPos::new(-1, 0, 0));
+        assert_eq!(ChunkPos::from_voxel(-cs - 1, 0, 0), ChunkPos::new(-2, 0, 0));
     }
 
     #[test]
     fn voxel_roundtrip() {
-        let (vx, vy, vz) = (10, -5, 30);
+        let cs = CHUNK_SIZE as i32;
+        let (vx, vy, vz) = (10, -5, cs + 14);
         let (cp, idx) = voxel_to_chunk_local(vx, vy, vz);
         assert_eq!(cp, ChunkPos::new(0, -1, 1));
-        // Local coords: (10, 11, 14)
-        let lx = vx.rem_euclid(16) as usize;
-        let ly = vy.rem_euclid(16) as usize;
-        let lz = vz.rem_euclid(16) as usize;
+        let lx = vx.rem_euclid(cs) as usize;
+        let ly = vy.rem_euclid(cs) as usize;
+        let lz = vz.rem_euclid(cs) as usize;
         assert_eq!(idx, local_index(lx, ly, lz));
     }
 
@@ -1086,19 +1089,18 @@ mod tests {
     #[test]
     fn cross_chunk_set_and_get() {
         let mut world = VoxelWorld::default();
+        let cs = CHUNK_SIZE as i32;
 
-        // Place voxels straddling a chunk boundary at x=15 and x=16.
-        world.set_voxel(15, 0, 0, Voxel::new(VoxelMaterial::Stone));
-        world.set_voxel(16, 0, 0, Voxel::new(VoxelMaterial::IronOre));
+        // Place voxels straddling a chunk boundary at x=cs-1 and x=cs.
+        world.set_voxel(cs - 1, 0, 0, Voxel::new(VoxelMaterial::Stone));
+        world.set_voxel(cs, 0, 0, Voxel::new(VoxelMaterial::IronOre));
 
-        // They should be in different chunks.
-        let cp1 = ChunkPos::from_voxel(15, 0, 0);
-        let cp2 = ChunkPos::from_voxel(16, 0, 0);
-        assert_ne!(cp1, cp2, "voxels at x=15 and x=16 must be in different chunks");
+        let cp1 = ChunkPos::from_voxel(cs - 1, 0, 0);
+        let cp2 = ChunkPos::from_voxel(cs, 0, 0);
+        assert_ne!(cp1, cp2, "voxels at x=cs-1 and x=cs must be in different chunks");
 
-        // Both should be readable.
-        assert_eq!(world.get_voxel(15, 0, 0).material, VoxelMaterial::Stone);
-        assert_eq!(world.get_voxel(16, 0, 0).material, VoxelMaterial::IronOre);
+        assert_eq!(world.get_voxel(cs - 1, 0, 0).material, VoxelMaterial::Stone);
+        assert_eq!(world.get_voxel(cs, 0, 0).material, VoxelMaterial::IronOre);
     }
 
     #[test]
@@ -1160,46 +1162,48 @@ mod tests {
     #[test]
     fn water_visible_across_chunk_boundary() {
         let mut world = VoxelWorld::default();
+        let cs = CHUNK_SIZE as i32;
 
-        // Place water at the very edge of chunk (0,0,0) — local x=15.
+        // Place water at the very edge of chunk (0,0,0) — local x=cs-1.
         let mut water = Voxel::new(VoxelMaterial::Water);
         water.set_water_level(8);
         water.set_source(true);
-        world.set_voxel(15, 0, 0, water);
+        world.set_voxel(cs - 1, 0, 0, water);
 
-        // Query from the perspective of the neighboring chunk.
-        let v = world.get_voxel(15, 0, 0);
+        let v = world.get_voxel(cs - 1, 0, 0);
         assert_eq!(v.material, VoxelMaterial::Water);
         assert_eq!(v.water_level(), 8);
         assert!(v.is_source());
 
-        // The next-door voxel (x=16, in chunk 1,0,0) should be air.
-        assert_eq!(world.get_voxel(16, 0, 0).material, VoxelMaterial::Air);
+        // The next-door voxel (x=cs, in chunk 1,0,0) should be air.
+        assert_eq!(world.get_voxel(cs, 0, 0).material, VoxelMaterial::Air);
     }
 
     #[test]
     fn water_column_spans_chunks_vertically() {
         let mut world = VoxelWorld::default();
+        let cs = CHUNK_SIZE as i32;
+        let lo = cs - 6;
+        let hi = cs + 4;
 
-        // Fill a column of water from z=10 to z=20, crossing the chunk boundary at z=16.
-        for z in 10..=20 {
+        // Fill a column of water crossing the z chunk boundary at z=cs.
+        for z in lo..=hi {
             let mut w = Voxel::new(VoxelMaterial::Water);
             w.set_water_level(15);
             world.set_voxel(0, 0, z, w);
         }
 
-        // Verify all are water, including across the z=15/16 chunk boundary.
-        for z in 10..=20 {
+        for z in lo..=hi {
             let v = world.get_voxel(0, 0, z);
             assert_eq!(v.material, VoxelMaterial::Water,
-                "water at z={} should be present (crosses chunk at z=16)", z);
+                "water at z={} should be present (crosses chunk at z={})", z, cs);
             assert_eq!(v.water_level(), 15);
         }
 
-        // Verify it's in two different chunks.
-        let cp_low = ChunkPos::from_voxel(0, 0, 10);
-        let cp_high = ChunkPos::from_voxel(0, 0, 20);
-        assert_ne!(cp_low, cp_high, "z=10 and z=20 should be in different chunks");
+        // Verify it spans two chunks.
+        let cp_low = ChunkPos::from_voxel(0, 0, lo);
+        let cp_high = ChunkPos::from_voxel(0, 0, hi);
+        assert_ne!(cp_low, cp_high, "z={} and z={} should be in different chunks", lo, hi);
     }
 
     // -----------------------------------------------------------------------
@@ -1267,11 +1271,12 @@ mod tests {
 
     #[test]
     fn is_chunk_boundary_detects_edges() {
-        assert!(VoxelWorld::is_chunk_boundary(0, 5, 5));   // x=0 → local x=0
-        assert!(VoxelWorld::is_chunk_boundary(15, 5, 5));  // x=15 → local x=15
-        assert!(VoxelWorld::is_chunk_boundary(16, 5, 5));  // x=16 → local x=0 (next chunk)
-        assert!(!VoxelWorld::is_chunk_boundary(8, 8, 8));  // center of chunk
-        assert!(VoxelWorld::is_chunk_boundary(-1, 0, 0));  // x=-1 → local x=15
+        let cs = CHUNK_SIZE as i32;
+        assert!(VoxelWorld::is_chunk_boundary(0, 5, 5));   // local x=0
+        assert!(VoxelWorld::is_chunk_boundary(cs - 1, 5, 5));  // local x=cs-1
+        assert!(VoxelWorld::is_chunk_boundary(cs, 5, 5));  // local x=0 (next chunk)
+        assert!(!VoxelWorld::is_chunk_boundary(cs / 2, cs / 2, cs / 2));  // center
+        assert!(VoxelWorld::is_chunk_boundary(-1, 0, 0));  // local x=cs-1
     }
 
     // -----------------------------------------------------------------------

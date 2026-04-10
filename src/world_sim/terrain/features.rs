@@ -41,29 +41,36 @@ pub fn stamp_tree_biome(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, se
     let vy = base_y + ly as i32;
 
     // Size category: small bush (20%), medium tree (60%), large tree (20%)
+    // At 10cm/voxel with CHUNK_SIZE=64 — realistic proportions
     let size_hash = noise::hash_f32(vx, vy, 5, seed.wrapping_add(TREE_HEIGHT_SALT));
     let h_hash = noise::hash_f32(vx, vy, 0, seed.wrapping_add(TREE_HEIGHT_SALT));
 
-    let (trunk_height, canopy_r) = if size_hash < 0.2 {
-        // Small bush: trunk 2-3, canopy 1-2
-        (2 + (h_hash * 2.0) as i32, if h_hash > 0.5 { 2 } else { 1 })
+    let (trunk_height, trunk_radius, canopy_r) = if size_hash < 0.2 {
+        // Small bush/sapling: 1-2m tall, 10cm trunk, 50-80cm canopy
+        (10 + (h_hash * 10.0) as i32, 1i32, 5 + (h_hash * 3.0) as i32)
     } else if size_hash > 0.8 {
-        // Large ancient tree: trunk 8-12, canopy 3-4
-        (8 + (h_hash * 5.0) as i32, if h_hash > 0.5 { 4 } else { 3 })
+        // Large tree: 8-12m tall, 40cm trunk, 2-3m canopy
+        (80 + (h_hash * 40.0) as i32, 2, 20 + (h_hash * 10.0) as i32)
     } else {
-        // Standard tree: trunk 5-8, canopy 2-3
-        let c_hash = noise::hash_f32(vx, vy, 1, seed.wrapping_add(TREE_CANOPY_SALT));
-        (5 + (h_hash * 4.0) as i32, if c_hash > 0.5 { 3 } else { 2 })
+        // Standard tree: 4-7m tall, 20-30cm trunk, 1.5-2m canopy
+        (40 + (h_hash * 30.0) as i32, 1 + (h_hash * 1.5) as i32, 12 + (h_hash * 6.0) as i32)
     };
 
-    // -- Trunk --
+    // -- Trunk (cylindrical) --
     for dz in 0..trunk_height {
         let wz = base_z + dz;
         let lz_local = wz - base_cz;
         if lz_local < 0 || lz_local >= CHUNK_SIZE as i32 { continue; }
-        if lx >= CHUNK_SIZE || ly >= CHUNK_SIZE { continue; }
-        let idx = local_index(lx, ly, lz_local as usize);
-        chunk.voxels[idx] = Voxel::new(VoxelMaterial::WoodLog);
+        for dy in -trunk_radius..=trunk_radius {
+            for dx in -trunk_radius..=trunk_radius {
+                if dx * dx + dy * dy > trunk_radius * trunk_radius + 1 { continue; }
+                let llx = lx as i32 + dx;
+                let lly = ly as i32 + dy;
+                if llx < 0 || lly < 0 || llx >= CHUNK_SIZE as i32 || lly >= CHUNK_SIZE as i32 { continue; }
+                let idx = local_index(llx as usize, lly as usize, lz_local as usize);
+                chunk.voxels[idx] = Voxel::new(VoxelMaterial::WoodLog);
+            }
+        }
     }
 
     // -- Canopy sphere --
@@ -101,7 +108,7 @@ fn stamp_boulder(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, seed: u64
     let vy = base_y + ly as i32;
 
     let s_hash = noise::hash_f32(vx, vy, 2, seed.wrapping_add(BOULDER_SIZE_SALT));
-    let size = 1 + (s_hash * 3.0) as i32; // 1..3
+    let size = 3 + (s_hash * 8.0) as i32; // 3..10 (30cm-1m at 10cm/voxel)
 
     for dz in 0..size {
         for dy in 0..size {
@@ -132,8 +139,8 @@ fn stamp_pillar(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, seed: u64,
     let vy = base_y + ly as i32;
 
     let h_hash = noise::hash_f32(vx, vy, 3, seed.wrapping_add(PILLAR_HEIGHT_SALT));
-    let height = 3 + (h_hash * 6.0) as i32; // 3..8
-    let radius: i32 = if h_hash > 0.6 { 2 } else { 1 };
+    let height = 20 + (h_hash * 40.0) as i32; // 20..60 (2-6m at 10cm/voxel)
+    let radius: i32 = 3 + (h_hash * 3.0) as i32; // 3..5 (30-50cm radius)
 
     for dz in 0..height {
         for dy in -radius..=radius {
@@ -167,21 +174,23 @@ struct FeatureParams {
 }
 
 fn feature_params(terrain: Terrain, sub_biome: SubBiome) -> FeatureParams {
+    // Densities for 10cm/voxel with CHUNK_SIZE=64. Trees are 40-120 voxels
+    // tall with 12-30 voxel canopy radius — very large footprint per tree.
     let tree_density = match terrain {
         Terrain::Forest => match sub_biome {
-            SubBiome::DenseForest   => 0.15,
-            SubBiome::LightForest   => 0.03,
-            SubBiome::AncientForest => 0.08,
-            _                       => 0.06,
+            SubBiome::DenseForest   => 0.004,
+            SubBiome::LightForest   => 0.001,
+            SubBiome::AncientForest => 0.002,
+            _                       => 0.002,
         },
         Terrain::Jungle => match sub_biome {
-            SubBiome::TempleJungle => 0.18,
-            _                      => 0.20,
+            SubBiome::TempleJungle => 0.005,
+            _                      => 0.006,
         },
-        Terrain::Tundra  => 0.01,
-        Terrain::Swamp   => 0.07,
-        Terrain::Mountains => 0.005,
-        Terrain::Plains  => 0.008,
+        Terrain::Tundra  => 0.0005,
+        Terrain::Swamp   => 0.002,
+        Terrain::Mountains => 0.0003,
+        Terrain::Plains  => 0.0003,
         _ => 0.0,
     };
 

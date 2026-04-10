@@ -113,8 +113,8 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
                 };
 
                 // --- Layer assignment ---
-                let material = if vz < -120 {
-                    // Deep bedrock — always granite
+                let material = if vz < -500 {
+                    // Deep bedrock — always granite (50m below datum)
                     VoxelMaterial::Granite
                 } else if depth > 80 {
                     // Deep stone zone — ore veins possible
@@ -151,10 +151,11 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
                     // Surface layer (depth 0 or -1 means vz == surface_z or surface_z+1)
                     if matches!(terrain, Terrain::Mountains | Terrain::Glacier) {
                         // Mountain surface varies by altitude + noise
+                        // At 10cm/voxel: snow above 150m, transition 130-150m
                         let n = noise::hash_f32(vx, vy, vz, seed.wrapping_add(0xA1B2));
-                        if vz > 160 {
+                        if vz > 1500 {
                             VoxelMaterial::Snow
-                        } else if vz > 140 {
+                        } else if vz > 1300 {
                             // Transition zone: patchy snow
                             if n > 0.4 { VoxelMaterial::Snow } else { VoxelMaterial::Stone }
                         } else if n > 0.7 {
@@ -254,7 +255,7 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
     // Post-pass feature integration
     // -----------------------------------------------------------------------
 
-    // 0. Swamp water pooling — shallow water in low spots above terrain surface.
+    // 0. Swamp water pooling — clustered ponds in low spots.
     {
         let cx = base_x + CHUNK_SIZE as i32 / 2;
         let cy = base_y + CHUNK_SIZE as i32 / 2;
@@ -265,10 +266,14 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
                     let vx = base_x + lx as i32;
                     let vy = base_y + ly as i32;
                     let col_surface = surface_height_at(vx as f32, vy as f32, plan, seed);
-                    // Pool water 1-2 voxels above surface in ~40% of columns
-                    let pool_noise = noise::hash_f32(vx, vy, 0, seed.wrapping_add(0x5A_A_0));
-                    if pool_noise < 0.40 {
-                        for dz in 1..=2 {
+                    // Use larger-scale noise to cluster ponds (15% coverage in clusters)
+                    let pond_field = noise::fbm_2d(
+                        vx as f32 * 0.012, vy as f32 * 0.012,
+                        seed.wrapping_add(0x5A_A_0), 2, 2.0, 0.5,
+                    );
+                    if pond_field > 0.65 {
+                        // Inside a pond cluster — fill 2-5 voxels deep
+                        for dz in 1..=4 {
                             let wz = col_surface + dz;
                             let lz = wz - base_z;
                             if lz >= 0 && lz < CHUNK_SIZE as i32 {

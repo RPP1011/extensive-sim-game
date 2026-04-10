@@ -1,20 +1,22 @@
 //! Spatial constants for the world sim voxel system.
 //!
 //! All scale-dependent values live here so a voxel size change is a single edit.
-//! Current scale: 1 voxel ≈ 5cm, 1 NPC ≈ 40 voxels tall (~2m).
+//! Current scale: 1 voxel ≈ 2.5cm, 1 NPC ≈ 80 voxels tall (~2m).
 
 // ---------------------------------------------------------------------------
 // Voxel grid
 // ---------------------------------------------------------------------------
 
 /// Voxels per chunk edge. Chunks are cubic: CHUNK_SIZE³ voxels.
-pub const CHUNK_SIZE: usize = 16;
+/// At 10cm/voxel, 64³ = 6.4m per chunk edge.
+pub const CHUNK_SIZE: usize = 64;
 
 /// Total voxels per chunk.
 pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
-/// World units per voxel. At 0.05 (5cm), a 40-voxel NPC is 2m tall.
-pub const VOXEL_SCALE: f32 = 1.0; // TODO: change to 0.05 for 5cm voxels
+/// World units per voxel. At 0.10 (10cm), an 18-voxel NPC is 1.8m tall.
+/// Targets Trove/Teardown chunky voxel art style.
+pub const VOXEL_SCALE: f32 = 0.10;
 
 // ---------------------------------------------------------------------------
 // Terrain generation
@@ -24,13 +26,16 @@ pub const VOXEL_SCALE: f32 = 1.0; // TODO: change to 0.05 for 5cm voxels
 pub const CELL_SIZE: i32 = 4096;
 
 /// Maximum surface height in voxels. Mountains peak near this value.
-pub const MAX_SURFACE_Z: i32 = 400;
+/// At 10cm/voxel, 2000 = 200m elevation range.
+pub const MAX_SURFACE_Z: i32 = 2000;
 
 /// Sea level in voxels. Water fills below this in ocean/coast/swamp biomes.
-pub const SEA_LEVEL: i32 = 80;
+/// At 10cm/voxel, 350 = 35m. Same ~17% ratio of MAX_SURFACE_Z as before.
+pub const SEA_LEVEL: i32 = 350;
 
 /// Base Z level where flying islands start generating.
-pub const SKY_BASE_Z: i32 = 300;
+/// At 10cm/voxel, 1600 = 160m.
+pub const SKY_BASE_Z: i32 = 1600;
 
 // ---------------------------------------------------------------------------
 // Sectors (3D spatial partitioning)
@@ -44,14 +49,21 @@ pub const SECTOR_SIZE: i32 = 4096;
 // ---------------------------------------------------------------------------
 
 /// How many sim chunks per mega-chunk axis. MEGA × CHUNK_SIZE = voxels per mega edge.
-pub const MEGA: i32 = 4;
+/// At 64 chunk size: 2×64 = 128 voxels = 12.8m per mega edge.
+pub const MEGA: i32 = 2;
 
 /// Voxels per mega-chunk edge.
 pub const MEGA_VOXELS: u32 = (MEGA as u32) * (CHUNK_SIZE as u32);
 
-/// Maximum distance (world units) from camera to load/render a mega-chunk.
+/// Maximum distance (voxels) from camera to load/render a mega-chunk.
+/// At 10cm/voxel, 2048 voxels ≈ 204.8m render distance.
 pub const LOAD_RADIUS: f32 = 2048.0;
 
-/// Window dimensions for the voxel renderer.
-pub const RENDER_WIDTH: u32 = 1280;
-pub const RENDER_HEIGHT: u32 = 720;
+/// Internal render resolution for the voxel raycaster.
+/// Kept lower than window size for performance; blit-upscaled to the window.
+pub const RENDER_WIDTH: u32 = 640;
+pub const RENDER_HEIGHT: u32 = 360;
+
+/// Window dimensions (may differ from render resolution for upscaling).
+pub const WINDOW_WIDTH: u32 = 1280;
+pub const WINDOW_HEIGHT: u32 = 720;
