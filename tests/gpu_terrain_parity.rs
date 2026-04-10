@@ -74,6 +74,11 @@ fn gpu_cpu_parity_baseline() {
     let cs = CHUNK_SIZE;
     assert_eq!(gpu_mats.len(), cs * cs * cs);
 
+    // Phase 3: the GPU shader now writes in engine-oriented (x, y-up, z)
+    // layout so the renderer can sample chunks directly from the pool. Sim
+    // coords are (x, y, z-up), so to compare with `cpu_chunk.get(lx, ly, lz)`
+    // we index the GPU bytes at (lx, sim_z=lz, sim_y=ly) → linear index
+    // `ly * cs * cs + lz * cs + lx`.
     let mut mismatches = 0usize;
     let mut cpu_air = 0;
     let mut gpu_air = 0;
@@ -81,7 +86,7 @@ fn gpu_cpu_parity_baseline() {
         for ly in 0..cs {
             for lx in 0..cs {
                 let cpu_mat = cpu_chunk.get(lx, ly, lz).material as u8;
-                let gpu_mat = gpu_mats[lz * cs * cs + ly * cs + lx];
+                let gpu_mat = gpu_mats[ly * cs * cs + lz * cs + lx];
                 if cpu_mat != gpu_mat {
                     mismatches += 1;
                 }

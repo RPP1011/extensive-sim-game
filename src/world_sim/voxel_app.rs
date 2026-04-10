@@ -19,6 +19,7 @@ use voxel_engine::render::VoxelRenderer;
 use voxel_engine::vulkan::allocator::VulkanAllocator;
 use voxel_engine::vulkan::instance::VulkanContext;
 use voxel_engine::vulkan::swapchain::SwapchainContext;
+use voxel_engine::terrain_compute::LoadedChunkView;
 use voxel_engine::vulkan::voxel_gpu::{self, GpuVoxelTexture};
 use voxel_engine::voxel::grid::VoxelGrid;
 
@@ -171,6 +172,16 @@ impl AppState {
                 gpu_cells.len(),
                 river_headers.len()
             );
+        }
+
+        // Upload the shared palette to the compute pool once. The pool render
+        // entry point samples this for every chunk draw; no per-mega palette
+        // uploads on the hot path.
+        {
+            let palette_rgba = bridge.palette_rgba();
+            terrain_compute
+                .upload_palette(&ctx, &mut alloc, palette_rgba)
+                .context("upload palette to pool")?;
         }
 
         let mut settlement_chunks: Vec<ChunkPos> = Vec::new();
@@ -447,49 +458,22 @@ impl AppState {
         }
     }
 
-    /// Poll the GPU terrain compute pipeline for completed dispatches and
-    /// convert each one into a sim `Chunk`. Non-blocking — if nothing is ready,
-    /// this is a cheap fence status check per slot.
+    /// Poll the GPU terrain compute pipeline for completed dispatches.
+    /// Phase 3: the chunk texture stays GPU-resident in the pool, and the
+    /// renderer samples it directly via `loaded_chunk_views()` — no CPU
+    /// readback or `VoxelWorld` insert happens here. Settlement chunks
+    /// (CPU-generated in a background thread) are handled by
+    /// `drain_ready_chunks` and still go through the CPU path.
     fn drain_completed_gpu_chunks(&mut self) {
-        // Phase 2: the pool keeps chunks GPU-resident. Until Phase 3 wires
-        // the renderer to sample the pool directly, we still need the bytes
-        // on the CPU side, so use the deprecated compat shim that performs
-        // an explicit readback per completed chunk.
-        let completed = match self
-            .terrain_compute
-            .try_take_completed_with_bytes(&self.ctx)
-        {
+        let completed = match self.terrain_compute.try_take_completed(&self.ctx) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("[voxel] try_take_completed_with_bytes failed: {}", e);
+                eprintln!("[voxel] try_take_completed failed: {}", e);
                 return;
             }
         };
-        let cs = CHUNK_SIZE;
-        for (req_id, chunk_pos, gpu_mats) in completed {
+        for (req_id, _chunk_pos) in completed {
             self.pending_chunk_requests.remove(&req_id);
-            let cp = ChunkPos::new(chunk_pos[0], chunk_pos[1], chunk_pos[2]);
-            // A pre-generated chunk may have been inserted between submit and
-            // drain (e.g. the settlement thread); don't clobber it.
-            if self.sim.state().voxel_world.chunks.contains_key(&cp) {
-                continue;
-            }
-            let mut chunk = crate::world_sim::voxel::Chunk::new_air(cp);
-            for lz in 0..cs {
-                for ly in 0..cs {
-                    for lx in 0..cs {
-                        let mat_byte = gpu_mats[lz * cs * cs + ly * cs + lx];
-                        if mat_byte != 0 {
-                            let mat = voxel_material_from_u8(mat_byte);
-                            chunk.voxels[crate::world_sim::voxel::local_index(lx, ly, lz)] =
-                                crate::world_sim::voxel::Voxel::new(mat);
-                        }
-                    }
-                }
-            }
-            chunk.dirty = true;
-            self.sim.state_mut().voxel_world.chunks.insert(cp, chunk);
-            self.dirty_megas.insert(MegaPos::from_chunk(cp));
         }
     }
 
@@ -579,44 +563,62 @@ impl AppState {
 
     /// Render one frame.
     fn render(&mut self) -> Result<()> {
-        if self.gpu_megas.is_empty() {
-            self.swapchain.present_cleared_frame(&self.ctx, [0.1, 0.1, 0.15, 1.0])?;
-            return Ok(());
-        }
-
         let dims = MEGA_VOXELS as f32;
         let aspect = RENDER_WIDTH as f32 / RENDER_HEIGHT as f32;
         let vp = frustum_vp_matrix(&self.camera, aspect);
         let planes = extract_frustum_planes(&vp);
         let cam_pos = self.camera.eye_position();
 
-        // Frustum cull + collect visible mega-chunks.
-        let mut visible: Vec<(&GpuVoxelTexture, [f32; 4], [f32; 3], [f32; 3], f32)> =
-            self.gpu_megas.values()
-                .filter(|gm| {
-                    let min = gm.position;
-                    let max = [min[0] + dims, min[1] + dims, min[2] + dims];
-                    aabb_vs_frustum(&planes, &min, &max)
-                })
-                .map(|gm| {
-                    let cx = gm.position[0] + dims * 0.5 - cam_pos[0];
-                    let cy = gm.position[1] + dims * 0.5 - cam_pos[1];
-                    let cz = gm.position[2] + dims * 0.5 - cam_pos[2];
-                    let dist2 = cx * cx + cy * cy + cz * cz;
-                    (&gm.texture, [1.0f32, 1.0, 1.0, 1.0], gm.position, [dims, dims, dims], dist2)
-                })
-                .collect();
-
-        // Sort front-to-back for early-z rejection.
+        // --- Phase 3: render directly from the GPU chunk pool ---
+        // Each LoadedChunkView maps a pool slot onto an engine-space AABB.
+        // chunk_pos is in sim coords (x, y, z-up); we swap Y↔Z into engine
+        // coords the same way build_mega_grid did for the legacy path.
+        let chunk_size_f = CHUNK_SIZE as f32;
+        let mut visible: Vec<(LoadedChunkView, [f32; 4], [f32; 3], [f32; 3], f32)> = self
+            .terrain_compute
+            .loaded_chunk_views()
+            .filter_map(|v| {
+                let pos = [
+                    v.chunk_pos[0] as f32 * chunk_size_f,
+                    v.chunk_pos[2] as f32 * chunk_size_f, // sim z → engine y (up)
+                    v.chunk_pos[1] as f32 * chunk_size_f, // sim y → engine z
+                ];
+                let max = [pos[0] + dims, pos[1] + dims, pos[2] + dims];
+                if !aabb_vs_frustum(&planes, &pos, &max) {
+                    return None;
+                }
+                // Skip chunks outside the load radius (camera-relative) so we
+                // don't waste draws on pool tail entries that are far from
+                // the viewer.
+                let cx = pos[0] + dims * 0.5 - cam_pos[0];
+                let cy = pos[1] + dims * 0.5 - cam_pos[1];
+                let cz = pos[2] + dims * 0.5 - cam_pos[2];
+                let dist2 = cx * cx + cy * cy + cz * cz;
+                if dist2 > LOAD_RADIUS * LOAD_RADIUS * 4.0 {
+                    return None;
+                }
+                Some((v, [1.0f32, 1.0, 1.0, 1.0], pos, [dims, dims, dims], dist2))
+            })
+            .collect();
         visible.sort_unstable_by(|a, b| a.4.partial_cmp(&b.4).unwrap_or(std::cmp::Ordering::Equal));
 
-        let objects: Vec<(&GpuVoxelTexture, [f32; 4], [f32; 3], [f32; 3])> =
-            visible.into_iter().map(|(t, c, p, d, _)| (t, c, p, d)).collect();
+        // Update LRU touched-frame for every chunk we rendered this frame.
+        for (v, _, _, _, _) in &visible {
+            self.terrain_compute.mark_touched(v.chunk_pos, self.frame_count as u64);
+        }
 
-        self.last_visible_megas = objects.len();
+        let pool_views: Vec<(LoadedChunkView, [f32; 4], [f32; 3], [f32; 3])> =
+            visible.into_iter().map(|(v, c, p, d, _)| (v, c, p, d)).collect();
+        self.last_visible_megas = pool_views.len();
 
-        // GPU render + blit to swapchain (no CPU readback).
-        self.renderer.render_frame_gpu(&self.ctx, &self.camera, &objects)?;
+        if pool_views.is_empty() {
+            self.swapchain.present_cleared_frame(&self.ctx, [0.1, 0.1, 0.15, 1.0])?;
+            return Ok(());
+        }
+
+        let palette_view = self.terrain_compute.palette_view();
+        self.renderer
+            .render_frame_pool(&self.ctx, &self.camera, &pool_views, palette_view)?;
         let src = self.renderer.light_output_image();
         self.swapchain.present_blit(&self.ctx, src, RENDER_WIDTH, RENDER_HEIGHT)?;
 
@@ -838,10 +840,13 @@ impl ApplicationHandler for WorldSimVoxelApp {
                 app.update_camera(dt);
                 app.tick_sim();
 
+                // Phase 3: GPU-generated chunks stay resident in the compute
+                // pool and are sampled directly by the renderer — no CPU
+                // round-trip. upload_megas() only handled the old
+                // VoxelWorld → GpuMega path for settlement chunks, which are
+                // now covered by the same pool path once the camera enters
+                // their neighborhood. Kept as a no-op timer for log parity.
                 let t_upload = Instant::now();
-                if let Err(e) = app.upload_megas() {
-                    eprintln!("[voxel] upload error: {}", e);
-                }
                 let t_render = Instant::now();
                 if let Err(e) = app.render() {
                     eprintln!("[voxel] render error: {}", e);
