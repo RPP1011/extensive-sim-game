@@ -1,3 +1,23 @@
+/// PCG-based deterministic hash using only u32 arithmetic so the same
+/// algorithm can be ported byte-for-byte to GLSL (no int64 extension needed).
+#[inline]
+pub fn hash_u32(x: i32, y: i32, z: i32, seed: u32) -> u32 {
+    let mut h = seed;
+    h = h.wrapping_mul(0x85ebca6b).wrapping_add(x as u32);
+    h = h ^ (h >> 16);
+    h = h.wrapping_mul(0xc2b2ae35).wrapping_add(y as u32);
+    h = h ^ (h >> 16);
+    h = h.wrapping_mul(0x27d4eb2f).wrapping_add(z as u32);
+    h = h ^ (h >> 16);
+    h
+}
+
+/// u32 hash → f32 in [0, 1).
+#[inline]
+pub fn hash_u32_to_f32(x: i32, y: i32, z: i32, seed: u32) -> f32 {
+    hash_u32(x, y, z, seed) as f32 / u32::MAX as f32
+}
+
 /// Deterministic 3D hash → u32. Ported from voxel.rs.
 pub fn hash_3d(x: i32, y: i32, z: i32, seed: u64) -> u32 {
     let mut h = seed;
@@ -155,6 +175,22 @@ mod tests {
             let v = fbm_3d(i as f32 * 10.0, 0.0, i as f32 * 7.0, 42, 4, 2.0, 0.5);
             assert!(v >= 0.0 && v <= 1.0, "fbm_3d out of range: {v}");
         }
+    }
+
+    #[test]
+    fn hash_u32_deterministic_and_uniform() {
+        // Same input → same output
+        assert_eq!(hash_u32(10, 20, 30, 42), hash_u32(10, 20, 30, 42));
+        // Different input → different output (with high probability)
+        assert_ne!(hash_u32(10, 20, 30, 42), hash_u32(11, 20, 30, 42));
+        // Output spans the full u32 range (sample mean ~ 0.5)
+        let mut sum = 0.0f64;
+        let n = 10_000;
+        for i in 0..n {
+            sum += hash_u32_to_f32(i, i * 7, i / 3, 999) as f64;
+        }
+        let mean = sum / n as f64;
+        assert!((mean - 0.5).abs() < 0.05, "hash_u32 distribution skewed: mean={mean}");
     }
 
     #[test]
