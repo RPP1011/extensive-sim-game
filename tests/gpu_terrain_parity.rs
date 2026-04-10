@@ -37,6 +37,11 @@ fn gpu_cpu_parity_baseline() {
         )
         .expect("upload region plan");
 
+    let (river_points, river_headers) = plan.to_gpu_rivers();
+    pipeline
+        .upload_rivers(&ctx, &mut alloc, &river_points, &river_headers)
+        .expect("upload rivers");
+
     // Find a land cell (not ocean/coast) that straddles the surface.
     // We want a chunk where the CPU surface intersects it so we're validating
     // more than just "all-air above ground" parity.

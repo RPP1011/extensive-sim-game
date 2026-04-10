@@ -111,6 +111,40 @@ impl RegionPlan {
             .collect()
     }
 
+    /// Flatten the river polylines into GPU buffer format:
+    /// a single `points` buffer plus a `headers` buffer describing each
+    /// river's `(start_idx, length)` range in the points buffer.
+    /// Pass the result to `TerrainComputePipeline::upload_rivers`.
+    #[cfg(feature = "app")]
+    pub fn to_gpu_rivers(
+        &self,
+    ) -> (
+        Vec<voxel_engine::terrain_compute::RiverPointGpu>,
+        Vec<voxel_engine::terrain_compute::RiverHeaderGpu>,
+    ) {
+        let mut points = Vec::new();
+        let mut headers = Vec::new();
+        for river in &self.rivers {
+            let start_idx = points.len() as u32;
+            for (i, &(x, y)) in river.points.iter().enumerate() {
+                let width = river.widths.get(i).copied().unwrap_or(1.0);
+                points.push(voxel_engine::terrain_compute::RiverPointGpu {
+                    x,
+                    y,
+                    width,
+                    _pad: 0.0,
+                });
+            }
+            headers.push(voxel_engine::terrain_compute::RiverHeaderGpu {
+                start_idx,
+                length: river.points.len() as u32,
+                _pad0: 0,
+                _pad1: 0,
+            });
+        }
+        (points, headers)
+    }
+
     /// Bilinear interpolation of height at a voxel-space position.
     pub fn interpolate_height(&self, vx: f32, vy: f32) -> f32 {
         let cx = vx / CELL_SIZE as f32;
