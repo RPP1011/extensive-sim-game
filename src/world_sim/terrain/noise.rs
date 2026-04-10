@@ -1,14 +1,18 @@
-/// PCG-based deterministic hash using only u32 arithmetic so the same
+/// Murmur3-based deterministic hash using only u32 arithmetic so the same
 /// algorithm can be ported byte-for-byte to GLSL (no int64 extension needed).
+/// Uses the standard Murmur3 fmix32 finalizer for full avalanche.
 #[inline]
 pub fn hash_u32(x: i32, y: i32, z: i32, seed: u32) -> u32 {
-    let mut h = seed;
-    h = h.wrapping_mul(0x85ebca6b).wrapping_add(x as u32);
-    h = h ^ (h >> 16);
-    h = h.wrapping_mul(0xc2b2ae35).wrapping_add(y as u32);
-    h = h ^ (h >> 16);
-    h = h.wrapping_mul(0x27d4eb2f).wrapping_add(z as u32);
-    h = h ^ (h >> 16);
+    let mut h = seed.wrapping_add(0x9e3779b9); // break fixed-point at zero
+    h = h.wrapping_add(x as u32).wrapping_mul(0x9e3779b9);
+    h = h.wrapping_add(y as u32).wrapping_mul(0x85ebca6b);
+    h = h.wrapping_add(z as u32).wrapping_mul(0xc2b2ae35);
+    // Murmur3 fmix32 finalizer
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x85ebca6b);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0xc2b2ae35);
+    h ^= h >> 16;
     h
 }
 
@@ -179,11 +183,38 @@ mod tests {
 
     #[test]
     fn hash_u32_deterministic_and_uniform() {
-        // Same input → same output
+        // Determinism: same input → same output
         assert_eq!(hash_u32(10, 20, 30, 42), hash_u32(10, 20, 30, 42));
-        // Different input → different output (with high probability)
-        assert_ne!(hash_u32(10, 20, 30, 42), hash_u32(11, 20, 30, 42));
-        // Output spans the full u32 range (sample mean ~ 0.5)
+
+        // Origin is not a fixed point
+        assert_ne!(hash_u32(0, 0, 0, 0), 0, "hash_u32(0,0,0,0) must not be zero");
+
+        // Different inputs → different outputs (10 different perturbations)
+        let base = hash_u32(100, 200, 300, 42);
+        for &(dx, dy, dz) in &[(1,0,0),(0,1,0),(0,0,1),(-1,0,0),(0,-1,0),(0,0,-1),(2,0,0),(0,2,0),(7,11,13),(1,1,1)] {
+            assert_ne!(hash_u32(100 + dx, 200 + dy, 300 + dz, 42), base,
+                "perturbation ({},{},{}) collided with base", dx, dy, dz);
+        }
+
+        // Seed independence: different seeds → different outputs
+        assert_ne!(hash_u32(10, 20, 30, 0), hash_u32(10, 20, 30, 1));
+        assert_ne!(hash_u32(0, 0, 0, 1), hash_u32(0, 0, 0, 2));
+
+        // Avalanche: changing one input bit should flip ~16 output bits on average
+        // (i.e. each output bit has ~50% chance of flipping). Sample 256 pairs.
+        let mut total_diff_bits = 0u32;
+        let n_pairs = 256;
+        for i in 0..n_pairs {
+            let a = hash_u32(i, i * 13, i * 7, 999);
+            let b = hash_u32(i + 1, i * 13, i * 7, 999); // adjacent in x
+            total_diff_bits += (a ^ b).count_ones();
+        }
+        let avg_flipped = total_diff_bits as f32 / n_pairs as f32;
+        assert!(avg_flipped > 12.0 && avg_flipped < 20.0,
+            "avalanche poor: avg {} bits flipped per adjacent input (expected ~16)",
+            avg_flipped);
+
+        // Distribution: mean of 10K samples should be near 0.5
         let mut sum = 0.0f64;
         let n = 10_000;
         for i in 0..n {
