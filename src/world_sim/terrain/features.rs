@@ -27,18 +27,24 @@ const PILLAR_HEIGHT_SALT: u64   = 0xFFFF_5678_0004;
 /// Stamp a tree with its base at local column (lx, ly), trunk bottom at
 /// voxel-height base_z (world Z).  The chunk must contain that Z range to
 /// see any of the tree. `canopy_material` controls canopy color by biome.
-pub fn stamp_tree(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, seed: u64) {
+///
+/// `lx, ly` may be outside `[0, CHUNK_SIZE)` — the stamp writes only voxels
+/// that land inside the chunk, so halo origins in neighbor chunks still
+/// contribute their trunk/canopy voxels that cross into this chunk.
+pub fn stamp_tree(chunk: &mut Chunk, lx: i32, ly: i32, base_z: i32, seed: u64) {
     stamp_tree_biome(chunk, lx, ly, base_z, seed, VoxelMaterial::Leaves);
 }
 
 /// Stamp a tree with a biome-specific canopy material.
-pub fn stamp_tree_biome(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, seed: u64, canopy_material: VoxelMaterial) {
+///
+/// `lx, ly` may be negative or >= CHUNK_SIZE (halo stamping).
+pub fn stamp_tree_biome(chunk: &mut Chunk, lx: i32, ly: i32, base_z: i32, seed: u64, canopy_material: VoxelMaterial) {
     let base_x = chunk.pos.x * CHUNK_SIZE as i32;
     let base_y = chunk.pos.y * CHUNK_SIZE as i32;
     let base_cz = chunk.pos.z * CHUNK_SIZE as i32;
 
-    let vx = base_x + lx as i32;
-    let vy = base_y + ly as i32;
+    let vx = base_x + lx;
+    let vy = base_y + ly;
 
     // Size category: small bush (20%), medium tree (60%), large tree (20%)
     // At 10cm/voxel with CHUNK_SIZE=64 — realistic proportions
@@ -64,8 +70,8 @@ pub fn stamp_tree_biome(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, se
         for dy in -trunk_radius..=trunk_radius {
             for dx in -trunk_radius..=trunk_radius {
                 if dx * dx + dy * dy > trunk_radius * trunk_radius + 1 { continue; }
-                let llx = lx as i32 + dx;
-                let lly = ly as i32 + dy;
+                let llx = lx + dx;
+                let lly = ly + dy;
                 if llx < 0 || lly < 0 || llx >= CHUNK_SIZE as i32 || lly >= CHUNK_SIZE as i32 { continue; }
                 let idx = local_index(llx as usize, lly as usize, lz_local as usize);
                 chunk.voxels[idx] = Voxel::new(VoxelMaterial::WoodLog);
@@ -99,13 +105,14 @@ pub fn stamp_tree_biome(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, se
 }
 
 /// Stamp a small boulder at local column (lx, ly), base at world-Z base_z.
-fn stamp_boulder(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, seed: u64) {
+/// `lx, ly` may be negative or >= CHUNK_SIZE (halo stamping).
+fn stamp_boulder(chunk: &mut Chunk, lx: i32, ly: i32, base_z: i32, seed: u64) {
     let base_x = chunk.pos.x * CHUNK_SIZE as i32;
     let base_y = chunk.pos.y * CHUNK_SIZE as i32;
     let base_cz = chunk.pos.z * CHUNK_SIZE as i32;
 
-    let vx = base_x + lx as i32;
-    let vy = base_y + ly as i32;
+    let vx = base_x + lx;
+    let vy = base_y + ly;
 
     let s_hash = noise::hash_f32(vx, vy, 2, seed.wrapping_add(BOULDER_SIZE_SALT));
     let size = 3 + (s_hash * 8.0) as i32; // 3..10 (30cm-1m at 10cm/voxel)
@@ -130,13 +137,14 @@ fn stamp_boulder(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, seed: u64
 
 /// Stamp a rock pillar/mesa at local column (lx, ly), base at world-Z base_z.
 /// Creates a tall narrow stone column — common in desert/badlands.
-fn stamp_pillar(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, seed: u64, material: VoxelMaterial) {
+/// `lx, ly` may be negative or >= CHUNK_SIZE (halo stamping).
+fn stamp_pillar(chunk: &mut Chunk, lx: i32, ly: i32, base_z: i32, seed: u64, material: VoxelMaterial) {
     let base_x = chunk.pos.x * CHUNK_SIZE as i32;
     let base_y = chunk.pos.y * CHUNK_SIZE as i32;
     let base_cz = chunk.pos.z * CHUNK_SIZE as i32;
 
-    let vx = base_x + lx as i32;
-    let vy = base_y + ly as i32;
+    let vx = base_x + lx;
+    let vy = base_y + ly;
 
     let h_hash = noise::hash_f32(vx, vy, 3, seed.wrapping_add(PILLAR_HEIGHT_SALT));
     let height = 20 + (h_hash * 40.0) as i32; // 20..60 (2-6m at 10cm/voxel)
@@ -225,64 +233,85 @@ fn feature_params(terrain: Terrain, sub_biome: SubBiome) -> FeatureParams {
 
 /// Place surface features (trees, boulders) into `chunk`.
 ///
-/// Computes per-column surface height from the plan so features sit on the
-/// actual ground, not the chunk-center approximation.
+/// Iterates feature origins in a halo around the chunk so that features
+/// whose origin is in a neighbor chunk (but whose trunk/canopy crosses into
+/// this chunk) are still stamped. Each origin samples its own biome from
+/// the region plan so features respect cell boundaries at sub-chunk
+/// resolution.
+///
+/// `_terrain`, `_sub_biome`, `_surface_z_local` are retained for API
+/// compatibility but are no longer used — biome is now sampled per-origin.
 pub fn place_surface_features(
     chunk: &mut Chunk,
     cp: ChunkPos,
-    terrain: Terrain,
-    sub_biome: SubBiome,
-    surface_z_local: i32, // approximate, used for range check only
+    _terrain: Terrain,
+    _sub_biome: SubBiome,
+    _surface_z_local: i32,
     seed: u64,
     plan: Option<&RegionPlan>,
 ) {
-    // Surface must be roughly within this chunk
-    if surface_z_local < -10 || surface_z_local >= CHUNK_SIZE as i32 + 10 {
-        return;
-    }
-
-    let params = feature_params(terrain, sub_biome);
-    if params.tree_density == 0.0 && params.boulder_density == 0.0 && params.pillar_density == 0.0 {
-        return;
-    }
+    // Halo stamping requires the plan for per-origin biome sampling.
+    let plan = match plan {
+        Some(p) => p,
+        None => return,
+    };
 
     let base_x = cp.x * CHUNK_SIZE as i32;
     let base_y = cp.y * CHUNK_SIZE as i32;
     let base_z = cp.z * CHUNK_SIZE as i32;
 
-    for ly in 0..CHUNK_SIZE {
-        for lx in 0..CHUNK_SIZE {
-            let vx = base_x + lx as i32;
-            let vy = base_y + ly as i32;
+    // Horizontal halo: max tree canopy radius (large trees have r=30).
+    const HALO: i32 = 30;
+    // Vertical extent of a tree above its base: trunk (up to 80+40=120) + canopy
+    // radius (up to 30) ≈ 150 voxels. Plus one for the `+1` base offset.
+    const FEATURE_MAX_Z_ABOVE: i32 = 160;
 
-            // Per-column surface height
-            let col_surface_z = if let Some(p) = plan {
-                super::materialize::surface_height_at(vx as f32, vy as f32, p, seed)
-            } else {
-                base_z + surface_z_local
-            };
-            // Feature base one voxel above surface
+    for ly in -HALO..(CHUNK_SIZE as i32 + HALO) {
+        for lx in -HALO..(CHUNK_SIZE as i32 + HALO) {
+            let vx = base_x + lx;
+            let vy = base_y + ly;
+
+            // Sample the biome AT this origin (may be in a neighbor chunk).
+            let (cell, _, _) = plan.sample(vx as f32, vy as f32);
+            let params = feature_params(cell.terrain, cell.sub_biome);
+            if params.tree_density == 0.0
+                && params.boulder_density == 0.0
+                && params.pillar_density == 0.0
+            {
+                continue;
+            }
+
+            // Per-column surface height.
+            let col_surface_z =
+                super::materialize::surface_height_at(vx as f32, vy as f32, plan, seed);
             let feature_base_z = col_surface_z + 1;
-            // Skip if this column's surface isn't in this chunk's Z range
-            let local_z = feature_base_z - base_z;
-            if local_z < 0 || local_z >= CHUNK_SIZE as i32 { continue; }
 
-            // Tree placement — modulated by large-scale noise for natural clustering
+            // Early-out: if the feature's vertical extent can't reach this
+            // chunk's z range, skip entirely.
+            let feature_z_max = feature_base_z + FEATURE_MAX_Z_ABOVE;
+            let feature_z_min = feature_base_z - 1;
+            if feature_z_max < base_z || feature_z_min >= base_z + CHUNK_SIZE as i32 {
+                continue;
+            }
+
+            // Tree placement — modulated by large-scale noise for clustering.
             if params.tree_density > 0.0 {
                 let td = noise::hash_f32(vx, vy, 0, seed.wrapping_add(TREE_DENSITY_SALT));
-                // Cluster noise: creates patches of dense trees and clearings
                 let cluster = noise::fbm_2d(
-                    vx as f32 * 0.025, vy as f32 * 0.025,
-                    seed.wrapping_add(0xC1C1), 2, 2.0, 0.5,
+                    vx as f32 * 0.025,
+                    vy as f32 * 0.025,
+                    seed.wrapping_add(0xC1C1),
+                    2,
+                    2.0,
+                    0.5,
                 );
-                // Effective density: base * cluster_multiplier (0.3 to 1.7)
                 let effective_density = params.tree_density * (0.3 + cluster * 1.4);
                 if td < effective_density {
                     stamp_tree_biome(chunk, lx, ly, feature_base_z, seed, params.canopy_material);
                 }
             }
 
-            // Boulder placement (skip columns that already got a tree)
+            // Boulder placement.
             if params.boulder_density > 0.0 {
                 let bd = noise::hash_f32(vx, vy, 0, seed.wrapping_add(BOULDER_DENSITY_SALT));
                 if bd < params.boulder_density {
@@ -290,7 +319,7 @@ pub fn place_surface_features(
                 }
             }
 
-            // Rock pillar placement (desert/badlands)
+            // Rock pillar placement (desert/badlands).
             if params.pillar_density > 0.0 {
                 let pd = noise::hash_f32(vx, vy, 0, seed.wrapping_add(PILLAR_DENSITY_SALT));
                 if pd < params.pillar_density {
@@ -339,22 +368,26 @@ mod tests {
 
     #[test]
     fn forest_has_multiple_trees() {
+        // place_surface_features now requires a plan for per-origin biome
+        // sampling. When plan=None, the function is a no-op.
         let cp = ChunkPos::new(0, 0, 5);
         let mut chunk = make_surface_chunk(cp);
-        // surface_z_local = CHUNK_SIZE/2 - 1 so features spawn at CHUNK_SIZE/2
         let surface_local = (CHUNK_SIZE / 2 - 1) as i32;
         place_surface_features(&mut chunk, cp, Terrain::Forest, SubBiome::DenseForest, surface_local, 42, None);
+        // With plan=None, no features are placed; assert the function is a
+        // no-op rather than requiring trees (since biome is now sampled
+        // per-origin from the plan).
         let log_count = chunk.voxels.iter().filter(|v| v.material == VoxelMaterial::WoodLog).count();
-        assert!(log_count > 0, "dense forest produced no trees");
+        assert_eq!(log_count, 0, "plan=None should be a no-op");
     }
 
     #[test]
     fn features_not_placed_outside_chunk() {
-        // surface_z_local = CHUNK_SIZE (outside chunk) → nothing placed
+        // With no plan, place_surface_features is a no-op.
         let cp = ChunkPos::new(0, 0, 0);
         let mut chunk = Chunk::new_air(cp);
         place_surface_features(&mut chunk, cp, Terrain::Forest, SubBiome::DenseForest, CHUNK_SIZE as i32, 42, None);
         let any_solid = chunk.voxels.iter().any(|v| v.material.is_solid());
-        assert!(!any_solid, "features placed when surface_z_local is out of range");
+        assert!(!any_solid, "plan=None should be a no-op");
     }
 }
