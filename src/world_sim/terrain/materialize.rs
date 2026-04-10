@@ -30,10 +30,11 @@ pub fn surface_height_at(vx: f32, vy: f32, plan: &RegionPlan, seed: u64) -> i32 
     let (large_amp, medium_amp, small_amp) = match terrain {
         Terrain::Mountains | Terrain::Glacier => (80.0, 30.0, 5.0),
         Terrain::Volcano => (60.0, 25.0, 4.0),
-        Terrain::Badlands => (40.0, 20.0, 4.0),
-        Terrain::Forest | Terrain::Jungle => (30.0, 12.0, 3.0),
+        Terrain::Badlands => (50.0, 35.0, 10.0),
+        Terrain::Forest => (30.0, 12.0, 3.0),
+        Terrain::Jungle => (45.0, 20.0, 6.0),
         Terrain::Tundra => (25.0, 10.0, 2.0),
-        Terrain::Desert => (20.0, 15.0, 2.0),
+        Terrain::Desert => (35.0, 20.0, 4.0),
         Terrain::Swamp | Terrain::Coast => (5.0, 3.0, 1.0),
         Terrain::DeepOcean | Terrain::CoralReef => (10.0, 5.0, 1.0),
         _ => (25.0, 10.0, 3.0),
@@ -121,16 +122,117 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
                         .unwrap_or(mats.deep_stone)
                 } else if depth > 20 {
                     // Subsoil zone — mix stone + subsoil by noise
-                    let n = noise::hash_f32(vx, vy, vz, seed.wrapping_add(0x1234));
-                    if n > 0.4 { mats.deep_stone } else { mats.subsoil }
+                    if matches!(terrain, Terrain::Mountains | Terrain::Glacier) {
+                        // Mountains: geological banding on cliff faces
+                        let band = ((vz as f32 * 0.15).sin() * 0.5 + 0.5) as f32;
+                        let n = noise::hash_f32(vx, vy, vz, seed.wrapping_add(0x1234));
+                        if band > 0.75 {
+                            VoxelMaterial::Granite
+                        } else if band > 0.5 && n > 0.3 {
+                            VoxelMaterial::Gravel
+                        } else {
+                            VoxelMaterial::Stone
+                        }
+                    } else {
+                        let n = noise::hash_f32(vx, vy, vz, seed.wrapping_add(0x1234));
+                        if n > 0.4 { mats.deep_stone } else { mats.subsoil }
+                    }
                 } else if depth > 0 {
-                    // Near-surface soil
-                    mats.subsoil
+                    // Near-surface soil — badlands get layered sediment
+                    if matches!(terrain, Terrain::Badlands) {
+                        let band = ((vz as f32 * 0.3).sin() * 0.5 + 0.5) as f32;
+                        if band > 0.7 { VoxelMaterial::Clay }
+                        else if band > 0.4 { VoxelMaterial::Sandstone }
+                        else { VoxelMaterial::RedSand }
+                    } else {
+                        mats.subsoil
+                    }
                 } else if depth >= -1 {
                     // Surface layer (depth 0 or -1 means vz == surface_z or surface_z+1)
-                    // Mountains high up → snow cap
-                    if matches!(terrain, Terrain::Mountains) && vz > 250 {
-                        VoxelMaterial::Snow
+                    if matches!(terrain, Terrain::Mountains | Terrain::Glacier) {
+                        // Mountain surface varies by altitude + noise
+                        let n = noise::hash_f32(vx, vy, vz, seed.wrapping_add(0xA1B2));
+                        if vz > 160 {
+                            VoxelMaterial::Snow
+                        } else if vz > 140 {
+                            // Transition zone: patchy snow
+                            if n > 0.4 { VoxelMaterial::Snow } else { VoxelMaterial::Stone }
+                        } else if n > 0.7 {
+                            VoxelMaterial::Gravel
+                        } else {
+                            VoxelMaterial::Stone
+                        }
+                    } else if matches!(terrain, Terrain::Jungle) {
+                        // Jungle floor: dense undergrowth with mud, roots, and moss
+                        let patch = noise::fbm_2d(vx as f32 * 0.06, vy as f32 * 0.06, seed.wrapping_add(0xBE_AF), 2, 2.0, 0.5);
+                        let n = noise::hash_f32(vx, vy, vz, seed.wrapping_add(0xD_00));
+                        if patch > 0.65 {
+                            VoxelMaterial::Clay // muddy patches
+                        } else if n > 0.9 {
+                            VoxelMaterial::WoodLog // fallen branches/roots
+                        } else if n > 0.8 {
+                            VoxelMaterial::Dirt // exposed soil
+                        } else {
+                            VoxelMaterial::JungleMoss
+                        }
+                    } else if matches!(terrain, Terrain::Desert) {
+                        // Desert: dune ridge patterns — directional wave using rotated coords
+                        let angle = 0.7f32; // dune orientation
+                        let rx = vx as f32 * angle.cos() + vy as f32 * angle.sin();
+                        let dune = ((rx * 0.08).sin() * 0.5 + 0.5) as f32;
+                        let n = noise::hash_f32(vx, vy, vz, seed.wrapping_add(0xD0E5));
+                        if dune > 0.7 {
+                            VoxelMaterial::Sandstone // exposed harder layer at dune crests
+                        } else if n > 0.9 {
+                            VoxelMaterial::Gravel // scattered pebbles
+                        } else {
+                            VoxelMaterial::Sand
+                        }
+                    } else if matches!(terrain, Terrain::Forest) {
+                        // Forest floor: leaf litter and exposed dirt patches
+                        let patch = noise::fbm_2d(vx as f32 * 0.05, vy as f32 * 0.05, seed.wrapping_add(0xF0E5), 2, 2.0, 0.5);
+                        let n = noise::hash_f32(vx, vy, vz, seed.wrapping_add(0xF100));
+                        if patch > 0.65 {
+                            VoxelMaterial::Dirt // exposed dirt/leaf litter
+                        } else if n > 0.85 {
+                            VoxelMaterial::WoodLog // fallen branch
+                        } else {
+                            VoxelMaterial::Grass
+                        }
+                    } else if matches!(terrain, Terrain::Plains) {
+                        // Plains: patches of regular grass mixed into tall grass
+                        let patch = noise::fbm_2d(vx as f32 * 0.04, vy as f32 * 0.04, seed.wrapping_add(0xF1E1D), 2, 2.0, 0.5);
+                        if patch > 0.6 {
+                            VoxelMaterial::Grass // darker green patches
+                        } else {
+                            VoxelMaterial::TallGrass
+                        }
+                    } else if matches!(terrain, Terrain::Badlands) {
+                        // Badlands: layered sediment bands visible on surface
+                        // Use vz to create horizontal stripes of different materials
+                        let band = ((vz as f32 * 0.3).sin() * 0.5 + 0.5) as f32;
+                        let n = noise::hash_f32(vx, vy, vz, seed.wrapping_add(0xBAD1));
+                        if band > 0.7 {
+                            VoxelMaterial::Sandstone
+                        } else if band > 0.4 && n > 0.5 {
+                            VoxelMaterial::Clay
+                        } else {
+                            VoxelMaterial::RedSand
+                        }
+                    } else if matches!(terrain, Terrain::Tundra) {
+                        // Tundra: patchy snow over frozen peat
+                        let n = noise::hash_f32(vx, vy, vz, seed.wrapping_add(0xC01D));
+                        // Use larger-scale noise for snow patch clustering
+                        let patch = noise::fbm_2d(vx as f32 * 0.03, vy as f32 * 0.03, seed.wrapping_add(0xF_0_2), 2, 2.0, 0.5);
+                        if patch > 0.55 {
+                            VoxelMaterial::Snow
+                        } else if n > 0.7 {
+                            VoxelMaterial::Ice
+                        } else if n > 0.5 {
+                            VoxelMaterial::Gravel
+                        } else {
+                            VoxelMaterial::Peat
+                        }
                     } else {
                         mats.surface
                     }
@@ -151,6 +253,36 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
     // -----------------------------------------------------------------------
     // Post-pass feature integration
     // -----------------------------------------------------------------------
+
+    // 0. Swamp water pooling — shallow water in low spots above terrain surface.
+    {
+        let cx = base_x + CHUNK_SIZE as i32 / 2;
+        let cy = base_y + CHUNK_SIZE as i32 / 2;
+        let (cell, _, _) = plan.sample(cx as f32, cy as f32);
+        if matches!(cell.terrain, Terrain::Swamp) {
+            for ly in 0..CHUNK_SIZE {
+                for lx in 0..CHUNK_SIZE {
+                    let vx = base_x + lx as i32;
+                    let vy = base_y + ly as i32;
+                    let col_surface = surface_height_at(vx as f32, vy as f32, plan, seed);
+                    // Pool water 1-2 voxels above surface in ~40% of columns
+                    let pool_noise = noise::hash_f32(vx, vy, 0, seed.wrapping_add(0x5A_A_0));
+                    if pool_noise < 0.40 {
+                        for dz in 1..=2 {
+                            let wz = col_surface + dz;
+                            let lz = wz - base_z;
+                            if lz >= 0 && lz < CHUNK_SIZE as i32 {
+                                let idx = local_index(lx, ly, lz as usize);
+                                if chunk.voxels[idx].material == VoxelMaterial::Air {
+                                    chunk.voxels[idx] = Voxel::new(VoxelMaterial::Water);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // 1. Cave carving — for chunks that are predominantly underground.
     {
@@ -394,7 +526,7 @@ mod tests {
 
             let chunk = materialize_chunk(ChunkPos::new(cx, cy, cz), &plan, 42);
             // Find the most common non-air material (only check valid material indices)
-            let mut counts = [0u32; 36]; // VoxelMaterial has ~35 variants
+            let mut counts = [0u32; 46]; // VoxelMaterial has ~42 variants
             for v in &chunk.voxels {
                 let idx = v.material as u8 as usize;
                 if idx > 0 && idx < counts.len() {

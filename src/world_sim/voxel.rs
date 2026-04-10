@@ -125,6 +125,19 @@ pub enum VoxelMaterial {
     Steel,
     Bronze,
     Obsidian,
+    // Biome-specific surface variants
+    JungleMoss,    // dark green, damp jungle floor
+    MudGrass,      // brownish-green, swamp surface
+    RedSand,       // reddish-orange, badlands surface
+    Peat,          // dark brown, tundra/bog surface
+    TallGrass,     // lighter yellow-green, open plains/savanna
+    Leaves,        // darker forest green, tree canopy
+    // Entity markers (non-solid, rendered but not interactable)
+    NpcIdle,       // blue — standing around
+    NpcWalking,    // cyan — moving
+    NpcWorking,    // green — harvesting/building
+    NpcFighting,   // red — in combat
+    MonsterMarker, // dark red
 }
 
 impl Default for VoxelMaterial {
@@ -134,7 +147,10 @@ impl Default for VoxelMaterial {
 impl VoxelMaterial {
     /// Whether this material is solid (blocks movement and light).
     pub fn is_solid(self) -> bool {
-        !matches!(self, VoxelMaterial::Air | VoxelMaterial::Water | VoxelMaterial::Lava)
+        !matches!(self, VoxelMaterial::Air | VoxelMaterial::Water | VoxelMaterial::Lava
+            | VoxelMaterial::NpcIdle | VoxelMaterial::NpcWalking
+            | VoxelMaterial::NpcWorking | VoxelMaterial::NpcFighting
+            | VoxelMaterial::MonsterMarker)
     }
 
     /// Whether this material is a fluid.
@@ -170,6 +186,12 @@ impl VoxelMaterial {
             VoxelMaterial::Steel => 50,
             VoxelMaterial::Obsidian => 60,
             VoxelMaterial::CutStone | VoxelMaterial::Concrete => 30,
+            // Biome-specific surfaces — soft like their base types
+            VoxelMaterial::JungleMoss | VoxelMaterial::MudGrass | VoxelMaterial::Peat => 5,
+            VoxelMaterial::RedSand | VoxelMaterial::TallGrass | VoxelMaterial::Leaves => 8,
+            VoxelMaterial::NpcIdle | VoxelMaterial::NpcWalking
+            | VoxelMaterial::NpcWorking | VoxelMaterial::NpcFighting
+            | VoxelMaterial::MonsterMarker => 0,
         }
     }
 
@@ -231,6 +253,17 @@ impl VoxelMaterial {
             VoxelMaterial::Obsidian => MaterialProperties { hp_multiplier: 70.0, fire_resistance: 1.0, load_bearing: true, weight: 2.4, rubble_move_cost: 3.5, construction_cost: 20.0, blast_resistance: 0.4 },
             VoxelMaterial::Farmland => MaterialProperties { hp_multiplier: 15.0, fire_resistance: 0.5, load_bearing: true, weight: 1.3, rubble_move_cost: 1.0, construction_cost: 1.0, blast_resistance: 0.05 },
             VoxelMaterial::Crop => MaterialProperties { hp_multiplier: 5.0, fire_resistance: 0.1, load_bearing: false, weight: 0.1, rubble_move_cost: 0.5, construction_cost: 0.0, blast_resistance: 0.0 },
+            // Biome-specific surface variants — similar to their base types
+            VoxelMaterial::JungleMoss => MaterialProperties { hp_multiplier: 15.0, fire_resistance: 0.3, load_bearing: true, weight: 1.4, rubble_move_cost: 1.0, construction_cost: 0.0, blast_resistance: 0.05 },
+            VoxelMaterial::MudGrass => MaterialProperties { hp_multiplier: 12.0, fire_resistance: 0.4, load_bearing: true, weight: 1.6, rubble_move_cost: 1.5, construction_cost: 0.0, blast_resistance: 0.05 },
+            VoxelMaterial::RedSand => MaterialProperties { hp_multiplier: 10.0, fire_resistance: 1.0, load_bearing: false, weight: 1.6, rubble_move_cost: 2.5, construction_cost: 1.0, blast_resistance: 0.05 },
+            VoxelMaterial::Peat => MaterialProperties { hp_multiplier: 10.0, fire_resistance: 0.2, load_bearing: true, weight: 1.2, rubble_move_cost: 1.5, construction_cost: 0.0, blast_resistance: 0.05 },
+            VoxelMaterial::TallGrass => MaterialProperties { hp_multiplier: 10.0, fire_resistance: 0.2, load_bearing: true, weight: 1.2, rubble_move_cost: 1.0, construction_cost: 0.0, blast_resistance: 0.03 },
+            VoxelMaterial::Leaves => MaterialProperties { hp_multiplier: 5.0, fire_resistance: 0.1, load_bearing: false, weight: 0.3, rubble_move_cost: 0.5, construction_cost: 0.0, blast_resistance: 0.02 },
+            // Entity markers — non-physical
+            VoxelMaterial::NpcIdle | VoxelMaterial::NpcWalking
+            | VoxelMaterial::NpcWorking | VoxelMaterial::NpcFighting
+            | VoxelMaterial::MonsterMarker => MaterialProperties { hp_multiplier: 0.0, fire_resistance: 0.0, load_bearing: false, weight: 0.0, rubble_move_cost: 0.0, construction_cost: 0.0, blast_resistance: 0.0 },
         }
     }
 }

@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use voxel_engine::scene::{Scene, SceneConfig, Transform};
+use voxel_engine::scene::{Scene, SceneConfig};
 use voxel_engine::scene::handle::{EntityHandle, ChunkHandle};
 use voxel_engine::voxel::grid::VoxelGrid;
 use voxel_engine::voxel::material::{MaterialPalette, PaletteEntry, MaterialType};
@@ -31,9 +31,9 @@ fn build_palette() -> MaterialPalette {
 
     // Natural terrain
     set(&mut p, VoxelMaterial::Dirt,       139, 90,  43,  MaterialType::Dirt);
-    set(&mut p, VoxelMaterial::Stone,      136, 140, 141, MaterialType::Stone);
+    set(&mut p, VoxelMaterial::Stone,      120, 125, 128, MaterialType::Stone);
     set(&mut p, VoxelMaterial::Granite,    100, 100, 105, MaterialType::Stone);
-    set(&mut p, VoxelMaterial::Sand,       210, 190, 140, MaterialType::Sand);
+    set(&mut p, VoxelMaterial::Sand,       194, 168, 110, MaterialType::Sand);
     set(&mut p, VoxelMaterial::Clay,       170, 130, 90,  MaterialType::Dirt);
     set(&mut p, VoxelMaterial::Gravel,     150, 150, 145, MaterialType::Stone);
     set(&mut p, VoxelMaterial::Grass,      86,  152, 59,  MaterialType::Foliage);
@@ -66,7 +66,7 @@ fn build_palette() -> MaterialPalette {
 
     // New materials
     set(&mut p, VoxelMaterial::Basalt,     60,  60,  65,  MaterialType::Stone);
-    set(&mut p, VoxelMaterial::Sandstone,  200, 170, 120, MaterialType::Stone);
+    set(&mut p, VoxelMaterial::Sandstone,  175, 145, 95,  MaterialType::Stone);
     set(&mut p, VoxelMaterial::Marble,     230, 225, 220, MaterialType::Stone);
     set(&mut p, VoxelMaterial::Bone,       220, 210, 190, MaterialType::Stone);
     set(&mut p, VoxelMaterial::Brick,      170, 90,  70,  MaterialType::Brick);
@@ -76,6 +76,20 @@ fn build_palette() -> MaterialPalette {
     set(&mut p, VoxelMaterial::Steel,      190, 195, 200, MaterialType::Metal);
     set(&mut p, VoxelMaterial::Bronze,     180, 140, 80,  MaterialType::Metal);
     set(&mut p, VoxelMaterial::Obsidian,   30,  25,  35,  MaterialType::Glass);
+    // Biome-specific surface variants
+    set(&mut p, VoxelMaterial::JungleMoss, 45,  100, 35,  MaterialType::Foliage); // dark tropical green
+    set(&mut p, VoxelMaterial::MudGrass,   95,  110, 55,  MaterialType::Dirt);    // muddy olive
+    set(&mut p, VoxelMaterial::RedSand,    180, 100, 60,  MaterialType::Sand);    // rusty orange
+    set(&mut p, VoxelMaterial::Peat,       80,  65,  40,  MaterialType::Dirt);    // dark peaty brown
+    set(&mut p, VoxelMaterial::TallGrass,  115, 155, 65,  MaterialType::Foliage); // lighter yellow-green
+    set(&mut p, VoxelMaterial::Leaves,     55,  120, 40,  MaterialType::Foliage); // darker canopy green
+
+    // Entity markers — bright colors by activity state
+    set(&mut p, VoxelMaterial::NpcIdle,        60, 120, 220, MaterialType::Stone); // blue
+    set(&mut p, VoxelMaterial::NpcWalking,     40, 200, 220, MaterialType::Stone); // cyan
+    set(&mut p, VoxelMaterial::NpcWorking,     50, 200,  80, MaterialType::Stone); // green
+    set(&mut p, VoxelMaterial::NpcFighting,   230,  60,  40, MaterialType::Stone); // red
+    set(&mut p, VoxelMaterial::MonsterMarker, 180,  30,  30, MaterialType::Stone); // dark red
 
     p
 }
@@ -262,67 +276,107 @@ impl VoxelBridge {
         }
     }
 
-    /// Sync all alive entities from world state into the scene.
-    /// Spawns new markers, updates moved positions, despawns dead entities.
-    pub fn sync_entities(&mut self, state: &WorldState) {
-        // Track which entities we've seen this tick.
-        let mut seen = std::collections::HashSet::new();
+    /// Pick marker material based on NPC activity state.
+    fn npc_activity_material(entity: &super::state::Entity) -> VoxelMaterial {
+        use super::state::NpcAction;
+        use super::voxel::VoxelMaterial;
+        if let Some(npc) = &entity.npc {
+            match &npc.action {
+                NpcAction::Walking { .. } => VoxelMaterial::NpcWalking,
+                NpcAction::Working { .. } | NpcAction::Harvesting { .. } => VoxelMaterial::NpcWorking,
+                NpcAction::Fighting { .. } => VoxelMaterial::NpcFighting,
+                _ => VoxelMaterial::NpcIdle,
+            }
+        } else {
+            VoxelMaterial::NpcIdle
+        }
+    }
+
+    /// Check if a voxel is an entity marker.
+    fn is_marker(mat: VoxelMaterial) -> bool {
+        matches!(mat,
+            VoxelMaterial::NpcIdle | VoxelMaterial::NpcWalking
+            | VoxelMaterial::NpcWorking | VoxelMaterial::NpcFighting
+            | VoxelMaterial::MonsterMarker)
+    }
+
+    /// Sync all alive entities by stamping marker voxels directly into the
+    /// voxel world. Interpolates positions for smooth movement.
+    pub fn sync_entities(&mut self, state: &mut WorldState) {
+        use super::voxel::{Voxel, VoxelMaterial};
+
+        // Clear previous marker positions.
+        for (_id, &(px, py, pz)) in &self.entity_positions {
+            let (sx, sy, sz) = (3i32, 3, 5); // max marker size
+            for dz in 0..sz {
+                for dy in 0..sy {
+                    for dx in 0..sx {
+                        let v = state.voxel_world.get_voxel(
+                            px as i32 + dx, py as i32 + dy, pz as i32 + dz,
+                        );
+                        if Self::is_marker(v.material) {
+                            state.voxel_world.set_voxel(
+                                px as i32 + dx, py as i32 + dy, pz as i32 + dz,
+                                Voxel::default(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Build new positions with interpolation.
+        let mut new_positions: HashMap<u32, (f32, f32, f32)> = HashMap::new();
 
         for entity in &state.entities {
             if !entity.alive { continue; }
-            seen.insert(entity.id);
 
-            let z = state.voxel_world.surface_height(
-                entity.pos.0 as i32,
-                entity.pos.1 as i32,
-            ) as f32;
-            let pos = (entity.pos.0, entity.pos.1, z);
+            let mat = match entity.kind {
+                EntityKind::Npc => Self::npc_activity_material(entity),
+                EntityKind::Monster => VoxelMaterial::MonsterMarker,
+                _ => continue,
+            };
 
-            // Check if position changed.
-            if let Some(old_pos) = self.entity_positions.get(&entity.id) {
-                if (old_pos.0 - pos.0).abs() < 0.01
-                    && (old_pos.1 - pos.1).abs() < 0.01
-                    && (old_pos.2 - pos.2).abs() < 0.01
-                {
-                    continue; // No movement.
+            // Interpolate toward target position for smooth movement.
+            let target_x = entity.pos.0;
+            let target_y = entity.pos.1;
+            let (vx, vy) = if let Some(&(prev_x, prev_y, _)) = self.entity_positions.get(&entity.id) {
+                // Lerp 30% toward target each sync (smooth glide).
+                let lerp = 0.3;
+                let ix = prev_x + (target_x - prev_x) * lerp;
+                let iy = prev_y + (target_y - prev_y) * lerp;
+                (ix as i32, iy as i32)
+            } else {
+                (target_x as i32, target_y as i32)
+            };
+            let vz = state.voxel_world.surface_height(vx, vy);
+
+            let (sx, sy, sz) = Self::marker_dims(entity.kind);
+            for dz in 0..sz as i32 {
+                for dy in 0..sy as i32 {
+                    for dx in 0..sx as i32 {
+                        state.voxel_world.set_voxel(
+                            vx + dx, vy + dy, vz + dz,
+                            Voxel::new(mat),
+                        );
+                    }
                 }
             }
 
-            let transform = Transform {
-                position: glam::Vec3::new(pos.0, pos.2, pos.1),
-                ..Default::default()
-            };
-
-            if let Some(&handle) = self.entity_handles.get(&entity.id) {
-                // Update position.
-                self.scene.set_transform(handle, transform);
-            } else {
-                // Spawn new marker.
-                let idx = marker_index_for_kind(entity.kind);
-                let (sx, sy, sz) = Self::marker_dims(entity.kind);
-                let grid = Self::make_marker_grid(idx, sx, sy, sz);
-                let handle = self.scene.spawn(&grid, transform, &self.palette);
-                self.entity_handles.insert(entity.id, handle);
-            }
-            self.entity_positions.insert(entity.id, pos);
+            new_positions.insert(entity.id, (vx as f32, vy as f32, vz as f32));
         }
 
-        // Despawn dead/removed entities.
-        let dead_ids: Vec<u32> = self.entity_handles.keys()
-            .filter(|id| !seen.contains(id))
-            .copied()
-            .collect();
-        for id in dead_ids {
-            if let Some(handle) = self.entity_handles.remove(&id) {
-                self.scene.despawn(handle);
-            }
-            self.entity_positions.remove(&id);
+        // Remove dead entities from cache.
+        self.entity_positions.retain(|id, _| new_positions.contains_key(id));
+        // Update cached positions.
+        for (id, pos) in new_positions {
+            self.entity_positions.insert(id, pos);
         }
     }
 
     /// Full sync: chunks + entities.
     pub fn sync_all(&mut self, state: &mut WorldState) {
-        self.sync_chunks(&mut state.voxel_world);
         self.sync_entities(state);
+        self.sync_chunks(&mut state.voxel_world);
     }
 }

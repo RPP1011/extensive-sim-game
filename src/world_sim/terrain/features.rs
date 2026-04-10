@@ -17,6 +17,8 @@ const TREE_HEIGHT_SALT: u64     = 0xAAAA_1234_0002;
 const TREE_CANOPY_SALT: u64     = 0xBBBB_1234_0003;
 const BOULDER_DENSITY_SALT: u64 = 0xCCCC_5678_0001;
 const BOULDER_SIZE_SALT: u64    = 0xDDDD_5678_0002;
+const PILLAR_DENSITY_SALT: u64  = 0xEEEE_5678_0003;
+const PILLAR_HEIGHT_SALT: u64   = 0xFFFF_5678_0004;
 
 // ---------------------------------------------------------------------------
 // Helpers: tree and boulder stampers
@@ -24,8 +26,13 @@ const BOULDER_SIZE_SALT: u64    = 0xDDDD_5678_0002;
 
 /// Stamp a tree with its base at local column (lx, ly), trunk bottom at
 /// voxel-height base_z (world Z).  The chunk must contain that Z range to
-/// see any of the tree.
+/// see any of the tree. `canopy_material` controls canopy color by biome.
 pub fn stamp_tree(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, seed: u64) {
+    stamp_tree_biome(chunk, lx, ly, base_z, seed, VoxelMaterial::Leaves);
+}
+
+/// Stamp a tree with a biome-specific canopy material.
+pub fn stamp_tree_biome(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, seed: u64, canopy_material: VoxelMaterial) {
     let base_x = chunk.pos.x * CHUNK_SIZE as i32;
     let base_y = chunk.pos.y * CHUNK_SIZE as i32;
     let base_cz = chunk.pos.z * CHUNK_SIZE as i32;
@@ -33,13 +40,21 @@ pub fn stamp_tree(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, seed: u6
     let vx = base_x + lx as i32;
     let vy = base_y + ly as i32;
 
-    // Deterministic trunk height 5-8
+    // Size category: small bush (20%), medium tree (60%), large tree (20%)
+    let size_hash = noise::hash_f32(vx, vy, 5, seed.wrapping_add(TREE_HEIGHT_SALT));
     let h_hash = noise::hash_f32(vx, vy, 0, seed.wrapping_add(TREE_HEIGHT_SALT));
-    let trunk_height = 5 + (h_hash * 4.0) as i32; // 5..8
 
-    // Canopy radius 2 or 3
-    let c_hash = noise::hash_f32(vx, vy, 1, seed.wrapping_add(TREE_CANOPY_SALT));
-    let canopy_r: i32 = if c_hash > 0.5 { 3 } else { 2 };
+    let (trunk_height, canopy_r) = if size_hash < 0.2 {
+        // Small bush: trunk 2-3, canopy 1-2
+        (2 + (h_hash * 2.0) as i32, if h_hash > 0.5 { 2 } else { 1 })
+    } else if size_hash > 0.8 {
+        // Large ancient tree: trunk 8-12, canopy 3-4
+        (8 + (h_hash * 5.0) as i32, if h_hash > 0.5 { 4 } else { 3 })
+    } else {
+        // Standard tree: trunk 5-8, canopy 2-3
+        let c_hash = noise::hash_f32(vx, vy, 1, seed.wrapping_add(TREE_CANOPY_SALT));
+        (5 + (h_hash * 4.0) as i32, if c_hash > 0.5 { 3 } else { 2 })
+    };
 
     // -- Trunk --
     for dz in 0..trunk_height {
@@ -69,7 +84,7 @@ pub fn stamp_tree(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, seed: u6
                 let idx = local_index(llx as usize, lly as usize, llz as usize);
                 // Don't overwrite trunk
                 if chunk.voxels[idx].material != VoxelMaterial::WoodLog {
-                    chunk.voxels[idx] = Voxel::new(VoxelMaterial::Grass);
+                    chunk.voxels[idx] = Voxel::new(canopy_material);
                 }
             }
         }
@@ -106,6 +121,39 @@ fn stamp_boulder(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, seed: u64
     }
 }
 
+/// Stamp a rock pillar/mesa at local column (lx, ly), base at world-Z base_z.
+/// Creates a tall narrow stone column — common in desert/badlands.
+fn stamp_pillar(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, seed: u64, material: VoxelMaterial) {
+    let base_x = chunk.pos.x * CHUNK_SIZE as i32;
+    let base_y = chunk.pos.y * CHUNK_SIZE as i32;
+    let base_cz = chunk.pos.z * CHUNK_SIZE as i32;
+
+    let vx = base_x + lx as i32;
+    let vy = base_y + ly as i32;
+
+    let h_hash = noise::hash_f32(vx, vy, 3, seed.wrapping_add(PILLAR_HEIGHT_SALT));
+    let height = 3 + (h_hash * 6.0) as i32; // 3..8
+    let radius: i32 = if h_hash > 0.6 { 2 } else { 1 };
+
+    for dz in 0..height {
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx * dx + dy * dy > radius * radius + 1 { continue; }
+                let wx = vx + dx;
+                let wy = vy + dy;
+                let wz = base_z + dz;
+                let llx = wx - base_x;
+                let lly = wy - base_y;
+                let llz = wz - base_cz;
+                if llx < 0 || lly < 0 || llz < 0 { continue; }
+                if llx >= CHUNK_SIZE as i32 || lly >= CHUNK_SIZE as i32 || llz >= CHUNK_SIZE as i32 { continue; }
+                let idx = local_index(llx as usize, lly as usize, llz as usize);
+                chunk.voxels[idx] = Voxel::new(material);
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Per-biome density tables
 // ---------------------------------------------------------------------------
@@ -113,6 +161,9 @@ fn stamp_boulder(chunk: &mut Chunk, lx: usize, ly: usize, base_z: i32, seed: u64
 struct FeatureParams {
     tree_density: f32,
     boulder_density: f32,
+    pillar_density: f32,
+    pillar_material: VoxelMaterial,
+    canopy_material: VoxelMaterial,
 }
 
 fn feature_params(terrain: Terrain, sub_biome: SubBiome) -> FeatureParams {
@@ -124,23 +175,39 @@ fn feature_params(terrain: Terrain, sub_biome: SubBiome) -> FeatureParams {
             _                       => 0.06,
         },
         Terrain::Jungle => match sub_biome {
-            SubBiome::TempleJungle => 0.12,
-            _                      => 0.12,
+            SubBiome::TempleJungle => 0.18,
+            _                      => 0.20,
         },
         Terrain::Tundra  => 0.01,
-        Terrain::Swamp   => 0.04,
+        Terrain::Swamp   => 0.07,
+        Terrain::Mountains => 0.005,
+        Terrain::Plains  => 0.008,
         _ => 0.0,
     };
 
     let boulder_density = match terrain {
-        Terrain::Plains  => 0.005,
-        Terrain::Desert  => 0.01,
-        Terrain::Badlands => 0.01,
+        Terrain::Plains  => 0.01,
+        Terrain::Desert  => 0.02,
+        Terrain::Badlands => 0.02,
         Terrain::Tundra  => 0.008,
+        Terrain::Mountains => 0.02,
         _ => 0.0,
     };
 
-    FeatureParams { tree_density, boulder_density }
+    let (pillar_density, pillar_material) = match terrain {
+        Terrain::Desert => (0.008, VoxelMaterial::Sandstone),
+        Terrain::Badlands => (0.012, VoxelMaterial::RedSand),
+        _ => (0.0, VoxelMaterial::Stone),
+    };
+
+    let canopy_material = match terrain {
+        Terrain::Jungle => VoxelMaterial::JungleMoss,
+        Terrain::Swamp => VoxelMaterial::Leaves, // dark green contrasts olive ground
+        Terrain::Forest => VoxelMaterial::Leaves,
+        _ => VoxelMaterial::Leaves,
+    };
+
+    FeatureParams { tree_density, boulder_density, pillar_density, pillar_material, canopy_material }
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +233,7 @@ pub fn place_surface_features(
     }
 
     let params = feature_params(terrain, sub_biome);
-    if params.tree_density == 0.0 && params.boulder_density == 0.0 {
+    if params.tree_density == 0.0 && params.boulder_density == 0.0 && params.pillar_density == 0.0 {
         return;
     }
 
@@ -191,11 +258,18 @@ pub fn place_surface_features(
             let local_z = feature_base_z - base_z;
             if local_z < 0 || local_z >= CHUNK_SIZE as i32 { continue; }
 
-            // Tree placement
+            // Tree placement — modulated by large-scale noise for natural clustering
             if params.tree_density > 0.0 {
                 let td = noise::hash_f32(vx, vy, 0, seed.wrapping_add(TREE_DENSITY_SALT));
-                if td < params.tree_density {
-                    stamp_tree(chunk, lx, ly, feature_base_z, seed);
+                // Cluster noise: creates patches of dense trees and clearings
+                let cluster = noise::fbm_2d(
+                    vx as f32 * 0.025, vy as f32 * 0.025,
+                    seed.wrapping_add(0xC1C1), 2, 2.0, 0.5,
+                );
+                // Effective density: base * cluster_multiplier (0.3 to 1.7)
+                let effective_density = params.tree_density * (0.3 + cluster * 1.4);
+                if td < effective_density {
+                    stamp_tree_biome(chunk, lx, ly, feature_base_z, seed, params.canopy_material);
                 }
             }
 
@@ -204,6 +278,14 @@ pub fn place_surface_features(
                 let bd = noise::hash_f32(vx, vy, 0, seed.wrapping_add(BOULDER_DENSITY_SALT));
                 if bd < params.boulder_density {
                     stamp_boulder(chunk, lx, ly, feature_base_z, seed);
+                }
+            }
+
+            // Rock pillar placement (desert/badlands)
+            if params.pillar_density > 0.0 {
+                let pd = noise::hash_f32(vx, vy, 0, seed.wrapping_add(PILLAR_DENSITY_SALT));
+                if pd < params.pillar_density {
+                    stamp_pillar(chunk, lx, ly, feature_base_z, seed, params.pillar_material);
                 }
             }
         }
@@ -241,9 +323,9 @@ mod tests {
         // Surface at local z=0, place base at z=1
         stamp_tree(&mut chunk, 8, 8, 1, 42);
         let log_count = chunk.voxels.iter().filter(|v| v.material == VoxelMaterial::WoodLog).count();
-        let leaf_count = chunk.voxels.iter().filter(|v| v.material == VoxelMaterial::Grass).count();
-        assert!(log_count >= 5, "tree trunk too short: {log_count} WoodLog voxels");
-        assert!(leaf_count > 0, "tree has no canopy (Grass voxels): {leaf_count}");
+        let leaf_count = chunk.voxels.iter().filter(|v| v.material == VoxelMaterial::Leaves).count();
+        assert!(log_count >= 2, "tree trunk too short: {log_count} WoodLog voxels");
+        assert!(leaf_count > 0, "tree has no canopy (Leaves voxels): {leaf_count}");
     }
 
     #[test]

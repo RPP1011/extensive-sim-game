@@ -140,7 +140,9 @@ fn classify_terrain(
     temperature: f32,
     detail: f32,
 ) -> Terrain {
-    if elevation > 0.75 {
+    // fbm_raw peaks at ~0.5, continent mask preserves that at center,
+    // so practical elevation range is [0, ~0.5]. Thresholds scaled accordingly.
+    if elevation > 0.42 {
         if temperature < 0.3 {
             return Terrain::Glacier;
         }
@@ -149,7 +151,7 @@ fn classify_terrain(
         }
         return Terrain::Mountains;
     }
-    if elevation < 0.15 {
+    if elevation < 0.12 {
         if moisture > 0.6 {
             return Terrain::DeepOcean;
         }
@@ -169,7 +171,7 @@ fn classify_terrain(
             else { Terrain::Badlands }
         }
         (false, true) => {
-            if temperature < 0.25 { Terrain::Tundra } else { Terrain::Forest }
+            if temperature < 0.35 { Terrain::Tundra } else { Terrain::Forest }
         }
         (false, false) => {
             if detail > 0.85 { Terrain::AncientRuins }
@@ -339,6 +341,10 @@ fn place_settlements(cells: &mut Vec<RegionCell>, cols: usize, rows: usize, seed
             let terrain = cells[idx].terrain;
 
             if !terrain.is_settleable() {
+                continue;
+            }
+            // Skip cells below sea level (height < 0.25 → surface below SEA_LEVEL).
+            if cells[idx].height < 0.25 {
                 continue;
             }
 
@@ -598,7 +604,7 @@ mod tests {
     fn height_maps_to_terrain() {
         let plan = generate_continent(50, 30, 42);
         for cell in &plan.cells {
-            if cell.height > 0.8 {
+            if cell.height > 0.45 {
                 assert!(
                     matches!(cell.terrain, Terrain::Mountains | Terrain::Glacier | Terrain::FlyingIslands | Terrain::Volcano),
                     "high elevation ({}) got {:?}", cell.height, cell.terrain

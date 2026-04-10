@@ -78,15 +78,15 @@ pub struct SurfaceMaterials {
 pub fn surface_materials(terrain: Terrain) -> SurfaceMaterials {
     use VoxelMaterial::*;
     let (surface, subsoil, deep_stone) = match terrain {
-        Terrain::Plains      => (Grass, Dirt, Stone),
+        Terrain::Plains      => (TallGrass, Dirt, Stone),
         Terrain::Forest      => (Grass, Dirt, Stone),
-        Terrain::Jungle      => (Grass, Dirt, Stone),
+        Terrain::Jungle      => (JungleMoss, Clay, Stone),
         Terrain::Desert      => (Sand, Sandstone, Stone),
-        Terrain::Badlands    => (Sand, Sandstone, Stone),
+        Terrain::Badlands    => (RedSand, Sandstone, Granite),
         Terrain::Mountains   => (Stone, Stone, Granite),
-        Terrain::Tundra      => (Snow, Gravel, Stone),
-        Terrain::Glacier     => (Snow, Gravel, Stone),
-        Terrain::Swamp       => (Grass, Clay, Stone),
+        Terrain::Tundra      => (Peat, Gravel, Stone),
+        Terrain::Glacier     => (Snow, Ice, Stone),
+        Terrain::Swamp       => (MudGrass, Clay, Stone),
         Terrain::Coast       => (Sand, Sand, Stone),
         Terrain::CoralReef   => (Sand, Sand, Stone),
         Terrain::Volcano     => (Basalt, Basalt, Obsidian),
