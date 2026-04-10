@@ -119,6 +119,10 @@ struct AppState {
     chunk_rx: mpsc::Receiver<(ChunkPos, Chunk)>,
     chunks_pending: usize,
     chunks_loaded: usize,
+
+    /// Maps an in-flight GPU dispatch request id → target ChunkPos, so we can
+    /// reconstruct the chunk once the dispatch completes (Task 14).
+    pending_chunk_requests: HashMap<u64, ChunkPos>,
 }
 
 impl AppState {
@@ -257,6 +261,7 @@ impl AppState {
             chunk_rx,
             chunks_pending: total_settlement_chunks,
             chunks_loaded: 0,
+            pending_chunk_requests: HashMap::new(),
         })
     }
 
@@ -363,10 +368,11 @@ impl AppState {
         }
     }
 
-    /// Generate chunks near the camera that don't exist yet.
-    /// Dispatches to the GPU terrain compute pipeline (Task 13). Each dispatch
-    /// currently waits on the Vulkan queue to idle before returning — Task 14
-    /// will make this asynchronous.
+    /// Submit chunks near the camera to the GPU terrain compute pipeline.
+    /// Dispatches are asynchronous (Task 14): we submit up to `budget` new
+    /// chunks per call, each consuming one free slot in the compute pipeline's
+    /// in-flight ring. Completed chunks are picked up by
+    /// [`drain_completed_gpu_chunks`] on a later frame.
     fn generate_camera_chunks(&mut self, budget: usize) {
         let has_plan = self.sim.state().voxel_world.region_plan.is_some();
         static LOGGED_PLAN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -401,56 +407,82 @@ impl AppState {
         // Radius in chunks to check around camera.
         let radius = (LOAD_RADIUS / (MEGA as f32 * cs)).ceil() as i32 + 1;
 
-        let mut generated = 0;
+        let mut submitted = 0;
         // Spiral outward from camera for priority ordering.
-        for dist in 0..=radius {
-            if generated >= budget { break; }
+        'outer: for dist in 0..=radius {
             for dx in -dist..=dist {
-                if generated >= budget { break; }
                 for dy in -dist..=dist {
-                    if generated >= budget { break; }
                     for dz in -2..=2 { // limited vertical range
-                        if generated >= budget { break; }
+                        if submitted >= budget { break 'outer; }
                         // Only process shell of current distance.
                         if dx.abs() != dist && dy.abs() != dist { continue; }
 
                         let cp = ChunkPos::new(center_cx + dx, center_cy + dy, center_cz + dz);
                         if self.sim.state().voxel_world.chunks.contains_key(&cp) { continue; }
+                        // Skip if already dispatched and waiting on GPU.
+                        if self.pending_chunk_requests.values().any(|p| *p == cp) { continue; }
 
-                        // Dispatch GPU compute. Returns CHUNK_VOLUME bytes (material per voxel).
-                        let gpu_mats = match self.terrain_compute.generate_chunk(
+                        match self.terrain_compute.submit_chunk(
                             &self.ctx,
                             [cp.x, cp.y, cp.z],
                             seed as u32,
                         ) {
-                            Ok(m) => m,
-                            Err(e) => {
-                                eprintln!("[voxel] GPU terrain compute failed for {:?}: {}", cp, e);
-                                continue;
+                            Ok(Some(req_id)) => {
+                                self.pending_chunk_requests.insert(req_id, cp);
+                                submitted += 1;
                             }
-                        };
-                        // Convert flat material array into a Chunk.
-                        let mut chunk = crate::world_sim::voxel::Chunk::new_air(cp);
-                        let cs_u = CHUNK_SIZE;
-                        for lz in 0..cs_u {
-                            for ly in 0..cs_u {
-                                for lx in 0..cs_u {
-                                    let mat_byte = gpu_mats[lz * cs_u * cs_u + ly * cs_u + lx];
-                                    if mat_byte != 0 {
-                                        let mat = voxel_material_from_u8(mat_byte);
-                                        chunk.voxels[crate::world_sim::voxel::local_index(lx, ly, lz)] =
-                                            crate::world_sim::voxel::Voxel::new(mat);
-                                    }
-                                }
+                            Ok(None) => {
+                                // No free slots in the ring — stop submitting
+                                // for this frame.
+                                break 'outer;
+                            }
+                            Err(e) => {
+                                eprintln!("[voxel] submit_chunk failed for {:?}: {}", cp, e);
+                                break 'outer;
                             }
                         }
-                        chunk.dirty = true;
-                        self.sim.state_mut().voxel_world.chunks.insert(cp, chunk);
-                        self.dirty_megas.insert(MegaPos::from_chunk(cp));
-                        generated += 1;
                     }
                 }
             }
+        }
+    }
+
+    /// Poll the GPU terrain compute pipeline for completed dispatches and
+    /// convert each one into a sim `Chunk`. Non-blocking — if nothing is ready,
+    /// this is a cheap fence status check per slot.
+    fn drain_completed_gpu_chunks(&mut self) {
+        let completed = match self.terrain_compute.try_take_completed(&self.ctx) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[voxel] try_take_completed failed: {}", e);
+                return;
+            }
+        };
+        let cs = CHUNK_SIZE;
+        for (req_id, chunk_pos, gpu_mats) in completed {
+            self.pending_chunk_requests.remove(&req_id);
+            let cp = ChunkPos::new(chunk_pos[0], chunk_pos[1], chunk_pos[2]);
+            // A pre-generated chunk may have been inserted between submit and
+            // drain (e.g. the settlement thread); don't clobber it.
+            if self.sim.state().voxel_world.chunks.contains_key(&cp) {
+                continue;
+            }
+            let mut chunk = crate::world_sim::voxel::Chunk::new_air(cp);
+            for lz in 0..cs {
+                for ly in 0..cs {
+                    for lx in 0..cs {
+                        let mat_byte = gpu_mats[lz * cs * cs + ly * cs + lx];
+                        if mat_byte != 0 {
+                            let mat = voxel_material_from_u8(mat_byte);
+                            chunk.voxels[crate::world_sim::voxel::local_index(lx, ly, lz)] =
+                                crate::world_sim::voxel::Voxel::new(mat);
+                        }
+                    }
+                }
+            }
+            chunk.dirty = true;
+            self.sim.state_mut().voxel_world.chunks.insert(cp, chunk);
+            self.dirty_megas.insert(MegaPos::from_chunk(cp));
         }
     }
 
@@ -762,11 +794,17 @@ impl ApplicationHandler for WorldSimVoxelApp {
                 // Drain background-generated settlement chunks.
                 app.drain_ready_chunks(64);
 
-                // Generate chunks near camera on-demand via GPU compute (Task 13).
-                // Dispatch is currently synchronous (waits on queue idle) — Task 14
-                // will make it async. Budget: 4 chunks/frame as a starting point.
+                // Drain GPU compute chunks whose fences are signaled (Task 14).
+                // Cheap fence polling — only blocks on memcpy+conversion for
+                // chunks that are actually ready.
+                let t_drain = Instant::now();
+                app.drain_completed_gpu_chunks();
+                let _drain_ms = t_drain.elapsed().as_secs_f32() * 1000.0;
+
+                // Submit new GPU terrain dispatches (Task 14). Up to 8 in
+                // flight; each frame we top up the ring without blocking.
                 let t_gen = Instant::now();
-                app.generate_camera_chunks(4);
+                app.generate_camera_chunks(8);
                 let gen_ms = t_gen.elapsed().as_secs_f32() * 1000.0;
 
                 // FPS tracking
