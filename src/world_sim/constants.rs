@@ -49,15 +49,17 @@ pub const SECTOR_SIZE: i32 = 4096;
 // ---------------------------------------------------------------------------
 
 /// How many sim chunks per mega-chunk axis. MEGA × CHUNK_SIZE = voxels per mega edge.
-/// At 64 chunk size: 2×64 = 128 voxels = 12.8m per mega edge.
-pub const MEGA: i32 = 2;
+/// At 64 chunk size, MEGA=1 means a mega-chunk IS a chunk (64 voxels = 6.4m).
+/// Larger CHUNK_SIZE makes mega-chunk grouping unnecessary.
+pub const MEGA: i32 = 1;
 
 /// Voxels per mega-chunk edge.
 pub const MEGA_VOXELS: u32 = (MEGA as u32) * (CHUNK_SIZE as u32);
 
 /// Maximum distance (voxels) from camera to load/render a mega-chunk.
-/// At 10cm/voxel, 2048 voxels ≈ 204.8m render distance.
-pub const LOAD_RADIUS: f32 = 2048.0;
+/// At 10cm/voxel, 768 voxels ≈ 76.8m render distance.
+/// Kept short because each chunk is now 64³ = 262K voxels (large upload).
+pub const LOAD_RADIUS: f32 = 768.0;
 
 /// Internal render resolution for the voxel raycaster.
 /// Kept lower than window size for performance; blit-upscaled to the window.

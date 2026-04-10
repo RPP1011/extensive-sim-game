@@ -1287,19 +1287,16 @@ impl WorldSim {
             super::systems::resource_nodes::spawn_initial_resources(&mut initial);
         }
 
-        // Generate voxel terrain chunks around settlements and NPC positions.
+        // Generate voxel terrain chunks around settlements only.
+        // At CHUNK_SIZE=64 with 10cm voxels, one chunk is 6.4m — large enough
+        // to contain a small structure. Per-NPC pregen is too expensive
+        // (262K voxels per chunk × thousands of NPCs); the renderer's dynamic
+        // chunk loading handles NPC areas on-demand.
         {
             let seed = initial.rng_state;
-            // Load chunks around each settlement center.
             for s in &initial.settlements {
-                initial.voxel_world.ensure_loaded_around(s.pos.0, s.pos.1, 30.0, 2, seed);
-            }
-            // Load chunks around NPC positions.
-            for e in &initial.entities {
-                if e.alive && e.kind == super::state::EntityKind::Npc {
-                    let sz = initial.voxel_world.surface_height(e.pos.0 as i32, e.pos.1 as i32) as f32;
-                    initial.voxel_world.ensure_loaded_around(e.pos.0, e.pos.1, sz, 1, seed);
-                }
+                // Radius 0 = just the central chunk (6.4m³ at 10cm/voxel)
+                initial.voxel_world.ensure_loaded_around(s.pos.0, s.pos.1, 30.0, 0, seed);
             }
         }
 

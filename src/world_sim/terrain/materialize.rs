@@ -150,14 +150,18 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
                 } else if depth >= -1 {
                     // Surface layer (depth 0 or -1 means vz == surface_z or surface_z+1)
                     if matches!(terrain, Terrain::Mountains | Terrain::Glacier) {
-                        // Mountain surface varies by altitude + noise
-                        // At 10cm/voxel: snow above 150m, transition 130-150m
+                        // Mountain surface varies by altitude + noise.
+                        // Mountain peaks reach ~800-900 in current terrain,
+                        // so snow line at ~700 with transition 600-700.
                         let n = noise::hash_f32(vx, vy, vz, seed.wrapping_add(0xA1B2));
-                        if vz > 1500 {
+                        if vz > 750 {
                             VoxelMaterial::Snow
-                        } else if vz > 1300 {
-                            // Transition zone: patchy snow
-                            if n > 0.4 { VoxelMaterial::Snow } else { VoxelMaterial::Stone }
+                        } else if vz > 600 {
+                            // Transition: snow probability based on altitude
+                            let snow_prob = ((vz - 600) as f32) / 150.0;
+                            if n < snow_prob { VoxelMaterial::Snow }
+                            else if n > 0.8 { VoxelMaterial::Gravel }
+                            else { VoxelMaterial::Stone }
                         } else if n > 0.7 {
                             VoxelMaterial::Gravel
                         } else {
