@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -26,7 +26,7 @@ use super::runtime::WorldSim;
 use super::voxel::{Chunk, ChunkPos, CHUNK_SIZE, CHUNK_VOLUME};
 use super::voxel_bridge::VoxelBridge;
 
-use super::constants::{MEGA, MEGA_VOXELS, LOAD_RADIUS, RENDER_WIDTH as WIDTH, RENDER_HEIGHT as HEIGHT};
+use super::constants::{MEGA, MEGA_VOXELS, LOAD_RADIUS, RENDER_WIDTH, RENDER_HEIGHT, WINDOW_WIDTH, WINDOW_HEIGHT};
 
 // ---------------------------------------------------------------------------
 // MegaChunkPos — groups 4×4×4 sim chunks
@@ -92,6 +92,9 @@ struct AppState {
     bridge: VoxelBridge,
     sim: WorldSim,
 
+    /// GPU compute pipeline for on-demand chunk terrain generation.
+    terrain_compute: voxel_engine::terrain_compute::TerrainComputePipeline,
+
     gpu_megas: HashMap<MegaPos, GpuMega>,
     /// Tracks which mega-chunks have been dirtied since last upload.
     dirty_megas: HashSet<MegaPos>,
@@ -109,6 +112,8 @@ struct AppState {
     frame_count: u32,
     fps_timer: Instant,
     last_fps: f32,
+    last_visible_megas: usize,
+    settlement_jump_idx: usize,
 
     // Background chunk generation
     chunk_rx: mpsc::Receiver<(ChunkPos, Chunk)>,
@@ -121,9 +126,9 @@ impl AppState {
         let t0 = Instant::now();
         let ctx = VulkanContext::new_with_surface_extensions(&window)?;
         eprintln!("[voxel] Vulkan context: {:.1}ms", t0.elapsed().as_secs_f32() * 1000.0);
-        let alloc = VulkanAllocator::new(&ctx)?;
+        let mut alloc = VulkanAllocator::new(&ctx)?;
         let mut swapchain = SwapchainContext::new(&ctx, &window)?;
-        let renderer = VoxelRenderer::new(&ctx, WIDTH, HEIGHT)?;
+        let renderer = VoxelRenderer::new(&ctx, RENDER_WIDTH, RENDER_HEIGHT)?;
         eprintln!("[voxel] Renderer ready: {:.1}ms total", t0.elapsed().as_secs_f32() * 1000.0);
 
         // Show a blank frame immediately so the window isn't frozen.
@@ -137,6 +142,33 @@ impl AppState {
         let seed = state.rng_state;
         let plan = state.voxel_world.region_plan.clone();
 
+        // Create GPU terrain compute pipeline and upload region plan + rivers.
+        let mut terrain_compute =
+            voxel_engine::terrain_compute::TerrainComputePipeline::new(&ctx, &mut alloc)
+                .context("create terrain compute pipeline")?;
+        if let Some(p) = plan.as_ref() {
+            let gpu_cells = p.to_gpu_cells();
+            terrain_compute
+                .upload_region_plan(
+                    &ctx,
+                    &mut alloc,
+                    p.cols as u32,
+                    p.rows as u32,
+                    crate::world_sim::terrain::CELL_SIZE as u32,
+                    &gpu_cells,
+                )
+                .context("upload region plan")?;
+            let (river_points, river_headers) = p.to_gpu_rivers();
+            terrain_compute
+                .upload_rivers(&ctx, &mut alloc, &river_points, &river_headers)
+                .context("upload rivers")?;
+            eprintln!(
+                "[voxel] GPU terrain compute initialized: {} cells, {} rivers",
+                gpu_cells.len(),
+                river_headers.len()
+            );
+        }
+
         let mut settlement_chunks: Vec<ChunkPos> = Vec::new();
         if let Some(ref plan) = plan {
             use crate::world_sim::terrain::MAX_SURFACE_Z;
@@ -144,6 +176,7 @@ impl AppState {
             let radius = 3i32; // 3 chunks each direction around each settlement
 
             for settlement in &state.settlements {
+                // Settlement pos is already in voxel space.
                 let (sx, sy) = settlement.pos;
                 let h = plan.interpolate_height(sx, sy);
                 let surface_cz = (h * MAX_SURFACE_Z as f32) as i32 / CHUNK_SIZE as i32;
@@ -186,17 +219,16 @@ impl AppState {
             });
         }
 
-        // Camera above first settlement.
+        // Camera directly above first settlement, looking down.
+        // Settlement pos is already in voxel space (not world units).
         let (cam_pos, cam_target) = if let Some(s) = sim.state().settlements.first() {
-            let z = if let Some(ref plan) = sim.state().voxel_world.region_plan {
-                let h = plan.interpolate_height(s.pos.0, s.pos.1);
-                h * crate::world_sim::terrain::MAX_SURFACE_Z as f32
-            } else {
-                80.0
-            };
-            eprintln!("[voxel] Camera target: settlement at ({:.0}, {:.0}), surface z={:.0}", s.pos.0, s.pos.1, z);
-            let target = glam::Vec3::new(s.pos.0, z, s.pos.1);
-            let eye = target + glam::Vec3::new(-80.0, 120.0, -80.0);
+            let vx = s.pos.0 as i32;
+            let vy = s.pos.1 as i32;
+            let surface_z = sim.state().voxel_world.surface_height(vx, vy);
+            // Engine coords: sim x → engine x, sim z → engine y (up), sim y → engine z
+            let target = glam::Vec3::new(vx as f32, surface_z as f32, vy as f32);
+            let eye = target + glam::Vec3::new(0.0, 150.0, -100.0);
+            eprintln!("[voxel] Camera above settlement '{}' at voxel ({}, {}, {})", s.name, vx, vy, surface_z);
             (eye, target)
         } else {
             (glam::Vec3::new(0.0, 200.0, 0.0), glam::Vec3::ZERO)
@@ -207,6 +239,7 @@ impl AppState {
         Ok(Self {
             window, ctx, alloc, swapchain, renderer, camera,
             bridge, sim,
+            terrain_compute,
             gpu_megas: HashMap::new(),
             dirty_megas: HashSet::new(),
             paused: true, // start paused so sim doesn't run during chunk loading
@@ -219,6 +252,8 @@ impl AppState {
             frame_count: 0,
             fps_timer: Instant::now(),
             last_fps: 0.0,
+            last_visible_megas: 0,
+            settlement_jump_idx: 0,
             chunk_rx,
             chunks_pending: total_settlement_chunks,
             chunks_loaded: 0,
@@ -228,26 +263,30 @@ impl AppState {
     /// Build a 64³ mega-grid from up to 4×4×4 sim chunks.
     fn build_mega_grid(&self, mp: MegaPos) -> Option<VoxelGrid> {
         let world = &self.sim.state().voxel_world;
-        let mut any_content = false;
+        let mut any_solid = false;
+        let mut all_full = true;
+        let mut all_loaded = true;
 
-        // Check if this mega-chunk is fully occluded (all constituent chunks solid
-        // and all 6 mega-neighbors also fully solid).
-        let mut all_solid = true;
         for dz in 0..MEGA {
             for dy in 0..MEGA {
                 for dx in 0..MEGA {
                     let cp = ChunkPos::new(mp.x * MEGA + dx, mp.y * MEGA + dy, mp.z * MEGA + dz);
                     match world.chunks.get(&cp) {
                         Some(c) => {
-                            if c.solid_count() != CHUNK_VOLUME { all_solid = false; }
-                            any_content = true;
+                            if !any_solid {
+                                any_solid = c.voxels.iter().any(|v| v.material.is_solid());
+                            }
+                            if all_full && c.voxels.iter().any(|v| !v.material.is_solid()) {
+                                all_full = false;
+                            }
                         }
-                        None => { all_solid = false; }
+                        None => { all_loaded = false; all_full = false; }
                     }
                 }
             }
         }
-        if !any_content { return None; }
+        if !any_solid { return None; }
+        let all_solid = all_full && all_loaded;
 
         // Check neighbor mega-chunks for occlusion.
         if all_solid {
@@ -325,8 +364,9 @@ impl AppState {
     }
 
     /// Generate chunks near the camera that don't exist yet.
-    /// CPU fallback — generates `budget` chunks per frame on the main thread.
-    /// TODO: Replace with GPU compute dispatch.
+    /// Dispatches to the GPU terrain compute pipeline (Task 13). Each dispatch
+    /// currently waits on the Vulkan queue to idle before returning — Task 14
+    /// will make this asynchronous.
     fn generate_camera_chunks(&mut self, budget: usize) {
         let has_plan = self.sim.state().voxel_world.region_plan.is_some();
         static LOGGED_PLAN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -377,7 +417,34 @@ impl AppState {
                         let cp = ChunkPos::new(center_cx + dx, center_cy + dy, center_cz + dz);
                         if self.sim.state().voxel_world.chunks.contains_key(&cp) { continue; }
 
-                        let chunk = crate::world_sim::terrain::materialize_chunk(cp, &plan, seed);
+                        // Dispatch GPU compute. Returns CHUNK_VOLUME bytes (material per voxel).
+                        let gpu_mats = match self.terrain_compute.generate_chunk(
+                            &self.ctx,
+                            [cp.x, cp.y, cp.z],
+                            seed as u32,
+                        ) {
+                            Ok(m) => m,
+                            Err(e) => {
+                                eprintln!("[voxel] GPU terrain compute failed for {:?}: {}", cp, e);
+                                continue;
+                            }
+                        };
+                        // Convert flat material array into a Chunk.
+                        let mut chunk = crate::world_sim::voxel::Chunk::new_air(cp);
+                        let cs_u = CHUNK_SIZE;
+                        for lz in 0..cs_u {
+                            for ly in 0..cs_u {
+                                for lx in 0..cs_u {
+                                    let mat_byte = gpu_mats[lz * cs_u * cs_u + ly * cs_u + lx];
+                                    if mat_byte != 0 {
+                                        let mat = voxel_material_from_u8(mat_byte);
+                                        chunk.voxels[crate::world_sim::voxel::local_index(lx, ly, lz)] =
+                                            crate::world_sim::voxel::Voxel::new(mat);
+                                    }
+                                }
+                            }
+                        }
+                        chunk.dirty = true;
                         self.sim.state_mut().voxel_world.chunks.insert(cp, chunk);
                         self.dirty_megas.insert(MegaPos::from_chunk(cp));
                         generated += 1;
@@ -388,25 +455,39 @@ impl AppState {
     }
 
     /// Upload dirty mega-chunks within camera radius to the GPU.
+    /// Budgeted: uploads at most `MAX_MEGA_UPLOADS_PER_FRAME` megas per call
+    /// to avoid stalling the render loop.
     fn upload_megas(&mut self) -> Result<()> {
+        const MAX_MEGA_UPLOADS_PER_FRAME: usize = 2;
+
         let palette_rgba = self.bridge.palette_rgba();
         let cam_pos = self.camera.eye_position();
         let r2 = LOAD_RADIUS * LOAD_RADIUS;
 
-        // Collect dirty megas to process (can't borrow self mutably in loop).
-        let to_process: Vec<MegaPos> = self.dirty_megas.drain().collect();
+        // Sort dirty megas by distance to camera (closest first), filtering
+        // out-of-range entries. Cheap loop — no grid building yet.
+        let mut candidates: Vec<(MegaPos, f32)> = self.dirty_megas.iter()
+            .filter_map(|&mp| {
+                let c = mp.world_center();
+                let dx = cam_pos[0] - c[0];
+                let dy = cam_pos[1] - c[1];
+                let dz = cam_pos[2] - c[2];
+                let d2 = dx * dx + dy * dy + dz * dz;
+                if d2 <= r2 { Some((mp, d2)) } else { None }
+            })
+            .collect();
+        candidates.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        for mp in to_process {
-            // Camera distance check.
-            let center = mp.world_center();
-            let dx = cam_pos[0] - center[0];
-            let dy = cam_pos[1] - center[1];
-            let dz = cam_pos[2] - center[2];
-            if dx * dx + dy * dy + dz * dz > r2 {
-                // Out of range — mark dirty again so it uploads when we get closer.
-                self.dirty_megas.insert(mp);
-                continue;
+        // Only build/upload up to MAX_MEGA_UPLOADS_PER_FRAME closest megas.
+        // Out-of-range entries stay in dirty_megas (no churn).
+        let mut uploaded = 0;
+        for (mp, _dist2) in candidates {
+            if uploaded >= MAX_MEGA_UPLOADS_PER_FRAME {
+                break;
             }
+
+            // Remove from dirty before processing (we'll re-dirty on failure).
+            self.dirty_megas.remove(&mp);
 
             let grid = match self.build_mega_grid(mp) {
                 Some(g) => g,
@@ -431,6 +512,7 @@ impl AppState {
                 texture,
                 position: mp.world_position(),
             });
+            uploaded += 1;
         }
 
         // Evict mega-chunks that are too far from camera.
@@ -448,7 +530,9 @@ impl AppState {
             if let Some(old) = self.gpu_megas.remove(&mp) {
                 old.texture.destroy(&self.ctx, &mut self.alloc);
             }
-            self.dirty_megas.insert(mp); // re-dirty so it reloads when close again
+            // Re-mark dirty so it reloads when camera returns to range.
+            // (Only re-dirty if not already dirty to avoid churn.)
+            self.dirty_megas.insert(mp);
         }
 
         Ok(())
@@ -462,16 +546,40 @@ impl AppState {
         }
 
         let dims = MEGA_VOXELS as f32;
+        let aspect = RENDER_WIDTH as f32 / RENDER_HEIGHT as f32;
+        let vp = frustum_vp_matrix(&self.camera, aspect);
+        let planes = extract_frustum_planes(&vp);
+        let cam_pos = self.camera.eye_position();
+
+        // Frustum cull + collect visible mega-chunks.
+        let mut visible: Vec<(&GpuVoxelTexture, [f32; 4], [f32; 3], [f32; 3], f32)> =
+            self.gpu_megas.values()
+                .filter(|gm| {
+                    let min = gm.position;
+                    let max = [min[0] + dims, min[1] + dims, min[2] + dims];
+                    aabb_vs_frustum(&planes, &min, &max)
+                })
+                .map(|gm| {
+                    let cx = gm.position[0] + dims * 0.5 - cam_pos[0];
+                    let cy = gm.position[1] + dims * 0.5 - cam_pos[1];
+                    let cz = gm.position[2] + dims * 0.5 - cam_pos[2];
+                    let dist2 = cx * cx + cy * cy + cz * cz;
+                    (&gm.texture, [1.0f32, 1.0, 1.0, 1.0], gm.position, [dims, dims, dims], dist2)
+                })
+                .collect();
+
+        // Sort front-to-back for early-z rejection.
+        visible.sort_unstable_by(|a, b| a.4.partial_cmp(&b.4).unwrap_or(std::cmp::Ordering::Equal));
 
         let objects: Vec<(&GpuVoxelTexture, [f32; 4], [f32; 3], [f32; 3])> =
-            self.gpu_megas.values()
-                .map(|gm| (&gm.texture, [1.0, 1.0, 1.0, 1.0], gm.position, [dims, dims, dims]))
-                .collect();
+            visible.into_iter().map(|(t, c, p, d, _)| (t, c, p, d)).collect();
+
+        self.last_visible_megas = objects.len();
 
         // GPU render + blit to swapchain (no CPU readback).
         self.renderer.render_frame_gpu(&self.ctx, &self.camera, &objects)?;
         let src = self.renderer.light_output_image();
-        self.swapchain.present_blit(&self.ctx, src, WIDTH, HEIGHT)?;
+        self.swapchain.present_blit(&self.ctx, src, RENDER_WIDTH, RENDER_HEIGHT)?;
 
         Ok(())
     }
@@ -485,10 +593,12 @@ impl AppState {
 
         self.bridge.sync_all(self.sim.state_mut());
 
-        // Mark mega-chunks dirty for any sim chunks that changed.
-        for chunk in self.sim.state().voxel_world.chunks.values() {
+        // Mark mega-chunks dirty for any sim chunks that changed,
+        // then clear the chunk dirty flag so we don't re-upload every frame.
+        for chunk in self.sim.state_mut().voxel_world.chunks.values_mut() {
             if chunk.dirty {
                 self.dirty_megas.insert(MegaPos::from_chunk(chunk.pos));
+                chunk.dirty = false;
             }
         }
     }
@@ -513,6 +623,24 @@ impl AppState {
             KeyCode::Minus | KeyCode::NumpadSubtract => {
                 self.ticks_per_frame = (self.ticks_per_frame / 2).max(1);
                 eprintln!("[voxel] speed: {} ticks/frame", self.ticks_per_frame);
+            }
+            KeyCode::Tab => {
+                // Settlement pos is already in voxel space.
+                let settlements = &self.sim.state().settlements;
+                if settlements.is_empty() { return; }
+                self.settlement_jump_idx = self.settlement_jump_idx % settlements.len();
+                let s = &settlements[self.settlement_jump_idx];
+                let vx = s.pos.0 as i32;
+                let vy = s.pos.1 as i32;
+                let surface_z = self.sim.state().voxel_world.surface_height(vx, vy);
+                let cam_pos = glam::Vec3::new(
+                    vx as f32,
+                    (surface_z + 80) as f32,
+                    vy as f32 - 60.0,
+                );
+                self.camera.set_position(cam_pos);
+                eprintln!("[voxel] Jumped to '{}' ({:.0},{:.0})", s.name, s.pos.0, s.pos.1);
+                self.settlement_jump_idx += 1;
             }
             _ => {}
         }
@@ -557,7 +685,7 @@ impl ApplicationHandler for WorldSimVoxelApp {
 
         let attrs = Window::default_attributes()
             .with_title("World Sim — Voxel Renderer")
-            .with_inner_size(winit::dpi::LogicalSize::new(WIDTH, HEIGHT));
+            .with_inner_size(winit::dpi::LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
 
         let window = match event_loop.create_window(attrs) {
             Ok(w) => w,
@@ -634,8 +762,12 @@ impl ApplicationHandler for WorldSimVoxelApp {
                 // Drain background-generated settlement chunks.
                 app.drain_ready_chunks(64);
 
-                // Generate chunks near camera on-demand (CPU fallback, TODO: GPU compute).
-                app.generate_camera_chunks(16);
+                // Generate chunks near camera on-demand via GPU compute (Task 13).
+                // Dispatch is currently synchronous (waits on queue idle) — Task 14
+                // will make it async. Budget: 4 chunks/frame as a starting point.
+                let t_gen = Instant::now();
+                app.generate_camera_chunks(4);
+                let gen_ms = t_gen.elapsed().as_secs_f32() * 1000.0;
 
                 // FPS tracking
                 app.frame_count += 1;
@@ -652,26 +784,96 @@ impl ApplicationHandler for WorldSimVoxelApp {
                         String::new()
                     };
                     app.window.set_title(&format!(
-                        "World Sim — {:.0} FPS | {} | {:.0},{:.0},{:.0} | {} megas | speed {}x{}",
+                        "World Sim — {:.0} FPS | {} | {:.0},{:.0},{:.0} | {}/{} megas | speed {}x{}",
                         app.last_fps, status, cam[0], cam[1], cam[2],
-                        app.gpu_megas.len(), app.ticks_per_frame, loading,
+                        app.last_visible_megas, app.gpu_megas.len(), app.ticks_per_frame, loading,
                     ));
                 }
 
                 app.update_camera(dt);
                 app.tick_sim();
 
+                let t_upload = Instant::now();
                 if let Err(e) = app.upload_megas() {
                     eprintln!("[voxel] upload error: {}", e);
                 }
+                let t_render = Instant::now();
                 if let Err(e) = app.render() {
                     eprintln!("[voxel] render error: {}", e);
+                }
+                let t_done = Instant::now();
+
+                // Log frame breakdown once per second (alongside FPS update)
+                if fps_elapsed >= 1.0 {
+                    let upload_ms = t_render.duration_since(t_upload).as_secs_f32() * 1000.0;
+                    let render_ms = t_done.duration_since(t_render).as_secs_f32() * 1000.0;
+                    let total_ms = 1000.0 / app.last_fps.max(0.1);
+                    eprintln!("[perf] {:.1} FPS | gen {:.1}ms upload {:.1}ms render {:.1}ms total {:.1}ms | {}/{} megas",
+                        app.last_fps, gen_ms, upload_ms, render_ms, total_ms,
+                        app.last_visible_megas, app.gpu_megas.len());
                 }
 
                 app.window.request_redraw();
             }
             _ => {}
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GPU material-byte → VoxelMaterial
+// ---------------------------------------------------------------------------
+
+/// Maps a material byte from the GPU terrain compute shader to the
+/// corresponding `VoxelMaterial` enum variant. Must stay in lockstep with the
+/// `repr(u8)` ordering in `voxel.rs` and the material ids the shader writes.
+fn voxel_material_from_u8(b: u8) -> crate::world_sim::voxel::VoxelMaterial {
+    use crate::world_sim::voxel::VoxelMaterial;
+    match b {
+        0 => VoxelMaterial::Air,
+        1 => VoxelMaterial::Dirt,
+        2 => VoxelMaterial::Stone,
+        3 => VoxelMaterial::Granite,
+        4 => VoxelMaterial::Sand,
+        5 => VoxelMaterial::Clay,
+        6 => VoxelMaterial::Gravel,
+        7 => VoxelMaterial::Grass,
+        8 => VoxelMaterial::Water,
+        9 => VoxelMaterial::Lava,
+        10 => VoxelMaterial::Ice,
+        11 => VoxelMaterial::Snow,
+        12 => VoxelMaterial::IronOre,
+        13 => VoxelMaterial::CopperOre,
+        14 => VoxelMaterial::GoldOre,
+        15 => VoxelMaterial::Coal,
+        16 => VoxelMaterial::Crystal,
+        17 => VoxelMaterial::WoodLog,
+        18 => VoxelMaterial::WoodPlanks,
+        19 => VoxelMaterial::StoneBlock,
+        20 => VoxelMaterial::StoneBrick,
+        21 => VoxelMaterial::Thatch,
+        22 => VoxelMaterial::Iron,
+        23 => VoxelMaterial::Glass,
+        24 => VoxelMaterial::Farmland,
+        25 => VoxelMaterial::Crop,
+        26 => VoxelMaterial::Basalt,
+        27 => VoxelMaterial::Sandstone,
+        28 => VoxelMaterial::Marble,
+        29 => VoxelMaterial::Bone,
+        30 => VoxelMaterial::Brick,
+        31 => VoxelMaterial::CutStone,
+        32 => VoxelMaterial::Concrete,
+        33 => VoxelMaterial::Ceramic,
+        34 => VoxelMaterial::Steel,
+        35 => VoxelMaterial::Bronze,
+        36 => VoxelMaterial::Obsidian,
+        37 => VoxelMaterial::JungleMoss,
+        38 => VoxelMaterial::MudGrass,
+        39 => VoxelMaterial::RedSand,
+        40 => VoxelMaterial::Peat,
+        41 => VoxelMaterial::TallGrass,
+        42 => VoxelMaterial::Leaves,
+        _ => VoxelMaterial::Air, // unknown → air
     }
 }
 
@@ -690,4 +892,73 @@ pub fn run_with_renderer(sim: WorldSim) -> Result<()> {
 
     event_loop.run_app(&mut app)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Frustum culling helpers
+// ---------------------------------------------------------------------------
+
+/// Build View-Projection matrix from camera (column-major, glam layout).
+fn frustum_vp_matrix(cam: &FreeCamera, aspect: f32) -> [f32; 16] {
+    let v = cam.view_matrix_array();
+    let p = cam.projection_matrix_array(aspect);
+    mat4_mul_cols(&p, &v)
+}
+
+/// Column-major 4×4 multiply.
+fn mat4_mul_cols(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
+    let mut r = [0.0f32; 16];
+    for col in 0..4 {
+        for row in 0..4 {
+            let mut sum = 0.0;
+            for k in 0..4 {
+                sum += a[k * 4 + row] * b[col * 4 + k];
+            }
+            r[col * 4 + row] = sum;
+        }
+    }
+    r
+}
+
+/// Extract 6 frustum planes from a column-major VP matrix.
+/// Each plane is [a, b, c, d] where ax + by + cz + d >= 0 is inside.
+fn extract_frustum_planes(vp: &[f32; 16]) -> [[f32; 4]; 6] {
+    let row = |i: usize| -> [f32; 4] { [vp[i], vp[4 + i], vp[8 + i], vp[12 + i]] };
+    let r0 = row(0);
+    let r1 = row(1);
+    let r2 = row(2);
+    let r3 = row(3);
+
+    let add = |a: &[f32; 4], b: &[f32; 4]| -> [f32; 4] { [a[0]+b[0], a[1]+b[1], a[2]+b[2], a[3]+b[3]] };
+    let sub = |a: &[f32; 4], b: &[f32; 4]| -> [f32; 4] { [a[0]-b[0], a[1]-b[1], a[2]-b[2], a[3]-b[3]] };
+
+    let mut planes = [
+        add(&r3, &r0), // left
+        sub(&r3, &r0), // right
+        add(&r3, &r1), // bottom
+        sub(&r3, &r1), // top
+        add(&r3, &r2), // near
+        sub(&r3, &r2), // far
+    ];
+
+    for p in &mut planes {
+        let len = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
+        if len > 1e-8 {
+            p[0] /= len; p[1] /= len; p[2] /= len; p[3] /= len;
+        }
+    }
+    planes
+}
+
+/// Test AABB against frustum planes. Returns true if potentially visible.
+fn aabb_vs_frustum(planes: &[[f32; 4]; 6], min: &[f32; 3], max: &[f32; 3]) -> bool {
+    for p in planes {
+        let px = if p[0] >= 0.0 { max[0] } else { min[0] };
+        let py = if p[1] >= 0.0 { max[1] } else { min[1] };
+        let pz = if p[2] >= 0.0 { max[2] } else { min[2] };
+        if p[0] * px + p[1] * py + p[2] * pz + p[3] < 0.0 {
+            return false;
+        }
+    }
+    true
 }
