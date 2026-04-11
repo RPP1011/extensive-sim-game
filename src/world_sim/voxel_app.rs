@@ -1463,11 +1463,15 @@ impl ApplicationHandler for WorldSimVoxelApp {
         //     dispatch, ~2.6 µs per iteration on this system) spreads
         //     across more frames.
         //   - Larger = worst-case input latency grows linearly
-        //     (batch_size × ~25 ns of work). At 256 that's ~6.4 µs,
-        //     still well below a single display refresh at 1000 Hz.
-        // 64 left measurable winit overhead on the table; 256 pushes
-        // past the amortization knee.
-        const FRAME_BATCH: usize = 256;
+        //     (batch_size × ~6 ns of work on the fully-inlined fast
+        //     path). At 1024 that's ~6.1 µs, still imperceptible.
+        // Model from the previous iteration:
+        //     frame_ns = winit_ns/N + work_ns
+        //     winit ≈ 2.66 µs, work ≈ 6 ns
+        // At 1024: 2660/1024 + 6 ≈ 8.6 ns/frame, expected ~116 M FPS.
+        // Further doubling past 1024 is diminishing returns — work is
+        // already ~70 % of the predicted frame.
+        const FRAME_BATCH: usize = 1024;
         if let Some(app) = &mut self.state {
             // Batch-level timing. One Instant::now() pair per batch
             // instead of one per frame. Per-frame `dt` is the batch
