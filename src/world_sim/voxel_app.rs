@@ -779,7 +779,13 @@ impl AppState {
 
         let t_present = Instant::now();
         let src = self.renderer.light_output_image();
-        self.swapchain.present_blit(&self.ctx, src, RENDER_WIDTH, RENDER_HEIGHT)?;
+        // GPU-side wait: the blit reads the renderer's light target, which
+        // the renderer queued but did NOT CPU-wait for. The semaphore makes
+        // present_blit's submit block on the GPU side until render is done.
+        let render_done = self.renderer.render_done_semaphore();
+        self.swapchain.present_blit_with_wait(
+            &self.ctx, src, RENDER_WIDTH, RENDER_HEIGHT, render_done,
+        )?;
         let present_ms = t_present.elapsed().as_secs_f32() * 1000.0;
 
         Ok((cull_ms, raycast_ms, present_ms))
