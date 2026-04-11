@@ -885,17 +885,21 @@ impl AppState {
         // Stable-scene ultra-fast path: if the camera is unchanged AND the
         // chunk pool hasn't mutated since the last cull, `pool_views_buf`
         // still holds the correct visibility set in the correct order.
-        // Skip the entire cull pass (frustum test + distance test + sort
-        // + mark_touched fan-out) and go straight to the renderer's own
-        // cache_matches check, which will short-circuit on the same
-        // stability signal and make render() collapse to two comparisons
-        // + two Instant::now calls.
+        // Skip the cull loop (frustum test + distance sort + pool_views_buf
+        // rebuild) and go straight to the early return. The renderer's
+        // own cache_matches() would trivially also hit here (same camera,
+        // same pool hash) so we skip it and cull_cache_hit becomes the
+        // sole signal for render-skip.
         //
-        // `mark_touched_slot` is safe to skip because the LRU is only
-        // pressured by submissions (`submit_chunk_with_frame`), and any
-        // submission bumps `pool_generation`, which invalidates the
-        // cache and forces a full cull before eviction decisions are
-        // made.
+        // We DO still have to mark_touched_slot on every visible chunk,
+        // though: the LRU guard in submit_chunk_with_frame keys on
+        // last_touched_frame, and if we stop refreshing it the guard
+        // fails and loaded chunks become evictable. Previously this
+        // caused a 20-chunk-per-second eviction→resubmit churn on a
+        // stationary camera — compute saturated on in_flight=32 forever
+        // even though every in-frustum chunk was already loaded. A
+        // single-pass field write per visible chunk is still orders of
+        // magnitude cheaper than the full cull loop.
         let cur_cam_pos = self.camera.eye_position();
         let cur_cam_center = self.camera.center();
         let cur_cam_key = [
@@ -910,13 +914,12 @@ impl AppState {
             && self.last_cull_pool_gen == cur_pool_gen
             && !self.pool_views_buf.is_empty();
         if cull_cache_hit {
-            let cull_ms = t_cull.elapsed().as_secs_f32() * 1000.0;
-            if self.renderer.cache_matches(&self.camera, &self.pool_views_buf) {
-                return Ok((cull_ms, 0.0, 0.0, 0.0));
+            let cur_frame = self.frame_count as u64;
+            for (v, _, _, _) in self.pool_views_buf.iter() {
+                self.terrain_compute.mark_touched_slot(v.slot_idx, cur_frame);
             }
-            // Cull cache hit but renderer cache miss is unexpected (same
-            // inputs should hash the same), but fall through to the full
-            // render path just in case.
+            let cull_ms = t_cull.elapsed().as_secs_f32() * 1000.0;
+            return Ok((cull_ms, 0.0, 0.0, 0.0));
         }
 
         let dims = MEGA_VOXELS as f32;
