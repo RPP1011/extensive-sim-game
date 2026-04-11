@@ -442,7 +442,20 @@ impl AppState {
     /// chunks per call, each consuming one free slot in the compute pipeline's
     /// in-flight ring. Completed chunks are picked up by
     /// [`drain_completed_gpu_chunks`] on a later frame.
+    ///
+    /// To avoid saturating the GPU, we also cap the total number of in-flight
+    /// dispatches (MAX_INFLIGHT). With the current halo-based feature
+    /// stamping the shader is expensive, and submitting hundreds of
+    /// dispatches at once means none complete in any reasonable time —
+    /// present_blit stalls behind the compute queue backlog and the frame
+    /// rate collapses.
     fn generate_camera_chunks(&mut self, budget: usize) {
+        const MAX_INFLIGHT: usize = 16;
+
+        // Short-circuit if we're already saturated — skip the spiral entirely.
+        let (_free, in_flight, _loaded) = self.terrain_compute.pool_stats();
+        if in_flight >= MAX_INFLIGHT { return; }
+        let budget = budget.min(MAX_INFLIGHT - in_flight);
         let has_plan = self.sim.state().voxel_world.region_plan.is_some();
         static LOGGED_PLAN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if !LOGGED_PLAN.swap(true, std::sync::atomic::Ordering::Relaxed) {
@@ -507,9 +520,13 @@ impl AppState {
                                 submitted += 1;
                             }
                             Ok(None) => {
-                                // No free slots in the ring — stop submitting
-                                // for this frame.
-                                break 'outer;
+                                // Chunk is already Loaded or InFlight in the
+                                // pool — deduplication, not a failure. Skip
+                                // and keep scanning for new chunks to submit.
+                                // (Also returned when all 256 slots are
+                                // InFlight, which is rare; the next frame
+                                // will drain some and retry.)
+                                continue;
                             }
                             Err(e) => {
                                 eprintln!("[voxel] submit_chunk failed for {:?}: {}", cp, e);
@@ -1028,8 +1045,9 @@ impl ApplicationHandler for WorldSimVoxelApp {
                     let accounted = app.ema_drain_cpu_ms + app.ema_drain_gpu_ms + app.ema_gen_ms
                         + app.ema_update_cam_ms + app.ema_tick_sim_ms + app.ema_render_ms;
                     let overhead = (app.ema_frame_ms - accounted).max(0.0);
+                    let (free, in_flight, loaded) = app.terrain_compute.pool_stats();
                     eprintln!(
-                        "[perf] {:.1} FPS frame={:.2}ms | drain_cpu={:.2} drain_gpu={:.2} gen={:.2} cam={:.2} sim={:.2} render={:.2} [cull={:.2} raycast={:.2} present={:.2}] other={:.2} | {} chunks",
+                        "[perf] {:.1} FPS frame={:.2}ms | drain_cpu={:.2} drain_gpu={:.2} gen={:.2} cam={:.2} sim={:.2} render={:.2} [cull={:.2} raycast={:.2} present={:.2}] other={:.2} | visible={} pool=free:{}/inflight:{}/loaded:{}",
                         app.last_fps,
                         app.ema_frame_ms,
                         app.ema_drain_cpu_ms,
@@ -1043,6 +1061,7 @@ impl ApplicationHandler for WorldSimVoxelApp {
                         app.ema_present_ms,
                         overhead,
                         app.last_visible_megas,
+                        free, in_flight, loaded,
                     );
                 }
 
