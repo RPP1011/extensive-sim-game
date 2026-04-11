@@ -895,8 +895,9 @@ impl AppState {
         self.visible_buf
             .sort_unstable_by(|a, b| a.4.partial_cmp(&b.4).unwrap_or(std::cmp::Ordering::Equal));
 
+        let cur_frame = self.frame_count as u64;
         for (v, _, _, _, _) in self.visible_buf.iter() {
-            self.terrain_compute.mark_touched(v.chunk_pos, self.frame_count as u64);
+            self.terrain_compute.mark_touched_slot(v.slot_idx, cur_frame);
         }
 
         self.pool_views_buf.clear();
