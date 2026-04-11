@@ -54,8 +54,9 @@ proptest = "1.6"
 # which matters a lot for the hot render loop: bulk_touch_all_loaded,
 # pool_generation, and the camera accessors all cross-crate calls that
 # are ~1 cycle bodies but cost a call+return without LTO. At 20 M+ FPS
-# (~49 ns/frame), a couple of eliminated function calls per frame is
-# worth the extra link time. `thin` captures most of fat's benefit with
-# a fraction of the cost.
+# (~48 ns/frame), a couple of eliminated function calls per frame is
+# worth the extra link time. `thin` captures most of fat's benefit
+# with less link time and better i-cache locality (fat sometimes
+# hurts at this perf level by inlining too aggressively).
 lto = "thin"
 codegen-units = 1
