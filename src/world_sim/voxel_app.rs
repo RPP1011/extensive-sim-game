@@ -1148,12 +1148,20 @@ impl AppState {
         } else {
             // Fast path: zero clock reads. Work only.
             //
-            // `drain_ready_chunks` and `drain_completed_gpu_chunks` are
-            // NOT called here — they're hoisted to `about_to_wait` and
-            // run once per batch.
+            // NOT called here — hoisted to `about_to_wait` and run
+            // once per batch:
+            //   - drain_ready_chunks / drain_completed_gpu_chunks
+            //     (idempotent feeders)
+            //   - tick_sim (at ~100 Hz sim rate vs ~71 k batches/sec,
+            //     only ~1 in every ~700 batches actually ticks, so
+            //     the per-frame sim_accumulator += dt RMW was ~3
+            //     cycles/frame of pure waste inside the batch loop)
+            //
+            // Unused `dt` on this path — kept as a parameter so the
+            // detailed debug path above can use it without branching.
+            let _ = dt;
             self.generate_camera_chunks(8);
             self.update_camera(dt);
-            self.tick_sim(dt);
             if let Err(e) = self.render() {
                 eprintln!("[voxel] render error: {}", e);
             }
@@ -1503,6 +1511,17 @@ impl ApplicationHandler for WorldSimVoxelApp {
             // at batch=64 translates to ~2 µs off each batch.
             app.drain_ready_chunks(64);
             app.drain_completed_gpu_chunks();
+
+            // tick_sim also runs once per batch. sim runs at ~100 Hz
+            // wall clock (sim_dt = 10 ms) while batches fire at
+            // ~71 k/sec. In steady state only ~1 in every ~715 batches
+            // actually ticks, so the per-frame `sim_accumulator += dt`
+            // RMW was 2047 dead ops per batch.
+            //
+            // Passing `dt_total` here means the accumulator advances
+            // by the same wall time as before — the `while` loop in
+            // tick_sim handles multi-tick catchup correctly.
+            app.tick_sim(dt_total);
 
             for _ in 0..FRAME_BATCH {
                 app.run_frame(per_frame_dt);
