@@ -1320,6 +1320,13 @@ impl AppState {
             }
         }
 
+        // Note: the second Instant::now inside `elapsed()` here looks
+        // like obvious waste on the fast path (batch_ms is only used
+        // to update ema_frame_ms), but two separate iterations tried
+        // to skip it (using dt_total*1000 or a detailed_perf gate) and
+        // both regressed ~2-3x. The call appears to act as a memory
+        // barrier that prevents harmful compiler reorderings in the
+        // tight outer loop. Keep it.
         let batch_ms = batch_start.elapsed().as_secs_f32() * 1000.0;
         self.record_batch_stats(batch_start, batch_ms, FRAME_BATCH);
     }
