@@ -1634,12 +1634,19 @@ pub fn run_with_renderer(sim: WorldSim) -> Result<()> {
     // ~0.69 µs per call. Pumping every Nth batch amortizes that to
     // 0.69 / N per batch.
     //
-    // Tried N=32 and observed a ~10x regression with huge variance
-    // (126 M-528 M FPS vs ~4 G baseline), likely because OS event
-    // queue backs up between pumps and each pump then does much
-    // more work (processing 32 batches' worth of queued events is
-    // not linearly equivalent to 32 pumps of 1 batch). N=8 sits
-    // comfortably in the stable zone.
+    // Previous failed experiments:
+    //   - N=32 counter-based: ~10x regression, huge variance. The
+    //     OS/compositor generates events faster than we were
+    //     pumping; the queue backed up and each delayed pump then
+    //     processed a superlinear batch of queued events.
+    //   - 100 µs time-based interval (≈ N=50 effective): same
+    //     regression, same root cause.
+    //   - Pure time throttling (Instant::now every iteration):
+    //     added ~25 ns/batch clock overhead — more than the savings
+    //     from fewer pumps.
+    //
+    // N=8 sits comfortably in the stable zone where the compositor
+    // event rate is low enough that the queue never backs up.
     const PUMP_EVERY: u32 = 8;
     let mut pump_counter: u32 = 0;
     let mut should_exit = false;
