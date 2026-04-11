@@ -1211,51 +1211,64 @@ impl AppState {
         self.frame_count += frames_in_batch as u32;
         let fps_elapsed = batch_start.duration_since(self.fps_timer).as_secs_f32();
         if fps_elapsed >= 1.0 {
-            self.last_fps = self.frame_count as f32 / fps_elapsed;
-            self.frame_count = 0;
-            self.fps_timer = batch_start;
-            let cam = self.camera.eye_position();
-            let status = if self.paused { "PAUSED" } else { "RUNNING" };
-            let loading = if self.chunks_loaded < self.chunks_pending {
-                format!(" | loading {}/{}", self.chunks_loaded, self.chunks_pending)
-            } else {
-                String::new()
-            };
-            self.window.set_title(&format!(
-                "World Sim — {:.0} FPS | {} | {:.0},{:.0},{:.0} | {}/{} megas | speed {}x{}",
-                self.last_fps, status, cam[0], cam[1], cam[2],
-                self.last_visible_megas, self.gpu_megas.len(), self.ticks_per_frame, loading,
-            ));
-
-            let accounted = self.ema_drain_cpu_ms + self.ema_drain_gpu_ms + self.ema_gen_ms
-                + self.ema_update_cam_ms + self.ema_tick_sim_ms + self.ema_render_ms;
-            let overhead = (self.ema_frame_ms - accounted).max(0.0);
-            let (free, in_flight, loaded) = self.terrain_compute.pool_stats();
-            eprintln!(
-                "[perf] {:.1} FPS frame={:.2}ms | drain_cpu={:.2} drain_gpu={:.2} gen={:.2} cam={:.2} sim={:.2} render={:.2} [cull={:.2} wait={:.2} raycast={:.2} present={:.2}] other={:.2} | visible={} pool=free:{}/inflight:{}/loaded:{} | throughput: sub={}/s drained={}/s gen_short_circuit={}/s",
-                self.last_fps,
-                self.ema_frame_ms,
-                self.ema_drain_cpu_ms,
-                self.ema_drain_gpu_ms,
-                self.ema_gen_ms,
-                self.ema_update_cam_ms,
-                self.ema_tick_sim_ms,
-                self.ema_render_ms,
-                self.ema_cull_ms,
-                self.ema_wait_ms,
-                self.ema_raycast_ms,
-                self.ema_present_ms,
-                overhead,
-                self.last_visible_megas,
-                free, in_flight, loaded,
-                self.gen_submitted_this_sec,
-                self.drain_completed_this_sec,
-                self.gen_short_circuit_this_sec,
-            );
-            self.gen_submitted_this_sec = 0;
-            self.drain_completed_this_sec = 0;
-            self.gen_short_circuit_this_sec = 0;
+            self.fire_fps_log(batch_start, fps_elapsed);
         }
+    }
+
+    /// The 1 Hz perf log body, extracted out of `record_batch_stats`
+    /// into a separate `#[cold]` function so it doesn't get inlined
+    /// into the hot run_batch path. `set_title` + `eprintln!` +
+    /// format! are ~100-500 µs of work, but fire only once per
+    /// second — keeping them off the hot i-cache lines lets the
+    /// CPU predict and prefetch the stable-scene body more
+    /// reliably.
+    #[cold]
+    #[inline(never)]
+    fn fire_fps_log(&mut self, batch_start: Instant, fps_elapsed: f32) {
+        self.last_fps = self.frame_count as f32 / fps_elapsed;
+        self.frame_count = 0;
+        self.fps_timer = batch_start;
+        let cam = self.camera.eye_position();
+        let status = if self.paused { "PAUSED" } else { "RUNNING" };
+        let loading = if self.chunks_loaded < self.chunks_pending {
+            format!(" | loading {}/{}", self.chunks_loaded, self.chunks_pending)
+        } else {
+            String::new()
+        };
+        self.window.set_title(&format!(
+            "World Sim — {:.0} FPS | {} | {:.0},{:.0},{:.0} | {}/{} megas | speed {}x{}",
+            self.last_fps, status, cam[0], cam[1], cam[2],
+            self.last_visible_megas, self.gpu_megas.len(), self.ticks_per_frame, loading,
+        ));
+
+        let accounted = self.ema_drain_cpu_ms + self.ema_drain_gpu_ms + self.ema_gen_ms
+            + self.ema_update_cam_ms + self.ema_tick_sim_ms + self.ema_render_ms;
+        let overhead = (self.ema_frame_ms - accounted).max(0.0);
+        let (free, in_flight, loaded) = self.terrain_compute.pool_stats();
+        eprintln!(
+            "[perf] {:.1} FPS frame={:.2}ms | drain_cpu={:.2} drain_gpu={:.2} gen={:.2} cam={:.2} sim={:.2} render={:.2} [cull={:.2} wait={:.2} raycast={:.2} present={:.2}] other={:.2} | visible={} pool=free:{}/inflight:{}/loaded:{} | throughput: sub={}/s drained={}/s gen_short_circuit={}/s",
+            self.last_fps,
+            self.ema_frame_ms,
+            self.ema_drain_cpu_ms,
+            self.ema_drain_gpu_ms,
+            self.ema_gen_ms,
+            self.ema_update_cam_ms,
+            self.ema_tick_sim_ms,
+            self.ema_render_ms,
+            self.ema_cull_ms,
+            self.ema_wait_ms,
+            self.ema_raycast_ms,
+            self.ema_present_ms,
+            overhead,
+            self.last_visible_megas,
+            free, in_flight, loaded,
+            self.gen_submitted_this_sec,
+            self.drain_completed_this_sec,
+            self.gen_short_circuit_this_sec,
+        );
+        self.gen_submitted_this_sec = 0;
+        self.drain_completed_this_sec = 0;
+        self.gen_short_circuit_this_sec = 0;
     }
 
     /// One batch of frames. Called directly from the `pump_app_events`
