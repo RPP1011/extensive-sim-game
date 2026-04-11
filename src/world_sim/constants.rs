@@ -63,8 +63,10 @@ pub const LOAD_RADIUS: f32 = 768.0;
 
 /// Internal render resolution for the voxel raycaster.
 /// Kept lower than window size for performance; blit-upscaled to the window.
-pub const RENDER_WIDTH: u32 = 640;
-pub const RENDER_HEIGHT: u32 = 360;
+/// At 480x270 (16:9), the window gets a 2.67x integer-ish upscale which is
+/// still crisp but the GPU does ~44% less work per frame vs 640x360.
+pub const RENDER_WIDTH: u32 = 480;
+pub const RENDER_HEIGHT: u32 = 270;
 
 /// Window dimensions (may differ from render resolution for upscaling).
 pub const WINDOW_WIDTH: u32 = 1280;

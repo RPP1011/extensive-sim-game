@@ -450,9 +450,12 @@ impl AppState {
     /// present_blit stalls behind the compute queue backlog and the frame
     /// rate collapses.
     fn generate_camera_chunks(&mut self, budget: usize) {
-        const MAX_INFLIGHT: usize = 16;
+        // Cap in-flight compute dispatches. Compute and graphics share a GPU
+        // queue family — too many concurrent chunk materializations starve
+        // the render pass. 4 is a good balance: pool fills over time without
+        // hurting frame time.
+        const MAX_INFLIGHT: usize = 4;
 
-        // Short-circuit if we're already saturated — skip the spiral entirely.
         let (_free, in_flight, _loaded) = self.terrain_compute.pool_stats();
         if in_flight >= MAX_INFLIGHT { return; }
         let budget = budget.min(MAX_INFLIGHT - in_flight);
